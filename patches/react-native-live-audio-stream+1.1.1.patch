@@ -1,0 +1,143 @@
+diff --git a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
+index 20f454f..6a64ac5 100644
+--- a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
++++ b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
+@@ -3,6 +3,8 @@ package com.imxiqi.rnliveaudiostream;
+ import android.media.AudioFormat;
+ import android.media.AudioRecord;
+ import android.media.MediaRecorder.AudioSource;
++import android.media.audiofx.AutomaticGainControl;
++import android.media.audiofx.NoiseSuppressor;
+ import android.util.Base64;
+ import android.util.Log;
+ 
+@@ -13,6 +15,7 @@ import com.facebook.react.bridge.ReactMethod;
+ import com.facebook.react.bridge.ReadableMap;
+ import com.facebook.react.modules.core.DeviceEventManagerModule;
+ 
++import java.util.Arrays;
+ import java.lang.Math;
+ 
+ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -26,8 +29,13 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+     private int audioSource;
+ 
+     private AudioRecord recorder;
++    private AutomaticGainControl automaticGainControl;
++    private NoiseSuppressor noiseSuppressor;
+     private int bufferSize;
+     private boolean isRecording;
++    private boolean enableAutomaticGainControl;
++    private boolean enableNoiseSuppressor;
++    private int skipInitialBuffers;
+ 
+     public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
+         super(reactContext);
+@@ -41,6 +49,8 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+ 
+     @ReactMethod
+     public void init(ReadableMap options) {
++        releaseAudioEffects();
++
+         sampleRateInHz = 44100;
+         if (options.hasKey("sampleRate")) {
+             sampleRateInHz = options.getInt("sampleRate");
+@@ -65,6 +75,14 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+             audioSource = options.getInt("audioSource");
+         }
+ 
++        enableAutomaticGainControl = !options.hasKey("enableAutomaticGainControl")
++                || options.getBoolean("enableAutomaticGainControl");
++        enableNoiseSuppressor = !options.hasKey("enableNoiseSuppressor")
++                || options.getBoolean("enableNoiseSuppressor");
++        skipInitialBuffers = options.hasKey("skipInitialBuffers")
++                ? options.getInt("skipInitialBuffers")
++                : 0;
++
+         isRecording = false;
+         eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
+ 
+@@ -76,6 +94,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+ 
+         int recordingBufferSize = bufferSize * 3;
+         recorder = new AudioRecord(audioSource, sampleRateInHz, channelConfig, audioFormat, recordingBufferSize);
++        configureAudioEffects(recorder.getAudioSessionId());
+     }
+ 
+     @ReactMethod
+@@ -94,15 +113,19 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+                     while (isRecording) {
+                         bytesRead = recorder.read(buffer, 0, buffer.length);
+ 
+-                        // skip first 2 buffers to eliminate "click sound"
+-                        if (bytesRead > 0 && ++count > 2) {
+-                            base64Data = Base64.encodeToString(buffer, Base64.NO_WRAP);
++                        if (bytesRead > 0 && ++count > skipInitialBuffers) {
++                            byte[] chunk = bytesRead == buffer.length
++                                    ? buffer
++                                    : Arrays.copyOf(buffer, bytesRead);
++                            base64Data = Base64.encodeToString(chunk, Base64.NO_WRAP);
+                             eventEmitter.emit("data", base64Data);
+                         }
+                     }
+                     recorder.stop();
++                    releaseAudioEffects();
+                 } catch (Exception e) {
+                     e.printStackTrace();
++                    releaseAudioEffects();
+                 }
+             }
+         });
+@@ -113,5 +136,52 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+     @ReactMethod
+     public void stop(Promise promise) {
+         isRecording = false;
++        promise.resolve(null);
++    }
++
++    private void configureAudioEffects(int audioSessionId) {
++        if (audioSessionId == AudioRecord.ERROR || audioSessionId == AudioRecord.ERROR_BAD_VALUE) {
++            return;
++        }
++
++        if (enableAutomaticGainControl && AutomaticGainControl.isAvailable()) {
++            try {
++                automaticGainControl = AutomaticGainControl.create(audioSessionId);
++                if (automaticGainControl != null) {
++                    automaticGainControl.setEnabled(true);
++                }
++            } catch (Exception e) {
++                Log.w("RNLiveAudioStream", "AutomaticGainControl unavailable", e);
++            }
++        }
++
++        if (enableNoiseSuppressor && NoiseSuppressor.isAvailable()) {
++            try {
++                noiseSuppressor = NoiseSuppressor.create(audioSessionId);
++                if (noiseSuppressor != null) {
++                    noiseSuppressor.setEnabled(true);
++                }
++            } catch (Exception e) {
++                Log.w("RNLiveAudioStream", "NoiseSuppressor unavailable", e);
++            }
++        }
++    }
++
++    private void releaseAudioEffects() {
++        if (automaticGainControl != null) {
++            try {
++                automaticGainControl.release();
++            } catch (Exception ignored) {
++            }
++            automaticGainControl = null;
++        }
++
++        if (noiseSuppressor != null) {
++            try {
++                noiseSuppressor.release();
++            } catch (Exception ignored) {
++            }
++            noiseSuppressor = null;
++        }
+     }
+ }

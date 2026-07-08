@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 10.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "APP_ENV": "development",
+        "EXPO_ALLOW_CLEARTEXT": "true"
+      },
+      "ios": { "simulator": true }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "channel": "preview",
+      "env": {
+        "APP_ENV": "preview",
+        "EXPO_PUBLIC_LAOJI_API_BASE": "http://183.36.243.124:8035",
+        "EXPO_PUBLIC_MEETING_API_BASE": "http://183.36.243.124:8020",
+        "EXPO_PUBLIC_REALTIME_ASR_HOST": "183.36.243.124",
+        "EXPO_PUBLIC_REALTIME_ASR_PORT": "8020",
+        "EXPO_PUBLIC_REALTIME_ASR_SECURE": "false",
+        "EXPO_ALLOW_CLEARTEXT": "true"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "channel": "production",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "APP_ENV": "production"
+      }
+    }
+  }
+}
