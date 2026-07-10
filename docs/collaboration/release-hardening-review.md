@@ -1,5 +1,28 @@
 # 老记 Android 发布补全协作记录
 
+## 2026-07-10 会议录音持久化与游客云端总结
+
+### 变更记录
+- 变更编号：`CHG-20260710-03`
+- 维护类型：纠错性维护与完善性维护。
+- 触发原因：Android 实时会议只保留转写，原生录音模块停止时不返回文件；客户端同时硬编码禁止游客生成云端总结。
+- 移动端影响范围：`react-native-live-audio-stream` 补丁、`realtimeAsr`、实时会议/转写/详情页面、会议总结服务与 API 客户端。
+- 服务端影响范围：工作区 `18020` App 会议接口、临时总结任务、会议总结模型配置和 Ollama 客户端；原协作者 `8020/8035` 服务未修改。
+- 设计决策：Android 在 App 私有 `files/meeting-audio` 目录并行写入 PCM WAV，停止后补写 WAV 头并返回 `file://` URI；登录用户继续上传云端，游客保留本机 URI。游客转写通过不写 SQLite 的临时目录生成总结，结果只由随机任务 ID 返回并在 App 本机缓存。
+- 资源策略：所有后续会议总结默认使用 `qwen3:8b`；Ollama 单次上下文默认 `8192`，超过 5000 个中文字符的会议继续走既有 Map-Reduce 分块；任务结束使用 `OLLAMA_BIN` 正确卸载模型。
+- 限制策略：按需求移除游客接口的公网来源每小时次数限制、500 句限制和 5 万字符总长度限制；仍保留至少一条非空转写及单句结构校验。
+- 风险与回滚方案：公开游客总结会增加算力滥用风险；服务器备份位于 `/home/zhong/laoji-service-platform/backups/20260710-guest-summary-audio`。回滚时恢复备份的后端、`meetingsummary` 文件和配置，重启 `18020`，移动端恢复本补丁前版本。
+
+### 接口与验证
+- 新增 `POST /api/laoji/meetings/guest-summary` 和 `GET /api/laoji/meetings/guest-summary/tasks/{task_id}`，均不要求登录；游客会议本体和总结不写共享会议数据库。
+- 服务端候选导入与 Python 编译通过；契约测试连续调用 7 次、每次 501 句均进入任务提交逻辑，OpenAPI 的 `transcript_lines` 无 `maxItems`。
+- 真实 8B 游客总结链路通过：8192 上下文冷请求约 60 秒，热模型请求约 28 秒；返回会议概览、关键决策和行动项，结束后 `ollama ps` 为空，GPU 回落到 ASR 基线。
+- `18020/18035/8020/8035` 均保持监听，`18020 /health` 返回 ok；重启前检查无活动 WebSocket 连接。
+- `npx tsc --noEmit`：通过；`npm test -- --runInBand`：11 suites / 88 tests passed。
+- `./gradlew assembleRelease --parallel --build-cache --max-workers=$(nproc)`：BUILD SUCCESSFUL。
+- APK：`android/app/build/outputs/apk/release/app-release.apk`，88294249 bytes，SHA-256 `6763b343b6e9a387da15c7880735c84f27825fa413dfb03f6de01338ab1c0283`。
+- 按用户偏好，本次仅构建未覆盖安装手机；WAV 已通过 release Java 编译和 APK 构建，仍需在用户明确要求安装后做一次真机录制、重启 App 后回放及登录态上传验收。
+
 ## 2026-07-10 实时会议录音入口去重
 
 ### 变更记录

@@ -7,9 +7,10 @@ import { Audio, AVPlaybackStatus } from 'expo-av';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
-import { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
+import { RootStackParamList, TranscriptLine } from '../types';
 import { useMeetings } from '../store/MeetingsStore';
-import { ApiMeetingAudioInfo, fetchMeetingAudioInfo, fetchMeetingSummary, fetchMeetingTranscript } from '../services/api';
+import { ApiMeetingAudioInfo, fetchMeetingAudioInfo, fetchMeetingTranscript } from '../services/api';
+import { generateSummaryForMeeting, meetingSummaryToText } from '../services/meetingSummary';
 import { BackHeader, Tag, Waveform } from '../components/Common';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
@@ -21,11 +22,6 @@ type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Recording'>;
   route: RouteProp<RootStackParamList, 'Recording'>;
 };
-
-function summaryToText(summary: MeetingSummary | null): string {
-  if (!summary) return '';
-  return (summary.markdown || summary.full_text || summary.overview || '').trim();
-}
 
 function localAudioInfo(uri: string | null | undefined): ApiMeetingAudioInfo | null {
   return uri ? { url: uri, mime_type: 'audio/wav', file_name: uri.split('/').pop() ?? 'meeting.wav' } : null;
@@ -210,22 +206,27 @@ export function RecordingScreen({ navigation, route }: Props) {
   const handleSummary = async () => {
     setSummaryVisible(true);
     if (summaryText) return; // already loaded
-    const cachedText = summaryToText(getCachedSummary(m.id));
+    const cachedText = meetingSummaryToText(getCachedSummary(m.id));
     if (cachedText) {
       setSummaryText(cachedText);
       return;
     }
-    if (isGuest || !accessToken) {
-      setSummaryText('该会议暂无云端总结。');
+    if (transcriptItems.length === 0) {
+      setSummaryText('该会议暂无转写内容，无法生成总结。');
       return;
     }
     setSummaryLoading(true);
     try {
-      const text = await fetchMeetingSummary(m.id, accessToken);
+      const generated = await generateSummaryForMeeting({
+        meetingId: m.id,
+        title: m.title,
+        transcriptLines: transcriptItems,
+        isGuest,
+        accessToken,
+      });
+      const text = meetingSummaryToText(generated);
       setSummaryText(text || '暂无总结内容');
-      if (text) {
-        void saveCachedSummary(m.id, { meeting_id: m.id, full_text: text, generated_at: new Date().toISOString() });
-      }
+      await saveCachedSummary(m.id, generated);
     } catch {
       setSummaryText('获取总结失败，请检查网络后重试');
     } finally {
@@ -238,7 +239,7 @@ export function RecordingScreen({ navigation, route }: Props) {
       const transcriptText = transcriptItems
         .map(item => `[${item.speaker_label ?? item.speaker_id ?? '发言人'}] ${item.text}`)
         .join('\n');
-      const cachedSummary = summaryText || summaryToText(getCachedSummary(m.id));
+      const cachedSummary = summaryText || meetingSummaryToText(getCachedSummary(m.id));
       await Share.share({
         message: [
           m.title,

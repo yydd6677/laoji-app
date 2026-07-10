@@ -19,6 +19,8 @@ import {
   transcribeAudio,
   fetchMeetingSummary,
   fetchMeetingAudioInfo,
+  fetchGuestMeetingSummaryTask,
+  generateGuestMeetingSummary,
 } from '../src/services/api';
 import {
   changePassword as authChangePassword,
@@ -476,6 +478,55 @@ describe('fetchMeetingSummary', () => {
     });
 
     await expect(fetchMeetingSummary('meeting-2')).resolves.toBe('概览\n\n行动项');
+  });
+});
+
+describe('guest meeting summary', () => {
+  it('submits locally cached transcript without an auth header', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ task_id: 'guest-task-1', transcript_count: 1 }),
+    });
+
+    await expect(generateGuestMeetingSummary('guest-meeting-1', [{
+      id: 'line-1',
+      speaker_label: '发言人 1',
+      text: '今天讨论了发布安排。',
+      start_time: 0,
+      end_time: 2.5,
+    }], '游客会议')).resolves.toMatchObject({ task_id: 'guest-task-1' });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://183.36.243.124:18020/api/laoji/meetings/guest-summary',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meeting_id: 'guest-meeting-1',
+          title: '游客会议',
+          transcript_lines: [{
+            speaker_label: '发言人 1',
+            speaker_id: null,
+            text: '今天讨论了发布安排。',
+            start_time: 0,
+            end_time: 2.5,
+            confidence: null,
+          }],
+        }),
+      }),
+    );
+  });
+
+  it('polls a guest task without an auth header', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ task_id: 'guest-task-1', status: 'SUCCESS', result: { overview: '完成' } }),
+    });
+
+    await expect(fetchGuestMeetingSummaryTask('guest-task-1')).resolves.toMatchObject({ status: 'SUCCESS' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://183.36.243.124:18020/api/laoji/meetings/guest-summary/tasks/guest-task-1',
+    );
   });
 });
 

@@ -2,6 +2,7 @@ import {
   applyPcmAutoGain,
   base64ToArrayBuffer,
   buildRealtimeAsrUrl,
+  buildRealtimeWavFileName,
   parseRealtimeAsrMessage,
   selectRealtimeScheduleText,
 } from '../src/services/realtimeAsr';
@@ -20,6 +21,11 @@ describe('realtime ASR helpers', () => {
       host: 'https://example.com:9443/',
       secure: true,
     })).toBe('wss://example.com:9443/ws/meeting/a%2Fb/whisper');
+  });
+
+  it('creates a unique safe WAV file name for each meeting', () => {
+    expect(buildRealtimeWavFileName('meeting/2026 07 10')).toBe('meeting_2026_07_10.wav');
+    expect(buildRealtimeWavFileName('')).toBe('laoji-realtime.wav');
   });
 
   it('decodes base64 PCM chunks to ArrayBuffer', () => {

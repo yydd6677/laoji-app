@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Meeting, MeetingSummary, TranscriptLine } from '../types';
 import {
   ApiMeeting,
@@ -149,9 +150,20 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const data = await fetchMeetings(1, 100, accessToken);
-      const local = data.map(serverToLocal);
-      setMeetings(local);
-      void persistMeetings(local);
+      setMeetings(previous => {
+        const previousById = new Map(previous.map(item => [item.id, item]));
+        const local = data.map(item => {
+          const remote = serverToLocal(item);
+          const cached = previousById.get(remote.id);
+          return {
+            ...remote,
+            audioAvailable: remote.audioAvailable || Boolean(cached?.audioLocalUri),
+            audioLocalUri: cached?.audioLocalUri,
+          };
+        });
+        void persistMeetings(local);
+        return local;
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '会议服务暂时不可用');
@@ -216,6 +228,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMeeting = useCallback(async (id: string) => {
     const target = meetings.find(m => m.id === id) ?? null;
+    const deleteLocalAudio = async () => {
+      if (!target?.audioLocalUri) return;
+      try {
+        await FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true });
+      } catch {
+        // Meeting deletion should still succeed if local media cleanup fails.
+      }
+    };
     setMeetings(prev => {
       const next = prev.filter(m => m.id !== id);
       void persistMeetings(next);
@@ -226,10 +246,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     void persistTranscripts();
     void persistSummaries();
 
-    if (mode === 'guest') return;
+    if (mode === 'guest') {
+      await deleteLocalAudio();
+      return;
+    }
     if (!accessToken) throw new Error('not authenticated');
     try {
       await apiDeleteMeeting(id, accessToken);
+      await deleteLocalAudio();
     } catch (err) {
       if (target) {
         setMeetings(prev => {

@@ -1,39 +1,57 @@
 diff --git a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
-index 20f454f..6a64ac5 100644
+index 20f454f..abeecc7 100644
 --- a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
 +++ b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
-@@ -3,6 +3,8 @@ package com.imxiqi.rnliveaudiostream;
+@@ -3,6 +3,9 @@ package com.imxiqi.rnliveaudiostream;
  import android.media.AudioFormat;
  import android.media.AudioRecord;
  import android.media.MediaRecorder.AudioSource;
 +import android.media.audiofx.AutomaticGainControl;
 +import android.media.audiofx.NoiseSuppressor;
++import android.net.Uri;
  import android.util.Base64;
  import android.util.Log;
  
-@@ -13,6 +15,7 @@ import com.facebook.react.bridge.ReactMethod;
+@@ -13,6 +16,10 @@ import com.facebook.react.bridge.ReactMethod;
  import com.facebook.react.bridge.ReadableMap;
  import com.facebook.react.modules.core.DeviceEventManagerModule;
  
++import java.io.File;
++import java.io.IOException;
++import java.io.RandomAccessFile;
 +import java.util.Arrays;
  import java.lang.Math;
  
  public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
-@@ -26,8 +29,13 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -22,12 +29,26 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+ 
+     private int sampleRateInHz;
+     private int channelConfig;
++    private int channelCount;
+     private int audioFormat;
++    private int bitsPerSample;
      private int audioSource;
  
      private AudioRecord recorder;
 +    private AutomaticGainControl automaticGainControl;
 +    private NoiseSuppressor noiseSuppressor;
      private int bufferSize;
-     private boolean isRecording;
+-    private boolean isRecording;
++    private volatile boolean isRecording;
 +    private boolean enableAutomaticGainControl;
 +    private boolean enableNoiseSuppressor;
 +    private int skipInitialBuffers;
++    private String wavFileName;
++    private File wavFile;
++    private RandomAccessFile wavWriter;
++    private long audioDataLength;
++    private volatile boolean recordingFinished = true;
++    private String lastAudioUri;
++    private Promise stopPromise;
  
      public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
          super(reactContext);
-@@ -41,6 +49,8 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -41,22 +62,28 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
  
      @ReactMethod
      public void init(ReadableMap options) {
@@ -42,7 +60,27 @@ index 20f454f..6a64ac5 100644
          sampleRateInHz = 44100;
          if (options.hasKey("sampleRate")) {
              sampleRateInHz = options.getInt("sampleRate");
-@@ -65,6 +75,14 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+         }
+ 
+         channelConfig = AudioFormat.CHANNEL_IN_MONO;
++        channelCount = 1;
+         if (options.hasKey("channels")) {
+             if (options.getInt("channels") == 2) {
+                 channelConfig = AudioFormat.CHANNEL_IN_STEREO;
++                channelCount = 2;
+             }
+         }
+ 
+         audioFormat = AudioFormat.ENCODING_PCM_16BIT;
++        bitsPerSample = 16;
+         if (options.hasKey("bitsPerSample")) {
+             if (options.getInt("bitsPerSample") == 8) {
+                 audioFormat = AudioFormat.ENCODING_PCM_8BIT;
++                bitsPerSample = 8;
+             }
+         }
+ 
+@@ -65,6 +92,17 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
              audioSource = options.getInt("audioSource");
          }
  
@@ -53,11 +91,14 @@ index 20f454f..6a64ac5 100644
 +        skipInitialBuffers = options.hasKey("skipInitialBuffers")
 +                ? options.getInt("skipInitialBuffers")
 +                : 0;
++        wavFileName = options.hasKey("wavFile")
++                ? sanitizeFileName(options.getString("wavFile"))
++                : "laoji-realtime.wav";
 +
          isRecording = false;
          eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
  
-@@ -76,6 +94,7 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -76,11 +114,20 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
  
          int recordingBufferSize = bufferSize * 3;
          recorder = new AudioRecord(audioSource, sampleRateInHz, channelConfig, audioFormat, recordingBufferSize);
@@ -65,7 +106,20 @@ index 20f454f..6a64ac5 100644
      }
  
      @ReactMethod
-@@ -94,15 +113,19 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+     public void start() {
++        try {
++            prepareWavWriter();
++        } catch (IOException e) {
++            throw new RuntimeException("Unable to create meeting WAV file", e);
++        }
++
+         isRecording = true;
++        recordingFinished = false;
++        lastAudioUri = null;
+         recorder.startRecording();
+ 
+         Thread recordingThread = new Thread(new Runnable() {
+@@ -94,15 +141,37 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                      while (isRecording) {
                          bytesRead = recorder.read(buffer, 0, buffer.length);
  
@@ -73,6 +127,7 @@ index 20f454f..6a64ac5 100644
 -                        if (bytesRead > 0 && ++count > 2) {
 -                            base64Data = Base64.encodeToString(buffer, Base64.NO_WRAP);
 +                        if (bytesRead > 0 && ++count > skipInitialBuffers) {
++                            writeAudioChunk(buffer, bytesRead);
 +                            byte[] chunk = bytesRead == buffer.length
 +                                    ? buffer
 +                                    : Arrays.copyOf(buffer, bytesRead);
@@ -80,19 +135,145 @@ index 20f454f..6a64ac5 100644
                              eventEmitter.emit("data", base64Data);
                          }
                      }
-                     recorder.stop();
-+                    releaseAudioEffects();
+-                    recorder.stop();
                  } catch (Exception e) {
-                     e.printStackTrace();
+-                    e.printStackTrace();
++                    Log.e("RNLiveAudioStream", "Recording failed", e);
++                } finally {
++                    try {
++                        if (recorder.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
++                            recorder.stop();
++                        }
++                    } catch (Exception e) {
++                        Log.w("RNLiveAudioStream", "AudioRecord stop failed", e);
++                    }
++                    String audioUri = finalizeWavFile();
 +                    releaseAudioEffects();
++                    Promise pending;
++                    synchronized (RNLiveAudioStreamModule.this) {
++                        recordingFinished = true;
++                        lastAudioUri = audioUri;
++                        pending = stopPromise;
++                        stopPromise = null;
++                    }
++                    if (pending != null) {
++                        pending.resolve(audioUri);
++                    }
                  }
              }
          });
-@@ -113,5 +136,52 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -111,7 +180,158 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+     }
+ 
      @ReactMethod
-     public void stop(Promise promise) {
+-    public void stop(Promise promise) {
++    public synchronized void stop(Promise promise) {
++        if (recordingFinished) {
++            promise.resolve(lastAudioUri);
++            return;
++        }
++        if (stopPromise != null) {
++            promise.reject("E_ALREADY_STOPPING", "Audio recording is already stopping");
++            return;
++        }
++        stopPromise = promise;
          isRecording = false;
-+        promise.resolve(null);
+     }
++
++    private String sanitizeFileName(String value) {
++        String name = value == null ? "" : new File(value).getName();
++        name = name.replaceAll("[^A-Za-z0-9._-]", "_");
++        if (name.isEmpty()) {
++            name = "laoji-realtime.wav";
++        }
++        if (!name.toLowerCase().endsWith(".wav")) {
++            name += ".wav";
++        }
++        return name;
++    }
++
++    private void prepareWavWriter() throws IOException {
++        closeWavWriter();
++        File audioDir = new File(reactContext.getFilesDir(), "meeting-audio");
++        if (!audioDir.exists() && !audioDir.mkdirs()) {
++            throw new IOException("Unable to create meeting audio directory");
++        }
++        wavFile = new File(audioDir, wavFileName);
++        wavWriter = new RandomAccessFile(wavFile, "rw");
++        wavWriter.setLength(0);
++        wavWriter.write(new byte[44]);
++        audioDataLength = 0;
++    }
++
++    private synchronized void writeAudioChunk(byte[] data, int length) throws IOException {
++        if (wavWriter == null || length <= 0) {
++            return;
++        }
++        wavWriter.write(data, 0, length);
++        audioDataLength += length;
++    }
++
++    private synchronized String finalizeWavFile() {
++        if (wavWriter == null || wavFile == null) {
++            return null;
++        }
++        try {
++            if (audioDataLength <= 0) {
++                closeWavWriter();
++                if (wavFile.exists()) {
++                    wavFile.delete();
++                }
++                return null;
++            }
++            writeWavHeader(wavWriter, audioDataLength);
++            closeWavWriter();
++            return Uri.fromFile(wavFile).toString();
++        } catch (IOException e) {
++            Log.e("RNLiveAudioStream", "Unable to finalize meeting WAV file", e);
++            closeWavWriter();
++            return null;
++        }
++    }
++
++    private void writeWavHeader(RandomAccessFile writer, long dataLength) throws IOException {
++        long byteRate = (long) sampleRateInHz * channelCount * bitsPerSample / 8;
++        writer.seek(0);
++        writer.writeBytes("RIFF");
++        writeIntLittleEndian(writer, dataLength + 36);
++        writer.writeBytes("WAVE");
++        writer.writeBytes("fmt ");
++        writeIntLittleEndian(writer, 16);
++        writeShortLittleEndian(writer, 1);
++        writeShortLittleEndian(writer, channelCount);
++        writeIntLittleEndian(writer, sampleRateInHz);
++        writeIntLittleEndian(writer, byteRate);
++        writeShortLittleEndian(writer, channelCount * bitsPerSample / 8);
++        writeShortLittleEndian(writer, bitsPerSample);
++        writer.writeBytes("data");
++        writeIntLittleEndian(writer, dataLength);
++    }
++
++    private void writeIntLittleEndian(RandomAccessFile writer, long value) throws IOException {
++        writer.write((int) (value & 0xff));
++        writer.write((int) ((value >> 8) & 0xff));
++        writer.write((int) ((value >> 16) & 0xff));
++        writer.write((int) ((value >> 24) & 0xff));
++    }
++
++    private void writeShortLittleEndian(RandomAccessFile writer, int value) throws IOException {
++        writer.write(value & 0xff);
++        writer.write((value >> 8) & 0xff);
++    }
++
++    private synchronized void closeWavWriter() {
++        if (wavWriter == null) {
++            return;
++        }
++        try {
++            wavWriter.close();
++        } catch (IOException ignored) {
++        }
++        wavWriter = null;
 +    }
 +
 +    private void configureAudioEffects(int audioSessionId) {
@@ -139,5 +320,5 @@ index 20f454f..6a64ac5 100644
 +            }
 +            noiseSuppressor = null;
 +        }
-     }
++    }
  }

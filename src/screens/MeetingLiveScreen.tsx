@@ -170,7 +170,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
             setError('会议已保存，但录音文件上传失败');
           }
         }
-        await updateMeetingStatus(meetingId, 'ended', { hasTranscript: transcript.length > 0, audioLocalUri: audioUri ?? null });
+        await updateMeetingStatus(meetingId, 'ended', {
+          hasTranscript: transcript.length > 0,
+          audioAvailable: Boolean(audioUri),
+          audioLocalUri: audioUri ?? null,
+        });
         if (transcript.length > 0) {
           setStatus('summarizing');
           try {
@@ -181,7 +185,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
         await refreshMeetings();
       } else {
-        await updateMeetingStatus(meetingId, 'ended', { hasTranscript: transcript.length > 0, audioLocalUri: audioUri ?? null });
+        await updateMeetingStatus(meetingId, 'ended', {
+          hasTranscript: transcript.length > 0,
+          audioAvailable: Boolean(audioUri),
+          audioLocalUri: audioUri ?? null,
+        });
       }
       setStatus('closed');
       navigation.replace('Transcription', { meetingId });

@@ -86,6 +86,11 @@ export function createRealtimeMeetingId(): string {
   return `laoji-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function buildRealtimeWavFileName(meetingId: string): string {
+  const safe = meetingId.replace(/[^A-Za-z0-9_-]/g, '_') || 'laoji-realtime';
+  return `${safe}.wav`;
+}
+
 export function buildRealtimeAsrUrl({
   meetingId,
   provider = DEFAULT_PROVIDER,
@@ -219,7 +224,7 @@ export async function startRealtimeAsr(
           enableAutomaticGainControl: true,
           enableNoiseSuppressor: true,
           skipInitialBuffers: 0,
-          wavFile: 'laoji-realtime.wav',
+          wavFile: buildRealtimeWavFileName(meetingId),
           bufferSize: DEFAULT_BUFFER_SIZE,
         });
         audioSubscription = audioStream.on('data', base64Pcm => {
@@ -458,7 +463,7 @@ async function stopAudioStream(audioStream: LiveAudioStreamModule): Promise<stri
   try {
     const result = await Promise.race([
       Promise.resolve(audioStream.stop()),
-      delay(500),
+      delay(5000),
     ]);
     return typeof result === 'string' && result ? result : undefined;
   } catch {

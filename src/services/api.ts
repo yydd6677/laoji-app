@@ -387,6 +387,37 @@ export async function fetchMeetingSummaryTask(
   return res.json();
 }
 
+export async function generateGuestMeetingSummary(
+  meetingId: string,
+  transcriptLines: TranscriptLine[],
+  title?: string,
+): Promise<ApiMeetingSummaryTask> {
+  const res = await fetch(meetingUrl('/api/laoji/meetings/guest-summary'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      meeting_id: meetingId,
+      title: title ?? null,
+      transcript_lines: transcriptLines.map(line => ({
+        speaker_label: line.speaker_label ?? null,
+        speaker_id: line.speaker_id ?? null,
+        text: line.text,
+        start_time: line.start_time ?? null,
+        end_time: line.end_time ?? null,
+        confidence: line.confidence ?? null,
+      })),
+    }),
+  });
+  if (!res.ok) throw await readResponseError('generate guest meeting summary failed', res);
+  return res.json();
+}
+
+export async function fetchGuestMeetingSummaryTask(taskId: string): Promise<ApiMeetingTaskStatus> {
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}`));
+  if (!res.ok) throw await readResponseError('fetch guest meeting summary task failed', res);
+  return res.json();
+}
+
 export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: string): Promise<ApiMeetingAudioInfo | null> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/audio`),

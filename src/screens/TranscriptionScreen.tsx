@@ -8,9 +8,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
-import { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
+import { RootStackParamList, TranscriptLine } from '../types';
 import { useMeetings } from '../store/MeetingsStore';
-import { fetchMeetingTranscript, fetchMeetingSummary, fetchMeetingSummaryTask, generateMeetingSummary } from '../services/api';
+import { fetchMeetingTranscript, fetchMeetingSummary } from '../services/api';
+import { generateSummaryForMeeting, meetingSummaryToText } from '../services/meetingSummary';
 import { BackHeader, Waveform } from '../components/Common';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
@@ -48,15 +49,6 @@ function safeFileName(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_').slice(0, 40) || 'laoji_transcript';
 }
 
-function summaryToText(summary: MeetingSummary | null): string {
-  if (!summary) return '';
-  return (summary.markdown || summary.full_text || summary.overview || '').trim();
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 export function TranscriptionScreen({ navigation, route }: Props) {
   const {
     meetings,
@@ -84,7 +76,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (!m) return;
     let alive = true;
     const cachedTranscript = getCachedTranscript(m.id);
-    const cachedSummary = summaryToText(getCachedSummary(m.id));
+    const cachedSummary = meetingSummaryToText(getCachedSummary(m.id));
     setTranscriptItems(cachedTranscript);
     setSummary(cachedSummary);
 
@@ -166,30 +158,22 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   };
 
   const handleGenerateSummary = async () => {
-    if (isGuest || !accessToken) {
-      showDialog({ title: '无法生成总结', message: '游客模式的会议只保存在本机，登录后可使用云端会议总结。', tone: 'info' });
-      return;
-    }
     if (transcriptItems.length === 0) {
       showDialog({ title: '暂无转写', message: '需要先有会议转写内容，才能生成总结。', tone: 'info' });
       return;
     }
     setLoadingSummary(true);
     try {
-      const task = await generateMeetingSummary(m.id, accessToken);
-      if (task.task_id) {
-        for (let index = 0; index < 8; index += 1) {
-          await delay(1200);
-          const status = await fetchMeetingSummaryTask(m.id, task.task_id, accessToken);
-          if (status.status === 'SUCCESS') break;
-          if (status.status === 'FAILURE') throw new Error('summary task failed');
-        }
-      }
-      const text = await fetchMeetingSummary(m.id, accessToken);
+      const generated = await generateSummaryForMeeting({
+        meetingId: m.id,
+        title: m.title,
+        transcriptLines: transcriptItems,
+        isGuest,
+        accessToken,
+      });
+      const text = meetingSummaryToText(generated);
       setSummary(text || '暂无总结内容');
-      if (text) {
-        await saveCachedSummary(m.id, { meeting_id: m.id, full_text: text, generated_at: new Date().toISOString() });
-      }
+      await saveCachedSummary(m.id, generated);
     } catch {
       showDialog({ title: '生成失败', message: '会议总结生成失败，请稍后重试。', tone: 'error' });
     } finally {
