@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { BackHeader } from '../components/Common';
@@ -65,7 +64,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const ticking = status === 'connecting' || status === 'recording' || status === 'connected' || status === 'stopping';
   const canStop = status === 'recording' || status === 'connected';
   const canStart = status === 'idle' || status === 'closed' || status === 'failed';
-  const busy = status === 'connecting' || status === 'stopping' || status === 'saving' || status === 'summarizing';
   const statusText = useMemo(() => {
     if (status === 'idle') return '准备开始';
     if (status === 'connecting') return '正在连接实时转写';
@@ -254,30 +252,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         ) : null}
       </ScrollView>
 
-      <View style={s.fixedControls}>
-        <TouchableOpacity
-          activeOpacity={0.88}
-          onPress={canStop ? stopRecording : startRecording}
-          disabled={!canStart && !canStop}
-          accessibilityRole="button"
-          accessibilityLabel={canStop ? '停止会议录音' : '开始会议录音'}
-        >
-          <LinearGradient
-            colors={canStop ? [C.red, '#D9363E'] : [C.gradFrom, C.gradTo]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[s.recordButton, (!canStart && !canStop) && s.recordButtonDisabled]}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Ionicons name={canStop ? 'stop' : 'mic'} size={31} color="#fff" />
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-        <Text style={s.controlText}>{canStop ? '停止并生成会议记录' : busy ? statusText : '开始录音'}</Text>
-      </View>
-
       <BottomTabBar
         active="meetings"
         onSchedule={() => openScheduleTab(navigation)}
@@ -293,7 +267,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
 const s = StyleSheet.create({
   scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: 134 },
+  content: { padding: 14, paddingBottom: 24 },
   heroCard: {
     backgroundColor: C.card,
     borderRadius: 18,
@@ -328,26 +302,4 @@ const s = StyleSheet.create({
   lineText: { fontSize: 14, color: '#4A4666', lineHeight: 22 },
   errorBox: { minHeight: 40, borderRadius: 14, backgroundColor: '#FFF0F0', marginTop: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
   errorText: { flex: 1, fontSize: 12, color: C.red, fontWeight: '700' },
-  fixedControls: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 86,
-    alignItems: 'center',
-    pointerEvents: 'box-none',
-  },
-  recordButton: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#6A38B2',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.34,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  recordButtonDisabled: { opacity: 0.58 },
-  controlText: { marginTop: 8, fontSize: 12, color: C.sub, fontWeight: '800' },
 });

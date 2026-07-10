@@ -1,5 +1,25 @@
 # 老记 Android 发布补全协作记录
 
+## 2026-07-10 实时会议录音入口去重
+
+### 变更记录
+- 变更编号：`CHG-20260710-02`
+- 维护类型：完善性维护。
+- 触发原因：实时会议页面内容区录音按钮与全局底部麦克风重复，造成同一主操作出现两个入口。
+- 影响范围：`src/screens/MeetingLiveScreen.tsx`；不修改录音、实时转写、音频上传、总结生成或服务端接口。
+- 设计决策：移除内容区悬浮录音按钮，只保留现有底部凹形栏麦克风；会议状态、计时、音量和错误反馈继续显示在内容区。
+- 测试与回归范围：静态重复入口检查、TypeScript、Jest 全量、Android release 构建、USB 覆盖安装和启动崩溃扫描。
+- 风险与回滚方案：底部按钮继续复用原 `startRecording` / `stopRecording` 分支；如需回滚，可恢复本次提交前的 `fixedControls` 代码块和样式。
+
+### 验证结果
+- 静态检查：`MeetingLiveScreen` 不再包含 `fixedControls`、独立录音按钮或对应渐变/加载依赖；只保留 `BottomTabBar.onMic` 的开始/停止分支。
+- `npx tsc --noEmit`：通过。
+- `npm test -- --runInBand`：10 suites / 83 tests passed。
+- `./gradlew assembleRelease --parallel --max-workers=$(nproc)`：BUILD SUCCESSFUL，Metro 重新生成 release JS bundle。
+- `adb install -r android/app/build/outputs/apk/release/app-release.apk`：Success，保留原有 App 数据。
+- 本地 APK 与手机已安装 `base.apk` 的 SHA-256 均为 `d95410bf6a37049f0540f74010ea8cb50f55fb5b75c8ef36b530a847307e5226`；设备更新时间为 `2026-07-10 09:08:24`。
+- 真机检查：`com.laoji.app/.MainActivity` 正常运行，崩溃扫描为 0；实时会议页截图确认内容区无重复录音按钮，底部麦克风可启动实时转写。
+
 ## 2026-07-10 GitHub 提交与 USB 真机更新
 
 ### 变更记录
