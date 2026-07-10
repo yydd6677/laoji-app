@@ -4,7 +4,6 @@
   },
   "build": {
     "development": {
-      "developmentClient": true,
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
@@ -19,10 +18,10 @@
       "channel": "preview",
       "env": {
         "APP_ENV": "preview",
-        "EXPO_PUBLIC_LAOJI_API_BASE": "http://183.36.243.124:8035",
-        "EXPO_PUBLIC_MEETING_API_BASE": "http://183.36.243.124:8020",
+        "EXPO_PUBLIC_LAOJI_API_BASE": "http://183.36.243.124:18035",
+        "EXPO_PUBLIC_MEETING_API_BASE": "http://183.36.243.124:18020",
         "EXPO_PUBLIC_REALTIME_ASR_HOST": "183.36.243.124",
-        "EXPO_PUBLIC_REALTIME_ASR_PORT": "8020",
+        "EXPO_PUBLIC_REALTIME_ASR_PORT": "18020",
         "EXPO_PUBLIC_REALTIME_ASR_SECURE": "false",
         "EXPO_ALLOW_CLEARTEXT": "true"
       }

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CalEvent } from '../types';
 import { ApiEvent, deleteEvent as apiDelete, fetchEvents, saveEvent, updateEvent as apiUpdate } from '../services/api';
 import { useAuth } from './AuthStore';
+import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
 import {
   cancelEventNotification,
   rescheduleEventNotification,
@@ -34,13 +35,13 @@ function cleanMetadata(meta: EventMetadata): EventMetadata {
 }
 
 function applyEventMetadata(ev: CalEvent, meta?: EventMetadata): CalEvent {
-  if (!meta) return ev;
-  return { ...ev, ...meta, color: meta.color ?? ev.color };
+  if (!meta) return { ...ev, category: normalizeEventCategory(ev.category), color: colorForEvent({ category: ev.category }) };
+  const category = normalizeEventCategory(meta.category ?? ev.category);
+  return { ...ev, ...meta, category, color: colorForEvent({ category }) };
 }
 
 function metadataFromEvent(ev: Omit<CalEvent, 'id'>): EventMetadata {
   return cleanMetadata({
-    color: ev.color,
     location: ev.location,
     category: ev.category,
     detail: ev.detail,
@@ -50,7 +51,6 @@ function metadataFromEvent(ev: Omit<CalEvent, 'id'>): EventMetadata {
 
 function metadataFromChanges(changes: Partial<CalEvent>): EventMetadata {
   const patch: EventMetadata = {};
-  if ('color' in changes) patch.color = changes.color;
   if ('location' in changes) patch.location = changes.location;
   if ('category' in changes) patch.category = changes.category;
   if ('detail' in changes) patch.detail = changes.detail;
@@ -67,31 +67,28 @@ function mergeMetadata(map: EventMetadataMap, id: string, patch: EventMetadata):
   return next;
 }
 
-function colorForType(type: string): string {
-  const map: Record<string, string> = {
-    once: '#7B5CB8',
-    daily: '#52C41A',
-    weekly: '#5B8CFF',
-    monthly: '#FF9500',
-    yearly: '#FF8FAB',
-  };
-  return map[type] ?? '#7B5CB8';
-}
-
 function serverToLocal(e: ApiEvent & { id: number }, meta?: EventMetadata): CalEvent {
+  const endDate = e.end_date ?? undefined;
+  const category = normalizeEventCategory(e.category ?? meta?.category);
   const local = {
     id: String(e.id),
     title: e.title,
     startDate: e.start_date,
-    endDate: e.end_time ? e.start_date : undefined,
+    endDate,
     startTime: e.start_time ?? undefined,
     endTime: e.end_time ?? undefined,
     isAllDay: e.is_all_day ?? false,
     repeat: (e.event_type !== 'once' ? e.event_type : undefined) as any,
     description: e.description ?? undefined,
+    rawText: e.raw_text ?? undefined,
+    location: e.location ?? meta?.location,
+    category,
+    detail: e.detail ?? meta?.detail,
+    status: e.status ?? undefined,
+    spanning: e.spanning ?? Boolean(endDate && endDate !== e.start_date),
     reminderMinutes: e.reminder_minutes ?? meta?.reminderMinutes ?? null,
     notificationId: meta?.notificationId ?? null,
-    color: colorForType(e.event_type),
+    color: colorForEvent({ category }),
   };
   return applyEventMetadata(local, meta);
 }
@@ -101,10 +98,18 @@ function localToServer(ev: Omit<CalEvent, 'id'>): ApiEvent {
     title: ev.title,
     event_type: (ev.repeat as string) || 'once',
     start_date: ev.startDate,
+    end_date: ev.endDate ?? null,
+    color: colorForEvent({ category: ev.category }),
+    spanning: ev.spanning ?? Boolean(ev.endDate && ev.endDate !== ev.startDate),
     start_time: ev.startTime ?? null,
     end_time: ev.endTime ?? null,
     is_all_day: ev.isAllDay ?? false,
     description: ev.description ?? null,
+    raw_text: ev.rawText ?? null,
+    location: ev.location ?? null,
+    category: normalizeEventCategory(ev.category),
+    detail: ev.detail ?? null,
+    status: ev.status ?? null,
     reminder_minutes: ev.reminderMinutes ?? null,
   };
 }
@@ -261,7 +266,13 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
 
   const addEvent = useCallback(async (ev: Omit<CalEvent, 'id'>) => {
     if (mode === 'guest') {
-      let localEv: CalEvent = { ...ev, id: createGuestId(), color: ev.color || '#7B5CB8' };
+      const category = normalizeEventCategory(ev.category);
+      let localEv: CalEvent = {
+        ...ev,
+        category,
+        id: createGuestId(),
+        color: colorForEvent({ category }),
+      };
       localEv = { ...localEv, notificationId: await scheduleEventNotification(localEv) };
       setEvents(prev => {
         const next = [...prev, localEv];
@@ -337,10 +348,18 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     if ('title' in changes) payload.title = changes.title;
     if ('repeat' in changes) payload.event_type = (changes.repeat as string) || 'once';
     if ('startDate' in changes) payload.start_date = changes.startDate;
+    if ('endDate' in changes) payload.end_date = changes.endDate ?? null;
+    if ('color' in changes) payload.color = changes.color ?? null;
+    if ('spanning' in changes) payload.spanning = changes.spanning ?? null;
     if ('startTime' in changes) payload.start_time = changes.startTime ?? null;
     if ('endTime' in changes) payload.end_time = changes.endTime ?? null;
     if ('isAllDay' in changes) payload.is_all_day = changes.isAllDay;
     if ('description' in changes) payload.description = changes.description ?? null;
+    if ('rawText' in changes) payload.raw_text = changes.rawText ?? null;
+    if ('location' in changes) payload.location = changes.location ?? null;
+    if ('category' in changes) payload.category = changes.category ?? null;
+    if ('detail' in changes) payload.detail = changes.detail ?? null;
+    if ('status' in changes) payload.status = changes.status ?? null;
     if ('reminderMinutes' in changes) payload.reminder_minutes = changes.reminderMinutes ?? null;
 
     const updated = await apiUpdate(Number(id), payload, accessToken);

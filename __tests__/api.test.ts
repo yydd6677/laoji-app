@@ -36,43 +36,96 @@ beforeEach(() => {
 });
 
 describe('parseText', () => {
-  it('sends POST to /api/laoji/parse with text', async () => {
+  it('uses local rules before server for simple complete text', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 9, 9, 0, 0));
+
+    try {
+      const result = await parseText('明天下午三点开会');
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        title: '开会',
+        start_date: '2026-07-10',
+        start_time: '15:00',
+        end_time: '16:00',
+        parse_source: 'rules',
+        confidence: 0,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('sends complex correction text to /api/laoji/parse', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        title: '开会',
+        title: '报销发票',
         event_type: 'once',
-        start_date: '2026-07-08',
-        start_time: '15:00',
-        end_time: '16:00',
+        start_date: '2026-07-10',
+        start_time: '09:00',
+        end_time: '10:00',
         is_all_day: false,
         description: null,
-        raw_text: '明天下午三点开会',
-        parse_source: 'rules',
-        confidence: 0.97,
+        raw_text: '不是星期日，是星期五上午九点报销发票',
+        parse_source: 'local_llm',
+        confidence: 0,
         needs_clarification: false,
         clarification_question: null,
       }),
     });
 
-    const result = await parseText('明天下午三点开会');
+    const result = await parseText('不是星期日，是星期五上午九点报销发票');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/parse',
+      'http://183.36.243.124:18035/api/laoji/parse',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: '明天下午三点开会' }),
+        body: JSON.stringify({ text: '不是星期日，是星期五上午九点报销发票' }),
       }),
     );
-    expect(result.title).toBe('开会');
-    expect(result.start_date).toBe('2026-07-08');
-    expect(result.confidence).toBeCloseTo(0.97);
+    expect(result.title).toBe('报销发票');
+    expect(result.start_date).toBe('2026-07-10');
+    expect(result.parse_source).toBe('local_llm');
   });
 
   it('throws on non-OK response', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 500 });
     await expect(parseText('test')).rejects.toThrow('parse failed: 500');
+  });
+
+  it('does not send explicit non-schedule control text to the server', async () => {
+    await expect(parseText('我刚才只是测试麦克风，不要真的创建日程')).rejects.toThrow(
+      'parse skipped: non-schedule control text',
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to local rules when the server is unreachable', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 9, 9, 0, 0));
+    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network request failed'));
+
+    try {
+      const result = await parseText('明天下午三点开会，如果冲突我再改');
+
+      expect(global.fetch).toHaveBeenCalled();
+      expect(result).toMatchObject({
+        start_date: '2026-07-10',
+        start_time: '15:00',
+        end_time: '16:00',
+        parse_source: 'rules',
+        confidence: 0,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the original error when neither server nor local rules can parse', async () => {
+    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network request failed'));
+
+    await expect(parseText('只是随便说句话')).rejects.toThrow('Network request failed');
   });
 });
 
@@ -87,7 +140,7 @@ describe('fetchEvents', () => {
     const result = await fetchEvents(2026, 7);
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/events?year=2026&month=7',
+      'http://183.36.243.124:18035/api/laoji/events?year=2026&month=7',
       { headers: undefined },
     );
     expect(result).toEqual(mockEvents);
@@ -102,7 +155,7 @@ describe('fetchEvents', () => {
     await fetchEvents(2026, 7, 'token-1');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/events?year=2026&month=7',
+      'http://183.36.243.124:18035/api/laoji/events?year=2026&month=7',
       { headers: { Authorization: 'Bearer token-1' } },
     );
   });
@@ -127,7 +180,7 @@ describe('saveEvent', () => {
     const result = await saveEvent(payload);
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/events',
+      'http://183.36.243.124:18035/api/laoji/events',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(result).toEqual(saved);
@@ -155,7 +208,7 @@ describe('clarifyText', () => {
     await clarifyText('明天下午开会', '三点', draft);
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/clarify',
+      'http://183.36.243.124:18035/api/laoji/clarify',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,7 +233,7 @@ describe('transcribeAudio', () => {
       { encoding: 'base64' },
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/asr/transcribe',
+      'http://183.36.243.124:18035/api/laoji/asr/transcribe',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -217,7 +270,7 @@ describe('parseAudio', () => {
       { encoding: 'base64' },
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/parse-audio',
+      'http://183.36.243.124:18035/api/laoji/parse-audio',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -233,7 +286,7 @@ describe('deleteEvent', () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
     await deleteEvent(42);
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/events/42',
+      'http://183.36.243.124:18035/api/laoji/events/42',
       { method: 'DELETE', headers: undefined },
     );
   });
@@ -258,7 +311,7 @@ describe('auth API', () => {
     const session = await authLoginAccount('a@example.com', 'secret123');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/auth/login',
+      'http://183.36.243.124:18035/api/auth/login',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -282,7 +335,7 @@ describe('auth API', () => {
     await authRegisterAccount('b@example.com', 'secret123', 'B');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/auth/register',
+      'http://183.36.243.124:18035/api/auth/register',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ account: 'b@example.com', password: 'secret123', nickname: 'B' }),
@@ -317,12 +370,12 @@ describe('auth API', () => {
 
     expect(global.fetch).toHaveBeenNthCalledWith(
       1,
-      'http://183.36.243.124:8035/api/auth/me',
+      'http://183.36.243.124:18035/api/auth/me',
       { headers: { Authorization: 'Bearer abc' } },
     );
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
-      'http://183.36.243.124:8035/api/auth/logout',
+      'http://183.36.243.124:18035/api/auth/logout',
       { method: 'POST', headers: { Authorization: 'Bearer abc' } },
     );
   });
@@ -333,7 +386,7 @@ describe('auth API', () => {
     await authChangePassword('abc', 'old-pass', 'new-pass-123');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/auth/change-password',
+      'http://183.36.243.124:18035/api/auth/change-password',
       expect.objectContaining({
         method: 'POST',
         headers: { Authorization: 'Bearer abc', 'Content-Type': 'application/json' },
@@ -351,7 +404,7 @@ describe('auth API', () => {
     await expect(authRequestPasswordReset('a@example.com')).resolves.toMatchObject({ request_id: 'reset-1' });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/auth/password-reset-requests',
+      'http://183.36.243.124:18035/api/auth/password-reset-requests',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -367,7 +420,7 @@ describe('auth API', () => {
     await expect(authUpdateRemoteProfile('abc', { nickname: '新昵称' })).resolves.toEqual(remote);
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/auth/me/profile',
+      'http://183.36.243.124:18035/api/auth/me/profile',
       expect.objectContaining({
         method: 'PATCH',
         headers: { Authorization: 'Bearer abc', 'Content-Type': 'application/json' },
@@ -386,7 +439,7 @@ describe('updateEvent', () => {
     const result = await updateEvent(42, changes);
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8035/api/laoji/events/42',
+      'http://183.36.243.124:18035/api/laoji/events/42',
       expect.objectContaining({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -443,16 +496,22 @@ describe('fetchMeetingAudioInfo', () => {
       url: 'https://cdn.example.com/meeting.m4a',
       duration_sec: 128,
     });
-    expect(global.fetch).toHaveBeenCalledWith('http://183.36.243.124:8020/api/meetings/meeting-1/audio-url');
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://183.36.243.124:18020/api/laoji/meetings/meeting-1/audio',
+      { headers: undefined },
+    );
   });
 
-  it('does not expose plain HTTP audio URLs to the player', async () => {
+  it('normalizes app-owned relative audio URLs', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ url: 'http://183.36.243.124:8020/audio/meeting.m4a' }),
+      json: async () => ({ url: '/api/laoji/meetings/meeting-2/audio/file', requires_auth: true }),
     });
 
-    await expect(fetchMeetingAudioInfo('meeting-2')).resolves.toBeNull();
+    await expect(fetchMeetingAudioInfo('meeting-2')).resolves.toMatchObject({
+      url: 'http://183.36.243.124:18020/api/laoji/meetings/meeting-2/audio/file',
+      requires_auth: true,
+    });
   });
 
   it('treats missing audio as a normal empty state', async () => {
@@ -462,7 +521,7 @@ describe('fetchMeetingAudioInfo', () => {
 });
 
 describe('updateMeeting', () => {
-  it('sends PATCH to /api/meetings/:id with changed meeting fields', async () => {
+  it('sends PATCH to /api/laoji/meetings/:id with changed meeting fields', async () => {
     const updated = {
       id: 'meeting-1',
       title: '新的会议标题',
@@ -477,7 +536,7 @@ describe('updateMeeting', () => {
     const result = await updateMeeting('meeting-1', { title: '新的会议标题' });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://183.36.243.124:8020/api/meetings/meeting-1',
+      'http://183.36.243.124:18020/api/laoji/meetings/meeting-1',
       expect.objectContaining({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

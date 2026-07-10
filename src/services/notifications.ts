@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { CalEvent } from '../types';
 
 export const DEFAULT_REMINDER_MINUTES = 15;
+export const SOON_REMINDER_DELAY_MS = 1_000;
 
 export type ReminderMinutes = number | null;
 
@@ -21,6 +22,7 @@ export const REMINDER_OPTIONS: { label: string; value: ReminderMinutes }[] = [
 ];
 
 const PREFS_KEY = '@laoji:notificationPrefs:v1';
+const EVENT_NOTIFICATION_CHANNEL_ID = 'laoji-events';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -58,7 +60,19 @@ export function reminderFireDate(event: Pick<CalEvent, 'startDate' | 'startTime'
   const start = parseEventDateTime(event.startDate, event.startTime);
   if (!start) return null;
   const fireAt = new Date(start.getTime() - event.reminderMinutes * 60 * 1000);
-  return fireAt.getTime() > now.getTime() ? fireAt : null;
+  if (fireAt.getTime() > now.getTime()) return fireAt;
+  if (start.getTime() <= now.getTime()) return null;
+  const soon = new Date(now.getTime() + SOON_REMINDER_DELAY_MS);
+  return soon.getTime() < start.getTime() ? soon : start;
+}
+
+export function notificationDateTrigger(date: Date): Notifications.DateTriggerInput {
+  const base: Notifications.DateTriggerInput = {
+    type: 'date' as Notifications.SchedulableTriggerInputTypes.DATE,
+    date,
+  };
+  if (Platform.OS !== 'android') return base;
+  return { ...base, channelId: EVENT_NOTIFICATION_CHANNEL_ID };
 }
 
 export async function loadNotificationPrefs(scope: string): Promise<NotificationPrefs> {
@@ -94,27 +108,33 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 export async function scheduleEventNotification(event: CalEvent): Promise<string | null> {
   const fireAt = reminderFireDate(event);
   if (!fireAt) return null;
-  const granted = await ensureNotificationPermission();
-  if (!granted) return null;
 
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('laoji-events', {
-      name: '日程提醒',
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: 'default',
-      vibrationPattern: [0, 250, 250, 250],
+  try {
+    const granted = await ensureNotificationPermission();
+    if (!granted) return null;
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync(EVENT_NOTIFICATION_CHANNEL_ID, {
+        name: '日程提醒',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '老记日程提醒',
+        body: event.title,
+        sound: 'default',
+        data: { eventId: event.id },
+      },
+      trigger: notificationDateTrigger(fireAt),
     });
+  } catch (err) {
+    console.warn('schedule event notification failed', err);
+    return null;
   }
-
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: '老记日程提醒',
-      body: event.title,
-      sound: 'default',
-      data: { eventId: event.id },
-    },
-    trigger: fireAt as any,
-  });
 }
 
 export async function cancelEventNotification(notificationId?: string | null): Promise<void> {

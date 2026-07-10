@@ -1,7 +1,7 @@
 const base = require('./app.json').expo;
 
-const INTERNAL_LAOJI_API_BASE = 'http://183.36.243.124:8035';
-const INTERNAL_MEETING_API_BASE = 'http://183.36.243.124:8020';
+const INTERNAL_LAOJI_API_BASE = 'http://183.36.243.124:18035';
+const INTERNAL_MEETING_API_BASE = 'http://183.36.243.124:18020';
 const INTERNAL_REALTIME_ASR_HOST = '183.36.243.124';
 
 function boolEnv(value) {
@@ -27,7 +27,7 @@ module.exports = () => {
   const laojiApiBase = cleanUrl(process.env.EXPO_PUBLIC_LAOJI_API_BASE || INTERNAL_LAOJI_API_BASE);
   const meetingApiBase = cleanUrl(process.env.EXPO_PUBLIC_MEETING_API_BASE || INTERNAL_MEETING_API_BASE);
   const realtimeAsrHost = process.env.EXPO_PUBLIC_REALTIME_ASR_HOST || INTERNAL_REALTIME_ASR_HOST;
-  const realtimeAsrPort = Number(process.env.EXPO_PUBLIC_REALTIME_ASR_PORT || 8020);
+  const realtimeAsrPort = Number(process.env.EXPO_PUBLIC_REALTIME_ASR_PORT || 18020);
   const realtimeAsrSecure = boolEnv(process.env.EXPO_PUBLIC_REALTIME_ASR_SECURE);
 
   assertProductionUrl('EXPO_PUBLIC_LAOJI_API_BASE', laojiApiBase);

@@ -17,13 +17,11 @@ import {
   uploadRemoteAvatar,
 } from '../services/auth';
 import {
-  AVATAR_PRESETS,
   DEFAULT_PROFILE,
   GUEST_PROFILE,
   UserProfile,
   loadProfile,
   normalizeAvatarColors,
-  profileInitial,
   saveProfile,
 } from '../services/profile';
 
@@ -54,7 +52,8 @@ function userToProfile(user: AuthUser): UserProfile {
     nickname: user.nickname || user.account,
     email: user.email || (isEmail ? user.account : DEFAULT_PROFILE.email),
     phone: user.phone || (!isEmail ? user.account : DEFAULT_PROFILE.phone),
-    avatarInitial: profileInitial(user.nickname || user.account),
+    avatarInitial: '',
+    avatarInitialManual: false,
     avatarColors: DEFAULT_PROFILE.avatarColors,
     avatarUrl: user.avatar_url ?? null,
     avatarLocalUri: null,
@@ -68,8 +67,9 @@ function mergeRemoteProfile(base: UserProfile, remote: any): UserProfile {
     nickname,
     email: remote?.email ?? base.email,
     phone: remote?.phone ?? base.phone,
-    avatarInitial: remote?.avatar_initial ?? remote?.avatarInitial ?? base.avatarInitial ?? profileInitial(nickname),
-    avatarColors: normalizeAvatarColors(remote?.avatar_colors ?? remote?.avatarColors, base.avatarColors ?? AVATAR_PRESETS[0]),
+    avatarInitial: '',
+    avatarInitialManual: false,
+    avatarColors: normalizeAvatarColors(remote?.avatar_colors ?? remote?.avatarColors, base.avatarColors ?? DEFAULT_PROFILE.avatarColors),
     avatarUrl: remote?.avatar_url ?? remote?.avatarUrl ?? base.avatarUrl ?? null,
     avatarLocalUri: remote?.avatar_url || remote?.avatarUrl ? null : base.avatarLocalUri ?? null,
   };
@@ -80,7 +80,7 @@ function profileToRemote(profile: UserProfile) {
     nickname: profile.nickname,
     email: profile.email,
     phone: profile.phone,
-    avatar_initial: profile.avatarInitial,
+    avatar_initial: '',
     avatar_colors: profile.avatarColors,
   };
 }
@@ -217,14 +217,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const uploadAvatar = useCallback(async (uri: string, fileName?: string, mimeType?: string) => {
     const scope = profileScope(mode, session);
     if (mode === 'guest') {
-      const nextProfile = { ...profile, avatarLocalUri: uri, avatarUrl: null };
+      const nextProfile = { ...profile, avatarLocalUri: uri, avatarUrl: null, avatarInitial: '', avatarInitialManual: false };
       await saveProfile(nextProfile, scope);
       setProfile(nextProfile);
       return;
     }
     if (!session?.accessToken) throw new Error('not authenticated');
     const remote = await uploadRemoteAvatar(session.accessToken, uri, fileName, mimeType);
-    const merged = mergeRemoteProfile({ ...profile, avatarLocalUri: uri }, remote);
+    const merged = mergeRemoteProfile({ ...profile, avatarLocalUri: uri, avatarInitial: '', avatarInitialManual: false }, remote);
     await saveProfile(merged, scope);
     setProfile(merged);
   }, [mode, profile, session]);
@@ -232,14 +232,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const deleteAvatar = useCallback(async () => {
     const scope = profileScope(mode, session);
     if (mode === 'guest') {
-      const nextProfile = { ...profile, avatarLocalUri: null, avatarUrl: null };
+      const nextProfile = { ...profile, avatarLocalUri: null, avatarUrl: null, avatarInitial: '', avatarInitialManual: false };
       await saveProfile(nextProfile, scope);
       setProfile(nextProfile);
       return;
     }
     if (!session?.accessToken) throw new Error('not authenticated');
     const remote = await deleteRemoteAvatar(session.accessToken);
-    const merged = mergeRemoteProfile({ ...profile, avatarLocalUri: null, avatarUrl: null }, remote);
+    const merged = mergeRemoteProfile({ ...profile, avatarLocalUri: null, avatarUrl: null, avatarInitial: '', avatarInitialManual: false }, remote);
     await saveProfile(merged, scope);
     setProfile(merged);
   }, [mode, profile, session]);

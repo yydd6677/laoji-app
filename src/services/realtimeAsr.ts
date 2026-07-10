@@ -3,7 +3,7 @@ import { getApiConfig } from './config';
 declare const require: (moduleName: string) => unknown;
 
 const DEFAULT_HOST = '183.36.243.124';
-const DEFAULT_PORT = 8020;
+const DEFAULT_PORT = 18020;
 const DEFAULT_PROVIDER: RealtimeAsrProvider = 'funasr';
 const DEFAULT_BUFFER_SIZE = 3200;
 const INITIAL_SILENCE_FRAMES = 3;
@@ -37,7 +37,7 @@ export interface RealtimeAsrAudioStats {
 export interface RealtimeAsrSession {
   meetingId: string;
   url: string;
-  stop: () => Promise<void>;
+  stop: () => Promise<string | undefined>;
 }
 
 export interface StartRealtimeAsrOptions {
@@ -46,6 +46,7 @@ export interface StartRealtimeAsrOptions {
   host?: string;
   port?: number;
   secure?: boolean;
+  accessToken?: string | null;
   connectionTimeoutMs?: number;
   stopTimeoutMs?: number;
   onStatus?: (status: RealtimeAsrStatus) => void;
@@ -91,12 +92,14 @@ export function buildRealtimeAsrUrl({
   host = DEFAULT_HOST,
   port = DEFAULT_PORT,
   secure = false,
+  accessToken,
 }: {
   meetingId: string;
   provider?: RealtimeAsrProvider;
   host?: string;
   port?: number;
   secure?: boolean;
+  accessToken?: string | null;
 }): string {
   const protocol = secure ? 'wss' : 'ws';
   const normalizedHost = host
@@ -104,7 +107,8 @@ export function buildRealtimeAsrUrl({
     .replace(/^wss?:\/\//, '')
     .replace(/\/+$/, '');
   const hostWithPort = normalizedHost.includes(':') ? normalizedHost : `${normalizedHost}:${port}`;
-  return `${protocol}://${hostWithPort}/ws/meeting/${encodeURIComponent(meetingId)}/${provider}`;
+  const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+  return `${protocol}://${hostWithPort}/ws/meeting/${encodeURIComponent(meetingId)}/${provider}${query}`;
 }
 
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -135,11 +139,12 @@ export async function startRealtimeAsr(
     host: options.host ?? apiConfig.realtimeAsrHost,
     port: options.port ?? apiConfig.realtimeAsrPort,
     secure: options.secure ?? apiConfig.realtimeAsrSecure,
+    accessToken: options.accessToken,
   });
   const connectionTimeoutMs = options.connectionTimeoutMs ?? 8000;
   const stopTimeoutMs = options.stopTimeoutMs ?? 10000;
 
-  console.info(`[LaoJi ASR] connecting ${url}`);
+  console.info(`[LaoJi ASR] connecting ${maskRealtimeUrl(url)}`);
   options.onStatus?.('connecting');
 
   return new Promise((resolve, reject) => {
@@ -163,11 +168,11 @@ export async function startRealtimeAsr(
       meetingId,
       url,
       stop: async () => {
-        if (stopped) return;
+        if (stopped) return undefined;
         stopped = true;
         options.onStatus?.('stopping');
         removeAudioListener(audioSubscription);
-        await stopAudioStream(audioStream);
+        const audioUri = await stopAudioStream(audioStream);
 
         if (ws.readyState === WebSocket.OPEN) {
           try {
@@ -180,6 +185,7 @@ export async function startRealtimeAsr(
 
         closeWebSocket(ws);
         options.onStatus?.('closed');
+        return audioUri;
       },
     };
 
@@ -365,16 +371,23 @@ export function applyPcmAutoGain(
 }
 
 export function selectRealtimeScheduleText(chunks: string[]): string {
-  const candidates = chunks
+  const unique = new Map<string, { text: string; index: number }>();
+  chunks
     .map(normalizeTranscriptChunk)
-    .filter((text): text is string => !!text)
-    .filter((text, index, items) => items.indexOf(text) === index);
+    .forEach((text, index) => {
+      if (text) unique.set(text, { text, index });
+    });
+  const candidates = Array.from(unique.values());
 
   if (candidates.length === 0) return '';
 
   const scored = candidates
-    .map(text => ({ text, score: scoreScheduleTranscript(text) }))
-    .sort((left, right) => right.score - left.score || right.text.length - left.text.length);
+    .map(candidate => ({ ...candidate, score: scoreScheduleTranscript(candidate.text) }))
+    .sort((left, right) => (
+      right.score - left.score
+      || right.text.length - left.text.length
+      || right.index - left.index
+    ));
   const best = scored[0];
 
   if (best.score >= 8) return best.text;
@@ -441,14 +454,16 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   return index === bytes.length ? bytes : bytes.slice(0, index);
 }
 
-async function stopAudioStream(audioStream: LiveAudioStreamModule): Promise<void> {
+async function stopAudioStream(audioStream: LiveAudioStreamModule): Promise<string | undefined> {
   try {
-    await Promise.race([
+    const result = await Promise.race([
       Promise.resolve(audioStream.stop()),
       delay(500),
     ]);
+    return typeof result === 'string' && result ? result : undefined;
   } catch {
     // Some native implementations throw when stop is called after the recorder has already ended.
+    return undefined;
   }
 }
 
@@ -464,6 +479,10 @@ function closeWebSocket(ws: WebSocket) {
   if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
     ws.close();
   }
+}
+
+function maskRealtimeUrl(url: string): string {
+  return url.replace(/([?&](?:access_token|token)=)[^&]+/g, '$1***');
 }
 
 async function sendInitialSilenceFrames(

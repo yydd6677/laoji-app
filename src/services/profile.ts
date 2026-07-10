@@ -9,6 +9,7 @@ export interface UserProfile {
   email: string;
   phone: string;
   avatarInitial: string;
+  avatarInitialManual?: boolean;
   avatarColors: AvatarColors;
   avatarUrl?: string | null;
   avatarLocalUri?: string | null;
@@ -23,17 +24,12 @@ export const AVATAR_PRESETS: AvatarColors[] = [
   ['#FF9500', '#FFC05C'],
 ];
 
-export function profileInitial(name: string): string {
-  const clean = name.trim();
-  if (!clean) return '记';
-  return clean.slice(0, 1).toUpperCase();
-}
-
 export const DEFAULT_PROFILE: UserProfile = {
   nickname: '王多鱼',
   email: 'wangduoyu@email.com',
   phone: '138 **** 8888',
-  avatarInitial: '王',
+  avatarInitial: '',
+  avatarInitialManual: false,
   avatarColors: AVATAR_PRESETS[0],
   avatarUrl: null,
   avatarLocalUri: null,
@@ -43,7 +39,8 @@ export const GUEST_PROFILE: UserProfile = {
   nickname: '访客用户',
   email: '访客模式',
   phone: '未绑定',
-  avatarInitial: '访',
+  avatarInitial: '',
+  avatarInitialManual: false,
   avatarColors: AVATAR_PRESETS[1],
   avatarUrl: null,
   avatarLocalUri: null,
@@ -66,7 +63,8 @@ export async function loadProfile(scope?: string, fallback: UserProfile = DEFAUL
       nickname,
       email: saved.email || fallback.email,
       phone: saved.phone || fallback.phone,
-      avatarInitial: saved.avatarInitial || profileInitial(nickname),
+      avatarInitial: '',
+      avatarInitialManual: false,
       avatarColors: savedColors,
       avatarUrl: saved.avatarUrl ?? fallback.avatarUrl ?? null,
       avatarLocalUri: saved.avatarLocalUri ?? fallback.avatarLocalUri ?? null,

@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
   id: string;
@@ -9,13 +10,14 @@ export interface CalEvent {
   endTime?: string;
   color: string;
   spanning?: boolean;
-  category?: string;
+  category?: EventCategory;
   location?: string;
   detail?: string;
   status?: string;
   isAllDay?: boolean;
   repeat?: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   description?: string;
+  rawText?: string;
   reminderMinutes?: number | null;
   notificationId?: string | null;
 }
@@ -32,6 +34,36 @@ export interface Meeting {
   hasTranscript?: boolean;
   hasSummary?: boolean;
   status?: string;
+  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen' | 'hybrid';
+  description?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  audioAvailable?: boolean;
+  audioLocalUri?: string | null;
+  source?: 'cloud' | 'guest';
+}
+
+export interface TranscriptLine {
+  id: string;
+  meeting_id?: string;
+  speaker_id?: string;
+  speaker_label?: string;
+  text: string;
+  start_time?: number;
+  end_time?: number;
+  confidence?: number;
+  created_at?: string | null;
+}
+
+export interface MeetingSummary {
+  id?: string;
+  meeting_id?: string;
+  overview?: string;
+  full_text?: string;
+  markdown?: string | null;
+  key_decisions?: string[];
+  action_items?: { id?: string; content: string; assignee?: string | null; due_date?: string | null; status?: string }[];
+  generated_at?: string | null;
 }
 
 export type RootStackParamList = {
@@ -40,6 +72,7 @@ export type RootStackParamList = {
   EventDetail: { eventId: string };
   Calendar: undefined;
   Recording: { meetingId: string };
+  MeetingLive: { meetingId?: string } | undefined;
   Transcription: { meetingId: string };
   Profile: undefined;
   Account: undefined;

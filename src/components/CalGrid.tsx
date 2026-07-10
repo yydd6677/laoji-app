@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { CalEvent } from '../types';
 
+const WEEKDAYS = ['一','二','三','四','五','六','日'];
+
 interface Props {
   year: number; month: number; selDay: number;
   onDay: (d: number) => void;
@@ -13,11 +15,20 @@ interface Props {
   events: CalEvent[];
 }
 
+function mondayFirstIndex(day: number): number {
+  return (day + 6) % 7;
+}
+
+function dateKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, onSearch, events }: Props) {
-  const WD = ['日','一','二','三','四','五','六'];
-  const fDow = new Date(year, month - 1, 1).getDay();
+  const fDow = mondayFirstIndex(new Date(year, month - 1, 1).getDay());
   const dim   = new Date(year, month, 0).getDate();
   const pDim  = new Date(year, month - 1, 0).getDate();
+  const today = new Date();
+  const todayStr = dateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
 
   type Cell = { d: number; cur: boolean };
   const cells: Cell[] = [];
@@ -26,8 +37,7 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
   while (cells.length % 7) cells.push({ d: cells.length - dim - fDow + 1, cur: false });
   const rows = Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
 
-  const ds = (d: number) =>
-    `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const ds = (d: number) => dateKey(year, month, d);
 
   const ptEvts = (d: number) =>
     events.filter(e => !e.spanning && e.startDate === ds(d));
@@ -74,7 +84,9 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
 
       {/* Weekday row */}
       <View style={s.wdRow}>
-        {WD.map(d => <Text key={d} style={s.wdText}>{d}</Text>)}
+        {WEEKDAYS.map((d, index) => (
+          <Text key={d} style={[s.wdText, index >= 5 && s.wdWeekend]}>{d}</Text>
+        ))}
       </View>
 
       {/* Date rows */}
@@ -84,7 +96,11 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
           <View key={ri}>
             <View style={s.dateRow}>
               {row.map((cell, ci) => {
-                const sel = cell.cur && cell.d === selDay;
+                const cellDate = cell.cur ? ds(cell.d) : '';
+                const isToday = cell.cur && cellDate === todayStr;
+                const isSelected = cell.cur && cell.d === selDay;
+                const isSelectedOnly = isSelected && !isToday;
+                const isWeekend = ci >= 5;
                 const evts = cell.cur ? ptEvts(cell.d) : [];
                 return (
                   <TouchableOpacity
@@ -93,10 +109,16 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
                     style={s.cell}
                     activeOpacity={cell.cur ? 0.7 : 1}
                   >
-                    <View style={[s.dayCircle, sel && { backgroundColor: C.purpleDark }]}>
+                    <View style={[
+                      s.dayMarker,
+                      isToday && s.dayToday,
+                      isSelectedOnly && s.daySelected,
+                    ]}>
                       <Text style={[
                         s.dayNum,
-                        sel && { color: '#fff', fontWeight: '700' },
+                        isWeekend && cell.cur && s.dayWeekend,
+                        isSelectedOnly && s.daySelectedText,
+                        isToday && s.dayTodayText,
                         !cell.cur && { color: '#D5D0ED' },
                       ]}>
                         {cell.d}
@@ -159,10 +181,16 @@ const s = StyleSheet.create({
   monthText: { fontSize: 15, fontWeight: '700', color: C.text },
   wdRow: { flexDirection: 'row', marginBottom: 4 },
   wdText: { flex: 1, textAlign: 'center', fontSize: 11, color: C.faint, fontWeight: '500', paddingVertical: 2 },
+  wdWeekend: { color: '#91A8E8' },
   dateRow: { flexDirection: 'row' },
   cell: { flex: 1, alignItems: 'center', paddingVertical: 2, minHeight: 50 },
-  dayCircle: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  dayMarker: { width: 30, height: 30, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 2, borderWidth: 1.5, borderColor: 'transparent' },
+  dayToday: { backgroundColor: C.purpleDark, borderColor: C.purpleDark },
+  daySelected: { backgroundColor: C.card, borderColor: C.purple },
   dayNum: { fontSize: 13, color: C.text, lineHeight: 16 },
+  dayWeekend: { color: C.blue },
+  dayTodayText: { color: '#fff', fontWeight: '800' },
+  daySelectedText: { color: C.purpleDark, fontWeight: '800' },
   pill: { borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1, marginBottom: 1, maxWidth: '95%' },
   pillText: { fontSize: 9, fontWeight: '600', lineHeight: 13 },
   spanRow: { flexDirection: 'row', marginBottom: 4, marginTop: -2 },

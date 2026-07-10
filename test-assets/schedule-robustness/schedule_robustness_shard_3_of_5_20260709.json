@@ -1,0 +1,2846 @@
+{
+  "source": "/home/yydd/LaoJi/mobile/test-assets/schedule-robustness/schedule_robustness_samples_1000_20260709.json",
+  "shard": 3,
+  "samples": [
+    {
+      "id": "RB0401",
+      "group": "ambiguous_clarify",
+      "text": "今天下午买高铁车票，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0402",
+      "group": "ambiguous_clarify",
+      "text": "后天早上去机场，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0403",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号上午大扫除，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0404",
+      "group": "ambiguous_clarify",
+      "text": "后天早上还信用卡，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0405",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号早上健身核心训练，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0406",
+      "group": "ambiguous_clarify",
+      "text": "后天早上喝水，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0407",
+      "group": "ambiguous_clarify",
+      "text": "周五上午健身核心训练，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0408",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号晚上整理文件，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0409",
+      "group": "ambiguous_clarify",
+      "text": "周五早上做需求评审，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0410",
+      "group": "ambiguous_clarify",
+      "text": "明天晚上朋友聚餐，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0411",
+      "group": "ambiguous_clarify",
+      "text": "下周二下午喝水，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0412",
+      "group": "ambiguous_clarify",
+      "text": "明天下午报销发票，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0413",
+      "group": "ambiguous_clarify",
+      "text": "下周二晚上买高铁车票，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0414",
+      "group": "ambiguous_clarify",
+      "text": "周日上午买菜，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0415",
+      "group": "ambiguous_clarify",
+      "text": "今天上午阅读论文，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0416",
+      "group": "ambiguous_clarify",
+      "text": "明天下午朋友聚餐，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0417",
+      "group": "ambiguous_clarify",
+      "text": "后天下午大扫除，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0418",
+      "group": "ambiguous_clarify",
+      "text": "下周二上午大扫除，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0419",
+      "group": "ambiguous_clarify",
+      "text": "周日上午阅读论文，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0420",
+      "group": "ambiguous_clarify",
+      "text": "明天晚上去机场，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0421",
+      "group": "ambiguous_clarify",
+      "text": "今天下午复习考试，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0422",
+      "group": "ambiguous_clarify",
+      "text": "后天早上上课，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0423",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上去车站，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0424",
+      "group": "ambiguous_clarify",
+      "text": "后天早上给妈妈打电话，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0425",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号早上检查服务器，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0426",
+      "group": "ambiguous_clarify",
+      "text": "今天上午检查服务器，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0427",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上阅读论文，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0428",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号早上旅行，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0429",
+      "group": "ambiguous_clarify",
+      "text": "明天晚上搬家，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0430",
+      "group": "ambiguous_clarify",
+      "text": "周日早上搬家，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0431",
+      "group": "ambiguous_clarify",
+      "text": "今天晚上朋友聚餐，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0432",
+      "group": "ambiguous_clarify",
+      "text": "今天上午去机场，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0433",
+      "group": "ambiguous_clarify",
+      "text": "周日下午整理文件，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0434",
+      "group": "ambiguous_clarify",
+      "text": "下周二早上整理文件，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0435",
+      "group": "ambiguous_clarify",
+      "text": "明天早上给妈妈打电话，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0436",
+      "group": "ambiguous_clarify",
+      "text": "下周二早上开周会，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0437",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上搬家，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0438",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上生日聚会，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0439",
+      "group": "ambiguous_clarify",
+      "text": "周日早上检查服务器，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0440",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上买菜，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0441",
+      "group": "ambiguous_clarify",
+      "text": "下周二早上和朋友吃饭，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0442",
+      "group": "ambiguous_clarify",
+      "text": "周日下午朋友聚餐，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0443",
+      "group": "ambiguous_clarify",
+      "text": "今天早上背单词，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0444",
+      "group": "ambiguous_clarify",
+      "text": "周日晚上缴费还款，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0445",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号早上买菜，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0446",
+      "group": "ambiguous_clarify",
+      "text": "后天早上朋友聚餐，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0447",
+      "group": "ambiguous_clarify",
+      "text": "后天晚上整理项目材料，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0448",
+      "group": "ambiguous_clarify",
+      "text": "后天早上阅读论文，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0449",
+      "group": "ambiguous_clarify",
+      "text": "周日早上记一下那个事情，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0450",
+      "group": "ambiguous_clarify",
+      "text": "明天早上买菜，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0451",
+      "group": "ambiguous_clarify",
+      "text": "后天晚上复习考试，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0452",
+      "group": "ambiguous_clarify",
+      "text": "明天晚上复习考试，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0453",
+      "group": "ambiguous_clarify",
+      "text": "周日晚上健身核心训练，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0454",
+      "group": "ambiguous_clarify",
+      "text": "周五晚上整理项目材料，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0455",
+      "group": "ambiguous_clarify",
+      "text": "今天晚上吃药，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0456",
+      "group": "ambiguous_clarify",
+      "text": "后天早上还信用卡，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0457",
+      "group": "ambiguous_clarify",
+      "text": "明天下午整理项目材料，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0458",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号上午报销发票，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0459",
+      "group": "ambiguous_clarify",
+      "text": "周五上午背单词，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0460",
+      "group": "ambiguous_clarify",
+      "text": "明天早上缴费还款，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0461",
+      "group": "ambiguous_clarify",
+      "text": "后天早上给妈妈打电话，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0462",
+      "group": "ambiguous_clarify",
+      "text": "下周二早上给妈妈打电话，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0463",
+      "group": "ambiguous_clarify",
+      "text": "今天早上买高铁车票，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0464",
+      "group": "ambiguous_clarify",
+      "text": "七月二十号上午睡觉，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0465",
+      "group": "ambiguous_clarify",
+      "text": "下周二下午做需求评审，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0466",
+      "group": "ambiguous_clarify",
+      "text": "明天早上参加培训，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0467",
+      "group": "ambiguous_clarify",
+      "text": "明天下午检查服务器，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0468",
+      "group": "ambiguous_clarify",
+      "text": "今天上午缴费还款，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0469",
+      "group": "ambiguous_clarify",
+      "text": "明天上午做需求评审，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0470",
+      "group": "ambiguous_clarify",
+      "text": "下周二下午吃药，具体几点还没定。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": null,
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "模糊时间",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0471",
+      "group": "ambiguous_clarify",
+      "text": "上午十点做需求评审，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "10:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0472",
+      "group": "ambiguous_clarify",
+      "text": "上午九点和朋友吃饭，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0473",
+      "group": "ambiguous_clarify",
+      "text": "上午九点收快递，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0474",
+      "group": "ambiguous_clarify",
+      "text": "下午三点还房贷，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0475",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半整理项目材料，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0476",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点系统维护，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0477",
+      "group": "ambiguous_clarify",
+      "text": "下午两点买菜，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0478",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半交预算报告，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0479",
+      "group": "ambiguous_clarify",
+      "text": "晚上七点整理账单，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "19:00",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0480",
+      "group": "ambiguous_clarify",
+      "text": "下午两点系统维护，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0481",
+      "group": "ambiguous_clarify",
+      "text": "中午十二点背单词，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "12:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0482",
+      "group": "ambiguous_clarify",
+      "text": "上午九点整理文件，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0483",
+      "group": "ambiguous_clarify",
+      "text": "下午两点阅读论文，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0484",
+      "group": "ambiguous_clarify",
+      "text": "下午两点跑步，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0485",
+      "group": "ambiguous_clarify",
+      "text": "上午九点复习考试，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0486",
+      "group": "ambiguous_clarify",
+      "text": "下午两点复习考试，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0487",
+      "group": "ambiguous_clarify",
+      "text": "上午九点开项目会，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0488",
+      "group": "ambiguous_clarify",
+      "text": "下午三点参加培训，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0489",
+      "group": "ambiguous_clarify",
+      "text": "上午八点半开周会，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "08:30",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0490",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点大扫除，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0491",
+      "group": "ambiguous_clarify",
+      "text": "上午八点半给妈妈打电话，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "08:30",
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0492",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点参加培训，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0493",
+      "group": "ambiguous_clarify",
+      "text": "上午八点半做需求评审，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "08:30",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0494",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半参加培训，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0495",
+      "group": "ambiguous_clarify",
+      "text": "下午两点还房贷，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0496",
+      "group": "ambiguous_clarify",
+      "text": "下午五点吃药，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "17:00",
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0497",
+      "group": "ambiguous_clarify",
+      "text": "中午十二点旅行，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "12:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0498",
+      "group": "ambiguous_clarify",
+      "text": "上午九点复习考试，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0499",
+      "group": "ambiguous_clarify",
+      "text": "晚上七点去车站，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "19:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0500",
+      "group": "ambiguous_clarify",
+      "text": "中午十二点记一下那个事情，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "12:00",
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0501",
+      "group": "ambiguous_clarify",
+      "text": "上午九点买高铁车票，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0502",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点记一下那个事情，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0503",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点开项目会，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0504",
+      "group": "ambiguous_clarify",
+      "text": "上午八点半参加培训，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "08:30",
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0505",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半大扫除，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0506",
+      "group": "ambiguous_clarify",
+      "text": "晚上九点体检，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "21:00",
+        "needs_clarification": true,
+        "category": "健康"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0507",
+      "group": "ambiguous_clarify",
+      "text": "中午十二点旅行，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "12:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0508",
+      "group": "ambiguous_clarify",
+      "text": "晚上七点开项目会，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "19:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0509",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半整理账单，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0510",
+      "group": "ambiguous_clarify",
+      "text": "晚上九点做需求评审，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "21:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0511",
+      "group": "ambiguous_clarify",
+      "text": "下午五点整理文件，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "17:00",
+        "needs_clarification": true,
+        "category": "其他"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0512",
+      "group": "ambiguous_clarify",
+      "text": "上午十点报销发票，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "10:00",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0513",
+      "group": "ambiguous_clarify",
+      "text": "下午两点出差，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "14:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0514",
+      "group": "ambiguous_clarify",
+      "text": "上午九点半还信用卡，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:30",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0515",
+      "group": "ambiguous_clarify",
+      "text": "下午三点整理账单，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0516",
+      "group": "ambiguous_clarify",
+      "text": "下午五点去机场，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "17:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0517",
+      "group": "ambiguous_clarify",
+      "text": "上午九点朋友聚餐，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "09:00",
+        "needs_clarification": true,
+        "category": "社交"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0518",
+      "group": "ambiguous_clarify",
+      "text": "下午三点系统维护，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0519",
+      "group": "ambiguous_clarify",
+      "text": "下午三点出差，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0520",
+      "group": "ambiguous_clarify",
+      "text": "晚上八点去机场，日期我没说，先问我是哪天。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "needs_clarification": true,
+        "category": "出行"
+      },
+      "tags": [
+        "缺日期",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0521",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，像素 螺母。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0522",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，星星 水桶。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0523",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，磁铁 玻璃。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0524",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，枕头 纸飞机。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0525",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，月亮 xyz。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0526",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，网格 黑盒。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0527",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，纸飞机 光标。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0528",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，枕头 雪花。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0529",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，黄色 玻璃。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0530",
+      "group": "ambiguous_clarify",
+      "text": "待办，那个材料，门窗 alpha。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0531",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，螺母 像素。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0532",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，橙子 云朵。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0533",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，红绿蓝 河流。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0534",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，xyz 水桶。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0535",
+      "group": "ambiguous_clarify",
+      "text": "待办，那个材料，石头 苹果。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0536",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，月亮 枕头。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0537",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，磁铁 火苗。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0538",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，拖鞋 纸飞机。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0539",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，星星 海盐。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0540",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，枕头 小票。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0541",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，拖鞋 河流。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0542",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，玻璃 泡泡。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0543",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，雨伞 咖啡。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0544",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，铅笔 键盘。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0545",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，黑盒 甲乙丙丁。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0546",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，风扇 火苗。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0547",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，石头 月亮。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0548",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，铅笔 alpha。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0549",
+      "group": "ambiguous_clarify",
+      "text": "提醒我有个事情，alpha 风扇。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0550",
+      "group": "ambiguous_clarify",
+      "text": "待办，那个材料，甲乙丙丁 红绿蓝。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0551",
+      "group": "ambiguous_clarify",
+      "text": "待办，那个材料，磁铁 泡泡。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0552",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，蓝灯 磁铁。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0553",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，玻璃 123。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0554",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，蓝灯 云朵。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0555",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，枕头 白墙。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0556",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，纸杯 黑盒。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0557",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，水桶 甲乙丙丁。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0558",
+      "group": "ambiguous_clarify",
+      "text": "记一下那个事情，星星 橙子。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0559",
+      "group": "ambiguous_clarify",
+      "text": "帮我记个事，铜锣 枕头。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0560",
+      "group": "ambiguous_clarify",
+      "text": "记一下，稍后处理，甲乙丙丁 拖鞋。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "needs_clarification": true
+      },
+      "tags": [
+        "低信息",
+        "噪音"
+      ]
+    },
+    {
+      "id": "RB0561",
+      "group": "ambiguous_clarify",
+      "text": "本月内参加培训，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0562",
+      "group": "ambiguous_clarify",
+      "text": "找个时间参加培训，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0563",
+      "group": "ambiguous_clarify",
+      "text": "月底前复习考试，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0564",
+      "group": "ambiguous_clarify",
+      "text": "找个时间系统维护，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0565",
+      "group": "ambiguous_clarify",
+      "text": "抽空背单词，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0566",
+      "group": "ambiguous_clarify",
+      "text": "本月内睡觉，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0567",
+      "group": "ambiguous_clarify",
+      "text": "尽快整理账单，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0568",
+      "group": "ambiguous_clarify",
+      "text": "本月内大扫除，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0569",
+      "group": "ambiguous_clarify",
+      "text": "月底前整理项目材料，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0570",
+      "group": "ambiguous_clarify",
+      "text": "月底前大扫除，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0571",
+      "group": "ambiguous_clarify",
+      "text": "尽快报销发票，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0572",
+      "group": "ambiguous_clarify",
+      "text": "月底前背单词，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0573",
+      "group": "ambiguous_clarify",
+      "text": "本月内还房贷，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0574",
+      "group": "ambiguous_clarify",
+      "text": "尽快买菜，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0575",
+      "group": "ambiguous_clarify",
+      "text": "本月内缴费还款，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0576",
+      "group": "ambiguous_clarify",
+      "text": "本月内阅读论文，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0577",
+      "group": "ambiguous_clarify",
+      "text": "本月内还房贷，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "财务"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0578",
+      "group": "ambiguous_clarify",
+      "text": "尽快系统维护，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0579",
+      "group": "ambiguous_clarify",
+      "text": "这周内睡觉，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0580",
+      "group": "ambiguous_clarify",
+      "text": "找个时间收快递，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0581",
+      "group": "ambiguous_clarify",
+      "text": "找个时间参加培训，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0582",
+      "group": "ambiguous_clarify",
+      "text": "本月内搬家，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0583",
+      "group": "ambiguous_clarify",
+      "text": "抽空上课，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0584",
+      "group": "ambiguous_clarify",
+      "text": "这周内大扫除，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0585",
+      "group": "ambiguous_clarify",
+      "text": "这周内参加培训，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0586",
+      "group": "ambiguous_clarify",
+      "text": "这周内大扫除，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0587",
+      "group": "ambiguous_clarify",
+      "text": "本月内做需求评审，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0588",
+      "group": "ambiguous_clarify",
+      "text": "抽空交预算报告，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0589",
+      "group": "ambiguous_clarify",
+      "text": "月底前检查服务器，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0590",
+      "group": "ambiguous_clarify",
+      "text": "找个时间交预算报告，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0591",
+      "group": "ambiguous_clarify",
+      "text": "找个时间睡觉，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0592",
+      "group": "ambiguous_clarify",
+      "text": "月底前喝水，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0593",
+      "group": "ambiguous_clarify",
+      "text": "本月内阅读论文，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0594",
+      "group": "ambiguous_clarify",
+      "text": "找个时间睡觉，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0595",
+      "group": "ambiguous_clarify",
+      "text": "本月内背单词，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0596",
+      "group": "ambiguous_clarify",
+      "text": "月底前开周会，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0597",
+      "group": "ambiguous_clarify",
+      "text": "找个时间复习考试，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0598",
+      "group": "ambiguous_clarify",
+      "text": "抽空睡觉，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "生活"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0599",
+      "group": "ambiguous_clarify",
+      "text": "找个时间上课，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "学习"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    },
+    {
+      "id": "RB0600",
+      "group": "ambiguous_clarify",
+      "text": "尽快检查服务器，不要编一个很具体的时间。",
+      "expected": {
+        "needs_clarification": true,
+        "category": "工作"
+      },
+      "tags": [
+        "模糊截止",
+        "追问"
+      ]
+    }
+  ]
+}

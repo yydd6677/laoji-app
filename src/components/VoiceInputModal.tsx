@@ -17,6 +17,7 @@ import {
 } from '../services/realtimeAsr';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
+import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
 
 interface Props {
   visible: boolean;
@@ -36,8 +37,6 @@ type TranscriptSegment = {
 
 const LOW_AUDIO_PEAK = 1000;
 const LOW_AUDIO_RMS = 280;
-const DUPLICATE_TRANSCRIPT_WINDOW_MS = 1000;
-const REFINEMENT_TRANSCRIPT_WINDOW_MS = 3000;
 
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const { addEvent, refreshEvents } = useEvents();
@@ -50,6 +49,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const recordingRef            = useRef<Audio.Recording | null>(null);
   const realtimeRef             = useRef<RealtimeAsrSession | null>(null);
   const recordingModeRef        = useRef<RecordingMode | null>(null);
+  const recordingRunRef         = useRef(0);
   const transcriptRef           = useRef('');
   const transcriptChunksRef     = useRef<string[]>([]);
   const transcriptSegmentsRef   = useRef<TranscriptSegment[]>([]);
@@ -57,6 +57,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const [recordingMode, setRecordingMode] = useState<RecordingMode | null>(null);
 
   const reset = () => {
+    recordingRunRef.current += 1;
     setStep('input');
     setText('');
     setDraft(null);
@@ -70,9 +71,18 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     recordingModeRef.current = null;
   };
   const close = () => {
+    recordingRunRef.current += 1;
     void stopActiveRecordingSilently();
     reset();
     onClose();
+  };
+  const returnToInput = () => {
+    const preservedText = text.trim() || draft?.raw_text?.trim() || '';
+    setStep('input');
+    setText(preservedText);
+    setDraft(null);
+    setClarifyAnswer('');
+    setError('');
   };
   const voiceErrorText = (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err ?? '');
@@ -96,47 +106,18 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const appendRealtimeTranscript = (transcript: RealtimeAsrTranscript) => {
     const clean = transcript.text.trim();
     if (!clean) return;
-    const selected = selectRealtimeScheduleText([clean]);
+    const chunks = [...transcriptChunksRef.current, clean];
+    const selected = selectRealtimeScheduleText(chunks);
     if (!selected) return;
 
-    transcriptChunksRef.current = [...transcriptChunksRef.current, clean];
+    transcriptChunksRef.current = chunks;
     const now = Date.now();
-    const segments = [...transcriptSegmentsRef.current];
-    const last = segments[segments.length - 1];
-    const nextSegment: TranscriptSegment = {
+    setTranscriptSegments([{
       text: selected,
       receivedAt: now,
       startTime: transcript.startTime,
       endTime: transcript.endTime,
-    };
-
-    if (last) {
-      const age = now - last.receivedAt;
-      const sameTiming = typeof transcript.startTime === 'number'
-        && typeof last.startTime === 'number'
-        && Math.abs(transcript.startTime - last.startTime) < 0.05;
-      const repeatedSoon = selected === last.text && age < DUPLICATE_TRANSCRIPT_WINDOW_MS;
-      const likelyRefinement = age < REFINEMENT_TRANSCRIPT_WINDOW_MS
-        && selected !== last.text
-        && (selected.includes(last.text) || last.text.includes(selected));
-
-      if (sameTiming || repeatedSoon) {
-        last.receivedAt = now;
-        setTranscriptSegments(segments);
-        return;
-      }
-
-      if (likelyRefinement) {
-        last.text = selectRealtimeScheduleText([last.text, selected]) || selected;
-        last.receivedAt = now;
-        last.startTime = last.startTime ?? transcript.startTime;
-        last.endTime = transcript.endTime ?? last.endTime;
-        setTranscriptSegments(segments);
-        return;
-      }
-    }
-
-    setTranscriptSegments([...segments, nextSegment]);
+    }]);
   };
 
   const noteRealtimeAudioStats = (stats: RealtimeAsrAudioStats) => {
@@ -197,6 +178,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   // ── Voice recording ────────────────────────────────────────────────────────
   const startRecording = async () => {
     try {
+      const runId = recordingRunRef.current + 1;
+      recordingRunRef.current = runId;
       const permission = await Audio.requestPermissionsAsync();
       if (!permission.granted) {
         showDialog({ title: '无法录音', message: '请在系统设置中允许麦克风权限', tone: 'warning' });
@@ -212,9 +195,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 
       try {
         const realtime = await startRealtimeAsr({
-          onTranscript: appendRealtimeTranscript,
-          onAudioStats: noteRealtimeAudioStats,
+          onTranscript: transcript => {
+            if (recordingRunRef.current === runId) appendRealtimeTranscript(transcript);
+          },
+          onAudioStats: stats => {
+            if (recordingRunRef.current === runId) noteRealtimeAudioStats(stats);
+          },
           onError: err => {
+            if (recordingRunRef.current !== runId) return;
             console.warn('realtime voice recognition warning', err);
             if (recordingModeRef.current === 'realtime') setError(voiceErrorText(err));
           },
@@ -246,12 +234,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const realtime = realtimeRef.current;
       if (!realtime) return;
       setStep('parsing');
-      realtimeRef.current = null;
-      recordingModeRef.current = null;
-      setRecordingMode(null);
       try {
         await realtime.stop();
         const transcribed = transcriptRef.current.trim();
+        realtimeRef.current = null;
+        recordingModeRef.current = null;
+        setRecordingMode(null);
         if (!transcribed) {
           setError(noTranscriptText());
           setStep('input');
@@ -265,6 +253,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         console.warn('realtime voice recognition failed', err);
         setError(voiceErrorText(err));
         setStep('input');
+        realtimeRef.current = null;
+        recordingModeRef.current = null;
+        setRecordingMode(null);
       }
       return;
     }
@@ -318,15 +309,24 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     }
     setStep('saving');
     try {
+      const category = normalizeEventCategory(draft.category);
       await addEvent({
         title:       draft.title,
         startDate:   draft.start_date,
+        endDate:     draft.end_date ?? undefined,
         startTime:   draft.start_time ?? undefined,
         endTime:     draft.end_time ?? undefined,
         isAllDay:    draft.is_all_day,
         repeat:      draft.event_type !== 'once' ? draft.event_type as any : undefined,
         description: draft.description ?? undefined,
-        color:       '#7B5CB8',
+        rawText:     draft.raw_text ?? text,
+        location:    draft.location ?? undefined,
+        category,
+        detail:      draft.detail ?? undefined,
+        status:      draft.status ?? undefined,
+        spanning:    draft.spanning ?? Boolean(draft.end_date && draft.end_date !== draft.start_date),
+        reminderMinutes: draft.reminder_minutes ?? null,
+        color:       colorForEvent({ category }),
       });
       // Refresh calendar for the month of the saved event
       const [y, m] = draft.start_date.split('-').map(Number);
@@ -338,6 +338,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const fmtDate = (d: string) => d.replace(/-/g, '/');
+  const fmtDateRange = (draft: ParseResult) => {
+    if (draft.end_date && draft.end_date !== draft.start_date) {
+      return `${fmtDate(draft.start_date)} – ${fmtDate(draft.end_date)}`;
+    }
+    return fmtDate(draft.start_date);
+  };
   const fmtTime = (t: string | null) => t ?? '全天';
   const sourceLabel = (source: ParseResult['parse_source']) => {
     if (source === 'rules') return '规则解析';
@@ -357,7 +363,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           {/* ── Input step ── */}
           {(step === 'input' || step === 'recording') && (
             <>
-              <Text style={s.title}>老记，说出你的日程</Text>
+              <Text style={s.title}>说出你的日常</Text>
               <Text style={s.hint}>例如：明天下午三点开会，下周一提醒我发周报</Text>
 
               <TextInput
@@ -371,11 +377,21 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 editable={step === 'input'}
               />
 
-              {error ? <Text style={s.errText}>{error}</Text> : null}
+              <View style={s.errorSlot}>
+                {error ? <Text style={s.errText}>{error}</Text> : null}
+              </View>
 
-              <View style={s.actionRow}>
-                {/* Mic button */}
+              <View style={s.actionDock}>
+                <View style={s.actionSide}>
+                  {step === 'recording' && (
+                    <Text style={s.recordingLabel} numberOfLines={2}>
+                      {recordingMode === 'realtime' ? '实时识别中，点击停止' : '录音中，点击停止'}
+                    </Text>
+                  )}
+                </View>
+
                 <TouchableOpacity
+                  style={s.micTouch}
                   onPress={step === 'recording' ? stopRecording : startRecording}
                   activeOpacity={0.8}
                 >
@@ -390,18 +406,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                   </LinearGradient>
                 </TouchableOpacity>
 
-                {step === 'recording' && (
-                  <Text style={s.recordingLabel}>
-                    {recordingMode === 'realtime' ? '● 实时识别中，点击停止' : '● 录音中，点击停止'}
-                  </Text>
-                )}
-
-                {text.trim().length > 0 && step === 'input' && (
-                  <TouchableOpacity style={s.submitBtn} onPress={handleSubmitText}>
-                    <Text style={s.submitTxt}>解析</Text>
-                    <Ionicons name="arrow-forward" size={14} color="#fff" />
-                  </TouchableOpacity>
-                )}
+                <View style={[s.actionSide, s.actionSideRight]}>
+                  {text.trim().length > 0 && step === 'input' && (
+                    <TouchableOpacity style={s.submitBtn} onPress={handleSubmitText}>
+                      <Text style={s.submitTxt}>解析</Text>
+                      <Ionicons name="arrow-forward" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </>
           )}
@@ -458,7 +470,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 <Text style={s.draftTitle}>{draft.title}</Text>
                 <View style={s.draftRow}>
                   <Ionicons name="calendar-outline" size={14} color={C.sub} />
-                  <Text style={s.draftVal}>{fmtDate(draft.start_date)}</Text>
+                  <Text style={s.draftVal}>{fmtDateRange(draft)}</Text>
                 </View>
                 <View style={s.draftRow}>
                   <Ionicons name="time-outline" size={14} color={C.sub} />
@@ -472,16 +484,39 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                     <Text style={s.draftVal}>{draft.description}</Text>
                   </View>
                 )}
+                {draft.detail && draft.detail !== draft.description && (
+                  <View style={s.draftRow}>
+                    <Ionicons name="reader-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{draft.detail}</Text>
+                  </View>
+                )}
+                {draft.location && (
+                  <View style={s.draftRow}>
+                    <Ionicons name="location-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{draft.location}</Text>
+                  </View>
+                )}
+                {draft.category && (
+                  <View style={s.draftRow}>
+                    <Ionicons name="pricetag-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{draft.category}</Text>
+                  </View>
+                )}
+                {draft.status && (
+                  <View style={s.draftRow}>
+                    <Ionicons name="ellipse-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{draft.status}</Text>
+                  </View>
+                )}
                 <Text style={s.draftMeta}>
                   {sourceLabel(draft.parse_source)}
-                  {'  '}置信度 {Math.round(draft.confidence * 100)}%
                 </Text>
               </View>
 
               {error ? <Text style={s.errText}>{error}</Text> : null}
 
               <View style={s.confirmRow}>
-                <TouchableOpacity style={s.cancelBtn} onPress={reset}>
+                <TouchableOpacity style={s.cancelBtn} onPress={returnToInput}>
                   <Text style={s.cancelTxt}>重新输入</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleSave} activeOpacity={0.85}>
@@ -508,11 +543,15 @@ const s = StyleSheet.create({
   handle:       { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 16 },
   title:        { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 4 },
   hint:         { fontSize: 12, color: C.sub, marginBottom: 14 },
-  textBox:      { backgroundColor: C.inputBg, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, minHeight: 80, textAlignVertical: 'top', marginBottom: 12 },
-  errText:      { fontSize: 12, color: C.red, marginBottom: 8 },
-  actionRow:    { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  textBox:      { backgroundColor: C.inputBg, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, minHeight: 80, textAlignVertical: 'top', marginBottom: 8 },
+  errorSlot:    { minHeight: 38, justifyContent: 'center', marginBottom: 8 },
+  errText:      { fontSize: 12, lineHeight: 17, color: C.red },
+  actionDock:   { height: 64, flexDirection: 'row', alignItems: 'center' },
+  actionSide:   { flex: 1, minWidth: 0, justifyContent: 'center' },
+  actionSideRight:{ alignItems: 'flex-end' },
+  micTouch:     { width: 72, alignItems: 'center', justifyContent: 'center' },
   micBtn:       { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  recordingLabel:{ fontSize: 13, color: C.red, flex: 1 },
+  recordingLabel:{ fontSize: 12, lineHeight: 16, color: C.red },
   submitBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.purple, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 },
   submitTxt:    { fontSize: 14, fontWeight: '600', color: '#fff' },
   loadingWrap:  { alignItems: 'center', paddingVertical: 40, gap: 14 },

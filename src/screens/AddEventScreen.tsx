@@ -24,6 +24,12 @@ import {
   defaultReminderForEvent,
   loadNotificationPrefs,
 } from '../services/notifications';
+import {
+  EVENT_CATEGORIES,
+  EventCategory,
+  colorForEventCategory,
+  normalizeEventCategory,
+} from '../utils/eventColors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -31,7 +37,6 @@ type Props = {
 };
 
 const REPEAT_OPTIONS = ['不重复', '每天', '每周', '每月', '每年'] as const;
-const COLORS = [C.blue, C.green, C.orange, C.pink, C.purple, C.red, C.teal, '#9B59B6'];
 
 const REPEAT_MAP = {
   '不重复': 'once' as const,
@@ -105,7 +110,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? false);
   const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat));
   const [desc, setDesc]         = useState(editingEvent?.description ?? editingEvent?.detail ?? '');
-  const [color, setColor]       = useState<string>(editingEvent?.color ?? C.blue);
+  const [category, setCategory] = useState<EventCategory>(() => normalizeEventCategory(editingEvent?.category));
   const [location, setLocation] = useState(editingEvent?.location ?? '');
   const [defaultReminder, setDefaultReminder] = useState<ReminderMinutes>(DEFAULT_REMINDER_MINUTES);
   const [reminderMinutes, setReminderMinutes] = useState<ReminderMinutes>(
@@ -124,7 +129,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     setAllDay(editingEvent.isAllDay ?? false);
     setRepeat(repeatToOption(editingEvent.repeat));
     setDesc(editingEvent.description ?? editingEvent.detail ?? '');
-    setColor(editingEvent.color ?? C.blue);
+    setCategory(normalizeEventCategory(editingEvent.category));
     setLocation(editingEvent.location ?? '');
     setReminderMinutes(editingEvent.reminderMinutes ?? null);
   }, [editingEvent?.id]);
@@ -149,6 +154,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   const date      = formatDate(dateObj);
   const startTime = formatTime(startObj);
   const endTime   = formatTime(endObj);
+  const color     = colorForEventCategory(category);
 
   const canSave = title.trim().length > 0;
 
@@ -164,6 +170,7 @@ export function AddEventScreen({ navigation, route }: Props) {
         repeat: REPEAT_MAP[repeat],
         description: desc,
         color,
+        category,
         location: location || undefined,
         reminderMinutes,
       };
@@ -248,11 +255,23 @@ export function AddEventScreen({ navigation, route }: Props) {
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Color picker */}
-          <View style={s.colorRow}>
-            {COLORS.map(c => (
-              <TouchableOpacity key={c} onPress={() => setColor(c)} style={[s.colorDot, { backgroundColor: c }, color === c && s.colorSelected]} />
-            ))}
+          {/* Category picker */}
+          <View style={s.categoryRow}>
+            {EVENT_CATEGORIES.map(item => {
+              const selected = category === item;
+              const itemColor = colorForEventCategory(item);
+              return (
+                <TouchableOpacity
+                  key={item}
+                  onPress={() => setCategory(item)}
+                  style={[s.categoryChip, selected && { backgroundColor: itemColor + '1F', borderColor: itemColor }]}
+                  activeOpacity={0.78}
+                >
+                  <View style={[s.categoryDot, { backgroundColor: itemColor }]} />
+                  <Text style={[s.categoryText, selected && { color: itemColor }]}>{item}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {/* Title */}
@@ -464,9 +483,10 @@ const s = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: 14, paddingTop: 16 },
   saveLink: { color: C.purple, fontSize: 15, fontWeight: '700' },
-  colorRow: { flexDirection: 'row', gap: 10, marginBottom: 14, paddingHorizontal: 4 },
-  colorDot: { width: 26, height: 26, borderRadius: 13 },
-  colorSelected: { borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOffset:{width:0,height:2}, shadowOpacity:0.2, shadowRadius:4, elevation:4 },
+  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14, paddingHorizontal: 4 },
+  categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(150,100,200,0.08)', backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7 },
+  categoryDot: { width: 8, height: 8, borderRadius: 4 },
+  categoryText: { fontSize: 12, color: C.sub, fontWeight: '700' },
   fieldCard: { backgroundColor: C.card, borderRadius: 16, marginBottom: 12, shadowColor:'#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
   titleInput: { fontSize: 18, fontWeight: '600', color: C.text, padding: 16 },
   row: { backgroundColor: C.card, borderRadius: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, shadowColor:'#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },

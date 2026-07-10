@@ -11,6 +11,7 @@ import { MeetingListScreen } from '../screens/MeetingListScreen';
 import { EventDetailScreen } from '../screens/EventDetailScreen';
 import { CalendarScreen }    from '../screens/CalendarScreen';
 import { RecordingScreen }   from '../screens/RecordingScreen';
+import { MeetingLiveScreen } from '../screens/MeetingLiveScreen';
 import { TranscriptionScreen } from '../screens/TranscriptionScreen';
 import { ProfileScreen }     from '../screens/ProfileScreen';
 import { AccountScreen }     from '../screens/AccountScreen';
@@ -51,6 +52,7 @@ export function RootNavigator() {
       <Stack.Screen name="EventDetail"   component={EventDetailScreen} />
       <Stack.Screen name="Calendar"      component={CalendarScreen} />
       <Stack.Screen name="Recording"     component={RecordingScreen} />
+      <Stack.Screen name="MeetingLive"   component={MeetingLiveScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="Transcription" component={TranscriptionScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />
       <Stack.Screen name="Account"       component={AccountScreen} />

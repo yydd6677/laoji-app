@@ -9,7 +9,7 @@ import {
 describe('realtime ASR helpers', () => {
   it('builds the default realtime websocket URL with the default server', () => {
     expect(buildRealtimeAsrUrl({ meetingId: 'meeting-1' })).toBe(
-      'ws://183.36.243.124:8020/ws/meeting/meeting-1/funasr',
+      'ws://183.36.243.124:18020/ws/meeting/meeting-1/funasr',
     );
   });
 
@@ -67,6 +67,13 @@ describe('realtime ASR helpers', () => {
       '下午三点开会。',
       '明天下午三点开会。',
     ])).toBe('明天下午三点开会');
+  });
+
+  it('prefers the latest equivalent schedule candidate while recording', () => {
+    expect(selectRealtimeScheduleText([
+      '下午三点开会。',
+      '下午四点开会。',
+    ])).toBe('下午四点开会');
   });
 
   it('repairs common clipped temporal prefixes from realtime ASR', () => {

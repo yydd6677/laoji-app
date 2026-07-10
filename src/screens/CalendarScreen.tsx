@@ -17,6 +17,17 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Calend
 
 const WDN = ['周日','周一','周二','周三','周四','周五','周六'];
 
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function relativeDayLabel(selectedDate: Date, today: Date): string {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diff = Math.round((startOfLocalDay(selectedDate).getTime() - startOfLocalDay(today).getTime()) / msPerDay);
+  if (diff === 0) return '';
+  return diff > 0 ? `${diff}天后` : `${Math.abs(diff)}天前`;
+}
+
 export function CalendarScreen({ navigation }: Props) {
   const initialDate = useMemo(() => new Date(), []);
   const [year, setYear]     = useState(() => initialDate.getFullYear());
@@ -31,7 +42,9 @@ export function CalendarScreen({ navigation }: Props) {
   const next = () => month === 12 ? (setMonth(1), setYear(y => y + 1)) : setMonth(m => m + 1);
 
   const ds = `${year}-${String(month).padStart(2,'0')}-${String(selDay).padStart(2,'0')}`;
-  const wday = WDN[new Date(year, month - 1, selDay).getDay()];
+  const selectedDate = new Date(year, month - 1, selDay);
+  const wday = WDN[selectedDate.getDay()];
+  const selectedRelativeLabel = relativeDayLabel(selectedDate, new Date());
   const dayEvts = events.filter(e =>
     e.spanning && e.endDate ? ds >= e.startDate && ds <= e.endDate : e.startDate === ds
   );
@@ -110,11 +123,14 @@ export function CalendarScreen({ navigation }: Props) {
 
         <View style={s.divider} />
 
-        <Text style={s.dayLabel}>{month}月{selDay}日（{wday}）</Text>
+        <View style={s.dayHeader}>
+          <Text style={s.dayLabel}>{month}月{selDay}日（{wday}）</Text>
+          {selectedRelativeLabel ? <Text style={s.relativePill}>{selectedRelativeLabel}</Text> : null}
+        </View>
 
         <View style={s.eventList}>
           {dayEvts.length === 0
-            ? <Text style={s.empty}>今日暂无日程</Text>
+            ? <Text style={s.empty}>{selectedRelativeLabel ? '当日暂无日程' : '今日暂无日程'}</Text>
             : dayEvts.map(e => {
                 const isSelected = selectedId === e.id;
                 return (
@@ -169,7 +185,9 @@ const s = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingBottom: 8 },
   divider: { height: 1, backgroundColor: C.border, marginHorizontal: 14, marginTop: 14 },
-  dayLabel: { fontSize: 14, fontWeight: '700', color: C.text, paddingLeft: 4, paddingRight: 4, paddingTop: 14, paddingBottom: 12 },
+  dayHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12 },
+  dayLabel: { fontSize: 14, fontWeight: '700', color: C.text },
+  relativePill: { fontSize: 11, lineHeight: 16, color: C.purple, fontWeight: '800', backgroundColor: C.purpleLight, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
   eventList: { paddingHorizontal: 14, gap: 10 },
   empty: { textAlign: 'center', paddingVertical: 28, color: C.faint, fontSize: 13 },
   eventCard: {

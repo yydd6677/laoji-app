@@ -1,0 +1,5006 @@
+老记日程解析鲁棒性样本 1000 条
+生成日期：2026-07-09
+当前基准日期：2026-07-09，星期四
+说明：这些样本用于测试自然语言日程解析的鲁棒性，覆盖口语、重复说明、修正、否定、跨日期、模糊时间、噪音词和 ASR 式干扰。
+重要约定：现有服务端 confidence 规则不是本项目认可的质量标准，后续分析不以该字段作为可靠依据；如需置信度，应重新设计。
+预期字段说明：expected 是部分断言，只检查列出的字段，不代表完整语义标注。
+
+[RB0001] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 对了，七月十八号下午两点报销发票，那个。
+expected: {"start_date": "2026-07-18", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0002] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个背单词，时间是这周六上午八点半，嗯。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0003] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个阅读论文，时间是本周日晚上八点，就这件事。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "学习"}
+
+[RB0004] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 老记，本周日晚上七点搬家，先这样。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "生活"}
+
+[RB0005] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，这周日，晚上八点，整理文件，我再确认一下就是这周日晚上八点。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0006] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 帮我记一下，下周日晚上九点去机场，嗯。
+expected: {"start_date": "2026-07-19", "start_time": "21:00", "end_time": "22:00", "category": "出行"}
+
+[RB0007] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个整理账单，时间是大后天上午九点半，帮我记一下。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0008] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周二上午十点搬家，嗯对，上午十点，不是别的时间。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0009] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个系统维护，时间是七月十九号晚上九点，我想想啊。
+expected: {"start_date": "2026-07-19", "start_time": "21:00", "end_time": "22:00", "category": "工作"}
+
+[RB0010] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 七月十九号上午九点半背单词，嗯对，上午九点半，不是别的时间。
+expected: {"start_date": "2026-07-19", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0011] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，今天晚上九点去机场，嗯。
+expected: {"start_date": "2026-07-09", "start_time": "21:00", "end_time": "22:00", "category": "出行"}
+
+[RB0012] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 礼拜六晚上九点交预算报告，嗯对，晚上九点，不是别的时间。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "工作"}
+
+[RB0013] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 大概是，周五，中午十二点，上课，我再确认一下就是周五中午十二点。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0014] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 我想想啊，星期五下午两点开周会，先这样。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0015] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个阅读论文，时间是七月十九号下午两点，那个。
+expected: {"start_date": "2026-07-19", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0016] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 周五上午九点半开周会，嗯对，上午九点半，不是别的时间。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0017] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个缴费还款，时间是本周日晚上七点，那个。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "财务"}
+
+[RB0018] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 嗯，七月二十五号上午九点去医院复诊，记个日程。
+expected: {"start_date": "2026-07-25", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0019] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个买菜，时间是下周五晚上九点，我再说一遍。
+expected: {"start_date": "2026-07-17", "start_time": "21:00", "end_time": "22:00", "category": "生活"}
+
+[RB0020] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个生日聚会，时间是下周日上午九点半，我想想啊。
+expected: {"start_date": "2026-07-19", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0021] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 老记，周天，晚上七点，吃药，我再确认一下就是周天晚上七点。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "健康"}
+
+[RB0022] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，本周五，晚上八点，旅行，我再确认一下就是本周五晚上八点。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "出行"}
+
+[RB0023] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个睡觉，时间是七月十五号下午三点，对了。
+expected: {"start_date": "2026-07-15", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0024] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，周日，晚上九点，开项目会，我再确认一下就是周日晚上九点。
+expected: {"start_date": "2026-07-12", "start_time": "21:00", "end_time": "22:00", "category": "工作"}
+
+[RB0025] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 老记，七月二十号上午九点半系统维护，我再说一遍。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0026] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 麻烦记下，礼拜六，上午八点半，生日聚会，我再确认一下就是礼拜六上午八点半。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "社交"}
+
+[RB0027] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 帮我记一下，星期天中午十二点旅行，先这样。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0028] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 大概是，下周四，晚上九点，收快递，我再确认一下就是下周四晚上九点。
+expected: {"start_date": "2026-07-16", "start_time": "21:00", "end_time": "22:00", "category": "生活"}
+
+[RB0029] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个还信用卡，时间是星期六上午八点半，提醒一下。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "财务"}
+
+[RB0030] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 这周日下午三点交预算报告，嗯对，下午三点，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0031] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 明天上午十点阅读论文，嗯对，上午十点，不是别的时间。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0032] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 后天晚上八点跑步，嗯对，晚上八点，不是别的时间。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0033] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个检查服务器，时间是下周四上午八点半，老记。
+expected: {"start_date": "2026-07-16", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0034] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个整理文件，时间是下周一下午三点，我想想啊。
+expected: {"start_date": "2026-07-13", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0035] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 我想想啊，星期六晚上九点健身核心训练，记个日程。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "健康"}
+
+[RB0036] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 提醒一下，这周日上午十点系统维护，麻烦记下。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "工作"}
+
+[RB0037] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 那个，这周日，下午五点，生日聚会，我再确认一下就是这周日下午五点。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "社交"}
+
+[RB0038] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 就这件事，七月二十五号中午十二点去医院复诊，顺手记一下。
+expected: {"start_date": "2026-07-25", "start_time": "12:00", "end_time": "13:00", "category": "健康"}
+
+[RB0039] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 麻烦记下，这周六中午十二点检查服务器，我想想啊。
+expected: {"start_date": "2026-07-11", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0040] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 我想想啊，下周三上午九点大扫除，我想想啊。
+expected: {"start_date": "2026-07-15", "start_time": "09:00", "end_time": "10:00", "category": "生活"}
+
+[RB0041] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 麻烦记下，下周四，下午三点，给妈妈打电话，我再确认一下就是下周四下午三点。
+expected: {"start_date": "2026-07-16", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0042] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 我想想啊，后天，上午九点，系统维护，我再确认一下就是后天上午九点。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0043] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，这周五上午八点半整理账单，提醒一下。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "财务"}
+
+[RB0044] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 就这件事，周日，上午九点半，和朋友吃饭，我再确认一下就是周日上午九点半。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0045] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个参加培训，时间是今日中午十二点，大概是。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0046] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个健身核心训练，时间是本周日晚上八点，就这件事。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0047] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个还房贷，时间是星期日上午九点半，我再说一遍。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0048] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下下周一晚上八点买高铁车票，嗯对，晚上八点，不是别的时间。
+expected: {"start_date": "2026-07-20", "start_time": "20:00", "end_time": "21:00", "category": "出行"}
+
+[RB0049] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 我再说一遍，下周六，中午十二点，旅行，我再确认一下就是下周六中午十二点。
+expected: {"start_date": "2026-07-18", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0050] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周六上午九点参加培训，嗯对，上午九点，不是别的时间。
+expected: {"start_date": "2026-07-18", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0051] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 记个日程，本周日上午九点做需求评审，顺手记一下。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0052] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个背单词，时间是本周日下午三点，嗯。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "学习"}
+
+[RB0053] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 大后天中午十二点吃药，嗯对，中午十二点，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "健康"}
+
+[RB0054] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 别弄错，这周日，上午九点，背单词，我再确认一下就是这周日上午九点。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0055] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周三下午五点大扫除，嗯对，下午五点，不是别的时间。
+expected: {"start_date": "2026-07-15", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0056] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周一上午九点半缴费还款，嗯对，上午九点半，不是别的时间。
+expected: {"start_date": "2026-07-13", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0057] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 这周日下午五点缴费还款，嗯对，下午五点，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "财务"}
+
+[RB0058] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 提醒一下，周六上午九点半吃药，就这件事。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0059] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个缴费还款，时间是七月十八号中午十二点，顺手记一下。
+expected: {"start_date": "2026-07-18", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0060] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个参加培训，时间是周天上午十点，记个日程。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0061] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个睡觉，时间是下周五上午九点半，对了。
+expected: {"start_date": "2026-07-17", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0062] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 周日下午三点跑步，嗯对，下午三点，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "健康"}
+
+[RB0063] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 别弄错，本周五晚上七点生日聚会，顺手记一下。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "社交"}
+
+[RB0064] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个大扫除，时间是七月十八号下午两点，对了。
+expected: {"start_date": "2026-07-18", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0065] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 周六晚上八点开项目会，嗯对，晚上八点，不是别的时间。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "工作"}
+
+[RB0066] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个朋友聚餐，时间是本周五晚上七点，嗯。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "社交"}
+
+[RB0067] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 周日上午九点半开项目会，嗯对，上午九点半，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0068] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周五上午九点买高铁车票，嗯对，上午九点，不是别的时间。
+expected: {"start_date": "2026-07-17", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0069] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 对了，本周六上午九点半健身核心训练，提醒一下。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0070] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个上课，时间是礼拜六上午十点，提醒一下。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0071] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 对了，这周六，下午两点，整理文件，我再确认一下就是这周六下午两点。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "其他"}
+
+[RB0072] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个整理账单，时间是七月二十五号下午两点，顺手记一下。
+expected: {"start_date": "2026-07-25", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0073] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 提醒一下，星期日，上午十点，买高铁车票，我再确认一下就是星期日上午十点。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0074] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 这周六晚上八点旅行，嗯对，晚上八点，不是别的时间。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "出行"}
+
+[RB0075] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个缴费还款，时间是下周四上午十点，对了。
+expected: {"start_date": "2026-07-16", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0076] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 下周六上午八点半开周会，嗯对，上午八点半，不是别的时间。
+expected: {"start_date": "2026-07-18", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0077] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 星期五上午九点记一下那个事情，嗯对，上午九点，不是别的时间。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "其他"}
+
+[RB0078] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 先给我记个阅读论文，时间是七月二十五号中午十二点，就这件事。
+expected: {"start_date": "2026-07-25", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0079] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 大后天上午十点出差，嗯对，上午十点，不是别的时间。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0080] group=oral_repeat
+tags: 口语, 重复, 明确字段
+text: 老记，周天，中午十二点，还信用卡，我再确认一下就是周天中午十二点。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0081] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是星期日，是星期五上午九点报销发票。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "财务"}
+
+[RB0082] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜六上午九点，不对，改成晚上八点朋友聚餐。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "社交"}
+
+[RB0083] group=oral_repeat
+tags: 修正, 否定前值
+text: 大后天晚上八点说错了，最终是下周五下午五点健身核心训练。
+expected: {"start_date": "2026-07-17", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0084] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是下周六，是周五晚上九点还房贷。
+expected: {"start_date": "2026-07-10", "start_time": "21:00", "end_time": "22:00", "category": "财务"}
+
+[RB0085] group=oral_repeat
+tags: 修正, 否定前值
+text: 本周日中午十二点，不对，改成下午三点系统维护。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0086] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期天中午十二点说错了，最终是大后天晚上八点整理文件。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0087] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是礼拜天，是下周五晚上八点跑步。
+expected: {"start_date": "2026-07-17", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0088] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜五上午九点，不对，改成下午五点搬家。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0089] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周三下午三点说错了，最终是大后天中午十二点去车站。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0090] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是本周六，是周日晚上八点参加培训。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "学习"}
+
+[RB0091] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周四上午九点，不对，改成晚上九点吃药。
+expected: {"start_date": "2026-07-16", "start_time": "21:00", "end_time": "22:00", "category": "健康"}
+
+[RB0092] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期天上午八点半说错了，最终是本周日下午两点参加培训。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0093] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是周六，是周天下午五点旅行。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "出行"}
+
+[RB0094] group=oral_repeat
+tags: 修正, 否定前值
+text: 这周五下午三点，不对，改成晚上七点背单词。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "学习"}
+
+[RB0095] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天下午五点说错了，最终是下周三中午十二点阅读论文。
+expected: {"start_date": "2026-07-15", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0096] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是星期天，是下周二上午八点半上课。
+expected: {"start_date": "2026-07-14", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0097] group=oral_repeat
+tags: 修正, 否定前值
+text: 今天晚上七点，不对，改成上午九点跑步。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0098] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期日晚上九点说错了，最终是明天上午九点半阅读论文。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0099] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是下周三，是礼拜五下午两点开周会。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0100] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜六晚上九点，不对，改成上午十点还信用卡。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0101] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天下午三点说错了，最终是这周六中午十二点缴费还款。
+expected: {"start_date": "2026-07-11", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0102] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是周五，是这周五晚上八点收快递。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "生活"}
+
+[RB0103] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期天上午九点半，不对，改成下午两点复习考试。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0104] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜六晚上七点说错了，最终是星期六上午九点跑步。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0105] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是礼拜六，是这周五中午十二点开项目会。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0106] group=oral_repeat
+tags: 修正, 否定前值
+text: 后天下午五点，不对，改成下午三点睡觉。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0107] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜六上午八点半说错了，最终是下周二晚上八点收快递。
+expected: {"start_date": "2026-07-14", "start_time": "20:00", "end_time": "21:00", "category": "生活"}
+
+[RB0108] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是周天，是大后天下午两点开项目会。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0109] group=oral_repeat
+tags: 修正, 否定前值
+text: 本周五上午九点半，不对，改成上午十点生日聚会。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "社交"}
+
+[RB0110] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期日上午八点半说错了，最终是本周五晚上七点缴费还款。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "财务"}
+
+[RB0111] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是礼拜六，是这周六下午两点生日聚会。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "社交"}
+
+[RB0112] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天上午八点半，不对，改成上午十点还房贷。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0113] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期六上午十点说错了，最终是周六晚上九点复习考试。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "学习"}
+
+[RB0114] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是周六，是礼拜天下午两点搬家。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0115] group=oral_repeat
+tags: 修正, 否定前值
+text: 星期天晚上七点，不对，改成上午八点半记一下那个事情。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "其他"}
+
+[RB0116] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天上午十点说错了，最终是下周三上午八点半旅行。
+expected: {"start_date": "2026-07-15", "start_time": "08:30", "end_time": "09:30", "category": "出行"}
+
+[RB0117] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是下周二，是星期五下午五点整理项目材料。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "工作"}
+
+[RB0118] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天上午九点，不对，改成上午九点半睡觉。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0119] group=oral_repeat
+tags: 修正, 否定前值
+text: 这周六下午五点说错了，最终是这周日上午九点整理文件。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "其他"}
+
+[RB0120] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是星期日，是今天下午两点喝水。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0121] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周二下午两点，不对，改成上午十点吃药。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0122] group=oral_repeat
+tags: 修正, 否定前值
+text: 这周日下午三点说错了，最终是本周五上午八点半参加培训。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0123] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是今天，是礼拜六下午两点跑步。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0124] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周六上午十点，不对，改成下午五点整理账单。
+expected: {"start_date": "2026-07-18", "start_time": "17:00", "end_time": "18:00", "category": "财务"}
+
+[RB0125] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周二晚上八点说错了，最终是本周五上午十点整理项目材料。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "工作"}
+
+[RB0126] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是下周六，是周五下午三点买菜。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0127] group=oral_repeat
+tags: 修正, 否定前值
+text: 下周一下午两点，不对，改成中午十二点收快递。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0128] group=oral_repeat
+tags: 修正, 否定前值
+text: 周六上午九点说错了，最终是后天晚上九点搬家。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "生活"}
+
+[RB0129] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是这周五，是礼拜五上午九点系统维护。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0130] group=oral_repeat
+tags: 修正, 否定前值
+text: 大后天上午九点半，不对，改成晚上九点整理项目材料。
+expected: {"start_date": "2026-07-12", "start_time": "21:00", "end_time": "22:00", "category": "工作"}
+
+[RB0131] group=oral_repeat
+tags: 修正, 否定前值
+text: 礼拜五上午九点半说错了，最终是本周六上午十点报销发票。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0132] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是这周六，是这周五上午九点跑步。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0133] group=oral_repeat
+tags: 修正, 否定前值
+text: 周天晚上八点，不对，改成上午十点去机场。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0134] group=oral_repeat
+tags: 修正, 否定前值
+text: 本周五上午八点半说错了，最终是星期六晚上七点参加培训。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "学习"}
+
+[RB0135] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是周六，是星期日中午十二点上课。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0136] group=oral_repeat
+tags: 修正, 否定前值
+text: 今日上午十点，不对，改成晚上九点健身核心训练。
+expected: {"start_date": "2026-07-09", "start_time": "21:00", "end_time": "22:00", "category": "健康"}
+
+[RB0137] group=oral_repeat
+tags: 修正, 否定前值
+text: 周五上午九点说错了，最终是本周五上午九点半阅读论文。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0138] group=oral_repeat
+tags: 修正, 否定前值
+text: 不是大后天，是明天下午三点检查服务器。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0139] group=oral_repeat
+tags: 修正, 否定前值
+text: 这周六上午十点，不对，改成下午三点复习考试。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "学习"}
+
+[RB0140] group=oral_repeat
+tags: 修正, 否定前值
+text: 本周日晚上七点说错了，最终是星期日上午九点半去医院复诊。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0141] group=oral_repeat
+tags: 提醒, 口语
+text: 记个日程，下周二下午五点开周会，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "17:00", "end_time": "18:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0142] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，下周一晚上九点系统维护，开始时提醒，别默认错。
+expected: {"start_date": "2026-07-13", "start_time": "21:00", "end_time": "22:00", "category": "工作", "reminder_minutes": 0}
+
+[RB0143] group=oral_repeat
+tags: 提醒, 口语
+text: 对了，明天中午十二点检查服务器，开始时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "工作", "reminder_minutes": 0}
+
+[RB0144] group=oral_repeat
+tags: 提醒, 口语
+text: 对了，明天晚上九点检查服务器，提前十五分钟提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "21:00", "end_time": "22:00", "category": "工作", "reminder_minutes": 15}
+
+[RB0145] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，周日下午两点系统维护，不提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "工作", "reminder_minutes": null}
+
+[RB0146] group=oral_repeat
+tags: 提醒, 口语
+text: 老记，下周二凌晨一点开周会，不提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "01:00", "end_time": "02:00", "category": "工作", "reminder_minutes": null}
+
+[RB0147] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，周日晚上八点整理项目材料，提前十五分钟提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": 15}
+
+[RB0148] group=oral_repeat
+tags: 提醒, 口语
+text: 老记，下周二中午十二点做需求评审，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "12:00", "end_time": "13:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0149] group=oral_repeat
+tags: 提醒, 口语
+text: 就这件事，七月二十号上午九点做需求评审，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-20", "start_time": "09:00", "end_time": "10:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0150] group=oral_repeat
+tags: 提醒, 口语
+text: 麻烦记下，下周二下午五点交预算报告，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "17:00", "end_time": "18:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0151] group=oral_repeat
+tags: 提醒, 口语
+text: 先这样，周日晚上九点检查服务器，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "21:00", "end_time": "22:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0152] group=oral_repeat
+tags: 提醒, 口语
+text: 就这件事，后天晚上七点交预算报告，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0153] group=oral_repeat
+tags: 提醒, 口语
+text: 顺手记一下，明天上午八点半做需求评审，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "工作", "reminder_minutes": 120}
+
+[RB0154] group=oral_repeat
+tags: 提醒, 口语
+text: 我再说一遍，周五下午三点检查服务器，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0155] group=oral_repeat
+tags: 提醒, 口语
+text: 那个，下周二晚上十一点半交预算报告，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "23:30", "category": "工作", "reminder_minutes": 30}
+
+[RB0156] group=oral_repeat
+tags: 提醒, 口语
+text: 那个，周日晚上八点系统维护，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0157] group=oral_repeat
+tags: 提醒, 口语
+text: 我再说一遍，周日上午十点系统维护，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0158] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，后天上午九点整理项目材料，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0159] group=oral_repeat
+tags: 提醒, 口语
+text: 嗯，下周二上午十点系统维护，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0160] group=oral_repeat
+tags: 提醒, 口语
+text: 大概是，周五晚上八点开项目会，开始时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": 0}
+
+[RB0161] group=oral_repeat
+tags: 提醒, 口语
+text: 提醒一下，七月二十号晚上七点交预算报告，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-20", "start_time": "19:00", "end_time": "20:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0162] group=oral_repeat
+tags: 提醒, 口语
+text: 麻烦记下，周五晚上十一点半做需求评审，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "23:30", "category": "工作", "reminder_minutes": 60}
+
+[RB0163] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，七月二十号上午十点整理项目材料，开始时提醒，别默认错。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:00", "category": "工作", "reminder_minutes": 0}
+
+[RB0164] group=oral_repeat
+tags: 提醒, 口语
+text: 记个日程，周日上午十点交预算报告，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0165] group=oral_repeat
+tags: 提醒, 口语
+text: 麻烦记下，后天下午三点开项目会，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0166] group=oral_repeat
+tags: 提醒, 口语
+text: 大概是，明天下午五点开项目会，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0167] group=oral_repeat
+tags: 提醒, 口语
+text: 就这件事，周日晚上八点整理项目材料，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0168] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，下周一中午十二点开项目会，不提醒，别默认错。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "工作", "reminder_minutes": null}
+
+[RB0169] group=oral_repeat
+tags: 提醒, 口语
+text: 那个，周日晚上十一点半交预算报告，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "23:30", "category": "工作", "reminder_minutes": 60}
+
+[RB0170] group=oral_repeat
+tags: 提醒, 口语
+text: 麻烦记下，明天晚上八点做需求评审，不提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": null}
+
+[RB0171] group=oral_repeat
+tags: 提醒, 口语
+text: 麻烦记下，下周二上午九点半检查服务器，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "09:30", "end_time": "10:30", "category": "工作", "reminder_minutes": 120}
+
+[RB0172] group=oral_repeat
+tags: 提醒, 口语
+text: 帮我记一下，周日晚上九点整理项目材料，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-12", "start_time": "21:00", "end_time": "22:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0173] group=oral_repeat
+tags: 提醒, 口语
+text: 大概是，周五上午十点系统维护，提前一小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "工作", "reminder_minutes": 60}
+
+[RB0174] group=oral_repeat
+tags: 提醒, 口语
+text: 老记，明天上午八点半检查服务器，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "工作", "reminder_minutes": 30}
+
+[RB0175] group=oral_repeat
+tags: 提醒, 口语
+text: 那个，下周一下午三点开项目会，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-13", "start_time": "15:00", "end_time": "16:00", "category": "工作", "reminder_minutes": 30}
+
+[RB0176] group=oral_repeat
+tags: 提醒, 口语
+text: 我再说一遍，下周一上午九点半做需求评审，不提醒，别默认错。
+expected: {"start_date": "2026-07-13", "start_time": "09:30", "end_time": "10:30", "category": "工作", "reminder_minutes": null}
+
+[RB0177] group=oral_repeat
+tags: 提醒, 口语
+text: 我想想啊，下周二下午三点系统维护，提前十五分钟提醒，别默认错。
+expected: {"start_date": "2026-07-14", "start_time": "15:00", "end_time": "16:00", "category": "工作", "reminder_minutes": 15}
+
+[RB0178] group=oral_repeat
+tags: 提醒, 口语
+text: 大概是，下周一晚上八点检查服务器，提前两小时提醒，别默认错。
+expected: {"start_date": "2026-07-13", "start_time": "20:00", "end_time": "21:00", "category": "工作", "reminder_minutes": 120}
+
+[RB0179] group=oral_repeat
+tags: 提醒, 口语
+text: 老记，后天上午九点半开周会，提前半小时提醒，别默认错。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "工作", "reminder_minutes": 30}
+
+[RB0180] group=oral_repeat
+tags: 提醒, 口语
+text: 嗯，明天下午五点开周会，开始时提醒，别默认错。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "工作", "reminder_minutes": 0}
+
+[RB0181] group=oral_repeat
+tags: 地点, 口语
+text: 周日下午两点在线上腾讯会议开项目会，麻烦记下。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "工作", "location_contains": "线上"}
+
+[RB0182] group=oral_repeat
+tags: 地点, 口语
+text: 后天上午八点半在三楼会议室检查服务器，那个。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "工作", "location_contains": "三楼"}
+
+[RB0183] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号中午十二点在线上腾讯会议交预算报告，别弄错。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "工作", "location_contains": "线上"}
+
+[RB0184] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号晚上七点在客户办公室整理项目材料，记个日程。
+expected: {"start_date": "2026-07-20", "start_time": "19:00", "end_time": "20:00", "category": "工作", "location_contains": "客户"}
+
+[RB0185] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号中午十二点在三楼会议室交预算报告，嗯。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "工作", "location_contains": "三楼"}
+
+[RB0186] group=oral_repeat
+tags: 地点, 口语
+text: 周日下午五点在线上腾讯会议整理项目材料，顺手记一下。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "工作", "location_contains": "线上"}
+
+[RB0187] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号上午十点在公司二号楼检查服务器，先这样。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:00", "category": "工作", "location_contains": "公司"}
+
+[RB0188] group=oral_repeat
+tags: 地点, 口语
+text: 下周一晚上八点在线上腾讯会议系统维护，提醒一下。
+expected: {"start_date": "2026-07-13", "start_time": "20:00", "end_time": "21:00", "category": "工作", "location_contains": "线上"}
+
+[RB0189] group=oral_repeat
+tags: 地点, 口语
+text: 后天上午十点在客户办公室开项目会，大概是。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "工作", "location_contains": "客户"}
+
+[RB0190] group=oral_repeat
+tags: 地点, 口语
+text: 后天下午两点在客户办公室开周会，老记。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "工作", "location_contains": "客户"}
+
+[RB0191] group=oral_repeat
+tags: 地点, 口语
+text: 后天上午九点半在公司二号楼系统维护，帮我记一下。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "工作", "location_contains": "公司"}
+
+[RB0192] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号上午九点半在客户办公室交预算报告，顺手记一下。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "工作", "location_contains": "客户"}
+
+[RB0193] group=oral_repeat
+tags: 地点, 口语
+text: 后天上午九点半在线上腾讯会议做需求评审，先这样。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "工作", "location_contains": "线上"}
+
+[RB0194] group=oral_repeat
+tags: 地点, 口语
+text: 下周一下午两点在公司二号楼交预算报告，顺手记一下。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "工作", "location_contains": "公司"}
+
+[RB0195] group=oral_repeat
+tags: 地点, 口语
+text: 下周一上午十点在公司二号楼检查服务器，记个日程。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:00", "category": "工作", "location_contains": "公司"}
+
+[RB0196] group=oral_repeat
+tags: 地点, 口语
+text: 明天上午八点半在客户办公室开项目会，记个日程。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "工作", "location_contains": "客户"}
+
+[RB0197] group=oral_repeat
+tags: 地点, 口语
+text: 周日上午九点在三楼会议室开项目会，那个。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "工作", "location_contains": "三楼"}
+
+[RB0198] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号中午十二点在客户办公室交预算报告，就这件事。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "工作", "location_contains": "客户"}
+
+[RB0199] group=oral_repeat
+tags: 地点, 口语
+text: 七月二十号下午三点在会议室B203开周会，提醒一下。
+expected: {"start_date": "2026-07-20", "start_time": "15:00", "end_time": "16:00", "category": "工作", "location_contains": "会议"}
+
+[RB0200] group=oral_repeat
+tags: 地点, 口语
+text: 周日晚上七点在三楼会议室系统维护，嗯。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "工作", "location_contains": "三楼"}
+
+[RB0201] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0202] group=complex_range
+tags: 跨日期, 范围
+text: 旅行从八月三号开始到八月五号结束，整个期间都算。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0203] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0204] group=complex_range
+tags: 跨日期, 范围
+text: 旅行安排在八月三号到八月五号，大概是。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0205] group=complex_range
+tags: 跨日期, 范围
+text: 从下周一到下周三交预算报告，中间不要拆成一天。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0206] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训从本周五开始到下周一结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0207] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除安排在七月二十号到七月二十二号，嗯。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0208] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，帮我记一下。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0209] group=complex_range
+tags: 跨日期, 范围
+text: 旅行从八月三号开始到八月五号结束，整个期间都算。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0210] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告从下周一开始到下周三结束，整个期间都算。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0211] group=complex_range
+tags: 跨日期, 范围
+text: 从本周五到下周一参加培训，中间不要拆成一天。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0212] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0213] group=complex_range
+tags: 跨日期, 范围
+text: 出差安排在七月十五号到七月十八号，记个日程。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0214] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，帮我记一下。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0215] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告从下周一开始到下周三结束，整个期间都算。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0216] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试从明天开始到后天结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0217] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训安排在本周五到下周一，就这件事。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0218] group=complex_range
+tags: 跨日期, 范围
+text: 七月十九号开始，七月二十五号前完成整理项目材料。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0219] group=complex_range
+tags: 跨日期, 范围
+text: 从八月三号到八月五号旅行，中间不要拆成一天。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0220] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训从本周五开始到下周一结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0221] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，我想想啊。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0222] group=complex_range
+tags: 跨日期, 范围
+text: 从七月十九号到七月二十五号整理项目材料，中间不要拆成一天。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0223] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0224] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料安排在七月十九号到七月二十五号，大概是。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0225] group=complex_range
+tags: 跨日期, 范围
+text: 旅行安排在八月三号到八月五号，我再说一遍。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0226] group=complex_range
+tags: 跨日期, 范围
+text: 从七月十五号到七月十八号出差，中间不要拆成一天。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0227] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，我再说一遍。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0228] group=complex_range
+tags: 跨日期, 范围
+text: 七月十九号开始，七月二十五号前完成整理项目材料。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0229] group=complex_range
+tags: 跨日期, 范围
+text: 从下周一到下周三交预算报告，中间不要拆成一天。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0230] group=complex_range
+tags: 跨日期, 范围
+text: 明天开始，后天前完成复习考试。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0231] group=complex_range
+tags: 跨日期, 范围
+text: 明天开始，后天前完成复习考试。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0232] group=complex_range
+tags: 跨日期, 范围
+text: 从明天到后天复习考试，中间不要拆成一天。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0233] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，老记。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0234] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告从下周一开始到下周三结束，整个期间都算。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0235] group=complex_range
+tags: 跨日期, 范围
+text: 旅行从八月三号开始到八月五号结束，整个期间都算。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0236] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试从明天开始到后天结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0237] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告安排在下周一到下周三，就这件事。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0238] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0239] group=complex_range
+tags: 跨日期, 范围
+text: 从七月二十号到七月二十二号大扫除，中间不要拆成一天。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0240] group=complex_range
+tags: 跨日期, 范围
+text: 从七月十五号到七月十八号出差，中间不要拆成一天。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0241] group=complex_range
+tags: 跨日期, 范围
+text: 从本周五到下周一参加培训，中间不要拆成一天。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0242] group=complex_range
+tags: 跨日期, 范围
+text: 七月二十号开始，七月二十二号前完成大扫除。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0243] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0244] group=complex_range
+tags: 跨日期, 范围
+text: 从七月二十号到七月二十二号大扫除，中间不要拆成一天。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0245] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0246] group=complex_range
+tags: 跨日期, 范围
+text: 出差安排在七月十五号到七月十八号，顺手记一下。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0247] group=complex_range
+tags: 跨日期, 范围
+text: 出差安排在七月十五号到七月十八号，嗯。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0248] group=complex_range
+tags: 跨日期, 范围
+text: 从七月十五号到七月十八号出差，中间不要拆成一天。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0249] group=complex_range
+tags: 跨日期, 范围
+text: 出差安排在七月十五号到七月十八号，就这件事。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0250] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训从本周五开始到下周一结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0251] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训从本周五开始到下周一结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0252] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0253] group=complex_range
+tags: 跨日期, 范围
+text: 出差从七月十五号开始到七月十八号结束，整个期间都算。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0254] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0255] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0256] group=complex_range
+tags: 跨日期, 范围
+text: 出差安排在七月十五号到七月十八号，老记。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0257] group=complex_range
+tags: 跨日期, 范围
+text: 七月十九号开始，七月二十五号前完成整理项目材料。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0258] group=complex_range
+tags: 跨日期, 范围
+text: 旅行安排在八月三号到八月五号，那个。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0259] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0260] group=complex_range
+tags: 跨日期, 范围
+text: 从七月二十号到七月二十二号大扫除，中间不要拆成一天。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0261] group=complex_range
+tags: 跨日期, 范围
+text: 七月十五号开始，七月十八号前完成出差。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0262] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除从七月二十号开始到七月二十二号结束，整个期间都算。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0263] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试从明天开始到后天结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0264] group=complex_range
+tags: 跨日期, 范围
+text: 从七月二十号到七月二十二号大扫除，中间不要拆成一天。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0265] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告从下周一开始到下周三结束，整个期间都算。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0266] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训安排在本周五到下周一，先这样。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0267] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除安排在七月二十号到七月二十二号，我想想啊。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0268] group=complex_range
+tags: 跨日期, 范围
+text: 从下周一到下周三交预算报告，中间不要拆成一天。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0269] group=complex_range
+tags: 跨日期, 范围
+text: 从本周五到下周一参加培训，中间不要拆成一天。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0270] group=complex_range
+tags: 跨日期, 范围
+text: 七月十九号开始，七月二十五号前完成整理项目材料。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0271] group=complex_range
+tags: 跨日期, 范围
+text: 从七月二十号到七月二十二号大扫除，中间不要拆成一天。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0272] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0273] group=complex_range
+tags: 跨日期, 范围
+text: 七月十五号开始，七月十八号前完成出差。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0274] group=complex_range
+tags: 跨日期, 范围
+text: 八月三号开始，八月五号前完成旅行。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0275] group=complex_range
+tags: 跨日期, 范围
+text: 七月十九号开始，七月二十五号前完成整理项目材料。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0276] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0277] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0278] group=complex_range
+tags: 跨日期, 范围
+text: 交预算报告安排在下周一到下周三，对了。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0279] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0280] group=complex_range
+tags: 跨日期, 范围
+text: 明天开始，后天前完成复习考试。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0281] group=complex_range
+tags: 跨日期, 范围
+text: 从八月三号到八月五号旅行，中间不要拆成一天。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0282] group=complex_range
+tags: 跨日期, 范围
+text: 七月二十号开始，七月二十二号前完成大扫除。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0283] group=complex_range
+tags: 跨日期, 范围
+text: 参加培训安排在本周五到下周一，对了。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0284] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试从明天开始到后天结束，整个期间都算。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0285] group=complex_range
+tags: 跨日期, 范围
+text: 大扫除安排在七月二十号到七月二十二号，提醒一下。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0286] group=complex_range
+tags: 跨日期, 范围
+text: 复习考试安排在明天到后天，老记。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0287] group=complex_range
+tags: 跨日期, 范围
+text: 整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0288] group=complex_range
+tags: 跨日期, 范围
+text: 从下周一到下周三交预算报告，中间不要拆成一天。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0289] group=complex_range
+tags: 跨日期, 范围
+text: 本周五开始，下周一前完成参加培训。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0290] group=complex_range
+tags: 跨日期, 范围
+text: 从下周一到下周三交预算报告，中间不要拆成一天。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0291] group=complex_range
+tags: 时间范围
+text: 下周二晚上七点到九点阅读论文，结束时间也要记。
+expected: {"start_date": "2026-07-14", "start_time": "19:00", "end_time": "21:00", "category": "学习"}
+
+[RB0292] group=complex_range
+tags: 时间范围
+text: 明天上午十点到十一点半跑步，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:30", "category": "健康"}
+
+[RB0293] group=complex_range
+tags: 时间范围
+text: 下周一凌晨一点到两点背单词，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "01:00", "end_time": "02:00", "category": "学习"}
+
+[RB0294] group=complex_range
+tags: 时间范围
+text: 后天上午十点到十一点半复习考试，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:30", "category": "学习"}
+
+[RB0295] group=complex_range
+tags: 时间范围
+text: 八月一号下午两点到四点健身核心训练，结束时间也要记。
+expected: {"start_date": "2026-08-01", "start_time": "14:00", "end_time": "16:00", "category": "健康"}
+
+[RB0296] group=complex_range
+tags: 时间范围
+text: 明天凌晨一点到两点交预算报告，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0297] group=complex_range
+tags: 时间范围
+text: 下周二上午十点到十一点半健身核心训练，结束时间也要记。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:30", "category": "健康"}
+
+[RB0298] group=complex_range
+tags: 时间范围
+text: 下周一上午九点到十一点背单词，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "11:00", "category": "学习"}
+
+[RB0299] group=complex_range
+tags: 时间范围
+text: 下周一凌晨一点到两点开项目会，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0300] group=complex_range
+tags: 时间范围
+text: 周日上午十点到十一点半和朋友吃饭，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:30", "category": "社交"}
+
+[RB0301] group=complex_range
+tags: 时间范围
+text: 周五上午十点到十一点半和朋友吃饭，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:30", "category": "社交"}
+
+[RB0302] group=complex_range
+tags: 时间范围
+text: 周五上午九点到十一点去医院复诊，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "11:00", "category": "健康"}
+
+[RB0303] group=complex_range
+tags: 时间范围
+text: 明天凌晨一点到两点吃药，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "01:00", "end_time": "02:00", "category": "健康"}
+
+[RB0304] group=complex_range
+tags: 时间范围
+text: 周日上午九点到十一点复习考试，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "11:00", "category": "学习"}
+
+[RB0305] group=complex_range
+tags: 时间范围
+text: 下周一上午九点到十一点参加培训，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "11:00", "category": "学习"}
+
+[RB0306] group=complex_range
+tags: 时间范围
+text: 七月二十号上午九点到十一点生日聚会，结束时间也要记。
+expected: {"start_date": "2026-07-20", "start_time": "09:00", "end_time": "11:00", "category": "社交"}
+
+[RB0307] group=complex_range
+tags: 时间范围
+text: 后天凌晨一点到两点吃药，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "01:00", "end_time": "02:00", "category": "健康"}
+
+[RB0308] group=complex_range
+tags: 时间范围
+text: 下周二上午九点到十一点检查服务器，结束时间也要记。
+expected: {"start_date": "2026-07-14", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0309] group=complex_range
+tags: 时间范围
+text: 后天晚上七点到九点体检，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "21:00", "category": "健康"}
+
+[RB0310] group=complex_range
+tags: 时间范围
+text: 七月二十号上午九点到十一点阅读论文，结束时间也要记。
+expected: {"start_date": "2026-07-20", "start_time": "09:00", "end_time": "11:00", "category": "学习"}
+
+[RB0311] group=complex_range
+tags: 时间范围
+text: 后天晚上七点到九点交预算报告，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0312] group=complex_range
+tags: 时间范围
+text: 周日下午两点到四点生日聚会，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "16:00", "category": "社交"}
+
+[RB0313] group=complex_range
+tags: 时间范围
+text: 下周一下午两点到四点开周会，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0314] group=complex_range
+tags: 时间范围
+text: 明天晚上七点到九点吃药，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "21:00", "category": "健康"}
+
+[RB0315] group=complex_range
+tags: 时间范围
+text: 下周一凌晨一点到两点生日聚会，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "01:00", "end_time": "02:00", "category": "社交"}
+
+[RB0316] group=complex_range
+tags: 时间范围
+text: 七月二十号下午两点到四点去医院复诊，结束时间也要记。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "16:00", "category": "健康"}
+
+[RB0317] group=complex_range
+tags: 时间范围
+text: 八月一号上午九点到十一点交预算报告，结束时间也要记。
+expected: {"start_date": "2026-08-01", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0318] group=complex_range
+tags: 时间范围
+text: 后天下午两点到四点整理项目材料，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0319] group=complex_range
+tags: 时间范围
+text: 后天上午十点到十一点半去医院复诊，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:30", "category": "健康"}
+
+[RB0320] group=complex_range
+tags: 时间范围
+text: 明天下午两点到四点背单词，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "16:00", "category": "学习"}
+
+[RB0321] group=complex_range
+tags: 时间范围
+text: 下周二晚上七点到九点健身核心训练，结束时间也要记。
+expected: {"start_date": "2026-07-14", "start_time": "19:00", "end_time": "21:00", "category": "健康"}
+
+[RB0322] group=complex_range
+tags: 时间范围
+text: 后天下午两点到四点交预算报告，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0323] group=complex_range
+tags: 时间范围
+text: 下周一上午九点到十一点上课，结束时间也要记。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "11:00", "category": "学习"}
+
+[RB0324] group=complex_range
+tags: 时间范围
+text: 八月一号晚上七点到九点生日聚会，结束时间也要记。
+expected: {"start_date": "2026-08-01", "start_time": "19:00", "end_time": "21:00", "category": "社交"}
+
+[RB0325] group=complex_range
+tags: 时间范围
+text: 周日下午两点到四点体检，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "16:00", "category": "健康"}
+
+[RB0326] group=complex_range
+tags: 时间范围
+text: 八月一号凌晨一点到两点复习考试，结束时间也要记。
+expected: {"start_date": "2026-08-01", "start_time": "01:00", "end_time": "02:00", "category": "学习"}
+
+[RB0327] group=complex_range
+tags: 时间范围
+text: 周日上午十点到十一点半和朋友吃饭，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:30", "category": "社交"}
+
+[RB0328] group=complex_range
+tags: 时间范围
+text: 明天凌晨一点到两点交预算报告，结束时间也要记。
+expected: {"start_date": "2026-07-10", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0329] group=complex_range
+tags: 时间范围
+text: 周日上午十点到十一点半生日聚会，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:30", "category": "社交"}
+
+[RB0330] group=complex_range
+tags: 时间范围
+text: 周日上午十点到十一点半跑步，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:30", "category": "健康"}
+
+[RB0331] group=complex_range
+tags: 时间范围
+text: 七月二十号上午十点到十一点半跑步，结束时间也要记。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:30", "category": "健康"}
+
+[RB0332] group=complex_range
+tags: 时间范围
+text: 后天上午九点到十一点朋友聚餐，结束时间也要记。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "11:00", "category": "社交"}
+
+[RB0333] group=complex_range
+tags: 时间范围
+text: 七月二十号下午两点到四点体检，结束时间也要记。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "16:00", "category": "健康"}
+
+[RB0334] group=complex_range
+tags: 时间范围
+text: 八月一号凌晨一点到两点和朋友吃饭，结束时间也要记。
+expected: {"start_date": "2026-08-01", "start_time": "01:00", "end_time": "02:00", "category": "社交"}
+
+[RB0335] group=complex_range
+tags: 时间范围
+text: 周日上午九点到十一点生日聚会，结束时间也要记。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "11:00", "category": "社交"}
+
+[RB0336] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把检查服务器处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0337] group=complex_range
+tags: 截止, 全天
+text: 月底前把还信用卡处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0338] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把缴费还款处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0339] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把整理项目材料处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0340] group=complex_range
+tags: 截止, 全天
+text: 七月二十五号前把睡觉处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-25", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0341] group=complex_range
+tags: 截止, 全天
+text: 月底前把开项目会处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0342] group=complex_range
+tags: 截止, 全天
+text: 下周三前把阅读论文处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "学习"}
+
+[RB0343] group=complex_range
+tags: 截止, 全天
+text: 月底前把买菜处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0344] group=complex_range
+tags: 截止, 全天
+text: 月底前把开周会处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0345] group=complex_range
+tags: 截止, 全天
+text: 月底前把大扫除处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0346] group=complex_range
+tags: 截止, 全天
+text: 月底前把收快递处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0347] group=complex_range
+tags: 截止, 全天
+text: 月底前把交预算报告处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0348] group=complex_range
+tags: 截止, 全天
+text: 七月二十五号前把整理账单处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-25", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0349] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把复习考试处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "学习"}
+
+[RB0350] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把还信用卡处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0351] group=complex_range
+tags: 截止, 全天
+text: 月底前把搬家处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0352] group=complex_range
+tags: 截止, 全天
+text: 月底前把买菜处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0353] group=complex_range
+tags: 截止, 全天
+text: 下周三前把交预算报告处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0354] group=complex_range
+tags: 截止, 全天
+text: 月底前把还房贷处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0355] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把缴费还款处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0356] group=complex_range
+tags: 截止, 全天
+text: 下周三前把还房贷处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0357] group=complex_range
+tags: 截止, 全天
+text: 月底前把还信用卡处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0358] group=complex_range
+tags: 截止, 全天
+text: 下周三前把缴费还款处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0359] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把买菜处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0360] group=complex_range
+tags: 截止, 全天
+text: 月底前把阅读论文处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "学习"}
+
+[RB0361] group=complex_range
+tags: 截止, 全天
+text: 七月二十五号前把搬家处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-25", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0362] group=complex_range
+tags: 截止, 全天
+text: 下周三前把报销发票处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0363] group=complex_range
+tags: 截止, 全天
+text: 下周三前把开周会处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-15", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0364] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把交预算报告处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "工作"}
+
+[RB0365] group=complex_range
+tags: 截止, 全天
+text: 七月二十五号前把收快递处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-25", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0366] group=complex_range
+tags: 截止, 全天
+text: 下个月月底前把缴费还款处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-08-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0367] group=complex_range
+tags: 截止, 全天
+text: 月底前把大扫除处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0368] group=complex_range
+tags: 截止, 全天
+text: 七月二十五号前把还房贷处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-25", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0369] group=complex_range
+tags: 截止, 全天
+text: 月底前把还房贷处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "财务"}
+
+[RB0370] group=complex_range
+tags: 截止, 全天
+text: 月底前把喝水处理完，具体几点没有，按全天。
+expected: {"start_date": "2026-07-31", "start_time": null, "is_all_day": true, "category": "生活"}
+
+[RB0371] group=complex_range
+tags: 重复事件
+text: 每天晚上七点搬家，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "19:00", "category": "生活"}
+
+[RB0372] group=complex_range
+tags: 重复事件
+text: 每周一晚上八点整理账单，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "20:00", "category": "财务"}
+
+[RB0373] group=complex_range
+tags: 重复事件
+text: 每天上午九点半吃药，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "09:30", "category": "健康"}
+
+[RB0374] group=complex_range
+tags: 重复事件
+text: 每周一上午九点还信用卡，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "09:00", "category": "财务"}
+
+[RB0375] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号下午三点背单词，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "15:00", "category": "学习"}
+
+[RB0376] group=complex_range
+tags: 重复事件
+text: 每周一晚上七点缴费还款，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "19:00", "category": "财务"}
+
+[RB0377] group=complex_range
+tags: 重复事件
+text: 每天下午三点体检，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "15:00", "category": "健康"}
+
+[RB0378] group=complex_range
+tags: 重复事件
+text: 每天上午九点喝水，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "09:00", "category": "生活"}
+
+[RB0379] group=complex_range
+tags: 重复事件
+text: 每周一上午十点复习考试，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "10:00", "category": "学习"}
+
+[RB0380] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号上午九点健身核心训练，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "09:00", "category": "健康"}
+
+[RB0381] group=complex_range
+tags: 重复事件
+text: 每月二十五号下午五点报销发票，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "17:00", "category": "财务"}
+
+[RB0382] group=complex_range
+tags: 重复事件
+text: 每天上午八点半买菜，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "08:30", "category": "生活"}
+
+[RB0383] group=complex_range
+tags: 重复事件
+text: 每天晚上八点开项目会，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "20:00", "category": "工作"}
+
+[RB0384] group=complex_range
+tags: 重复事件
+text: 每周一下午五点还房贷，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "17:00", "category": "财务"}
+
+[RB0385] group=complex_range
+tags: 重复事件
+text: 每月二十五号下午五点整理账单，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "17:00", "category": "财务"}
+
+[RB0386] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号晚上七点背单词，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "19:00", "category": "学习"}
+
+[RB0387] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号上午八点半吃药，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "08:30", "category": "健康"}
+
+[RB0388] group=complex_range
+tags: 重复事件
+text: 每天中午十二点缴费还款，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "12:00", "category": "财务"}
+
+[RB0389] group=complex_range
+tags: 重复事件
+text: 每周一中午十二点还房贷，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "12:00", "category": "财务"}
+
+[RB0390] group=complex_range
+tags: 重复事件
+text: 每月二十五号上午九点整理账单，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "09:00", "category": "财务"}
+
+[RB0391] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号上午十点跑步，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "10:00", "category": "健康"}
+
+[RB0392] group=complex_range
+tags: 重复事件
+text: 每月二十五号下午三点参加培训，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "15:00", "category": "学习"}
+
+[RB0393] group=complex_range
+tags: 重复事件
+text: 每月二十五号上午十点开项目会，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "10:00", "category": "工作"}
+
+[RB0394] group=complex_range
+tags: 重复事件
+text: 每周一上午八点半搬家，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "08:30", "category": "生活"}
+
+[RB0395] group=complex_range
+tags: 重复事件
+text: 每天下午三点跑步，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "15:00", "category": "健康"}
+
+[RB0396] group=complex_range
+tags: 重复事件
+text: 每周一下午三点背单词，从下周一开始也行。
+expected: {"event_type": "weekly", "start_time": "15:00", "category": "学习"}
+
+[RB0397] group=complex_range
+tags: 重复事件
+text: 每年十二月三十一号上午十点上课，从七月三十一号开始也行。
+expected: {"event_type": "yearly", "start_time": "10:00", "category": "学习"}
+
+[RB0398] group=complex_range
+tags: 重复事件
+text: 每月二十五号中午十二点报销发票，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "12:00", "category": "财务"}
+
+[RB0399] group=complex_range
+tags: 重复事件
+text: 每月二十五号上午九点上课，从七月二十五号开始也行。
+expected: {"event_type": "monthly", "start_time": "09:00", "category": "学习"}
+
+[RB0400] group=complex_range
+tags: 重复事件
+text: 每天晚上八点上课，从今天开始也行。
+expected: {"event_type": "daily", "start_time": "20:00", "category": "学习"}
+
+[RB0401] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天下午买高铁车票，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0402] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上去机场，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0403] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号上午大扫除，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0404] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上还信用卡，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0405] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号早上健身核心训练，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "健康"}
+
+[RB0406] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上喝水，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0407] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五上午健身核心训练，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "健康"}
+
+[RB0408] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号晚上整理文件，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0409] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五早上做需求评审，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0410] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天晚上朋友聚餐，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0411] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二下午喝水，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0412] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天下午报销发票，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0413] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二晚上买高铁车票，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0414] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日上午买菜，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0415] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天上午阅读论文，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0416] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天下午朋友聚餐，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0417] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天下午大扫除，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0418] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二上午大扫除，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0419] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日上午阅读论文，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0420] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天晚上去机场，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0421] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天下午复习考试，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0422] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上上课，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0423] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上去车站，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0424] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上给妈妈打电话，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0425] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号早上检查服务器，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0426] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天上午检查服务器，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0427] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上阅读论文，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0428] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号早上旅行，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0429] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天晚上搬家，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0430] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日早上搬家，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0431] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天晚上朋友聚餐，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0432] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天上午去机场，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0433] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日下午整理文件，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0434] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二早上整理文件，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0435] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天早上给妈妈打电话，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0436] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二早上开周会，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0437] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上搬家，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0438] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上生日聚会，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0439] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日早上检查服务器，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0440] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上买菜，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0441] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二早上和朋友吃饭，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0442] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日下午朋友聚餐，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0443] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天早上背单词，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0444] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日晚上缴费还款，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0445] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号早上买菜，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0446] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上朋友聚餐，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "社交"}
+
+[RB0447] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天晚上整理项目材料，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0448] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上阅读论文，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0449] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日早上记一下那个事情，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0450] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天早上买菜，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0451] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天晚上复习考试，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0452] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天晚上复习考试，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0453] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周日晚上健身核心训练，具体几点还没定。
+expected: {"start_date": "2026-07-12", "start_time": null, "needs_clarification": true, "category": "健康"}
+
+[RB0454] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五晚上整理项目材料，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0455] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天晚上吃药，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "健康"}
+
+[RB0456] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上还信用卡，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0457] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天下午整理项目材料，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0458] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号上午报销发票，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0459] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 周五上午背单词，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0460] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天早上缴费还款，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0461] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 后天早上给妈妈打电话，具体几点还没定。
+expected: {"start_date": "2026-07-11", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0462] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二早上给妈妈打电话，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "其他"}
+
+[RB0463] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天早上买高铁车票，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "出行"}
+
+[RB0464] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 七月二十号上午睡觉，具体几点还没定。
+expected: {"start_date": "2026-07-20", "start_time": null, "needs_clarification": true, "category": "生活"}
+
+[RB0465] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二下午做需求评审，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0466] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天早上参加培训，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "学习"}
+
+[RB0467] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天下午检查服务器，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0468] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 今天上午缴费还款，具体几点还没定。
+expected: {"start_date": "2026-07-09", "start_time": null, "needs_clarification": true, "category": "财务"}
+
+[RB0469] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 明天上午做需求评审，具体几点还没定。
+expected: {"start_date": "2026-07-10", "start_time": null, "needs_clarification": true, "category": "工作"}
+
+[RB0470] group=ambiguous_clarify
+tags: 模糊时间, 追问
+text: 下周二下午吃药，具体几点还没定。
+expected: {"start_date": "2026-07-14", "start_time": null, "needs_clarification": true, "category": "健康"}
+
+[RB0471] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午十点做需求评审，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "10:00", "needs_clarification": true, "category": "工作"}
+
+[RB0472] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点和朋友吃饭，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "社交"}
+
+[RB0473] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点收快递，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "生活"}
+
+[RB0474] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午三点还房贷，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "needs_clarification": true, "category": "财务"}
+
+[RB0475] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半整理项目材料，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "工作"}
+
+[RB0476] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点系统维护，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "工作"}
+
+[RB0477] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点买菜，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "生活"}
+
+[RB0478] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半交预算报告，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "工作"}
+
+[RB0479] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上七点整理账单，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "19:00", "needs_clarification": true, "category": "财务"}
+
+[RB0480] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点系统维护，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "工作"}
+
+[RB0481] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 中午十二点背单词，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "needs_clarification": true, "category": "学习"}
+
+[RB0482] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点整理文件，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "其他"}
+
+[RB0483] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点阅读论文，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "学习"}
+
+[RB0484] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点跑步，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "健康"}
+
+[RB0485] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点复习考试，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "学习"}
+
+[RB0486] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点复习考试，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "学习"}
+
+[RB0487] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点开项目会，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "工作"}
+
+[RB0488] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午三点参加培训，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "needs_clarification": true, "category": "学习"}
+
+[RB0489] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午八点半开周会，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "needs_clarification": true, "category": "工作"}
+
+[RB0490] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点大扫除，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "生活"}
+
+[RB0491] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午八点半给妈妈打电话，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "needs_clarification": true, "category": "其他"}
+
+[RB0492] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点参加培训，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "学习"}
+
+[RB0493] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午八点半做需求评审，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "needs_clarification": true, "category": "工作"}
+
+[RB0494] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半参加培训，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "学习"}
+
+[RB0495] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点还房贷，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "财务"}
+
+[RB0496] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午五点吃药，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "17:00", "needs_clarification": true, "category": "健康"}
+
+[RB0497] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 中午十二点旅行，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "needs_clarification": true, "category": "出行"}
+
+[RB0498] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点复习考试，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "学习"}
+
+[RB0499] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上七点去车站，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "19:00", "needs_clarification": true, "category": "出行"}
+
+[RB0500] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 中午十二点记一下那个事情，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "needs_clarification": true, "category": "其他"}
+
+[RB0501] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点买高铁车票，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "出行"}
+
+[RB0502] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点记一下那个事情，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "其他"}
+
+[RB0503] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点开项目会，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "工作"}
+
+[RB0504] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午八点半参加培训，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "needs_clarification": true, "category": "学习"}
+
+[RB0505] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半大扫除，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "生活"}
+
+[RB0506] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上九点体检，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "21:00", "needs_clarification": true, "category": "健康"}
+
+[RB0507] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 中午十二点旅行，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "needs_clarification": true, "category": "出行"}
+
+[RB0508] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上七点开项目会，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "19:00", "needs_clarification": true, "category": "工作"}
+
+[RB0509] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半整理账单，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "财务"}
+
+[RB0510] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上九点做需求评审，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "21:00", "needs_clarification": true, "category": "工作"}
+
+[RB0511] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午五点整理文件，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "17:00", "needs_clarification": true, "category": "其他"}
+
+[RB0512] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午十点报销发票，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "10:00", "needs_clarification": true, "category": "财务"}
+
+[RB0513] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午两点出差，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "needs_clarification": true, "category": "出行"}
+
+[RB0514] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点半还信用卡，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:30", "needs_clarification": true, "category": "财务"}
+
+[RB0515] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午三点整理账单，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "needs_clarification": true, "category": "财务"}
+
+[RB0516] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午五点去机场，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "17:00", "needs_clarification": true, "category": "出行"}
+
+[RB0517] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 上午九点朋友聚餐，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "09:00", "needs_clarification": true, "category": "社交"}
+
+[RB0518] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午三点系统维护，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "needs_clarification": true, "category": "工作"}
+
+[RB0519] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 下午三点出差，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "needs_clarification": true, "category": "出行"}
+
+[RB0520] group=ambiguous_clarify
+tags: 缺日期, 追问
+text: 晚上八点去机场，日期我没说，先问我是哪天。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "needs_clarification": true, "category": "出行"}
+
+[RB0521] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，像素 螺母。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0522] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，星星 水桶。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0523] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，磁铁 玻璃。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0524] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，枕头 纸飞机。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0525] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，月亮 xyz。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0526] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，网格 黑盒。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0527] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，纸飞机 光标。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0528] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，枕头 雪花。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0529] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，黄色 玻璃。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0530] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 待办，那个材料，门窗 alpha。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0531] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，螺母 像素。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0532] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，橙子 云朵。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0533] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，红绿蓝 河流。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0534] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，xyz 水桶。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0535] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 待办，那个材料，石头 苹果。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0536] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，月亮 枕头。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0537] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，磁铁 火苗。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0538] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，拖鞋 纸飞机。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0539] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，星星 海盐。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0540] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，枕头 小票。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0541] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，拖鞋 河流。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0542] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，玻璃 泡泡。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0543] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，雨伞 咖啡。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0544] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，铅笔 键盘。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0545] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，黑盒 甲乙丙丁。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0546] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，风扇 火苗。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0547] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，石头 月亮。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0548] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，铅笔 alpha。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0549] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 提醒我有个事情，alpha 风扇。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0550] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 待办，那个材料，甲乙丙丁 红绿蓝。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0551] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 待办，那个材料，磁铁 泡泡。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0552] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，蓝灯 磁铁。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0553] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，玻璃 123。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0554] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，蓝灯 云朵。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0555] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，枕头 白墙。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0556] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，纸杯 黑盒。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0557] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，水桶 甲乙丙丁。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0558] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下那个事情，星星 橙子。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0559] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 帮我记个事，铜锣 枕头。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0560] group=ambiguous_clarify
+tags: 低信息, 噪音
+text: 记一下，稍后处理，甲乙丙丁 拖鞋。
+expected: {"start_date": "2026-07-09", "needs_clarification": true}
+
+[RB0561] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内参加培训，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0562] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间参加培训，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0563] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前复习考试，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0564] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间系统维护，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0565] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 抽空背单词，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0566] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内睡觉，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0567] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 尽快整理账单，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "财务"}
+
+[RB0568] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内大扫除，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0569] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前整理项目材料，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0570] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前大扫除，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0571] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 尽快报销发票，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "财务"}
+
+[RB0572] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前背单词，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0573] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内还房贷，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "财务"}
+
+[RB0574] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 尽快买菜，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0575] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内缴费还款，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "财务"}
+
+[RB0576] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内阅读论文，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0577] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内还房贷，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "财务"}
+
+[RB0578] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 尽快系统维护，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0579] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 这周内睡觉，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0580] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间收快递，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0581] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间参加培训，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0582] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内搬家，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0583] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 抽空上课，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0584] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 这周内大扫除，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0585] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 这周内参加培训，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0586] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 这周内大扫除，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0587] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内做需求评审，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0588] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 抽空交预算报告，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0589] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前检查服务器，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0590] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间交预算报告，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0591] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间睡觉，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0592] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前喝水，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0593] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内阅读论文，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0594] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间睡觉，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0595] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 本月内背单词，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0596] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 月底前开周会，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0597] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间复习考试，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0598] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 抽空睡觉，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "生活"}
+
+[RB0599] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 找个时间上课，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "学习"}
+
+[RB0600] group=ambiguous_clarify
+tags: 模糊截止, 追问
+text: 尽快检查服务器，不要编一个很具体的时间。
+expected: {"needs_clarification": true, "category": "工作"}
+
+[RB0601] group=noise
+tags: 随机词噪音
+text: 苹果 胶带 周六上午九点给妈妈打电话 黄色。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "其他"}
+
+[RB0602] group=noise
+tags: 随机词噪音
+text: 七月二十号 电池 上午十点 黑盒 记一下那个事情。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:00", "category": "其他"}
+
+[RB0603] group=noise
+tags: 随机词噪音
+text: 那个，纽扣 木板 云朵，周日上午九点去机场，前面都是噪音。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0604] group=noise
+tags: 随机词噪音
+text: 下周二上午九点半买菜，后面这些字不用管：橙子 量子 海盐 雪花。
+expected: {"start_date": "2026-07-14", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0605] group=noise
+tags: 随机词噪音
+text: 河流八月一号螺丝下午五点上课石头。
+expected: {"start_date": "2026-08-01", "start_time": "17:00", "end_time": "18:00", "category": "学习"}
+
+[RB0606] group=noise
+tags: 随机词噪音
+text: 海盐 风扇 七月二十号上午八点半缴费还款 海盐。
+expected: {"start_date": "2026-07-20", "start_time": "08:30", "end_time": "09:30", "category": "财务"}
+
+[RB0607] group=noise
+tags: 随机词噪音
+text: 后天 猫狗树 下午两点 猫狗树 去机场。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "出行"}
+
+[RB0608] group=noise
+tags: 随机词噪音
+text: 那个，雨伞 水桶 泡泡，八月一号上午十点去医院复诊，前面都是噪音。
+expected: {"start_date": "2026-08-01", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0609] group=noise
+tags: 随机词噪音
+text: 下周二中午十二点缴费还款，后面这些字不用管：咖啡 蓝灯 火苗 网格。
+expected: {"start_date": "2026-07-14", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0610] group=noise
+tags: 随机词噪音
+text: 键盘下周一雪花晚上九点记一下那个事情网格。
+expected: {"start_date": "2026-07-13", "start_time": "21:00", "end_time": "22:00", "category": "其他"}
+
+[RB0611] group=noise
+tags: 随机词噪音
+text: 橙子 海盐 下周一中午十二点复习考试 beta。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0612] group=noise
+tags: 随机词噪音
+text: 下周二 黄色 中午十二点 alpha 和朋友吃饭。
+expected: {"start_date": "2026-07-14", "start_time": "12:00", "end_time": "13:00", "category": "社交"}
+
+[RB0613] group=noise
+tags: 随机词噪音
+text: 我想想啊，雪花 甲乙丙丁 黑盒，后天中午十二点整理项目材料，前面都是噪音。
+expected: {"start_date": "2026-07-11", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0614] group=noise
+tags: 随机词噪音
+text: 下周二晚上八点记一下那个事情，后面这些字不用管：螺丝 网格 白墙 黑盒。
+expected: {"start_date": "2026-07-14", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0615] group=noise
+tags: 随机词噪音
+text: 甲乙丙丁七月二十号键盘上午九点喝水拖鞋。
+expected: {"start_date": "2026-07-20", "start_time": "09:00", "end_time": "10:00", "category": "生活"}
+
+[RB0616] group=noise
+tags: 随机词噪音
+text: 云朵 铅笔 八月一号上午九点半参加培训 黄色。
+expected: {"start_date": "2026-08-01", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0617] group=noise
+tags: 随机词噪音
+text: 后天 泡泡 上午九点半 小票 喝水。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0618] group=noise
+tags: 随机词噪音
+text: 先这样，红绿蓝 玻璃 纸飞机，八月一号上午八点半去车站，前面都是噪音。
+expected: {"start_date": "2026-08-01", "start_time": "08:30", "end_time": "09:30", "category": "出行"}
+
+[RB0619] group=noise
+tags: 随机词噪音
+text: 后天下午五点生日聚会，后面这些字不用管：咖啡 纽扣 红绿蓝 螺母。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "社交"}
+
+[RB0620] group=noise
+tags: 随机词噪音
+text: 星星周日拖鞋中午十二点买菜番茄。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0621] group=noise
+tags: 随机词噪音
+text: 雨伞 玻璃 下周一下午五点整理项目材料 石头。
+expected: {"start_date": "2026-07-13", "start_time": "17:00", "end_time": "18:00", "category": "工作"}
+
+[RB0622] group=noise
+tags: 随机词噪音
+text: 后天 xyz 下午两点 红绿蓝 睡觉。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0623] group=noise
+tags: 随机词噪音
+text: 对了，白墙 咖啡 门窗，明天上午八点半买菜，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "生活"}
+
+[RB0624] group=noise
+tags: 随机词噪音
+text: 周六上午九点半买高铁车票，后面这些字不用管：电池 小票 网格 雨伞。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "出行"}
+
+[RB0625] group=noise
+tags: 随机词噪音
+text: 红绿蓝周日键盘上午十点还房贷星星。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0626] group=noise
+tags: 随机词噪音
+text: 黑盒 纸飞机 八月一号上午九点买高铁车票 像素。
+expected: {"start_date": "2026-08-01", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0627] group=noise
+tags: 随机词噪音
+text: 周日 量子 上午八点半 木板 体检。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "健康"}
+
+[RB0628] group=noise
+tags: 随机词噪音
+text: 大概是，红绿蓝 螺母 泡泡，下周二上午十点报销发票，前面都是噪音。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0629] group=noise
+tags: 随机词噪音
+text: 周六上午十点收快递，后面这些字不用管：玻璃 橙子 月亮 星星。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0630] group=noise
+tags: 随机词噪音
+text: 量子今天beta下午五点系统维护纸飞机。
+expected: {"start_date": "2026-07-09", "start_time": "17:00", "end_time": "18:00", "category": "工作"}
+
+[RB0631] group=noise
+tags: 随机词噪音
+text: xyz 门窗 八月一号下午三点睡觉 猫狗树。
+expected: {"start_date": "2026-08-01", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0632] group=noise
+tags: 随机词噪音
+text: 七月二十号 橙子 上午九点半 咖啡 背单词。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0633] group=noise
+tags: 随机词噪音
+text: 先这样，猫狗树 纽扣 胶带，周日晚上九点上课，前面都是噪音。
+expected: {"start_date": "2026-07-12", "start_time": "21:00", "end_time": "22:00", "category": "学习"}
+
+[RB0634] group=noise
+tags: 随机词噪音
+text: 后天晚上七点去机场，后面这些字不用管：枕头 咖啡 量子 木板。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "出行"}
+
+[RB0635] group=noise
+tags: 随机词噪音
+text: 电池周六光标上午九点体检光标。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0636] group=noise
+tags: 随机词噪音
+text: 像素 网格 周六下午五点背单词 螺丝。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "学习"}
+
+[RB0637] group=noise
+tags: 随机词噪音
+text: 七月二十号 胶带 下午三点 雪花 大扫除。
+expected: {"start_date": "2026-07-20", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0638] group=noise
+tags: 随机词噪音
+text: 我再说一遍，石头 星星 苹果，八月一号晚上七点去机场，前面都是噪音。
+expected: {"start_date": "2026-08-01", "start_time": "19:00", "end_time": "20:00", "category": "出行"}
+
+[RB0639] group=noise
+tags: 随机词噪音
+text: 今天上午八点半记一下那个事情，后面这些字不用管：星星 键盘 风扇 水桶。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "end_time": "09:30", "category": "其他"}
+
+[RB0640] group=noise
+tags: 随机词噪音
+text: 蓝灯周日纽扣晚上八点生日聚会量子。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "社交"}
+
+[RB0641] group=noise
+tags: 随机词噪音
+text: 蓝灯 门窗 下周二上午十点买菜 黄色。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0642] group=noise
+tags: 随机词噪音
+text: 周五 星星 上午九点 beta 开周会。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0643] group=noise
+tags: 随机词噪音
+text: 对了，纽扣 螺丝 泡泡，周日上午八点半去机场，前面都是噪音。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "出行"}
+
+[RB0644] group=noise
+tags: 随机词噪音
+text: 八月一号晚上八点检查服务器，后面这些字不用管：电池 键盘 纸杯 小票。
+expected: {"start_date": "2026-08-01", "start_time": "20:00", "end_time": "21:00", "category": "工作"}
+
+[RB0645] group=noise
+tags: 随机词噪音
+text: 光标下周二石头上午九点买高铁车票石头。
+expected: {"start_date": "2026-07-14", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0646] group=noise
+tags: 随机词噪音
+text: 键盘 玻璃 周五上午十点背单词 风扇。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0647] group=noise
+tags: 随机词噪音
+text: 周日 纸杯 上午十点 螺丝 喝水。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0648] group=noise
+tags: 随机词噪音
+text: 老记，风扇 拖鞋 胶带，明天下午三点生日聚会，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "社交"}
+
+[RB0649] group=noise
+tags: 随机词噪音
+text: 后天上午九点半跑步，后面这些字不用管：猫狗树 蓝灯 风扇 番茄。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0650] group=noise
+tags: 随机词噪音
+text: 拖鞋明天苹果晚上九点报销发票雪花。
+expected: {"start_date": "2026-07-10", "start_time": "21:00", "end_time": "22:00", "category": "财务"}
+
+[RB0651] group=noise
+tags: 随机词噪音
+text: beta 甲乙丙丁 七月二十号晚上九点出差 磁铁。
+expected: {"start_date": "2026-07-20", "start_time": "21:00", "end_time": "22:00", "category": "出行"}
+
+[RB0652] group=noise
+tags: 随机词噪音
+text: 下周一 拖鞋 上午八点半 雨伞 给妈妈打电话。
+expected: {"start_date": "2026-07-13", "start_time": "08:30", "end_time": "09:30", "category": "其他"}
+
+[RB0653] group=noise
+tags: 随机词噪音
+text: 大概是，小票 苹果 石头，八月一号上午九点半整理文件，前面都是噪音。
+expected: {"start_date": "2026-08-01", "start_time": "09:30", "end_time": "10:30", "category": "其他"}
+
+[RB0654] group=noise
+tags: 随机词噪音
+text: 七月二十号下午三点去车站，后面这些字不用管：雪花 木板 beta 电池。
+expected: {"start_date": "2026-07-20", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0655] group=noise
+tags: 随机词噪音
+text: xyz后天123下午五点检查服务器键盘。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "工作"}
+
+[RB0656] group=noise
+tags: 随机词噪音
+text: 木板 雪花 八月一号晚上八点还信用卡 beta。
+expected: {"start_date": "2026-08-01", "start_time": "20:00", "end_time": "21:00", "category": "财务"}
+
+[RB0657] group=noise
+tags: 随机词噪音
+text: 下周一 水桶 下午三点 月亮 大扫除。
+expected: {"start_date": "2026-07-13", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0658] group=noise
+tags: 随机词噪音
+text: 就这件事，番茄 黑盒 螺丝，明天晚上七点还信用卡，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "财务"}
+
+[RB0659] group=noise
+tags: 随机词噪音
+text: 周日晚上八点买高铁车票，后面这些字不用管：星星 雪花 黄色 苹果。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "出行"}
+
+[RB0660] group=noise
+tags: 随机词噪音
+text: 铜锣下周二键盘下午三点阅读论文网格。
+expected: {"start_date": "2026-07-14", "start_time": "15:00", "end_time": "16:00", "category": "学习"}
+
+[RB0661] group=noise
+tags: 随机词噪音
+text: 火苗 铜锣 今天晚上八点生日聚会 玻璃。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "end_time": "21:00", "category": "社交"}
+
+[RB0662] group=noise
+tags: 随机词噪音
+text: 周六 星星 晚上七点 螺母 出差。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "出行"}
+
+[RB0663] group=noise
+tags: 随机词噪音
+text: 顺手记一下，123 月亮 拖鞋，明天上午九点开周会，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0664] group=noise
+tags: 随机词噪音
+text: 明天上午八点半买菜，后面这些字不用管：枕头 番茄 猫狗树 电池。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "生活"}
+
+[RB0665] group=noise
+tags: 随机词噪音
+text: 风扇下周一星星晚上九点背单词枕头。
+expected: {"start_date": "2026-07-13", "start_time": "21:00", "end_time": "22:00", "category": "学习"}
+
+[RB0666] group=noise
+tags: 随机词噪音
+text: 量子 火苗 下周一上午九点半记一下那个事情 123。
+expected: {"start_date": "2026-07-13", "start_time": "09:30", "end_time": "10:30", "category": "其他"}
+
+[RB0667] group=noise
+tags: 随机词噪音
+text: 周日 橙子 下午两点 蓝灯 去医院复诊。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0668] group=noise
+tags: 随机词噪音
+text: 就这件事，星星 雨伞 纸杯，周五上午九点和朋友吃饭，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "社交"}
+
+[RB0669] group=noise
+tags: 随机词噪音
+text: 八月一号晚上八点复习考试，后面这些字不用管：枕头 量子 玻璃 火苗。
+expected: {"start_date": "2026-08-01", "start_time": "20:00", "end_time": "21:00", "category": "学习"}
+
+[RB0670] group=noise
+tags: 随机词噪音
+text: 红绿蓝八月一号雨伞上午十点缴费还款玻璃。
+expected: {"start_date": "2026-08-01", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0671] group=noise
+tags: 随机词噪音
+text: 磁铁 alpha 七月二十号中午十二点睡觉 番茄。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0672] group=noise
+tags: 随机词噪音
+text: 七月二十号 水桶 下午两点 海盐 给妈妈打电话。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "15:00", "category": "其他"}
+
+[RB0673] group=noise
+tags: 随机词噪音
+text: 对了，拖鞋 网格 白墙，七月二十号上午九点半开项目会，前面都是噪音。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0674] group=noise
+tags: 随机词噪音
+text: 周五上午十点买高铁车票，后面这些字不用管：星星 网格 alpha 木板。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0675] group=noise
+tags: 随机词噪音
+text: 磁铁周五枕头下午五点收快递铜锣。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0676] group=noise
+tags: 随机词噪音
+text: 门窗 星星 今天中午十二点开项目会 门窗。
+expected: {"start_date": "2026-07-09", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0677] group=noise
+tags: 随机词噪音
+text: 明天 猫狗树 下午五点 河流 朋友聚餐。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "社交"}
+
+[RB0678] group=noise
+tags: 随机词噪音
+text: 记个日程，河流 黄色 纸杯，八月一号晚上七点整理文件，前面都是噪音。
+expected: {"start_date": "2026-08-01", "start_time": "19:00", "end_time": "20:00", "category": "其他"}
+
+[RB0679] group=noise
+tags: 随机词噪音
+text: 八月一号晚上七点买菜，后面这些字不用管：纸杯 云朵 螺丝 蓝灯。
+expected: {"start_date": "2026-08-01", "start_time": "19:00", "end_time": "20:00", "category": "生活"}
+
+[RB0680] group=noise
+tags: 随机词噪音
+text: 甲乙丙丁周六螺母晚上九点去医院复诊苹果。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "健康"}
+
+[RB0681] group=noise
+tags: 随机词噪音
+text: 磁铁 云朵 明天上午八点半给妈妈打电话 白墙。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "其他"}
+
+[RB0682] group=noise
+tags: 随机词噪音
+text: 明天 铅笔 中午十二点 磁铁 体检。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "健康"}
+
+[RB0683] group=noise
+tags: 随机词噪音
+text: 我再说一遍，纸飞机 苹果 海盐，周六晚上八点检查服务器，前面都是噪音。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "工作"}
+
+[RB0684] group=noise
+tags: 随机词噪音
+text: 后天下午三点复习考试，后面这些字不用管：键盘 苹果 胶带 风扇。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "学习"}
+
+[RB0685] group=noise
+tags: 随机词噪音
+text: 纸飞机明天蓝灯晚上九点整理账单猫狗树。
+expected: {"start_date": "2026-07-10", "start_time": "21:00", "end_time": "22:00", "category": "财务"}
+
+[RB0686] group=noise
+tags: 随机词噪音
+text: 量子 水桶 今天晚上八点朋友聚餐 甲乙丙丁。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "end_time": "21:00", "category": "社交"}
+
+[RB0687] group=noise
+tags: 随机词噪音
+text: 明天 泡泡 中午十二点 河流 朋友聚餐。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "社交"}
+
+[RB0688] group=noise
+tags: 随机词噪音
+text: 记个日程，石头 光标 磁铁，周六下午五点买菜，前面都是噪音。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0689] group=noise
+tags: 随机词噪音
+text: 今天下午两点记一下那个事情，后面这些字不用管：电池 苹果 云朵 水桶。
+expected: {"start_date": "2026-07-09", "start_time": "14:00", "end_time": "15:00", "category": "其他"}
+
+[RB0690] group=noise
+tags: 随机词噪音
+text: 门窗后天白墙晚上九点大扫除纸飞机。
+expected: {"start_date": "2026-07-11", "start_time": "21:00", "end_time": "22:00", "category": "生活"}
+
+[RB0691] group=noise
+tags: 随机词噪音
+text: 蓝灯 纸杯 周六上午九点交预算报告 beta。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0692] group=noise
+tags: 随机词噪音
+text: 后天 木板 下午三点 alpha 朋友聚餐。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "社交"}
+
+[RB0693] group=noise
+tags: 随机词噪音
+text: 顺手记一下，纸杯 河流 枕头，周五晚上八点整理文件，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0694] group=noise
+tags: 随机词噪音
+text: 下周二下午两点系统维护，后面这些字不用管：苹果 光标 alpha 123。
+expected: {"start_date": "2026-07-14", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0695] group=noise
+tags: 随机词噪音
+text: 光标明天黑盒下午五点跑步胶带。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0696] group=noise
+tags: 随机词噪音
+text: 螺母 纸杯 八月一号上午九点半开项目会 雪花。
+expected: {"start_date": "2026-08-01", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0697] group=noise
+tags: 随机词噪音
+text: 后天 纸杯 上午十点 胶带 睡觉。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0698] group=noise
+tags: 随机词噪音
+text: 我再说一遍，番茄 泡泡 alpha，明天晚上七点体检，前面都是噪音。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "健康"}
+
+[RB0699] group=noise
+tags: 随机词噪音
+text: 周五下午两点去医院复诊，后面这些字不用管：黄色 木板 电池 白墙。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0700] group=noise
+tags: 随机词噪音
+text: 螺丝今天xyz晚上八点整理文件红绿蓝。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0701] group=noise
+tags: 跨日期, 噪音
+text: 枕头 风扇 从下周一到下周三交预算报告 像素 白墙。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0702] group=noise
+tags: 跨日期, 噪音
+text: 火苗 泡泡 从明天到后天复习考试 铜锣 铅笔。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0703] group=noise
+tags: 跨日期, 噪音
+text: 电池 量子 从八月三号到八月五号旅行 雪花 苹果。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0704] group=noise
+tags: 跨日期, 噪音
+text: 咖啡 泡泡 从八月三号到八月五号旅行 泡泡 小票。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0705] group=noise
+tags: 跨日期, 噪音
+text: 白墙 蓝灯 从明天到后天复习考试 小票 alpha。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0706] group=noise
+tags: 跨日期, 噪音
+text: 白墙 光标 从八月三号到八月五号旅行 门窗 网格。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0707] group=noise
+tags: 跨日期, 噪音
+text: 黑盒 蓝灯 从七月十九号到七月二十五号整理项目材料 白墙 月亮。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0708] group=noise
+tags: 跨日期, 噪音
+text: 火苗 螺母 从下周一到下周三交预算报告 网格 风扇。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0709] group=noise
+tags: 跨日期, 噪音
+text: 胶带 像素 从七月十五号到七月十八号出差 雨伞 拖鞋。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0710] group=noise
+tags: 跨日期, 噪音
+text: 键盘 alpha 从本周五到下周一参加培训 纸飞机 玻璃。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0711] group=noise
+tags: 跨日期, 噪音
+text: 黄色 风扇 从七月十五号到七月十八号出差 苹果 beta。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0712] group=noise
+tags: 跨日期, 噪音
+text: 橙子 键盘 从下周一到下周三交预算报告 木板 风扇。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0713] group=noise
+tags: 跨日期, 噪音
+text: 铜锣 纽扣 从七月十九号到七月二十五号整理项目材料 河流 红绿蓝。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0714] group=noise
+tags: 跨日期, 噪音
+text: 螺母 雨伞 从七月十九号到七月二十五号整理项目材料 枕头 泡泡。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0715] group=noise
+tags: 跨日期, 噪音
+text: 量子 枕头 从明天到后天复习考试 铅笔 beta。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0716] group=noise
+tags: 跨日期, 噪音
+text: 橙子 白墙 从七月十五号到七月十八号出差 键盘 石头。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0717] group=noise
+tags: 跨日期, 噪音
+text: 木板 雨伞 从七月十九号到七月二十五号整理项目材料 枕头 火苗。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0718] group=noise
+tags: 跨日期, 噪音
+text: 纸杯 月亮 从七月二十号到七月二十二号大扫除 像素 螺丝。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0719] group=noise
+tags: 跨日期, 噪音
+text: 枕头 风扇 从七月二十号到七月二十二号大扫除 咖啡 月亮。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0720] group=noise
+tags: 跨日期, 噪音
+text: 光标 石头 从八月三号到八月五号旅行 黑盒 风扇。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0721] group=noise
+tags: 跨日期, 噪音
+text: 123 枕头 从明天到后天复习考试 月亮 泡泡。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0722] group=noise
+tags: 跨日期, 噪音
+text: 海盐 番茄 从明天到后天复习考试 苹果 枕头。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0723] group=noise
+tags: 跨日期, 噪音
+text: 木板 xyz 从七月十五号到七月十八号出差 螺母 水桶。
+expected: {"start_date": "2026-07-15", "end_date": "2026-07-18", "category": "出行"}
+
+[RB0724] group=noise
+tags: 跨日期, 噪音
+text: 像素 磁铁 从八月三号到八月五号旅行 键盘 量子。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0725] group=noise
+tags: 跨日期, 噪音
+text: 枕头 云朵 从本周五到下周一参加培训 火苗 黑盒。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0726] group=noise
+tags: 跨日期, 噪音
+text: 雪花 胶带 从明天到后天复习考试 泡泡 番茄。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0727] group=noise
+tags: 跨日期, 噪音
+text: 拖鞋 石头 从八月三号到八月五号旅行 橙子 甲乙丙丁。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0728] group=noise
+tags: 跨日期, 噪音
+text: alpha 云朵 从七月二十号到七月二十二号大扫除 铜锣 纸飞机。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0729] group=noise
+tags: 跨日期, 噪音
+text: 云朵 螺母 从七月十九号到七月二十五号整理项目材料 猫狗树 白墙。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0730] group=noise
+tags: 跨日期, 噪音
+text: 木板 铜锣 从七月二十号到七月二十二号大扫除 猫狗树 咖啡。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0731] group=noise
+tags: 跨日期, 噪音
+text: 胶带 星星 从八月三号到八月五号旅行 纸杯 番茄。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0732] group=noise
+tags: 跨日期, 噪音
+text: 橙子 黄色 从七月十九号到七月二十五号整理项目材料 量子 小票。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0733] group=noise
+tags: 跨日期, 噪音
+text: alpha 黄色 从七月十九号到七月二十五号整理项目材料 纽扣 磁铁。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0734] group=noise
+tags: 跨日期, 噪音
+text: 木板 泡泡 从本周五到下周一参加培训 黑盒 螺丝。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0735] group=noise
+tags: 跨日期, 噪音
+text: 光标 黄色 从七月二十号到七月二十二号大扫除 光标 猫狗树。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0736] group=noise
+tags: 跨日期, 噪音
+text: 云朵 雨伞 从下周一到下周三交预算报告 玻璃 123。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0737] group=noise
+tags: 跨日期, 噪音
+text: alpha 海盐 从八月三号到八月五号旅行 橙子 纸飞机。
+expected: {"start_date": "2026-08-03", "end_date": "2026-08-05", "category": "出行"}
+
+[RB0738] group=noise
+tags: 跨日期, 噪音
+text: 海盐 甲乙丙丁 从下周一到下周三交预算报告 红绿蓝 磁铁。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0739] group=noise
+tags: 跨日期, 噪音
+text: 像素 雪花 从七月二十号到七月二十二号大扫除 河流 甲乙丙丁。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0740] group=noise
+tags: 跨日期, 噪音
+text: 玻璃 纸飞机 从明天到后天复习考试 甲乙丙丁 小票。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0741] group=noise
+tags: 跨日期, 噪音
+text: 木板 螺丝 从七月二十号到七月二十二号大扫除 火苗 枕头。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0742] group=noise
+tags: 跨日期, 噪音
+text: 蓝灯 火苗 从七月二十号到七月二十二号大扫除 黑盒 橙子。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0743] group=noise
+tags: 跨日期, 噪音
+text: 水桶 黑盒 从七月二十号到七月二十二号大扫除 月亮 小票。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0744] group=noise
+tags: 跨日期, 噪音
+text: 光标 蓝灯 从下周一到下周三交预算报告 苹果 雨伞。
+expected: {"start_date": "2026-07-13", "end_date": "2026-07-15", "category": "工作"}
+
+[RB0745] group=noise
+tags: 跨日期, 噪音
+text: 云朵 螺丝 从七月十九号到七月二十五号整理项目材料 咖啡 铅笔。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0746] group=noise
+tags: 跨日期, 噪音
+text: 铜锣 雨伞 从明天到后天复习考试 雨伞 铜锣。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-11", "category": "学习"}
+
+[RB0747] group=noise
+tags: 跨日期, 噪音
+text: 河流 电池 从本周五到下周一参加培训 雨伞 量子。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0748] group=noise
+tags: 跨日期, 噪音
+text: 光标 白墙 从七月十九号到七月二十五号整理项目材料 星星 木板。
+expected: {"start_date": "2026-07-19", "end_date": "2026-07-25", "category": "工作"}
+
+[RB0749] group=noise
+tags: 跨日期, 噪音
+text: 石头 纸杯 从本周五到下周一参加培训 螺母 纸飞机。
+expected: {"start_date": "2026-07-10", "end_date": "2026-07-13", "category": "学习"}
+
+[RB0750] group=noise
+tags: 跨日期, 噪音
+text: 纸飞机 海盐 从七月二十号到七月二十二号大扫除 石头 河流。
+expected: {"start_date": "2026-07-20", "end_date": "2026-07-22", "category": "生活"}
+
+[RB0751] group=noise
+tags: 时间范围, 噪音
+text: 苹果 后天晚上七点到九点开周会 玻璃 纽扣 纸杯。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0752] group=noise
+tags: 时间范围, 噪音
+text: beta 明天晚上七点到九点整理项目材料 木板 纸杯 水桶。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0753] group=noise
+tags: 时间范围, 噪音
+text: 像素 明天上午九点到十一点系统维护 橙子 网格 螺母。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0754] group=noise
+tags: 时间范围, 噪音
+text: 螺丝 下周一晚上七点到九点系统维护 苹果 星星 火苗。
+expected: {"start_date": "2026-07-13", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0755] group=noise
+tags: 时间范围, 噪音
+text: 螺母 七月二十号晚上七点到九点系统维护 beta 123 键盘。
+expected: {"start_date": "2026-07-20", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0756] group=noise
+tags: 时间范围, 噪音
+text: 苹果 七月二十号晚上七点到九点交预算报告 螺丝 铅笔 猫狗树。
+expected: {"start_date": "2026-07-20", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0757] group=noise
+tags: 时间范围, 噪音
+text: 甲乙丙丁 下周一晚上七点到九点系统维护 水桶 网格 玻璃。
+expected: {"start_date": "2026-07-13", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0758] group=noise
+tags: 时间范围, 噪音
+text: beta 后天上午九点到十一点检查服务器 橙子 网格 河流。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0759] group=noise
+tags: 时间范围, 噪音
+text: 纽扣 明天上午十点到十一点半整理项目材料 河流 白墙 咖啡。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0760] group=noise
+tags: 时间范围, 噪音
+text: 雪花 周日凌晨一点到两点整理项目材料 螺母 xyz 像素。
+expected: {"start_date": "2026-07-12", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0761] group=noise
+tags: 时间范围, 噪音
+text: 电池 后天上午十点到十一点半开周会 红绿蓝 甲乙丙丁 白墙。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0762] group=noise
+tags: 时间范围, 噪音
+text: 风扇 七月二十号凌晨一点到两点做需求评审 星星 甲乙丙丁 xyz。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0763] group=noise
+tags: 时间范围, 噪音
+text: 雨伞 下周一晚上七点到九点交预算报告 风扇 雨伞 网格。
+expected: {"start_date": "2026-07-13", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0764] group=noise
+tags: 时间范围, 噪音
+text: 黑盒 周日上午十点到十一点半整理项目材料 海盐 电池 风扇。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0765] group=noise
+tags: 时间范围, 噪音
+text: 水桶 周日下午两点到四点检查服务器 键盘 量子 水桶。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0766] group=noise
+tags: 时间范围, 噪音
+text: 番茄 后天上午九点到十一点开项目会 纽扣 猫狗树 苹果。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0767] group=noise
+tags: 时间范围, 噪音
+text: 红绿蓝 明天下午两点到四点整理项目材料 纸飞机 苹果 咖啡。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0768] group=noise
+tags: 时间范围, 噪音
+text: 光标 下周一上午十点到十一点半交预算报告 橙子 木板 苹果。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0769] group=noise
+tags: 时间范围, 噪音
+text: 猫狗树 七月二十号凌晨一点到两点做需求评审 玻璃 蓝灯 橙子。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0770] group=noise
+tags: 时间范围, 噪音
+text: 纸飞机 下周一上午十点到十一点半开周会 玻璃 海盐 纸杯。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0771] group=noise
+tags: 时间范围, 噪音
+text: 铅笔 后天上午九点到十一点做需求评审 alpha 红绿蓝 木板。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0772] group=noise
+tags: 时间范围, 噪音
+text: 纸杯 周日晚上七点到九点整理项目材料 蓝灯 量子 月亮。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0773] group=noise
+tags: 时间范围, 噪音
+text: 键盘 下周一下午两点到四点交预算报告 石头 白墙 泡泡。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0774] group=noise
+tags: 时间范围, 噪音
+text: 纸杯 后天晚上七点到九点开周会 铅笔 胶带 beta。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0775] group=noise
+tags: 时间范围, 噪音
+text: 泡泡 七月二十号上午十点到十一点半检查服务器 拖鞋 铜锣 咖啡。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0776] group=noise
+tags: 时间范围, 噪音
+text: beta 下周一上午十点到十一点半整理项目材料 黑盒 门窗 木板。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0777] group=noise
+tags: 时间范围, 噪音
+text: 纸飞机 明天晚上七点到九点做需求评审 橙子 月亮 电池。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0778] group=noise
+tags: 时间范围, 噪音
+text: 铅笔 七月二十号上午十点到十一点半交预算报告 像素 量子 木板。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0779] group=noise
+tags: 时间范围, 噪音
+text: 铜锣 七月二十号凌晨一点到两点开项目会 枕头 量子 键盘。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0780] group=noise
+tags: 时间范围, 噪音
+text: 苹果 周日上午九点到十一点开周会 网格 黄色 拖鞋。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0781] group=noise
+tags: 时间范围, 噪音
+text: 网格 后天上午九点到十一点开周会 纽扣 蓝灯 咖啡。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0782] group=noise
+tags: 时间范围, 噪音
+text: 键盘 周日凌晨一点到两点开项目会 云朵 苹果 月亮。
+expected: {"start_date": "2026-07-12", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0783] group=noise
+tags: 时间范围, 噪音
+text: 玻璃 七月二十号上午十点到十一点半系统维护 黑盒 星星 门窗。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0784] group=noise
+tags: 时间范围, 噪音
+text: 纽扣 后天晚上七点到九点交预算报告 火苗 beta 纸飞机。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0785] group=noise
+tags: 时间范围, 噪音
+text: 电池 七月二十号凌晨一点到两点整理项目材料 beta 纸杯 量子。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0786] group=noise
+tags: 时间范围, 噪音
+text: 门窗 七月二十号凌晨一点到两点系统维护 石头 火苗 水桶。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0787] group=noise
+tags: 时间范围, 噪音
+text: 电池 后天上午十点到十一点半开项目会 苹果 纽扣 拖鞋。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0788] group=noise
+tags: 时间范围, 噪音
+text: beta 下周一上午九点到十一点开周会 拖鞋 alpha 纸飞机。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "11:00", "category": "工作"}
+
+[RB0789] group=noise
+tags: 时间范围, 噪音
+text: 纸飞机 明天晚上七点到九点系统维护 火苗 水桶 螺母。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0790] group=noise
+tags: 时间范围, 噪音
+text: 像素 周日晚上七点到九点检查服务器 alpha 河流 雨伞。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "21:00", "category": "工作"}
+
+[RB0791] group=noise
+tags: 时间范围, 噪音
+text: 123 下周一下午两点到四点系统维护 键盘 门窗 木板。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0792] group=noise
+tags: 时间范围, 噪音
+text: 磁铁 下周一下午两点到四点开周会 拖鞋 网格 白墙。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0793] group=noise
+tags: 时间范围, 噪音
+text: 石头 七月二十号凌晨一点到两点做需求评审 xyz 胶带 黄色。
+expected: {"start_date": "2026-07-20", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0794] group=noise
+tags: 时间范围, 噪音
+text: 星星 七月二十号下午两点到四点做需求评审 玻璃 螺母 磁铁。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0795] group=noise
+tags: 时间范围, 噪音
+text: 枕头 后天下午两点到四点检查服务器 红绿蓝 海盐 键盘。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0796] group=noise
+tags: 时间范围, 噪音
+text: 苹果 下周一上午十点到十一点半交预算报告 白墙 风扇 泡泡。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:30", "category": "工作"}
+
+[RB0797] group=noise
+tags: 时间范围, 噪音
+text: 星星 明天凌晨一点到两点交预算报告 番茄 木板 拖鞋。
+expected: {"start_date": "2026-07-10", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0798] group=noise
+tags: 时间范围, 噪音
+text: 纸杯 周日下午两点到四点做需求评审 木板 纸杯 123。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0799] group=noise
+tags: 时间范围, 噪音
+text: 石头 明天下午两点到四点检查服务器 光标 猫狗树 铅笔。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "16:00", "category": "工作"}
+
+[RB0800] group=noise
+tags: 时间范围, 噪音
+text: 纸飞机 周日凌晨一点到两点系统维护 水桶 白墙 月亮。
+expected: {"start_date": "2026-07-12", "start_time": "01:00", "end_time": "02:00", "category": "工作"}
+
+[RB0801] group=adversarial_asr
+tags: 否定日期, 修正
+text: 明天不是，周五上午八点半买高铁车票。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "出行"}
+
+[RB0802] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一晚上八点说错了，是今天晚上八点整理项目材料。
+expected: {"start_date": "2026-07-09", "start_time": "20:00", "end_time": "21:00", "category": "工作"}
+
+[RB0803] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周六晚上八点说错了，是下周一晚上八点跑步。
+expected: {"start_date": "2026-07-13", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0804] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记今天，记下周二晚上七点报销发票。
+expected: {"start_date": "2026-07-14", "start_time": "19:00", "end_time": "20:00", "category": "财务"}
+
+[RB0805] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周一，记周五中午十二点喝水。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0806] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，明天中午十二点缴费还款。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0807] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二中午十二点说错了，是下周一中午十二点检查服务器。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0808] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，周五上午九点买高铁车票。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0809] group=adversarial_asr
+tags: 否定日期, 修正
+text: 明天不是，周六晚上八点吃药。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0810] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记周日，记今天上午八点半喝水。
+expected: {"start_date": "2026-07-09", "start_time": "08:30", "end_time": "09:30", "category": "生活"}
+
+[RB0811] group=adversarial_asr
+tags: 否定日期, 修正
+text: 明天不是，下周一上午八点半系统维护。
+expected: {"start_date": "2026-07-13", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0812] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周六下午两点说错了，是后天下午两点喝水。
+expected: {"start_date": "2026-07-11", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0813] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记今天，记下周二晚上七点整理项目材料。
+expected: {"start_date": "2026-07-14", "start_time": "19:00", "end_time": "20:00", "category": "工作"}
+
+[RB0814] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一不是，后天下午五点健身核心训练。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0815] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周日上午九点说错了，是明天上午九点整理项目材料。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0816] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周日上午八点半说错了，是后天上午八点半开项目会。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0817] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记周五，记下周二下午五点去医院复诊。
+expected: {"start_date": "2026-07-14", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0818] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二下午三点说错了，是今天下午三点开项目会。
+expected: {"start_date": "2026-07-09", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0819] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二不是，后天上午九点半生日聚会。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0820] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一不是，周日上午十点上课。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0821] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二上午九点半说错了，是周五上午九点半去车站。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "出行"}
+
+[RB0822] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周一，记下周二中午十二点睡觉。
+expected: {"start_date": "2026-07-14", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0823] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记周日，记周五上午十点收快递。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0824] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，下周一下午五点生日聚会。
+expected: {"start_date": "2026-07-13", "start_time": "17:00", "end_time": "18:00", "category": "社交"}
+
+[RB0825] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记明天，记下周一下午两点参加培训。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0826] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周二，记周六晚上七点参加培训。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "学习"}
+
+[RB0827] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记今天，记周五下午两点做需求评审。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0828] group=adversarial_asr
+tags: 否定日期, 修正
+text: 今天上午十点说错了，是明天上午十点开周会。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "工作"}
+
+[RB0829] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周日不是，周五下午五点跑步。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0830] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，下周一上午九点半缴费还款。
+expected: {"start_date": "2026-07-13", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0831] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周六上午十点说错了，是下周二上午十点睡觉。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0832] group=adversarial_asr
+tags: 否定日期, 修正
+text: 明天不是，下周一中午十二点去机场。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0833] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一不是，后天晚上八点整理文件。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "其他"}
+
+[RB0834] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周六不是，周五上午十点整理文件。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "其他"}
+
+[RB0835] group=adversarial_asr
+tags: 否定日期, 修正
+text: 明天不是，周日下午两点上课。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0836] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二上午九点半说错了，是周日上午九点半去机场。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "出行"}
+
+[RB0837] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，下周一下午三点检查服务器。
+expected: {"start_date": "2026-07-13", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0838] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二上午九点说错了，是周五上午九点出差。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0839] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记明天，记周五上午九点半跑步。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0840] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记今天，记周五中午十二点开项目会。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0841] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周五不是，周六晚上八点做需求评审。
+expected: {"start_date": "2026-07-11", "start_time": "20:00", "end_time": "21:00", "category": "工作"}
+
+[RB0842] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周六晚上七点说错了，是周日晚上七点做需求评审。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "工作"}
+
+[RB0843] group=adversarial_asr
+tags: 否定日期, 修正
+text: 今天下午三点说错了，是周日下午三点开周会。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "工作"}
+
+[RB0844] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一上午十点说错了，是今天上午十点大扫除。
+expected: {"start_date": "2026-07-09", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0845] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周日不是，后天下午五点睡觉。
+expected: {"start_date": "2026-07-11", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0846] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一上午九点说错了，是周五上午九点复习考试。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0847] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周五上午九点半说错了，是后天上午九点半朋友聚餐。
+expected: {"start_date": "2026-07-11", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0848] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周二，记周六上午十点阅读论文。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0849] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周二上午九点说错了，是周六上午九点跑步。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0850] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记后天，记周日上午九点半报销发票。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0851] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，下周二上午八点半开项目会。
+expected: {"start_date": "2026-07-14", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0852] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周日不是，后天上午十点整理账单。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0853] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天下午五点说错了，是下周一下午五点阅读论文。
+expected: {"start_date": "2026-07-13", "start_time": "17:00", "end_time": "18:00", "category": "学习"}
+
+[RB0854] group=adversarial_asr
+tags: 否定日期, 修正
+text: 后天不是，下周一下午两点开项目会。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0855] group=adversarial_asr
+tags: 否定日期, 修正
+text: 下周一上午八点半说错了，是周日上午八点半给妈妈打电话。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "其他"}
+
+[RB0856] group=adversarial_asr
+tags: 否定日期, 修正
+text: 周五不是，周日上午十点上课。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0857] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周一，记周五下午三点出差。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0858] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记今天，记周五上午九点整理项目材料。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0859] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周一，记周五上午九点吃药。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0860] group=adversarial_asr
+tags: 否定日期, 修正
+text: 不要记下周一，记周五上午九点半整理账单。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "财务"}
+
+[RB0861] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一上午八点半不对，改成上午九点去车站。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0862] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日上午九点不对，改成晚上七点复习考试。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "学习"}
+
+[RB0863] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午九点半不对，改成晚上九点复习考试。
+expected: {"start_date": "2026-07-10", "start_time": "21:00", "end_time": "22:00", "category": "学习"}
+
+[RB0864] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午两点不对，改成上午九点半睡觉。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0865] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一上午十点不对，改成下午五点体检。
+expected: {"start_date": "2026-07-13", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0866] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一晚上八点不对，改成上午九点去医院复诊。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0867] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日晚上九点不对，改成中午十二点去机场。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0868] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天上午八点半不对，改成上午九点参加培训。
+expected: {"start_date": "2026-07-11", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0869] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午九点半不对，改成下午三点去车站。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0870] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一上午八点半不对，改成晚上九点买菜。
+expected: {"start_date": "2026-07-13", "start_time": "21:00", "end_time": "22:00", "category": "生活"}
+
+[RB0871] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午十点不对，改成上午八点半整理项目材料。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0872] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日中午十二点不对，改成上午九点交预算报告。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0873] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午三点不对，改成下午五点体检。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "健康"}
+
+[RB0874] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天晚上九点不对，改成下午三点健身核心训练。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "健康"}
+
+[RB0875] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午两点不对，改成中午十二点检查服务器。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0876] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日中午十二点不对，改成上午九点搬家。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "生活"}
+
+[RB0877] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天上午十点不对，改成下午三点搬家。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "生活"}
+
+[RB0878] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一晚上八点不对，改成上午九点半开项目会。
+expected: {"start_date": "2026-07-13", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0879] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天晚上九点不对，改成下午两点朋友聚餐。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "社交"}
+
+[RB0880] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日上午十点不对，改成上午八点半背单词。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0881] group=adversarial_asr
+tags: 否定时间, 修正
+text: 七月二十号下午两点不对，改成上午十点去医院复诊。
+expected: {"start_date": "2026-07-20", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0882] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一上午九点不对，改成下午两点吃药。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0883] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午九点不对，改成下午五点朋友聚餐。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "社交"}
+
+[RB0884] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天晚上七点不对，改成上午八点半开项目会。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0885] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一晚上九点不对，改成上午九点朋友聚餐。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "10:00", "category": "社交"}
+
+[RB0886] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午两点不对，改成中午十二点旅行。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "出行"}
+
+[RB0887] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天上午九点不对，改成中午十二点给妈妈打电话。
+expected: {"start_date": "2026-07-11", "start_time": "12:00", "end_time": "13:00", "category": "其他"}
+
+[RB0888] group=adversarial_asr
+tags: 否定时间, 修正
+text: 七月二十号下午三点不对，改成中午十二点阅读论文。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "学习"}
+
+[RB0889] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午九点不对，改成晚上七点跑步。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "健康"}
+
+[RB0890] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午九点半不对，改成上午八点半去车站。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "出行"}
+
+[RB0891] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一晚上八点不对，改成下午五点搬家。
+expected: {"start_date": "2026-07-13", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0892] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日晚上八点不对，改成下午三点记一下那个事情。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0893] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一晚上八点不对，改成下午两点大扫除。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0894] group=adversarial_asr
+tags: 否定时间, 修正
+text: 七月二十号上午八点半不对，改成上午九点半和朋友吃饭。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0895] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天上午九点不对，改成下午三点给妈妈打电话。
+expected: {"start_date": "2026-07-11", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0896] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天晚上七点不对，改成上午八点半还房贷。
+expected: {"start_date": "2026-07-11", "start_time": "08:30", "end_time": "09:30", "category": "财务"}
+
+[RB0897] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日下午三点不对，改成上午十点出差。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0898] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日上午十点不对，改成上午九点半整理文件。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "其他"}
+
+[RB0899] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日下午五点不对，改成上午十点报销发票。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0900] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午两点不对，改成上午十点缴费还款。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0901] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天上午八点半不对，改成晚上七点搬家。
+expected: {"start_date": "2026-07-11", "start_time": "19:00", "end_time": "20:00", "category": "生活"}
+
+[RB0902] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日上午八点半不对，改成上午十点复习考试。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0903] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天上午八点半不对，改成中午十二点还房贷。
+expected: {"start_date": "2026-07-10", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0904] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天晚上八点不对，改成上午十点去医院复诊。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0905] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天晚上七点不对，改成中午十二点开周会。
+expected: {"start_date": "2026-07-11", "start_time": "12:00", "end_time": "13:00", "category": "工作"}
+
+[RB0906] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日上午十点不对，改成下午五点参加培训。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "学习"}
+
+[RB0907] group=adversarial_asr
+tags: 否定时间, 修正
+text: 下周一中午十二点不对，改成下午两点吃药。
+expected: {"start_date": "2026-07-13", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0908] group=adversarial_asr
+tags: 否定时间, 修正
+text: 明天下午两点不对，改成上午十点给妈妈打电话。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "其他"}
+
+[RB0909] group=adversarial_asr
+tags: 否定时间, 修正
+text: 周日中午十二点不对，改成晚上八点体检。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "健康"}
+
+[RB0910] group=adversarial_asr
+tags: 否定时间, 修正
+text: 后天晚上八点不对，改成上午十点跑步。
+expected: {"start_date": "2026-07-11", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0911] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计七月二十号下午两点系统维护，这是日程。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0912] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计明天上午十点大扫除，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0913] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，七月二十号下午两点和朋友吃饭，老记。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "15:00", "category": "社交"}
+
+[RB0914] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周五下午三点和朋友吃饭。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "社交"}
+
+[RB0915] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计明天上午九点半阅读论文，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0916] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周五上午九点半朋友聚餐，老记。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0917] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计七月二十号下午三点还房贷，这是日程。
+expected: {"start_date": "2026-07-20", "start_time": "15:00", "end_time": "16:00", "category": "财务"}
+
+[RB0918] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，明天下午两点还房贷，老记。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0919] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周日晚上八点整理账单，老记。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "财务"}
+
+[RB0920] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计下周一晚上八点参加培训，这是日程。
+expected: {"start_date": "2026-07-13", "start_time": "20:00", "end_time": "21:00", "category": "学习"}
+
+[RB0921] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 下周一上午十点上课。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:00", "category": "学习"}
+
+[RB0922] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周五晚上七点买高铁车票，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "出行"}
+
+[RB0923] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 明天上午九点参加培训。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0924] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周日下午五点上课，这是日程。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "学习"}
+
+[RB0925] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 明天下午两点还信用卡。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0926] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计下周一晚上七点收快递，这是日程。
+expected: {"start_date": "2026-07-13", "start_time": "19:00", "end_time": "20:00", "category": "生活"}
+
+[RB0927] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周五下午三点给妈妈打电话，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0928] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计明天晚上七点整理账单，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "财务"}
+
+[RB0929] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 七月二十号上午八点半系统维护。
+expected: {"start_date": "2026-07-20", "start_time": "08:30", "end_time": "09:30", "category": "工作"}
+
+[RB0930] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 明天上午十点去机场。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0931] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周五上午九点半和朋友吃饭。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "社交"}
+
+[RB0932] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周五上午十点吃药。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "健康"}
+
+[RB0933] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，七月二十号下午两点买菜，老记。
+expected: {"start_date": "2026-07-20", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0934] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周五下午三点去机场。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0935] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周日下午两点喝水，这是日程。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "生活"}
+
+[RB0936] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周五上午九点收快递，这是日程。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "生活"}
+
+[RB0937] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计七月二十号中午十二点整理文件，这是日程。
+expected: {"start_date": "2026-07-20", "start_time": "12:00", "end_time": "13:00", "category": "其他"}
+
+[RB0938] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周日上午九点半整理文件。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "其他"}
+
+[RB0939] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周日上午十点系统维护。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "工作"}
+
+[RB0940] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周日下午五点整理账单。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "财务"}
+
+[RB0941] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计七月二十号下午三点整理账单，这是日程。
+expected: {"start_date": "2026-07-20", "start_time": "15:00", "end_time": "16:00", "category": "财务"}
+
+[RB0942] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周日中午十二点喝水，老记。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0943] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周五下午五点去车站。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "出行"}
+
+[RB0944] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 下周一晚上八点搬家。
+expected: {"start_date": "2026-07-13", "start_time": "20:00", "end_time": "21:00", "category": "生活"}
+
+[RB0945] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 周日下午两点报销发票。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0946] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老计周日下午三点给妈妈打电话，这是日程。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "其他"}
+
+[RB0947] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老纪 老记 明天晚上七点出差。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "出行"}
+
+[RB0948] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周日上午十点还房贷，老记。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "财务"}
+
+[RB0949] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周日下午三点买高铁车票，老记。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0950] group=adversarial_asr
+tags: 唤醒词误识别
+text: 老吉，周日上午八点半缴费还款，老记。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "财务"}
+
+[RB0951] group=adversarial_asr
+tags: 整句重复
+text: 周五上午八点半参加培训，周五上午八点半参加培训，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0952] group=adversarial_asr
+tags: 整句重复
+text: 下周一上午九点系统维护，下周一上午九点系统维护，重复说了一遍。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0953] group=adversarial_asr
+tags: 整句重复
+text: 明天上午九点出差，明天上午九点出差，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0954] group=adversarial_asr
+tags: 整句重复
+text: 周日上午十点旅行，周日上午十点旅行，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "10:00", "end_time": "11:00", "category": "出行"}
+
+[RB0955] group=adversarial_asr
+tags: 整句重复
+text: 明天下午五点开周会，明天下午五点开周会，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "17:00", "end_time": "18:00", "category": "工作"}
+
+[RB0956] group=adversarial_asr
+tags: 整句重复
+text: 明天上午八点半吃药，明天上午八点半吃药，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "健康"}
+
+[RB0957] group=adversarial_asr
+tags: 整句重复
+text: 明天上午八点半复习考试，明天上午八点半复习考试，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "08:30", "end_time": "09:30", "category": "学习"}
+
+[RB0958] group=adversarial_asr
+tags: 整句重复
+text: 周五下午三点跑步，周五下午三点跑步，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "健康"}
+
+[RB0959] group=adversarial_asr
+tags: 整句重复
+text: 周五下午两点吃药，周五下午两点吃药，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0960] group=adversarial_asr
+tags: 整句重复
+text: 周五上午九点半体检，周五上午九点半体检，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "健康"}
+
+[RB0961] group=adversarial_asr
+tags: 整句重复
+text: 明天下午两点还信用卡，明天下午两点还信用卡，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0962] group=adversarial_asr
+tags: 整句重复
+text: 明天上午九点半复习考试，明天上午九点半复习考试，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0963] group=adversarial_asr
+tags: 整句重复
+text: 下周一中午十二点大扫除，下周一中午十二点大扫除，重复说了一遍。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "生活"}
+
+[RB0964] group=adversarial_asr
+tags: 整句重复
+text: 七月二十号上午九点半买菜，七月二十号上午九点半买菜，重复说了一遍。
+expected: {"start_date": "2026-07-20", "start_time": "09:30", "end_time": "10:30", "category": "生活"}
+
+[RB0965] group=adversarial_asr
+tags: 整句重复
+text: 周五上午十点喝水，周五上午十点喝水，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0966] group=adversarial_asr
+tags: 整句重复
+text: 明天晚上八点报销发票，明天晚上八点报销发票，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "20:00", "end_time": "21:00", "category": "财务"}
+
+[RB0967] group=adversarial_asr
+tags: 整句重复
+text: 周日下午三点去医院复诊，周日下午三点去医院复诊，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "15:00", "end_time": "16:00", "category": "健康"}
+
+[RB0968] group=adversarial_asr
+tags: 整句重复
+text: 下周一下午三点去医院复诊，下周一下午三点去医院复诊，重复说了一遍。
+expected: {"start_date": "2026-07-13", "start_time": "15:00", "end_time": "16:00", "category": "健康"}
+
+[RB0969] group=adversarial_asr
+tags: 整句重复
+text: 明天上午九点旅行，明天上午九点旅行，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "09:00", "end_time": "10:00", "category": "出行"}
+
+[RB0970] group=adversarial_asr
+tags: 整句重复
+text: 周日上午九点复习考试，周日上午九点复习考试，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "学习"}
+
+[RB0971] group=adversarial_asr
+tags: 整句重复
+text: 周日上午九点系统维护，周日上午九点系统维护，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0972] group=adversarial_asr
+tags: 整句重复
+text: 周日晚上七点给妈妈打电话，周日晚上七点给妈妈打电话，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "其他"}
+
+[RB0973] group=adversarial_asr
+tags: 整句重复
+text: 七月二十号上午九点跑步，七月二十号上午九点跑步，重复说了一遍。
+expected: {"start_date": "2026-07-20", "start_time": "09:00", "end_time": "10:00", "category": "健康"}
+
+[RB0974] group=adversarial_asr
+tags: 整句重复
+text: 明天上午十点买菜，明天上午十点买菜，重复说了一遍。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "生活"}
+
+[RB0975] group=adversarial_asr
+tags: 整句重复
+text: 周日下午两点体检，周日下午两点体检，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "健康"}
+
+[RB0976] group=adversarial_asr
+tags: 整句重复
+text: 周日晚上八点收快递，周日晚上八点收快递，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "生活"}
+
+[RB0977] group=adversarial_asr
+tags: 整句重复
+text: 下周一上午十点给妈妈打电话，下周一上午十点给妈妈打电话，重复说了一遍。
+expected: {"start_date": "2026-07-13", "start_time": "10:00", "end_time": "11:00", "category": "其他"}
+
+[RB0978] group=adversarial_asr
+tags: 整句重复
+text: 周日上午九点半参加培训，周日上午九点半参加培训，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "学习"}
+
+[RB0979] group=adversarial_asr
+tags: 整句重复
+text: 周日上午九点系统维护，周日上午九点系统维护，重复说了一遍。
+expected: {"start_date": "2026-07-12", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB0980] group=adversarial_asr
+tags: 整句重复
+text: 下周一中午十二点去医院复诊，下周一中午十二点去医院复诊，重复说了一遍。
+expected: {"start_date": "2026-07-13", "start_time": "12:00", "end_time": "13:00", "category": "健康"}
+
+[RB0981] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是周六，下周二晚上八点大扫除。
+expected: {"start_date": "2026-07-14", "start_time": "20:00", "end_time": "21:00", "category": "生活"}
+
+[RB0982] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是明天，下周二中午十二点报销发票。
+expected: {"start_date": "2026-07-14", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0983] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是明天，周日下午五点缴费还款。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "财务"}
+
+[RB0984] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周五不是明天，周五下午三点旅行。
+expected: {"start_date": "2026-07-10", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0985] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是周六，下周二下午两点做需求评审。
+expected: {"start_date": "2026-07-14", "start_time": "14:00", "end_time": "15:00", "category": "工作"}
+
+[RB0986] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是这周一，下周二上午十点和朋友吃饭。
+expected: {"start_date": "2026-07-14", "start_time": "10:00", "end_time": "11:00", "category": "社交"}
+
+[RB0987] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周五不是周六，周五上午十点和朋友吃饭。
+expected: {"start_date": "2026-07-10", "start_time": "10:00", "end_time": "11:00", "category": "社交"}
+
+[RB0988] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周五不是今天，周五上午九点半开周会。
+expected: {"start_date": "2026-07-10", "start_time": "09:30", "end_time": "10:30", "category": "工作"}
+
+[RB0989] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是明天，周日下午两点上课。
+expected: {"start_date": "2026-07-12", "start_time": "14:00", "end_time": "15:00", "category": "学习"}
+
+[RB0990] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是周六，周日中午十二点整理账单。
+expected: {"start_date": "2026-07-12", "start_time": "12:00", "end_time": "13:00", "category": "财务"}
+
+[RB0991] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周五不是今天，周五晚上七点体检。
+expected: {"start_date": "2026-07-10", "start_time": "19:00", "end_time": "20:00", "category": "健康"}
+
+[RB0992] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是周六，下周二下午两点还信用卡。
+expected: {"start_date": "2026-07-14", "start_time": "14:00", "end_time": "15:00", "category": "财务"}
+
+[RB0993] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是这周一，下周二下午三点旅行。
+expected: {"start_date": "2026-07-14", "start_time": "15:00", "end_time": "16:00", "category": "出行"}
+
+[RB0994] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是今天，周日上午九点半记一下那个事情。
+expected: {"start_date": "2026-07-12", "start_time": "09:30", "end_time": "10:30", "category": "其他"}
+
+[RB0995] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是今天，周日晚上八点旅行。
+expected: {"start_date": "2026-07-12", "start_time": "20:00", "end_time": "21:00", "category": "出行"}
+
+[RB0996] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周二不是明天，下周二下午五点睡觉。
+expected: {"start_date": "2026-07-14", "start_time": "17:00", "end_time": "18:00", "category": "生活"}
+
+[RB0997] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是今天，周日晚上七点去医院复诊。
+expected: {"start_date": "2026-07-12", "start_time": "19:00", "end_time": "20:00", "category": "健康"}
+
+[RB0998] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是周六，周日下午五点去机场。
+expected: {"start_date": "2026-07-12", "start_time": "17:00", "end_time": "18:00", "category": "出行"}
+
+[RB0999] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 下周一不是明天，下周一上午九点系统维护。
+expected: {"start_date": "2026-07-13", "start_time": "09:00", "end_time": "10:00", "category": "工作"}
+
+[RB1000] group=adversarial_asr
+tags: 否定干扰, 周几
+text: 周日不是周六，周日上午八点半跑步。
+expected: {"start_date": "2026-07-12", "start_time": "08:30", "end_time": "09:30", "category": "健康"}

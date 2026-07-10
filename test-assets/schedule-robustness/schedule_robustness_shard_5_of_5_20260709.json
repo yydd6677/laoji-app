@@ -1,0 +1,2936 @@
+{
+  "source": "/home/yydd/LaoJi/mobile/test-assets/schedule-robustness/schedule_robustness_samples_1000_20260709.json",
+  "shard": 5,
+  "samples": [
+    {
+      "id": "RB0801",
+      "group": "adversarial_asr",
+      "text": "明天不是，周五上午八点半买高铁车票。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0802",
+      "group": "adversarial_asr",
+      "text": "下周一晚上八点说错了，是今天晚上八点整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0803",
+      "group": "adversarial_asr",
+      "text": "周六晚上八点说错了，是下周一晚上八点跑步。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0804",
+      "group": "adversarial_asr",
+      "text": "不要记今天，记下周二晚上七点报销发票。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0805",
+      "group": "adversarial_asr",
+      "text": "不要记下周一，记周五中午十二点喝水。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0806",
+      "group": "adversarial_asr",
+      "text": "后天不是，明天中午十二点缴费还款。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0807",
+      "group": "adversarial_asr",
+      "text": "下周二中午十二点说错了，是下周一中午十二点检查服务器。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0808",
+      "group": "adversarial_asr",
+      "text": "后天不是，周五上午九点买高铁车票。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0809",
+      "group": "adversarial_asr",
+      "text": "明天不是，周六晚上八点吃药。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0810",
+      "group": "adversarial_asr",
+      "text": "不要记周日，记今天上午八点半喝水。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0811",
+      "group": "adversarial_asr",
+      "text": "明天不是，下周一上午八点半系统维护。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0812",
+      "group": "adversarial_asr",
+      "text": "周六下午两点说错了，是后天下午两点喝水。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0813",
+      "group": "adversarial_asr",
+      "text": "不要记今天，记下周二晚上七点整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0814",
+      "group": "adversarial_asr",
+      "text": "下周一不是，后天下午五点健身核心训练。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0815",
+      "group": "adversarial_asr",
+      "text": "周日上午九点说错了，是明天上午九点整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0816",
+      "group": "adversarial_asr",
+      "text": "周日上午八点半说错了，是后天上午八点半开项目会。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0817",
+      "group": "adversarial_asr",
+      "text": "不要记周五，记下周二下午五点去医院复诊。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0818",
+      "group": "adversarial_asr",
+      "text": "下周二下午三点说错了，是今天下午三点开项目会。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0819",
+      "group": "adversarial_asr",
+      "text": "下周二不是，后天上午九点半生日聚会。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "社交"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0820",
+      "group": "adversarial_asr",
+      "text": "下周一不是，周日上午十点上课。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0821",
+      "group": "adversarial_asr",
+      "text": "下周二上午九点半说错了，是周五上午九点半去车站。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0822",
+      "group": "adversarial_asr",
+      "text": "不要记下周一，记下周二中午十二点睡觉。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0823",
+      "group": "adversarial_asr",
+      "text": "不要记周日，记周五上午十点收快递。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0824",
+      "group": "adversarial_asr",
+      "text": "后天不是，下周一下午五点生日聚会。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0825",
+      "group": "adversarial_asr",
+      "text": "不要记明天，记下周一下午两点参加培训。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0826",
+      "group": "adversarial_asr",
+      "text": "不要记下周二，记周六晚上七点参加培训。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0827",
+      "group": "adversarial_asr",
+      "text": "不要记今天，记周五下午两点做需求评审。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0828",
+      "group": "adversarial_asr",
+      "text": "今天上午十点说错了，是明天上午十点开周会。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0829",
+      "group": "adversarial_asr",
+      "text": "周日不是，周五下午五点跑步。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0830",
+      "group": "adversarial_asr",
+      "text": "后天不是，下周一上午九点半缴费还款。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0831",
+      "group": "adversarial_asr",
+      "text": "周六上午十点说错了，是下周二上午十点睡觉。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0832",
+      "group": "adversarial_asr",
+      "text": "明天不是，下周一中午十二点去机场。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0833",
+      "group": "adversarial_asr",
+      "text": "下周一不是，后天晚上八点整理文件。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0834",
+      "group": "adversarial_asr",
+      "text": "周六不是，周五上午十点整理文件。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0835",
+      "group": "adversarial_asr",
+      "text": "明天不是，周日下午两点上课。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0836",
+      "group": "adversarial_asr",
+      "text": "下周二上午九点半说错了，是周日上午九点半去机场。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0837",
+      "group": "adversarial_asr",
+      "text": "后天不是，下周一下午三点检查服务器。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0838",
+      "group": "adversarial_asr",
+      "text": "下周二上午九点说错了，是周五上午九点出差。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0839",
+      "group": "adversarial_asr",
+      "text": "不要记明天，记周五上午九点半跑步。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0840",
+      "group": "adversarial_asr",
+      "text": "不要记今天，记周五中午十二点开项目会。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0841",
+      "group": "adversarial_asr",
+      "text": "周五不是，周六晚上八点做需求评审。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0842",
+      "group": "adversarial_asr",
+      "text": "周六晚上七点说错了，是周日晚上七点做需求评审。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0843",
+      "group": "adversarial_asr",
+      "text": "今天下午三点说错了，是周日下午三点开周会。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0844",
+      "group": "adversarial_asr",
+      "text": "下周一上午十点说错了，是今天上午十点大扫除。",
+      "expected": {
+        "start_date": "2026-07-09",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0845",
+      "group": "adversarial_asr",
+      "text": "周日不是，后天下午五点睡觉。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0846",
+      "group": "adversarial_asr",
+      "text": "下周一上午九点说错了，是周五上午九点复习考试。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0847",
+      "group": "adversarial_asr",
+      "text": "周五上午九点半说错了，是后天上午九点半朋友聚餐。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "社交"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0848",
+      "group": "adversarial_asr",
+      "text": "不要记下周二，记周六上午十点阅读论文。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0849",
+      "group": "adversarial_asr",
+      "text": "下周二上午九点说错了，是周六上午九点跑步。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0850",
+      "group": "adversarial_asr",
+      "text": "不要记后天，记周日上午九点半报销发票。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0851",
+      "group": "adversarial_asr",
+      "text": "后天不是，下周二上午八点半开项目会。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0852",
+      "group": "adversarial_asr",
+      "text": "周日不是，后天上午十点整理账单。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0853",
+      "group": "adversarial_asr",
+      "text": "后天下午五点说错了，是下周一下午五点阅读论文。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0854",
+      "group": "adversarial_asr",
+      "text": "后天不是，下周一下午两点开项目会。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0855",
+      "group": "adversarial_asr",
+      "text": "下周一上午八点半说错了，是周日上午八点半给妈妈打电话。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "其他"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0856",
+      "group": "adversarial_asr",
+      "text": "周五不是，周日上午十点上课。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0857",
+      "group": "adversarial_asr",
+      "text": "不要记下周一，记周五下午三点出差。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0858",
+      "group": "adversarial_asr",
+      "text": "不要记今天，记周五上午九点整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0859",
+      "group": "adversarial_asr",
+      "text": "不要记下周一，记周五上午九点吃药。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0860",
+      "group": "adversarial_asr",
+      "text": "不要记下周一，记周五上午九点半整理账单。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "财务"
+      },
+      "tags": [
+        "否定日期",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0861",
+      "group": "adversarial_asr",
+      "text": "下周一上午八点半不对，改成上午九点去车站。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0862",
+      "group": "adversarial_asr",
+      "text": "周日上午九点不对，改成晚上七点复习考试。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0863",
+      "group": "adversarial_asr",
+      "text": "明天上午九点半不对，改成晚上九点复习考试。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "21:00",
+        "end_time": "22:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0864",
+      "group": "adversarial_asr",
+      "text": "明天下午两点不对，改成上午九点半睡觉。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0865",
+      "group": "adversarial_asr",
+      "text": "下周一上午十点不对，改成下午五点体检。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0866",
+      "group": "adversarial_asr",
+      "text": "下周一晚上八点不对，改成上午九点去医院复诊。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0867",
+      "group": "adversarial_asr",
+      "text": "周日晚上九点不对，改成中午十二点去机场。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0868",
+      "group": "adversarial_asr",
+      "text": "后天上午八点半不对，改成上午九点参加培训。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0869",
+      "group": "adversarial_asr",
+      "text": "明天上午九点半不对，改成下午三点去车站。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0870",
+      "group": "adversarial_asr",
+      "text": "下周一上午八点半不对，改成晚上九点买菜。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "21:00",
+        "end_time": "22:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0871",
+      "group": "adversarial_asr",
+      "text": "明天上午十点不对，改成上午八点半整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0872",
+      "group": "adversarial_asr",
+      "text": "周日中午十二点不对，改成上午九点交预算报告。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0873",
+      "group": "adversarial_asr",
+      "text": "明天下午三点不对，改成下午五点体检。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0874",
+      "group": "adversarial_asr",
+      "text": "明天晚上九点不对，改成下午三点健身核心训练。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0875",
+      "group": "adversarial_asr",
+      "text": "明天下午两点不对，改成中午十二点检查服务器。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0876",
+      "group": "adversarial_asr",
+      "text": "周日中午十二点不对，改成上午九点搬家。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0877",
+      "group": "adversarial_asr",
+      "text": "后天上午十点不对，改成下午三点搬家。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0878",
+      "group": "adversarial_asr",
+      "text": "下周一晚上八点不对，改成上午九点半开项目会。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0879",
+      "group": "adversarial_asr",
+      "text": "明天晚上九点不对，改成下午两点朋友聚餐。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0880",
+      "group": "adversarial_asr",
+      "text": "周日上午十点不对，改成上午八点半背单词。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0881",
+      "group": "adversarial_asr",
+      "text": "七月二十号下午两点不对，改成上午十点去医院复诊。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0882",
+      "group": "adversarial_asr",
+      "text": "下周一上午九点不对，改成下午两点吃药。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0883",
+      "group": "adversarial_asr",
+      "text": "明天上午九点不对，改成下午五点朋友聚餐。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0884",
+      "group": "adversarial_asr",
+      "text": "后天晚上七点不对，改成上午八点半开项目会。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0885",
+      "group": "adversarial_asr",
+      "text": "下周一晚上九点不对，改成上午九点朋友聚餐。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0886",
+      "group": "adversarial_asr",
+      "text": "明天下午两点不对，改成中午十二点旅行。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0887",
+      "group": "adversarial_asr",
+      "text": "后天上午九点不对，改成中午十二点给妈妈打电话。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0888",
+      "group": "adversarial_asr",
+      "text": "七月二十号下午三点不对，改成中午十二点阅读论文。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0889",
+      "group": "adversarial_asr",
+      "text": "明天上午九点不对，改成晚上七点跑步。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0890",
+      "group": "adversarial_asr",
+      "text": "明天上午九点半不对，改成上午八点半去车站。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0891",
+      "group": "adversarial_asr",
+      "text": "下周一晚上八点不对，改成下午五点搬家。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0892",
+      "group": "adversarial_asr",
+      "text": "周日晚上八点不对，改成下午三点记一下那个事情。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0893",
+      "group": "adversarial_asr",
+      "text": "下周一晚上八点不对，改成下午两点大扫除。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0894",
+      "group": "adversarial_asr",
+      "text": "七月二十号上午八点半不对，改成上午九点半和朋友吃饭。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "社交"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0895",
+      "group": "adversarial_asr",
+      "text": "后天上午九点不对，改成下午三点给妈妈打电话。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0896",
+      "group": "adversarial_asr",
+      "text": "后天晚上七点不对，改成上午八点半还房贷。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "财务"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0897",
+      "group": "adversarial_asr",
+      "text": "周日下午三点不对，改成上午十点出差。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0898",
+      "group": "adversarial_asr",
+      "text": "周日上午十点不对，改成上午九点半整理文件。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "其他"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0899",
+      "group": "adversarial_asr",
+      "text": "周日下午五点不对，改成上午十点报销发票。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0900",
+      "group": "adversarial_asr",
+      "text": "明天下午两点不对，改成上午十点缴费还款。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0901",
+      "group": "adversarial_asr",
+      "text": "后天上午八点半不对，改成晚上七点搬家。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0902",
+      "group": "adversarial_asr",
+      "text": "周日上午八点半不对，改成上午十点复习考试。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0903",
+      "group": "adversarial_asr",
+      "text": "明天上午八点半不对，改成中午十二点还房贷。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0904",
+      "group": "adversarial_asr",
+      "text": "明天晚上八点不对，改成上午十点去医院复诊。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0905",
+      "group": "adversarial_asr",
+      "text": "后天晚上七点不对，改成中午十二点开周会。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0906",
+      "group": "adversarial_asr",
+      "text": "周日上午十点不对，改成下午五点参加培训。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0907",
+      "group": "adversarial_asr",
+      "text": "下周一中午十二点不对，改成下午两点吃药。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0908",
+      "group": "adversarial_asr",
+      "text": "明天下午两点不对，改成上午十点给妈妈打电话。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "其他"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0909",
+      "group": "adversarial_asr",
+      "text": "周日中午十二点不对，改成晚上八点体检。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0910",
+      "group": "adversarial_asr",
+      "text": "后天晚上八点不对，改成上午十点跑步。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定时间",
+        "修正"
+      ]
+    },
+    {
+      "id": "RB0911",
+      "group": "adversarial_asr",
+      "text": "老计七月二十号下午两点系统维护，这是日程。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "工作"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0912",
+      "group": "adversarial_asr",
+      "text": "老计明天上午十点大扫除，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0913",
+      "group": "adversarial_asr",
+      "text": "老吉，七月二十号下午两点和朋友吃饭，老记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "社交"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0914",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周五下午三点和朋友吃饭。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "社交"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0915",
+      "group": "adversarial_asr",
+      "text": "老计明天上午九点半阅读论文，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "学习"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0916",
+      "group": "adversarial_asr",
+      "text": "老吉，周五上午九点半朋友聚餐，老记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "社交"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0917",
+      "group": "adversarial_asr",
+      "text": "老计七月二十号下午三点还房贷，这是日程。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0918",
+      "group": "adversarial_asr",
+      "text": "老吉，明天下午两点还房贷，老记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0919",
+      "group": "adversarial_asr",
+      "text": "老吉，周日晚上八点整理账单，老记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0920",
+      "group": "adversarial_asr",
+      "text": "老计下周一晚上八点参加培训，这是日程。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "学习"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0921",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 下周一上午十点上课。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0922",
+      "group": "adversarial_asr",
+      "text": "老计周五晚上七点买高铁车票，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0923",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 明天上午九点参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0924",
+      "group": "adversarial_asr",
+      "text": "老计周日下午五点上课，这是日程。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "学习"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0925",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 明天下午两点还信用卡。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0926",
+      "group": "adversarial_asr",
+      "text": "老计下周一晚上七点收快递，这是日程。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0927",
+      "group": "adversarial_asr",
+      "text": "老计周五下午三点给妈妈打电话，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "其他"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0928",
+      "group": "adversarial_asr",
+      "text": "老计明天晚上七点整理账单，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0929",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 七月二十号上午八点半系统维护。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "工作"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0930",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 明天上午十点去机场。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0931",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周五上午九点半和朋友吃饭。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "社交"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0932",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周五上午十点吃药。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "健康"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0933",
+      "group": "adversarial_asr",
+      "text": "老吉，七月二十号下午两点买菜，老记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0934",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周五下午三点去机场。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0935",
+      "group": "adversarial_asr",
+      "text": "老计周日下午两点喝水，这是日程。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0936",
+      "group": "adversarial_asr",
+      "text": "老计周五上午九点收快递，这是日程。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0937",
+      "group": "adversarial_asr",
+      "text": "老计七月二十号中午十二点整理文件，这是日程。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "其他"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0938",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周日上午九点半整理文件。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "其他"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0939",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周日上午十点系统维护。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "工作"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0940",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周日下午五点整理账单。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0941",
+      "group": "adversarial_asr",
+      "text": "老计七月二十号下午三点整理账单，这是日程。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0942",
+      "group": "adversarial_asr",
+      "text": "老吉，周日中午十二点喝水，老记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0943",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周五下午五点去车站。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0944",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 下周一晚上八点搬家。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "生活"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0945",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 周日下午两点报销发票。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0946",
+      "group": "adversarial_asr",
+      "text": "老计周日下午三点给妈妈打电话，这是日程。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "其他"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0947",
+      "group": "adversarial_asr",
+      "text": "老纪 老记 明天晚上七点出差。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0948",
+      "group": "adversarial_asr",
+      "text": "老吉，周日上午十点还房贷，老记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0949",
+      "group": "adversarial_asr",
+      "text": "老吉，周日下午三点买高铁车票，老记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0950",
+      "group": "adversarial_asr",
+      "text": "老吉，周日上午八点半缴费还款，老记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "财务"
+      },
+      "tags": [
+        "唤醒词误识别"
+      ]
+    },
+    {
+      "id": "RB0951",
+      "group": "adversarial_asr",
+      "text": "周五上午八点半参加培训，周五上午八点半参加培训，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "学习"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0952",
+      "group": "adversarial_asr",
+      "text": "下周一上午九点系统维护，下周一上午九点系统维护，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0953",
+      "group": "adversarial_asr",
+      "text": "明天上午九点出差，明天上午九点出差，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "出行"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0954",
+      "group": "adversarial_asr",
+      "text": "周日上午十点旅行，周日上午十点旅行，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "出行"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0955",
+      "group": "adversarial_asr",
+      "text": "明天下午五点开周会，明天下午五点开周会，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "工作"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0956",
+      "group": "adversarial_asr",
+      "text": "明天上午八点半吃药，明天上午八点半吃药，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0957",
+      "group": "adversarial_asr",
+      "text": "明天上午八点半复习考试，明天上午八点半复习考试，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "学习"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0958",
+      "group": "adversarial_asr",
+      "text": "周五下午三点跑步，周五下午三点跑步，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0959",
+      "group": "adversarial_asr",
+      "text": "周五下午两点吃药，周五下午两点吃药，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0960",
+      "group": "adversarial_asr",
+      "text": "周五上午九点半体检，周五上午九点半体检，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0961",
+      "group": "adversarial_asr",
+      "text": "明天下午两点还信用卡，明天下午两点还信用卡，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "财务"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0962",
+      "group": "adversarial_asr",
+      "text": "明天上午九点半复习考试，明天上午九点半复习考试，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "学习"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0963",
+      "group": "adversarial_asr",
+      "text": "下周一中午十二点大扫除，下周一中午十二点大扫除，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "生活"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0964",
+      "group": "adversarial_asr",
+      "text": "七月二十号上午九点半买菜，七月二十号上午九点半买菜，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "生活"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0965",
+      "group": "adversarial_asr",
+      "text": "周五上午十点喝水，周五上午十点喝水，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0966",
+      "group": "adversarial_asr",
+      "text": "明天晚上八点报销发票，明天晚上八点报销发票，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "财务"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0967",
+      "group": "adversarial_asr",
+      "text": "周日下午三点去医院复诊，周日下午三点去医院复诊，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0968",
+      "group": "adversarial_asr",
+      "text": "下周一下午三点去医院复诊，下周一下午三点去医院复诊，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0969",
+      "group": "adversarial_asr",
+      "text": "明天上午九点旅行，明天上午九点旅行，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "出行"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0970",
+      "group": "adversarial_asr",
+      "text": "周日上午九点复习考试，周日上午九点复习考试，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0971",
+      "group": "adversarial_asr",
+      "text": "周日上午九点系统维护，周日上午九点系统维护，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0972",
+      "group": "adversarial_asr",
+      "text": "周日晚上七点给妈妈打电话，周日晚上七点给妈妈打电话，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "其他"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0973",
+      "group": "adversarial_asr",
+      "text": "七月二十号上午九点跑步，七月二十号上午九点跑步，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0974",
+      "group": "adversarial_asr",
+      "text": "明天上午十点买菜，明天上午十点买菜，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "生活"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0975",
+      "group": "adversarial_asr",
+      "text": "周日下午两点体检，周日下午两点体检，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0976",
+      "group": "adversarial_asr",
+      "text": "周日晚上八点收快递，周日晚上八点收快递，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "生活"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0977",
+      "group": "adversarial_asr",
+      "text": "下周一上午十点给妈妈打电话，下周一上午十点给妈妈打电话，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "其他"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0978",
+      "group": "adversarial_asr",
+      "text": "周日上午九点半参加培训，周日上午九点半参加培训，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "学习"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0979",
+      "group": "adversarial_asr",
+      "text": "周日上午九点系统维护，周日上午九点系统维护，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0980",
+      "group": "adversarial_asr",
+      "text": "下周一中午十二点去医院复诊，下周一中午十二点去医院复诊，重复说了一遍。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "健康"
+      },
+      "tags": [
+        "整句重复"
+      ]
+    },
+    {
+      "id": "RB0981",
+      "group": "adversarial_asr",
+      "text": "下周二不是周六，下周二晚上八点大扫除。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0982",
+      "group": "adversarial_asr",
+      "text": "下周二不是明天，下周二中午十二点报销发票。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0983",
+      "group": "adversarial_asr",
+      "text": "周日不是明天，周日下午五点缴费还款。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0984",
+      "group": "adversarial_asr",
+      "text": "周五不是明天，周五下午三点旅行。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0985",
+      "group": "adversarial_asr",
+      "text": "下周二不是周六，下周二下午两点做需求评审。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0986",
+      "group": "adversarial_asr",
+      "text": "下周二不是这周一，下周二上午十点和朋友吃饭。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0987",
+      "group": "adversarial_asr",
+      "text": "周五不是周六，周五上午十点和朋友吃饭。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "category": "社交"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0988",
+      "group": "adversarial_asr",
+      "text": "周五不是今天，周五上午九点半开周会。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "工作"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0989",
+      "group": "adversarial_asr",
+      "text": "周日不是明天，周日下午两点上课。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0990",
+      "group": "adversarial_asr",
+      "text": "周日不是周六，周日中午十二点整理账单。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "12:00",
+        "end_time": "13:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0991",
+      "group": "adversarial_asr",
+      "text": "周五不是今天，周五晚上七点体检。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0992",
+      "group": "adversarial_asr",
+      "text": "下周二不是周六，下周二下午两点还信用卡。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "14:00",
+        "end_time": "15:00",
+        "category": "财务"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0993",
+      "group": "adversarial_asr",
+      "text": "下周二不是这周一，下周二下午三点旅行。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "15:00",
+        "end_time": "16:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0994",
+      "group": "adversarial_asr",
+      "text": "周日不是今天，周日上午九点半记一下那个事情。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:30",
+        "end_time": "10:30",
+        "category": "其他"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0995",
+      "group": "adversarial_asr",
+      "text": "周日不是今天，周日晚上八点旅行。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "20:00",
+        "end_time": "21:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0996",
+      "group": "adversarial_asr",
+      "text": "下周二不是明天，下周二下午五点睡觉。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "生活"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0997",
+      "group": "adversarial_asr",
+      "text": "周日不是今天，周日晚上七点去医院复诊。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "19:00",
+        "end_time": "20:00",
+        "category": "健康"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0998",
+      "group": "adversarial_asr",
+      "text": "周日不是周六，周日下午五点去机场。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "17:00",
+        "end_time": "18:00",
+        "category": "出行"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB0999",
+      "group": "adversarial_asr",
+      "text": "下周一不是明天，下周一上午九点系统维护。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    },
+    {
+      "id": "RB1000",
+      "group": "adversarial_asr",
+      "text": "周日不是周六，周日上午八点半跑步。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "08:30",
+        "end_time": "09:30",
+        "category": "健康"
+      },
+      "tags": [
+        "否定干扰",
+        "周几"
+      ]
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { Audio, AVPlaybackStatus } from 'expo-av';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
-import { RootStackParamList } from '../types';
+import { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { useMeetings } from '../store/MeetingsStore';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo, fetchMeetingSummary, fetchMeetingTranscript } from '../services/api';
 import { BackHeader, Tag, Waveform } from '../components/Common';
@@ -15,17 +15,35 @@ import { BottomTabBar } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { fallbackMeetingBars, formatDuration, transcriptDurationSec, transcriptToBars } from '../utils/meetingMedia';
 import { useAppDialog } from '../components/AppDialog';
+import { useAuth } from '../store/AuthStore';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Recording'>;
   route: RouteProp<RootStackParamList, 'Recording'>;
 };
 
+function summaryToText(summary: MeetingSummary | null): string {
+  if (!summary) return '';
+  return (summary.markdown || summary.full_text || summary.overview || '').trim();
+}
+
+function localAudioInfo(uri: string | null | undefined): ApiMeetingAudioInfo | null {
+  return uri ? { url: uri, mime_type: 'audio/wav', file_name: uri.split('/').pop() ?? 'meeting.wav' } : null;
+}
+
 export function RecordingScreen({ navigation, route }: Props) {
-  const { meetings, deleteMeeting } = useMeetings();
+  const {
+    meetings,
+    deleteMeeting,
+    getCachedTranscript,
+    saveCachedTranscript,
+    getCachedSummary,
+    saveCachedSummary,
+  } = useMeetings();
+  const { accessToken, isGuest } = useAuth();
   const { showDialog } = useAppDialog();
   const m = meetings.find(x => x.id === route.params.meetingId);
-  const [transcriptItems, setTranscriptItems] = useState<any[]>([]);
+  const [transcriptItems, setTranscriptItems] = useState<TranscriptLine[]>([]);
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -46,11 +64,19 @@ export function RecordingScreen({ navigation, route }: Props) {
       return;
     }
     let alive = true;
-    fetchMeetingTranscript(meetingId)
-      .then(items => { if (alive) setTranscriptItems(items); })
-      .catch(() => { if (alive) setTranscriptItems([]); });
+    const cached = getCachedTranscript(meetingId);
+    setTranscriptItems(cached);
+    if (isGuest || !accessToken) return () => { alive = false; };
+    fetchMeetingTranscript(meetingId, accessToken)
+      .then(items => {
+        if (!alive) return;
+        const next = items.length > 0 ? items : cached;
+        setTranscriptItems(next);
+        if (items.length > 0) void saveCachedTranscript(meetingId, items);
+      })
+      .catch(() => { if (alive) setTranscriptItems(cached); });
     return () => { alive = false; };
-  }, [meetingId]);
+  }, [accessToken, getCachedTranscript, isGuest, meetingId, saveCachedTranscript]);
 
   useEffect(() => {
     if (!meetingId) {
@@ -66,21 +92,29 @@ export function RecordingScreen({ navigation, route }: Props) {
     setDurationMs(0);
     soundRef.current?.unloadAsync().catch(() => {});
     soundRef.current = null;
-    fetchMeetingAudioInfo(meetingId)
+    const fallbackAudio = localAudioInfo(m?.audioLocalUri);
+    if (isGuest || !accessToken) {
+      setAudioInfo(fallbackAudio);
+      setAudioLoading(false);
+      return () => { alive = false; };
+    }
+    fetchMeetingAudioInfo(meetingId, accessToken)
       .then(info => {
         if (!alive) return;
-        setAudioInfo(info);
-        if (info?.duration_sec) setDurationMs(Math.round(info.duration_sec * 1000));
+        const next = info ?? fallbackAudio;
+        setAudioInfo(next);
+        if (next?.duration_sec) setDurationMs(Math.round(next.duration_sec * 1000));
       })
       .catch(() => {
         if (!alive) return;
-        setAudioError('录音服务暂时不可用');
+        setAudioInfo(fallbackAudio);
+        setAudioError(fallbackAudio ? '' : '录音服务暂时不可用');
       })
       .finally(() => {
         if (alive) setAudioLoading(false);
       });
     return () => { alive = false; };
-  }, [meetingId]);
+  }, [accessToken, isGuest, meetingId, m?.audioLocalUri]);
 
   useEffect(() => {
     return () => {
@@ -116,7 +150,9 @@ export function RecordingScreen({ navigation, route }: Props) {
     try {
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const created = await Audio.Sound.createAsync(
-        { uri: audioInfo.url },
+        (audioInfo.requires_auth && accessToken
+          ? { uri: audioInfo.url, headers: { Authorization: `Bearer ${accessToken}` } }
+          : { uri: audioInfo.url }) as any,
         { shouldPlay: false, rate: speed, shouldCorrectPitch: true },
         handlePlaybackStatus,
       );
@@ -132,7 +168,7 @@ export function RecordingScreen({ navigation, route }: Props) {
 
   const togglePlayback = async () => {
     if (!audioInfo) {
-      showDialog({ title: '暂无录音文件', message: '会议服务没有提供可播放的 HTTPS 录音地址。', tone: 'info' });
+      showDialog({ title: '暂无录音文件', message: '当前会议只有转写内容，没有可播放的录音文件。', tone: 'info' });
       return;
     }
     const sound = await ensureSound();
@@ -161,7 +197,12 @@ export function RecordingScreen({ navigation, route }: Props) {
           <Text style={s.emptyTitle}>会议记录不存在</Text>
           <Text style={s.emptyText}>请返回会议列表后重新打开。</Text>
         </View>
-        <BottomTabBar active="meetings" onSchedule={() => openScheduleTab(navigation)} onMeetings={() => openMeetingsTab(navigation)} />
+        <BottomTabBar
+          active="meetings"
+          onSchedule={() => openScheduleTab(navigation)}
+          onMeetings={() => openMeetingsTab(navigation)}
+          onMic={() => navigation.navigate('MeetingLive')}
+        />
       </ScreenContainer>
     );
   }
@@ -169,10 +210,22 @@ export function RecordingScreen({ navigation, route }: Props) {
   const handleSummary = async () => {
     setSummaryVisible(true);
     if (summaryText) return; // already loaded
+    const cachedText = summaryToText(getCachedSummary(m.id));
+    if (cachedText) {
+      setSummaryText(cachedText);
+      return;
+    }
+    if (isGuest || !accessToken) {
+      setSummaryText('该会议暂无云端总结。');
+      return;
+    }
     setSummaryLoading(true);
     try {
-      const text = await fetchMeetingSummary(m.id);
+      const text = await fetchMeetingSummary(m.id, accessToken);
       setSummaryText(text || '暂无总结内容');
+      if (text) {
+        void saveCachedSummary(m.id, { meeting_id: m.id, full_text: text, generated_at: new Date().toISOString() });
+      }
     } catch {
       setSummaryText('获取总结失败，请检查网络后重试');
     } finally {
@@ -182,7 +235,18 @@ export function RecordingScreen({ navigation, route }: Props) {
 
   const handleShareMeeting = async () => {
     try {
-      await Share.share({ message: `${m.title}\n${[m.date, m.time].filter(Boolean).join(' ')}` });
+      const transcriptText = transcriptItems
+        .map(item => `[${item.speaker_label ?? item.speaker_id ?? '发言人'}] ${item.text}`)
+        .join('\n');
+      const cachedSummary = summaryText || summaryToText(getCachedSummary(m.id));
+      await Share.share({
+        message: [
+          m.title,
+          [m.date, m.time].filter(Boolean).join(' '),
+          cachedSummary ? `会议总结：\n${cachedSummary}` : '',
+          transcriptText ? `转写内容：\n${transcriptText}` : '',
+        ].filter(Boolean).join('\n\n'),
+      });
     } catch (_) {}
   };
 
@@ -310,7 +374,12 @@ export function RecordingScreen({ navigation, route }: Props) {
         </View>
         <View style={{ height: 16 }} />
       </ScrollView>
-      <BottomTabBar active="meetings" onSchedule={() => openScheduleTab(navigation)} onMeetings={() => openMeetingsTab(navigation)} />
+      <BottomTabBar
+        active="meetings"
+        onSchedule={() => openScheduleTab(navigation)}
+        onMeetings={() => openMeetingsTab(navigation)}
+        onMic={() => navigation.navigate('MeetingLive')}
+      />
 
       {/* AI Summary Modal */}
       <Modal visible={summaryVisible} transparent animationType="slide" onRequestClose={() => setSummaryVisible(false)}>

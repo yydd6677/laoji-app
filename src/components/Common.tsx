@@ -1,10 +1,9 @@
 import React from 'react';
 import { Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { Colors as C } from '../theme/colors';
-import { AVATAR_PRESETS, UserProfile } from '../services/profile';
+import { UserProfile } from '../services/profile';
 
 // ─── Sparkle ─────────────────────────────────────────────────────────────────
 export function Sparkle({ size, color }: { size: number; color: string }) {
@@ -41,8 +40,8 @@ export function Avatar({ size = 36, profile, initial, colors }: {
   initial?: string;
   colors?: [string, string];
 }) {
-  const avatarColors = colors ?? profile?.avatarColors ?? AVATAR_PRESETS[0];
-  const avatarInitial = (initial ?? profile?.avatarInitial ?? profile?.nickname?.slice(0, 1) ?? '记').slice(0, 1);
+  void initial;
+  void colors;
   const imageUri = profile?.avatarUrl || profile?.avatarLocalUri;
   if (imageUri) {
     return (
@@ -52,14 +51,20 @@ export function Avatar({ size = 36, profile, initial, colors }: {
       />
     );
   }
+  return <NeutralAvatar size={size} />;
+}
+
+function NeutralAvatar({ size }: { size: number }) {
   return (
-    <LinearGradient
-      colors={avatarColors}
-      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-      style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}
-    >
-      <Text style={[styles.avatarText, { fontSize: size * 0.36 }]}>{avatarInitial}</Text>
-    </LinearGradient>
+    <View style={[styles.neutralAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Svg width={size * 0.72} height={size * 0.72} viewBox="0 0 100 100">
+        <Circle cx="50" cy="36" r="18" fill="#B8B4D4" />
+        <Path
+          d="M20 86c4-22 18-34 30-34s26 12 30 34c-8 6-18 9-30 9s-22-3-30-9z"
+          fill="#B8B4D4"
+        />
+      </Svg>
+    </View>
   );
 }
 
@@ -88,16 +93,18 @@ export function BackHeader({ title, onBack, right }: {
 }
 
 const styles = StyleSheet.create({
-  avatar: {
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#fff',
-    shadowColor: 'rgba(180,100,220,0.25)',
+  neutralAvatar: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: '#ECE8F4',
+    shadowColor: 'rgba(180,100,220,0.18)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 10,
     elevation: 4,
   },
-  avatarText: { color: '#fff', fontWeight: '700' },
   avatarImage: {
     borderWidth: 2,
     borderColor: '#fff',

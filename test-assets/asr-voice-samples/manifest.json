@@ -1,0 +1,1246 @@
+{
+  "created_for": "LaoJi ASR and schedule parser diagnostics",
+  "current_date_for_expectations": "2026-07-09",
+  "count": 68,
+  "samples": [
+    {
+      "id": "001",
+      "text": "明天下午三点开会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "核心短句，相对日期+时间+工作",
+      "expected_text": "明天下午三点开会",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-10",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_001.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_001.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_001.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_001.m4a"
+      }
+    },
+    {
+      "id": "002",
+      "text": "今天晚上七点健身",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "今天+晚上+健康",
+      "expected_text": "今天晚上七点健身",
+      "expected": {
+        "category": "健康",
+        "start_date": "2026-07-09",
+        "start_time": "19:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_002.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_002.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_002.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_002.m4a"
+      }
+    },
+    {
+      "id": "003",
+      "text": "后天上午九点半上课",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "后天+半点+学习",
+      "expected_text": "后天上午九点半上课",
+      "expected": {
+        "category": "学习",
+        "start_date": "2026-07-11",
+        "start_time": "09:30"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_003.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_003.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_003.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_003.m4a"
+      }
+    },
+    {
+      "id": "004",
+      "text": "下周一上午十点周会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "下周+工作",
+      "expected_text": "下周一上午十点周会",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-13",
+        "start_time": "10:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_004.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_004.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_004.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_004.m4a"
+      }
+    },
+    {
+      "id": "005",
+      "text": "七月二十号下午两点项目评审",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "明确日期+工作",
+      "expected_text": "七月二十号下午两点项目评审",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-20",
+        "start_time": "14:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_005.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_005.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_005.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_005.m4a"
+      }
+    },
+    {
+      "id": "006",
+      "text": "八月一号早上八点体检",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "明确日期+健康",
+      "expected_text": "八月一号早上八点体检",
+      "expected": {
+        "category": "健康",
+        "start_date": "2026-08-01",
+        "start_time": "08:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_006.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_006.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_006.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_006.m4a"
+      }
+    },
+    {
+      "id": "007",
+      "text": "今天缴费还款",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "财务分类",
+      "expected_text": "今天缴费还款",
+      "expected": {
+        "category": "财务",
+        "start_date": "2026-07-09"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_007.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_007.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_007.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_007.m4a"
+      }
+    },
+    {
+      "id": "008",
+      "text": "明天买高铁车票",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "出行分类",
+      "expected_text": "明天买高铁车票",
+      "expected": {
+        "category": "出行",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_008.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_008.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_008.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_008.m4a"
+      }
+    },
+    {
+      "id": "009",
+      "text": "周六朋友聚餐",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "社交分类",
+      "expected_text": "周六朋友聚餐",
+      "expected": {
+        "category": "社交",
+        "start_date": "2026-07-11"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_009.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_009.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_009.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_009.m4a"
+      }
+    },
+    {
+      "id": "010",
+      "text": "明天整理东西",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "其他分类",
+      "expected_text": "明天整理东西",
+      "expected": {
+        "category": "其他",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_010.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_010.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_010.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_010.m4a"
+      }
+    },
+    {
+      "id": "011",
+      "text": "七月十九日到七月二十五日完成笔记本制作",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "-8%",
+      "note": "跨日期全天",
+      "expected_text": "七月十九日到七月二十五日完成笔记本制作",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "is_all_day": true
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_011.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_011.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_011.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_011.m4a"
+      }
+    },
+    {
+      "id": "012",
+      "text": "从明天到周五准备项目材料",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "相对日期范围，同日起止",
+      "expected_text": "从明天到周五准备项目材料",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_012.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_012.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_012.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_012.m4a"
+      }
+    },
+    {
+      "id": "013",
+      "text": "七月十五号到七月十八号出差",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "出行+跨日期",
+      "expected_text": "七月十五号到七月十八号出差",
+      "expected": {
+        "category": "出行",
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_013.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_013.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_013.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_013.m4a"
+      }
+    },
+    {
+      "id": "014",
+      "text": "本周五到下周一参加培训",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "跨周+学习",
+      "expected_text": "本周五到下周一参加培训",
+      "expected": {
+        "category": "学习",
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_014.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_014.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_014.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_014.m4a"
+      }
+    },
+    {
+      "id": "015",
+      "text": "八月三号到八月五号旅行",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "出行+跨日期",
+      "expected_text": "八月三号到八月五号旅行",
+      "expected": {
+        "category": "出行",
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_015.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_015.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_015.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_015.m4a"
+      }
+    },
+    {
+      "id": "016",
+      "text": "明天到后天复习考试",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "学习+跨日期",
+      "expected_text": "明天到后天复习考试",
+      "expected": {
+        "category": "学习",
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_016.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_016.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_016.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_016.m4a"
+      }
+    },
+    {
+      "id": "017",
+      "text": "七月二十号到二十二号家里大扫除",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "生活+跨日期",
+      "expected_text": "七月二十号到二十二号家里大扫除",
+      "expected": {
+        "category": "生活",
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_017.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_017.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_017.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_017.m4a"
+      }
+    },
+    {
+      "id": "018",
+      "text": "下周一到下周三完成报告",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "工作+跨日期",
+      "expected_text": "下周一到下周三完成报告",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_018.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_018.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_018.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_018.m4a"
+      }
+    },
+    {
+      "id": "019",
+      "text": "每天早上八点喝水",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "daily",
+      "expected_text": "每天早上八点喝水",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "08:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_019.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_019.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_019.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_019.m4a"
+      }
+    },
+    {
+      "id": "020",
+      "text": "每天晚上十点睡觉",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "daily+生活",
+      "expected_text": "每天晚上十点睡觉",
+      "expected": {
+        "event_type": "daily",
+        "category": "生活",
+        "start_time": "22:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_020.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_020.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_020.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_020.m4a"
+      }
+    },
+    {
+      "id": "021",
+      "text": "每周一上午十点开周会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "weekly+工作",
+      "expected_text": "每周一上午十点开周会",
+      "expected": {
+        "event_type": "weekly",
+        "category": "工作",
+        "start_time": "10:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_021.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_021.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_021.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_021.m4a"
+      }
+    },
+    {
+      "id": "022",
+      "text": "每周三晚上七点跑步",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "weekly+健康",
+      "expected_text": "每周三晚上七点跑步",
+      "expected": {
+        "event_type": "weekly",
+        "category": "健康",
+        "start_time": "19:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_022.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_022.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_022.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_022.m4a"
+      }
+    },
+    {
+      "id": "023",
+      "text": "每月一号上午九点交报告",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "monthly+工作",
+      "expected_text": "每月一号上午九点交报告",
+      "expected": {
+        "event_type": "monthly",
+        "category": "工作",
+        "start_time": "09:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_023.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_023.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_023.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_023.m4a"
+      }
+    },
+    {
+      "id": "024",
+      "text": "每月十五号还信用卡",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "monthly+财务",
+      "expected_text": "每月十五号还信用卡",
+      "expected": {
+        "event_type": "monthly",
+        "category": "财务"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_024.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_024.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_024.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_024.m4a"
+      }
+    },
+    {
+      "id": "025",
+      "text": "每年七月一号纪念日",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "yearly",
+      "expected_text": "每年七月一号纪念日",
+      "expected": {
+        "event_type": "yearly"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_025.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_025.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_025.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_025.m4a"
+      }
+    },
+    {
+      "id": "026",
+      "text": "每年十二月三十一号做年度复盘",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "yearly+工作",
+      "expected_text": "每年十二月三十一号做年度复盘",
+      "expected": {
+        "event_type": "yearly",
+        "category": "工作"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_026.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_026.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_026.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_026.m4a"
+      }
+    },
+    {
+      "id": "027",
+      "text": "明天下午三点开会，提前十五分钟提醒我",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "默认提醒",
+      "expected_text": "明天下午三点开会，提前十五分钟提醒我",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00",
+        "reminder_minutes": 15
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_027.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_027.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_027.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_027.m4a"
+      }
+    },
+    {
+      "id": "028",
+      "text": "明天上午十点交材料，提前半小时提醒我",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "30 分钟提醒",
+      "expected_text": "明天上午十点交材料，提前半小时提醒我",
+      "expected": {
+        "start_time": "10:00",
+        "reminder_minutes": 30
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_028.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_028.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_028.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_028.m4a"
+      }
+    },
+    {
+      "id": "029",
+      "text": "今天下午五点还款，提前一小时提醒我",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "财务+1小时",
+      "expected_text": "今天下午五点还款，提前一小时提醒我",
+      "expected": {
+        "category": "财务",
+        "start_time": "17:00",
+        "reminder_minutes": 60
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_029.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_029.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_029.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_029.m4a"
+      }
+    },
+    {
+      "id": "030",
+      "text": "明天晚上七点聚餐，开始时提醒我",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "0 分钟提醒",
+      "expected_text": "明天晚上七点聚餐，开始时提醒我",
+      "expected": {
+        "category": "社交",
+        "start_time": "19:00",
+        "reminder_minutes": 0
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_030.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_030.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_030.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_030.m4a"
+      }
+    },
+    {
+      "id": "031",
+      "text": "后天下午三点开会，不要提醒我",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "不提醒",
+      "expected_text": "后天下午三点开会，不要提醒我",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00",
+        "reminder_minutes": null
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_031.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_031.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_031.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_031.m4a"
+      }
+    },
+    {
+      "id": "032",
+      "text": "明天上午九点体检，不用提醒",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "不提醒同义表达",
+      "expected_text": "明天上午九点体检，不用提醒",
+      "expected": {
+        "category": "健康",
+        "start_time": "09:00",
+        "reminder_minutes": null
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_032.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_032.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_032.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_032.m4a"
+      }
+    },
+    {
+      "id": "033",
+      "text": "十分钟后提醒我喝水",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "临近提醒",
+      "expected_text": "十分钟后提醒我喝水",
+      "expected": {
+        "category": "生活"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_033.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_033.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_033.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_033.m4a"
+      }
+    },
+    {
+      "id": "034",
+      "text": "一小时后提醒我打电话",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "相对时间提醒",
+      "expected_text": "一小时后提醒我打电话",
+      "expected": {
+        "category": "其他"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_034.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_034.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_034.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_034.m4a"
+      }
+    },
+    {
+      "id": "035",
+      "text": "下午开会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "缺日期/时间不完整",
+      "expected_text": "下午开会",
+      "expected": {
+        "category": "工作"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_035.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_035.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_035.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_035.m4a"
+      }
+    },
+    {
+      "id": "036",
+      "text": "明天开会",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "缺具体时间",
+      "expected_text": "明天开会",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_036.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_036.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_036.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_036.m4a"
+      }
+    },
+    {
+      "id": "037",
+      "text": "周五处理材料",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "缺具体时间",
+      "expected_text": "周五处理材料",
+      "expected": {
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_037.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_037.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_037.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_037.m4a"
+      }
+    },
+    {
+      "id": "038",
+      "text": "晚上去健身",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "缺日期",
+      "expected_text": "晚上去健身",
+      "expected": {
+        "category": "健康"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_038.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_038.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_038.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_038.m4a"
+      }
+    },
+    {
+      "id": "039",
+      "text": "下个月交报告",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "缺具体日",
+      "expected_text": "下个月交报告",
+      "expected": {
+        "category": "工作"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_039.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_039.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_039.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_039.m4a"
+      }
+    },
+    {
+      "id": "040",
+      "text": "周末聚餐",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "周末歧义",
+      "expected_text": "周末聚餐",
+      "expected": {
+        "category": "社交"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_040.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_040.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_040.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_040.m4a"
+      }
+    },
+    {
+      "id": "041",
+      "text": "有空的时候整理资料",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "应低置信度或失败",
+      "expected_text": "有空的时候整理资料",
+      "expected": null,
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_041.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_041.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_041.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_041.m4a"
+      }
+    },
+    {
+      "id": "042",
+      "text": "记一下那个事情",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "应失败或低置信度",
+      "expected_text": "记一下那个事情",
+      "expected": null,
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_042.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_042.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_042.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_042.m4a"
+      }
+    },
+    {
+      "id": "043",
+      "text": "明天下午四点需求评审",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "工作",
+      "expected_text": "明天下午四点需求评审",
+      "expected": {
+        "category": "工作",
+        "start_time": "16:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_043.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_043.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_043.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_043.m4a"
+      }
+    },
+    {
+      "id": "044",
+      "text": "周五晚上阅读论文",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "学习",
+      "expected_text": "周五晚上阅读论文",
+      "expected": {
+        "category": "学习",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_044.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_044.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_044.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_044.m4a"
+      }
+    },
+    {
+      "id": "045",
+      "text": "明天早上吃药",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "健康",
+      "expected_text": "明天早上吃药",
+      "expected": {
+        "category": "健康",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_045.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_045.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_045.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_045.m4a"
+      }
+    },
+    {
+      "id": "046",
+      "text": "后天取快递",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "生活",
+      "expected_text": "后天取快递",
+      "expected": {
+        "category": "生活",
+        "start_date": "2026-07-11"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_046.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_046.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_046.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_046.m4a"
+      }
+    },
+    {
+      "id": "047",
+      "text": "周六晚上朋友生日聚餐",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "社交",
+      "expected_text": "周六晚上朋友生日聚餐",
+      "expected": {
+        "category": "社交",
+        "start_date": "2026-07-11"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_047.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_047.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_047.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_047.m4a"
+      }
+    },
+    {
+      "id": "048",
+      "text": "明天下午三点去机场",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "出行",
+      "expected_text": "明天下午三点去机场",
+      "expected": {
+        "category": "出行",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_048.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_048.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_048.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_048.m4a"
+      }
+    },
+    {
+      "id": "049",
+      "text": "今天晚上报销发票",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "财务",
+      "expected_text": "今天晚上报销发票",
+      "expected": {
+        "category": "财务",
+        "start_date": "2026-07-09"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_049.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_049.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_049.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_049.m4a"
+      }
+    },
+    {
+      "id": "050",
+      "text": "明天截止提交申请",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "重要",
+      "expected_text": "明天截止提交申请",
+      "expected": {
+        "category": "重要",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_050.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_050.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_050.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_050.m4a"
+      }
+    },
+    {
+      "id": "051",
+      "text": "后天整理文件",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "其他",
+      "expected_text": "后天整理文件",
+      "expected": {
+        "category": "其他",
+        "start_date": "2026-07-11"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_051.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_051.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_051.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_051.m4a"
+      }
+    },
+    {
+      "id": "052",
+      "text": "明天上午买菜",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "生活",
+      "expected_text": "明天上午买菜",
+      "expected": {
+        "category": "生活",
+        "start_date": "2026-07-10"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_052.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_052.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_052.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_052.m4a"
+      }
+    },
+    {
+      "id": "053",
+      "text": "帮我记一下，明天下午三点在会议室开项目会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "地点+工作",
+      "expected_text": "帮我记一下，明天下午三点在会议室开项目会",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_053.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_053.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_053.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_053.m4a"
+      }
+    },
+    {
+      "id": "054",
+      "text": "记个日程，周五晚上七点和朋友吃饭",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "社交",
+      "expected_text": "记个日程，周五晚上七点和朋友吃饭",
+      "expected": {
+        "category": "社交",
+        "start_date": "2026-07-10",
+        "start_time": "19:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_054.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_054.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_054.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_054.m4a"
+      }
+    },
+    {
+      "id": "055",
+      "text": "下周二上午九点到十一点参加培训",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "起止时间+学习",
+      "expected_text": "下周二上午九点到十一点参加培训",
+      "expected": {
+        "category": "学习",
+        "start_time": "09:00",
+        "end_time": "11:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_055.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_055.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_055.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_055.m4a"
+      }
+    },
+    {
+      "id": "056",
+      "text": "七月二十号下午两点到四点做需求评审",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "起止时间+工作",
+      "expected_text": "七月二十号下午两点到四点做需求评审",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "16:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_056.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_056.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_056.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_056.m4a"
+      }
+    },
+    {
+      "id": "057",
+      "text": "明天早上八点半去医院体检",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "半点+健康",
+      "expected_text": "明天早上八点半去医院体检",
+      "expected": {
+        "category": "健康",
+        "start_time": "08:30"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_057.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_057.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_057.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_057.m4a"
+      }
+    },
+    {
+      "id": "058",
+      "text": "后天下午五点之前还信用卡",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "截止+财务",
+      "expected_text": "后天下午五点之前还信用卡",
+      "expected": {
+        "category": "财务",
+        "start_time": "17:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_058.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_058.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_058.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_058.m4a"
+      }
+    },
+    {
+      "id": "059",
+      "text": "下周一开始到周三完成预算报告",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "跨日期+工作",
+      "expected_text": "下周一开始到周三完成预算报告",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_059.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_059.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_059.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_059.m4a"
+      }
+    },
+    {
+      "id": "060",
+      "text": "明天晚上八点提醒我给妈妈打电话",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "生活/其他边界",
+      "expected_text": "明天晚上八点提醒我给妈妈打电话",
+      "expected": {
+        "category": "其他",
+        "start_time": "20:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_060.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_060.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_060.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_060.m4a"
+      }
+    },
+    {
+      "id": "061",
+      "text": "嗯，明天下午三点开会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "口头填充词",
+      "expected_text": "嗯，明天下午三点开会",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_061.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_061.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_061.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_061.m4a"
+      }
+    },
+    {
+      "id": "062",
+      "text": "明天，下午三点，开会",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "中间停顿",
+      "expected_text": "明天，下午三点，开会",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_062.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_062.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_062.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_062.m4a"
+      }
+    },
+    {
+      "id": "063",
+      "text": "明天下午三点开会，地点会议室 B",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "英文字母地点",
+      "expected_text": "明天下午三点开会，地点会议室 B",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_063.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_063.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_063.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_063.m4a"
+      }
+    },
+    {
+      "id": "064",
+      "text": "明天下午三点开会，会议室 B 二零三",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "混合数字",
+      "expected_text": "明天下午三点开会，会议室 B 二零三",
+      "expected": {
+        "category": "工作",
+        "start_time": "15:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_064.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_064.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_064.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_064.m4a"
+      }
+    },
+    {
+      "id": "065",
+      "text": "七月二十号下午两点，项目评审，不要忘了",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "尾部无关口语",
+      "expected_text": "七月二十号下午两点，项目评审，不要忘了",
+      "expected": {
+        "category": "工作",
+        "start_date": "2026-07-20",
+        "start_time": "14:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_065.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_065.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_065.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_065.m4a"
+      }
+    },
+    {
+      "id": "066",
+      "text": "今天晚上七点健身，核心训练",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "详情补充",
+      "expected_text": "今天晚上七点健身，核心训练",
+      "expected": {
+        "category": "健康",
+        "start_time": "19:00"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_066.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_066.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_066.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_066.m4a"
+      }
+    },
+    {
+      "id": "067",
+      "text": "明天上午九点半开会，讨论预算",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "详情+财务关键词干扰",
+      "expected_text": "明天上午九点半开会，讨论预算",
+      "expected": {
+        "category": "工作",
+        "start_time": "09:30"
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_067.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_067.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_067.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_067.m4a"
+      }
+    },
+    {
+      "id": "068",
+      "text": "下周一十点周会，提前十五分钟提醒",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "重复/提醒组合",
+      "expected_text": "下周一十点周会，提前十五分钟提醒",
+      "expected": {
+        "category": "工作",
+        "start_time": "10:00",
+        "reminder_minutes": 15
+      },
+      "files": {
+        "mp3": "test-assets/asr-voice-samples/mp3/asr_068.mp3",
+        "wav": "test-assets/asr-voice-samples/wav/asr_068.wav",
+        "aac": "test-assets/asr-voice-samples/aac/asr_068.aac",
+        "m4a": "test-assets/asr-voice-samples/m4a/asr_068.m4a"
+      }
+    }
+  ]
+}

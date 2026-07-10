@@ -46,6 +46,9 @@ export function EventDetailScreen({ navigation, route }: Props) {
     const days = ['日', '一', '二', '三', '四', '五', '六'];
     return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（周${days[d.getDay()]}）`;
   };
+  const dateText = ev.endDate && ev.endDate !== ev.startDate
+    ? `${formatDate(ev.startDate)} – ${formatDate(ev.endDate)}`
+    : formatDate(ev.startDate);
   const timeText = ev.isAllDay
     ? '全天'
     : ev.startTime && ev.endTime
@@ -54,7 +57,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
   const detailText = ev.detail ?? ev.description;
 
   const infoRows = [
-    { icon: 'calendar-outline' as const, text: ev.startDate ? formatDate(ev.startDate) : '—' },
+    { icon: 'calendar-outline' as const, text: ev.startDate ? dateText : '—' },
     { icon: 'time-outline' as const,     text: timeText },
     { icon: 'notifications-outline' as const, text: ev.reminderMinutes == null ? '不提醒' : labelForReminder(ev.reminderMinutes) },
     { icon: 'location-outline' as const, text: ev.location ?? '—' },

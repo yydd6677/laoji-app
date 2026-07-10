@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
+  NativeScrollEvent, NativeSyntheticEvent, View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
 } from 'react-native';
 import { VoiceInputModal } from '../components/VoiceInputModal';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,8 +14,28 @@ import { BottomTabBar } from '../components/BottomTabBar';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
+import { selectTasksForDate } from '../utils/taskOrdering';
+import { sortEventsForSearch } from '../utils/eventOrdering';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
+const TASK_VISIBLE_ROWS = 4;
+const TASK_ROW_HEIGHT = 38;
+const TASK_LIST_MAX_HEIGHT = TASK_VISIBLE_ROWS * TASK_ROW_HEIGHT;
+
+function dateKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function relativeDayLabel(selectedDate: Date, today: Date): string {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diff = Math.round((startOfLocalDay(selectedDate).getTime() - startOfLocalDay(today).getTime()) / msPerDay);
+  if (diff === 0) return '';
+  return diff > 0 ? `${diff}天后` : `${Math.abs(diff)}天前`;
+}
 
 export function ScheduleScreen({ navigation }: Props) {
   const { events, refreshEvents } = useEvents();
@@ -27,21 +47,47 @@ export function ScheduleScreen({ navigation }: Props) {
   const [selDay, setSelDay] = useState(() => initialDate.getDate());
   const [searchQuery, setSearchQuery] = useState('');
   const [voiceVisible, setVoiceVisible] = useState(false);
+  const taskScrollRef = useRef<ScrollView | null>(null);
+  const [taskScrollY, setTaskScrollY] = useState(0);
+  const [taskViewportHeight, setTaskViewportHeight] = useState(TASK_LIST_MAX_HEIGHT);
+  const [taskContentHeight, setTaskContentHeight] = useState(TASK_LIST_MAX_HEIGHT);
 
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const todayStr = dateKey(today.getFullYear(), today.getMonth() + 1, today.getDate());
   const WDN = ['周日','周一','周二','周三','周四','周五','周六'];
-  const todayLabel = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日 ${WDN[today.getDay()]}`;
+  const daysInSelectedMonth = new Date(year, month, 0).getDate();
+  const selectedDay = Math.min(selDay, daysInSelectedMonth);
+  const selectedDate = useMemo(() => new Date(year, month - 1, selectedDay), [year, month, selectedDay]);
+  const selectedDateStr = dateKey(year, month, selectedDay);
+  const isTodaySelected = selectedDateStr === todayStr;
+  const selectedDateLabel = `${year}年${month}月${selectedDay}日 ${WDN[selectedDate.getDay()]}`;
+  const selectedRelativeLabel = relativeDayLabel(selectedDate, today);
 
-  const todayEvents = useMemo(() =>
-    events.filter(e => e.startDate === todayStr && e.startTime).slice(0, 5),
-    [events, todayStr]
+  const selectedTasks = useMemo(
+    () => selectTasksForDate(events, selectedDateStr),
+    [events, selectedDateStr],
   );
+  const hasTaskOverflow = selectedTasks.length > TASK_VISIBLE_ROWS;
+  const taskViewportForThumb = Math.max(1, taskViewportHeight || TASK_LIST_MAX_HEIGHT);
+  const taskContentForThumb = Math.max(taskContentHeight, selectedTasks.length * TASK_ROW_HEIGHT);
+  const taskThumbHeight = hasTaskOverflow
+    ? Math.max(24, (taskViewportForThumb * taskViewportForThumb) / taskContentForThumb)
+    : 0;
+  const taskMaxScrollY = Math.max(1, taskContentForThumb - taskViewportForThumb);
+  const taskThumbTop = hasTaskOverflow
+    ? Math.min(
+      taskViewportForThumb - taskThumbHeight,
+      (Math.max(0, taskScrollY) / taskMaxScrollY) * (taskViewportForThumb - taskThumbHeight),
+    )
+    : 0;
+  const taskPlaceholderCount = hasTaskOverflow
+    ? 0
+    : Math.max(0, TASK_VISIBLE_ROWS - selectedTasks.length);
 
   const eventSearchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
-    return events.filter(e => [
+    const matches = events.filter(e => [
       e.title,
       e.startDate,
       e.startTime,
@@ -51,7 +97,8 @@ export function ScheduleScreen({ navigation }: Props) {
       e.detail,
       e.category,
     ].filter(Boolean).some(value => String(value).toLowerCase().includes(q)));
-  }, [events, searchQuery]);
+    return sortEventsForSearch(matches, today);
+  }, [events, searchQuery, todayStr]);
 
   const meetingSearchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -74,6 +121,17 @@ export function ScheduleScreen({ navigation }: Props) {
     refreshEvents(year, month);
   }, [year, month, refreshEvents]);
 
+  useEffect(() => {
+    taskScrollRef.current?.scrollTo({ y: 0, animated: false });
+    setTaskScrollY(0);
+    setTaskViewportHeight(TASK_LIST_MAX_HEIGHT);
+    setTaskContentHeight(Math.max(TASK_LIST_MAX_HEIGHT, selectedTasks.length * TASK_ROW_HEIGHT));
+  }, [selectedDateStr, selectedTasks.length]);
+
+  const handleTaskScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setTaskScrollY(event.nativeEvent.contentOffset.y);
+  };
+
   const fmtTime = (e: CalEvent) => {
     if (e.startTime && e.endTime) return `${e.startTime} – ${e.endTime}`;
     if (e.startTime) return e.startTime;
@@ -81,6 +139,31 @@ export function ScheduleScreen({ navigation }: Props) {
       return `${e.startDate.slice(5).replace('-','月')}日 – ${e.endDate.slice(5).replace('-','月')}日`;
     return '全天';
   };
+
+  const renderTaskRow = (task: CalEvent, index: number) => (
+    <TouchableOpacity
+      key={task.id}
+      style={[s.taskRow, index > 0 && s.taskBorder]}
+      onPress={() => navigation.navigate('EventDetail', { eventId: task.id })}
+      activeOpacity={0.82}
+    >
+      <View style={[s.taskDot, { backgroundColor: task.color }]} />
+      <Text style={s.taskTitle} numberOfLines={1}>{task.title}</Text>
+      <Text style={s.taskTime}>{fmtTime(task)}</Text>
+    </TouchableOpacity>
+  );
+
+  const renderTaskPlaceholder = (index: number) => (
+    <View
+      key={`task-placeholder-${index}`}
+      pointerEvents="none"
+      style={[
+        s.taskRow,
+        (selectedTasks.length > 0 || index > 0) && s.taskBorder,
+        s.taskPlaceholder,
+      ]}
+    />
+  );
 
   return (
     <ScreenContainer edges={['top']}>
@@ -165,28 +248,53 @@ export function ScheduleScreen({ navigation }: Props) {
           {/* 今日待办 */}
           <View style={s.todayCard}>
             <View style={s.todayHeader}>
-              <Text style={s.todayTitle}>今日待办</Text>
-              <Text style={s.todayDate}>{todayLabel}</Text>
+              <View style={s.todayTitleWrap}>
+                <Text style={s.todayTitle}>{isTodaySelected ? '今日待办' : '当日待办'}</Text>
+                {selectedRelativeLabel ? <Text style={s.relativePill}>{selectedRelativeLabel}</Text> : null}
+              </View>
+              <Text style={s.todayDate}>{selectedDateLabel}</Text>
             </View>
-            {todayEvents.length === 0
-              ? <Text style={s.noTask}>今日暂无待办</Text>
-              : todayEvents.map((t, i) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[s.taskRow, i > 0 && s.taskBorder]}
-                  onPress={() => navigation.navigate('EventDetail', { eventId: t.id })}
+            <View style={s.taskListShell}>
+              <View style={[s.taskScrollTrack, !hasTaskOverflow && s.taskScrollTrackHidden]} pointerEvents="none">
+                {hasTaskOverflow ? (
+                  <View
+                    style={[
+                      s.taskScrollThumb,
+                      { height: taskThumbHeight, transform: [{ translateY: taskThumbTop }] },
+                    ]}
+                  />
+                ) : null}
+              </View>
+              {hasTaskOverflow ? (
+                <ScrollView
+                  ref={taskScrollRef}
+                  style={s.taskScroll}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                  onLayout={event => setTaskViewportHeight(event.nativeEvent.layout.height)}
+                  onContentSizeChange={(_, height) => setTaskContentHeight(height)}
+                  onScroll={handleTaskScroll}
                 >
-                  <View style={[s.taskDot, { backgroundColor: t.color }]} />
-                  <Text style={s.taskTitle}>{t.title}</Text>
-                  <Text style={s.taskTime}>{t.startTime}</Text>
-                </TouchableOpacity>
-              ))
-            }
+                  {selectedTasks.map(renderTaskRow)}
+                </ScrollView>
+              ) : (
+                <View style={s.taskStaticList}>
+                  {selectedTasks.map(renderTaskRow)}
+                  {Array.from({ length: taskPlaceholderCount }, (_, index) => renderTaskPlaceholder(index))}
+                </View>
+              )}
+              {selectedTasks.length === 0 ? (
+                <View pointerEvents="none" style={s.noTaskOverlay}>
+                  <Text style={s.noTask}>{isTodaySelected ? '今日暂无待办' : '当日暂无待办'}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           {/* Calendar */}
           <CalGrid
-            year={year} month={month} selDay={selDay}
+            year={year} month={month} selDay={selectedDay}
             onDay={setSelDay} onPrev={prev} onNext={next}
             onTitle={() => navigation.navigate('Calendar')}
             events={events}
@@ -220,13 +328,23 @@ const s = StyleSheet.create({
   /* Today card */
   todayCard: { margin: 14, marginBottom: 16, backgroundColor: C.tasksBg, borderRadius: 18, padding: 14, paddingHorizontal: 16 },
   todayHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  todayTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   todayTitle: { fontSize: 14, fontWeight: '700', color: C.text },
   todayDate: { fontSize: 12, color: C.sub },
-  taskRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  relativePill: { fontSize: 11, lineHeight: 16, color: C.purple, fontWeight: '800', backgroundColor: C.purpleLight, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
+  taskListShell: { position: 'relative', height: TASK_LIST_MAX_HEIGHT, paddingLeft: 10 },
+  taskStaticList: { height: TASK_LIST_MAX_HEIGHT },
+  taskScroll: { height: TASK_LIST_MAX_HEIGHT },
+  taskScrollTrack: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, borderRadius: 2, backgroundColor: 'rgba(123,92,184,0.14)' },
+  taskScrollTrackHidden: { opacity: 0 },
+  taskScrollThumb: { width: 3, borderRadius: 2, backgroundColor: C.purple },
+  taskRow: { height: TASK_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  taskPlaceholder: { opacity: 0 },
   taskBorder: { borderTopWidth: 1, borderTopColor: 'rgba(255,150,200,0.2)' },
   taskDot: { width: 10, height: 10, borderRadius: 5 },
   taskTitle: { flex: 1, fontSize: 14, fontWeight: '500', color: C.text },
-  noTask: { fontSize: 13, color: C.faint, paddingVertical: 8, textAlign: 'center' },
+  noTaskOverlay: { position: 'absolute', left: 10, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  noTask: { fontSize: 13, color: C.faint, textAlign: 'center' },
   taskTime: { fontSize: 13, color: C.sub, fontWeight: '500' },
   /* Search results */
   searchResultLabel: { fontSize: 13, color: C.sub, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 },

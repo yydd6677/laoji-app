@@ -11,6 +11,7 @@ import { Avatar, Tag, Waveform } from '../components/Common';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
+import { openScheduleTab } from '../navigation/tabTargets';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -27,9 +28,9 @@ function groupMeetings(meetings: ReturnType<typeof import('../store/MeetingsStor
   for (const m of meetings) {
     const prefix = m.date ? m.date.slice(0, 11) : '';
     let label: string;
-    if (prefix && todayStr.startsWith(prefix) || m.date?.startsWith(todayStr)) {
+    if ((prefix && todayStr.startsWith(prefix)) || m.date?.startsWith(todayStr)) {
       label = '今天';
-    } else if (prefix && yesterdayStr.startsWith(prefix) || m.date?.startsWith(yesterdayStr)) {
+    } else if ((prefix && yesterdayStr.startsWith(prefix)) || m.date?.startsWith(yesterdayStr)) {
       label = '昨日';
     } else {
       label = prefix || m.date || '';
@@ -50,6 +51,10 @@ export function MeetingListScreen({ navigation }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const { showDialog } = useAppDialog();
   const { profile } = useAuth();
+
+  const startMeeting = () => {
+    navigation.navigate('MeetingLive');
+  };
 
   const confirmDelete = (id: string) => {
     showDialog({
@@ -79,6 +84,7 @@ export function MeetingListScreen({ navigation }: Props) {
       message: '选择要对这条会议记录执行的操作。',
       tone: 'info',
       actions: [
+        { text: '继续录音', role: 'primary', onPress: () => navigation.navigate('MeetingLive', { meetingId: id }) },
         { text: '查看详情', role: 'primary', onPress: () => navigation.navigate('Recording', { meetingId: id }) },
         { text: '删除', role: 'destructive', onPress: () => confirmDelete(id) },
         { text: '取消', role: 'cancel' },
@@ -103,9 +109,15 @@ export function MeetingListScreen({ navigation }: Props) {
     <ScreenContainer edges={['top']}>
       <View style={s.header}>
         <Text style={s.title}>会议记录</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
-          <Avatar size={36} profile={profile} />
-        </TouchableOpacity>
+        <View style={s.headerActions}>
+          <TouchableOpacity style={s.startBtn} onPress={startMeeting} activeOpacity={0.84}>
+            <Ionicons name="mic-outline" size={16} color="#fff" />
+            <Text style={s.startText}>开始</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+            <Avatar size={36} profile={profile} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={s.searchBar}>
@@ -138,7 +150,10 @@ export function MeetingListScreen({ navigation }: Props) {
         {!loading && !error && grouped.length === 0 ? (
           <View style={s.stateBox}>
             <Text style={s.stateTitle}>暂无会议记录</Text>
-            <Text style={s.stateText}>这里会展示外部会议服务生成的会议、转写和总结。</Text>
+            <Text style={s.stateText}>点击右上角或底部麦克风开始会议，转写和总结会保存在这里。</Text>
+            <TouchableOpacity style={s.retryBtn} onPress={startMeeting}>
+              <Text style={s.retryText}>开始会议</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
         {grouped.map(group => (
@@ -178,8 +193,9 @@ export function MeetingListScreen({ navigation }: Props) {
 
       <BottomTabBar
         active="meetings"
-        onSchedule={() => (navigation as any).navigate('Schedule')}
+        onSchedule={() => openScheduleTab(navigation)}
         onMeetings={() => {}}
+        onMic={startMeeting}
       />
     </ScreenContainer>
   );
@@ -189,6 +205,9 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.appBg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
   title: { fontSize: 22, fontWeight: '800', color: C.text },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  startBtn: { height: 34, borderRadius: 17, backgroundColor: C.purple, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  startText: { fontSize: 13, fontWeight: '800', color: '#fff' },
   searchBar: { marginHorizontal: 14, marginBottom: 12, height: 38, backgroundColor: C.inputBg, borderRadius: 19, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 8 },
   searchPlaceholder: { fontSize: 13, color: C.faint },
   searchInput: { flex: 1, fontSize: 13, color: C.text, padding: 0 },

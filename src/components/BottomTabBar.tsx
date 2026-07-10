@@ -12,8 +12,9 @@ const { width: W } = Dimensions.get('window');
 const BAR_H  = 76;   // flat section height
 const CR     = 24;   // top corner radius
 const NR     = 46;   // notch radius — wider notch makes the concave shape visible
-const MIC_D  = 58;   // mic button diameter
+const MIC_D  = 70;   // mic button diameter
 const MIC_R  = MIC_D / 2;
+const MIC_ICON = 29;
 const cx     = W / 2;
 
 /**
@@ -108,7 +109,7 @@ export function BottomTabBar({ active, onSchedule, onMeetings, onMic }: Props) {
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
             style={s.mic}
           >
-            <Ionicons name="mic" size={24} color="#fff" />
+            <Ionicons name="mic" size={MIC_ICON} color="#fff" />
           </LinearGradient>
         </TouchableOpacity>
       </View>

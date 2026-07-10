@@ -2,10 +2,10 @@ declare const process:
   | { env?: Record<string, string | undefined> }
   | undefined;
 
-const INTERNAL_LAOJI_API_BASE = 'http://183.36.243.124:8035';
-const INTERNAL_MEETING_API_BASE = 'http://183.36.243.124:8020';
+const INTERNAL_LAOJI_API_BASE = 'http://183.36.243.124:18035';
+const INTERNAL_MEETING_API_BASE = 'http://183.36.243.124:18020';
 const INTERNAL_REALTIME_ASR_HOST = '183.36.243.124';
-const INTERNAL_REALTIME_ASR_PORT = 8020;
+const INTERNAL_REALTIME_ASR_PORT = 18020;
 
 export interface ApiConfig {
   laojiApiBase: string;

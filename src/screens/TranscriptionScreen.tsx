@@ -8,14 +8,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
-import { RootStackParamList } from '../types';
+import { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { useMeetings } from '../store/MeetingsStore';
-import { fetchMeetingTranscript, fetchMeetingSummary } from '../services/api';
+import { fetchMeetingTranscript, fetchMeetingSummary, fetchMeetingSummaryTask, generateMeetingSummary } from '../services/api';
 import { BackHeader, Waveform } from '../components/Common';
 import { BottomTabBar } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { fallbackMeetingBars, formatDuration, transcriptDurationSec, transcriptToBars } from '../utils/meetingMedia';
 import { useAppDialog } from '../components/AppDialog';
+import { useAuth } from '../store/AuthStore';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -47,12 +48,29 @@ function safeFileName(name: string): string {
   return name.trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_').slice(0, 40) || 'laoji_transcript';
 }
 
+function summaryToText(summary: MeetingSummary | null): string {
+  if (!summary) return '';
+  return (summary.markdown || summary.full_text || summary.overview || '').trim();
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function TranscriptionScreen({ navigation, route }: Props) {
-  const { meetings, updateMeetingTitle } = useMeetings();
+  const {
+    meetings,
+    updateMeetingTitle,
+    getCachedTranscript,
+    saveCachedTranscript,
+    getCachedSummary,
+    saveCachedSummary,
+  } = useMeetings();
+  const { accessToken, isGuest } = useAuth();
   const { showDialog } = useAppDialog();
   const m = meetings.find(x => x.id === route.params.meetingId);
   const [titleEdit, setTitleEdit] = useState(m?.title ?? '');
-  const [transcriptItems, setTranscriptItems] = useState<any[]>([]);
+  const [transcriptItems, setTranscriptItems] = useState<TranscriptLine[]>([]);
   const [summary, setSummary] = useState('');
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -64,22 +82,50 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!m) return;
-    setLoadingTranscript(true);
-    fetchMeetingTranscript(m.id)
-      .then(items => setTranscriptItems(items))
-      .catch(() => {})
-      .finally(() => setLoadingTranscript(false));
+    let alive = true;
+    const cachedTranscript = getCachedTranscript(m.id);
+    const cachedSummary = summaryToText(getCachedSummary(m.id));
+    setTranscriptItems(cachedTranscript);
+    setSummary(cachedSummary);
 
-    if (m.hasSummary) {
-      setLoadingSummary(true);
-      fetchMeetingSummary(m.id)
-        .then(s => setSummary(s))
-        .catch(() => {})
-        .finally(() => setLoadingSummary(false));
+    setLoadingTranscript(true);
+    if (isGuest || !accessToken) {
+      setLoadingTranscript(false);
     } else {
-      setSummary('');
+      fetchMeetingTranscript(m.id, accessToken)
+        .then(items => {
+          if (!alive) return;
+          if (items.length > 0) {
+            setTranscriptItems(items);
+            void saveCachedTranscript(m.id, items);
+          }
+        })
+        .catch(() => {})
+        .finally(() => { if (alive) setLoadingTranscript(false); });
     }
-  }, [m?.id]);
+
+    if (m.hasSummary && !isGuest && accessToken) {
+      setLoadingSummary(true);
+      fetchMeetingSummary(m.id, accessToken)
+        .then(text => {
+          if (!alive) return;
+          setSummary(text || cachedSummary);
+          if (text) void saveCachedSummary(m.id, { meeting_id: m.id, full_text: text, generated_at: new Date().toISOString() });
+        })
+        .catch(() => {})
+        .finally(() => { if (alive) setLoadingSummary(false); });
+    }
+    return () => { alive = false; };
+  }, [
+    accessToken,
+    getCachedSummary,
+    getCachedTranscript,
+    isGuest,
+    m?.hasSummary,
+    m?.id,
+    saveCachedSummary,
+    saveCachedTranscript,
+  ]);
 
   if (!m) {
     return (
@@ -89,7 +135,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           <Text style={s.emptyTitle}>会议记录不存在</Text>
           <Text style={s.emptyText}>请返回会议列表后重新打开。</Text>
         </View>
-        <BottomTabBar active="meetings" onSchedule={() => openScheduleTab(navigation)} onMeetings={() => openMeetingsTab(navigation)} />
+        <BottomTabBar
+          active="meetings"
+          onSchedule={() => openScheduleTab(navigation)}
+          onMeetings={() => openMeetingsTab(navigation)}
+          onMic={() => navigation.navigate('MeetingLive')}
+        />
       </ScreenContainer>
     );
   }
@@ -114,8 +165,46 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   };
 
+  const handleGenerateSummary = async () => {
+    if (isGuest || !accessToken) {
+      showDialog({ title: '无法生成总结', message: '游客模式的会议只保存在本机，登录后可使用云端会议总结。', tone: 'info' });
+      return;
+    }
+    if (transcriptItems.length === 0) {
+      showDialog({ title: '暂无转写', message: '需要先有会议转写内容，才能生成总结。', tone: 'info' });
+      return;
+    }
+    setLoadingSummary(true);
+    try {
+      const task = await generateMeetingSummary(m.id, accessToken);
+      if (task.task_id) {
+        for (let index = 0; index < 8; index += 1) {
+          await delay(1200);
+          const status = await fetchMeetingSummaryTask(m.id, task.task_id, accessToken);
+          if (status.status === 'SUCCESS') break;
+          if (status.status === 'FAILURE') throw new Error('summary task failed');
+        }
+      }
+      const text = await fetchMeetingSummary(m.id, accessToken);
+      setSummary(text || '暂无总结内容');
+      if (text) {
+        await saveCachedSummary(m.id, { meeting_id: m.id, full_text: text, generated_at: new Date().toISOString() });
+      }
+    } catch {
+      showDialog({ title: '生成失败', message: '会议总结生成失败，请稍后重试。', tone: 'error' });
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
+
   const handleExportTxt = async () => {
-    const txtContent = [m.title, m.date + ' ' + m.time, transcriptionText].join('\n\n');
+    const txtContent = [
+      m.title,
+      m.date + ' ' + m.time,
+      '转写内容：',
+      transcriptionText,
+      summary ? `会议总结：\n${summary}` : '',
+    ].filter(Boolean).join('\n\n');
     try {
       const fileUri = `${FileSystem.cacheDirectory}${safeFileName(m.title)}_转写.txt`;
       await FileSystem.writeAsStringAsync(fileUri, txtContent, { encoding: FileSystem.EncodingType.UTF8 });
@@ -227,6 +316,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           ) : (
             <Text style={s.emptyText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
           )}
+          {!loadingSummary && !summary ? (
+            <TouchableOpacity style={s.generateBtn} onPress={handleGenerateSummary} activeOpacity={0.84}>
+              <Ionicons name="sparkles-outline" size={14} color="#fff" />
+              <Text style={s.generateText}>生成总结</Text>
+            </TouchableOpacity>
+          ) : null}
         </SCard>
 
         <View style={s.exportRow}>
@@ -251,7 +346,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         </View>
         <View style={{ height: 16 }} />
       </ScrollView>
-      <BottomTabBar active="meetings" onSchedule={() => openScheduleTab(navigation)} onMeetings={() => openMeetingsTab(navigation)} />
+      <BottomTabBar
+        active="meetings"
+        onSchedule={() => openScheduleTab(navigation)}
+        onMeetings={() => openMeetingsTab(navigation)}
+        onMic={() => navigation.navigate('MeetingLive')}
+      />
     </ScreenContainer>
   );
 }
@@ -283,6 +383,8 @@ const s = StyleSheet.create({
   transcript: { fontSize: 13, color: '#4A4666', lineHeight: 26 },
   summaryText: { fontSize: 13, color: '#4A4666', lineHeight: 26 },
   inlineLoading: { marginVertical: 10 },
+  generateBtn: { marginTop: 12, alignSelf: 'flex-start', height: 34, borderRadius: 17, paddingHorizontal: 14, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  generateText: { fontSize: 12, color: '#fff', fontWeight: '800' },
   exportRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   exportBtn: { flex: 1, height: 38, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   exportText: { fontSize: 11, fontWeight: '600' },

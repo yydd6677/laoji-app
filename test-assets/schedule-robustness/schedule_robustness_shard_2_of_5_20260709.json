@@ -1,0 +1,2811 @@
+{
+  "source": "/home/yydd/LaoJi/mobile/test-assets/schedule-robustness/schedule_robustness_samples_1000_20260709.json",
+  "shard": 2,
+  "samples": [
+    {
+      "id": "RB0201",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0202",
+      "group": "complex_range",
+      "text": "旅行从八月三号开始到八月五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0203",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0204",
+      "group": "complex_range",
+      "text": "旅行安排在八月三号到八月五号，大概是。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0205",
+      "group": "complex_range",
+      "text": "从下周一到下周三交预算报告，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0206",
+      "group": "complex_range",
+      "text": "参加培训从本周五开始到下周一结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0207",
+      "group": "complex_range",
+      "text": "大扫除安排在七月二十号到七月二十二号，嗯。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0208",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，帮我记一下。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0209",
+      "group": "complex_range",
+      "text": "旅行从八月三号开始到八月五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0210",
+      "group": "complex_range",
+      "text": "交预算报告从下周一开始到下周三结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0211",
+      "group": "complex_range",
+      "text": "从本周五到下周一参加培训，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0212",
+      "group": "complex_range",
+      "text": "整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0213",
+      "group": "complex_range",
+      "text": "出差安排在七月十五号到七月十八号，记个日程。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0214",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，帮我记一下。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0215",
+      "group": "complex_range",
+      "text": "交预算报告从下周一开始到下周三结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0216",
+      "group": "complex_range",
+      "text": "复习考试从明天开始到后天结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0217",
+      "group": "complex_range",
+      "text": "参加培训安排在本周五到下周一，就这件事。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0218",
+      "group": "complex_range",
+      "text": "七月十九号开始，七月二十五号前完成整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0219",
+      "group": "complex_range",
+      "text": "从八月三号到八月五号旅行，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0220",
+      "group": "complex_range",
+      "text": "参加培训从本周五开始到下周一结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0221",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，我想想啊。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0222",
+      "group": "complex_range",
+      "text": "从七月十九号到七月二十五号整理项目材料，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0223",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0224",
+      "group": "complex_range",
+      "text": "整理项目材料安排在七月十九号到七月二十五号，大概是。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0225",
+      "group": "complex_range",
+      "text": "旅行安排在八月三号到八月五号，我再说一遍。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0226",
+      "group": "complex_range",
+      "text": "从七月十五号到七月十八号出差，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0227",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，我再说一遍。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0228",
+      "group": "complex_range",
+      "text": "七月十九号开始，七月二十五号前完成整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0229",
+      "group": "complex_range",
+      "text": "从下周一到下周三交预算报告，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0230",
+      "group": "complex_range",
+      "text": "明天开始，后天前完成复习考试。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0231",
+      "group": "complex_range",
+      "text": "明天开始，后天前完成复习考试。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0232",
+      "group": "complex_range",
+      "text": "从明天到后天复习考试，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0233",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，老记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0234",
+      "group": "complex_range",
+      "text": "交预算报告从下周一开始到下周三结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0235",
+      "group": "complex_range",
+      "text": "旅行从八月三号开始到八月五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0236",
+      "group": "complex_range",
+      "text": "复习考试从明天开始到后天结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0237",
+      "group": "complex_range",
+      "text": "交预算报告安排在下周一到下周三，就这件事。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0238",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0239",
+      "group": "complex_range",
+      "text": "从七月二十号到七月二十二号大扫除，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0240",
+      "group": "complex_range",
+      "text": "从七月十五号到七月十八号出差，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0241",
+      "group": "complex_range",
+      "text": "从本周五到下周一参加培训，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0242",
+      "group": "complex_range",
+      "text": "七月二十号开始，七月二十二号前完成大扫除。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0243",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0244",
+      "group": "complex_range",
+      "text": "从七月二十号到七月二十二号大扫除，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0245",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0246",
+      "group": "complex_range",
+      "text": "出差安排在七月十五号到七月十八号，顺手记一下。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0247",
+      "group": "complex_range",
+      "text": "出差安排在七月十五号到七月十八号，嗯。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0248",
+      "group": "complex_range",
+      "text": "从七月十五号到七月十八号出差，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0249",
+      "group": "complex_range",
+      "text": "出差安排在七月十五号到七月十八号，就这件事。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0250",
+      "group": "complex_range",
+      "text": "参加培训从本周五开始到下周一结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0251",
+      "group": "complex_range",
+      "text": "参加培训从本周五开始到下周一结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0252",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0253",
+      "group": "complex_range",
+      "text": "出差从七月十五号开始到七月十八号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0254",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0255",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0256",
+      "group": "complex_range",
+      "text": "出差安排在七月十五号到七月十八号，老记。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0257",
+      "group": "complex_range",
+      "text": "七月十九号开始，七月二十五号前完成整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0258",
+      "group": "complex_range",
+      "text": "旅行安排在八月三号到八月五号，那个。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0259",
+      "group": "complex_range",
+      "text": "整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0260",
+      "group": "complex_range",
+      "text": "从七月二十号到七月二十二号大扫除，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0261",
+      "group": "complex_range",
+      "text": "七月十五号开始，七月十八号前完成出差。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0262",
+      "group": "complex_range",
+      "text": "大扫除从七月二十号开始到七月二十二号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0263",
+      "group": "complex_range",
+      "text": "复习考试从明天开始到后天结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0264",
+      "group": "complex_range",
+      "text": "从七月二十号到七月二十二号大扫除，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0265",
+      "group": "complex_range",
+      "text": "交预算报告从下周一开始到下周三结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0266",
+      "group": "complex_range",
+      "text": "参加培训安排在本周五到下周一，先这样。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0267",
+      "group": "complex_range",
+      "text": "大扫除安排在七月二十号到七月二十二号，我想想啊。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0268",
+      "group": "complex_range",
+      "text": "从下周一到下周三交预算报告，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0269",
+      "group": "complex_range",
+      "text": "从本周五到下周一参加培训，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0270",
+      "group": "complex_range",
+      "text": "七月十九号开始，七月二十五号前完成整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0271",
+      "group": "complex_range",
+      "text": "从七月二十号到七月二十二号大扫除，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0272",
+      "group": "complex_range",
+      "text": "整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0273",
+      "group": "complex_range",
+      "text": "七月十五号开始，七月十八号前完成出差。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "end_date": "2026-07-18",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0274",
+      "group": "complex_range",
+      "text": "八月三号开始，八月五号前完成旅行。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0275",
+      "group": "complex_range",
+      "text": "七月十九号开始，七月二十五号前完成整理项目材料。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0276",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0277",
+      "group": "complex_range",
+      "text": "整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0278",
+      "group": "complex_range",
+      "text": "交预算报告安排在下周一到下周三，对了。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0279",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0280",
+      "group": "complex_range",
+      "text": "明天开始，后天前完成复习考试。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0281",
+      "group": "complex_range",
+      "text": "从八月三号到八月五号旅行，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-08-03",
+        "end_date": "2026-08-05",
+        "category": "出行"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0282",
+      "group": "complex_range",
+      "text": "七月二十号开始，七月二十二号前完成大扫除。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0283",
+      "group": "complex_range",
+      "text": "参加培训安排在本周五到下周一，对了。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0284",
+      "group": "complex_range",
+      "text": "复习考试从明天开始到后天结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0285",
+      "group": "complex_range",
+      "text": "大扫除安排在七月二十号到七月二十二号，提醒一下。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "end_date": "2026-07-22",
+        "category": "生活"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0286",
+      "group": "complex_range",
+      "text": "复习考试安排在明天到后天，老记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-11",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0287",
+      "group": "complex_range",
+      "text": "整理项目材料从七月十九号开始到七月二十五号结束，整个期间都算。",
+      "expected": {
+        "start_date": "2026-07-19",
+        "end_date": "2026-07-25",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0288",
+      "group": "complex_range",
+      "text": "从下周一到下周三交预算报告，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0289",
+      "group": "complex_range",
+      "text": "本周五开始，下周一前完成参加培训。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "end_date": "2026-07-13",
+        "category": "学习"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0290",
+      "group": "complex_range",
+      "text": "从下周一到下周三交预算报告，中间不要拆成一天。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "end_date": "2026-07-15",
+        "category": "工作"
+      },
+      "tags": [
+        "跨日期",
+        "范围"
+      ]
+    },
+    {
+      "id": "RB0291",
+      "group": "complex_range",
+      "text": "下周二晚上七点到九点阅读论文，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0292",
+      "group": "complex_range",
+      "text": "明天上午十点到十一点半跑步，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0293",
+      "group": "complex_range",
+      "text": "下周一凌晨一点到两点背单词，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0294",
+      "group": "complex_range",
+      "text": "后天上午十点到十一点半复习考试，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0295",
+      "group": "complex_range",
+      "text": "八月一号下午两点到四点健身核心训练，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-08-01",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0296",
+      "group": "complex_range",
+      "text": "明天凌晨一点到两点交预算报告，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0297",
+      "group": "complex_range",
+      "text": "下周二上午十点到十一点半健身核心训练，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0298",
+      "group": "complex_range",
+      "text": "下周一上午九点到十一点背单词，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0299",
+      "group": "complex_range",
+      "text": "下周一凌晨一点到两点开项目会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0300",
+      "group": "complex_range",
+      "text": "周日上午十点到十一点半和朋友吃饭，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0301",
+      "group": "complex_range",
+      "text": "周五上午十点到十一点半和朋友吃饭，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0302",
+      "group": "complex_range",
+      "text": "周五上午九点到十一点去医院复诊，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0303",
+      "group": "complex_range",
+      "text": "明天凌晨一点到两点吃药，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0304",
+      "group": "complex_range",
+      "text": "周日上午九点到十一点复习考试，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0305",
+      "group": "complex_range",
+      "text": "下周一上午九点到十一点参加培训，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0306",
+      "group": "complex_range",
+      "text": "七月二十号上午九点到十一点生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0307",
+      "group": "complex_range",
+      "text": "后天凌晨一点到两点吃药，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0308",
+      "group": "complex_range",
+      "text": "下周二上午九点到十一点检查服务器，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0309",
+      "group": "complex_range",
+      "text": "后天晚上七点到九点体检，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0310",
+      "group": "complex_range",
+      "text": "七月二十号上午九点到十一点阅读论文，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0311",
+      "group": "complex_range",
+      "text": "后天晚上七点到九点交预算报告，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0312",
+      "group": "complex_range",
+      "text": "周日下午两点到四点生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0313",
+      "group": "complex_range",
+      "text": "下周一下午两点到四点开周会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0314",
+      "group": "complex_range",
+      "text": "明天晚上七点到九点吃药，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0315",
+      "group": "complex_range",
+      "text": "下周一凌晨一点到两点生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0316",
+      "group": "complex_range",
+      "text": "七月二十号下午两点到四点去医院复诊，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0317",
+      "group": "complex_range",
+      "text": "八月一号上午九点到十一点交预算报告，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-08-01",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0318",
+      "group": "complex_range",
+      "text": "后天下午两点到四点整理项目材料，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0319",
+      "group": "complex_range",
+      "text": "后天上午十点到十一点半去医院复诊，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0320",
+      "group": "complex_range",
+      "text": "明天下午两点到四点背单词，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0321",
+      "group": "complex_range",
+      "text": "下周二晚上七点到九点健身核心训练，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-14",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0322",
+      "group": "complex_range",
+      "text": "后天下午两点到四点交预算报告，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0323",
+      "group": "complex_range",
+      "text": "下周一上午九点到十一点上课，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-13",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0324",
+      "group": "complex_range",
+      "text": "八月一号晚上七点到九点生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-08-01",
+        "start_time": "19:00",
+        "end_time": "21:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0325",
+      "group": "complex_range",
+      "text": "周日下午两点到四点体检，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0326",
+      "group": "complex_range",
+      "text": "八月一号凌晨一点到两点复习考试，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-08-01",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "学习"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0327",
+      "group": "complex_range",
+      "text": "周日上午十点到十一点半和朋友吃饭，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0328",
+      "group": "complex_range",
+      "text": "明天凌晨一点到两点交预算报告，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-10",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "工作"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0329",
+      "group": "complex_range",
+      "text": "周日上午十点到十一点半生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0330",
+      "group": "complex_range",
+      "text": "周日上午十点到十一点半跑步，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0331",
+      "group": "complex_range",
+      "text": "七月二十号上午十点到十一点半跑步，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "10:00",
+        "end_time": "11:30",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0332",
+      "group": "complex_range",
+      "text": "后天上午九点到十一点朋友聚餐，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-11",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0333",
+      "group": "complex_range",
+      "text": "七月二十号下午两点到四点体检，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-20",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "category": "健康"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0334",
+      "group": "complex_range",
+      "text": "八月一号凌晨一点到两点和朋友吃饭，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-08-01",
+        "start_time": "01:00",
+        "end_time": "02:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0335",
+      "group": "complex_range",
+      "text": "周日上午九点到十一点生日聚会，结束时间也要记。",
+      "expected": {
+        "start_date": "2026-07-12",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "category": "社交"
+      },
+      "tags": [
+        "时间范围"
+      ]
+    },
+    {
+      "id": "RB0336",
+      "group": "complex_range",
+      "text": "下个月月底前把检查服务器处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0337",
+      "group": "complex_range",
+      "text": "月底前把还信用卡处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0338",
+      "group": "complex_range",
+      "text": "下个月月底前把缴费还款处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0339",
+      "group": "complex_range",
+      "text": "下个月月底前把整理项目材料处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0340",
+      "group": "complex_range",
+      "text": "七月二十五号前把睡觉处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-25",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0341",
+      "group": "complex_range",
+      "text": "月底前把开项目会处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0342",
+      "group": "complex_range",
+      "text": "下周三前把阅读论文处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "学习"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0343",
+      "group": "complex_range",
+      "text": "月底前把买菜处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0344",
+      "group": "complex_range",
+      "text": "月底前把开周会处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0345",
+      "group": "complex_range",
+      "text": "月底前把大扫除处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0346",
+      "group": "complex_range",
+      "text": "月底前把收快递处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0347",
+      "group": "complex_range",
+      "text": "月底前把交预算报告处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0348",
+      "group": "complex_range",
+      "text": "七月二十五号前把整理账单处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-25",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0349",
+      "group": "complex_range",
+      "text": "下个月月底前把复习考试处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "学习"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0350",
+      "group": "complex_range",
+      "text": "下个月月底前把还信用卡处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0351",
+      "group": "complex_range",
+      "text": "月底前把搬家处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0352",
+      "group": "complex_range",
+      "text": "月底前把买菜处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0353",
+      "group": "complex_range",
+      "text": "下周三前把交预算报告处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0354",
+      "group": "complex_range",
+      "text": "月底前把还房贷处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0355",
+      "group": "complex_range",
+      "text": "下个月月底前把缴费还款处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0356",
+      "group": "complex_range",
+      "text": "下周三前把还房贷处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0357",
+      "group": "complex_range",
+      "text": "月底前把还信用卡处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0358",
+      "group": "complex_range",
+      "text": "下周三前把缴费还款处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0359",
+      "group": "complex_range",
+      "text": "下个月月底前把买菜处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0360",
+      "group": "complex_range",
+      "text": "月底前把阅读论文处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "学习"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0361",
+      "group": "complex_range",
+      "text": "七月二十五号前把搬家处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-25",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0362",
+      "group": "complex_range",
+      "text": "下周三前把报销发票处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0363",
+      "group": "complex_range",
+      "text": "下周三前把开周会处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-15",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0364",
+      "group": "complex_range",
+      "text": "下个月月底前把交预算报告处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "工作"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0365",
+      "group": "complex_range",
+      "text": "七月二十五号前把收快递处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-25",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0366",
+      "group": "complex_range",
+      "text": "下个月月底前把缴费还款处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-08-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0367",
+      "group": "complex_range",
+      "text": "月底前把大扫除处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0368",
+      "group": "complex_range",
+      "text": "七月二十五号前把还房贷处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-25",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0369",
+      "group": "complex_range",
+      "text": "月底前把还房贷处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "财务"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0370",
+      "group": "complex_range",
+      "text": "月底前把喝水处理完，具体几点没有，按全天。",
+      "expected": {
+        "start_date": "2026-07-31",
+        "start_time": null,
+        "is_all_day": true,
+        "category": "生活"
+      },
+      "tags": [
+        "截止",
+        "全天"
+      ]
+    },
+    {
+      "id": "RB0371",
+      "group": "complex_range",
+      "text": "每天晚上七点搬家，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "19:00",
+        "category": "生活"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0372",
+      "group": "complex_range",
+      "text": "每周一晚上八点整理账单，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "20:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0373",
+      "group": "complex_range",
+      "text": "每天上午九点半吃药，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "09:30",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0374",
+      "group": "complex_range",
+      "text": "每周一上午九点还信用卡，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "09:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0375",
+      "group": "complex_range",
+      "text": "每年十二月三十一号下午三点背单词，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0376",
+      "group": "complex_range",
+      "text": "每周一晚上七点缴费还款，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "19:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0377",
+      "group": "complex_range",
+      "text": "每天下午三点体检，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0378",
+      "group": "complex_range",
+      "text": "每天上午九点喝水，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "09:00",
+        "category": "生活"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0379",
+      "group": "complex_range",
+      "text": "每周一上午十点复习考试，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0380",
+      "group": "complex_range",
+      "text": "每年十二月三十一号上午九点健身核心训练，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "09:00",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0381",
+      "group": "complex_range",
+      "text": "每月二十五号下午五点报销发票，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "17:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0382",
+      "group": "complex_range",
+      "text": "每天上午八点半买菜，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "08:30",
+        "category": "生活"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0383",
+      "group": "complex_range",
+      "text": "每天晚上八点开项目会，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "20:00",
+        "category": "工作"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0384",
+      "group": "complex_range",
+      "text": "每周一下午五点还房贷，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "17:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0385",
+      "group": "complex_range",
+      "text": "每月二十五号下午五点整理账单，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "17:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0386",
+      "group": "complex_range",
+      "text": "每年十二月三十一号晚上七点背单词，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "19:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0387",
+      "group": "complex_range",
+      "text": "每年十二月三十一号上午八点半吃药，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "08:30",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0388",
+      "group": "complex_range",
+      "text": "每天中午十二点缴费还款，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "12:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0389",
+      "group": "complex_range",
+      "text": "每周一中午十二点还房贷，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "12:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0390",
+      "group": "complex_range",
+      "text": "每月二十五号上午九点整理账单，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "09:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0391",
+      "group": "complex_range",
+      "text": "每年十二月三十一号上午十点跑步，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "10:00",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0392",
+      "group": "complex_range",
+      "text": "每月二十五号下午三点参加培训，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0393",
+      "group": "complex_range",
+      "text": "每月二十五号上午十点开项目会，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "10:00",
+        "category": "工作"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0394",
+      "group": "complex_range",
+      "text": "每周一上午八点半搬家，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "08:30",
+        "category": "生活"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0395",
+      "group": "complex_range",
+      "text": "每天下午三点跑步，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "15:00",
+        "category": "健康"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0396",
+      "group": "complex_range",
+      "text": "每周一下午三点背单词，从下周一开始也行。",
+      "expected": {
+        "event_type": "weekly",
+        "start_time": "15:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0397",
+      "group": "complex_range",
+      "text": "每年十二月三十一号上午十点上课，从七月三十一号开始也行。",
+      "expected": {
+        "event_type": "yearly",
+        "start_time": "10:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0398",
+      "group": "complex_range",
+      "text": "每月二十五号中午十二点报销发票，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "12:00",
+        "category": "财务"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0399",
+      "group": "complex_range",
+      "text": "每月二十五号上午九点上课，从七月二十五号开始也行。",
+      "expected": {
+        "event_type": "monthly",
+        "start_time": "09:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    },
+    {
+      "id": "RB0400",
+      "group": "complex_range",
+      "text": "每天晚上八点上课，从今天开始也行。",
+      "expected": {
+        "event_type": "daily",
+        "start_time": "20:00",
+        "category": "学习"
+      },
+      "tags": [
+        "重复事件"
+      ]
+    }
+  ]
+}

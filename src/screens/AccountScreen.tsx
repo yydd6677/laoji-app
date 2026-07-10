@@ -12,7 +12,6 @@ import { BottomTabBar } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
-import { AVATAR_PRESETS, profileInitial } from '../services/profile';
 import { changePassword } from '../services/auth';
 import { readableErrorMessage } from '../services/errors';
 import {
@@ -33,8 +32,6 @@ export function AccountScreen({ navigation }: Props) {
   const [nickname, setNickname] = useState(profile.nickname);
   const [email, setEmail] = useState(profile.email);
   const [phone, setPhone] = useState(profile.phone);
-  const [avatarInitial, setAvatarInitial] = useState(profile.avatarInitial);
-  const [avatarColors, setAvatarColors] = useState(profile.avatarColors);
   const [saving, setSaving] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -72,8 +69,6 @@ export function AccountScreen({ navigation }: Props) {
     setNickname(profile.nickname);
     setEmail(profile.email);
     setPhone(profile.phone);
-    setAvatarInitial(profile.avatarInitial);
-    setAvatarColors(profile.avatarColors);
   }, [profile]);
 
   useEffect(() => {
@@ -110,8 +105,8 @@ export function AccountScreen({ navigation }: Props) {
         nickname: nextNickname,
         email: nextEmail || profile.email,
         phone: nextPhone || profile.phone,
-        avatarInitial: avatarInitial.trim().slice(0, 1) || profileInitial(nextNickname),
-        avatarColors,
+        avatarInitial: '',
+        avatarInitialManual: false,
       });
       showDialog({ title: '保存成功', message: isGuest ? '个人信息已保存在本机' : '个人信息已同步到云端', tone: 'success' });
     } catch (err) {
@@ -154,7 +149,7 @@ export function AccountScreen({ navigation }: Props) {
     setAvatarBusy(true);
     try {
       await deleteAvatar();
-      showDialog({ title: '头像已移除', message: '已恢复为文字头像。', tone: 'success' });
+      showDialog({ title: '头像已移除', message: '已恢复为默认头像。', tone: 'success' });
     } catch (err) {
       showDialog({ title: '头像移除失败', message: readableErrorMessage(err, '请检查网络后重试。'), tone: 'error' });
     } finally {
@@ -243,19 +238,10 @@ export function AccountScreen({ navigation }: Props) {
           <Text style={s.fieldLabel}>头像</Text>
           <View style={s.avatarRight}>
             <TouchableOpacity onPress={handlePickAvatar} disabled={avatarBusy} activeOpacity={0.82}>
-              <Avatar size={58} profile={{ ...profile, avatarInitial, avatarColors }} />
+              <Avatar size={58} profile={profile} />
               {avatarBusy && <View style={s.avatarBusy}><ActivityIndicator size="small" color="#fff" /></View>}
             </TouchableOpacity>
             <View style={s.avatarEditor}>
-              <Text style={s.avatarHint}>头像文字</Text>
-              <TextInput
-                style={s.avatarInput}
-                value={avatarInitial}
-                onChangeText={value => setAvatarInitial(value.slice(0, 1))}
-                placeholder={profileInitial(nickname)}
-                placeholderTextColor={C.faint}
-                maxLength={1}
-              />
               <TouchableOpacity onPress={handlePickAvatar} disabled={avatarBusy}>
                 <Text style={s.avatarAction}>选择图片</Text>
               </TouchableOpacity>
@@ -265,30 +251,6 @@ export function AccountScreen({ navigation }: Props) {
                 </TouchableOpacity>
               ) : null}
             </View>
-          </View>
-        </View>
-
-        <View style={s.avatarPaletteCard}>
-          <Text style={s.avatarPaletteTitle}>头像颜色</Text>
-          <View style={s.paletteRow}>
-            {AVATAR_PRESETS.map(colors => {
-              const selected = colors[0] === avatarColors[0] && colors[1] === avatarColors[1];
-              return (
-                <TouchableOpacity
-                  key={colors.join('-')}
-                  style={[s.paletteItem, selected && s.paletteSelected]}
-                  onPress={() => setAvatarColors(colors)}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient
-                    colors={colors}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={s.paletteDot}
-                  />
-                </TouchableOpacity>
-              );
-            })}
           </View>
         </View>
 
@@ -500,18 +462,10 @@ const s = StyleSheet.create({
   saveLink: { color: C.purple, fontSize: 15, fontWeight: '700' },
   avatarCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
   avatarRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatarHint: { fontSize: 13, color: C.sub },
   avatarEditor: { alignItems: 'flex-end', gap: 6 },
   avatarBusy: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 29, backgroundColor: 'rgba(28,27,51,0.28)', alignItems: 'center', justifyContent: 'center' },
-  avatarInput: { minWidth: 44, height: 36, borderRadius: 12, backgroundColor: C.inputBg, color: C.text, fontSize: 17, fontWeight: '800', textAlign: 'center', paddingVertical: 0 },
   avatarAction: { fontSize: 12, color: C.purple, fontWeight: '700' },
   avatarDelete: { fontSize: 12, color: C.red, fontWeight: '700' },
-  avatarPaletteCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
-  avatarPaletteTitle: { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 12 },
-  paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  paletteItem: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
-  paletteSelected: { borderColor: C.purple },
-  paletteDot: { width: 28, height: 28, borderRadius: 14 },
   fieldsCard: { backgroundColor: C.card, borderRadius: 16, overflow: 'hidden', marginBottom: 28, shadowColor: '#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
   fieldRow: { flexDirection: 'row', alignItems: 'center', padding: 14, paddingHorizontal: 16 },
   fieldBorder: { borderBottomWidth: 1, borderBottomColor: C.border },
