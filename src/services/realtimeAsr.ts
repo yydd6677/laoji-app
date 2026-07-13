@@ -1,16 +1,27 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
+import { diagnosticInfo, diagnosticWarn } from './diagnostics';
 
 declare const require: (moduleName: string) => unknown;
 
-const DEFAULT_HOST = '183.36.243.124';
 const DEFAULT_PORT = 18020;
 const DEFAULT_PROVIDER: RealtimeAsrProvider = 'funasr';
 const DEFAULT_BUFFER_SIZE = 3200;
+const VOICE_RECOGNITION_AUDIO_SOURCE = 6;
+const VOICE_COMMUNICATION_AUDIO_SOURCE = 7;
 const INITIAL_SILENCE_FRAMES = 3;
 const TARGET_PCM_PEAK = 8000;
 const MAX_AUTO_GAIN = 20;
+const SCHEDULE_MAX_AUTO_GAIN = 40;
+const SCHEDULE_NOISE_GATE_PEAK = 64;
+const SCHEDULE_NOISE_GATE_RMS = 32;
+const SCHEDULE_GATE_LOOKAHEAD_FRAMES = 3;
+const SCHEDULE_GATE_HANGOVER_FRAMES = 5;
+
+let activeAudioOwner: symbol | null = null;
 
 export type RealtimeAsrProvider = 'funasr' | 'whisper' | 'qwen';
+export type RealtimeAsrPurpose = 'meeting' | 'schedule';
 export type RealtimeAsrStatus = 'connecting' | 'connected' | 'recording' | 'stopping' | 'closed';
 
 export interface RealtimeAsrTranscript {
@@ -32,21 +43,48 @@ export interface RealtimeAsrAudioStats {
   raw: PcmStats;
   sent: PcmStats;
   gain: number;
+  gated: boolean;
+}
+
+export interface PreparedRealtimePcmFrame {
+  buffer: ArrayBuffer;
+  raw: PcmStats;
+  sent: PcmStats;
+  gain: number;
+  gated: boolean;
+}
+
+export interface RealtimePcmProcessor {
+  push: (buffer: ArrayBuffer) => PreparedRealtimePcmFrame[];
+  flush: () => PreparedRealtimePcmFrame[];
+}
+
+export interface RealtimeAsrCompletion {
+  reason: 'stopped' | 'connection-closed';
+  audioUri?: string;
 }
 
 export interface RealtimeAsrSession {
   meetingId: string;
   url: string;
+  completion: Promise<RealtimeAsrCompletion>;
   stop: () => Promise<string | undefined>;
+}
+
+export interface LocalWavRecordingSession {
+  fileName: string;
+  stop: () => Promise<string>;
 }
 
 export interface StartRealtimeAsrOptions {
   meetingId?: string;
   provider?: RealtimeAsrProvider;
+  purpose?: RealtimeAsrPurpose;
   host?: string;
   port?: number;
   secure?: boolean;
   accessToken?: string | null;
+  guestToken?: string | null;
   connectionTimeoutMs?: number;
   stopTimeoutMs?: number;
   onStatus?: (status: RealtimeAsrStatus) => void;
@@ -91,29 +129,58 @@ export function buildRealtimeWavFileName(meetingId: string): string {
   return `${safe}.wav`;
 }
 
+export async function deleteLocalWavRecording(uri: string | undefined): Promise<void> {
+  if (!uri) return;
+  const normalized = uri.startsWith('file://') || uri.startsWith('content://')
+    ? uri
+    : `file://${uri}`;
+  await FileSystem.deleteAsync(normalized, { idempotent: true });
+}
+
 export function buildRealtimeAsrUrl({
   meetingId,
   provider = DEFAULT_PROVIDER,
-  host = DEFAULT_HOST,
+  purpose = 'meeting',
+  host,
   port = DEFAULT_PORT,
   secure = false,
-  accessToken,
 }: {
   meetingId: string;
   provider?: RealtimeAsrProvider;
-  host?: string;
+  purpose?: RealtimeAsrPurpose;
+  host: string;
   port?: number;
   secure?: boolean;
-  accessToken?: string | null;
 }): string {
+  const cleanHost = host.trim();
+  if (!cleanHost) throw new Error('realtime ASR host is not configured');
   const protocol = secure ? 'wss' : 'ws';
-  const normalizedHost = host
+  const normalizedHost = cleanHost
     .replace(/^https?:\/\//, '')
     .replace(/^wss?:\/\//, '')
     .replace(/\/+$/, '');
   const hostWithPort = normalizedHost.includes(':') ? normalizedHost : `${normalizedHost}:${port}`;
-  const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
-  return `${protocol}://${hostWithPort}/ws/meeting/${encodeURIComponent(meetingId)}/${provider}${query}`;
+  const route = purpose === 'schedule'
+    ? `/ws/laoji/schedule/${encodeURIComponent(meetingId)}/${provider}`
+    : `/ws/meeting/${encodeURIComponent(meetingId)}/${provider}`;
+  return `${protocol}://${hostWithPort}${route}`;
+}
+
+export function buildRealtimeAsrHeaders({
+  accessToken,
+  guestToken,
+}: Pick<StartRealtimeAsrOptions, 'accessToken' | 'guestToken'>): Record<string, string> {
+  if (accessToken) return { Authorization: `Bearer ${accessToken}` };
+  if (guestToken) return { 'X-Guest-Session-Token': guestToken };
+  return {};
+}
+
+export function audioSourceForRealtimePurpose(
+  purpose: RealtimeAsrPurpose = 'meeting',
+): number {
+  return purpose === 'schedule'
+    ? VOICE_RECOGNITION_AUDIO_SOURCE
+    : VOICE_COMMUNICATION_AUDIO_SOURCE;
 }
 
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -132,6 +199,25 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return buffer;
 }
 
+export async function waitForRealtimeAsrReady(
+  readyPromise: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      readyPromise,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`realtime ASR stop timed out after ${timeoutMs} ms`));
+        }, Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export async function startRealtimeAsr(
   options: StartRealtimeAsrOptions = {},
 ): Promise<RealtimeAsrSession> {
@@ -141,20 +227,31 @@ export async function startRealtimeAsr(
   const url = buildRealtimeAsrUrl({
     meetingId,
     provider: options.provider ?? DEFAULT_PROVIDER,
+    purpose: options.purpose ?? 'meeting',
     host: options.host ?? apiConfig.realtimeAsrHost,
     port: options.port ?? apiConfig.realtimeAsrPort,
     secure: options.secure ?? apiConfig.realtimeAsrSecure,
-    accessToken: options.accessToken,
   });
+  const websocketHeaders = buildRealtimeAsrHeaders(options);
   const connectionTimeoutMs = options.connectionTimeoutMs ?? 8000;
   const stopTimeoutMs = options.stopTimeoutMs ?? 10000;
+  const audioOwner = Symbol(meetingId);
+  const pcmProcessor = createRealtimePcmProcessor(options.purpose ?? 'meeting');
 
-  console.info(`[LaoJi ASR] connecting ${maskRealtimeUrl(url)}`);
+  if (activeAudioOwner) {
+    throw new Error('realtime ASR microphone is already in use');
+  }
+  activeAudioOwner = audioOwner;
+
+  diagnosticInfo(`[LaoJi ASR] connecting ${maskRealtimeUrl(url)}`);
   options.onStatus?.('connecting');
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let stopped = false;
+    let audioStarted = false;
+    let stoppedAudioUri: string | undefined;
+    let audioCleanupPromise: Promise<string | undefined> | null = null;
     let frameCount = 0;
     let byteCount = 0;
     let audioSubscription: { remove?: () => void } | void;
@@ -162,8 +259,20 @@ export async function startRealtimeAsr(
     const readyPromise = new Promise<void>(readyResolve => {
       resolveReady = readyResolve;
     });
+    let completionSettled = false;
+    let resolveCompletion = (_completion: RealtimeAsrCompletion) => {};
+    const completion = new Promise<RealtimeAsrCompletion>(completionResolve => {
+      resolveCompletion = completionResolve;
+    });
 
-    const ws = new WebSocket(url);
+    let ws: WebSocket;
+    try {
+      ws = createRealtimeWebSocket(url, websocketHeaders);
+    } catch (error) {
+      activeAudioOwner = null;
+      reject(toError(error, 'realtime ASR websocket initialization failed'));
+      return;
+    }
     const timeoutId = setTimeout(() => {
       failBeforeOpen(new Error('realtime ASR connection timed out'));
       closeWebSocket(ws);
@@ -172,17 +281,21 @@ export async function startRealtimeAsr(
     const session: RealtimeAsrSession = {
       meetingId,
       url,
+      completion,
       stop: async () => {
-        if (stopped) return undefined;
+        if (stopped) {
+          return audioCleanupPromise ? await audioCleanupPromise : stoppedAudioUri;
+        }
         stopped = true;
         options.onStatus?.('stopping');
-        removeAudioListener(audioSubscription);
-        const audioUri = await stopAudioStream(audioStream);
+        const audioUri = await cleanupOwnedAudio();
+        stoppedAudioUri = audioUri;
 
         if (ws.readyState === WebSocket.OPEN) {
           try {
+            pcmProcessor.flush().forEach(sendPreparedFrame);
             ws.send(new ArrayBuffer(0));
-            await Promise.race([readyPromise, delay(stopTimeoutMs)]);
+            await waitForRealtimeAsrReady(readyPromise, stopTimeoutMs);
           } catch (error) {
             options.onError?.(toError(error, 'realtime ASR stop failed'));
           }
@@ -190,9 +303,55 @@ export async function startRealtimeAsr(
 
         closeWebSocket(ws);
         options.onStatus?.('closed');
+        settleCompletion('stopped', audioUri);
         return audioUri;
       },
     };
+
+    function settleCompletion(reason: RealtimeAsrCompletion['reason'], audioUri?: string) {
+      if (completionSettled) return;
+      completionSettled = true;
+      resolveCompletion({ reason, audioUri });
+    }
+
+    function releaseAudioOwnership() {
+      if (activeAudioOwner === audioOwner) activeAudioOwner = null;
+    }
+
+    function cleanupOwnedAudio(): Promise<string | undefined> {
+      if (audioCleanupPromise) return audioCleanupPromise;
+      removeAudioListener(audioSubscription);
+      audioCleanupPromise = (async () => {
+        try {
+          return audioStarted ? await stopAudioStream(audioStream) : undefined;
+        } finally {
+          releaseAudioOwnership();
+        }
+      })();
+      return audioCleanupPromise;
+    }
+
+    function sendPreparedFrame(prepared: PreparedRealtimePcmFrame) {
+      frameCount += 1;
+      byteCount += prepared.buffer.byteLength;
+      options.onAudioStats?.({
+        frameCount,
+        byteCount,
+        raw: prepared.raw,
+        sent: prepared.sent,
+        gain: prepared.gain,
+        gated: prepared.gated,
+      });
+      if (frameCount === 1 || frameCount % 50 === 0) {
+        diagnosticInfo(
+          `[LaoJi ASR] sent PCM frames=${frameCount} bytes=${byteCount}`
+          + ` rawPeak=${prepared.raw.peak} rawRms=${prepared.raw.rms}`
+          + ` gated=${prepared.gated} gain=${prepared.gain.toFixed(1)}`
+          + ` sentPeak=${prepared.sent.peak} sentRms=${prepared.sent.rms}`,
+        );
+      }
+      ws.send(prepared.buffer);
+    }
 
     function failBeforeOpen(error: Error) {
       if (settled) {
@@ -200,10 +359,13 @@ export async function startRealtimeAsr(
         return;
       }
       settled = true;
+      stopped = true;
       clearTimeout(timeoutId);
       removeAudioListener(audioSubscription);
-      void stopAudioStream(audioStream);
-      reject(error);
+      void cleanupOwnedAudio().then(
+        () => reject(error),
+        () => reject(error),
+      );
     }
 
     ws.onopen = () => {
@@ -220,9 +382,11 @@ export async function startRealtimeAsr(
           sampleRate: 16000,
           channels: 1,
           bitsPerSample: 16,
-          audioSource: 7,
+          audioSource: audioSourceForRealtimePurpose(options.purpose),
           enableAutomaticGainControl: true,
-          enableNoiseSuppressor: true,
+          // Nearby playback can be classified as background noise on some Android devices.
+          // Schedule capture already has a client gate and server VAD.
+          enableNoiseSuppressor: (options.purpose ?? 'meeting') !== 'schedule',
           skipInitialBuffers: 0,
           wavFile: buildRealtimeWavFileName(meetingId),
           bufferSize: DEFAULT_BUFFER_SIZE,
@@ -231,32 +395,19 @@ export async function startRealtimeAsr(
           if (stopped || ws.readyState !== WebSocket.OPEN) return;
           try {
             const pcm = base64ToArrayBuffer(base64Pcm);
-            const prepared = applyPcmAutoGain(pcm);
-            frameCount += 1;
-            byteCount += prepared.buffer.byteLength;
-            options.onAudioStats?.({
-              frameCount,
-              byteCount,
-              raw: prepared.raw,
-              sent: prepared.sent,
-              gain: prepared.gain,
-            });
-            if (frameCount === 1 || frameCount % 50 === 0) {
-              console.info(
-                `[LaoJi ASR] sent PCM frames=${frameCount} bytes=${byteCount}`
-                + ` rawPeak=${prepared.raw.peak} rawRms=${prepared.raw.rms}`
-                + ` gain=${prepared.gain.toFixed(1)} sentPeak=${prepared.sent.peak} sentRms=${prepared.sent.rms}`,
-              );
-            }
-            ws.send(prepared.buffer);
+            pcmProcessor.push(pcm).forEach(sendPreparedFrame);
           } catch (error) {
             options.onError?.(toError(error, 'send PCM frame failed'));
           }
         });
-        audioStream.start();
+        audioStarted = true;
+        await Promise.resolve(audioStream.start());
+        if (stopped || ws.readyState !== WebSocket.OPEN) {
+          throw new Error('realtime ASR connection closed while audio was starting');
+        }
         settled = true;
         clearTimeout(timeoutId);
-        console.info(`[LaoJi ASR] recording meetingId=${meetingId}`);
+        diagnosticInfo(`[LaoJi ASR] recording meetingId=${meetingId}`);
         options.onStatus?.('connected');
         options.onStatus?.('recording');
         resolve(session);
@@ -270,12 +421,11 @@ export async function startRealtimeAsr(
       const message = parseRealtimeAsrMessage(event.data);
       if (!message) return;
       if (message.type) {
-        console.info(`[LaoJi ASR] recv ${message.type}`);
+        diagnosticInfo(`[LaoJi ASR] recv ${message.type}`);
       }
       if (message.type === 'transcript.completed' && typeof message.text === 'string') {
         const text = message.text.trim();
         if (text) {
-          console.info(`[LaoJi ASR] transcript ${text}`);
           options.onTranscript?.({
             text,
             speakerName: typeof message.speaker_name === 'string'
@@ -291,7 +441,7 @@ export async function startRealtimeAsr(
         return;
       }
       if (message.type === 'ready_to_stop') {
-        console.info(`[LaoJi ASR] ready_to_stop frames=${frameCount} bytes=${byteCount}`);
+        diagnosticInfo(`[LaoJi ASR] ready_to_stop frames=${frameCount} bytes=${byteCount}`);
         resolveReady();
         return;
       }
@@ -308,7 +458,7 @@ export async function startRealtimeAsr(
     ws.onerror = event => {
       const message = (event as { message?: string }).message ?? '';
       const error = new Error(`realtime ASR websocket error: ${message}`.trim());
-      console.warn('[LaoJi ASR] websocket error', error);
+      diagnosticWarn('[LaoJi ASR] websocket error', error);
       if (!settled) {
         failBeforeOpen(error);
       } else {
@@ -319,14 +469,98 @@ export async function startRealtimeAsr(
     ws.onclose = () => {
       clearTimeout(timeoutId);
       resolveReady();
-      console.info(`[LaoJi ASR] closed frames=${frameCount} bytes=${byteCount}`);
+      diagnosticInfo(`[LaoJi ASR] closed frames=${frameCount} bytes=${byteCount}`);
       if (!settled) {
         failBeforeOpen(new Error('realtime ASR connection closed'));
       } else {
+        if (!stopped) {
+          stopped = true;
+          const cleanup = cleanupOwnedAudio();
+          settleCompletion('connection-closed');
+          void cleanup.then(uri => {
+            stoppedAudioUri = uri;
+          });
+        }
         options.onStatus?.('closed');
       }
     };
   });
+}
+
+export async function startLocalWavRecording(
+  recordingId: string,
+  onAudioStats?: (stats: RealtimeAsrAudioStats) => void,
+): Promise<LocalWavRecordingSession> {
+  const audioStream = loadLiveAudioStream();
+  const audioOwner = Symbol(recordingId);
+  const fileName = buildRealtimeWavFileName(recordingId);
+  if (activeAudioOwner) throw new Error('麦克风正在被其他录音使用');
+  activeAudioOwner = audioOwner;
+
+  let stopped = false;
+  let stopPromise: Promise<string> | null = null;
+  let frameCount = 0;
+  let byteCount = 0;
+  let subscription: { remove?: () => void } | void = undefined;
+
+  const stop = (): Promise<string> => {
+    if (stopPromise) return stopPromise;
+    stopped = true;
+    removeAudioListener(subscription);
+    stopPromise = (async () => {
+      try {
+        const uri = await stopAudioStream(audioStream);
+        if (!uri) throw new Error('录音文件没有正确保存，请重新录制');
+        return uri;
+      } finally {
+        if (activeAudioOwner === audioOwner) activeAudioOwner = null;
+      }
+    })();
+    return stopPromise;
+  };
+
+  try {
+    audioStream.init({
+      sampleRate: 16000,
+      channels: 1,
+      bitsPerSample: 16,
+      audioSource: VOICE_RECOGNITION_AUDIO_SOURCE,
+      enableAutomaticGainControl: true,
+      enableNoiseSuppressor: true,
+      skipInitialBuffers: 0,
+      wavFile: fileName,
+      bufferSize: DEFAULT_BUFFER_SIZE,
+    });
+    subscription = audioStream.on('data', base64Pcm => {
+      if (stopped) return;
+      try {
+        const buffer = base64ToArrayBuffer(base64Pcm);
+        const raw = pcmStats(buffer);
+        frameCount += 1;
+        byteCount += buffer.byteLength;
+        onAudioStats?.({
+          frameCount,
+          byteCount,
+          raw,
+          sent: raw,
+          gain: 1,
+          gated: false,
+        });
+      } catch (error) {
+        diagnosticWarn('[LaoJi speaker] audio frame inspection failed', error);
+      }
+    });
+    await Promise.resolve(audioStream.start());
+    return { fileName, stop };
+  } catch (error) {
+    removeAudioListener(subscription);
+    try {
+      await stopAudioStream(audioStream);
+    } finally {
+      if (activeAudioOwner === audioOwner) activeAudioOwner = null;
+    }
+    throw toError(error, '启动音色录制失败');
+  }
 }
 
 export function parseRealtimeAsrMessage(data: unknown): RealtimeAsrMessage | null {
@@ -350,6 +584,14 @@ export function applyPcmAutoGain(
   }
 
   const gain = Math.max(1, Math.min(maxGain, targetPeak / raw.peak));
+  return applyPcmGain(buffer, raw, gain);
+}
+
+function applyPcmGain(
+  buffer: ArrayBuffer,
+  raw: PcmStats,
+  gain: number,
+): { buffer: ArrayBuffer; raw: PcmStats; sent: PcmStats; gain: number } {
   if (gain <= 1.05) {
     return { buffer, raw, sent: raw, gain: 1 };
   }
@@ -373,6 +615,115 @@ export function applyPcmAutoGain(
     sent: pcmStats(amplified),
     gain,
   };
+}
+
+export function prepareRealtimePcmFrame(
+  buffer: ArrayBuffer,
+  purpose: RealtimeAsrPurpose = 'meeting',
+): PreparedRealtimePcmFrame {
+  const raw = pcmStats(buffer);
+  if (
+    purpose === 'schedule'
+    && raw.peak < SCHEDULE_NOISE_GATE_PEAK
+    && raw.rms < SCHEDULE_NOISE_GATE_RMS
+  ) {
+    return {
+      buffer: new ArrayBuffer(buffer.byteLength),
+      raw,
+      sent: { peak: 0, rms: 0 },
+      gain: 0,
+      gated: true,
+    };
+  }
+  return { ...applyPcmAutoGain(buffer), gated: false };
+}
+
+export function createRealtimePcmProcessor(
+  purpose: RealtimeAsrPurpose = 'meeting',
+): RealtimePcmProcessor {
+  if (purpose !== 'schedule') {
+    return {
+      push: buffer => [prepareRealtimePcmFrame(buffer, purpose)],
+      flush: () => [],
+    };
+  }
+
+  const pending: Array<{ buffer: ArrayBuffer; raw: PcmStats; active: boolean }> = [];
+  let postActiveFrames = 0;
+  let previousKept = false;
+  let segmentPeak = 0;
+  let segmentGain = 1;
+
+  const processOldest = (): PreparedRealtimePcmFrame => {
+    const current = pending[0];
+    const visible = pending.slice(0, SCHEDULE_GATE_LOOKAHEAD_FRAMES + 1);
+    const activePeaks = visible
+      .filter(frame => frame.active)
+      .map(frame => frame.raw.peak);
+    const hasUpcomingSpeech = activePeaks.length > 0;
+    const keep = hasUpcomingSpeech || postActiveFrames > 0;
+
+    if (keep && !previousKept) {
+      segmentPeak = Math.max(1, ...activePeaks);
+      segmentGain = scheduleSegmentGain(segmentPeak);
+    } else if (keep && activePeaks.length > 0) {
+      const nextPeak = Math.max(segmentPeak, ...activePeaks);
+      if (nextPeak > segmentPeak) {
+        segmentPeak = nextPeak;
+        segmentGain = Math.min(segmentGain, scheduleSegmentGain(segmentPeak));
+      }
+    }
+
+    if (current.active) {
+      postActiveFrames = SCHEDULE_GATE_HANGOVER_FRAMES;
+    } else if (postActiveFrames > 0) {
+      postActiveFrames -= 1;
+    }
+    previousKept = keep;
+    pending.shift();
+
+    if (!keep) {
+      segmentPeak = 0;
+      segmentGain = 1;
+      return {
+        buffer: new ArrayBuffer(current.buffer.byteLength),
+        raw: current.raw,
+        sent: { peak: 0, rms: 0 },
+        gain: 0,
+        gated: true,
+      };
+    }
+
+    return { ...applyPcmGain(current.buffer, current.raw, segmentGain), gated: false };
+  };
+
+  return {
+    push: buffer => {
+      const raw = pcmStats(buffer);
+      pending.push({
+        buffer,
+        raw,
+        active: isScheduleSpeechFrame(raw),
+      });
+      return pending.length > SCHEDULE_GATE_LOOKAHEAD_FRAMES
+        ? [processOldest()]
+        : [];
+    },
+    flush: () => {
+      const frames: PreparedRealtimePcmFrame[] = [];
+      while (pending.length > 0) frames.push(processOldest());
+      return frames;
+    },
+  };
+}
+
+function isScheduleSpeechFrame(stats: PcmStats): boolean {
+  return stats.peak >= SCHEDULE_NOISE_GATE_PEAK || stats.rms >= SCHEDULE_NOISE_GATE_RMS;
+}
+
+function scheduleSegmentGain(peak: number): number {
+  if (peak <= 0) return 1;
+  return Math.max(1, Math.min(SCHEDULE_MAX_AUTO_GAIN, TARGET_PCM_PEAK / peak));
 }
 
 export function selectRealtimeScheduleText(chunks: string[]): string {
@@ -481,13 +832,27 @@ function removeAudioListener(subscription: { remove?: () => void } | void) {
 }
 
 function closeWebSocket(ws: WebSocket) {
-  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-    ws.close();
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+  } catch {
+    // Native websocket teardown can race with a remote close.
   }
 }
 
+function createRealtimeWebSocket(url: string, headers: Record<string, string>): WebSocket {
+  if (Object.keys(headers).length === 0) return new WebSocket(url);
+  const ReactNativeWebSocket = WebSocket as unknown as new (
+    targetUrl: string,
+    protocols?: string | string[] | null,
+    options?: { headers?: Record<string, string> },
+  ) => WebSocket;
+  return new ReactNativeWebSocket(url, null, { headers });
+}
+
 function maskRealtimeUrl(url: string): string {
-  return url.replace(/([?&](?:access_token|token)=)[^&]+/g, '$1***');
+  return url.replace(/([?&](?:access_token|guest_token|token)=)[^&]+/g, '$1***');
 }
 
 async function sendInitialSilenceFrames(
@@ -501,7 +866,7 @@ async function sendInitialSilenceFrames(
     ws.send(silence);
     await delay(100);
   }
-  console.info(`[LaoJi ASR] sent initial silence frames=${frameCount}`);
+  diagnosticInfo(`[LaoJi ASR] sent initial silence frames=${frameCount}`);
 }
 
 function delay(ms: number): Promise<void> {

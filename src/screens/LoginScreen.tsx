@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Keyboard,
 } from 'react-native';
@@ -21,8 +21,19 @@ export function LoginScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
   const [pwd, setPwd] = useState('');
   const [busy, setBusy] = useState(false);
-  const { signIn, register, continueAsGuest } = useAuth();
+  const { signIn, register, continueAsGuest, sessionNotice, clearSessionNotice } = useAuth();
   const { showDialog } = useAppDialog();
+
+  useEffect(() => {
+    if (!sessionNotice) return;
+    clearSessionNotice();
+    showDialog({
+      title: '请重新登录',
+      message: sessionNotice,
+      hint: '本机缓存仍按原账号隔离保存，重新登录后会继续同步。',
+      tone: 'warning',
+    });
+  }, [clearSessionNotice, sessionNotice, showDialog]);
 
   const validateAccount = () => {
     if (!email.trim()) {
@@ -60,6 +71,10 @@ export function LoginScreen({ navigation }: Props) {
 
   const handleRegister = async () => {
     if (!validateAccount()) return;
+    if (pwd.length < 8) {
+      showDialog({ title: '密码过短', message: '注册密码至少需要 8 位。', tone: 'warning' });
+      return;
+    }
     setBusy(true);
     try {
       await register(email.trim(), pwd);
@@ -138,7 +153,12 @@ export function LoginScreen({ navigation }: Props) {
               style={s.input} placeholder="密码" placeholderTextColor={C.faint}
               value={pwd} onChangeText={setPwd} secureTextEntry={!showPwd}
             />
-            <TouchableOpacity onPress={() => setShowPwd(v => !v)}>
+            <TouchableOpacity
+              onPress={() => setShowPwd(v => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={showPwd ? '隐藏密码' : '显示密码'}
+              testID="login-password-visibility"
+            >
               <Ionicons name={showPwd ? 'eye-off-outline' : 'eye-outline'} size={17} color={C.sub} />
             </TouchableOpacity>
           </View>

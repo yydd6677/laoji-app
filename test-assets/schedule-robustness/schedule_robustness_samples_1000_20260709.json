@@ -4,7 +4,7 @@
   "timezone": "Asia/Shanghai",
   "random_seed": 20260709,
   "description": "1000 robust natural-language schedule parsing samples. Expected fields are partial assertions for parser behavior. Groups cover oral fillers/repetition/correction, complex ranges/repeats, ambiguous clarification cases, random dictionary noise, and adversarial ASR-like text.",
-  "endpoint": "http://183.36.243.124:8035/api/laoji/parse",
+  "endpoint": "http://203.0.113.10:8035/api/laoji/parse",
   "comparison_rules": "Only fields present in expected are checked. location_contains means parsed.location should contain the substring. Null expected values require parsed value to be null.",
   "samples": [
     {

@@ -16,6 +16,8 @@ expo-env.d.ts
 *.p8
 *.p12
 *.key
+credentials.properties
+android-signing.properties
 *.mobileprovision
 
 # Metro
@@ -26,6 +28,7 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 /tmp/
+/coverage/
 __pycache__/
 *.py[cod]
 
@@ -35,6 +38,26 @@ __pycache__/
 
 # local env files
 .env*.local
+
+# Local collaboration records and device evidence. These may contain internal
+# topology, account screenshots, or third-party source material and must never
+# be included in the public source repository.
+/docs/collaboration/
+/docs/evidence/
+
+# Generated quality reports and synthetic audio are retained locally. Public
+# fixtures keep only manifests and text/JSON source samples.
+/test-assets/**/reports/
+/test-assets/asr-voice-preview/*.mp3
+/test-assets/asr-voice-samples/aac/
+/test-assets/asr-voice-samples/m4a/
+/test-assets/asr-voice-samples/mp3/
+/test-assets/asr-voice-samples/wav/
+/test-assets/phone-acoustic-asr/*.aac
+/test-assets/phone-acoustic-asr/*.m4a
+/test-assets/phone-acoustic-asr/*.mp3
+/test-assets/phone-acoustic-asr/*.wav
+/test-assets/meeting-summary-quality/audio/
 
 # typescript
 *.tsbuildinfo

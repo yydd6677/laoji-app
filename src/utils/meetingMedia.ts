@@ -5,6 +5,43 @@ type TranscriptLike = {
   text?: string;
 };
 
+type ResumableMeetingLike = {
+  status?: string;
+  audioAvailable?: boolean;
+  audioLocalUri?: string | null;
+};
+
+export function canResumeMeetingRecording(meeting: ResumableMeetingLike): boolean {
+  if (meeting.audioAvailable || meeting.audioLocalUri) return false;
+  return ['created', 'recording', 'failed'].includes(meeting.status ?? 'created');
+}
+
+export function latestTranscriptWindow<T>(items: T[], maxItems = 40): {
+  items: T[];
+  hiddenCount: number;
+} {
+  const limit = Number.isFinite(maxItems) ? Math.max(1, Math.floor(maxItems)) : 40;
+  const hiddenCount = Math.max(0, items.length - limit);
+  return {
+    items: hiddenCount > 0 ? items.slice(hiddenCount) : items,
+    hiddenCount,
+  };
+}
+
+export function shouldCheckpointTranscript(
+  nextLineCount: number,
+  lastCheckpointLineCount: number,
+  elapsedSinceCheckpointMs: number,
+  lineInterval = 4,
+  maxDelayMs = 10_000,
+): boolean {
+  if (!Number.isFinite(nextLineCount) || nextLineCount <= 0) return false;
+  if (!Number.isFinite(lastCheckpointLineCount) || lastCheckpointLineCount <= 0) return true;
+  const unsavedLines = nextLineCount - lastCheckpointLineCount;
+  return unsavedLines >= Math.max(1, Math.floor(lineInterval))
+    || elapsedSinceCheckpointMs >= Math.max(0, maxDelayMs);
+}
+
 export function transcriptDurationSec(items: TranscriptLike[]): number | undefined {
   const end = items.reduce((max, item) => {
     const value = typeof item.end_time === 'number' ? item.end_time : 0;
@@ -25,39 +62,36 @@ export function formatDuration(seconds?: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export function transcriptToBars(items: TranscriptLike[], count = 40): number[] {
-  const duration = transcriptDurationSec(items);
-  if (!duration || count <= 0) return [];
-  const bars = Array.from({ length: count }, () => 0.16);
-
-  for (const item of items) {
-    const start = Math.max(0, typeof item.start_time === 'number' ? item.start_time : 0);
-    const end = Math.max(start, typeof item.end_time === 'number' ? item.end_time : start);
-    const startIdx = Math.max(0, Math.min(count - 1, Math.floor((start / duration) * count)));
-    const endIdx = Math.max(startIdx, Math.min(count - 1, Math.ceil((end / duration) * count)));
-    const confidence = typeof item.confidence === 'number' && Number.isFinite(item.confidence)
-      ? item.confidence
-      : 0.45;
-    const textWeight = Math.min(0.35, (item.text?.length ?? 0) / 180);
-    const amp = Math.max(0.22, Math.min(0.95, 0.24 + confidence * 0.44 + textWeight));
-    for (let i = startIdx; i <= endIdx; i += 1) {
-      bars[i] = Math.max(bars[i], amp);
-    }
+export function pcmDurationSec(
+  byteCount: number,
+  sampleRate = 16000,
+  channels = 1,
+  bitsPerSample = 16,
+): number | undefined {
+  const bytesPerSecond = sampleRate * channels * (bitsPerSample / 8);
+  if (!Number.isFinite(byteCount) || byteCount <= 0 || !Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) {
+    return undefined;
   }
-
-  return bars;
+  return byteCount / bytesPerSecond;
 }
 
-export function fallbackMeetingBars(seed: string, count = 40): number[] {
-  let hash = 2166136261;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return Array.from({ length: count }, (_, i) => {
-    hash ^= i + 1;
-    hash = Math.imul(hash, 16777619);
-    const value = (hash >>> 0) / 0xffffffff;
-    return 0.22 + value * 0.58;
+export function audioSamplesToBars(samples: number[], count = 50): number[] {
+  const usable = samples.filter(value => Number.isFinite(value) && value >= 0);
+  if (usable.length === 0 || count <= 0) return [];
+
+  const outputCount = Math.min(count, usable.length);
+  const bars = Array.from({ length: outputCount }, (_, index) => {
+    const start = Math.floor((index * usable.length) / outputCount);
+    const end = Math.max(start + 1, Math.floor(((index + 1) * usable.length) / outputCount));
+    return Math.max(...usable.slice(start, end));
   });
+  const peak = Math.max(...bars, 1);
+  return bars.map(value => Math.max(0.04, Math.min(1, value / peak)));
+}
+
+export function shouldReplayAudio(positionMs: number, durationMs: number, toleranceMs = 250): boolean {
+  return Number.isFinite(positionMs)
+    && Number.isFinite(durationMs)
+    && durationMs > 0
+    && positionMs >= durationMs - Math.max(0, toleranceMs);
 }

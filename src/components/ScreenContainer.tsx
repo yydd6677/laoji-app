@@ -14,7 +14,7 @@ interface Props {
 /**
  * Root wrapper for every screen.
  * SafeAreaView from react-native-safe-area-context is the most reliable
- * way to respect status-bar and bottom-navigation-bar insets in Expo Go.
+ * way to respect status-bar and system-navigation insets in native builds.
  */
 export function ScreenContainer({
   children,

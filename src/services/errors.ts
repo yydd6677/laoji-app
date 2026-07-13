@@ -1,3 +1,20 @@
+import { notifyUnauthorized } from './authInvalidation';
+
+export class HttpResponseError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly detail: string | null = null,
+  ) {
+    super(message);
+    this.name = 'HttpResponseError';
+  }
+}
+
+export function isUnauthorizedResponseError(error: unknown): boolean {
+  return error instanceof HttpResponseError && error.status === 401;
+}
+
 export function stringifyErrorDetail(value: unknown): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -36,26 +53,61 @@ export function stringifyErrorDetail(value: unknown): string | null {
   return null;
 }
 
-export async function readResponseError(prefix: string, res: Response): Promise<Error> {
-  let detail: string | null = null;
-  try {
-    const data = await res.json();
-    detail = stringifyErrorDetail(data?.detail ?? data?.message ?? data?.error ?? data);
-  } catch {
+export async function readResponseData(res: Response): Promise<unknown> {
+  const response = res as Response & {
+    text?: () => Promise<string>;
+    json?: () => Promise<unknown>;
+  };
+  if (typeof response.text === 'function') {
     try {
-      detail = stringifyErrorDetail(await res.text());
+      const raw = await response.text();
+      if (!raw.trim()) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
     } catch {
-      detail = null;
+      return null;
     }
   }
 
-  return new Error(detail ? `${prefix}: ${res.status} ${detail}` : `${prefix}: ${res.status}`);
+  // Lightweight test doubles and a few legacy fetch shims expose json() only.
+  if (typeof response.json === 'function') {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export async function readResponseError(
+  prefix: string,
+  res: Response,
+  options: { unauthorizedToken?: string } = {},
+): Promise<HttpResponseError> {
+  const data = await readResponseData(res);
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : null;
+  const detail = stringifyErrorDetail(record?.detail ?? record?.message ?? record?.error ?? data);
+
+  if (res.status === 401 && options.unauthorizedToken) {
+    notifyUnauthorized(options.unauthorizedToken);
+  }
+
+  return new HttpResponseError(
+    detail ? `${prefix}: ${res.status} ${detail}` : `${prefix}: ${res.status}`,
+    res.status,
+    detail,
+  );
 }
 
 export function readableErrorMessage(err: unknown, fallback: string): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : stringifyErrorDetail(err) ?? '';
   const message = raw.trim();
   if (!message || message === '[object Object]') return fallback;
+  if (isUnauthorizedResponseError(err)) return '登录已过期，请重新登录。';
   if (/Network request failed|Failed to fetch|timeout/i.test(message)) {
     return '暂时无法连接老记服务，请检查网络后重试。';
   }

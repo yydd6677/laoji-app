@@ -2,7 +2,7 @@
   "generated_at": "2026-07-09T16:30:00+08:00",
   "current_date": "2026-07-09",
   "description": "Complex natural-language schedule parsing robustness samples with oral fillers, repeated/corrected statements, noisy dictionary words, and out-of-order phrasing. Expected fields are partial assertions, not full semantic truth labels.",
-  "endpoint": "http://183.36.243.124:8035/api/laoji/parse",
+  "endpoint": "http://203.0.113.10:8035/api/laoji/parse",
   "samples": [
     {
       "id": "R001",

@@ -9,7 +9,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { RootStackParamList } from '../types';
 import { useEvents } from '../store/EventsStore';
 import { BackHeader } from '../components/Common';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { useAppDialog } from '../components/AppDialog';
 import { labelForReminder } from '../services/notifications';
@@ -71,13 +71,15 @@ export function EventDetailScreen({ navigation, route }: Props) {
   };
 
   const handleEdit = () => {
-    navigation.navigate('AddEvent', { date: ev.startDate, eventId: ev.id });
+    navigation.navigate('AddEvent', { date: ev.seriesStartDate ?? ev.startDate, eventId: ev.id });
   };
 
   const handleDelete = () => {
     showDialog({
       title: '确认删除',
-      message: '确定要删除这条日程吗？',
+      message: ev.repeat && ev.repeat !== 'once'
+        ? '这是重复日程。删除后，整个重复系列都会被移除。'
+        : '确定要删除这条日程吗？',
       tone: 'danger',
       actions: [
         {
@@ -166,7 +168,7 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 8 },
   emptyText: { fontSize: 13, color: C.sub, lineHeight: 20 },
   scroll: { flex: 1, backgroundColor: C.card },
-  content: { padding: 26, paddingHorizontal: 20 },
+  content: { padding: 26, paddingHorizontal: 20, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 28 },
   colorDot: { width: 14, height: 14, borderRadius: 7 },
   titleText: { flex: 1, fontSize: 21, fontWeight: '800', color: C.text },

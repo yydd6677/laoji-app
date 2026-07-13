@@ -9,9 +9,10 @@ import { RootStackParamList, CalEvent } from '../types';
 import { useEvents } from '../store/EventsStore';
 import { BackHeader } from '../components/Common';
 import { CalGrid } from '../components/CalGrid';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { useAppDialog } from '../components/AppDialog';
+import { selectTasksForDate } from '../utils/taskOrdering';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Calendar'> };
 
@@ -35,22 +36,23 @@ export function CalendarScreen({ navigation }: Props) {
   const [selDay, setSelDay] = useState(() => initialDate.getDate());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const { events, deleteEvent, refreshEvents } = useEvents();
+  const { events, error: eventsError, deleteEvent, refreshEvents } = useEvents();
   const { showDialog } = useAppDialog();
 
   const prev = () => month === 1 ? (setMonth(12), setYear(y => y - 1)) : setMonth(m => m - 1);
   const next = () => month === 12 ? (setMonth(1), setYear(y => y + 1)) : setMonth(m => m + 1);
 
-  const ds = `${year}-${String(month).padStart(2,'0')}-${String(selDay).padStart(2,'0')}`;
-  const selectedDate = new Date(year, month - 1, selDay);
+  const selectedDay = Math.min(selDay, new Date(year, month, 0).getDate());
+  const ds = `${year}-${String(month).padStart(2,'0')}-${String(selectedDay).padStart(2,'0')}`;
+  const selectedDate = new Date(year, month - 1, selectedDay);
   const wday = WDN[selectedDate.getDay()];
   const selectedRelativeLabel = relativeDayLabel(selectedDate, new Date());
-  const dayEvts = events.filter(e =>
-    e.spanning && e.endDate ? ds >= e.startDate && ds <= e.endDate : e.startDate === ds
-  );
+  const dayEvts = selectTasksForDate(events, ds);
+  const canDelete = Boolean(selectedId);
 
   const fmtTime = (e: CalEvent) => {
     if (e.startTime && e.endTime) return `${e.startTime} – ${e.endTime}`;
+    if (e.startTime) return e.startTime;
     if (e.spanning && e.endDate)
       return `${e.startDate.slice(5).replace('-','月')}日 – ${e.endDate.slice(5).replace('-','月')}日`;
     return '全天';
@@ -109,6 +111,16 @@ export function CalendarScreen({ navigation }: Props) {
       <BackHeader
         title={`日历 · ${year}年${month}月`}
         onBack={() => navigation.goBack()}
+        right={eventsError ? (
+          <TouchableOpacity
+            onPress={() => { void refreshEvents(year, month); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="日程同步失败，点击重试"
+          >
+            <Ionicons name="cloud-offline-outline" size={20} color={C.red} />
+          </TouchableOpacity>
+        ) : undefined}
       />
       <ScrollView
         style={s.scroll}
@@ -119,12 +131,12 @@ export function CalendarScreen({ navigation }: Props) {
         }
       >
         <View style={{ height: 14 }} />
-        <CalGrid year={year} month={month} selDay={selDay} onDay={setSelDay} onPrev={prev} onNext={next} events={events} />
+        <CalGrid year={year} month={month} selDay={selectedDay} onDay={setSelDay} onPrev={prev} onNext={next} events={events} />
 
         <View style={s.divider} />
 
         <View style={s.dayHeader}>
-          <Text style={s.dayLabel}>{month}月{selDay}日（{wday}）</Text>
+          <Text style={s.dayLabel}>{month}月{selectedDay}日（{wday}）</Text>
           {selectedRelativeLabel ? <Text style={s.relativePill}>{selectedRelativeLabel}</Text> : null}
         </View>
 
@@ -168,9 +180,14 @@ export function CalendarScreen({ navigation }: Props) {
             <Ionicons name="add" size={14} color={C.purple} />
             <Text style={[s.btnText, { color: C.purple }]}>新增事件</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[s.btn, { borderColor: C.red }]} onPress={handleDelete}>
-            <Ionicons name="trash-outline" size={14} color={C.red} />
-            <Text style={[s.btnText, { color: C.red }]}>删除事件</Text>
+          <TouchableOpacity
+            style={[s.btn, { borderColor: canDelete ? C.red : C.faint }, !canDelete && s.btnDisabled]}
+            onPress={handleDelete}
+            disabled={!canDelete}
+            accessibilityState={{ disabled: !canDelete }}
+          >
+            <Ionicons name="trash-outline" size={14} color={canDelete ? C.red : C.faint} />
+            <Text style={[s.btnText, { color: canDelete ? C.red : C.faint }]}>删除事件</Text>
           </TouchableOpacity>
         </View>
         <View style={{ height: 16 }} />
@@ -183,7 +200,7 @@ export function CalendarScreen({ navigation }: Props) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.appBg },
   scroll: { flex: 1 },
-  content: { paddingBottom: 8 },
+  content: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   divider: { height: 1, backgroundColor: C.border, marginHorizontal: 14, marginTop: 14 },
   dayHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12 },
   dayLabel: { fontSize: 14, fontWeight: '700', color: C.text },
@@ -207,5 +224,6 @@ const s = StyleSheet.create({
   evTime: { fontSize: 12, color: '#A09CC0' },
   btnRow: { flexDirection: 'row', gap: 12, marginHorizontal: 14, marginTop: 18, marginBottom: 4 },
   btn: { flex: 1, height: 42, borderRadius: 21, borderWidth: 1.5, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  btnDisabled: { opacity: 0.55 },
   btnText: { fontSize: 13, fontWeight: '600' },
 });

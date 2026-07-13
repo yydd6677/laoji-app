@@ -4,10 +4,12 @@ import { readResponseError } from './errors';
 import { isNonScheduleControlText, parseLocalScheduleText, shouldUseLocalScheduleParseFirst } from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
 import type { MeetingSummary, TranscriptLine } from '../types';
+import { fetchWithTimeout as fetch } from './http';
+import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 
 // LaoJi Backend API Client
-// Defaults target the internal test server. Production builds must provide
-// HTTPS endpoints through EXPO_PUBLIC_* environment variables.
+// Endpoints are embedded by app.config.js from EXPO_PUBLIC_* build variables.
+// Production builds reject missing, plain-HTTP, and bare-IP values.
 
 function laojiUrl(path: string): string {
   return `${getApiConfig().laojiApiBase}${path}`;
@@ -26,6 +28,10 @@ function jsonHeaders(accessToken?: string): Record<string, string> {
 
 function authHeaders(accessToken?: string): Record<string, string> | undefined {
   return accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+}
+
+async function apiResponseError(prefix: string, res: Response, accessToken?: string): Promise<Error> {
+  return readResponseError(prefix, res, { unauthorizedToken: accessToken });
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -55,6 +61,11 @@ export interface ParseResult {
 
 export interface ApiEvent {
   id?: number;
+  source_event_id?: number | null;
+  occurrence_id?: string | null;
+  is_expanded?: boolean;
+  series_start_date?: string | null;
+  series_end_date?: string | null;
   title: string;
   event_type: string;
   start_date: string;
@@ -66,6 +77,7 @@ export interface ApiEvent {
   is_all_day?: boolean;
   description?: string | null;
   raw_text?: string | null;
+  client_request_id?: string | null;
   location?: string | null;
   category?: EventCategory | null;
   detail?: string | null;
@@ -89,7 +101,7 @@ export async function parseText(text: string): Promise<ParseResult> {
       body: JSON.stringify({ text }),
     });
     if (res.ok) return res.json();
-    error = new Error(`parse failed: ${res.status}`);
+    error = await readResponseError('parse failed', res);
   } catch (err) {
     error = err instanceof Error ? err : new Error(String(err));
   }
@@ -110,7 +122,7 @@ export async function clarifyText(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current: { ...draft, raw_text: draft.raw_text ?? original }, answer: supplement }),
   });
-  if (!res.ok) throw new Error(`clarify failed: ${res.status}`);
+  if (!res.ok) throw await readResponseError('clarify failed', res);
   return res.json();
 }
 
@@ -122,18 +134,19 @@ export async function saveEvent(event: ApiEvent, accessToken?: string): Promise<
     headers: jsonHeaders(accessToken),
     body: JSON.stringify(event),
   });
-  if (!res.ok) throw new Error(`save event failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('save event failed', res, accessToken);
   return res.json();
 }
 
 // ── Fetch events by month ───────────────────────────────────────────────────
 
-export async function fetchEvents(year: number, month: number, accessToken?: string): Promise<ApiEvent[]> {
+export async function fetchEvents(year?: number, month?: number, accessToken?: string): Promise<ApiEvent[]> {
+  const query = year != null && month != null ? `?year=${year}&month=${month}` : '';
   const res = await fetch(
-    laojiUrl(`/api/laoji/events?year=${year}&month=${month}`),
+    laojiUrl(`/api/laoji/events${query}`),
     { headers: authHeaders(accessToken) },
   );
-  if (!res.ok) throw new Error(`fetch events failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('fetch events failed', res, accessToken);
   const data = await res.json();
   return Array.isArray(data) ? data : data.events ?? [];
 }
@@ -177,7 +190,7 @@ async function audioUriToBase64(audioUri: string): Promise<string> {
   }
 
   const res = await fetch(audioUri);
-  if (!res.ok) throw new Error(`read audio failed: ${res.status}`);
+  if (!res.ok) throw await readResponseError('read audio failed', res);
   return blobToBase64(await res.blob());
 }
 
@@ -191,7 +204,7 @@ export async function transcribeAudio(audioUri: string): Promise<string> {
   const audio_base64 = await audioUriToBase64(audioUri);
   const filename = filenameFromUri(audioUri);
 
-  const res = await fetch(laojiUrl('/api/laoji/asr/transcribe'), {
+  const res = await fetch(meetingUrl('/api/laoji/asr/transcribe'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audio_base64, filename }),
@@ -205,7 +218,7 @@ export async function parseAudio(audioUri: string): Promise<ParseResult> {
   const audio_base64 = await audioUriToBase64(audioUri);
   const filename = filenameFromUri(audioUri);
 
-  const res = await fetch(laojiUrl('/api/laoji/parse-audio'), {
+  const res = await fetch(meetingUrl('/api/laoji/parse-audio'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audio_base64, filename }),
@@ -221,7 +234,7 @@ export async function deleteEvent(id: number, accessToken?: string): Promise<voi
     method: 'DELETE',
     headers: authHeaders(accessToken),
   });
-  if (!res.ok) throw new Error(`delete event failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('delete event failed', res, accessToken);
 }
 
 // ── Update event ────────────────────────────────────────────────────────────
@@ -236,7 +249,7 @@ export async function updateEvent(
     headers: jsonHeaders(accessToken),
     body: JSON.stringify(changes),
   });
-  if (!res.ok) throw new Error(`update event failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('update event failed', res, accessToken);
   return res.json();
 }
 
@@ -255,6 +268,10 @@ export interface ApiMeeting {
   audio_mime_type?: string | null;
   audio_file_name?: string | null;
   audio_duration_sec?: number | null;
+  transcript_count?: number;
+  transcript_available?: boolean;
+  summary_available?: boolean;
+  client_request_id?: string | null;
 }
 
 export interface ApiMeetingAudioInfo {
@@ -283,13 +300,36 @@ export async function fetchMeetings(page = 1, size = 20, accessToken?: string): 
     meetingUrl(`/api/laoji/meetings?page=${page}&size=${size}`),
     { headers: authHeaders(accessToken) },
   );
-  if (!res.ok) throw new Error(`fetch meetings failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('fetch meetings failed', res, accessToken);
   const data = await res.json();
   return data.items ?? data ?? [];
 }
 
+export async function fetchAllMeetings(accessToken?: string, pageSize = 100): Promise<ApiMeeting[]> {
+  const safePageSize = Math.max(1, Math.min(100, pageSize));
+  const all: ApiMeeting[] = [];
+  const seen = new Set<string>();
+  for (let page = 1; page <= 50; page += 1) {
+    const batch = await fetchMeetings(page, safePageSize, accessToken);
+    for (const meeting of batch) {
+      if (!seen.has(meeting.id)) {
+        seen.add(meeting.id);
+        all.push(meeting);
+      }
+    }
+    if (batch.length < safePageSize) break;
+  }
+  return all;
+}
+
 export async function createMeeting(
-  payload: { title: string; description?: string | null; participants?: string[]; mode?: ApiMeeting['mode'] },
+  payload: {
+    title: string;
+    description?: string | null;
+    participants?: string[];
+    mode?: ApiMeeting['mode'];
+    clientRequestId?: string;
+  },
   accessToken?: string,
 ): Promise<ApiMeeting> {
   const res = await fetch(meetingUrl('/api/laoji/meetings'), {
@@ -300,10 +340,38 @@ export async function createMeeting(
       description: payload.description ?? null,
       participants: payload.participants ?? [],
       mode: payload.mode ?? 'realtime',
+      client_request_id: payload.clientRequestId ?? null,
     }),
   });
-  if (!res.ok) throw await readResponseError('create meeting failed', res);
+  if (!res.ok) throw await apiResponseError('create meeting failed', res, accessToken);
   return res.json();
+}
+
+export interface ApiGuestRealtimeSession {
+  meeting_id: string;
+  guest_token: string;
+  expires_at: string;
+  transient: true;
+}
+
+export async function createGuestRealtimeSession(title: string): Promise<ApiGuestRealtimeSession> {
+  const res = await fetch(meetingUrl('/api/laoji/meetings/guest-sessions'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: title.trim() || null }),
+  });
+  if (!res.ok) throw await readResponseError('create guest meeting session failed', res);
+  return res.json();
+}
+
+export async function deleteGuestRealtimeSession(meetingId: string, guestToken: string): Promise<void> {
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/guest-sessions/${encodeURIComponent(meetingId)}`), {
+    method: 'DELETE',
+    headers: { 'X-Guest-Session-Token': guestToken },
+  });
+  if (!res.ok && res.status !== 404) {
+    throw await readResponseError('delete guest meeting session failed', res);
+  }
 }
 
 export async function updateMeeting(
@@ -316,18 +384,53 @@ export async function updateMeeting(
     headers: jsonHeaders(accessToken),
     body: JSON.stringify(changes),
   });
-  if (!res.ok) throw new Error(`update meeting failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('update meeting failed', res, accessToken);
   return res.json();
 }
 
-export async function fetchMeetingTranscript(meetingId: string, accessToken?: string): Promise<TranscriptLine[]> {
-  const res = await fetch(
-    meetingUrl(`/api/laoji/meetings/${meetingId}/transcripts?offset=0&limit=1000`),
-    { headers: authHeaders(accessToken) },
-  );
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.items ?? [];
+export interface FetchMeetingTranscriptOptions {
+  fallbackItems?: TranscriptLine[];
+  pageSize?: number;
+}
+
+export async function fetchMeetingTranscript(
+  meetingId: string,
+  accessToken?: string,
+  options: FetchMeetingTranscriptOptions = {},
+): Promise<TranscriptLine[]> {
+  const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 1000));
+  const all: TranscriptLine[] = [];
+  const seenIds = new Set<string>();
+  let offset = 0;
+
+  while (true) {
+    const res = await fetch(
+      meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}/transcripts?offset=${offset}&limit=${pageSize}`),
+      { headers: authHeaders(accessToken) },
+    );
+    if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, accessToken);
+    const data = await res.json();
+    const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
+      ? data.total
+      : undefined;
+    const previousCount = all.length;
+
+    batch.forEach(line => {
+      if (line.id && seenIds.has(line.id)) return;
+      if (line.id) seenIds.add(line.id);
+      all.push(line);
+    });
+    offset += batch.length;
+
+    if (batch.length === 0) break;
+    if (total != null && offset >= total) break;
+    if (batch.length < pageSize) break;
+    if (all.length === previousCount) break;
+  }
+
+  const fallbackItems = options.fallbackItems ?? [];
+  return fallbackItems.length > all.length ? fallbackItems : all;
 }
 
 function summaryValueToText(value: unknown): string {
@@ -343,12 +446,13 @@ function summaryValueToText(value: unknown): string {
   return '';
 }
 
-export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string): Promise<MeetingSummary | null> {
+export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string, signal?: AbortSignal): Promise<MeetingSummary | null> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/final`),
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(accessToken), signal },
   );
-  if (!res.ok) return null;
+  if (res.status === 404 || res.status === 204) return null;
+  if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, accessToken);
   return res.json();
 }
 
@@ -365,12 +469,22 @@ export async function fetchMeetingSummary(meetingId: string, accessToken?: strin
   );
 }
 
-export async function generateMeetingSummary(meetingId: string, accessToken?: string): Promise<ApiMeetingSummaryTask> {
-  const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/generate?summary_type=final`), {
+export async function generateMeetingSummary(
+  meetingId: string,
+  accessToken?: string,
+  signal?: AbortSignal,
+  force = false,
+): Promise<ApiMeetingSummaryTask> {
+  const query = new URLSearchParams({
+    summary_type: 'final',
+    force: String(force),
+  });
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/generate?${query}`), {
     method: 'POST',
     headers: authHeaders(accessToken),
+    signal,
   });
-  if (!res.ok) throw await readResponseError('generate meeting summary failed', res);
+  if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, accessToken);
   return res.json();
 }
 
@@ -378,12 +492,13 @@ export async function fetchMeetingSummaryTask(
   meetingId: string,
   taskId: string,
   accessToken?: string,
+  signal?: AbortSignal,
 ): Promise<ApiMeetingTaskStatus> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/task/${taskId}`),
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(accessToken), signal },
   );
-  if (!res.ok) throw await readResponseError('fetch meeting summary task failed', res);
+  if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, accessToken);
   return res.json();
 }
 
@@ -391,13 +506,19 @@ export async function generateGuestMeetingSummary(
   meetingId: string,
   transcriptLines: TranscriptLine[],
   title?: string,
+  signal?: AbortSignal,
+  meetingDate?: string,
+  force = false,
 ): Promise<ApiMeetingSummaryTask> {
   const res = await fetch(meetingUrl('/api/laoji/meetings/guest-summary'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       meeting_id: meetingId,
       title: title ?? null,
+      meeting_date: meetingDate ?? null,
+      force,
       transcript_lines: transcriptLines.map(line => ({
         speaker_label: line.speaker_label ?? null,
         speaker_id: line.speaker_id ?? null,
@@ -412,8 +533,8 @@ export async function generateGuestMeetingSummary(
   return res.json();
 }
 
-export async function fetchGuestMeetingSummaryTask(taskId: string): Promise<ApiMeetingTaskStatus> {
-  const res = await fetch(meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}`));
+export async function fetchGuestMeetingSummaryTask(taskId: string, signal?: AbortSignal): Promise<ApiMeetingTaskStatus> {
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}`), { signal });
   if (!res.ok) throw await readResponseError('fetch guest meeting summary task failed', res);
   return res.json();
 }
@@ -424,18 +545,20 @@ export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: str
     { headers: authHeaders(accessToken) },
   );
   if (res.status === 404 || res.status === 204) return null;
-  if (!res.ok) throw await readResponseError('fetch meeting audio failed', res);
+  if (!res.ok) throw await apiResponseError('fetch meeting audio failed', res, accessToken);
   const data = await res.json();
   const url = typeof data?.url === 'string' ? data.url.trim() : '';
   if (!url) return null;
-  const absoluteUrl = url.startsWith('/') ? meetingUrl(url) : url;
+  const requiresAuth = data.requires_auth ?? data.requiresAuth ?? false;
+  const expiresAt = data.expires_at ?? data.expiresAt ?? null;
+  const absoluteUrl = validateMeetingAudioUrl(url, { requiresAuth, expiresAt });
   return {
     url: absoluteUrl,
     mime_type: data.mime_type ?? data.mimeType ?? null,
     duration_sec: typeof data.duration_sec === 'number' ? data.duration_sec : data.durationSec ?? null,
     file_name: data.file_name ?? data.fileName ?? null,
-    expires_at: data.expires_at ?? data.expiresAt ?? null,
-    requires_auth: data.requires_auth ?? data.requiresAuth ?? false,
+    expires_at: expiresAt,
+    requires_auth: requiresAuth,
   };
 }
 
@@ -460,18 +583,20 @@ export async function uploadMeetingAudio(
     headers: authHeaders(accessToken),
     body: form,
   });
-  if (!res.ok) throw await readResponseError('upload meeting audio failed', res);
+  if (!res.ok) throw await apiResponseError('upload meeting audio failed', res, accessToken);
   const data = await res.json();
   const audio = data.audio ?? data;
   if (!audio?.url) return null;
-  const url = String(audio.url).startsWith('/') ? meetingUrl(audio.url) : String(audio.url);
+  const requiresAuth = audio.requires_auth ?? false;
+  const expiresAt = audio.expires_at ?? null;
+  const url = validateMeetingAudioUrl(String(audio.url), { requiresAuth, expiresAt });
   return {
     url,
     mime_type: audio.mime_type ?? null,
     duration_sec: audio.duration_sec ?? null,
     file_name: audio.file_name ?? null,
-    expires_at: audio.expires_at ?? null,
-    requires_auth: audio.requires_auth ?? false,
+    expires_at: expiresAt,
+    requires_auth: requiresAuth,
   };
 }
 
@@ -480,5 +605,5 @@ export async function deleteMeeting(meetingId: string, accessToken?: string): Pr
     method: 'DELETE',
     headers: authHeaders(accessToken),
   });
-  if (!res.ok) throw new Error(`delete meeting failed: ${res.status}`);
+  if (!res.ok) throw await apiResponseError('delete meeting failed', res, accessToken);
 }

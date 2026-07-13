@@ -3,6 +3,11 @@ import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
   id: string;
+  sourceEventId?: string;
+  occurrenceId?: string;
+  isExpandedOccurrence?: boolean;
+  seriesStartDate?: string;
+  seriesEndDate?: string;
   title: string;
   startDate: string;
   endDate?: string;
@@ -18,6 +23,7 @@ export interface CalEvent {
   repeat?: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   description?: string;
   rawText?: string;
+  clientRequestId?: string;
   reminderMinutes?: number | null;
   notificationId?: string | null;
 }
@@ -34,12 +40,16 @@ export interface Meeting {
   hasTranscript?: boolean;
   hasSummary?: boolean;
   status?: string;
+  statusSyncPending?: boolean;
   mode?: 'realtime' | 'offline' | 'whisper' | 'qwen' | 'hybrid';
   description?: string | null;
   createdAt?: string;
   updatedAt?: string;
   audioAvailable?: boolean;
   audioLocalUri?: string | null;
+  audioDurationSec?: number;
+  audioBars?: number[];
+  clientRequestId?: string;
   source?: 'cloud' | 'guest';
 }
 
@@ -73,9 +83,11 @@ export type RootStackParamList = {
   Calendar: undefined;
   Recording: { meetingId: string };
   MeetingLive: { meetingId?: string } | undefined;
-  Transcription: { meetingId: string };
+  Transcription: { meetingId: string; focus?: 'transcript' | 'summary' | 'title' };
+  SpeakerManager: undefined;
+  SpeakerEnrollment: { speakerId?: string } | undefined;
   Profile: undefined;
-  Account: undefined;
+  Account: { section?: 'deletion' } | undefined;
   Privacy: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
   AddEvent: { date?: string; eventId?: string };

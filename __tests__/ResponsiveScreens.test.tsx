@@ -1,0 +1,181 @@
+import React from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { ProfileScreen } from '../src/screens/ProfileScreen';
+import { MeetingListScreen } from '../src/screens/MeetingListScreen';
+import { useEvents } from '../src/store/EventsStore';
+import { useMeetings } from '../src/store/MeetingsStore';
+import { useAuth } from '../src/store/AuthStore';
+
+jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
+jest.mock('expo-image-picker', () => ({
+  MediaTypeOptions: { Images: 'images' },
+  launchImageLibraryAsync: jest.fn(),
+  requestMediaLibraryPermissionsAsync: jest.fn(),
+}));
+jest.mock('../src/components/Common', () => ({
+  Avatar: 'Avatar',
+  Tag: 'Tag',
+  Waveform: 'Waveform',
+}));
+jest.mock('../src/components/BottomTabBar', () => ({
+  BottomTabBar: 'BottomTabBar',
+  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 51 },
+}));
+jest.mock('../src/store/EventsStore', () => ({ useEvents: jest.fn() }));
+jest.mock('../src/store/MeetingsStore', () => ({ useMeetings: jest.fn() }));
+jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
+jest.mock('../src/components/AppDialog', () => ({
+  useAppDialog: () => ({ showDialog: jest.fn() }),
+}));
+
+const longNickname = '这是一个需要在窄屏中稳定省略的超长用户昵称';
+const longEmail = 'very-long-account-name-for-layout-check@example-subdomain.test';
+const profile = {
+  nickname: longNickname,
+  email: longEmail,
+  phone: '13800138000',
+  avatarUrl: '',
+  avatarLocalUri: '',
+};
+
+describe('responsive profile and meeting states', () => {
+  const updateProfile = jest.fn();
+  const uploadAvatar = jest.fn();
+  const deleteAvatar = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (useEvents as jest.Mock).mockReturnValue({ events: [] });
+    (useMeetings as jest.Mock).mockReturnValue({ meetings: [] });
+    updateProfile.mockResolvedValue(undefined);
+    uploadAvatar.mockResolvedValue(undefined);
+    deleteAvatar.mockResolvedValue(undefined);
+    (useAuth as jest.Mock).mockReturnValue({
+      profile,
+      isGuest: false,
+      updateProfile,
+      uploadAvatar,
+      deleteAvatar,
+    });
+  });
+
+  it('exposes each profile field directly and keeps utility entries behind settings', async () => {
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof ProfileScreen>['navigation'];
+    await render(<ProfileScreen navigation={navigation} />);
+
+    expect(screen.getByLabelText('打开设置')).toBeTruthy();
+    expect(screen.getByLabelText('更换头像')).toBeTruthy();
+    expect(screen.getByTestId('profile-nickname-input')).toBeTruthy();
+    expect(screen.getByTestId('profile-email-input')).toBeTruthy();
+    expect(screen.getByTestId('profile-phone-input')).toBeTruthy();
+    expect(screen.getByTestId('profile-save')).toBeTruthy();
+    expect(screen.queryByLabelText('编辑资料')).toBeNull();
+
+    expect(StyleSheet.flatten(screen.getByTestId('profile-identity').props.style))
+      .toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+
+    const nickname = screen.getByTestId('profile-nickname');
+    expect(nickname.props.numberOfLines).toBe(1);
+    expect(StyleSheet.flatten(nickname.props.style).flexShrink).toBe(1);
+
+    const email = screen.getByTestId('profile-email');
+    expect(email.props.numberOfLines).toBe(1);
+    expect(email.props.ellipsizeMode).toBe('middle');
+
+    expect(screen.queryByText('邮箱设置')).toBeNull();
+    expect(screen.queryByText('手机号设置')).toBeNull();
+    expect(screen.queryByLabelText('隐私与数据')).toBeNull();
+    expect(screen.queryByLabelText('使用帮助')).toBeNull();
+    expect(screen.queryByLabelText('使用指南')).toBeNull();
+    expect(screen.queryByLabelText('版本信息')).toBeNull();
+
+    await fireEvent.press(screen.getByLabelText('打开设置'));
+    expect(navigation.navigate).toHaveBeenCalledWith('Privacy');
+  });
+
+  it('saves profile changes from the profile page', async () => {
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof ProfileScreen>['navigation'];
+    await render(<ProfileScreen navigation={navigation} />);
+
+    fireEvent.changeText(screen.getByTestId('profile-nickname-input'), '新的昵称');
+    await waitFor(() => expect(screen.getByTestId('profile-nickname-input').props.value).toBe('新的昵称'));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('profile-save'));
+    });
+
+    await waitFor(() => {
+      expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({
+        nickname: '新的昵称',
+        email: longEmail,
+        phone: '13800138000',
+      }));
+    });
+  });
+
+  it('uses neutral status copy for a guest profile', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      profile: { ...profile, email: '', phone: '' },
+      isGuest: true,
+      updateProfile,
+      uploadAvatar,
+      deleteAvatar,
+    });
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof ProfileScreen>['navigation'];
+    await render(<ProfileScreen navigation={navigation} />);
+
+    expect(screen.getByText('未登录账号')).toBeTruthy();
+    expect(screen.queryByText('资料仅保存在本机')).toBeNull();
+    expect(screen.queryByText('资料和日程仅保存在本机')).toBeNull();
+  });
+
+  it('keeps a cached meeting sync error compact and outside list flow', async () => {
+    const refreshMeetings = jest.fn();
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{
+        id: 'meeting-1',
+        title: '缓存会议',
+        date: '2026年7月11日',
+        time: '10:00',
+        duration: '12:00',
+        tags: [],
+        bars: [1, 2, 3],
+      }],
+      loading: false,
+      error: 'network unavailable',
+      deleteMeeting: jest.fn(),
+      refreshMeetings,
+    });
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof MeetingListScreen>['navigation'];
+    await render(<MeetingListScreen navigation={navigation} />);
+
+    expect(screen.getByText('缓存会议')).toBeTruthy();
+    expect(screen.getByLabelText('打开个人资料')).toBeTruthy();
+    expect(screen.getByLabelText('管理讲话人')).toBeTruthy();
+    expect(screen.getByLabelText('打开缓存会议的更多操作')).toBeTruthy();
+    const banner = screen.getByTestId('meeting-cache-error');
+    expect(StyleSheet.flatten(banner.props.style)).toEqual(expect.objectContaining({
+      position: 'absolute',
+      height: 38,
+    }));
+
+    await fireEvent.press(screen.getByLabelText('重新同步会议记录'));
+    expect(refreshMeetings).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the full retry state when no cached meetings exist', async () => {
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [],
+      loading: false,
+      error: 'network unavailable',
+      deleteMeeting: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof MeetingListScreen>['navigation'];
+    await render(<MeetingListScreen navigation={navigation} />);
+
+    expect(screen.queryByTestId('meeting-cache-error')).toBeNull();
+    expect(screen.getByText('会议服务暂时不可用')).toBeTruthy();
+  });
+});

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +21,7 @@ export type AppDialogOptions = {
   tone?: AppDialogTone;
   icon?: IconName;
   actions?: AppDialogAction[];
+  onDismiss?: () => void;
 };
 
 type AppDialogContextValue = {
@@ -69,9 +70,16 @@ function defaultActions(): AppDialogAction[] {
 
 export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   const [dialog, setDialog] = useState<AppDialogOptions | null>(null);
+  const dialogRef = useRef<AppDialogOptions | null>(null);
 
-  const hideDialog = useCallback(() => setDialog(null), []);
+  const hideDialog = useCallback(() => {
+    const current = dialogRef.current;
+    dialogRef.current = null;
+    setDialog(null);
+    current?.onDismiss?.();
+  }, []);
   const showDialog = useCallback((options: AppDialogOptions) => {
+    dialogRef.current = options;
     setDialog(options);
   }, []);
 
@@ -81,6 +89,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   const actions = dialog?.actions?.length ? dialog.actions : defaultActions();
 
   const runAction = async (action: AppDialogAction) => {
+    dialogRef.current = null;
     setDialog(null);
     await action.onPress?.();
   };

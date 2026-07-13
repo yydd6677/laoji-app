@@ -68,7 +68,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--endpoint", default="http://183.36.243.124:18035/api/laoji/parse")
+    parser.add_argument("--endpoint", default="http://127.0.0.1:18035/api/laoji/parse")
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--pause-ms", type=int, default=0)
     args = parser.parse_args()

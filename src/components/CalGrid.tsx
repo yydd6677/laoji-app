@@ -42,6 +42,15 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
   const ptEvts = (d: number) =>
     events.filter(e => !e.spanning && e.startDate === ds(d));
 
+  const dayEventCount = (d: number) => {
+    const key = ds(d);
+    return events.filter(event => (
+      event.spanning && event.endDate
+        ? key >= event.startDate && key <= event.endDate
+        : event.startDate === key
+    )).length;
+  };
+
   const getSpans = (row: Cell[]) => {
     const out: { e: CalEvent; sc: number; ec: number }[] = [];
     for (const e of events) {
@@ -61,20 +70,46 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
     <View style={s.card}>
       {/* Month header */}
       <View style={s.monthRow}>
-        <TouchableOpacity onPress={onPrev} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <TouchableOpacity
+          onPress={onPrev}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="上一个月"
+          testID="calendar-previous-month"
+        >
           <Ionicons name="chevron-back" size={20} color={C.sub} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={onTitle} disabled={!onTitle} style={s.monthTitle}>
+        <TouchableOpacity
+          onPress={onTitle}
+          disabled={!onTitle}
+          style={s.monthTitle}
+          accessibilityRole="button"
+          accessibilityLabel={`打开完整日历，${year}年${month}月`}
+          accessibilityState={{ disabled: !onTitle }}
+          testID="calendar-open-month"
+        >
           <Text style={s.monthText}>{year}年{month}月</Text>
           {onTitle && <Ionicons name="chevron-forward" size={13} color={C.purple} />}
         </TouchableOpacity>
         <View style={s.monthRight}>
-          <TouchableOpacity onPress={onNext} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={onNext}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="下一个月"
+            testID="calendar-next-month"
+          >
             <Ionicons name="chevron-forward" size={20} color={C.sub} />
           </TouchableOpacity>
           {onSearch
             ? (
-              <TouchableOpacity onPress={onSearch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <TouchableOpacity
+                onPress={onSearch}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="搜索日程"
+                testID="calendar-search"
+              >
                 <Ionicons name="search-outline" size={15} color={C.sub} />
               </TouchableOpacity>
             )
@@ -102,12 +137,25 @@ export function CalGrid({ year, month, selDay, onDay, onPrev, onNext, onTitle, o
                 const isSelectedOnly = isSelected && !isToday;
                 const isWeekend = ci >= 5;
                 const evts = cell.cur ? ptEvts(cell.d) : [];
+                const eventCount = cell.cur ? dayEventCount(cell.d) : 0;
+                const dayLabel = cell.cur
+                  ? [
+                      `${year}年${month}月${cell.d}日`,
+                      isToday ? '今天' : '',
+                      isSelected ? '已选择' : '',
+                      eventCount > 0 ? `${eventCount}条日程` : '无日程',
+                    ].filter(Boolean).join('，')
+                  : undefined;
                 return (
                   <TouchableOpacity
                     key={ci}
                     onPress={() => cell.cur && onDay(cell.d)}
+                    disabled={!cell.cur}
                     style={s.cell}
                     activeOpacity={cell.cur ? 0.7 : 1}
+                    accessibilityRole="button"
+                    accessibilityLabel={dayLabel}
+                    accessibilityState={{ disabled: !cell.cur, selected: isSelected }}
                   >
                     <View style={[
                       s.dayMarker,

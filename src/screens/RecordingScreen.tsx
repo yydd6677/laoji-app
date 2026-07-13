@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Share, Modal, ActivityIndicator, GestureResponderEvent } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  GestureResponderEvent,
+  AccessibilityActionEvent,
+} from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,15 +17,18 @@ import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList, TranscriptLine } from '../types';
-import { useMeetings } from '../store/MeetingsStore';
-import { ApiMeetingAudioInfo, fetchMeetingAudioInfo, fetchMeetingTranscript } from '../services/api';
-import { generateSummaryForMeeting, meetingSummaryToText } from '../services/meetingSummary';
+import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
+import { ApiMeetingAudioInfo, fetchMeetingAudioInfo, fetchMeetingSummary, fetchMeetingTranscript } from '../services/api';
+import { meetingSummaryToText } from '../services/meetingSummary';
+import { MeetingShareKind, meetingShareErrorMessage, shareMeetingArtifact } from '../services/meetingShare';
 import { BackHeader, Tag, Waveform } from '../components/Common';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
-import { fallbackMeetingBars, formatDuration, transcriptDurationSec, transcriptToBars } from '../utils/meetingMedia';
+import { formatDuration, shouldReplayAudio, transcriptDurationSec } from '../utils/meetingMedia';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
+import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from '../services/meetingAudioSecurity';
+import { readableErrorMessage } from '../services/errors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Recording'>;
@@ -40,17 +52,17 @@ export function RecordingScreen({ navigation, route }: Props) {
   const { showDialog } = useAppDialog();
   const m = meetings.find(x => x.id === route.params.meetingId);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptLine[]>([]);
-  const [summaryVisible, setSummaryVisible] = useState(false);
   const [summaryText, setSummaryText] = useState('');
-  const [summaryLoading, setSummaryLoading] = useState(false);
   const [audioInfo, setAudioInfo] = useState<ApiMeetingAudioInfo | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState('');
+  const [audioReloadKey, setAudioReloadKey] = useState(0);
   const [isPlaying, setPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [progressWidth, setProgressWidth] = useState(1);
+  const [sharing, setSharing] = useState(false);
   const soundRef = useRef<Audio.Sound | null>(null);
   const meetingId = m?.id;
 
@@ -68,7 +80,9 @@ export function RecordingScreen({ navigation, route }: Props) {
         if (!alive) return;
         const next = items.length > 0 ? items : cached;
         setTranscriptItems(next);
-        if (items.length > 0) void saveCachedTranscript(meetingId, items);
+        if (items.length > 0) {
+          void saveCachedTranscript(meetingId, items).catch(() => {});
+        }
       })
       .catch(() => { if (alive) setTranscriptItems(cached); });
     return () => { alive = false; };
@@ -91,6 +105,7 @@ export function RecordingScreen({ navigation, route }: Props) {
     const fallbackAudio = localAudioInfo(m?.audioLocalUri);
     if (isGuest || !accessToken) {
       setAudioInfo(fallbackAudio);
+      if (m?.audioDurationSec) setDurationMs(Math.round(m.audioDurationSec * 1000));
       setAudioLoading(false);
       return () => { alive = false; };
     }
@@ -99,18 +114,20 @@ export function RecordingScreen({ navigation, route }: Props) {
         if (!alive) return;
         const next = info ?? fallbackAudio;
         setAudioInfo(next);
-        if (next?.duration_sec) setDurationMs(Math.round(next.duration_sec * 1000));
+        const durationSec = next?.duration_sec ?? m?.audioDurationSec;
+        if (durationSec) setDurationMs(Math.round(durationSec * 1000));
       })
-      .catch(() => {
+      .catch(error => {
         if (!alive) return;
         setAudioInfo(fallbackAudio);
-        setAudioError(fallbackAudio ? '' : '录音服务暂时不可用');
+        if (m?.audioDurationSec) setDurationMs(Math.round(m.audioDurationSec * 1000));
+        setAudioError(fallbackAudio ? '' : meetingAudioUrlErrorMessage(error) ?? '录音服务暂时不可用');
       })
       .finally(() => {
         if (alive) setAudioLoading(false);
       });
     return () => { alive = false; };
-  }, [accessToken, isGuest, meetingId, m?.audioLocalUri]);
+  }, [accessToken, audioReloadKey, isGuest, meetingId, m?.audioDurationSec, m?.audioLocalUri]);
 
   useEffect(() => {
     return () => {
@@ -119,12 +136,11 @@ export function RecordingScreen({ navigation, route }: Props) {
     };
   }, []);
 
-  const bars = useMemo(() => {
-    const fromTranscript = transcriptToBars(transcriptItems, 50);
-    return fromTranscript.length > 0 ? fromTranscript : fallbackMeetingBars(meetingId ?? 'meeting', 50);
-  }, [meetingId, transcriptItems]);
+  const bars = useMemo(() => m?.audioBars ?? [], [m?.audioBars]);
   const durationText = formatDuration(transcriptDurationSec(transcriptItems));
-  const audioDurationText = formatDuration(Math.round((durationMs || (audioInfo?.duration_sec ?? 0) * 1000) / 1000));
+  const audioDurationText = formatDuration(Math.round((
+    durationMs || (audioInfo?.duration_sec ?? m?.audioDurationSec ?? 0) * 1000
+  ) / 1000));
   const positionText = formatDuration(Math.round(positionMs / 1000)) === '—' ? '00:00' : formatDuration(Math.round(positionMs / 1000));
   const progress = durationMs > 0 ? Math.min(1, Math.max(0, positionMs / durationMs)) : 0;
 
@@ -144,22 +160,49 @@ export function RecordingScreen({ navigation, route }: Props) {
     setAudioLoading(true);
     setAudioError('');
     try {
+      const isLocalAudio = audioInfo.url.startsWith('file://') || audioInfo.url.startsWith('content://');
+      const sourceUrl = isLocalAudio
+        ? audioInfo.url
+        : validateMeetingAudioUrl(audioInfo.url, {
+          requiresAuth: audioInfo.requires_auth,
+          expiresAt: audioInfo.expires_at,
+        });
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const created = await Audio.Sound.createAsync(
         (audioInfo.requires_auth && accessToken
-          ? { uri: audioInfo.url, headers: { Authorization: `Bearer ${accessToken}` } }
-          : { uri: audioInfo.url }) as any,
+          ? { uri: sourceUrl, headers: { Authorization: `Bearer ${accessToken}` } }
+          : { uri: sourceUrl }) as any,
         { shouldPlay: false, rate: speed, shouldCorrectPitch: true },
         handlePlaybackStatus,
       );
       soundRef.current = created.sound;
       return created.sound;
-    } catch {
-      setAudioError('录音加载失败，请稍后重试');
+    } catch (error) {
+      setAudioInfo(null);
+      setAudioError(meetingAudioUrlErrorMessage(error) ?? '录音加载失败，请稍后重试');
       return null;
     } finally {
       setAudioLoading(false);
     }
+  };
+
+  const failPlayback = async (error: unknown) => {
+    const sound = soundRef.current;
+    soundRef.current = null;
+    if (sound) await sound.unloadAsync().catch(() => {});
+    setPlaying(false);
+    setAudioInfo(null);
+    setAudioError(meetingAudioUrlErrorMessage(error) ?? readableErrorMessage(error, '录音播放失败，请重新获取后再试。'));
+  };
+
+  const retryAudio = async () => {
+    const sound = soundRef.current;
+    soundRef.current = null;
+    if (sound) await sound.unloadAsync().catch(() => {});
+    setPlaying(false);
+    setPositionMs(0);
+    setAudioError('');
+    setAudioReloadKey(value => value + 1);
   };
 
   const togglePlayback = async () => {
@@ -167,22 +210,48 @@ export function RecordingScreen({ navigation, route }: Props) {
       showDialog({ title: '暂无录音文件', message: '当前会议只有转写内容，没有可播放的录音文件。', tone: 'info' });
       return;
     }
-    const sound = await ensureSound();
-    if (!sound) return;
-    if (isPlaying) await sound.pauseAsync();
-    else await sound.playAsync();
+    try {
+      const sound = await ensureSound();
+      if (!sound) return;
+      if (isPlaying) await sound.pauseAsync();
+      else if (shouldReplayAudio(positionMs, durationMs)) await sound.replayAsync();
+      else await sound.playAsync();
+    } catch (error) {
+      await failPlayback(error);
+    }
   };
 
   const handleSeek = async (event: GestureResponderEvent) => {
     if (!durationMs || !soundRef.current) return;
     const ratio = Math.min(1, Math.max(0, event.nativeEvent.locationX / Math.max(1, progressWidth)));
-    await soundRef.current.setPositionAsync(Math.round(durationMs * ratio));
+    try {
+      await soundRef.current.setPositionAsync(Math.round(durationMs * ratio));
+    } catch (error) {
+      await failPlayback(error);
+    }
+  };
+
+  const handleAccessibleSeek = async (event: AccessibilityActionEvent) => {
+    if (!durationMs || !soundRef.current) return;
+    const deltaMs = event.nativeEvent.actionName === 'increment' ? 10_000 : -10_000;
+    const nextPositionMs = Math.min(durationMs, Math.max(0, positionMs + deltaMs));
+    try {
+      await soundRef.current.setPositionAsync(nextPositionMs);
+    } catch (error) {
+      await failPlayback(error);
+    }
   };
 
   const handleSpeed = async () => {
     const next = speed === 1 ? 1.25 : speed === 1.25 ? 1.5 : 1;
     setSpeed(next);
-    if (soundRef.current) await soundRef.current.setRateAsync(next, true);
+    if (soundRef.current) {
+      try {
+        await soundRef.current.setRateAsync(next, true);
+      } catch (error) {
+        await failPlayback(error);
+      }
+    }
   };
 
   if (!m) {
@@ -203,61 +272,59 @@ export function RecordingScreen({ navigation, route }: Props) {
     );
   }
 
-  const handleSummary = async () => {
-    setSummaryVisible(true);
-    if (summaryText) return; // already loaded
-    const cachedText = meetingSummaryToText(getCachedSummary(m.id));
-    if (cachedText) {
-      setSummaryText(cachedText);
-      return;
-    }
-    if (transcriptItems.length === 0) {
-      setSummaryText('该会议暂无转写内容，无法生成总结。');
-      return;
-    }
-    setSummaryLoading(true);
+  const runMeetingShare = async (kind: MeetingShareKind) => {
+    if (sharing) return;
+    setSharing(true);
     try {
-      const generated = await generateSummaryForMeeting({
-        meetingId: m.id,
-        title: m.title,
+      let shareSummary = summaryText || meetingSummaryToText(getCachedSummary(m.id));
+      if (!shareSummary && !isGuest && accessToken && ['bundle', 'document'].includes(kind)) {
+        shareSummary = await fetchMeetingSummary(m.id, accessToken);
+        if (shareSummary) {
+          setSummaryText(shareSummary);
+          await saveCachedSummary(m.id, {
+            meeting_id: m.id,
+            full_text: shareSummary,
+            generated_at: new Date().toISOString(),
+          }).catch(() => {});
+        }
+      }
+      await shareMeetingArtifact(kind, {
+        meeting: m,
         transcriptLines: transcriptItems,
+        summaryText: shareSummary,
         isGuest,
         accessToken,
+        audioInfo,
       });
-      const text = meetingSummaryToText(generated);
-      setSummaryText(text || '暂无总结内容');
-      await saveCachedSummary(m.id, generated);
-    } catch {
-      setSummaryText('获取总结失败，请检查网络后重试');
+    } catch (error) {
+      showDialog({ title: '分享失败', message: meetingShareErrorMessage(error), tone: 'error' });
     } finally {
-      setSummaryLoading(false);
+      setSharing(false);
     }
   };
 
-  const handleShareMeeting = async () => {
-    try {
-      const transcriptText = transcriptItems
-        .map(item => `[${item.speaker_label ?? item.speaker_id ?? '发言人'}] ${item.text}`)
-        .join('\n');
-      const cachedSummary = summaryText || meetingSummaryToText(getCachedSummary(m.id));
-      await Share.share({
-        message: [
-          m.title,
-          [m.date, m.time].filter(Boolean).join(' '),
-          cachedSummary ? `会议总结：\n${cachedSummary}` : '',
-          transcriptText ? `转写内容：\n${transcriptText}` : '',
-        ].filter(Boolean).join('\n\n'),
-      });
-    } catch (_) {}
+  const openShareMenu = () => {
+    if (sharing) return;
+    const audioAvailable = Boolean(audioInfo || m.audioAvailable || m.audioLocalUri);
+    showDialog({
+      title: '分享会议文件',
+      icon: 'share-outline',
+      actions: [
+        { text: '完整资料包', role: 'primary', onPress: () => runMeetingShare('bundle') },
+        { text: '会议文档', role: 'secondary', onPress: () => runMeetingShare('document') },
+        ...(audioAvailable
+          ? [{ text: '录音文件', role: 'secondary' as const, onPress: () => runMeetingShare('audio') }]
+          : []),
+        { text: '取消', role: 'cancel' },
+      ],
+    });
   };
 
   const tiles = [
     { label: '转写', icon: 'document-text-outline' as const, bg: '#EEF3FF', color: C.blue,
-      onPress: () => navigation.navigate('Transcription', { meetingId: m.id }) },
+      onPress: () => navigation.navigate('Transcription', { meetingId: m.id, focus: 'transcript' }) },
     { label: '总结', icon: 'clipboard-outline' as const, bg: '#FFF4E8', color: C.orange,
-      onPress: handleSummary },
-    { label: '分享', icon: 'share-outline' as const, bg: '#E8FAFC', color: C.teal,
-      onPress: handleShareMeeting },
+      onPress: () => navigation.navigate('Transcription', { meetingId: m.id, focus: 'summary' }) },
     { label: '删除', icon: 'trash-outline' as const, bg: '#FFF0F0', color: C.red,
       onPress: () => {
         showDialog({
@@ -272,8 +339,21 @@ export function RecordingScreen({ navigation, route }: Props) {
                 try {
                   await deleteMeeting(m.id);
                   openMeetingsTab(navigation);
-                } catch {
-                  showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
+                } catch (error) {
+                  if (error instanceof MeetingDeletionCleanupError) {
+                    openMeetingsTab(navigation);
+                    showDialog({
+                      title: '会议已删除，清理未完成',
+                      message: error.message,
+                      tone: 'warning',
+                    });
+                  } else {
+                    showDialog({
+                      title: '删除失败',
+                      message: readableErrorMessage(error, '请检查网络后重试。'),
+                      tone: 'error',
+                    });
+                  }
                 }
               },
             },
@@ -288,9 +368,18 @@ export function RecordingScreen({ navigation, route }: Props) {
       <BackHeader
         title="录音详情"
         onBack={() => navigation.goBack()}
-        right={<TouchableOpacity onPress={handleShareMeeting} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
-          <Ionicons name="share-outline" size={20} color={C.sub} />
-        </TouchableOpacity>}
+        right={sharing
+          ? <ActivityIndicator size="small" color={C.purple} />
+          : <TouchableOpacity
+            onPress={openShareMenu}
+            hitSlop={{ top:8,bottom:8,left:8,right:8 }}
+            accessible
+            accessibilityRole="button"
+            accessibilityLabel="分享会议资料"
+            testID="recording-share-menu"
+          >
+            <Ionicons name="share-outline" size={20} color={C.sub} accessible={false} />
+          </TouchableOpacity>}
       />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         {/* Title */}
@@ -298,9 +387,12 @@ export function RecordingScreen({ navigation, route }: Props) {
           <Text style={s.title}>{m.title}</Text>
           <TouchableOpacity
             hitSlop={{ top:8,bottom:8,left:8,right:8 }}
-            onPress={() => navigation.navigate('Transcription', { meetingId: m.id })}
+            onPress={() => navigation.navigate('Transcription', { meetingId: m.id, focus: 'title' })}
+            accessible
+            accessibilityRole="button"
+            accessibilityLabel="编辑会议标题"
           >
-            <Ionicons name="pencil-outline" size={15} color={C.sub} />
+            <Ionicons name="pencil-outline" size={15} color={C.sub} accessible={false} />
           </TouchableOpacity>
         </View>
         <Text style={s.meta}>{[m.date, m.time].filter(Boolean).join('　')}</Text>
@@ -310,7 +402,14 @@ export function RecordingScreen({ navigation, route }: Props) {
 
         <View style={s.playerCard}>
           <View style={s.waveWrap}>
-            <Waveform bars={bars} color={audioInfo ? C.purple : C.faint} height={64} splitAt={audioInfo ? Math.floor(bars.length * progress) : undefined} />
+            {bars.length > 0 ? (
+              <Waveform bars={bars} color={audioInfo ? C.purple : C.faint} height={64} splitAt={audioInfo ? Math.floor(bars.length * progress) : undefined} />
+            ) : (
+              <View style={s.noWaveform}>
+                <Ionicons name="pulse-outline" size={18} color={C.faint} />
+                <Text style={s.noWaveformText}>暂无可用波形数据</Text>
+              </View>
+            )}
           </View>
           {audioLoading && !audioInfo ? (
             <View style={s.audioState}>
@@ -320,10 +419,25 @@ export function RecordingScreen({ navigation, route }: Props) {
           ) : audioInfo ? (
             <>
               <View style={s.playerTop}>
-                <TouchableOpacity style={s.playBtn} onPress={togglePlayback} activeOpacity={0.86}>
-                  {audioLoading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name={isPlaying ? 'pause' : 'play'} size={22} color="#fff" />}
+                <TouchableOpacity
+                  style={s.playBtn}
+                  onPress={togglePlayback}
+                  activeOpacity={0.86}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlaying ? '暂停会议录音' : '播放会议录音'}
+                >
+                  {audioLoading
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Ionicons name={isPlaying ? 'pause' : 'play'} size={22} color="#fff" accessible={false} />}
                 </TouchableOpacity>
-                <TouchableOpacity style={s.speedBtn} onPress={handleSpeed}>
+                <TouchableOpacity
+                  style={s.speedBtn}
+                  onPress={handleSpeed}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={`播放速度 ${speed} 倍，点击切换`}
+                >
                   <Text style={s.speedText}>{speed}x</Text>
                 </TouchableOpacity>
               </View>
@@ -332,6 +446,15 @@ export function RecordingScreen({ navigation, route }: Props) {
                 onLayout={event => setProgressWidth(event.nativeEvent.layout.width)}
                 onPress={handleSeek}
                 activeOpacity={0.8}
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="录音播放进度"
+                accessibilityValue={{ min: 0, max: durationMs, now: positionMs, text: `${positionText} / ${audioDurationText}` }}
+                accessibilityActions={[
+                  { name: 'decrement', label: '后退 10 秒' },
+                  { name: 'increment', label: '前进 10 秒' },
+                ]}
+                onAccessibilityAction={handleAccessibleSeek}
               >
                 <View style={[s.progressFill, { width: `${progress * 100}%` }]} />
               </TouchableOpacity>
@@ -349,26 +472,34 @@ export function RecordingScreen({ navigation, route }: Props) {
               <View style={s.audioState}>
                 <Ionicons name="information-circle-outline" size={16} color={C.sub} />
                 <Text style={s.audioStateText}>{audioError || '仅有转写，无录音文件'}</Text>
+                {audioError ? (
+                  <TouchableOpacity
+                    style={s.audioRetryButton}
+                    onPress={retryAudio}
+                    accessibilityRole="button"
+                    accessibilityLabel="重试获取会议录音"
+                    testID="meeting-audio-retry"
+                  >
+                    <Ionicons name="refresh" size={16} color={C.purple} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </>
           )}
-          <View style={s.recordingActions}>
-            <TouchableOpacity
-              style={s.recordingAction}
-              onPress={() => navigation.navigate('Transcription', { meetingId: m.id })}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="document-text-outline" size={16} color={C.purple} />
-              <Text style={s.recordingActionText}>查看转写</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
-        {/* 2×2 tiles */}
         <View style={s.tileGrid}>
           {tiles.map(({ label, icon, bg, color, onPress }) => (
-            <TouchableOpacity key={label} style={[s.tile, { backgroundColor: bg }]} onPress={onPress} activeOpacity={0.8}>
-              <Ionicons name={icon} size={30} color={color} />
+            <TouchableOpacity
+              key={label}
+              style={[s.tile, { backgroundColor: bg }]}
+              onPress={onPress}
+              activeOpacity={0.8}
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={label === '删除' ? '删除会议' : `查看会议${label}`}
+            >
+              <Ionicons name={icon} size={27} color={color} accessible={false} />
               <Text style={s.tileLabel}>{label}</Text>
             </TouchableOpacity>
           ))}
@@ -382,22 +513,6 @@ export function RecordingScreen({ navigation, route }: Props) {
         onMic={() => navigation.navigate('MeetingLive')}
       />
 
-      {/* AI Summary Modal */}
-      <Modal visible={summaryVisible} transparent animationType="slide" onRequestClose={() => setSummaryVisible(false)}>
-        <View style={s.modalOverlay}>
-          <View style={s.modalSheet}>
-            <View style={s.modalHandle} />
-            <Text style={s.modalTitle}>会议总结</Text>
-            {summaryLoading
-              ? <ActivityIndicator size="large" color={C.purple} style={{ marginVertical: 30 }} />
-              : <Text style={s.modalBody}>{summaryText}</Text>
-            }
-            <TouchableOpacity style={s.modalClose} onPress={() => setSummaryVisible(false)}>
-              <Text style={s.modalCloseTxt}>关闭</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </ScreenContainer>
   );
 }
@@ -405,7 +520,7 @@ export function RecordingScreen({ navigation, route }: Props) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.appBg },
   scroll: { flex: 1 },
-  content: { padding: 20, paddingTop: 22 },
+  content: { padding: 20, paddingTop: 22, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 8 },
   emptyText: { fontSize: 13, color: C.sub, lineHeight: 20 },
@@ -415,6 +530,8 @@ const s = StyleSheet.create({
   tags: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 24 },
   playerCard: { backgroundColor: C.waveformBg, borderRadius: 20, padding: 20, paddingBottom: 18, marginBottom: 22 },
   waveWrap: { marginBottom: 14 },
+  noWaveform: { height: 64, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.5)', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+  noWaveformText: { fontSize: 12, color: C.faint, fontWeight: '600' },
   timeLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
   timeText: { fontSize: 12, color: C.sub },
   playerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
@@ -424,19 +541,9 @@ const s = StyleSheet.create({
   progressTrack: { height: 10, borderRadius: 5, backgroundColor: '#E2DBF4', marginBottom: 10, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 5, backgroundColor: C.purple },
   audioState: { minHeight: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.62)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginBottom: 14, paddingHorizontal: 12 },
-  audioStateText: { fontSize: 12, color: C.sub, fontWeight: '600' },
-  recordingActions: { flexDirection: 'row', justifyContent: 'center' },
-  recordingAction: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.purpleLight, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9 },
-  recordingActionText: { fontSize: 13, color: C.purple, fontWeight: '700' },
+  audioStateText: { flex: 1, fontSize: 12, color: C.sub, fontWeight: '600' },
+  audioRetryButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  tile: { width: '47%', height: 96, borderRadius: 18, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  tileLabel: { fontSize: 15, fontWeight: '600', color: C.text },
-  // Summary modal
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
-  modalSheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 36, maxHeight: '80%' },
-  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0D8F0', alignSelf: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#1C1B33', marginBottom: 16 },
-  modalBody: { fontSize: 14, color: '#1C1B33', lineHeight: 22 },
-  modalClose: { marginTop: 24, backgroundColor: '#7B5CB8', borderRadius: 20, paddingVertical: 12, alignItems: 'center' },
-  modalCloseTxt: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  tile: { flex: 1, minWidth: 86, height: 88, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 7 },
+  tileLabel: { fontSize: 14, fontWeight: '600', color: C.text },
 });

@@ -1,23 +1,40 @@
 import React, { useState, useRef } from 'react';
 import {
   Modal, View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors as C } from '../theme/colors';
-import { clarifyText, parseAudio, parseText, ParseResult } from '../services/api';
+import {
+  ApiGuestRealtimeSession,
+  clarifyText,
+  createGuestRealtimeSession,
+  deleteGuestRealtimeSession,
+  parseAudio,
+  parseText,
+  ParseResult,
+} from '../services/api';
 import {
   RealtimeAsrAudioStats,
   RealtimeAsrSession,
   RealtimeAsrTranscript,
-  selectRealtimeScheduleText,
   startRealtimeAsr,
 } from '../services/realtimeAsr';
+import {
+  ScheduleTranscriptSegment,
+  appendScheduleTranscriptSegment,
+  scheduleTranscriptDisplayText,
+  scheduleTranscriptText,
+} from '../services/scheduleTranscript';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
+import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
+import { diagnosticWarn } from '../services/diagnostics';
 
 interface Props {
   visible: boolean;
@@ -25,18 +42,24 @@ interface Props {
   onSaved: () => void;
 }
 
-type Step = 'input' | 'recording' | 'parsing' | 'confirm' | 'saving';
+type Step = 'input' | 'connecting' | 'recording' | 'parsing' | 'confirm' | 'saving';
 type RecordingMode = 'realtime' | 'file';
 type AudioLevelSummary = { frameCount: number; maxPeak: number; maxRms: number };
-type TranscriptSegment = {
-  text: string;
-  receivedAt: number;
-  startTime?: number;
-  endTime?: number;
-};
 
 const LOW_AUDIO_PEAK = 1000;
 const LOW_AUDIO_RMS = 280;
+const ERROR_LINE_HEIGHT = 17;
+const ERROR_SLOT_HEIGHT = ERROR_LINE_HEIGHT * 2;
+
+async function discardScheduleRecording(uri: string | undefined): Promise<void> {
+  if (!uri) return;
+  const normalizedUri = uri.includes('://') ? uri : `file://${uri}`;
+  try {
+    await FileSystem.deleteAsync(normalizedUri, { idempotent: true });
+  } catch {
+    diagnosticWarn('schedule realtime audio cleanup failed');
+  }
+}
 
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const { addEvent, refreshEvents } = useEvents();
@@ -48,11 +71,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const [error, setError]       = useState('');
   const recordingRef            = useRef<Audio.Recording | null>(null);
   const realtimeRef             = useRef<RealtimeAsrSession | null>(null);
+  const realtimeAuthorizationRef = useRef<ApiGuestRealtimeSession | null>(null);
   const recordingModeRef        = useRef<RecordingMode | null>(null);
   const recordingRunRef         = useRef(0);
+  const recordingStartRef       = useRef(false);
+  const recordingStopRef        = useRef(false);
+  const createRequestRef        = useRef(createClientRequestState('event'));
   const transcriptRef           = useRef('');
-  const transcriptChunksRef     = useRef<string[]>([]);
-  const transcriptSegmentsRef   = useRef<TranscriptSegment[]>([]);
+  const transcriptSegmentsRef   = useRef<ScheduleTranscriptSegment[]>([]);
   const audioLevelRef           = useRef<AudioLevelSummary>({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const [recordingMode, setRecordingMode] = useState<RecordingMode | null>(null);
 
@@ -65,10 +91,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setError('');
     setRecordingMode(null);
     transcriptRef.current = '';
-    transcriptChunksRef.current = [];
     transcriptSegmentsRef.current = [];
     audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
     recordingModeRef.current = null;
+    recordingStartRef.current = false;
+    recordingStopRef.current = false;
+    createRequestRef.current = createClientRequestState('event');
   };
   const close = () => {
     recordingRunRef.current += 1;
@@ -83,6 +111,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setDraft(null);
     setClarifyAnswer('');
     setError('');
+    createRequestRef.current = createClientRequestState('event');
+  };
+
+  const acceptNewDraft = (result: ParseResult) => {
+    createRequestRef.current = createClientRequestState('event');
+    setDraft(result);
   };
   const voiceErrorText = (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err ?? '');
@@ -96,28 +130,22 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     return message ? `语音识别失败：${message}` : '语音识别失败，请重试';
   };
 
-  const setTranscriptSegments = (segments: TranscriptSegment[]) => {
+  const setTranscriptSegments = (segments: ScheduleTranscriptSegment[]) => {
     transcriptSegmentsRef.current = segments;
-    const nextText = segments.map(segment => segment.text).join('\n');
-    transcriptRef.current = nextText;
-    setText(nextText);
+    transcriptRef.current = scheduleTranscriptText(segments);
+    setText(scheduleTranscriptDisplayText(segments));
   };
 
   const appendRealtimeTranscript = (transcript: RealtimeAsrTranscript) => {
     const clean = transcript.text.trim();
     if (!clean) return;
-    const chunks = [...transcriptChunksRef.current, clean];
-    const selected = selectRealtimeScheduleText(chunks);
-    if (!selected) return;
-
-    transcriptChunksRef.current = chunks;
-    const now = Date.now();
-    setTranscriptSegments([{
-      text: selected,
-      receivedAt: now,
+    const segments = appendScheduleTranscriptSegment(transcriptSegmentsRef.current, {
+      text: clean,
+      receivedAt: Date.now(),
       startTime: transcript.startTime,
       endTime: transcript.endTime,
-    }]);
+    });
+    setTranscriptSegments(segments);
   };
 
   const noteRealtimeAudioStats = (stats: RealtimeAsrAudioStats) => {
@@ -139,17 +167,37 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     return '未识别到语音内容，请靠近麦克风再说一次';
   };
 
+  const releaseRealtimeAuthorization = async (
+    authorization: ApiGuestRealtimeSession | null = realtimeAuthorizationRef.current,
+  ) => {
+    if (!authorization) return;
+    if (realtimeAuthorizationRef.current === authorization) {
+      realtimeAuthorizationRef.current = null;
+    }
+    try {
+      await deleteGuestRealtimeSession(
+        authorization.meeting_id,
+        authorization.guest_token,
+      );
+    } catch (err) {
+      diagnosticWarn('schedule realtime authorization cleanup failed', err);
+    }
+  };
+
   const stopActiveRecordingSilently = async () => {
+    recordingStopRef.current = true;
     const realtime = realtimeRef.current;
     const recording = recordingRef.current;
+    const authorization = realtimeAuthorizationRef.current;
     realtimeRef.current = null;
     recordingRef.current = null;
+    realtimeAuthorizationRef.current = null;
     recordingModeRef.current = null;
     setRecordingMode(null);
 
     if (realtime) {
       try {
-        await realtime.stop();
+        await discardScheduleRecording(await realtime.stop());
       } catch {
         // Closing the modal should never block on recorder cleanup.
       }
@@ -161,6 +209,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         // The recording may already be unloaded.
       }
     }
+    await releaseRealtimeAuthorization(authorization);
   };
 
   // ── Text submit ────────────────────────────────────────────────────────────
@@ -169,32 +218,49 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('parsing'); setError('');
     try {
       const result = await parseText(text.trim());
-      setDraft(result); setStep('confirm');
-    } catch (e: any) {
+      acceptNewDraft(result); setStep('confirm');
+    } catch {
       setError('解析失败，请检查网络'); setStep('input');
     }
   };
 
   // ── Voice recording ────────────────────────────────────────────────────────
   const startRecording = async () => {
+    if (recordingStartRef.current || recordingModeRef.current) return;
+    recordingStartRef.current = true;
+    recordingStopRef.current = false;
+    const runId = recordingRunRef.current + 1;
+    recordingRunRef.current = runId;
+    setStep('connecting');
+    setError('');
     try {
-      const runId = recordingRunRef.current + 1;
-      recordingRunRef.current = runId;
       const permission = await Audio.requestPermissionsAsync();
+      if (recordingRunRef.current !== runId) return;
       if (!permission.granted) {
+        setStep('input');
         showDialog({ title: '无法录音', message: '请在系统设置中允许麦克风权限', tone: 'warning' });
         return;
       }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      if (recordingRunRef.current !== runId) return;
       setError('');
       setText('');
       transcriptRef.current = '';
-      transcriptChunksRef.current = [];
       transcriptSegmentsRef.current = [];
       audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
 
+      let authorization: ApiGuestRealtimeSession | null = null;
       try {
+        authorization = await createGuestRealtimeSession('日程语音输入');
+        if (recordingRunRef.current !== runId) {
+          await releaseRealtimeAuthorization(authorization);
+          return;
+        }
+        realtimeAuthorizationRef.current = authorization;
         const realtime = await startRealtimeAsr({
+          meetingId: authorization.meeting_id,
+          guestToken: authorization.guest_token,
+          purpose: 'schedule',
           onTranscript: transcript => {
             if (recordingRunRef.current === runId) appendRealtimeTranscript(transcript);
           },
@@ -203,39 +269,95 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           },
           onError: err => {
             if (recordingRunRef.current !== runId) return;
-            console.warn('realtime voice recognition warning', err);
+            diagnosticWarn('realtime voice recognition warning', err);
             if (recordingModeRef.current === 'realtime') setError(voiceErrorText(err));
           },
         });
+        if (recordingRunRef.current !== runId) {
+          await discardScheduleRecording(await realtime.stop());
+          await releaseRealtimeAuthorization(authorization);
+          return;
+        }
         realtimeRef.current = realtime;
         recordingModeRef.current = 'realtime';
         setRecordingMode('realtime');
         setStep('recording');
+        void realtime.completion.then(async completion => {
+          if (
+            completion.reason !== 'connection-closed'
+            || recordingRunRef.current !== runId
+            || realtimeRef.current !== realtime
+            || recordingStopRef.current
+          ) return;
+          const audioUri = await realtime.stop().catch(() => undefined);
+          await discardScheduleRecording(audioUri);
+          await releaseRealtimeAuthorization(authorization);
+          if (
+            recordingRunRef.current !== runId
+            || realtimeRef.current !== realtime
+            || recordingStopRef.current
+          ) return;
+          realtimeRef.current = null;
+          recordingModeRef.current = null;
+          setRecordingMode(null);
+          const transcribed = transcriptRef.current.trim();
+          if (transcribed) setText(transcribed);
+          setError(transcribed
+            ? '实时连接已断开，已保留识别内容，可直接解析或重新录音'
+            : '实时语音接口连接失败，请确认手机网络能访问服务器');
+          setStep('input');
+        }).catch(err => {
+          if (recordingRunRef.current !== runId || realtimeRef.current !== realtime) return;
+          void releaseRealtimeAuthorization(authorization);
+          setError(voiceErrorText(err));
+          setStep('input');
+          realtimeRef.current = null;
+          recordingModeRef.current = null;
+          setRecordingMode(null);
+        });
         return;
       } catch (realtimeErr) {
-        console.warn('realtime voice unavailable, falling back to file recording', realtimeErr);
+        diagnosticWarn('realtime voice unavailable, falling back to file recording', realtimeErr);
+        await releaseRealtimeAuthorization(authorization);
+        if (recordingRunRef.current !== runId) return;
+        if (realtimeErr instanceof Error && realtimeErr.message.includes('microphone is already in use')) {
+          throw realtimeErr;
+        }
       }
 
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
+      if (recordingRunRef.current !== runId) {
+        await recording.stopAndUnloadAsync().catch(() => {});
+        return;
+      }
       recordingRef.current = recording;
       recordingModeRef.current = 'file';
       setRecordingMode('file');
       setStep('recording');
     } catch (err) {
-      console.warn('recording start failed', err);
-      showDialog({ title: '无法录音', message: '请检查麦克风权限', tone: 'warning' });
+      diagnosticWarn('recording start failed', err);
+      if (recordingRunRef.current === runId) {
+        setStep('input');
+        const message = err instanceof Error && err.message.includes('microphone is already in use')
+          ? '麦克风正在被另一个录音任务使用，请先结束后再试'
+          : '请检查麦克风权限';
+        showDialog({ title: '无法录音', message, tone: 'warning' });
+      }
+    } finally {
+      if (recordingRunRef.current === runId) recordingStartRef.current = false;
     }
   };
 
   const stopRecording = async () => {
+    recordingStopRef.current = true;
     if (recordingModeRef.current === 'realtime') {
       const realtime = realtimeRef.current;
       if (!realtime) return;
       setStep('parsing');
       try {
-        await realtime.stop();
+        await discardScheduleRecording(await realtime.stop());
         const transcribed = transcriptRef.current.trim();
         realtimeRef.current = null;
         recordingModeRef.current = null;
@@ -247,15 +369,17 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
         setText(transcribed);
         const result = await parseText(transcribed);
-        setDraft(result);
+        acceptNewDraft(result);
         setStep('confirm');
       } catch (err) {
-        console.warn('realtime voice recognition failed', err);
+        diagnosticWarn('realtime voice recognition failed', err);
         setError(voiceErrorText(err));
         setStep('input');
         realtimeRef.current = null;
         recordingModeRef.current = null;
         setRecordingMode(null);
+      } finally {
+        await releaseRealtimeAuthorization();
       }
       return;
     }
@@ -273,9 +397,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const transcribed = result.raw_text ?? '';
       if (!transcribed.trim()) { setError('未识别到语音内容'); setStep('input'); return; }
       setText(transcribed);
-      setDraft(result); setStep('confirm');
+      acceptNewDraft(result); setStep('confirm');
     } catch (err) {
-      console.warn('voice recognition failed', err);
+      diagnosticWarn('voice recognition failed', err);
       setError(voiceErrorText(err)); setStep('input');
       recordingRef.current = null;
       recordingModeRef.current = null;
@@ -310,14 +434,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('saving');
     try {
       const category = normalizeEventCategory(draft.category);
-      await addEvent({
+      const eventPayload = {
         title:       draft.title,
         startDate:   draft.start_date,
         endDate:     draft.end_date ?? undefined,
         startTime:   draft.start_time ?? undefined,
         endTime:     draft.end_time ?? undefined,
         isAllDay:    draft.is_all_day,
-        repeat:      draft.event_type !== 'once' ? draft.event_type as any : undefined,
+        repeat:      draft.event_type !== 'once' ? draft.event_type : undefined,
         description: draft.description ?? undefined,
         rawText:     draft.raw_text ?? text,
         location:    draft.location ?? undefined,
@@ -327,7 +451,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         spanning:    draft.spanning ?? Boolean(draft.end_date && draft.end_date !== draft.start_date),
         reminderMinutes: draft.reminder_minutes ?? null,
         color:       colorForEvent({ category }),
-      });
+      };
+      createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', eventPayload);
+      await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
       // Refresh calendar for the month of the saved event
       const [y, m] = draft.start_date.split('-').map(Number);
       await refreshEvents(y, m);
@@ -356,18 +482,23 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       <KeyboardAvoidingView
         style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={s.sheet}>
+        <SafeAreaView
+          style={[s.sheet, step === 'confirm' && s.confirmSheet]}
+          edges={['bottom']}
+          testID="schedule-voice-sheet"
+        >
           {/* Handle */}
           <View style={s.handle} />
 
           {/* ── Input step ── */}
-          {(step === 'input' || step === 'recording') && (
+          {(step === 'input' || step === 'connecting' || step === 'recording') && (
             <>
               <Text style={s.title}>说出你的日常</Text>
               <Text style={s.hint}>例如：明天下午三点开会，下周一提醒我发周报</Text>
 
               <TextInput
                 style={s.textBox}
+                testID="schedule-voice-input"
                 placeholder="输入或说出日程内容…"
                 placeholderTextColor={C.faint}
                 value={text}
@@ -377,15 +508,19 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 editable={step === 'input'}
               />
 
-              <View style={s.errorSlot}>
-                {error ? <Text style={s.errText}>{error}</Text> : null}
+              <View style={s.errorSlot} testID="schedule-voice-error-slot">
+                {error ? <Text style={s.errText} numberOfLines={2}>{error}</Text> : null}
               </View>
 
               <View style={s.actionDock}>
                 <View style={s.actionSide}>
-                  {step === 'recording' && (
+                  {(step === 'connecting' || step === 'recording') && (
                     <Text style={s.recordingLabel} numberOfLines={2}>
-                      {recordingMode === 'realtime' ? '实时识别中，点击停止' : '录音中，点击停止'}
+                      {step === 'connecting'
+                        ? '正在连接语音服务'
+                        : recordingMode === 'realtime'
+                          ? '实时识别中，点击停止'
+                          : '录音中，点击停止'}
                     </Text>
                   )}
                 </View>
@@ -393,16 +528,34 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 <TouchableOpacity
                   style={s.micTouch}
                   onPress={step === 'recording' ? stopRecording : startRecording}
+                  disabled={step === 'connecting'}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={step === 'recording'
+                    ? '停止语音输入'
+                    : step === 'connecting'
+                      ? '正在连接语音服务'
+                      : '开始语音输入'}
+                  accessibilityState={{
+                    disabled: step === 'connecting',
+                    busy: step === 'connecting',
+                  }}
+                  testID={step === 'recording'
+                    ? 'schedule-voice-stop'
+                    : step === 'connecting'
+                      ? 'schedule-voice-connecting'
+                      : 'schedule-voice-start'}
                 >
                   <LinearGradient
                     colors={step === 'recording' ? ['#FF4D4F','#CC2222'] : [C.gradFrom, C.gradTo]}
                     style={s.micBtn}
                   >
-                    <Ionicons
-                      name={step === 'recording' ? 'stop' : 'mic'}
-                      size={26} color="#fff"
-                    />
+                    {step === 'connecting'
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Ionicons
+                          name={step === 'recording' ? 'stop' : 'mic'}
+                          size={26} color="#fff"
+                        />}
                   </LinearGradient>
                 </TouchableOpacity>
 
@@ -430,108 +583,125 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 
           {/* ── Confirm step ── */}
           {step === 'confirm' && draft && (
-            <>
+            <View style={s.confirmStep}>
               <Text style={s.title}>确认日程</Text>
 
-              {draft.needs_clarification && draft.clarification_question && (
-                <>
-                  <View style={s.clarifyBox}>
-                    <Ionicons name="help-circle-outline" size={16} color={C.orange} />
-                    <Text style={s.clarifyTxt}>{draft.clarification_question}</Text>
-                  </View>
-                  <View style={s.clarifyAnswerRow}>
-                    <TextInput
-                      style={s.clarifyInput}
-                      value={clarifyAnswer}
-                      onChangeText={setClarifyAnswer}
-                      placeholder="补充答案"
-                      placeholderTextColor={C.faint}
-                      returnKeyType="done"
-                      onSubmitEditing={handleClarify}
-                    />
-                    <TouchableOpacity
-                      onPress={handleClarify}
-                      disabled={!clarifyAnswer.trim()}
-                      style={[s.clarifyBtn, !clarifyAnswer.trim() && { opacity: 0.4 }]}
-                    >
-                      <Text style={s.clarifyBtnText}>补充解析</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-
-              <View style={s.draftCard}>
-                {text.trim() && (
-                  <View style={s.recognizedBox}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.sub} />
-                    <Text style={s.recognizedText}>{text.trim()}</Text>
-                  </View>
+              <ScrollView
+                style={s.confirmScroll}
+                contentContainerStyle={s.confirmScrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                testID="schedule-voice-confirm-scroll"
+              >
+                {draft.needs_clarification && draft.clarification_question && (
+                  <>
+                    <View style={s.clarifyBox}>
+                      <Ionicons name="help-circle-outline" size={16} color={C.orange} />
+                      <Text style={s.clarifyTxt}>{draft.clarification_question}</Text>
+                    </View>
+                    <View style={s.clarifyAnswerRow}>
+                      <TextInput
+                        style={s.clarifyInput}
+                        value={clarifyAnswer}
+                        onChangeText={setClarifyAnswer}
+                        placeholder="补充答案"
+                        placeholderTextColor={C.faint}
+                        returnKeyType="done"
+                        onSubmitEditing={handleClarify}
+                      />
+                      <TouchableOpacity
+                        onPress={handleClarify}
+                        disabled={!clarifyAnswer.trim()}
+                        style={[s.clarifyBtn, !clarifyAnswer.trim() && { opacity: 0.4 }]}
+                      >
+                        <Text style={s.clarifyBtnText}>补充解析</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
                 )}
-                <Text style={s.draftTitle}>{draft.title}</Text>
-                <View style={s.draftRow}>
-                  <Ionicons name="calendar-outline" size={14} color={C.sub} />
-                  <Text style={s.draftVal}>{fmtDateRange(draft)}</Text>
-                </View>
-                <View style={s.draftRow}>
-                  <Ionicons name="time-outline" size={14} color={C.sub} />
-                  <Text style={s.draftVal}>{fmtTime(draft.start_time)}
-                    {draft.end_time ? ` – ${draft.end_time}` : ''}
+
+                <View style={s.draftCard}>
+                  {text.trim() && (
+                    <View style={s.recognizedBox}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.sub} />
+                      <Text style={s.recognizedText} testID="schedule-voice-transcript">{text.trim()}</Text>
+                    </View>
+                  )}
+                  <Text style={s.draftTitle} testID="schedule-voice-draft-title">{draft.title}</Text>
+                  <View style={s.draftRow}>
+                    <Ionicons name="calendar-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{fmtDateRange(draft)}</Text>
+                  </View>
+                  <View style={s.draftRow}>
+                    <Ionicons name="time-outline" size={14} color={C.sub} />
+                    <Text style={s.draftVal}>{fmtTime(draft.start_time)}
+                      {draft.end_time ? ` – ${draft.end_time}` : ''}
+                    </Text>
+                  </View>
+                  {draft.description && (
+                    <View style={s.draftRow}>
+                      <Ionicons name="document-text-outline" size={14} color={C.sub} />
+                      <Text style={s.draftVal}>{draft.description}</Text>
+                    </View>
+                  )}
+                  {draft.detail && draft.detail !== draft.description && (
+                    <View style={s.draftRow}>
+                      <Ionicons name="reader-outline" size={14} color={C.sub} />
+                      <Text style={s.draftVal}>{draft.detail}</Text>
+                    </View>
+                  )}
+                  {draft.location && (
+                    <View style={s.draftRow}>
+                      <Ionicons name="location-outline" size={14} color={C.sub} />
+                      <Text style={s.draftVal}>{draft.location}</Text>
+                    </View>
+                  )}
+                  {draft.category && (
+                    <View style={s.draftRow}>
+                      <Ionicons name="pricetag-outline" size={14} color={C.sub} />
+                      <Text style={s.draftVal}>{draft.category}</Text>
+                    </View>
+                  )}
+                  {draft.status && (
+                    <View style={s.draftRow}>
+                      <Ionicons name="ellipse-outline" size={14} color={C.sub} />
+                      <Text style={s.draftVal}>{draft.status}</Text>
+                    </View>
+                  )}
+                  <Text style={s.draftMeta}>
+                    {sourceLabel(draft.parse_source)}
                   </Text>
                 </View>
-                {draft.description && (
-                  <View style={s.draftRow}>
-                    <Ionicons name="document-text-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{draft.description}</Text>
-                  </View>
-                )}
-                {draft.detail && draft.detail !== draft.description && (
-                  <View style={s.draftRow}>
-                    <Ionicons name="reader-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{draft.detail}</Text>
-                  </View>
-                )}
-                {draft.location && (
-                  <View style={s.draftRow}>
-                    <Ionicons name="location-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{draft.location}</Text>
-                  </View>
-                )}
-                {draft.category && (
-                  <View style={s.draftRow}>
-                    <Ionicons name="pricetag-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{draft.category}</Text>
-                  </View>
-                )}
-                {draft.status && (
-                  <View style={s.draftRow}>
-                    <Ionicons name="ellipse-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{draft.status}</Text>
-                  </View>
-                )}
-                <Text style={s.draftMeta}>
-                  {sourceLabel(draft.parse_source)}
-                </Text>
+              </ScrollView>
+
+              <View style={s.errorSlot} testID="schedule-voice-error-slot">
+                {error ? <Text style={s.errText} numberOfLines={2}>{error}</Text> : null}
               </View>
 
-              {error ? <Text style={s.errText}>{error}</Text> : null}
-
-              <View style={s.confirmRow}>
+              <View style={s.confirmRow} testID="schedule-voice-confirm-actions">
                 <TouchableOpacity style={s.cancelBtn} onPress={returnToInput}>
                   <Text style={s.cancelTxt}>重新输入</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSave} activeOpacity={0.85}>
+                <TouchableOpacity style={s.saveTouch} onPress={handleSave} activeOpacity={0.85}>
                   <LinearGradient colors={[C.gradFrom, C.gradTo]} style={s.saveBtn}>
                     <Text style={s.saveTxt}>保存日程</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
-            </>
+            </View>
           )}
 
-          <TouchableOpacity style={s.closeBtn} onPress={close} hitSlop={{ top:10,bottom:10,left:10,right:10 }}>
+          <TouchableOpacity
+            style={s.closeBtn}
+            onPress={close}
+            hitSlop={{ top:10,bottom:10,left:10,right:10 }}
+            accessibilityRole="button"
+            accessibilityLabel="关闭语音输入"
+            testID="schedule-voice-close"
+          >
             <Ionicons name="close" size={20} color={C.sub} />
           </TouchableOpacity>
-        </View>
+        </SafeAreaView>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -540,12 +710,16 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 const s = StyleSheet.create({
   overlay:      { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
   sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36, minHeight: 320 },
+  confirmSheet: { minHeight: 0, maxHeight: '92%' },
+  confirmStep:  { flexShrink: 1, minHeight: 0 },
+  confirmScroll:{ flexGrow: 0, flexShrink: 1, minHeight: 0 },
+  confirmScrollContent: { paddingTop: 8 },
   handle:       { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 16 },
   title:        { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 4 },
   hint:         { fontSize: 12, color: C.sub, marginBottom: 14 },
   textBox:      { backgroundColor: C.inputBg, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, minHeight: 80, textAlignVertical: 'top', marginBottom: 8 },
-  errorSlot:    { minHeight: 38, justifyContent: 'center', marginBottom: 8 },
-  errText:      { fontSize: 12, lineHeight: 17, color: C.red },
+  errorSlot:    { height: ERROR_SLOT_HEIGHT, justifyContent: 'center', marginBottom: 8 },
+  errText:      { minWidth: 0, fontSize: 12, lineHeight: ERROR_LINE_HEIGHT, color: C.red },
   actionDock:   { height: 64, flexDirection: 'row', alignItems: 'center' },
   actionSide:   { flex: 1, minWidth: 0, justifyContent: 'center' },
   actionSideRight:{ alignItems: 'flex-end' },
@@ -557,22 +731,23 @@ const s = StyleSheet.create({
   loadingWrap:  { alignItems: 'center', paddingVertical: 40, gap: 14 },
   loadingTxt:   { fontSize: 14, color: C.sub },
   clarifyBox:   { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFF8E1', borderRadius: 10, padding: 10, marginBottom: 12 },
-  clarifyTxt:   { flex: 1, fontSize: 13, color: C.text },
-  clarifyAnswerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  clarifyInput: { flex: 1, backgroundColor: C.inputBg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: C.text },
-  clarifyBtn:   { backgroundColor: C.orange, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  clarifyTxt:   { flex: 1, minWidth: 0, fontSize: 13, color: C.text },
+  clarifyAnswerRow: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  clarifyInput: { flex: 1, minWidth: 0, backgroundColor: C.inputBg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: C.text },
+  clarifyBtn:   { flexShrink: 0, backgroundColor: C.orange, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   clarifyBtnText:{ fontSize: 13, fontWeight: '700', color: '#fff' },
   draftCard:    { backgroundColor: C.tasksBg, borderRadius: 16, padding: 16, marginBottom: 16, gap: 10 },
   recognizedBox:{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingBottom: 4 },
-  recognizedText:{ flex: 1, fontSize: 12, lineHeight: 17, color: C.sub },
-  draftTitle:   { fontSize: 17, fontWeight: '700', color: C.text },
-  draftRow:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  draftVal:     { fontSize: 13, color: C.text },
+  recognizedText:{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, color: C.sub },
+  draftTitle:   { minWidth: 0, flexShrink: 1, fontSize: 17, fontWeight: '700', color: C.text },
+  draftRow:     { minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  draftVal:     { flex: 1, minWidth: 0, fontSize: 13, color: C.text },
   draftMeta:    { fontSize: 11, color: C.faint, marginTop: 4 },
-  confirmRow:   { flexDirection: 'row', gap: 12 },
-  cancelBtn:    { flex: 1, borderRadius: 20, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
+  confirmRow:   { flexShrink: 0, flexDirection: 'row', gap: 12 },
+  cancelBtn:    { flex: 1, minWidth: 0, borderRadius: 20, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
   cancelTxt:    { fontSize: 14, color: C.sub },
-  saveBtn:      { flex: 1, borderRadius: 20, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
+  saveTouch:    { flex: 1, minWidth: 0 },
+  saveBtn:      { width: '100%', borderRadius: 20, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
   saveTxt:      { fontSize: 14, fontWeight: '700', color: '#fff' },
   closeBtn:     { position: 'absolute', top: 16, right: 16 },
 });

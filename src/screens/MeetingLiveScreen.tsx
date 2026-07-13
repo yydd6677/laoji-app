@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,14 +7,29 @@ import { Audio } from 'expo-av';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { BackHeader } from '../components/Common';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { useAppDialog } from '../components/AppDialog';
 import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
-import { generateMeetingSummary, uploadMeetingAudio } from '../services/api';
+import {
+  ApiGuestRealtimeSession,
+  createGuestRealtimeSession,
+  deleteGuestRealtimeSession,
+  uploadMeetingAudio,
+} from '../services/api';
+import { createMeetingRecordingFinalizer, finalizeMeetingRecording } from '../services/meetingRecording';
 import { RealtimeAsrAudioStats, RealtimeAsrSession, RealtimeAsrStatus, startRealtimeAsr } from '../services/realtimeAsr';
 import { RootStackParamList, TranscriptLine } from '../types';
+import {
+  audioSamplesToBars,
+  canResumeMeetingRecording,
+  latestTranscriptWindow,
+  pcmDurationSec,
+  shouldCheckpointTranscript,
+} from '../utils/meetingMedia';
+import { meetingAudioInputLabel, meetingAudioLevelPercent } from '../utils/meetingAudioStatus';
+import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -33,16 +48,26 @@ function formatClock(ms: number): string {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-function normalizeAudioUri(uri: string | undefined): string | undefined {
-  if (!uri) return undefined;
-  return uri.startsWith('file://') || uri.startsWith('content://') ? uri : `file://${uri}`;
+interface ActiveRecording {
+  meetingId: string;
+  session: RealtimeAsrSession;
+  guestSession?: ApiGuestRealtimeSession;
+  finalize: ReturnType<typeof createMeetingRecordingFinalizer>;
+}
+
+class MeetingStartCancelledError extends Error {
+  constructor() {
+    super('meeting start cancelled');
+    this.name = 'MeetingStartCancelledError';
+  }
 }
 
 export function MeetingLiveScreen({ navigation, route }: Props) {
-  const { accessToken, isGuest } = useAuth();
+  const { accessToken, isGuest, session } = useAuth();
   const {
     meetings,
     createMeeting,
+    deleteMeeting,
     updateMeetingStatus,
     getCachedTranscript,
     saveCachedTranscript,
@@ -57,13 +82,30 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const [error, setError] = useState('');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [audioStats, setAudioStats] = useState<RealtimeAsrAudioStats | null>(null);
-  const sessionRef = useRef<RealtimeAsrSession | null>(null);
+  const activeRecordingRef = useRef<ActiveRecording | null>(null);
+  const finalizationUiPromiseRef = useRef<Promise<boolean> | null>(null);
+  const navigateAfterFinalizeRef = useRef(false);
+  const mountedRef = useRef(true);
   const startedAtRef = useRef<number | null>(null);
+  const audioStatsRef = useRef<RealtimeAsrAudioStats | null>(null);
+  const audioRmsSamplesRef = useRef<number[]>([]);
   const activeMeetingIdRef = useRef('');
+  const transcriptRef = useRef<TranscriptLine[]>(transcript);
+  const transcriptCheckpointRef = useRef({ lineCount: transcript.length, savedAtMs: Date.now() });
+  const leavePromptOpenRef = useRef(false);
+  const backgroundStopRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const createRequestRef = useRef(createClientRequestState('meeting'));
+  const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
 
   const ticking = status === 'connecting' || status === 'recording' || status === 'connected' || status === 'stopping';
-  const canStop = status === 'recording' || status === 'connected';
-  const canStart = status === 'idle' || status === 'closed' || status === 'failed';
+  const canStop = Boolean(activeRecordingRef.current) && (
+    status === 'recording' || status === 'connected' || status === 'failed'
+  );
+  const canStart = (!existing || canResumeMeetingRecording(existing)) && !activeRecordingRef.current && (
+    status === 'idle' || status === 'closed' || status === 'failed'
+  );
+  const visibleTranscript = useMemo(() => latestTranscriptWindow(transcript, 40), [transcript]);
   const statusText = useMemo(() => {
     if (status === 'idle') return '准备开始';
     if (status === 'connecting') return '正在连接实时转写';
@@ -75,6 +117,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     return '需要重试';
   }, [status]);
 
+  const restorePlaybackAudioMode = useCallback(async () => {
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!ticking) return;
     const timer = setInterval(() => {
@@ -85,15 +131,107 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!existing?.id) return;
-    setTranscript(getCachedTranscript(existing.id));
+    const cachedTranscript = getCachedTranscript(existing.id);
+    setTranscript(cachedTranscript);
+    transcriptCheckpointRef.current = {
+      lineCount: cachedTranscript.length,
+      savedAtMs: Date.now(),
+    };
     activeMeetingIdRef.current = existing.id;
   }, [existing?.id, getCachedTranscript]);
 
   useEffect(() => {
+    transcriptRef.current = transcript;
+  }, [transcript]);
+
+  const persistStoppedSession = useCallback(async (
+    session: RealtimeAsrSession,
+    id: string,
+    guestSession?: ApiGuestRealtimeSession,
+  ) => {
+    const audioDurationSec = pcmDurationSec(audioStatsRef.current?.byteCount ?? 0);
+    const audioBars = audioSamplesToBars(audioRmsSamplesRef.current, 50);
+    try {
+      return await finalizeMeetingRecording({
+        meetingId: id,
+        storageScope: recordingStorageScope,
+        transcriptLines: transcriptRef.current,
+        isGuest,
+        accessToken,
+        audioDurationSec,
+        audioBars,
+        stopAudio: session.stop,
+      }, {
+        saveTranscript: saveCachedTranscript,
+        uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
+          meetingIdToUpload,
+          uri,
+          token,
+          { fileName: `${meetingIdToUpload}.wav`, mimeType: 'audio/wav' },
+        ),
+        updateStatus: updateMeetingStatus,
+        refreshMeetings,
+      });
+    } finally {
+      try {
+        if (guestSession) {
+          await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
+        }
+      } finally {
+        await restorePlaybackAudioMode();
+      }
+    }
+  }, [accessToken, isGuest, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
+
+  const finalizeActiveRecording = useCallback((
+    active: ActiveRecording,
+    navigateAfter: boolean,
+  ): Promise<boolean> => {
+    if (navigateAfter) navigateAfterFinalizeRef.current = true;
+    if (finalizationUiPromiseRef.current) return finalizationUiPromiseRef.current;
+    if (mountedRef.current) setStatus('saving');
+
+    const operation = active.finalize()
+      .then(result => {
+        if (activeRecordingRef.current === active) activeRecordingRef.current = null;
+        if (!mountedRef.current) return true;
+        const syncWarnings: string[] = [];
+        if (result.uploadFailed) {
+          syncWarnings.push(result.retryQueued
+            ? '录音文件待上传，可在转写页重试'
+            : '待上传记录写入失败，请勿清理本机数据');
+        }
+        if (result.statusSyncPending) syncWarnings.push('会议状态将在网络恢复后自动同步');
+        if (syncWarnings.length > 0) setError(`会议已保存到本机；${syncWarnings.join('；')}`);
+        setStatus('closed');
+        const shouldNavigate = navigateAfterFinalizeRef.current;
+        navigateAfterFinalizeRef.current = false;
+        if (shouldNavigate) navigation.replace('Transcription', { meetingId: active.meetingId });
+        return true;
+      })
+      .catch(err => {
+        if (!mountedRef.current) return false;
+        setStatus('failed');
+        const message = err instanceof Error ? err.message : '停止会议失败';
+        setError(message);
+        showDialog({ title: '保存失败', message, tone: 'error' });
+        return false;
+      })
+      .finally(() => {
+        if (finalizationUiPromiseRef.current === operation) {
+          finalizationUiPromiseRef.current = null;
+        }
+      });
+    finalizationUiPromiseRef.current = operation;
+    return operation;
+  }, [navigation, showDialog]);
+
+  useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      const session = sessionRef.current;
-      sessionRef.current = null;
-      if (session) void session.stop();
+      mountedRef.current = false;
+      const active = activeRecordingRef.current;
+      if (active) void active.finalize().catch(() => {});
     };
   }, []);
 
@@ -102,34 +240,93 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const id = `${activeMeetingIdRef.current || meetingId}-${line.start_time ?? prev.length}-${line.text}`;
       if (prev.some(item => item.id === id || (item.text === line.text && item.start_time === line.start_time))) return prev;
       const next = [...prev, { id, ...line }];
-      if (activeMeetingIdRef.current) void saveCachedTranscript(activeMeetingIdRef.current, next);
+      transcriptRef.current = next;
+      if (activeMeetingIdRef.current) {
+        const previousCheckpoint = transcriptCheckpointRef.current;
+        const now = Date.now();
+        if (!shouldCheckpointTranscript(
+          next.length,
+          previousCheckpoint.lineCount,
+          now - previousCheckpoint.savedAtMs,
+        )) return next;
+        transcriptCheckpointRef.current = { lineCount: next.length, savedAtMs: now };
+        void saveCachedTranscript(activeMeetingIdRef.current, next).catch(() => {
+          if (transcriptCheckpointRef.current.lineCount === next.length) {
+            transcriptCheckpointRef.current = previousCheckpoint;
+          }
+          if (mountedRef.current) setError('转写正在显示，但暂时无法保存到本机；结束会议时会再次尝试');
+        });
+      }
       return next;
     });
   };
 
   const startRecording = async () => {
-    if (!canStart) return;
+    if (
+      !canStart
+      || startInFlightRef.current
+      || activeRecordingRef.current
+      || finalizationUiPromiseRef.current
+    ) return;
+    startInFlightRef.current = true;
+    setStatus('connecting');
     setError('');
+    setAudioStats(null);
+    audioStatsRef.current = null;
+    audioRmsSamplesRef.current = [];
+    let startedMeetingId = '';
+    let guestSession: ApiGuestRealtimeSession | undefined;
+    let createdForAttempt = false;
+    let reusableStatus = 'created';
+    const ensureScreenActive = () => {
+      if (!mountedRef.current) throw new MeetingStartCancelledError();
+    };
     try {
       const permission = await Audio.requestPermissionsAsync();
+      ensureScreenActive();
       if (!permission.granted) {
+        setStatus('idle');
         showDialog({ title: '无法录音', message: '请允许麦克风权限后再开始会议。', tone: 'warning' });
         return;
       }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const meeting = existing ?? await createMeeting(title, { mode: 'realtime' });
+      ensureScreenActive();
+      const reusableMeeting = existing ?? (meetingId ? meetings.find(item => item.id === meetingId) : undefined);
+      reusableStatus = reusableMeeting?.status ?? 'created';
+      createdForAttempt = !reusableMeeting;
+      const meetingPayload = { title: title.trim() || defaultTitle(), mode: 'realtime' as const };
+      createRequestRef.current = requestStateForPayload(createRequestRef.current, 'meeting', meetingPayload);
+      const meeting = reusableMeeting ?? await createMeeting(meetingPayload.title, {
+        mode: meetingPayload.mode,
+        clientRequestId: createRequestRef.current.id,
+      });
+      startedMeetingId = meeting.id;
+      ensureScreenActive();
       setMeetingId(meeting.id);
       activeMeetingIdRef.current = meeting.id;
       await updateMeetingStatus(meeting.id, 'recording');
-      startedAtRef.current = Date.now();
-      setElapsedMs(0);
-      setTranscript(existing?.id === meeting.id ? getCachedTranscript(meeting.id) : []);
+      ensureScreenActive();
+      const initialTranscript = reusableMeeting ? getCachedTranscript(meeting.id) : [];
+      transcriptRef.current = initialTranscript;
+      transcriptCheckpointRef.current = { lineCount: initialTranscript.length, savedAtMs: Date.now() };
+      setTranscript(initialTranscript);
+      if (isGuest) {
+        guestSession = await createGuestRealtimeSession(meeting.title);
+        ensureScreenActive();
+      }
       const session = await startRealtimeAsr({
-        meetingId: meeting.id,
+        meetingId: guestSession?.meeting_id ?? meeting.id,
         accessToken: isGuest ? null : accessToken,
+        guestToken: guestSession?.guest_token,
         provider: 'funasr',
-        onStatus: next => setStatus(next),
-        onAudioStats: setAudioStats,
+        onStatus: next => {
+          if (mountedRef.current) setStatus(next);
+        },
+        onAudioStats: stats => {
+          audioStatsRef.current = stats;
+          audioRmsSamplesRef.current.push(stats.raw.rms);
+          if (mountedRef.current) setAudioStats(stats);
+        },
         onTranscript: item => {
           appendTranscript({
             meeting_id: meeting.id,
@@ -142,64 +339,102 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
             created_at: new Date().toISOString(),
           });
         },
-        onError: err => setError(err.message || '实时转写异常'),
+        onError: err => {
+          if (mountedRef.current) setError(err.message || '实时转写异常');
+        },
       });
-      sessionRef.current = session;
+      const active: ActiveRecording = {
+        meetingId: meeting.id,
+        session,
+        guestSession,
+        finalize: createMeetingRecordingFinalizer(() => persistStoppedSession(session, meeting.id, guestSession)),
+      };
+      if (!mountedRef.current) {
+        await active.finalize().catch(() => {});
+        if (createdForAttempt) await deleteMeeting(meeting.id).catch(() => {});
+        return;
+      }
+      activeRecordingRef.current = active;
+      void session.completion.then(completion => {
+        if (activeRecordingRef.current !== active || !mountedRef.current) return;
+        if (completion.reason !== 'connection-closed') return;
+        setError('实时连接意外断开，正在保存本次录音和转写');
+        void finalizeActiveRecording(active, !finalizationUiPromiseRef.current);
+      });
+      startedAtRef.current = Date.now();
+      setElapsedMs(0);
     } catch (err) {
-      setStatus('failed');
-      const message = err instanceof Error ? err.message : '启动会议录音失败';
-      setError(message);
-      showDialog({ title: '启动失败', message, tone: 'error' });
+      await restorePlaybackAudioMode();
+      const cancelled = err instanceof MeetingStartCancelledError || !mountedRef.current;
+      if (guestSession) {
+        await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
+      }
+      if (startedMeetingId) {
+        if (cancelled && createdForAttempt) {
+          await deleteMeeting(startedMeetingId).catch(async () => {
+            await updateMeetingStatus(startedMeetingId, 'failed').catch(() => {});
+          });
+        } else {
+          await updateMeetingStatus(startedMeetingId, cancelled ? reusableStatus : 'failed').catch(() => {});
+        }
+      }
+      if (mountedRef.current) {
+        setStatus('failed');
+        const message = err instanceof Error ? err.message : '启动会议录音失败';
+        setError(message);
+        showDialog({ title: '启动失败', message, tone: 'error' });
+      }
+    } finally {
+      startInFlightRef.current = false;
     }
   };
 
-  const stopRecording = async () => {
-    const session = sessionRef.current;
-    if (!session || !meetingId) return;
+  const stopRecording = useCallback((navigateAfter = true): Promise<boolean> => {
+    const active = activeRecordingRef.current;
+    if (!active) return Promise.resolve(false);
     setStatus('stopping');
-    sessionRef.current = null;
-    try {
-      const audioUri = normalizeAudioUri(await session.stop());
-      setStatus('saving');
-      await saveCachedTranscript(meetingId, transcript);
-      if (!isGuest && accessToken) {
-        if (audioUri) {
-          try {
-            await uploadMeetingAudio(meetingId, audioUri, accessToken, { fileName: `${meetingId}.wav`, mimeType: 'audio/wav' });
-          } catch {
-            setError('会议已保存，但录音文件上传失败');
-          }
-        }
-        await updateMeetingStatus(meetingId, 'ended', {
-          hasTranscript: transcript.length > 0,
-          audioAvailable: Boolean(audioUri),
-          audioLocalUri: audioUri ?? null,
-        });
-        if (transcript.length > 0) {
-          setStatus('summarizing');
-          try {
-            await generateMeetingSummary(meetingId, accessToken);
-          } catch {
-            setError('转写已保存，总结生成稍后可重试');
-          }
-        }
-        await refreshMeetings();
-      } else {
-        await updateMeetingStatus(meetingId, 'ended', {
-          hasTranscript: transcript.length > 0,
-          audioAvailable: Boolean(audioUri),
-          audioLocalUri: audioUri ?? null,
-        });
-      }
-      setStatus('closed');
-      navigation.replace('Transcription', { meetingId });
-    } catch (err) {
-      setStatus('failed');
-      const message = err instanceof Error ? err.message : '停止会议失败';
-      setError(message);
-      showDialog({ title: '停止失败', message, tone: 'error' });
-    }
-  };
+    return finalizeActiveRecording(active, navigateAfter);
+  }, [finalizeActiveRecording]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active' || !activeRecordingRef.current || backgroundStopRef.current) return;
+      backgroundStopRef.current = true;
+      if (mountedRef.current) setError('应用进入后台，正在结束并保存本次会议');
+      void stopRecording(true).finally(() => {
+        backgroundStopRef.current = false;
+      });
+    });
+    return () => subscription.remove();
+  }, [stopRecording]);
+
+  useEffect(() => navigation.addListener('beforeRemove', event => {
+    if (!activeRecordingRef.current || leavePromptOpenRef.current) return;
+    event.preventDefault();
+    leavePromptOpenRef.current = true;
+    showDialog({
+      title: '会议仍在录制',
+      message: '离开前需要结束并保存本次录音和转写。',
+      tone: 'warning',
+      onDismiss: () => { leavePromptOpenRef.current = false; },
+      actions: [
+        {
+          text: '结束并离开',
+          role: 'primary',
+          onPress: async () => {
+            const saved = await stopRecording(false);
+            leavePromptOpenRef.current = false;
+            if (saved) navigation.dispatch(event.data.action);
+          },
+        },
+        {
+          text: '继续录音',
+          role: 'cancel',
+          onPress: () => { leavePromptOpenRef.current = false; },
+        },
+      ],
+    });
+  }), [navigation, showDialog, stopRecording]);
 
   return (
     <ScreenContainer edges={['top']}>
@@ -209,6 +444,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           <Text style={s.label}>会议标题</Text>
           <TextInput
             style={s.titleInput}
+            testID="meeting-live-title"
             value={title}
             onChangeText={setTitle}
             editable={!ticking && !meetingId}
@@ -217,7 +453,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           />
           <View style={s.statusRow}>
             <View style={[s.dot, ticking ? s.dotLive : status === 'failed' ? s.dotError : s.dotIdle]} />
-            <Text style={s.statusText}>{statusText}</Text>
+            <Text style={s.statusText} testID="meeting-live-status">{statusText}</Text>
             <Text style={s.timer}>{formatClock(elapsedMs)}</Text>
           </View>
         </View>
@@ -225,10 +461,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         <View style={s.levelCard}>
           <Text style={s.sectionTitle}>音频输入</Text>
           <View style={s.levelTrack}>
-            <View style={[s.levelFill, { width: `${Math.min(100, Math.round(((audioStats?.sent.rms ?? 0) / 9000) * 100))}%` }]} />
+            <View style={[s.levelFill, { width: `${meetingAudioLevelPercent(audioStats?.raw.rms ?? 0)}%` }]} />
           </View>
           <Text style={s.levelMeta}>
-            {audioStats ? `已发送 ${audioStats.frameCount} 帧 · 增益 ${audioStats.gain.toFixed(1)}x` : '等待麦克风输入'}
+            {audioStats ? meetingAudioInputLabel(audioStats.raw.rms) : '等待麦克风输入'}
           </Text>
         </View>
 
@@ -243,12 +479,17 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
               <Text style={s.emptyText}>开始录音后，识别出的句子会实时出现在这里</Text>
             </View>
           ) : (
-            transcript.map(line => (
-              <View key={line.id} style={s.lineItem}>
-                <Text style={s.speaker}>{line.speaker_label ?? '发言人'}</Text>
-                <Text style={s.lineText}>{line.text}</Text>
-              </View>
-            ))
+            <>
+              {visibleTranscript.hiddenCount > 0 ? (
+                <Text style={s.archivedText}>较早的 {visibleTranscript.hiddenCount} 句已收纳</Text>
+              ) : null}
+              {visibleTranscript.items.map(line => (
+                <View key={line.id} style={s.lineItem}>
+                  <Text style={s.speaker}>{line.speaker_label ?? '发言人'}</Text>
+                  <Text style={s.lineText} testID="meeting-live-transcript-line">{line.text}</Text>
+                </View>
+              ))}
+            </>
           )}
         </View>
 
@@ -264,8 +505,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         active="meetings"
         onSchedule={() => openScheduleTab(navigation)}
         onMeetings={() => openMeetingsTab(navigation)}
+        micTone={canStop ? 'recording' : 'meeting'}
         onMic={() => {
-          if (canStop) void stopRecording();
+          if (canStop) void stopRecording(true);
           else if (canStart) void startRecording();
         }}
       />
@@ -275,7 +517,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
 const s = StyleSheet.create({
   scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: 24 },
+  content: { padding: 14, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   heroCard: {
     backgroundColor: C.card,
     borderRadius: 18,
@@ -303,6 +545,7 @@ const s = StyleSheet.create({
   transcriptCard: { marginTop: 12, backgroundColor: C.card, borderRadius: 18, padding: 16, minHeight: 260 },
   cardHead: { height: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   countText: { fontSize: 12, color: C.sub, fontWeight: '700' },
+  archivedText: { marginBottom: 8, fontSize: 11, color: C.sub, textAlign: 'center', fontWeight: '600' },
   emptyTranscript: { minHeight: 192, alignItems: 'center', justifyContent: 'center', gap: 10 },
   emptyText: { fontSize: 13, color: C.sub, textAlign: 'center', lineHeight: 20 },
   lineItem: { borderRadius: 12, backgroundColor: '#F8F5FF', padding: 12, marginBottom: 8 },

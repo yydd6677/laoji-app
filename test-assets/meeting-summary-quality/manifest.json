@@ -1,0 +1,429 @@
+{
+  "version": 3,
+  "description": "Evidence-driven quality cases for LaoJi guest and cloud meeting summaries.",
+  "meeting_date": "2026-07-10",
+  "cases": [
+    {
+      "id": "MS001",
+      "title": "Android 发布范围确认",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "张敏", "text": "我们今天只确认发布范围。Android 版本在 2026 年 7 月 20 日先发布，iOS 本轮不上线，因为推送证书还没完成。"},
+        {"speaker": "李工", "text": "登录页崩溃我负责，2026 年 7 月 15 日前修复并提测。"},
+        {"speaker": "王芳", "text": "回归测试清单由我整理，2026 年 7 月 16 日中午前发到群里。"},
+        {"speaker": "张敏", "text": "就这样，Android 先发，iOS 延期。"}
+      ],
+      "expect": {
+        "decision_groups": [["Android", "2026", "7", "20"], ["iOS"]],
+        "actions": [
+          {"content_all": ["登录", "崩溃"], "assignee_any": ["李工"], "due_any": ["2026-07-15", "7 月 15", "7月15"]},
+          {"content_all": ["测试", "清单"], "assignee_any": ["王芳"], "due_any": ["2026-07-16", "7 月 16", "7月16"]}
+        ]
+      }
+    },
+    {
+      "id": "MS002",
+      "title": "首页配色纠正",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "陈晨", "text": "首页颜色最开始考虑红色。等等，这个方案取消，不要按红色做。"},
+        {"speaker": "陈晨", "text": "最终决定使用蓝色，并且保持现有图标不变。"},
+        {"speaker": "赵工", "text": "我在 2026 年 7 月 18 日前更新色值并提交。"}
+      ],
+      "expect": {
+        "overview_groups": [["图标", "不变"]],
+        "decision_groups": [["蓝色"]],
+        "actions": [
+          {"content_all": ["更新", "色值"], "assignee_any": ["赵工"], "due_any": ["2026-07-18", "7 月 18", "7月18"]}
+        ]
+      }
+    },
+    {
+      "id": "MS003",
+      "title": "未形成结论的头脑风暴",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "甲", "text": "我只是抛一个想法，以后也许可以加导出 PDF，但今天不决定。"},
+        {"speaker": "乙", "text": "我也没有同意具体方案，而且没有指定负责人和时间。"},
+        {"speaker": "甲", "text": "请只记录讨论过这个想法，本次没有决策，也没有行动项。"}
+      ],
+      "expect": {"max_decisions": 0, "max_actions": 0}
+    },
+    {
+      "id": "MS004",
+      "title": "数据库迁移风险与执行",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "周工", "text": "数据库迁移可能长时间锁表，会导致线上请求失败，这是高风险。"},
+        {"speaker": "孙工", "text": "缓解方案是先做全量备份，然后在凌晨两点低峰执行，如果十分钟内失败就回滚。"},
+        {"speaker": "主持人", "text": "最终决定 2026 年 7 月 20 日凌晨两点迁移。周工负责提前备份，孙工负责执行迁移和失败回滚。"}
+      ],
+      "expect": {
+        "decision_groups": [["2026", "7", "20", "迁移"]],
+        "actions": [
+          {"content_all": ["备份"], "assignee_any": ["周工"]},
+          {"content_all": ["迁移"], "assignee_any": ["孙工"]}
+        ]
+      }
+    },
+    {
+      "id": "MS005",
+      "title": "未指定负责人的行动项",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "供应商名单需要在 2026 年 7 月 22 日前整理完成。"},
+        {"speaker": "参会者", "text": "这项工作还没有指定负责人，请记为待定，不要猜一个人名。"}
+      ],
+      "expect": {
+        "actions": [
+          {"content_all": ["供应商", "名单"], "assignee_any": ["待定"], "due_any": ["2026-07-22", "7 月 22", "7月22"]}
+        ]
+      }
+    },
+    {
+      "id": "MS006",
+      "title": "口语噪声与日期纠正",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "林经理", "text": "嗯，我想一下，培训原本说周四，不是，刚才说错了。"},
+        {"speaker": "林经理", "text": "最终以 2026 年 7 月 17 日周五下午三点为准，地点是三楼会议室。"},
+        {"speaker": "小陈", "text": "我今天下班前发培训通知给全员。"}
+      ],
+      "expect": {
+        "decision_groups": [["2026", "7", "17"]],
+        "actions": [{"content_all": ["培训", "通知"], "assignee_any": ["小陈"], "due_any": ["2026-07-10", "7 月 10", "7月10"]}]
+      }
+    },
+    {
+      "id": "MS007",
+      "title": "争议中的暂不变更",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "甲", "text": "我建议删除访客模式，这只是我的提案。"},
+        {"speaker": "乙", "text": "我不同意，目前还有很多人用访客功能。"},
+        {"speaker": "主持人", "text": "今天不决定删除，先保留现状。王芳在 2026 年 7 月 24 日前整理访客使用数据，下次再评估。"}
+      ],
+      "expect": {
+        "decision_groups": [["保留", "现状"]],
+        "actions": [{"content_all": ["访客", "数据"], "assignee_any": ["王芳"], "due_any": ["2026-07-24", "7 月 24", "7月24"]}]
+      }
+    },
+    {
+      "id": "MS008",
+      "title": "长转写中的稀疏决策",
+      "tier": "extended",
+      "generated_context": {"count": 120, "template": "成员{index}：第{index}项只是进度同步，目前仍在整理资料，未形成新决策，也没有新的负责人安排。"},
+      "transcript": [
+        {"speaker": "主持人", "text": "最后只有一项决定：2026 年 8 月 1 日启用新的备份流程。"},
+        {"speaker": "吴工", "text": "新备份流程的操作文档由我在 2026 年 7 月 28 日前完成。"}
+      ],
+      "expect": {
+        "decision_groups": [["2026", "8", "1", "备份流程"]],
+        "actions": [{"content_all": ["备份", "文档"], "assignee_any": ["吴工"], "due_any": ["2026-07-28", "7 月 28", "7月28"]}]
+      }
+    },
+    {
+      "id": "MS009",
+      "title": "负责人和截止日期纠正",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "原先安排张三在 2026 年 7 月 20 日前提交报价单。"},
+        {"speaker": "主持人", "text": "不对，前面的安排作废。改由李四负责，截止日期改成 2026 年 7 月 21 日。"},
+        {"speaker": "李四", "text": "确认，最终由我在 7 月 21 日前提交报价单。"}
+      ],
+      "expect": {
+        "min_actions": 1,
+        "max_actions": 1,
+        "actions": [
+          {
+            "content_all": ["报价单"],
+            "assignee_any": ["李四"],
+            "due_any": ["2026-07-21", "7 月 21", "7月21"],
+            "assignee_forbidden": ["张三"],
+            "due_forbidden": ["2026-07-20", "7 月 20", "7月20"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "MS010",
+      "title": "条件提案尚未成立",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "产品", "text": "如果预算获批，也许可以在八月尝试会员功能。"},
+        {"speaker": "财务", "text": "预算目前没有批准，这只是条件设想。"},
+        {"speaker": "主持人", "text": "今天不作决策，也不指定负责人或截止日期。"}
+      ],
+      "expect": {"max_decisions": 0, "max_actions": 0}
+    },
+    {
+      "id": "MS011",
+      "title": "已计划事项最终取消",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "原定 2026 年 7 月 15 日发布测试版。"},
+        {"speaker": "主持人", "text": "最终决定取消这次发布，原计划作废。"},
+        {"speaker": "赵工", "text": "我不再执行打包任务，也没有新的行动项。"}
+      ],
+      "expect": {
+        "decision_groups": [["取消", "发布"]],
+        "max_actions": 0
+      }
+    },
+    {
+      "id": "MS012",
+      "title": "重复表述需要去重",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "决定 2026 年 7 月 25 日切换新域名。"},
+        {"speaker": "主持人", "text": "再确认一次，7 月 25 日切换新域名，这不是新增决策。"},
+        {"speaker": "刘工", "text": "域名切换清单由我在 2026 年 7 月 23 日前完成。"},
+        {"speaker": "刘工", "text": "重复确认，我只负责同一份域名切换清单，不是第二个行动项。"}
+      ],
+      "expect": {
+        "decision_groups": [["7", "25", "域名"]],
+        "max_decisions": 1,
+        "min_actions": 1,
+        "max_actions": 1,
+        "actions": [
+          {"content_all": ["域名", "清单"], "assignee_any": ["刘工"], "due_any": ["2026-07-23", "7 月 23", "7月23"]}
+        ]
+      }
+    },
+    {
+      "id": "MS013",
+      "title": "并列行动项不能合并",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "王芳在 2026 年 7 月 18 日前整理用户反馈。"},
+        {"speaker": "主持人", "text": "陈工在 2026 年 7 月 19 日前修复支付页闪退。"},
+        {"speaker": "主持人", "text": "这是两个独立行动项，负责人和截止日期不要混淆。"}
+      ],
+      "expect": {
+        "min_actions": 2,
+        "max_actions": 2,
+        "actions": [
+          {"content_all": ["用户", "反馈"], "assignee_any": ["王芳"], "due_any": ["2026-07-18", "7 月 18", "7月18"]},
+          {"content_all": ["支付", "闪退"], "assignee_any": ["陈工"], "due_any": ["2026-07-19", "7 月 19", "7月19"]}
+        ]
+      }
+    },
+    {
+      "id": "MS014",
+      "title": "相对日期换算",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "小林", "text": "发布公告由我明天下午发给全员。"},
+        {"speaker": "主持人", "text": "确认，以今天的会议日期为基准，不要把明天算成其他日期。"}
+      ],
+      "expect": {
+        "actions": [
+          {"content_all": ["公告"], "assignee_any": ["小林"], "due_any": ["2026-07-11", "7 月 11", "7月11"]}
+        ]
+      }
+    },
+    {
+      "id": "MS015",
+      "title": "争论后仍无结论",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "甲", "text": "我支持把按钮改成绿色。"},
+        {"speaker": "乙", "text": "我反对，我更倾向保留蓝色。"},
+        {"speaker": "主持人", "text": "双方没有达成一致，本次暂不决定，也没有行动项。"}
+      ],
+      "expect": {"max_decisions": 0, "max_actions": 0}
+    },
+    {
+      "id": "MS016",
+      "title": "只有闲聊和设备故障",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "甲", "text": "嗯，大家稍等一下，网络有点卡。"},
+        {"speaker": "乙", "text": "我这边听不清，先调一下麦克风。"},
+        {"speaker": "主持人", "text": "今天没有讨论业务事项，没有决策，也没有行动项。"}
+      ],
+      "expect": {"max_decisions": 0, "max_actions": 0}
+    },
+    {
+      "id": "MS017",
+      "title": "周期性行动项",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "最终要求从下周开始，每周五提交一次运行周报。"},
+        {"speaker": "陈工", "text": "运行周报由我负责，每周五下班前发送。"}
+      ],
+      "expect": {
+        "actions": [
+          {"content_all": ["运行", "周报"], "assignee_any": ["陈工"], "due_any": ["每周五", "周五"]}
+        ]
+      }
+    },
+    {
+      "id": "MS018",
+      "title": "转述的外部设想不是决策",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "销售", "text": "客户原话是以后可能采购一百台设备。"},
+        {"speaker": "销售", "text": "这只是客户的设想，不是采购承诺，也不是我们的内部决策。"},
+        {"speaker": "主持人", "text": "本次不建立行动项，等待客户正式文件。"}
+      ],
+      "expect": {
+        "decision_forbidden_groups": [["采购", "一百"], ["采购", "100"]],
+        "max_decisions": 1,
+        "max_actions": 0
+      }
+    },
+    {
+      "id": "MS019",
+      "title": "否定之否定表达延期",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "不是不做数据迁移，而是延期到 2026 年 8 月 3 日执行。"},
+        {"speaker": "主持人", "text": "今天只形成延期决策，执行负责人稍后再定。"}
+      ],
+      "expect": {
+        "decision_groups": [["延期", "2026", "8", "3"]],
+        "max_actions": 0
+      }
+    },
+    {
+      "id": "MS020",
+      "title": "行动项未给截止日期",
+      "tier": "core",
+      "transcript": [
+        {"speaker": "主持人", "text": "孙工负责整理接口错误码文档。"},
+        {"speaker": "孙工", "text": "我确认负责，但会议没有确定完成日期，请不要猜截止时间。"}
+      ],
+      "expect": {
+        "actions": [
+          {"content_all": ["错误码", "文档"], "assignee_any": ["孙工"], "due_any": ["N/A", "待定", "TBD"]}
+        ]
+      }
+    },
+    {
+      "id": "MS021",
+      "title": "长转写开头的决策与行动",
+      "tier": "extended",
+      "timeline": [
+        {"speaker": "主持人", "text": "最终决定在 2026 年 8 月 5 日启用离线模式。"},
+        {"speaker": "李工", "text": "离线模式迁移脚本由我在 2026 年 7 月 30 日前完成。"},
+        {
+          "generated": {
+            "count": 120,
+            "speaker_template": "成员{index}",
+            "text_template": "第{index}项只是常规状态同步，资料仍在整理，没有新增决策或行动项。"
+          }
+        }
+      ],
+      "expect": {
+        "decision_groups": [["2026", "8", "5", "离线"]],
+        "actions": [
+          {"content_all": ["离线", "迁移", "脚本"], "assignee_any": ["李工"], "due_any": ["2026-07-30", "7 月 30", "7月30"]}
+        ]
+      }
+    },
+    {
+      "id": "MS022",
+      "title": "长转写中间的日期纠正",
+      "tier": "extended",
+      "timeline": [
+        {
+          "generated": {
+            "count": 80,
+            "speaker_template": "研发成员{index}",
+            "text_template": "第{index}项是缺陷排查进度，目前没有形成发布决策。"
+          }
+        },
+        {"speaker": "主持人", "text": "原来考虑 2026 年 8 月 9 日切换主数据库。"},
+        {"speaker": "主持人", "text": "更正，最终决定改为 2026 年 8 月 10 日凌晨切换主数据库，以后面的日期为准。"},
+        {"speaker": "王工", "text": "数据库回滚脚本由我在 2026 年 8 月 8 日前验证完成。"},
+        {
+          "generated": {
+            "count": 80,
+            "start_index": 81,
+            "speaker_template": "运营成员{index}",
+            "text_template": "第{index}项是运营数据复核，没有新增负责人或截止日期。"
+          }
+        },
+        {"speaker": "主持人", "text": "除此之外没有形成新的决策或行动项。"}
+      ],
+      "expect": {
+        "decision_groups": [["2026", "8", "10", "数据库"]],
+        "decision_forbidden_groups": [["2026", "8", "9", "数据库"]],
+        "actions": [
+          {"content_all": ["数据库", "回滚", "脚本"], "assignee_any": ["王工"], "due_any": ["2026-08-08", "8 月 8", "8月8"]}
+        ]
+      }
+    },
+    {
+      "id": "MS023",
+      "title": "长转写全程无结论",
+      "tier": "extended",
+      "timeline": [
+        {
+          "generated": {
+            "count": 130,
+            "speaker_template": "讨论成员{index}",
+            "text_template": "第{index}轮只是自由讨论，观点仍有分歧，没有形成决策，也没有行动项。"
+          }
+        }
+      ],
+      "expect": {
+        "max_decisions": 0,
+        "max_actions": 0
+      }
+    },
+    {
+      "id": "MS024",
+      "title": "长转写多话题多行动项",
+      "tier": "extended",
+      "timeline": [
+        {
+          "generated": {
+            "count": 60,
+            "speaker_template": "产品成员{index}",
+            "text_template": "产品话题第{index}项是背景同步，尚未新增决策。"
+          }
+        },
+        {"speaker": "主持人", "text": "最终决定在 2026 年 8 月 2 日启用只读模式。"},
+        {"speaker": "张工", "text": "只读模式开关由我在 2026 年 7 月 29 日前完成。"},
+        {
+          "generated": {
+            "count": 60,
+            "start_index": 61,
+            "speaker_template": "安全成员{index}",
+            "text_template": "安全话题第{index}项是风险说明，没有新增负责人。"
+          }
+        },
+        {"speaker": "主持人", "text": "最终决定在 2026 年 8 月 6 日切换审计日志。"},
+        {"speaker": "周工", "text": "审计日志切换脚本由我在 2026 年 8 月 4 日前完成。"},
+        {
+          "generated": {
+            "count": 60,
+            "start_index": 121,
+            "speaker_template": "运营成员{index}",
+            "text_template": "运营话题第{index}项是数据复核，没有形成额外行动项。"
+          }
+        },
+        {"speaker": "主持人", "text": "最终决定在 2026 年 8 月 12 日下线旧入口。"},
+        {"speaker": "陈工", "text": "旧入口下线公告由我在 2026 年 8 月 10 日前发出。"}
+      ],
+      "expect": {
+        "decision_groups": [
+          ["2026", "8", "2", "只读"],
+          ["2026", "8", "6", "审计"],
+          ["2026", "8", "12", "旧入口"]
+        ],
+        "min_decisions": 3,
+        "max_decisions": 3,
+        "min_actions": 3,
+        "max_actions": 3,
+        "actions": [
+          {"content_all": ["只读", "开关"], "assignee_any": ["张工"], "due_any": ["2026-07-29", "7 月 29", "7月29"]},
+          {"content_all": ["审计", "切换", "脚本"], "assignee_any": ["周工"], "due_any": ["2026-08-04", "8 月 4", "8月4"]},
+          {"content_all": ["旧入口", "公告"], "assignee_any": ["陈工"], "due_any": ["2026-08-10", "8 月 10", "8月10"]}
+        ]
+      }
+    }
+  ]
+}

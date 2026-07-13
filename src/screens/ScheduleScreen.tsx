@@ -10,12 +10,14 @@ import { RootStackParamList, CalEvent } from '../types';
 import { Avatar } from '../components/Common';
 import { useEvents } from '../store/EventsStore';
 import { CalGrid } from '../components/CalGrid';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import { selectTasksForDate } from '../utils/taskOrdering';
 import { sortEventsForSearch } from '../utils/eventOrdering';
+import { materializeEventsForSearch } from '../utils/eventRecurrence';
+import { openMeetingsTab } from '../navigation/tabTargets';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 const TASK_VISIBLE_ROWS = 4;
@@ -38,7 +40,7 @@ function relativeDayLabel(selectedDate: Date, today: Date): string {
 }
 
 export function ScheduleScreen({ navigation }: Props) {
-  const { events, refreshEvents } = useEvents();
+  const { events, searchableEvents, error: eventsError, refreshEvents } = useEvents();
   const { meetings } = useMeetings();
   const { profile } = useAuth();
   const initialDate = useMemo(() => new Date(), []);
@@ -87,7 +89,7 @@ export function ScheduleScreen({ navigation }: Props) {
   const eventSearchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase();
-    const matches = events.filter(e => [
+    const matches = searchableEvents.filter(e => [
       e.title,
       e.startDate,
       e.startTime,
@@ -97,8 +99,8 @@ export function ScheduleScreen({ navigation }: Props) {
       e.detail,
       e.category,
     ].filter(Boolean).some(value => String(value).toLowerCase().includes(q)));
-    return sortEventsForSearch(matches, today);
-  }, [events, searchQuery, todayStr]);
+    return sortEventsForSearch(materializeEventsForSearch(matches, today), today);
+  }, [searchableEvents, searchQuery, todayStr]);
 
   const meetingSearchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -182,12 +184,22 @@ export function ScheduleScreen({ navigation }: Props) {
             clearButtonMode="never"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="清除日程搜索"
+            >
               <Ionicons name="close-circle" size={15} color={C.sub} />
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Profile')}
+          accessibilityRole="button"
+          accessibilityLabel="打开个人资料"
+          testID="schedule-open-profile"
+        >
           <Avatar size={36} profile={profile} />
         </TouchableOpacity>
       </View>
@@ -251,6 +263,16 @@ export function ScheduleScreen({ navigation }: Props) {
               <View style={s.todayTitleWrap}>
                 <Text style={s.todayTitle}>{isTodaySelected ? '今日待办' : '当日待办'}</Text>
                 {selectedRelativeLabel ? <Text style={s.relativePill}>{selectedRelativeLabel}</Text> : null}
+                {eventsError ? (
+                  <TouchableOpacity
+                    onPress={() => { void refreshEvents(year, month); }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="日程同步失败，点击重试"
+                  >
+                    <Ionicons name="cloud-offline-outline" size={16} color={C.red} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <Text style={s.todayDate}>{selectedDateLabel}</Text>
             </View>
@@ -306,7 +328,7 @@ export function ScheduleScreen({ navigation }: Props) {
       <BottomTabBar
         active="schedule"
         onSchedule={() => {}}
-        onMeetings={() => (navigation as any).navigate('Meetings')}
+        onMeetings={() => openMeetingsTab(navigation)}
         onMic={() => setVoiceVisible(true)}
       />
       <VoiceInputModal
@@ -324,7 +346,7 @@ const s = StyleSheet.create({
   searchBar: { flex: 1, height: 34, backgroundColor: C.inputBg, borderRadius: 17, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 8 },
   searchInput: { flex: 1, fontSize: 12, color: C.text, paddingVertical: 0 },
   scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 8 },
+  scrollContent: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   /* Today card */
   todayCard: { margin: 14, marginBottom: 16, backgroundColor: C.tasksBg, borderRadius: 18, padding: 14, paddingHorizontal: 16 },
   todayHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },

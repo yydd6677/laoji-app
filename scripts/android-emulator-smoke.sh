@@ -10,6 +10,9 @@ DEVICE="${DEVICE:-emulator-5554}"
 APK="${APK:-$ROOT_DIR/android/app/build/outputs/apk/release/app-release.apk}"
 OUT_DIR="${OUT_DIR:-/tmp/laoji-emulator-smoke}"
 RESET_APP_DATA="${RESET_APP_DATA:-1}"
+ALLOW_PHYSICAL_DEVICE="${ALLOW_PHYSICAL_DEVICE:-0}"
+ALLOW_ADDITIONAL_DEVICES="${ALLOW_ADDITIONAL_DEVICES:-0}"
+DEVICE_PIN="${DEVICE_PIN:-}"
 
 mkdir -p "$OUT_DIR"
 
@@ -70,7 +73,33 @@ wait_boot() {
     local state
     state="$(adb_cmd shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     if [ "$state" = "1" ]; then
-      adb_cmd shell input keyevent 82 >/dev/null 2>&1 || true
+      adb_cmd shell input keyevent 224 >/dev/null 2>&1 || true
+      if ! adb_cmd shell dumpsys user | grep -q 'State: RUNNING_UNLOCKED'; then
+        adb_cmd shell input swipe 540 2100 540 400 400 >/dev/null 2>&1 || true
+        if [ -n "$DEVICE_PIN" ]; then
+          local index digit keycode
+          for ((index = 0; index < ${#DEVICE_PIN}; index += 1)); do
+            digit="${DEVICE_PIN:index:1}"
+            if [[ ! "$digit" =~ ^[0-9]$ ]]; then
+              log "DEVICE_PIN must contain digits only"
+              return 1
+            fi
+            keycode=$((7 + digit))
+            adb_cmd shell input keyevent "$keycode" >/dev/null
+          done
+          adb_cmd shell input keyevent 66 >/dev/null
+        fi
+        for _ in $(seq 1 10); do
+          if adb_cmd shell dumpsys user | grep -q 'State: RUNNING_UNLOCKED'; then
+            break
+          fi
+          sleep 1
+        done
+      fi
+      if ! adb_cmd shell dumpsys user | grep -q 'State: RUNNING_UNLOCKED'; then
+        log "device user storage is still locked; unlock it or provide DEVICE_PIN"
+        return 1
+      fi
       adb_cmd shell settings put system screen_off_timeout 2147483647 >/dev/null 2>&1 || true
       return 0
     fi
@@ -81,18 +110,37 @@ wait_boot() {
   exit 1
 }
 
-ensure_emulator() {
+ensure_target_device() {
   require_file "$ADB"
-  require_file "$EMULATOR"
   local connected
   connected="$("$ADB" devices | awk 'NR > 1 && $2 == "device" { print $1 }')"
   local unexpected
   unexpected="$(printf '%s\n' "$connected" | awk -v expected="$DEVICE" 'NF && $1 != expected { print $1 }')"
   if [ -n "$unexpected" ]; then
-    log "unexpected adb device(s); disconnect phones before emulator-only validation:"
+    if [ "$ALLOW_ADDITIONAL_DEVICES" != "1" ]; then
+      log "unexpected adb device(s); disconnect phones before emulator-only validation:"
+      printf '%s\n' "$unexpected"
+      exit 1
+    fi
+    log "additional adb device(s) explicitly allowed and will not be targeted:"
     printf '%s\n' "$unexpected"
-    exit 1
   fi
+
+  if [[ "$DEVICE" != emulator-* ]]; then
+    if [ "$ALLOW_PHYSICAL_DEVICE" != "1" ]; then
+      log "refusing physical-device validation without ALLOW_PHYSICAL_DEVICE=1: $DEVICE"
+      exit 1
+    fi
+    if ! printf '%s\n' "$connected" | grep -qx "$DEVICE"; then
+      log "physical target is not connected: $DEVICE"
+      exit 1
+    fi
+    log "physical target connected: $DEVICE"
+    wait_boot
+    return 0
+  fi
+
+  require_file "$EMULATOR"
   if "$ADB" devices | awk 'NR > 1 { print $1 }' | grep -qx "$DEVICE"; then
     log "emulator already connected: $DEVICE"
     wait_boot
@@ -109,7 +157,18 @@ ensure_emulator() {
 
 dump_ui() {
   local name="$1"
-  adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null
+  local dumped=0
+  for _ in $(seq 1 6); do
+    if adb_cmd shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1; then
+      dumped=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$dumped" != "1" ]; then
+    log "uiautomator dump failed after retries: $name"
+    return 1
+  fi
   adb_cmd exec-out cat /sdcard/window.xml >"$OUT_DIR/$name.xml"
   perl -pe 's/></>\n</g' "$OUT_DIR/$name.xml" >"$OUT_DIR/$name.pretty.xml"
 }
@@ -198,9 +257,41 @@ tap_xy() {
   log "tap at $x $y"
 }
 
+tap_text_fraction() {
+  local name="$1"
+  local needle="$2"
+  local fraction="$3"
+  local xy
+  xy="$(python3 - "$OUT_DIR/$name.xml" "$needle" "$fraction" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+xml_path, needle, fraction_text = sys.argv[1], sys.argv[2], sys.argv[3]
+fraction = float(fraction_text)
+if not 0 <= fraction <= 1:
+    raise SystemExit(2)
+
+root = ET.parse(xml_path).getroot()
+for node in root.iter("node"):
+    if needle not in node.attrib.get("text", ""):
+        continue
+    numbers = list(map(int, re.findall(r"\d+", node.attrib.get("bounds", ""))))
+    if len(numbers) != 4:
+        continue
+    x1, y1, x2, y2 = numbers
+    print(round(x1 + (x2 - x1) * fraction), (y1 + y2) // 2)
+    raise SystemExit(0)
+raise SystemExit(2)
+PY
+)"
+  adb_cmd shell input tap $xy
+  log "tap text '$needle' at fraction $fraction: $xy"
+}
+
 launch_app() {
   adb_cmd shell am force-stop com.laoji.app >/dev/null 2>&1 || true
-  adb_cmd shell monkey -p com.laoji.app -c android.intent.category.LAUNCHER 1 >/dev/null
+  adb_cmd shell am start -W -n com.laoji.app/.MainActivity >/dev/null
   sleep 2
 }
 
@@ -230,9 +321,9 @@ run_login_route() {
   sleep 0.5
 
   dump_ui login_after_forgot
-  # The legal links are nested Text spans; use stable Pixel 6 coordinates
-  # inside the rendered terms line to verify both documents.
-  tap_xy 524 2140
+  # The links are nested Text spans, so UIAutomator exposes one parent node.
+  # Derive both hit targets from its current bounds instead of fixed pixels.
+  tap_text_fraction login_after_forgot '登录即代表你同意' 0.54
   sleep 1
   dump_ui terms
   screenshot terms
@@ -242,7 +333,7 @@ run_login_route() {
   sleep 0.7
 
   dump_ui login_after_terms
-  tap_xy 760 2140
+  tap_text_fraction login_after_terms '登录即代表你同意' 0.88
   sleep 1
   dump_ui privacy_policy
   screenshot privacy_policy
@@ -298,16 +389,27 @@ run_main_route() {
   dump_ui profile
   screenshot profile
   assert_ui profile 'text="我"'
-  assert_ui profile 'text="本地体验账号"'
-  assert_ui profile 'text="编辑资料"'
+  assert_ui profile 'text="未登录账号"'
+  assert_ui profile 'text="头像"'
+  assert_ui profile 'text="昵称"'
+  assert_ui profile 'text="邮箱"'
+  assert_ui profile 'text="手机号"'
+  assert_ui profile 'text="保存修改"'
 
-  tap_node profile '编辑资料'
+  tap_node profile '打开设置'
+  sleep 1
+  dump_ui settings
+  screenshot settings
+  assert_ui settings 'text="设置"'
+  assert_ui settings 'text="隐私与权限管理"'
+  assert_ui settings 'text="帮助与支持"'
+  assert_ui settings 'text="账号与安全"'
+  tap_node settings '账号与安全'
   sleep 1
   dump_ui account
   screenshot account
-  assert_ui account 'text="账号与资料"'
-  assert_ui account 'text="头像"'
-  assert_ui account 'text="选择图片"'
+  assert_ui account 'text="账号与安全"'
+  assert_ui account 'text="密码与安全"'
   assert_ui account 'text="通知与提醒"'
 
   tap_node account '通知与提醒'
@@ -352,7 +454,7 @@ run_main_route() {
   sleep 1
   dump_ui voice_modal
   screenshot voice_modal
-  assert_ui voice_modal 'text="老记，说出你的日程"'
+  assert_ui voice_modal 'text="说出你的日常"'
   assert_ui voice_modal 'text="输入或说出日程内容.*"'
 
   tap_node voice_modal '输入或说出日程内容'
@@ -365,7 +467,7 @@ run_main_route() {
 
 main() {
   require_file "$APK"
-  ensure_emulator
+  ensure_target_device
 
   log "installing APK: $APK"
   adb_cmd install -r "$APK" >/dev/null
@@ -378,6 +480,7 @@ main() {
   screenshot launch
   run_login_route
   run_main_route
+  python3 "$ROOT_DIR/scripts/check_android_ui_accessibility.py" "$OUT_DIR"
 
   log "smoke completed; artifacts: $OUT_DIR"
 }

@@ -1,20 +1,29 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Meeting, MeetingSummary, TranscriptLine } from '../types';
 import {
   ApiMeeting,
   createMeeting as apiCreateMeeting,
   deleteMeeting as apiDeleteMeeting,
-  fetchMeetings,
+  fetchAllMeetings,
   updateMeeting as apiUpdateMeeting,
 } from '../services/api';
 import { useAuth } from './AuthStore';
 import { Colors as C } from '../theme/colors';
+import { formatDuration } from '../utils/meetingMedia';
+import { clearPendingMeetingAudioUpload } from '../services/meetingRecording';
+import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
 const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
+
+export class MeetingDeletionCleanupError extends Error {
+  constructor(public readonly failureCount: number) {
+    super('会议记录已删除，但部分本机录音或缓存未能清理。请在隐私设置中清除本机数据。');
+    this.name = 'MeetingDeletionCleanupError';
+  }
+}
 
 function isFinishedStatus(status: string): boolean {
   return ['completed', 'ended', 'done', 'processed'].includes(status);
@@ -38,30 +47,45 @@ function statusTag(status: string): { label: string; color: string } {
   return { label: '未开始', color: C.purple };
 }
 
+const STATUS_TAG_LABELS = new Set(['录音中', '处理中', '失败', '已完成', '未开始']);
+
+function tagsForStatus(meeting: Meeting, status: string): Meeting['tags'] {
+  const retained = meeting.tags.filter(tag => !STATUS_TAG_LABELS.has(tag.label) && tag.label !== '待同步');
+  return [statusTag(status), ...retained];
+}
+
+function tagsWithPendingSync(tags: Meeting['tags']): Meeting['tags'] {
+  return [...tags.filter(tag => tag.label !== '待同步'), { label: '待同步', color: C.orange }];
+}
+
 function serverToLocal(m: ApiMeeting): Meeting {
   const { date, time } = formatDateTime(m.created_at);
-  const finished = isFinishedStatus(m.status);
+  const audioDurationSec = typeof m.audio_duration_sec === 'number' && m.audio_duration_sec > 0
+    ? m.audio_duration_sec
+    : undefined;
   return {
     id: m.id,
     title: m.title,
     date,
     time,
-    duration: m.audio_duration_sec ? `${Math.max(1, Math.round(m.audio_duration_sec / 60))} 分钟` : '—',
+    duration: formatDuration(audioDurationSec),
     tags: [statusTag(m.status), ...(m.mode ? [{ label: m.mode === 'offline' ? '离线' : '实时', color: C.blue }] : [])],
     participants: m.participants ?? [],
-    hasTranscript: finished,
-    hasSummary: finished,
+    hasTranscript: m.transcript_available ?? (m.transcript_count ?? 0) > 0,
+    hasSummary: m.summary_available ?? false,
     status: m.status,
     mode: m.mode ?? 'realtime',
     description: m.description ?? null,
     createdAt: m.created_at,
     updatedAt: m.updated_at,
     audioAvailable: Boolean(m.audio_available),
+    audioDurationSec,
+    clientRequestId: m.client_request_id ?? undefined,
     source: 'cloud',
   };
 }
 
-function createGuestMeeting(title: string, now = new Date()): Meeting {
+function createGuestMeeting(title: string, clientRequestId?: string, now = new Date()): Meeting {
   return {
     id: `guest-meeting-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title,
@@ -77,13 +101,14 @@ function createGuestMeeting(title: string, now = new Date()): Meeting {
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     audioAvailable: false,
+    clientRequestId,
     source: 'guest',
   };
 }
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await getAppStorageItem(key);
     return raw ? JSON.parse(raw) as T : fallback;
   } catch {
     return fallback;
@@ -91,21 +116,22 @@ async function loadJson<T>(key: string, fallback: T): Promise<T> {
 }
 
 async function persistJson(key: string, value: unknown): Promise<void> {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Cache failures should not block the main meeting flow.
-  }
+  await writeAppStorageJson(key, value, { bestEffort: true });
 }
 
 interface MeetingsContextType {
   meetings: Meeting[];
   loading: boolean;
   error: string | null;
-  createMeeting: (title: string, options?: { description?: string | null; participants?: string[]; mode?: ApiMeeting['mode'] }) => Promise<Meeting>;
+  createMeeting: (title: string, options?: {
+    description?: string | null;
+    participants?: string[];
+    mode?: ApiMeeting['mode'];
+    clientRequestId?: string;
+  }) => Promise<Meeting>;
   deleteMeeting: (id: string) => Promise<void>;
   updateMeetingTitle: (id: string, title: string) => Promise<void>;
-  updateMeetingStatus: (id: string, status: string, patch?: Partial<Meeting>) => Promise<void>;
+  updateMeetingStatus: (id: string, status: string, patch?: Partial<Meeting>) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   getCachedTranscript: (id: string) => TranscriptLine[];
   saveCachedTranscript: (id: string, transcript: TranscriptLine[]) => Promise<void>;
@@ -122,6 +148,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const transcriptCacheRef = useRef<Record<string, TranscriptLine[]>>({});
   const summaryCacheRef = useRef<Record<string, MeetingSummary | null>>({});
+  const meetingsRef = useRef<Meeting[]>([]);
+  const generationRef = useRef(0);
+  const activeScopeRef = useRef<string | null>(null);
+  const guestMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const scope = useMemo(() => {
     if (mode === 'authenticated' && session) return `user:${session.user.id}`;
@@ -133,12 +163,41 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const transcriptKey = `${TRANSCRIPT_CACHE_KEY}:${scope}`;
   const summaryKey = `${SUMMARY_CACHE_KEY}:${scope}`;
 
+  useLayoutEffect(() => {
+    generationRef.current += 1;
+    activeScopeRef.current = scope;
+    meetingsRef.current = [];
+    transcriptCacheRef.current = {};
+    summaryCacheRef.current = {};
+    setMeetings([]);
+    setError(null);
+    setLoading(false);
+  }, [scope]);
+
   const persistMeetings = useCallback((next: Meeting[]) => persistJson(meetingsKey, next), [meetingsKey]);
-  const persistTranscripts = useCallback(() => persistJson(transcriptKey, transcriptCacheRef.current), [transcriptKey]);
-  const persistSummaries = useCallback(() => persistJson(summaryKey, summaryCacheRef.current), [summaryKey]);
+  const persistMeetingsStrict = useCallback(
+    (next: Meeting[]) => writeAppStorageJson(meetingsKey, next, { removeIfEmpty: true }),
+    [meetingsKey],
+  );
+  const persistTranscripts = useCallback(
+    () => writeAppStorageJson(transcriptKey, transcriptCacheRef.current, { removeIfEmpty: true }),
+    [transcriptKey],
+  );
+  const persistSummaries = useCallback(
+    () => writeAppStorageJson(summaryKey, summaryCacheRef.current, { removeIfEmpty: true }),
+    [summaryKey],
+  );
+  const enqueueGuestMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = guestMutationQueueRef.current.then(operation, operation);
+    guestMutationQueueRef.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, []);
 
   const refreshMeetings = useCallback(async () => {
+    const requestGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
     if (mode === 'signed_out') {
+      meetingsRef.current = [];
       setMeetings([]);
       return;
     }
@@ -149,33 +208,68 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
     setLoading(true);
     try {
-      const data = await fetchMeetings(1, 100, accessToken);
-      setMeetings(previous => {
-        const previousById = new Map(previous.map(item => [item.id, item]));
-        const local = data.map(item => {
-          const remote = serverToLocal(item);
-          const cached = previousById.get(remote.id);
-          return {
-            ...remote,
-            audioAvailable: remote.audioAvailable || Boolean(cached?.audioLocalUri),
-            audioLocalUri: cached?.audioLocalUri,
-          };
-        });
-        void persistMeetings(local);
-        return local;
+      const data = await fetchAllMeetings(accessToken);
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      const previousById = new Map(meetingsRef.current.map(item => [item.id, item]));
+      const remoteItems = data.map(item => {
+        const remote = serverToLocal(item);
+        const cached = previousById.get(remote.id);
+        const preservePendingStatus = Boolean(cached?.statusSyncPending && cached.status);
+        return {
+          ...remote,
+          status: preservePendingStatus ? cached?.status : remote.status,
+          tags: preservePendingStatus
+            ? tagsWithPendingSync(cached?.tags ?? remote.tags)
+            : remote.tags,
+          statusSyncPending: preservePendingStatus,
+          hasTranscript: remote.hasTranscript || (transcriptCacheRef.current[remote.id]?.length ?? 0) > 0,
+          hasSummary: remote.hasSummary || Boolean(summaryCacheRef.current[remote.id]),
+          audioAvailable: remote.audioAvailable || Boolean(cached?.audioLocalUri),
+          audioLocalUri: cached?.audioLocalUri,
+          audioDurationSec: remote.audioDurationSec ?? cached?.audioDurationSec,
+          audioBars: cached?.audioBars,
+          duration: remote.audioDurationSec ? remote.duration : cached?.duration ?? remote.duration,
+        };
       });
+      const local = await Promise.all(remoteItems.map(async item => {
+        if (!item.statusSyncPending || !item.status) return item;
+        try {
+          const synced = serverToLocal(await apiUpdateMeeting(item.id, { status: item.status }, accessToken));
+          return {
+            ...item,
+            status: synced.status,
+            tags: synced.tags,
+            updatedAt: synced.updatedAt,
+            statusSyncPending: false,
+          };
+        } catch {
+          return item;
+        }
+      }));
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      meetingsRef.current = local;
+      setMeetings(local);
+      await persistMeetings(local);
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
       setError(null);
     } catch (err) {
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
       setError(err instanceof Error ? err.message : '会议服务暂时不可用');
     } finally {
-      setLoading(false);
+      if (generationRef.current === requestGeneration && activeScopeRef.current === scope) {
+        setLoading(false);
+      }
     }
-  }, [accessToken, mode, persistMeetings]);
+  }, [accessToken, mode, persistMeetings, scope]);
 
   useEffect(() => {
     let alive = true;
+    const loadGeneration = generationRef.current;
+    const isCurrent = () => alive
+      && generationRef.current === loadGeneration
+      && activeScopeRef.current === scope;
     async function loadForScope() {
-      setError(null);
+      if (mode === 'signed_out') return;
       setLoading(true);
       try {
         const [cachedMeetings, cachedTranscripts, cachedSummaries] = await Promise.all([
@@ -183,33 +277,48 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           loadJson<Record<string, TranscriptLine[]>>(transcriptKey, {}),
           loadJson<Record<string, MeetingSummary | null>>(summaryKey, {}),
         ]);
-        if (!alive) return;
+        if (!isCurrent()) return;
         transcriptCacheRef.current = cachedTranscripts;
         summaryCacheRef.current = cachedSummaries;
-        setMeetings(cachedMeetings);
+        const hydratedMeetings = cachedMeetings.map(meeting => ({
+          ...meeting,
+          hasTranscript: meeting.hasTranscript || (cachedTranscripts[meeting.id]?.length ?? 0) > 0,
+          hasSummary: meeting.hasSummary || Boolean(cachedSummaries[meeting.id]),
+        }));
+        meetingsRef.current = hydratedMeetings;
+        setMeetings(hydratedMeetings);
         if (mode === 'authenticated') await refreshMeetings();
-        if (mode === 'signed_out') setMeetings([]);
       } finally {
-        if (alive) setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     }
     void loadForScope();
     return () => { alive = false; };
-  }, [meetingsKey, mode, refreshMeetings, summaryKey, transcriptKey]);
+  }, [meetingsKey, mode, refreshMeetings, scope, summaryKey, transcriptKey]);
 
   const createMeeting = useCallback(async (
     title: string,
-    options: { description?: string | null; participants?: string[]; mode?: ApiMeeting['mode'] } = {},
+    options: {
+      description?: string | null;
+      participants?: string[];
+      mode?: ApiMeeting['mode'];
+      clientRequestId?: string;
+    } = {},
   ): Promise<Meeting> => {
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
     const cleanTitle = title.trim() || '未命名会议';
     if (mode === 'guest') {
-      const local = createGuestMeeting(cleanTitle);
-      setMeetings(prev => {
-        const next = [local, ...prev];
-        void persistMeetings(next);
-        return next;
+      return enqueueGuestMutation(async () => {
+        if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
+        const local = createGuestMeeting(cleanTitle, options.clientRequestId);
+        const next = [local, ...meetingsRef.current];
+        await persistMeetingsStrict(next);
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return local;
+        meetingsRef.current = next;
+        setMeetings(next);
+        return local;
       });
-      return local;
     }
     if (!accessToken) throw new Error('not authenticated');
     const created = serverToLocal(await apiCreateMeeting({
@@ -217,121 +326,253 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       description: options.description ?? null,
       participants: options.participants ?? [],
       mode: options.mode ?? 'realtime',
+      clientRequestId: options.clientRequestId,
     }, accessToken));
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return created;
     setMeetings(prev => {
       const next = [created, ...prev.filter(item => item.id !== created.id)];
+      meetingsRef.current = next;
       void persistMeetings(next);
       return next;
     });
     return created;
-  }, [accessToken, mode, persistMeetings]);
+  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
   const deleteMeeting = useCallback(async (id: string) => {
-    const target = meetings.find(m => m.id === id) ?? null;
-    const deleteLocalAudio = async () => {
-      if (!target?.audioLocalUri) return;
-      try {
-        await FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true });
-      } catch {
-        // Meeting deletion should still succeed if local media cleanup fails.
-      }
-    };
-    setMeetings(prev => {
-      const next = prev.filter(m => m.id !== id);
-      void persistMeetings(next);
-      return next;
-    });
-    delete transcriptCacheRef.current[id];
-    delete summaryCacheRef.current[id];
-    void persistTranscripts();
-    void persistSummaries();
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
+    if (mode !== 'guest' && !accessToken) throw new Error('not authenticated');
 
     if (mode === 'guest') {
-      await deleteLocalAudio();
-      return;
+      return enqueueGuestMutation(async () => {
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
+        if (!target) return;
+        const nextMeetings = meetingsRef.current.filter(meeting => meeting.id !== id);
+        await persistMeetingsStrict(nextMeetings);
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+
+        const nextTranscripts = { ...transcriptCacheRef.current };
+        const nextSummaries = { ...summaryCacheRef.current };
+        delete nextTranscripts[id];
+        delete nextSummaries[id];
+        meetingsRef.current = nextMeetings;
+        transcriptCacheRef.current = nextTranscripts;
+        summaryCacheRef.current = nextSummaries;
+        setMeetings(nextMeetings);
+        const cleanupResults = await Promise.allSettled([
+          persistTranscripts(),
+          persistSummaries(),
+          clearPendingMeetingAudioUpload(scope, id),
+          ...(target.audioLocalUri
+            ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
+            : []),
+        ]);
+        const failures = cleanupResults.filter(result => result.status === 'rejected').length;
+        if (failures > 0) throw new MeetingDeletionCleanupError(failures);
+      });
     }
-    if (!accessToken) throw new Error('not authenticated');
+
+    const previousMeetings = meetingsRef.current;
+    const previousTranscripts = transcriptCacheRef.current;
+    const previousSummaries = summaryCacheRef.current;
+    const target = previousMeetings.find(m => m.id === id) ?? null;
+    const targetIndex = previousMeetings.findIndex(m => m.id === id);
+    const hadTranscript = Object.prototype.hasOwnProperty.call(previousTranscripts, id);
+    const previousTranscript = previousTranscripts[id];
+    const hadSummary = Object.prototype.hasOwnProperty.call(previousSummaries, id);
+    const previousSummary = previousSummaries[id];
+    const nextMeetings = previousMeetings.filter(m => m.id !== id);
+    const nextTranscripts = { ...transcriptCacheRef.current };
+    const nextSummaries = { ...summaryCacheRef.current };
+    delete nextTranscripts[id];
+    delete nextSummaries[id];
+    meetingsRef.current = nextMeetings;
+    transcriptCacheRef.current = nextTranscripts;
+    summaryCacheRef.current = nextSummaries;
+    setMeetings(nextMeetings);
+
     try {
-      await apiDeleteMeeting(id, accessToken);
-      await deleteLocalAudio();
+      await apiDeleteMeeting(id, accessToken!);
     } catch (err) {
-      if (target) {
-        setMeetings(prev => {
-          const next = prev.some(m => m.id === id) ? prev : [target, ...prev];
-          void persistMeetings(next);
-          return next;
-        });
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+        await Promise.allSettled([
+          persistJson(meetingsKey, previousMeetings),
+          writeAppStorageJson(transcriptKey, previousTranscripts, { removeIfEmpty: true }),
+          writeAppStorageJson(summaryKey, previousSummaries, { removeIfEmpty: true }),
+        ]);
+        throw err;
       }
+      if (target) {
+        const restoredMeetings = meetingsRef.current.some(m => m.id === id)
+          ? meetingsRef.current
+          : [
+            ...meetingsRef.current.slice(0, Math.max(0, targetIndex)),
+            target,
+            ...meetingsRef.current.slice(Math.max(0, targetIndex)),
+          ];
+        meetingsRef.current = restoredMeetings;
+        setMeetings(restoredMeetings);
+      }
+      const restoredTranscripts = { ...transcriptCacheRef.current };
+      if (hadTranscript) restoredTranscripts[id] = previousTranscript;
+      else delete restoredTranscripts[id];
+      transcriptCacheRef.current = restoredTranscripts;
+      const restoredSummaries = { ...summaryCacheRef.current };
+      if (hadSummary) restoredSummaries[id] = previousSummary;
+      else delete restoredSummaries[id];
+      summaryCacheRef.current = restoredSummaries;
+      await Promise.allSettled([
+        persistMeetings(meetingsRef.current),
+        persistTranscripts(),
+        persistSummaries(),
+      ]);
       throw err;
     }
-  }, [accessToken, meetings, mode, persistMeetings, persistSummaries, persistTranscripts]);
+
+    const cleanupResults = await Promise.allSettled([
+      persistMeetingsStrict(nextMeetings),
+      persistTranscripts(),
+      persistSummaries(),
+      clearPendingMeetingAudioUpload(scope, id),
+      ...(target?.audioLocalUri
+        ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
+        : []),
+    ]);
+    const failures = cleanupResults.filter(result => result.status === 'rejected').length;
+    if (failures > 0) throw new MeetingDeletionCleanupError(failures);
+  }, [accessToken, enqueueGuestMutation, meetingsKey, mode, persistMeetings, persistMeetingsStrict, persistSummaries, persistTranscripts, scope, summaryKey, transcriptKey]);
 
   const updateMeetingTitle = useCallback(async (id: string, title: string) => {
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
     const cleanTitle = title.trim();
     if (!cleanTitle) return;
+    if (mode === 'guest') {
+      return enqueueGuestMutation(async () => {
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        const next = meetingsRef.current.map(meeting => (
+          meeting.id === id ? { ...meeting, title: cleanTitle, updatedAt: new Date().toISOString() } : meeting
+        ));
+        await persistMeetingsStrict(next);
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        meetingsRef.current = next;
+        setMeetings(next);
+      });
+    }
     setMeetings(prev => {
       const next = prev.map(m => m.id === id ? { ...m, title: cleanTitle, updatedAt: new Date().toISOString() } : m);
+      meetingsRef.current = next;
       void persistMeetings(next);
       return next;
     });
-    if (mode === 'guest') return;
     if (!accessToken) throw new Error('not authenticated');
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { title: cleanTitle }, accessToken));
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       setMeetings(prev => {
         const next = prev.map(m => m.id === id ? { ...m, ...updated } : m);
+        meetingsRef.current = next;
         void persistMeetings(next);
         return next;
       });
     } catch (err) {
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) throw err;
       await refreshMeetings();
       throw err;
     }
-  }, [accessToken, mode, persistMeetings, refreshMeetings]);
+  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, refreshMeetings, scope]);
 
   const updateMeetingStatus = useCallback(async (id: string, status: string, patch: Partial<Meeting> = {}) => {
-    setMeetings(prev => {
-      const next = prev.map(m => m.id === id
-        ? { ...m, ...patch, status, tags: [statusTag(status), ...(m.source === 'guest' ? [{ label: '本机', color: C.teal }] : [])], updatedAt: new Date().toISOString() }
-        : m);
-      void persistMeetings(next);
-      return next;
-    });
-    if (mode === 'guest') return;
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return false;
+    if (mode === 'guest') {
+      return enqueueGuestMutation(async () => {
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
+        const next = meetingsRef.current.map(meeting => meeting.id === id
+          ? { ...meeting, ...patch, status, tags: [statusTag(status), { label: '本机', color: C.teal }], updatedAt: new Date().toISOString() }
+          : meeting);
+        await persistMeetingsStrict(next);
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
+        meetingsRef.current = next;
+        setMeetings(next);
+        return true;
+      });
+    }
     if (!accessToken) throw new Error('not authenticated');
+    const local = meetingsRef.current.map(meeting => meeting.id === id
+      ? {
+        ...meeting,
+        ...patch,
+        status,
+        tags: tagsWithPendingSync(tagsForStatus(meeting, status)),
+        statusSyncPending: true,
+        updatedAt: new Date().toISOString(),
+      }
+      : meeting);
+    await persistMeetingsStrict(local);
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
+    meetingsRef.current = local;
+    setMeetings(local);
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
-      setMeetings(prev => {
-        const next = prev.map(m => m.id === id ? { ...m, ...updated, ...patch } : m);
-        void persistMeetings(next);
-        return next;
-      });
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
+      const synced = meetingsRef.current.map(meeting => meeting.id === id
+        ? { ...meeting, ...updated, ...patch, statusSyncPending: false }
+        : meeting);
+      await persistMeetingsStrict(synced);
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
+      meetingsRef.current = synced;
+      setMeetings(synced);
+      return true;
     } catch {
-      // Keep local status so the user does not lose the active recording state.
+      return false;
     }
-  }, [accessToken, mode, persistMeetings]);
+  }, [accessToken, enqueueGuestMutation, mode, persistMeetingsStrict, scope]);
 
   const getCachedTranscript = useCallback((id: string) => transcriptCacheRef.current[id] ?? [], []);
   const saveCachedTranscript = useCallback(async (id: string, transcript: TranscriptLine[]) => {
-    transcriptCacheRef.current = { ...transcriptCacheRef.current, [id]: transcript };
-    await persistTranscripts();
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
+    const previous = transcriptCacheRef.current;
+    const next = { ...previous, [id]: transcript };
+    transcriptCacheRef.current = next;
+    try {
+      await persistTranscripts();
+    } catch (error) {
+      if (transcriptCacheRef.current === next) transcriptCacheRef.current = previous;
+      throw error;
+    }
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
     setMeetings(prev => {
       const next = prev.map(m => m.id === id ? { ...m, hasTranscript: transcript.length > 0 } : m);
+      meetingsRef.current = next;
       void persistMeetings(next);
       return next;
     });
-  }, [persistMeetings, persistTranscripts]);
+  }, [persistMeetings, persistTranscripts, scope]);
 
   const getCachedSummary = useCallback((id: string) => summaryCacheRef.current[id] ?? null, []);
   const saveCachedSummary = useCallback(async (id: string, summary: MeetingSummary | null) => {
-    summaryCacheRef.current = { ...summaryCacheRef.current, [id]: summary };
-    await persistSummaries();
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
+    const previous = summaryCacheRef.current;
+    const next = { ...previous, [id]: summary };
+    summaryCacheRef.current = next;
+    try {
+      await persistSummaries();
+    } catch (error) {
+      if (summaryCacheRef.current === next) summaryCacheRef.current = previous;
+      throw error;
+    }
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
     setMeetings(prev => {
       const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(summary) } : m);
+      meetingsRef.current = next;
       void persistMeetings(next);
       return next;
     });
-  }, [persistMeetings, persistSummaries]);
+  }, [persistMeetings, persistSummaries, scope]);
 
   return (
     <MeetingsContext.Provider

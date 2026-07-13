@@ -1,5 +1,6 @@
 import 'react-native-gesture-handler';
-import React from 'react';
+import React, { useEffect } from 'react';
+import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,10 +11,16 @@ import { MeetingsProvider } from './src/store/MeetingsStore';
 import { AppDialogProvider } from './src/components/AppDialog';
 import { AppLockGate } from './src/components/AppLockGate';
 import { assertProductionApiConfig } from './src/services/config';
+import { EventUndoBanner } from './src/components/EventUndoBanner';
+import { cleanupStaleMeetingShareCache } from './src/services/meetingShare';
 
 assertProductionApiConfig();
 
 export default function App() {
+  useEffect(() => {
+    void cleanupStaleMeetingShareCache().catch(() => {});
+  }, []);
+
   return (
     <SafeAreaProvider>
       <AuthProvider>
@@ -21,10 +28,13 @@ export default function App() {
           <MeetingsProvider>
             <AppDialogProvider>
               <AppLockGate>
-                <NavigationContainer>
-                  <StatusBar style="dark" />
-                  <RootNavigator />
-                </NavigationContainer>
+                <View style={{ flex: 1 }}>
+                  <NavigationContainer>
+                    <StatusBar style="dark" />
+                    <RootNavigator />
+                  </NavigationContainer>
+                  <EventUndoBanner />
+                </View>
               </AppLockGate>
             </AppDialogProvider>
           </MeetingsProvider>

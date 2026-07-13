@@ -18,6 +18,8 @@ import { AccountScreen }     from '../screens/AccountScreen';
 import { PrivacyScreen }     from '../screens/PrivacyScreen';
 import { AddEventScreen }    from '../screens/AddEventScreen';
 import { LegalDocumentScreen } from '../screens/LegalDocumentScreen';
+import { SpeakerManagerScreen } from '../screens/SpeakerManagerScreen';
+import { SpeakerEnrollmentScreen } from '../screens/SpeakerEnrollmentScreen';
 import { MainTabsNavigator } from './MainTabs';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -54,6 +56,8 @@ export function RootNavigator() {
       <Stack.Screen name="Recording"     component={RecordingScreen} />
       <Stack.Screen name="MeetingLive"   component={MeetingLiveScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="Transcription" component={TranscriptionScreen} />
+      <Stack.Screen name="SpeakerManager" component={SpeakerManagerScreen} />
+      <Stack.Screen name="SpeakerEnrollment" component={SpeakerEnrollmentScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />
       <Stack.Screen name="Account"       component={AccountScreen} />
       <Stack.Screen name="Privacy"       component={PrivacyScreen} />

@@ -30,6 +30,7 @@ import {
   colorForEventCategory,
   normalizeEventCategory,
 } from '../utils/eventColors';
+import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -100,11 +101,14 @@ export function AddEventScreen({ navigation, route }: Props) {
   const editingId = route.params?.eventId;
   const editingEvent = editingId ? events.find(e => e.id === editingId) : undefined;
   const isEditing = Boolean(editingId);
-  const initDate = route.params?.date ?? editingEvent?.startDate ?? todayDateStr();
+  const initDate = route.params?.date ?? editingEvent?.seriesStartDate ?? editingEvent?.startDate ?? todayDateStr();
+  const initEndDate = editingEvent?.seriesEndDate ?? editingEvent?.endDate ?? initDate;
   const [saving, setSaving] = React.useState(false);
+  const createRequestRef = React.useRef(createClientRequestState('event'));
 
   const [title, setTitle]       = useState(editingEvent?.title ?? '');
   const [dateObj, setDateObj]   = useState<Date>(() => parseDateStr(initDate));
+  const [endDateObj, setEndDateObj] = useState<Date>(() => parseDateStr(initEndDate));
   const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(editingEvent?.startTime ?? '10:00'));
   const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(editingEvent?.endTime ?? '11:00'));
   const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? false);
@@ -123,7 +127,9 @@ export function AddEventScreen({ navigation, route }: Props) {
   React.useEffect(() => {
     if (!editingEvent) return;
     setTitle(editingEvent.title);
-    setDateObj(parseDateStr(editingEvent.startDate));
+    const seriesStart = editingEvent.seriesStartDate ?? editingEvent.startDate;
+    setDateObj(parseDateStr(seriesStart));
+    setEndDateObj(parseDateStr(editingEvent.seriesEndDate ?? editingEvent.endDate ?? seriesStart));
     setStartObj(parseTimeStr(editingEvent.startTime ?? '10:00'));
     setEndObj(parseTimeStr(editingEvent.endTime ?? '11:00'));
     setAllDay(editingEvent.isAllDay ?? false);
@@ -148,10 +154,12 @@ export function AddEventScreen({ navigation, route }: Props) {
 
   // picker visibility
   const [showDatePicker, setShowDatePicker]   = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker]     = useState(false);
 
   const date      = formatDate(dateObj);
+  const endDate   = formatDate(endDateObj);
   const startTime = formatTime(startObj);
   const endTime   = formatTime(endObj);
   const color     = colorForEventCategory(category);
@@ -164,6 +172,8 @@ export function AddEventScreen({ navigation, route }: Props) {
       const payload: Omit<CalEvent, 'id'> = {
         title: title.trim(),
         startDate: date,
+        endDate: endDate !== date ? endDate : undefined,
+        spanning: endDate !== date,
         startTime: isAllDay ? undefined : startTime,
         endTime: isAllDay ? undefined : endTime,
         isAllDay,
@@ -177,10 +187,16 @@ export function AddEventScreen({ navigation, route }: Props) {
       if (editingEvent) {
         await updateEvent(editingEvent.id, payload);
       } else {
+        createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
+        payload.clientRequestId = createRequestRef.current.id;
         await addEvent(payload);
       }
       const d = parseDateStr(date);
       await refreshEvents(d.getFullYear(), d.getMonth() + 1);
+      if (endDate.slice(0, 7) !== date.slice(0, 7)) {
+        const end = parseDateStr(endDate);
+        await refreshEvents(end.getFullYear(), end.getMonth() + 1);
+      }
       if (editingEvent && !editingEvent.startDate.startsWith(date.slice(0, 7))) {
         const oldDate = parseDateStr(editingEvent.startDate);
         await refreshEvents(oldDate.getFullYear(), oldDate.getMonth() + 1);
@@ -203,13 +219,18 @@ export function AddEventScreen({ navigation, route }: Props) {
       return;
     }
 
-    if (!isAllDay && timeToMinutes(startTime) >= timeToMinutes(endTime)) {
+    if (endDate < date) {
+      showDialog({ title: '日期不正确', message: '结束日期不能早于开始日期', tone: 'warning' });
+      return;
+    }
+
+    if (!isAllDay && endDate === date && timeToMinutes(startTime) >= timeToMinutes(endTime)) {
       showDialog({ title: '时间不正确', message: '结束时间需要晚于开始时间', tone: 'warning' });
       return;
     }
 
     if (!isAllDay && startTime && endTime) {
-      const { hasConflict, conflicts } = checkConflict(events, date, startTime, endTime, editingEvent?.id);
+      const { hasConflict, conflicts } = checkConflict(events, date, startTime, endTime, editingEvent?.id, endDate);
       if (hasConflict) {
         const names = conflicts.map(e => `• ${e.title} (${e.startTime}–${e.endTime})`).join('\n');
         showDialog({
@@ -246,16 +267,18 @@ export function AddEventScreen({ navigation, route }: Props) {
       <BackHeader
         title={isEditing ? '编辑日程' : '新建日程'}
         onBack={() => navigation.goBack()}
-        right={
-          <TouchableOpacity onPress={handleSave} disabled={!canSave || saving}>
-            <Text style={[s.saveLink, (!canSave || saving) && { opacity: 0.35 }]}>{saving ? '保存中' : '保存'}</Text>
-          </TouchableOpacity>
-        }
       />
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           {/* Category picker */}
+          {editingEvent?.isExpandedOccurrence ? (
+            <View style={s.seriesNotice}>
+              <Ionicons name="repeat-outline" size={16} color={C.purple} />
+              <Text style={s.seriesNoticeText}>本次修改将应用到整个重复日程</Text>
+            </View>
+          ) : null}
+
           <View style={s.categoryRow}>
             {EVENT_CATEGORIES.map(item => {
               const selected = category === item;
@@ -292,7 +315,7 @@ export function AddEventScreen({ navigation, route }: Props) {
               <Ionicons name="calendar-outline" size={18} color={color} />
             </View>
             <View style={s.rowContent}>
-              <Text style={s.rowLabel}>日期</Text>
+              <Text style={s.rowLabel}>开始日期</Text>
               <Text style={s.rowValue}>{date}</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={C.faint} />
@@ -305,8 +328,36 @@ export function AddEventScreen({ navigation, route }: Props) {
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
               onChange={(_e, selected) => {
                 setShowDatePicker(Platform.OS === 'ios');
-                if (selected) setDateObj(selected);
+                if (selected) {
+                  setDateObj(selected);
+                  if (selected.getTime() > endDateObj.getTime()) setEndDateObj(selected);
+                }
                 if (Platform.OS === 'android') setShowDatePicker(false);
+              }}
+            />
+          )}
+
+          <TouchableOpacity style={s.row} onPress={() => setShowEndDatePicker(true)} activeOpacity={0.7}>
+            <View style={[s.iconBox, { backgroundColor: color + '22' }]}>
+              <Ionicons name="calendar-number-outline" size={18} color={color} />
+            </View>
+            <View style={s.rowContent}>
+              <Text style={s.rowLabel}>结束日期</Text>
+              <Text style={s.rowValue}>{endDate}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={C.faint} />
+          </TouchableOpacity>
+
+          {showEndDatePicker && (
+            <DateTimePicker
+              value={endDateObj}
+              minimumDate={dateObj}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={(_e, selected) => {
+                setShowEndDatePicker(Platform.OS === 'ios');
+                if (selected) setEndDateObj(selected);
+                if (Platform.OS === 'android') setShowEndDatePicker(false);
               }}
             />
           )}
@@ -355,29 +406,31 @@ export function AddEventScreen({ navigation, route }: Props) {
             <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
               <Ionicons name="notifications-outline" size={18} color={C.purple} />
             </View>
-            <Text style={[s.rowLabel, { flex: 1 }]}>提醒</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
-              {REMINDER_OPTIONS.map(opt => {
-                const disabled = isAllDay && opt.value !== null;
-                const selected = reminderMinutes === opt.value || (isAllDay && opt.value === null);
-                return (
-                  <TouchableOpacity
-                    key={opt.label}
-                    style={[
-                      s.repeatChip,
-                      selected && { backgroundColor: C.purple },
-                      disabled && { opacity: 0.35 },
-                    ]}
-                    onPress={() => {
-                      if (!disabled) setReminderMinutes(opt.value);
-                    }}
-                    disabled={disabled}
-                  >
-                    <Text style={[s.repeatChipText, selected && { color: '#fff' }]}>{opt.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <View style={s.rowContent}>
+              <Text style={s.rowLabel}>提醒</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
+                {REMINDER_OPTIONS.map(opt => {
+                  const disabled = isAllDay && opt.value !== null;
+                  const selected = reminderMinutes === opt.value || (isAllDay && opt.value === null);
+                  return (
+                    <TouchableOpacity
+                      key={opt.label}
+                      style={[
+                        s.repeatChip,
+                        selected && { backgroundColor: C.purple },
+                        disabled && { opacity: 0.35 },
+                      ]}
+                      onPress={() => {
+                        if (!disabled) setReminderMinutes(opt.value);
+                      }}
+                      disabled={disabled}
+                    >
+                      <Text style={[s.repeatChipText, selected && { color: '#fff' }]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
           </View>
 
           {showStartPicker && (
@@ -424,18 +477,20 @@ export function AddEventScreen({ navigation, route }: Props) {
             <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
               <Ionicons name="repeat-outline" size={18} color={C.purple} />
             </View>
-            <Text style={[s.rowLabel, { flex: 1 }]}>重复</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
-              {REPEAT_OPTIONS.map(opt => (
-                <TouchableOpacity
-                  key={opt}
-                  style={[s.repeatChip, repeat === opt && { backgroundColor: C.purple }]}
-                  onPress={() => setRepeat(opt)}
-                >
-                  <Text style={[s.repeatChipText, repeat === opt && { color: '#fff' }]}>{opt}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <View style={s.rowContent}>
+              <Text style={s.rowLabel}>重复</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
+                {REPEAT_OPTIONS.map(opt => (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[s.repeatChip, repeat === opt && { backgroundColor: C.purple }]}
+                    onPress={() => setRepeat(opt)}
+                  >
+                    <Text style={[s.repeatChipText, repeat === opt && { color: '#fff' }]}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
           </View>
 
           {/* Description */}
@@ -482,8 +537,9 @@ const s = StyleSheet.create({
   emptyText: { fontSize: 13, color: C.sub, lineHeight: 20 },
   scroll: { flex: 1 },
   content: { padding: 14, paddingTop: 16 },
-  saveLink: { color: C.purple, fontSize: 15, fontWeight: '700' },
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14, paddingHorizontal: 4 },
+  seriesNotice: { minHeight: 42, borderRadius: 12, backgroundColor: C.purpleLight, paddingHorizontal: 13, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  seriesNoticeText: { flex: 1, fontSize: 12, color: C.purple, fontWeight: '700' },
   categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(150,100,200,0.08)', backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7 },
   categoryDot: { width: 8, height: 8, borderRadius: 4 },
   categoryText: { fontSize: 12, color: C.sub, fontWeight: '700' },
@@ -502,7 +558,7 @@ const s = StyleSheet.create({
   timeSep: { color: C.faint },
   toggle: { width: 46, height: 26, borderRadius: 13, justifyContent: 'center' },
   toggleThumb: { position: 'absolute', width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', shadowColor:'#000', shadowOffset:{width:0,height:1}, shadowOpacity:0.18, shadowRadius:2, elevation:2 },
-  repeatScroll: { flexShrink: 1 },
+  repeatScroll: { flexGrow: 0, marginTop: 8 },
   repeatChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: C.purpleLight, marginRight: 6 },
   repeatChipText: { fontSize: 12, color: C.purple, fontWeight: '600' },
   saveBtn: { height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', shadowColor:'#6A38B2', shadowOffset:{width:0,height:6}, shadowOpacity:0.45, shadowRadius:12, elevation:6 },

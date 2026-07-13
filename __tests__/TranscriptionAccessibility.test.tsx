@@ -1,0 +1,431 @@
+import React from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { TranscriptionScreen } from '../src/screens/TranscriptionScreen';
+import { useAuth } from '../src/store/AuthStore';
+import { useMeetings } from '../src/store/MeetingsStore';
+import { generateSummaryForMeeting } from '../src/services/meetingSummary';
+import { fetchMeetingTranscript } from '../src/services/api';
+import {
+  clearPendingMeetingSummaryTask,
+  getPendingMeetingSummaryTask,
+  savePendingMeetingSummaryTask,
+} from '../src/services/meetingSummaryTasks';
+
+const showDialog = jest.fn();
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
+jest.mock('../src/components/ScreenContainer', () => ({ ScreenContainer: 'ScreenContainer' }));
+jest.mock('../src/components/Common', () => ({
+  BackHeader: ({ right }: { right?: React.ReactNode }) => <>{right}</>,
+  Waveform: 'Waveform',
+}));
+jest.mock('../src/components/BottomTabBar', () => ({
+  BottomTabBar: 'BottomTabBar',
+  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 100 },
+}));
+jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
+jest.mock('../src/store/MeetingsStore', () => ({ useMeetings: jest.fn() }));
+jest.mock('../src/components/AppDialog', () => ({
+  useAppDialog: () => ({ showDialog }),
+}));
+jest.mock('../src/services/api', () => ({
+  fetchMeetingTranscript: jest.fn(),
+  fetchMeetingSummary: jest.fn(),
+  uploadMeetingAudio: jest.fn(),
+}));
+jest.mock('../src/services/meetingRecording', () => ({
+  getPendingMeetingAudioUpload: jest.fn(async () => null),
+  retryPendingMeetingAudioUpload: jest.fn(),
+}));
+jest.mock('../src/services/meetingSummary', () => ({
+  generateSummaryForMeeting: jest.fn(),
+  meetingDateForSummary: jest.fn(),
+  meetingSummaryProgressLabel: jest.fn(() => '正在生成总结'),
+  meetingSummaryToText: jest.fn(() => ''),
+  shouldDiscardPendingMeetingSummaryTask: jest.fn(() => false),
+}));
+jest.mock('../src/services/meetingSummaryTasks', () => ({
+  clearPendingMeetingSummaryTask: jest.fn(async () => {}),
+  getPendingMeetingSummaryTask: jest.fn(async () => null),
+  meetingSummaryInputFingerprint: jest.fn(() => 'fingerprint-1'),
+  savePendingMeetingSummaryTask: jest.fn(async task => task),
+}));
+jest.mock('../src/services/meetingShare', () => ({
+  meetingShareErrorMessage: jest.fn(),
+  shareMeetingArtifact: jest.fn(),
+}));
+
+describe('TranscriptionScreen accessibility', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (useAuth as jest.Mock).mockReturnValue({ accessToken: null, isGuest: true, session: null });
+    (fetchMeetingTranscript as jest.Mock).mockResolvedValue([]);
+    (getPendingMeetingSummaryTask as jest.Mock).mockResolvedValue(null);
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{
+        id: 'guest-meeting-1',
+        title: '现场会议',
+        date: '2026年7月11日',
+        time: '15:40',
+        duration: '02:35',
+        tags: [],
+        audioAvailable: true,
+        audioLocalUri: 'file:///data/meeting.wav',
+        audioDurationSec: 155,
+        audioBars: [1, 2, 3],
+      }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => []),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+  });
+
+  it('automatically resumes a persisted summary task and clears it after caching', async () => {
+    (getPendingMeetingSummaryTask as jest.Mock).mockResolvedValueOnce({
+      meetingId: 'guest-meeting-1',
+      taskId: 'task-persisted',
+      mode: 'guest',
+      inputFingerprint: 'fingerprint-1',
+      createdAt: '2026-07-13T00:00:00.000Z',
+      updatedAt: '2026-07-13T00:00:00.000Z',
+    });
+    (generateSummaryForMeeting as jest.Mock).mockResolvedValueOnce({
+      meeting_id: 'guest-meeting-1',
+      overview: '恢复后的总结',
+      generated_at: '2026-07-13T00:00:01.000Z',
+    });
+    const saveCachedSummary = jest.fn(async () => {});
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{
+        id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [],
+      }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '等待恢复的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary,
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-resume-summary',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await act(async () => {
+      render(<TranscriptionScreen navigation={navigation} route={route} />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(generateSummaryForMeeting).toHaveBeenCalledWith(expect.objectContaining({
+        meetingId: 'guest-meeting-1',
+        resumeTaskId: 'task-persisted',
+      }));
+    });
+    expect(saveCachedSummary).toHaveBeenCalledWith('guest-meeting-1', expect.objectContaining({
+      overview: '恢复后的总结',
+    }));
+    expect(clearPendingMeetingSummaryTask).toHaveBeenCalledWith('guest', 'guest-meeting-1');
+  });
+
+  it('keeps a persisted task after automatic recovery hits a network error', async () => {
+    (getPendingMeetingSummaryTask as jest.Mock).mockResolvedValue({
+      meetingId: 'guest-meeting-1',
+      taskId: 'task-offline',
+      mode: 'guest',
+      inputFingerprint: 'fingerprint-1',
+      createdAt: '2026-07-13T00:00:00.000Z',
+      updatedAt: '2026-07-13T00:00:00.000Z',
+    });
+    (generateSummaryForMeeting as jest.Mock).mockRejectedValue(new Error('network unavailable'));
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '断网后等待恢复的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-offline-recovery',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(generateSummaryForMeeting).toHaveBeenCalledWith(expect.objectContaining({
+      resumeTaskId: 'task-offline',
+    })));
+    await waitFor(() => expect(screen.getByText('network unavailable')).toBeTruthy());
+    expect(clearPendingMeetingSummaryTask).not.toHaveBeenCalled();
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('discards mismatched recovery state without submitting a duplicate task', async () => {
+    (getPendingMeetingSummaryTask as jest.Mock).mockResolvedValue({
+      meetingId: 'guest-meeting-1',
+      taskId: 'task-old-input',
+      mode: 'guest',
+      inputFingerprint: 'fingerprint-for-old-transcript',
+      createdAt: '2026-07-13T00:00:00.000Z',
+      updatedAt: '2026-07-13T00:00:00.000Z',
+    });
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '已经修改过的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-mismatched-recovery',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(clearPendingMeetingSummaryTask).toHaveBeenCalledWith('guest', 'guest-meeting-1'));
+    expect(generateSummaryForMeeting).not.toHaveBeenCalled();
+  });
+
+  it('does not submit when the pending-task registry cannot be read', async () => {
+    (getPendingMeetingSummaryTask as jest.Mock).mockRejectedValue(new Error('storage unavailable'));
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '不可重复提交的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-storage-unavailable',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await waitFor(() => expect(screen.getByText('无法读取上次总结任务，点击重试可重新生成。')).toBeTruthy());
+    await act(async () => {
+      void screen.getByLabelText('生成会议总结').props.onPress();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '生成失败',
+      message: '无法读取上次总结任务，未提交新任务。请检查本机存储后重试。',
+    })));
+    expect(generateSummaryForMeeting).not.toHaveBeenCalled();
+  });
+
+  it('stops polling without clearing the submitted server task', async () => {
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '需要稍后恢复的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    (generateSummaryForMeeting as jest.Mock).mockImplementation(async options => {
+      await options.onTaskSubmitted?.('task-still-running');
+      return await new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          const error = new Error('cancelled');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-stop-polling',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await act(async () => {
+      void screen.getByLabelText('生成会议总结').props.onPress();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(savePendingMeetingSummaryTask).toHaveBeenCalledWith('guest', expect.objectContaining({
+      taskId: 'task-still-running',
+    })));
+
+    await fireEvent.press(screen.getByText('停止等待'));
+
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '已停止等待' })));
+    expect(clearPendingMeetingSummaryTask).not.toHaveBeenCalled();
+  });
+
+  it('silently stops the old account poll when the account scope changes', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      accessToken: 'token-a',
+      isGuest: false,
+      session: { user: { id: 'account-a' } },
+    });
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '账号切换前的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    (generateSummaryForMeeting as jest.Mock).mockImplementation(async options => {
+      await options.onTaskSubmitted?.('task-account-a');
+      return await new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          const error = new Error('cancelled');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-account-switch',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+    const view = await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await waitFor(() => expect(screen.getByLabelText('生成会议总结')).toBeTruthy());
+    await act(async () => {
+      void screen.getByLabelText('生成会议总结').props.onPress();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(savePendingMeetingSummaryTask).toHaveBeenCalledWith('user:account-a', expect.objectContaining({
+      taskId: 'task-account-a',
+    })));
+
+    (useAuth as jest.Mock).mockReturnValue({
+      accessToken: 'token-b',
+      isGuest: false,
+      session: { user: { id: 'account-b' } },
+    });
+    await view.rerender(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(getPendingMeetingSummaryTask).toHaveBeenCalledWith('user:account-b', 'guest-meeting-1'));
+    expect(showDialog).not.toHaveBeenCalled();
+    expect(clearPendingMeetingSummaryTask).not.toHaveBeenCalledWith('user:account-a', 'guest-meeting-1');
+  });
+
+  it('announces and opens the meeting share menu', async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+    } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-1',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await fireEvent.press(screen.getByLabelText('分享会议资料'));
+
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '分享会议文件',
+    }));
+  });
+
+  it('keeps long transcripts collapsed until the user expands them', async () => {
+    (useMeetings as jest.Mock).mockReturnValue({
+      ...(useMeetings as jest.Mock).mock.results.at(-1)?.value,
+      meetings: [{
+        id: 'guest-meeting-1',
+        title: '现场会议',
+        date: '2026年7月11日',
+        time: '15:40',
+        duration: '02:35',
+        tags: [],
+      }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [
+        { id: '1', text: '第一段转写' },
+        { id: '2', text: '第二段转写' },
+      ]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-1',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    expect(screen.getByTestId('meeting-transcript-text').props.numberOfLines).toBe(6);
+
+    await fireEvent.press(screen.getByLabelText('展开完整转写'));
+
+    expect(screen.getByTestId('meeting-transcript-text').props.numberOfLines).toBe(0);
+    expect(screen.getByLabelText('收起完整转写')).toBeTruthy();
+  });
+
+  it('does not show a cancellation dialog after leaving a pending summary', async () => {
+    let rejectSummary = (_error: Error) => {};
+    (generateSummaryForMeeting as jest.Mock).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectSummary = reject;
+    }));
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{
+        id: 'guest-meeting-1',
+        title: '现场会议',
+        date: '2026年7月11日',
+        duration: '02:35',
+        tags: [],
+      }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '等待生成总结的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-pending-summary',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+    const view = await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await act(async () => {
+      void view.getByLabelText('生成会议总结').props.onPress();
+      await Promise.resolve();
+    });
+    await view.unmount();
+    const aborted = new Error('cancelled');
+    aborted.name = 'AbortError';
+    rejectSummary(aborted);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+});

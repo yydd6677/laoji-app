@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image, View, Text, StyleSheet, TouchableOpacity, type LayoutChangeEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Colors as C } from '../theme/colors';
@@ -15,19 +15,68 @@ export function Sparkle({ size, color }: { size: number; color: string }) {
 }
 
 // ─── Waveform ─────────────────────────────────────────────────────────────────
+const WAVEFORM_BAR_WIDTH = 3;
+const WAVEFORM_BAR_GAP = 2;
+
+export function waveformBarCapacity(availableWidth: number): number {
+  if (availableWidth <= 0) return 0;
+  return Math.max(1, Math.floor(
+    (availableWidth + WAVEFORM_BAR_GAP) / (WAVEFORM_BAR_WIDTH + WAVEFORM_BAR_GAP),
+  ));
+}
+
+export function resampleWaveformBars(bars: number[], targetCount: number): number[] {
+  if (targetCount <= 0 || bars.length === 0) return [];
+  if (bars.length <= targetCount) return bars;
+
+  return Array.from({ length: targetCount }, (_, index) => {
+    const start = Math.floor((index * bars.length) / targetCount);
+    const end = Math.max(start + 1, Math.floor(((index + 1) * bars.length) / targetCount));
+    let peak = bars[start] ?? 0;
+    for (let sourceIndex = start + 1; sourceIndex < end; sourceIndex += 1) {
+      peak = Math.max(peak, bars[sourceIndex] ?? 0);
+    }
+    return peak;
+  });
+}
+
 export function Waveform({ bars, color, height = 28, splitAt }: {
   bars: number[]; color: string; height?: number; splitAt?: number;
 }) {
-  const max = Math.max(...bars);
+  const [availableWidth, setAvailableWidth] = React.useState<number | null>(null);
+  const visibleBars = React.useMemo(() => {
+    if (availableWidth === null) return bars;
+    return resampleWaveformBars(bars, waveformBarCapacity(availableWidth));
+  }, [availableWidth, bars]);
+  const visibleSplitAt = React.useMemo(() => {
+    if (splitAt === undefined || bars.length === 0) return undefined;
+    const ratio = Math.min(1, Math.max(0, splitAt / bars.length));
+    return Math.round(ratio * visibleBars.length);
+  }, [bars.length, splitAt, visibleBars.length]);
+  const max = visibleBars.reduce((peak, value) => Math.max(peak, value), 0.0001);
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const nextWidth = Math.max(0, Math.floor(event.nativeEvent.layout.width));
+    setAvailableWidth(currentWidth => currentWidth === nextWidth ? currentWidth : nextWidth);
+  };
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, height }}>
-      {bars.map((v, i) => (
-        <View key={i} style={{
-          width: 3, borderRadius: 2,
-          height: Math.max(2, (v / max) * height),
-          backgroundColor: splitAt !== undefined && i < splitAt ? '#4A90D9' : color,
-          opacity: 0.85,
-        }} />
+    <View
+      style={[styles.waveform, { height }]}
+      onLayout={handleLayout}
+      testID="waveform"
+    >
+      {visibleBars.map((value, index) => (
+        <View
+          key={index}
+          testID="waveform-bar"
+          style={[
+            styles.waveformBar,
+            {
+              height: Math.max(2, (value / max) * height),
+              backgroundColor: visibleSplitAt !== undefined && index < visibleSplitAt ? '#4A90D9' : color,
+            },
+          ]}
+        />
       ))}
     </View>
   );
@@ -43,11 +92,14 @@ export function Avatar({ size = 36, profile, initial, colors }: {
   void initial;
   void colors;
   const imageUri = profile?.avatarUrl || profile?.avatarLocalUri;
-  if (imageUri) {
+  const [failedUri, setFailedUri] = React.useState<string | null>(null);
+  React.useEffect(() => setFailedUri(null), [imageUri]);
+  if (imageUri && failedUri !== imageUri) {
     return (
       <Image
         source={{ uri: imageUri }}
         style={[styles.avatarImage, { width: size, height: size, borderRadius: size / 2 }]}
+        onError={() => setFailedUri(imageUri)}
       />
     );
   }
@@ -83,16 +135,36 @@ export function BackHeader({ title, onBack, right }: {
 }) {
   return (
     <View style={styles.backHeader}>
-      <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+      <TouchableOpacity
+        style={styles.backSide}
+        onPress={onBack}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel="返回"
+      >
         <Ionicons name="chevron-back" size={22} color={C.sub} />
       </TouchableOpacity>
-      <Text style={styles.backTitle}>{title}</Text>
-      <View style={styles.backRight}>{right}</View>
+      <Text style={styles.backTitle} numberOfLines={1}>{title}</Text>
+      <View style={[styles.backSide, styles.backRight]}>{right}</View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  waveform: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: WAVEFORM_BAR_GAP,
+    overflow: 'hidden',
+  },
+  waveformBar: {
+    width: WAVEFORM_BAR_WIDTH,
+    borderRadius: 2,
+    opacity: 0.85,
+  },
   neutralAvatar: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -122,7 +194,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between', paddingHorizontal: 16,
     backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.border,
   },
+  backSide: { width: 64, minHeight: 40, justifyContent: 'center' },
   backChevron: { fontSize: 28, color: C.sub, fontWeight: '200', lineHeight: 34 },
-  backTitle: { fontSize: 16, fontWeight: '700', color: C.text },
-  backRight: { minWidth: 36, alignItems: 'flex-end' },
+  backTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: C.text, textAlign: 'center' },
+  backRight: { alignItems: 'flex-end' },
 });

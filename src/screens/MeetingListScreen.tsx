@@ -6,12 +6,14 @@ import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
-import { useMeetings } from '../store/MeetingsStore';
+import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import { Avatar, Tag, Waveform } from '../components/Common';
-import { BottomTabBar } from '../components/BottomTabBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { openScheduleTab } from '../navigation/tabTargets';
+import { readableErrorMessage } from '../services/errors';
+import { canResumeMeetingRecording } from '../utils/meetingMedia';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
 
@@ -51,6 +53,7 @@ export function MeetingListScreen({ navigation }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const { showDialog } = useAppDialog();
   const { profile } = useAuth();
+  const hasCachedMeetings = meetings.length > 0;
 
   const startMeeting = () => {
     navigation.navigate('MeetingLive');
@@ -68,8 +71,20 @@ export function MeetingListScreen({ navigation }: Props) {
           onPress: async () => {
             try {
               await deleteMeeting(id);
-            } catch {
-              showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
+            } catch (error) {
+              if (error instanceof MeetingDeletionCleanupError) {
+                showDialog({
+                  title: '会议已删除，清理未完成',
+                  message: error.message,
+                  tone: 'warning',
+                });
+              } else {
+                showDialog({
+                  title: '删除失败',
+                  message: readableErrorMessage(error, '请检查网络后重试。'),
+                  tone: 'error',
+                });
+              }
             }
           },
         },
@@ -79,12 +94,15 @@ export function MeetingListScreen({ navigation }: Props) {
   };
 
   const openMeetingMenu = (id: string) => {
+    const meeting = meetings.find(item => item.id === id);
     showDialog({
       title: '会议操作',
       message: '选择要对这条会议记录执行的操作。',
       tone: 'info',
       actions: [
-        { text: '继续录音', role: 'primary', onPress: () => navigation.navigate('MeetingLive', { meetingId: id }) },
+        ...(meeting && canResumeMeetingRecording(meeting)
+          ? [{ text: '继续录音', role: 'primary' as const, onPress: () => navigation.navigate('MeetingLive', { meetingId: id }) }]
+          : []),
         { text: '查看详情', role: 'primary', onPress: () => navigation.navigate('Recording', { meetingId: id }) },
         { text: '删除', role: 'destructive', onPress: () => confirmDelete(id) },
         { text: '取消', role: 'cancel' },
@@ -110,11 +128,21 @@ export function MeetingListScreen({ navigation }: Props) {
       <View style={s.header}>
         <Text style={s.title}>会议记录</Text>
         <View style={s.headerActions}>
-          <TouchableOpacity style={s.startBtn} onPress={startMeeting} activeOpacity={0.84}>
-            <Ionicons name="mic-outline" size={16} color="#fff" />
-            <Text style={s.startText}>开始</Text>
+          <TouchableOpacity
+            style={s.speakerButton}
+            onPress={() => navigation.navigate('SpeakerManager')}
+            accessibilityRole="button"
+            accessibilityLabel="管理讲话人"
+            testID="meetings-open-speakers"
+          >
+            <Ionicons name="people-outline" size={20} color={C.purple} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Profile')}
+            accessibilityRole="button"
+            accessibilityLabel="打开个人资料"
+            testID="meetings-open-profile"
+          >
             <Avatar size={36} profile={profile} />
           </TouchableOpacity>
         </View>
@@ -131,65 +159,81 @@ export function MeetingListScreen({ navigation }: Props) {
         />
       </View>
 
-      <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
-        {loading && meetings.length === 0 ? (
-          <View style={s.stateBox}>
-            <ActivityIndicator color={C.purple} />
-            <Text style={s.stateText}>正在加载会议记录…</Text>
-          </View>
-        ) : null}
-        {error ? (
-          <View style={s.stateBox}>
-            <Text style={s.stateTitle}>会议服务暂时不可用</Text>
-            <Text style={s.stateText}>请稍后重试，或确认手机网络能访问会议服务。</Text>
-            <TouchableOpacity style={s.retryBtn} onPress={refreshMeetings}>
-              <Text style={s.retryText}>重试</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {!loading && !error && grouped.length === 0 ? (
-          <View style={s.stateBox}>
-            <Text style={s.stateTitle}>暂无会议记录</Text>
-            <Text style={s.stateText}>点击右上角或底部麦克风开始会议，转写和总结会保存在这里。</Text>
-            <TouchableOpacity style={s.retryBtn} onPress={startMeeting}>
-              <Text style={s.retryText}>开始会议</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {grouped.map(group => (
-          <View key={group.label}>
-            <Text style={s.groupLabel}>{group.label}</Text>
-            {group.items.map(m => (
-              <TouchableOpacity
-                key={m.id}
-                style={s.card}
-                onPress={() => navigation.navigate('Recording', { meetingId: m.id })}
-                onLongPress={() => confirmDelete(m.id)}
-                activeOpacity={0.85}
-              >
-                <View style={s.cardTop}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.cardTitle}>{m.title}</Text>
-                    <Text style={s.cardMeta}>{m.time}　{m.duration}</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => openMeetingMenu(m.id)}
-                    hitSlop={{ top:8,bottom:8,left:8,right:8 }}
-                  >
-                    <Ionicons name="ellipsis-horizontal" size={18} color={C.faint} />
-                  </TouchableOpacity>
-                </View>
-                <View style={s.waveWrap}>
-                  <Waveform bars={m.bars ?? []} color={C.purple} height={30} />
-                </View>
-                <View style={s.tags}>
-                  {m.tags.map(t => <Tag key={t.label} label={t.label} color={t.color} />)}
-                </View>
+      <View style={s.listArea}>
+        <ScrollView style={s.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
+          {loading && meetings.length === 0 ? (
+            <View style={s.stateBox}>
+              <ActivityIndicator color={C.purple} />
+              <Text style={s.stateText}>正在加载会议记录…</Text>
+            </View>
+          ) : null}
+          {error && !hasCachedMeetings ? (
+            <View style={s.stateBox}>
+              <Text style={s.stateTitle}>会议服务暂时不可用</Text>
+              <Text style={s.stateText}>请稍后重试，或确认手机网络能访问会议服务。</Text>
+              <TouchableOpacity style={s.retryBtn} onPress={refreshMeetings}>
+                <Text style={s.retryText}>重试</Text>
               </TouchableOpacity>
-            ))}
+            </View>
+          ) : null}
+          {!loading && !error && grouped.length === 0 ? (
+            <View style={s.stateBox}>
+              <Text style={s.stateTitle}>暂无会议记录</Text>
+              <Text style={s.stateText}>点击底部“记录会议”开始录音，转写和总结会保存在这里。</Text>
+            </View>
+          ) : null}
+          {grouped.map(group => (
+            <View key={group.label}>
+              <Text style={s.groupLabel}>{group.label}</Text>
+              {group.items.map(m => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={s.card}
+                  onPress={() => navigation.navigate('Recording', { meetingId: m.id })}
+                  onLongPress={() => confirmDelete(m.id)}
+                  activeOpacity={0.85}
+                >
+                  <View style={s.cardTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.cardTitle}>{m.title}</Text>
+                      <Text style={s.cardMeta}>{m.time}　{m.duration}</Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => openMeetingMenu(m.id)}
+                      hitSlop={{ top:8,bottom:8,left:8,right:8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`打开${m.title}的更多操作`}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={18} color={C.faint} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={s.waveWrap}>
+                    <Waveform bars={m.audioBars ?? m.bars ?? []} color={C.purple} height={30} />
+                  </View>
+                  <View style={s.tags}>
+                    {m.tags.map(t => <Tag key={t.label} label={t.label} color={t.color} />)}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ))}
+        </ScrollView>
+
+        {error && hasCachedMeetings ? (
+          <View style={s.cachedError} accessibilityRole="alert" testID="meeting-cache-error">
+            <Ionicons name="cloud-offline-outline" size={16} color={C.red} />
+            <Text style={s.cachedErrorText} numberOfLines={1}>同步失败，正在显示本机缓存</Text>
+            <TouchableOpacity
+              style={s.cachedRetry}
+              onPress={refreshMeetings}
+              accessibilityRole="button"
+              accessibilityLabel="重新同步会议记录"
+            >
+              <Ionicons name="refresh" size={17} color={C.purple} />
+            </TouchableOpacity>
           </View>
-        ))}
-      </ScrollView>
+        ) : null}
+      </View>
 
       <BottomTabBar
         active="meetings"
@@ -205,13 +249,14 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.appBg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
   title: { fontSize: 22, fontWeight: '800', color: C.text },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  startBtn: { height: 34, borderRadius: 17, backgroundColor: C.purple, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 5 },
-  startText: { fontSize: 13, fontWeight: '800', color: '#fff' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  speakerButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center' },
   searchBar: { marginHorizontal: 14, marginBottom: 12, height: 38, backgroundColor: C.inputBg, borderRadius: 19, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 8 },
   searchPlaceholder: { fontSize: 13, color: C.faint },
   searchInput: { flex: 1, fontSize: 13, color: C.text, padding: 0 },
+  listArea: { flex: 1, minHeight: 0 },
   scroll: { flex: 1 },
+  content: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
   groupLabel: { fontSize: 12, color: C.sub, fontWeight: '600', paddingHorizontal: 18, paddingVertical: 6, letterSpacing: 0.5 },
   card: {
     marginHorizontal: 14, marginBottom: 10, backgroundColor: C.card, borderRadius: 16, padding: 14,
@@ -227,4 +272,24 @@ const s = StyleSheet.create({
   stateText: { fontSize: 12, color: C.sub, textAlign: 'center', lineHeight: 18 },
   retryBtn: { marginTop: 4, backgroundColor: C.purple, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 9 },
   retryText: { fontSize: 13, color: '#fff', fontWeight: '700' },
+  cachedError: {
+    position: 'absolute',
+    top: 4,
+    left: 14,
+    right: 14,
+    height: 38,
+    zIndex: 20,
+    elevation: 8,
+    borderRadius: 8,
+    paddingLeft: 12,
+    paddingRight: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF7F7',
+    borderWidth: 1,
+    borderColor: '#F3C7CA',
+  },
+  cachedErrorText: { flex: 1, minWidth: 0, fontSize: 12, color: C.red, fontWeight: '600' },
+  cachedRetry: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 });

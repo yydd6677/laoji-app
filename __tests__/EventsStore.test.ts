@@ -57,4 +57,29 @@ describe('checkConflict', () => {
     const { conflicts } = checkConflict([BASE, ev2], '2026-07-08', '10:00', '11:00');
     expect(conflicts).toHaveLength(2);
   });
+
+  it('detects overlap with an existing cross-date event', () => {
+    const spanning: CalEvent = {
+      ...BASE,
+      startDate: '2026-07-08',
+      endDate: '2026-07-10',
+      startTime: '18:00',
+      endTime: '09:00',
+      spanning: true,
+    };
+    const { hasConflict } = checkConflict([spanning], '2026-07-09', '10:00', '11:00');
+    expect(hasConflict).toBe(true);
+  });
+
+  it('compares a proposed cross-date range as one interval', () => {
+    const { hasConflict } = checkConflict(
+      [BASE],
+      '2026-07-07',
+      '20:00',
+      '09:00',
+      undefined,
+      '2026-07-09',
+    );
+    expect(hasConflict).toBe(true);
+  });
 });

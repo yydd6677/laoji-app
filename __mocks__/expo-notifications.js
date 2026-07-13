@@ -6,4 +6,5 @@ module.exports = {
   setNotificationChannelAsync: jest.fn(async () => undefined),
   scheduleNotificationAsync: jest.fn(async () => 'notification-1'),
   cancelScheduledNotificationAsync: jest.fn(async () => undefined),
+  cancelAllScheduledNotificationsAsync: jest.fn(async () => undefined),
 };
