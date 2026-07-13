@@ -460,13 +460,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         setMeetings(next);
       });
     }
+    if (!accessToken) throw new Error('not authenticated');
+    const previousMeeting = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
+    const optimisticUpdatedAt = new Date().toISOString();
     setMeetings(prev => {
-      const next = prev.map(m => m.id === id ? { ...m, title: cleanTitle, updatedAt: new Date().toISOString() } : m);
+      const next = prev.map(m => m.id === id ? { ...m, title: cleanTitle, updatedAt: optimisticUpdatedAt } : m);
       meetingsRef.current = next;
-      void persistMeetings(next);
       return next;
     });
-    if (!accessToken) throw new Error('not authenticated');
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { title: cleanTitle }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -478,10 +479,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (err) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) throw err;
-      await refreshMeetings();
+      if (previousMeeting) {
+        const rolledBack = meetingsRef.current.map(meeting => (
+          meeting.id === id && meeting.title === cleanTitle
+            ? { ...meeting, title: previousMeeting.title, updatedAt: previousMeeting.updatedAt }
+            : meeting
+        ));
+        meetingsRef.current = rolledBack;
+        setMeetings(rolledBack);
+      }
       throw err;
     }
-  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, refreshMeetings, scope]);
+  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
   const updateMeetingStatus = useCallback(async (id: string, status: string, patch: Partial<Meeting> = {}) => {
     const operationGeneration = generationRef.current;

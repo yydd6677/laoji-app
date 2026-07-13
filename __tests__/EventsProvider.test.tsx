@@ -1,8 +1,17 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, render, waitFor } from '@testing-library/react-native';
-import { fetchEvents } from '../src/services/api';
-import { reconcileEventNotifications } from '../src/services/notifications';
+import {
+  deleteEvent as apiDeleteEvent,
+  fetchEvents,
+  saveEvent,
+  updateEvent as apiUpdateEvent,
+} from '../src/services/api';
+import {
+  cancelEventNotificationsForScope,
+  reconcileEventNotifications,
+  scheduleEventNotificationForScope,
+} from '../src/services/notifications';
 import { EventsProvider, useEvents } from '../src/store/EventsStore';
 import { useAuth } from '../src/store/AuthStore';
 
@@ -18,6 +27,9 @@ jest.mock('../src/services/api', () => ({
 jest.mock('../src/services/notifications', () => ({
   cancelEventNotificationsForScope: jest.fn().mockResolvedValue(undefined),
   reconcileEventNotifications: jest.fn().mockResolvedValue({}),
+  reminderFireDate: jest.fn((event: { startTime?: string; reminderMinutes?: number | null }) => (
+    event.startTime && event.reminderMinutes != null ? new Date('2099-01-01T00:00:00Z') : null
+  )),
   scheduleEventNotificationForScope: jest.fn().mockResolvedValue(null),
   switchEventNotificationScope: jest.fn().mockResolvedValue(undefined),
 }));
@@ -149,6 +161,196 @@ describe('EventsProvider authenticated cache', () => {
     expect(current?.events[0]).toEqual(expect.objectContaining({ reminderMinutes: 60 }));
   });
 
+  it('keeps a cloud-saved event and reports when its local reminder is unavailable', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchEvents as jest.Mock).mockResolvedValue([]);
+    (saveEvent as jest.Mock).mockResolvedValue({
+      id: 44,
+      title: '不会重复创建的日程',
+      event_type: 'once',
+      start_date: '2099-01-10',
+      start_time: '10:00',
+      reminder_minutes: 15,
+    });
+    (scheduleEventNotificationForScope as jest.Mock).mockResolvedValue(null);
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.loading).toBe(false));
+
+    let result: Awaited<ReturnType<NonNullable<typeof current>['addEvent']>> | undefined;
+    await act(async () => {
+      result = await current!.addEvent({
+        title: '不会重复创建的日程',
+        startDate: '2099-01-10',
+        startTime: '10:00',
+        reminderMinutes: 15,
+        color: '#5B8CFF',
+      });
+    });
+
+    expect(result).toEqual({ reminderDelivery: 'unavailable' });
+    expect(saveEvent).toHaveBeenCalledTimes(1);
+    expect(current?.events).toEqual([
+      expect.objectContaining({ id: '44', title: '不会重复创建的日程' }),
+    ]);
+  });
+
+  it('does not turn a notification registry failure into a failed cloud save', async () => {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchEvents as jest.Mock).mockResolvedValue([]);
+    (saveEvent as jest.Mock).mockResolvedValue({
+      id: 45,
+      title: '提醒状态待确认',
+      event_type: 'once',
+      start_date: '2099-01-11',
+      start_time: '11:00',
+      reminder_minutes: 15,
+    });
+    (scheduleEventNotificationForScope as jest.Mock).mockRejectedValue(new Error('registry full'));
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.loading).toBe(false));
+
+    let result: Awaited<ReturnType<NonNullable<typeof current>['addEvent']>> | undefined;
+    await act(async () => {
+      result = await current!.addEvent({
+        title: '提醒状态待确认',
+        startDate: '2099-01-11',
+        startTime: '11:00',
+        reminderMinutes: 15,
+        color: '#5B8CFF',
+      });
+    });
+
+    expect(result).toEqual({ reminderDelivery: 'unconfirmed' });
+    expect(current?.events.map(event => event.title)).toContain('提醒状态待确认');
+  });
+
+  it('does not remove a cached cloud event when no access token is available', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 7 } },
+      accessToken: null,
+    });
+    const cached = [{
+      id: 'tokenless-event',
+      title: '不能本机误删的日程',
+      startDate: '2026-07-13',
+      color: '#5B8CFF',
+    }];
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => (
+      key === '@laoji:eventsCache:v1:user:7' ? JSON.stringify(cached) : null
+    ));
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.events).toHaveLength(1));
+
+    await act(async () => {
+      await expect(current!.deleteEvent('tokenless-event')).rejects.toThrow('not authenticated');
+    });
+
+    expect(apiDeleteEvent).not.toHaveBeenCalled();
+    expect(current?.events).toEqual([expect.objectContaining({ title: '不能本机误删的日程' })]);
+  });
+
+  it('restores a cloud event when deletion and reminder rebuilding both fail', async () => {
+    const cached = [{
+      id: '99',
+      title: '云端仍然存在的日程',
+      startDate: '2099-01-12',
+      startTime: '12:00',
+      reminderMinutes: 15,
+      color: '#5B8CFF',
+    }];
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => (
+      key === '@laoji:eventsCache:v1:user:7' ? JSON.stringify(cached) : null
+    ));
+    (fetchEvents as jest.Mock).mockRejectedValue(new Error('offline'));
+    (apiDeleteEvent as jest.Mock).mockRejectedValue(new Error('delete failed'));
+    (scheduleEventNotificationForScope as jest.Mock).mockRejectedValue(new Error('registry full'));
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.events).toHaveLength(1));
+
+    await act(async () => {
+      await expect(current!.deleteEvent('99')).rejects.toThrow('delete failed');
+    });
+
+    expect(apiDeleteEvent).toHaveBeenCalledWith(99, 'token-7');
+    expect(current?.events).toEqual([
+      expect.objectContaining({ id: '99', title: '云端仍然存在的日程', notificationId: null }),
+    ]);
+    expect(current?.lastDeleted).toBeNull();
+  });
+
+  it('reports an unavailable reminder after a cloud event edit without repeating the month refresh', async () => {
+    const initial = {
+      id: 77,
+      title: '编辑前日程',
+      event_type: 'once',
+      start_date: '2099-01-12',
+      start_time: '12:00',
+      reminder_minutes: 15,
+    };
+    const updated = { ...initial, title: '编辑后日程' };
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchEvents as jest.Mock).mockResolvedValue([initial]);
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.events.map(event => event.title)).toContain('编辑前日程'));
+
+    (fetchEvents as jest.Mock).mockClear();
+    (fetchEvents as jest.Mock).mockResolvedValue([updated]);
+    (apiUpdateEvent as jest.Mock).mockResolvedValue(updated);
+    (cancelEventNotificationsForScope as jest.Mock).mockResolvedValueOnce(undefined);
+    (reconcileEventNotifications as jest.Mock).mockResolvedValueOnce({ '77': null });
+
+    let result: Awaited<ReturnType<NonNullable<typeof current>['updateEvent']>> | undefined;
+    await act(async () => {
+      result = await current!.updateEvent('77', { title: '编辑后日程' });
+    });
+
+    expect(result).toEqual({ reminderDelivery: 'unavailable' });
+    expect(apiUpdateEvent).toHaveBeenCalledWith(77, { title: '编辑后日程' }, 'token-7');
+    expect(fetchEvents).toHaveBeenCalledTimes(1);
+    expect(fetchEvents).toHaveBeenCalledWith(2099, 1, 'token-7');
+    expect(current?.events).toEqual([
+      expect.objectContaining({ id: '77', title: '编辑后日程', notificationId: null }),
+    ]);
+  });
+
+  it('keeps reminder removal unconfirmed when an old notification cannot be cancelled', async () => {
+    const initial = {
+      id: 78,
+      title: '关闭提醒',
+      event_type: 'once',
+      start_date: '2099-01-13',
+      start_time: '13:00',
+      reminder_minutes: 15,
+    };
+    const updated = { ...initial, reminder_minutes: null };
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchEvents as jest.Mock).mockResolvedValue([initial]);
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.events.map(event => event.title)).toContain('关闭提醒'));
+
+    (fetchEvents as jest.Mock).mockResolvedValue([updated]);
+    (apiUpdateEvent as jest.Mock).mockResolvedValue(updated);
+    (cancelEventNotificationsForScope as jest.Mock).mockRejectedValueOnce(new Error('registry unavailable'));
+    (reconcileEventNotifications as jest.Mock).mockResolvedValueOnce({});
+
+    let result: Awaited<ReturnType<NonNullable<typeof current>['updateEvent']>> | undefined;
+    await act(async () => {
+      result = await current!.updateEvent('78', { reminderMinutes: null });
+    });
+
+    expect(result).toEqual({ reminderDelivery: 'unconfirmed' });
+    expect(current?.events).toEqual([
+      expect.objectContaining({ id: '78', reminderMinutes: null }),
+    ]);
+  });
+
   it('does not expose an unsaved guest event when local persistence fails', async () => {
     (useAuth as jest.Mock).mockReturnValue({ mode: 'guest', session: null, accessToken: null });
     (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
@@ -186,8 +388,8 @@ describe('EventsProvider authenticated cache', () => {
     await render(<EventsProvider><Probe /></EventsProvider>);
     await waitFor(() => expect(current?.loading).toBe(false));
 
-    let firstCreate!: Promise<void>;
-    let secondCreate!: Promise<void>;
+    let firstCreate!: ReturnType<NonNullable<typeof current>['addEvent']>;
+    let secondCreate!: ReturnType<NonNullable<typeof current>['addEvent']>;
     await act(async () => {
       firstCreate = current!.addEvent({ title: '并发日程 A', startDate: '2026-07-12', color: '#7B5CB8' });
       secondCreate = current!.addEvent({ title: '并发日程 B', startDate: '2026-07-12', color: '#7B5CB8' });

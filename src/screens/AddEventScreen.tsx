@@ -169,6 +169,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   const doSave = async () => {
     setSaving(true);
     try {
+      let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
       const payload: Omit<CalEvent, 'id'> = {
         title: title.trim(),
         startDate: date,
@@ -185,23 +186,32 @@ export function AddEventScreen({ navigation, route }: Props) {
         reminderMinutes,
       };
       if (editingEvent) {
-        await updateEvent(editingEvent.id, payload);
+        ({ reminderDelivery } = await updateEvent(editingEvent.id, payload));
       } else {
         createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
         payload.clientRequestId = createRequestRef.current.id;
-        await addEvent(payload);
-      }
-      const d = parseDateStr(date);
-      await refreshEvents(d.getFullYear(), d.getMonth() + 1);
-      if (endDate.slice(0, 7) !== date.slice(0, 7)) {
-        const end = parseDateStr(endDate);
-        await refreshEvents(end.getFullYear(), end.getMonth() + 1);
-      }
-      if (editingEvent && !editingEvent.startDate.startsWith(date.slice(0, 7))) {
-        const oldDate = parseDateStr(editingEvent.startDate);
-        await refreshEvents(oldDate.getFullYear(), oldDate.getMonth() + 1);
+        ({ reminderDelivery } = await addEvent(payload));
+        const d = parseDateStr(date);
+        await refreshEvents(d.getFullYear(), d.getMonth() + 1);
+        if (endDate.slice(0, 7) !== date.slice(0, 7)) {
+          const end = parseDateStr(endDate);
+          await refreshEvents(end.getFullYear(), end.getMonth() + 1);
+        }
       }
       navigation.goBack();
+      if (reminderDelivery === 'unavailable') {
+        showDialog({
+          title: '日程已保存',
+          message: '本机未创建系统提醒，请在设置中检查通知权限。',
+          tone: 'warning',
+        });
+      } else if (reminderDelivery === 'unconfirmed') {
+        showDialog({
+          title: '日程已保存',
+          message: '本机提醒状态未能确认，可重新打开日程并保存提醒。',
+          tone: 'warning',
+        });
+      }
     } catch {
       showDialog({ title: '保存失败', message: '请检查网络后重试', tone: 'error' });
     } finally {
@@ -513,7 +523,15 @@ export function AddEventScreen({ navigation, route }: Props) {
           </View>
 
           {/* Save button */}
-          <TouchableOpacity onPress={handleSave} disabled={!canSave || saving} activeOpacity={0.85} style={{ marginTop: 8 }}>
+          <TouchableOpacity
+            testID="event-save"
+            accessibilityRole="button"
+            accessibilityLabel={isEditing ? '保存日程修改' : '保存到日历'}
+            onPress={handleSave}
+            disabled={!canSave || saving}
+            activeOpacity={0.85}
+            style={{ marginTop: 8 }}
+          >
             <LinearGradient
               colors={canSave && !saving ? [C.gradFrom, C.gradTo] : ['#CCC8E0', '#CCC8E0']}
               start={{ x:0,y:0 }} end={{ x:1,y:0 }}

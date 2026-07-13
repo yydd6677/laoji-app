@@ -331,6 +331,45 @@ describe('MeetingsProvider lifecycle and cache', () => {
     );
   });
 
+  it('rolls back an optimistic meeting title when cloud rename fails', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const cachedMeeting = {
+      id: 'rename-rollback',
+      title: '原会议标题',
+      date: '2026年7月13日',
+      duration: '10:00',
+      tags: [],
+      source: 'cloud',
+      updatedAt: '2026-07-13T08:00:00+08:00',
+    };
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => (
+      key === '@laoji:meetings:v2:user:9' ? JSON.stringify([cachedMeeting]) : null
+    ));
+    (fetchAllMeetings as jest.Mock).mockRejectedValue(new Error('offline'));
+    (apiUpdateMeeting as jest.Mock).mockRejectedValue(new Error('rename failed'));
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(current?.meetings).toHaveLength(1));
+
+    await act(async () => {
+      await expect(current!.updateMeetingTitle('rename-rollback', '未同步的新标题'))
+        .rejects.toThrow('rename failed');
+    });
+
+    expect(current?.meetings[0]).toEqual(expect.objectContaining({
+      title: '原会议标题',
+      updatedAt: '2026-07-13T08:00:00+08:00',
+    }));
+    expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+      '@laoji:meetings:v2:user:9',
+      expect.stringContaining('未同步的新标题'),
+    );
+  });
+
   it('restores the meeting, transcript, summary, and media cache when cloud deletion fails', async () => {
     (useAuth as jest.Mock).mockReturnValue({
       mode: 'authenticated',

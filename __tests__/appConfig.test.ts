@@ -33,7 +33,7 @@ describe('Expo app config release gates', () => {
     const config = loadConfig() as {
       android?: { versionCode?: number; allowBackup?: boolean; blockedPermissions?: string[] };
     };
-    expect(config.android?.versionCode).toBe(35);
+    expect(config.android?.versionCode).toBe(36);
     expect(config.android?.allowBackup).toBe(false);
     expect(config.android?.blockedPermissions).toEqual(expect.arrayContaining([
       'android.permission.CAMERA',

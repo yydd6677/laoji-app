@@ -52,11 +52,12 @@ const TIME_TOKEN =
   '|(?:凌晨|早上|上午|中午|下午|晚上|晚间)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?';
 
 const LAOJI_WAKE_WORD = '(?:老记|老纪|老计|老季|牢记|小记)';
+const IMPLICIT_CROSS_YEAR_CONFIRM_DAYS = 183;
 
 const CATEGORY_RULES: Array<[EventCategory, RegExp]> = [
   ['重要', /(重要|截止|紧急|到期|必须|尽快|加急|最终版|回滚|风险|护照过期|证书到期|ddl|DDL|deadline|Deadline)/],
-  ['工作', /(工作|会议|开会|周会|周报|项目|评审|复盘|需求|汇报|报告|预算|系统维护|检查服务器|客户|合同|供应商|产品方案|设计稿|接口联调|测试用例|上线|投标|库存|数据报表|值班|招聘|面试)/],
   ['学习', /(学习|复习|上课|课程|考试|作业|论文|阅读|培训|背单词|公开课|文献|答辩|实验报告|模拟考试|资格考试|读书会|听力|算法课|统计学)/],
+  ['工作', /(工作|会议|开会|周会|周报|项目|评审|复盘|需求|汇报|报告|预算|系统维护|检查服务器|客户|合同|供应商|产品方案|设计稿|接口联调|测试用例|上线|投标|库存|数据报表|值班|招聘|面试)/],
   ['健康', /(健康|健身|运动|跑步|训练|复诊|体检|看病|服药|吃药|买药|牙医|眼科|康复|疫苗|心理咨询|睡眠|血压|游泳|瑜伽)/],
   ['出行', /(出行|出发|旅行|旅游|交通|航班|飞机|高铁|火车|车票|机票|打车|坐车|出差|机场|车站|酒店|值机|行李|路线|租车|签证|景点|退票|换乘|行程|接机)/],
   ['财务', /(财务|钱|付款|付钱|支付|缴费|交费|还款|账单|发票|报销|工资|收入|贷款|房贷|信用卡|房租|社保|转账|收款|退款|保险|停车费|物业费|水电费|报名费)/],
@@ -173,6 +174,8 @@ function normalizeScheduleText(text: string): string {
     .replace(/不(?:[，,]*(?:呃|额|嗯|那个)[，,]*)+对/g, '不对')
     .replace(/说(?:[，,]*(?:呃|额|嗯|那个)[，,]*)+错/g, '说错')
     .replace(/改(?:[，,]*(?:呃|额|嗯|那个)[，,]*)+成/g, '改成')
+    .replace(/^(?:(?:刚才)?(?:说漏了|漏说了|忘了说)|补充一下|再补充(?:一下)?|对了)[，,。]*/g, '')
+    .replace(/((?:每天|每日))[0-9一二两三四五六七八九十]{1,2}(?:差不多|大概(?:是)?|可能(?:是)?)(?=(?:[01]?\d|2[0-3])[:：])/g, '$1')
     .replace(new RegExp(`([0-9一二两三四五六七八九十])${temporalFiller}(?=月)`, 'g'), '$1')
     .replace(new RegExp(`(月)${temporalFiller}(?=[0-9一二两三四五六七八九十])`, 'g'), '$1')
     .replace(new RegExp(`((?:下下|下|本|这)?(?:周|星期|礼拜))${temporalFiller}(?=[一二三四五六日天1-7])`, 'g'), '$1')
@@ -298,6 +301,22 @@ function parseDateRange(text: string, today: LocalDate): [LocalDate, LocalDate] 
   }
   if (ranges.length === 0) return null;
   return DATE_CORRECTION_RE.test(text) ? ranges[ranges.length - 1] : ranges[0];
+}
+
+function implicitLongCrossYearRangeNeedsConfirmation(
+  text: string,
+  range: [LocalDate, LocalDate] | null,
+): boolean {
+  if (!range || range[1].year <= range[0].year) return false;
+  const durationDays = Math.round(compareDate(range[1], range[0]) / 86_400_000);
+  if (durationDays <= IMPLICIT_CROSS_YEAR_CONFIRM_DAYS) return false;
+
+  const pattern = new RegExp(`(${DATE_TOKEN})(?:开始)?(?:到|至|直到|[-—~～])(${DATE_TOKEN})`, 'g');
+  const pairs: Array<[string, string]> = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) pairs.push([match[1], match[2]]);
+  const selected = DATE_CORRECTION_RE.test(text) ? pairs[pairs.length - 1] : pairs[0];
+  return Boolean(selected && !selected.every(token => /^[0-9]{4}年/.test(token)));
 }
 
 function parseAuthoritativeDate(text: string, today: LocalDate): LocalDate | null {
@@ -541,6 +560,7 @@ export function parseLocalScheduleText(text: string, referenceDate = new Date())
   let eventType: ParseResult['event_type'] = 'once';
   const recurrenceText = normalizeRecurrenceExpression(normalized);
   const parsedRange = parseDateRange(normalized, today);
+  const implicitLongRangeNeedsConfirmation = implicitLongCrossYearRangeNeedsConfirmation(normalized, parsedRange);
   const dateTokens = normalized.match(new RegExp(DATE_TOKEN, 'g')) ?? [];
   const unresolvedDateRange = !parsedRange
     && dateTokens.length >= 2
@@ -605,8 +625,10 @@ export function parseLocalScheduleText(text: string, referenceDate = new Date())
     raw_text: text,
     parse_source: 'rules',
     confidence: 0,
-    needs_clarification: unresolvedDateRange || !hasDate || (!hasTime && !effectiveEndDate),
-    clarification_question: unresolvedDateRange
+    needs_clarification: implicitLongRangeNeedsConfirmation || unresolvedDateRange || !hasDate || (!hasTime && !effectiveEndDate),
+    clarification_question: implicitLongRangeNeedsConfirmation && effectiveEndDate
+      ? `结束日期按 ${formatDate(effectiveEndDate)} 处理会形成跨年长日程，需要确认年份和起止顺序。`
+      : unresolvedDateRange
       ? '听到了日期范围，但开始或结束日期不够清楚，需要确认完整的起止日期。'
       : (effectiveEndDate && !hasTime ? null : quickClarificationQuestion(hasDate, hasTime)),
   };

@@ -15,6 +15,7 @@ import {
 import {
   cancelEventNotificationsForScope,
   reconcileEventNotifications,
+  reminderFireDate,
   scheduleEventNotificationForScope,
   switchEventNotificationScope,
 } from '../services/notifications';
@@ -121,12 +122,46 @@ interface EventsContextType {
   searchableEvents: CalEvent[];
   loading: boolean;
   error: string | null;
-  addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<void>;
+  addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<EventMutationResult>;
   deleteEvent: (id: string) => Promise<void>;
-  updateEvent: (id: string, changes: Partial<CalEvent>) => Promise<void>;
-  refreshEvents: (year: number, month: number) => Promise<void>;
+  updateEvent: (id: string, changes: Partial<CalEvent>) => Promise<EventMutationResult>;
+  refreshEvents: (year: number, month: number) => Promise<EventRefreshResult>;
   undoDelete: () => Promise<void>;
   lastDeleted: CalEvent | null;
+}
+
+export type EventReminderDelivery = 'not-required' | 'scheduled' | 'unavailable' | 'unconfirmed';
+
+export interface EventMutationResult {
+  reminderDelivery: EventReminderDelivery;
+}
+
+export interface EventRefreshResult {
+  dataLoaded: boolean;
+  reminderSyncConfirmed: boolean;
+}
+
+function reminderDeliveryForEvent(
+  event: CalEvent,
+  notificationId: string | null | undefined,
+  unconfirmed = false,
+): EventReminderDelivery {
+  if (!reminderFireDate(event)) return 'not-required';
+  if (unconfirmed) return 'unconfirmed';
+  return notificationId ? 'scheduled' : 'unavailable';
+}
+
+function reminderDeliveryForUpdatedEvents(
+  events: CalEvent[],
+  fallback: CalEvent,
+  unconfirmed: boolean,
+): EventReminderDelivery {
+  if (unconfirmed) return 'unconfirmed';
+  const expected = events.filter(event => reminderFireDate(event));
+  if (expected.length === 0) {
+    return reminderDeliveryForEvent(fallback, fallback.notificationId);
+  }
+  return expected.every(event => event.notificationId) ? 'scheduled' : 'unavailable';
 }
 
 const EventsContext = createContext<EventsContextType | null>(null);
@@ -247,14 +282,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     await persistEventCatalog(catalog);
   }, [accessToken, mode, persistEventCatalog, scope]);
 
-  const refreshEvents = useCallback(async (year: number, month: number) => {
+  const refreshEvents = useCallback(async (year: number, month: number): Promise<EventRefreshResult> => {
     const requestGeneration = generationRef.current;
-    if (activeScopeRef.current !== scope) return;
+    if (activeScopeRef.current !== scope) {
+      return { dataLoaded: false, reminderSyncConfirmed: false };
+    }
     if (mode === 'signed_out') {
       eventsRef.current = [];
       setEvents([]);
       setError(null);
-      return;
+      return { dataLoaded: true, reminderSyncConfirmed: true };
     }
     if (mode === 'guest') {
       const monthKey = `${year}-${String(month).padStart(2, '0')}`;
@@ -267,6 +304,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       const window = monthWindow(year, month);
       let notificationIds: Record<string, string | null> = {};
+      let reminderSyncConfirmed = true;
       try {
         notificationIds = await reconcileEventNotifications(scope, expanded, {
           windowStart: window.start,
@@ -275,8 +313,11 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         });
       } catch {
         // Notification persistence must not block the guest calendar.
+        reminderSyncConfirmed = false;
       }
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) {
+        return { dataLoaded: false, reminderSyncConfirmed: false };
+      }
 
       const withNotifications = expanded.map(event => ({
         ...event,
@@ -302,14 +343,15 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       }
       eventMetadataRef.current = nextMetadata;
       await persistMetadata(nextMetadata);
-      return;
+      return { dataLoaded: true, reminderSyncConfirmed };
     }
-    if (!accessToken) return;
+    if (!accessToken) return { dataLoaded: false, reminderSyncConfirmed: false };
 
     setLoading(true);
+    let result: EventRefreshResult = { dataLoaded: false, reminderSyncConfirmed: false };
     try {
       const data = await fetchEvents(year, month, accessToken);
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return result;
       const local = (data as (ApiEvent & { id: number })[]).map(e => {
         return apiEventToCalEvent(e, metadataForApiEvent(e, eventMetadataRef.current));
       });
@@ -325,10 +367,11 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       eventsRef.current = next;
       setEvents(next);
       await persistEvents(next);
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return result;
       setError(null);
 
       let notificationIds: Record<string, string | null> = {};
+      let reminderSyncConfirmed = true;
       try {
         notificationIds = await reconcileEventNotifications(scope, local, {
           windowStart: window.start,
@@ -337,8 +380,9 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         });
       } catch {
         // The cloud calendar remains usable when local notification storage fails.
+        reminderSyncConfirmed = false;
       }
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return result;
 
       const withNotifications = eventsRef.current.map(event => (
         incomingIds.has(event.id) && Object.prototype.hasOwnProperty.call(notificationIds, event.id)
@@ -348,7 +392,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       eventsRef.current = withNotifications;
       setEvents(withNotifications);
       await persistEvents(withNotifications);
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return result;
 
       let nextMetadata = { ...eventMetadataRef.current };
       for (const event of previous) {
@@ -364,14 +408,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       }
       eventMetadataRef.current = nextMetadata;
       await persistMetadata(nextMetadata);
+      result = { dataLoaded: true, reminderSyncConfirmed };
     } catch (err) {
-      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return result;
       setError(err instanceof Error ? err.message : '日程服务暂时不可用');
     } finally {
       if (generationRef.current === requestGeneration && activeScopeRef.current === scope) {
         setLoading(false);
       }
     }
+    return result;
   }, [accessToken, mode, persistEvents, persistMetadata, scope]);
 
   useEffect(() => {
@@ -436,12 +482,14 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(t);
   }, [lastDeleted]);
 
-  const addEvent = useCallback(async (ev: Omit<CalEvent, 'id'>) => {
+  const addEvent = useCallback(async (ev: Omit<CalEvent, 'id'>): Promise<EventMutationResult> => {
     const operationGeneration = generationRef.current;
-    if (activeScopeRef.current !== scope) return;
+    if (activeScopeRef.current !== scope) throw new Error('event scope changed');
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          throw new Error('event scope changed');
+        }
         const category = normalizeEventCategory(ev.category);
         const baseId = createGuestId();
         const baseEvent: CalEvent = {
@@ -455,26 +503,50 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         };
         const nextGuestEvents = [...guestBaseEventsRef.current, baseEvent];
         await persistGuestEvents(nextGuestEvents);
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          return { reminderDelivery: reminderDeliveryForEvent(baseEvent, null, true) };
+        }
         guestBaseEventsRef.current = nextGuestEvents;
         searchableEventsRef.current = nextGuestEvents;
         setSearchableEvents(nextGuestEvents);
         const date = new Date(`${ev.startDate}T00:00:00`);
-        await refreshEvents(date.getFullYear(), date.getMonth() + 1);
+        const refreshResult = await refreshEvents(date.getFullYear(), date.getMonth() + 1);
+        const persisted = eventsRef.current.find(event => sourceEventId(event) === baseId) ?? baseEvent;
+        return {
+          reminderDelivery: reminderDeliveryForEvent(
+            persisted,
+            persisted.notificationId,
+            !refreshResult.dataLoaded || !refreshResult.reminderSyncConfirmed,
+          ),
+        };
       });
     }
     if (!accessToken) throw new Error('not authenticated');
 
     const saved = await saveEvent(calEventToApiEvent(ev), accessToken);
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { reminderDelivery: 'unconfirmed' };
+    }
     const savedId = String((saved as ApiEvent & { id: number }).id);
     const localMeta = await saveMetadataPatch(savedId, metadataFromEvent(ev));
     let localEv = apiEventToCalEvent(saved as ApiEvent & { id: number }, localMeta);
-    const notificationId = await scheduleEventNotificationForScope(scope, localEv);
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    let notificationId: string | null = null;
+    let reminderUnconfirmed = false;
+    try {
+      notificationId = await scheduleEventNotificationForScope(scope, localEv);
+    } catch {
+      // The cloud event is already durable. A local notification registry
+      // failure must not invite the user to create the same event again.
+      reminderUnconfirmed = true;
+    }
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true) };
+    }
     if (notificationId) {
       localEv = await persistNotificationId(localEv, notificationId);
-      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+        return { reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true) };
+      }
     }
     setEvents(prev => {
       const next = [...prev, localEv];
@@ -488,11 +560,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       void persistEventCatalog(next);
       return next;
     });
+    return {
+      reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, reminderUnconfirmed),
+    };
   }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistNotificationId, refreshEvents, saveMetadataPatch, scope]);
 
   const deleteEvent = useCallback(async (id: string) => {
     const operationGeneration = generationRef.current;
+    const deleteAccessToken = accessToken;
     if (activeScopeRef.current !== scope) return;
+    if (mode !== 'guest' && !deleteAccessToken) throw new Error('not authenticated');
     const currentEvents = eventsRef.current;
     const target = currentEvents.find(e => e.id === id) ?? null;
     const targetSourceId = target ? sourceEventId(target) : id.split('@', 1)[0];
@@ -557,17 +634,21 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       // A failed registry write must not block deletion from the source of truth.
     }
 
-    if (!accessToken) throw new Error('not authenticated');
-
     try {
-      await apiDelete(Number(targetSourceId), accessToken);
+      await apiDelete(Number(targetSourceId), deleteAccessToken!);
     } catch (err) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) throw err;
       if (removedEvents.length > 0) {
-        const restored = await Promise.all(removedEvents.map(async event => ({
-          ...event,
-          notificationId: await scheduleEventNotificationForScope(scope, event),
-        })));
+        const restored = await Promise.all(removedEvents.map(async event => {
+          let notificationId: string | null = null;
+          try {
+            notificationId = await scheduleEventNotificationForScope(scope, event);
+          } catch {
+            // The cloud deletion failed, so the event must be restored even if
+            // its local reminder cannot be rebuilt right now.
+          }
+          return { ...event, notificationId };
+        }));
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) throw err;
         const restoredEvents = eventsRef.current.some(e => e.id === id)
           ? eventsRef.current
@@ -596,14 +677,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistMetadata, scope]);
 
-  const updateEvent = useCallback(async (id: string, changes: Partial<CalEvent>) => {
+  const updateEvent = useCallback(async (id: string, changes: Partial<CalEvent>): Promise<EventMutationResult> => {
     const operationGeneration = generationRef.current;
-    if (activeScopeRef.current !== scope) return;
+    if (activeScopeRef.current !== scope) throw new Error('event scope changed');
     const currentEvents = eventsRef.current;
     const previous = currentEvents.find(e => e.id === id) ?? null;
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          throw new Error('event scope changed');
+        }
         const guestCurrentEvents = eventsRef.current;
         const guestPrevious = guestCurrentEvents.find(event => event.id === id) ?? null;
         const targetSourceId = guestPrevious ? sourceEventId(guestPrevious) : id.split('@', 1)[0];
@@ -625,23 +708,39 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           sourceEventId(event) === targetSourceId ? updatedBase : event
         ));
         await persistGuestEvents(nextGuestEvents);
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          return { reminderDelivery: 'unconfirmed' };
+        }
         guestBaseEventsRef.current = nextGuestEvents;
         searchableEventsRef.current = nextGuestEvents;
         setSearchableEvents(nextGuestEvents);
+        let reminderUnconfirmed = false;
         try {
           await cancelEventNotificationsForScope(scope, relatedEvents);
         } catch {
           // Startup reconciliation will retry cleanup if the notification service is unavailable.
+          reminderUnconfirmed = true;
         }
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          return { reminderDelivery: 'unconfirmed' };
+        }
         const nextMetadata = { ...eventMetadataRef.current };
         for (const event of relatedEvents) delete nextMetadata[event.id];
         eventMetadataRef.current = nextMetadata;
         await persistMetadata(nextMetadata);
-        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          return { reminderDelivery: 'unconfirmed' };
+        }
         const date = new Date(`${updatedBase.startDate}T00:00:00`);
-        await refreshEvents(date.getFullYear(), date.getMonth() + 1);
+        const refreshResult = await refreshEvents(date.getFullYear(), date.getMonth() + 1);
+        const updatedEvents = eventsRef.current.filter(event => sourceEventId(event) === targetSourceId);
+        return {
+          reminderDelivery: reminderDeliveryForUpdatedEvents(
+            updatedEvents,
+            updatedBase,
+            reminderUnconfirmed || !refreshResult.dataLoaded || !refreshResult.reminderSyncConfirmed,
+          ),
+        };
       });
     }
     if (!accessToken) throw new Error('not authenticated');
@@ -667,18 +766,26 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     if ('reminderMinutes' in changes) payload.reminder_minutes = changes.reminderMinutes ?? null;
 
     const updated = await apiUpdate(Number(targetSourceId), payload, accessToken) as ApiEvent & { id: number };
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { reminderDelivery: 'unconfirmed' };
+    }
+    let reminderUnconfirmed = false;
     try {
       await cancelEventNotificationsForScope(scope, relatedEvents);
     } catch {
       // The following refresh will retry notification reconciliation.
+      reminderUnconfirmed = true;
     }
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { reminderDelivery: 'unconfirmed' };
+    }
     const nextMetadata = { ...eventMetadataRef.current };
     for (const event of relatedEvents) delete nextMetadata[event.id];
     eventMetadataRef.current = nextMetadata;
     await persistMetadata(nextMetadata);
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { reminderDelivery: 'unconfirmed' };
+    }
     const updatedCatalogEvent = apiEventToCalEvent(updated, metadataForApiEvent(updated, nextMetadata));
     setSearchableEvents(prev => {
       const next = [
@@ -694,11 +801,32 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     for (const event of relatedEvents) months.add(event.startDate.slice(0, 7));
     months.add(updated.start_date.slice(0, 7));
     if (updated.end_date) months.add(updated.end_date.slice(0, 7));
+    const projectedEvents = [
+      ...eventsRef.current.filter(event => sourceEventId(event) !== targetSourceId),
+      ...expandEventsForMonths([updatedCatalogEvent], months),
+    ];
+    eventsRef.current = projectedEvents;
+    setEvents(projectedEvents);
+    void persistEvents(projectedEvents);
+
+    const refreshResults: EventRefreshResult[] = [];
     for (const key of months) {
       const [year, month] = key.split('-').map(Number);
-      if (Number.isFinite(year) && Number.isFinite(month)) await refreshEvents(year, month);
+      if (Number.isFinite(year) && Number.isFinite(month)) {
+        refreshResults.push(await refreshEvents(year, month));
+      }
     }
-  }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistGuestEvents, persistMetadata, refreshEvents, scope]);
+    const updatedEvents = eventsRef.current.filter(event => sourceEventId(event) === targetSourceId);
+    return {
+      reminderDelivery: reminderDeliveryForUpdatedEvents(
+        updatedEvents,
+        updatedCatalogEvent,
+        reminderUnconfirmed || refreshResults.some(result => (
+          !result.dataLoaded || !result.reminderSyncConfirmed
+        )),
+      ),
+    };
+  }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistMetadata, refreshEvents, scope]);
 
   const undoDelete = useCallback(async () => {
     if (!lastDeleted) return;

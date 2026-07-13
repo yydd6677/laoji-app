@@ -453,11 +453,24 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         color:       colorForEvent({ category }),
       };
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', eventPayload);
-      await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
+      const { reminderDelivery } = await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
       // Refresh calendar for the month of the saved event
       const [y, m] = draft.start_date.split('-').map(Number);
       await refreshEvents(y, m);
       onSaved(); close();
+      if (reminderDelivery === 'unavailable') {
+        showDialog({
+          title: '日程已保存',
+          message: '本机未创建系统提醒，请在设置中检查通知权限。',
+          tone: 'warning',
+        });
+      } else if (reminderDelivery === 'unconfirmed') {
+        showDialog({
+          title: '日程已保存',
+          message: '本机提醒状态未能确认，可重新打开日程并保存提醒。',
+          tone: 'warning',
+        });
+      }
     } catch {
       setError('保存失败，请重试'); setStep('confirm');
     }

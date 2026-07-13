@@ -216,6 +216,37 @@ describe('local schedule parser', () => {
     expect(weekly).toMatchObject({ event_type: 'weekly', title: '线上培训' });
   });
 
+  it('removes repair-preface and isolated ASR noise before a recurring clock time', () => {
+    expect(
+      parseLocalScheduleText('刚才说漏了，每日1 差不多 9:30实验报告。', new Date(2026, 6, 13))
+    ).toMatchObject({
+      title: '实验报告',
+      event_type: 'daily',
+      start_time: '09:30',
+      category: '学习',
+      needs_clarification: false,
+    });
+    expect(
+      parseLocalScheduleText('每日19:30整理实验报告', new Date(2026, 6, 13))
+    ).toMatchObject({ start_time: '19:30' });
+  });
+
+  it('asks before accepting an implicit near-year-long cross-year range', () => {
+    const text = '投诉回访要在8月2号到7月23号之间处理';
+    const parsed = parseLocalScheduleText(text, new Date(2026, 6, 13));
+
+    expect(parsed).toMatchObject({
+      start_date: '2026-08-02',
+      end_date: '2027-07-23',
+      needs_clarification: true,
+      clarification_question: '结束日期按 2027-07-23 处理会形成跨年长日程，需要确认年份和起止顺序。',
+    });
+    expect(shouldUseLocalScheduleParseFirst(text, parsed)).toBe(false);
+    expect(
+      parseLocalScheduleText('2026年8月2号到2027年7月23号长期项目', new Date(2026, 6, 13))
+    ).toMatchObject({ needs_clarification: false });
+  });
+
   it('preserves finite daily ranges and explicit open-ended starts', () => {
     expect(
       parseLocalScheduleText('下周一到下周三在上海参加培训，每天上午九点开始', BASE_DATE)

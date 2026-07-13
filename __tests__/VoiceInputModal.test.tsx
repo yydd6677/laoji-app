@@ -12,6 +12,8 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { StyleSheet } from 'react-native';
 
+const mockShowDialog = jest.fn();
+
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => {
   const ReactModule = require('react');
@@ -38,7 +40,7 @@ jest.mock('../src/services/api', () => ({
 jest.mock('../src/services/realtimeAsr', () => ({ startRealtimeAsr: jest.fn() }));
 jest.mock('../src/store/EventsStore', () => ({ useEvents: jest.fn() }));
 jest.mock('../src/components/AppDialog', () => ({
-  useAppDialog: () => ({ showDialog: jest.fn() }),
+  useAppDialog: () => ({ showDialog: mockShowDialog }),
 }));
 
 const parsed = {
@@ -65,7 +67,7 @@ describe('VoiceInputModal manual schedule path', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    addEvent.mockResolvedValue(undefined);
+    addEvent.mockResolvedValue({ reminderDelivery: 'not-required' });
     refreshEvents.mockResolvedValue(undefined);
     (useEvents as jest.Mock).mockReturnValue({ addEvent, refreshEvents });
     (parseText as jest.Mock).mockResolvedValue(parsed);
@@ -100,6 +102,23 @@ describe('VoiceInputModal manual schedule path', () => {
     })));
     expect(refreshEvents).toHaveBeenCalledWith(2026, 7);
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a saved event honestly when the local reminder is unavailable', async () => {
+    addEvent.mockResolvedValueOnce({ reminderDelivery: 'unavailable' });
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
+    await fireEvent.press(screen.getByText('保存日程'));
+
+    await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith({
+      title: '日程已保存',
+      message: '本机未创建系统提醒，请在设置中检查通知权限。',
+      tone: 'warning',
+    }));
+    expect(addEvent).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the original text when the user chooses to re-enter it', async () => {
