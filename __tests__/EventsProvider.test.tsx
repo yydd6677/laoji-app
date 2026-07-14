@@ -176,6 +176,7 @@ describe('EventsProvider authenticated cache', () => {
 
     await render(<EventsProvider><Probe /></EventsProvider>);
     await waitFor(() => expect(current?.loading).toBe(false));
+    (fetchEvents as jest.Mock).mockClear();
 
     let result: Awaited<ReturnType<NonNullable<typeof current>['addEvent']>> | undefined;
     await act(async () => {
@@ -190,6 +191,7 @@ describe('EventsProvider authenticated cache', () => {
 
     expect(result).toEqual({ reminderDelivery: 'unavailable' });
     expect(saveEvent).toHaveBeenCalledTimes(1);
+    expect(fetchEvents).not.toHaveBeenCalled();
     expect(current?.events).toEqual([
       expect.objectContaining({ id: '44', title: '不会重复创建的日程' }),
     ]);
@@ -281,6 +283,37 @@ describe('EventsProvider authenticated cache', () => {
       expect.objectContaining({ id: '99', title: '云端仍然存在的日程', notificationId: null }),
     ]);
     expect(current?.lastDeleted).toBeNull();
+  });
+
+  it('keeps the undo action available when restoring a deleted cloud event fails', async () => {
+    const initial = {
+      id: 101,
+      title: '需要撤销的日程',
+      event_type: 'once',
+      start_date: '2099-01-12',
+      start_time: '12:00',
+      reminder_minutes: null,
+    };
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchEvents as jest.Mock).mockResolvedValue([initial]);
+    (apiDeleteEvent as jest.Mock).mockResolvedValue(undefined);
+    (saveEvent as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+
+    await render(<EventsProvider><Probe /></EventsProvider>);
+    await waitFor(() => expect(current?.events.some(event => event.id === '101')).toBe(true));
+
+    await act(async () => { await current!.deleteEvent('101'); });
+    expect(current?.lastDeleted).toEqual(expect.objectContaining({ title: '需要撤销的日程' }));
+
+    await act(async () => {
+      await expect(current!.undoDelete()).rejects.toThrow('offline');
+    });
+    expect(current?.lastDeleted).toEqual(expect.objectContaining({ title: '需要撤销的日程' }));
+
+    (saveEvent as jest.Mock).mockResolvedValueOnce(initial);
+    await act(async () => { await current!.undoDelete(); });
+    expect(current?.lastDeleted).toBeNull();
+    expect(saveEvent).toHaveBeenCalledTimes(2);
   });
 
   it('reports an unavailable reminder after a cloud event edit without repeating the month refresh', async () => {

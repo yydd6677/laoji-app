@@ -211,6 +211,31 @@ describe('AuthProvider session restoration', () => {
     expect(current?.profile.nickname).toBe('账号 B');
   });
 
+  it('keeps authenticated profile edits retryable when cloud sync fails', async () => {
+    (authService.fetchCurrentUser as jest.Mock).mockResolvedValue(cachedSession.user);
+
+    await act(async () => {
+      render(<AuthProvider><Probe /></AuthProvider>);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(current?.mode).toBe('authenticated'));
+
+    const originalProfile = current!.profile;
+    (authService.updateRemoteProfile as jest.Mock).mockRejectedValue(new Error('Network request failed'));
+    (AsyncStorage.setItem as jest.Mock).mockClear();
+
+    await expect(current!.updateProfile({
+      ...originalProfile,
+      nickname: '尚未同步的昵称',
+    })).rejects.toThrow('Network request failed');
+
+    expect(current?.profile).toEqual(originalProfile);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(
+      '@laoji_profile:user:7',
+      expect.stringContaining('尚未同步的昵称'),
+    );
+  });
+
   it('keeps the latest login intent when two login responses finish out of order', async () => {
     (authService.fetchCurrentUser as jest.Mock).mockResolvedValue(cachedSession.user);
     await act(async () => {

@@ -42,6 +42,26 @@ function similarity(left, right) {
   return length === 0 ? 1 : 1 - editDistance(a, b) / length;
 }
 
+function missingCriticalTerms(actual, criticalTerms = []) {
+  const normalizedActual = normalize(actual);
+  return criticalTerms.filter(term => {
+    const normalizedTerm = normalize(term);
+    return normalizedTerm && !normalizedActual.includes(normalizedTerm);
+  });
+}
+
+function crossSessionContamination(expected, actual, otherExpected) {
+  const normalizedExpected = normalize(expected);
+  const normalizedActual = normalize(actual);
+  return otherExpected
+    .map(value => normalize(value))
+    .filter(phrase => (
+      phrase
+      && !normalizedExpected.includes(phrase)
+      && normalizedActual.includes(phrase)
+    ));
+}
+
 function percentile(values, fraction) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -67,6 +87,15 @@ function resolveSampleFile(manifestDirectory, sample, format) {
   return path.resolve(manifestDirectory, value);
 }
 
+function sampleBatches(samples, level, sweepAll) {
+  if (!sweepAll) return [samples.slice(0, level)];
+  const batches = [];
+  for (let index = 0; index < samples.length; index += level) {
+    batches.push(samples.slice(index, index + level));
+  }
+  return batches;
+}
+
 async function main() {
   const baseUrl = argument('base-url', 'http://127.0.0.1:18020').replace(/\/$/, '');
   const route = argument('route', 'schedule');
@@ -77,13 +106,19 @@ async function main() {
   const sampleIds = argument('sample-ids', '001,002,003,004').split(',');
   const threshold = Number(argument('threshold', '0.85'));
   const maxFirstCompletionMs = Number(argument('max-first-completion-ms', '6000'));
+  const maxFirstAfterSegmentEndMs = Number(argument('max-first-after-segment-end-ms', '1000'));
   const maxReadyAfterStopMs = Number(argument('max-ready-after-stop-ms', '5000'));
   const maxSlowdownRatio = Number(argument('max-slowdown-ratio', '2'));
+  const maxTranscriptsPerSample = Number(argument('max-transcripts-per-sample', '0'));
   const output = argument('output', '');
   const respectEnvironmentProxy = process.argv.includes('--respect-environment-proxy');
+  const sweepAll = process.argv.includes('--sweep-all');
   if (!['schedule', 'meeting'].includes(route)) throw new Error('--route must be schedule or meeting');
   if (levels.some(value => !Number.isInteger(value) || value < 1)) throw new Error('--levels must be positive integers');
   if (!Number.isInteger(repeats) || repeats < 1) throw new Error('--repeats must be a positive integer');
+  if (!Number.isInteger(maxTranscriptsPerSample) || maxTranscriptsPerSample < 0) {
+    throw new Error('--max-transcripts-per-sample must be a non-negative integer');
+  }
   if (Math.max(...levels) > sampleIds.length) throw new Error('provide at least one distinct --sample-ids value per concurrent session');
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -109,69 +144,86 @@ async function main() {
   const rows = [];
   for (const level of levels) {
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
-      process.stderr.write(`level=${level} repeat=${repeat}/${repeats}\n`);
-      const batch = selected.slice(0, level).map(async sample => {
-        let report;
-        try {
-          report = await runProbe({
-            baseUrl,
-            route,
-            files: [sample.file],
-            title: `Realtime ASR benchmark c${level} r${repeat} ${sample.id}`,
-            respectEnvironmentProxy,
-          });
-        } catch (error) {
+      const batches = sampleBatches(selected, level, sweepAll);
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+        const selectedBatch = batches[batchIndex];
+        process.stderr.write(
+          `level=${level} repeat=${repeat}/${repeats} batch=${batchIndex + 1}/${batches.length}\n`,
+        );
+        const batch = selectedBatch.map(async sample => {
+          let report;
+          try {
+            report = await runProbe({
+              baseUrl,
+              route,
+              files: [sample.file],
+              title: `Realtime ASR benchmark c${level} r${repeat} b${batchIndex + 1} ${sample.id}`,
+              respectEnvironmentProxy,
+            });
+          } catch (error) {
+            return {
+              level,
+              repeat,
+              sample_id: sample.id,
+              expected: sample.text,
+              actual: '',
+              score: 0,
+              contamination: [],
+              passed: false,
+              issues: ['probe_error'],
+              error: describeError(error),
+              report: null,
+            };
+          }
+          const actual = report.transcripts.map(item => item.text).join(' ');
+          const score = similarity(sample.text, actual);
+          const missingTerms = missingCriticalTerms(actual, sample.critical_terms);
+          const otherPhrases = selectedBatch
+            .filter(other => other.id !== sample.id)
+            .map(other => other.text);
+          const contamination = crossSessionContamination(sample.text, actual, otherPhrases);
+          const issues = [];
+          if (score < threshold) issues.push(`accuracy:${score.toFixed(4)}<${threshold}`);
+          if (missingTerms.length) issues.push(`missing_critical_terms:${missingTerms.join('|')}`);
+          if (contamination.length) issues.push('cross_session_contamination');
+          if (report.cleanup_status !== 204) issues.push(`cleanup_status:${report.cleanup_status}`);
+          const firstCompletion = report.timing.first_completed_after_audio_start_ms;
+          if (!Number.isFinite(firstCompletion)) issues.push('missing_transcript');
+          else if (firstCompletion > maxFirstCompletionMs) {
+            issues.push(`first_completion_ms:${firstCompletion}>${maxFirstCompletionMs}`);
+          }
+          const firstAfterSegmentEnd = report.timing.first_completed_after_segment_end_ms;
+          if (!Number.isFinite(firstAfterSegmentEnd)) issues.push('missing_segment_tail_latency');
+          else if (firstAfterSegmentEnd > maxFirstAfterSegmentEndMs) {
+            issues.push(`segment_tail_ms:${firstAfterSegmentEnd}>${maxFirstAfterSegmentEndMs}`);
+          }
+          const readyAfterStop = report.timing.ready_after_stop_signal_ms;
+          if (!Number.isFinite(readyAfterStop)) issues.push('missing_ready_to_stop');
+          else if (readyAfterStop > maxReadyAfterStopMs) {
+            issues.push(`ready_after_stop_ms:${readyAfterStop}>${maxReadyAfterStopMs}`);
+          }
+          if (maxTranscriptsPerSample > 0 && report.transcripts.length > maxTranscriptsPerSample) {
+            issues.push(`transcript_count:${report.transcripts.length}>${maxTranscriptsPerSample}`);
+          }
           return {
             level,
             repeat,
+            batch: batchIndex + 1,
             sample_id: sample.id,
             expected: sample.text,
-            actual: '',
-            score: 0,
-            contamination: [],
-            passed: false,
-            issues: ['probe_error'],
-            error: describeError(error),
-            report: null,
+            actual,
+            transcript_count: report.transcripts.length,
+            score: Number(score.toFixed(4)),
+            contamination,
+            missing_critical_terms: missingTerms,
+            passed: issues.length === 0,
+            issues,
+            error: null,
+            report,
           };
-        }
-        const actual = report.transcripts.map(item => item.text).join(' ');
-        const score = similarity(sample.text, actual);
-        const otherPhrases = selected
-          .slice(0, level)
-          .filter(other => other.id !== sample.id)
-          .map(other => normalize(other.text));
-        const normalizedActual = normalize(actual);
-        const contamination = otherPhrases.filter(phrase => phrase && normalizedActual.includes(phrase));
-        const issues = [];
-        if (score < threshold) issues.push(`accuracy:${score.toFixed(4)}<${threshold}`);
-        if (contamination.length) issues.push('cross_session_contamination');
-        if (report.cleanup_status !== 204) issues.push(`cleanup_status:${report.cleanup_status}`);
-        const firstCompletion = report.timing.first_completed_after_audio_start_ms;
-        if (!Number.isFinite(firstCompletion)) issues.push('missing_transcript');
-        else if (firstCompletion > maxFirstCompletionMs) {
-          issues.push(`first_completion_ms:${firstCompletion}>${maxFirstCompletionMs}`);
-        }
-        const readyAfterStop = report.timing.ready_after_stop_signal_ms;
-        if (!Number.isFinite(readyAfterStop)) issues.push('missing_ready_to_stop');
-        else if (readyAfterStop > maxReadyAfterStopMs) {
-          issues.push(`ready_after_stop_ms:${readyAfterStop}>${maxReadyAfterStopMs}`);
-        }
-        return {
-          level,
-          repeat,
-          sample_id: sample.id,
-          expected: sample.text,
-          actual,
-          score: Number(score.toFixed(4)),
-          contamination,
-          passed: issues.length === 0,
-          issues,
-          error: null,
-          report,
-        };
-      });
-      rows.push(...await Promise.all(batch));
+        });
+        rows.push(...await Promise.all(batch));
+      }
     }
   }
 
@@ -187,6 +239,7 @@ async function main() {
       },
       first_completed_after_audio_start_ms: metricSummary(levelRows, 'first_completed_after_audio_start_ms'),
       first_completed_after_speech_end_ms: metricSummary(levelRows, 'first_completed_after_speech_end_ms'),
+      first_completed_after_segment_end_ms: metricSummary(levelRows, 'first_completed_after_segment_end_ms'),
       ready_after_stop_signal_ms: metricSummary(levelRows, 'ready_after_stop_signal_ms'),
       total_ms: metricSummary(levelRows, 'total_ms'),
     };
@@ -211,11 +264,14 @@ async function main() {
     format,
     levels,
     repeats,
+    sweep_all: sweepAll,
     budgets: {
       minimum_similarity: threshold,
       max_first_completion_after_audio_start_ms: maxFirstCompletionMs,
+      max_first_completion_after_segment_end_ms: maxFirstAfterSegmentEndMs,
       max_ready_after_stop_signal_ms: maxReadyAfterStopMs,
       max_concurrency_slowdown_ratio: maxSlowdownRatio,
+      max_transcripts_per_sample: maxTranscriptsPerSample || null,
     },
     total_sessions: rows.length,
     passed_sessions: rows.filter(row => row.passed).length,
@@ -239,7 +295,16 @@ async function main() {
   process.exitCode = report.passed ? 0 : 1;
 }
 
-module.exports = { describeError, editDistance, normalize, percentile, similarity };
+module.exports = {
+  crossSessionContamination,
+  describeError,
+  editDistance,
+  missingCriticalTerms,
+  normalize,
+  percentile,
+  sampleBatches,
+  similarity,
+};
 
 if (require.main === module) {
   const reexecStatus = reexecWithoutEnvironmentProxy();

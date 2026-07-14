@@ -8,11 +8,13 @@ import {
 } from '../src/services/api';
 import { startRealtimeAsr } from '../src/services/realtimeAsr';
 import { useEvents } from '../src/store/EventsStore';
+import { checkConflict } from '../src/utils/eventUtils';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { StyleSheet } from 'react-native';
 
 const mockShowDialog = jest.fn();
+const mockNavigate = jest.fn();
 
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => {
@@ -39,8 +41,15 @@ jest.mock('../src/services/api', () => ({
 }));
 jest.mock('../src/services/realtimeAsr', () => ({ startRealtimeAsr: jest.fn() }));
 jest.mock('../src/store/EventsStore', () => ({ useEvents: jest.fn() }));
+jest.mock('../src/utils/eventUtils', () => ({ checkConflict: jest.fn() }));
+jest.mock('@react-navigation/native', () => ({
+  useNavigation: () => ({ navigate: mockNavigate }),
+}));
 jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog: mockShowDialog }),
+}));
+jest.mock('../src/services/notifications', () => ({
+  reminderUnavailableMessage: jest.fn(async () => '系统通知已开启，但本机提醒创建失败。请重新打开日程并保存提醒。'),
 }));
 
 const parsed = {
@@ -69,7 +78,8 @@ describe('VoiceInputModal manual schedule path', () => {
     jest.clearAllMocks();
     addEvent.mockResolvedValue({ reminderDelivery: 'not-required' });
     refreshEvents.mockResolvedValue(undefined);
-    (useEvents as jest.Mock).mockReturnValue({ addEvent, refreshEvents });
+    (useEvents as jest.Mock).mockReturnValue({ events: [], addEvent, refreshEvents });
+    (checkConflict as jest.Mock).mockReturnValue({ hasConflict: false, conflicts: [] });
     (parseText as jest.Mock).mockResolvedValue(parsed);
     (Audio.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
     (Audio.setAudioModeAsync as jest.Mock).mockResolvedValue(undefined);
@@ -100,7 +110,7 @@ describe('VoiceInputModal manual schedule path', () => {
       category: '工作',
       reminderMinutes: 15,
     })));
-    expect(refreshEvents).toHaveBeenCalledWith(2026, 7);
+    expect(refreshEvents).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -115,10 +125,83 @@ describe('VoiceInputModal manual schedule path', () => {
 
     await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith({
       title: '日程已保存',
-      message: '本机未创建系统提醒，请在设置中检查通知权限。',
+      message: '系统通知已开启，但本机提醒创建失败。请重新打开日程并保存提醒。',
       tone: 'warning',
     }));
     expect(addEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves a dated result without a specific time as an all-day event', async () => {
+    (parseText as jest.Mock).mockResolvedValueOnce({
+      ...parsed,
+      title: '提交材料',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      reminder_minutes: null,
+      raw_text: '明天提交材料',
+    });
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天提交材料');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByText('提交材料')).toBeTruthy());
+    expect(screen.getByText('全天')).toBeTruthy();
+    await fireEvent.press(screen.getByText('保存日程'));
+
+    await waitFor(() => expect(addEvent).toHaveBeenCalledWith(expect.objectContaining({
+      startTime: undefined,
+      endTime: undefined,
+      isAllDay: true,
+      reminderMinutes: null,
+    })));
+  });
+
+  it('does not save a malformed parsed date', async () => {
+    (parseText as jest.Mock).mockResolvedValueOnce({
+      ...parsed,
+      start_date: '2026-02-30',
+      needs_clarification: false,
+      clarification_question: null,
+    });
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
+    await fireEvent.press(screen.getByText('保存日程'));
+
+    expect(addEvent).not.toHaveBeenCalled();
+    expect(screen.getByText('请先补充有效日期，再保存日程')).toBeTruthy();
+  });
+
+  it('allows a valid draft to be saved without answering an optional clarification', async () => {
+    (parseText as jest.Mock).mockResolvedValueOnce({
+      ...parsed,
+      title: '上班',
+      start_date: '2026-07-14',
+      end_date: '2026-07-15',
+      spanning: true,
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      category: '工作',
+      needs_clarification: true,
+      clarification_question: '没有听到具体日期，需要补充日期。',
+    });
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '今明两天上班');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByPlaceholderText('补充答案（选填）')).toBeTruthy());
+    await fireEvent.press(screen.getByText('保存日程'));
+
+    await waitFor(() => expect(addEvent).toHaveBeenCalledWith(expect.objectContaining({
+      title: '上班',
+      startDate: '2026-07-14',
+      endDate: '2026-07-15',
+      spanning: true,
+    })));
   });
 
   it('preserves the original text when the user chooses to re-enter it', async () => {
@@ -132,12 +215,102 @@ describe('VoiceInputModal manual schedule path', () => {
     expect(screen.getByTestId('schedule-voice-input').props.value).toBe('明天下午三点项目评审');
   });
 
+  it('opens the full event form with every parsed field preserved for editing', async () => {
+    const onClose = jest.fn();
+    (parseText as jest.Mock).mockResolvedValueOnce({
+      ...parsed,
+      end_date: '2026-07-12',
+      spanning: true,
+      description: '核对项目风险',
+      raw_text: '明天下午三点到后天四点项目评审',
+      location: '三楼会议室',
+      detail: '携带评审材料',
+      status: '待确认',
+    });
+    await render(<VoiceInputModal visible onClose={onClose} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点到后天四点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByLabelText('编辑日程详情')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('编辑日程详情'));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('AddEvent', {
+      date: '2026-07-11',
+      draft: expect.objectContaining({
+        title: '项目评审',
+        startDate: '2026-07-11',
+        endDate: '2026-07-12',
+        startTime: '15:00',
+        endTime: '16:00',
+        isAllDay: false,
+        description: '核对项目风险',
+        rawText: '明天下午三点到后天四点项目评审',
+        location: '三楼会议室',
+        category: '工作',
+        detail: '携带评审材料',
+        status: '待确认',
+        reminderMinutes: 15,
+      }),
+    });
+    expect(addEvent).not.toHaveBeenCalled();
+  });
+
+  it('uses the same conflict confirmation as the manual event form', async () => {
+    const conflict = {
+      id: 'existing-1',
+      title: '已有会议',
+      startDate: '2026-07-11',
+      startTime: '15:30',
+      endTime: '16:30',
+      isAllDay: false,
+      color: '#5B8CFF',
+    };
+    (useEvents as jest.Mock).mockReturnValue({ events: [conflict], addEvent, refreshEvents });
+    (checkConflict as jest.Mock).mockReturnValue({ hasConflict: true, conflicts: [conflict] });
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
+    await fireEvent.press(screen.getByText('保存日程'));
+
+    expect(addEvent).not.toHaveBeenCalled();
+    expect(mockShowDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '时间冲突',
+      message: expect.stringContaining('已有会议'),
+      tone: 'warning',
+    }));
+    const actions = mockShowDialog.mock.calls.at(-1)?.[0]?.actions;
+    await act(async () => { await actions[0].onPress(); });
+    await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
+  });
+
   it('keeps the bottom-sheet actions above the system navigation inset', async () => {
     await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
 
     expect(screen.getByTestId('schedule-voice-sheet').props.edges).toEqual(['bottom']);
     expect(screen.getByLabelText('开始语音输入')).toBeTruthy();
     expect(screen.getByLabelText('关闭语音输入')).toBeTruthy();
+  });
+
+  it('keeps the dimming backdrop fixed while only the sheet moves upward', async () => {
+    const view = await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    const modal = view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })[0];
+    const backdropStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-backdrop').props.style);
+    const sheetMotionStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-sheet-motion').props.style);
+
+    expect(modal.props.animationType).toBe('none');
+    expect(backdropStyle).toEqual(expect.objectContaining({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    }));
+    expect(backdropStyle.transform).toBeUndefined();
+    expect(sheetMotionStyle.transform).toHaveLength(1);
   });
 
   it('keeps the microphone fixed and starts only once while realtime audio is connecting', async () => {

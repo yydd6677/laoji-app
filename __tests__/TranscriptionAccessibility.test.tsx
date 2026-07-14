@@ -4,7 +4,12 @@ import { TranscriptionScreen } from '../src/screens/TranscriptionScreen';
 import { useAuth } from '../src/store/AuthStore';
 import { useMeetings } from '../src/store/MeetingsStore';
 import { generateSummaryForMeeting } from '../src/services/meetingSummary';
-import { fetchMeetingTranscript } from '../src/services/api';
+import { fetchMeetingTranscript, uploadMeetingAudio } from '../src/services/api';
+import {
+  canAutomaticallyRetryPendingMeetingAudioUpload,
+  getPendingMeetingAudioUpload,
+  retryPendingMeetingAudioUpload,
+} from '../src/services/meetingRecording';
 import {
   clearPendingMeetingSummaryTask,
   getPendingMeetingSummaryTask,
@@ -36,6 +41,7 @@ jest.mock('../src/services/api', () => ({
   uploadMeetingAudio: jest.fn(),
 }));
 jest.mock('../src/services/meetingRecording', () => ({
+  canAutomaticallyRetryPendingMeetingAudioUpload: jest.fn(() => true),
   getPendingMeetingAudioUpload: jest.fn(async () => null),
   retryPendingMeetingAudioUpload: jest.fn(),
 }));
@@ -62,6 +68,10 @@ describe('TranscriptionScreen accessibility', () => {
     jest.clearAllMocks();
     (useAuth as jest.Mock).mockReturnValue({ accessToken: null, isGuest: true, session: null });
     (fetchMeetingTranscript as jest.Mock).mockResolvedValue([]);
+    (uploadMeetingAudio as jest.Mock).mockResolvedValue(null);
+    (getPendingMeetingAudioUpload as jest.Mock).mockResolvedValue(null);
+    (retryPendingMeetingAudioUpload as jest.Mock).mockResolvedValue(false);
+    (canAutomaticallyRetryPendingMeetingAudioUpload as jest.Mock).mockReturnValue(true);
     (getPendingMeetingSummaryTask as jest.Mock).mockResolvedValue(null);
     (useMeetings as jest.Mock).mockReturnValue({
       meetings: [{
@@ -83,6 +93,158 @@ describe('TranscriptionScreen accessibility', () => {
       saveCachedSummary: jest.fn(),
       refreshMeetings: jest.fn(),
     });
+  });
+
+  it('automatically resumes a pending authenticated audio upload without a dialog', async () => {
+    const pending = {
+      meetingId: 'guest-meeting-1',
+      audioUri: 'file:///data/pending.wav',
+      fileName: 'pending.wav',
+      mimeType: 'audio/wav',
+      createdAt: '2026-07-14T00:00:00.000Z',
+      lastAttemptAt: '2026-07-14T00:00:00.000Z',
+      attemptCount: 1,
+      uploadState: 'pending',
+    };
+    (useAuth as jest.Mock).mockReturnValue({
+      accessToken: 'token-1',
+      isGuest: false,
+      session: { user: { id: 'account-1' } },
+    });
+    (getPendingMeetingAudioUpload as jest.Mock).mockResolvedValueOnce(pending);
+    (retryPendingMeetingAudioUpload as jest.Mock).mockResolvedValueOnce(true);
+    const refreshMeetings = jest.fn(async () => {});
+    (useMeetings as jest.Mock).mockReturnValue({
+      ...(useMeetings as jest.Mock).mock.results.at(-1)?.value,
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => []),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings,
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-auto-audio-upload',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(retryPendingMeetingAudioUpload).toHaveBeenCalledWith(
+      'user:account-1',
+      'guest-meeting-1',
+      'token-1',
+      expect.any(Function),
+      { automatic: true },
+    ));
+    await waitFor(() => expect(refreshMeetings).toHaveBeenCalledTimes(1));
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed automatic audio upload visible for manual retry', async () => {
+    const pending = {
+      meetingId: 'guest-meeting-1',
+      audioUri: 'file:///data/pending.wav',
+      fileName: 'pending.wav',
+      mimeType: 'audio/wav',
+      createdAt: '2026-07-14T00:00:00.000Z',
+      lastAttemptAt: '2026-07-14T00:00:00.000Z',
+      attemptCount: 2,
+      uploadState: 'pending',
+      failureMessage: '自动同步未完成，录音仍保存在本机',
+    };
+    (useAuth as jest.Mock).mockReturnValue({
+      accessToken: 'token-1',
+      isGuest: false,
+      session: { user: { id: 'account-1' } },
+    });
+    (getPendingMeetingAudioUpload as jest.Mock).mockResolvedValue(pending);
+    (retryPendingMeetingAudioUpload as jest.Mock).mockRejectedValueOnce(new Error('offline'));
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => []),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-auto-audio-failure',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(screen.getByText('自动同步未完成，录音仍保存在本机')).toBeTruthy());
+    expect(screen.getByLabelText('重试上传会议录音')).toBeTruthy();
+    expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('shows a blocked recording reason without automatically resending the file', async () => {
+    const pending = {
+      meetingId: 'guest-meeting-1',
+      audioUri: 'file:///data/too-large.wav',
+      fileName: 'too-large.wav',
+      mimeType: 'audio/wav',
+      createdAt: '2026-07-14T00:00:00.000Z',
+      lastAttemptAt: '2026-07-14T00:00:00.000Z',
+      attemptCount: 3,
+      uploadState: 'blocked',
+      failureCode: 'file_too_large',
+      failureMessage: '录音文件超过云端上传上限，仍保存在本机。',
+    };
+    (useAuth as jest.Mock).mockReturnValue({
+      accessToken: 'token-1',
+      isGuest: false,
+      session: { user: { id: 'account-1' } },
+    });
+    (canAutomaticallyRetryPendingMeetingAudioUpload as jest.Mock).mockReturnValue(false);
+    (getPendingMeetingAudioUpload as jest.Mock).mockResolvedValue(pending);
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => []),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-blocked-audio',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+
+    await waitFor(() => expect(screen.getByText('录音文件超过云端上传上限，仍保存在本机。')).toBeTruthy());
+    const retryButton = screen.getByLabelText('重试上传会议录音');
+    expect(retryPendingMeetingAudioUpload).not.toHaveBeenCalled();
+
+    (retryPendingMeetingAudioUpload as jest.Mock).mockResolvedValueOnce(true);
+    await act(async () => {
+      fireEvent.press(retryButton);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(retryPendingMeetingAudioUpload).toHaveBeenCalledWith(
+      'user:account-1',
+      'guest-meeting-1',
+      'token-1',
+      expect.any(Function),
+      { automatic: false },
+    ));
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '上传完成',
+      tone: 'success',
+    })));
   });
 
   it('automatically resumes a persisted summary task and clears it after caching', async () => {
@@ -275,6 +437,35 @@ describe('TranscriptionScreen accessibility', () => {
     await fireEvent.press(screen.getByText('停止等待'));
 
     await waitFor(() => expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '已停止等待' })));
+    expect(clearPendingMeetingSummaryTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the previous recovery task when forced regeneration fails before submission', async () => {
+    const meetingSummaryToText = jest.requireMock('../src/services/meetingSummary').meetingSummaryToText as jest.Mock;
+    meetingSummaryToText.mockReturnValueOnce('旧会议总结');
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ id: 'guest-meeting-1', title: '现场会议', date: '2026年7月11日', duration: '02:35', tags: [] }],
+      updateMeetingTitle: jest.fn(),
+      getCachedTranscript: jest.fn(() => [{ id: '1', text: '需要重新总结的转写' }]),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => ({ overview: '旧会议总结' })),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    (generateSummaryForMeeting as jest.Mock).mockRejectedValueOnce(new Error('network unavailable'));
+    const navigation = { goBack: jest.fn(), navigate: jest.fn() } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-force-submit-failure',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await fireEvent.press(await screen.findByLabelText('重新生成会议总结'));
+
+    await waitFor(() => expect(generateSummaryForMeeting).toHaveBeenCalledWith(expect.objectContaining({
+      forceRegenerate: true,
+    })));
     expect(clearPendingMeetingSummaryTask).not.toHaveBeenCalled();
   });
 

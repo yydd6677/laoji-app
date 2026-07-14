@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Meeting, MeetingSummary, TranscriptLine } from '../types';
 import {
@@ -6,13 +7,21 @@ import {
   createMeeting as apiCreateMeeting,
   deleteMeeting as apiDeleteMeeting,
   fetchAllMeetings,
+  uploadMeetingAudio,
   updateMeeting as apiUpdateMeeting,
 } from '../services/api';
 import { useAuth } from './AuthStore';
 import { Colors as C } from '../theme/colors';
 import { formatDuration } from '../utils/meetingMedia';
-import { clearPendingMeetingAudioUpload } from '../services/meetingRecording';
+import {
+  clearPendingMeetingAudioUpload,
+  listPendingMeetingAudioUploads,
+  PendingMeetingAudioUpload,
+  retryPendingMeetingAudioUploads,
+} from '../services/meetingRecording';
 import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
+import { HttpResponseError } from '../services/errors';
+import { meetingSummaryToText } from '../services/meetingSummary';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -58,6 +67,14 @@ function tagsWithPendingSync(tags: Meeting['tags']): Meeting['tags'] {
   return [...tags.filter(tag => tag.label !== '待同步'), { label: '待同步', color: C.orange }];
 }
 
+function tagsForAudioSync(tags: Meeting['tags'], pending: boolean, blocked = false): Meeting['tags'] {
+  const retained = tags.filter(tag => tag.label !== '待上传' && tag.label !== '上传受阻');
+  if (!pending) return retained;
+  return [...retained, blocked
+    ? { label: '上传受阻', color: C.red }
+    : { label: '待上传', color: C.orange }];
+}
+
 function serverToLocal(m: ApiMeeting): Meeting {
   const { date, time } = formatDateTime(m.created_at);
   const audioDurationSec = typeof m.audio_duration_sec === 'number' && m.audio_duration_sec > 0
@@ -79,6 +96,8 @@ function serverToLocal(m: ApiMeeting): Meeting {
     createdAt: m.created_at,
     updatedAt: m.updated_at,
     audioAvailable: Boolean(m.audio_available),
+    audioSyncPending: false,
+    audioSyncBlocked: false,
     audioDurationSec,
     clientRequestId: m.client_request_id ?? undefined,
     source: 'cloud',
@@ -152,6 +171,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const generationRef = useRef(0);
   const activeScopeRef = useRef<string | null>(null);
   const guestMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const audioResumeOperationsRef = useRef(new Map<string, Promise<void>>());
+  const lastAudioResumeAtRef = useRef(new Map<string, number>());
 
   const scope = useMemo(() => {
     if (mode === 'authenticated' && session) return `user:${session.user.id}`;
@@ -193,7 +214,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, []);
 
-  const refreshMeetings = useCallback(async () => {
+  const refreshMeetingsFromCloud = useCallback(async () => {
     const requestGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
     if (mode === 'signed_out') {
@@ -215,13 +236,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         const remote = serverToLocal(item);
         const cached = previousById.get(remote.id);
         const preservePendingStatus = Boolean(cached?.statusSyncPending && cached.status);
+        const audioSyncPending = !remote.audioAvailable && Boolean(cached?.audioSyncPending);
+        const audioSyncBlocked = audioSyncPending && Boolean(cached?.audioSyncBlocked);
+        const statusTags = preservePendingStatus
+          ? tagsWithPendingSync(cached?.tags ?? remote.tags)
+          : remote.tags;
         return {
           ...remote,
           status: preservePendingStatus ? cached?.status : remote.status,
-          tags: preservePendingStatus
-            ? tagsWithPendingSync(cached?.tags ?? remote.tags)
-            : remote.tags,
+          tags: tagsForAudioSync(statusTags, audioSyncPending, audioSyncBlocked),
           statusSyncPending: preservePendingStatus,
+          audioSyncPending,
+          audioSyncBlocked,
           hasTranscript: remote.hasTranscript || (transcriptCacheRef.current[remote.id]?.length ?? 0) > 0,
           hasSummary: remote.hasSummary || Boolean(summaryCacheRef.current[remote.id]),
           audioAvailable: remote.audioAvailable || Boolean(cached?.audioLocalUri),
@@ -231,14 +257,32 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           duration: remote.audioDurationSec ? remote.duration : cached?.duration ?? remote.duration,
         };
       });
-      const local = await Promise.all(remoteItems.map(async item => {
+      const remoteIds = new Set(remoteItems.map(item => item.id));
+      const retainedPendingItems = meetingsRef.current
+        .filter(item => (
+          !remoteIds.has(item.id)
+          && (item.statusSyncPending || item.audioSyncPending)
+        ))
+        .map(item => ({
+          ...item,
+          tags: tagsForAudioSync(
+            item.statusSyncPending ? tagsWithPendingSync(item.tags) : item.tags,
+            Boolean(item.audioSyncPending),
+            Boolean(item.audioSyncBlocked),
+          ),
+        }));
+      const local = await Promise.all([...remoteItems, ...retainedPendingItems].map(async item => {
         if (!item.statusSyncPending || !item.status) return item;
         try {
           const synced = serverToLocal(await apiUpdateMeeting(item.id, { status: item.status }, accessToken));
           return {
             ...item,
             status: synced.status,
-            tags: synced.tags,
+            tags: tagsForAudioSync(
+              synced.tags,
+              Boolean(item.audioSyncPending),
+              Boolean(item.audioSyncBlocked),
+            ),
             updatedAt: synced.updatedAt,
             statusSyncPending: false,
           };
@@ -262,6 +306,98 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accessToken, mode, persistMeetings, scope]);
 
+  const reconcilePendingAudioUploads = useCallback(async (
+    pendingUploads: PendingMeetingAudioUpload[],
+    operationGeneration: number,
+  ) => {
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    const pendingById = new Map(pendingUploads.map(item => [item.meetingId, item]));
+    let changed = false;
+    const next = meetingsRef.current.map(meeting => {
+      const pending = pendingById.get(meeting.id);
+      const audioSyncPending = Boolean(pending);
+      const audioSyncBlocked = pending?.uploadState === 'blocked';
+      const tags = tagsForAudioSync(meeting.tags, audioSyncPending, audioSyncBlocked);
+      const hasMatchingTag = meeting.tags.some(tag => tag.label === '待上传') === audioSyncPending;
+      const hasMatchingBlockedTag = meeting.tags.some(tag => tag.label === '上传受阻') === audioSyncBlocked;
+      const pendingTagMatches = audioSyncBlocked
+        ? !meeting.tags.some(tag => tag.label === '待上传')
+        : hasMatchingTag;
+      if (
+        meeting.audioSyncPending === audioSyncPending
+        && meeting.audioSyncBlocked === audioSyncBlocked
+        && pendingTagMatches
+        && hasMatchingBlockedTag
+      ) return meeting;
+      changed = true;
+      return { ...meeting, audioSyncPending, audioSyncBlocked, tags };
+    });
+    if (!changed) return;
+    meetingsRef.current = next;
+    setMeetings(next);
+    await persistMeetings(next);
+  }, [persistMeetings, scope]);
+
+  const resumePendingAudioUploads = useCallback((force = false): Promise<void> => {
+    if (mode !== 'authenticated' || !accessToken || activeScopeRef.current !== scope) {
+      return Promise.resolve();
+    }
+    const operationKey = scope;
+    const existing = audioResumeOperationsRef.current.get(operationKey);
+    if (existing) return existing;
+    const now = Date.now();
+    const lastAttemptAt = lastAudioResumeAtRef.current.get(operationKey) ?? 0;
+    if (!force && now - lastAttemptAt < 30_000) return Promise.resolve();
+    lastAudioResumeAtRef.current.set(operationKey, now);
+    const operationGeneration = generationRef.current;
+
+    let operation: Promise<void>;
+    operation = (async () => {
+      const before = await listPendingMeetingAudioUploads(scope);
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      await reconcilePendingAudioUploads(before, operationGeneration);
+      if (before.length === 0) return;
+
+      const result = await retryPendingMeetingAudioUploads(
+        scope,
+        accessToken,
+        (pending, token) => uploadMeetingAudio(
+          pending.meetingId,
+          pending.audioUri,
+          token,
+          { fileName: pending.fileName, mimeType: pending.mimeType },
+        ),
+        2,
+      );
+      const after = await listPendingMeetingAudioUploads(scope);
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      if (result.uploadedIds.length > 0 || after.length < before.length) {
+        await refreshMeetingsFromCloud();
+      }
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      await reconcilePendingAudioUploads(after, operationGeneration);
+    })().finally(() => {
+      if (audioResumeOperationsRef.current.get(operationKey) === operation) {
+        audioResumeOperationsRef.current.delete(operationKey);
+      }
+    });
+    audioResumeOperationsRef.current.set(operationKey, operation);
+    return operation;
+  }, [accessToken, mode, reconcilePendingAudioUploads, refreshMeetingsFromCloud, scope]);
+
+  const refreshMeetings = useCallback(async () => {
+    await refreshMeetingsFromCloud();
+    void resumePendingAudioUploads(true).catch(() => {});
+  }, [refreshMeetingsFromCloud, resumePendingAudioUploads]);
+
+  useEffect(() => {
+    if (mode !== 'authenticated' || !accessToken) return undefined;
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') void resumePendingAudioUploads().catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [accessToken, mode, resumePendingAudioUploads]);
+
   useEffect(() => {
     let alive = true;
     const loadGeneration = generationRef.current;
@@ -272,19 +408,31 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'signed_out') return;
       setLoading(true);
       try {
-        const [cachedMeetings, cachedTranscripts, cachedSummaries] = await Promise.all([
+        const [cachedMeetings, cachedTranscripts, cachedSummaries, pendingAudioUploads] = await Promise.all([
           loadJson<Meeting[]>(meetingsKey, []),
           loadJson<Record<string, TranscriptLine[]>>(transcriptKey, {}),
           loadJson<Record<string, MeetingSummary | null>>(summaryKey, {}),
+          mode === 'authenticated'
+            ? listPendingMeetingAudioUploads(scope).catch(() => [])
+            : Promise.resolve([]),
         ]);
         if (!isCurrent()) return;
         transcriptCacheRef.current = cachedTranscripts;
         summaryCacheRef.current = cachedSummaries;
-        const hydratedMeetings = cachedMeetings.map(meeting => ({
-          ...meeting,
-          hasTranscript: meeting.hasTranscript || (cachedTranscripts[meeting.id]?.length ?? 0) > 0,
-          hasSummary: meeting.hasSummary || Boolean(cachedSummaries[meeting.id]),
-        }));
+        const pendingAudioById = new Map(pendingAudioUploads.map(item => [item.meetingId, item]));
+        const hydratedMeetings = cachedMeetings.map(meeting => {
+          const pendingAudio = pendingAudioById.get(meeting.id);
+          const audioSyncPending = Boolean(pendingAudio);
+          const audioSyncBlocked = pendingAudio?.uploadState === 'blocked';
+          return {
+            ...meeting,
+            hasTranscript: meeting.hasTranscript || (cachedTranscripts[meeting.id]?.length ?? 0) > 0,
+            hasSummary: meeting.hasSummary || Boolean(cachedSummaries[meeting.id]),
+            audioSyncPending,
+            audioSyncBlocked,
+            tags: tagsForAudioSync(meeting.tags, audioSyncPending, audioSyncBlocked),
+          };
+        });
         meetingsRef.current = hydratedMeetings;
         setMeetings(hydratedMeetings);
         if (mode === 'authenticated') await refreshMeetings();
@@ -395,39 +543,42 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     try {
       await apiDeleteMeeting(id, accessToken!);
     } catch (err) {
-      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      const alreadyDeleted = err instanceof HttpResponseError && err.status === 404;
+      if (!alreadyDeleted) {
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+          await Promise.allSettled([
+            persistJson(meetingsKey, previousMeetings),
+            writeAppStorageJson(transcriptKey, previousTranscripts, { removeIfEmpty: true }),
+            writeAppStorageJson(summaryKey, previousSummaries, { removeIfEmpty: true }),
+          ]);
+          throw err;
+        }
+        if (target) {
+          const restoredMeetings = meetingsRef.current.some(m => m.id === id)
+            ? meetingsRef.current
+            : [
+              ...meetingsRef.current.slice(0, Math.max(0, targetIndex)),
+              target,
+              ...meetingsRef.current.slice(Math.max(0, targetIndex)),
+            ];
+          meetingsRef.current = restoredMeetings;
+          setMeetings(restoredMeetings);
+        }
+        const restoredTranscripts = { ...transcriptCacheRef.current };
+        if (hadTranscript) restoredTranscripts[id] = previousTranscript;
+        else delete restoredTranscripts[id];
+        transcriptCacheRef.current = restoredTranscripts;
+        const restoredSummaries = { ...summaryCacheRef.current };
+        if (hadSummary) restoredSummaries[id] = previousSummary;
+        else delete restoredSummaries[id];
+        summaryCacheRef.current = restoredSummaries;
         await Promise.allSettled([
-          persistJson(meetingsKey, previousMeetings),
-          writeAppStorageJson(transcriptKey, previousTranscripts, { removeIfEmpty: true }),
-          writeAppStorageJson(summaryKey, previousSummaries, { removeIfEmpty: true }),
+          persistMeetings(meetingsRef.current),
+          persistTranscripts(),
+          persistSummaries(),
         ]);
         throw err;
       }
-      if (target) {
-        const restoredMeetings = meetingsRef.current.some(m => m.id === id)
-          ? meetingsRef.current
-          : [
-            ...meetingsRef.current.slice(0, Math.max(0, targetIndex)),
-            target,
-            ...meetingsRef.current.slice(Math.max(0, targetIndex)),
-          ];
-        meetingsRef.current = restoredMeetings;
-        setMeetings(restoredMeetings);
-      }
-      const restoredTranscripts = { ...transcriptCacheRef.current };
-      if (hadTranscript) restoredTranscripts[id] = previousTranscript;
-      else delete restoredTranscripts[id];
-      transcriptCacheRef.current = restoredTranscripts;
-      const restoredSummaries = { ...summaryCacheRef.current };
-      if (hadSummary) restoredSummaries[id] = previousSummary;
-      else delete restoredSummaries[id];
-      summaryCacheRef.current = restoredSummaries;
-      await Promise.allSettled([
-        persistMeetings(meetingsRef.current),
-        persistTranscripts(),
-        persistSummaries(),
-      ]);
-      throw err;
     }
 
     const cleanupResults = await Promise.allSettled([
@@ -472,7 +623,19 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const updated = serverToLocal(await apiUpdateMeeting(id, { title: cleanTitle }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       setMeetings(prev => {
-        const next = prev.map(m => m.id === id ? { ...m, ...updated } : m);
+        const next = prev.map(m => m.id === id
+          ? {
+              ...m,
+              ...updated,
+              audioSyncPending: m.audioSyncPending,
+              audioSyncBlocked: m.audioSyncBlocked,
+              tags: tagsForAudioSync(
+                updated.tags,
+                Boolean(m.audioSyncPending),
+                Boolean(m.audioSyncBlocked),
+              ),
+            }
+          : m);
         meetingsRef.current = next;
         void persistMeetings(next);
         return next;
@@ -509,16 +672,26 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       });
     }
     if (!accessToken) throw new Error('not authenticated');
-    const local = meetingsRef.current.map(meeting => meeting.id === id
-      ? {
+    const local = meetingsRef.current.map(meeting => {
+      if (meeting.id !== id) return meeting;
+      const audioSyncPending = Boolean(patch.audioSyncPending ?? meeting.audioSyncPending);
+      const audioSyncBlocked = audioSyncPending
+        && Boolean(patch.audioSyncBlocked ?? meeting.audioSyncBlocked);
+      return {
         ...meeting,
         ...patch,
         status,
-        tags: tagsWithPendingSync(tagsForStatus(meeting, status)),
+        tags: tagsForAudioSync(
+          tagsWithPendingSync(tagsForStatus(meeting, status)),
+          audioSyncPending,
+          audioSyncBlocked,
+        ),
+        audioSyncPending,
+        audioSyncBlocked,
         statusSyncPending: true,
         updatedAt: new Date().toISOString(),
-      }
-      : meeting);
+      };
+    });
     await persistMeetingsStrict(local);
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
     meetingsRef.current = local;
@@ -526,9 +699,21 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
-      const synced = meetingsRef.current.map(meeting => meeting.id === id
-        ? { ...meeting, ...updated, ...patch, statusSyncPending: false }
-        : meeting);
+      const synced = meetingsRef.current.map(meeting => {
+        if (meeting.id !== id) return meeting;
+        const audioSyncPending = Boolean(patch.audioSyncPending ?? meeting.audioSyncPending);
+        const audioSyncBlocked = audioSyncPending
+          && Boolean(patch.audioSyncBlocked ?? meeting.audioSyncBlocked);
+        return {
+          ...meeting,
+          ...updated,
+          ...patch,
+          tags: tagsForAudioSync(updated.tags, audioSyncPending, audioSyncBlocked),
+          audioSyncPending,
+          audioSyncBlocked,
+          statusSyncPending: false,
+        };
+      });
       await persistMeetingsStrict(synced);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
       meetingsRef.current = synced;
@@ -565,8 +750,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const saveCachedSummary = useCallback(async (id: string, summary: MeetingSummary | null) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
+    const usableSummary = summary && meetingSummaryToText(summary) ? summary : null;
     const previous = summaryCacheRef.current;
-    const next = { ...previous, [id]: summary };
+    const next = { ...previous, [id]: usableSummary };
     summaryCacheRef.current = next;
     try {
       await persistSummaries();
@@ -576,7 +762,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
     setMeetings(prev => {
-      const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(summary) } : m);
+      const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(usableSummary) } : m);
       meetingsRef.current = next;
       void persistMeetings(next);
       return next;

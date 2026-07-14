@@ -1,15 +1,22 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
 import { readResponseError } from './errors';
-import { isNonScheduleControlText, parseLocalScheduleText, shouldUseLocalScheduleParseFirst } from './localScheduleParser';
+import {
+  isNonScheduleControlText,
+  normalizeScheduleParseResult,
+  parseLocalScheduleText,
+  shouldUseLocalScheduleParseFirst,
+} from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
 import type { MeetingSummary, TranscriptLine } from '../types';
 import { fetchWithTimeout as fetch } from './http';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
+import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 
 // LaoJi Backend API Client
 // Endpoints are embedded by app.config.js from EXPO_PUBLIC_* build variables.
 // Production builds reject missing, plain-HTTP, and bare-IP values.
+const SUMMARY_TASK_WAIT_MS = 5_000;
 
 function laojiUrl(path: string): string {
   return `${getApiConfig().laojiApiBase}${path}`;
@@ -91,7 +98,9 @@ export async function parseText(text: string): Promise<ParseResult> {
   if (isNonScheduleControlText(text)) throw new Error('parse skipped: non-schedule control text');
 
   const local = parseLocalScheduleText(text);
-  if (local && shouldUseLocalScheduleParseFirst(text, local)) return local;
+  if (local && shouldUseLocalScheduleParseFirst(text, local)) {
+    return normalizeScheduleParseResult(text, local);
+  }
 
   let error: Error | null = null;
   try {
@@ -100,13 +109,16 @@ export async function parseText(text: string): Promise<ParseResult> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
     });
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const parsed = await res.json() as ParseResult;
+      return normalizeScheduleParseResult(text, parsed);
+    }
     error = await readResponseError('parse failed', res);
   } catch (err) {
     error = err instanceof Error ? err : new Error(String(err));
   }
 
-  if (local) return local;
+  if (local) return normalizeScheduleParseResult(text, local);
   throw error ?? new Error('parse failed');
 }
 
@@ -123,7 +135,8 @@ export async function clarifyText(
     body: JSON.stringify({ current: { ...draft, raw_text: draft.raw_text ?? original }, answer: supplement }),
   });
   if (!res.ok) throw await readResponseError('clarify failed', res);
-  return res.json();
+  const parsed = await res.json() as ParseResult;
+  return normalizeScheduleParseResult(`${original}\n${supplement}`, parsed);
 }
 
 // ── Save event ──────────────────────────────────────────────────────────────
@@ -224,7 +237,8 @@ export async function parseAudio(audioUri: string): Promise<ParseResult> {
     body: JSON.stringify({ audio_base64, filename }),
   });
   if (!res.ok) throw await readResponseError('audio parse failed', res);
-  return res.json();
+  const parsed = await res.json() as ParseResult;
+  return normalizeScheduleParseResult(parsed.raw_text, parsed);
 }
 
 // ── Delete event ────────────────────────────────────────────────────────────
@@ -293,6 +307,7 @@ export interface ApiMeetingTaskStatus {
   task_id?: string;
   status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | string;
   result?: unknown;
+  long_poll_supported?: boolean;
 }
 
 export async function fetchMeetings(page = 1, size = 20, accessToken?: string): Promise<ApiMeeting[]> {
@@ -493,9 +508,11 @@ export async function fetchMeetingSummaryTask(
   taskId: string,
   accessToken?: string,
   signal?: AbortSignal,
+  waitMs = SUMMARY_TASK_WAIT_MS,
 ): Promise<ApiMeetingTaskStatus> {
+  const query = new URLSearchParams({ wait_ms: String(waitMs) });
   const res = await fetch(
-    meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/task/${taskId}`),
+    meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/task/${taskId}?${query}`),
     { headers: authHeaders(accessToken), signal },
   );
   if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, accessToken);
@@ -533,8 +550,16 @@ export async function generateGuestMeetingSummary(
   return res.json();
 }
 
-export async function fetchGuestMeetingSummaryTask(taskId: string, signal?: AbortSignal): Promise<ApiMeetingTaskStatus> {
-  const res = await fetch(meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}`), { signal });
+export async function fetchGuestMeetingSummaryTask(
+  taskId: string,
+  signal?: AbortSignal,
+  waitMs = SUMMARY_TASK_WAIT_MS,
+): Promise<ApiMeetingTaskStatus> {
+  const query = new URLSearchParams({ wait_ms: String(waitMs) });
+  const res = await fetch(
+    meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}?${query}`),
+    { signal },
+  );
   if (!res.ok) throw await readResponseError('fetch guest meeting summary task failed', res);
   return res.json();
 }
@@ -568,6 +593,14 @@ export async function uploadMeetingAudio(
   accessToken?: string,
   options: { fileName?: string; mimeType?: string; process?: boolean } = {},
 ): Promise<ApiMeetingAudioInfo | null> {
+  if (audioUri.startsWith('file://')) {
+    try {
+      const info = await FileSystem.getInfoAsync(audioUri);
+      if (info?.exists === false) throw new LocalMeetingAudioFileMissingError();
+    } catch (error) {
+      if (error instanceof LocalMeetingAudioFileMissingError) throw error;
+    }
+  }
   const fileName = options.fileName ?? filenameFromUri(audioUri).replace(/\.(m4a|aac)$/i, '.$1');
   const mimeType = options.mimeType ?? (
     fileName.endsWith('.wav') ? 'audio/wav'

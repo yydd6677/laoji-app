@@ -23,6 +23,7 @@ import {
   ReminderMinutes,
   defaultReminderForEvent,
   loadNotificationPrefs,
+  reminderUnavailableMessage,
 } from '../services/notifications';
 import {
   EVENT_CATEGORIES,
@@ -95,31 +96,36 @@ function timeToMinutes(str: string): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AddEventScreen({ navigation, route }: Props) {
-  const { events, addEvent, updateEvent, refreshEvents } = useEvents();
+  const { events, addEvent, updateEvent } = useEvents();
   const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingId = route.params?.eventId;
   const editingEvent = editingId ? events.find(e => e.id === editingId) : undefined;
+  const routeDraft = editingId ? undefined : route.params?.draft;
   const isEditing = Boolean(editingId);
-  const initDate = route.params?.date ?? editingEvent?.seriesStartDate ?? editingEvent?.startDate ?? todayDateStr();
-  const initEndDate = editingEvent?.seriesEndDate ?? editingEvent?.endDate ?? initDate;
+  const initDate = editingEvent?.seriesStartDate
+    ?? editingEvent?.startDate
+    ?? routeDraft?.startDate
+    ?? route.params?.date
+    ?? todayDateStr();
+  const initEndDate = editingEvent?.seriesEndDate ?? editingEvent?.endDate ?? routeDraft?.endDate ?? initDate;
   const [saving, setSaving] = React.useState(false);
   const createRequestRef = React.useRef(createClientRequestState('event'));
 
-  const [title, setTitle]       = useState(editingEvent?.title ?? '');
+  const [title, setTitle]       = useState(editingEvent?.title ?? routeDraft?.title ?? '');
   const [dateObj, setDateObj]   = useState<Date>(() => parseDateStr(initDate));
   const [endDateObj, setEndDateObj] = useState<Date>(() => parseDateStr(initEndDate));
-  const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(editingEvent?.startTime ?? '10:00'));
-  const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(editingEvent?.endTime ?? '11:00'));
-  const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? false);
-  const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat));
-  const [desc, setDesc]         = useState(editingEvent?.description ?? editingEvent?.detail ?? '');
-  const [category, setCategory] = useState<EventCategory>(() => normalizeEventCategory(editingEvent?.category));
-  const [location, setLocation] = useState(editingEvent?.location ?? '');
+  const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(editingEvent?.startTime ?? routeDraft?.startTime ?? '10:00'));
+  const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(editingEvent?.endTime ?? routeDraft?.endTime ?? '11:00'));
+  const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? routeDraft?.isAllDay ?? false);
+  const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat ?? routeDraft?.repeat));
+  const [desc, setDesc]         = useState(editingEvent?.description ?? editingEvent?.detail ?? routeDraft?.description ?? routeDraft?.detail ?? '');
+  const [category, setCategory] = useState<EventCategory>(() => normalizeEventCategory(editingEvent?.category ?? routeDraft?.category));
+  const [location, setLocation] = useState(editingEvent?.location ?? routeDraft?.location ?? '');
   const [defaultReminder, setDefaultReminder] = useState<ReminderMinutes>(DEFAULT_REMINDER_MINUTES);
   const [reminderMinutes, setReminderMinutes] = useState<ReminderMinutes>(
-    editingEvent
-      ? editingEvent.reminderMinutes ?? null
+    editingEvent || routeDraft
+      ? (editingEvent?.reminderMinutes ?? routeDraft?.reminderMinutes ?? null)
       : defaultReminderForEvent(false, '10:00'),
   );
   const notificationScope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
@@ -145,7 +151,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     loadNotificationPrefs(notificationScope).then(prefs => {
       if (!alive) return;
       setDefaultReminder(prefs.defaultReminderMinutes);
-      if (!isEditing) {
+      if (!isEditing && !routeDraft) {
         setReminderMinutes(defaultReminderForEvent(isAllDay, startTime, prefs.defaultReminderMinutes));
       }
     });
@@ -180,9 +186,12 @@ export function AddEventScreen({ navigation, route }: Props) {
         isAllDay,
         repeat: REPEAT_MAP[repeat],
         description: desc,
+        rawText: routeDraft?.rawText,
         color,
         category,
         location: location || undefined,
+        detail: routeDraft?.detail,
+        status: routeDraft?.status,
         reminderMinutes,
       };
       if (editingEvent) {
@@ -191,18 +200,12 @@ export function AddEventScreen({ navigation, route }: Props) {
         createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
         payload.clientRequestId = createRequestRef.current.id;
         ({ reminderDelivery } = await addEvent(payload));
-        const d = parseDateStr(date);
-        await refreshEvents(d.getFullYear(), d.getMonth() + 1);
-        if (endDate.slice(0, 7) !== date.slice(0, 7)) {
-          const end = parseDateStr(endDate);
-          await refreshEvents(end.getFullYear(), end.getMonth() + 1);
-        }
       }
       navigation.goBack();
       if (reminderDelivery === 'unavailable') {
         showDialog({
           title: '日程已保存',
-          message: '本机未创建系统提醒，请在设置中检查通知权限。',
+          message: await reminderUnavailableMessage(),
           tone: 'warning',
         });
       } else if (reminderDelivery === 'unconfirmed') {
@@ -385,6 +388,10 @@ export function AddEventScreen({ navigation, route }: Props) {
                 return next;
               })}
               style={[s.toggle, { backgroundColor: isAllDay ? C.purple : '#CCC8E0' }]}
+              accessibilityRole="switch"
+              accessibilityLabel="全天日程"
+              accessibilityState={{ checked: isAllDay }}
+              testID="event-all-day-toggle"
             >
               <View style={[s.toggleThumb, { left: isAllDay ? 23 : 3 }]} />
             </TouchableOpacity>

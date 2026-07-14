@@ -1,5 +1,6 @@
 declare const require: (path: string) => (config: object) => {
   modResults: Array<{ type: string; key: string; value: string }>;
+  appBuildGradle: string;
 };
 
 const mockWithGradleProperties = jest.fn((
@@ -17,7 +18,24 @@ const mockWithGradleProperties = jest.fn((
   return { ...config, modResults: gradleConfig.modResults };
 });
 
+const mockWithAppBuildGradle = jest.fn((
+  config: object,
+  action: (gradleConfig: {
+    modResults: { language: string; contents: string };
+  }) => void,
+) => {
+  const gradleConfig = {
+    modResults: {
+      language: 'groovy',
+      contents: 'proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"',
+    },
+  };
+  action(gradleConfig);
+  return { ...config, appBuildGradle: gradleConfig.modResults.contents };
+});
+
 jest.mock('@expo/config-plugins', () => ({
+  withAppBuildGradle: mockWithAppBuildGradle,
   withGradleProperties: mockWithGradleProperties,
 }));
 
@@ -33,5 +51,11 @@ describe('Android release optimization config', () => {
       .toBe('-Xmx3072m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8');
     expect(properties['android.enableMinifyInReleaseBuilds']).toBe('true');
     expect(properties['android.enableShrinkResourcesInReleaseBuilds']).toBe('true');
+    expect(result.appBuildGradle).toContain(
+      'node_modules/expo-notifications/android/proguard-rules.pro',
+    );
+    expect(result.appBuildGradle).toContain(
+      '// LaoJi expo-notifications serialization keep rules',
+    );
   });
 });

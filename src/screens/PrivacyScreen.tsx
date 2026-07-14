@@ -195,12 +195,12 @@ export function PrivacyScreen({ navigation }: Props) {
           <Row key="account-security" border icon="key-outline" label="账号与安全"
             desc={mode === 'authenticated' ? '密码、通知、退出与账号删除' : '通知、访客模式与本机数据'} right={arrow}
             onPress={() => navigation.navigate('Account')} />,
-          <Row key="1" border icon="folder-open-outline" label="数据权限管理" desc="账号数据按用户隔离，访客数据仅保存在本机" right={arrow}
-            onPress={() => showDialog({ title: '数据权限管理', message: '登录账号的日程、会议列表与资料会按用户隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号也会缓存已读取的会议内容，断网时可继续查看缓存。', tone: 'info' })} />,
-          <Row key="2" border icon="mic-outline" label="录音隐私设置" desc="语音会发送到老记语音服务进行转写" right={arrow}
-            onPress={() => showDialog({ title: '录音隐私设置', message: '日程语音和会议录音会发送到老记服务器上的语音识别服务。会议录音结束后会先保存在本机；登录账号会尝试上传，访客录音不上传。', tone: 'info' })} />,
-          <Row key="3" border icon="share-social-outline" label="文件分享权限" desc="使用系统分享面板确认接收方" right={arrow}
-            onPress={() => showDialog({ title: '文件分享权限', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })} />,
+          <Row key="1" border icon="folder-open-outline" label="数据存储说明" desc="账号数据按用户隔离，访客数据仅保存在本机" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
+            onPress={() => showDialog({ title: '数据存储说明', message: '登录账号的日程、会议列表与资料会按用户隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号也会缓存已读取的会议内容，断网时可继续查看缓存。', tone: 'info' })} />,
+          <Row key="2" border icon="mic-outline" label="录音数据说明" desc="语音会发送到老记语音服务进行转写" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
+            onPress={() => showDialog({ title: '录音数据说明', message: '日程语音和会议录音会发送到老记服务器上的语音识别服务。会议录音结束后会先保存在本机；登录账号会尝试上传，访客录音不上传。', tone: 'info' })} />,
+          <Row key="3" border icon="share-social-outline" label="文件分享说明" desc="使用系统分享面板确认接收方" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
+            onPress={() => showDialog({ title: '文件分享说明', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })} />,
           <Row key="4" border icon="finger-print-outline" label="系统验证" desc="使用系统指纹、面容或设备密码验证"
             right={<Toggle label="系统验证" on={faceId} onToggle={handleFaceIdToggle} />} />,
           <Row key="5" border icon="lock-closed-outline" label="启动时验证" desc="打开老记时先验证身份"

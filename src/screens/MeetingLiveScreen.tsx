@@ -161,6 +161,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         audioDurationSec,
         audioBars,
         stopAudio: session.stop,
+        getTranscriptLines: () => transcriptRef.current,
       }, {
         saveTranscript: saveCachedTranscript,
         uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
@@ -236,29 +237,28 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, []);
 
   const appendTranscript = (line: Omit<TranscriptLine, 'id'>) => {
-    setTranscript(prev => {
-      const id = `${activeMeetingIdRef.current || meetingId}-${line.start_time ?? prev.length}-${line.text}`;
-      if (prev.some(item => item.id === id || (item.text === line.text && item.start_time === line.start_time))) return prev;
-      const next = [...prev, { id, ...line }];
-      transcriptRef.current = next;
-      if (activeMeetingIdRef.current) {
-        const previousCheckpoint = transcriptCheckpointRef.current;
-        const now = Date.now();
-        if (!shouldCheckpointTranscript(
-          next.length,
-          previousCheckpoint.lineCount,
-          now - previousCheckpoint.savedAtMs,
-        )) return next;
-        transcriptCheckpointRef.current = { lineCount: next.length, savedAtMs: now };
-        void saveCachedTranscript(activeMeetingIdRef.current, next).catch(() => {
-          if (transcriptCheckpointRef.current.lineCount === next.length) {
-            transcriptCheckpointRef.current = previousCheckpoint;
-          }
-          if (mountedRef.current) setError('转写正在显示，但暂时无法保存到本机；结束会议时会再次尝试');
-        });
-      }
-      return next;
-    });
+    const current = transcriptRef.current;
+    const id = `${activeMeetingIdRef.current || meetingId}-${line.start_time ?? current.length}-${line.text}`;
+    if (current.some(item => item.id === id || (item.text === line.text && item.start_time === line.start_time))) return;
+    const next = [...current, { id, ...line }];
+    transcriptRef.current = next;
+    setTranscript(next);
+    if (activeMeetingIdRef.current) {
+      const previousCheckpoint = transcriptCheckpointRef.current;
+      const now = Date.now();
+      if (!shouldCheckpointTranscript(
+        next.length,
+        previousCheckpoint.lineCount,
+        now - previousCheckpoint.savedAtMs,
+      )) return;
+      transcriptCheckpointRef.current = { lineCount: next.length, savedAtMs: now };
+      void saveCachedTranscript(activeMeetingIdRef.current, next).catch(() => {
+        if (transcriptCheckpointRef.current.lineCount === next.length) {
+          transcriptCheckpointRef.current = previousCheckpoint;
+        }
+        if (mountedRef.current) setError('转写正在显示，但暂时无法保存到本机；结束会议时会再次尝试');
+      });
+    }
   };
 
   const startRecording = async () => {

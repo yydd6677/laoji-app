@@ -103,6 +103,8 @@ async function runProbe({
   baseUrl,
   route,
   files,
+  meetingId,
+  accessToken,
   gapMs = 1400,
   leadingSilenceMs = 300,
   trailingSilenceMs = 2000,
@@ -119,6 +121,9 @@ async function runProbe({
   files.forEach(file => {
     if (!fs.existsSync(file)) throw new Error(`missing audio file: ${file}`);
   });
+  if (Boolean(meetingId) !== Boolean(accessToken)) {
+    throw new Error('meetingId and accessToken must be provided together');
+  }
 
   const pcmFiles = files.map(file => decodePcm(file));
   const frameBytes = 3200;
@@ -127,13 +132,18 @@ async function runProbe({
     pcmFiles.reduce((total, pcm) => total + pcm.length, 0) / (16000 * 2) * 1000,
   );
   const startedAt = performance.now();
-  const createdResponse = await fetchDetailed('guest session creation', `${normalizedBaseUrl}/api/laoji/meetings/guest-sessions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
-  });
-  if (!createdResponse.ok) throw new Error(`session creation failed: ${createdResponse.status}`);
-  const session = await createdResponse.json();
+  let session;
+  if (meetingId && accessToken) {
+    session = { meeting_id: meetingId, access_token: accessToken, transient: false };
+  } else {
+    const createdResponse = await fetchDetailed('guest session creation', `${normalizedBaseUrl}/api/laoji/meetings/guest-sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    if (!createdResponse.ok) throw new Error(`session creation failed: ${createdResponse.status}`);
+    session = await createdResponse.json();
+  }
   const sessionCreatedAt = performance.now();
   const wsBase = normalizedBaseUrl.replace(/^http/, 'ws');
   const routePath = route === 'schedule'
@@ -156,9 +166,10 @@ async function runProbe({
 
   try {
     await new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${wsBase}${routePath}`, {
-        headers: { 'X-Guest-Session-Token': session.guest_token },
-      });
+      const wsHeaders = session.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : { 'X-Guest-Session-Token': session.guest_token };
+      const ws = new WebSocket(`${wsBase}${routePath}`, { headers: wsHeaders });
       let settled = false;
       let senderStarted = false;
       const finish = (error) => {
@@ -196,6 +207,10 @@ async function runProbe({
             start_time: message.start_time,
             end_time: message.end_time,
             purpose: message.purpose,
+            speaker_id: message.speaker_id,
+            speaker_name: message.speaker_name,
+            speaker_confidence: message.speaker_confidence,
+            identified: message.identified,
             received_ms: receivedMs,
           });
         }
@@ -244,12 +259,17 @@ async function runProbe({
       });
     });
   } finally {
-    cleanupStatus = await revokeGuestSession(normalizedBaseUrl, session);
+    cleanupStatus = session.transient === false
+      ? 'not_applicable'
+      : await revokeGuestSession(normalizedBaseUrl, session);
   }
 
   timing.total_ms = Math.round(performance.now() - startedAt);
+  const firstTranscript = transcripts[0];
+  const firstSegmentEndMs = Number(firstTranscript?.end_time) * 1000;
   return {
     route,
+    session_mode: session.transient === false ? 'authenticated' : 'guest',
     files,
     gap_ms: gapMs,
     leading_silence_ms: leadingSilenceMs,
@@ -266,6 +286,12 @@ async function runProbe({
         timing.first_completed_ms === null || timing.speech_ended_ms === null
           ? null
           : timing.first_completed_ms - timing.speech_ended_ms,
+      first_completed_after_segment_end_ms:
+        timing.first_completed_ms === null
+        || timing.audio_started_ms === null
+        || !Number.isFinite(firstSegmentEndMs)
+          ? null
+          : Math.round(timing.first_completed_ms - timing.audio_started_ms - firstSegmentEndMs),
       ready_after_stop_signal_ms:
         timing.ready_to_stop_ms === null || timing.stop_signal_ms === null
           ? null
@@ -279,9 +305,11 @@ async function main() {
   const baseUrl = argument('base-url', 'http://127.0.0.1:18020').replace(/\/$/, '');
   const route = argument('route', 'schedule');
   const files = argumentsFor('file').map(value => path.resolve(value));
+  const meetingId = argument('meeting-id', '');
+  const accessToken = process.env.LAOJI_ACCESS_TOKEN || '';
   const gapMs = Number(argument('gap-ms', '1400'));
   const output = argument('output', '');
-  const report = await runProbe({ baseUrl, route, files, gapMs });
+  const report = await runProbe({ baseUrl, route, files, meetingId, accessToken, gapMs });
   if (output) fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report));
 }

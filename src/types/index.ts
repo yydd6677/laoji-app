@@ -46,6 +46,8 @@ export interface Meeting {
   createdAt?: string;
   updatedAt?: string;
   audioAvailable?: boolean;
+  audioSyncPending?: boolean;
+  audioSyncBlocked?: boolean;
   audioLocalUri?: string | null;
   audioDurationSec?: number;
   audioBars?: number[];
@@ -76,6 +78,23 @@ export interface MeetingSummary {
   generated_at?: string | null;
 }
 
+export interface EventDraftParams {
+  title: string;
+  startDate: string;
+  endDate?: string;
+  startTime?: string;
+  endTime?: string;
+  isAllDay: boolean;
+  repeat?: CalEvent['repeat'];
+  description?: string;
+  rawText?: string;
+  location?: string;
+  category?: EventCategory;
+  detail?: string;
+  status?: string;
+  reminderMinutes?: number | null;
+}
+
 export type RootStackParamList = {
   Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
@@ -90,7 +109,7 @@ export type RootStackParamList = {
   Account: { section?: 'deletion' } | undefined;
   Privacy: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
-  AddEvent: { date?: string; eventId?: string };
+  AddEvent: { date?: string; eventId?: string; draft?: EventDraftParams };
 };
 
 export type MainTabsParamList = {

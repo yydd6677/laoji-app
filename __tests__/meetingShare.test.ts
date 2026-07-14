@@ -94,6 +94,22 @@ describe('meeting share content', () => {
     );
   });
 
+  it('rejects an empty meeting instead of sharing an info-only complete package', async () => {
+    await expect(shareMeetingArtifact('bundle', {
+      meeting,
+      transcriptLines: [],
+      summaryText: '',
+      isGuest: true,
+    })).rejects.toMatchObject({ code: 'NO_MEETING_CONTENT' });
+
+    expect(zip).not.toHaveBeenCalled();
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      expect.stringContaining('meeting-shares/'),
+      { idempotent: true },
+    );
+  });
+
   it('downloads authenticated cloud audio before sharing it', async () => {
     (FileSystem.downloadAsync as jest.Mock).mockResolvedValue({ status: 200 });
 

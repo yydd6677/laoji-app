@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
-  Modal, View, Text, TextInput, TouchableOpacity,
+  Animated, Modal, View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { Colors as C } from '../theme/colors';
 import {
   ApiGuestRealtimeSession,
@@ -33,8 +34,12 @@ import {
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
+import { checkConflict } from '../utils/eventUtils';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { diagnosticWarn } from '../services/diagnostics';
+import { isValidScheduleDate } from '../services/localScheduleParser';
+import { reminderUnavailableMessage } from '../services/notifications';
+import { CalEvent, EventDraftParams, RootStackParamList } from '../types';
 
 interface Props {
   visible: boolean;
@@ -62,8 +67,9 @@ async function discardScheduleRecording(uri: string | undefined): Promise<void> 
 }
 
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
-  const { addEvent, refreshEvents } = useEvents();
+  const { events, addEvent } = useEvents();
   const { showDialog } = useAppDialog();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [step, setStep]         = useState<Step>('input');
   const [text, setText]         = useState('');
   const [draft, setDraft]       = useState<ParseResult | null>(null);
@@ -81,6 +87,28 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const transcriptSegmentsRef   = useRef<ScheduleTranscriptSegment[]>([]);
   const audioLevelRef           = useRef<AudioLevelSummary>({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const [recordingMode, setRecordingMode] = useState<RecordingMode | null>(null);
+  const backdropOpacity         = useRef(new Animated.Value(0)).current;
+  const sheetTranslateY         = useRef(new Animated.Value(48)).current;
+
+  useEffect(() => {
+    if (!visible) {
+      backdropOpacity.setValue(0);
+      sheetTranslateY.setValue(48);
+      return;
+    }
+    backdropOpacity.setValue(0);
+    sheetTranslateY.setValue(48);
+    Animated.timing(backdropOpacity, {
+      toValue: 1,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
+    Animated.timing(sheetTranslateY, {
+      toValue: 0,
+      duration: 240,
+      useNativeDriver: true,
+    }).start();
+  }, [backdropOpacity, sheetTranslateY, visible]);
 
   const reset = () => {
     recordingRunRef.current += 1;
@@ -425,43 +453,74 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   // ── Save ───────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!draft) return;
-    if (draft.needs_clarification && draft.clarification_question) {
-      setError('请先补充信息，再保存日程');
-      return;
+  const eventPayloadFromDraft = (source: ParseResult): Omit<CalEvent, 'id'> => {
+    const category = normalizeEventCategory(source.category);
+    return {
+      title:       source.title.trim(),
+      startDate:   source.start_date,
+      endDate:     source.end_date ?? undefined,
+      startTime:   source.start_time ?? undefined,
+      endTime:     source.end_time ?? undefined,
+      isAllDay:    source.is_all_day,
+      repeat:      source.event_type !== 'once' ? source.event_type : undefined,
+      description: source.description ?? undefined,
+      rawText:     source.raw_text ?? text,
+      location:    source.location ?? undefined,
+      category,
+      detail:      source.detail ?? undefined,
+      status:      source.status ?? undefined,
+      spanning:    source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
+      reminderMinutes: source.reminder_minutes ?? null,
+      color:       colorForEvent({ category }),
+    };
+  };
+
+  const routeDraftFromParseResult = (source: ParseResult): EventDraftParams => {
+    const payload = eventPayloadFromDraft(source);
+    return {
+      title: payload.title,
+      startDate: payload.startDate,
+      endDate: payload.endDate,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      isAllDay: payload.isAllDay ?? false,
+      repeat: payload.repeat,
+      description: payload.description,
+      rawText: payload.rawText,
+      location: payload.location,
+      category: payload.category,
+      detail: payload.detail,
+      status: payload.status,
+      reminderMinutes: payload.reminderMinutes,
+    };
+  };
+
+  const validateDraftForSave = (source: ParseResult): boolean => {
+    if (!source.title.trim()) {
+      setError('日程标题不能为空');
+      return false;
     }
+    if (!isValidScheduleDate(source.start_date)) {
+      setError('请先补充有效日期，再保存日程');
+      return false;
+    }
+    if (source.end_date && (!isValidScheduleDate(source.end_date) || source.end_date < source.start_date)) {
+      setError('结束日期不能早于开始日期');
+      return false;
+    }
+    return true;
+  };
+
+  const saveDraft = async (eventPayload: Omit<CalEvent, 'id'>) => {
     setStep('saving');
     try {
-      const category = normalizeEventCategory(draft.category);
-      const eventPayload = {
-        title:       draft.title,
-        startDate:   draft.start_date,
-        endDate:     draft.end_date ?? undefined,
-        startTime:   draft.start_time ?? undefined,
-        endTime:     draft.end_time ?? undefined,
-        isAllDay:    draft.is_all_day,
-        repeat:      draft.event_type !== 'once' ? draft.event_type : undefined,
-        description: draft.description ?? undefined,
-        rawText:     draft.raw_text ?? text,
-        location:    draft.location ?? undefined,
-        category,
-        detail:      draft.detail ?? undefined,
-        status:      draft.status ?? undefined,
-        spanning:    draft.spanning ?? Boolean(draft.end_date && draft.end_date !== draft.start_date),
-        reminderMinutes: draft.reminder_minutes ?? null,
-        color:       colorForEvent({ category }),
-      };
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', eventPayload);
       const { reminderDelivery } = await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
-      // Refresh calendar for the month of the saved event
-      const [y, m] = draft.start_date.split('-').map(Number);
-      await refreshEvents(y, m);
       onSaved(); close();
       if (reminderDelivery === 'unavailable') {
         showDialog({
           title: '日程已保存',
-          message: '本机未创建系统提醒，请在设置中检查通知权限。',
+          message: await reminderUnavailableMessage(),
           tone: 'warning',
         });
       } else if (reminderDelivery === 'unconfirmed') {
@@ -474,6 +533,43 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     } catch {
       setError('保存失败，请重试'); setStep('confirm');
     }
+  };
+
+  const handleSave = () => {
+    if (!draft || !validateDraftForSave(draft)) return;
+    const eventPayload = eventPayloadFromDraft(draft);
+    if (!eventPayload.isAllDay && eventPayload.startTime && eventPayload.endTime) {
+      const { hasConflict, conflicts } = checkConflict(
+        events,
+        eventPayload.startDate,
+        eventPayload.startTime,
+        eventPayload.endTime,
+        undefined,
+        eventPayload.endDate,
+      );
+      if (hasConflict) {
+        const names = conflicts.map(event => `• ${event.title} (${event.startTime}–${event.endTime})`).join('\n');
+        showDialog({
+          title: '时间冲突',
+          message: `该时间段与以下日程冲突：\n${names}`,
+          hint: '如果确认这些安排可以重叠，仍然可以继续保存。',
+          tone: 'warning',
+          actions: [
+            { text: '仍然保存', role: 'primary', onPress: () => saveDraft(eventPayload) },
+            { text: '取消', role: 'cancel' },
+          ],
+        });
+        return;
+      }
+    }
+    void saveDraft(eventPayload);
+  };
+
+  const openDetailedEdit = () => {
+    if (!draft || !validateDraftForSave(draft)) return;
+    const params = { date: draft.start_date, draft: routeDraftFromParseResult(draft) };
+    close();
+    navigation.navigate('AddEvent', params);
   };
 
   const fmtDate = (d: string) => d.replace(/-/g, '/');
@@ -491,10 +587,26 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={close}
+    >
+      <View style={s.modalRoot}>
+        <Animated.View
+          pointerEvents="none"
+          style={[s.backdrop, { opacity: backdropOpacity }]}
+          testID="schedule-voice-backdrop"
+        />
       <KeyboardAvoidingView
         style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <Animated.View
+          style={[s.sheetMotion, { transform: [{ translateY: sheetTranslateY }] }]}
+          testID="schedule-voice-sheet-motion"
+        >
         <SafeAreaView
           style={[s.sheet, step === 'confirm' && s.confirmSheet]}
           edges={['bottom']}
@@ -597,7 +709,20 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           {/* ── Confirm step ── */}
           {step === 'confirm' && draft && (
             <View style={s.confirmStep}>
-              <Text style={s.title}>确认日程</Text>
+              <View style={s.confirmHeader}>
+                <Text style={s.title}>确认日程</Text>
+                <TouchableOpacity
+                  style={s.editDraftBtn}
+                  onPress={openDetailedEdit}
+                  activeOpacity={0.72}
+                  accessibilityRole="button"
+                  accessibilityLabel="编辑日程详情"
+                  testID="schedule-voice-edit-details"
+                >
+                  <Ionicons name="create-outline" size={16} color={C.purple} />
+                  <Text style={s.editDraftText}>编辑</Text>
+                </TouchableOpacity>
+              </View>
 
               <ScrollView
                 style={s.confirmScroll}
@@ -617,7 +742,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                         style={s.clarifyInput}
                         value={clarifyAnswer}
                         onChangeText={setClarifyAnswer}
-                        placeholder="补充答案"
+                        placeholder="补充答案（选填）"
                         placeholderTextColor={C.faint}
                         returnKeyType="done"
                         onSubmitEditing={handleClarify}
@@ -715,16 +840,24 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
             <Ionicons name="close" size={20} color={C.sub} />
           </TouchableOpacity>
         </SafeAreaView>
+        </Animated.View>
       </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
 
 const s = StyleSheet.create({
-  overlay:      { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
+  modalRoot:    { flex: 1 },
+  backdrop:     { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+  overlay:      { flex: 1, justifyContent: 'flex-end' },
+  sheetMotion:  { width: '100%' },
   sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36, minHeight: 320 },
   confirmSheet: { minHeight: 0, maxHeight: '92%' },
   confirmStep:  { flexShrink: 1, minHeight: 0 },
+  confirmHeader:{ minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  editDraftBtn: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6 },
+  editDraftText:{ fontSize: 13, lineHeight: 18, color: C.purple, fontWeight: '700' },
   confirmScroll:{ flexGrow: 0, flexShrink: 1, minHeight: 0 },
   confirmScrollContent: { paddingTop: 8 },
   handle:       { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 16 },

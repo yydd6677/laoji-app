@@ -319,6 +319,7 @@ export function ScheduleScreen({ navigation }: Props) {
             year={year} month={month} selDay={selectedDay}
             onDay={setSelDay} onPrev={prev} onNext={next}
             onTitle={() => navigation.navigate('Calendar')}
+            onEvent={event => navigation.navigate('EventDetail', { eventId: event.id })}
             events={events}
           />
           <View style={{ height: 16 }} />

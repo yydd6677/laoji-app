@@ -54,6 +54,32 @@ class CompactMeetingSummaryExperimentTest(unittest.TestCase):
             ["CORE", "LONG"],
         )
 
+    def test_summarize_metric_ignores_missing_and_converts_nanoseconds(self):
+        rows = [
+            {"metrics": {"eval_duration": 1_000_000}},
+            {"metrics": {"eval_duration": 3_000_000}},
+            {"metrics": {}},
+            {"metrics": {"eval_duration": True}},
+        ]
+
+        self.assertEqual(
+            MODULE.summarize_metric(rows, "eval_duration", divisor=1_000_000),
+            {
+                "samples": 2,
+                "total": 4.0,
+                "mean": 2.0,
+                "median": 2.0,
+                "p95": 2.9,
+                "max": 3.0,
+            },
+        )
+
+    def test_summarize_metric_returns_zero_shape_without_samples(self):
+        self.assertEqual(
+            MODULE.summarize_metric([{"metrics": {}}], "eval_count"),
+            {"samples": 0, "total": 0, "mean": 0, "median": 0, "p95": 0, "max": 0},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

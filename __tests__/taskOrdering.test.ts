@@ -10,14 +10,14 @@ const base: CalEvent = {
 };
 
 describe('selectTasksForDate', () => {
-  it('keeps timed events on the selected date and excludes single-day all-day items', () => {
+  it('keeps timed and all-day events on the selected date', () => {
     const result = selectTasksForDate([
       base,
       { ...base, id: 'no-time', title: '全天事项', startTime: undefined, isAllDay: true },
       { ...base, id: 'other-date', title: '其他日期', startDate: '2026-07-09', startTime: '09:00' },
     ], '2026-07-08');
 
-    expect(result.map(event => event.id)).toEqual(['base']);
+    expect(result.map(event => event.id)).toEqual(['base', 'no-time']);
   });
 
   it('includes spanning events that cover the selected date', () => {

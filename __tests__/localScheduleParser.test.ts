@@ -1,4 +1,8 @@
-import { parseLocalScheduleText, shouldUseLocalScheduleParseFirst } from '../src/services/localScheduleParser';
+import {
+  normalizeScheduleParseResult,
+  parseLocalScheduleText,
+  shouldUseLocalScheduleParseFirst,
+} from '../src/services/localScheduleParser';
 
 const BASE_DATE = new Date(2026, 6, 9, 9, 0, 0);
 
@@ -15,6 +19,223 @@ describe('local schedule parser', () => {
       category: '工作',
       parse_source: 'rules',
       confidence: 0,
+      needs_clarification: false,
+    });
+  });
+
+  it('accepts a concrete date without requiring a clock time', () => {
+    const parsed = parseLocalScheduleText('明天开会', BASE_DATE);
+
+    expect(parsed).toMatchObject({
+      title: '开会',
+      start_date: '2026-07-10',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      reminder_minutes: null,
+      needs_clarification: false,
+      clarification_question: null,
+    });
+    expect(shouldUseLocalScheduleParseFirst('明天开会', parsed)).toBe(true);
+  });
+
+  it('parses consecutive relative-day phrases as complete spanning schedules', () => {
+    const cases = [
+      ['今明两天上班', '2026-07-09', '2026-07-10'],
+      ['明后两天上班', '2026-07-10', '2026-07-11'],
+      ['今明后三天值班', '2026-07-09', '2026-07-11'],
+      ['今天和明天上班', '2026-07-09', '2026-07-10'],
+      ['明天与后天上班', '2026-07-10', '2026-07-11'],
+    ] as const;
+
+    cases.forEach(([text, startDate, endDate]) => {
+      const parsed = parseLocalScheduleText(text, BASE_DATE);
+      expect(parsed).toMatchObject({
+        start_date: startDate,
+        end_date: endDate,
+        spanning: true,
+        is_all_day: true,
+        needs_clarification: false,
+        clarification_question: null,
+      });
+      expect(shouldUseLocalScheduleParseFirst(text, parsed)).toBe(true);
+    });
+
+    expect(parseLocalScheduleText('今明两天上班', BASE_DATE)).toMatchObject({
+      title: '上班',
+      category: '工作',
+    });
+  });
+
+  it('clears a stale server date question for a recognized relative-day range', () => {
+    expect(normalizeScheduleParseResult('今明两天上班', {
+      title: '上班',
+      event_type: 'once',
+      start_date: '2026-07-09',
+      end_date: '2026-07-10',
+      spanning: true,
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      description: null,
+      category: '工作',
+      raw_text: '今明两天上班',
+      parse_source: 'local_llm',
+      confidence: 0.72,
+      needs_clarification: true,
+      clarification_question: '没有听到具体日期，需要补充日期。',
+    }, BASE_DATE)).toMatchObject({
+      start_date: '2026-07-09',
+      end_date: '2026-07-10',
+      needs_clarification: false,
+      clarification_question: null,
+    });
+  });
+
+  it('removes a leading fuzzy period from an all-day title without damaging semantic compounds', () => {
+    expect(parseLocalScheduleText('明天下午开会', BASE_DATE)).toMatchObject({
+      title: '开会',
+      start_time: null,
+      is_all_day: true,
+      needs_clarification: false,
+    });
+    expect(parseLocalScheduleText('明天下午茶聚会', BASE_DATE)).toMatchObject({
+      title: '下午茶聚会',
+      start_time: null,
+      is_all_day: true,
+    });
+  });
+
+  it('still requires a date when only a clock time or an invented candidate is present', () => {
+    expect(parseLocalScheduleText('下午三点开会', BASE_DATE)).toMatchObject({
+      needs_clarification: true,
+      clarification_question: '没有听到具体日期，需要补充日期。',
+    });
+    expect(normalizeScheduleParseResult('开会', {
+      title: '开会',
+      event_type: 'once',
+      start_date: '2026-07-10',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      description: null,
+      raw_text: '开会',
+      parse_source: 'local_llm',
+      confidence: 0.8,
+      needs_clarification: false,
+      clarification_question: null,
+    }, BASE_DATE)).toMatchObject({
+      needs_clarification: true,
+      clarification_question: '没有听到具体日期，需要补充日期。',
+    });
+  });
+
+  it('uses a local date clarification for simple undated schedule actions', () => {
+    const action = parseLocalScheduleText('开会', BASE_DATE);
+    const task = parseLocalScheduleText('提交材料', BASE_DATE);
+    const errands = ['取快递', '缴水电费', '预约牙医', '整理房间'];
+
+    expect(action).toMatchObject({
+      title: '开会',
+      start_date: '2026-07-09',
+      start_time: null,
+      is_all_day: true,
+      parse_source: 'rules',
+      needs_clarification: true,
+      clarification_question: '没有听到具体日期，需要补充日期。',
+    });
+    expect(task).toMatchObject({
+      title: '提交材料',
+      needs_clarification: true,
+    });
+    expect(shouldUseLocalScheduleParseFirst('开会', action)).toBe(true);
+    expect(shouldUseLocalScheduleParseFirst('提交材料', task)).toBe(true);
+    errands.forEach(text => {
+      const parsed = parseLocalScheduleText(text, BASE_DATE);
+      expect(parsed).toMatchObject({ needs_clarification: true });
+      expect(shouldUseLocalScheduleParseFirst(text, parsed)).toBe(true);
+    });
+  });
+
+  it('keeps ambiguous undated text on the server path', () => {
+    const uncertain = parseLocalScheduleText('开会地点可能在东门', BASE_DATE);
+    const correction = parseLocalScheduleText('不是开会，改成提交材料', BASE_DATE);
+
+    expect(uncertain).not.toBeNull();
+    expect(correction).not.toBeNull();
+    expect(shouldUseLocalScheduleParseFirst('开会地点可能在东门', uncertain)).toBe(false);
+    expect(shouldUseLocalScheduleParseFirst('不是开会，改成提交材料', correction)).toBe(false);
+    expect(parseLocalScheduleText('只是随便说句话', BASE_DATE)).toBeNull();
+    expect(parseLocalScheduleText('我们交流一下', BASE_DATE)).toBeNull();
+    expect(parseLocalScheduleText('我买了一个东西', BASE_DATE)).toBeNull();
+    expect(parseLocalScheduleText('文件已经完成了', BASE_DATE)).toBeNull();
+  });
+
+  it('clears stale time-only clarification for a dated all-day event', () => {
+    expect(normalizeScheduleParseResult('明天开会', {
+      title: '开会',
+      event_type: 'once',
+      start_date: '2026-07-10',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      description: null,
+      raw_text: '明天开会',
+      parse_source: 'local_llm',
+      confidence: 0.8,
+      needs_clarification: true,
+      clarification_question: '没有听到具体时间，是否作为全天事项保存？',
+    }, BASE_DATE)).toMatchObject({
+      is_all_day: true,
+      reminder_minutes: null,
+      needs_clarification: false,
+      clarification_question: null,
+    });
+  });
+
+  it('requires a real calendar date even when the server shape claims success', () => {
+    const malformed = normalizeScheduleParseResult('明天开会', {
+      title: '开会',
+      event_type: 'once',
+      start_date: '2026-02-30',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      description: null,
+      raw_text: '明天开会',
+      parse_source: 'local_llm',
+      confidence: 0.9,
+      needs_clarification: false,
+      clarification_question: null,
+    }, BASE_DATE);
+
+    expect(malformed).toMatchObject({
+      start_date: '2026-07-09',
+      needs_clarification: true,
+      clarification_question: '未能确定有效日期，需要补充日期。',
+    });
+  });
+
+  it('treats relative minute and hour offsets as complete local datetimes', () => {
+    const nearMidnight = new Date(2026, 6, 13, 23, 50, 48);
+    const minutes = parseLocalScheduleText('十五分钟后提醒我提交材料', nearMidnight);
+    const halfHour = parseLocalScheduleText('半个小时以后出门', BASE_DATE);
+
+    expect(minutes).toMatchObject({
+      title: '提交材料',
+      start_date: '2026-07-14',
+      start_time: '00:05',
+      end_time: '01:05',
+      reminder_minutes: 0,
+      needs_clarification: false,
+      clarification_question: null,
+      parse_source: 'rules',
+    });
+    expect(shouldUseLocalScheduleParseFirst('十五分钟后提醒我提交材料', minutes)).toBe(true);
+    expect(halfHour).toMatchObject({
+      title: '出门',
+      start_date: '2026-07-09',
+      start_time: '09:30',
       needs_clarification: false,
     });
   });
@@ -48,6 +269,26 @@ describe('local schedule parser', () => {
       end_date: '2026-07-31',
       spanning: true,
       category: '工作',
+    });
+  });
+
+  it('parses explicit month-end dates without leaking date fragments into titles', () => {
+    expect(parseLocalScheduleText('7月先这样底安排盘点', BASE_DATE)).toMatchObject({
+      title: '盘点',
+      start_date: '2026-07-31',
+      start_time: null,
+      needs_clarification: false,
+    });
+    expect(parseLocalScheduleText('8月差不多末盘点库存', BASE_DATE)).toMatchObject({
+      title: '盘点库存',
+      start_date: '2026-08-31',
+    });
+    expect(parseLocalScheduleText('7月18日到8月底整理数据', BASE_DATE)).toMatchObject({
+      start_date: '2026-07-18',
+      end_date: '2026-08-31',
+    });
+    expect(parseLocalScheduleText('6月末盘点库存', BASE_DATE)).toMatchObject({
+      start_date: '2027-06-30',
     });
   });
 

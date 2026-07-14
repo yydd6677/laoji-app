@@ -13,6 +13,7 @@ import { AppLockGate } from './src/components/AppLockGate';
 import { assertProductionApiConfig } from './src/services/config';
 import { EventUndoBanner } from './src/components/EventUndoBanner';
 import { cleanupStaleMeetingShareCache } from './src/services/meetingShare';
+import { NotificationPermissionPrimer } from './src/components/NotificationPermissionPrimer';
 
 assertProductionApiConfig();
 
@@ -27,6 +28,7 @@ export default function App() {
         <EventsProvider>
           <MeetingsProvider>
             <AppDialogProvider>
+              <NotificationPermissionPrimer />
               <AppLockGate>
                 <View style={{ flex: 1 }}>
                   <NavigationContainer>

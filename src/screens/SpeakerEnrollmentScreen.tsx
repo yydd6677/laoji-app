@@ -293,6 +293,39 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     );
   }
 
+  if (speakerId && !speaker) {
+    return (
+      <ScreenContainer edges={['top']}>
+        <BackHeader title="管理讲话人" onBack={() => navigation.goBack()} />
+        <View style={s.centerState}>
+          {loading ? (
+            <>
+              <ActivityIndicator color={C.purple} />
+              <Text style={s.stateHint}>正在加载讲话人</Text>
+            </>
+          ) : (
+            <>
+              <View style={s.loadErrorIcon}>
+                <Ionicons name="cloud-offline-outline" size={26} color={C.red} />
+              </View>
+              <Text style={s.stateTitle}>讲话人未能加载</Text>
+              <Text style={s.stateHint}>{error || '请检查网络后重试。'}</Text>
+              <TouchableOpacity
+                style={s.retryButton}
+                onPress={() => { void loadSpeaker(); }}
+                accessibilityRole="button"
+                accessibilityLabel="重试加载讲话人详情"
+              >
+                <Ionicons name="refresh" size={17} color="#fff" />
+                <Text style={s.retryButtonText}>重试</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </ScreenContainer>
+    );
+  }
+
   return (
     <ScreenContainer edges={['top']}>
       <BackHeader
@@ -305,8 +338,6 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
         ) : null}
       />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {loading ? <ActivityIndicator color={C.purple} style={s.loader} /> : null}
-
         <View style={s.section}>
           <Text style={s.label}>讲话人名称</Text>
           <View style={s.nameRow}>
@@ -403,6 +434,10 @@ const s = StyleSheet.create({
   submitButton: { height: 48, borderRadius: 24, backgroundColor: C.purple, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   submitText: { fontSize: 14, color: '#fff', fontWeight: '800' },
   buttonDisabled: { opacity: 0.42 },
-  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 10 },
   stateTitle: { fontSize: 16, color: C.text, fontWeight: '800' },
+  stateHint: { maxWidth: 300, fontSize: 12, lineHeight: 19, color: C.sub, textAlign: 'center' },
+  loadErrorIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF0F0', marginBottom: 2 },
+  retryButton: { minWidth: 112, height: 42, borderRadius: 21, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 6 },
+  retryButtonText: { fontSize: 13, color: '#fff', fontWeight: '800' },
 });

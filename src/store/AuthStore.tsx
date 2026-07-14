@@ -353,14 +353,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const scope = profileScope(mode, session);
     const operationGeneration = authGenerationRef.current;
     const operationToken = session?.accessToken ?? null;
-    await saveProfile(nextProfile, scope);
-    if (isCurrentAuthOperation(operationGeneration, operationToken)) setProfile(nextProfile);
     if (mode === 'authenticated' && session?.accessToken) {
       const remote = await updateRemoteProfile(session.accessToken, profileToRemote(nextProfile));
       const merged = mergeRemoteProfile(nextProfile, remote);
       await saveProfile(merged, scope);
       if (isCurrentAuthOperation(operationGeneration, operationToken)) setProfile(merged);
+      return;
     }
+    await saveProfile(nextProfile, scope);
+    if (isCurrentAuthOperation(operationGeneration, operationToken)) setProfile(nextProfile);
   }, [isCurrentAuthOperation, mode, session]);
 
   const uploadAvatar = useCallback(async (uri: string, fileName?: string, mimeType?: string) => {

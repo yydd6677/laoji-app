@@ -1,6 +1,10 @@
 import { Meeting, TranscriptLine } from '../types';
 import { formatDuration } from '../utils/meetingMedia';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
+import {
+  classifyMeetingAudioUploadFailure,
+  MeetingAudioUploadFailureCode,
+} from './meetingAudioUploadFailure';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v2';
 const LEGACY_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v1';
@@ -19,6 +23,7 @@ export interface FinalizeMeetingRecordingInput {
   audioDurationSec?: number;
   audioBars?: number[];
   stopAudio: () => Promise<string | undefined>;
+  getTranscriptLines?: () => TranscriptLine[];
 }
 
 export interface FinalizeMeetingRecordingDependencies {
@@ -32,6 +37,7 @@ export interface FinalizeMeetingRecordingResult {
   audioUri?: string;
   uploadFailed: boolean;
   retryQueued: boolean;
+  uploadInBackground: boolean;
   statusSyncPending: boolean;
 }
 
@@ -43,6 +49,10 @@ export interface PendingMeetingAudioUpload {
   createdAt: string;
   lastAttemptAt: string;
   attemptCount: number;
+  uploadState: 'pending' | 'blocked';
+  failureCode?: MeetingAudioUploadFailureCode;
+  failureMessage?: string;
+  nextAttemptAt?: string;
 }
 
 type PendingUploadMap = Record<string, PendingMeetingAudioUpload>;
@@ -51,7 +61,19 @@ type PendingAudioUploader = (
   accessToken: string,
 ) => Promise<unknown>;
 
+export interface PendingMeetingAudioUploadBatchResult {
+  found: number;
+  uploadedIds: string[];
+  failedIds: string[];
+  skippedIds: string[];
+}
+
+export interface PendingMeetingAudioRetryOptions {
+  automatic?: boolean;
+}
+
 let pendingStorageMutation: Promise<void> = Promise.resolve();
+const pendingAudioUploadsInFlight = new Map<string, Promise<boolean>>();
 
 export function createMeetingRecordingFinalizer(
   finalize: () => Promise<FinalizeMeetingRecordingResult>,
@@ -76,39 +98,125 @@ export async function getPendingMeetingAudioUpload(
   return (await readPendingUploads(storageScope))[meetingId] ?? null;
 }
 
+export async function listPendingMeetingAudioUploads(
+  storageScope: string,
+): Promise<PendingMeetingAudioUpload[]> {
+  await pendingStorageMutation.catch(() => {});
+  return Object.values(await readPendingUploads(storageScope)).sort((left, right) => (
+    left.createdAt.localeCompare(right.createdAt)
+    || left.meetingId.localeCompare(right.meetingId)
+  ));
+}
+
 export async function retryPendingMeetingAudioUpload(
   storageScope: string,
   meetingId: string,
   accessToken: string,
   uploadAudio: PendingAudioUploader,
+  options: PendingMeetingAudioRetryOptions = {},
 ): Promise<boolean> {
-  const pending = await getPendingMeetingAudioUpload(storageScope, meetingId);
-  if (!pending) return false;
+  const operationKey = `${storageScope}\u001f${meetingId}`;
+  const existing = pendingAudioUploadsInFlight.get(operationKey);
+  if (existing) return existing;
 
-  try {
-    await uploadAudio(pending, accessToken);
-    await clearPendingMeetingAudioUpload(storageScope, meetingId);
-    return true;
-  } catch (error) {
-    await savePendingMeetingAudioUpload(storageScope, pending).catch(() => {});
-    throw error;
-  }
+  const operation = (async () => {
+    const pending = await getPendingMeetingAudioUpload(storageScope, meetingId);
+    if (!pending) return false;
+    if (options.automatic && !canAutomaticallyRetryPendingMeetingAudioUpload(pending)) return false;
+    try {
+      await uploadAudio(pending, accessToken);
+      await clearPendingMeetingAudioUpload(storageScope, meetingId);
+      return true;
+    } catch (error) {
+      await markPendingMeetingAudioUploadFailure(storageScope, pending, error).catch(() => {});
+      throw error;
+    }
+  })();
+  pendingAudioUploadsInFlight.set(operationKey, operation);
+  void operation.then(
+    () => {
+      if (pendingAudioUploadsInFlight.get(operationKey) === operation) {
+        pendingAudioUploadsInFlight.delete(operationKey);
+      }
+    },
+    () => {
+      if (pendingAudioUploadsInFlight.get(operationKey) === operation) {
+        pendingAudioUploadsInFlight.delete(operationKey);
+      }
+    },
+  );
+  return operation;
+}
+
+export async function retryPendingMeetingAudioUploads(
+  storageScope: string,
+  accessToken: string,
+  uploadAudio: PendingAudioUploader,
+  concurrency = 2,
+): Promise<PendingMeetingAudioUploadBatchResult> {
+  const pending = await listPendingMeetingAudioUploads(storageScope);
+  const outcomes: Array<'uploaded' | 'failed' | 'skipped'> = new Array(pending.length);
+  let cursor = 0;
+  const workerCount = Math.min(pending.length, Math.max(1, Math.min(3, Math.floor(concurrency) || 1)));
+
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        const uploaded = await retryPendingMeetingAudioUpload(
+          storageScope,
+          pending[index].meetingId,
+          accessToken,
+          uploadAudio,
+          { automatic: true },
+        );
+        outcomes[index] = uploaded ? 'uploaded' : 'skipped';
+      } catch {
+        outcomes[index] = 'failed';
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return {
+    found: pending.length,
+    uploadedIds: pending.filter((_, index) => outcomes[index] === 'uploaded').map(item => item.meetingId),
+    failedIds: pending.filter((_, index) => outcomes[index] === 'failed').map(item => item.meetingId),
+    skippedIds: pending.filter((_, index) => outcomes[index] === 'skipped').map(item => item.meetingId),
+  };
 }
 
 export async function finalizeMeetingRecording(
   input: FinalizeMeetingRecordingInput,
   dependencies: FinalizeMeetingRecordingDependencies,
 ): Promise<FinalizeMeetingRecordingResult> {
-  const [stoppedAudioUri] = await Promise.all([
-    input.stopAudio(),
-    dependencies.saveTranscript(input.meetingId, input.transcriptLines),
-  ]);
-  const audioUri = normalizeRecordingUri(stoppedAudioUri);
+  const audioResult = await Promise.resolve()
+    .then(input.stopAudio)
+    .then(value => ({ status: 'fulfilled' as const, value }))
+    .catch(reason => ({ status: 'rejected' as const, reason }));
+  const transcriptLines = input.getTranscriptLines?.() ?? input.transcriptLines;
+  const transcriptResult = await Promise.resolve()
+    .then(() => dependencies.saveTranscript(input.meetingId, transcriptLines))
+    .then(value => ({ status: 'fulfilled' as const, value }))
+    .catch(reason => ({ status: 'rejected' as const, reason }));
+  if (audioResult.status === 'rejected') {
+    throw audioResult.reason instanceof Error
+      ? audioResult.reason
+      : new Error('录音文件停止失败，请重试');
+  }
+  const audioUri = normalizeRecordingUri(audioResult.value);
+  if (transcriptResult.status === 'rejected') {
+    const audioState = audioUri ? '录音文件已保留在本机' : '录音已安全停止';
+    throw new Error(`转写暂时无法保存，${audioState}。请检查存储空间后重试`);
+  }
 
   let uploadFailed = false;
   let retryQueued = false;
+  let uploadInBackground = false;
+  let pendingAudio: PendingMeetingAudioUpload | null = null;
   if (!input.isGuest && audioUri) {
-    const pending: PendingMeetingAudioUpload = {
+    pendingAudio = {
       meetingId: input.meetingId,
       audioUri,
       fileName: `${input.meetingId}.wav`,
@@ -116,44 +224,23 @@ export async function finalizeMeetingRecording(
       createdAt: new Date().toISOString(),
       lastAttemptAt: new Date().toISOString(),
       attemptCount: 0,
+      uploadState: 'pending',
     };
     try {
-      await savePendingMeetingAudioUpload(input.storageScope, pending);
+      await savePendingMeetingAudioUpload(input.storageScope, pendingAudio);
       retryQueued = true;
     } catch {
       retryQueued = false;
     }
-    if (!input.accessToken) {
-      uploadFailed = true;
-    } else {
-      try {
-        await dependencies.uploadAudio(input.meetingId, audioUri, input.accessToken);
-        if (retryQueued) {
-          try {
-            await clearPendingMeetingAudioUpload(input.storageScope, input.meetingId);
-            retryQueued = false;
-          } catch {
-            // A stale retry marker is safer than losing track of a failed upload.
-          }
-        }
-      } catch {
-        uploadFailed = true;
-        if (!retryQueued) {
-          try {
-            await savePendingMeetingAudioUpload(input.storageScope, pending);
-            retryQueued = true;
-          } catch {
-            retryQueued = false;
-          }
-        }
-      }
-    }
+    if (!input.accessToken) uploadFailed = true;
   }
 
   const meetingPatch: Partial<Meeting> = {
-    hasTranscript: input.transcriptLines.length > 0,
+    hasTranscript: transcriptLines.length > 0,
     audioAvailable: Boolean(audioUri),
     audioLocalUri: audioUri ?? null,
+    audioSyncPending: retryQueued,
+    audioSyncBlocked: false,
   };
   if (input.audioDurationSec) {
     meetingPatch.audioDurationSec = input.audioDurationSec;
@@ -161,12 +248,33 @@ export async function finalizeMeetingRecording(
   }
   if (input.audioBars?.length) meetingPatch.audioBars = input.audioBars;
   const statusSynced = await dependencies.updateStatus(input.meetingId, 'ended', meetingPatch);
-  if (!input.isGuest && input.accessToken && statusSynced) await dependencies.refreshMeetings();
+
+  if (pendingAudio && input.accessToken && retryQueued) {
+    uploadInBackground = true;
+    void retryPendingMeetingAudioUpload(
+      input.storageScope,
+      input.meetingId,
+      input.accessToken,
+      (pending, token) => dependencies.uploadAudio(pending.meetingId, pending.audioUri, token),
+      { automatic: true },
+    ).then(uploaded => {
+      if (uploaded) return dependencies.refreshMeetings();
+      return undefined;
+    }).catch(() => {});
+  } else if (pendingAudio && input.accessToken && !retryQueued) {
+    try {
+      await dependencies.uploadAudio(input.meetingId, audioUri!, input.accessToken);
+      void dependencies.refreshMeetings().catch(() => {});
+    } catch {
+      uploadFailed = true;
+    }
+  }
 
   return {
     audioUri,
     uploadFailed,
     retryQueued,
+    uploadInBackground,
     statusSyncPending: !input.isGuest && !statusSynced,
   };
 }
@@ -183,6 +291,45 @@ async function savePendingMeetingAudioUpload(
       createdAt: existing?.createdAt ?? pending.createdAt ?? attemptedAt,
       lastAttemptAt: attemptedAt,
       attemptCount: (existing?.attemptCount ?? pending.attemptCount) + 1,
+    };
+  });
+}
+
+export function meetingAudioRetryDelayMs(attemptCount: number): number {
+  const exponent = Math.max(0, Math.min(10, Math.floor(attemptCount) - 1));
+  return Math.min(6 * 60 * 60 * 1000, 30_000 * (2 ** exponent));
+}
+
+export function canAutomaticallyRetryPendingMeetingAudioUpload(
+  pending: PendingMeetingAudioUpload,
+  now = Date.now(),
+): boolean {
+  if (pending.uploadState === 'blocked') return false;
+  if (!pending.nextAttemptAt) return true;
+  const retryAt = Date.parse(pending.nextAttemptAt);
+  return Number.isNaN(retryAt) || retryAt <= now;
+}
+
+async function markPendingMeetingAudioUploadFailure(
+  storageScope: string,
+  pending: PendingMeetingAudioUpload,
+  error: unknown,
+): Promise<void> {
+  const failedAt = new Date();
+  const failure = classifyMeetingAudioUploadFailure(error);
+  await mutatePendingUploads(storageScope, records => {
+    const existing = records[pending.meetingId] ?? pending;
+    const attemptCount = existing.attemptCount + 1;
+    records[pending.meetingId] = {
+      ...existing,
+      lastAttemptAt: failedAt.toISOString(),
+      attemptCount,
+      uploadState: failure.retryable ? 'pending' : 'blocked',
+      failureCode: failure.code,
+      failureMessage: failure.message,
+      nextAttemptAt: failure.retryable
+        ? new Date(failedAt.getTime() + meetingAudioRetryDelayMs(attemptCount)).toISOString()
+        : undefined,
     };
   });
 }
@@ -232,6 +379,12 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
       lastAttemptAt: typeof item.lastAttemptAt === 'string' ? item.lastAttemptAt : new Date(0).toISOString(),
       attemptCount: typeof item.attemptCount === 'number' ? item.attemptCount : 0,
+      uploadState: item.uploadState === 'blocked' ? 'blocked' : 'pending',
+      failureCode: typeof item.failureCode === 'string'
+        ? item.failureCode as MeetingAudioUploadFailureCode
+        : undefined,
+      failureMessage: typeof item.failureMessage === 'string' ? item.failureMessage : undefined,
+      nextAttemptAt: typeof item.nextAttemptAt === 'string' ? item.nextAttemptAt : undefined,
     };
   });
   return records;
@@ -241,4 +394,9 @@ function pendingUploadsKey(storageScope: string): string {
   const normalized = storageScope.trim();
   if (!normalized) throw new Error('meeting recording storage scope is required');
   return `${PENDING_AUDIO_UPLOADS_KEY}:${normalized}`;
+}
+
+export function resetMeetingRecordingStateForTests(): void {
+  pendingStorageMutation = Promise.resolve();
+  pendingAudioUploadsInFlight.clear();
 }

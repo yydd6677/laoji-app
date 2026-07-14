@@ -53,6 +53,8 @@ __pycache__/
 /test-assets/asr-voice-samples/m4a/
 /test-assets/asr-voice-samples/mp3/
 /test-assets/asr-voice-samples/wav/
+/test-assets/meeting-asr-voice-samples/mp3/
+/test-assets/meeting-asr-voice-samples/wav/
 /test-assets/phone-acoustic-asr/*.aac
 /test-assets/phone-acoustic-asr/*.m4a
 /test-assets/phone-acoustic-asr/*.mp3

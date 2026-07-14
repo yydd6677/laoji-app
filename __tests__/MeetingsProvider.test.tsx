@@ -1,11 +1,13 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import { AppState } from 'react-native';
 import { act, render, waitFor } from '@testing-library/react-native';
 import {
   fetchAllMeetings,
   createMeeting as apiCreateMeeting,
   deleteMeeting as apiDeleteMeeting,
+  uploadMeetingAudio,
   updateMeeting as apiUpdateMeeting,
 } from '../src/services/api';
 import {
@@ -14,6 +16,9 @@ import {
   useMeetings,
 } from '../src/store/MeetingsStore';
 import { useAuth } from '../src/store/AuthStore';
+import { resetMeetingRecordingStateForTests } from '../src/services/meetingRecording';
+import { resetAppStorageQueueForTests } from '../src/services/appStorage';
+import { HttpResponseError } from '../src/services/errors';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -22,6 +27,7 @@ jest.mock('../src/services/api', () => ({
   fetchAllMeetings: jest.fn(),
   createMeeting: jest.fn(),
   deleteMeeting: jest.fn(),
+  uploadMeetingAudio: jest.fn(),
   updateMeeting: jest.fn(),
 }));
 
@@ -33,6 +39,18 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function pendingAudioRecord(meetingId: string, audioUri = `file:///tmp/${meetingId}.wav`) {
+  return {
+    meetingId,
+    audioUri,
+    fileName: `${meetingId}.wav`,
+    mimeType: 'audio/wav',
+    createdAt: '2026-07-14T00:00:00.000Z',
+    lastAttemptAt: '2026-07-14T00:00:00.000Z',
+    attemptCount: 2,
+  };
 }
 
 describe('MeetingsProvider lifecycle and cache', () => {
@@ -48,6 +66,11 @@ describe('MeetingsProvider lifecycle and cache', () => {
     (AsyncStorage.setItem as jest.Mock).mockResolvedValue(undefined);
     (AsyncStorage.removeItem as jest.Mock).mockResolvedValue(undefined);
     (FileSystem.deleteAsync as jest.Mock).mockResolvedValue(undefined);
+    (uploadMeetingAudio as jest.Mock).mockResolvedValue(null);
+    (AppState.addEventListener as jest.Mock).mockImplementation(() => ({ remove: jest.fn() }));
+    AppState.currentState = 'active';
+    resetAppStorageQueueForTests();
+    resetMeetingRecordingStateForTests();
     current = null;
   });
 
@@ -420,13 +443,68 @@ describe('MeetingsProvider lifecycle and cache', () => {
 
     const storageCalls = (AsyncStorage.setItem as jest.Mock).mock.calls as [string, string][];
     const lastValueFor = (key: string) => storageCalls.filter(call => call[0] === key).slice(-1)[0]?.[1];
-    expect(JSON.parse(lastValueFor('@laoji:meetings:v2:user:9')!)).toEqual([cachedMeeting]);
+    expect(JSON.parse(lastValueFor('@laoji:meetings:v2:user:9')!)).toEqual([
+      { ...cachedMeeting, audioSyncPending: false, audioSyncBlocked: false },
+    ]);
     expect(JSON.parse(lastValueFor('@laoji:meetingTranscripts:v1:user:9')!)).toEqual({
       'rollback-meeting': transcript,
     });
     expect(JSON.parse(lastValueFor('@laoji:meetingSummaries:v1:user:9')!)).toEqual({
       'rollback-meeting': summary,
     });
+  });
+
+  it('treats an already missing cloud meeting as deleted and removes its local recording state', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingId = 'already-deleted-cloud-meeting';
+    const cachedMeeting = {
+      id: meetingId,
+      title: '云端已删除会议',
+      date: '2026年7月11日',
+      duration: '30:00',
+      tags: [{ label: '上传受阻', color: '#FF4D4F' }],
+      audioLocalUri: `file:///tmp/${meetingId}.wav`,
+      audioSyncPending: true,
+      audioSyncBlocked: true,
+      source: 'cloud',
+    };
+    const storage = new Map<string, string>([
+      ['@laoji:meetings:v2:user:9', JSON.stringify([cachedMeeting])],
+      ['@laoji:pendingMeetingAudioUploads:v2:user:9', JSON.stringify({
+        [meetingId]: {
+          ...pendingAudioRecord(meetingId),
+          uploadState: 'blocked',
+          failureCode: 'meeting_missing',
+        },
+      })],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockRejectedValue(new Error('offline'));
+    (apiDeleteMeeting as jest.Mock).mockRejectedValue(new HttpResponseError('not found', 404));
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(current?.meetings).toHaveLength(1));
+
+    await act(async () => {
+      await expect(current?.deleteMeeting(meetingId)).resolves.toBeUndefined();
+    });
+
+    expect(current?.meetings).toEqual([]);
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(
+      `file:///tmp/${meetingId}.wav`,
+      { idempotent: true },
+    );
+    expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(false);
   });
 
   it('does not restore a cloud-deleted meeting when only local audio cleanup fails', async () => {
@@ -519,5 +597,409 @@ describe('MeetingsProvider lifecycle and cache', () => {
       status: 'ended',
       statusSyncPending: false,
     }));
+  });
+
+  it('retains and retries a status-pending local meeting omitted by the cloud list', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const cachedMeeting = {
+      id: 'missing-status-pending',
+      title: '云端暂缺的结束会议',
+      date: '2026年7月14日',
+      duration: '12:00',
+      tags: [{ label: '已完成', color: '#52C41A' }, { label: '待同步', color: '#FF9500' }],
+      status: 'ended',
+      statusSyncPending: true,
+      source: 'cloud',
+    };
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => (
+      key === '@laoji:meetings:v2:user:9' ? JSON.stringify([cachedMeeting]) : null
+    ));
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([]);
+    (apiUpdateMeeting as jest.Mock).mockRejectedValue(new Error('not visible yet'));
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(apiUpdateMeeting).toHaveBeenCalledWith(
+      'missing-status-pending',
+      { status: 'ended' },
+      'token-9',
+    ));
+    expect(current?.meetings).toEqual([
+      expect.objectContaining({
+        id: 'missing-status-pending',
+        statusSyncPending: true,
+        tags: expect.arrayContaining([expect.objectContaining({ label: '待同步' })]),
+      }),
+    ]);
+  });
+
+  it('drops a cloud meeting omitted by an authoritative refresh when no local work is pending', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => (
+      key === '@laoji:meetings:v2:user:9'
+        ? JSON.stringify([{
+            id: 'deleted-in-cloud',
+            title: '已在其他设备删除',
+            date: '2026年7月14日',
+            duration: '08:00',
+            tags: [{ label: '已完成', color: '#52C41A' }],
+            source: 'cloud',
+          }])
+        : null
+    ));
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([]);
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(current?.loading).toBe(false));
+    expect(current?.meetings).toEqual([]);
+    expect(apiUpdateMeeting).not.toHaveBeenCalled();
+    expect(uploadMeetingAudio).not.toHaveBeenCalled();
+  });
+
+  it('resumes every persisted recording upload after a cold start and clears the visible pending state', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingId = 'cold-start-audio';
+    const cachedMeeting = {
+      id: meetingId,
+      title: '冷启动恢复会议',
+      date: '2026年7月14日',
+      duration: '35:00',
+      tags: [{ label: '已完成', color: '#52C41A' }],
+      audioLocalUri: `file:///tmp/${meetingId}.wav`,
+      source: 'cloud',
+    };
+    const pending = pendingAudioRecord(meetingId);
+    const storage = new Map<string, string>([
+      ['@laoji:meetings:v2:user:9', JSON.stringify([cachedMeeting])],
+      ['@laoji:pendingMeetingAudioUploads:v2:user:9', JSON.stringify({ [meetingId]: pending })],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([{
+      id: meetingId,
+      title: '冷启动恢复会议',
+      status: 'ended',
+      created_at: '2026-07-14T08:00:00+08:00',
+      updated_at: '2026-07-14T08:35:00+08:00',
+      audio_available: false,
+    }]);
+    const upload = deferred<null>();
+    (uploadMeetingAudio as jest.Mock).mockReturnValue(upload.promise);
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(uploadMeetingAudio).toHaveBeenCalledWith(
+      meetingId,
+      `file:///tmp/${meetingId}.wav`,
+      'token-9',
+      { fileName: `${meetingId}.wav`, mimeType: 'audio/wav' },
+    ));
+    expect(current?.meetings[0]).toEqual(expect.objectContaining({
+      audioSyncPending: true,
+      tags: expect.arrayContaining([expect.objectContaining({ label: '待上传' })]),
+    }));
+    await act(async () => {
+      await current!.refreshMeetings();
+    });
+    expect(uploadMeetingAudio).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      upload.resolve(null);
+      await upload.promise;
+    });
+    await waitFor(() => expect(current?.meetings[0]).toEqual(expect.objectContaining({
+      audioSyncPending: false,
+    })));
+    expect(current?.meetings[0].tags.some(tag => tag.label === '待上传')).toBe(false);
+    expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(false);
+    expect(fetchAllMeetings).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a permanently rejected recording visible without retrying it on lifecycle refreshes', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingId = 'blocked-audio';
+    const cachedMeeting = {
+      id: meetingId,
+      title: '上传受阻会议',
+      date: '2026年7月14日',
+      duration: '60:00',
+      tags: [{ label: '已完成', color: '#52C41A' }],
+      audioLocalUri: `file:///tmp/${meetingId}.wav`,
+      source: 'cloud',
+    };
+    const pending = {
+      ...pendingAudioRecord(meetingId),
+      uploadState: 'blocked',
+      failureCode: 'file_too_large',
+      failureMessage: '录音文件超过云端上传上限，仍保存在本机。',
+    };
+    const storage = new Map<string, string>([
+      ['@laoji:meetings:v2:user:9', JSON.stringify([cachedMeeting])],
+      ['@laoji:pendingMeetingAudioUploads:v2:user:9', JSON.stringify({ [meetingId]: pending })],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([{
+      id: meetingId,
+      title: cachedMeeting.title,
+      status: 'ended',
+      created_at: '2026-07-14T08:00:00+08:00',
+      updated_at: '2026-07-14T09:00:00+08:00',
+      audio_available: false,
+    }]);
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(current?.meetings[0]).toEqual(expect.objectContaining({
+      audioSyncPending: true,
+      audioSyncBlocked: true,
+      tags: expect.arrayContaining([expect.objectContaining({ label: '上传受阻' })]),
+    })));
+    expect(uploadMeetingAudio).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await current!.refreshMeetings();
+    });
+    expect(uploadMeetingAudio).not.toHaveBeenCalled();
+    expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(true);
+  });
+
+  it('keeps only failed recordings pending when a cold-start batch partially succeeds', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingIds = ['audio-success', 'audio-failure'];
+    const cachedMeetings = meetingIds.map((id, index) => ({
+      id,
+      title: index === 0 ? '可同步会议' : '暂未同步会议',
+      date: '2026年7月14日',
+      duration: '20:00',
+      tags: [{ label: '已完成', color: '#52C41A' }],
+      audioLocalUri: `file:///tmp/${id}.wav`,
+      source: 'cloud',
+    }));
+    const pendingRecords = Object.fromEntries(meetingIds.map(id => [id, pendingAudioRecord(id)]));
+    const storage = new Map<string, string>([
+      ['@laoji:meetings:v2:user:9', JSON.stringify(cachedMeetings)],
+      ['@laoji:pendingMeetingAudioUploads:v2:user:9', JSON.stringify(pendingRecords)],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockResolvedValue(cachedMeetings
+      .filter(meeting => meeting.id === 'audio-success')
+      .map(meeting => ({
+        id: meeting.id,
+        title: meeting.title,
+        status: 'ended',
+        created_at: '2026-07-14T08:00:00+08:00',
+        updated_at: '2026-07-14T08:20:00+08:00',
+        audio_available: false,
+      })));
+    (uploadMeetingAudio as jest.Mock).mockImplementation(async (meetingId: string) => {
+      if (meetingId === 'audio-failure') throw new Error('offline');
+      return null;
+    });
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(uploadMeetingAudio).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const success = current?.meetings.find(meeting => meeting.id === 'audio-success');
+      const failure = current?.meetings.find(meeting => meeting.id === 'audio-failure');
+      expect(success?.audioSyncPending).toBe(false);
+      expect(success?.tags.some(tag => tag.label === '待上传')).toBe(false);
+      expect(failure?.audioSyncPending).toBe(true);
+      expect(failure?.tags.some(tag => tag.label === '待上传')).toBe(true);
+    });
+    const remaining = JSON.parse(storage.get('@laoji:pendingMeetingAudioUploads:v2:user:9')!);
+    expect(Object.keys(remaining)).toEqual(['audio-failure']);
+    expect(remaining['audio-failure'].attemptCount).toBe(3);
+  });
+
+  it('does not erase an omitted local meeting in the refresh that confirms its audio upload', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingId = 'upload-accepted-before-list-catches-up';
+    const cachedMeeting = {
+      id: meetingId,
+      title: '列表稍后可见的会议',
+      date: '2026年7月14日',
+      duration: '18:00',
+      tags: [{ label: '已完成', color: '#52C41A' }],
+      audioLocalUri: `file:///tmp/${meetingId}.wav`,
+      source: 'cloud',
+    };
+    const pending = pendingAudioRecord(meetingId);
+    const storage = new Map<string, string>([
+      ['@laoji:meetings:v2:user:9', JSON.stringify([cachedMeeting])],
+      ['@laoji:pendingMeetingAudioUploads:v2:user:9', JSON.stringify({ [meetingId]: pending })],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([]);
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(uploadMeetingAudio).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(current?.meetings).toEqual([
+      expect.objectContaining({
+        id: meetingId,
+        audioSyncPending: false,
+      }),
+    ]));
+    expect(current?.meetings[0].tags.some(tag => tag.label === '待上传')).toBe(false);
+    expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(false);
+
+    await act(async () => {
+      await current!.refreshMeetings();
+    });
+    await waitFor(() => expect(current?.meetings).toEqual([]));
+  });
+
+  it('does not let a completed upload from the previous account refresh or mutate the next account', async () => {
+    let auth = {
+      mode: 'authenticated',
+      session: { user: { id: 'A' } },
+      accessToken: 'token-A',
+    };
+    (useAuth as jest.Mock).mockImplementation(() => auth);
+    const pendingA = pendingAudioRecord('meeting-A');
+    const storage = new Map<string, string>([
+      ['@laoji:pendingMeetingAudioUploads:v2:user:A', JSON.stringify({ 'meeting-A': pendingA })],
+    ]);
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockImplementation(async (token: string) => token === 'token-A'
+      ? [{
+          id: 'meeting-A', title: 'A 的会议', status: 'ended',
+          created_at: '2026-07-14T08:00:00+08:00', updated_at: '2026-07-14T08:30:00+08:00',
+        }]
+      : [{
+          id: 'meeting-B', title: 'B 的会议', status: 'ended',
+          created_at: '2026-07-14T09:00:00+08:00', updated_at: '2026-07-14T09:30:00+08:00',
+        }]);
+    const uploadA = deferred<null>();
+    (uploadMeetingAudio as jest.Mock).mockReturnValue(uploadA.promise);
+
+    const view = await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(uploadMeetingAudio).toHaveBeenCalledTimes(1));
+
+    auth = {
+      mode: 'authenticated',
+      session: { user: { id: 'B' } },
+      accessToken: 'token-B',
+    };
+    await act(async () => {
+      await view.rerender(<MeetingsProvider><Probe /></MeetingsProvider>);
+    });
+    await waitFor(() => expect(current?.meetings.map(meeting => meeting.id)).toEqual(['meeting-B']));
+    const refreshCountAfterSwitch = (fetchAllMeetings as jest.Mock).mock.calls.length;
+
+    await act(async () => {
+      uploadA.resolve(null);
+      await uploadA.promise;
+      await Promise.resolve();
+    });
+    expect(current?.meetings.map(meeting => meeting.id)).toEqual(['meeting-B']);
+    expect(current?.meetings[0].tags.some(tag => tag.label === '待上传')).toBe(false);
+    expect((fetchAllMeetings as jest.Mock).mock.calls.length).toBe(refreshCountAfterSwitch);
+  });
+
+  it('retries newly queued recordings when the app returns to the foreground', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    const meetingId = 'foreground-audio';
+    const storage = new Map<string, string>();
+    (AsyncStorage.getItem as jest.Mock).mockImplementation(async (key: string) => storage.get(key) ?? null);
+    (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key: string, value: string) => {
+      storage.set(key, value);
+    });
+    (AsyncStorage.removeItem as jest.Mock).mockImplementation(async (key: string) => {
+      storage.delete(key);
+    });
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([{
+      id: meetingId,
+      title: '前台续传会议',
+      status: 'ended',
+      created_at: '2026-07-14T08:00:00+08:00',
+      updated_at: '2026-07-14T08:30:00+08:00',
+    }]);
+    let appStateListener: ((state: string) => void) | undefined;
+    (AppState.addEventListener as jest.Mock).mockImplementation((_event, listener) => {
+      appStateListener = listener;
+      return { remove: jest.fn() };
+    });
+    let now = 1_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+
+    try {
+      await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+      await waitFor(() => expect(current?.loading).toBe(false));
+      expect(uploadMeetingAudio).not.toHaveBeenCalled();
+
+      const pending = pendingAudioRecord(meetingId);
+      storage.set(
+        '@laoji:pendingMeetingAudioUploads:v2:user:9',
+        JSON.stringify({ [meetingId]: pending }),
+      );
+      now += 31_000;
+      await act(async () => {
+        appStateListener?.('active');
+      });
+
+      await waitFor(() => expect(uploadMeetingAudio).toHaveBeenCalledWith(
+        meetingId,
+        pending.audioUri,
+        'token-9',
+        { fileName: pending.fileName, mimeType: pending.mimeType },
+      ));
+      await waitFor(() => expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(false));
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

@@ -4,18 +4,20 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
 import statistics
+import threading
 import time
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from run_meeting_summary_quality import build_lines, evaluate
+from run_meeting_summary_quality import build_lines, evaluate, percentile
 
 
-DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_THREAD_LOCAL = threading.local()
 NEGATED_ACTION_RE = re.compile(
     r"(不再执行|无需执行|不需要执行|不用执行|不再负责|不予执行|"
     r"不建立行动项|没有新的行动项|无新的行动项)"
@@ -30,6 +32,14 @@ STRONG_DECISION_RE = re.compile(r"(最终决定|最终以|最终就按|先保留
 NEGATED_DECISION_RE = re.compile(
     r"(不决定|暂不决定|没有决策|无决策|未形成(?:新)?决策|不是[^。；;]{0,12}决策)"
 )
+
+
+def direct_opener() -> urllib.request.OpenerDirector:
+    opener = getattr(_THREAD_LOCAL, "direct_opener", None)
+    if opener is None:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        _THREAD_LOCAL.direct_opener = opener
+    return opener
 
 
 def build_input(case: dict[str, Any], meeting_date: str) -> str:
@@ -112,6 +122,31 @@ def select_cases(
     ]
 
 
+def summarize_metric(
+    rows: list[dict[str, Any]],
+    key: str,
+    *,
+    divisor: float = 1.0,
+) -> dict[str, float | int]:
+    values = [
+        float(row.get("metrics", {}).get(key)) / divisor
+        for row in rows
+        if isinstance(row.get("metrics", {}).get(key), (int, float))
+        and not isinstance(row.get("metrics", {}).get(key), bool)
+    ]
+    if not values:
+        return {"samples": 0, "total": 0, "mean": 0, "median": 0, "p95": 0, "max": 0}
+    p95 = percentile(values, 0.95)
+    return {
+        "samples": len(values),
+        "total": round(sum(values), 3),
+        "mean": round(statistics.mean(values), 3),
+        "median": round(statistics.median(values), 3),
+        "p95": round(p95, 3) if p95 is not None else 0,
+        "max": round(max(values), 3),
+    }
+
+
 def run_case(
     endpoint: str,
     prompt: str,
@@ -146,7 +181,7 @@ def run_case(
         method="POST",
     )
     started = time.perf_counter()
-    with DIRECT_OPENER.open(request, timeout=120) as response:
+    with direct_opener().open(request, timeout=120) as response:
         envelope = json.loads(response.read().decode("utf-8"))
     duration_ms = round((time.perf_counter() - started) * 1000)
     raw = json.loads(envelope["message"]["content"])
@@ -186,59 +221,179 @@ def main() -> int:
     parser.add_argument("--keep-alive", default="60s")
     parser.add_argument("--case", action="append", dest="case_ids")
     parser.add_argument("--include-extended", action="store_true")
+    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--max-case-ms", type=float, default=0)
+    parser.add_argument("--max-p95-ms", type=float, default=0)
+    parser.add_argument("--max-wave-ms", type=float, default=0)
     args = parser.parse_args()
+
+    if args.concurrency < 1:
+        parser.error("--concurrency must be positive")
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
+    if args.max_case_ms < 0 or args.max_p95_ms < 0 or args.max_wave_ms < 0:
+        parser.error("latency budgets must be non-negative")
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     prompt = args.prompt.read_text(encoding="utf-8")
     selected = set(args.case_ids or [])
     cases = select_cases(manifest, selected, args.include_extended)
+    if not cases:
+        parser.error("no meeting-summary cases selected")
     rows = []
-    for index, case in enumerate(cases, 1):
-        row = run_case(
-            args.endpoint,
-            prompt,
-            case,
-            manifest["meeting_date"],
-            args.model,
-            args.num_ctx,
-            args.max_tokens,
-            args.keep_alive,
-        )
-        rows.append(row)
-        print(
-            json.dumps(
-                {
-                    "index": index,
-                    "id": row["id"],
-                    "passed": row["passed"],
-                    "issues": row["issues"],
-                    "duration_ms": row["duration_ms"],
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
+    wave_durations = []
+    for repeat in range(1, args.repeats + 1):
+        wave_started = time.perf_counter()
+        indexed_rows = []
+        with ThreadPoolExecutor(
+            max_workers=min(args.concurrency, len(cases)),
+            thread_name_prefix="compact-summary-experiment",
+        ) as executor:
+            futures = {
+                executor.submit(
+                    run_case,
+                    args.endpoint,
+                    prompt,
+                    case,
+                    manifest["meeting_date"],
+                    args.model,
+                    args.num_ctx,
+                    args.max_tokens,
+                    args.keep_alive,
+                ): (index, case)
+                for index, case in enumerate(cases, 1)
+            }
+            for future in as_completed(futures):
+                index, case = futures[future]
+                try:
+                    row = future.result()
+                except Exception as exc:  # noqa: BLE001 - preserve experiment evidence.
+                    row = {
+                        "id": case["id"],
+                        "title": case["title"],
+                        "passed": False,
+                        "issues": ["runtime_error"],
+                        "duration_ms": 0,
+                        "error": repr(exc),
+                        "metrics": {},
+                        "result": None,
+                    }
+                row["repeat"] = repeat
+                row["case_index"] = index
+                row["concurrency"] = args.concurrency
+                if args.max_case_ms > 0 and row["duration_ms"] > args.max_case_ms:
+                    row["issues"].append(
+                        f"duration_ms:{row['duration_ms']}>{args.max_case_ms:g}"
+                    )
+                    row["passed"] = False
+                indexed_rows.append((index, row))
+                print(
+                    json.dumps(
+                        {
+                            "repeat": repeat,
+                            "index": index,
+                            "id": row["id"],
+                            "passed": row["passed"],
+                            "issues": row["issues"],
+                            "duration_ms": row["duration_ms"],
+                            "metrics": row.get("metrics", {}),
+                            "error": row.get("error"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+        rows.extend(row for _, row in sorted(indexed_rows, key=lambda item: item[0]))
+        wave_durations.append(round((time.perf_counter() - wave_started) * 1000))
 
-    durations = [row["duration_ms"] for row in rows]
+    durations = [row["duration_ms"] for row in rows if row["duration_ms"] > 0]
+    duration_p95 = percentile(durations, 0.95)
+    gate_issues = [
+        f"repeat_{index}_wave_ms:{duration}>{args.max_wave_ms:g}"
+        for index, duration in enumerate(wave_durations, 1)
+        if args.max_wave_ms > 0 and duration > args.max_wave_ms
+    ]
+    if args.max_p95_ms > 0 and duration_p95 is not None and duration_p95 > args.max_p95_ms:
+        gate_issues.append(f"p95_ms:{duration_p95:.1f}>{args.max_p95_ms:g}")
+    passed_count = sum(row["passed"] for row in rows)
+    gate_passed = passed_count == len(rows) and not gate_issues
     report = {
         "endpoint": args.endpoint,
         "model": args.model,
         "num_ctx": args.num_ctx,
         "max_tokens": args.max_tokens,
+        "keep_alive": args.keep_alive,
+        "concurrency": args.concurrency,
+        "repeats": args.repeats,
+        "budgets": {
+            "max_case_ms": args.max_case_ms or None,
+            "max_p95_ms": args.max_p95_ms or None,
+            "max_wave_ms": args.max_wave_ms or None,
+        },
         "total": len(rows),
-        "passed": sum(row["passed"] for row in rows),
+        "passed": passed_count,
+        "gate_passed": gate_passed,
+        "gate_issues": gate_issues,
         "duration_ms": {
-            "min": min(durations),
-            "median": statistics.median(durations),
-            "max": max(durations),
+            "min": min(durations) if durations else 0,
+            "mean": round(statistics.mean(durations), 1) if durations else 0,
+            "median": statistics.median(durations) if durations else 0,
+            "p95": round(duration_p95, 1) if duration_p95 is not None else 0,
+            "max": max(durations) if durations else 0,
             "total": sum(durations),
+        },
+        "wave_wall_ms": {
+            "min": min(wave_durations),
+            "median": statistics.median(wave_durations),
+            "max": max(wave_durations),
+            "total": sum(wave_durations),
+        },
+        "throughput_per_second": round(
+            len(rows) / (sum(wave_durations) / 1000), 3
+        ) if sum(wave_durations) > 0 else 0,
+        "model_metrics": {
+            "prompt_tokens": summarize_metric(rows, "prompt_eval_count"),
+            "output_tokens": summarize_metric(rows, "eval_count"),
+            "load_ms": summarize_metric(rows, "load_duration", divisor=1_000_000),
+            "prompt_eval_ms": summarize_metric(
+                rows, "prompt_eval_duration", divisor=1_000_000
+            ),
+            "decode_ms": summarize_metric(rows, "eval_duration", divisor=1_000_000),
+            "wall_output_tokens_per_second": round(
+                sum(
+                    float(row.get("metrics", {}).get("eval_count", 0))
+                    for row in rows
+                    if isinstance(row.get("metrics", {}).get("eval_count"), (int, float))
+                )
+                / (sum(wave_durations) / 1000),
+                3,
+            ) if sum(wave_durations) > 0 else 0,
         },
         "rows": rows,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({key: report[key] for key in ("total", "passed", "duration_ms")}, ensure_ascii=False, indent=2))
-    return 0 if report["passed"] == report["total"] else 1
+    print(
+        json.dumps(
+            {
+                key: report[key]
+                for key in (
+                    "total",
+                    "passed",
+                    "gate_passed",
+                    "gate_issues",
+                    "duration_ms",
+                    "wave_wall_ms",
+                    "throughput_per_second",
+                    "model_metrics",
+                )
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0 if report["gate_passed"] else 1
 
 
 if __name__ == "__main__":

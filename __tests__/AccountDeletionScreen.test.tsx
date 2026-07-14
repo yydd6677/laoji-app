@@ -2,6 +2,13 @@ import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AccountScreen } from '../src/screens/AccountScreen';
 import { useAuth } from '../src/store/AuthStore';
+import {
+  ensureNotificationPermission,
+  getNotificationPermissionStatus,
+  openNotificationSettings,
+  saveNotificationPrefs,
+  scheduleTestNotification,
+} from '../src/services/notifications';
 
 const showDialog = jest.fn();
 
@@ -19,12 +26,17 @@ jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog }),
 }));
 jest.mock('../src/services/notifications', () => ({
-  REMINDER_OPTIONS: [{ value: 15, label: '提前15分钟' }],
+  REMINDER_OPTIONS: [
+    { value: 15, label: '提前15分钟' },
+    { value: 30, label: '提前30分钟' },
+  ],
   ensureNotificationPermission: jest.fn(async () => true),
   getNotificationPermissionStatus: jest.fn(async () => 'granted'),
   labelForReminder: jest.fn(() => '提前15分钟'),
   loadNotificationPrefs: jest.fn(async () => ({ defaultReminderMinutes: 15 })),
+  openNotificationSettings: jest.fn(async () => undefined),
   saveNotificationPrefs: jest.fn(async () => undefined),
+  scheduleTestNotification: jest.fn(async () => 'test-notification-id'),
 }));
 
 describe('AccountScreen account deletion', () => {
@@ -37,6 +49,11 @@ describe('AccountScreen account deletion', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (ensureNotificationPermission as jest.Mock).mockResolvedValue(true);
+    (getNotificationPermissionStatus as jest.Mock).mockResolvedValue('granted');
+    (openNotificationSettings as jest.Mock).mockResolvedValue(undefined);
+    (saveNotificationPrefs as jest.Mock).mockResolvedValue(undefined);
+    (scheduleTestNotification as jest.Mock).mockResolvedValue('test-notification-id');
     deleteAccount.mockResolvedValue({
       deleted: true,
       events_deleted: 1,
@@ -152,5 +169,63 @@ describe('AccountScreen account deletion', () => {
     expect(view.queryByText('手机号')).toBeNull();
     expect(view.getByText('密码与安全')).toBeTruthy();
     expect(view.getAllByText('通知与提醒').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the previous reminder visible when local preference persistence fails', async () => {
+    (saveNotificationPrefs as jest.Mock).mockRejectedValueOnce(new Error('storage full'));
+    const view = await render(<AccountScreen navigation={navigation} />);
+
+    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
+    await fireEvent.press(view.getByTestId('notification-reminder-30'));
+
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith({
+      title: '提醒设置未保存',
+      message: '本机存储暂时不可用，默认提醒仍保持原设置。',
+      tone: 'error',
+    }));
+    expect(view.getByTestId('notification-reminder-15').props.accessibilityState.selected).toBe(true);
+    expect(view.getByTestId('notification-reminder-30').props.accessibilityState.selected).toBe(false);
+  });
+
+  it('reports notification permission inspection failures without leaving the button busy', async () => {
+    (getNotificationPermissionStatus as jest.Mock).mockResolvedValue('unknown');
+    (ensureNotificationPermission as jest.Mock).mockRejectedValueOnce(new Error('native unavailable'));
+    const view = await render(<AccountScreen navigation={navigation} />);
+
+    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
+    await waitFor(() => expect(view.getByText('系统通知状态未知')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('notification-permission-button'));
+
+    await waitFor(() => expect(showDialog).toHaveBeenCalledWith({
+      title: '无法检查通知权限',
+      message: '系统通知状态读取失败，请稍后重试或前往系统设置检查。',
+      tone: 'error',
+    }));
+    expect(view.getByTestId('notification-permission-button').props.disabled).toBe(false);
+  });
+
+  it('opens the exact system notification page when permission is already granted', async () => {
+    const view = await render(<AccountScreen navigation={navigation} />);
+
+    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
+    await waitFor(() => expect(view.getByText('系统通知设置')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('notification-permission-button'));
+
+    await waitFor(() => expect(openNotificationSettings).toHaveBeenCalledTimes(1));
+    expect(ensureNotificationPermission).not.toHaveBeenCalled();
+  });
+
+  it('schedules an observable test reminder from notification settings', async () => {
+    const view = await render(<AccountScreen navigation={navigation} />);
+
+    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
+    await fireEvent.press(view.getByTestId('notification-test-button'));
+
+    await waitFor(() => expect(scheduleTestNotification).toHaveBeenCalledTimes(1));
+    expect(showDialog).toHaveBeenCalledWith({
+      title: '测试提醒已安排',
+      message: '老记将在 3 秒后发送一条系统通知。',
+      tone: 'success',
+    });
   });
 });

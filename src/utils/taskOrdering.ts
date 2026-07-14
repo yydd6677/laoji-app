@@ -5,17 +5,9 @@ const TIME_MAX = Number.MAX_SAFE_INTEGER;
 export function selectTasksForDate(events: CalEvent[], date: string): CalEvent[] {
   return events
     .map((event, index) => ({ event, index }))
-    .filter(({ event }) => eventCoversDate(event, date) && isTaskVisibleForDate(event))
+    .filter(({ event }) => eventCoversDate(event, date))
     .sort((left, right) => compareTaskEntries(left, right))
     .map(({ event }) => event);
-}
-
-function isTaskVisibleForDate(event: CalEvent): boolean {
-  return Boolean(event.startTime) || isSpanningEvent(event);
-}
-
-function isSpanningEvent(event: CalEvent): boolean {
-  return Boolean(event.spanning && event.endDate && event.endDate !== event.startDate);
 }
 
 function eventCoversDate(event: CalEvent, date: string): boolean {

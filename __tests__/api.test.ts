@@ -20,6 +20,7 @@ import {
   updateMeeting,
   transcribeAudio,
   fetchMeetingSummary,
+  fetchMeetingSummaryTask,
   fetchMeetingAudioInfo,
   fetchGuestMeetingSummaryTask,
   generateGuestMeetingSummary,
@@ -27,7 +28,9 @@ import {
   createGuestRealtimeSession,
   deleteGuestRealtimeSession,
   createMeeting,
+  uploadMeetingAudio,
 } from '../src/services/api';
+import { LocalMeetingAudioFileMissingError } from '../src/services/meetingAudioUploadFailure';
 import {
   changePassword as authChangePassword,
   deleteAccount as authDeleteAccount,
@@ -44,6 +47,7 @@ import { setUnauthorizedHandler } from '../src/services/authInvalidation';
 beforeEach(() => {
   (global.fetch as jest.Mock).mockReset();
   (FileSystem.readAsStringAsync as jest.Mock).mockReset();
+  (FileSystem.getInfoAsync as jest.Mock).mockReset().mockResolvedValue({ exists: true });
 });
 
 describe('parseText', () => {
@@ -62,6 +66,105 @@ describe('parseText', () => {
         parse_source: 'rules',
         confidence: 0,
       });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps complete relative offsets on the local fast path', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 13, 23, 50, 48));
+
+    try {
+      const result = await parseText('十五分钟后提醒我提交材料');
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        title: '提交材料',
+        start_date: '2026-07-14',
+        start_time: '00:05',
+        reminder_minutes: 0,
+        needs_clarification: false,
+        clarification_question: null,
+        parse_source: 'rules',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps dated all-day text on the local fast path without asking for time', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 9, 9, 0, 0));
+
+    try {
+      const result = await parseText('明天开会');
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        start_date: '2026-07-10',
+        start_time: null,
+        end_time: null,
+        is_all_day: true,
+        needs_clarification: false,
+        clarification_question: null,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('removes a server time-only question but never accepts an invented date', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 9, 9, 0, 0));
+    const serverResult = {
+      title: '项目会',
+      event_type: 'once' as const,
+      start_date: '2026-07-10',
+      start_time: null,
+      end_time: null,
+      is_all_day: true,
+      description: null,
+      raw_text: '明天开会，标题就写项目会',
+      parse_source: 'local_llm' as const,
+      confidence: 0.8,
+      needs_clarification: true,
+      clarification_question: '没有听到具体时间，是否作为全天事项保存？',
+    };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => serverResult });
+
+    try {
+      await expect(parseText('明天开会，标题就写项目会')).resolves.toMatchObject({
+        needs_clarification: false,
+        clarification_question: null,
+      });
+      await expect(parseText('开会')).resolves.toMatchObject({
+        needs_clarification: true,
+        clarification_question: '没有听到具体日期，需要补充日期。',
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('returns simple missing-date clarification without network or model latency', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 6, 13, 10, 0, 0));
+
+    try {
+      await expect(parseText('开会')).resolves.toMatchObject({
+        title: '开会',
+        start_date: '2026-07-13',
+        start_time: null,
+        parse_source: 'rules',
+        needs_clarification: true,
+        clarification_question: '没有听到具体日期，需要补充日期。',
+      });
+      await expect(parseText('下午三点开会')).resolves.toMatchObject({
+        title: '开会',
+        start_date: '2026-07-13',
+        start_time: '15:00',
+        parse_source: 'rules',
+        needs_clarification: true,
+      });
+      expect(global.fetch).not.toHaveBeenCalled();
     } finally {
       jest.useRealTimers();
     }
@@ -729,7 +832,7 @@ describe('guest meeting summary', () => {
     );
   });
 
-  it('polls a guest task without an auth header', async () => {
+  it('long-polls a guest task without an auth header', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ task_id: 'guest-task-1', status: 'SUCCESS', result: { overview: '完成' } }),
@@ -737,8 +840,28 @@ describe('guest meeting summary', () => {
 
     await expect(fetchGuestMeetingSummaryTask('guest-task-1')).resolves.toMatchObject({ status: 'SUCCESS' });
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://203.0.113.10:18020/api/laoji/meetings/guest-summary/tasks/guest-task-1',
+      'http://203.0.113.10:18020/api/laoji/meetings/guest-summary/tasks/guest-task-1?wait_ms=5000',
       expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it('long-polls an authenticated task within its meeting scope', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ task_id: 'cloud-task-1', status: 'STARTED', result: null }),
+    });
+
+    await expect(fetchMeetingSummaryTask(
+      'meeting-1',
+      'cloud-task-1',
+      'access-token',
+    )).resolves.toMatchObject({ status: 'STARTED' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://203.0.113.10:18020/api/laoji/meetings/meeting-1/summaries/task/cloud-task-1?wait_ms=5000',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer access-token' },
+        signal: expect.anything(),
+      }),
     );
   });
 });
@@ -779,6 +902,20 @@ describe('guest realtime meeting session', () => {
         signal: expect.anything(),
       }),
     );
+  });
+});
+
+describe('uploadMeetingAudio', () => {
+  it('rejects a missing local file before starting a network request', async () => {
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: false });
+
+    await expect(uploadMeetingAudio(
+      'meeting-missing-file',
+      'file:///data/missing.wav',
+      'token-1',
+    )).rejects.toBeInstanceOf(LocalMeetingAudioFileMissingError);
+
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
 

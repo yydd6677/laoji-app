@@ -1,16 +1,23 @@
 import * as Notifications from 'expo-notifications';
 import { diagnosticWarn } from './diagnostics';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { CalEvent } from '../types';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
 
 export const DEFAULT_REMINDER_MINUTES = 15;
 export const SOON_REMINDER_DELAY_MS = 1_000;
+export const TEST_NOTIFICATION_DELAY_MS = 3_000;
 
 export type ReminderMinutes = number | null;
 
 export interface NotificationPrefs {
   defaultReminderMinutes: ReminderMinutes;
+}
+
+export interface NotificationPermissionState {
+  status: string;
+  granted: boolean;
+  canAskAgain: boolean;
 }
 
 export const REMINDER_OPTIONS: { label: string; value: ReminderMinutes }[] = [
@@ -223,15 +230,72 @@ export async function saveNotificationPrefs(scope: string, prefs: NotificationPr
 }
 
 export async function getNotificationPermissionStatus(): Promise<string> {
+  return (await getNotificationPermissionState()).status;
+}
+
+export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
   const current = await Notifications.getPermissionsAsync();
-  return current.status;
+  return {
+    status: current.status,
+    granted: current.granted || current.status === 'granted',
+    canAskAgain: current.canAskAgain !== false,
+  };
+}
+
+export async function prepareNotificationChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(EVENT_NOTIFICATION_CHANNEL_ID, {
+    name: '日程提醒',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+  });
 }
 
 export async function ensureNotificationPermission(): Promise<boolean> {
-  const current = await Notifications.getPermissionsAsync();
-  if (current.granted || current.status === 'granted') return true;
+  await prepareNotificationChannel();
+  const current = await getNotificationPermissionState();
+  if (current.granted) return true;
+  if (!current.canAskAgain) return false;
   const requested = await Notifications.requestPermissionsAsync();
   return requested.granted || requested.status === 'granted';
+}
+
+export async function openNotificationSettings(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'android') {
+    try {
+      await Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+        { key: 'android.provider.extra.APP_PACKAGE', value: 'com.laoji.app' },
+      ]);
+      return;
+    } catch {
+      // Older Android builds may not expose the dedicated notification settings intent.
+    }
+  }
+  await Linking.openSettings();
+}
+
+export async function reminderUnavailableMessage(): Promise<string> {
+  const permission = await getNotificationPermissionState().catch(() => null);
+  if (permission?.granted) {
+    return '系统通知已开启，但本机提醒创建失败。请重新打开日程并保存提醒。';
+  }
+  return '本机未创建系统提醒，请在“通知与提醒”中检查并开启系统通知。';
+}
+
+export async function scheduleTestNotification(): Promise<string> {
+  const granted = await ensureNotificationPermission();
+  if (!granted) throw new Error('notification permission denied');
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '老记测试提醒',
+      body: '通知功能运行正常',
+      sound: 'default',
+      data: { source: 'notification-settings-test' },
+    },
+    trigger: notificationDateTrigger(new Date(Date.now() + TEST_NOTIFICATION_DELAY_MS)),
+  });
 }
 
 export async function scheduleEventNotification(event: CalEvent): Promise<string | null> {
@@ -241,15 +305,6 @@ export async function scheduleEventNotification(event: CalEvent): Promise<string
   try {
     const granted = await ensureNotificationPermission();
     if (!granted) return null;
-
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(EVENT_NOTIFICATION_CHANNEL_ID, {
-        name: '日程提醒',
-        importance: Notifications.AndroidImportance.HIGH,
-        sound: 'default',
-        vibrationPattern: [0, 250, 250, 250],
-      });
-    }
 
     return await Notifications.scheduleNotificationAsync({
       content: {

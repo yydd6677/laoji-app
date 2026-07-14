@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -10,6 +10,7 @@ import { RootStackParamList, TranscriptLine } from '../types';
 import { useMeetings } from '../store/MeetingsStore';
 import { fetchMeetingTranscript, fetchMeetingSummary, uploadMeetingAudio } from '../services/api';
 import {
+  canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
   PendingMeetingAudioUpload,
   retryPendingMeetingAudioUpload,
@@ -95,6 +96,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const silentSummaryAbortRef = useRef(new WeakSet<AbortController>());
   const summaryStorageScopeRef = useRef<string | null>(null);
   const summaryInFlightRef = useRef<Promise<void> | null>(null);
+  const audioUploadUiPromiseRef = useRef<Promise<void> | null>(null);
+  const automaticAudioUploadKeyRef = useRef('');
   const autoResumeTaskRef = useRef('');
   const mountedRef = useRef(true);
   const scrollRef = useRef<ScrollView | null>(null);
@@ -104,6 +107,70 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const summaryYRef = useRef<number | null>(null);
   const focusHandledRef = useRef(false);
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
+
+  const performPendingAudioUpload = useCallback((
+    pending: PendingMeetingAudioUpload,
+    notifyUser: boolean,
+  ): Promise<void> => {
+    if (!accessToken) return Promise.resolve();
+    if (audioUploadUiPromiseRef.current) return audioUploadUiPromiseRef.current;
+    setRetryingAudioUpload(true);
+    setPendingAudioError('');
+    let operation: Promise<void> | null = null;
+    operation = (async () => {
+      try {
+        const uploaded = await retryPendingMeetingAudioUpload(
+          recordingStorageScope,
+          pending.meetingId,
+          accessToken,
+          (item, token) => uploadMeetingAudio(
+            item.meetingId,
+            item.audioUri,
+            token,
+            { fileName: item.fileName, mimeType: item.mimeType },
+          ),
+          { automatic: !notifyUser },
+        );
+        const stillPending = uploaded
+          ? null
+          : await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
+        if (mountedRef.current) {
+          setPendingAudioUpload(stillPending);
+          setPendingAudioError(stillPending?.failureMessage ?? '');
+        }
+        if (uploaded) await refreshMeetings();
+        if (uploaded && notifyUser && mountedRef.current) {
+          showDialog({ title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
+        }
+      } catch {
+        try {
+          const stillPending = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
+          if (mountedRef.current) {
+            setPendingAudioUpload(stillPending);
+            setPendingAudioError(stillPending?.failureMessage ?? '自动同步未完成，录音仍保存在本机');
+          }
+        } catch {
+          if (mountedRef.current) {
+            setPendingAudioUpload(null);
+            setPendingAudioError('无法读取录音待上传状态，请重试。');
+          }
+        }
+        if (notifyUser && mountedRef.current) {
+          const latest = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId).catch(() => null);
+          showDialog({
+            title: latest?.uploadState === 'blocked' ? '录音上传受阻' : '上传失败',
+            message: latest?.failureMessage ?? '录音仍保存在本机，可稍后再次重试。',
+            tone: 'error',
+          });
+        }
+      } finally {
+        if (mountedRef.current) setRetryingAudioUpload(false);
+        if (audioUploadUiPromiseRef.current === operation) audioUploadUiPromiseRef.current = null;
+      }
+    })();
+    audioUploadUiPromiseRef.current = operation;
+    return operation;
+  }, [accessToken, recordingStorageScope, refreshMeetings, showDialog]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -194,6 +261,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     let alive = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     if (!m || isGuest) {
       setPendingAudioUpload(null);
       setPendingAudioError('');
@@ -201,15 +269,37 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
     setPendingAudioError('');
     void getPendingMeetingAudioUpload(recordingStorageScope, m.id).then(pending => {
-      if (alive) setPendingAudioUpload(pending);
+      if (!alive) return;
+      setPendingAudioUpload(pending);
+      setPendingAudioError(pending?.failureMessage ?? '');
+      if (pending && accessToken) {
+        const automaticKey = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
+        if (automaticAudioUploadKeyRef.current !== automaticKey) {
+          automaticAudioUploadKeyRef.current = automaticKey;
+          if (canAutomaticallyRetryPendingMeetingAudioUpload(pending)) {
+            void performPendingAudioUpload(pending, false);
+          } else if (pending.uploadState !== 'blocked' && pending.nextAttemptAt) {
+            const retryAt = Date.parse(pending.nextAttemptAt);
+            if (!Number.isNaN(retryAt)) {
+              retryTimer = setTimeout(
+                () => setReloadKey(value => value + 1),
+                Math.max(0, retryAt - Date.now()),
+              );
+            }
+          }
+        }
+      }
     }).catch(() => {
       if (alive) {
         setPendingAudioUpload(null);
         setPendingAudioError('无法读取录音待上传状态，请重试。');
       }
     });
-    return () => { alive = false; };
-  }, [isGuest, m?.id, recordingStorageScope, reloadKey]);
+    return () => {
+      alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [accessToken, isGuest, m?.id, performPendingAudioUpload, recordingStorageScope, reloadKey]);
 
   useEffect(() => {
     focusHandledRef.current = false;
@@ -250,7 +340,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       try {
         let pending = options.resumeTask ?? null;
         if (options.forceRegenerate) {
-          await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
           pending = null;
         } else if (options.resumeTask === undefined) {
           try {
@@ -447,32 +536,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   };
 
-  const handleRetryAudioUpload = async () => {
-    if (!pendingAudioUpload || !accessToken || retryingAudioUpload) return;
-    setRetryingAudioUpload(true);
-    try {
-      await retryPendingMeetingAudioUpload(recordingStorageScope, m.id, accessToken, (pending, token) => uploadMeetingAudio(
-        pending.meetingId,
-        pending.audioUri,
-        token,
-        { fileName: pending.fileName, mimeType: pending.mimeType },
-      ));
-      setPendingAudioUpload(null);
-      await refreshMeetings();
-      showDialog({ title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
-    } catch {
-      try {
-        const pending = await getPendingMeetingAudioUpload(recordingStorageScope, m.id);
-        setPendingAudioUpload(pending);
-        setPendingAudioError('');
-      } catch {
-        setPendingAudioUpload(null);
-        setPendingAudioError('无法读取录音待上传状态，请重试。');
-      }
-      showDialog({ title: '上传失败', message: '录音仍保存在本机，可稍后再次重试。', tone: 'error' });
-    } finally {
-      setRetryingAudioUpload(false);
-    }
+  const handleRetryAudioUpload = () => {
+    if (!pendingAudioUpload || retryingAudioUpload) return;
+    void performPendingAudioUpload(pendingAudioUpload, true);
   };
 
   const handleGenerateSummary = () => runSummaryTask({ forceRegenerate: Boolean(summary) });
@@ -566,8 +632,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           </View>
           {pendingAudioUpload ? (
             <View style={s.uploadPending} testID="meeting-audio-upload-pending">
-              <Ionicons name="cloud-upload-outline" size={16} color={C.orange} />
-              <Text style={s.uploadPendingText}>录音已保存在本机，尚未同步到云端</Text>
+              <Ionicons
+                name={pendingAudioUpload.uploadState === 'blocked' ? 'alert-circle-outline' : 'cloud-upload-outline'}
+                size={16}
+                color={pendingAudioUpload.uploadState === 'blocked' ? C.red : C.orange}
+              />
+              <Text style={s.uploadPendingText}>
+                {pendingAudioError || (retryingAudioUpload ? '录音正在后台同步' : '录音已保存在本机，尚未同步到云端')}
+              </Text>
               <TouchableOpacity
                 style={s.uploadRetryButton}
                 onPress={handleRetryAudioUpload}

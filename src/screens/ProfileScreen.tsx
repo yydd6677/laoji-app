@@ -46,11 +46,15 @@ export function ProfileScreen({ navigation }: Props) {
   const stats = useMemo(() => {
     const monthlyEvents = events.filter(e => e.startDate.startsWith(currentYearMonth)).length;
     const meetingCount = meetings.length;
-    const importantDates = events.filter(e => e.isAllDay !== true).length;
+    const timedEvents = events.filter(e => (
+      e.startDate.startsWith(currentYearMonth)
+      && e.isAllDay !== true
+      && Boolean(e.startTime)
+    )).length;
     return [
       { l: '本月日程', v: String(monthlyEvents), u: '个' },
       { l: '会议记录', v: String(meetingCount),   u: '篇' },
-      { l: '定时日程', v: String(importantDates), u: '次' },
+      { l: '本月定时', v: String(timedEvents), u: '次' },
     ];
   }, [events, meetings, currentYearMonth]);
 
@@ -88,7 +92,7 @@ export function ProfileScreen({ navigation }: Props) {
     } catch (error) {
       showDialog({
         title: '资料同步失败',
-        message: readableErrorMessage(error, '资料已保存在本机，稍后可重新同步。'),
+        message: readableErrorMessage(error, '当前修改尚未保存，请检查网络后重试。'),
         tone: 'warning',
       });
     } finally {

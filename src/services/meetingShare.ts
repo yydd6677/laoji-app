@@ -6,7 +6,7 @@ import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
 
 export type MeetingShareKind = 'bundle' | 'document' | 'audio';
-export type MeetingShareErrorCode = 'NO_AUDIO' | 'SHARING_UNAVAILABLE';
+export type MeetingShareErrorCode = 'NO_AUDIO' | 'NO_MEETING_CONTENT' | 'SHARING_UNAVAILABLE';
 export const MEETING_SHARE_RETENTION_MS = 10 * 60 * 1000;
 
 export class MeetingShareError extends Error {
@@ -261,6 +261,9 @@ export async function shareMeetingArtifact(kind: MeetingShareKind, input: Meetin
     }
     const audio = await materializeAudio(input, directoryUri, baseName);
     if (audio) files.push(audio.uri);
+    if (!summary && !transcript && !audio) {
+      throw new MeetingShareError('NO_MEETING_CONTENT', 'meeting package has no transcript, summary, or audio');
+    }
 
     archiveUri = `${requireCacheDirectory()}meeting-shares/${baseName}_完整资料_${Date.now()}.zip`;
     const result = await zip(files.map(fileUriToPath), fileUriToPath(archiveUri), BEST_SPEED);
@@ -283,6 +286,7 @@ export function meetingShareErrorMessage(error: unknown): string {
   if (audioSecurityMessage) return audioSecurityMessage;
   if (error instanceof MeetingShareError) {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
+    if (error.code === 'NO_MEETING_CONTENT') return '当前会议还没有录音、转写或总结，无法生成完整资料包。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';
   }
   return '分享文件准备失败，请稍后重试。';

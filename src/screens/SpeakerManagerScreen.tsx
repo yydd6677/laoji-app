@@ -21,7 +21,7 @@ function qualityLabel(value: number): string {
 }
 
 export function SpeakerManagerScreen({ navigation }: Props) {
-  const { accessToken, isGuest } = useAuth();
+  const { accessToken, isGuest, signOut } = useAuth();
   const [speakers, setSpeakers] = useState<SpeakerProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -79,11 +79,11 @@ export function SpeakerManagerScreen({ navigation }: Props) {
           <Text style={s.guestText}>声纹是账号私有资料，访客模式不会上传或保存个人音色。</Text>
           <TouchableOpacity
             style={s.primaryButton}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => { void signOut().catch(() => {}); }}
             accessibilityRole="button"
-            accessibilityLabel="前往账号页面"
+            accessibilityLabel="退出访客模式并登录"
           >
-            <Text style={s.primaryButtonText}>前往账号</Text>
+            <Text style={s.primaryButtonText}>登录账号</Text>
           </TouchableOpacity>
         </View>
       ) : (

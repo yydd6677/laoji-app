@@ -10,6 +10,7 @@ import { MeetingSummary, TranscriptLine } from '../types';
 import { HttpResponseError } from './errors';
 
 const MAX_POLL_DURATION_MS = 180_000;
+const SUMMARY_LONG_POLL_MS = 5_000;
 
 export interface MeetingSummaryProgress {
   attempt: number;
@@ -18,10 +19,15 @@ export interface MeetingSummaryProgress {
   stage: 'queued' | 'generating' | 'reconnecting' | 'resubmitting';
 }
 
-export function summaryPollDelayMs(elapsedMs: number): number {
-  if (elapsedMs < 5_000) return 500;
-  if (elapsedMs < 30_000) return 1_000;
-  return 2_000;
+export function summaryPollDelayMs(elapsedMs: number, lastStatus = ''): number {
+  if (lastStatus === 'RECONNECTING') {
+    if (elapsedMs < 5_000) return 500;
+    if (elapsedMs < 30_000) return 1_000;
+    return 2_000;
+  }
+  if (elapsedMs < 5_000) return 250;
+  if (elapsedMs < 30_000) return lastStatus === 'PENDING' ? 1_000 : 500;
+  return lastStatus === 'PENDING' ? 2_000 : 1_000;
 }
 
 export function meetingSummaryProgressLabel(progress: MeetingSummaryProgress): string {
@@ -102,12 +108,12 @@ export function meetingDateForSummary(dateLabel?: string, createdAt?: string): s
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 }
 
-export function normalizeGuestSummaryResult(meetingId: string, value: unknown): MeetingSummary | null {
+export function normalizeMeetingSummaryResult(meetingId: string, value: unknown): MeetingSummary | null {
   if (!value || typeof value !== 'object') return null;
   const result = value as Record<string, unknown>;
-  const overview = typeof result.overview === 'string' ? result.overview : '';
-  const fullText = typeof result.full_text === 'string' ? result.full_text : overview;
-  const markdown = typeof result.markdown === 'string' ? result.markdown : fullText;
+  const overview = typeof result.overview === 'string' ? result.overview.trim() : '';
+  const fullText = typeof result.full_text === 'string' ? result.full_text.trim() : overview;
+  const markdown = typeof result.markdown === 'string' ? result.markdown.trim() : fullText;
   if (!(overview || fullText || markdown)) return null;
   return {
     meeting_id: typeof result.meeting_id === 'string' ? result.meeting_id : meetingId,
@@ -120,27 +126,34 @@ export function normalizeGuestSummaryResult(meetingId: string, value: unknown): 
   };
 }
 
+export const normalizeGuestSummaryResult = normalizeMeetingSummaryResult;
+
 async function waitForTask(
-  fetchStatus: () => Promise<ApiMeetingTaskStatus>,
+  fetchStatus: (waitMs: number) => Promise<ApiMeetingTaskStatus>,
   options: { signal?: AbortSignal; onProgress?: (progress: MeetingSummaryProgress) => void } = {},
 ): Promise<ApiMeetingTaskStatus> {
   const startedAt = Date.now();
   let consecutiveFetchFailures = 0;
   let lastFetchError: unknown;
+  let lastStatus = '';
+  let supportsLongPoll = false;
   for (let attempt = 0; Date.now() - startedAt <= MAX_POLL_DURATION_MS; attempt += 1) {
     throwIfAborted(options.signal);
-    if (attempt > 0) {
-      await delay(summaryPollDelayMs(Date.now() - startedAt), options.signal);
+    if (attempt > 0 && !supportsLongPoll) {
+      await delay(summaryPollDelayMs(Date.now() - startedAt, lastStatus), options.signal);
     }
     let status: ApiMeetingTaskStatus;
     try {
-      status = await fetchStatus();
+      status = await fetchStatus(attempt === 0 ? 0 : SUMMARY_LONG_POLL_MS);
       consecutiveFetchFailures = 0;
       lastFetchError = undefined;
+      supportsLongPoll = status.long_poll_supported === true;
     } catch (error) {
       if (isTerminalPollError(error)) throw error;
       consecutiveFetchFailures += 1;
       lastFetchError = error;
+      lastStatus = 'RECONNECTING';
+      supportsLongPoll = false;
       options.onProgress?.({
         attempt: attempt + 1,
         status: 'RECONNECTING',
@@ -150,6 +163,7 @@ async function waitForTask(
       if (consecutiveFetchFailures < 5) continue;
       throw error;
     }
+    lastStatus = status.status;
     const elapsedMs = Date.now() - startedAt;
     options.onProgress?.({
       attempt: attempt + 1,
@@ -231,20 +245,20 @@ export async function generateSummaryForMeeting(options: {
     let status: ApiMeetingTaskStatus;
     try {
       status = await waitForTask(
-        () => fetchGuestMeetingSummaryTask(taskId, signal),
+        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs),
         { signal, onProgress },
       );
     } catch (error) {
-      if (!resumeTaskId || !isMissingTaskError(error)) throw error;
+      if (!isMissingTaskError(error)) throw error;
       throwIfAborted(signal);
       reportResubmission();
       taskId = await submitTask(false);
       status = await waitForTask(
-        () => fetchGuestMeetingSummaryTask(taskId, signal),
+        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs),
         { signal, onProgress },
       );
     }
-    const summary = normalizeGuestSummaryResult(meetingId, status.result);
+    const summary = normalizeMeetingSummaryResult(meetingId, status.result);
     if (!summary) throw new Error('guest meeting summary is empty');
     return summary;
   }
@@ -259,7 +273,7 @@ export async function generateSummaryForMeeting(options: {
   if (taskId) {
     try {
       await waitForTask(
-        () => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal),
+        waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
         { signal, onProgress },
       );
     } catch (error) {
@@ -267,12 +281,13 @@ export async function generateSummaryForMeeting(options: {
       // summary. Check the durable result once before showing a terminal error.
       throwIfAborted(signal);
       const completed = await fetchMeetingSummaryDetail(meetingId, accessToken, signal).catch(() => null);
-      if (completed) return completed;
-      if (resumeTaskId && isMissingTaskError(error)) {
+      const normalizedCompleted = normalizeMeetingSummaryResult(meetingId, completed);
+      if (normalizedCompleted) return normalizedCompleted;
+      if (isMissingTaskError(error)) {
         reportResubmission();
         taskId = await submitTask(false);
         await waitForTask(
-          () => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal),
+          waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
           { signal, onProgress },
         );
       } else {
@@ -281,7 +296,10 @@ export async function generateSummaryForMeeting(options: {
     }
   }
   throwIfAborted(signal);
-  const summary = await fetchMeetingSummaryDetail(meetingId, accessToken, signal);
+  const summary = normalizeMeetingSummaryResult(
+    meetingId,
+    await fetchMeetingSummaryDetail(meetingId, accessToken, signal),
+  );
   if (!summary) throw new Error('meeting summary is empty');
   return summary;
 }

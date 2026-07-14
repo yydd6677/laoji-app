@@ -131,7 +131,16 @@ export function CalendarScreen({ navigation }: Props) {
         }
       >
         <View style={{ height: 14 }} />
-        <CalGrid year={year} month={month} selDay={selectedDay} onDay={setSelDay} onPrev={prev} onNext={next} events={events} />
+        <CalGrid
+          year={year}
+          month={month}
+          selDay={selectedDay}
+          onDay={setSelDay}
+          onPrev={prev}
+          onNext={next}
+          onEvent={event => navigation.navigate('EventDetail', { eventId: event.id })}
+          events={events}
+        />
 
         <View style={s.divider} />
 

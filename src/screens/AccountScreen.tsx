@@ -23,7 +23,9 @@ import {
   getNotificationPermissionStatus,
   labelForReminder,
   loadNotificationPrefs,
+  openNotificationSettings,
   saveNotificationPrefs,
+  scheduleTestNotification,
 } from '../services/notifications';
 
 type Props = {
@@ -46,6 +48,9 @@ export function AccountScreen({ navigation, route }: Props) {
   const [notificationVisible, setNotificationVisible] = useState(false);
   const [defaultReminder, setDefaultReminder] = useState<ReminderMinutes>(15);
   const [permissionStatus, setPermissionStatus] = useState('unknown');
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const [notificationTestBusy, setNotificationTestBusy] = useState(false);
   const notificationScope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
   const staticFields = [
     {
@@ -118,19 +123,100 @@ export function AccountScreen({ navigation, route }: Props) {
   };
 
   const handleReminderChoice = async (value: ReminderMinutes) => {
-    setDefaultReminder(value);
-    await saveNotificationPrefs(notificationScope, { defaultReminderMinutes: value });
+    if (reminderSaving || value === defaultReminder) return;
+    setReminderSaving(true);
+    try {
+      await saveNotificationPrefs(notificationScope, { defaultReminderMinutes: value });
+      setDefaultReminder(value);
+    } catch {
+      showDialog({
+        title: '提醒设置未保存',
+        message: '本机存储暂时不可用，默认提醒仍保持原设置。',
+        tone: 'error',
+      });
+    } finally {
+      setReminderSaving(false);
+    }
   };
 
   const handleRequestPermission = async () => {
-    const granted = await ensureNotificationPermission();
-    const status = await getNotificationPermissionStatus().catch(() => granted ? 'granted' : 'denied');
-    setPermissionStatus(status);
-    showDialog({
-      title: granted ? '通知已开启' : '通知未开启',
-      message: granted ? '老记可以为有提醒的日程创建系统通知。' : '未获得系统通知权限，日程提醒不会弹出系统通知。',
-      tone: granted ? 'success' : 'warning',
-    });
+    if (permissionBusy) return;
+    setPermissionBusy(true);
+    try {
+      if (permissionStatus === 'granted') {
+        try {
+          await openNotificationSettings();
+        } catch {
+          showDialog({
+            title: '无法打开系统设置',
+            message: '请在手机设置的应用管理中找到“老记”，再进入通知管理。',
+            tone: 'error',
+          });
+        }
+        return;
+      }
+      const granted = await ensureNotificationPermission();
+      const status = await getNotificationPermissionStatus().catch(() => granted ? 'granted' : 'denied');
+      setPermissionStatus(status);
+      showDialog({
+        title: granted ? '通知已开启' : '通知未开启',
+        message: granted ? '老记可以为有提醒的日程创建系统通知。' : '未获得系统通知权限，日程提醒不会弹出系统通知。',
+        tone: granted ? 'success' : 'warning',
+        actions: granted ? undefined : [
+          {
+            text: '打开系统设置',
+            role: 'primary',
+            onPress: async () => {
+              try {
+                await openNotificationSettings();
+              } catch {
+                showDialog({
+                  title: '无法打开系统设置',
+                  message: '请在手机设置的应用管理中找到“老记”，再进入通知管理。',
+                  tone: 'error',
+                });
+              }
+            },
+          },
+          { text: '以后再说', role: 'cancel' },
+        ],
+      });
+    } catch {
+      setPermissionStatus('unknown');
+      showDialog({
+        title: '无法检查通知权限',
+        message: '系统通知状态读取失败，请稍后重试或前往系统设置检查。',
+        tone: 'error',
+      });
+    } finally {
+      setPermissionBusy(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    if (notificationTestBusy) return;
+    setNotificationTestBusy(true);
+    try {
+      await scheduleTestNotification();
+      setPermissionStatus('granted');
+      showDialog({
+        title: '测试提醒已安排',
+        message: '老记将在 3 秒后发送一条系统通知。',
+        tone: 'success',
+      });
+    } catch {
+      const status = await getNotificationPermissionStatus().catch(() => 'unknown');
+      setPermissionStatus(status);
+      showDialog({
+        title: '测试提醒未发送',
+        message: status === 'granted'
+          ? '系统通知已开启，但提醒调度失败。请稍后重试。'
+          : '请先开启老记的系统通知，再发送测试提醒。',
+        tone: 'warning',
+      });
+    } finally {
+      setNotificationTestBusy(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -254,8 +340,12 @@ export function AccountScreen({ navigation, route }: Props) {
         visible={notificationVisible}
         permissionStatus={permissionStatus}
         defaultReminder={defaultReminder}
+        reminderSaving={reminderSaving}
+        permissionBusy={permissionBusy}
+        notificationTestBusy={notificationTestBusy}
         onChoice={handleReminderChoice}
         onPermission={handleRequestPermission}
+        onTestNotification={handleTestNotification}
         onClose={() => setNotificationVisible(false)}
       />
       <DeleteAccountSheet
@@ -407,15 +497,23 @@ function NotificationSheet({
   visible,
   permissionStatus,
   defaultReminder,
+  reminderSaving,
+  permissionBusy,
+  notificationTestBusy,
   onChoice,
   onPermission,
+  onTestNotification,
   onClose,
 }: {
   visible: boolean;
   permissionStatus: string;
   defaultReminder: ReminderMinutes;
+  reminderSaving: boolean;
+  permissionBusy: boolean;
+  notificationTestBusy: boolean;
   onChoice: (value: ReminderMinutes) => void | Promise<void>;
   onPermission: () => void | Promise<void>;
+  onTestNotification: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const permissionText = permissionStatus === 'granted'
@@ -428,16 +526,60 @@ function NotificationSheet({
       <View style={s.permissionBox}>
         <Text style={s.permissionTitle}>{permissionText}</Text>
         <Text style={s.permissionDesc}>新建有具体时间的日程会按默认提醒创建本机系统通知。</Text>
-        <TouchableOpacity style={s.permissionBtn} onPress={() => { void onPermission(); }}>
-          <Text style={s.permissionBtnText}>检查并开启通知</Text>
-        </TouchableOpacity>
+        <View style={s.permissionActions}>
+          <TouchableOpacity
+            style={s.permissionBtn}
+            onPress={() => { void onPermission(); }}
+            disabled={permissionBusy || notificationTestBusy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: permissionBusy || notificationTestBusy, busy: permissionBusy }}
+            testID="notification-permission-button"
+          >
+            {permissionBusy
+              ? <ActivityIndicator size="small" color={C.purple} />
+              : <>
+                  <Ionicons name="settings-outline" size={14} color={C.purple} />
+                  <Text style={s.permissionBtnText}>
+                    {permissionStatus === 'granted' ? '系统通知设置' : '检查并开启'}
+                  </Text>
+                </>}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.permissionBtn}
+            onPress={() => { void onTestNotification(); }}
+            disabled={permissionBusy || notificationTestBusy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: permissionBusy || notificationTestBusy, busy: notificationTestBusy }}
+            testID="notification-test-button"
+          >
+            {notificationTestBusy
+              ? <ActivityIndicator size="small" color={C.purple} />
+              : <>
+                  <Ionicons name="notifications-outline" size={14} color={C.purple} />
+                  <Text style={s.permissionBtnText}>发送测试提醒</Text>
+                </>}
+          </TouchableOpacity>
+        </View>
       </View>
-      <Text style={s.modalLabel}>默认提醒</Text>
+      <View style={s.reminderHeader}>
+        <Text style={s.modalLabel}>默认提醒</Text>
+        <View style={s.reminderBusySlot}>
+          {reminderSaving ? <ActivityIndicator size="small" color={C.purple} /> : null}
+        </View>
+      </View>
       <View style={s.reminderGrid}>
         {REMINDER_OPTIONS.map(opt => {
           const selected = opt.value === defaultReminder;
           return (
-            <TouchableOpacity key={opt.label} style={[s.reminderItem, selected && s.reminderSelected]} onPress={() => { void onChoice(opt.value); }}>
+            <TouchableOpacity
+              key={opt.label}
+              style={[s.reminderItem, selected && s.reminderSelected]}
+              onPress={() => { void onChoice(opt.value); }}
+              disabled={reminderSaving}
+              accessibilityRole="button"
+              accessibilityState={{ selected, disabled: reminderSaving, busy: reminderSaving }}
+              testID={`notification-reminder-${opt.value ?? 'none'}`}
+            >
               <Text style={[s.reminderText, selected && s.reminderSelectedText]}>{opt.label}</Text>
             </TouchableOpacity>
           );
@@ -481,9 +623,12 @@ const s = StyleSheet.create({
   permissionBox: { borderRadius: 18, backgroundColor: C.waveformBg, padding: 15, marginBottom: 16 },
   permissionTitle: { fontSize: 15, fontWeight: '800', color: C.text, marginBottom: 5 },
   permissionDesc: { fontSize: 12, color: C.sub, lineHeight: 18, marginBottom: 12 },
-  permissionBtn: { alignSelf: 'flex-start', backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+  permissionActions: { flexDirection: 'row', gap: 8 },
+  permissionBtn: { flex: 1, minWidth: 0, height: 36, backgroundColor: C.card, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 9 },
   permissionBtnText: { fontSize: 12, color: C.purple, fontWeight: '800' },
-  modalLabel: { fontSize: 13, color: C.sub, fontWeight: '700', marginBottom: 10 },
+  reminderHeader: { minHeight: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  reminderBusySlot: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
+  modalLabel: { fontSize: 13, color: C.sub, fontWeight: '700' },
   reminderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   reminderItem: { minWidth: '30%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: C.inputBg },
   reminderSelected: { backgroundColor: C.purple },

@@ -1,0 +1,342 @@
+{
+  "created_for": "LaoJi realtime meeting ASR quality gate",
+  "count": 28,
+  "samples": [
+    {
+      "id": "M001",
+      "text": "大家先确认一下，今天的发布范围只包含登录和日历，会议模块延期到下周。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "范围决策和延期",
+      "critical_terms": ["登录和日历", "会议模块", "延期到下周"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_001.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_001.wav"
+      }
+    },
+    {
+      "id": "M002",
+      "text": "王磊负责周三前完成安卓回归，李娜负责整理接口文档。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+2%",
+      "note": "双负责人和截止日期",
+      "critical_terms": ["王磊", "周三前", "安卓回归", "李娜", "接口文档"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_002.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_002.wav"
+      }
+    },
+    {
+      "id": "M003",
+      "text": "刚才说由陈晨处理不对，改成赵敏负责，截止时间仍然是周五下午六点。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "-3%",
+      "note": "负责人纠正",
+      "critical_terms": ["陈晨", "赵敏", "周五下午六点"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_003.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_003.wav"
+      }
+    },
+    {
+      "id": "M004",
+      "text": "这个方案暂时不通过，等压测数据出来以后再决定。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+6%",
+      "note": "否定和待定表达",
+      "critical_terms": ["暂时不通过", "再决定"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_004.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_004.wav"
+      }
+    },
+    {
+      "id": "M005",
+      "text": "最终决定采用方案乙，不再继续评估方案甲。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "-5%",
+      "note": "最终决策和废弃方案",
+      "critical_terms": ["方案乙", "不再继续评估方案甲"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_005.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_005.wav"
+      }
+    },
+    {
+      "id": "M006",
+      "text": "当前转写延迟中位数是三百八十毫秒，峰值是九百二十毫秒。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "性能数字",
+      "critical_terms": ["三百八十毫秒", "九百二十毫秒"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_006.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_006.wav"
+      }
+    },
+    {
+      "id": "M007",
+      "text": "请把一八零二零端口的健康检查加入上线清单。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+4%",
+      "note": "端口数字",
+      "critical_terms": ["一八零二零端口", "健康检查", "上线清单"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_007.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_007.wav"
+      }
+    },
+    {
+      "id": "M008",
+      "text": "客户端版本号是五十八，包名是老记应用。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%",
+      "note": "版本和产品名",
+      "critical_terms": ["五十八", "包名", "老记应用"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_008.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_008.wav"
+      }
+    },
+    {
+      "id": "M009",
+      "text": "会议室是B二零三，下午两点开始，预计四十五分钟结束。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "-4%",
+      "note": "字母房间号和时长",
+      "critical_terms": ["B二零三", "下午两点", "四十五分钟"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_009.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_009.wav"
+      }
+    },
+    {
+      "id": "M010",
+      "text": "不是七月十六号发布，是七月十八号上午十点发布。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+1%",
+      "note": "日期纠正",
+      "critical_terms": ["不是七月十六号", "七月十八号上午十点"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_010.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_010.wav"
+      }
+    },
+    {
+      "id": "M011",
+      "text": "我补充一个风险，如果服务器断线，录音必须先保存在本机，恢复网络后再上传。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "-2%",
+      "note": "风险和恢复策略",
+      "critical_terms": ["服务器断线", "保存在本机", "恢复网络后再上传"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_011.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_011.wav"
+      }
+    },
+    {
+      "id": "M012",
+      "text": "张伟这周先完成数据库迁移脚本，但不要执行迁移，等评审通过后再操作。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+3%",
+      "note": "行动与禁止执行",
+      "critical_terms": ["张伟", "数据库迁移脚本", "不要执行迁移", "评审通过后"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_012.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_012.wav"
+      }
+    },
+    {
+      "id": "M013",
+      "text": "关于通知权限，小米手机要同时检查系统通知开关和应用内提醒状态。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+5%",
+      "note": "设备和权限术语",
+      "critical_terms": ["小米手机", "系统通知开关", "应用内提醒状态"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_013.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_013.wav"
+      }
+    },
+    {
+      "id": "M014",
+      "text": "目前游客也可以生成总结，不过会议列表必须按本地作用域隔离。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "-1%",
+      "note": "游客能力和隔离",
+      "critical_terms": ["游客", "生成总结", "本地作用域隔离"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_014.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_014.wav"
+      }
+    },
+    {
+      "id": "M015",
+      "text": "研发这边没有新增问题，测试还剩两个阻塞项，一个是冷启动，一个是录音续传。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "状态和并列阻塞项",
+      "critical_terms": ["两个阻塞项", "冷启动", "录音续传"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_015.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_015.wav"
+      }
+    },
+    {
+      "id": "M016",
+      "text": "接口网关的超时时间从三十秒改成十秒，失败后最多重试一次。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+8%",
+      "note": "配置变更和重试次数",
+      "critical_terms": ["三十秒改成十秒", "最多重试一次"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_016.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_016.wav"
+      }
+    },
+    {
+      "id": "M017",
+      "text": "嗯，我确认一下，刚才那个录音上传的负责人还是周倩，日期没有变化。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "-6%",
+      "note": "口语停顿和负责人确认",
+      "critical_terms": ["周倩", "日期没有变化"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_017.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_017.wav"
+      }
+    },
+    {
+      "id": "M018",
+      "text": "先别关闭旧服务，等新实例通过健康检查，再切换流量，最后观察五分钟。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+2%",
+      "note": "顺序操作",
+      "critical_terms": ["别关闭旧服务", "新实例", "健康检查", "切换流量", "观察五分钟"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_018.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_018.wav"
+      }
+    },
+    {
+      "id": "M019",
+      "text": "本轮二十四条总结全部通过，九十五分位耗时三点三秒。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%",
+      "note": "统计口径和小数",
+      "critical_terms": ["二十四条", "全部通过", "九十五分位", "三点三秒"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_019.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_019.wav"
+      }
+    },
+    {
+      "id": "M020",
+      "text": "会议结论有三点，第一保留游客入口，第二默认提醒十五分钟，第三安卓优先发布。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+4%",
+      "note": "三项并列结论",
+      "critical_terms": ["保留游客入口", "默认提醒十五分钟", "安卓优先发布"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_020.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_020.wav"
+      }
+    },
+    {
+      "id": "M021",
+      "text": "之前安排周四上线的事项取消，不要再加入本周发布计划。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "-2%",
+      "note": "明确取消",
+      "critical_terms": ["周四上线", "取消", "不要再加入"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_021.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_021.wav"
+      }
+    },
+    {
+      "id": "M022",
+      "text": "数据组今天只做只读核验，不修改数据库，也不清理历史会议。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+3%",
+      "note": "只读边界",
+      "critical_terms": ["只读核验", "不修改数据库", "不清理历史会议"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_022.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_022.wav"
+      }
+    },
+    {
+      "id": "M023",
+      "text": "如果用户已经确认解析结果正确，即使系统建议补充，也要允许直接保存。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+1%",
+      "note": "条件和产品规则",
+      "critical_terms": ["确认解析结果正确", "允许直接保存"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_023.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_023.wav"
+      }
+    },
+    {
+      "id": "M024",
+      "text": "还有没有其他问题？如果没有，我们就按刚才确认的负责人和日期执行。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "-4%",
+      "note": "问句和收尾确认",
+      "critical_terms": ["负责人和日期", "执行"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_024.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_024.wav"
+      }
+    },
+    {
+      "id": "M025",
+      "text": "API返回四零四时显示可恢复错误，不要把对象直接渲染成文字。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+5%",
+      "note": "英文缩写和错误码",
+      "critical_terms": ["API", "四零四", "可恢复错误", "不要把对象"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_025.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_025.wav"
+      }
+    },
+    {
+      "id": "M026",
+      "text": "八B模型保持热加载，三十二B模型本轮不参与日程解析。",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "-3%",
+      "note": "模型规格",
+      "critical_terms": ["八B模型", "热加载", "三十二B模型", "不参与"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_026.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_026.wav"
+      }
+    },
+    {
+      "id": "M027",
+      "text": "录音格式统一为十六K采样率、十六位、单声道WAV。",
+      "voice": "zh-CN-XiaoyiNeural",
+      "rate": "+0%",
+      "note": "音频规格和英文缩写",
+      "critical_terms": ["十六K采样率", "十六位", "单声道WAV"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_027.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_027.wav"
+      }
+    },
+    {
+      "id": "M028",
+      "text": "这不是最终结论，我只是复述备选方案，正式决策等负责人确认。",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "-5%",
+      "note": "否定终局和备选方案",
+      "critical_terms": ["不是最终结论", "备选方案", "正式决策"],
+      "files": {
+        "mp3": "test-assets/meeting-asr-voice-samples/mp3/meeting_028.mp3",
+        "wav": "test-assets/meeting-asr-voice-samples/wav/meeting_028.wav"
+      }
+    }
+  ]
+}

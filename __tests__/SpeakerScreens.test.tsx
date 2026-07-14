@@ -64,13 +64,38 @@ describe('speaker management screens', () => {
   });
 
   it('keeps voiceprints unavailable to guest mode and offers an account route', async () => {
-    (useAuth as jest.Mock).mockReturnValue({ isGuest: true, accessToken: null });
+    const signOut = jest.fn(async () => undefined);
+    (useAuth as jest.Mock).mockReturnValue({ isGuest: true, accessToken: null, signOut });
     await render(<SpeakerManagerScreen navigation={navigation} />);
 
     expect(screen.getByText('登录后管理讲话人')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('前往账号页面'));
-    expect(navigation.navigate).toHaveBeenCalledWith('Profile');
+    fireEvent.press(screen.getByLabelText('退出访客模式并登录'));
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(navigation.navigate).not.toHaveBeenCalled();
     expect(fetchSpeakers).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing-speaker actions hidden after a load failure and offers retry', async () => {
+    (useAuth as jest.Mock).mockReturnValue({ isGuest: false, accessToken: 'token-7' });
+    (fetchSpeakers as jest.Mock)
+      .mockRejectedValueOnce(new Error('network offline'))
+      .mockResolvedValueOnce([{ speaker_id: 'u7_a', name: '张老师', sample_count: 2, quality: 0.83 }]);
+    const route = {
+      key: 'speaker-existing',
+      name: 'SpeakerEnrollment' as const,
+      params: { speakerId: 'u7_a' },
+    } as React.ComponentProps<typeof SpeakerEnrollmentScreen>['route'];
+    const enrollmentNavigation = navigation as unknown as React.ComponentProps<typeof SpeakerEnrollmentScreen>['navigation'];
+    await render(<SpeakerEnrollmentScreen navigation={enrollmentNavigation} route={route} />);
+
+    expect(await screen.findByText('讲话人未能加载')).toBeTruthy();
+    expect(screen.queryByLabelText('删除讲话人')).toBeNull();
+    expect(screen.queryByLabelText('开始录制音色')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('重试加载讲话人详情'));
+
+    expect(await screen.findByDisplayValue('张老师')).toBeTruthy();
+    expect(screen.getByLabelText('删除讲话人')).toBeTruthy();
+    expect(screen.getByLabelText('开始录制音色')).toBeTruthy();
   });
 
   it('shows an explicit management entry and account-owned speaker rows', async () => {

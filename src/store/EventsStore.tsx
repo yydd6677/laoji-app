@@ -831,8 +831,15 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
   const undoDelete = useCallback(async () => {
     if (!lastDeleted) return;
     const deleted = lastDeleted;
-    setLastDeleted(null);
-    await addEvent(eventSeriesDraft(deleted));
+    try {
+      await addEvent(eventSeriesDraft(deleted));
+      setLastDeleted(current => current === deleted ? null : current);
+    } catch (error) {
+      // The five-second banner timer may expire while a cloud retry is in flight.
+      // Restore the same undo payload unless a newer deletion has replaced it.
+      setLastDeleted(current => current ?? deleted);
+      throw error;
+    }
   }, [addEvent, lastDeleted]);
 
   return (

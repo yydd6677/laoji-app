@@ -1,11 +1,19 @@
+import * as Notifications from 'expo-notifications';
+import { Linking } from 'react-native';
 import {
   DEFAULT_REMINDER_MINUTES,
   SOON_REMINDER_DELAY_MS,
+  TEST_NOTIFICATION_DELAY_MS,
   defaultReminderForEvent,
+  ensureNotificationPermission,
   labelForReminder,
   notificationDateTrigger,
+  openNotificationSettings,
   parseEventDateTime,
+  prepareNotificationChannel,
   reminderFireDate,
+  reminderUnavailableMessage,
+  scheduleTestNotification,
 } from '../src/services/notifications';
 
 describe('notification reminder rules', () => {
@@ -66,5 +74,94 @@ describe('notification reminder rules', () => {
       type: 'date',
       date,
     }));
+  });
+});
+
+describe('notification permission setup', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('creates the Android reminder channel before requesting permission', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: 'undetermined',
+      granted: false,
+      canAskAgain: true,
+    });
+    (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: 'granted',
+      granted: true,
+      canAskAgain: true,
+    });
+
+    await expect(ensureNotificationPermission()).resolves.toBe(true);
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      'laoji-events',
+      expect.objectContaining({ name: '日程提醒', importance: 'high' }),
+    );
+    expect(Notifications.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat a system request after the OS disallows asking again', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: 'denied',
+      granted: false,
+      canAskAgain: false,
+    });
+
+    await expect(ensureNotificationPermission()).resolves.toBe(false);
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('prepares a visible reminder channel and opens its Android notification settings', async () => {
+    await prepareNotificationChannel();
+    await openNotificationSettings();
+
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      'laoji-events',
+      expect.objectContaining({ sound: 'default' }),
+    );
+    expect(Linking.sendIntent).toHaveBeenCalledWith(
+      'android.settings.APP_NOTIFICATION_SETTINGS',
+      [{ key: 'android.provider.extra.APP_PACKAGE', value: 'com.laoji.app' }],
+    );
+    expect(Linking.openSettings).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the app settings when dedicated notification settings are unavailable', async () => {
+    (Linking.sendIntent as jest.Mock).mockRejectedValueOnce(new Error('unsupported intent'));
+
+    await openNotificationSettings();
+
+    expect(Linking.openSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('distinguishes a granted scheduling failure from a permission denial', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock)
+      .mockResolvedValueOnce({ status: 'granted', granted: true, canAskAgain: true })
+      .mockResolvedValueOnce({ status: 'denied', granted: false, canAskAgain: true });
+
+    await expect(reminderUnavailableMessage()).resolves.toContain('系统通知已开启');
+    await expect(reminderUnavailableMessage()).resolves.toContain('检查并开启系统通知');
+  });
+
+  it('schedules the settings test through the same Android date-trigger path', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: 'granted',
+      granted: true,
+      canAskAgain: true,
+    });
+    (Notifications.scheduleNotificationAsync as jest.Mock).mockResolvedValueOnce('test-id');
+
+    await expect(scheduleTestNotification()).resolves.toBe('test-id');
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.objectContaining({ title: '老记测试提醒' }),
+      trigger: expect.objectContaining({
+        type: 'date',
+        date: new Date(1_800_000_000_000 + TEST_NOTIFICATION_DELAY_MS),
+      }),
+    }));
+    now.mockRestore();
   });
 });

@@ -22,6 +22,8 @@ module.exports = {
   Linking: {
     canOpenURL: jest.fn(async () => true),
     openURL: jest.fn(async () => undefined),
+    openSettings: jest.fn(async () => undefined),
+    sendIntent: jest.fn(async () => undefined),
   },
   AppState: {
     currentState: 'active',
@@ -32,8 +34,17 @@ module.exports = {
   Dimensions: { get: jest.fn(() => ({ width: 390, height: 844 })) },
   useWindowDimensions: jest.fn(() => ({ width: 390, height: 844 })),
   Animated: {
-    Value: jest.fn(),
-    timing: jest.fn(() => ({ start: jest.fn() })),
+    Value: class MockAnimatedValue {
+      constructor(value) { this.value = value; }
+      setValue(value) { this.value = value; }
+      interpolate(config) { return { value: this.value, config }; }
+    },
+    timing: jest.fn((value, config) => ({
+      start: jest.fn(callback => {
+        value?.setValue?.(config?.toValue);
+        callback?.({ finished: true });
+      }),
+    })),
     View: 'Animated.View',
   },
   Easing: {},

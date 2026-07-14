@@ -7,8 +7,11 @@ jest.mock('../src/services/api', () => ({
 }));
 
 import {
+  fetchMeetingSummaryDetail,
+  fetchMeetingSummaryTask,
   fetchGuestMeetingSummaryTask,
   generateGuestMeetingSummary,
+  generateMeetingSummary,
 } from '../src/services/api';
 import { HttpResponseError } from '../src/services/errors';
 import {
@@ -52,13 +55,40 @@ describe('meeting summary helpers', () => {
   it('rejects an empty or malformed guest summary result', () => {
     expect(normalizeGuestSummaryResult('guest-meeting-1', null)).toBeNull();
     expect(normalizeGuestSummaryResult('guest-meeting-1', { key_decisions: [] })).toBeNull();
+    expect(normalizeGuestSummaryResult('guest-meeting-1', { overview: '   ', markdown: '\n' })).toBeNull();
+  });
+
+  it('rejects an authenticated task whose durable summary has no displayable content', async () => {
+    (generateMeetingSummary as jest.Mock).mockResolvedValueOnce({ task_id: 'cloud-empty-task' });
+    (fetchMeetingSummaryTask as jest.Mock).mockResolvedValueOnce({
+      status: 'SUCCESS',
+      result: { key_decisions: [], action_items: [] },
+    });
+    (fetchMeetingSummaryDetail as jest.Mock).mockResolvedValueOnce({
+      meeting_id: 'cloud-meeting-empty',
+      overview: '',
+      full_text: '',
+      markdown: '',
+      key_decisions: [],
+      action_items: [],
+    });
+
+    await expect(generateSummaryForMeeting({
+      meetingId: 'cloud-meeting-empty',
+      transcriptLines: [{ id: 'line-1', text: '讨论发布计划' }],
+      isGuest: false,
+      accessToken: 'token-1',
+    })).rejects.toThrow('meeting summary is empty');
   });
 
   it('polls quickly for interactive summaries and backs off for long tasks', () => {
-    expect(summaryPollDelayMs(0)).toBe(500);
-    expect(summaryPollDelayMs(4_999)).toBe(500);
-    expect(summaryPollDelayMs(5_000)).toBe(1_000);
-    expect(summaryPollDelayMs(30_000)).toBe(2_000);
+    expect(summaryPollDelayMs(0)).toBe(250);
+    expect(summaryPollDelayMs(4_999, 'STARTED')).toBe(250);
+    expect(summaryPollDelayMs(5_000, 'STARTED')).toBe(500);
+    expect(summaryPollDelayMs(5_000, 'PENDING')).toBe(1_000);
+    expect(summaryPollDelayMs(30_000, 'STARTED')).toBe(1_000);
+    expect(summaryPollDelayMs(30_000, 'PENDING')).toBe(2_000);
+    expect(summaryPollDelayMs(0, 'RECONNECTING')).toBe(500);
   });
 
   it('uses actual elapsed time and distinguishes queueing from generation', () => {
@@ -101,7 +131,7 @@ describe('meeting summary helpers', () => {
       resumeTaskId: 'task-existing',
     })).resolves.toMatchObject({ overview: '恢复完成' });
 
-    expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledWith('task-existing', undefined);
+    expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledWith('task-existing', undefined, 0);
     expect(generateGuestMeetingSummary).not.toHaveBeenCalled();
   });
 
@@ -127,6 +157,48 @@ describe('meeting summary helpers', () => {
     expect(onTaskSubmitted).toHaveBeenCalledWith('task-new');
   });
 
+  it('resubmits a newly created guest task once when the service process loses it', async () => {
+    (generateGuestMeetingSummary as jest.Mock)
+      .mockResolvedValueOnce({ task_id: 'task-lost' })
+      .mockResolvedValueOnce({ task_id: 'task-replacement' });
+    (fetchGuestMeetingSummaryTask as jest.Mock)
+      .mockRejectedValueOnce(new HttpResponseError('missing', 404, '任务不存在'))
+      .mockResolvedValueOnce({
+        status: 'SUCCESS',
+        result: { overview: '重提后完成', key_decisions: [], action_items: [] },
+      });
+
+    await expect(generateSummaryForMeeting({
+      meetingId: 'guest-meeting-new-task-lost',
+      transcriptLines: [{ id: 'line-1', text: '确认发布计划' }],
+      isGuest: true,
+    })).resolves.toMatchObject({ overview: '重提后完成' });
+
+    expect(generateGuestMeetingSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it('resubmits a newly created authenticated task once when the service process loses it', async () => {
+    (generateMeetingSummary as jest.Mock)
+      .mockResolvedValueOnce({ task_id: 'cloud-task-lost' })
+      .mockResolvedValueOnce({ task_id: 'cloud-task-replacement' });
+    (fetchMeetingSummaryTask as jest.Mock)
+      .mockRejectedValueOnce(new HttpResponseError('missing', 404, '任务不存在'))
+      .mockResolvedValueOnce({ status: 'SUCCESS', result: null });
+    (fetchMeetingSummaryDetail as jest.Mock)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ overview: '登录任务重提后完成' });
+
+    await expect(generateSummaryForMeeting({
+      meetingId: 'cloud-meeting-new-task-lost',
+      transcriptLines: [{ id: 'line-1', text: '确认发布计划' }],
+      isGuest: false,
+      accessToken: 'token-1',
+    })).resolves.toMatchObject({ overview: '登录任务重提后完成' });
+
+    expect(generateMeetingSummary).toHaveBeenCalledTimes(2);
+    expect(fetchMeetingSummaryTask).toHaveBeenCalledTimes(2);
+  });
+
   it('stops polling promptly when the caller aborts', async () => {
     (generateGuestMeetingSummary as jest.Mock).mockResolvedValueOnce({ task_id: 'task-1' });
     (fetchGuestMeetingSummaryTask as jest.Mock).mockResolvedValueOnce({ status: 'PENDING' });
@@ -145,7 +217,7 @@ describe('meeting summary helpers', () => {
     expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledTimes(1);
   });
 
-  it('detects an interactive completion on the 500 ms follow-up poll', async () => {
+  it('keeps the 250 ms fallback for a server without long-poll support', async () => {
     jest.useFakeTimers();
     try {
       (generateGuestMeetingSummary as jest.Mock).mockReset();
@@ -167,7 +239,9 @@ describe('meeting summary helpers', () => {
 
       await jest.advanceTimersByTimeAsync(0);
       expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledTimes(1);
-      await jest.advanceTimersByTimeAsync(500);
+      await jest.advanceTimersByTimeAsync(249);
+      expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
 
       await expect(pending).resolves.toMatchObject({ overview: '已完成总结' });
       expect(fetchGuestMeetingSummaryTask).toHaveBeenCalledTimes(2);
@@ -176,6 +250,40 @@ describe('meeting summary helpers', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('starts a long poll immediately after the server advertises support', async () => {
+    (generateGuestMeetingSummary as jest.Mock).mockResolvedValueOnce({ task_id: 'task-long-poll' });
+    (fetchGuestMeetingSummaryTask as jest.Mock)
+      .mockResolvedValueOnce({
+        status: 'STARTED',
+        result: null,
+        long_poll_supported: true,
+      })
+      .mockResolvedValueOnce({
+        status: 'SUCCESS',
+        result: { overview: '长轮询完成', key_decisions: [], action_items: [] },
+        long_poll_supported: true,
+      });
+
+    await expect(generateSummaryForMeeting({
+      meetingId: 'guest-meeting-long-poll',
+      transcriptLines: [{ id: 'line-1', text: '确认发布计划' }],
+      isGuest: true,
+    })).resolves.toMatchObject({ overview: '长轮询完成' });
+
+    expect(fetchGuestMeetingSummaryTask).toHaveBeenNthCalledWith(
+      1,
+      'task-long-poll',
+      undefined,
+      0,
+    );
+    expect(fetchGuestMeetingSummaryTask).toHaveBeenNthCalledWith(
+      2,
+      'task-long-poll',
+      undefined,
+      5_000,
+    );
   });
 
   it('recovers from short polling disconnects instead of reporting a false failure', async () => {
