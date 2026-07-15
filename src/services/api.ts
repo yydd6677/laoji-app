@@ -274,7 +274,7 @@ export interface ApiMeeting {
   title: string;
   description?: string;
   status: string;
-  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen' | 'hybrid';
+  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
   participants?: string[];
   created_at: string;
   updated_at: string;

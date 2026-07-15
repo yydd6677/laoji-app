@@ -34,6 +34,10 @@ npm run audit:public
 
 `audit:dependencies` 检查会进入生产安装图的依赖漏洞。`audit:public` 检查即将进入版本控制的文件边界、真实公网 IP、个人绝对路径和常见凭据，并要求本机安装 `gitleaks`。发布前还应对重写后的完整 Git 历史运行 Gitleaks，并从全新克隆再次执行以上命令。
 
+## 当前开发目标
+
+当前实施顺序、已确认裁剪和待拍板事项见 [当前工作目标](docs/current-work-goal.md)。飞书日历重构的长期边界见 [基线合同](docs/feishu-calendar-baseline-contract.md)，老记语音创建入口见 [语音交互合同](docs/voice-schedule-interaction-contract.md)。
+
 ## 构建
 
 开发 APK 可通过 Expo 本地原生构建生成。生产 AAB 使用 `eas.json` 的 `production` profile，并要求 EAS production environment 中存在全部 `EXPO_PUBLIC_*` 配置。正式 production 配置会拒绝裸 IP、明文 HTTP、不安全 WebSocket、保留域名和明显占位域名。

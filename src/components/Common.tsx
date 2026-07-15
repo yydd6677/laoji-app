@@ -5,15 +5,6 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { Colors as C } from '../theme/colors';
 import { UserProfile } from '../services/profile';
 
-// ─── Sparkle ─────────────────────────────────────────────────────────────────
-export function Sparkle({ size, color }: { size: number; color: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 20 20">
-      <Path d="M10 0 L11.8 8.2 L20 10 L11.8 11.8 L10 20 L8.2 11.8 L0 10 L8.2 8.2 Z" fill={color} />
-    </Svg>
-  );
-}
-
 // ─── Waveform ─────────────────────────────────────────────────────────────────
 const WAVEFORM_BAR_WIDTH = 3;
 const WAVEFORM_BAR_GAP = 2;
@@ -73,7 +64,7 @@ export function Waveform({ bars, color, height = 28, splitAt }: {
             styles.waveformBar,
             {
               height: Math.max(2, (value / max) * height),
-              backgroundColor: visibleSplitAt !== undefined && index < visibleSplitAt ? '#4A90D9' : color,
+              backgroundColor: visibleSplitAt !== undefined && index < visibleSplitAt ? C.primaryHover : color,
             },
           ]}
         />
@@ -110,10 +101,10 @@ function NeutralAvatar({ size }: { size: number }) {
   return (
     <View style={[styles.neutralAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
       <Svg width={size * 0.72} height={size * 0.72} viewBox="0 0 100 100">
-        <Circle cx="50" cy="36" r="18" fill="#B8B4D4" />
+        <Circle cx="50" cy="36" r="18" fill="#A6ABB2" />
         <Path
           d="M20 86c4-22 18-34 30-34s26 12 30 34c-8 6-18 9-30 9s-22-3-30-9z"
-          fill="#B8B4D4"
+          fill="#A6ABB2"
         />
       </Svg>
     </View>
@@ -130,11 +121,20 @@ export function Tag({ label, color }: { label: string; color: string }) {
 }
 
 // ─── BackHeader ──────────────────────────────────────────────────────────────
+export const BACK_HEADER_GEOMETRY = {
+  height: 44,
+  backTargetWidth: 54,
+  backIconSize: 24,
+  titleInset: 62,
+  titleSize: 18,
+  rightTargetWidth: 48,
+} as const;
+
 export function BackHeader({ title, onBack, right }: {
   title: string; onBack: () => void; right?: React.ReactNode;
 }) {
   return (
-    <View style={styles.backHeader}>
+    <View style={styles.backHeader} testID="app-back-header">
       <TouchableOpacity
         style={styles.backSide}
         onPress={onBack}
@@ -142,10 +142,15 @@ export function BackHeader({ title, onBack, right }: {
         accessibilityRole="button"
         accessibilityLabel="返回"
       >
-        <Ionicons name="chevron-back" size={22} color={C.sub} />
+        <Ionicons
+          name="chevron-back"
+          size={BACK_HEADER_GEOMETRY.backIconSize}
+          color={C.text}
+          testID="app-back-icon"
+        />
       </TouchableOpacity>
-      <Text style={styles.backTitle} numberOfLines={1}>{title}</Text>
-      <View style={[styles.backSide, styles.backRight]}>{right}</View>
+      <Text style={styles.backTitle} numberOfLines={1} testID="app-back-title">{title}</Text>
+      <View style={styles.backRight} testID="app-back-right">{right}</View>
     </View>
   );
 }
@@ -168,34 +173,44 @@ const styles = StyleSheet.create({
   neutralAvatar: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#fff',
-    backgroundColor: '#ECE8F4',
-    shadowColor: 'rgba(180,100,220,0.18)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 4,
+    backgroundColor: '#E5E6E8',
   },
   avatarImage: {
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: '#fff',
-    backgroundColor: C.purpleLight,
-    shadowColor: 'rgba(180,100,220,0.25)',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 4,
+    backgroundColor: C.primaryLight,
   },
   tag: { borderRadius: 6, paddingHorizontal: 9, paddingVertical: 3 },
   tagText: { fontSize: 12, fontWeight: '600' },
   backHeader: {
-    height: 52, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', paddingHorizontal: 16,
-    backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.border,
+    height: BACK_HEADER_GEOMETRY.height,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.body,
   },
-  backSide: { width: 64, minHeight: 40, justifyContent: 'center' },
-  backChevron: { fontSize: 28, color: C.sub, fontWeight: '200', lineHeight: 34 },
-  backTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: C.text, textAlign: 'center' },
-  backRight: { alignItems: 'flex-end' },
+  backSide: {
+    width: BACK_HEADER_GEOMETRY.backTargetWidth,
+    height: BACK_HEADER_GEOMETRY.height,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backTitle: {
+    position: 'absolute',
+    left: BACK_HEADER_GEOMETRY.titleInset,
+    right: BACK_HEADER_GEOMETRY.titleInset,
+    fontSize: BACK_HEADER_GEOMETRY.titleSize,
+    lineHeight: 25,
+    fontWeight: '400',
+    color: C.text,
+    textAlign: 'center',
+  },
+  backRight: {
+    width: BACK_HEADER_GEOMETRY.rightTargetWidth,
+    height: BACK_HEADER_GEOMETRY.height,
+    marginLeft: 'auto',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

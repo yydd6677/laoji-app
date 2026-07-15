@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import Constants from 'expo-constants';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
 import { BackHeader } from '../components/Common';
-import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
-import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
+import { CalendarSwitch } from '../components/CalendarSwitch';
+import { SettingsGroup, SettingsRow } from '../components/SettingsGroup';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import {
@@ -25,55 +24,27 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Privac
 
 const APP_VERSION = Constants.expoConfig?.version ?? '未知';
 
-function Toggle({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+function Toggle({
+  label,
+  on,
+  onToggle,
+  testID,
+}: {
+  label: string;
+  on: boolean;
+  onToggle: () => void;
+  testID: string;
+}) {
   return (
-    <TouchableOpacity
-      onPress={onToggle}
-      style={[s.toggle, { backgroundColor: on ? C.purple : '#CCC8E0' }]}
-      activeOpacity={0.8}
-      accessibilityRole="switch"
+    <CalendarSwitch
+      checked={on}
+      onChange={onToggle}
       accessibilityLabel={label}
       accessibilityHint={`双击以${on ? '关闭' : '开启'}${label}`}
-      accessibilityState={{ checked: on }}
-    >
-      <View style={[s.toggleThumb, { left: on ? 23 : 3 }]} />
-    </TouchableOpacity>
+      testID={testID}
+    />
   );
 }
-
-function Row({ icon, label, desc, right, border, onPress }: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  desc: string;
-  right: React.ReactNode;
-  border?: boolean;
-  onPress?: () => void;
-}) {
-  const Wrapper = onPress ? TouchableOpacity : View;
-  return (
-    <Wrapper style={[s.row, border && s.rowBorder]} {...(onPress ? { onPress, activeOpacity: 0.7 } : {})}>
-      <View style={s.rowIcon}>
-        <Ionicons name={icon} size={18} color={C.purple} />
-      </View>
-      <View style={s.rowBody}>
-        <Text style={s.rowLabel}>{label}</Text>
-        <Text style={s.rowDesc}>{desc}</Text>
-      </View>
-      {right}
-    </Wrapper>
-  );
-}
-
-function Section({ title, items }: { title: string; items: React.ReactNode[] }) {
-  return (
-    <View style={s.section}>
-      <Text style={s.sectionTitle}>{title}</Text>
-      <View style={s.sectionCard}>{items}</View>
-    </View>
-  );
-}
-
-const arrow = <Ionicons name="chevron-forward" size={16} color={C.faint} />;
 
 export function PrivacyScreen({ navigation }: Props) {
   const [faceId, setFaceId] = useState(false);
@@ -188,69 +159,62 @@ export function PrivacyScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top']}>
+    <ScreenContainer edges={['top', 'bottom']}>
       <BackHeader title="设置" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-        <Section title="隐私与权限管理" items={[
-          <Row key="account-security" border icon="key-outline" label="账号与安全"
-            desc={mode === 'authenticated' ? '密码、通知、退出与账号删除' : '通知、访客模式与本机数据'} right={arrow}
-            onPress={() => navigation.navigate('Account')} />,
-          <Row key="1" border icon="folder-open-outline" label="数据存储说明" desc="账号数据按用户隔离，访客数据仅保存在本机" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
-            onPress={() => showDialog({ title: '数据存储说明', message: '登录账号的日程、会议列表与资料会按用户隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号也会缓存已读取的会议内容，断网时可继续查看缓存。', tone: 'info' })} />,
-          <Row key="2" border icon="mic-outline" label="录音数据说明" desc="语音会发送到老记语音服务进行转写" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
-            onPress={() => showDialog({ title: '录音数据说明', message: '日程语音和会议录音会发送到老记服务器上的语音识别服务。会议录音结束后会先保存在本机；登录账号会尝试上传，访客录音不上传。', tone: 'info' })} />,
-          <Row key="3" border icon="share-social-outline" label="文件分享说明" desc="使用系统分享面板确认接收方" right={<Ionicons name="information-circle-outline" size={18} color={C.faint} />}
-            onPress={() => showDialog({ title: '文件分享说明', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })} />,
-          <Row key="4" border icon="finger-print-outline" label="系统验证" desc="使用系统指纹、面容或设备密码验证"
-            right={<Toggle label="系统验证" on={faceId} onToggle={handleFaceIdToggle} />} />,
-          <Row key="5" border icon="lock-closed-outline" label="启动时验证" desc="打开老记时先验证身份"
-            right={<Toggle label="启动时验证" on={appLock} onToggle={handleAppLockToggle} />} />,
-          <Row key="6" icon="trash-bin-outline" label="清除本机数据" desc="仅清除缓存、访客日程与本地资料" right={arrow}
-            onPress={handleClearLocalData} />,
-        ]} />
+        <SettingsGroup testID="privacy-settings-group">
+          <SettingsRow label="账号与安全" onPress={() => navigation.navigate('Account')} />
+          <SettingsRow
+            label="数据存储说明"
+            onPress={() => showDialog({ title: '数据存储说明', message: '登录账号的日程、会议列表与资料会按用户隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号也会缓存已读取的会议内容，断网时可继续查看缓存。', tone: 'info' })}
+          />
+          <SettingsRow
+            label="录音数据说明"
+            onPress={() => showDialog({ title: '录音数据说明', message: '日程语音和会议录音会发送到老记服务器上的语音识别服务。会议录音结束后会先保存在本机；登录账号会尝试上传，访客录音不上传。', tone: 'info' })}
+          />
+          <SettingsRow
+            label="文件分享说明"
+            onPress={() => showDialog({ title: '文件分享说明', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })}
+          />
+          <SettingsRow
+            label="系统验证"
+            right={(
+              <Toggle
+                label="系统验证"
+                on={faceId}
+                onToggle={handleFaceIdToggle}
+                testID="privacy-system-verification-toggle"
+              />
+            )}
+          />
+          <SettingsRow
+            label="启动时验证"
+            right={(
+              <Toggle
+                label="启动时验证"
+                on={appLock}
+                onToggle={handleAppLockToggle}
+                testID="privacy-app-lock-toggle"
+              />
+            )}
+          />
+          <SettingsRow label="清除本机数据" onPress={handleClearLocalData} destructive last />
+        </SettingsGroup>
 
-        <Section title="帮助与支持" items={[
-          <Row key="terms" border icon="document-text-outline" label="用户协议" desc="服务范围、账号和数据删除说明" right={arrow}
-            onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />,
-          <Row key="privacy" border icon="shield-checkmark-outline" label="隐私政策" desc="权限、同步、外部服务和你的控制权" right={arrow}
-            onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} />,
-          <Row key="1" border icon="help-circle-outline" label="帮助中心" desc="常见问题与解决方案" right={arrow}
-            onPress={() => navigation.navigate('Legal', { kind: 'help' })} />,
-          <Row key="2" border icon="book-outline" label="使用指南" desc="新手教程与功能介绍" right={arrow}
-            onPress={() => navigation.navigate('Legal', { kind: 'guide' })} />,
-          <Row key="3" border icon="information-circle-outline" label="版本信息" desc={`当前版本 ${APP_VERSION}`}
-            right={
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={s.newBadge}><Text style={s.newBadgeText}>当前版本</Text></View>
-                {arrow}
-              </View>
-            }
-            onPress={() => navigation.navigate('Legal', { kind: 'version' })} />,
-          <Row key="4" icon="chatbubble-ellipses-outline" label="联系我们" desc="反馈问题与建议" right={arrow}
-            onPress={() => navigation.navigate('Legal', { kind: 'contact' })} />,
-        ]} />
-        <View style={{ height: 16 }} />
+        <SettingsGroup testID="support-settings-group">
+          <SettingsRow label="用户协议" onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />
+          <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} />
+          <SettingsRow label="帮助中心" onPress={() => navigation.navigate('Legal', { kind: 'help' })} />
+          <SettingsRow label="使用指南" onPress={() => navigation.navigate('Legal', { kind: 'guide' })} />
+          <SettingsRow label="版本信息" value={APP_VERSION} onPress={() => navigation.navigate('Legal', { kind: 'version' })} />
+          <SettingsRow label="联系我们" onPress={() => navigation.navigate('Legal', { kind: 'contact' })} last />
+        </SettingsGroup>
       </ScrollView>
-      <BottomTabBar active="schedule" onSchedule={() => openScheduleTab(navigation)} onMeetings={() => openMeetingsTab(navigation)} />
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.appBg },
   scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
-  section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: C.sub, marginBottom: 8, paddingLeft: 4 },
-  sectionCard: { backgroundColor: C.card, borderRadius: 16, overflow: 'hidden', shadowColor: '#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, paddingHorizontal: 16 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: C.border },
-  rowIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center' },
-  rowBody: { flex: 1 },
-  rowLabel: { fontSize: 14, fontWeight: '600', color: C.text },
-  rowDesc: { fontSize: 11, color: C.sub, marginTop: 2 },
-  toggle: { width: 46, height: 26, borderRadius: 13, justifyContent: 'center' },
-  toggleThumb: { position: 'absolute', width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', shadowColor: '#000', shadowOffset:{width:0,height:1}, shadowOpacity:0.18, shadowRadius:2, elevation:2 },
-  newBadge: { backgroundColor: C.purpleLight, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  newBadgeText: { fontSize: 10, color: C.purple, fontWeight: '600' },
+  content: { paddingBottom: 32 },
 });

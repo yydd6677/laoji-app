@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Animated, Modal, View, Text, TextInput, TouchableOpacity,
+  Animated, Modal, View, Text, TextInput, TouchableOpacity, Pressable,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -50,11 +49,134 @@ interface Props {
 type Step = 'input' | 'connecting' | 'recording' | 'parsing' | 'confirm' | 'saving';
 type RecordingMode = 'realtime' | 'file';
 type AudioLevelSummary = { frameCount: number; maxPeak: number; maxRms: number };
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const LOW_AUDIO_PEAK = 1000;
 const LOW_AUDIO_RMS = 280;
 const ERROR_LINE_HEIGHT = 17;
 const ERROR_SLOT_HEIGHT = ERROR_LINE_HEIGHT * 2;
+const HOLD_TO_TALK_DELAY_MS = 320;
+
+export const VOICE_INPUT_GEOMETRY = Object.freeze({
+  sheetRadius: 12,
+  titleBarHeight: 48,
+  titleRowMinHeight: 52,
+  fieldRowMinHeight: 48,
+  fieldIconColumnWidth: 46,
+  controlDockHeight: 128,
+  microphoneSize: 72,
+  microphoneTouchSize: 88,
+  holdToTalkDelay: HOLD_TO_TALK_DELAY_MS,
+  errorSlotHeight: ERROR_SLOT_HEIGHT,
+});
+
+function VoiceSheetTitleBar({
+  title,
+  leftText,
+  rightText,
+  onLeft,
+  onRight,
+  onClose,
+  testID,
+}: {
+  title: string;
+  leftText?: string;
+  rightText?: string;
+  onLeft?: () => void;
+  onRight?: () => void;
+  onClose?: () => void;
+  testID?: string;
+}) {
+  return (
+    <View style={s.sheetTitleBar} testID={testID}>
+      <View style={s.sheetTitleSide}>
+        {leftText && onLeft ? (
+          <TouchableOpacity
+            style={s.sheetTextAction}
+            onPress={onLeft}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel={leftText}
+          >
+            <Text style={s.sheetCancelText}>{leftText}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      <Text style={s.sheetTitle} numberOfLines={1} testID={testID ? `${testID}-title` : undefined}>{title}</Text>
+      <View
+        style={[s.sheetTitleSide, s.sheetTitleSideRight]}
+        testID={testID ? `${testID}-right-slot` : undefined}
+      >
+        {rightText && onRight ? (
+          <TouchableOpacity
+            style={[s.sheetTextAction, s.sheetTextActionRight]}
+            onPress={onRight}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel={rightText}
+          >
+            <Text style={s.sheetSaveText}>{rightText}</Text>
+          </TouchableOpacity>
+        ) : onClose ? (
+          <TouchableOpacity
+            style={s.sheetCloseAction}
+            onPress={onClose}
+            activeOpacity={0.65}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="关闭语音输入"
+            testID="schedule-voice-close"
+          >
+            <Ionicons name="close" size={20} color={C.sub} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function ParsedFieldRow({
+  icon,
+  value,
+  testID,
+  onPress,
+  trailing,
+  accessibilityLabel,
+}: {
+  icon: IconName;
+  value: string;
+  testID?: string;
+  onPress?: () => void;
+  trailing?: React.ReactNode;
+  accessibilityLabel?: string;
+}) {
+  const content = (
+    <>
+      <View style={s.parsedFieldIcon}>
+        <Ionicons name={icon} size={18} color={C.faint} />
+      </View>
+      <Text style={s.parsedFieldValue}>{value}</Text>
+      {trailing}
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        style={s.parsedFieldRow}
+        onPress={onPress}
+        activeOpacity={0.65}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? value}
+        testID={testID}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={s.parsedFieldRow} testID={testID}>{content}</View>;
+}
 
 async function discardScheduleRecording(uri: string | undefined): Promise<void> {
   if (!uri) return;
@@ -82,11 +204,18 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const recordingRunRef         = useRef(0);
   const recordingStartRef       = useRef(false);
   const recordingStopRef        = useRef(false);
+  const operationRunRef         = useRef(0);
+  const micPressStartedAtRef    = useRef(0);
+  const micPressStartedStepRef  = useRef<Step | null>(null);
+  const micPhysicalReleaseAtRef = useRef(0);
+  const micHoldTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdReleaseRequestedRef = useRef(false);
   const createRequestRef        = useRef(createClientRequestState('event'));
   const transcriptRef           = useRef('');
   const transcriptSegmentsRef   = useRef<ScheduleTranscriptSegment[]>([]);
   const audioLevelRef           = useRef<AudioLevelSummary>({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const [recordingMode, setRecordingMode] = useState<RecordingMode | null>(null);
+  const [micInteraction, setMicInteraction] = useState<'idle' | 'latched' | 'holding'>('idle');
   const backdropOpacity         = useRef(new Animated.Value(0)).current;
   const sheetTranslateY         = useRef(new Animated.Value(48)).current;
 
@@ -111,6 +240,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   }, [backdropOpacity, sheetTranslateY, visible]);
 
   const reset = () => {
+    operationRunRef.current += 1;
+    if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
+    micHoldTimerRef.current = null;
     recordingRunRef.current += 1;
     setStep('input');
     setText('');
@@ -124,6 +256,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     recordingModeRef.current = null;
     recordingStartRef.current = false;
     recordingStopRef.current = false;
+    holdReleaseRequestedRef.current = false;
+    micPressStartedStepRef.current = null;
+    setMicInteraction('idle');
     createRequestRef.current = createClientRequestState('event');
   };
   const close = () => {
@@ -132,7 +267,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     reset();
     onClose();
   };
+  const requestClose = () => {
+    if (step === 'saving') return;
+    close();
+  };
   const returnToInput = () => {
+    operationRunRef.current += 1;
     const preservedText = text.trim() || draft?.raw_text?.trim() || '';
     setStep('input');
     setText(preservedText);
@@ -243,11 +383,16 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   // ── Text submit ────────────────────────────────────────────────────────────
   const handleSubmitText = async () => {
     if (!text.trim()) return;
+    const runId = operationRunRef.current + 1;
+    operationRunRef.current = runId;
+    const sourceText = text.trim();
     setStep('parsing'); setError('');
     try {
-      const result = await parseText(text.trim());
+      const result = await parseText(sourceText);
+      if (operationRunRef.current !== runId) return;
       acceptNewDraft(result); setStep('confirm');
     } catch {
+      if (operationRunRef.current !== runId) return;
       setError('解析失败，请检查网络'); setStep('input');
     }
   };
@@ -265,6 +410,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const permission = await Audio.requestPermissionsAsync();
       if (recordingRunRef.current !== runId) return;
       if (!permission.granted) {
+        if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
+        micHoldTimerRef.current = null;
+        setMicInteraction('idle');
         setStep('input');
         showDialog({ title: '无法录音', message: '请在系统设置中允许麦克风权限', tone: 'warning' });
         return;
@@ -310,6 +458,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         recordingModeRef.current = 'realtime';
         setRecordingMode('realtime');
         setStep('recording');
+        if (holdReleaseRequestedRef.current) void stopRecording();
         void realtime.completion.then(async completion => {
           if (
             completion.reason !== 'connection-closed'
@@ -333,6 +482,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           setError(transcribed
             ? '实时连接已断开，已保留识别内容，可直接解析或重新录音'
             : '实时语音接口连接失败，请确认手机网络能访问服务器');
+          setMicInteraction('idle');
           setStep('input');
         }).catch(err => {
           if (recordingRunRef.current !== runId || realtimeRef.current !== realtime) return;
@@ -342,6 +492,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           realtimeRef.current = null;
           recordingModeRef.current = null;
           setRecordingMode(null);
+          setMicInteraction('idle');
         });
         return;
       } catch (realtimeErr) {
@@ -364,9 +515,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       recordingModeRef.current = 'file';
       setRecordingMode('file');
       setStep('recording');
+      if (holdReleaseRequestedRef.current) void stopRecording();
     } catch (err) {
       diagnosticWarn('recording start failed', err);
       if (recordingRunRef.current === runId) {
+        if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
+        micHoldTimerRef.current = null;
+        setMicInteraction('idle');
         setStep('input');
         const message = err instanceof Error && err.message.includes('microphone is already in use')
           ? '麦克风正在被另一个录音任务使用，请先结束后再试'
@@ -379,6 +534,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const stopRecording = async () => {
+    const runId = recordingRunRef.current;
+    if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
+    micHoldTimerRef.current = null;
+    setMicInteraction('idle');
     recordingStopRef.current = true;
     if (recordingModeRef.current === 'realtime') {
       const realtime = realtimeRef.current;
@@ -386,6 +545,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setStep('parsing');
       try {
         await discardScheduleRecording(await realtime.stop());
+        if (recordingRunRef.current !== runId) return;
         const transcribed = transcriptRef.current.trim();
         realtimeRef.current = null;
         recordingModeRef.current = null;
@@ -397,9 +557,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
         setText(transcribed);
         const result = await parseText(transcribed);
+        if (recordingRunRef.current !== runId) return;
         acceptNewDraft(result);
         setStep('confirm');
       } catch (err) {
+        if (recordingRunRef.current !== runId) return;
         diagnosticWarn('realtime voice recognition failed', err);
         setError(voiceErrorText(err));
         setStep('input');
@@ -416,17 +578,20 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('parsing');
     try {
       await recordingRef.current.stopAndUnloadAsync();
+      if (recordingRunRef.current !== runId) return;
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
       recordingModeRef.current = null;
       setRecordingMode(null);
       if (!uri) throw new Error('recording uri is empty');
       const result = await parseAudio(uri);
+      if (recordingRunRef.current !== runId) return;
       const transcribed = result.raw_text ?? '';
       if (!transcribed.trim()) { setError('未识别到语音内容'); setStep('input'); return; }
       setText(transcribed);
       acceptNewDraft(result); setStep('confirm');
     } catch (err) {
+      if (recordingRunRef.current !== runId) return;
       diagnosticWarn('voice recognition failed', err);
       setError(voiceErrorText(err)); setStep('input');
       recordingRef.current = null;
@@ -435,18 +600,69 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     }
   };
 
+  const handleMicPressIn = () => {
+    micPressStartedAtRef.current = Date.now();
+    micPressStartedStepRef.current = step;
+    if (step !== 'input') return;
+    holdReleaseRequestedRef.current = false;
+    setMicInteraction('latched');
+    micHoldTimerRef.current = setTimeout(() => {
+      setMicInteraction('holding');
+    }, HOLD_TO_TALK_DELAY_MS);
+    void startRecording();
+  };
+
+  const handleMicPressOut = () => {
+    const startedStep = micPressStartedStepRef.current;
+    micPressStartedStepRef.current = null;
+    micPhysicalReleaseAtRef.current = Date.now();
+    if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
+    micHoldTimerRef.current = null;
+
+    if (startedStep === 'recording') {
+      void stopRecording();
+      return;
+    }
+    if (startedStep !== 'input') return;
+
+    const heldFor = Date.now() - micPressStartedAtRef.current;
+    if (heldFor >= HOLD_TO_TALK_DELAY_MS) {
+      holdReleaseRequestedRef.current = true;
+      setMicInteraction('idle');
+      if (recordingModeRef.current) void stopRecording();
+      return;
+    }
+    setMicInteraction('latched');
+  };
+
+  const handleMicPress = () => {
+    if (Date.now() - micPhysicalReleaseAtRef.current < 120) return;
+    if (step === 'recording') {
+      void stopRecording();
+      return;
+    }
+    if (step === 'input') {
+      setMicInteraction('latched');
+      void startRecording();
+    }
+  };
+
   // ── Clarify parser follow-up ───────────────────────────────────────────────
   const handleClarify = async () => {
     if (!draft || !clarifyAnswer.trim()) return;
+    const runId = operationRunRef.current + 1;
+    operationRunRef.current = runId;
     setStep('parsing'); setError('');
     try {
       const answer = clarifyAnswer.trim();
       const result = await clarifyText(text, answer, draft);
+      if (operationRunRef.current !== runId) return;
       setDraft(result);
       setText(prev => prev ? `${prev}\n${answer}` : answer);
       setClarifyAnswer('');
       setStep('confirm');
     } catch {
+      if (operationRunRef.current !== runId) return;
       setError('补充解析失败，请重试');
       setStep('confirm');
     }
@@ -512,10 +728,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const saveDraft = async (eventPayload: Omit<CalEvent, 'id'>) => {
+    const runId = operationRunRef.current + 1;
+    operationRunRef.current = runId;
     setStep('saving');
     try {
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', eventPayload);
       const { reminderDelivery } = await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
+      if (operationRunRef.current !== runId) return;
       onSaved(); close();
       if (reminderDelivery === 'unavailable') {
         showDialog({
@@ -531,6 +750,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         });
       }
     } catch {
+      if (operationRunRef.current !== runId) return;
       setError('保存失败，请重试'); setStep('confirm');
     }
   };
@@ -572,7 +792,19 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     navigation.navigate('AddEvent', params);
   };
 
-  const fmtDate = (d: string) => d.replace(/-/g, '/');
+  const fmtDate = (dateText: string) => {
+    const [year, month, day] = dateText.split('-').map(Number);
+    const value = new Date(year, month - 1, day);
+    if (
+      !Number.isInteger(year)
+      || !Number.isInteger(month)
+      || !Number.isInteger(day)
+      || Number.isNaN(value.getTime())
+    ) return dateText.replace(/-/g, '/');
+    const weekday = ['日', '一', '二', '三', '四', '五', '六'][value.getDay()];
+    const yearText = year === new Date().getFullYear() ? '' : `${year}年`;
+    return `${yearText}${month}月${day}日 周${weekday}`;
+  };
   const fmtDateRange = (draft: ParseResult) => {
     if (draft.end_date && draft.end_date !== draft.start_date) {
       return `${fmtDate(draft.start_date)} – ${fmtDate(draft.end_date)}`;
@@ -580,10 +812,19 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     return fmtDate(draft.start_date);
   };
   const fmtTime = (t: string | null) => t ?? '全天';
-  const sourceLabel = (source: ParseResult['parse_source']) => {
-    if (source === 'rules') return '规则解析';
-    if (source === 'clarified') return '补充解析';
-    return 'AI解析';
+  const fmtRepeat = (value: ParseResult['event_type']) => {
+    if (value === 'daily') return '每天重复';
+    if (value === 'weekly') return '每周重复';
+    if (value === 'monthly') return '每月重复';
+    if (value === 'yearly') return '每年重复';
+    return '不重复';
+  };
+  const fmtReminder = (minutes: number | null | undefined) => {
+    if (minutes === null || minutes === undefined) return '不提醒';
+    if (minutes === 0) return '开始时提醒';
+    if (minutes % (24 * 60) === 0) return `提前 ${minutes / (24 * 60)} 天提醒`;
+    if (minutes % 60 === 0) return `提前 ${minutes / 60} 小时提醒`;
+    return `提前 ${minutes} 分钟提醒`;
   };
 
   return (
@@ -592,7 +833,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={close}
+      onRequestClose={requestClose}
     >
       <View style={s.modalRoot}>
         <Animated.View
@@ -612,117 +853,130 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           edges={['bottom']}
           testID="schedule-voice-sheet"
         >
-          {/* Handle */}
-          <View style={s.handle} />
-
           {/* ── Input step ── */}
           {(step === 'input' || step === 'connecting' || step === 'recording') && (
-            <>
-              <Text style={s.title}>说出你的日常</Text>
-              <Text style={s.hint}>例如：明天下午三点开会，下周一提醒我发周报</Text>
-
-              <TextInput
-                style={s.textBox}
-                testID="schedule-voice-input"
-                placeholder="输入或说出日程内容…"
-                placeholderTextColor={C.faint}
-                value={text}
-                onChangeText={setText}
-                multiline
-                maxLength={200}
-                editable={step === 'input'}
+            <View style={s.inputStep}>
+              <VoiceSheetTitleBar
+                title="语音新建日程"
+                onClose={requestClose}
+                testID="schedule-voice-input-title-bar"
               />
 
-              <View style={s.errorSlot} testID="schedule-voice-error-slot">
-                {error ? <Text style={s.errText} numberOfLines={2}>{error}</Text> : null}
-              </View>
+              <View style={s.inputContent}>
+                <TextInput
+                  style={s.textBox}
+                  testID="schedule-voice-input"
+                  placeholder="输入日程内容"
+                  placeholderTextColor={C.faint}
+                  value={text}
+                  onChangeText={setText}
+                  multiline
+                  maxLength={200}
+                  editable={step === 'input'}
+                />
 
-              <View style={s.actionDock}>
-                <View style={s.actionSide}>
-                  {(step === 'connecting' || step === 'recording') && (
-                    <Text style={s.recordingLabel} numberOfLines={2}>
-                      {step === 'connecting'
-                        ? '正在连接语音服务'
-                        : recordingMode === 'realtime'
-                          ? '实时识别中，点击停止'
-                          : '录音中，点击停止'}
+                <View style={s.errorSlot} testID="schedule-voice-error-slot">
+                  {error ? (
+                    <Text style={s.errText} numberOfLines={2} accessibilityLiveRegion="polite">
+                      {error}
                     </Text>
-                  )}
+                  ) : null}
                 </View>
 
-                <TouchableOpacity
-                  style={s.micTouch}
-                  onPress={step === 'recording' ? stopRecording : startRecording}
-                  disabled={step === 'connecting'}
-                  activeOpacity={0.8}
-                  accessibilityRole="button"
-                  accessibilityLabel={step === 'recording'
-                    ? '停止语音输入'
-                    : step === 'connecting'
-                      ? '正在连接语音服务'
-                      : '开始语音输入'}
-                  accessibilityState={{
-                    disabled: step === 'connecting',
-                    busy: step === 'connecting',
-                  }}
-                  testID={step === 'recording'
-                    ? 'schedule-voice-stop'
-                    : step === 'connecting'
-                      ? 'schedule-voice-connecting'
-                      : 'schedule-voice-start'}
-                >
-                  <LinearGradient
-                    colors={step === 'recording' ? ['#FF4D4F','#CC2222'] : [C.gradFrom, C.gradTo]}
-                    style={s.micBtn}
-                  >
-                    {step === 'connecting'
-                      ? <ActivityIndicator size="small" color="#fff" />
-                      : <Ionicons
-                          name={step === 'recording' ? 'stop' : 'mic'}
-                          size={26} color="#fff"
-                        />}
-                  </LinearGradient>
-                </TouchableOpacity>
+                <View style={s.actionDock} testID="schedule-voice-control-dock">
+                  <View style={s.recordingStatusSlot}>
+                    {(step === 'connecting' || step === 'recording') && (
+                      <Text style={s.recordingLabel} numberOfLines={2}>
+                        {step === 'connecting'
+                          ? '正在连接语音服务'
+                          : micInteraction === 'holding'
+                            ? '松开结束'
+                            : recordingMode === 'realtime'
+                              ? '实时识别中，轻点结束'
+                              : '录音中，轻点结束'}
+                      </Text>
+                    )}
+                  </View>
 
-                <View style={[s.actionSide, s.actionSideRight]}>
+                  <Pressable
+                    style={s.micTouch}
+                    onPressIn={handleMicPressIn}
+                    onPressOut={handleMicPressOut}
+                    onPress={handleMicPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={step === 'recording'
+                      ? '停止语音输入'
+                      : step === 'connecting'
+                        ? '正在连接语音服务'
+                        : '开始语音输入'}
+                    accessibilityState={{
+                      busy: step === 'connecting',
+                    }}
+                    accessibilityHint="轻点可持续录音，再轻点结束；按住录音时松开即可结束"
+                    testID={step === 'recording'
+                      ? 'schedule-voice-stop'
+                      : step === 'connecting'
+                        ? 'schedule-voice-connecting'
+                        : 'schedule-voice-start'}
+                  >
+                    <View style={[
+                      s.micBtn,
+                      step === 'recording' && s.micBtnRecording,
+                      micInteraction === 'holding' && s.micBtnHolding,
+                    ]} testID="schedule-voice-mic-visual">
+                      {step === 'connecting'
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Ionicons
+                            name={step === 'recording' ? 'stop' : 'mic'}
+                            size={34} color="#fff"
+                          />}
+                    </View>
+                  </Pressable>
+
                   {text.trim().length > 0 && step === 'input' && (
-                    <TouchableOpacity style={s.submitBtn} onPress={handleSubmitText}>
+                    <TouchableOpacity
+                      style={s.submitBtn}
+                      onPress={handleSubmitText}
+                      activeOpacity={0.65}
+                      accessibilityRole="button"
+                      accessibilityLabel="解析日程"
+                    >
                       <Text style={s.submitTxt}>解析</Text>
-                      <Ionicons name="arrow-forward" size={14} color="#fff" />
+                      <Ionicons name="chevron-forward" size={14} color={C.primary} />
                     </TouchableOpacity>
                   )}
                 </View>
               </View>
-            </>
+            </View>
           )}
 
           {/* ── Parsing / saving ── */}
           {(step === 'parsing' || step === 'saving') && (
-            <View style={s.loadingWrap}>
-              <ActivityIndicator size="large" color={C.purple} />
-              <Text style={s.loadingTxt}>
-                {step === 'parsing' ? '正在解析…' : '正在保存…'}
-              </Text>
+            <View style={s.loadingStep}>
+              <VoiceSheetTitleBar
+                title={step === 'parsing' ? '解析日程' : '保存日程'}
+                onClose={step === 'saving' ? undefined : requestClose}
+              />
+              <View style={s.loadingWrap}>
+                <ActivityIndicator size="small" color={C.primary} />
+                <Text style={s.loadingTxt}>
+                  {step === 'parsing' ? '正在解析' : '正在保存'}
+                </Text>
+              </View>
             </View>
           )}
 
           {/* ── Confirm step ── */}
           {step === 'confirm' && draft && (
             <View style={s.confirmStep}>
-              <View style={s.confirmHeader}>
-                <Text style={s.title}>确认日程</Text>
-                <TouchableOpacity
-                  style={s.editDraftBtn}
-                  onPress={openDetailedEdit}
-                  activeOpacity={0.72}
-                  accessibilityRole="button"
-                  accessibilityLabel="编辑日程详情"
-                  testID="schedule-voice-edit-details"
-                >
-                  <Ionicons name="create-outline" size={16} color={C.purple} />
-                  <Text style={s.editDraftText}>编辑</Text>
-                </TouchableOpacity>
-              </View>
+              <VoiceSheetTitleBar
+                title="确认日程"
+                leftText="取消"
+                rightText="保存"
+                onLeft={requestClose}
+                onRight={handleSave}
+                testID="schedule-voice-confirm-actions"
+              />
 
               <ScrollView
                 style={s.confirmScroll}
@@ -731,10 +985,33 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 keyboardShouldPersistTaps="handled"
                 testID="schedule-voice-confirm-scroll"
               >
+                {text.trim() ? (
+                  <View style={s.transcriptSection}>
+                    <View style={s.transcriptHeader}>
+                      <Text style={s.transcriptLabel}>识别内容</Text>
+                      <TouchableOpacity
+                        style={s.reenterAction}
+                        onPress={returnToInput}
+                        activeOpacity={0.65}
+                        accessibilityRole="button"
+                        accessibilityLabel="重新输入"
+                      >
+                        <Ionicons name="refresh" size={15} color={C.primary} />
+                        <Text style={s.reenterText}>重新输入</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={s.recognizedText} testID="schedule-voice-transcript">
+                      {text.trim()}
+                    </Text>
+                  </View>
+                ) : null}
+
                 {draft.needs_clarification && draft.clarification_question && (
-                  <>
-                    <View style={s.clarifyBox}>
-                      <Ionicons name="help-circle-outline" size={16} color={C.orange} />
+                  <View style={s.clarifySection}>
+                    <View style={s.clarifyPromptRow}>
+                      <View style={s.parsedFieldIcon}>
+                        <Ionicons name="help-circle-outline" size={18} color={C.faint} />
+                      </View>
                       <Text style={s.clarifyTxt}>{draft.clarification_question}</Text>
                     </View>
                     <View style={s.clarifyAnswerRow}>
@@ -755,90 +1032,60 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                         <Text style={s.clarifyBtnText}>补充解析</Text>
                       </TouchableOpacity>
                     </View>
-                  </>
+                  </View>
                 )}
 
-                <View style={s.draftCard}>
-                  {text.trim() && (
-                    <View style={s.recognizedBox}>
-                      <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.sub} />
-                      <Text style={s.recognizedText} testID="schedule-voice-transcript">{text.trim()}</Text>
-                    </View>
-                  )}
+                <View style={s.draftForm} testID="schedule-voice-draft-form">
                   <Text style={s.draftTitle} testID="schedule-voice-draft-title">{draft.title}</Text>
-                  <View style={s.draftRow}>
-                    <Ionicons name="calendar-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{fmtDateRange(draft)}</Text>
-                  </View>
-                  <View style={s.draftRow}>
-                    <Ionicons name="time-outline" size={14} color={C.sub} />
-                    <Text style={s.draftVal}>{fmtTime(draft.start_time)}
-                      {draft.end_time ? ` – ${draft.end_time}` : ''}
-                    </Text>
-                  </View>
+                  <View style={s.formDivider} />
+                  <ParsedFieldRow
+                    icon="calendar-outline"
+                    value={fmtDateRange(draft)}
+                    testID="schedule-voice-field-date"
+                  />
+                  <ParsedFieldRow
+                    icon="time-outline"
+                    value={`${fmtTime(draft.start_time)}${draft.end_time ? ` – ${draft.end_time}` : ''}`}
+                    testID="schedule-voice-field-time"
+                  />
+                  <ParsedFieldRow icon="repeat-outline" value={fmtRepeat(draft.event_type)} />
+                  <ParsedFieldRow
+                    icon="notifications-outline"
+                    value={fmtReminder(draft.reminder_minutes)}
+                  />
                   {draft.description && (
-                    <View style={s.draftRow}>
-                      <Ionicons name="document-text-outline" size={14} color={C.sub} />
-                      <Text style={s.draftVal}>{draft.description}</Text>
-                    </View>
+                    <ParsedFieldRow icon="document-text-outline" value={draft.description} />
                   )}
                   {draft.detail && draft.detail !== draft.description && (
-                    <View style={s.draftRow}>
-                      <Ionicons name="reader-outline" size={14} color={C.sub} />
-                      <Text style={s.draftVal}>{draft.detail}</Text>
-                    </View>
+                    <ParsedFieldRow icon="reader-outline" value={draft.detail} />
                   )}
                   {draft.location && (
-                    <View style={s.draftRow}>
-                      <Ionicons name="location-outline" size={14} color={C.sub} />
-                      <Text style={s.draftVal}>{draft.location}</Text>
-                    </View>
-                  )}
-                  {draft.category && (
-                    <View style={s.draftRow}>
-                      <Ionicons name="pricetag-outline" size={14} color={C.sub} />
-                      <Text style={s.draftVal}>{draft.category}</Text>
-                    </View>
+                    <ParsedFieldRow icon="location-outline" value={draft.location} />
                   )}
                   {draft.status && (
-                    <View style={s.draftRow}>
-                      <Ionicons name="ellipse-outline" size={14} color={C.sub} />
-                      <Text style={s.draftVal}>{draft.status}</Text>
-                    </View>
+                    <ParsedFieldRow icon="ellipse-outline" value={draft.status} />
                   )}
-                  <Text style={s.draftMeta}>
-                    {sourceLabel(draft.parse_source)}
-                  </Text>
+                  <View style={s.formDivider} />
+                  <ParsedFieldRow
+                    icon="create-outline"
+                    value="编辑更多内容"
+                    onPress={openDetailedEdit}
+                    testID="schedule-voice-edit-details"
+                    accessibilityLabel="编辑日程详情"
+                    trailing={<Ionicons name="chevron-forward" size={14} color={C.faint} />}
+                  />
                 </View>
               </ScrollView>
 
               <View style={s.errorSlot} testID="schedule-voice-error-slot">
-                {error ? <Text style={s.errText} numberOfLines={2}>{error}</Text> : null}
-              </View>
-
-              <View style={s.confirmRow} testID="schedule-voice-confirm-actions">
-                <TouchableOpacity style={s.cancelBtn} onPress={returnToInput}>
-                  <Text style={s.cancelTxt}>重新输入</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={s.saveTouch} onPress={handleSave} activeOpacity={0.85}>
-                  <LinearGradient colors={[C.gradFrom, C.gradTo]} style={s.saveBtn}>
-                    <Text style={s.saveTxt}>保存日程</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+                  {error ? (
+                    <Text style={s.errText} numberOfLines={2} accessibilityLiveRegion="polite">
+                      {error}
+                    </Text>
+                  ) : null}
               </View>
             </View>
           )}
-
-          <TouchableOpacity
-            style={s.closeBtn}
-            onPress={close}
-            hitSlop={{ top:10,bottom:10,left:10,right:10 }}
-            accessibilityRole="button"
-            accessibilityLabel="关闭语音输入"
-            testID="schedule-voice-close"
-          >
-            <Ionicons name="close" size={20} color={C.sub} />
-          </TouchableOpacity>
         </SafeAreaView>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -849,51 +1096,178 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 
 const s = StyleSheet.create({
   modalRoot:    { flex: 1 },
-  backdrop:     { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+  backdrop:     { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: C.overlay },
   overlay:      { flex: 1, justifyContent: 'flex-end' },
   sheetMotion:  { width: '100%' },
-  sheet:        { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36, minHeight: 320 },
+  sheet:        {
+    backgroundColor: C.body,
+    borderTopLeftRadius: VOICE_INPUT_GEOMETRY.sheetRadius,
+    borderTopRightRadius: VOICE_INPUT_GEOMETRY.sheetRadius,
+    paddingTop: 8,
+    minHeight: 360,
+    overflow: 'hidden',
+  },
   confirmSheet: { minHeight: 0, maxHeight: '92%' },
+  inputStep:    { minHeight: 344 },
+  inputContent: { paddingHorizontal: 16 },
+  loadingStep:  { minHeight: 280 },
   confirmStep:  { flexShrink: 1, minHeight: 0 },
-  confirmHeader:{ minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  editDraftBtn: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6 },
-  editDraftText:{ fontSize: 13, lineHeight: 18, color: C.purple, fontWeight: '700' },
+  sheetTitleBar:{
+    height: VOICE_INPUT_GEOMETRY.titleBarHeight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.body,
+  },
+  sheetTitleSide: { width: 72, height: VOICE_INPUT_GEOMETRY.titleBarHeight, flexShrink: 0, justifyContent: 'center' },
+  sheetTitleSideRight: { alignItems: 'flex-end' },
+  sheetTitle: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: C.text,
+    textAlign: 'center',
+  },
+  sheetTextAction: { height: 48, minWidth: 64, paddingHorizontal: 16, justifyContent: 'center' },
+  sheetTextActionRight: { alignItems: 'flex-end' },
+  sheetCancelText: { fontSize: 16, lineHeight: 22, color: C.text },
+  sheetSaveText: { fontSize: 16, lineHeight: 22, fontWeight: '500', color: C.primary },
+  sheetCloseAction: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   confirmScroll:{ flexGrow: 0, flexShrink: 1, minHeight: 0 },
-  confirmScrollContent: { paddingTop: 8 },
-  handle:       { width: 40, height: 4, borderRadius: 2, backgroundColor: C.border, alignSelf: 'center', marginBottom: 16 },
-  title:        { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 4 },
-  hint:         { fontSize: 12, color: C.sub, marginBottom: 14 },
-  textBox:      { backgroundColor: C.inputBg, borderRadius: 14, padding: 12, fontSize: 14, color: C.text, minHeight: 80, textAlignVertical: 'top', marginBottom: 8 },
-  errorSlot:    { height: ERROR_SLOT_HEIGHT, justifyContent: 'center', marginBottom: 8 },
+  confirmScrollContent: { paddingHorizontal: 16, paddingBottom: 8 },
+  textBox:      {
+    backgroundColor: C.inputBg,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    lineHeight: 20,
+    color: C.text,
+    minHeight: 88,
+    maxHeight: 128,
+    textAlignVertical: 'top',
+    marginTop: 8,
+  },
+  errorSlot:    {
+    height: VOICE_INPUT_GEOMETRY.errorSlotHeight,
+    justifyContent: 'center',
+    marginHorizontal: 16,
+  },
   errText:      { minWidth: 0, fontSize: 12, lineHeight: ERROR_LINE_HEIGHT, color: C.red },
-  actionDock:   { height: 64, flexDirection: 'row', alignItems: 'center' },
-  actionSide:   { flex: 1, minWidth: 0, justifyContent: 'center' },
-  actionSideRight:{ alignItems: 'flex-end' },
-  micTouch:     { width: 72, alignItems: 'center', justifyContent: 'center' },
-  micBtn:       { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  recordingLabel:{ fontSize: 12, lineHeight: 16, color: C.red },
-  submitBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.purple, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 10 },
-  submitTxt:    { fontSize: 14, fontWeight: '600', color: '#fff' },
-  loadingWrap:  { alignItems: 'center', paddingVertical: 40, gap: 14 },
+  actionDock:   {
+    height: VOICE_INPUT_GEOMETRY.controlDockHeight,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  recordingStatusSlot: {
+    position: 'absolute',
+    top: 0,
+    left: 72,
+    right: 72,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micTouch:     {
+    width: VOICE_INPUT_GEOMETRY.microphoneTouchSize,
+    height: VOICE_INPUT_GEOMETRY.microphoneTouchSize,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  micBtn:       {
+    width: VOICE_INPUT_GEOMETRY.microphoneSize,
+    height: VOICE_INPUT_GEOMETRY.microphoneSize,
+    borderRadius: VOICE_INPUT_GEOMETRY.microphoneSize / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.primary,
+  },
+  micBtnRecording:{ backgroundColor: C.red },
+  micBtnHolding: { transform: [{ scale: 0.94 }] },
+  recordingLabel:{ fontSize: 12, lineHeight: 17, color: C.sub, textAlign: 'center' },
+  submitBtn:    {
+    position: 'absolute',
+    right: 0,
+    bottom: 24,
+    minWidth: 64,
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
+  submitTxt:    { fontSize: 16, lineHeight: 22, fontWeight: '500', color: C.primary },
+  loadingWrap:  { flex: 1, minHeight: 200, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingTxt:   { fontSize: 14, color: C.sub },
-  clarifyBox:   { flexDirection: 'row', alignItems: 'flex-start', gap: 6, backgroundColor: '#FFF8E1', borderRadius: 10, padding: 10, marginBottom: 12 },
-  clarifyTxt:   { flex: 1, minWidth: 0, fontSize: 13, color: C.text },
-  clarifyAnswerRow: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  clarifyInput: { flex: 1, minWidth: 0, backgroundColor: C.inputBg, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: C.text },
-  clarifyBtn:   { flexShrink: 0, backgroundColor: C.orange, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
-  clarifyBtnText:{ fontSize: 13, fontWeight: '700', color: '#fff' },
-  draftCard:    { backgroundColor: C.tasksBg, borderRadius: 16, padding: 16, marginBottom: 16, gap: 10 },
-  recognizedBox:{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingBottom: 4 },
-  recognizedText:{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, color: C.sub },
-  draftTitle:   { minWidth: 0, flexShrink: 1, fontSize: 17, fontWeight: '700', color: C.text },
-  draftRow:     { minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  draftVal:     { flex: 1, minWidth: 0, fontSize: 13, color: C.text },
-  draftMeta:    { fontSize: 11, color: C.faint, marginTop: 4 },
-  confirmRow:   { flexShrink: 0, flexDirection: 'row', gap: 12 },
-  cancelBtn:    { flex: 1, minWidth: 0, borderRadius: 20, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
-  cancelTxt:    { fontSize: 14, color: C.sub },
-  saveTouch:    { flex: 1, minWidth: 0 },
-  saveBtn:      { width: '100%', borderRadius: 20, paddingVertical: 12, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
-  saveTxt:      { fontSize: 14, fontWeight: '700', color: '#fff' },
-  closeBtn:     { position: 'absolute', top: 16, right: 16 },
+  transcriptSection: { paddingTop: 8, paddingBottom: 14 },
+  transcriptHeader: { height: 32, flexDirection: 'row', alignItems: 'center' },
+  transcriptLabel: { fontSize: 14, lineHeight: 20, color: C.sub },
+  reenterAction: { marginLeft: 'auto', height: 32, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  reenterText: { fontSize: 14, lineHeight: 20, color: C.primary },
+  recognizedText:{
+    minWidth: 0,
+    fontSize: 14,
+    lineHeight: 20,
+    color: C.text,
+    backgroundColor: C.inputBg,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  clarifySection: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.divider, paddingBottom: 8 },
+  clarifyPromptRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center' },
+  clarifyTxt:   { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 20, color: C.text, paddingVertical: 12 },
+  clarifyAnswerRow: { minWidth: 0, height: 48, flexDirection: 'row', alignItems: 'center', paddingLeft: 46 },
+  clarifyInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 40,
+    backgroundColor: C.inputBg,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    fontSize: 14,
+    color: C.text,
+  },
+  clarifyBtn:   { flexShrink: 0, height: 40, justifyContent: 'center', paddingLeft: 12 },
+  clarifyBtnText:{ fontSize: 14, lineHeight: 20, fontWeight: '500', color: C.primary },
+  draftForm:    { minWidth: 0 },
+  draftTitle:   {
+    minWidth: 0,
+    flexShrink: 1,
+    minHeight: VOICE_INPUT_GEOMETRY.titleRowMinHeight,
+    paddingVertical: 13,
+    fontSize: 18,
+    lineHeight: 26,
+    fontWeight: '500',
+    color: C.text,
+  },
+  formDivider:  {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.divider,
+    marginVertical: 14,
+  },
+  parsedFieldRow: {
+    minHeight: VOICE_INPUT_GEOMETRY.fieldRowMinHeight,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  parsedFieldIcon: {
+    width: VOICE_INPUT_GEOMETRY.fieldIconColumnWidth,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingLeft: 4,
+  },
+  parsedFieldValue: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 12,
+    paddingRight: 8,
+    fontSize: 16,
+    lineHeight: 22,
+    color: C.text,
+  },
 });

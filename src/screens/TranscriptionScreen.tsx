@@ -1,5 +1,16 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  PanResponder,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +18,7 @@ import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList, TranscriptLine } from '../types';
-import { useMeetings } from '../store/MeetingsStore';
+import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import { fetchMeetingTranscript, fetchMeetingSummary, uploadMeetingAudio } from '../services/api';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
@@ -30,43 +41,60 @@ import {
   savePendingMeetingSummaryTask,
 } from '../services/meetingSummaryTasks';
 import { MeetingShareKind, meetingShareErrorMessage, shareMeetingArtifact } from '../services/meetingShare';
-import { BackHeader, Waveform } from '../components/Common';
-import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
-import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
-import { formatDuration, transcriptDurationSec } from '../utils/meetingMedia';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { readableErrorMessage } from '../services/errors';
+import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
+import { AppActionSheet } from '../components/AppActionSheet';
+import { MeetingAudioPlayerDock } from '../components/MeetingAudioPlayerDock';
+import { MeetingSummaryContent } from '../components/MeetingSummaryContent';
+import { openMeetingsTab } from '../navigation/tabTargets';
+import { transcriptDurationSec } from '../utils/meetingMedia';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
   route: RouteProp<RootStackParamList, 'Transcription'>;
 };
 
-function SCard({ num, title, badge, children }: {
-  num: number; title: string; badge?: string; children: React.ReactNode;
-}) {
-  return (
-    <View style={s.scard}>
-      <View style={s.scardHeader}>
-        <View style={s.numCircle}>
-          <Text style={s.numText}>{num}</Text>
-        </View>
-        <Text style={s.scardTitle}>{title}</Text>
-        {badge && (
-          <View style={s.badge}>
-            <Text style={s.badgeText}>{badge}</Text>
-          </View>
-        )}
-      </View>
-      {children}
-    </View>
-  );
+function transcriptTimestamp(seconds?: number): string {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds ?? 0) : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = Math.floor(safeSeconds % 60);
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+const MEETING_DETAIL_TAB_GEOMETRY = Object.freeze({
+  startInset: 10,
+  transcriptWidth: 76,
+  summaryWidth: 60,
+  transcriptIndicatorLeft: 20,
+  summaryIndicatorLeft: 102,
+  transcriptIndicatorWidth: 56,
+  summaryIndicatorWidth: 28,
+});
+
+const SPEAKER_AVATAR_TONES = [
+  { backgroundColor: '#E8F3FF', foregroundColor: '#3370FF' },
+  { backgroundColor: '#E4F7ED', foregroundColor: '#20A162' },
+  { backgroundColor: '#F0EBFF', foregroundColor: '#7F5AF0' },
+  { backgroundColor: '#FFF0E2', foregroundColor: '#F07C2B' },
+  { backgroundColor: '#E1F6F5', foregroundColor: '#169C96' },
+  { backgroundColor: '#FDEAF2', foregroundColor: '#D64F82' },
+] as const;
+
+function speakerAvatarTone(line: TranscriptLine) {
+  const key = line.speaker_id || line.speaker_label || 'unknown';
+  let hash = 0;
+  for (let position = 0; position < key.length; position += 1) {
+    hash = ((hash * 31) + key.charCodeAt(position)) >>> 0;
+  }
+  return SPEAKER_AVATAR_TONES[hash % SPEAKER_AVATAR_TONES.length];
 }
 
 export function TranscriptionScreen({ navigation, route }: Props) {
   const {
     meetings,
+    deleteMeeting,
     updateMeetingTitle,
     getCachedTranscript,
     saveCachedTranscript,
@@ -82,13 +110,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [summary, setSummary] = useState('');
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
-  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'transcript' | 'summary'>(
+    route.params.focus === 'summary' ? 'summary' : 'transcript',
+  );
   const [transcriptError, setTranscriptError] = useState('');
   const [summaryError, setSummaryError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [summaryProgress, setSummaryProgress] = useState('正在提交总结任务');
+  const [titleEditing, setTitleEditing] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [moreVisible, setMoreVisible] = useState(false);
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
@@ -100,13 +132,51 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const automaticAudioUploadKeyRef = useRef('');
   const autoResumeTaskRef = useRef('');
   const mountedRef = useRef(true);
-  const scrollRef = useRef<ScrollView | null>(null);
   const titleInputRef = useRef<TextInput | null>(null);
-  const titleYRef = useRef<number | null>(null);
-  const transcriptYRef = useRef<number | null>(null);
-  const summaryYRef = useRef<number | null>(null);
-  const focusHandledRef = useRef(false);
+  const titleFocusHandledRef = useRef(false);
+  const activeTabRef = useRef(activeTab);
+  const tabDirectionRef = useRef<1 | -1>(1);
+  const tabPageProgress = useRef(new Animated.Value(1)).current;
+  const tabIndicatorPosition = useRef(new Animated.Value(activeTab === 'summary' ? 1 : 0)).current;
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
+  const focusTitleInput = useCallback(() => {
+    setTimeout(() => titleInputRef.current?.focus?.(), 0);
+  }, []);
+
+  const selectDetailTab = useCallback((next: 'transcript' | 'summary') => {
+    const current = activeTabRef.current;
+    if (current === next) return;
+    tabDirectionRef.current = next === 'summary' ? 1 : -1;
+    activeTabRef.current = next;
+    tabPageProgress.stopAnimation();
+    tabPageProgress.setValue(0);
+    setActiveTab(next);
+    Animated.parallel([
+      Animated.timing(tabPageProgress, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(tabIndicatorPosition, {
+        toValue: next === 'summary' ? 1 : 0,
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [tabIndicatorPosition, tabPageProgress]);
+
+  const detailPagerPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      Math.abs(gesture.dx) > 16
+      && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35
+    ),
+    onPanResponderRelease: (_event, gesture) => {
+      if (gesture.dx < -48) selectDetailTab('summary');
+      if (gesture.dx > 48) selectDetailTab('transcript');
+    },
+  }), [selectDetailTab]);
 
   const performPendingAudioUpload = useCallback((
     pending: PendingMeetingAudioUpload,
@@ -191,12 +261,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [recordingStorageScope]);
 
   useEffect(() => {
-    if (m) setTitleEdit(m.title);
-  }, [m?.id, m?.title]);
-
-  useEffect(() => {
-    setTranscriptExpanded(false);
-  }, [m?.id]);
+    if (m && !titleEditing) setTitleEdit(m.title);
+  }, [m?.id, m?.title, titleEditing]);
 
   useEffect(() => {
     if (!m) return;
@@ -300,10 +366,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [accessToken, isGuest, m?.id, performPendingAudioUpload, recordingStorageScope, reloadKey]);
-
-  useEffect(() => {
-    focusHandledRef.current = false;
-  }, [m?.id, route.params.focus]);
 
   useEffect(() => {
     autoResumeTaskRef.current = '';
@@ -470,67 +532,62 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     transcriptItems,
   ]);
 
-  const scrollToRequestedSection = () => {
-    if (focusHandledRef.current) return;
-    const target = route.params.focus === 'title'
-      ? titleYRef.current
-      : route.params.focus === 'summary'
-      ? summaryYRef.current
-      : route.params.focus === 'transcript'
-        ? transcriptYRef.current
-        : null;
-    if (target == null) return;
-    focusHandledRef.current = true;
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, target - 10), animated: true });
-      if (route.params.focus === 'title') {
-        requestAnimationFrame(() => titleInputRef.current?.focus());
-      }
-    });
-  };
+  useEffect(() => {
+    if (route.params.focus === 'summary') selectDetailTab('summary');
+    if (route.params.focus === 'transcript') selectDetailTab('transcript');
+    if (route.params.focus !== 'title') {
+      titleFocusHandledRef.current = false;
+      return;
+    }
+    if (m && !titleFocusHandledRef.current) {
+      titleFocusHandledRef.current = true;
+      setTitleEdit(m.title);
+      setTitleEditing(true);
+      focusTitleInput();
+    }
+  }, [focusTitleInput, m?.id, route.params.focus, selectDetailTab]);
 
   if (!m) {
     return (
-      <ScreenContainer edges={['top']}>
-        <BackHeader title="会议转写" onBack={() => navigation.goBack()} />
+      <ScreenContainer edges={['top', 'bottom']}>
+        <MinutesDetailTitleBar onBack={() => navigation.goBack()} />
         <View style={s.emptyWrap}>
           <Text style={s.emptyTitle}>会议记录不存在</Text>
           <Text style={s.emptyText}>请返回会议列表后重新打开。</Text>
         </View>
-        <BottomTabBar
-          active="meetings"
-          onSchedule={() => openScheduleTab(navigation)}
-          onMeetings={() => openMeetingsTab(navigation)}
-          onMic={() => navigation.navigate('MeetingLive')}
-        />
       </ScreenContainer>
     );
   }
 
-  const transcriptionText = transcriptItems.length > 0
-    ? transcriptItems.map(t => `[${t.speaker_label ?? t.speaker_id ?? '发言人'}] ${t.text}`).join('\n')
-    : '暂无转写内容';
-  const recordingBars = m.audioBars ?? [];
-  const transcriptDuration = formatDuration(transcriptDurationSec(transcriptItems));
-  const recordingDuration = m.audioDurationSec
-    ? formatDuration(m.audioDurationSec)
-    : m.duration && m.duration !== '—'
-      ? m.duration
-      : transcriptDuration;
+  const beginTitleEdit = () => {
+    setTitleEdit(m.title);
+    setTitleEditing(true);
+    focusTitleInput();
+  };
 
   const commitTitle = async () => {
     const t = titleEdit.trim();
     if (!t) {
       setTitleEdit(m.title);
+      setTitleEditing(false);
       showDialog({ title: '标题不能为空', message: '已恢复原会议标题。', tone: 'warning' });
-      return;
+      return false;
     }
-    if (t === m.title || titleSaving) return;
+    if (titleSaving) return false;
+    if (t === m.title) {
+      setTitleEditing(false);
+      return true;
+    }
     setTitleSaving(true);
     try {
       await updateMeetingTitle(m.id, t);
+      setTitleEditing(false);
+      return true;
     } catch {
+      setTitleEdit(m.title);
+      setTitleEditing(false);
       showDialog({ title: '保存失败', message: '会议标题更新失败，请稍后重试', tone: 'error' });
+      return false;
     } finally {
       setTitleSaving(false);
     }
@@ -578,57 +635,91 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   };
 
+  const confirmDelete = () => {
+    showDialog({
+      title: '确认删除',
+      message: '确定要删除这条会议记录吗？',
+      tone: 'danger',
+      actions: [
+        {
+          text: '删除',
+          role: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteMeeting(m.id);
+              openMeetingsTab(navigation);
+            } catch (deleteError) {
+              if (deleteError instanceof MeetingDeletionCleanupError) {
+                openMeetingsTab(navigation);
+                showDialog({
+                  title: '会议已删除，清理未完成',
+                  message: deleteError.message,
+                  tone: 'warning',
+                });
+              } else {
+                showDialog({
+                  title: '删除失败',
+                  message: readableErrorMessage(deleteError, '请检查网络后重试。'),
+                  tone: 'error',
+                });
+              }
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
   return (
-    <ScreenContainer edges={['top']}>
-      <BackHeader
-        title="会议转写"
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
+      <MinutesDetailTitleBar
         onBack={() => navigation.goBack()}
-        right={sharing
-          ? <ActivityIndicator size="small" color={C.purple} />
-          : <TouchableOpacity
-            onPress={openShareMenu}
-            hitSlop={{ top:8,bottom:8,left:8,right:8 }}
-            accessibilityRole="button"
-            accessibilityLabel="分享会议资料"
-            testID="meeting-share-menu"
-          >
-            <Ionicons name="share-outline" size={20} color={C.sub} />
-          </TouchableOpacity>}
+        onShare={openShareMenu}
+        onMore={() => setMoreVisible(true)}
+        sharing={sharing}
+        shareTestID="meeting-share-menu"
+        backgroundColor={C.body}
       />
       <ScrollView
-        ref={scrollRef}
         style={s.scroll}
         contentContainerStyle={s.content}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={scrollToRequestedSection}
+        keyboardShouldPersistTaps="handled"
+        stickyHeaderIndices={[1]}
       >
-
-        <SCard num={1} title="日期">
-          <Text style={s.bodyText}>{[m.date, m.time].filter(Boolean).join('　')}</Text>
-        </SCard>
-
-        <SCard num={2} title="录音">
-          <View style={s.miniPlayer}>
+        <View style={s.meetingHeader}>
+          {titleEditing ? (
+            <TextInput
+              ref={titleInputRef}
+              style={s.titleInput}
+              value={titleEdit}
+              onChangeText={setTitleEdit}
+              onBlur={() => { void commitTitle(); }}
+              onSubmitEditing={() => titleInputRef.current?.blur?.()}
+              editable={!titleSaving}
+              autoFocus
+              blurOnSubmit
+              returnKeyType="done"
+              accessibilityLabel="会议标题"
+              testID="meeting-title-input"
+            />
+          ) : (
             <TouchableOpacity
-              style={s.miniPlayBtn}
-              onPress={() => navigation.navigate('Recording', { meetingId: m.id })}
-              activeOpacity={0.8}
-              testID="meeting-audio-open"
-              accessibilityLabel={m.audioAvailable || m.audioLocalUri ? '打开会议录音' : '查看会议录音状态'}
+              style={s.titleDisplayButton}
+              onPress={beginTitleEdit}
+              activeOpacity={0.72}
+              accessibilityRole="button"
+              accessibilityLabel="编辑会议标题"
+              accessibilityValue={{ text: m.title }}
+              testID="meeting-title-display"
             >
-              <Ionicons name={m.audioAvailable || m.audioLocalUri ? 'play' : 'mic-off-outline'} size={14} color="#fff" />
+              <Text style={s.titleDisplay} numberOfLines={2}>{m.title}</Text>
             </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              {recordingBars.length > 0 ? (
-                <Waveform bars={recordingBars} color={C.purple} height={28} />
-              ) : (
-                <Text style={s.noWaveText}>暂无波形数据</Text>
-              )}
-            </View>
-            <View style={s.miniTime}>
-              <Text style={s.miniTimeText}>00:00</Text>
-              <Text style={s.miniTimeText}>{recordingDuration}</Text>
-            </View>
+          )}
+          <View style={s.metaRow}>
+            <Ionicons name="time-outline" size={12} color={C.sub} />
+            <Text style={s.metaText}>{[m.date, m.time].filter(Boolean).join(' ')}</Text>
           </View>
           {pendingAudioUpload ? (
             <View style={s.uploadPending} testID="meeting-audio-upload-pending">
@@ -649,8 +740,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 testID="meeting-audio-upload-retry"
               >
                 {retryingAudioUpload
-                  ? <ActivityIndicator size="small" color={C.purple} />
-                  : <Ionicons name="refresh" size={16} color={C.purple} />}
+                  ? <ActivityIndicator size="small" color={C.primary} />
+                  : <Ionicons name="refresh" size={16} color={C.primary} />}
               </TouchableOpacity>
             </View>
           ) : pendingAudioError ? (
@@ -663,93 +754,137 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel="重试读取录音待上传状态"
               >
-                <Ionicons name="refresh" size={16} color={C.purple} />
+                <Ionicons name="refresh" size={16} color={C.primary} />
               </TouchableOpacity>
             </View>
           ) : null}
-        </SCard>
-
-        <View
-          onLayout={event => {
-            titleYRef.current = event.nativeEvent.layout.y;
-            scrollToRequestedSection();
-          }}
-        >
-          <SCard num={3} title="录音标题">
-            <View style={s.titleField}>
-              <TextInput
-                ref={titleInputRef}
-                style={[s.titleFieldText, { flex: 1, padding: 0 }]}
-                value={titleEdit}
-                onChangeText={setTitleEdit}
-                onBlur={commitTitle}
-                onSubmitEditing={commitTitle}
-                editable={!titleSaving}
-                returnKeyType="done"
-                accessibilityLabel="会议标题"
-              />
-              <Ionicons name="pencil-outline" size={14} color={C.sub} />
-            </View>
-          </SCard>
         </View>
 
         <View
-          onLayout={event => {
-            transcriptYRef.current = event.nativeEvent.layout.y;
-            scrollToRequestedSection();
-          }}
+          style={s.tabs}
+          testID="meeting-detail-tabs"
         >
-          <SCard num={4} title="转写文本">
+          <TouchableOpacity
+            style={[s.tab, s.transcriptTab]}
+            onPress={() => selectDetailTab('transcript')}
+            accessibilityRole="button"
+            accessibilityLabel="查看会议转写"
+            accessibilityState={{ selected: activeTab === 'transcript' }}
+          >
+            <Text style={[s.tabText, activeTab === 'transcript' && s.tabTextActive]}>文字记录</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.tab, s.summaryTab]}
+            onPress={() => selectDetailTab('summary')}
+            accessibilityRole="button"
+            accessibilityLabel="查看会议纪要"
+            accessibilityState={{ selected: activeTab === 'summary' }}
+          >
+            <Text style={[s.tabText, activeTab === 'summary' && s.tabTextActive]}>纪要</Text>
+          </TouchableOpacity>
+          <View style={s.tabDivider} />
+          <Animated.View
+            testID="meeting-detail-tab-indicator"
+            style={[
+              s.tabIndicator,
+              {
+                left: tabIndicatorPosition.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [
+                    MEETING_DETAIL_TAB_GEOMETRY.transcriptIndicatorLeft,
+                    MEETING_DETAIL_TAB_GEOMETRY.summaryIndicatorLeft,
+                  ],
+                }),
+                width: tabIndicatorPosition.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [
+                    MEETING_DETAIL_TAB_GEOMETRY.transcriptIndicatorWidth,
+                    MEETING_DETAIL_TAB_GEOMETRY.summaryIndicatorWidth,
+                  ],
+                }),
+              },
+            ]}
+          />
+        </View>
+
+        <Animated.View
+          testID="meeting-detail-tab-page"
+          style={{
+            opacity: tabPageProgress,
+            transform: [{
+              translateX: tabPageProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [tabDirectionRef.current * 24, 0],
+              }),
+            }],
+          }}
+          {...detailPagerPanResponder.panHandlers}
+        >
+          {activeTab === 'transcript' ? (
+            <View style={s.tabContent} testID="meeting-transcript-list">
             {transcriptError ? (
-              <TouchableOpacity style={s.syncWarning} onPress={() => setReloadKey(value => value + 1)}>
+              <TouchableOpacity
+                style={s.syncWarning}
+                onPress={() => setReloadKey(value => value + 1)}
+                accessibilityRole="button"
+                accessibilityLabel="重试同步会议转写"
+              >
                 <Ionicons name="cloud-offline-outline" size={15} color={C.red} />
                 <Text style={s.syncWarningText}>{transcriptError}</Text>
                 <Text style={s.retryText}>重试</Text>
               </TouchableOpacity>
             ) : null}
             {loadingTranscript && transcriptItems.length === 0 ? (
-              <ActivityIndicator size="small" color={C.purple} style={s.inlineLoading} />
-            ) : (
-              <>
-                {transcriptItems.length > 0 ? (
-                  <View style={s.transcriptMetaRow}>
-                    <Text style={s.transcriptMeta}>共 {transcriptItems.length} 段 · {transcriptDuration}</Text>
-                    <TouchableOpacity
-                      style={s.transcriptToggle}
-                      onPress={() => setTranscriptExpanded(value => !value)}
-                      accessibilityRole="button"
-                      accessibilityLabel={transcriptExpanded ? '收起完整转写' : '展开完整转写'}
-                      accessibilityState={{ expanded: transcriptExpanded }}
-                    >
-                      <Text style={s.transcriptToggleText}>{transcriptExpanded ? '收起' : '展开全文'}</Text>
-                      <Ionicons
-                        name={transcriptExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={14}
-                        color={C.purple}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-                <Text
-                  style={s.transcript}
-                  numberOfLines={transcriptExpanded ? 0 : 6}
-                  ellipsizeMode="tail"
-                  testID="meeting-transcript-text"
+              <View style={s.loadingState}>
+                <ActivityIndicator size="small" color={C.primary} />
+                <Text style={s.loadingText}>正在同步文字记录</Text>
+              </View>
+            ) : transcriptItems.length > 0 ? (
+              transcriptItems.map((line, index) => (
+                <View
+                  key={line.id || `${line.start_time ?? index}-${index}`}
+                  style={s.transcriptItem}
+                  testID={`meeting-transcript-line-${line.id || index}`}
                 >
-                  {transcriptionText}
-                </Text>
-              </>
+                  <View
+                    style={s.transcriptMetaRow}
+                    testID={`meeting-transcript-meta-${line.id || index}`}
+                  >
+                    <View
+                      style={[
+                        s.speakerAvatar,
+                        { backgroundColor: speakerAvatarTone(line).backgroundColor },
+                      ]}
+                      testID={`meeting-speaker-avatar-${line.id || index}`}
+                    >
+                      <Ionicons
+                        name="person"
+                        size={14}
+                        color={speakerAvatarTone(line).foregroundColor}
+                      />
+                    </View>
+                    <Text style={s.transcriptSpeaker} numberOfLines={1}>
+                      {line.speaker_label || '讲话人'}
+                    </Text>
+                    <View style={s.transcriptDot} />
+                    <Text style={s.transcriptTime}>{transcriptTimestamp(line.start_time)}</Text>
+                  </View>
+                  <Text
+                    style={s.transcriptText}
+                    testID={`meeting-transcript-text-${line.id || index}`}
+                  >
+                    {line.text}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View style={s.emptyState}>
+                <Text style={s.emptyStateText}>暂无文字记录</Text>
+              </View>
             )}
-          </SCard>
-        </View>
-
-        <View
-          onLayout={event => {
-            summaryYRef.current = event.nativeEvent.layout.y;
-            scrollToRequestedSection();
-          }}
-        >
-          <SCard num={5} title="AI 会议总结" badge="AI 生成">
+            </View>
+          ) : (
+            <View style={s.summaryContent} testID="meeting-summary-content">
             {summaryError ? (
               <TouchableOpacity
                 style={s.syncWarning}
@@ -764,7 +899,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             ) : null}
             {loadingSummary ? (
               <View style={s.summaryLoading}>
-                <ActivityIndicator size="small" color={C.purple} />
+                <ActivityIndicator size="small" color={C.primary} />
                 <Text style={s.summaryLoadingText}>{summaryProgress}</Text>
                 {summaryAbortRef.current ? (
                   <TouchableOpacity onPress={() => summaryAbortRef.current?.abort()} style={s.stopWaitingBtn}>
@@ -773,9 +908,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 ) : null}
               </View>
             ) : summary ? (
-              <Text style={s.summaryText}>{summary}</Text>
+              <MeetingSummaryContent markdown={summary} />
             ) : (
-              <Text style={s.emptyText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
+              <View style={s.emptyState}>
+                <Text style={s.emptyStateText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
+              </View>
             )}
             {!loadingSummary && transcriptItems.length > 0 ? (
               <TouchableOpacity
@@ -785,69 +922,155 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={summary ? '重新生成会议总结' : '生成会议总结'}
               >
-                <Ionicons name="sparkles-outline" size={14} color={summary ? C.purple : '#fff'} />
+                <Ionicons name="sparkles-outline" size={16} color={summary ? C.primary : '#fff'} />
                 <Text style={[s.generateText, summary && s.regenerateText]}>{summary ? '重新生成' : '生成总结'}</Text>
               </TouchableOpacity>
             ) : null}
-          </SCard>
-        </View>
-
-        <View style={{ height: 16 }} />
+            </View>
+          )}
+        </Animated.View>
       </ScrollView>
-      <BottomTabBar
-        active="meetings"
-        onSchedule={() => openScheduleTab(navigation)}
-        onMeetings={() => openMeetingsTab(navigation)}
-        onMic={() => navigation.navigate('MeetingLive')}
+
+      <MeetingAudioPlayerDock
+        meeting={m}
+        accessToken={accessToken}
+        isGuest={isGuest}
+        fallbackDurationSec={transcriptDurationSec(transcriptItems)}
       />
+
+      {moreVisible ? (
+        <AppActionSheet
+          visible
+          title={m.title}
+          onClose={() => setMoreVisible(false)}
+          items={[
+            {
+              key: 'delete',
+              label: '删除会议',
+              destructive: true,
+              onPress: confirmDelete,
+            },
+          ]}
+        />
+      ) : null}
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.appBg },
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 8 },
-  emptyText: { fontSize: 13, color: C.sub, lineHeight: 20 },
-  scard: {
-    backgroundColor: C.card, borderRadius: 16, padding: 14, paddingHorizontal: 16, marginBottom: 12,
-    shadowColor: '#5028A0', shadowOffset: { width:0,height:1 }, shadowOpacity:0.05, shadowRadius:8, elevation:2,
+  scroll: { flex: 1, backgroundColor: C.body },
+  content: { paddingBottom: 32 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.body },
+  emptyTitle: { fontSize: 17, fontWeight: '600', color: C.text, marginBottom: 8 },
+  emptyText: { fontSize: 14, color: C.sub, lineHeight: 20 },
+  meetingHeader: { paddingTop: 20, paddingBottom: 16 },
+  titleDisplayButton: {
+    minHeight: 44,
+    marginHorizontal: 20,
+    justifyContent: 'center',
   },
-  scardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  numCircle: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.purpleDark, alignItems: 'center', justifyContent: 'center' },
-  numText: { fontSize: 11, fontWeight: '700', color: '#fff' },
-  scardTitle: { fontSize: 14, fontWeight: '700', color: C.text },
-  badge: { backgroundColor: '#FFE8F0', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 1 },
-  badgeText: { fontSize: 10, color: C.pink, fontWeight: '600' },
-  bodyText: { fontSize: 14, color: C.text },
-  miniPlayer: { backgroundColor: C.purpleLight, borderRadius: 12, padding: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  miniPlayBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
-  miniTime: { alignItems: 'flex-end' },
-  miniTimeText: { fontSize: 11, color: C.sub },
-  noWaveText: { fontSize: 11, color: C.faint, textAlign: 'center' },
-  uploadPending: { minHeight: 42, marginTop: 10, borderRadius: 10, backgroundColor: '#FFF6E8', paddingLeft: 11, paddingRight: 5, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  uploadPendingText: { flex: 1, fontSize: 11, lineHeight: 16, color: C.sub, fontWeight: '600' },
-  uploadRetryButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  titleField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F6F2FF', borderRadius: 10, padding: 10, paddingHorizontal: 14 },
-  titleFieldText: { fontSize: 14, fontWeight: '500', color: C.text },
-  transcript: { fontSize: 13, color: '#4A4666', lineHeight: 26 },
-  transcriptMetaRow: { minHeight: 34, marginBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  transcriptMeta: { fontSize: 11, color: C.sub, fontWeight: '600' },
-  transcriptToggle: { minHeight: 34, paddingLeft: 12, flexDirection: 'row', alignItems: 'center', gap: 3 },
-  transcriptToggleText: { fontSize: 11, color: C.purple, fontWeight: '800' },
-  summaryText: { fontSize: 13, color: '#4A4666', lineHeight: 26 },
-  inlineLoading: { marginVertical: 10 },
-  syncWarning: { minHeight: 40, borderRadius: 10, backgroundColor: '#FFF3F3', flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, marginBottom: 10 },
-  syncWarningText: { flex: 1, fontSize: 11, lineHeight: 16, color: C.red },
-  retryText: { fontSize: 11, color: C.purple, fontWeight: '800' },
-  summaryLoading: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  summaryLoadingText: { flex: 1, fontSize: 12, color: C.sub, fontWeight: '600' },
-  stopWaitingBtn: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 8, backgroundColor: C.purpleLight },
-  stopWaitingText: { fontSize: 11, color: C.purple, fontWeight: '800' },
-  generateBtn: { marginTop: 12, alignSelf: 'flex-start', height: 34, borderRadius: 17, paddingHorizontal: 14, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  generateText: { fontSize: 12, color: '#fff', fontWeight: '800' },
-  regenerateBtn: { backgroundColor: C.purpleLight },
-  regenerateText: { color: C.purple },
+  titleDisplay: {
+    fontSize: 24,
+    lineHeight: 36,
+    fontWeight: '700',
+    color: C.text,
+  },
+  titleInput: {
+    minHeight: 44,
+    marginHorizontal: 20,
+    padding: 0,
+    fontSize: 24,
+    lineHeight: 36,
+    fontWeight: '700',
+    color: C.text,
+  },
+  metaRow: { height: 22, marginLeft: 20, marginTop: 6, flexDirection: 'row', alignItems: 'center' },
+  metaText: { marginLeft: 4, fontSize: 14, lineHeight: 22, color: C.sub },
+  uploadPending: {
+    minHeight: 44,
+    marginTop: 12,
+    paddingLeft: 20,
+    paddingRight: 8,
+    backgroundColor: '#FFF7E8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadPendingText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.sub },
+  uploadRetryButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  tabs: {
+    height: 41,
+    flexDirection: 'row',
+    paddingLeft: MEETING_DETAIL_TAB_GEOMETRY.startInset,
+    backgroundColor: C.body,
+  },
+  tab: { height: 41, alignItems: 'center', justifyContent: 'center' },
+  transcriptTab: { width: MEETING_DETAIL_TAB_GEOMETRY.transcriptWidth },
+  summaryTab: { width: MEETING_DETAIL_TAB_GEOMETRY.summaryWidth },
+  tabText: { fontSize: 14, lineHeight: 20, color: C.sub },
+  tabTextActive: { color: C.text, fontWeight: '600' },
+  tabDivider: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.border,
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    height: 2,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+    backgroundColor: C.primary,
+  },
+  tabContent: { minHeight: 320, paddingBottom: 20 },
+  transcriptItem: { paddingTop: 20, paddingBottom: 12 },
+  speakerAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transcriptMetaRow: { minHeight: 24, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center' },
+  transcriptSpeaker: { maxWidth: '55%', fontSize: 14, lineHeight: 20, color: C.sub },
+  transcriptDot: { width: 3, height: 3, borderRadius: 1.5, marginHorizontal: 12, backgroundColor: C.faint },
+  transcriptTime: { fontSize: 14, lineHeight: 20, color: C.sub },
+  transcriptText: { marginTop: 10, marginHorizontal: 20, fontSize: 16, lineHeight: 28, color: C.text },
+  summaryContent: { minHeight: 320, paddingTop: 10, paddingBottom: 24 },
+  loadingState: { minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  loadingText: { fontSize: 14, lineHeight: 20, color: C.sub },
+  emptyState: { minHeight: 220, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  emptyStateText: { fontSize: 14, lineHeight: 20, color: C.sub },
+  syncWarning: {
+    minHeight: 44,
+    backgroundColor: '#FFF3F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 20,
+  },
+  syncWarningText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.red },
+  retryText: { fontSize: 13, lineHeight: 20, color: C.primary, fontWeight: '500' },
+  summaryLoading: { minHeight: 220, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  summaryLoadingText: { fontSize: 14, lineHeight: 20, color: C.sub },
+  stopWaitingBtn: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 },
+  stopWaitingText: { fontSize: 14, lineHeight: 20, color: C.primary, fontWeight: '500' },
+  generateBtn: {
+    alignSelf: 'center',
+    height: 40,
+    marginTop: 20,
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    backgroundColor: C.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  generateText: { fontSize: 14, lineHeight: 20, color: '#fff', fontWeight: '500' },
+  regenerateBtn: { backgroundColor: C.primaryLight },
+  regenerateText: { color: C.primary },
 });

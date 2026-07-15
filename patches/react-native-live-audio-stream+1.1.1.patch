@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
-index 20f454f..3c7bb86 100644
+index 20f454f..191da4c 100644
 --- a/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
 +++ b/node_modules/react-native-live-audio-stream/android/src/main/java/com/imxiqi/rnliveaudiostream/RNLiveAudioStreamModule.java
 @@ -3,6 +3,9 @@ package com.imxiqi.rnliveaudiostream;
@@ -23,7 +23,7 @@ index 20f454f..3c7bb86 100644
  import java.lang.Math;
 
  public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
-@@ -22,12 +29,27 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -22,12 +29,28 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
      private int sampleRateInHz;
      private int channelConfig;
@@ -38,6 +38,7 @@ index 20f454f..3c7bb86 100644
      private int bufferSize;
 -    private boolean isRecording;
 +    private volatile boolean isRecording;
++    private volatile boolean isPaused;
 +    private boolean enableAutomaticGainControl;
 +    private boolean enableNoiseSuppressor;
 +    private int skipInitialBuffers;
@@ -52,7 +53,7 @@ index 20f454f..3c7bb86 100644
 
      public RNLiveAudioStreamModule(ReactApplicationContext reactContext) {
          super(reactContext);
-@@ -40,23 +62,33 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -40,23 +63,33 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
      }
 
      @ReactMethod
@@ -87,7 +88,7 @@ index 20f454f..3c7bb86 100644
              }
          }
 
-@@ -65,6 +97,17 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -65,7 +98,19 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
              audioSource = options.getInt("audioSource");
          }
 
@@ -103,9 +104,11 @@ index 20f454f..3c7bb86 100644
 +                : "laoji-realtime.wav";
 +
          isRecording = false;
++        isPaused = false;
          eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
 
-@@ -76,14 +119,30 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+         bufferSize = AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioFormat);
+@@ -76,14 +121,31 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
 
          int recordingBufferSize = bufferSize * 3;
          recorder = new AudioRecord(audioSource, sampleRateInHz, channelConfig, audioFormat, recordingBufferSize);
@@ -129,6 +132,7 @@ index 20f454f..3c7bb86 100644
 +
          isRecording = true;
 -        recorder.startRecording();
++        isPaused = false;
 +        recordingFinished = false;
 +        lastAudioUri = null;
 +        final AudioRecord activeRecorder = recorder;
@@ -139,7 +143,7 @@ index 20f454f..3c7bb86 100644
              public void run() {
                  try {
                      int bytesRead;
-@@ -91,18 +150,45 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -91,18 +153,46 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
                      String base64Data;
                      byte[] buffer = new byte[bufferSize];
 
@@ -151,7 +155,7 @@ index 20f454f..3c7bb86 100644
 -                        // skip first 2 buffers to eliminate "click sound"
 -                        if (bytesRead > 0 && ++count > 2) {
 -                            base64Data = Base64.encodeToString(buffer, Base64.NO_WRAP);
-+                        if (bytesRead > 0 && ++count > skipInitialBuffers) {
++                        if (bytesRead > 0 && isRecording && !isPaused && ++count > skipInitialBuffers) {
 +                            writeAudioChunk(buffer, bytesRead);
 +                            byte[] chunk = bytesRead == buffer.length
 +                                    ? buffer
@@ -177,6 +181,7 @@ index 20f454f..3c7bb86 100644
 +                    Promise pending;
 +                    synchronized (RNLiveAudioStreamModule.this) {
 +                        recordingFinished = true;
++                        isPaused = false;
 +                        lastAudioUri = audioUri;
 +                        if (recorder == activeRecorder) {
 +                            activeRecorder.release();
@@ -192,11 +197,25 @@ index 20f454f..3c7bb86 100644
                  }
              }
          });
-@@ -111,7 +197,169 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
+@@ -111,7 +201,183 @@ public class RNLiveAudioStreamModule extends ReactContextBaseJavaModule {
      }
 
      @ReactMethod
 -    public void stop(Promise promise) {
++    public synchronized void pause() {
++        if (!recordingFinished && isRecording) {
++            isPaused = true;
++        }
++    }
++
++    @ReactMethod
++    public synchronized void resume() {
++        if (!recordingFinished && isRecording) {
++            isPaused = false;
++        }
++    }
++
++    @ReactMethod
 +    public synchronized void stop(Promise promise) {
 +        if (recordingFinished) {
 +            promise.resolve(lastAudioUri);
@@ -363,3 +382,108 @@ index 20f454f..3c7bb86 100644
 +        recorder = null;
 +    }
  }
+diff --git a/node_modules/react-native-live-audio-stream/index.d.ts b/node_modules/react-native-live-audio-stream/index.d.ts
+index b846438..3ebab43 100644
+--- a/node_modules/react-native-live-audio-stream/index.d.ts
++++ b/node_modules/react-native-live-audio-stream/index.d.ts
+@@ -2,6 +2,8 @@ declare module "react-native-live-audio-stream" {
+   export interface IAudioRecord {
+     init: (options: Options) => void
+     start: () => void
++    pause: () => void
++    resume: () => void
+     stop: () => Promise<string>
+     on: (event: "data", callback: (data: string) => void) => void
+   }
+diff --git a/node_modules/react-native-live-audio-stream/index.js b/node_modules/react-native-live-audio-stream/index.js
+index c5968b2..aab6ec7 100644
+--- a/node_modules/react-native-live-audio-stream/index.js
++++ b/node_modules/react-native-live-audio-stream/index.js
+@@ -6,6 +6,8 @@ const AudioRecord = {};
+
+ AudioRecord.init = options => RNLiveAudioStream.init(options);
+ AudioRecord.start = () => RNLiveAudioStream.start();
++AudioRecord.pause = () => RNLiveAudioStream.pause();
++AudioRecord.resume = () => RNLiveAudioStream.resume();
+ AudioRecord.stop = () => RNLiveAudioStream.stop();
+
+ const eventsMap = {
+diff --git a/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.h b/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.h
+index 8ade6b5..7f95bd4 100644
+--- a/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.h
++++ b/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.h
+@@ -12,6 +12,7 @@ typedef struct {
+     UInt32                      bufferByteSize;
+     SInt64                      mCurrentPacket;
+     bool                        mIsRunning;
++    bool                        mIsPaused;
+ } AQRecordState;
+
+ @interface RNLiveAudioStream: RCTEventEmitter <RCTBridgeModule>
+diff --git a/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.m b/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.m
+index a6f2317..9ac940e 100644
+--- a/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.m
++++ b/node_modules/react-native-live-audio-stream/ios/RNLiveAudioStream.m
+@@ -17,6 +17,7 @@ RCT_EXPORT_METHOD(init:(NSDictionary *) options) {
+     _recordState.mDataFormat.mFormatFlags       = _recordState.mDataFormat.mBitsPerChannel == 8 ? kLinearPCMFormatFlagIsPacked : (kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked);
+     _recordState.bufferByteSize                 = options[@"bufferSize"] == nil ? 2048 : [options[@"bufferSize"] unsignedIntValue];
+     _recordState.mSelf = self;
++    _recordState.mIsPaused = false;
+ }
+
+ RCT_EXPORT_METHOD(start) {
+@@ -44,6 +45,7 @@ RCT_EXPORT_METHOD(start) {
+     }
+
+     _recordState.mIsRunning = true;
++    _recordState.mIsPaused = false;
+
+     OSStatus status = AudioQueueNewInput(&_recordState.mDataFormat, HandleInputBuffer, &_recordState, NULL, NULL, 0, &_recordState.mQueue);
+     if (status != 0) {
+@@ -58,10 +60,35 @@ RCT_EXPORT_METHOD(start) {
+     AudioQueueStart(_recordState.mQueue, NULL);
+ }
+
++RCT_EXPORT_METHOD(pause) {
++    RCTLogInfo(@"[RNLiveAudioStream] pause");
++    if (_recordState.mIsRunning && !_recordState.mIsPaused) {
++        OSStatus status = AudioQueuePause(_recordState.mQueue);
++        if (status == 0) {
++            _recordState.mIsPaused = true;
++        } else {
++            RCTLog(@"[RNLiveAudioStream] Pause failed. status: %i", (int) status);
++        }
++    }
++}
++
++RCT_EXPORT_METHOD(resume) {
++    RCTLogInfo(@"[RNLiveAudioStream] resume");
++    if (_recordState.mIsRunning && _recordState.mIsPaused) {
++        OSStatus status = AudioQueueStart(_recordState.mQueue, NULL);
++        if (status == 0) {
++            _recordState.mIsPaused = false;
++        } else {
++            RCTLog(@"[RNLiveAudioStream] Resume failed. status: %i", (int) status);
++        }
++    }
++}
++
+ RCT_EXPORT_METHOD(stop) {
+     RCTLogInfo(@"[RNLiveAudioStream] stop");
+     if (_recordState.mIsRunning) {
+         _recordState.mIsRunning = false;
++        _recordState.mIsPaused = false;
+         AudioQueueStop(_recordState.mQueue, true);
+         for (int i = 0; i < kNumberBuffers; i++) {
+             AudioQueueFreeBuffer(_recordState.mQueue, _recordState.mBuffers[i]);
+@@ -81,6 +108,10 @@ void HandleInputBuffer(void *inUserData,
+     if (!pRecordState->mIsRunning) {
+         return;
+     }
++    if (pRecordState->mIsPaused) {
++        AudioQueueEnqueueBuffer(pRecordState->mQueue, inBuffer, 0, NULL);
++        return;
++    }
+
+     short *samples = (short *) inBuffer->mAudioData;
+     long nsamples = inBuffer->mAudioDataByteSize;

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { AppState, Text } from 'react-native';
+import { AppState, StyleSheet, Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AppLockGate } from '../src/components/AppLockGate';
 import { useAuth } from '../src/store/AuthStore';
@@ -12,7 +12,7 @@ import {
 
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
-jest.mock('../src/components/Common', () => ({ Sparkle: 'Sparkle' }));
+jest.mock('../src/components/Common', () => ({ Avatar: 'Avatar', Sparkle: 'Sparkle' }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
 jest.mock('../src/services/privacy', () => ({
   authenticateWithSystem: jest.fn(),
@@ -31,13 +31,17 @@ function deferred<T>() {
 const unlockedPrefs = { biometricEnabled: false, appLockEnabled: false };
 
 describe('AppLockGate', () => {
-  let authState: { mode: string; session: { user: { id: number } } | null };
+  let authState: {
+    mode: string;
+    session: { user: { id: number } } | null;
+    profile?: { nickname: string };
+  };
   let privacyListener: ((prefs: typeof unlockedPrefs) => void) | null;
   let appStateListener: ((state: string) => void) | null;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    authState = { mode: 'guest', session: null };
+    authState = { mode: 'guest', session: null, profile: { nickname: '访客用户' } };
     privacyListener = null;
     appStateListener = null;
     (useAuth as jest.Mock).mockImplementation(() => authState);
@@ -87,7 +91,24 @@ describe('AppLockGate', () => {
       appStateListener?.('background');
     });
 
-    expect(view.getByText('老记已锁定')).toBeTruthy();
+    expect(view.getByText('老记已锁定，请使用系统生物识别或设备密码验证身份')).toBeTruthy();
+    expect(StyleSheet.flatten(view.getByTestId('app-lock-screen').props.style).paddingTop).toBe(20);
+    expect(StyleSheet.flatten(view.getByTestId('app-lock-avatar').props.style)).toEqual(expect.objectContaining({
+      width: 80,
+      height: 80,
+    }));
+    expect(StyleSheet.flatten(view.getByTestId('app-lock-user-name').props.style)).toEqual(expect.objectContaining({
+      height: 32,
+      marginTop: 8,
+      fontSize: 24,
+    }));
+    expect(StyleSheet.flatten(view.getByTestId('app-lock-hint').props.style)).toEqual(expect.objectContaining({
+      minHeight: 52,
+      marginTop: 20,
+      fontSize: 17,
+    }));
+    expect(StyleSheet.flatten(view.getByTestId('app-lock-status-slot').props.style).height).toBe(52);
+    expect(view.queryByText('验证并解锁')).toBeNull();
     expect(view.getByTestId('private-content', { includeHiddenElements: true })).toBeTruthy();
     expect(view.getByTestId('app-lock-protected-content', { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
     expect(authenticateWithSystem).not.toHaveBeenCalled();
@@ -100,7 +121,7 @@ describe('AppLockGate', () => {
 
     await waitFor(() => expect(authenticateWithSystem).toHaveBeenCalledWith('解锁老记'));
     expect(view.getByTestId('private-content', { includeHiddenElements: true })).toBeTruthy();
-    expect(view.getByText('老记已锁定')).toBeTruthy();
+    expect(view.getByText('老记已锁定，请使用系统生物识别或设备密码验证身份')).toBeTruthy();
     expect(unmounted).not.toHaveBeenCalled();
   });
 
@@ -113,7 +134,7 @@ describe('AppLockGate', () => {
     await waitFor(() => expect(loadPrivacyPrefs).toHaveBeenCalledWith('guest'));
     await waitFor(() => expect(view.getByTestId('private-content')).toBeTruthy());
 
-    authState = { mode: 'authenticated', session: { user: { id: 7 } } };
+    authState = { mode: 'authenticated', session: { user: { id: 7 } }, profile: { nickname: '测试用户' } };
     await view.rerender(<AppLockGate><Text testID="private-content">私密日程</Text></AppLockGate>);
 
     expect(view.getByTestId('app-lock-loading')).toBeTruthy();

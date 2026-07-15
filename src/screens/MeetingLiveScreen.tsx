@@ -1,15 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { BackHeader } from '../components/Common';
-import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
+import { Waveform } from '../components/Common';
+import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
 import { useAppDialog } from '../components/AppDialog';
-import { openMeetingsTab, openScheduleTab } from '../navigation/tabTargets';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import {
@@ -28,7 +38,6 @@ import {
   pcmDurationSec,
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
-import { meetingAudioInputLabel, meetingAudioLevelPercent } from '../utils/meetingAudioStatus';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 
 type Props = {
@@ -47,6 +56,37 @@ function formatClock(ms: number): string {
   const sec = total % 60;
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
+
+function formatMeetingStart(value: Date): string {
+  return `${value.getFullYear()}年${value.getMonth() + 1}月${value.getDate()}日 ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatTranscriptTime(seconds?: number): string {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds ?? 0) : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = Math.floor(safeSeconds % 60);
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+const IDLE_WAVE_BARS = Array.from({ length: 48 }, (_, index) => (
+  0.08 + ((Math.sin(index * 0.92) + 1) * 0.04)
+));
+
+export const MEETING_RECORDING_GEOMETRY = Object.freeze({
+  topBarHeight: 44,
+  titleMinHeight: 100,
+  singleTabDividerHeight: 0.5,
+  toolbarHeight: 104,
+  waveformHeight: 32,
+  controlRowHeight: 56,
+  durationHeight: 50,
+  resumePauseWidth: 88,
+  stopWidth: 72,
+  stopHeight: 40,
+  transcriptAvatarSize: 18,
+  transcriptPaddingStart: 18,
+  transcriptPaddingEnd: 20,
+});
 
 interface ActiveRecording {
   meetingId: string;
@@ -68,6 +108,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     meetings,
     createMeeting,
     deleteMeeting,
+    updateMeetingTitle,
     updateMeetingStatus,
     getCachedTranscript,
     saveCachedTranscript,
@@ -76,40 +117,70 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const { showDialog } = useAppDialog();
   const existing = route.params?.meetingId ? meetings.find(item => item.id === route.params?.meetingId) : undefined;
   const [title, setTitle] = useState(existing?.title ?? defaultTitle());
+  const [titleDraft, setTitleDraft] = useState(existing?.title ?? title);
+  const [titleEditing, setTitleEditing] = useState(false);
   const [meetingId, setMeetingId] = useState(existing?.id ?? '');
   const [status, setStatus] = useState<RealtimeAsrStatus | 'idle' | 'saving' | 'summarizing' | 'failed'>('idle');
   const [transcript, setTranscript] = useState<TranscriptLine[]>(() => existing ? getCachedTranscript(existing.id) : []);
   const [error, setError] = useState('');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [audioStats, setAudioStats] = useState<RealtimeAsrAudioStats | null>(null);
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [followingTranscript, setFollowingTranscript] = useState(true);
+  const [pauseTransitioning, setPauseTransitioning] = useState(false);
   const activeRecordingRef = useRef<ActiveRecording | null>(null);
   const finalizationUiPromiseRef = useRef<Promise<boolean> | null>(null);
   const navigateAfterFinalizeRef = useRef(false);
   const mountedRef = useRef(true);
   const startedAtRef = useRef<number | null>(null);
+  const pausedAtRef = useRef<number | null>(null);
+  const accumulatedPausedMsRef = useRef(0);
   const audioStatsRef = useRef<RealtimeAsrAudioStats | null>(null);
   const audioRmsSamplesRef = useRef<number[]>([]);
   const activeMeetingIdRef = useRef('');
   const transcriptRef = useRef<TranscriptLine[]>(transcript);
+  const titleRef = useRef(title);
   const transcriptCheckpointRef = useRef({ lineCount: transcript.length, savedAtMs: Date.now() });
   const leavePromptOpenRef = useRef(false);
   const backgroundStopRef = useRef(false);
   const startInFlightRef = useRef(false);
+  const autoStartAttemptedRef = useRef(false);
+  const transcriptScrollRef = useRef<ScrollView | null>(null);
+  const meetingStartedAtRef = useRef(new Date());
   const createRequestRef = useRef(createClientRequestState('meeting'));
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
 
+  const recordingElapsedAt = useCallback((now = Date.now()) => {
+    if (!startedAtRef.current) return 0;
+    const currentPauseMs = pausedAtRef.current ? now - pausedAtRef.current : 0;
+    return Math.max(0, now - startedAtRef.current - accumulatedPausedMsRef.current - currentPauseMs);
+  }, []);
   const ticking = status === 'connecting' || status === 'recording' || status === 'connected' || status === 'stopping';
+  const isPaused = status === 'paused';
   const canStop = Boolean(activeRecordingRef.current) && (
-    status === 'recording' || status === 'connected' || status === 'failed'
+    status === 'recording' || status === 'connected' || status === 'paused' || status === 'failed'
   );
-  const canStart = (!existing || canResumeMeetingRecording(existing)) && !activeRecordingRef.current && (
+  const canTogglePause = !pauseTransitioning && Boolean(activeRecordingRef.current) && (
+    status === 'recording' || status === 'connected' || status === 'paused'
+  );
+  const requestedMeetingMissing = Boolean(route.params?.meetingId && !existing);
+  const canStart = !requestedMeetingMissing && (!existing || canResumeMeetingRecording(existing)) && !activeRecordingRef.current && (
     status === 'idle' || status === 'closed' || status === 'failed'
   );
+  const canEditTitle = status !== 'stopping' && status !== 'saving' && !titleSaving;
   const visibleTranscript = useMemo(() => latestTranscriptWindow(transcript, 40), [transcript]);
+  const liveWaveBars = useMemo(() => {
+    const bars = audioSamplesToBars(audioRmsSamplesRef.current.slice(-160), 48);
+    return bars.length > 0 ? bars : IDLE_WAVE_BARS;
+  }, [audioStats?.frameCount]);
+  const meetingStartText = existing
+    ? [existing.date, existing.time].filter(Boolean).join(' ')
+    : formatMeetingStart(meetingStartedAtRef.current);
   const statusText = useMemo(() => {
     if (status === 'idle') return '准备开始';
     if (status === 'connecting') return '正在连接实时转写';
     if (status === 'recording' || status === 'connected') return '实时转写中';
+    if (status === 'paused') return '录音已暂停';
     if (status === 'stopping') return '正在停止';
     if (status === 'saving') return '正在保存会议';
     if (status === 'summarizing') return '正在生成总结';
@@ -124,10 +195,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!ticking) return;
     const timer = setInterval(() => {
-      if (startedAtRef.current) setElapsedMs(Date.now() - startedAtRef.current);
+      if (startedAtRef.current) setElapsedMs(recordingElapsedAt());
     }, 500);
     return () => clearInterval(timer);
-  }, [ticking]);
+  }, [recordingElapsedAt, ticking]);
 
   useEffect(() => {
     if (!existing?.id) return;
@@ -143,6 +214,17 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
+
+  useEffect(() => {
+    titleRef.current = title;
+  }, [title]);
+
+  useEffect(() => {
+    if (!existing?.title) return;
+    titleRef.current = existing.title;
+    setTitle(existing.title);
+    if (!titleEditing) setTitleDraft(existing.title);
+  }, [existing?.id, existing?.title]);
 
   const persistStoppedSession = useCallback(async (
     session: RealtimeAsrSession,
@@ -274,6 +356,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     setAudioStats(null);
     audioStatsRef.current = null;
     audioRmsSamplesRef.current = [];
+    pausedAtRef.current = null;
+    accumulatedPausedMsRef.current = 0;
+    setPauseTransitioning(false);
     let startedMeetingId = '';
     let guestSession: ApiGuestRealtimeSession | undefined;
     let createdForAttempt = false;
@@ -294,7 +379,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const reusableMeeting = existing ?? (meetingId ? meetings.find(item => item.id === meetingId) : undefined);
       reusableStatus = reusableMeeting?.status ?? 'created';
       createdForAttempt = !reusableMeeting;
-      const meetingPayload = { title: title.trim() || defaultTitle(), mode: 'realtime' as const };
+      const meetingPayload = { title: titleRef.current.trim() || defaultTitle(), mode: 'realtime' as const };
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'meeting', meetingPayload);
       const meeting = reusableMeeting ?? await createMeeting(meetingPayload.title, {
         mode: meetingPayload.mode,
@@ -304,6 +389,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       ensureScreenActive();
       setMeetingId(meeting.id);
       activeMeetingIdRef.current = meeting.id;
+      const latestTitle = titleRef.current.trim();
+      if (latestTitle && latestTitle !== meeting.title) {
+        await updateMeetingTitle(meeting.id, latestTitle);
+        ensureScreenActive();
+      }
       await updateMeetingStatus(meeting.id, 'recording');
       ensureScreenActive();
       const initialTranscript = reusableMeeting ? getCachedTranscript(meeting.id) : [];
@@ -311,14 +401,13 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       transcriptCheckpointRef.current = { lineCount: initialTranscript.length, savedAtMs: Date.now() };
       setTranscript(initialTranscript);
       if (isGuest) {
-        guestSession = await createGuestRealtimeSession(meeting.title);
+        guestSession = await createGuestRealtimeSession(latestTitle || meeting.title);
         ensureScreenActive();
       }
       const session = await startRealtimeAsr({
         meetingId: guestSession?.meeting_id ?? meeting.id,
         accessToken: isGuest ? null : accessToken,
         guestToken: guestSession?.guest_token,
-        provider: 'funasr',
         onStatus: next => {
           if (mountedRef.current) setStatus(next);
         },
@@ -355,6 +444,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         return;
       }
       activeRecordingRef.current = active;
+      setStatus('recording');
       void session.completion.then(completion => {
         if (activeRecordingRef.current !== active || !mountedRef.current) return;
         if (completion.reason !== 'connection-closed') return;
@@ -362,6 +452,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         void finalizeActiveRecording(active, !finalizationUiPromiseRef.current);
       });
       startedAtRef.current = Date.now();
+      pausedAtRef.current = null;
+      accumulatedPausedMsRef.current = 0;
       setElapsedMs(0);
     } catch (err) {
       await restorePlaybackAudioMode();
@@ -392,9 +484,101 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const stopRecording = useCallback((navigateAfter = true): Promise<boolean> => {
     const active = activeRecordingRef.current;
     if (!active) return Promise.resolve(false);
+    setPauseTransitioning(false);
     setStatus('stopping');
     return finalizeActiveRecording(active, navigateAfter);
   }, [finalizeActiveRecording]);
+
+  const togglePauseRecording = async () => {
+    const active = activeRecordingRef.current;
+    if (!active || !canTogglePause) return;
+    setPauseTransitioning(true);
+    setError('');
+    try {
+      if (isPaused) {
+        const pausedAt = pausedAtRef.current;
+        await active.session.resume();
+        const resumedAt = Date.now();
+        if (pausedAt) accumulatedPausedMsRef.current += Math.max(0, resumedAt - pausedAt);
+        pausedAtRef.current = null;
+        setStatus('recording');
+      } else {
+        await active.session.pause();
+        const pausedAt = Date.now();
+        pausedAtRef.current = pausedAt;
+        setElapsedMs(recordingElapsedAt(pausedAt));
+        setStatus('paused');
+      }
+    } catch (reason) {
+      const fallback = isPaused ? '继续录音失败，请重试。' : '暂停录音失败，请重试。';
+      setError(reason instanceof Error && reason.message ? reason.message : fallback);
+    } finally {
+      if (mountedRef.current) setPauseTransitioning(false);
+    }
+  };
+
+  const beginTitleEditing = () => {
+    if (!canEditTitle) return;
+    setTitleDraft(titleRef.current);
+    setTitleEditing(true);
+  };
+
+  const commitTitle = async () => {
+    const previousTitle = titleRef.current;
+    const nextTitle = titleDraft.trim();
+    setTitleEditing(false);
+    if (!nextTitle || nextTitle === previousTitle) {
+      setTitleDraft(previousTitle);
+      return;
+    }
+    titleRef.current = nextTitle;
+    setTitle(nextTitle);
+    setTitleDraft(nextTitle);
+    const id = activeMeetingIdRef.current || meetingId || existing?.id;
+    if (!id || titleSaving) return;
+    setTitleSaving(true);
+    try {
+      await updateMeetingTitle(id, nextTitle);
+    } catch {
+      showDialog({ title: '保存失败', message: '会议标题更新失败，请稍后重试。', tone: 'error' });
+    } finally {
+      if (mountedRef.current) setTitleSaving(false);
+    }
+  };
+
+  const handleTranscriptScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    setFollowingTranscript(distanceFromBottom <= 72);
+  };
+
+  const scrollToLatestTranscript = () => {
+    setFollowingTranscript(true);
+    transcriptScrollRef.current?.scrollToEnd({ animated: true });
+  };
+
+  const confirmStopRecording = () => {
+    if (!canStop) return;
+    showDialog({
+      title: '结束录音？',
+      message: '结束后将保存本次录音和文字记录。',
+      tone: 'warning',
+      actions: [
+        {
+          text: '结束录音',
+          role: 'primary',
+          onPress: async () => { await stopRecording(true); },
+        },
+        { text: '继续录音', role: 'cancel' },
+      ],
+    });
+  };
+
+  useEffect(() => {
+    if (!canStart || autoStartAttemptedRef.current) return;
+    autoStartAttemptedRef.current = true;
+    void startRecording();
+  }, [canStart]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -437,120 +621,339 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }), [navigation, showDialog, stopRecording]);
 
   return (
-    <ScreenContainer edges={['top']}>
-      <BackHeader title="实时会议" onBack={() => navigation.goBack()} />
-      <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-        <View style={s.heroCard}>
-          <Text style={s.label}>会议标题</Text>
-          <TextInput
-            style={s.titleInput}
-            testID="meeting-live-title"
-            value={title}
-            onChangeText={setTitle}
-            editable={!ticking && !meetingId}
-            placeholder="输入会议标题"
-            placeholderTextColor={C.faint}
-          />
-          <View style={s.statusRow}>
-            <View style={[s.dot, ticking ? s.dotLive : status === 'failed' ? s.dotError : s.dotIdle]} />
-            <Text style={s.statusText} testID="meeting-live-status">{statusText}</Text>
-            <Text style={s.timer}>{formatClock(elapsedMs)}</Text>
-          </View>
-        </View>
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
+      <MinutesDetailTitleBar onBack={() => navigation.goBack()} backgroundColor={C.body} />
 
-        <View style={s.levelCard}>
-          <Text style={s.sectionTitle}>音频输入</Text>
-          <View style={s.levelTrack}>
-            <View style={[s.levelFill, { width: `${meetingAudioLevelPercent(audioStats?.raw.rms ?? 0)}%` }]} />
-          </View>
-          <Text style={s.levelMeta}>
-            {audioStats ? meetingAudioInputLabel(audioStats.raw.rms) : '等待麦克风输入'}
-          </Text>
+      <View style={s.meetingHeader}>
+        <View style={s.titleContainer}>
+          {titleEditing ? (
+            <TextInput
+              style={s.titleInput}
+              testID="meeting-live-title-editor"
+              value={titleDraft}
+              onChangeText={setTitleDraft}
+              onBlur={() => { void commitTitle(); }}
+              editable={canEditTitle}
+              autoFocus
+              selectTextOnFocus
+              multiline
+              scrollEnabled={false}
+              submitBehavior="blurAndSubmit"
+              returnKeyType="done"
+              maxLength={80}
+              placeholder="输入会议标题"
+              placeholderTextColor={C.faint}
+              accessibilityLabel="会议标题"
+            />
+          ) : (
+            <TouchableOpacity
+              style={s.titleCover}
+              onPress={beginTitleEditing}
+              activeOpacity={0.72}
+              disabled={!canEditTitle}
+              accessibilityRole="button"
+              accessibilityLabel="编辑会议标题"
+            >
+              <Text style={s.titleText} testID="meeting-live-title">{title}</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        <View style={s.metaRow}>
+          <Ionicons name="time-outline" size={12} color={C.sub} />
+          <Text style={s.metaText}>{meetingStartText}</Text>
+        </View>
+        <View style={s.singleTabDivider} testID="meeting-live-single-tab-divider" />
+      </View>
 
-        <View style={s.transcriptCard}>
-          <View style={s.cardHead}>
-            <Text style={s.sectionTitle}>实时转写</Text>
-            <Text style={s.countText}>{transcript.length} 句</Text>
-          </View>
+      {error ? (
+        <View style={s.errorBox} accessibilityRole="alert">
+          <Ionicons name="alert-circle-outline" size={16} color={C.red} />
+          <Text style={s.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={s.transcriptArea}>
+        <ScrollView
+          ref={transcriptScrollRef}
+          style={s.transcriptScroll}
+          contentContainerStyle={s.transcriptContent}
+          showsVerticalScrollIndicator={false}
+          onScroll={handleTranscriptScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={() => {
+            if (followingTranscript) transcriptScrollRef.current?.scrollToEnd({ animated: true });
+          }}
+        >
           {transcript.length === 0 ? (
             <View style={s.emptyTranscript}>
-              <Ionicons name="mic-outline" size={28} color={C.faint} />
-              <Text style={s.emptyText}>开始录音后，识别出的句子会实时出现在这里</Text>
+              <Text style={s.emptyText} testID="meeting-live-status">
+                {requestedMeetingMissing
+                  ? '会议记录不存在'
+                  : status === 'recording' || status === 'connected'
+                    ? '正在聆听'
+                    : statusText}
+              </Text>
             </View>
           ) : (
             <>
               {visibleTranscript.hiddenCount > 0 ? (
                 <Text style={s.archivedText}>较早的 {visibleTranscript.hiddenCount} 句已收纳</Text>
               ) : null}
-              {visibleTranscript.items.map(line => (
-                <View key={line.id} style={s.lineItem}>
-                  <Text style={s.speaker}>{line.speaker_label ?? '发言人'}</Text>
+              {visibleTranscript.items.map((line, index) => (
+                <View
+                  key={line.id}
+                  style={[s.lineItem, index === 0 && s.firstLineItem]}
+                  testID="meeting-live-transcript-item"
+                >
+                  <View style={s.lineMeta}>
+                    <View style={s.speakerAvatar} testID="meeting-live-speaker-avatar">
+                      <Ionicons name="person" size={10} color={C.faint} />
+                    </View>
+                    <Text style={s.speaker} numberOfLines={1}>{line.speaker_label ?? '发言人'}</Text>
+                    <View style={s.lineDot} />
+                    <Text style={s.lineTime}>{formatTranscriptTime(line.start_time)}</Text>
+                  </View>
                   <Text style={s.lineText} testID="meeting-live-transcript-line">{line.text}</Text>
                 </View>
               ))}
             </>
           )}
-        </View>
-
-        {error ? (
-          <View style={s.errorBox}>
-            <Ionicons name="alert-circle-outline" size={16} color={C.red} />
-            <Text style={s.errorText}>{error}</Text>
-          </View>
+        </ScrollView>
+        {!followingTranscript && transcript.length > 0 ? (
+          <TouchableOpacity
+            style={s.backToBottom}
+            onPress={scrollToLatestTranscript}
+            accessibilityRole="button"
+            accessibilityLabel="回到最新转写"
+          >
+            <Ionicons name="arrow-down" size={18} color={C.sub} />
+          </TouchableOpacity>
         ) : null}
-      </ScrollView>
+      </View>
 
-      <BottomTabBar
-        active="meetings"
-        onSchedule={() => openScheduleTab(navigation)}
-        onMeetings={() => openMeetingsTab(navigation)}
-        micTone={canStop ? 'recording' : 'meeting'}
-        onMic={() => {
-          if (canStop) void stopRecording(true);
-          else if (canStart) void startRecording();
-        }}
-      />
+      <View style={s.recordingToolbar} testID="meeting-live-recording-toolbar">
+        <View style={s.waveformWrap} testID="meeting-live-waveform-slot">
+          <Waveform
+            bars={liveWaveBars}
+            color={status === 'recording' || status === 'connected' ? C.primary : C.faint}
+            height={MEETING_RECORDING_GEOMETRY.waveformHeight}
+          />
+        </View>
+        <View style={s.recordingControlRow} testID="meeting-live-control-row">
+          <Text
+            style={s.timer}
+            accessibilityLabel={`${statusText}，已录制 ${formatClock(elapsedMs)}`}
+          >
+            {formatClock(elapsedMs)}
+          </Text>
+          <View style={s.resumePauseSlot}>
+            <TouchableOpacity
+              style={[s.resumePauseButton, !canTogglePause && s.controlDisabled]}
+              onPress={() => { void togglePauseRecording(); }}
+              disabled={!canTogglePause}
+              activeOpacity={0.68}
+              accessibilityRole="button"
+              accessibilityLabel={isPaused ? '继续录音' : '暂停录音'}
+              accessibilityState={{ disabled: !canTogglePause }}
+              testID="meeting-live-resume-pause"
+            >
+              {pauseTransitioning ? (
+                <ActivityIndicator size="small" color={C.primary} />
+              ) : (
+                <Ionicons name={isPaused ? 'play' : 'pause'} size={22} color={C.primary} />
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={s.controlSlot}>
+            {canStop ? (
+              <TouchableOpacity
+                style={s.stopButton}
+                onPress={confirmStopRecording}
+                activeOpacity={0.68}
+                accessibilityRole="button"
+                accessibilityLabel="结束并保存会议录音"
+              >
+                <Ionicons name="stop" size={18} color={C.text} />
+              </TouchableOpacity>
+            ) : canStart ? (
+              <TouchableOpacity
+                style={s.retryButton}
+                onPress={() => { void startRecording(); }}
+                activeOpacity={0.72}
+                accessibilityRole="button"
+                accessibilityLabel={status === 'failed' ? '重试开始会议录音' : '开始会议录音'}
+              >
+                <Ionicons name={status === 'failed' ? 'refresh' : 'mic'} size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : requestedMeetingMissing ? (
+              <Ionicons name="close-circle-outline" size={20} color={C.disabled} />
+            ) : (
+              <ActivityIndicator size="small" color={C.primary} />
+            )}
+          </View>
+        </View>
+      </View>
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
-  heroCard: {
-    backgroundColor: C.card,
-    borderRadius: 18,
-    padding: 16,
-    shadowColor: '#5028A0',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    elevation: 2,
+  meetingHeader: {
+    minHeight: MEETING_RECORDING_GEOMETRY.titleMinHeight,
+    backgroundColor: C.body,
   },
-  label: { fontSize: 12, color: C.sub, fontWeight: '700', marginBottom: 8 },
-  titleInput: { minHeight: 42, fontSize: 20, fontWeight: '800', color: C.text, padding: 0 },
-  statusRow: { height: 34, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  dotLive: { backgroundColor: C.red },
-  dotError: { backgroundColor: C.red },
-  dotIdle: { backgroundColor: C.faint },
-  statusText: { flex: 1, fontSize: 13, color: C.sub, fontWeight: '700' },
-  timer: { fontSize: 20, color: C.purpleDark, fontWeight: '800' },
-  levelCard: { marginTop: 12, backgroundColor: C.waveformBg, borderRadius: 18, padding: 16 },
-  sectionTitle: { fontSize: 15, color: C.text, fontWeight: '800' },
-  levelTrack: { height: 10, borderRadius: 5, backgroundColor: '#E2DBF4', overflow: 'hidden', marginTop: 14 },
-  levelFill: { height: '100%', borderRadius: 5, backgroundColor: C.purple },
-  levelMeta: { marginTop: 10, fontSize: 12, color: C.sub, fontWeight: '600' },
-  transcriptCard: { marginTop: 12, backgroundColor: C.card, borderRadius: 18, padding: 16, minHeight: 260 },
-  cardHead: { height: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  countText: { fontSize: 12, color: C.sub, fontWeight: '700' },
-  archivedText: { marginBottom: 8, fontSize: 11, color: C.sub, textAlign: 'center', fontWeight: '600' },
-  emptyTranscript: { minHeight: 192, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  emptyText: { fontSize: 13, color: C.sub, textAlign: 'center', lineHeight: 20 },
-  lineItem: { borderRadius: 12, backgroundColor: '#F8F5FF', padding: 12, marginBottom: 8 },
-  speaker: { fontSize: 12, color: C.purple, fontWeight: '800', marginBottom: 4 },
-  lineText: { fontSize: 14, color: '#4A4666', lineHeight: 22 },
-  errorBox: { minHeight: 40, borderRadius: 14, backgroundColor: '#FFF0F0', marginTop: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  errorText: { flex: 1, fontSize: 12, color: C.red, fontWeight: '700' },
+  titleContainer: {
+    minHeight: 36,
+    marginTop: 20,
+    marginLeft: 20,
+    marginRight: 10,
+  },
+  titleCover: { minHeight: 36, justifyContent: 'center' },
+  titleText: {
+    minHeight: 36,
+    fontSize: 24,
+    lineHeight: 36,
+    fontWeight: '700',
+    color: C.text,
+  },
+  titleInput: {
+    minHeight: 36,
+    padding: 0,
+    fontSize: 24,
+    lineHeight: 36,
+    fontWeight: '700',
+    color: C.text,
+  },
+  metaRow: {
+    height: 22,
+    marginLeft: 20,
+    marginTop: 6,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metaText: { marginLeft: 4, fontSize: 14, lineHeight: 22, color: C.sub },
+  singleTabDivider: {
+    height: MEETING_RECORDING_GEOMETRY.singleTabDividerHeight,
+    marginHorizontal: 20,
+    backgroundColor: C.border,
+  },
+  errorBox: {
+    minHeight: 44,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFF3F3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  errorText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.red },
+  transcriptArea: { flex: 1, backgroundColor: C.body },
+  transcriptScroll: { flex: 1 },
+  transcriptContent: { flexGrow: 1, paddingBottom: 20 },
+  emptyTranscript: { flex: 1, minHeight: 220, alignItems: 'center', justifyContent: 'center' },
+  emptyText: { fontSize: 14, lineHeight: 20, color: C.sub, textAlign: 'center' },
+  archivedText: { marginTop: 16, fontSize: 12, lineHeight: 18, color: C.sub, textAlign: 'center' },
+  lineItem: {
+    marginTop: 32,
+    paddingLeft: MEETING_RECORDING_GEOMETRY.transcriptPaddingStart,
+    paddingRight: MEETING_RECORDING_GEOMETRY.transcriptPaddingEnd,
+  },
+  firstLineItem: { marginTop: 20 },
+  speakerAvatar: {
+    width: MEETING_RECORDING_GEOMETRY.transcriptAvatarSize,
+    height: MEETING_RECORDING_GEOMETRY.transcriptAvatarSize,
+    borderRadius: MEETING_RECORDING_GEOMETRY.transcriptAvatarSize / 2,
+    marginLeft: 2,
+    marginRight: 6,
+    backgroundColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lineMeta: { minHeight: 23, flexDirection: 'row', alignItems: 'center' },
+  speaker: { maxWidth: 200, paddingRight: 6, fontSize: 14, lineHeight: 20, color: C.sub },
+  lineDot: { width: 3, height: 3, borderRadius: 1.5, marginRight: 12, backgroundColor: C.faint },
+  lineTime: { fontSize: 14, lineHeight: 20, color: C.sub },
+  lineText: { marginTop: 8, marginLeft: 2, fontSize: 16, lineHeight: 28, color: C.text },
+  backToBottom: {
+    position: 'absolute',
+    right: 20,
+    bottom: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: C.body,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.border,
+    elevation: 4,
+  },
+  recordingToolbar: {
+    height: MEETING_RECORDING_GEOMETRY.toolbarHeight,
+    backgroundColor: C.body,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+  },
+  waveformWrap: {
+    height: MEETING_RECORDING_GEOMETRY.waveformHeight,
+    marginTop: 12,
+    marginHorizontal: 4,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  recordingControlRow: {
+    height: MEETING_RECORDING_GEOMETRY.controlRowHeight,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timer: {
+    minWidth: 88,
+    height: MEETING_RECORDING_GEOMETRY.durationHeight,
+    marginLeft: 20,
+    paddingHorizontal: 13,
+    fontSize: 16,
+    lineHeight: 22,
+    color: C.text,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+  },
+  resumePauseSlot: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -(MEETING_RECORDING_GEOMETRY.resumePauseWidth / 2),
+    width: MEETING_RECORDING_GEOMETRY.resumePauseWidth,
+    height: MEETING_RECORDING_GEOMETRY.durationHeight,
+  },
+  resumePauseButton: {
+    width: MEETING_RECORDING_GEOMETRY.resumePauseWidth,
+    height: MEETING_RECORDING_GEOMETRY.durationHeight,
+    borderRadius: 25,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlDisabled: { opacity: 0.35 },
+  controlSlot: {
+    position: 'absolute',
+    right: 20,
+    width: MEETING_RECORDING_GEOMETRY.stopWidth,
+    height: MEETING_RECORDING_GEOMETRY.durationHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stopButton: {
+    width: MEETING_RECORDING_GEOMETRY.stopWidth,
+    height: MEETING_RECORDING_GEOMETRY.stopHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButton: {
+    width: MEETING_RECORDING_GEOMETRY.stopWidth,
+    height: MEETING_RECORDING_GEOMETRY.stopHeight,
+    borderRadius: 6,
+    backgroundColor: C.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

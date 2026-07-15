@@ -9,15 +9,22 @@ describe('API config', () => {
       realtimeAsrHost: 'preview.example',
       realtimeAsrPort: '18020',
       realtimeAsrSecure: 'false',
+      realtimeAsrProvider: 'qwen',
     });
 
     expect(config.laojiApiBase).toBe('http://preview.example:18035');
     expect(config.meetingApiBase).toBe('http://preview.example:18020');
     expect(config.realtimeAsrPort).toBe(18020);
+    expect(config.realtimeAsrProvider).toBe('qwen');
     expect(config.appEnv).toBe('preview');
     expect(config.privacyPolicyUrl).toBe('http://preview.example:18035/privacy');
     expect(config.termsOfServiceUrl).toBe('http://preview.example:18035/terms');
     expect(config.accountDeletionUrl).toBe('http://preview.example:18035/account-deletion');
+  });
+
+  it('defaults unknown or missing realtime ASR providers to Qwen3-ASR', () => {
+    expect(getApiConfig({ realtimeAsrProvider: 'unknown' }).realtimeAsrProvider).toBe('qwen');
+    expect(getApiConfig({}).realtimeAsrProvider).toBe('qwen');
   });
 
   it('rejects plain HTTP production endpoints', () => {

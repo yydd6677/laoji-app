@@ -41,7 +41,7 @@ export interface Meeting {
   hasSummary?: boolean;
   status?: string;
   statusSyncPending?: boolean;
-  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen' | 'hybrid';
+  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
   description?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -95,21 +95,33 @@ export interface EventDraftParams {
   reminderMinutes?: number | null;
 }
 
+export type EditableProfileField = 'nickname' | 'email' | 'phone';
+
 export type RootStackParamList = {
   Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
   EventDetail: { eventId: string };
-  Calendar: undefined;
   Recording: { meetingId: string };
   MeetingLive: { meetingId?: string } | undefined;
   Transcription: { meetingId: string; focus?: 'transcript' | 'summary' | 'title' };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
   Profile: undefined;
+  ProfileField: { field: EditableProfileField };
   Account: { section?: 'deletion' } | undefined;
+  ChangePassword: undefined;
+  NotificationSettings: undefined;
+  AccountDeletion: undefined;
   Privacy: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
-  AddEvent: { date?: string; eventId?: string; draft?: EventDraftParams };
+  AddEvent: {
+    date?: string;
+    endDate?: string;
+    startTime?: string;
+    endTime?: string;
+    eventId?: string;
+    draft?: EventDraftParams;
+  };
 };
 
 export type MainTabsParamList = {

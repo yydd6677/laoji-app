@@ -27,6 +27,8 @@ type Props = {
 
 const MIN_RECORDING_MS = 2000;
 const MAX_RECORDING_MS = 15000;
+const VOLUME_SEGMENTS = 10;
+const VOICEPRINT_SAMPLE_TEXT = '今天的会议将围绕项目进展展开，请大家依次说明完成情况和下一步安排。';
 
 function clock(ms: number): string {
   const seconds = Math.floor(Math.max(0, ms) / 1000);
@@ -216,8 +218,10 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
       if (!mountedRef.current) return;
       setAudioUri('');
       showDialog({
-        title: speakerId ? '音色已补录' : '讲话人已建立',
-        message: `${result.speaker.name} · ${result.speaker.sample_count} 段音色${result.quality_level ? ` · 质量${result.quality_level}` : ''}`,
+        title: '声纹采集成功',
+        message: speakerId
+          ? `已为“${result.speaker.name}”补充声纹，后续会议将自动应用这个名称。`
+          : `已建立“${result.speaker.name}”，后续会议将自动应用这个名称。`,
         tone: 'success',
         actions: [{ text: '完成', role: 'primary', onPress: () => navigation.goBack() }],
       });
@@ -250,7 +254,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   };
 
   const confirmDelete = () => {
-    if (!speakerId || !accessToken) return;
+    if (!speakerId || !accessToken || busy || recording || startingRecording) return;
     showDialog({
       title: '删除讲话人',
       message: `删除“${speaker?.name ?? name}”后，后续会议将不再使用这份音色识别名称。`,
@@ -278,16 +282,24 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
 
   const stateText = useMemo(() => {
     if (startingRecording) return '正在准备麦克风';
-    if (recording) return '正在录制音色';
+    if (recording) return '正在采集声音';
     if (audioUri && elapsedMs >= MIN_RECORDING_MS) return '录音已就绪';
     if (audioUri) return '录音不足 2 秒，请重新录制';
-    return '轻触麦克风开始';
+    return '尚未录制';
   }, [audioUri, elapsedMs, recording, startingRecording]);
+
+  const recordingReady = Boolean(audioUri && elapsedMs >= MIN_RECORDING_MS);
+  const destructiveActionsLocked = busy || recording || startingRecording;
+  const recordActionLabel = recording
+    ? '停止录制音色'
+    : audioUri
+      ? '重新录制音色'
+      : '开始录制音色';
 
   if (isGuest || !accessToken) {
     return (
-      <ScreenContainer edges={['top']}>
-        <BackHeader title="录制音色" onBack={() => navigation.goBack()} />
+      <ScreenContainer edges={['top']} bg={C.appBg}>
+        <BackHeader title="声纹采集" onBack={() => navigation.goBack()} />
         <View style={s.centerState}><Text style={s.stateTitle}>请先登录账号</Text></View>
       </ScreenContainer>
     );
@@ -295,12 +307,12 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
 
   if (speakerId && !speaker) {
     return (
-      <ScreenContainer edges={['top']}>
-        <BackHeader title="管理讲话人" onBack={() => navigation.goBack()} />
+      <ScreenContainer edges={['top']} bg={C.appBg}>
+        <BackHeader title="讲话人详情" onBack={() => navigation.goBack()} />
         <View style={s.centerState}>
           {loading ? (
             <>
-              <ActivityIndicator color={C.purple} />
+              <ActivityIndicator color={C.primary} />
               <Text style={s.stateHint}>正在加载讲话人</Text>
             </>
           ) : (
@@ -327,25 +339,36 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }
 
   return (
-    <ScreenContainer edges={['top']}>
+    <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>
       <BackHeader
-        title={speakerId ? '管理讲话人' : '新建讲话人'}
+        title={speakerId ? '讲话人详情' : '声纹采集'}
         onBack={() => navigation.goBack()}
         right={speakerId ? (
-          <TouchableOpacity style={s.headerButton} onPress={confirmDelete} accessibilityRole="button" accessibilityLabel="删除讲话人">
-            <Ionicons name="trash-outline" size={20} color={C.red} />
+          <TouchableOpacity
+            style={[s.headerButton, destructiveActionsLocked && s.headerButtonDisabled]}
+            onPress={confirmDelete}
+            disabled={destructiveActionsLocked}
+            accessibilityRole="button"
+            accessibilityLabel="删除讲话人"
+            accessibilityState={{ disabled: destructiveActionsLocked }}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={24}
+              color={C.red}
+              testID="speaker-delete-icon"
+            />
           </TouchableOpacity>
         ) : null}
       />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={s.section}>
-          <Text style={s.label}>讲话人名称</Text>
+        <View style={s.nameSection}>
           <View style={s.nameRow}>
             <TextInput
               style={s.nameInput}
               value={name}
               onChangeText={setName}
-              placeholder="例如：张老师"
+              placeholder="输入人名"
               placeholderTextColor={C.faint}
               maxLength={30}
               editable={!busy && !recording}
@@ -353,91 +376,141 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
             />
             {speaker ? (
               <TouchableOpacity
-                style={[s.saveNameButton, (busy || !name.trim() || name.trim() === speaker.name) && s.buttonDisabled]}
+                style={s.saveNameButton}
                 onPress={() => void saveName()}
                 disabled={busy || !name.trim() || name.trim() === speaker.name}
                 accessibilityRole="button"
                 accessibilityLabel="保存讲话人名称"
+                accessibilityState={{ disabled: busy || !name.trim() || name.trim() === speaker.name }}
               >
-                <Text style={s.saveNameText}>保存</Text>
+                <Text style={[
+                  s.saveNameText,
+                  (busy || !name.trim() || name.trim() === speaker.name) && s.saveNameTextDisabled,
+                ]}>保存</Text>
               </TouchableOpacity>
             ) : null}
           </View>
-          {speaker ? <Text style={s.profileMeta}>已保存 {speaker.sample_count} 段音色</Text> : null}
+          {speaker ? <Text style={s.nameHint}>后续会议将自动应用修改后的名称</Text> : null}
         </View>
 
+        <View style={s.groupGap} />
         <View style={s.recordingSection}>
-          <Text style={s.recordingTitle}>{speakerId ? '补录音色' : '录制音色'}</Text>
-          <Text style={s.recordingHint}>自然说话 5 至 10 秒，保持手机与嘴部距离稳定。</Text>
-          <Text style={s.timer}>{clock(elapsedMs)}</Text>
-          <View style={s.levelTrack}>
-            <View style={[s.levelFill, { width: `${audioLevel}%` }]} />
+          <Text style={s.recordingHint}>
+            {speakerId
+              ? '请在安静环境下，点击“开始”后朗读下方文字以补充声纹'
+              : '请在安静环境下，点击“开始”后朗读下方文字'}
+          </Text>
+          <View style={s.readingPanel}>
+            <Text style={s.readingText}>{VOICEPRINT_SAMPLE_TEXT}</Text>
           </View>
-          <View style={s.micSlot}>
-            <TouchableOpacity
-              style={[s.micButton, recording && s.micButtonRecording]}
-              onPress={() => recording ? void stopRecording() : void startRecording()}
-              disabled={busy || startingRecording}
-              activeOpacity={0.82}
-              accessibilityRole="button"
-              accessibilityLabel={recording ? '停止录制音色' : '开始录制音色'}
-            >
-              <Ionicons name={recording ? 'stop' : 'mic'} size={32} color="#fff" />
-            </TouchableOpacity>
+          <Text style={s.readingHint}>偶尔读错无需停顿，继续朗读即可</Text>
+          <View style={s.recordingMetaRow}>
+            <Text style={s.recordingState}>{stateText}</Text>
+            <Text style={s.timer}>{clock(elapsedMs)} / 00:15</Text>
+          </View>
+          <View style={s.levelTrack} testID="speaker-volume-level">
+            {Array.from({ length: VOLUME_SEGMENTS }, (_, index) => (
+              <View
+                key={index}
+                testID="speaker-volume-segment"
+                style={[
+                  s.levelSegment,
+                  audioLevel >= ((index + 1) / VOLUME_SEGMENTS) * 100 && s.levelSegmentActive,
+                ]}
+              />
+            ))}
           </View>
           <View style={s.statusSlot}>
-            <Text style={[s.statusText, error ? s.errorText : null]} accessibilityRole={error ? 'alert' : undefined}>
-              {error || stateText}
-            </Text>
+            {error ? <Text style={[s.statusText, s.errorText]} accessibilityRole="alert">{error}</Text> : null}
           </View>
         </View>
-
-        <TouchableOpacity
-          style={[s.submitButton, (!audioUri || elapsedMs < MIN_RECORDING_MS || busy) && s.buttonDisabled]}
-          onPress={() => void submit()}
-          disabled={!audioUri || elapsedMs < MIN_RECORDING_MS || busy}
-          accessibilityRole="button"
-          accessibilityLabel={speakerId ? '保存补录音色' : '保存新讲话人音色'}
-        >
-          {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={19} color="#fff" />}
-          <Text style={s.submitText}>{busy ? '正在保存' : speakerId ? '保存补录音色' : '建立讲话人'}</Text>
-        </TouchableOpacity>
       </ScrollView>
+      <View style={s.bottomBar} testID="speaker-recording-bottom-bar">
+        {recordingReady && !recording && !busy ? (
+          <View style={s.readyActions}>
+            <TouchableOpacity
+              style={s.secondaryButton}
+              onPress={() => void startRecording()}
+              accessibilityRole="button"
+              accessibilityLabel="重新录制音色"
+            >
+              <Text style={s.secondaryButtonText}>重新录制</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.submitButton}
+              onPress={() => void submit()}
+              accessibilityRole="button"
+              accessibilityLabel={speakerId ? '保存补录音色' : '保存新讲话人音色'}
+            >
+              <Text style={s.submitText}>{speakerId ? '保存补录音色' : '建立讲话人'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[
+              s.recordAction,
+              recording && s.recordActionStop,
+              (busy || startingRecording) && s.buttonDisabled,
+            ]}
+            onPress={() => recording ? void stopRecording() : void startRecording()}
+            disabled={busy || startingRecording}
+            accessibilityRole="button"
+            accessibilityLabel={busy ? '正在保存音色' : startingRecording ? '正在准备麦克风' : recordActionLabel}
+            testID="speaker-record-action"
+          >
+            {busy || startingRecording ? <ActivityIndicator size="small" color="#fff" /> : null}
+            <Text style={[s.recordActionText, recording && s.recordActionStopText]}>
+              {busy ? '正在保存' : startingRecording ? '正在准备' : recording ? '停止' : audioUri ? '重新录制' : '开始'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  headerButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: 36 },
-  loader: { marginVertical: 10 },
-  section: { padding: 16, borderRadius: 16, backgroundColor: C.card, marginBottom: 12 },
-  label: { fontSize: 12, color: C.sub, fontWeight: '700', marginBottom: 9 },
-  nameRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  nameInput: { flex: 1, minWidth: 0, height: 44, borderRadius: 12, backgroundColor: C.inputBg, paddingHorizontal: 13, fontSize: 14, color: C.text },
-  saveNameButton: { width: 62, height: 44, borderRadius: 12, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center' },
-  saveNameText: { fontSize: 13, color: C.purple, fontWeight: '800' },
-  profileMeta: { marginTop: 9, fontSize: 11, color: C.sub },
-  recordingSection: { borderRadius: 16, backgroundColor: C.card, padding: 18, alignItems: 'center' },
-  recordingTitle: { fontSize: 16, color: C.text, fontWeight: '800', marginBottom: 7 },
-  recordingHint: { fontSize: 12, lineHeight: 18, color: C.sub, textAlign: 'center' },
-  timer: { marginTop: 18, fontSize: 30, color: C.purpleDark, fontWeight: '800' },
-  levelTrack: { width: '76%', height: 8, borderRadius: 4, backgroundColor: '#E4DDF4', overflow: 'hidden', marginTop: 12 },
-  levelFill: { height: '100%', borderRadius: 4, backgroundColor: C.pink },
-  micSlot: { height: 118, alignItems: 'center', justifyContent: 'center' },
-  micButton: { width: 82, height: 82, borderRadius: 41, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center', shadowColor: C.purpleDark, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 5 },
-  micButtonRecording: { backgroundColor: C.pink },
-  statusSlot: { minHeight: 44, width: '100%', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  statusText: { fontSize: 12, lineHeight: 18, color: C.sub, textAlign: 'center', fontWeight: '600' },
+  headerButton: { width: 48, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerButtonDisabled: { opacity: 0.35 },
+  scroll: { flex: 1, backgroundColor: C.appBg },
+  content: { flexGrow: 1, paddingBottom: 20 },
+  nameSection: { paddingTop: 12, paddingBottom: 12, backgroundColor: C.body },
+  nameRow: { height: 40, marginHorizontal: 16, paddingLeft: 12, paddingRight: 2, borderRadius: 6, backgroundColor: C.inputBg, flexDirection: 'row', alignItems: 'center' },
+  nameInput: { flex: 1, minWidth: 0, height: 40, padding: 0, fontSize: 16, lineHeight: 24, color: C.text },
+  saveNameButton: { width: 56, height: 40, alignItems: 'center', justifyContent: 'center' },
+  saveNameText: { fontSize: 14, lineHeight: 20, color: C.primary, fontWeight: '500' },
+  saveNameTextDisabled: { color: C.faint },
+  nameHint: { marginTop: 8, paddingHorizontal: 16, fontSize: 12, lineHeight: 18, color: C.faint, textAlign: 'center' },
+  groupGap: { height: 8, backgroundColor: C.appBg },
+  recordingSection: { flex: 1, minHeight: 286, paddingTop: 10, paddingHorizontal: 16, backgroundColor: C.body },
+  recordingHint: { marginBottom: 8, fontSize: 14, lineHeight: 20, color: C.text },
+  readingPanel: { minHeight: 92, borderRadius: 6, paddingHorizontal: 20, paddingVertical: 16, backgroundColor: C.inputBg, justifyContent: 'center' },
+  readingText: { fontSize: 14, lineHeight: 22, color: C.text },
+  readingHint: { marginTop: 8, fontSize: 12, lineHeight: 18, color: C.faint },
+  recordingMetaRow: { height: 40, marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  recordingState: { fontSize: 14, lineHeight: 20, color: C.sub },
+  timer: { fontSize: 14, lineHeight: 20, color: C.sub, fontVariant: ['tabular-nums'] },
+  levelTrack: { width: '100%', height: 5, flexDirection: 'row', gap: 4 },
+  levelSegment: { flex: 1, height: 5, borderRadius: 2, backgroundColor: C.border },
+  levelSegmentActive: { backgroundColor: C.primary },
+  statusSlot: { minHeight: 44, width: '100%', alignItems: 'flex-start', justifyContent: 'center' },
+  statusText: { fontSize: 14, lineHeight: 20, color: C.sub },
   errorText: { color: C.red },
-  submitButton: { height: 48, borderRadius: 24, backgroundColor: C.purple, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  submitText: { fontSize: 14, color: '#fff', fontWeight: '800' },
+  bottomBar: { minHeight: 65, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 9, backgroundColor: C.body, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border },
+  readyActions: { height: 48, flexDirection: 'row', gap: 12 },
+  recordAction: { height: 48, borderRadius: 6, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  recordActionStop: { backgroundColor: C.body, borderWidth: 1, borderColor: C.border },
+  recordActionText: { fontSize: 17, lineHeight: 24, color: '#fff', fontWeight: '600' },
+  recordActionStopText: { color: C.text },
+  secondaryButton: { flex: 1, height: 48, borderRadius: 6, borderWidth: 1, borderColor: C.border, backgroundColor: C.body, alignItems: 'center', justifyContent: 'center' },
+  secondaryButtonText: { fontSize: 17, lineHeight: 24, color: C.text, fontWeight: '600' },
+  submitButton: { flex: 1, height: 48, borderRadius: 6, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  submitText: { fontSize: 17, lineHeight: 24, color: '#fff', fontWeight: '600' },
   buttonDisabled: { opacity: 0.42 },
   centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 10 },
-  stateTitle: { fontSize: 16, color: C.text, fontWeight: '800' },
-  stateHint: { maxWidth: 300, fontSize: 12, lineHeight: 19, color: C.sub, textAlign: 'center' },
+  stateTitle: { fontSize: 16, color: C.text, fontWeight: '600' },
+  stateHint: { maxWidth: 300, fontSize: 14, lineHeight: 20, color: C.sub, textAlign: 'center' },
   loadErrorIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF0F0', marginBottom: 2 },
-  retryButton: { minWidth: 112, height: 42, borderRadius: 21, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 6 },
-  retryButtonText: { fontSize: 13, color: '#fff', fontWeight: '800' },
+  retryButton: { minWidth: 112, height: 40, borderRadius: 6, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 6 },
+  retryButtonText: { fontSize: 14, lineHeight: 20, color: '#fff', fontWeight: '500' },
 });

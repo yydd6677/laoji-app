@@ -1,11 +1,12 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
+import type { RealtimeAsrProvider } from './config';
 import { diagnosticInfo, diagnosticWarn } from './diagnostics';
 
 declare const require: (moduleName: string) => unknown;
 
 const DEFAULT_PORT = 18020;
-const DEFAULT_PROVIDER: RealtimeAsrProvider = 'funasr';
+const DEFAULT_PROVIDER: RealtimeAsrProvider = 'qwen';
 const DEFAULT_BUFFER_SIZE = 3200;
 const VOICE_RECOGNITION_AUDIO_SOURCE = 6;
 const VOICE_COMMUNICATION_AUDIO_SOURCE = 7;
@@ -20,9 +21,9 @@ const SCHEDULE_GATE_HANGOVER_FRAMES = 5;
 
 let activeAudioOwner: symbol | null = null;
 
-export type RealtimeAsrProvider = 'funasr' | 'whisper' | 'qwen';
+export type { RealtimeAsrProvider } from './config';
 export type RealtimeAsrPurpose = 'meeting' | 'schedule';
-export type RealtimeAsrStatus = 'connecting' | 'connected' | 'recording' | 'stopping' | 'closed';
+export type RealtimeAsrStatus = 'connecting' | 'connected' | 'recording' | 'paused' | 'stopping' | 'closed';
 
 export interface RealtimeAsrTranscript {
   text: string;
@@ -68,6 +69,8 @@ export interface RealtimeAsrSession {
   meetingId: string;
   url: string;
   completion: Promise<RealtimeAsrCompletion>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
   stop: () => Promise<string | undefined>;
 }
 
@@ -106,6 +109,8 @@ interface LiveAudioStreamModule {
     bufferSize?: number;
   }) => void;
   start: () => void;
+  pause: () => Promise<void> | void;
+  resume: () => Promise<void> | void;
   stop: () => Promise<string> | string | void;
   on: (event: 'data', callback: (base64Pcm: string) => void) => { remove?: () => void } | void;
 }
@@ -226,7 +231,7 @@ export async function startRealtimeAsr(
   const meetingId = options.meetingId ?? createRealtimeMeetingId();
   const url = buildRealtimeAsrUrl({
     meetingId,
-    provider: options.provider ?? DEFAULT_PROVIDER,
+    provider: options.provider ?? apiConfig.realtimeAsrProvider,
     purpose: options.purpose ?? 'meeting',
     host: options.host ?? apiConfig.realtimeAsrHost,
     port: options.port ?? apiConfig.realtimeAsrPort,
@@ -250,6 +255,8 @@ export async function startRealtimeAsr(
     let settled = false;
     let stopped = false;
     let audioStarted = false;
+    let paused = false;
+    let pauseControlPromise: Promise<void> = Promise.resolve();
     let stoppedAudioUri: string | undefined;
     let audioCleanupPromise: Promise<string | undefined> | null = null;
     let frameCount = 0;
@@ -282,12 +289,15 @@ export async function startRealtimeAsr(
       meetingId,
       url,
       completion,
+      pause: () => setPaused(true),
+      resume: () => setPaused(false),
       stop: async () => {
         if (stopped) {
           return audioCleanupPromise ? await audioCleanupPromise : stoppedAudioUri;
         }
         stopped = true;
         options.onStatus?.('stopping');
+        await pauseControlPromise.catch(() => {});
         const audioUri = await cleanupOwnedAudio();
         stoppedAudioUri = audioUri;
 
@@ -307,6 +317,23 @@ export async function startRealtimeAsr(
         return audioUri;
       },
     };
+
+    function setPaused(nextPaused: boolean): Promise<void> {
+      const operation = pauseControlPromise.then(async () => {
+        if (stopped || !audioStarted || paused === nextPaused) return;
+        if (nextPaused) {
+          await Promise.resolve(audioStream.pause());
+        } else {
+          await Promise.resolve(audioStream.resume());
+        }
+        if (stopped) return;
+        paused = nextPaused;
+        diagnosticInfo(`[LaoJi ASR] ${paused ? 'paused' : 'resumed'} meetingId=${meetingId}`);
+        options.onStatus?.(paused ? 'paused' : 'recording');
+      });
+      pauseControlPromise = operation.catch(() => {});
+      return operation;
+    }
 
     function settleCompletion(reason: RealtimeAsrCompletion['reason'], audioUri?: string) {
       if (completionSettled) return;
@@ -392,7 +419,7 @@ export async function startRealtimeAsr(
           bufferSize: DEFAULT_BUFFER_SIZE,
         });
         audioSubscription = audioStream.on('data', base64Pcm => {
-          if (stopped || ws.readyState !== WebSocket.OPEN) return;
+          if (stopped || paused || ws.readyState !== WebSocket.OPEN) return;
           try {
             const pcm = base64ToArrayBuffer(base64Pcm);
             pcmProcessor.push(pcm).forEach(sendPreparedFrame);
@@ -401,6 +428,7 @@ export async function startRealtimeAsr(
           }
         });
         audioStarted = true;
+        paused = false;
         await Promise.resolve(audioStream.start());
         if (stopped || ws.readyState !== WebSocket.OPEN) {
           throw new Error('realtime ASR connection closed while audio was starting');
@@ -776,6 +804,8 @@ function isLiveAudioStreamModule(value: unknown): value is LiveAudioStreamModule
     typeof value === 'object' &&
     typeof (value as LiveAudioStreamModule).init === 'function' &&
     typeof (value as LiveAudioStreamModule).start === 'function' &&
+    typeof (value as LiveAudioStreamModule).pause === 'function' &&
+    typeof (value as LiveAudioStreamModule).resume === 'function' &&
     typeof (value as LiveAudioStreamModule).stop === 'function' &&
     typeof (value as LiveAudioStreamModule).on === 'function'
   );

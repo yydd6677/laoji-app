@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import { ProfileScreen } from '../src/screens/ProfileScreen';
 import { MeetingListScreen } from '../src/screens/MeetingListScreen';
@@ -16,6 +16,10 @@ jest.mock('expo-image-picker', () => ({
 }));
 jest.mock('../src/components/Common', () => ({
   Avatar: 'Avatar',
+  BackHeader: ({ title, right }: { title: string; right?: React.ReactNode }) => {
+    const ReactNative = require('react-native');
+    return <><ReactNative.Text>{title}</ReactNative.Text>{right}</>;
+  },
   Tag: 'Tag',
   Waveform: 'Waveform',
 }));
@@ -66,23 +70,27 @@ describe('responsive profile and meeting states', () => {
     await render(<ProfileScreen navigation={navigation} />);
 
     expect(screen.getByLabelText('打开设置')).toBeTruthy();
+    expect(screen.getByTestId('profile-settings-icon').props.size).toBe(24);
+    expect(StyleSheet.flatten(screen.getByLabelText('打开设置').props.style)).toEqual(
+      expect.objectContaining({ width: 48, height: 44 }),
+    );
     expect(screen.getByLabelText('更换头像')).toBeTruthy();
-    expect(screen.getByTestId('profile-nickname-input')).toBeTruthy();
-    expect(screen.getByTestId('profile-email-input')).toBeTruthy();
-    expect(screen.getByTestId('profile-phone-input')).toBeTruthy();
-    expect(screen.getByTestId('profile-save')).toBeTruthy();
+    expect(screen.getByLabelText('编辑昵称')).toBeTruthy();
+    expect(screen.getByLabelText('编辑邮箱')).toBeTruthy();
+    expect(screen.getByLabelText('编辑手机号')).toBeTruthy();
+    expect(screen.queryByTestId('profile-nickname-input')).toBeNull();
+    expect(screen.queryByTestId('profile-save')).toBeNull();
     expect(screen.queryByLabelText('编辑资料')).toBeNull();
 
-    expect(StyleSheet.flatten(screen.getByTestId('profile-identity').props.style))
-      .toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+    expect(StyleSheet.flatten(screen.getByTestId('profile-settings-group').props.style))
+      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+    expect(StyleSheet.flatten(screen.getByTestId('profile-avatar-picker').props.style).minHeight).toBe(64);
+    expect(StyleSheet.flatten(screen.getByTestId('profile-nickname-row').props.style).minHeight).toBe(52);
 
-    const nickname = screen.getByTestId('profile-nickname');
-    expect(nickname.props.numberOfLines).toBe(1);
-    expect(StyleSheet.flatten(nickname.props.style).flexShrink).toBe(1);
-
-    const email = screen.getByTestId('profile-email');
-    expect(email.props.numberOfLines).toBe(1);
-    expect(email.props.ellipsizeMode).toBe('middle');
+    expect(screen.queryByTestId('profile-identity')).toBeNull();
+    expect(screen.queryByText('本月日程')).toBeNull();
+    expect(screen.queryByText('会议记录')).toBeNull();
+    expect(screen.queryByText('已登录')).toBeNull();
 
     expect(screen.queryByText('邮箱设置')).toBeNull();
     expect(screen.queryByText('手机号设置')).toBeNull();
@@ -95,23 +103,18 @@ describe('responsive profile and meeting states', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('Privacy');
   });
 
-  it('saves profile changes from the profile page', async () => {
+  it('opens a dedicated source-style editor for each profile value', async () => {
     const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof ProfileScreen>['navigation'];
     await render(<ProfileScreen navigation={navigation} />);
 
-    fireEvent.changeText(screen.getByTestId('profile-nickname-input'), '新的昵称');
-    await waitFor(() => expect(screen.getByTestId('profile-nickname-input').props.value).toBe('新的昵称'));
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('profile-save'));
-    });
+    await fireEvent.press(screen.getByLabelText('编辑昵称'));
+    await fireEvent.press(screen.getByLabelText('编辑邮箱'));
+    await fireEvent.press(screen.getByLabelText('编辑手机号'));
 
-    await waitFor(() => {
-      expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({
-        nickname: '新的昵称',
-        email: longEmail,
-        phone: '13800138000',
-      }));
-    });
+    expect(navigation.navigate).toHaveBeenNthCalledWith(1, 'ProfileField', { field: 'nickname' });
+    expect(navigation.navigate).toHaveBeenNthCalledWith(2, 'ProfileField', { field: 'email' });
+    expect(navigation.navigate).toHaveBeenNthCalledWith(3, 'ProfileField', { field: 'phone' });
+    expect(updateProfile).not.toHaveBeenCalled();
   });
 
   it('uses neutral status copy for a guest profile', async () => {
@@ -130,7 +133,7 @@ describe('responsive profile and meeting states', () => {
     expect(screen.queryByText('资料和日程仅保存在本机')).toBeNull();
   });
 
-  it('keeps a cached meeting sync error compact and outside list flow', async () => {
+  it('keeps a cached meeting sync error in the source notice geometry', async () => {
     const refreshMeetings = jest.fn();
     (useMeetings as jest.Mock).mockReturnValue({
       meetings: [{
@@ -151,14 +154,17 @@ describe('responsive profile and meeting states', () => {
     await render(<MeetingListScreen navigation={navigation} />);
 
     expect(screen.getByText('缓存会议')).toBeTruthy();
-    expect(screen.getByLabelText('打开个人资料')).toBeTruthy();
-    expect(screen.getByLabelText('管理讲话人')).toBeTruthy();
-    expect(screen.getByLabelText('打开缓存会议的更多操作')).toBeTruthy();
+    expect(screen.getByLabelText('搜索会议记录')).toBeTruthy();
+    expect(screen.getByLabelText('更多会议操作')).toBeTruthy();
+    expect(screen.getByLabelText('缓存会议').props.accessibilityHint).toBe('打开会议详情，长按显示更多操作');
     const banner = screen.getByTestId('meeting-cache-error');
     expect(StyleSheet.flatten(banner.props.style)).toEqual(expect.objectContaining({
-      position: 'absolute',
-      height: 38,
+      height: 44,
     }));
+
+    await fireEvent.press(screen.getByLabelText('更多会议操作'));
+    expect(screen.getByLabelText('管理讲话人')).toBeTruthy();
+    expect(screen.getByLabelText('个人资料')).toBeTruthy();
 
     await fireEvent.press(screen.getByLabelText('重新同步会议记录'));
     expect(refreshMeetings).toHaveBeenCalledTimes(1);

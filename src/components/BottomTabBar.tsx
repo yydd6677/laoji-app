@@ -1,60 +1,46 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React from 'react';
+import { Animated, Easing, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path, Rect } from 'react-native-svg';
 import { Colors as C } from '../theme/colors';
-import { VoiceInputModal } from './VoiceInputModal';
 
-const BAR_H  = 76;   // flat section height
-const CR     = 24;   // top corner radius
-const NR     = 46;   // notch radius — wider notch makes the concave shape visible
-const MIC_D  = 70;   // mic button diameter
-const MIC_R  = MIC_D / 2;
-const MIC_ICON = 29;
-const MIN_BOTTOM_FILL = 20;
-const CONTENT_GAP = 16;
-const FLOATING_OVERLAY_GAP = 12;
-const TOP_CLEARANCE = MIC_R + CONTENT_GAP;
+const BAR_H = 65;
+const ACTION_D = 48;
+const ACTION_R = ACTION_D / 2;
+const MIN_BOTTOM_FILL = 8;
+const ACTION_BOTTOM_GAP = 12;
+const TAB_ICON_SIZE = 22;
+const TAB_ICON_CONTAINER_W = TAB_ICON_SIZE + 16;
+const TAB_ICON_CONTAINER_H = TAB_ICON_SIZE + 8;
+const TAB_ICON_TOP = 9;
+const TAB_LABEL_GAP = 5;
+const TAB_LABEL_SIZE = 12;
+const TAB_LABEL_LINE_HEIGHT = 17;
+const TAB_PRESS_SCALE = 0.8;
+const TAB_PRESS_HALF_DURATION = 125;
 
 export const BOTTOM_TAB_BAR_GEOMETRY = Object.freeze({
   barHeight: BAR_H,
-  cornerRadius: CR,
-  notchRadius: NR,
-  micDiameter: MIC_D,
-  micRadius: MIC_R,
+  cornerRadius: 0,
+  notchRadius: 0,
+  micDiameter: ACTION_D,
+  micRadius: ACTION_R,
   minimumBottomFill: MIN_BOTTOM_FILL,
-  scrollContentClearance: TOP_CLEARANCE,
-  floatingOverlayGap: FLOATING_OVERLAY_GAP,
+  scrollContentClearance: BAR_H + ACTION_BOTTOM_GAP + ACTION_R,
+  floatingOverlayGap: 12,
+  tabIconSize: TAB_ICON_SIZE,
+  tabIconContainerWidth: TAB_ICON_CONTAINER_W,
+  tabIconContainerHeight: TAB_ICON_CONTAINER_H,
+  tabIconTop: TAB_ICON_TOP,
+  tabLabelGap: TAB_LABEL_GAP,
+  tabLabelSize: TAB_LABEL_SIZE,
+  tabLabelLineHeight: TAB_LABEL_LINE_HEIGHT,
+  tabPressScale: TAB_PRESS_SCALE,
+  tabPressHalfDuration: TAB_PRESS_HALF_DURATION,
 });
 
 export function getBottomTabBarFloatingTopInset(safeAreaBottom: number): number {
-  return BAR_H + Math.max(safeAreaBottom, MIN_BOTTOM_FILL) + MIC_R;
-}
-
-/**
- * SVG path that draws the "凹" (concave) bar shape:
- * flat left section → curved down notch in center → flat right section
- * Coordinate origin is top-left; y increases downward.
- */
-function makePath(w: number): string {
-  const h  = BAR_H;
-  const r  = CR;
-  const nr = NR;
-  const centerX = w / 2;
-  return [
-    `M 0 ${h}`,
-    `L 0 ${r}`,
-    `Q 0 0 ${r} 0`,
-    `L ${centerX - nr} 0`,
-    // Counter-clockwise arc → curves DOWNWARD creating the concave notch
-    `A ${nr} ${nr} 0 0 0 ${centerX + nr} 0`,
-    `L ${w - r} 0`,
-    `Q ${w} 0 ${w} ${r}`,
-    `L ${w} ${h}`,
-    `Z`,
-  ].join(' ');
+  return BAR_H + Math.max(safeAreaBottom, MIN_BOTTOM_FILL) + ACTION_BOTTOM_GAP;
 }
 
 interface Props {
@@ -67,25 +53,10 @@ interface Props {
   micIcon?: React.ComponentProps<typeof Ionicons>['name'];
 }
 
-const MIC_META = {
-  schedule: {
-    colors: [C.gradFrom, C.gradTo] as const,
-    shadowColor: '#6A38B2',
-    label: '说出日程',
-    icon: 'mic' as const,
-  },
-  meeting: {
-    colors: [C.teal, C.blue] as const,
-    shadowColor: '#278DBF',
-    label: '记录会议',
-    icon: 'mic' as const,
-  },
-  recording: {
-    colors: ['#FF6B6D', '#D9363E'] as const,
-    shadowColor: '#D9363E',
-    label: '结束录音',
-    icon: 'stop' as const,
-  },
+const ACTION_META = {
+  schedule: { label: '新建日程', icon: 'add' as const, color: C.primary },
+  meeting: { label: '记录会议', icon: 'mic' as const, color: C.primary },
+  recording: { label: '结束录音', icon: 'stop' as const, color: C.red },
 };
 
 export function BottomTabBar({
@@ -97,138 +68,155 @@ export function BottomTabBar({
   micLabel,
   micIcon,
 }: Props) {
-  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [voiceVisible, setVoiceVisible] = useState(false);
   const bottomFill = Math.max(insets.bottom, MIN_BOTTOM_FILL);
-  const centerX = width / 2;
-  const path = makePath(width);
-  const openMic = onMic ?? (() => setVoiceVisible(true));
-  const resolvedTone = micTone ?? (active === 'meetings' ? 'meeting' : 'schedule');
-  const micMeta = MIC_META[resolvedTone];
-  const resolvedLabel = micLabel ?? micMeta.label;
-  const resolvedIcon = micIcon ?? micMeta.icon;
+  const tone = micTone ?? (active === 'meetings' ? 'meeting' : 'schedule');
+  const action = ACTION_META[tone];
 
   return (
-    <View style={s.outer} testID="bottom-tab-bar">
-      {/* SVG bar + white safe-area fill */}
-      <View
-        style={{
-          shadowColor: '#6432B4',
-          shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.10,
-          shadowRadius: 16,
-          elevation: 12,
-          backgroundColor: 'transparent',
-        }}
-      >
-        <Svg width={width} height={BAR_H} style={{ display: 'flex' }}>
-          {/* App background fill — makes the concave notch show the correct bg color */}
-          <Rect x="0" y="0" width={width} height={BAR_H} fill={C.appBg} />
-          <Path d={path} fill="#FFFFFF" />
-        </Svg>
-        <View style={{ height: bottomFill, backgroundColor: '#FFFFFF', width }} />
-      </View>
-
-      {/* Tab row — sits over the flat sections of the bar */}
-      <View
-        testID="bottom-tab-row"
-        style={[s.tabRow, { height: BAR_H, top: TOP_CLEARANCE }]}
-      >
-        <TouchableOpacity
-          style={s.tab}
+    <View style={[s.outer, { paddingBottom: bottomFill }]} testID="bottom-tab-bar">
+      <View testID="bottom-tab-row" style={s.tabRow}>
+        <TabButton
+          label="日程"
+          icon={active === 'schedule' ? 'calendar' : 'calendar-outline'}
+          selected={active === 'schedule'}
           onPress={onSchedule}
-          activeOpacity={0.7}
           testID="bottom-tab-schedule"
-          accessibilityRole="tab"
-          accessibilityLabel="日程"
-          accessibilityState={{ selected: active === 'schedule' }}
-        >
-          <Ionicons
-            name="calendar-outline" size={22}
-            color={active === 'schedule' ? C.purple : C.faint}
-          />
-          <Text style={[s.label, { color: active === 'schedule' ? C.purple : C.faint }]}>
-            日程
-          </Text>
-        </TouchableOpacity>
-
-        {/* Gap matches the notch width */}
-        <View style={{ width: NR * 2 }} />
-
-        <TouchableOpacity
-          style={s.tab}
-          onPress={onMeetings}
-          activeOpacity={0.7}
-          testID="bottom-tab-meetings"
-          accessibilityRole="tab"
-          accessibilityLabel="会议"
-          accessibilityState={{ selected: active === 'meetings' }}
-        >
-          <Ionicons
-            name="people-outline" size={22}
-            color={active === 'meetings' ? C.purple : C.faint}
-          />
-          <Text style={[s.label, { color: active === 'meetings' ? C.purple : C.faint }]}>
-            会议
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Mic button — centered, half above / half in the notch */}
-      <View
-        testID="bottom-microphone-wrap"
-        style={[s.micWrap, { left: centerX - MIC_R, top: CONTENT_GAP }]}
-      >
-        <TouchableOpacity
-          onPress={openMic}
-          activeOpacity={0.85}
-          testID={`bottom-microphone-${resolvedTone}`}
-          accessibilityRole="button"
-          accessibilityLabel={resolvedLabel}
-        >
-          <LinearGradient
-            colors={micMeta.colors}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[s.mic, { shadowColor: micMeta.shadowColor }]}
-          >
-            <Ionicons name={resolvedIcon} size={MIC_ICON} color="#fff" />
-            <Text style={s.micLabel} numberOfLines={1}>{resolvedLabel}</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
-      {!onMic && (
-        <VoiceInputModal
-          visible={voiceVisible}
-          onClose={() => setVoiceVisible(false)}
-          onSaved={() => setVoiceVisible(false)}
         />
-      )}
+        <TabButton
+          label="会议"
+          icon={active === 'meetings' ? 'people' : 'people-outline'}
+          selected={active === 'meetings'}
+          onPress={onMeetings}
+          testID="bottom-tab-meetings"
+        />
+      </View>
+
+      {onMic ? (
+        <TouchableOpacity
+          style={[s.action, { backgroundColor: action.color }]}
+          onPress={onMic}
+          activeOpacity={0.78}
+          testID={`bottom-microphone-${tone}`}
+          accessibilityRole="button"
+          accessibilityLabel={micLabel ?? action.label}
+        >
+          <Ionicons name={micIcon ?? action.icon} size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
 
+function TabButton({
+  label,
+  icon,
+  selected,
+  onPress,
+  testID,
+}: {
+  label: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  selected: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
+  const iconScale = React.useRef(new Animated.Value(1)).current;
+
+  const playSelectionFeedback = React.useCallback(() => {
+    iconScale.stopAnimation(() => {
+      iconScale.setValue(1);
+      Animated.timing(iconScale, {
+        toValue: TAB_PRESS_SCALE,
+        duration: TAB_PRESS_HALF_DURATION,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) return;
+        Animated.timing(iconScale, {
+          toValue: 1,
+          duration: TAB_PRESS_HALF_DURATION,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }).start();
+      });
+    });
+  }, [iconScale]);
+
+  const handlePress = React.useCallback(() => {
+    playSelectionFeedback();
+    onPress();
+  }, [onPress, playSelectionFeedback]);
+
+  return (
+    <TouchableOpacity
+      style={s.tab}
+      onPress={handlePress}
+      activeOpacity={1}
+      testID={testID}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+    >
+      <Animated.View
+        testID={`${testID}-icon-box`}
+        style={[s.iconBox, { transform: [{ scale: iconScale }] }]}
+      >
+        <Ionicons name={icon} size={TAB_ICON_SIZE} color={selected ? C.primary : C.faint} />
+      </Animated.View>
+      <Text testID={`${testID}-label`} style={[s.label, selected && s.labelSelected]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const s = StyleSheet.create({
-  // Reserve the microphone's protruding footprint in layout so scrollable
-  // controls cannot render underneath it on short screens.
-  outer: { position: 'relative', paddingTop: TOP_CLEARANCE },
+  outer: {
+    position: 'relative',
+    backgroundColor: C.card,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.border,
+  },
   tabRow: {
-    position: 'absolute', left: 0, right: 0,
-    flexDirection: 'row', alignItems: 'center',
+    height: BAR_H,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  tab: { flex: 1, alignItems: 'center', gap: 4 },
-  label: { fontSize: 11, fontWeight: '500' },
-  micWrap: {
+  tab: {
+    flex: 1,
+    height: BAR_H,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  iconBox: {
+    width: TAB_ICON_CONTAINER_W,
+    height: TAB_ICON_CONTAINER_H,
+    marginTop: TAB_ICON_TOP,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  label: {
+    marginTop: TAB_LABEL_GAP,
+    fontSize: TAB_LABEL_SIZE,
+    lineHeight: TAB_LABEL_LINE_HEIGHT,
+    fontWeight: '400',
+    color: C.faint,
+  },
+  labelSelected: {
+    color: C.primary,
+  },
+  action: {
     position: 'absolute',
-    zIndex: 10,
+    right: 16,
+    top: -(ACTION_D + ACTION_BOTTOM_GAP),
+    width: ACTION_D,
+    height: ACTION_D,
+    borderRadius: ACTION_R,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  mic: {
-    width: MIC_D, height: MIC_D, borderRadius: MIC_R,
-    alignItems: 'center', justifyContent: 'center',
-    gap: 1,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.55, shadowRadius: 12, elevation: 12,
-  },
-  micLabel: { color: '#fff', fontSize: 9, lineHeight: 11, fontWeight: '700', letterSpacing: 0 },
 });

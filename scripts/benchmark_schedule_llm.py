@@ -264,7 +264,7 @@ def main() -> int:
     parser.add_argument("--prompt", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--endpoint", default="http://127.0.0.1:21434")
-    parser.add_argument("--model", default="qwen3:8b")
+    parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--num-ctx", type=int, default=8192)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--keep-alive", default="15m")

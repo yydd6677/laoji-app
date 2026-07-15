@@ -25,7 +25,7 @@ class ScheduleLlmBenchmarkTest(unittest.TestCase):
 
     def test_payload_only_adds_the_requested_format(self):
         common = {
-            "model": "qwen3:8b",
+            "model": "qwen3.5:9b",
             "prompt": "prompt",
             "text": "text",
             "num_ctx": 8192,

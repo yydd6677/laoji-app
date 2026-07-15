@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { PrivacyScreen } from '../src/screens/PrivacyScreen';
 import { useAuth } from '../src/store/AuthStore';
 import { loadPrivacyPrefs } from '../src/services/privacy';
@@ -54,10 +55,16 @@ describe('PrivacyScreen accessibility', () => {
     const startupVerification = screen.getByLabelText('启动时验证');
 
     expect(systemVerification.props.accessibilityRole).toBe('switch');
-    expect(systemVerification.props.accessibilityState).toEqual({ checked: false });
+    expect(systemVerification.props.accessibilityState).toEqual({ checked: false, disabled: false });
     expect(systemVerification.props.accessibilityHint).toBe('双击以开启系统验证');
+    expect(StyleSheet.flatten(systemVerification.props.style)).toEqual(expect.objectContaining({
+      width: 36,
+      height: 20,
+    }));
+    expect(StyleSheet.flatten(screen.getByTestId('privacy-system-verification-toggle-track').props.style))
+      .toEqual(expect.objectContaining({ height: 14, top: 3 }));
     expect(startupVerification.props.accessibilityRole).toBe('switch');
-    expect(startupVerification.props.accessibilityState).toEqual({ checked: false });
+    expect(startupVerification.props.accessibilityState).toEqual({ checked: false, disabled: false });
     expect(startupVerification.props.accessibilityHint).toBe('双击以开启启动时验证');
   });
 
@@ -78,5 +85,9 @@ describe('PrivacyScreen accessibility', () => {
 
     expect(navigation.navigate).toHaveBeenCalledWith('Account');
     expect(screen.queryByText('账号与数据删除')).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('privacy-settings-group').props.style))
+      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+    expect(screen.queryByText('密码、通知、退出与账号删除')).toBeNull();
+    expect(screen.queryByText('账号数据按用户隔离，访客数据仅保存在本机')).toBeNull();
   });
 });

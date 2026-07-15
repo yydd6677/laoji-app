@@ -12,10 +12,18 @@ const base = {
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
+  androidStatusBar: {
+    backgroundColor: '#FFFFFF',
+    barStyle: 'dark-content',
+  },
+  androidNavigationBar: {
+    backgroundColor: '#FFFFFF',
+    barStyle: 'dark-content',
+  },
   splash: {
     image: './assets/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#FFF5F8',
+    backgroundColor: '#FFFFFF',
   },
   ios: {
     supportsTablet: false,
@@ -27,10 +35,10 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 58,
+    versionCode: 80,
     allowBackup: false,
     adaptiveIcon: {
-      backgroundColor: '#FFF5F8',
+      backgroundColor: '#FFFFFF',
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundImage: './assets/android-icon-background.png',
       monochromeImage: './assets/android-icon-monochrome.png',
@@ -64,7 +72,13 @@ const base = {
       photosPermission: '老记需要访问照片，用于选择账号头像。',
       cameraPermission: false,
     }],
-    ['expo-notifications', { color: '#7B5CB8' }],
+    ['expo-notifications', { color: '#1456F0' }],
+    ['expo-splash-screen', {
+      backgroundColor: '#FFFFFF',
+      image: './assets/splash-icon.png',
+      imageWidth: 288,
+      resizeMode: 'contain',
+    }],
     ['expo-local-authentication', { faceIDPermission: '老记需要使用系统验证，用于保护你的日程和会议记录。' }],
   ],
 };
@@ -146,6 +160,9 @@ module.exports = () => {
   const realtimeAsrHost = String(process.env.EXPO_PUBLIC_REALTIME_ASR_HOST || '').trim();
   const realtimeAsrPort = Number(process.env.EXPO_PUBLIC_REALTIME_ASR_PORT || 18020);
   const realtimeAsrSecure = boolEnv(process.env.EXPO_PUBLIC_REALTIME_ASR_SECURE);
+  const realtimeAsrProvider = String(
+    process.env.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || 'qwen',
+  ).trim().toLowerCase();
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
   );
@@ -166,6 +183,9 @@ module.exports = () => {
   assertServiceUrl('EXPO_PUBLIC_TERMS_OF_SERVICE_URL', termsOfServiceUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_ACCOUNT_DELETION_URL', accountDeletionUrl, appEnv);
   assertRealtimeHost(realtimeAsrHost, realtimeAsrPort, realtimeAsrSecure, appEnv);
+  if (!['whisper', 'qwen'].includes(realtimeAsrProvider)) {
+    throw new Error('EXPO_PUBLIC_REALTIME_ASR_PROVIDER must be whisper or qwen.');
+  }
 
   return {
     ...base,
@@ -177,6 +197,7 @@ module.exports = () => {
       realtimeAsrHost,
       realtimeAsrPort,
       realtimeAsrSecure,
+      realtimeAsrProvider,
       privacyPolicyUrl,
       termsOfServiceUrl,
       accountDeletionUrl,

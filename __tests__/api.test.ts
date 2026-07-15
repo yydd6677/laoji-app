@@ -466,7 +466,7 @@ describe('transcribeAudio', () => {
     (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce('AQIDBA==');
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ text: '明天下午三点开会', duration_sec: 1.2, provider: 'funasr' }),
+      json: async () => ({ text: '明天下午三点开会', duration_sec: 1.2, provider: 'qwen3-asr' }),
     });
 
     const text = await transcribeAudio('file:///tmp/recording.wav');

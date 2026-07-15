@@ -11,6 +11,8 @@ declare const process:
 
 const DEFAULT_REALTIME_ASR_PORT = 18020;
 
+export type RealtimeAsrProvider = 'whisper' | 'qwen';
+
 interface ApiConfigSource {
   appEnv?: string;
   laojiApiBase?: string;
@@ -18,6 +20,7 @@ interface ApiConfigSource {
   realtimeAsrHost?: string;
   realtimeAsrPort?: string | number;
   realtimeAsrSecure?: string | boolean;
+  realtimeAsrProvider?: string;
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
   accountDeletionUrl?: string;
@@ -30,6 +33,7 @@ export interface ApiConfig {
   realtimeAsrHost: string;
   realtimeAsrPort: number;
   realtimeAsrSecure: boolean;
+  realtimeAsrProvider: RealtimeAsrProvider;
   privacyPolicyUrl: string;
   termsOfServiceUrl: string;
   accountDeletionUrl: string;
@@ -89,6 +93,11 @@ function envInt(value: string | number | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function realtimeAsrProvider(value: string | undefined): RealtimeAsrProvider {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'whisper' ? normalized : 'qwen';
+}
+
 function runtimeSource(): ApiConfigSource {
   const extra = (Constants.expoConfig?.extra ?? {}) as ApiConfigSource;
   const runtimeEnv = typeof process !== 'undefined' ? process.env : undefined;
@@ -99,6 +108,7 @@ function runtimeSource(): ApiConfigSource {
     realtimeAsrHost: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_HOST || extra.realtimeAsrHost,
     realtimeAsrPort: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PORT || extra.realtimeAsrPort,
     realtimeAsrSecure: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_SECURE ?? extra.realtimeAsrSecure,
+    realtimeAsrProvider: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || extra.realtimeAsrProvider,
     privacyPolicyUrl: runtimeEnv?.EXPO_PUBLIC_PRIVACY_POLICY_URL || extra.privacyPolicyUrl,
     termsOfServiceUrl: runtimeEnv?.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || extra.termsOfServiceUrl,
     accountDeletionUrl: runtimeEnv?.EXPO_PUBLIC_ACCOUNT_DELETION_URL || extra.accountDeletionUrl,
@@ -115,6 +125,7 @@ export function getApiConfig(source: ApiConfigSource = runtimeSource()): ApiConf
     realtimeAsrHost: String(source.realtimeAsrHost ?? '').trim(),
     realtimeAsrPort: envInt(source.realtimeAsrPort, DEFAULT_REALTIME_ASR_PORT),
     realtimeAsrSecure: envBool(source.realtimeAsrSecure),
+    realtimeAsrProvider: realtimeAsrProvider(source.realtimeAsrProvider),
     privacyPolicyUrl: normalizeBaseUrl(String(source.privacyPolicyUrl ?? (laojiApiBase ? `${laojiApiBase}/privacy` : ''))),
     termsOfServiceUrl: normalizeBaseUrl(String(source.termsOfServiceUrl ?? (laojiApiBase ? `${laojiApiBase}/terms` : ''))),
     accountDeletionUrl: normalizeBaseUrl(String(source.accountDeletionUrl ?? (laojiApiBase ? `${laojiApiBase}/account-deletion` : ''))),

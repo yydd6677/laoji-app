@@ -1,9 +1,9 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { BackHeader } from '../components/Common';
+import { Avatar, BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
 import { fetchSpeakers, SpeakerProfile } from '../services/speakers';
@@ -12,13 +12,6 @@ import { Colors as C } from '../theme/colors';
 import { RootStackParamList } from '../types';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
-
-function qualityLabel(value: number): string {
-  if (value >= 0.8) return '优秀';
-  if (value >= 0.6) return '良好';
-  if (value >= 0.4) return '一般';
-  return '建议补录';
-}
 
 export function SpeakerManagerScreen({ navigation }: Props) {
   const { accessToken, isGuest, signOut } = useAuth();
@@ -58,25 +51,13 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     };
   }, [load]));
 
-  const addButton = !isGuest && accessToken ? (
-    <TouchableOpacity
-      style={s.headerButton}
-      onPress={() => navigation.navigate('SpeakerEnrollment')}
-      accessibilityRole="button"
-      accessibilityLabel="新建讲话人"
-    >
-      <Ionicons name="add" size={22} color={C.purple} />
-    </TouchableOpacity>
-  ) : null;
-
   return (
-    <ScreenContainer edges={['top']}>
-      <BackHeader title="讲话人管理" onBack={() => navigation.goBack()} right={addButton} />
+    <ScreenContainer edges={['top']} bg={C.appBg}>
+      <BackHeader title="讲话人管理" onBack={() => navigation.goBack()} />
       {isGuest || !accessToken ? (
         <View style={s.guestWrap}>
-          <View style={s.heroIcon}><Ionicons name="people-outline" size={34} color={C.purple} /></View>
-          <Text style={s.guestTitle}>登录后管理讲话人</Text>
-          <Text style={s.guestText}>声纹是账号私有资料，访客模式不会上传或保存个人音色。</Text>
+          <Ionicons name="people-outline" size={72} color={C.disabled} />
+          <Text style={s.guestTitle}>请先登录账号</Text>
           <TouchableOpacity
             style={s.primaryButton}
             onPress={() => { void signOut().catch(() => {}); }}
@@ -87,93 +68,96 @@ export function SpeakerManagerScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-          <View style={s.introBand}>
-            <Ionicons name="shield-checkmark-outline" size={20} color={C.purple} />
-            <Text style={s.introText}>会议只会使用当前账号保存的声纹识别讲话人。</Text>
-          </View>
-
-          {loading && speakers.length === 0 ? (
-            <View style={s.stateBox}>
-              <ActivityIndicator color={C.purple} />
-              <Text style={s.stateText}>正在加载讲话人</Text>
-            </View>
-          ) : null}
-
-          {error ? (
-            <TouchableOpacity
-              style={s.errorBox}
-              onPress={() => void load()}
-              accessibilityRole="button"
-              accessibilityLabel="重试加载讲话人"
-            >
-              <Ionicons name="cloud-offline-outline" size={18} color={C.red} />
-              <Text style={s.errorText}>{error}</Text>
-              <Ionicons name="refresh" size={18} color={C.purple} />
-            </TouchableOpacity>
-          ) : null}
-
-          {!loading && !error && speakers.length === 0 ? (
-            <View style={s.stateBox}>
-              <View style={s.emptyIcon}><Ionicons name="person-add-outline" size={27} color={C.purple} /></View>
-              <Text style={s.stateTitle}>还没有讲话人</Text>
-              <Text style={s.stateText}>录制一段个人音色后，实时会议会尝试显示对应名称。</Text>
+        <FlatList
+          style={s.list}
+          contentContainerStyle={[s.listContent, speakers.length === 0 && s.emptyListContent]}
+          data={speakers}
+          keyExtractor={speaker => speaker.speaker_id}
+          showsVerticalScrollIndicator={false}
+          refreshing={loading && speakers.length > 0}
+          onRefresh={() => { void load(); }}
+          ListHeaderComponent={(
+            <View>
               <TouchableOpacity
-                style={s.primaryButton}
+                style={s.addRow}
                 onPress={() => navigation.navigate('SpeakerEnrollment')}
                 accessibilityRole="button"
-                accessibilityLabel="新建第一个讲话人"
+                accessibilityLabel="新建讲话人"
               >
-                <Ionicons name="mic-outline" size={17} color="#fff" />
-                <Text style={s.primaryButtonText}>录制音色</Text>
+                <View style={s.addIcon}>
+                  <Ionicons name="person-add-outline" size={20} color={C.primary} />
+                </View>
+                <Text style={s.addText}>新建讲话人</Text>
               </TouchableOpacity>
+              <View style={s.groupGap} />
+              {error ? (
+                <TouchableOpacity
+                  style={s.errorBox}
+                  onPress={() => void load()}
+                  accessibilityRole="button"
+                  accessibilityLabel="重试加载讲话人"
+                >
+                  <Ionicons name="cloud-offline-outline" size={18} color={C.red} />
+                  <Text style={s.errorText}>{error}</Text>
+                  <Ionicons name="refresh" size={18} color={C.primary} />
+                </TouchableOpacity>
+              ) : null}
             </View>
-          ) : null}
-
-          {speakers.map(speaker => (
+          )}
+          ListEmptyComponent={(
+            <View style={s.stateBox}>
+              {loading ? (
+                <>
+                  <ActivityIndicator color={C.primary} />
+                  <Text style={s.stateText}>正在加载讲话人</Text>
+                </>
+              ) : error ? null : (
+                <Text style={s.stateText}>暂无讲话人</Text>
+              )}
+            </View>
+          )}
+          ItemSeparatorComponent={() => <View style={s.rowDivider} />}
+          renderItem={({ item: speaker }) => (
             <TouchableOpacity
-              key={speaker.speaker_id}
-              style={s.speakerCard}
-              activeOpacity={0.84}
+              style={s.speakerRow}
+              activeOpacity={0.68}
               onPress={() => navigation.navigate('SpeakerEnrollment', { speakerId: speaker.speaker_id })}
               accessibilityRole="button"
               accessibilityLabel={`管理讲话人${speaker.name}`}
             >
-              <View style={s.personIcon}><Ionicons name="person-outline" size={20} color={C.purple} /></View>
+              <Avatar size={40} />
               <View style={s.speakerBody}>
                 <Text style={s.speakerName} numberOfLines={1}>{speaker.name}</Text>
-                <Text style={s.speakerMeta}>{speaker.sample_count} 段音色 · 质量{qualityLabel(speaker.quality)}</Text>
+                {speaker.quality < 0.4 ? <Text style={s.speakerMeta}>建议补充采集</Text> : null}
               </View>
               <Ionicons name="chevron-forward" size={18} color={C.faint} />
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+        />
       )}
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  headerButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingBottom: 36 },
-  introBand: { minHeight: 52, borderRadius: 14, backgroundColor: C.purpleLight, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  introText: { flex: 1, fontSize: 12, lineHeight: 18, color: '#5A5079', fontWeight: '600' },
+  list: { flex: 1, backgroundColor: C.appBg },
+  listContent: { paddingBottom: 24 },
+  emptyListContent: { flexGrow: 1 },
+  addRow: { height: 64, paddingHorizontal: 16, backgroundColor: C.body, flexDirection: 'row', alignItems: 'center' },
+  addIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  addText: { marginLeft: 12, fontSize: 16, lineHeight: 24, color: C.primary },
+  groupGap: { height: 8, backgroundColor: C.appBg },
   guestWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 38, paddingBottom: 80 },
-  heroIcon: { width: 70, height: 70, borderRadius: 35, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center', marginBottom: 18 },
-  guestTitle: { fontSize: 18, color: C.text, fontWeight: '800', marginBottom: 8 },
-  guestText: { fontSize: 13, lineHeight: 20, color: C.sub, textAlign: 'center', marginBottom: 22 },
-  stateBox: { minHeight: 210, borderRadius: 16, backgroundColor: C.card, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  emptyIcon: { width: 54, height: 54, borderRadius: 27, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  stateTitle: { fontSize: 16, color: C.text, fontWeight: '800' },
-  stateText: { fontSize: 12, lineHeight: 18, color: C.sub, textAlign: 'center' },
-  primaryButton: { minHeight: 42, borderRadius: 21, backgroundColor: C.purple, paddingHorizontal: 20, marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  primaryButtonText: { fontSize: 13, color: '#fff', fontWeight: '800' },
-  errorBox: { minHeight: 54, borderRadius: 14, backgroundColor: '#FFF1F2', paddingHorizontal: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  errorText: { flex: 1, fontSize: 12, lineHeight: 18, color: C.red },
-  speakerCard: { height: 74, borderRadius: 16, backgroundColor: C.card, paddingHorizontal: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 12, shadowColor: '#5028A0', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  personIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center' },
-  speakerBody: { flex: 1, minWidth: 0 },
-  speakerName: { fontSize: 15, color: C.text, fontWeight: '800', marginBottom: 5 },
-  speakerMeta: { fontSize: 11, color: C.sub, fontWeight: '600' },
+  guestTitle: { marginTop: 12, fontSize: 16, lineHeight: 24, color: C.text, fontWeight: '600' },
+  stateBox: { flex: 1, minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  stateText: { fontSize: 14, lineHeight: 20, color: C.sub, textAlign: 'center' },
+  primaryButton: { minHeight: 40, borderRadius: 6, backgroundColor: C.primary, paddingHorizontal: 20, marginTop: 20, alignItems: 'center', justifyContent: 'center' },
+  primaryButtonText: { fontSize: 14, lineHeight: 20, color: '#fff', fontWeight: '500' },
+  errorBox: { minHeight: 44, backgroundColor: '#FFF3F3', paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  errorText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.red },
+  speakerRow: { height: 66, backgroundColor: C.body, paddingLeft: 16, paddingRight: 16, flexDirection: 'row', alignItems: 'center' },
+  rowDivider: { height: StyleSheet.hairlineWidth, marginLeft: 76, backgroundColor: C.border },
+  speakerBody: { flex: 1, minWidth: 0, marginLeft: 12 },
+  speakerName: { fontSize: 16, lineHeight: 22, color: C.text },
+  speakerMeta: { marginTop: 2, fontSize: 12, lineHeight: 18, color: C.orange },
 });

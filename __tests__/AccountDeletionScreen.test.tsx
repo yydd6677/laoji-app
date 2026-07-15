@@ -1,7 +1,15 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { AccountScreen } from '../src/screens/AccountScreen';
+import {
+  ACCOUNT_SECURITY_GEOMETRY,
+  ChangePasswordScreen,
+} from '../src/screens/ChangePasswordScreen';
+import { NotificationSettingsScreen } from '../src/screens/NotificationSettingsScreen';
+import { AccountDeletionScreen } from '../src/screens/AccountDeletionScreen';
 import { useAuth } from '../src/store/AuthStore';
+import { changePassword } from '../src/services/auth';
 import {
   ensureNotificationPermission,
   getNotificationPermissionStatus,
@@ -14,16 +22,13 @@ const showDialog = jest.fn();
 
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
-jest.mock('../src/components/Common', () => ({
-  BackHeader: 'BackHeader',
-}));
-jest.mock('../src/components/BottomTabBar', () => ({
-  BottomTabBar: 'BottomTabBar',
-  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 100 },
-}));
+jest.mock('../src/components/Common', () => ({ BackHeader: 'BackHeader' }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
 jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog }),
+}));
+jest.mock('../src/services/auth', () => ({
+  changePassword: jest.fn(async () => undefined),
 }));
 jest.mock('../src/services/notifications', () => ({
   REMINDER_OPTIONS: [
@@ -39,16 +44,18 @@ jest.mock('../src/services/notifications', () => ({
   scheduleTestNotification: jest.fn(async () => 'test-notification-id'),
 }));
 
-describe('AccountScreen account deletion', () => {
+describe('account security pages', () => {
   const deleteAccount = jest.fn();
+  const signOut = jest.fn();
   const navigation = {
     goBack: jest.fn(),
     navigate: jest.fn(),
     reset: jest.fn(),
-  } as unknown as React.ComponentProps<typeof AccountScreen>['navigation'];
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (changePassword as jest.Mock).mockResolvedValue(undefined);
     (ensureNotificationPermission as jest.Mock).mockResolvedValue(true);
     (getNotificationPermissionStatus as jest.Mock).mockResolvedValue('granted');
     (openNotificationSettings as jest.Mock).mockResolvedValue(undefined);
@@ -62,36 +69,105 @@ describe('AccountScreen account deletion', () => {
       cleanup_pending: 0,
     });
     (useAuth as jest.Mock).mockReturnValue({
-      profile: {
-        nickname: '测试用户',
-        email: 'user@example.com',
-        phone: '',
-        avatarUrl: null,
-        avatarLocalUri: null,
-      },
       isGuest: false,
       mode: 'authenticated',
       session: { user: { id: 7 } },
       accessToken: 'token-7',
-      updateProfile: jest.fn(),
-      uploadAvatar: jest.fn(),
-      deleteAvatar: jest.fn(),
-      signOut: jest.fn(),
+      signOut,
       deleteAccount,
     });
   });
 
-  it('requires password and the exact destructive confirmation before deletion', async () => {
-    const view = await render(<AccountScreen navigation={navigation} />);
+  it('keeps the account page as a source-style entry list with distinct destinations', async () => {
+    const view = await render(
+      <AccountScreen navigation={navigation as unknown as React.ComponentProps<typeof AccountScreen>['navigation']} />,
+    );
 
-    expect(view.queryByTestId('account-avatar-picker')).toBeNull();
-    expect(view.queryByTestId('account-nickname-input')).toBeNull();
-    expect(view.queryByTestId('account-email-input')).toBeNull();
-    expect(view.queryByTestId('account-phone-input')).toBeNull();
+    expect(view.queryByText('头像')).toBeNull();
+    expect(view.queryByText('昵称')).toBeNull();
+    expect(view.queryByText('邮箱')).toBeNull();
+    expect(view.queryByText('手机号')).toBeNull();
+    expect(StyleSheet.flatten(view.getByTestId('account-settings-group').props.style))
+      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+    expect(StyleSheet.flatten(view.getByTestId('account-setting-0').props.style).minHeight).toBe(54);
 
+    await fireEvent.press(view.getByTestId('account-setting-0'));
+    expect(navigation.navigate).toHaveBeenCalledWith('ChangePassword');
+    await fireEvent.press(view.getByTestId('account-setting-1'));
+    expect(navigation.navigate).toHaveBeenCalledWith('NotificationSettings');
     await fireEvent.press(view.getByTestId('open-account-deletion'));
-    expect(view.getByText('此操作不可撤销')).toBeTruthy();
+    expect(navigation.navigate).toHaveBeenCalledWith('AccountDeletion');
+    expect(view.queryByTestId('account-bottom-sheet')).toBeNull();
+  });
+
+  it('does not expose cloud account deletion in guest mode', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      isGuest: true,
+      mode: 'guest',
+      session: null,
+      accessToken: null,
+      signOut,
+      deleteAccount,
+    });
+    const view = await render(
+      <AccountScreen navigation={navigation as unknown as React.ComponentProps<typeof AccountScreen>['navigation']} />,
+    );
+    expect(view.queryByTestId('open-account-deletion')).toBeNull();
+
+    await fireEvent.press(view.getByTestId('account-setting-0'));
+    expect(navigation.navigate).not.toHaveBeenCalledWith('ChangePassword');
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '密码与安全' }));
+  });
+
+  it('routes the existing deletion deep link to the dedicated page', async () => {
+    const route = {
+      key: 'account-deletion-route',
+      name: 'Account' as const,
+      params: { section: 'deletion' as const },
+    };
+    await render(
+      <AccountScreen
+        navigation={navigation as unknown as React.ComponentProps<typeof AccountScreen>['navigation']}
+        route={route}
+      />,
+    );
+
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalledWith('AccountDeletion'));
+  });
+
+  it('changes the password from a full page without moving its fixed action area', async () => {
+    const view = await render(
+      <ChangePasswordScreen navigation={navigation as unknown as React.ComponentProps<typeof ChangePasswordScreen>['navigation']} />,
+    );
+
+    expect(StyleSheet.flatten(view.getByTestId('change-password-current-field').props.style).height)
+      .toBe(ACCOUNT_SECURITY_GEOMETRY.inputHeight);
+    expect(StyleSheet.flatten(view.getByTestId('change-password-submit').props.style)).toEqual(expect.objectContaining({
+      height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
+      borderRadius: ACCOUNT_SECURITY_GEOMETRY.actionRadius,
+    }));
+
+    await fireEvent.changeText(view.getByTestId('change-password-current'), 'OldPassword123');
+    await fireEvent.changeText(view.getByTestId('change-password-new'), 'NewPassword123');
+    await fireEvent.changeText(view.getByTestId('change-password-confirm'), 'NewPassword123');
+    await fireEvent.press(view.getByTestId('change-password-submit'));
+
+    await waitFor(() => expect(changePassword).toHaveBeenCalledWith('token-7', 'OldPassword123', 'NewPassword123'));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '密码已修改' }));
+  });
+
+  it('requires password and the exact destructive confirmation on the deletion page', async () => {
+    const view = await render(
+      <AccountDeletionScreen navigation={navigation as unknown as React.ComponentProps<typeof AccountDeletionScreen>['navigation']} />,
+    );
+
+    expect(view.getByText('删除后无法恢复')).toBeTruthy();
     expect(view.getByTestId('confirm-account-deletion').props.disabled).toBe(true);
+    expect(StyleSheet.flatten(view.getByTestId('confirm-account-deletion').props.style)).toEqual(expect.objectContaining({
+      height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
+      borderRadius: ACCOUNT_SECURITY_GEOMETRY.actionRadius,
+    }));
 
     await fireEvent.changeText(view.getByTestId('account-deletion-password'), 'Password123');
     await fireEvent.changeText(view.getByTestId('account-deletion-confirmation'), '删除账号');
@@ -108,35 +184,6 @@ describe('AccountScreen account deletion', () => {
     }));
   });
 
-  it('does not expose cloud account deletion in guest mode', async () => {
-    (useAuth as jest.Mock).mockReturnValue({
-      profile: { nickname: '访客', email: '', phone: '', avatarUrl: null, avatarLocalUri: null },
-      isGuest: true,
-      mode: 'guest',
-      session: null,
-      accessToken: null,
-      updateProfile: jest.fn(),
-      uploadAvatar: jest.fn(),
-      deleteAvatar: jest.fn(),
-      signOut: jest.fn(),
-      deleteAccount,
-    });
-    const view = await render(<AccountScreen navigation={navigation} />);
-    expect(view.queryByTestId('open-account-deletion')).toBeNull();
-  });
-
-  it('opens the destructive confirmation directly from a deletion deep link', async () => {
-    const route = {
-      key: 'account-deletion-route',
-      name: 'Account' as const,
-      params: { section: 'deletion' as const },
-    };
-    const view = await render(<AccountScreen navigation={navigation} route={route} />);
-
-    expect(view.getByText('此操作不可撤销')).toBeTruthy();
-    expect(view.getByTestId('account-deletion-password')).toBeTruthy();
-  });
-
   it('warns honestly when cloud deletion succeeds but local cleanup is partial', async () => {
     deleteAccount.mockResolvedValueOnce({
       deleted: true,
@@ -146,9 +193,10 @@ describe('AccountScreen account deletion', () => {
       cleanup_pending: 0,
       local_cleanup_failed: 2,
     });
-    const view = await render(<AccountScreen navigation={navigation} />);
+    const view = await render(
+      <AccountDeletionScreen navigation={navigation as unknown as React.ComponentProps<typeof AccountDeletionScreen>['navigation']} />,
+    );
 
-    await fireEvent.press(view.getByTestId('open-account-deletion'));
     await fireEvent.changeText(view.getByTestId('account-deletion-password'), 'Password123');
     await fireEvent.changeText(view.getByTestId('account-deletion-confirmation'), '删除账号');
     await fireEvent.press(view.getByTestId('confirm-account-deletion'));
@@ -160,22 +208,14 @@ describe('AccountScreen account deletion', () => {
     })));
   });
 
-  it('keeps profile editing out of the account security page', async () => {
-    const view = await render(<AccountScreen navigation={navigation} />);
-
-    expect(view.queryByText('头像')).toBeNull();
-    expect(view.queryByText('昵称')).toBeNull();
-    expect(view.queryByText('邮箱')).toBeNull();
-    expect(view.queryByText('手机号')).toBeNull();
-    expect(view.getByText('密码与安全')).toBeTruthy();
-    expect(view.getAllByText('通知与提醒').length).toBeGreaterThan(0);
-  });
-
-  it('keeps the previous reminder visible when local preference persistence fails', async () => {
+  it('keeps the previous reminder selected when local persistence fails', async () => {
     (saveNotificationPrefs as jest.Mock).mockRejectedValueOnce(new Error('storage full'));
-    const view = await render(<AccountScreen navigation={navigation} />);
+    const view = await render(
+      <NotificationSettingsScreen navigation={navigation as unknown as React.ComponentProps<typeof NotificationSettingsScreen>['navigation']} />,
+    );
 
-    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
+    await waitFor(() => expect(view.getByTestId('notification-reminder-15').props.accessibilityState.selected).toBe(true));
+    expect(StyleSheet.flatten(view.getByTestId('notification-reminder-15').props.style).minHeight).toBe(52);
     await fireEvent.press(view.getByTestId('notification-reminder-30'));
 
     await waitFor(() => expect(showDialog).toHaveBeenCalledWith({
@@ -187,12 +227,13 @@ describe('AccountScreen account deletion', () => {
     expect(view.getByTestId('notification-reminder-30').props.accessibilityState.selected).toBe(false);
   });
 
-  it('reports notification permission inspection failures without leaving the button busy', async () => {
+  it('reports notification permission failures without leaving the row busy', async () => {
     (getNotificationPermissionStatus as jest.Mock).mockResolvedValue('unknown');
     (ensureNotificationPermission as jest.Mock).mockRejectedValueOnce(new Error('native unavailable'));
-    const view = await render(<AccountScreen navigation={navigation} />);
+    const view = await render(
+      <NotificationSettingsScreen navigation={navigation as unknown as React.ComponentProps<typeof NotificationSettingsScreen>['navigation']} />,
+    );
 
-    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
     await waitFor(() => expect(view.getByText('系统通知状态未知')).toBeTruthy());
     await fireEvent.press(view.getByTestId('notification-permission-button'));
 
@@ -204,10 +245,11 @@ describe('AccountScreen account deletion', () => {
     expect(view.getByTestId('notification-permission-button').props.disabled).toBe(false);
   });
 
-  it('opens the exact system notification page when permission is already granted', async () => {
-    const view = await render(<AccountScreen navigation={navigation} />);
+  it('opens the system notification page when permission is already granted', async () => {
+    const view = await render(
+      <NotificationSettingsScreen navigation={navigation as unknown as React.ComponentProps<typeof NotificationSettingsScreen>['navigation']} />,
+    );
 
-    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
     await waitFor(() => expect(view.getByText('系统通知设置')).toBeTruthy());
     await fireEvent.press(view.getByTestId('notification-permission-button'));
 
@@ -215,12 +257,12 @@ describe('AccountScreen account deletion', () => {
     expect(ensureNotificationPermission).not.toHaveBeenCalled();
   });
 
-  it('schedules an observable test reminder from notification settings', async () => {
-    const view = await render(<AccountScreen navigation={navigation} />);
+  it('schedules an observable test reminder from the dedicated notification page', async () => {
+    const view = await render(
+      <NotificationSettingsScreen navigation={navigation as unknown as React.ComponentProps<typeof NotificationSettingsScreen>['navigation']} />,
+    );
 
-    await fireEvent.press(view.getAllByText('通知与提醒')[0]);
     await fireEvent.press(view.getByTestId('notification-test-button'));
-
     await waitFor(() => expect(scheduleTestNotification).toHaveBeenCalledTimes(1));
     expect(showDialog).toHaveBeenCalledWith({
       title: '测试提醒已安排',

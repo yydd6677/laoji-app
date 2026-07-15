@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { TranscriptionScreen } from '../src/screens/TranscriptionScreen';
 import { useAuth } from '../src/store/AuthStore';
 import { useMeetings } from '../src/store/MeetingsStore';
@@ -31,7 +32,13 @@ jest.mock('../src/components/BottomTabBar', () => ({
   BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 100 },
 }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
-jest.mock('../src/store/MeetingsStore', () => ({ useMeetings: jest.fn() }));
+jest.mock('../src/store/MeetingsStore', () => ({
+  MeetingDeletionCleanupError: class MeetingDeletionCleanupError extends Error {},
+  useMeetings: jest.fn(),
+}));
+jest.mock('../src/components/MeetingAudioPlayerDock', () => ({
+  MeetingAudioPlayerDock: 'MeetingAudioPlayerDock',
+}));
 jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog }),
 }));
@@ -86,6 +93,7 @@ describe('TranscriptionScreen accessibility', () => {
         audioDurationSec: 155,
         audioBars: [1, 2, 3],
       }],
+      deleteMeeting: jest.fn(),
       updateMeetingTitle: jest.fn(),
       getCachedTranscript: jest.fn(() => []),
       saveCachedTranscript: jest.fn(),
@@ -322,7 +330,7 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-offline-recovery',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
 
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
@@ -381,7 +389,7 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-storage-unavailable',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
 
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
@@ -422,7 +430,7 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-stop-polling',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
 
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
@@ -457,7 +465,7 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-force-submit-failure',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
 
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
@@ -498,7 +506,7 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-account-switch',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
     const view = await render(<TranscriptionScreen navigation={navigation} route={route} />);
     await waitFor(() => expect(screen.getByLabelText('生成会议总结')).toBeTruthy());
@@ -539,9 +547,128 @@ describe('TranscriptionScreen accessibility', () => {
     expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
       title: '分享会议文件',
     }));
+    expect(screen.getByTestId('meeting-detail-tabs')).toHaveStyle({
+      height: 41,
+      backgroundColor: '#FFFFFF',
+    });
   });
 
-  it('keeps long transcripts collapsed until the user expands them', async () => {
+  it('uses the source title display and explicit title edit mode', async () => {
+    const updateMeetingTitle = jest.fn(async () => undefined);
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{
+        id: 'guest-meeting-1',
+        title: '现场会议',
+        date: '2026年7月11日',
+        time: '15:40',
+        duration: '02:35',
+        tags: [],
+      }],
+      deleteMeeting: jest.fn(),
+      updateMeetingTitle,
+      getCachedTranscript: jest.fn(() => []),
+      saveCachedTranscript: jest.fn(),
+      getCachedSummary: jest.fn(() => null),
+      saveCachedSummary: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+    } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-title-edit',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    expect(screen.getByTestId('meeting-title-display')).toBeTruthy();
+    expect(screen.queryByTestId('meeting-title-input')).toBeNull();
+
+    await fireEvent.press(screen.getByLabelText('编辑会议标题'));
+    expect(screen.getByLabelText('分享会议资料')).toBeTruthy();
+    expect(screen.getByLabelText('更多会议操作')).toBeTruthy();
+
+    const input = screen.getByTestId('meeting-title-input');
+    await fireEvent.changeText(input, '新版会议标题');
+    await fireEvent(input, 'blur');
+    await waitFor(() => expect(updateMeetingTitle).toHaveBeenCalledWith('guest-meeting-1', '新版会议标题'));
+    await waitFor(() => expect(screen.getByTestId('meeting-title-display')).toBeTruthy());
+  });
+
+  it('uses the source compact tabs and meeting-notes wording', async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+    } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-tab-geometry',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    expect(StyleSheet.flatten(screen.getByTestId('meeting-detail-tabs').props.style))
+      .toEqual(expect.objectContaining({ height: 41, paddingLeft: 10 }));
+    expect(StyleSheet.flatten(screen.getByLabelText('查看会议转写').props.style))
+      .toEqual(expect.objectContaining({ width: 76 }));
+    expect(StyleSheet.flatten(screen.getByLabelText('查看会议纪要').props.style))
+      .toEqual(expect.objectContaining({ width: 60 }));
+    expect(screen.getByText('纪要')).toBeTruthy();
+    expect(screen.queryByText('智能总结')).toBeNull();
+  });
+
+  it('switches transcript and summary with the source horizontal pager gesture', async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+    } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-pager',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    const page = screen.getByTestId('meeting-detail-tab-page');
+
+    expect(screen.getByTestId('meeting-transcript-list')).toBeTruthy();
+    await act(async () => {
+      page.props.onResponderRelease?.({}, { dx: -72, dy: 3 });
+    });
+    expect(screen.getByTestId('meeting-summary-content')).toBeTruthy();
+    expect(screen.getByLabelText('查看会议纪要').props.accessibilityState).toEqual({ selected: true });
+
+    await act(async () => {
+      screen.getByTestId('meeting-detail-tab-page').props.onResponderRelease?.({}, { dx: 72, dy: 2 });
+    });
+    expect(screen.getByTestId('meeting-transcript-list')).toBeTruthy();
+    expect(screen.getByLabelText('查看会议转写').props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it('keeps destructive meeting actions in the unified detail menu', async () => {
+    const navigation = {
+      goBack: jest.fn(),
+      navigate: jest.fn(),
+    } as unknown as React.ComponentProps<typeof TranscriptionScreen>['navigation'];
+    const route = {
+      key: 'transcription-more',
+      name: 'Transcription' as const,
+      params: { meetingId: 'guest-meeting-1' },
+    } as React.ComponentProps<typeof TranscriptionScreen>['route'];
+
+    await render(<TranscriptionScreen navigation={navigation} route={route} />);
+    await fireEvent.press(screen.getByLabelText('更多会议操作'));
+    await fireEvent.press(screen.getByLabelText('删除会议'));
+
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '确认删除',
+      tone: 'danger',
+    }));
+  });
+
+  it('renders every transcript segment without a legacy expand control', async () => {
     (useMeetings as jest.Mock).mockReturnValue({
       ...(useMeetings as jest.Mock).mock.results.at(-1)?.value,
       meetings: [{
@@ -570,12 +697,18 @@ describe('TranscriptionScreen accessibility', () => {
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
 
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
-    expect(screen.getByTestId('meeting-transcript-text').props.numberOfLines).toBe(6);
-
-    await fireEvent.press(screen.getByLabelText('展开完整转写'));
-
-    expect(screen.getByTestId('meeting-transcript-text').props.numberOfLines).toBe(0);
-    expect(screen.getByLabelText('收起完整转写')).toBeTruthy();
+    expect(screen.getByTestId('meeting-transcript-line-1')).toBeTruthy();
+    expect(screen.getByTestId('meeting-transcript-line-2')).toBeTruthy();
+    expect(screen.getByText('第一段转写')).toBeTruthy();
+    expect(screen.getByText('第二段转写')).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByTestId('meeting-transcript-line-1').props.style))
+      .toEqual(expect.objectContaining({ paddingTop: 20, paddingBottom: 12 }));
+    expect(StyleSheet.flatten(screen.getByTestId('meeting-transcript-meta-1').props.style))
+      .toEqual(expect.objectContaining({ minHeight: 24, paddingHorizontal: 20 }));
+    expect(StyleSheet.flatten(screen.getByTestId('meeting-transcript-text-1').props.style))
+      .toEqual(expect.objectContaining({ marginTop: 10, marginHorizontal: 20, lineHeight: 28 }));
+    expect(screen.queryByLabelText('展开完整转写')).toBeNull();
+    expect(screen.queryByLabelText('收起完整转写')).toBeNull();
   });
 
   it('does not show a cancellation dialog after leaving a pending summary', async () => {
@@ -602,10 +735,9 @@ describe('TranscriptionScreen accessibility', () => {
     const route = {
       key: 'transcription-pending-summary',
       name: 'Transcription' as const,
-      params: { meetingId: 'guest-meeting-1' },
+      params: { meetingId: 'guest-meeting-1', focus: 'summary' },
     } as React.ComponentProps<typeof TranscriptionScreen>['route'];
     const view = await render(<TranscriptionScreen navigation={navigation} route={route} />);
-
     await act(async () => {
       void view.getByLabelText('生成会议总结').props.onPress();
       await Promise.resolve();

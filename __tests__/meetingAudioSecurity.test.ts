@@ -12,6 +12,7 @@ function config(overrides: Partial<ApiConfig> = {}): ApiConfig {
     realtimeAsrHost: 'realtime.example.com',
     realtimeAsrPort: 443,
     realtimeAsrSecure: true,
+    realtimeAsrProvider: 'qwen',
     privacyPolicyUrl: 'https://www.example.com/privacy',
     termsOfServiceUrl: 'https://www.example.com/terms',
     accountDeletionUrl: 'https://www.example.com/account-deletion',

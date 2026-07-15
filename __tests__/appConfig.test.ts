@@ -17,6 +17,7 @@ describe('Expo app config release gates', () => {
       EXPO_PUBLIC_REALTIME_ASR_HOST: 'realtime.release-domain.cn',
       EXPO_PUBLIC_REALTIME_ASR_PORT: '443',
       EXPO_PUBLIC_REALTIME_ASR_SECURE: 'true',
+      EXPO_PUBLIC_REALTIME_ASR_PROVIDER: 'qwen',
       EXPO_PUBLIC_PRIVACY_POLICY_URL: 'https://www.release-domain.cn/privacy',
       EXPO_PUBLIC_TERMS_OF_SERVICE_URL: 'https://www.release-domain.cn/terms',
       EXPO_PUBLIC_ACCOUNT_DELETION_URL: 'https://www.release-domain.cn/account-deletion',
@@ -31,9 +32,19 @@ describe('Expo app config release gates', () => {
   it('accepts complete production HTTPS and WSS domains', () => {
     configureProduction();
     const config = loadConfig() as {
-      android?: { versionCode?: number; allowBackup?: boolean; blockedPermissions?: string[] };
+      splash?: { backgroundColor?: string };
+      androidStatusBar?: { backgroundColor?: string; barStyle?: string };
+      androidNavigationBar?: { backgroundColor?: string; barStyle?: string };
+      android?: {
+        versionCode?: number;
+        allowBackup?: boolean;
+        blockedPermissions?: string[];
+        adaptiveIcon?: { backgroundColor?: string };
+      };
+      plugins?: Array<string | [string, Record<string, unknown>]>;
+      extra?: { realtimeAsrProvider?: string };
     };
-    expect(config.android?.versionCode).toBe(58);
+    expect(config.android?.versionCode).toBe(80);
     expect(config.android?.allowBackup).toBe(false);
     expect(config.android?.blockedPermissions).toEqual(expect.arrayContaining([
       'android.permission.CAMERA',
@@ -41,6 +52,23 @@ describe('Expo app config release gates', () => {
       'android.permission.SYSTEM_ALERT_WINDOW',
       'com.google.android.c2dm.permission.RECEIVE',
     ]));
+    expect(config.splash?.backgroundColor).toBe('#FFFFFF');
+    expect(config.android?.adaptiveIcon?.backgroundColor).toBe('#FFFFFF');
+    expect(config.androidStatusBar).toEqual({ backgroundColor: '#FFFFFF', barStyle: 'dark-content' });
+    expect(config.androidNavigationBar).toEqual({ backgroundColor: '#FFFFFF', barStyle: 'dark-content' });
+    expect(config.extra?.realtimeAsrProvider).toBe('qwen');
+    expect(config.plugins).toEqual(expect.arrayContaining([
+      ['expo-notifications', { color: '#1456F0' }],
+      ['expo-splash-screen', expect.objectContaining({
+        backgroundColor: '#FFFFFF',
+        imageWidth: 288,
+      })],
+    ]));
+  });
+
+  it('rejects unknown realtime ASR providers', () => {
+    configureProduction({ EXPO_PUBLIC_REALTIME_ASR_PROVIDER: 'not-an-asr' });
+    expect(loadConfig).toThrow('EXPO_PUBLIC_REALTIME_ASR_PROVIDER');
   });
 
   it.each([

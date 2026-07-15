@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { VoiceInputModal } from '../src/components/VoiceInputModal';
+import { VoiceInputModal, VOICE_INPUT_GEOMETRY } from '../src/components/VoiceInputModal';
 import {
   createGuestRealtimeSession,
   deleteGuestRealtimeSession,
@@ -100,7 +100,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     await waitFor(() => expect(addEvent).toHaveBeenCalledWith(expect.objectContaining({
       title: '项目评审',
@@ -121,7 +121,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith({
       title: '日程已保存',
@@ -147,7 +147,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByText('提交材料')).toBeTruthy());
     expect(screen.getByText('全天')).toBeTruthy();
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     await waitFor(() => expect(addEvent).toHaveBeenCalledWith(expect.objectContaining({
       startTime: undefined,
@@ -169,7 +169,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天项目评审');
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     expect(addEvent).not.toHaveBeenCalled();
     expect(screen.getByText('请先补充有效日期，再保存日程')).toBeTruthy();
@@ -194,7 +194,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '今明两天上班');
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByPlaceholderText('补充答案（选填）')).toBeTruthy());
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     await waitFor(() => expect(addEvent).toHaveBeenCalledWith(expect.objectContaining({
       title: '上班',
@@ -273,7 +273,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
     await fireEvent.press(screen.getByText('解析'));
     await waitFor(() => expect(screen.getByText('项目评审')).toBeTruthy());
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
 
     expect(addEvent).not.toHaveBeenCalled();
     expect(mockShowDialog).toHaveBeenCalledWith(expect.objectContaining({
@@ -292,6 +292,45 @@ describe('VoiceInputModal manual schedule path', () => {
     expect(screen.getByTestId('schedule-voice-sheet').props.edges).toEqual(['bottom']);
     expect(screen.getByLabelText('开始语音输入')).toBeTruthy();
     expect(screen.getByLabelText('关闭语音输入')).toBeTruthy();
+  });
+
+  it('uses fixed, non-overlapping geometry for voice controls and parsed fields', async () => {
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    const sheetStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-sheet').props.style);
+    const dockStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-control-dock').props.style);
+    const micTouchStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-start').props.style);
+    const micStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-mic-visual').props.style);
+    expect(sheetStyle).toEqual(expect.objectContaining({
+      borderTopLeftRadius: VOICE_INPUT_GEOMETRY.sheetRadius,
+      borderTopRightRadius: VOICE_INPUT_GEOMETRY.sheetRadius,
+    }));
+    expect(dockStyle.height).toBe(VOICE_INPUT_GEOMETRY.controlDockHeight);
+    expect(micTouchStyle).toEqual(expect.objectContaining({
+      width: VOICE_INPUT_GEOMETRY.microphoneTouchSize,
+      height: VOICE_INPUT_GEOMETRY.microphoneTouchSize,
+    }));
+    expect(micStyle).toEqual(expect.objectContaining({
+      width: VOICE_INPUT_GEOMETRY.microphoneSize,
+      height: VOICE_INPUT_GEOMETRY.microphoneSize,
+    }));
+    expect(screen.getByText('语音新建日程')).toBeTruthy();
+    expect(screen.queryByText('说出你的日常')).toBeNull();
+    const titleStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-input-title-bar-title').props.style);
+    const closeSlotStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-input-title-bar-right-slot').props.style);
+    expect(titleStyle).toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+    expect(titleStyle.position).toBeUndefined();
+    expect(closeSlotStyle).toEqual(expect.objectContaining({ width: 72, flexShrink: 0 }));
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByTestId('schedule-voice-draft-form')).toBeTruthy());
+
+    const titleBarStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-confirm-actions').props.style);
+    const dateRowStyle = StyleSheet.flatten(screen.getByTestId('schedule-voice-field-date').props.style);
+    expect(titleBarStyle.height).toBe(VOICE_INPUT_GEOMETRY.titleBarHeight);
+    expect(dateRowStyle.minHeight).toBe(VOICE_INPUT_GEOMETRY.fieldRowMinHeight);
+    expect(screen.queryByText('规则解析')).toBeNull();
   });
 
   it('keeps the dimming backdrop fixed while only the sheet moves upward', async () => {
@@ -352,6 +391,130 @@ describe('VoiceInputModal manual schedule path', () => {
       purpose: 'schedule',
     }));
     expect(screen.getByLabelText('停止语音输入')).toBeTruthy();
+  });
+
+  it('keeps recording after a short tap and stops on the next tap', async () => {
+    const stop = jest.fn(async () => 'file:///data/schedule.wav');
+    (startRealtimeAsr as jest.Mock).mockImplementationOnce(async options => {
+      options.onTranscript?.({ text: '明天下午三点开会', raw: {} });
+      return { stop, completion: new Promise(() => {}) };
+    });
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await act(() => screen.getByTestId('schedule-voice-start').props.onPressIn());
+    await waitFor(() => expect(screen.getByTestId('schedule-voice-stop')).toBeTruthy());
+    now.mockReturnValue(1_100);
+    await act(() => screen.getByTestId('schedule-voice-stop').props.onPressOut());
+    await act(() => screen.getByTestId('schedule-voice-stop').props.onPress());
+    expect(stop).not.toHaveBeenCalled();
+    expect(screen.getByText('实时识别中，轻点结束')).toBeTruthy();
+
+    now.mockReturnValue(1_200);
+    await act(() => screen.getByTestId('schedule-voice-stop').props.onPressIn());
+    now.mockReturnValue(1_250);
+    await act(() => screen.getByTestId('schedule-voice-stop').props.onPressOut());
+    await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    now.mockRestore();
+  });
+
+  it('stops automatically when a hold-to-talk gesture is released', async () => {
+    const stop = jest.fn(async () => 'file:///data/schedule.wav');
+    (startRealtimeAsr as jest.Mock).mockImplementationOnce(async options => {
+      options.onTranscript?.({ text: '明天下午三点开会', raw: {} });
+      return { stop, completion: new Promise(() => {}) };
+    });
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(2_000);
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await act(() => screen.getByTestId('schedule-voice-start').props.onPressIn());
+    await waitFor(() => expect(screen.getByTestId('schedule-voice-stop')).toBeTruthy());
+    now.mockReturnValue(2_000 + VOICE_INPUT_GEOMETRY.holdToTalkDelay + 1);
+    await act(() => screen.getByTestId('schedule-voice-stop').props.onPressOut());
+
+    await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(parseText).toHaveBeenCalledWith('明天下午三点开会'));
+    now.mockRestore();
+  });
+
+  it('honors a hold release that happens while the voice service is still connecting', async () => {
+    let resolvePermission: ((value: { granted: boolean }) => void) | undefined;
+    const pendingPermission = new Promise<{ granted: boolean }>(resolve => {
+      resolvePermission = resolve;
+    });
+    const stop = jest.fn(async () => 'file:///data/schedule.wav');
+    (Audio.requestPermissionsAsync as jest.Mock).mockReturnValue(pendingPermission);
+    (startRealtimeAsr as jest.Mock).mockImplementationOnce(async options => {
+      options.onTranscript?.({ text: '明天下午三点开会', raw: {} });
+      return { stop, completion: new Promise(() => {}) };
+    });
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(3_000);
+    await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
+
+    await act(() => screen.getByTestId('schedule-voice-start').props.onPressIn());
+    await waitFor(() => expect(screen.getByTestId('schedule-voice-connecting')).toBeTruthy());
+    expect(screen.getByTestId('schedule-voice-connecting').props.disabled).toBeUndefined();
+    now.mockReturnValue(3_000 + VOICE_INPUT_GEOMETRY.holdToTalkDelay + 1);
+    await act(() => screen.getByTestId('schedule-voice-connecting').props.onPressOut());
+    await act(async () => {
+      resolvePermission?.({ granted: true });
+      await pendingPermission;
+    });
+
+    await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(parseText).toHaveBeenCalledWith('明天下午三点开会'));
+    now.mockRestore();
+  });
+
+  it('does not restore a stale parse result after the sheet has been closed', async () => {
+    let resolveParse: ((value: typeof parsed) => void) | undefined;
+    const pendingParse = new Promise<typeof parsed>(resolve => { resolveParse = resolve; });
+    (parseText as jest.Mock).mockReturnValueOnce(pendingParse);
+    const onClose = jest.fn();
+    await render(<VoiceInputModal visible onClose={onClose} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await act(() => { fireEvent.press(screen.getByText('解析')); });
+    await waitFor(() => expect(screen.getByText('正在解析')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('关闭语音输入'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveParse?.(parsed);
+      await pendingParse;
+    });
+    expect(screen.queryByTestId('schedule-voice-draft-form')).toBeNull();
+  });
+
+  it('keeps saving non-dismissible until the create request resolves', async () => {
+    let resolveSave: ((value: { reminderDelivery: 'not-required' }) => void) | undefined;
+    const pendingSave = new Promise<{ reminderDelivery: 'not-required' }>(resolve => {
+      resolveSave = resolve;
+    });
+    addEvent.mockReturnValueOnce(pendingSave);
+    const onClose = jest.fn();
+    const onSaved = jest.fn();
+    const view = await render(<VoiceInputModal visible onClose={onClose} onSaved={onSaved} />);
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByLabelText('保存')).toBeTruthy());
+    await act(() => { fireEvent.press(screen.getByLabelText('保存')); });
+    await waitFor(() => expect(screen.getByText('正在保存')).toBeTruthy());
+
+    expect(screen.queryByLabelText('关闭语音输入')).toBeNull();
+    const modal = view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })[0];
+    await act(() => modal.props.onRequestClose());
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSave?.({ reminderDelivery: 'not-required' });
+      await pendingSave;
+    });
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('revokes the transient realtime authorization after recording stops', async () => {
@@ -482,11 +645,11 @@ describe('VoiceInputModal manual schedule path', () => {
     expect(StyleSheet.flatten(screen.getByTestId('schedule-voice-draft-title').props.style))
       .toEqual(expect.objectContaining({ flexShrink: 1, minWidth: 0 }));
 
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
     await waitFor(() => expect(screen.getByText('保存失败，请重试')).toBeTruthy());
     expect(screen.getByText('保存失败，请重试').props.numberOfLines).toBe(2);
     const firstRequestId = addEvent.mock.calls[0][0].clientRequestId;
-    await fireEvent.press(screen.getByText('保存日程'));
+    await fireEvent.press(screen.getByLabelText('保存'));
     await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(2));
     expect(addEvent.mock.calls[1][0].clientRequestId).toBe(firstRequestId);
   });

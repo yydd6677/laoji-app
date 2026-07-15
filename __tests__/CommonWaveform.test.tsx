@@ -1,11 +1,14 @@
 import React from 'react';
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import {
+  BACK_HEADER_GEOMETRY,
+  BackHeader,
   Waveform,
   resampleWaveformBars,
   waveformBarCapacity,
 } from '../src/components/Common';
+import { Colors as C } from '../src/theme/colors';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 jest.mock('react-native-svg', () => ({
@@ -40,7 +43,40 @@ describe('Waveform responsive layout', () => {
     expect(renderedBars).toHaveLength(waveformBarCapacity(178));
 
     const colors = renderedBars.map(bar => StyleSheet.flatten(bar.props.style).backgroundColor);
-    expect(colors.filter(color => color === '#4A90D9')).toHaveLength(18);
+    expect(colors.filter(color => color === C.primaryHover)).toHaveLength(18);
     expect(colors.slice(18).every(color => color === '#7C3AED')).toBe(true);
+  });
+});
+
+describe('BackHeader source geometry', () => {
+  it('uses the full-screen CommonTitleBar geometry', async () => {
+    const onBack = jest.fn();
+    await render(<BackHeader title="讲话人管理" onBack={onBack} />);
+
+    expect(BACK_HEADER_GEOMETRY).toEqual({
+      height: 44,
+      backTargetWidth: 54,
+      backIconSize: 24,
+      titleInset: 62,
+      titleSize: 18,
+      rightTargetWidth: 48,
+    });
+    expect(StyleSheet.flatten(screen.getByLabelText('返回').props.style)).toMatchObject({
+      width: 54,
+      height: 44,
+    });
+    expect(screen.getByTestId('app-back-icon').props.size).toBe(24);
+    expect(StyleSheet.flatten(screen.getByTestId('app-back-title').props.style)).toMatchObject({
+      left: 62,
+      right: 62,
+      fontSize: 18,
+      fontWeight: '400',
+    });
+    expect(StyleSheet.flatten(screen.getByTestId('app-back-right').props.style)).toMatchObject({
+      width: 48,
+      height: 44,
+    });
+    fireEvent.press(screen.getByLabelText('返回'));
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

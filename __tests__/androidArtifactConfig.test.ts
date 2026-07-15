@@ -13,6 +13,7 @@ function embeddedConfig(appEnv = 'production') {
       realtimeAsrHost: 'realtime.release-domain.cn',
       realtimeAsrPort: 443,
       realtimeAsrSecure: true,
+      realtimeAsrProvider: 'qwen',
       privacyPolicyUrl: 'https://www.release-domain.cn/privacy',
       termsOfServiceUrl: 'https://www.release-domain.cn/terms',
       accountDeletionUrl: 'https://www.release-domain.cn/account-deletion',
@@ -59,5 +60,15 @@ describe('embedded Android artifact configuration policy', () => {
     const config = embeddedConfig('production-rehearsal');
     config.extra.laojiApiBase = 'http://api.example.com';
     expect(() => validateEmbeddedAppConfig(config, 'rehearsal')).toThrow('HTTPS');
+  });
+
+  it('rejects a missing or unknown embedded ASR provider', () => {
+    const missing = embeddedConfig();
+    delete (missing.extra as { realtimeAsrProvider?: string }).realtimeAsrProvider;
+    expect(() => validateEmbeddedAppConfig(missing, 'production')).toThrow('realtimeAsrProvider');
+
+    const unknown = embeddedConfig();
+    unknown.extra.realtimeAsrProvider = 'unknown';
+    expect(() => validateEmbeddedAppConfig(unknown, 'production')).toThrow('realtimeAsrProvider');
   });
 });

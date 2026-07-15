@@ -177,6 +177,19 @@ if (forbiddenFound.length > 0) {
 
 manifest = manifest || runAnalyzer(['manifest', 'print', artifactPath]);
 const applicationTag = manifest.match(/<application\b[^>]*>/s)?.[0] ?? '';
+const embeddedConfig = embeddedAppConfig();
+const manifestVersionCode = Number(
+  manifest.match(/android:versionCode=["'](\d+)["']/)?.[1],
+);
+const configuredVersionCode = Number(embeddedConfig?.android?.versionCode);
+if (!Number.isInteger(manifestVersionCode)
+    || !Number.isInteger(configuredVersionCode)
+    || manifestVersionCode !== configuredVersionCode) {
+  console.error(
+    `Android versionCode mismatch: manifest=${String(manifestVersionCode)}, app.config=${String(configuredVersionCode)}.`,
+  );
+  process.exit(1);
+}
 if (!/android:allowBackup=["']false["']/.test(applicationTag)) {
   console.error('Android artifact must disable application data backup.');
   process.exit(1);
@@ -188,7 +201,7 @@ if (productionLike) {
     process.exit(1);
   }
   try {
-    validateEmbeddedAppConfig(embeddedAppConfig(), production ? 'production' : 'rehearsal');
+    validateEmbeddedAppConfig(embeddedConfig, production ? 'production' : 'rehearsal');
   } catch (error) {
     console.error(error.message);
     process.exit(1);

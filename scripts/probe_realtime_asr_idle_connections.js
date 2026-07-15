@@ -20,10 +20,10 @@ async function createSession(baseUrl, index) {
   return response.json();
 }
 
-function openConnection(wsBase, session, timeoutMs) {
+function openConnection(wsBase, session, timeoutMs, provider) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(
-      `${wsBase}/ws/laoji/schedule/${encodeURIComponent(session.meeting_id)}/funasr`,
+      `${wsBase}/ws/laoji/schedule/${encodeURIComponent(session.meeting_id)}/${provider}`,
       { headers: { 'X-Guest-Session-Token': session.guest_token } },
     );
     let settled = false;
@@ -99,6 +99,10 @@ async function main() {
   const holdMs = Number(argument('hold-ms', '5000'));
   const timeoutMs = Number(argument('timeout-ms', '30000'));
   const output = argument('output', '');
+  const provider = argument('provider', 'qwen');
+  if (!['whisper', 'qwen'].includes(provider)) {
+    throw new Error('--provider must be whisper or qwen');
+  }
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
     throw new Error('--concurrency must be an integer from 1 to 64');
   }
@@ -118,7 +122,7 @@ async function main() {
       Array.from({ length: concurrency }, (_, index) => createSession(baseUrl, index + 1)),
     ));
     await Promise.all(sessions.map(async session => {
-      const connection = await openConnection(wsBase, session, timeoutMs);
+      const connection = await openConnection(wsBase, session, timeoutMs, provider);
       connections.push(connection);
     }));
     openedAt = performance.now();
@@ -138,6 +142,7 @@ async function main() {
     generated_at: new Date().toISOString(),
     endpoint: baseUrl,
     route: 'schedule',
+    provider,
     concurrency,
     hold_ms: holdMs,
     sessions_created: sessions.length,

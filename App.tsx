@@ -14,6 +14,7 @@ import { assertProductionApiConfig } from './src/services/config';
 import { EventUndoBanner } from './src/components/EventUndoBanner';
 import { cleanupStaleMeetingShareCache } from './src/services/meetingShare';
 import { NotificationPermissionPrimer } from './src/components/NotificationPermissionPrimer';
+import { AppReadinessGate } from './src/components/AppReadinessGate';
 
 assertProductionApiConfig();
 
@@ -25,22 +26,24 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <EventsProvider>
-          <MeetingsProvider>
-            <AppDialogProvider>
-              <NotificationPermissionPrimer />
-              <AppLockGate>
-                <View style={{ flex: 1 }}>
-                  <NavigationContainer>
-                    <StatusBar style="dark" />
-                    <RootNavigator />
-                  </NavigationContainer>
-                  <EventUndoBanner />
-                </View>
-              </AppLockGate>
-            </AppDialogProvider>
-          </MeetingsProvider>
-        </EventsProvider>
+        <AppReadinessGate>
+          <EventsProvider>
+            <MeetingsProvider>
+              <AppDialogProvider>
+                <NotificationPermissionPrimer />
+                <AppLockGate>
+                  <View style={{ flex: 1 }}>
+                    <NavigationContainer>
+                      <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                      <RootNavigator />
+                    </NavigationContainer>
+                    <EventUndoBanner />
+                  </View>
+                </AppLockGate>
+              </AppDialogProvider>
+            </MeetingsProvider>
+          </EventsProvider>
+        </AppReadinessGate>
       </AuthProvider>
     </SafeAreaProvider>
   );

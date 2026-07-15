@@ -102,6 +102,7 @@ async function sendPcm(ws, pcm, frameBytes, frameMs) {
 async function runProbe({
   baseUrl,
   route,
+  provider = 'qwen',
   files,
   meetingId,
   accessToken,
@@ -117,6 +118,9 @@ async function runProbe({
   }
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   if (!['schedule', 'meeting'].includes(route)) throw new Error('route must be schedule or meeting');
+  if (!['whisper', 'qwen'].includes(provider)) {
+    throw new Error('provider must be whisper or qwen');
+  }
   if (files.length === 0) throw new Error('provide at least one file');
   files.forEach(file => {
     if (!fs.existsSync(file)) throw new Error(`missing audio file: ${file}`);
@@ -147,8 +151,8 @@ async function runProbe({
   const sessionCreatedAt = performance.now();
   const wsBase = normalizedBaseUrl.replace(/^http/, 'ws');
   const routePath = route === 'schedule'
-    ? `/ws/laoji/schedule/${encodeURIComponent(session.meeting_id)}/funasr`
-    : `/ws/meeting/${encodeURIComponent(session.meeting_id)}/funasr`;
+    ? `/ws/laoji/schedule/${encodeURIComponent(session.meeting_id)}/${provider}`
+    : `/ws/meeting/${encodeURIComponent(session.meeting_id)}/${provider}`;
   const transcripts = [];
   const timing = {
     session_created_ms: Math.round(sessionCreatedAt - startedAt),
@@ -269,6 +273,7 @@ async function runProbe({
   const firstSegmentEndMs = Number(firstTranscript?.end_time) * 1000;
   return {
     route,
+    provider,
     session_mode: session.transient === false ? 'authenticated' : 'guest',
     files,
     gap_ms: gapMs,
@@ -304,12 +309,13 @@ async function runProbe({
 async function main() {
   const baseUrl = argument('base-url', 'http://127.0.0.1:18020').replace(/\/$/, '');
   const route = argument('route', 'schedule');
+  const provider = argument('provider', 'qwen');
   const files = argumentsFor('file').map(value => path.resolve(value));
   const meetingId = argument('meeting-id', '');
   const accessToken = process.env.LAOJI_ACCESS_TOKEN || '';
   const gapMs = Number(argument('gap-ms', '1400'));
   const output = argument('output', '');
-  const report = await runProbe({ baseUrl, route, files, meetingId, accessToken, gapMs });
+  const report = await runProbe({ baseUrl, route, provider, files, meetingId, accessToken, gapMs });
   if (output) fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report));
 }

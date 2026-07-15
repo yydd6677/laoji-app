@@ -1,12 +1,19 @@
 jest.mock('react-native-live-audio-stream', () => {
   const subscription = { remove: jest.fn() };
+  let dataListener: ((data: string) => void) | null = null;
   return {
     __esModule: true,
     default: {
       init: jest.fn(),
       start: jest.fn(async () => {}),
+      pause: jest.fn(async () => {}),
+      resume: jest.fn(async () => {}),
       stop: jest.fn(async () => '/data/user/0/meeting-disconnect.wav'),
-      on: jest.fn(() => subscription),
+      on: jest.fn((_event: string, listener: (data: string) => void) => {
+        dataListener = listener;
+        return subscription;
+      }),
+      emitData: (data: string) => dataListener?.(data),
       subscription,
     },
   };
@@ -33,8 +40,11 @@ const mockLiveAudioStream = (jest.requireMock('react-native-live-audio-stream') 
   default: {
     init: jest.Mock;
     start: jest.Mock;
+    pause: jest.Mock;
+    resume: jest.Mock;
     stop: jest.Mock;
     on: jest.Mock;
+    emitData: (data: string) => void;
     subscription: { remove: jest.Mock };
   };
 }).default;
@@ -43,7 +53,7 @@ const mockAudioSubscription = mockLiveAudioStream.subscription;
 describe('realtime ASR helpers', () => {
   it('builds a realtime websocket URL from explicit build configuration', () => {
     expect(buildRealtimeAsrUrl({ meetingId: 'meeting-1', host: 'asr.example.com', port: 18020 })).toBe(
-      'ws://asr.example.com:18020/ws/meeting/meeting-1/funasr',
+      'ws://asr.example.com:18020/ws/meeting/meeting-1/qwen',
     );
   });
 
@@ -61,7 +71,7 @@ describe('realtime ASR helpers', () => {
       meetingId: 'guest-session-1',
       host: 'asr.example.com',
     })).toBe(
-      'ws://asr.example.com:18020/ws/meeting/guest-session-1/funasr',
+      'ws://asr.example.com:18020/ws/meeting/guest-session-1/qwen',
     );
     expect(buildRealtimeAsrHeaders({ guestToken: 'guest token' })).toEqual({
       'X-Guest-Session-Token': 'guest token',
@@ -74,8 +84,22 @@ describe('realtime ASR helpers', () => {
       host: 'asr.example.com',
       purpose: 'schedule',
     })).toBe(
-      'ws://asr.example.com:18020/ws/laoji/schedule/guest-session-schedule-1/funasr',
+      'ws://asr.example.com:18020/ws/laoji/schedule/guest-session-schedule-1/qwen',
     );
+  });
+
+  it('builds Qwen3-ASR routes for both schedule and meeting test sessions', () => {
+    expect(buildRealtimeAsrUrl({
+      meetingId: 'meeting-qwen',
+      provider: 'qwen',
+      host: 'asr.example.com',
+    })).toBe('ws://asr.example.com:18020/ws/meeting/meeting-qwen/qwen');
+    expect(buildRealtimeAsrUrl({
+      meetingId: 'schedule-qwen',
+      provider: 'qwen',
+      purpose: 'schedule',
+      host: 'asr.example.com',
+    })).toBe('ws://asr.example.com:18020/ws/laoji/schedule/schedule-qwen/qwen');
   });
 
   it('uses speech-recognition capture for schedules and communication capture for meetings', () => {
@@ -217,6 +241,53 @@ describe('realtime ASR helpers', () => {
       const stopping = session.stop();
       socket.message(JSON.stringify({ type: 'ready_to_stop' }));
       await expect(stopping).resolves.toBe('/data/user/0/schedule-low-level.wav');
+    } finally {
+      globalThis.WebSocket = originalWebSocket;
+      jest.useRealTimers();
+    }
+  });
+
+  it('pauses native capture and drops any buffered PCM until recording resumes', async () => {
+    jest.useFakeTimers();
+    const originalWebSocket = globalThis.WebSocket;
+    MockWebSocket.instances = [];
+    mockLiveAudioStream.pause.mockClear();
+    mockLiveAudioStream.resume.mockClear();
+    mockLiveAudioStream.stop.mockResolvedValueOnce('/data/user/0/meeting-paused.wav');
+    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    const statuses: string[] = [];
+
+    try {
+      const sessionPromise = startRealtimeAsr({
+        meetingId: 'meeting-paused',
+        host: 'asr.example.com',
+        onStatus: status => statuses.push(status),
+      });
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      await jest.advanceTimersByTimeAsync(350);
+      const session = await sessionPromise;
+
+      const beforeLiveFrame = socket.sent.length;
+      mockLiveAudioStream.emitData('AQIDBA==');
+      expect(socket.sent).toHaveLength(beforeLiveFrame + 1);
+
+      await session.pause();
+      expect(mockLiveAudioStream.pause).toHaveBeenCalledTimes(1);
+      expect(statuses.at(-1)).toBe('paused');
+      const beforePausedFrame = socket.sent.length;
+      mockLiveAudioStream.emitData('BQYHCA==');
+      expect(socket.sent).toHaveLength(beforePausedFrame);
+
+      await session.resume();
+      expect(mockLiveAudioStream.resume).toHaveBeenCalledTimes(1);
+      expect(statuses.at(-1)).toBe('recording');
+      mockLiveAudioStream.emitData('CQoLDA==');
+      expect(socket.sent).toHaveLength(beforePausedFrame + 1);
+
+      const stopping = session.stop();
+      socket.message(JSON.stringify({ type: 'ready_to_stop' }));
+      await expect(stopping).resolves.toBe('/data/user/0/meeting-paused.wav');
     } finally {
       globalThis.WebSocket = originalWebSocket;
       jest.useRealTimers();

@@ -10,6 +10,7 @@ module.exports = {
         realtimeAsrHost: '203.0.113.10',
         realtimeAsrPort: 18020,
         realtimeAsrSecure: false,
+        realtimeAsrProvider: 'qwen',
       },
     },
   },

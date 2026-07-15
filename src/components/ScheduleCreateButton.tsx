@@ -1,0 +1,267 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  GestureResponderEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors as C, Motion } from '../theme/colors';
+
+type CreateTarget = 'voice' | 'manual';
+
+const BUTTON_SIZE = 48;
+const OPTION_SIZE = 60;
+const ARC_RADIUS = 116;
+const CLUSTER_SIZE = 236;
+const LONG_PRESS_DELAY = 350;
+const TARGET_HIT_RADIUS = 42;
+
+const TARGET_OFFSETS: Record<CreateTarget, { x: number; y: number }> = {
+  voice: { x: -98, y: -58 },
+  manual: { x: -34, y: -112 },
+};
+
+export const SCHEDULE_CREATE_GEOMETRY = Object.freeze({
+  buttonSize: BUTTON_SIZE,
+  optionSize: OPTION_SIZE,
+  arcRadius: ARC_RADIUS,
+  clusterSize: CLUSTER_SIZE,
+  longPressDelay: LONG_PRESS_DELAY,
+  targetHitRadius: TARGET_HIT_RADIUS,
+  targetOffsets: TARGET_OFFSETS,
+});
+
+export function scheduleCreateTargetAt(
+  center: { x: number; y: number },
+  point: { x: number; y: number },
+): CreateTarget | null {
+  const targets = (Object.keys(TARGET_OFFSETS) as CreateTarget[]).map(target => {
+    const offset = TARGET_OFFSETS[target];
+    return {
+      target,
+      distance: Math.hypot(
+        point.x - (center.x + offset.x),
+        point.y - (center.y + offset.y),
+      ),
+    };
+  });
+  const nearest = targets.sort((a, b) => a.distance - b.distance)[0];
+  return nearest && nearest.distance <= TARGET_HIT_RADIUS ? nearest.target : null;
+}
+
+function touchPoint(event: GestureResponderEvent) {
+  return { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+}
+
+function buttonCenter(event: GestureResponderEvent) {
+  const { pageX, pageY, locationX, locationY } = event.nativeEvent;
+  return {
+    x: pageX + BUTTON_SIZE / 2 - locationX,
+    y: pageY + BUTTON_SIZE / 2 - locationY,
+  };
+}
+
+export function ScheduleCreateButton({
+  bottom,
+  onPress,
+  onVoice,
+  onManual,
+}: {
+  bottom: number;
+  onPress: () => void;
+  onVoice: () => void;
+  onManual: () => void;
+}) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const centerRef = useRef({ x: 0, y: 0 });
+  const radialActiveRef = useRef(false);
+  const consumedLongPressRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
+  const [hovered, setHovered] = useState<CreateTarget | null>(null);
+
+  useEffect(() => () => progress.stopAnimation(), [progress]);
+
+  const openRadial = (event: GestureResponderEvent) => {
+    centerRef.current = buttonCenter(event);
+    radialActiveRef.current = true;
+    consumedLongPressRef.current = true;
+    setHovered(null);
+    setMounted(true);
+    progress.stopAnimation();
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: Motion.standard,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeRadial = () => {
+    radialActiveRef.current = false;
+    setHovered(null);
+    progress.stopAnimation();
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: Motion.fast,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setMounted(false);
+    });
+  };
+
+  const moveRadial = (event: GestureResponderEvent) => {
+    if (!radialActiveRef.current) return;
+    setHovered(scheduleCreateTargetAt(centerRef.current, touchPoint(event)));
+  };
+
+  const releaseRadial = (event: GestureResponderEvent) => {
+    if (!radialActiveRef.current) return;
+    const target = scheduleCreateTargetAt(centerRef.current, touchPoint(event));
+    closeRadial();
+    if (target === 'voice') onVoice();
+    if (target === 'manual') onManual();
+    setTimeout(() => { consumedLongPressRef.current = false; }, 0);
+  };
+
+  const handlePress = () => {
+    if (consumedLongPressRef.current) {
+      consumedLongPressRef.current = false;
+      return;
+    }
+    onPress();
+  };
+
+  const optionScale = (target: CreateTarget) => (
+    hovered === target
+      ? 1.12
+      : progress.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] })
+  );
+
+  return (
+    <View pointerEvents="box-none" style={[s.cluster, { bottom }]} testID="calendar-create-cluster">
+      {mounted ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[s.radialLayer, { opacity: progress }]}
+          testID="calendar-create-radial"
+        >
+          <View style={s.arc} testID="calendar-create-arc" />
+          <Animated.View
+            style={[
+              s.option,
+              s.voiceOption,
+              hovered === 'voice' && s.optionHovered,
+              { transform: [{ scale: optionScale('voice') }] },
+            ]}
+            testID="calendar-create-target-voice"
+          >
+            <Ionicons name="mic-outline" size={20} color={hovered === 'voice' ? '#FFFFFF' : C.primary} />
+            <Text style={[s.optionLabel, hovered === 'voice' && s.optionLabelHovered]}>语音</Text>
+          </Animated.View>
+          <Animated.View
+            style={[
+              s.option,
+              s.manualOption,
+              hovered === 'manual' && s.optionHovered,
+              { transform: [{ scale: optionScale('manual') }] },
+            ]}
+            testID="calendar-create-target-manual"
+          >
+            <Ionicons name="create-outline" size={20} color={hovered === 'manual' ? '#FFFFFF' : C.primary} />
+            <Text style={[s.optionLabel, hovered === 'manual' && s.optionLabelHovered]}>手动</Text>
+          </Animated.View>
+        </Animated.View>
+      ) : null}
+
+      <Pressable
+        style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
+        onPress={handlePress}
+        onLongPress={openRadial}
+        onTouchMove={moveRadial}
+        onPressOut={releaseRadial}
+        delayLongPress={LONG_PRESS_DELAY}
+        pressRetentionOffset={ARC_RADIUS + OPTION_SIZE}
+        accessibilityRole="button"
+        accessibilityLabel="新建日程"
+        accessibilityHint="轻点选择创建方式，长按并拖动可快速选择语音或手动创建"
+        testID="calendar-create-button"
+      >
+        <Animated.View style={{ transform: [{
+          rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }),
+        }] }}>
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </Animated.View>
+      </Pressable>
+    </View>
+  );
+}
+
+const optionPosition = (target: CreateTarget) => ({
+  right: BUTTON_SIZE / 2 - OPTION_SIZE / 2 - TARGET_OFFSETS[target].x,
+  bottom: BUTTON_SIZE / 2 - OPTION_SIZE / 2 - TARGET_OFFSETS[target].y,
+});
+
+const s = StyleSheet.create({
+  cluster: {
+    position: 'absolute',
+    right: 16,
+    width: CLUSTER_SIZE,
+    height: CLUSTER_SIZE,
+    zIndex: 30,
+    elevation: 8,
+  },
+  radialLayer: { ...StyleSheet.absoluteFillObject },
+  arc: {
+    position: 'absolute',
+    right: BUTTON_SIZE / 2,
+    bottom: BUTTON_SIZE / 2,
+    width: ARC_RADIUS,
+    height: ARC_RADIUS,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderTopLeftRadius: ARC_RADIUS,
+    borderColor: 'rgba(20,86,240,0.30)',
+  },
+  option: {
+    position: 'absolute',
+    width: OPTION_SIZE,
+    height: OPTION_SIZE,
+    borderRadius: OPTION_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.body,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 7,
+    elevation: 5,
+  },
+  voiceOption: optionPosition('voice'),
+  manualOption: optionPosition('manual'),
+  optionHovered: { backgroundColor: C.primary, borderColor: C.primary },
+  optionLabel: { fontSize: 11, lineHeight: 15, fontWeight: '500', color: C.text },
+  optionLabelHovered: { color: '#FFFFFF' },
+  button: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: BUTTON_SIZE,
+    height: BUTTON_SIZE,
+    borderRadius: BUTTON_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.primary,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  buttonPressed: { backgroundColor: C.primaryPressed },
+});

@@ -11,7 +11,7 @@ export function selectTasksForDate(events: CalEvent[], date: string): CalEvent[]
 }
 
 function eventCoversDate(event: CalEvent, date: string): boolean {
-  if (event.spanning && event.endDate) {
+  if (event.endDate && event.endDate >= event.startDate) {
     return event.startDate <= date && date <= event.endDate;
   }
   return event.startDate === date;

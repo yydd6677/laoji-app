@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform,
+  Animated, View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ScrollView, KeyboardAvoidingView, Platform, useWindowDimensions,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { NavigationAction, RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { CalendarDetailTitleBar, CalendarEditTitleBar } from '../components/CalendarTitleBar';
+import { EventTimeEditor, EventTimeValue } from '../components/EventTimeEditor';
+import { EventTimeRangeArrow } from '../components/EventTimeRangeArrow';
+import {
+  DescriptionEditorPage,
+  LocationEditorPage,
+  ReminderSelectionPage,
+  RepeatSelectionPage,
+} from '../components/EventEditorChoicePages';
 import { useAppDialog } from '../components/AppDialog';
 
 import { CalEvent, RootStackParamList } from '../types';
 import { useEvents } from '../store/EventsStore';
 import { checkConflict } from '../store/EventsStore';
-import { BackHeader } from '../components/Common';
 import { useAuth } from '../store/AuthStore';
 import {
   DEFAULT_REMINDER_MINUTES,
@@ -26,9 +32,7 @@ import {
   reminderUnavailableMessage,
 } from '../services/notifications';
 import {
-  EVENT_CATEGORIES,
   EventCategory,
-  colorForEventCategory,
   normalizeEventCategory,
 } from '../utils/eventColors';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
@@ -39,6 +43,20 @@ type Props = {
 };
 
 const REPEAT_OPTIONS = ['不重复', '每天', '每周', '每月', '每年'] as const;
+
+type EventEditorSnapshot = {
+  title: string;
+  date: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  isAllDay: boolean;
+  repeat: typeof REPEAT_OPTIONS[number];
+  description: string;
+  category: EventCategory;
+  location: string;
+  reminderMinutes: ReminderMinutes;
+};
 
 const REPEAT_MAP = {
   '不重复': 'once' as const,
@@ -56,6 +74,27 @@ function repeatToOption(repeat?: CalEvent['repeat']): typeof REPEAT_OPTIONS[numb
     case 'yearly': return '每年';
     default: return '不重复';
   }
+}
+
+function snapshotKey(snapshot: EventEditorSnapshot): string {
+  return JSON.stringify(snapshot);
+}
+
+function snapshotFromEvent(event: CalEvent): EventEditorSnapshot {
+  const date = event.seriesStartDate ?? event.startDate;
+  return {
+    title: event.title,
+    date,
+    endDate: event.seriesEndDate ?? event.endDate ?? date,
+    startTime: event.startTime ?? '10:00',
+    endTime: event.endTime ?? '11:00',
+    isAllDay: event.isAllDay ?? false,
+    repeat: repeatToOption(event.repeat),
+    description: event.description ?? event.detail ?? '',
+    category: normalizeEventCategory(event.category),
+    location: event.location ?? '',
+    reminderMinutes: event.reminderMinutes ?? null,
+  };
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -93,14 +132,25 @@ function timeToMinutes(str: string): number {
   return h * 60 + min;
 }
 
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+const mediumDecelerate = (progress: number) => 1 - Math.pow(1 - progress, 6);
+
+function formatEditorDate(d: Date): string {
+  const includeYear = d.getFullYear() !== new Date().getFullYear();
+  return `${includeYear ? `${d.getFullYear()}年` : ''}${d.getMonth() + 1}月${d.getDate()}日 周${WEEKDAYS[d.getDay()]}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AddEventScreen({ navigation, route }: Props) {
-  const { events, addEvent, updateEvent } = useEvents();
+  const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
   const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingId = route.params?.eventId;
-  const editingEvent = editingId ? events.find(e => e.id === editingId) : undefined;
+  const editingEvent = editingId
+    ? events.find(event => event.id === editingId)
+      ?? searchableEvents?.find(event => event.id === editingId)
+    : undefined;
   const routeDraft = editingId ? undefined : route.params?.draft;
   const isEditing = Boolean(editingId);
   const initDate = editingEvent?.seriesStartDate
@@ -108,15 +158,21 @@ export function AddEventScreen({ navigation, route }: Props) {
     ?? routeDraft?.startDate
     ?? route.params?.date
     ?? todayDateStr();
-  const initEndDate = editingEvent?.seriesEndDate ?? editingEvent?.endDate ?? routeDraft?.endDate ?? initDate;
+  const initEndDate = editingEvent?.seriesEndDate
+    ?? editingEvent?.endDate
+    ?? routeDraft?.endDate
+    ?? route.params?.endDate
+    ?? initDate;
+  const initStartTime = editingEvent?.startTime ?? routeDraft?.startTime ?? route.params?.startTime ?? '10:00';
+  const initEndTime = editingEvent?.endTime ?? routeDraft?.endTime ?? route.params?.endTime ?? '11:00';
   const [saving, setSaving] = React.useState(false);
   const createRequestRef = React.useRef(createClientRequestState('event'));
 
   const [title, setTitle]       = useState(editingEvent?.title ?? routeDraft?.title ?? '');
   const [dateObj, setDateObj]   = useState<Date>(() => parseDateStr(initDate));
   const [endDateObj, setEndDateObj] = useState<Date>(() => parseDateStr(initEndDate));
-  const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(editingEvent?.startTime ?? routeDraft?.startTime ?? '10:00'));
-  const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(editingEvent?.endTime ?? routeDraft?.endTime ?? '11:00'));
+  const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(initStartTime));
+  const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(initEndTime));
   const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? routeDraft?.isAllDay ?? false);
   const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat ?? routeDraft?.repeat));
   const [desc, setDesc]         = useState(editingEvent?.description ?? editingEvent?.detail ?? routeDraft?.description ?? routeDraft?.detail ?? '');
@@ -126,24 +182,85 @@ export function AddEventScreen({ navigation, route }: Props) {
   const [reminderMinutes, setReminderMinutes] = useState<ReminderMinutes>(
     editingEvent || routeDraft
       ? (editingEvent?.reminderMinutes ?? routeDraft?.reminderMinutes ?? null)
-      : defaultReminderForEvent(false, '10:00'),
+      : defaultReminderForEvent(false, initStartTime),
   );
   const notificationScope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
 
+  const [showTimeEditor, setShowTimeEditor] = useState(false);
+  const [timeEditorTarget, setTimeEditorTarget] = useState<'start' | 'end'>('start');
+  const [choicePage, setChoicePage] = useState<'repeat' | 'reminder' | 'location' | 'description' | null>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const editorContentOffset = React.useRef(new Animated.Value(0)).current;
+  const editorOverlayVisible = showTimeEditor || choicePage !== null;
+  const previousEditorOverlayVisible = React.useRef(false);
+
+  React.useEffect(() => {
+    const wasVisible = previousEditorOverlayVisible.current;
+    previousEditorOverlayVisible.current = editorOverlayVisible;
+    if (wasVisible === editorOverlayVisible) return;
+
+    editorContentOffset.stopAnimation();
+    if (editorOverlayVisible) {
+      Animated.timing(editorContentOffset, {
+        toValue: -windowHeight * 0.05,
+        duration: 800,
+        easing: mediumDecelerate,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    editorContentOffset.setValue(-windowHeight * 0.0875);
+    Animated.timing(editorContentOffset, {
+      toValue: 0,
+      duration: 800,
+      easing: mediumDecelerate,
+      useNativeDriver: true,
+    }).start();
+  }, [editorContentOffset, editorOverlayVisible, windowHeight]);
+
+  const date      = formatDate(dateObj);
+  const endDate   = formatDate(endDateObj);
+  const startTime = formatTime(startObj);
+  const endTime   = formatTime(endObj);
+  const currentSnapshot: EventEditorSnapshot = {
+    title,
+    date,
+    endDate,
+    startTime,
+    endTime,
+    isAllDay,
+    repeat,
+    description: desc,
+    category,
+    location,
+    reminderMinutes,
+  };
+  const baselineSnapshotRef = React.useRef(currentSnapshot);
+  const currentSnapshotRef = React.useRef(currentSnapshot);
+  const dirtyRef = React.useRef(false);
+  const allowLeaveRef = React.useRef(false);
+  const leavePromptOpenRef = React.useRef(false);
+  currentSnapshotRef.current = currentSnapshot;
+  dirtyRef.current = snapshotKey(currentSnapshot) !== snapshotKey(baselineSnapshotRef.current);
+
   React.useEffect(() => {
     if (!editingEvent) return;
-    setTitle(editingEvent.title);
-    const seriesStart = editingEvent.seriesStartDate ?? editingEvent.startDate;
-    setDateObj(parseDateStr(seriesStart));
-    setEndDateObj(parseDateStr(editingEvent.seriesEndDate ?? editingEvent.endDate ?? seriesStart));
-    setStartObj(parseTimeStr(editingEvent.startTime ?? '10:00'));
-    setEndObj(parseTimeStr(editingEvent.endTime ?? '11:00'));
-    setAllDay(editingEvent.isAllDay ?? false);
-    setRepeat(repeatToOption(editingEvent.repeat));
-    setDesc(editingEvent.description ?? editingEvent.detail ?? '');
-    setCategory(normalizeEventCategory(editingEvent.category));
-    setLocation(editingEvent.location ?? '');
-    setReminderMinutes(editingEvent.reminderMinutes ?? null);
+    const snapshot = snapshotFromEvent(editingEvent);
+    baselineSnapshotRef.current = snapshot;
+    currentSnapshotRef.current = snapshot;
+    dirtyRef.current = false;
+    setTitle(snapshot.title);
+    setDateObj(parseDateStr(snapshot.date));
+    setEndDateObj(parseDateStr(snapshot.endDate));
+    setStartObj(parseTimeStr(snapshot.startTime));
+    setEndObj(parseTimeStr(snapshot.endTime));
+    setAllDay(snapshot.isAllDay);
+    setRepeat(snapshot.repeat);
+    setDesc(snapshot.description);
+    setCategory(snapshot.category);
+    setLocation(snapshot.location);
+    setReminderMinutes(snapshot.reminderMinutes);
   }, [editingEvent?.id]);
 
   React.useEffect(() => {
@@ -152,25 +269,64 @@ export function AddEventScreen({ navigation, route }: Props) {
       if (!alive) return;
       setDefaultReminder(prefs.defaultReminderMinutes);
       if (!isEditing && !routeDraft) {
-        setReminderMinutes(defaultReminderForEvent(isAllDay, startTime, prefs.defaultReminderMinutes));
+        const current = currentSnapshotRef.current;
+        const baseline = baselineSnapshotRef.current;
+        if (current.reminderMinutes === baseline.reminderMinutes) {
+          const nextReminder = defaultReminderForEvent(
+            current.isAllDay,
+            current.isAllDay ? undefined : current.startTime,
+            prefs.defaultReminderMinutes,
+          );
+          baselineSnapshotRef.current = { ...baseline, reminderMinutes: nextReminder };
+          currentSnapshotRef.current = { ...current, reminderMinutes: nextReminder };
+          setReminderMinutes(nextReminder);
+        }
       }
     });
     return () => { alive = false; };
   }, [notificationScope, isEditing]);
 
-  // picker visibility
-  const [showDatePicker, setShowDatePicker]   = useState(false);
-  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  const [showStartPicker, setShowStartPicker] = useState(false);
-  const [showEndPicker, setShowEndPicker]     = useState(false);
-
-  const date      = formatDate(dateObj);
-  const endDate   = formatDate(endDateObj);
-  const startTime = formatTime(startObj);
-  const endTime   = formatTime(endObj);
-  const color     = colorForEventCategory(category);
-
   const canSave = title.trim().length > 0;
+
+  const requestLeave = React.useCallback((action?: NavigationAction) => {
+    if (allowLeaveRef.current || !dirtyRef.current) {
+      if (action) navigation.dispatch(action);
+      else navigation.goBack();
+      return;
+    }
+    if (leavePromptOpenRef.current) return;
+
+    leavePromptOpenRef.current = true;
+    showDialog({
+      title: '确定退出当前日程编辑吗？',
+      message: '退出后，将无法保存当前日程的更改',
+      tone: 'warning',
+      onDismiss: () => { leavePromptOpenRef.current = false; },
+      actions: [
+        {
+          text: '退出',
+          role: 'primary',
+          onPress: () => {
+            allowLeaveRef.current = true;
+            leavePromptOpenRef.current = false;
+            if (action) navigation.dispatch(action);
+            else navigation.goBack();
+          },
+        },
+        {
+          text: '继续编辑',
+          role: 'cancel',
+          onPress: () => { leavePromptOpenRef.current = false; },
+        },
+      ],
+    });
+  }, [navigation, showDialog]);
+
+  React.useEffect(() => navigation.addListener('beforeRemove', event => {
+    if (allowLeaveRef.current || !dirtyRef.current) return;
+    event.preventDefault();
+    requestLeave(event.data.action);
+  }), [navigation, requestLeave]);
 
   const doSave = async () => {
     setSaving(true);
@@ -187,7 +343,7 @@ export function AddEventScreen({ navigation, route }: Props) {
         repeat: REPEAT_MAP[repeat],
         description: desc,
         rawText: routeDraft?.rawText,
-        color,
+        color: C.primary,
         category,
         location: location || undefined,
         detail: routeDraft?.detail,
@@ -201,6 +357,7 @@ export function AddEventScreen({ navigation, route }: Props) {
         payload.clientRequestId = createRequestRef.current.id;
         ({ reminderDelivery } = await addEvent(payload));
       }
+      allowLeaveRef.current = true;
       navigation.goBack();
       if (reminderDelivery === 'unavailable') {
         showDialog({
@@ -263,10 +420,59 @@ export function AddEventScreen({ navigation, route }: Props) {
     doSave();
   };
 
+  const handleDelete = () => {
+    if (!editingEvent) return;
+    showDialog({
+      title: '删除日程',
+      message: editingEvent.repeat && editingEvent.repeat !== 'once'
+        ? '这是一条重复日程，删除后整个系列都会被移除。'
+        : `确定删除“${editingEvent.title}”吗？`,
+      tone: 'danger',
+      actions: [
+        {
+          text: '删除',
+          role: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEvent(editingEvent.id);
+              allowLeaveRef.current = true;
+              navigation.navigate('MainTabs', { screen: 'Schedule' });
+            } catch {
+              showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
+  const openTimeEditor = (target: 'start' | 'end') => {
+    setTimeEditorTarget(target);
+    setShowTimeEditor(true);
+  };
+
+  const applyTimeEditorValue = (value: EventTimeValue) => {
+    const allDayChanged = value.isAllDay !== isAllDay;
+    setDateObj(value.startDate);
+    setEndDateObj(value.endDate);
+    setStartObj(value.startTime);
+    setEndObj(value.endTime);
+    setAllDay(value.isAllDay);
+    if (allDayChanged) {
+      setReminderMinutes(defaultReminderForEvent(
+        value.isAllDay,
+        value.isAllDay ? undefined : formatTime(value.startTime),
+        defaultReminder,
+      ));
+    }
+    setShowTimeEditor(false);
+  };
+
   if (isEditing && !editingEvent) {
     return (
-      <ScreenContainer>
-        <BackHeader title="编辑日程" onBack={() => navigation.goBack()} />
+      <ScreenContainer bg={C.body}>
+        <CalendarDetailTitleBar title="编辑日程" onBack={() => navigation.goBack()} />
         <View style={s.emptyWrap}>
           <Text style={s.emptyTitle}>日程不存在</Text>
           <Text style={s.emptyText}>请返回日程详情后重新打开编辑。</Text>
@@ -276,316 +482,259 @@ export function AddEventScreen({ navigation, route }: Props) {
   }
 
   return (
-    <ScreenContainer>
-      <BackHeader
-        title={isEditing ? '编辑日程' : '新建日程'}
-        onBack={() => navigation.goBack()}
-      />
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <ScreenContainer bg={C.body}>
+      <Animated.View
+        style={[s.editorContent, { transform: [{ translateY: editorContentOffset }] }]}
+        pointerEvents={editorOverlayVisible ? 'none' : 'auto'}
+        accessibilityElementsHidden={editorOverlayVisible}
+        importantForAccessibility={editorOverlayVisible ? 'no-hide-descendants' : 'auto'}
+        testID="event-editor-main-content"
+      >
+        <CalendarEditTitleBar
+          onCancel={() => requestLeave()}
+          onSave={handleSave}
+          saveEnabled
+          saving={saving}
+          saveAccessibilityLabel={isEditing ? '保存日程修改' : '保存到日历'}
+        />
+        <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {/* Category picker */}
           {editingEvent?.isExpandedOccurrence ? (
             <View style={s.seriesNotice}>
-              <Ionicons name="repeat-outline" size={16} color={C.purple} />
+              <Ionicons name="repeat-outline" size={16} color={C.primary} />
               <Text style={s.seriesNoticeText}>本次修改将应用到整个重复日程</Text>
             </View>
           ) : null}
 
-          <View style={s.categoryRow}>
-            {EVENT_CATEGORIES.map(item => {
-              const selected = category === item;
-              const itemColor = colorForEventCategory(item);
-              return (
-                <TouchableOpacity
-                  key={item}
-                  onPress={() => setCategory(item)}
-                  style={[s.categoryChip, selected && { backgroundColor: itemColor + '1F', borderColor: itemColor }]}
-                  activeOpacity={0.78}
-                >
-                  <View style={[s.categoryDot, { backgroundColor: itemColor }]} />
-                  <Text style={[s.categoryText, selected && { color: itemColor }]}>{item}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <TextInput
+            style={s.titleInput}
+            placeholder="添加主题"
+            placeholderTextColor={C.faint}
+            value={title}
+            onChangeText={setTitle}
+            maxLength={400}
+          />
+          <View style={s.sectionDivider} />
 
-          {/* Title */}
-          <View style={s.fieldCard}>
-            <TextInput
-              style={s.titleInput}
-              placeholder="添加标题"
-              placeholderTextColor={C.faint}
-              value={title}
-              onChangeText={setTitle}
-              maxLength={60}
-            />
-          </View>
-
-          {/* Date */}
-          <TouchableOpacity style={s.row} onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
-            <View style={[s.iconBox, { backgroundColor: color + '22' }]}>
-              <Ionicons name="calendar-outline" size={18} color={color} />
+          <View style={s.timeBlock}>
+            <View style={s.timeIconLane}>
+              <Ionicons name="time-outline" size={18} color={C.faint} />
             </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>开始日期</Text>
-              <Text style={s.rowValue}>{date}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={C.faint} />
-          </TouchableOpacity>
-
-          {showDatePicker && (
-            <DateTimePicker
-              value={dateObj}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_e, selected) => {
-                setShowDatePicker(Platform.OS === 'ios');
-                if (selected) {
-                  setDateObj(selected);
-                  if (selected.getTime() > endDateObj.getTime()) setEndDateObj(selected);
-                }
-                if (Platform.OS === 'android') setShowDatePicker(false);
-              }}
-            />
-          )}
-
-          <TouchableOpacity style={s.row} onPress={() => setShowEndDatePicker(true)} activeOpacity={0.7}>
-            <View style={[s.iconBox, { backgroundColor: color + '22' }]}>
-              <Ionicons name="calendar-number-outline" size={18} color={color} />
-            </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>结束日期</Text>
-              <Text style={s.rowValue}>{endDate}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={C.faint} />
-          </TouchableOpacity>
-
-          {showEndDatePicker && (
-            <DateTimePicker
-              value={endDateObj}
-              minimumDate={dateObj}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_e, selected) => {
-                setShowEndDatePicker(Platform.OS === 'ios');
-                if (selected) setEndDateObj(selected);
-                if (Platform.OS === 'android') setShowEndDatePicker(false);
-              }}
-            />
-          )}
-
-          {/* All day toggle */}
-          <View style={s.row}>
-            <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-              <Ionicons name="sunny-outline" size={18} color={C.purple} />
-            </View>
-            <Text style={[s.rowLabel, { flex: 1 }]}>全天</Text>
-            <TouchableOpacity
-              onPress={() => setAllDay(v => {
-                const next = !v;
-                setReminderMinutes(defaultReminderForEvent(next, next ? undefined : startTime, defaultReminder));
-                return next;
-              })}
-              style={[s.toggle, { backgroundColor: isAllDay ? C.purple : '#CCC8E0' }]}
-              accessibilityRole="switch"
-              accessibilityLabel="全天日程"
-              accessibilityState={{ checked: isAllDay }}
-              testID="event-all-day-toggle"
-            >
-              <View style={[s.toggleThumb, { left: isAllDay ? 23 : 3 }]} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Time */}
-          {!isAllDay && (
-            <View style={s.row}>
-              <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-                <Ionicons name="time-outline" size={18} color={C.purple} />
-              </View>
-              <View style={s.rowContent}>
-                <Text style={s.rowLabel}>时间</Text>
-                <View style={s.timeRow}>
-                  <TouchableOpacity onPress={() => setShowStartPicker(true)} style={s.timeChip}>
-                    <Text style={s.timeChipText}>{startTime}</Text>
-                  </TouchableOpacity>
-                  <Text style={s.timeSep}>–</Text>
-                  <TouchableOpacity onPress={() => setShowEndPicker(true)} style={s.timeChip}>
-                    <Text style={s.timeChipText}>{endTime}</Text>
-                  </TouchableOpacity>
-                </View>
+            <View style={s.timeLine}>
+              <TouchableOpacity
+                style={[s.timeEndpoint, s.timeStartEndpoint]}
+                onPress={() => openTimeEditor('start')}
+                activeOpacity={0.65}
+                accessibilityRole="button"
+                accessibilityLabel={`开始日期 ${date}`}
+              >
+                <Text style={s.timeMain} numberOfLines={1}>{formatEditorDate(dateObj)}</Text>
+                {!isAllDay ? <Text style={s.timeMinor} numberOfLines={1}>{startTime}</Text> : null}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.timeEndpoint, s.timeEndEndpoint]}
+                onPress={() => openTimeEditor('end')}
+                activeOpacity={0.65}
+                accessibilityRole="button"
+                accessibilityLabel={`结束日期 ${endDate}`}
+              >
+                <Text style={s.timeMain} numberOfLines={1}>{formatEditorDate(endDateObj)}</Text>
+                {!isAllDay ? <Text style={s.timeMinor} numberOfLines={1}>{endTime}</Text> : null}
+              </TouchableOpacity>
+              <View style={s.timeRangeArrow}>
+                <EventTimeRangeArrow testID="event-main-time-range-arrow" />
               </View>
             </View>
-          )}
-
-          {/* Reminder */}
-          <View style={s.row}>
-            <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-              <Ionicons name="notifications-outline" size={18} color={C.purple} />
-            </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>提醒</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
-                {REMINDER_OPTIONS.map(opt => {
-                  const disabled = isAllDay && opt.value !== null;
-                  const selected = reminderMinutes === opt.value || (isAllDay && opt.value === null);
-                  return (
-                    <TouchableOpacity
-                      key={opt.label}
-                      style={[
-                        s.repeatChip,
-                        selected && { backgroundColor: C.purple },
-                        disabled && { opacity: 0.35 },
-                      ]}
-                      onPress={() => {
-                        if (!disabled) setReminderMinutes(opt.value);
-                      }}
-                      disabled={disabled}
-                    >
-                      <Text style={[s.repeatChipText, selected && { color: '#fff' }]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
           </View>
 
-          {showStartPicker && (
-            <DateTimePicker
-              value={startObj}
-              mode="time"
-              is24Hour
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_e, selected) => {
-                setShowStartPicker(Platform.OS === 'ios');
-                if (selected) setStartObj(selected);
-                if (Platform.OS === 'android') setShowStartPicker(false);
-              }}
-            />
-          )}
-
-          {showEndPicker && (
-            <DateTimePicker
-              value={endObj}
-              mode="time"
-              is24Hour
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_e, selected) => {
-                setShowEndPicker(Platform.OS === 'ios');
-                if (selected) setEndObj(selected);
-                if (Platform.OS === 'android') setShowEndPicker(false);
-              }}
-            />
-          )}
-
-          {/* Location */}
-          <View style={s.row}>
-            <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-              <Ionicons name="location-outline" size={18} color={C.purple} />
-            </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>地点</Text>
-              <TextInput style={s.rowInput} value={location} onChangeText={setLocation} placeholder="添加地点" placeholderTextColor={C.faint} />
-            </View>
-          </View>
-
-          {/* Repeat */}
-          <View style={s.row}>
-            <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-              <Ionicons name="repeat-outline" size={18} color={C.purple} />
-            </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>重复</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.repeatScroll}>
-                {REPEAT_OPTIONS.map(opt => (
-                  <TouchableOpacity
-                    key={opt}
-                    style={[s.repeatChip, repeat === opt && { backgroundColor: C.purple }]}
-                    onPress={() => setRepeat(opt)}
-                  >
-                    <Text style={[s.repeatChipText, repeat === opt && { color: '#fff' }]}>{opt}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-
-          {/* Description */}
-          <View style={s.row}>
-            <View style={[s.iconBox, { backgroundColor: C.purpleLight }]}>
-              <Ionicons name="document-text-outline" size={18} color={C.purple} />
-            </View>
-            <View style={s.rowContent}>
-              <Text style={s.rowLabel}>备注</Text>
-              <TextInput
-                style={[s.rowInput, s.descInput]}
-                value={desc}
-                onChangeText={setDesc}
-                placeholder="添加备注"
-                placeholderTextColor={C.faint}
-                multiline
-                numberOfLines={3}
-              />
-            </View>
-          </View>
-
-          {/* Save button */}
           <TouchableOpacity
-            testID="event-save"
+            style={s.editorRow}
+            onPress={() => setChoicePage('repeat')}
+            activeOpacity={0.65}
             accessibilityRole="button"
-            accessibilityLabel={isEditing ? '保存日程修改' : '保存到日历'}
-            onPress={handleSave}
-            disabled={!canSave || saving}
-            activeOpacity={0.85}
-            style={{ marginTop: 8 }}
+            accessibilityLabel={`重复 ${repeat}`}
           >
-            <LinearGradient
-              colors={canSave && !saving ? [C.gradFrom, C.gradTo] : ['#CCC8E0', '#CCC8E0']}
-              start={{ x:0,y:0 }} end={{ x:1,y:0 }}
-              style={s.saveBtn}
-            >
-              <Text style={s.saveBtnText}>{saving ? '保存中…' : isEditing ? '保存修改' : '保存到日历'}</Text>
-            </LinearGradient>
+            <View style={s.iconLane}>
+              <Ionicons name="repeat-outline" size={18} color={C.faint} />
+            </View>
+            <Text style={s.rowText}>{repeat}</Text>
+              <Ionicons testID="event-repeat-chevron" name="chevron-forward" size={12} color={C.faint} />
           </TouchableOpacity>
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+          <View style={s.sectionDivider} />
+
+          <TouchableOpacity
+            style={s.editorRow}
+            onPress={() => setChoicePage('location')}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel={location ? `地点 ${location}` : '添加地点'}
+          >
+            <View style={s.iconLane}>
+              <Ionicons name="location-outline" size={18} color={C.faint} />
+            </View>
+            <Text style={[s.rowText, !location && s.placeholderText]} numberOfLines={1}>
+              {location || '添加地点'}
+            </Text>
+            {location ? (
+              <TouchableOpacity
+                style={s.clearAction}
+                onPress={event => {
+                  event.stopPropagation();
+                  setLocation('');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="清空地点"
+              >
+                <Ionicons testID="event-location-clear-icon" name="close" size={12} color={C.faint} />
+              </TouchableOpacity>
+            ) : null}
+          </TouchableOpacity>
+
+          <View style={s.sectionDivider} />
+
+          <TouchableOpacity
+            style={s.descriptionRow}
+            onPress={() => setChoicePage('description')}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel={desc ? '编辑描述' : '添加描述'}
+          >
+            <View style={s.iconLane}>
+              <Ionicons name="document-text-outline" size={18} color={C.faint} />
+            </View>
+            <Text
+              style={[s.descriptionPreview, !desc && s.placeholderText]}
+              numberOfLines={desc ? 4 : 1}
+            >
+              {desc || '添加描述'}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={s.sectionDivider} />
+
+          <TouchableOpacity
+            style={s.editorRow}
+            onPress={() => setChoicePage('reminder')}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel="选择提醒时间"
+          >
+            <View style={s.iconLane}>
+              <Ionicons name="notifications-outline" size={18} color={C.faint} />
+            </View>
+            <Text style={s.rowText}>
+              {REMINDER_OPTIONS.find(option => option.value === reminderMinutes)?.label ?? '不提醒'}
+            </Text>
+            <Ionicons testID="event-reminder-chevron" name="chevron-forward" size={12} color={C.faint} />
+          </TouchableOpacity>
+
+          {isEditing ? (
+            <>
+              <View style={s.sectionDivider} />
+              <TouchableOpacity
+                style={s.editorRow}
+                onPress={handleDelete}
+                activeOpacity={0.65}
+                accessibilityRole="button"
+                accessibilityLabel="删除日程"
+              >
+                <View style={s.iconLane}>
+                  <Ionicons testID="event-delete-icon" name="trash-outline" size={18} color={C.red} />
+                </View>
+                <Text style={s.deleteText}>删除</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Animated.View>
+
+      <EventTimeEditor
+        visible={showTimeEditor}
+        value={{ startDate: dateObj, endDate: endDateObj, startTime: startObj, endTime: endObj, isAllDay }}
+        initialTarget={timeEditorTarget}
+        onCancel={() => setShowTimeEditor(false)}
+        onDone={applyTimeEditorValue}
+        onInvalid={() => showDialog({
+          title: '时间不正确',
+          message: isAllDay ? '结束日期不能早于开始日期' : '结束时间需要晚于开始时间',
+          tone: 'warning',
+        })}
+      />
+      <RepeatSelectionPage
+        visible={choicePage === 'repeat'}
+        selectedKey={repeat}
+        options={REPEAT_OPTIONS.map(option => ({ key: option, label: option }))}
+        onSelect={key => setRepeat(key as typeof REPEAT_OPTIONS[number])}
+        onClose={() => setChoicePage(null)}
+      />
+      <ReminderSelectionPage
+        visible={choicePage === 'reminder'}
+        value={reminderMinutes}
+        defaultValue={defaultReminder ?? DEFAULT_REMINDER_MINUTES}
+        options={REMINDER_OPTIONS.filter(option => option.value != null).map(option => ({
+          key: String(option.value),
+          label: option.label,
+          value: option.value as number,
+        }))}
+        disabled={isAllDay}
+        onDone={value => {
+          setReminderMinutes(value);
+          setChoicePage(null);
+        }}
+        onClose={() => setChoicePage(null)}
+      />
+      <LocationEditorPage
+        visible={choicePage === 'location'}
+        value={location}
+        onDone={value => {
+          setLocation(value);
+          setChoicePage(null);
+        }}
+        onClose={() => setChoicePage(null)}
+      />
+      <DescriptionEditorPage
+        visible={choicePage === 'description'}
+        value={desc}
+        onDone={value => {
+          setDesc(value);
+          setChoicePage(null);
+        }}
+        onClose={() => setChoicePage(null)}
+      />
     </ScreenContainer>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.appBg },
   flex: { flex: 1 },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 8 },
-  emptyText: { fontSize: 13, color: C.sub, lineHeight: 20 },
-  scroll: { flex: 1 },
-  content: { padding: 14, paddingTop: 16 },
-  categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14, paddingHorizontal: 4 },
-  seriesNotice: { minHeight: 42, borderRadius: 12, backgroundColor: C.purpleLight, paddingHorizontal: 13, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  seriesNoticeText: { flex: 1, fontSize: 12, color: C.purple, fontWeight: '700' },
-  categoryChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: 'rgba(150,100,200,0.08)', backgroundColor: C.card, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7 },
-  categoryDot: { width: 8, height: 8, borderRadius: 4 },
-  categoryText: { fontSize: 12, color: C.sub, fontWeight: '700' },
-  fieldCard: { backgroundColor: C.card, borderRadius: 16, marginBottom: 12, shadowColor:'#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
-  titleInput: { fontSize: 18, fontWeight: '600', color: C.text, padding: 16 },
-  row: { backgroundColor: C.card, borderRadius: 16, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, shadowColor:'#5028A0', shadowOffset:{width:0,height:1}, shadowOpacity:0.06, shadowRadius:8, elevation:2 },
-  iconBox: { width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  rowContent: { flex: 1 },
-  rowLabel: { fontSize: 14, fontWeight: '600', color: C.text },
-  rowInput: { fontSize: 14, color: C.sub, marginTop: 4 },
-  rowValue: { fontSize: 14, color: C.sub, marginTop: 4 },
-  descInput: { height: 60, textAlignVertical: 'top' },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  timeChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: C.purpleLight },
-  timeChipText: { fontSize: 14, color: C.purple, fontWeight: '600' },
-  timeSep: { color: C.faint },
-  toggle: { width: 46, height: 26, borderRadius: 13, justifyContent: 'center' },
-  toggleThumb: { position: 'absolute', width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', shadowColor:'#000', shadowOffset:{width:0,height:1}, shadowOpacity:0.18, shadowRadius:2, elevation:2 },
-  repeatScroll: { flexGrow: 0, marginTop: 8 },
-  repeatChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: C.purpleLight, marginRight: 6 },
-  repeatChipText: { fontSize: 12, color: C.purple, fontWeight: '600' },
-  saveBtn: { height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', shadowColor:'#6A38B2', shadowOffset:{width:0,height:6}, shadowOpacity:0.45, shadowRadius:12, elevation:6 },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  editorContent: { flex: 1 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.body },
+  emptyTitle: { fontSize: 17, lineHeight: 24, fontWeight: '600', color: C.text, marginBottom: 8 },
+  emptyText: { fontSize: 14, color: C.sub, lineHeight: 22 },
+  scroll: { flex: 1, backgroundColor: C.body },
+  content: { paddingBottom: 50 },
+  seriesNotice: { minHeight: 40, backgroundColor: C.primaryLight, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  seriesNoticeText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.primary },
+  titleInput: { minHeight: 54, paddingHorizontal: 16, paddingVertical: 12, fontSize: 20, lineHeight: 28, fontWeight: '600', color: C.text },
+  sectionDivider: { height: StyleSheet.hairlineWidth, backgroundColor: C.divider, marginLeft: 16, marginVertical: 14 },
+  iconLane: { width: 46, minHeight: 22, alignItems: 'center', justifyContent: 'center' },
+  timeBlock: { position: 'relative', minHeight: 68, paddingBottom: 12 },
+  timeIconLane: { position: 'absolute', left: 0, top: 12, width: 46, height: 44, alignItems: 'center', justifyContent: 'center' },
+  timeLine: { minHeight: 56, flexDirection: 'row', alignItems: 'flex-start' },
+  timeEndpoint: { width: '50%', minHeight: 56, paddingTop: 12 },
+  timeStartEndpoint: { paddingLeft: 46, paddingRight: 12 },
+  timeEndEndpoint: { paddingLeft: 32, paddingRight: 16 },
+  timeRangeArrow: { position: 'absolute', left: '50%', top: 18, marginLeft: -4, width: 8, height: 32 },
+  timeMain: { fontSize: 16, lineHeight: 22, color: C.text },
+  timeMinor: { fontSize: 14, lineHeight: 22, color: C.text },
+  editorRow: { minHeight: 48, paddingRight: 16, flexDirection: 'row', alignItems: 'center' },
+  rowText: { flex: 1, fontSize: 16, lineHeight: 22, color: C.text },
+  placeholderText: { color: C.faint },
+  clearAction: { width: 32, height: 48, alignItems: 'center', justifyContent: 'center' },
+  descriptionRow: { minHeight: 48, flexDirection: 'row', alignItems: 'flex-start', paddingRight: 16 },
+  descriptionPreview: { flex: 1, marginTop: 13, marginBottom: 13, fontSize: 16, lineHeight: 22, color: C.text },
+  deleteText: { flex: 1, fontSize: 16, lineHeight: 22, color: C.red },
 });

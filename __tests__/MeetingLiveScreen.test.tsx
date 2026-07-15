@@ -1,7 +1,7 @@
 import React from 'react';
-import { AppState } from 'react-native';
-import { act, render, waitFor } from '@testing-library/react-native';
-import { MeetingLiveScreen } from '../src/screens/MeetingLiveScreen';
+import { AppState, StyleSheet } from 'react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { MeetingLiveScreen, MEETING_RECORDING_GEOMETRY } from '../src/screens/MeetingLiveScreen';
 import { useAuth } from '../src/store/AuthStore';
 import { useMeetings } from '../src/store/MeetingsStore';
 import { startRealtimeAsr } from '../src/services/realtimeAsr';
@@ -17,14 +17,7 @@ jest.mock('expo-av', () => ({
   },
 }));
 jest.mock('../src/components/ScreenContainer', () => ({ ScreenContainer: 'ScreenContainer' }));
-jest.mock('../src/components/Common', () => ({ BackHeader: 'BackHeader' }));
-jest.mock('../src/components/BottomTabBar', () => ({
-  BottomTabBar: ({ onMic }: { onMic: () => void }) => {
-    const ReactNative = require('react-native');
-    return <ReactNative.TouchableOpacity testID="meeting-live-mic" onPress={onMic} />;
-  },
-  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 100 },
-}));
+jest.mock('../src/components/Common', () => ({ Waveform: 'Waveform' }));
 jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog }),
 }));
@@ -52,6 +45,7 @@ function meetingStore(overrides: Record<string, unknown> = {}) {
     meetings: [],
     createMeeting: jest.fn(),
     deleteMeeting: jest.fn(async () => undefined),
+    updateMeetingTitle: jest.fn(async () => undefined),
     updateMeetingStatus: jest.fn(async () => true),
     getCachedTranscript: jest.fn(() => []),
     saveCachedTranscript: jest.fn(async () => undefined),
@@ -70,7 +64,7 @@ describe('MeetingLiveScreen reliability', () => {
     });
   });
 
-  it('renders only the latest 40 live lines while retaining the full count', async () => {
+  it('renders the latest 40 live lines in the source-aligned recording layout', async () => {
     const transcript = Array.from({ length: 75 }, (_, index) => ({
       id: `line-${index + 1}`,
       meeting_id: 'meeting-long',
@@ -98,12 +92,86 @@ describe('MeetingLiveScreen reliability', () => {
 
     const view = await render(<MeetingLiveScreen navigation={navigation} route={route} />);
 
-    expect(view.getByText('75 句')).toBeTruthy();
     expect(view.getByText('较早的 35 句已收纳')).toBeTruthy();
     expect(view.getAllByTestId('meeting-live-transcript-line')).toHaveLength(40);
     expect(view.queryByText('第 35 句')).toBeNull();
     expect(view.getByText('第 36 句')).toBeTruthy();
     expect(view.getByText('第 75 句')).toBeTruthy();
+    expect(StyleSheet.flatten(view.getByTestId('meeting-live-title').props.style)).toMatchObject({
+      fontSize: 24,
+      lineHeight: 36,
+    });
+    expect(view.queryByText('文字记录')).toBeNull();
+    expect(StyleSheet.flatten(view.getByTestId('meeting-live-single-tab-divider').props.style))
+      .toEqual(expect.objectContaining({
+        height: MEETING_RECORDING_GEOMETRY.singleTabDividerHeight,
+        marginHorizontal: 20,
+      }));
+    expect(StyleSheet.flatten(view.getByTestId('meeting-live-recording-toolbar').props.style).height)
+      .toBe(MEETING_RECORDING_GEOMETRY.toolbarHeight);
+    expect(StyleSheet.flatten(view.getByTestId('meeting-live-waveform-slot').props.style)).toEqual(
+      expect.objectContaining({
+        height: MEETING_RECORDING_GEOMETRY.waveformHeight,
+        marginTop: 12,
+      }),
+    );
+    expect(StyleSheet.flatten(view.getByTestId('meeting-live-control-row').props.style).height)
+      .toBe(MEETING_RECORDING_GEOMETRY.controlRowHeight);
+    expect(StyleSheet.flatten(view.getAllByTestId('meeting-live-speaker-avatar')[0].props.style))
+      .toEqual(expect.objectContaining({
+        width: MEETING_RECORDING_GEOMETRY.transcriptAvatarSize,
+        height: MEETING_RECORDING_GEOMETRY.transcriptAvatarSize,
+      }));
+    expect(StyleSheet.flatten(view.getAllByTestId('meeting-live-transcript-item')[0].props.style))
+      .not.toEqual(expect.objectContaining({ flexDirection: 'row' }));
+    expect(StyleSheet.flatten(view.getAllByTestId('meeting-live-transcript-line')[0].props.style))
+      .toEqual(expect.objectContaining({ marginTop: 8, marginLeft: 2 }));
+    expect(view.queryByText('音频输入')).toBeNull();
+    expect(view.queryByText('开始录音')).toBeNull();
+  });
+
+  it('reveals the source-style title editor only after the title is pressed', async () => {
+    const meeting = {
+      id: 'meeting-title',
+      title: '原会议标题',
+      date: '2026年7月15日',
+      duration: '—',
+      tags: [],
+      participants: [],
+      status: 'ended',
+    };
+    const updateMeetingTitle = jest.fn(async () => undefined);
+    (useMeetings as jest.Mock).mockReturnValue(meetingStore({
+      meetings: [meeting],
+      updateMeetingTitle,
+    }));
+    const route = {
+      key: 'meeting-live-title',
+      name: 'MeetingLive' as const,
+      params: { meetingId: meeting.id },
+    } as React.ComponentProps<typeof MeetingLiveScreen>['route'];
+
+    const view = await render(<MeetingLiveScreen navigation={navigation} route={route} />);
+
+    expect(view.queryByLabelText('会议标题')).toBeNull();
+    await fireEvent.press(view.getByLabelText('编辑会议标题'));
+    const editor = view.getByLabelText('会议标题');
+    expect(editor.props.selectTextOnFocus).toBe(true);
+
+    await fireEvent.changeText(editor, '新的会议标题');
+    await fireEvent(editor, 'blur');
+
+    await waitFor(() => expect(updateMeetingTitle).toHaveBeenCalledWith(meeting.id, '新的会议标题'));
+    expect(view.queryByLabelText('会议标题')).toBeNull();
+    expect(view.getByText('新的会议标题')).toBeTruthy();
+
+    await fireEvent.press(view.getByLabelText('编辑会议标题'));
+    await fireEvent.changeText(view.getByLabelText('会议标题'), '   ');
+    await fireEvent(view.getByLabelText('会议标题'), 'blur');
+
+    expect(updateMeetingTitle).toHaveBeenCalledTimes(1);
+    expect(view.getByText('新的会议标题')).toBeTruthy();
+    expect(showDialog).not.toHaveBeenCalled();
   });
 
   it('deletes a newly created empty meeting when the screen closes during startup', async () => {
@@ -120,10 +188,6 @@ describe('MeetingLiveScreen reliability', () => {
     } as React.ComponentProps<typeof MeetingLiveScreen>['route'];
     const view = await render(<MeetingLiveScreen navigation={navigation} route={route} />);
 
-    await act(async () => {
-      view.getByTestId('meeting-live-mic').props.onPress();
-      await Promise.resolve();
-    });
     await waitFor(() => expect(createMeeting).toHaveBeenCalledTimes(1));
     await view.unmount();
     await act(async () => {
@@ -175,10 +239,6 @@ describe('MeetingLiveScreen reliability', () => {
     } as React.ComponentProps<typeof MeetingLiveScreen>['route'];
     const view = await render(<MeetingLiveScreen navigation={navigation} route={route} />);
 
-    await act(async () => {
-      view.getByTestId('meeting-live-mic').props.onPress();
-      await Promise.resolve();
-    });
     await waitFor(() => expect(startRealtimeAsr).toHaveBeenCalledTimes(1));
 
     await act(async () => {
@@ -201,5 +261,67 @@ describe('MeetingLiveScreen reliability', () => {
       'ended',
       expect.objectContaining({ audioAvailable: true }),
     );
+  });
+
+  it('starts automatically and confirms before a user ends the recording', async () => {
+    const createMeeting = jest.fn(async (title: string) => ({
+      id: 'meeting-manual-stop',
+      title,
+      date: '2026年7月14日',
+      duration: '—',
+      tags: [],
+      participants: [],
+      status: 'created',
+    }));
+    const stop = jest.fn(async () => '/data/user/0/meeting-manual-stop.wav');
+    const pause = jest.fn(async () => undefined);
+    const resume = jest.fn(async () => undefined);
+    (startRealtimeAsr as jest.Mock).mockResolvedValue({
+      meetingId: 'meeting-manual-stop',
+      url: 'ws://asr.example.test',
+      pause,
+      resume,
+      stop,
+      completion: new Promise(() => {}),
+    });
+    (useMeetings as jest.Mock).mockReturnValue(meetingStore({ createMeeting }));
+    const route = {
+      key: 'meeting-live-manual-stop',
+      name: 'MeetingLive' as const,
+      params: undefined,
+    } as React.ComponentProps<typeof MeetingLiveScreen>['route'];
+
+    const view = await render(<MeetingLiveScreen navigation={navigation} route={route} />);
+    await waitFor(() => expect(startRealtimeAsr).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.getByLabelText('结束并保存会议录音')).toBeTruthy());
+
+    const pauseButton = view.getByLabelText('暂停录音');
+    expect(StyleSheet.flatten(pauseButton.props.style)).toEqual(expect.objectContaining({
+      width: MEETING_RECORDING_GEOMETRY.resumePauseWidth,
+      height: MEETING_RECORDING_GEOMETRY.durationHeight,
+    }));
+    await fireEvent.press(pauseButton);
+    await waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
+    expect(view.getByText('录音已暂停')).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('继续录音'));
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+
+    await fireEvent.press(view.getByLabelText('结束并保存会议录音'));
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
+      title: '结束录音？',
+      actions: expect.arrayContaining([expect.objectContaining({ text: '结束录音' })]),
+    }));
+
+    const dialog = showDialog.mock.calls.at(-1)?.[0];
+    const endAction = dialog?.actions?.find((action: { text?: string }) => action.text === '结束录音');
+    await act(async () => {
+      await endAction?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('Transcription', {
+      meetingId: 'meeting-manual-stop',
+    }));
   });
 });

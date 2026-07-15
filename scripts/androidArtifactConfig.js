@@ -66,6 +66,9 @@ function validateEmbeddedAppConfig(appConfig, mode) {
   if (rejectPlaceholders && isPlaceholderProductionHost(realtimeHost)) {
     throw new Error('realtimeAsrHost contains a reserved or placeholder production domain.');
   }
+  if (!['whisper', 'qwen'].includes(String(extra.realtimeAsrProvider || ''))) {
+    throw new Error('Embedded realtimeAsrProvider must be whisper or qwen.');
+  }
 }
 
 module.exports = { validateEmbeddedAppConfig };

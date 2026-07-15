@@ -16,40 +16,22 @@ DEVICE_PIN="${DEVICE_PIN:-}"
 
 mkdir -p "$OUT_DIR"
 
-today_label() {
-  python3 <<'PY'
-from datetime import date
-
-weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-today = date.today()
-print(f"{today.year}年{today.month}月{today.day}日 周{weekdays[today.weekday()]}")
-PY
-}
-
-target_calendar_day() {
+month_title() {
   python3 <<'PY'
 from datetime import date
 
 today = date.today()
-print(18 if today.day == 17 else 17)
+print(f"{today.year}年{today.month}月")
 PY
 }
 
-relative_label_for_day() {
-  local day="$1"
-  python3 - "$day" <<'PY'
+target_calendar_date() {
+  python3 <<'PY'
 from datetime import date
-import sys
 
 today = date.today()
-target = date(today.year, today.month, int(sys.argv[1]))
-delta = (target - today).days
-if delta > 0:
-    print(f"{delta}天后")
-elif delta < 0:
-    print(f"{abs(delta)}天前")
-else:
-    print("今天")
+day = 18 if today.day == 17 else 17
+print(f"{today.year}年{today.month}月{day}日")
 PY
 }
 
@@ -353,26 +335,34 @@ run_main_route() {
   dump_ui schedule
   screenshot schedule
   assert_ui schedule 'text="日程"'
-  assert_ui schedule 'text="今日待办"'
-  local today_text
-  today_text="$(today_label)"
-  assert_ui schedule "text=\"$today_text\""
+  assert_ui schedule 'text="日历"'
+  local current_month
+  current_month="$(month_title)"
+  assert_ui schedule "text=\"$current_month\""
+  assert_ui schedule 'content-desc="切换到单日视图"'
 
-  local target_day
-  local relative_text
-  target_day="$(target_calendar_day)"
-  relative_text="$(relative_label_for_day "$target_day")"
-  tap_node schedule "$target_day"
+  local target_date
+  target_date="$(target_calendar_date)"
+  tap_node schedule "$target_date"
   sleep 1
   dump_ui selected_17
   screenshot selected_17
-  assert_ui selected_17 'text="当日待办"'
-  if [ "$relative_text" != "今天" ]; then
-    assert_ui selected_17 "text=\"$relative_text\""
-  fi
-  assert_ui selected_17 'text="当日暂无待办"'
+  assert_ui selected_17 "content-desc=\"$target_date[^\"]*已展开"
 
-  tap_node selected_17 '会议'
+  tap_node selected_17 '切换到单日视图'
+  sleep 1
+  dump_ui day_view
+  screenshot day_view
+  assert_ui day_view 'text="00:00"'
+  assert_ui day_view 'text="24:00"'
+  assert_ui day_view 'content-desc="切换到月视图"'
+
+  tap_node day_view '切换到月视图'
+  sleep 1
+  dump_ui month_view_restored
+  assert_ui month_view_restored 'content-desc="切换到单日视图"'
+
+  tap_node month_view_restored '会议'
   sleep 2
   dump_ui meetings
   screenshot meetings
@@ -450,14 +440,20 @@ run_main_route() {
   dump_ui schedule_after_profile
   assert_ui schedule_after_profile 'text="日程"'
 
-  tap_xy 540 2098
+  tap_node schedule_after_profile '新建日程'
+  sleep 0.5
+  dump_ui create_schedule_sheet
+  assert_ui create_schedule_sheet 'text="新建日程"'
+  assert_ui create_schedule_sheet 'text="语音输入"'
+  assert_ui create_schedule_sheet 'text="手动新建"'
+  tap_node create_schedule_sheet '语音输入'
   sleep 1
   dump_ui voice_modal
   screenshot voice_modal
-  assert_ui voice_modal 'text="说出你的日常"'
-  assert_ui voice_modal 'text="输入或说出日程内容.*"'
+  assert_ui voice_modal 'text="语音新建日程"'
+  assert_ui voice_modal 'text="输入日程内容.*"'
 
-  tap_node voice_modal '输入或说出日程内容'
+  tap_node voice_modal '输入日程内容'
   type_ascii 'meeting tomorrow at 3pm'
   sleep 1
   dump_ui voice_text
