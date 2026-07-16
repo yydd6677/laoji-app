@@ -1,16 +1,34 @@
 import React from 'react';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import {
+  createBottomTabNavigator,
+  type BottomTabBarProps,
+} from '@react-navigation/bottom-tabs';
+import { BottomTabBar } from '../components/BottomTabBar';
 import { ScheduleScreen } from '../screens/ScheduleScreen';
 import { MeetingListScreen } from '../screens/MeetingListScreen';
 import { MainTabsParamList } from '../types';
+import { openMeetingRecorder, pressMainTab } from './tabTargets';
 
-// We use a custom BottomTabBar inside each screen, so hide the default one
 const Tab = createBottomTabNavigator<MainTabsParamList>();
+
+function MainTabBar({ state, navigation }: BottomTabBarProps) {
+  const active = state.routes[state.index]?.name === 'Meetings' ? 'meetings' : 'schedule';
+
+  return (
+    <BottomTabBar
+      active={active}
+      onSchedule={() => pressMainTab(navigation, state, 'Schedule')}
+      onMeetings={() => pressMainTab(navigation, state, 'Meetings')}
+      onMic={active === 'meetings' ? () => openMeetingRecorder(navigation) : undefined}
+    />
+  );
+}
 
 export function MainTabsNavigator() {
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }}
+      screenOptions={{ headerShown: false }}
+      tabBar={props => <MainTabBar {...props} />}
       initialRouteName="Schedule"
     >
       <Tab.Screen name="Schedule" component={ScheduleScreen} />

@@ -1,16 +1,32 @@
 import React, { useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Animated,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
+import {
+  ResponsiveContentFrame,
+  resolveResponsiveContentLayout,
+} from '../components/ResponsiveContentFrame';
 import { CalendarDetailTitleBar } from '../components/CalendarTitleBar';
 import { RootStackParamList } from '../types';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from '../components/AppDialog';
 import { labelForReminder } from '../services/notifications';
+import { eventRefForEvent } from '../utils/eventIdentity';
+import { resolveEventReference } from '../utils/eventRecurrence';
+import { recurrenceDeleteDialog } from '../services/recurrenceActions';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -23,6 +39,39 @@ const DETAIL_TITLE_BAR_HEIGHT = 44;
 const HEADER_BG_MIN_HEIGHT_WIDTH_RATIO = 0.30113637;
 const SUMMARY_FADE_RANGE = 40;
 const TITLE_FADE_RANGE = 30;
+const HEADER_SNAP_MIN_FLING_VELOCITY = 0.2;
+const HEADER_SNAP_EPSILON = 0.5;
+
+type HeaderSnapMetrics = {
+  offsetY: number;
+  releaseVelocityY: number;
+  headerHeight: number;
+  contentHeight: number;
+  viewportHeight: number;
+};
+
+export function resolveHeaderSnapTarget({
+  offsetY,
+  releaseVelocityY,
+  headerHeight,
+  contentHeight,
+  viewportHeight,
+}: HeaderSnapMetrics): number | null {
+  if (![offsetY, releaseVelocityY, headerHeight, contentHeight, viewportHeight].every(Number.isFinite)) {
+    return null;
+  }
+  if (headerHeight <= HEADER_SNAP_EPSILON) return null;
+
+  const maxScrollOffset = Math.max(0, contentHeight - viewportHeight);
+  if (maxScrollOffset + HEADER_SNAP_EPSILON < headerHeight) return null;
+  if (offsetY <= HEADER_SNAP_EPSILON || offsetY >= headerHeight - HEADER_SNAP_EPSILON) return null;
+
+  if (Math.abs(releaseVelocityY) > HEADER_SNAP_MIN_FLING_VELOCITY) {
+    // React Native reports the finger velocity, opposite to the content offset direction.
+    return releaseVelocityY < 0 ? headerHeight : 0;
+  }
+  return offsetY >= headerHeight / 2 ? headerHeight : 0;
+}
 
 function parseLocalDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
@@ -82,19 +131,28 @@ export function EventDetailScreen({ navigation, route }: Props) {
   const { events, searchableEvents, deleteEvent } = useEvents();
   const { showDialog } = useAppDialog();
   const scrollY = useRef(new Animated.Value(0)).current;
-  const { width } = useWindowDimensions();
+  const scrollRef = useRef<ScrollView>(null);
+  const contentHeightRef = useRef(0);
+  const viewportHeightRef = useRef(0);
+  const releaseHandledRef = useRef(false);
+  const { width, height } = useWindowDimensions();
+  const responsiveLayout = resolveResponsiveContentLayout(width, height);
   const [eventHeaderHeight, setEventHeaderHeight] = useState(0);
-  const ev = events.find(event => event.id === route.params.eventId)
-    ?? searchableEvents?.find(event => event.id === route.params.eventId);
+  const ev = resolveEventReference(
+    [...events, ...(searchableEvents ?? [])],
+    route.params.eventRef,
+  );
 
   if (!ev) {
     return (
       <ScreenContainer edges={['top']} bg={C.body}>
-        <CalendarDetailTitleBar title="" onBack={() => navigation.goBack()} />
-        <View style={s.emptyWrap}>
-          <Text style={s.emptyTitle}>日程不存在</Text>
-          <Text style={s.emptyText}>请返回日历后重新打开。</Text>
-        </View>
+        <ResponsiveContentFrame testID="event-detail-content-frame">
+          <CalendarDetailTitleBar title="" onBack={() => navigation.goBack()} />
+          <View style={s.emptyWrap}>
+            <Text style={s.emptyTitle}>日程不存在</Text>
+            <Text style={s.emptyText}>请返回日历后重新打开。</Text>
+          </View>
+        </ResponsiveContentFrame>
       </ScreenContainer>
     );
   }
@@ -125,39 +183,41 @@ export function EventDetailScreen({ navigation, route }: Props) {
   });
   const headerWashHeight = Math.max(
     DETAIL_TITLE_BAR_HEIGHT + eventHeaderHeight,
-    width * HEADER_BG_MIN_HEIGHT_WIDTH_RATIO,
+    responsiveLayout.contentWidth * HEADER_BG_MIN_HEIGHT_WIDTH_RATIO,
   );
 
   const handleEdit = () => {
     navigation.navigate('AddEvent', {
       date: ev.seriesStartDate ?? ev.startDate,
-      eventId: ev.id,
+      eventRef: eventRefForEvent(ev),
     });
   };
 
   const handleDelete = () => {
-    showDialog({
-      title: '删除日程',
-      message: ev.repeat && ev.repeat !== 'once'
-        ? '这是一条重复日程，删除后整个系列都会被移除。'
-        : `确定删除“${ev.title}”吗？`,
-      tone: 'danger',
-      actions: [
-        {
-          text: '删除',
-          role: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteEvent(ev.id);
-              navigation.goBack();
-            } catch {
-              showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
-            }
-          },
-        },
-        { text: '取消', role: 'cancel' },
-      ],
+    showDialog(recurrenceDeleteDialog(ev, async recurrenceScope => {
+      try {
+        await deleteEvent(eventRefForEvent(ev), recurrenceScope);
+        navigation.goBack();
+      } catch {
+        showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
+      }
+    }));
+  };
+
+  const settleHeader = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (releaseHandledRef.current) return;
+    releaseHandledRef.current = true;
+
+    const { contentOffset, contentSize, layoutMeasurement, velocity } = event.nativeEvent;
+    const target = resolveHeaderSnapTarget({
+      offsetY: contentOffset.y,
+      releaseVelocityY: velocity?.y ?? 0,
+      headerHeight: eventHeaderHeight,
+      contentHeight: contentSize.height > 0 ? contentSize.height : contentHeightRef.current,
+      viewportHeight: layoutMeasurement.height > 0 ? layoutMeasurement.height : viewportHeightRef.current,
     });
+    if (target == null) return;
+    scrollRef.current?.scrollTo({ x: 0, y: target, animated: true });
   };
 
   return (
@@ -173,78 +233,94 @@ export function EventDetailScreen({ navigation, route }: Props) {
         locations={[0, 0.55, 1]}
         style={[s.headerWash, { height: headerWashHeight }]}
       />
-      <CalendarDetailTitleBar
-        title={ev.title}
-        titleOpacity={titleOpacity}
-        titleAlignment="leading"
-        titleColor={DEFAULT_CALENDAR_TITLE_COLOR}
-        onBack={() => navigation.goBack()}
-        actions={[
-          { key: 'edit', icon: 'pencil-outline', label: '编辑日程', onPress: handleEdit },
-          { key: 'delete', icon: 'trash-outline', label: '删除日程', onPress: handleDelete },
-        ]}
-      />
-      <Animated.ScrollView
-        style={s.scroll}
-        contentContainerStyle={s.content}
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: true },
-        )}
-      >
-        <View
-          style={s.eventHeader}
-          testID="event-detail-header"
+      <ResponsiveContentFrame testID="event-detail-content-frame">
+        <CalendarDetailTitleBar
+          title={ev.title}
+          titleOpacity={titleOpacity}
+          titleAlignment="leading"
+          titleColor={DEFAULT_CALENDAR_TITLE_COLOR}
+          onBack={() => navigation.goBack()}
+          actions={[
+            { key: 'edit', icon: 'pencil-outline', label: '编辑日程', onPress: handleEdit },
+            { key: 'delete', icon: 'trash-outline', label: '删除日程', onPress: handleDelete },
+          ]}
+        />
+        <Animated.ScrollView
+          ref={scrollRef}
+          testID="event-detail-scroll"
+          style={s.scroll}
+          contentContainerStyle={s.content}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          scrollEventThrottle={16}
           onLayout={event => {
-            const nextHeight = event.nativeEvent.layout.height;
-            setEventHeaderHeight(current => Math.abs(current - nextHeight) < 0.5 ? current : nextHeight);
+            viewportHeightRef.current = event.nativeEvent.layout.height;
           }}
+          onContentSizeChange={(_contentWidth, contentHeight) => {
+            contentHeightRef.current = contentHeight;
+          }}
+          onScrollBeginDrag={() => {
+            releaseHandledRef.current = false;
+          }}
+          onScrollEndDrag={settleHeader}
+          onMomentumScrollEnd={settleHeader}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
         >
-          <Animated.View
-            style={[s.summaryRow, { opacity: summaryOpacity }]}
-            testID="event-detail-summary-row"
+          <View
+            style={s.eventHeader}
+            testID="event-detail-header"
+            onLayout={event => {
+              const nextHeight = event.nativeEvent.layout.height;
+              setEventHeaderHeight(current => Math.abs(current - nextHeight) < 0.5 ? current : nextHeight);
+            }}
           >
-            <View testID="event-detail-color" style={s.colorSymbol} />
-            <Text style={s.summary} numberOfLines={2}>{ev.title}</Text>
-          </Animated.View>
-          <Animated.Text
-            testID="event-detail-time"
-            style={[s.headerMeta, { opacity: headerMetaOpacity }]}
-          >
-            {timeRangeText}
-          </Animated.Text>
-          {repeatText ? (
-            <Animated.Text
-              style={[s.headerRule, { opacity: headerMetaOpacity }]}
-              numberOfLines={2}
+            <Animated.View
+              style={[s.summaryRow, { opacity: summaryOpacity }]}
+              testID="event-detail-summary-row"
             >
-              {repeatText}
+              <View testID="event-detail-color" style={s.colorSymbol} />
+              <Text style={s.summary} numberOfLines={2}>{ev.title}</Text>
+            </Animated.View>
+            <Animated.Text
+              testID="event-detail-time"
+              style={[s.headerMeta, { opacity: headerMetaOpacity }]}
+            >
+              {timeRangeText}
             </Animated.Text>
-          ) : null}
-        </View>
+            {repeatText ? (
+              <Animated.Text
+                style={[s.headerRule, { opacity: headerMetaOpacity }]}
+                numberOfLines={2}
+              >
+                {repeatText}
+              </Animated.Text>
+            ) : null}
+          </View>
 
-        <View testID="event-detail-body">
-          {ev.location ? (
-            <DetailInfoRow icon="location-outline" testID="event-detail-location-row">
-              <Text style={s.infoText}>{ev.location}</Text>
-            </DetailInfoRow>
-          ) : null}
+          <View testID="event-detail-body">
+            {ev.location ? (
+              <DetailInfoRow icon="location-outline" testID="event-detail-location-row">
+                <Text style={s.infoText}>{ev.location}</Text>
+              </DetailInfoRow>
+            ) : null}
 
-          {detailText ? (
-            <DetailInfoRow icon="reorder-three-outline" testID="event-detail-description-row">
-              <Text style={s.description}>{detailText}</Text>
-            </DetailInfoRow>
-          ) : null}
+            {detailText ? (
+              <DetailInfoRow icon="reorder-three-outline" testID="event-detail-description-row">
+                <Text style={s.description}>{detailText}</Text>
+              </DetailInfoRow>
+            ) : null}
 
-          {ev.reminderMinutes != null ? (
-            <DetailInfoRow icon="notifications-outline" testID="event-detail-reminder-row">
-              <Text style={s.infoText}>{labelForReminder(ev.reminderMinutes)}</Text>
-            </DetailInfoRow>
-          ) : null}
-        </View>
-      </Animated.ScrollView>
+            {ev.reminderMinutes != null ? (
+              <DetailInfoRow icon="notifications-outline" testID="event-detail-reminder-row">
+                <Text style={s.infoText}>{labelForReminder(ev.reminderMinutes)}</Text>
+              </DetailInfoRow>
+            ) : null}
+          </View>
+        </Animated.ScrollView>
+      </ResponsiveContentFrame>
     </ScreenContainer>
   );
 }

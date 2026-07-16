@@ -9,6 +9,7 @@ const ACTION_D = 48;
 const ACTION_R = ACTION_D / 2;
 const MIN_BOTTOM_FILL = 8;
 const ACTION_BOTTOM_GAP = 12;
+const FLOATING_OVERLAY_GAP = 12;
 const TAB_ICON_SIZE = 22;
 const TAB_ICON_CONTAINER_W = TAB_ICON_SIZE + 16;
 const TAB_ICON_CONTAINER_H = TAB_ICON_SIZE + 8;
@@ -26,8 +27,9 @@ export const BOTTOM_TAB_BAR_GEOMETRY = Object.freeze({
   micDiameter: ACTION_D,
   micRadius: ACTION_R,
   minimumBottomFill: MIN_BOTTOM_FILL,
-  scrollContentClearance: BAR_H + ACTION_BOTTOM_GAP + ACTION_R,
-  floatingOverlayGap: 12,
+  sceneActionBottom: ACTION_BOTTOM_GAP,
+  sceneContentClearance: ACTION_D + ACTION_BOTTOM_GAP + FLOATING_OVERLAY_GAP,
+  floatingOverlayGap: FLOATING_OVERLAY_GAP,
   tabIconSize: TAB_ICON_SIZE,
   tabIconContainerWidth: TAB_ICON_CONTAINER_W,
   tabIconContainerHeight: TAB_ICON_CONTAINER_H,

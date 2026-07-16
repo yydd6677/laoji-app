@@ -1,11 +1,12 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import {
   APP_DIALOG_GEOMETRY,
   AppDialogProvider,
   useAppDialog,
 } from '../src/components/AppDialog';
+import { Colors as C } from '../src/theme/colors';
 
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => {
@@ -34,6 +35,22 @@ function DialogHarness({ onAction, onDismiss }: { onAction: () => void; onDismis
   );
 }
 
+function deferTimingAnimations() {
+  const timing = Animated.timing as jest.Mock;
+  const originalImplementation = timing.getMockImplementation();
+  const completions: Array<(result: { finished: boolean }) => void> = [];
+  timing.mockImplementation((value, config) => ({
+    start: jest.fn((completion?: (result: { finished: boolean }) => void) => {
+      value?.setValue?.(config?.toValue);
+      if (completion) completions.push(completion);
+    }),
+  }));
+  return {
+    completions,
+    restore: () => timing.mockImplementation(originalImplementation),
+  };
+}
+
 describe('AppDialog', () => {
   it('renders the app-styled action flow and runs the chosen action', async () => {
     const onAction = jest.fn();
@@ -59,12 +76,14 @@ describe('AppDialog', () => {
     expect(StyleSheet.flatten(screen.getByTestId('app-dialog-content-region').props.style).marginTop).toBe(12);
     expect(StyleSheet.flatten(screen.getByTestId('app-dialog-actions').props.style)).toEqual(expect.objectContaining({
       marginTop: 20,
-      borderTopWidth: 1,
+      borderTopWidth: APP_DIALOG_GEOMETRY.dividerWidth,
+      borderTopColor: C.divider,
       flexDirection: 'row-reverse',
     }));
     expect(StyleSheet.flatten(screen.getByTestId('app-dialog-action-0').props.style)).toEqual(expect.objectContaining({
       minHeight: APP_DIALOG_GEOMETRY.actionHeight,
-      borderLeftWidth: 1,
+      borderLeftWidth: APP_DIALOG_GEOMETRY.dividerWidth,
+      borderLeftColor: C.divider,
     }));
     await fireEvent.press(screen.getByText('结束并离开'));
 
@@ -105,7 +124,8 @@ describe('AppDialog', () => {
     expect(StyleSheet.flatten(screen.getByTestId('app-dialog-actions').props.style).flexDirection).toBeUndefined();
     expect(StyleSheet.flatten(screen.getByTestId('app-dialog-action-1').props.style)).toEqual(expect.objectContaining({
       minHeight: APP_DIALOG_GEOMETRY.actionHeight,
-      borderTopWidth: 1,
+      borderTopWidth: APP_DIALOG_GEOMETRY.dividerWidth,
+      borderTopColor: C.divider,
     }));
   });
 
@@ -123,5 +143,38 @@ describe('AppDialog', () => {
 
     expect(onDismiss).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByText('会议仍在录制')).toBeNull());
+  });
+
+  it('keeps the modal mounted until the Android-back exit finishes', async () => {
+    const onDismiss = jest.fn();
+    await render(
+      <AppDialogProvider>
+        <DialogHarness onAction={jest.fn()} onDismiss={onDismiss} />
+      </AppDialogProvider>,
+    );
+    await fireEvent.press(screen.getByText('打开弹窗'));
+
+    const modal = screen.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })[0];
+    expect(modal.props.animationType).toBe('none');
+    expect(StyleSheet.flatten(screen.getByTestId('app-dialog-backdrop').props.style)).toEqual(
+      expect.objectContaining({ backgroundColor: C.overlay }),
+    );
+
+    const deferred = deferTimingAnimations();
+    try {
+      await act(() => modal.props.onRequestClose());
+
+      expect(onDismiss).not.toHaveBeenCalled();
+      expect(screen.getByText('会议仍在录制')).toBeTruthy();
+      expect(screen.getByTestId('app-dialog-card').props.pointerEvents).toBe('none');
+      expect(deferred.completions).toHaveLength(1);
+
+      await act(() => deferred.completions[0]({ finished: true }));
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('会议仍在录制')).toBeNull();
+      expect(screen.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })).toHaveLength(0);
+    } finally {
+      deferred.restore();
+    }
   });
 });

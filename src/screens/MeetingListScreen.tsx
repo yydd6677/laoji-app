@@ -7,22 +7,27 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { RootStackParamList } from '../types';
+import type { MainTabsParamList, RootStackParamList } from '../types';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
-import { BottomTabBar, BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
+import { BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
 import { useAppDialog } from '../components/AppDialog';
 import { AppActionSheet, AppActionSheetItem } from '../components/AppActionSheet';
 import { MeetingListItem } from '../components/MeetingListItem';
 import { MeetingSearchPage } from '../components/MeetingSearchPage';
-import { openScheduleTab } from '../navigation/tabTargets';
 import { readableErrorMessage } from '../services/errors';
 import { canResumeMeetingRecording } from '../utils/meetingMedia';
 
-type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'MainTabs'> };
+type MeetingListNavigationProp = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabsParamList, 'Meetings'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+type Props = { navigation: MeetingListNavigationProp };
 
 export function MeetingListScreen({ navigation }: Props) {
   const { meetings, loading, error, deleteMeeting, refreshMeetings } = useMeetings();
@@ -32,10 +37,6 @@ export function MeetingListScreen({ navigation }: Props) {
   const [meetingMenuId, setMeetingMenuId] = useState<string | null>(null);
   const hasCachedMeetings = meetings.length > 0;
   const menuMeeting = meetings.find(meeting => meeting.id === meetingMenuId);
-
-  const startMeeting = () => {
-    navigation.navigate('MeetingLive');
-  };
 
   const openMeeting = (meetingId: string) => {
     navigation.navigate('Transcription', { meetingId });
@@ -200,13 +201,6 @@ export function MeetingListScreen({ navigation }: Props) {
         ListEmptyComponent={renderEmptyState}
       />
 
-      <BottomTabBar
-        active="meetings"
-        onSchedule={() => openScheduleTab(navigation)}
-        onMeetings={() => {}}
-        onMic={startMeeting}
-      />
-
       <MeetingSearchPage
         visible={searchVisible}
         meetings={meetings}
@@ -255,7 +249,7 @@ const s = StyleSheet.create({
   headerActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   list: { flex: 1, backgroundColor: '#F8F9FA' },
-  content: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance },
+  content: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance },
   emptyContent: { flexGrow: 1 },
   listTopSpace: { height: 12 },
   state: {

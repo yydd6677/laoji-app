@@ -18,6 +18,11 @@ const ARC_RADIUS = 116;
 const CLUSTER_SIZE = 236;
 const LONG_PRESS_DELAY = 350;
 const TARGET_HIT_RADIUS = 42;
+const PRESSED_TRANSLATE_Y = 1;
+const REST_ELEVATION = 6;
+const PRESSED_ELEVATION = 3;
+const OPEN_ROTATION = 45;
+const HOVER_SCALE = 1.12;
 
 const TARGET_OFFSETS: Record<CreateTarget, { x: number; y: number }> = {
   voice: { x: -98, y: -58 },
@@ -31,6 +36,11 @@ export const SCHEDULE_CREATE_GEOMETRY = Object.freeze({
   clusterSize: CLUSTER_SIZE,
   longPressDelay: LONG_PRESS_DELAY,
   targetHitRadius: TARGET_HIT_RADIUS,
+  pressedTranslateY: PRESSED_TRANSLATE_Y,
+  restElevation: REST_ELEVATION,
+  pressedElevation: PRESSED_ELEVATION,
+  openRotation: OPEN_ROTATION,
+  hoverScale: HOVER_SCALE,
   targetOffsets: TARGET_OFFSETS,
 });
 
@@ -79,17 +89,25 @@ export function ScheduleCreateButton({
   const centerRef = useRef({ x: 0, y: 0 });
   const radialActiveRef = useRef(false);
   const consumedLongPressRef = useRef(false);
+  const transitionRef = useRef(0);
   const [mounted, setMounted] = useState(false);
+  const [radialOpen, setRadialOpen] = useState(false);
   const [hovered, setHovered] = useState<CreateTarget | null>(null);
 
-  useEffect(() => () => progress.stopAnimation(), [progress]);
+  useEffect(() => () => {
+    transitionRef.current += 1;
+    progress.stopAnimation();
+  }, [progress]);
 
   const openRadial = (event: GestureResponderEvent) => {
+    if (radialActiveRef.current) return;
     centerRef.current = buttonCenter(event);
     radialActiveRef.current = true;
     consumedLongPressRef.current = true;
+    transitionRef.current += 1;
     setHovered(null);
     setMounted(true);
+    setRadialOpen(true);
     progress.stopAnimation();
     progress.setValue(0);
     Animated.timing(progress, {
@@ -99,30 +117,38 @@ export function ScheduleCreateButton({
     }).start();
   };
 
-  const closeRadial = () => {
+  const closeRadial = (afterExit?: () => void, preserveSelection = false) => {
     radialActiveRef.current = false;
-    setHovered(null);
+    setRadialOpen(false);
+    if (!preserveSelection) setHovered(null);
+    const transition = transitionRef.current + 1;
+    transitionRef.current = transition;
     progress.stopAnimation();
     Animated.timing(progress, {
       toValue: 0,
       duration: Motion.fast,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setMounted(false);
+      if (!finished || transitionRef.current !== transition) return;
+      setHovered(null);
+      setMounted(false);
+      afterExit?.();
     });
   };
 
   const moveRadial = (event: GestureResponderEvent) => {
     if (!radialActiveRef.current) return;
-    setHovered(scheduleCreateTargetAt(centerRef.current, touchPoint(event)));
+    const target = scheduleCreateTargetAt(centerRef.current, touchPoint(event));
+    setHovered(current => current === target ? current : target);
   };
 
   const releaseRadial = (event: GestureResponderEvent) => {
     if (!radialActiveRef.current) return;
     const target = scheduleCreateTargetAt(centerRef.current, touchPoint(event));
-    closeRadial();
-    if (target === 'voice') onVoice();
-    if (target === 'manual') onManual();
+    closeRadial(() => {
+      if (target === 'voice') onVoice();
+      if (target === 'manual') onManual();
+    }, Boolean(target));
     setTimeout(() => { consumedLongPressRef.current = false; }, 0);
   };
 
@@ -136,7 +162,7 @@ export function ScheduleCreateButton({
 
   const optionScale = (target: CreateTarget) => (
     hovered === target
-      ? 1.12
+      ? HOVER_SCALE
       : progress.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] })
   );
 
@@ -148,7 +174,7 @@ export function ScheduleCreateButton({
           style={[s.radialLayer, { opacity: progress }]}
           testID="calendar-create-radial"
         >
-          <View style={s.arc} testID="calendar-create-arc" />
+          <View style={[s.arc, hovered && s.arcActive]} testID="calendar-create-arc" />
           <Animated.View
             style={[
               s.option,
@@ -177,7 +203,7 @@ export function ScheduleCreateButton({
       ) : null}
 
       <Pressable
-        style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
+        style={({ pressed }) => [s.button, (pressed || radialOpen) && s.buttonPressed]}
         onPress={handlePress}
         onLongPress={openRadial}
         onTouchMove={moveRadial}
@@ -187,11 +213,12 @@ export function ScheduleCreateButton({
         accessibilityRole="button"
         accessibilityLabel="新建日程"
         accessibilityHint="轻点选择创建方式，长按并拖动可快速选择语音或手动创建"
+        accessibilityState={{ expanded: radialOpen }}
         testID="calendar-create-button"
       >
         <Animated.View style={{ transform: [{
-          rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }),
-        }] }}>
+          rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${OPEN_ROTATION}deg`] }),
+        }] }} testID="calendar-create-icon-motion">
           <Ionicons name="add" size={28} color="#FFFFFF" />
         </Animated.View>
       </Pressable>
@@ -225,6 +252,7 @@ const s = StyleSheet.create({
     borderTopLeftRadius: ARC_RADIUS,
     borderColor: 'rgba(20,86,240,0.30)',
   },
+  arcActive: { borderColor: C.primary },
   option: {
     position: 'absolute',
     width: OPTION_SIZE,
@@ -244,7 +272,13 @@ const s = StyleSheet.create({
   },
   voiceOption: optionPosition('voice'),
   manualOption: optionPosition('manual'),
-  optionHovered: { backgroundColor: C.primary, borderColor: C.primary },
+  optionHovered: {
+    backgroundColor: C.primary,
+    borderColor: C.primary,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 7,
+  },
   optionLabel: { fontSize: 11, lineHeight: 15, fontWeight: '500', color: C.text },
   optionLabelHovered: { color: '#FFFFFF' },
   button: {
@@ -261,7 +295,14 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: REST_ELEVATION,
   },
-  buttonPressed: { backgroundColor: C.primaryPressed },
+  buttonPressed: {
+    backgroundColor: C.primaryPressed,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.14,
+    shadowRadius: 4,
+    elevation: PRESSED_ELEVATION,
+    transform: [{ translateY: PRESSED_TRANSLATE_Y }],
+  },
 });

@@ -30,6 +30,20 @@ describe('selectTasksForDate', () => {
     expect(result.map(event => event.id)).toEqual(['span', 'span-all-day']);
   });
 
+  it('does not include the exclusive end date of a timed midnight boundary', () => {
+    const overnight = {
+      ...base,
+      id: 'midnight-boundary',
+      startDate: '2026-07-08',
+      endDate: '2026-07-09',
+      startTime: '23:00',
+      endTime: '00:00',
+      spanning: true,
+    };
+    expect(selectTasksForDate([overnight], '2026-07-08')).toHaveLength(1);
+    expect(selectTasksForDate([overnight], '2026-07-09')).toEqual([]);
+  });
+
   it('sorts tasks by start time, end time, title, then original order', () => {
     const result = selectTasksForDate([
       { ...base, id: 'late', title: '晚些', startTime: '16:00' },

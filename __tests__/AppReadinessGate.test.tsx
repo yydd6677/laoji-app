@@ -20,6 +20,7 @@ describe('AppReadinessGate', () => {
     );
 
     expect(SplashScreen.hideAsync).not.toHaveBeenCalled();
+    expect(view.queryByText('业务页')).toBeNull();
 
     initializing = false;
     await act(async () => {
@@ -27,5 +28,6 @@ describe('AppReadinessGate', () => {
     });
 
     await waitFor(() => expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1));
+    expect(view.getByText('业务页')).toBeTruthy();
   });
 });

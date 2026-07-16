@@ -1,12 +1,22 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { Animated, StyleSheet } from 'react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { Animated, StyleSheet, useWindowDimensions } from 'react-native';
 import { AddEventScreen } from '../src/screens/AddEventScreen';
 import { useAuth } from '../src/store/AuthStore';
 import { useEvents } from '../src/store/EventsStore';
 import { Colors as C } from '../src/theme/colors';
 
 const mockShowDialog = jest.fn();
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function expectBottomUpPage(page: { props: Record<string, unknown> }) {
   const style = page.props.style as Array<{ transform?: Array<Record<string, unknown>> }>;
@@ -25,7 +35,6 @@ jest.mock('../src/components/AppDialog', () => ({
 }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
 jest.mock('../src/store/EventsStore', () => ({
-  checkConflict: jest.fn(() => ({ hasConflict: false, conflicts: [] })),
   useEvents: jest.fn(),
 }));
 jest.mock('../src/services/notifications', () => ({
@@ -44,6 +53,7 @@ describe('AddEventScreen save reliability', () => {
   const updateEvent = jest.fn();
   const deleteEvent = jest.fn();
   const refreshEvents = jest.fn();
+  const findConflicts = jest.fn();
   let beforeRemoveListener: ((event: {
     preventDefault: () => void;
     data: { action: { type: string } };
@@ -60,16 +70,18 @@ describe('AddEventScreen save reliability', () => {
   const route = {
     key: 'edit-event',
     name: 'AddEvent' as const,
-    params: { eventId: 'event-1' },
+    params: { eventRef: { sourceEventId: 'event-1', occurrenceDate: '2026-07-20' } },
   } as React.ComponentProps<typeof AddEventScreen>['route'];
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (useWindowDimensions as jest.Mock).mockReturnValue({ width: 390, height: 844 });
     beforeRemoveListener = undefined;
     addEvent.mockResolvedValue({ reminderDelivery: 'not-required' });
     updateEvent.mockResolvedValue({ reminderDelivery: 'unconfirmed' });
     deleteEvent.mockResolvedValue(undefined);
     refreshEvents.mockResolvedValue({ dataLoaded: true, reminderSyncConfirmed: true });
+    findConflicts.mockResolvedValue({ hasConflict: false, conflicts: [], complete: true });
     (useAuth as jest.Mock).mockReturnValue({
       mode: 'authenticated',
       session: { user: { id: 7 } },
@@ -89,6 +101,7 @@ describe('AddEventScreen save reliability', () => {
       updateEvent,
       deleteEvent,
       refreshEvents,
+      findConflicts,
     });
   });
 
@@ -149,6 +162,41 @@ describe('AddEventScreen save reliability', () => {
     }));
   });
 
+  it.each([
+    { viewport: { width: 320, height: 568 }, expectedWidth: '100%', expectedMaxWidth: undefined },
+    { viewport: { width: 640, height: 360 }, expectedWidth: 608, expectedMaxWidth: 720 },
+  ])('keeps editor actions fixed and body controls scroll-reachable at $viewport.width x $viewport.height', async ({
+    viewport,
+    expectedWidth,
+    expectedMaxWidth,
+  }) => {
+    (useWindowDimensions as jest.Mock).mockReturnValue(viewport);
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+    const frame = view.getByTestId('event-editor-content-frame');
+    const frameStyle = StyleSheet.flatten(frame.props.style);
+    const framedContent = within(frame);
+    const scroll = framedContent.getByTestId('event-editor-scroll');
+    const scrollContent = within(scroll);
+
+    expect(frameStyle).toEqual(expect.objectContaining({
+      flex: 1,
+      width: expectedWidth,
+      alignSelf: 'center',
+    }));
+    expect(frameStyle.maxWidth).toBe(expectedMaxWidth);
+    expect(framedContent.getByLabelText('取消编辑')).toBeTruthy();
+    expect(framedContent.getByLabelText('保存日程修改')).toBeTruthy();
+    expect(StyleSheet.flatten(scroll.props.style)).toEqual(expect.objectContaining({ flex: 1 }));
+    expect(scrollContent.getByPlaceholderText('添加主题')).toBeTruthy();
+    expect(scrollContent.getByLabelText('开始日期 2026-07-20')).toBeTruthy();
+    expect(scrollContent.getByLabelText('结束日期 2026-07-20')).toBeTruthy();
+    expect(scrollContent.getByLabelText('重复 不重复')).toBeTruthy();
+    expect(scrollContent.getByLabelText('添加地点')).toBeTruthy();
+    expect(scrollContent.getByLabelText('添加描述')).toBeTruthy();
+    expect(scrollContent.getByLabelText('选择提醒时间')).toBeTruthy();
+    expect(scrollContent.getByLabelText('删除日程')).toBeTruthy();
+  });
+
   it('keeps the source-style save action clickable so an empty title explains the block', async () => {
     (useEvents as jest.Mock).mockReturnValue({
       events: [],
@@ -156,6 +204,7 @@ describe('AddEventScreen save reliability', () => {
       updateEvent,
       deleteEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-empty-title-event',
@@ -193,8 +242,9 @@ describe('AddEventScreen save reliability', () => {
     await fireEvent.press(view.getByTestId('event-save'));
 
     await waitFor(() => expect(updateEvent).toHaveBeenCalledWith(
-      'event-1',
+      { sourceEventId: 'event-1', occurrenceDate: '2026-07-20' },
       expect.objectContaining({ title: '项目评审', startDate: '2026-07-20' }),
+      'series',
     ));
     expect(refreshEvents).not.toHaveBeenCalled();
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
@@ -205,12 +255,203 @@ describe('AddEventScreen save reliability', () => {
     });
   });
 
+  it('edits the selected recurrence date and chooses scope before conflict checking', async () => {
+    (useEvents as jest.Mock).mockReturnValue({
+      events: [{
+        id: 'series-1@2026-07-20',
+        sourceEventId: 'series-1',
+        occurrenceDate: '2026-07-20',
+        isExpandedOccurrence: true,
+        title: '每周复盘',
+        startDate: '2026-07-20',
+        seriesStartDate: '2026-07-06',
+        startTime: '10:00',
+        endTime: '11:00',
+        repeat: 'weekly',
+        color: '#5B8CFF',
+      }],
+      searchableEvents: [],
+      addEvent,
+      updateEvent,
+      deleteEvent,
+      refreshEvents,
+      findConflicts,
+    });
+    const recurringRoute = {
+      ...route,
+      params: { eventRef: { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' } },
+    } as React.ComponentProps<typeof AddEventScreen>['route'];
+    const view = await render(<AddEventScreen navigation={navigation} route={recurringRoute} />);
+
+    expect(view.getByLabelText('开始日期 2026-07-20')).toBeTruthy();
+    expect(view.getByText('这是重复日程，保存时可选择修改范围')).toBeTruthy();
+    await fireEvent.press(view.getByTestId('event-save'));
+
+    expect(findConflicts).not.toHaveBeenCalled();
+    const scopeDialog = mockShowDialog.mock.calls.at(-1)?.[0];
+    expect(scopeDialog).toEqual(expect.objectContaining({ title: '修改重复日程' }));
+    await act(async () => { await scopeDialog.actions[0].onPress(); });
+
+    await waitFor(() => expect(findConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({ startDate: '2026-07-20' }),
+      { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' },
+      'occurrence',
+    ));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledWith(
+      { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' },
+      expect.objectContaining({ startDate: '2026-07-20' }),
+      'occurrence',
+    ));
+  });
+
+  it('reports a durable pending edit without telling the user to submit it again', async () => {
+    updateEvent.mockResolvedValueOnce({ reminderDelivery: 'unconfirmed', syncStatus: 'pending' });
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+
+    await fireEvent.press(view.getByTestId('event-save'));
+
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalledTimes(1));
+    expect(mockShowDialog).toHaveBeenCalledWith({
+      title: '日程等待同步',
+      message: '保存请求已记录，将在网络恢复后自动确认。',
+      tone: 'warning',
+    });
+  });
+
+  it('locks repeated saves, close, and native back through conflict check and write', async () => {
+    const conflictRequest = deferred<{ hasConflict: false; conflicts: []; complete: true }>();
+    const writeRequest = deferred<{ reminderDelivery: 'not-required' }>();
+    findConflicts.mockReturnValueOnce(conflictRequest.promise);
+    updateEvent.mockReturnValueOnce(writeRequest.promise);
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+    const initialSaveAction = view.getByTestId('event-save').props.onPress;
+
+    await act(() => {
+      initialSaveAction();
+      initialSaveAction();
+    });
+    expect(findConflicts).toHaveBeenCalledTimes(1);
+    expect(view.getByTestId('event-save', { includeHiddenElements: true }).props.accessibilityState.disabled).toBe(true);
+    expect(view.getByTestId('event-editor-main-content', { includeHiddenElements: true }).props.pointerEvents).toBe('none');
+    expect(view.getByTestId('event-editor-main-content', { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
+    expect(view.getByTestId('event-saving-overlay').props.accessibilityViewIsModal).toBe(true);
+    expect(view.getByPlaceholderText('添加主题', { includeHiddenElements: true }).props.editable).toBe(false);
+
+    await fireEvent.press(view.getByLabelText('取消编辑', { includeHiddenElements: true }));
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(mockShowDialog).not.toHaveBeenCalled();
+
+    const preventDefault = jest.fn();
+    await act(() => {
+      beforeRemoveListener?.({
+        preventDefault,
+        data: { action: { type: 'GO_BACK' } },
+      });
+    });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(navigation.dispatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      conflictRequest.resolve({ hasConflict: false, conflicts: [], complete: true });
+      await conflictRequest.promise;
+    });
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledTimes(1));
+
+    await fireEvent.press(view.getByLabelText('取消编辑', { includeHiddenElements: true }));
+    const writePreventDefault = jest.fn();
+    await act(() => {
+      beforeRemoveListener?.({
+        preventDefault: writePreventDefault,
+        data: { action: { type: 'GO_BACK' } },
+      });
+    });
+    expect(writePreventDefault).toHaveBeenCalledTimes(1);
+    expect(navigation.goBack).not.toHaveBeenCalled();
+
+    await act(() => initialSaveAction());
+    expect(findConflicts).toHaveBeenCalledTimes(1);
+    expect(updateEvent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      writeRequest.resolve({ reminderDelivery: 'not-required' });
+      await writeRequest.promise;
+    });
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores a conflict result that resolves after the editor unmounts', async () => {
+    const conflictRequest = deferred<{ hasConflict: false; conflicts: []; complete: true }>();
+    findConflicts.mockReturnValueOnce(conflictRequest.promise);
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+
+    await fireEvent.press(view.getByTestId('event-save'));
+    expect(findConflicts).toHaveBeenCalledTimes(1);
+    await view.unmount();
+    await act(async () => {
+      conflictRequest.resolve({ hasConflict: false, conflicts: [], complete: true });
+      await conflictRequest.promise;
+    });
+
+    expect(updateEvent).not.toHaveBeenCalled();
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(mockShowDialog).not.toHaveBeenCalled();
+  });
+
+  it('ignores a completed write result after the editor has been forcibly removed', async () => {
+    const writeRequest = deferred<{ reminderDelivery: 'not-required' }>();
+    updateEvent.mockReturnValueOnce(writeRequest.promise);
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+
+    await fireEvent.press(view.getByTestId('event-save'));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await act(async () => {
+      writeRequest.resolve({ reminderDelivery: 'not-required' });
+      await writeRequest.promise;
+    });
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(mockShowDialog).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a conflict confirmation after cancellation before allowing a fresh save', async () => {
+    findConflicts.mockResolvedValueOnce({
+      hasConflict: true,
+      complete: true,
+      conflicts: [{
+        severity: 'overlap',
+        event: {
+          id: 'event-2',
+          title: '已有安排',
+          startDate: '2026-07-20',
+          startTime: '10:30',
+          endTime: '11:30',
+          color: '#1456F0',
+        },
+      }],
+    });
+    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+
+    await fireEvent.press(view.getByTestId('event-save'));
+    await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '时间冲突' }),
+    ));
+    const conflictDialog = mockShowDialog.mock.calls.at(-1)?.[0];
+    await act(() => conflictDialog.actions[1].onPress());
+    await act(() => conflictDialog.actions[0].onPress());
+    expect(updateEvent).not.toHaveBeenCalled();
+
+    await fireEvent.press(view.getByTestId('event-save'));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledTimes(1));
+  });
+
   it('uses the store create result without issuing a duplicate screen refresh', async () => {
     (useEvents as jest.Mock).mockReturnValue({
       events: [],
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-event',
@@ -237,6 +478,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-all-day-event',
@@ -270,6 +512,7 @@ describe('AddEventScreen save reliability', () => {
       updateEvent,
       deleteEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-from-day-slot',
@@ -302,9 +545,14 @@ describe('AddEventScreen save reliability', () => {
       updateEvent,
       deleteEvent,
       refreshEvents,
+      findConflicts,
     });
 
-    const view = await render(<AddEventScreen navigation={navigation} route={route} />);
+    const searchRoute = {
+      ...route,
+      params: { eventRef: { sourceEventId: 'event-1', occurrenceDate: '2025-03-08' } },
+    } as React.ComponentProps<typeof AddEventScreen>['route'];
+    const view = await render(<AddEventScreen navigation={navigation} route={searchRoute} />);
     expect(view.getByPlaceholderText('添加主题').props.value).toBe('历史复盘');
     expect(view.queryByText('日程不存在')).toBeNull();
   });
@@ -315,6 +563,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const draftRoute = {
       key: 'create-from-voice-draft',
@@ -371,6 +620,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-repeat-event',
@@ -409,6 +659,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-reminder-event',
@@ -444,6 +695,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-description-event',
@@ -480,6 +732,7 @@ describe('AddEventScreen save reliability', () => {
       addEvent,
       updateEvent,
       refreshEvents,
+      findConflicts,
     });
     const createRoute = {
       key: 'create-event-details',

@@ -1,11 +1,13 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   AppState,
   Easing,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,9 +16,18 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getCalendars } from 'expo-localization';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
+import { eventDisplaysAsAllDay, sortAllDayEvents } from '../utils/eventAllDay';
+import { layoutTimelineEvents, type TimelineEvent } from '../utils/dayTimelineLayout';
+import {
+  projectTimelineEdit,
+  timelineEdgeScrollStep,
+  type TimelineEditKind,
+  type TimelineMinuteRange,
+} from '../utils/dayTimelineGestures';
 import {
   addDays,
   dateKey,
@@ -36,14 +47,14 @@ const DAY_HEADER_HEIGHT = 52;
 const ALL_DAY_ITEM_HEIGHT = 25;
 const ALL_DAY_COLLAPSED_ROWS = 3;
 const ALL_DAY_MAX_EXPANDED_ROWS = 7.5;
+const QUICK_CREATE_MINUTES = 60;
+const REPEAT_ACTION_GUARD_MS = 700;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-type TimelineEvent = {
+type TimelineEditPreview = TimelineMinuteRange & {
   event: CalEvent;
-  start: number;
-  end: number;
-  column: number;
-  columns: number;
+  original: TimelineMinuteRange;
+  saving: boolean;
 };
 
 export function DayTimelineView({
@@ -52,18 +63,26 @@ export function DayTimelineView({
   onDateChange,
   onOpenEvent,
   onCreate,
+  onChangeEventTime,
 }: {
   date: Date;
   events: CalEvent[];
   onDateChange: (date: Date) => void;
   onOpenEvent: (event: CalEvent) => void;
   onCreate: (startDate: Date, startTime: string, endDate: Date, endTime: string) => void;
+  onChangeEventTime?: (
+    event: CalEvent,
+    changes: Pick<CalEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ) => Promise<boolean>;
 }) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [now, setNow] = useState(() => new Date());
   const pagerRef = useRef<ScrollView | null>(null);
   const dayGestureActive = useRef(false);
   const dayGestureHandled = useRef(false);
+  const [transientClearSignal, setTransientClearSignal] = useState(0);
+  const [allDayExpanded, setAllDayExpanded] = useState(false);
+  const [allDayScrollY, setAllDayScrollY] = useState(0);
   const pageWidth = Math.max(280, width);
   const dates = useMemo(() => [addDays(date, -1), date, addDays(date, 1)], [date]);
 
@@ -95,23 +114,8 @@ export function DayTimelineView({
     onDateChange(addDays(date, page === 0 ? -1 : 1));
   };
 
-  const shiftByAccessibility = (event: { nativeEvent: { actionName: string } }) => {
-    if (event.nativeEvent.actionName === 'decrement') onDateChange(addDays(date, -1));
-    if (event.nativeEvent.actionName === 'increment') onDateChange(addDays(date, 1));
-  };
-
   return (
-    <View
-      style={s.root}
-      accessibilityRole="adjustable"
-      accessibilityLabel={`单日视图，${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`}
-      accessibilityHint="左右滑动切换日期"
-      accessibilityActions={[
-        { name: 'decrement', label: '前一天' },
-        { name: 'increment', label: '后一天' },
-      ]}
-      onAccessibilityAction={shiftByAccessibility}
-    >
+    <View style={s.root} accessible={false}>
       <ScrollView
         ref={pagerRef}
         horizontal
@@ -119,10 +123,12 @@ export function DayTimelineView({
         bounces={false}
         decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
+        accessible={false}
         contentOffset={{ x: pageWidth, y: 0 }}
         onScrollBeginDrag={() => {
           dayGestureActive.current = true;
           dayGestureHandled.current = false;
+          setTransientClearSignal(value => value + 1);
         }}
         onMomentumScrollEnd={settleDate}
         scrollEventThrottle={16}
@@ -130,7 +136,7 @@ export function DayTimelineView({
       >
         {dates.map((pageDate, index) => (
           <DayPage
-            key={`${dateKey(pageDate)}-${index}`}
+            key={dateKey(pageDate)}
             date={pageDate}
             width={pageWidth}
             events={events}
@@ -138,7 +144,14 @@ export function DayTimelineView({
             onDateChange={onDateChange}
             onOpenEvent={onOpenEvent}
             onCreate={onCreate}
+            onChangeEventTime={onChangeEventTime}
             now={now}
+            screenHeight={height}
+            transientClearSignal={transientClearSignal}
+            allDayExpanded={allDayExpanded}
+            allDayScrollY={allDayScrollY}
+            onAllDayExpandedChange={setAllDayExpanded}
+            onAllDayScrollChange={setAllDayScrollY}
           />
         ))}
       </ScrollView>
@@ -154,7 +167,14 @@ function DayPage({
   onDateChange,
   onOpenEvent,
   onCreate,
+  onChangeEventTime,
   now,
+  screenHeight,
+  transientClearSignal,
+  allDayExpanded,
+  allDayScrollY,
+  onAllDayExpandedChange,
+  onAllDayScrollChange,
 }: {
   date: Date;
   width: number;
@@ -163,22 +183,48 @@ function DayPage({
   onDateChange: (date: Date) => void;
   onOpenEvent: (event: CalEvent) => void;
   onCreate: (startDate: Date, startTime: string, endDate: Date, endTime: string) => void;
+  onChangeEventTime?: (
+    event: CalEvent,
+    changes: Pick<CalEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
+  ) => Promise<boolean>;
   now: Date;
+  screenHeight: number;
+  transientClearSignal: number;
+  allDayExpanded: boolean;
+  allDayScrollY: number;
+  onAllDayExpandedChange: (expanded: boolean) => void;
+  onAllDayScrollChange: (offset: number) => void;
 }) {
   const scrollRef = useRef<ScrollView | null>(null);
+  const allDayScrollRef = useRef<ScrollView | null>(null);
+  const positionedDateRef = useRef<string | null>(null);
+  const lastCreateRef = useRef<{ key: string; at: number } | null>(null);
+  const lastOpenRef = useRef<{ key: string; at: number } | null>(null);
+  const timelineScrollYRef = useRef(0);
+  const editPreviewRef = useRef<TimelineEditPreview | null>(null);
+  const editGestureRef = useRef<{
+    kind: TimelineEditKind;
+    original: TimelineMinuteRange;
+    scrollStart: number;
+  } | null>(null);
+  const longPressConsumedRef = useRef<string | null>(null);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [quickSlot, setQuickSlot] = useState<{ start: number; end: number } | null>(null);
-  const [allDayExpanded, setAllDayExpanded] = useState(false);
+  const [editPreview, setEditPreview] = useState<TimelineEditPreview | null>(null);
   const allDayHeight = useRef(new Animated.Value(0)).current;
+  const uses24HourClock = systemUses24HourClock();
   const today = now;
   const selectedKey = dateKey(date);
   const selectedEvents = useMemo(
-    () => selectTasksForDate(events, selectedKey).filter(event => eventOccupiesDate(event, selectedKey)),
+    () => selectTasksForDate(events, selectedKey),
     [events, selectedKey],
   );
   const allDayEvents = useMemo(
-    () => selectedEvents.filter(eventShowsAsAllDay),
-    [selectedEvents],
+    () => sortAllDayEvents(
+      selectedEvents.filter(eventDisplaysAsAllDay),
+      events,
+    ),
+    [events, selectedEvents],
   );
   const timelineEvents = useMemo(
     () => layoutTimelineEvents(selectedEvents, selectedKey),
@@ -187,11 +233,30 @@ function DayPage({
   const weekStart = sundayStartOfWeek(date);
   const weekDates = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
   const availableWidth = Math.max(180, width - TIME_GUTTER - 6);
+  const clearQuickSlot = useCallback(() => setQuickSlot(null), []);
+  const updateEditPreview = useCallback((next: TimelineEditPreview | null) => {
+    editPreviewRef.current = next;
+    setEditPreview(next);
+  }, []);
+
+  const cancelTimelineEdit = useCallback(() => {
+    editGestureRef.current = null;
+    longPressConsumedRef.current = null;
+    updateEditPreview(null);
+  }, [updateEditPreview]);
 
   useEffect(() => {
-    setQuickSlot(null);
-    setAllDayExpanded(false);
-  }, [selectedKey]);
+    clearQuickSlot();
+    positionedDateRef.current = null;
+    lastCreateRef.current = null;
+    lastOpenRef.current = null;
+    cancelTimelineEdit();
+  }, [cancelTimelineEdit, clearQuickSlot, selectedKey]);
+
+  useEffect(() => {
+    clearQuickSlot();
+    cancelTimelineEdit();
+  }, [cancelTimelineEdit, clearQuickSlot, transientClearSignal]);
 
   const collapsedAllDayCount = allDayEvents.length > ALL_DAY_COLLAPSED_ROWS
     ? ALL_DAY_COLLAPSED_ROWS
@@ -201,6 +266,20 @@ function DayPage({
       ? Math.min(allDayEvents.length, ALL_DAY_MAX_EXPANDED_ROWS)
       : collapsedAllDayCount
   ) * ALL_DAY_ITEM_HEIGHT;
+  const allDayMaxScroll = allDayExpanded
+    ? Math.max(0, allDayEvents.length * ALL_DAY_ITEM_HEIGHT - targetAllDayHeight)
+    : 0;
+
+  useEffect(() => {
+    if (!active || allDayEvents.length === 0) return;
+    const clamped = Math.max(0, Math.min(allDayScrollY, allDayMaxScroll));
+    if (clamped !== allDayScrollY) onAllDayScrollChange(clamped);
+    if (clamped === 0 && allDayScrollY === 0) return;
+    const frame = requestAnimationFrame(() => {
+      allDayScrollRef.current?.scrollTo({ y: clamped, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, allDayEvents.length, allDayMaxScroll, allDayScrollY, onAllDayScrollChange, selectedKey]);
 
   useEffect(() => {
     Animated.timing(allDayHeight, {
@@ -212,7 +291,11 @@ function DayPage({
   }, [allDayHeight, targetAllDayHeight]);
 
   useEffect(() => {
-    if (!active || viewportHeight <= 0) return;
+    if (
+      !active
+      || viewportHeight <= 0
+      || positionedDateRef.current === selectedKey
+    ) return;
     const firstStart = timelineEvents[0]?.start;
     const focusMinutes = isSameDay(date, now)
       ? now.getHours() * 60 + now.getMinutes()
@@ -220,13 +303,201 @@ function DayPage({
     const focusY = TOP_SPACE + (focusMinutes / 60) * HOUR_HEIGHT;
     const maxScroll = Math.max(0, DAY_CANVAS_HEIGHT - viewportHeight);
     const target = Math.max(0, Math.min(maxScroll, focusY - viewportHeight / 2));
-    const frame = requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: target, animated: false }));
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: target, animated: false });
+      positionedDateRef.current = selectedKey;
+    });
     return () => cancelAnimationFrame(frame);
-  }, [active, date, selectedKey, timelineEvents, viewportHeight]);
+    // Event refreshes must not move a timeline the user has already positioned.
+    // The latest events are intentionally read only when a date first becomes active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, selectedKey, viewportHeight]);
 
   const onTimelineLayout = (event: LayoutChangeEvent) => {
     const height = Math.round(event.nativeEvent.layout.height);
+    if (viewportHeight > 0 && viewportHeight !== height) clearQuickSlot();
     setViewportHeight(current => current === height ? current : height);
+  };
+
+  const openEvent = (event: CalEvent) => {
+    clearQuickSlot();
+    const key = `${event.id}:${event.startDate}:${event.startTime ?? ''}`;
+    if (longPressConsumedRef.current === key) {
+      longPressConsumedRef.current = null;
+      return;
+    }
+    const actionTime = Date.now();
+    const elapsed = actionTime - (lastOpenRef.current?.at ?? actionTime);
+    if (
+      lastOpenRef.current?.key === key
+      && elapsed >= 0
+      && elapsed < REPEAT_ACTION_GUARD_MS
+    ) return;
+    lastOpenRef.current = { key, at: actionTime };
+    onOpenEvent(event);
+  };
+
+  const selectQuickSlot = (start: number) => {
+    setQuickSlot({ start, end: start + QUICK_CREATE_MINUTES });
+  };
+
+  const createFromQuickSlot = (slot: { start: number; end: number }) => {
+    const actionKey = `${selectedKey}:${slot.start}:${slot.end}`;
+    const actionTime = Date.now();
+    const elapsed = actionTime - (lastCreateRef.current?.at ?? actionTime);
+    if (
+      lastCreateRef.current?.key === actionKey
+      && elapsed >= 0
+      && elapsed < REPEAT_ACTION_GUARD_MS
+    ) return;
+
+    lastCreateRef.current = { key: actionKey, at: actionTime };
+    clearQuickSlot();
+    const endDayOffset = Math.floor(slot.end / DAY_MINUTES);
+    const endMinute = slot.end % DAY_MINUTES;
+    try {
+      onCreate(
+        date,
+        minutesToTime(slot.start),
+        addDays(date, endDayOffset),
+        minutesToTime(endMinute),
+      );
+    } catch (error) {
+      lastCreateRef.current = null;
+      throw error;
+    }
+  };
+
+  const canEditTimelineItem = useCallback((item: TimelineEvent) => (
+    Boolean(onChangeEventTime)
+    && item.event.startDate === selectedKey
+    && (!item.event.endDate || item.event.endDate === selectedKey)
+    && item.end > item.start
+  ), [onChangeEventTime, selectedKey]);
+
+  const startTimelineEdit = useCallback((item: TimelineEvent) => {
+    if (!active || !canEditTimelineItem(item)) return;
+    clearQuickSlot();
+    longPressConsumedRef.current = `${item.event.id}:${item.event.startDate}:${item.event.startTime ?? ''}`;
+    updateEditPreview({
+      event: item.event,
+      start: item.start,
+      end: item.end,
+      original: { start: item.start, end: item.end },
+      saving: false,
+    });
+  }, [active, canEditTimelineItem, clearQuickSlot, updateEditPreview]);
+
+  const beginTimelineGesture = useCallback((kind: TimelineEditKind) => {
+    const current = editPreviewRef.current;
+    if (!current || current.saving) return;
+    editGestureRef.current = {
+      kind,
+      original: { start: current.start, end: current.end },
+      scrollStart: timelineScrollYRef.current,
+    };
+  }, []);
+
+  const moveTimelineGesture = useCallback((dy: number, moveY: number) => {
+    const current = editPreviewRef.current;
+    const gesture = editGestureRef.current;
+    if (!current || current.saving || !gesture) return;
+
+    const edgeStep = timelineEdgeScrollStep(moveY, screenHeight);
+    if (edgeStep !== 0 && viewportHeight > 0) {
+      const maxScroll = Math.max(0, DAY_CANVAS_HEIGHT - viewportHeight);
+      const nextScroll = Math.max(0, Math.min(maxScroll, timelineScrollYRef.current + edgeStep));
+      if (nextScroll !== timelineScrollYRef.current) {
+        timelineScrollYRef.current = nextScroll;
+        scrollRef.current?.scrollTo({ y: nextScroll, animated: false });
+      }
+    }
+
+    const projected = projectTimelineEdit({
+      kind: gesture.kind,
+      original: gesture.original,
+      deltaPixels: dy + timelineScrollYRef.current - gesture.scrollStart,
+      pixelsPerMinute: HOUR_HEIGHT / 60,
+    });
+    updateEditPreview({ ...current, ...projected });
+  }, [screenHeight, updateEditPreview, viewportHeight]);
+
+  const commitTimelineEdit = useCallback(async () => {
+    const current = editPreviewRef.current;
+    editGestureRef.current = null;
+    if (!current || current.saving || !onChangeEventTime) return;
+    if (current.start === current.original.start && current.end === current.original.end) return;
+
+    const pending = { ...current, saving: true };
+    updateEditPreview(pending);
+    let applied = false;
+    try {
+      applied = await onChangeEventTime(current.event, {
+        startDate: selectedKey,
+        endDate: current.event.endDate === undefined ? undefined : selectedKey,
+        startTime: minutesToTime(current.start),
+        endTime: minutesToTime(current.end),
+      });
+    } catch {
+      applied = false;
+    }
+
+    if (editPreviewRef.current !== pending) return;
+    // The source event remains unchanged until the repository confirms the write,
+    // so clearing the preview is also the deterministic failure rollback.
+    updateEditPreview(null);
+    longPressConsumedRef.current = null;
+    if (!applied) return;
+  }, [onChangeEventTime, selectedKey, updateEditPreview]);
+
+  const terminateTimelineGesture = useCallback(() => {
+    const current = editPreviewRef.current;
+    const gesture = editGestureRef.current;
+    editGestureRef.current = null;
+    if (!current || !gesture || current.saving) return;
+    updateEditPreview({ ...current, ...gesture.original });
+  }, [updateEditPreview]);
+
+  const nudgeTimelineEdit = useCallback((kind: TimelineEditKind, minutes: number) => {
+    const current = editPreviewRef.current;
+    if (!current || current.saving) return;
+    const projected = projectTimelineEdit({
+      kind,
+      original: { start: current.start, end: current.end },
+      deltaPixels: minutes * (HOUR_HEIGHT / 60),
+      pixelsPerMinute: HOUR_HEIGHT / 60,
+    });
+    updateEditPreview({ ...current, ...projected });
+  }, [updateEditPreview]);
+
+  const makeTimelineResponder = useCallback((kind: TimelineEditKind) => PanResponder.create({
+    onStartShouldSetPanResponder: () => kind !== 'move' && Boolean(editPreviewRef.current),
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      Boolean(editPreviewRef.current)
+      && Math.abs(gesture.dy) > 2
+    ),
+    onPanResponderGrant: () => beginTimelineGesture(kind),
+    onPanResponderMove: (_event, gesture) => moveTimelineGesture(gesture.dy, gesture.moveY),
+    onPanResponderRelease: () => { void commitTimelineEdit(); },
+    onPanResponderTerminate: terminateTimelineGesture,
+    onPanResponderTerminationRequest: () => false,
+  }), [beginTimelineGesture, commitTimelineEdit, moveTimelineGesture, terminateTimelineGesture]);
+  const moveTimelineResponder = useMemo(
+    () => makeTimelineResponder('move'),
+    [makeTimelineResponder],
+  );
+  const resizeStartResponder = useMemo(
+    () => makeTimelineResponder('resize-start'),
+    [makeTimelineResponder],
+  );
+  const resizeEndResponder = useMemo(
+    () => makeTimelineResponder('resize-end'),
+    [makeTimelineResponder],
+  );
+
+  const shiftByAccessibility = (event: { nativeEvent: { actionName: string } }) => {
+    if (event.nativeEvent.actionName === 'decrement') onDateChange(addDays(date, -1));
+    if (event.nativeEvent.actionName === 'increment') onDateChange(addDays(date, 1));
   };
 
   return (
@@ -235,7 +506,7 @@ function DayPage({
       accessibilityElementsHidden={!active}
       importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
     >
-      <View style={s.dayHeader}>
+      <View key="day-header" style={s.dayHeader} accessible={false}>
         <View style={s.timeZoneHeader}>
           <Text style={s.timeZoneText}>{timeZoneLabel(date)}</Text>
         </View>
@@ -247,12 +518,21 @@ function DayPage({
               <TouchableOpacity
                 key={dateKey(weekDate)}
                 style={s.weekDay}
-                onPress={() => onDateChange(weekDate)}
+                onPress={() => {
+                  clearQuickSlot();
+                  onDateChange(weekDate);
+                }}
                 disabled={!active}
                 activeOpacity={0.68}
                 accessibilityRole="button"
                 accessibilityState={{ selected, disabled: !active }}
                 accessibilityLabel={`${weekDate.getMonth() + 1}月${weekDate.getDate()}日，周${WEEKDAYS[index]}${current ? '，今天' : ''}`}
+                accessibilityHint={selected ? '使用调整操作切换前后一天' : '双击切换到这一天'}
+                accessibilityActions={selected ? [
+                  { name: 'decrement', label: '前一天' },
+                  { name: 'increment', label: '后一天' },
+                ] : undefined}
+                onAccessibilityAction={selected ? shiftByAccessibility : undefined}
                 testID={active ? `day-header-${dateKey(weekDate)}` : undefined}
               >
                 <Text style={[
@@ -283,15 +563,26 @@ function DayPage({
       </View>
 
       {allDayEvents.length > 0 ? (
-        <View style={s.allDayRow}>
+        <View key="all-day-row" style={s.allDayRow} accessible={false}>
           <View style={s.allDayLabelLane}>
             <Text style={s.allDayLabel}>全天</Text>
           </View>
           <Animated.View style={[s.allDayViewport, { height: allDayHeight }]}>
             <ScrollView
+              ref={allDayScrollRef}
               showsVerticalScrollIndicator={false}
               scrollEnabled={allDayExpanded && allDayEvents.length > ALL_DAY_MAX_EXPANDED_ROWS}
               nestedScrollEnabled
+              contentOffset={{ x: 0, y: Math.min(allDayScrollY, allDayMaxScroll) }}
+              onScroll={event => {
+                if (!active || !allDayExpanded) return;
+                onAllDayScrollChange(Math.max(0, Math.min(
+                  event.nativeEvent.contentOffset.y,
+                  allDayMaxScroll,
+                )));
+              }}
+              scrollEventThrottle={16}
+              testID={active ? 'all-day-scroll' : undefined}
             >
               {(allDayExpanded || allDayEvents.length <= ALL_DAY_COLLAPSED_ROWS
                 ? allDayEvents
@@ -300,24 +591,29 @@ function DayPage({
                 <TouchableOpacity
                   key={event.id}
                   style={s.allDayChip}
-                  onPress={() => onOpenEvent(event)}
+                  onPress={() => openEvent(event)}
                   disabled={!active}
                   activeOpacity={0.72}
                   accessibilityRole="button"
+                  accessible={active}
+                  accessibilityState={{ disabled: !active }}
                   accessibilityLabel={`${event.title}，全天`}
+                  accessibilityHint="双击查看日程详情"
                 >
-                  <Text style={s.allDayTitle} numberOfLines={1}>{event.title}</Text>
+                  <Text style={s.allDayTitle} numberOfLines={1} accessible={false}>{event.title}</Text>
                 </TouchableOpacity>
               ))}
               {!allDayExpanded && allDayEvents.length > ALL_DAY_COLLAPSED_ROWS ? (
                 <TouchableOpacity
                   style={s.allDayMoreRow}
-                  onPress={() => setAllDayExpanded(true)}
+                  onPress={() => onAllDayExpandedChange(true)}
                   disabled={!active}
                   accessibilityRole="button"
+                  accessible={active}
+                  accessibilityState={{ disabled: !active }}
                   accessibilityLabel={`展开其余${allDayEvents.length - (ALL_DAY_COLLAPSED_ROWS - 1)}项全天日程`}
                 >
-                  <Text style={s.allDayMoreText}>
+                  <Text style={s.allDayMoreText} accessible={false}>
                     还有 {allDayEvents.length - (ALL_DAY_COLLAPSED_ROWS - 1)} 项
                   </Text>
                 </TouchableOpacity>
@@ -327,27 +623,40 @@ function DayPage({
           {allDayEvents.length > ALL_DAY_COLLAPSED_ROWS ? (
             <TouchableOpacity
               style={s.allDayExpandButton}
-              onPress={() => setAllDayExpanded(value => !value)}
+              onPress={() => onAllDayExpandedChange(!allDayExpanded)}
               disabled={!active}
               accessibilityRole="button"
+              accessible={active}
               accessibilityLabel={allDayExpanded ? '收起全天日程' : '展开全天日程'}
-              accessibilityState={{ expanded: allDayExpanded }}
+              accessibilityState={{ expanded: allDayExpanded, disabled: !active }}
               testID={active ? 'all-day-expand-toggle' : undefined}
             >
-              <Ionicons name={allDayExpanded ? 'chevron-up' : 'chevron-down'} size={12} color={C.sub} />
+              <Ionicons
+                name={allDayExpanded ? 'chevron-up' : 'chevron-down'}
+                size={12}
+                color={C.sub}
+                accessible={false}
+              />
             </TouchableOpacity>
           ) : null}
         </View>
       ) : null}
 
       <ScrollView
+        key="timeline-scroll"
         ref={scrollRef}
         style={s.timelineScroll}
         contentContainerStyle={s.timelineContent}
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled
         onLayout={onTimelineLayout}
-        scrollEnabled={active}
+        onScrollBeginDrag={clearQuickSlot}
+        onScroll={event => {
+          timelineScrollYRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+        }}
+        scrollEventThrottle={16}
+        scrollEnabled={active && !editPreview}
+        accessible={false}
         testID={active ? 'day-timeline-scroll' : undefined}
       >
         <View style={s.timelineGrid}>
@@ -356,26 +665,41 @@ function DayPage({
               <Text
                 style={[s.hourLabel, { top: TOP_SPACE + hour * HOUR_HEIGHT - 8 }]}
                 pointerEvents="none"
+                accessible={false}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
                 testID={active ? `day-hour-${String(hour).padStart(2, '0')}` : undefined}
               >
-                {`${String(hour).padStart(2, '0')}:00`}
+                {formatTimelineHourLabel(hour, uses24HourClock)}
               </Text>
-              <View style={[s.hourDivider, { top: TOP_SPACE + hour * HOUR_HEIGHT }]} pointerEvents="none" />
+              <View
+                style={[s.hourDivider, { top: TOP_SPACE + hour * HOUR_HEIGHT }]}
+                pointerEvents="none"
+                accessible={false}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              />
             </React.Fragment>
           ))}
 
           {Array.from({ length: 48 }, (_, slot) => {
             const start = slot * 30;
-            const end = start + 30;
+            const end = start + QUICK_CREATE_MINUTES;
+            const selected = quickSlot?.start === start;
             return (
               <TouchableOpacity
                 key={slot}
                 style={[s.halfHourSlot, { top: TOP_SPACE + (start / 60) * HOUR_HEIGHT }]}
-                onPress={() => setQuickSlot({ start, end })}
+                onPress={() => selectQuickSlot(start)}
                 disabled={!active}
                 activeOpacity={1}
                 accessibilityRole="button"
-                accessibilityLabel={`${minutesToTime(start)}，新建日程`}
+                accessible={active && !selected}
+                accessibilityElementsHidden={!active || selected}
+                importantForAccessibility={active && !selected ? 'yes' : 'no-hide-descendants'}
+                accessibilityState={{ disabled: !active }}
+                accessibilityLabel={`${formatTimelineRange(start, end, uses24HourClock)}，空白时段`}
+                accessibilityHint="双击新建一小时日程"
                 testID={active ? `day-slot-${minutesToTime(start)}` : undefined}
               />
             );
@@ -387,55 +711,142 @@ function DayPage({
                 s.quickCreateBlock,
                 {
                   top: TOP_SPACE + (quickSlot.start / 60) * HOUR_HEIGHT,
-                  height: Math.max(25, ((quickSlot.end - quickSlot.start) / 60) * HOUR_HEIGHT),
+                  height: Math.max(
+                    25,
+                    ((Math.min(quickSlot.end, DAY_MINUTES) - quickSlot.start) / 60) * HOUR_HEIGHT,
+                  ),
                 },
               ]}
-              onPress={() => onCreate(
-                date,
-                minutesToTime(quickSlot.start),
-                quickSlot.end === DAY_MINUTES ? addDays(date, 1) : date,
-                quickSlot.end === DAY_MINUTES ? '00:00' : minutesToTime(quickSlot.end),
-              )}
+              onPress={() => createFromQuickSlot(quickSlot)}
               disabled={!active}
               activeOpacity={0.72}
               accessibilityRole="button"
-              accessibilityLabel={`${minutesToTime(quickSlot.start)}至${minutesToTime(quickSlot.end)}，新建日程`}
+              accessible={active}
+              accessibilityState={{ disabled: !active }}
+              accessibilityLabel={`${formatTimelineRange(quickSlot.start, quickSlot.end, uses24HourClock)}，新建日程`}
+              accessibilityHint="双击确认，滚动可取消"
               testID={active ? 'day-quick-create' : undefined}
             >
-              <Ionicons name="add" size={14} color={C.primary} />
-              <Text style={s.quickCreateText}>新建日程</Text>
+              <Ionicons name="add" size={14} color={C.primary} accessible={false} />
+              <Text style={s.quickCreateText} accessible={false}>新建日程</Text>
             </TouchableOpacity>
           ) : null}
 
           {timelineEvents.map(item => {
+            const selectedEdit = editPreview?.event.id === item.event.id ? editPreview : null;
             const columnGap = 2;
             const eventWidth = (availableWidth - columnGap * Math.max(0, item.columns - 1)) / item.columns;
-            const top = TOP_SPACE + (item.start / 60) * HOUR_HEIGHT;
-            const height = Math.max(24, ((item.end - item.start) / 60) * HOUR_HEIGHT - 1);
+            const displayWidth = eventWidth * item.columnSpan + columnGap * (item.columnSpan - 1);
+            const displayStart = selectedEdit?.start ?? item.start;
+            const displayEnd = selectedEdit?.end ?? item.end;
+            const top = TOP_SPACE + (displayStart / 60) * HOUR_HEIGHT;
+            const height = Math.max(24, ((displayEnd - displayStart) / 60) * HOUR_HEIGHT - 1);
             return (
               <TouchableOpacity
                 key={item.event.id}
                 style={[
                   s.timelineEvent,
+                  selectedEdit && s.timelineEventEditing,
                   {
                     top,
                     height,
                     left: TIME_GUTTER + 3 + item.column * (eventWidth + columnGap),
-                    width: eventWidth,
+                    width: displayWidth,
+                    zIndex: selectedEdit ? 50 : item.zIndex,
                   },
                 ]}
-                onPress={() => onOpenEvent(item.event)}
+                onPress={() => {
+                  if (selectedEdit) return;
+                  openEvent(item.event);
+                }}
+                onLongPress={() => startTimelineEdit(item)}
+                delayLongPress={320}
                 disabled={!active}
-                activeOpacity={0.74}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.event.title}，${minutesToTime(item.start)}至${minutesToTime(item.end)}`}
+                activeOpacity={selectedEdit ? 1 : 0.74}
+                accessibilityRole={selectedEdit ? 'adjustable' : 'button'}
+                accessible={active}
+                accessibilityState={{ disabled: !active, busy: Boolean(selectedEdit?.saving) }}
+                accessibilityLabel={`${item.event.title}，${formatTimelineRange(displayStart, displayEnd, uses24HourClock)}`}
+                accessibilityHint={selectedEdit
+                  ? '上下调整移动十五分钟，确认保存，取消恢复原时间'
+                  : onChangeEventTime && canEditTimelineItem(item)
+                    ? '双击查看详情，可用调整时间操作编辑'
+                    : '双击查看日程详情'}
+                accessibilityActions={selectedEdit ? [
+                  { name: 'decrement', label: '提前十五分钟' },
+                  { name: 'increment', label: '推迟十五分钟' },
+                  { name: 'activate', label: '保存时间' },
+                  { name: 'escape', label: '取消调整' },
+                ] : onChangeEventTime && canEditTimelineItem(item) ? [
+                  { name: 'edit', label: '调整时间' },
+                ] : undefined}
+                onAccessibilityAction={event => {
+                  const action = event.nativeEvent.actionName;
+                  if (action === 'edit') startTimelineEdit(item);
+                  if (action === 'decrement') nudgeTimelineEdit('move', -15);
+                  if (action === 'increment') nudgeTimelineEdit('move', 15);
+                  if (action === 'activate') { void commitTimelineEdit(); }
+                  if (action === 'escape') cancelTimelineEdit();
+                }}
                 testID={active ? `timeline-event-${item.event.id}` : undefined}
+                {...(selectedEdit ? moveTimelineResponder.panHandlers : {})}
               >
-                <Text style={s.timelineEventTitle} numberOfLines={height < 39 ? 1 : 2}>{item.event.title}</Text>
+                <Text style={s.timelineEventTitle} numberOfLines={height < 39 ? 1 : 2} accessible={false}>
+                  {item.event.title}
+                </Text>
                 {height >= 39 ? (
-                  <Text style={s.timelineEventTime} numberOfLines={1}>
-                    {minutesToTime(item.start)} - {minutesToTime(item.end)}
+                  <Text style={s.timelineEventTime} numberOfLines={1} accessible={false}>
+                    {formatTimelineRange(displayStart, displayEnd, uses24HourClock, ' - ')}
                   </Text>
+                ) : null}
+                {selectedEdit ? (
+                  <>
+                    <View
+                      style={[s.timelineResizeHandle, s.timelineResizeHandleTop]}
+                      accessible={active}
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="调整日程开始时间"
+                      accessibilityActions={[
+                        { name: 'decrement', label: '开始时间提前十五分钟' },
+                        { name: 'increment', label: '开始时间推迟十五分钟' },
+                      ]}
+                      onAccessibilityAction={event => {
+                        nudgeTimelineEdit(
+                          'resize-start',
+                          event.nativeEvent.actionName === 'decrement' ? -15 : 15,
+                        );
+                      }}
+                      testID={active ? `timeline-resize-start-${item.event.id}` : undefined}
+                      {...resizeStartResponder.panHandlers}
+                    >
+                      <View style={s.timelineResizeKnob} />
+                    </View>
+                    <View
+                      style={[s.timelineResizeHandle, s.timelineResizeHandleBottom]}
+                      accessible={active}
+                      accessibilityRole="adjustable"
+                      accessibilityLabel="调整日程结束时间"
+                      accessibilityActions={[
+                        { name: 'decrement', label: '结束时间提前十五分钟' },
+                        { name: 'increment', label: '结束时间推迟十五分钟' },
+                      ]}
+                      onAccessibilityAction={event => {
+                        nudgeTimelineEdit(
+                          'resize-end',
+                          event.nativeEvent.actionName === 'decrement' ? -15 : 15,
+                        );
+                      }}
+                      testID={active ? `timeline-resize-end-${item.event.id}` : undefined}
+                      {...resizeEndResponder.panHandlers}
+                    >
+                      <View style={s.timelineResizeKnob} />
+                    </View>
+                    {selectedEdit.saving ? (
+                      <View style={s.timelineSaving} pointerEvents="none">
+                        <ActivityIndicator size="small" color={C.primary} />
+                      </View>
+                    ) : null}
+                  </>
                 ) : null}
               </TouchableOpacity>
             );
@@ -451,106 +862,72 @@ function DayPage({
 function CurrentTimeLine({ now }: { now: Date }) {
   const minutes = now.getHours() * 60 + now.getMinutes();
   return (
-    <View style={[s.currentLine, { top: TOP_SPACE + (minutes / 60) * HOUR_HEIGHT - 3.5 }]} pointerEvents="none">
+    <View
+      style={[s.currentLine, { top: TOP_SPACE + (minutes / 60) * HOUR_HEIGHT - 3.5 }]}
+      pointerEvents="none"
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       <View style={s.currentDot} />
       <View style={s.currentRule} />
     </View>
   );
 }
 
-export function layoutTimelineEvents(events: CalEvent[], selectedDate: string): TimelineEvent[] {
-  const source = events
-    .filter(event => !eventShowsAsAllDay(event) && Boolean(event.startTime))
-    .map(event => {
-      const range = eventRangeForDate(event, selectedDate);
-      return range ? { event, ...range, column: 0, columns: 1 } : null;
-    })
-    .filter((item): item is TimelineEvent => item !== null)
-    .sort((left, right) => left.start - right.start || left.end - right.end);
-
-  const groups: TimelineEvent[][] = [];
-  let group: TimelineEvent[] = [];
-  let groupEnd = -1;
-  source.forEach(item => {
-    if (group.length > 0 && item.start >= groupEnd) {
-      groups.push(group);
-      group = [];
-      groupEnd = -1;
-    }
-    group.push(item);
-    groupEnd = Math.max(groupEnd, item.end);
-  });
-  if (group.length > 0) groups.push(group);
-
-  groups.forEach(items => {
-    const columnEnds: number[] = [];
-    items.forEach(item => {
-      let column = columnEnds.findIndex(end => end <= item.start);
-      if (column < 0) column = columnEnds.length;
-      columnEnds[column] = item.end;
-      item.column = column;
-    });
-    const columns = Math.max(1, columnEnds.length);
-    items.forEach(item => { item.columns = columns; });
-  });
-
-  return source;
+export function systemUses24HourClock(
+  nativePreference: boolean | null = getCalendars()[0]?.uses24hourClock ?? null,
+): boolean {
+  if (typeof nativePreference === 'boolean') return nativePreference;
+  try {
+    const formatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
+    const options = formatter.resolvedOptions();
+    if (typeof options.hour12 === 'boolean') return !options.hour12;
+    if (options.hourCycle === 'h23' || options.hourCycle === 'h24') return true;
+    if (options.hourCycle === 'h11' || options.hourCycle === 'h12') return false;
+    return !formatter.formatToParts(new Date(2026, 0, 1, 13)).some(part => part.type === 'dayPeriod');
+  } catch {
+    return true;
+  }
 }
 
-function eventRangeForDate(event: CalEvent, selectedDate: string): { start: number; end: number } | null {
-  const startTime = timeToMinutes(event.startTime);
-  if (startTime === null) return null;
-  const spansDays = Boolean(event.endDate && event.endDate !== event.startDate);
-  let start = selectedDate === event.startDate ? startTime : 0;
-  let end = timeToMinutes(event.endTime);
+export function formatTimelineTime(minutes: number, uses24HourClock: boolean): string {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const dayOffset = Math.floor(safeMinutes / DAY_MINUTES);
+  const minuteOfDay = safeMinutes % DAY_MINUTES;
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
 
-  if (spansDays) {
-    if (selectedDate < event.startDate || selectedDate > (event.endDate ?? event.startDate)) return null;
-    if (selectedDate !== event.endDate) end = DAY_MINUTES;
-    else {
-      end = end ?? DAY_MINUTES;
-      if (end === 0 && selectedDate !== event.startDate) return null;
-    }
-  } else {
-    if (selectedDate !== event.startDate) return null;
-    if (end === null || end <= start) end = Math.min(DAY_MINUTES, start + 60);
+  if (uses24HourClock) {
+    if (safeMinutes === DAY_MINUTES) return '24:00';
+    const prefix = dayOffset > 0 ? '次日' : '';
+    return `${prefix}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   }
 
-  start = Math.max(0, Math.min(DAY_MINUTES - 1, start));
-  end = Math.max(start + 15, Math.min(DAY_MINUTES, end));
-  return { start, end };
+  const prefix = dayOffset > 0 ? '次日' : '';
+  const period = hour < 12 ? '上午' : '下午';
+  const displayHour = hour % 12 || 12;
+  return `${prefix}${period}${displayHour}:${String(minute).padStart(2, '0')}`;
 }
 
-function eventShowsAsAllDay(event: CalEvent): boolean {
-  if (event.isAllDay || !event.startTime) return true;
-  if (!event.endDate || !event.endTime) return false;
-  const start = eventDateTimeMinutes(event.startDate, event.startTime);
-  const end = eventDateTimeMinutes(event.endDate, event.endTime);
-  if (start === null || end === null || end <= start) return false;
-  const duration = end - start;
-  const startMinute = timeToMinutes(event.startTime);
-  return duration >= DAY_MINUTES || (startMinute === 0 && duration >= DAY_MINUTES - 1);
+export function formatTimelineHourLabel(hour: number, uses24HourClock: boolean): string {
+  if (uses24HourClock) return `${String(hour).padStart(2, '0')}:00`;
+  if (hour === 24) return '次日12';
+  const period = hour < 12 ? '上午' : '下午';
+  return `${period}${hour % 12 || 12}`;
 }
 
-function eventOccupiesDate(event: CalEvent, selectedDate: string): boolean {
-  return !(
-    event.startDate < selectedDate
-    && event.endDate === selectedDate
-    && !event.isAllDay
-    && event.endTime === '00:00'
-  );
+function formatTimelineRange(
+  start: number,
+  end: number,
+  uses24HourClock: boolean,
+  separator = '至',
+): string {
+  return `${formatTimelineTime(start, uses24HourClock)}${separator}${formatTimelineTime(end, uses24HourClock)}`;
 }
 
-function eventDateTimeMinutes(date: string, time: string): number | null {
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  const minute = timeToMinutes(time);
-  if (!dateMatch || minute === null) return null;
-  return Math.floor(Date.UTC(
-    Number(dateMatch[1]),
-    Number(dateMatch[2]) - 1,
-    Number(dateMatch[3]),
-  ) / 60000) + minute;
-}
+export { sortAllDayEvents } from '../utils/eventAllDay';
+export { layoutTimelineEvents } from '../utils/dayTimelineLayout';
 
 function timeZoneLabel(date: Date): string {
   const totalMinutes = -new Date(
@@ -676,6 +1053,39 @@ const s = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 3,
     overflow: 'hidden',
+  },
+  timelineEventEditing: {
+    borderWidth: 1,
+    borderColor: C.primary,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.16,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  timelineResizeHandle: {
+    position: 'absolute',
+    left: 3,
+    right: 0,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 3,
+  },
+  timelineResizeHandleTop: { top: 0 },
+  timelineResizeHandleBottom: { bottom: 0 },
+  timelineResizeKnob: {
+    width: 28,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: C.primary,
+  },
+  timelineSaving: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    zIndex: 4,
   },
   timelineEventTitle: { fontSize: 12, lineHeight: 16, color: C.primaryPressed },
   timelineEventTime: { fontSize: 10, lineHeight: 14, color: C.primaryPressed },

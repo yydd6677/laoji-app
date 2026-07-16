@@ -1,5 +1,7 @@
 import type { CalEvent } from '../types';
 import { timeToMinutes } from './calendarDate';
+import { eventEffectiveEndDate } from './eventDateSemantics';
+import { eventDisplaysAsAllDay } from './eventAllDay';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -80,7 +82,7 @@ export function layoutMonthWeekEvents(
 function normalizeEvent(event: CalEvent, sourceIndex: number): NormalizedEvent | null {
   const startDay = safeUtcDay(event.startDate);
   if (startDay === null) return null;
-  const parsedEnd = safeUtcDay(event.endDate ?? event.startDate);
+  const parsedEnd = safeUtcDay(eventEffectiveEndDate(event));
   const endDay = Math.max(startDay, parsedEnd ?? startDay);
   const startMinute = timeToMinutes(event.startTime) ?? Number.MAX_SAFE_INTEGER;
   const endMinute = timeToMinutes(event.endTime) ?? Number.MAX_SAFE_INTEGER;
@@ -89,7 +91,7 @@ function normalizeEvent(event: CalEvent, sourceIndex: number): NormalizedEvent |
     key: monthEventKey(event, sourceIndex),
     startDay,
     endDay,
-    allDay: Boolean(event.isAllDay || !event.startTime),
+    allDay: eventDisplaysAsAllDay(event),
     startMinute,
     endMinute,
     sourceIndex,

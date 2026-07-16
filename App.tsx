@@ -15,6 +15,11 @@ import { EventUndoBanner } from './src/components/EventUndoBanner';
 import { cleanupStaleMeetingShareCache } from './src/services/meetingShare';
 import { NotificationPermissionPrimer } from './src/components/NotificationPermissionPrimer';
 import { AppReadinessGate } from './src/components/AppReadinessGate';
+import { NotificationNavigationHandler } from './src/components/NotificationNavigationHandler';
+import {
+  flushPendingNotificationNavigation,
+  navigationRef,
+} from './src/navigation/notificationNavigation';
 
 assertProductionApiConfig();
 
@@ -33,9 +38,14 @@ export default function App() {
                 <NotificationPermissionPrimer />
                 <AppLockGate>
                   <View style={{ flex: 1 }}>
-                    <NavigationContainer>
+                    <NavigationContainer
+                      ref={navigationRef}
+                      onReady={() => { void flushPendingNotificationNavigation(); }}
+                      onStateChange={() => { void flushPendingNotificationNavigation(); }}
+                    >
                       <StatusBar style="dark" backgroundColor="#FFFFFF" />
                       <RootNavigator />
+                      <NotificationNavigationHandler />
                     </NavigationContainer>
                     <EventUndoBanner />
                   </View>

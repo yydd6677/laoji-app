@@ -8,7 +8,7 @@ import {
   shouldUseLocalScheduleParseFirst,
 } from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
-import type { MeetingSummary, TranscriptLine } from '../types';
+import type { EventRecurrenceScope, MeetingSummary, TranscriptLine } from '../types';
 import { fetchWithTimeout as fetch } from './http';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
@@ -69,10 +69,20 @@ export interface ParseResult {
 export interface ApiEvent {
   id?: number;
   source_event_id?: number | null;
+  occurrence_date?: string | null;
   occurrence_id?: string | null;
   is_expanded?: boolean;
   series_start_date?: string | null;
   series_end_date?: string | null;
+  revision?: number;
+  segment_id?: number | null;
+  is_recurrence_exception?: boolean;
+  recurrence_interval?: number | null;
+  recurrence_weekdays?: number[] | null;
+  recurrence_until_date?: string | null;
+  recurrence_effective_from_date?: string | null;
+  excluded_occurrence_dates?: string[] | null;
+  excluded_after_date?: string | null;
   title: string;
   event_type: string;
   start_date: string;
@@ -90,6 +100,85 @@ export interface ApiEvent {
   detail?: string | null;
   status?: string | null;
   reminder_minutes?: number | null;
+}
+
+export interface ApiEventStateCommand {
+  client_request_id: string;
+  desired_state: 'present' | 'absent';
+  scope: EventRecurrenceScope;
+  occurrence_date?: string | null;
+  expected_revision?: number | null;
+}
+
+export interface ApiEventStateCommandResponse {
+  client_request_id: string;
+  source_event_id: number;
+  desired_state: 'present' | 'absent';
+  observed_state: 'present' | 'absent';
+  scope: EventRecurrenceScope;
+  occurrence_date?: string | null;
+  revision: number;
+  changed: boolean;
+  event?: ApiEvent | null;
+}
+
+export interface ApiEventRecurrencePatch {
+  frequency?: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  interval?: number;
+  weekdays?: number[] | null;
+  until_date?: string | null;
+}
+
+export interface ApiEventEditPatch {
+  title?: string;
+  event_type?: string;
+  start_date?: string;
+  end_date?: string | null;
+  color?: string | null;
+  spanning?: boolean;
+  start_time?: string | null;
+  end_time?: string | null;
+  is_all_day?: boolean;
+  description?: string | null;
+  raw_text?: string | null;
+  location?: string | null;
+  category?: EventCategory | null;
+  detail?: string | null;
+  status?: string | null;
+  reminder_minutes?: number | null;
+  recurrence?: ApiEventRecurrencePatch;
+}
+
+export interface ApiEventEditCommand {
+  client_request_id: string;
+  scope: EventRecurrenceScope;
+  occurrence_date: string;
+  expected_revision?: number | null;
+  patch: ApiEventEditPatch;
+}
+
+export interface ApiEventEditCommandResponse {
+  client_request_id: string;
+  source_event_id: number;
+  canonical_ref: {
+    source_event_id: number;
+    occurrence_date: string;
+  };
+  scope: EventRecurrenceScope;
+  segment_id?: number | null;
+  previous_revision: number;
+  revision: number;
+  changed: boolean;
+  event: ApiEvent & { id: number };
+  affected_range: {
+    from_occurrence_date: string | null;
+    through_occurrence_date: string | null;
+  };
+  reminder_rebuild?: {
+    token: string;
+    from_occurrence_date: string | null;
+    through_occurrence_date: string | null;
+  } | null;
 }
 
 // ── Parse natural language ──────────────────────────────────────────────────
@@ -251,6 +340,20 @@ export async function deleteEvent(id: number, accessToken?: string): Promise<voi
   if (!res.ok) throw await apiResponseError('delete event failed', res, accessToken);
 }
 
+export async function commandEventState(
+  id: number,
+  command: ApiEventStateCommand,
+  accessToken: string,
+): Promise<ApiEventStateCommandResponse> {
+  const res = await fetch(laojiUrl(`/api/laoji/events/${id}/commands`), {
+    method: 'POST',
+    headers: jsonHeaders(accessToken),
+    body: JSON.stringify(command),
+  });
+  if (!res.ok) throw await apiResponseError('event state command failed', res, accessToken);
+  return res.json();
+}
+
 // ── Update event ────────────────────────────────────────────────────────────
 
 export async function updateEvent(
@@ -264,6 +367,32 @@ export async function updateEvent(
     body: JSON.stringify(changes),
   });
   if (!res.ok) throw await apiResponseError('update event failed', res, accessToken);
+  return res.json();
+}
+
+export async function commandEventEdit(
+  id: number,
+  command: ApiEventEditCommand,
+  accessToken: string,
+): Promise<ApiEventEditCommandResponse> {
+  const res = await fetch(laojiUrl(`/api/laoji/events/${id}/edit-commands`), {
+    method: 'POST',
+    headers: jsonHeaders(accessToken),
+    body: JSON.stringify(command),
+  });
+  if (!res.ok) throw await apiResponseError('event edit command failed', res, accessToken);
+  return res.json();
+}
+
+export async function fetchEventEditCommand(
+  clientRequestId: string,
+  accessToken: string,
+): Promise<ApiEventEditCommandResponse> {
+  const res = await fetch(
+    laojiUrl(`/api/laoji/event-commands/${encodeURIComponent(clientRequestId)}`),
+    { headers: authHeaders(accessToken) },
+  );
+  if (!res.ok) throw await apiResponseError('fetch event edit command failed', res, accessToken);
   return res.json();
 }
 

@@ -4,10 +4,23 @@ import type { EventCategory } from '../utils/eventColors';
 export interface CalEvent {
   id: string;
   sourceEventId?: string;
+  /** Original recurrence anchor. It remains stable if this occurrence is moved. */
+  occurrenceDate?: string;
   occurrenceId?: string;
   isExpandedOccurrence?: boolean;
+  isRecurrenceException?: boolean;
   seriesStartDate?: string;
   seriesEndDate?: string;
+  revision?: number;
+  recurrenceSegmentId?: number | string;
+  recurrenceInterval?: number;
+  /** ISO weekdays: 1 = Monday ... 7 = Sunday. */
+  recurrenceWeekdays?: number[];
+  recurrenceUntilDate?: string;
+  /** Stable recurrence anchor from which a segment becomes effective. */
+  recurrenceEffectiveFromDate?: string;
+  excludedOccurrenceDates?: string[];
+  excludedAfterDate?: string;
   title: string;
   startDate: string;
   endDate?: string;
@@ -26,6 +39,14 @@ export interface CalEvent {
   clientRequestId?: string;
   reminderMinutes?: number | null;
   notificationId?: string | null;
+}
+
+export type EventRecurrenceScope = 'occurrence' | 'following' | 'series';
+
+/** Stable domain identity for one calendar occurrence. */
+export interface EventRef {
+  sourceEventId: string;
+  occurrenceDate: string;
 }
 
 export interface Meeting {
@@ -100,7 +121,7 @@ export type EditableProfileField = 'nickname' | 'email' | 'phone';
 export type RootStackParamList = {
   Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
-  EventDetail: { eventId: string };
+  EventDetail: { eventRef: EventRef };
   Recording: { meetingId: string };
   MeetingLive: { meetingId?: string } | undefined;
   Transcription: { meetingId: string; focus?: 'transcript' | 'summary' | 'title' };
@@ -119,7 +140,7 @@ export type RootStackParamList = {
     endDate?: string;
     startTime?: string;
     endTime?: string;
-    eventId?: string;
+    eventRef?: EventRef;
     draft?: EventDraftParams;
   };
 };

@@ -2,6 +2,8 @@ import * as Notifications from 'expo-notifications';
 import { Linking } from 'react-native';
 import {
   DEFAULT_REMINDER_MINUTES,
+  ANDROID_EVENT_REMINDER_LIMIT,
+  EVENT_REMINDER_HORIZON_DAYS,
   SOON_REMINDER_DELAY_MS,
   TEST_NOTIFICATION_DELAY_MS,
   defaultReminderForEvent,
@@ -10,10 +12,12 @@ import {
   notificationDateTrigger,
   openNotificationSettings,
   parseEventDateTime,
+  planEventNotificationHorizon,
   prepareNotificationChannel,
   reminderFireDate,
   reminderUnavailableMessage,
   scheduleTestNotification,
+  scheduleEventNotification,
 } from '../src/services/notifications';
 
 describe('notification reminder rules', () => {
@@ -66,6 +70,49 @@ describe('notification reminder rules', () => {
 
   it('labels explicit start-time reminders', () => {
     expect(labelForReminder(0)).toBe('开始时');
+  });
+
+  it('plans a bounded rolling horizon for future recurrence reminders', () => {
+    const plan = planEventNotificationHorizon([{
+      id: 'daily-series',
+      sourceEventId: 'daily-series',
+      title: '每日复盘',
+      startDate: '2026-07-15',
+      startTime: '10:00',
+      repeat: 'daily',
+      reminderMinutes: 15,
+      color: '#1456F0',
+    }], new Date(2026, 6, 15, 8, 0), EVENT_REMINDER_HORIZON_DAYS, 3);
+
+    expect(plan.events.map(event => event.startDate)).toEqual([
+      '2026-07-15',
+      '2026-07-16',
+      '2026-07-17',
+    ]);
+    expect(plan.truncated).toBe(true);
+    expect(plan.windowEnd).toBe('2026-10-13');
+    expect(ANDROID_EVENT_REMINDER_LIMIT).toBeGreaterThan(3);
+  });
+
+  it('keeps all-day and untimed events out of the reminder horizon', () => {
+    const now = new Date(2026, 6, 15, 8, 0);
+    const plan = planEventNotificationHorizon([{
+      id: 'all-day',
+      title: '全天事项',
+      startDate: '2026-07-16',
+      isAllDay: true,
+      reminderMinutes: 15,
+      color: '#1456F0',
+    }, {
+      id: 'untimed',
+      title: '无时间事项',
+      startDate: '2026-07-16',
+      reminderMinutes: 15,
+      color: '#1456F0',
+    }], now);
+
+    expect(plan.events).toEqual([]);
+    expect(plan.truncated).toBe(false);
   });
 
   it('builds an explicit date notification trigger', () => {
@@ -163,5 +210,36 @@ describe('notification permission setup', () => {
       }),
     }));
     now.mockRestore();
+  });
+
+  it('embeds a stable occurrence ref instead of a client event id', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({
+      status: 'granted',
+      granted: true,
+      canAskAgain: true,
+    });
+    await scheduleEventNotification({
+      id: 'temporary-row-id',
+      sourceEventId: 'series@source',
+      title: '项目评审',
+      startDate: '2099-07-20',
+      startTime: '10:00',
+      reminderMinutes: 15,
+      color: '#1456F0',
+    }, 'user:7');
+
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.objectContaining({
+        data: expect.objectContaining({
+          kind: 'event',
+          version: 2,
+          eventSourceId: 'series@source',
+          eventOccurrenceDate: '2099-07-20',
+          notificationScope: 'user:7',
+          fingerprint: expect.any(String),
+          fireAt: expect.any(String),
+        }),
+      }),
+    }));
   });
 });

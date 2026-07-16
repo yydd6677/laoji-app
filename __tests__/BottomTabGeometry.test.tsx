@@ -23,13 +23,17 @@ describe('bottom tab geometry', () => {
     });
   });
 
-  it('derives content and overlay clearance from the compact action button', () => {
-    expect(BOTTOM_TAB_BAR_GEOMETRY.scrollContentClearance)
-      .toBe(
-        BOTTOM_TAB_BAR_GEOMETRY.barHeight
-          + BOTTOM_TAB_BAR_GEOMETRY.floatingOverlayGap
-          + BOTTOM_TAB_BAR_GEOMETRY.micRadius,
-      );
+  it('separates scene clearance from root-level full-bar insets', () => {
+    expect(BOTTOM_TAB_BAR_GEOMETRY.sceneActionBottom)
+      .toBe(BOTTOM_TAB_BAR_GEOMETRY.floatingOverlayGap);
+    expect(BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance).toBe(
+      BOTTOM_TAB_BAR_GEOMETRY.micDiameter
+        + BOTTOM_TAB_BAR_GEOMETRY.sceneActionBottom
+        + BOTTOM_TAB_BAR_GEOMETRY.floatingOverlayGap,
+    );
+    expect(BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance).toBeLessThan(
+      BOTTOM_TAB_BAR_GEOMETRY.barHeight + BOTTOM_TAB_BAR_GEOMETRY.micDiameter,
+    );
     expect(getBottomTabBarFloatingTopInset(0)).toBe(
       BOTTOM_TAB_BAR_GEOMETRY.barHeight
         + BOTTOM_TAB_BAR_GEOMETRY.minimumBottomFill

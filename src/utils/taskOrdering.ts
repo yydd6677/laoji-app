@@ -1,4 +1,5 @@
 import { CalEvent } from '../types';
+import { eventCoversDate } from './eventDateSemantics';
 
 const TIME_MAX = Number.MAX_SAFE_INTEGER;
 
@@ -8,13 +9,6 @@ export function selectTasksForDate(events: CalEvent[], date: string): CalEvent[]
     .filter(({ event }) => eventCoversDate(event, date))
     .sort((left, right) => compareTaskEntries(left, right))
     .map(({ event }) => event);
-}
-
-function eventCoversDate(event: CalEvent, date: string): boolean {
-  if (event.endDate && event.endDate >= event.startDate) {
-    return event.startDate <= date && date <= event.endDate;
-  }
-  return event.startDate === date;
 }
 
 function compareTaskEntries(

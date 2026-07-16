@@ -25,7 +25,7 @@ jest.mock('../src/components/Common', () => ({
 }));
 jest.mock('../src/components/BottomTabBar', () => ({
   BottomTabBar: 'BottomTabBar',
-  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 51 },
+  BOTTOM_TAB_BAR_GEOMETRY: { sceneContentClearance: 72 },
 }));
 jest.mock('../src/store/EventsStore', () => ({ useEvents: jest.fn() }));
 jest.mock('../src/store/MeetingsStore', () => ({ useMeetings: jest.fn() }));

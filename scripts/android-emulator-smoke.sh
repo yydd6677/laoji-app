@@ -10,6 +10,7 @@ DEVICE="${DEVICE:-emulator-5554}"
 APK="${APK:-$ROOT_DIR/android/app/build/outputs/apk/release/app-release.apk}"
 OUT_DIR="${OUT_DIR:-/tmp/laoji-emulator-smoke}"
 RESET_APP_DATA="${RESET_APP_DATA:-1}"
+EXPECT_PERSISTED_SESSION="${EXPECT_PERSISTED_SESSION:-0}"
 ALLOW_PHYSICAL_DEVICE="${ALLOW_PHYSICAL_DEVICE:-0}"
 ALLOW_ADDITIONAL_DEVICES="${ALLOW_ADDITIONAL_DEVICES:-0}"
 DEVICE_PIN="${DEVICE_PIN:-}"
@@ -171,6 +172,17 @@ assert_ui() {
   log "assert ok: $pattern"
 }
 
+dismiss_notification_primer() {
+  local name="$1"
+  if ! rg -q 'content-desc="继续开启"|text="继续开启"' "$OUT_DIR/$name.pretty.xml"; then
+    return 1
+  fi
+  assert_ui "$name" 'text="开启日程提醒"'
+  assert_ui "$name" 'text="暂不开启"'
+  tap_node "$name" '暂不开启'
+  sleep 0.7
+}
+
 tap_node() {
   local name="$1"
   local needle="$2"
@@ -232,13 +244,6 @@ type_ascii() {
   log "typed ascii: $value"
 }
 
-tap_xy() {
-  local x="$1"
-  local y="$2"
-  adb_cmd shell input tap "$x" "$y"
-  log "tap at $x $y"
-}
-
 tap_text_fraction() {
   local name="$1"
   local needle="$2"
@@ -280,10 +285,12 @@ launch_app() {
 run_login_route() {
   dump_ui login
   screenshot login
-  assert_ui login 'text="老记"'
+  assert_ui login 'text="欢迎使用老记"'
+  assert_ui login 'text="请使用老记账号登录"'
   assert_ui login 'text="游客体验"'
+  assert_ui login 'content-desc="下一步"'
 
-  tap_node login '登录'
+  tap_node login '下一步'
   sleep 1
   dump_ui login_empty_dialog
   screenshot login_empty_dialog
@@ -293,19 +300,9 @@ run_login_route() {
   sleep 0.5
   dump_ui login_after_empty
 
-  tap_node login_after_empty '忘记密码?'
-  sleep 1
-  dump_ui forgot_empty_dialog
-  screenshot forgot_empty_dialog
-  assert_ui forgot_empty_dialog 'text="填写账号后重试"'
-  assert_ui forgot_empty_dialog 'text="请先输入邮箱或手机号，再提交人工重置请求。"'
-  tap_node forgot_empty_dialog '知道了'
-  sleep 0.5
-
-  dump_ui login_after_forgot
   # The links are nested Text spans, so UIAutomator exposes one parent node.
   # Derive both hit targets from its current bounds instead of fixed pixels.
-  tap_text_fraction login_after_forgot '登录即代表你同意' 0.54
+  tap_text_fraction login_after_empty '继续即代表你已阅读并同意' 0.60
   sleep 1
   dump_ui terms
   screenshot terms
@@ -315,7 +312,7 @@ run_login_route() {
   sleep 0.7
 
   dump_ui login_after_terms
-  tap_text_fraction login_after_terms '登录即代表你同意' 0.88
+  tap_text_fraction login_after_terms '继续即代表你已阅读并同意' 0.88
   sleep 1
   dump_ui privacy_policy
   screenshot privacy_policy
@@ -328,8 +325,14 @@ run_login_route() {
 run_main_route() {
   dump_ui before_guest
   if rg -q 'content-desc="游客体验"|text="游客体验"' "$OUT_DIR/before_guest.pretty.xml"; then
+    if [ "$EXPECT_PERSISTED_SESSION" = "1" ]; then
+      log "expected the persisted guest session, but the app returned to login"
+      exit 1
+    fi
     tap_node before_guest "游客体验"
     sleep 2
+    dump_ui notification_primer
+    dismiss_notification_primer notification_primer || true
   fi
 
   dump_ui schedule
@@ -345,16 +348,15 @@ run_main_route() {
   target_date="$(target_calendar_date)"
   tap_node schedule "$target_date"
   sleep 1
-  dump_ui selected_17
-  screenshot selected_17
-  assert_ui selected_17 "content-desc=\"$target_date[^\"]*已展开"
+  dump_ui selected_date
+  screenshot selected_date
+  assert_ui selected_date "content-desc=\"$target_date[^\"]*已展开"
 
-  tap_node selected_17 '切换到单日视图'
+  tap_node selected_date '切换到单日视图'
   sleep 1
   dump_ui day_view
   screenshot day_view
-  assert_ui day_view 'text="00:00"'
-  assert_ui day_view 'text="24:00"'
+  assert_ui day_view 'content-desc="[^\"]+，空白时段"'
   assert_ui day_view 'content-desc="切换到月视图"'
 
   tap_node day_view '切换到月视图'
@@ -374,7 +376,7 @@ run_main_route() {
   screenshot schedule_back
   assert_ui schedule_back 'text="日程"'
 
-  tap_xy 990 211
+  tap_node schedule_back '打开个人资料'
   sleep 1
   dump_ui profile
   screenshot profile
@@ -384,16 +386,16 @@ run_main_route() {
   assert_ui profile 'text="昵称"'
   assert_ui profile 'text="邮箱"'
   assert_ui profile 'text="手机号"'
-  assert_ui profile 'text="保存修改"'
 
   tap_node profile '打开设置'
   sleep 1
   dump_ui settings
   screenshot settings
   assert_ui settings 'text="设置"'
-  assert_ui settings 'text="隐私与权限管理"'
-  assert_ui settings 'text="帮助与支持"'
   assert_ui settings 'text="账号与安全"'
+  assert_ui settings 'text="数据存储说明"'
+  assert_ui settings 'text="系统验证"'
+  assert_ui settings 'text="帮助中心"'
   tap_node settings '账号与安全'
   sleep 1
   dump_ui account
@@ -408,9 +410,9 @@ run_main_route() {
   screenshot notification_sheet
   assert_ui notification_sheet 'text="通知与提醒"'
   assert_ui notification_sheet 'text="默认提醒"'
-  assert_ui notification_sheet 'text="检查并开启通知"'
-  tap_node notification_sheet '关闭'
-  sleep 0.5
+  assert_ui notification_sheet 'text="发送测试提醒"'
+  adb_cmd shell input keyevent 4
+  sleep 0.7
 
   dump_ui account_after_notification
   tap_node account_after_notification '密码与安全'
@@ -432,6 +434,9 @@ run_main_route() {
   tap_node signout_dialog '取消'
   sleep 0.5
 
+  adb_cmd shell input keyevent 4
+  sleep 0.7
+  dump_ui settings_back
   adb_cmd shell input keyevent 4
   sleep 0.7
   dump_ui profile_back
@@ -474,7 +479,16 @@ main() {
   launch_app
   dump_ui launch
   screenshot launch
-  run_login_route
+  route_dump=launch
+  if dismiss_notification_primer launch; then
+    dump_ui launch_after_notification_primer
+    route_dump=launch_after_notification_primer
+  fi
+  if rg -q 'content-desc="游客体验"|text="游客体验"' "$OUT_DIR/$route_dump.pretty.xml"; then
+    run_login_route
+  elif [ "$EXPECT_PERSISTED_SESSION" = "1" ]; then
+    log "persisted guest session restored after reinstall/restart"
+  fi
   run_main_route
   python3 "$ROOT_DIR/scripts/check_android_ui_accessibility.py" "$OUT_DIR"
 

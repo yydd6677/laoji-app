@@ -9,11 +9,15 @@ import {
   savePrivacyPrefs,
   subscribePrivacyPrefs,
 } from '../src/services/privacy';
+import { setNotificationNavigationUnlocked } from '../src/navigation/notificationNavigation';
 
 jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'LinearGradient' }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 jest.mock('../src/components/Common', () => ({ Avatar: 'Avatar', Sparkle: 'Sparkle' }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
+jest.mock('../src/navigation/notificationNavigation', () => ({
+  setNotificationNavigationUnlocked: jest.fn(),
+}));
 jest.mock('../src/services/privacy', () => ({
   authenticateWithSystem: jest.fn(),
   DEFAULT_PRIVACY_PREFS: { biometricEnabled: false, appLockEnabled: false },
@@ -111,6 +115,7 @@ describe('AppLockGate', () => {
     expect(view.queryByText('验证并解锁')).toBeNull();
     expect(view.getByTestId('private-content', { includeHiddenElements: true })).toBeTruthy();
     expect(view.getByTestId('app-lock-protected-content', { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
+    expect(setNotificationNavigationUnlocked).toHaveBeenLastCalledWith(false);
     expect(authenticateWithSystem).not.toHaveBeenCalled();
     expect(mounted).toHaveBeenCalledTimes(1);
     expect(unmounted).not.toHaveBeenCalled();
@@ -123,6 +128,9 @@ describe('AppLockGate', () => {
     expect(view.getByTestId('private-content', { includeHiddenElements: true })).toBeTruthy();
     expect(view.getByText('老记已锁定，请使用系统生物识别或设备密码验证身份')).toBeTruthy();
     expect(unmounted).not.toHaveBeenCalled();
+
+    await act(async () => { authentication.resolve(true); });
+    await waitFor(() => expect(setNotificationNavigationUnlocked).toHaveBeenLastCalledWith(true));
   });
 
   it('blocks the previous account content immediately while a new scope loads', async () => {

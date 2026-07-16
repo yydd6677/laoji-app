@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Image,
   Keyboard,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,11 +10,17 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import type { StyleProp, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CalendarSlidePage } from './CalendarSlidePage';
 import { dateFromKey, formatMonthTitle } from '../utils/calendarDate';
 import { sortEventsForSearch } from '../utils/eventOrdering';
-import { materializeEventsForSearch } from '../utils/eventRecurrence';
+import {
+  materializeEventOccurrencesCoveringDate,
+  materializeEventsForSearch,
+} from '../utils/eventRecurrence';
+import { isValidEventDate } from '../utils/eventDraftValidation';
+import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
 
@@ -34,9 +42,14 @@ export function buildCalendarSearchGroups(
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) return [];
 
+  const requestedDates = searchDateKeys(query, today);
+  if (requestedDates.length > 0) {
+    return buildDateFilteredSearchGroups(events, query, requestedDates, today);
+  }
   const matches = events.filter(event => searchableEventValues(event)
     .some(value => value.toLocaleLowerCase().includes(normalizedQuery)));
-  const sorted = sortEventsForSearch(materializeEventsForSearch(matches, today), today);
+  const projected = materializeEventsForSearch(matches, today);
+  const sorted = sortEventsForSearch(projected, today);
   const groups: Omit<CalendarSearchGroup, 'showMonthHeader'>[] = [];
   const groupByDate = new Map<string, Omit<CalendarSearchGroup, 'showMonthHeader'>>();
 
@@ -63,6 +76,150 @@ export function buildCalendarSearchGroups(
   }));
 }
 
+function buildDateFilteredSearchGroups(
+  events: CalEvent[],
+  query: string,
+  requestedDates: string[],
+  today: Date,
+): CalendarSearchGroup[] {
+  const textQuery = queryWithoutDateTokens(query).trim().toLocaleLowerCase();
+  const seen = new Set<string>();
+  const entries = requestedDates.flatMap(groupDate => events.flatMap(event => (
+    materializeEventOccurrencesCoveringDate(event, groupDate).flatMap(occurrence => {
+      const key = `${groupDate}:${eventRefKey(eventRefForEvent(occurrence))}`;
+      if (seen.has(key)) return [];
+      if (textQuery && !searchableEventValues(occurrence)
+        .some(value => value.toLocaleLowerCase().includes(textQuery))) return [];
+      seen.add(key);
+      return [{ event: occurrence, groupDate }];
+    })
+  )));
+  const projections: CalEvent[] = entries.map(entry => ({
+    ...entry.event,
+    startDate: entry.groupDate,
+    endDate: undefined,
+    spanning: false,
+  }));
+  const entryForProjection = new Map(projections.map((projection, index) => [projection, entries[index]]));
+  const sortedEntries = sortEventsForSearch(projections, today)
+    .map(projection => entryForProjection.get(projection))
+    .filter((entry): entry is (typeof entries)[number] => Boolean(entry));
+  const groups: Omit<CalendarSearchGroup, 'showMonthHeader'>[] = [];
+  const groupByDate = new Map<string, Omit<CalendarSearchGroup, 'showMonthHeader'>>();
+  for (const entry of sortedEntries) {
+    const existing = groupByDate.get(entry.groupDate);
+    if (existing) {
+      existing.events.push(entry.event);
+      continue;
+    }
+    const date = dateFromKey(entry.groupDate);
+    const group = {
+      key: entry.groupDate,
+      date,
+      monthKey: entry.groupDate.slice(0, 7),
+      events: [entry.event],
+    };
+    groups.push(group);
+    groupByDate.set(entry.groupDate, group);
+  }
+  return groups.map((group, index) => ({
+    ...group,
+    showMonthHeader: index === 0 || groups[index - 1].monthKey !== group.monthKey,
+  }));
+}
+
+function dateKey(year: number, month: number, day: number): string | null {
+  const value = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return isValidEventDate(value) ? value : null;
+}
+
+function searchDateKeys(query: string, today: Date): string[] {
+  const keys = new Set<string>();
+  const fullDatePattern = /(\d{4})\s*(?:年|[-/.])\s*(\d{1,2})\s*(?:月|[-/.])\s*(\d{1,2})\s*日?/g;
+  for (const match of query.matchAll(fullDatePattern)) {
+    const key = dateKey(Number(match[1]), Number(match[2]), Number(match[3]));
+    if (key) keys.add(key);
+  }
+  if (keys.size === 0) {
+    const monthDayPattern = /(^|\D)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/g;
+    for (const match of query.matchAll(monthDayPattern)) {
+      const key = dateKey(today.getFullYear(), Number(match[2]), Number(match[3]));
+      if (key) keys.add(key);
+    }
+  }
+  return [...keys];
+}
+
+function queryWithoutDateTokens(query: string): string {
+  return query
+    .replace(/\d{4}\s*(?:年|[-/.])\s*\d{1,2}\s*(?:月|[-/.])\s*\d{1,2}\s*日?/g, ' ')
+    .replace(/\d{1,2}\s*月\s*\d{1,2}\s*日?/g, ' ');
+}
+
+type HighlightSegment = {
+  text: string;
+  matchIndex?: number;
+};
+
+function splitHighlightSegments(text: string, query: string): HighlightSegment[] {
+  const keyword = query.trim();
+  if (!keyword) return [{ text }];
+
+  const matcher = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+  const segments: HighlightSegment[] = [];
+  let cursor = 0;
+  let matchIndex = 0;
+
+  for (const match of text.matchAll(matcher)) {
+    const start = match.index ?? 0;
+    if (start > cursor) segments.push({ text: text.slice(cursor, start) });
+    segments.push({ text: match[0], matchIndex });
+    cursor = start + match[0].length;
+    matchIndex += 1;
+  }
+
+  if (cursor === 0) return [{ text }];
+  if (cursor < text.length) segments.push({ text: text.slice(cursor) });
+  return segments;
+}
+
+function HighlightedText({
+  text,
+  query,
+  style,
+  testID,
+}: {
+  text: string;
+  query: string;
+  style: StyleProp<TextStyle>;
+  testID: string;
+}) {
+  const segments = splitHighlightSegments(text, query);
+
+  return (
+    <Text
+      style={style}
+      numberOfLines={1}
+      accessibilityLabel={text}
+      testID={testID}
+    >
+      {segments.map((segment, index) => (
+        segment.matchIndex === undefined
+          ? segment.text
+          : (
+            <Text
+              key={`${index}-${segment.matchIndex}`}
+              style={s.highlight}
+              testID={`${testID}-highlight-${segment.matchIndex}`}
+            >
+              {segment.text}
+            </Text>
+          )
+      ))}
+    </Text>
+  );
+}
+
 function searchableEventValues(event: CalEvent): string[] {
   const date = dateFromKey(event.startDate);
   const endDate = event.endDate ? dateFromKey(event.endDate) : null;
@@ -71,6 +228,7 @@ function searchableEventValues(event: CalEvent): string[] {
     event.startDate,
     event.endDate,
     `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`,
+    `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`,
     `${date.getMonth() + 1}月${date.getDate()}日`,
     endDate ? `${endDate.getMonth() + 1}月${endDate.getDate()}日` : '',
     event.startTime,
@@ -177,7 +335,14 @@ function SearchBody({
     return (
       <View style={s.noResult} testID="calendar-search-empty">
         <View style={s.noResultArtwork}>
-          <Ionicons name="search-outline" size={58} color={C.disabled} />
+          <Image
+            source={require('../../assets/calendar-search-empty.png')}
+            style={s.noResultImage}
+            resizeMode="contain"
+            accessible={false}
+            accessibilityIgnoresInvertColors
+            testID="calendar-search-empty-asset"
+          />
         </View>
         <Text style={s.noResultText}>无相关结果</Text>
       </View>
@@ -206,6 +371,7 @@ function SearchBody({
               event={event}
               date={group.date}
               showDate={index === 0}
+              query={queryWithoutDateTokens(query)}
               onPress={() => onOpenEvent(event)}
             />
           ))}
@@ -223,13 +389,16 @@ function SearchEventRow({
   event,
   date,
   showDate,
+  query,
   onPress,
 }: {
   event: CalEvent;
   date: Date;
   showDate: boolean;
+  query: string;
   onPress: () => void;
 }) {
+  const [pressed, setPressed] = useState(false);
   const supportingText = event.description || event.detail;
   const taller = Boolean(supportingText);
   const today = isToday(date);
@@ -247,10 +416,11 @@ function SearchEventRow({
           </>
         ) : null}
       </View>
-      <TouchableOpacity
+      <Pressable
         style={[s.eventChip, taller && s.eventChipTall]}
         onPress={onPress}
-        activeOpacity={0.72}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
         accessibilityRole="button"
         accessibilityLabel={`${event.title}，${event.startDate}，${eventTimeLabel(event)}`}
         testID={`calendar-search-chip-${event.id}`}
@@ -263,17 +433,33 @@ function SearchEventRow({
           style={s.eventCopy}
           testID={`calendar-search-copy-${event.id}`}
         >
-          <Text style={s.eventTitle} numberOfLines={1}>{event.title}</Text>
+          <HighlightedText
+            text={event.title}
+            query={query}
+            style={s.eventTitle}
+            testID={`calendar-search-title-${event.id}`}
+          />
           <Text style={s.eventMeta} numberOfLines={1}>
             {eventMetaLabel(event)}
           </Text>
           {supportingText ? (
-            <Text style={s.eventSupporting} numberOfLines={1}>
-              {`描述: ${supportingText}`}
-            </Text>
+            <HighlightedText
+              text={`描述: ${supportingText}`}
+              query={query}
+              style={s.eventSupporting}
+              testID={`calendar-search-description-${event.id}`}
+            />
           ) : null}
         </View>
-      </TouchableOpacity>
+        {pressed ? (
+          <View
+            pointerEvents="none"
+            accessible={false}
+            style={s.eventPressedOverlay}
+            testID={`calendar-search-pressed-${event.id}`}
+          />
+        ) : null}
+      </Pressable>
     </View>
   );
 }
@@ -343,12 +529,13 @@ const s = StyleSheet.create({
     backgroundColor: C.body,
   },
   noResultArtwork: {
-    width: 116,
-    height: 116,
+    width: 160,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  noResultText: { marginTop: 10, fontSize: 14, lineHeight: 20, color: C.sub },
+  noResultImage: { width: 160, height: 120 },
+  noResultText: { marginTop: 12, fontSize: 14, lineHeight: 20, color: C.sub },
   results: { flex: 1, backgroundColor: C.body },
   resultsContent: { paddingTop: 14, paddingBottom: 28 },
   monthTitle: {
@@ -385,6 +572,15 @@ const s = StyleSheet.create({
     backgroundColor: C.primaryLight,
   },
   eventChipTall: { height: 68 },
+  eventPressedOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 1,
+    backgroundColor: C.pressed,
+  },
   eventStrip: {
     position: 'absolute',
     top: 0,
@@ -403,5 +599,6 @@ const s = StyleSheet.create({
   eventTitle: { fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.text },
   eventMeta: { marginTop: 2, fontSize: 12, lineHeight: 16, color: C.sub },
   eventSupporting: { marginTop: 2, fontSize: 12, lineHeight: 16, color: C.sub },
+  highlight: { color: C.primary, backgroundColor: '#DDE8FF', fontWeight: '700' },
   dayGap: { height: 12 },
 });

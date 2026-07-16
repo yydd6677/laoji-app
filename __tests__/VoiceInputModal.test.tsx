@@ -8,10 +8,9 @@ import {
 } from '../src/services/api';
 import { startRealtimeAsr } from '../src/services/realtimeAsr';
 import { useEvents } from '../src/store/EventsStore';
-import { checkConflict } from '../src/utils/eventUtils';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { StyleSheet } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
 
 const mockShowDialog = jest.fn();
 const mockNavigate = jest.fn();
@@ -41,7 +40,6 @@ jest.mock('../src/services/api', () => ({
 }));
 jest.mock('../src/services/realtimeAsr', () => ({ startRealtimeAsr: jest.fn() }));
 jest.mock('../src/store/EventsStore', () => ({ useEvents: jest.fn() }));
-jest.mock('../src/utils/eventUtils', () => ({ checkConflict: jest.fn() }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),
 }));
@@ -70,16 +68,33 @@ const parsed = {
   reminder_minutes: 15,
 };
 
+function deferTimingAnimations() {
+  const timing = Animated.timing as jest.Mock;
+  const originalImplementation = timing.getMockImplementation();
+  const completions: Array<(result: { finished: boolean }) => void> = [];
+  timing.mockImplementation((value, config) => ({
+    start: jest.fn((completion?: (result: { finished: boolean }) => void) => {
+      value?.setValue?.(config?.toValue);
+      if (completion) completions.push(completion);
+    }),
+  }));
+  return {
+    completions,
+    restore: () => timing.mockImplementation(originalImplementation),
+  };
+}
+
 describe('VoiceInputModal manual schedule path', () => {
   const addEvent = jest.fn();
   const refreshEvents = jest.fn();
+  const findConflicts = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
     addEvent.mockResolvedValue({ reminderDelivery: 'not-required' });
     refreshEvents.mockResolvedValue(undefined);
-    (useEvents as jest.Mock).mockReturnValue({ events: [], addEvent, refreshEvents });
-    (checkConflict as jest.Mock).mockReturnValue({ hasConflict: false, conflicts: [] });
+    findConflicts.mockResolvedValue({ hasConflict: false, conflicts: [], complete: true });
+    (useEvents as jest.Mock).mockReturnValue({ events: [], addEvent, refreshEvents, findConflicts });
     (parseText as jest.Mock).mockResolvedValue(parsed);
     (Audio.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
     (Audio.setAudioModeAsync as jest.Mock).mockResolvedValue(undefined);
@@ -172,7 +187,7 @@ describe('VoiceInputModal manual schedule path', () => {
     await fireEvent.press(screen.getByLabelText('保存'));
 
     expect(addEvent).not.toHaveBeenCalled();
-    expect(screen.getByText('请先补充有效日期，再保存日程')).toBeTruthy();
+    expect(screen.getByText('请选择有效的开始日期')).toBeTruthy();
   });
 
   it('allows a valid draft to be saved without answering an optional clarification', async () => {
@@ -266,8 +281,12 @@ describe('VoiceInputModal manual schedule path', () => {
       isAllDay: false,
       color: '#5B8CFF',
     };
-    (useEvents as jest.Mock).mockReturnValue({ events: [conflict], addEvent, refreshEvents });
-    (checkConflict as jest.Mock).mockReturnValue({ hasConflict: true, conflicts: [conflict] });
+    (useEvents as jest.Mock).mockReturnValue({ events: [conflict], addEvent, refreshEvents, findConflicts });
+    findConflicts.mockResolvedValue({
+      hasConflict: true,
+      conflicts: [{ event: conflict, kind: 'timed-overlap', severity: 'overlap' }],
+      complete: true,
+    });
     await render(<VoiceInputModal visible onClose={jest.fn()} onSaved={jest.fn()} />);
 
     await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
@@ -284,6 +303,37 @@ describe('VoiceInputModal manual schedule path', () => {
     const actions = mockShowDialog.mock.calls.at(-1)?.[0]?.actions;
     await act(async () => { await actions[0].onPress(); });
     await waitFor(() => expect(addEvent).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores a conflict check that resolves after the voice sheet closes', async () => {
+    let resolveConflicts: ((value: {
+      hasConflict: boolean;
+      conflicts: never[];
+      complete: boolean;
+    }) => void) | undefined;
+    const pendingConflicts = new Promise<{
+      hasConflict: boolean;
+      conflicts: never[];
+      complete: boolean;
+    }>(resolve => { resolveConflicts = resolve; });
+    findConflicts.mockReturnValueOnce(pendingConflicts);
+    const onClose = jest.fn();
+    await render(<VoiceInputModal visible onClose={onClose} onSaved={jest.fn()} />);
+
+    await fireEvent.changeText(screen.getByTestId('schedule-voice-input'), '明天下午三点项目评审');
+    await fireEvent.press(screen.getByText('解析'));
+    await waitFor(() => expect(screen.getByLabelText('保存')).toBeTruthy());
+    await act(() => { fireEvent.press(screen.getByLabelText('保存')); });
+    await waitFor(() => expect(findConflicts).toHaveBeenCalledTimes(1));
+    await fireEvent.press(screen.getByLabelText('取消'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveConflicts?.({ hasConflict: false, conflicts: [], complete: true });
+      await pendingConflicts;
+    });
+    expect(addEvent).not.toHaveBeenCalled();
+    expect(mockShowDialog).not.toHaveBeenCalled();
   });
 
   it('keeps the bottom-sheet actions above the system navigation inset', async () => {
@@ -349,7 +399,40 @@ describe('VoiceInputModal manual schedule path', () => {
       left: 0,
     }));
     expect(backdropStyle.transform).toBeUndefined();
+    expect(screen.getByTestId('schedule-voice-backdrop').props.pointerEvents).toBe('auto');
+    const hitShield = screen.getByTestId('schedule-voice-backdrop-hit-shield');
+    expect(hitShield).toBeTruthy();
+    expect(hitShield.props.onPress).toBeUndefined();
+    expect(hitShield.props.accessible).toBe(false);
+    expect(screen.queryByTestId('schedule-voice-drag-handle')).toBeNull();
     expect(sheetMotionStyle.transform).toHaveLength(1);
+  });
+
+  it('keeps the blocking backdrop mounted until both exit animations finish', async () => {
+    const onClose = jest.fn();
+    const view = await render(<VoiceInputModal visible onClose={onClose} onSaved={jest.fn()} />);
+    const modal = view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })[0];
+    const deferred = deferTimingAnimations();
+
+    try {
+      await act(() => modal.props.onRequestClose());
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByTestId('schedule-voice-backdrop-hit-shield')).toBeTruthy();
+      expect(screen.getByTestId('schedule-voice-sheet-motion').props.pointerEvents).toBe('none');
+      expect(deferred.completions).toHaveLength(2);
+
+      await act(() => deferred.completions[0]({ finished: true }));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByTestId('schedule-voice-backdrop-hit-shield')).toBeTruthy();
+
+      await act(() => deferred.completions[1]({ finished: true }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('schedule-voice-backdrop-hit-shield')).toBeNull();
+      expect(view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })).toHaveLength(0);
+    } finally {
+      deferred.restore();
+    }
   });
 
   it('keeps the microphone fixed and starts only once while realtime audio is connecting', async () => {

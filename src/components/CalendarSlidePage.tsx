@@ -26,6 +26,8 @@ export function CalendarSlidePage({
 }) {
   const { width, height } = useWindowDimensions();
   const [mounted, setMounted] = React.useState(visible);
+  const mountedRef = React.useRef(visible);
+  const transitionRef = React.useRef(0);
   const progress = React.useRef(new Animated.Value(visible ? 1 : 0)).current;
   const resolvedEnterDuration = enterDuration ?? duration ?? (direction === 'vertical' ? 800 : 180);
   const resolvedExitDuration = exitDuration ?? duration ?? (direction === 'vertical' ? 300 : 180);
@@ -37,9 +39,13 @@ export function CalendarSlidePage({
     : Easing.in(Easing.ease);
 
   React.useEffect(() => {
+    const transition = transitionRef.current + 1;
+    transitionRef.current = transition;
+    progress.stopAnimation();
+
     if (visible) {
+      mountedRef.current = true;
       setMounted(true);
-      progress.stopAnimation();
       Animated.timing(progress, {
         toValue: 1,
         duration: resolvedEnterDuration,
@@ -48,17 +54,23 @@ export function CalendarSlidePage({
       }).start();
       return;
     }
-    if (!mounted) return;
-    progress.stopAnimation();
+    if (!mountedRef.current) return;
     Animated.timing(progress, {
       toValue: 0,
       duration: resolvedExitDuration,
       easing: exitEasing,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setMounted(false);
+      if (!finished || transitionRef.current !== transition) return;
+      mountedRef.current = false;
+      setMounted(false);
     });
-  }, [direction, mounted, progress, resolvedEnterDuration, resolvedExitDuration, visible]);
+  }, [direction, progress, resolvedEnterDuration, resolvedExitDuration, visible]);
+
+  React.useEffect(() => () => {
+    transitionRef.current += 1;
+    progress.stopAnimation();
+  }, [progress]);
 
   React.useEffect(() => {
     if (!visible) return undefined;
@@ -83,7 +95,10 @@ export function CalendarSlidePage({
         s.root,
         { transform },
       ]}
-      accessibilityViewIsModal
+      pointerEvents={visible ? 'auto' : 'none'}
+      accessibilityViewIsModal={visible}
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
       testID={testID}
     >
       {children}

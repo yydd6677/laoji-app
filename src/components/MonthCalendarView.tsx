@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -11,7 +12,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
@@ -25,6 +25,7 @@ import {
   monthCells,
   startOfMonth,
 } from '../utils/calendarDate';
+import { useCurrentDate } from '../hooks/useCurrentDate';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_HEIGHT = 32;
@@ -36,6 +37,7 @@ const EVENT_TOP = 29;
 const EVENT_HEIGHT = 16;
 const EVENT_GAP = 3;
 const ROW_ANIMATION_MS = 350;
+const PROGRAMMATIC_MONTH_ANIMATION_MS = 400;
 const accelerateDecelerate = (progress: number) => Math.cos((progress + 1) * Math.PI) / 2 + 0.5;
 
 export function MonthCalendarView({
@@ -60,12 +62,80 @@ export function MonthCalendarView({
   const pagerRef = useRef<ScrollView | null>(null);
   const monthGestureActive = useRef(false);
   const monthGestureHandled = useRef(false);
+  const gestureTargetMonthRef = useRef<string | null>(null);
+  const activeExpandedCloserRef = useRef<((afterClose: () => void) => void) | null>(null);
+  const transitionRunRef = useRef(0);
+  const transitionProgress = useRef(new Animated.Value(0)).current;
   const [bodyHeight, setBodyHeight] = useState(() => Math.max(320, windowHeight - 250));
-  const pages = useMemo(() => [-1, 0, 1].map(offset => addMonths(month, offset)), [month]);
+  const [displayMonth, setDisplayMonth] = useState(() => startOfMonth(month));
+  const [monthTransition, setMonthTransition] = useState<{
+    from: Date;
+    to: Date;
+    direction: -1 | 1;
+    run: number;
+  } | null>(null);
+  const today = useCurrentDate();
+  const pages = useMemo(
+    () => [-1, 0, 1].map(offset => addMonths(displayMonth, offset)),
+    [displayMonth],
+  );
+
+  useEffect(() => {
+    const target = startOfMonth(month);
+    const targetKey = dateKey(target);
+    if (isSameMonth(target, displayMonth)) {
+      if (monthTransition) {
+        transitionRunRef.current += 1;
+        transitionProgress.stopAnimation();
+        setMonthTransition(null);
+      }
+      return;
+    }
+    if (monthTransition && isSameMonth(monthTransition.to, target)) return;
+
+    if (gestureTargetMonthRef.current === targetKey) {
+      gestureTargetMonthRef.current = null;
+      transitionRunRef.current += 1;
+      transitionProgress.stopAnimation();
+      setMonthTransition(null);
+      setDisplayMonth(target);
+      return;
+    }
+
+    const run = transitionRunRef.current + 1;
+    transitionRunRef.current = run;
+    const beginTransition = () => {
+      if (transitionRunRef.current !== run) return;
+      const direction: -1 | 1 = target.getTime() < displayMonth.getTime() ? -1 : 1;
+      transitionProgress.stopAnimation();
+      transitionProgress.setValue(0);
+      setMonthTransition({ from: displayMonth, to: target, direction, run });
+      requestAnimationFrame(() => {
+        Animated.timing(transitionProgress, {
+          toValue: 1,
+          duration: PROGRAMMATIC_MONTH_ANIMATION_MS,
+          easing: accelerateDecelerate,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (!finished || transitionRunRef.current !== run) return;
+          setDisplayMonth(target);
+          setMonthTransition(null);
+        });
+      });
+    };
+
+    const closeExpanded = activeExpandedCloserRef.current;
+    if (closeExpanded) {
+      activeExpandedCloserRef.current = null;
+      closeExpanded(beginTransition);
+    } else {
+      beginTransition();
+    }
+  }, [displayMonth, month, monthTransition, transitionProgress]);
 
   useLayoutEffect(() => {
     pagerRef.current?.scrollTo({ x: pageWidth, animated: false });
-  }, [month, pageWidth]);
+  }, [displayMonth, pageWidth]);
 
   const settleMonth = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!monthGestureActive.current || monthGestureHandled.current) return;
@@ -76,7 +146,9 @@ export function MonthCalendarView({
       pagerRef.current?.scrollTo({ x: pageWidth, animated: false });
       return;
     }
-    onMonthChange(addMonths(month, page === 0 ? -1 : 1));
+    const target = addMonths(displayMonth, page === 0 ? -1 : 1);
+    gestureTargetMonthRef.current = dateKey(target);
+    onMonthChange(target);
   };
 
   const onBodyLayout = (event: LayoutChangeEvent) => {
@@ -85,8 +157,20 @@ export function MonthCalendarView({
   };
 
   const accessibilityShift = (event: { nativeEvent: { actionName: string } }) => {
-    if (event.nativeEvent.actionName === 'decrement') onMonthChange(addMonths(month, -1));
-    if (event.nativeEvent.actionName === 'increment') onMonthChange(addMonths(month, 1));
+    if (event.nativeEvent.actionName === 'decrement') onMonthChange(addMonths(displayMonth, -1));
+    if (event.nativeEvent.actionName === 'increment') onMonthChange(addMonths(displayMonth, 1));
+  };
+
+  const pageProps = {
+    width: pageWidth,
+    height: bodyHeight,
+    selectedDate,
+    today,
+    events,
+    onSelectDate,
+    onMonthChange,
+    onOpenEvent,
+    onCreate,
   };
 
   return (
@@ -97,7 +181,39 @@ export function MonthCalendarView({
         ))}
       </View>
       <View style={s.body} onLayout={onBodyLayout} testID="calendar-month-body">
-        <ScrollView
+        {monthTransition ? (
+          <Animated.View
+            style={[
+              s.monthTransitionTrack,
+              {
+                width: pageWidth * 2,
+                left: monthTransition.direction > 0 ? 0 : -pageWidth,
+                transform: [{
+                  translateX: transitionProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, monthTransition.direction > 0 ? -pageWidth : pageWidth],
+                  }),
+                }],
+              },
+            ]}
+            pointerEvents="none"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            testID="calendar-programmatic-month-transition"
+          >
+            {(monthTransition.direction > 0
+              ? [monthTransition.from, monthTransition.to]
+              : [monthTransition.to, monthTransition.from]
+            ).map(transitionMonth => (
+              <MonthPage
+                key={`transition-${dateKey(transitionMonth)}`}
+                month={transitionMonth}
+                active={false}
+                {...pageProps}
+              />
+            ))}
+          </Animated.View>
+        ) : <ScrollView
           ref={pagerRef}
           horizontal
           pagingEnabled
@@ -112,7 +228,7 @@ export function MonthCalendarView({
           onMomentumScrollEnd={settleMonth}
           scrollEventThrottle={16}
           accessibilityRole="adjustable"
-          accessibilityLabel={`${month.getFullYear()}年${month.getMonth() + 1}月`}
+          accessibilityLabel={`${displayMonth.getFullYear()}年${displayMonth.getMonth() + 1}月`}
           accessibilityHint="左右滑动切换月份"
           accessibilityActions={[
             { name: 'decrement', label: '上一个月' },
@@ -129,14 +245,18 @@ export function MonthCalendarView({
               height={bodyHeight}
               active={pageIndex === 1}
               selectedDate={selectedDate}
+              today={today}
               events={events}
               onSelectDate={onSelectDate}
               onMonthChange={onMonthChange}
               onOpenEvent={onOpenEvent}
               onCreate={onCreate}
+              onExpandedCloserChange={pageIndex === 1 ? closer => {
+                activeExpandedCloserRef.current = closer;
+              } : undefined}
             />
           ))}
-        </ScrollView>
+        </ScrollView>}
       </View>
     </View>
   );
@@ -148,22 +268,28 @@ function MonthPage({
   height,
   active,
   selectedDate,
+  today,
   events,
   onSelectDate,
   onMonthChange,
   onOpenEvent,
   onCreate,
+  onExpandedCloserChange,
 }: {
   month: Date;
   width: number;
   height: number;
   active: boolean;
   selectedDate: Date;
+  today: Date;
   events: CalEvent[];
   onSelectDate: (date: Date) => void;
   onMonthChange: (month: Date) => void;
   onOpenEvent: (event: CalEvent) => void;
   onCreate: (date: Date) => void;
+  onExpandedCloserChange?: (
+    closer: ((afterClose: () => void) => void) | null,
+  ) => void;
 }) {
   const rows = useMemo(() => {
     const cells = monthCells(month);
@@ -178,12 +304,6 @@ function MonthPage({
   const pendingOpenRow = useRef<number | null>(null);
   const [expanded, setExpanded] = useState<{ date: Date; row: number } | null>(null);
   const [panelVisible, setPanelVisible] = useState(false);
-  const today = useMemo(() => {
-    const current = new Date();
-    current.setHours(0, 0, 0, 0);
-    return current;
-  }, []);
-
   useEffect(() => {
     if (expanded !== null) return;
     rowOffsets.current.forEach(value => value.setValue(0));
@@ -233,6 +353,16 @@ function MonthPage({
       afterClose?.();
     });
   };
+
+  useEffect(() => {
+    if (!onExpandedCloserChange) return undefined;
+    if (!active || !expanded) {
+      onExpandedCloserChange(null);
+      return undefined;
+    }
+    onExpandedCloserChange(afterClose => closeRow(afterClose));
+    return () => onExpandedCloserChange(null);
+  }, [active, expanded, onExpandedCloserChange]);
 
   const resetSelectionAfterClose = () => {
     const firstVisibleDate = rows[0][0].date;
@@ -550,7 +680,14 @@ function ExpandedDayPage({
         style={[s.expandedPage, s.expandedEmpty, { width }]}
         testID={`calendar-expanded-day-${dateKey(date)}`}
       >
-        <Ionicons name="calendar-clear-outline" size={54} color={C.disabled} />
+        <Image
+          source={require('../../assets/calendar-day-empty.png')}
+          style={s.expandedEmptyImage}
+          resizeMode="contain"
+          accessible={false}
+          accessibilityIgnoresInvertColors
+          testID={`calendar-expanded-empty-asset-${dateKey(date)}`}
+        />
         <View style={s.emptyCopy}>
           <Text style={s.emptyText}>暂无日程，</Text>
           <TouchableOpacity onPress={() => onCreate(date)} activeOpacity={0.7}>
@@ -608,7 +745,13 @@ const s = StyleSheet.create({
     borderBottomColor: C.divider,
   },
   weekday: { flex: 1, textAlign: 'center', fontSize: 12, color: C.text },
-  body: { flex: 1, minHeight: 0 },
+  body: { flex: 1, minHeight: 0, overflow: 'hidden' },
+  monthTransitionTrack: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+  },
   monthPage: { position: 'relative', overflow: 'hidden', backgroundColor: C.body },
   weekRow: {
     position: 'absolute',
@@ -692,6 +835,7 @@ const s = StyleSheet.create({
   expandedEventTitle: { fontSize: 14, lineHeight: 20, color: C.text },
   expandedEventMeta: { fontSize: 12, lineHeight: 17, color: C.sub },
   expandedEmpty: { alignItems: 'center', justifyContent: 'center', gap: 12 },
+  expandedEmptyImage: { width: 125, height: 94 },
   emptyCopy: { flexDirection: 'row', alignItems: 'center' },
   emptyText: { fontSize: 14, color: C.faint },
   emptyAction: { fontSize: 14, color: C.primary },

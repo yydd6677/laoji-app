@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Animated, View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Animated, View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, KeyboardAvoidingView, Platform, useWindowDimensions,
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import type { NavigationAction, RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ResponsiveContentFrame } from '../components/ResponsiveContentFrame';
 import { CalendarDetailTitleBar, CalendarEditTitleBar } from '../components/CalendarTitleBar';
 import { EventTimeEditor, EventTimeValue } from '../components/EventTimeEditor';
 import { EventTimeRangeArrow } from '../components/EventTimeRangeArrow';
@@ -19,9 +20,8 @@ import {
 } from '../components/EventEditorChoicePages';
 import { useAppDialog } from '../components/AppDialog';
 
-import { CalEvent, RootStackParamList } from '../types';
+import { CalEvent, EventRecurrenceScope, RootStackParamList } from '../types';
 import { useEvents } from '../store/EventsStore';
-import { checkConflict } from '../store/EventsStore';
 import { useAuth } from '../store/AuthStore';
 import {
   DEFAULT_REMINDER_MINUTES,
@@ -36,6 +36,11 @@ import {
   normalizeEventCategory,
 } from '../utils/eventColors';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
+import { eventRefForEvent } from '../utils/eventIdentity';
+import { resolveEventReference } from '../utils/eventRecurrence';
+import { validateEventDraft } from '../utils/eventDraftValidation';
+import { recurrenceDeleteDialog, recurrenceEditDialog } from '../services/recurrenceActions';
+import { HttpResponseError, readableErrorMessage } from '../services/errors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -81,11 +86,11 @@ function snapshotKey(snapshot: EventEditorSnapshot): string {
 }
 
 function snapshotFromEvent(event: CalEvent): EventEditorSnapshot {
-  const date = event.seriesStartDate ?? event.startDate;
+  const date = event.startDate;
   return {
     title: event.title,
     date,
-    endDate: event.seriesEndDate ?? event.endDate ?? date,
+    endDate: event.endDate ?? date,
     startTime: event.startTime ?? '10:00',
     endTime: event.endTime ?? '11:00',
     isAllDay: event.isAllDay ?? false,
@@ -127,11 +132,6 @@ function formatTime(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function timeToMinutes(str: string): number {
-  const [h, min] = str.split(':').map(Number);
-  return h * 60 + min;
-}
-
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const mediumDecelerate = (progress: number) => 1 - Math.pow(1 - progress, 6);
 
@@ -143,23 +143,20 @@ function formatEditorDate(d: Date): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AddEventScreen({ navigation, route }: Props) {
-  const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
+  const { events, searchableEvents, addEvent, updateEvent, deleteEvent, findConflicts } = useEvents();
   const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
-  const editingId = route.params?.eventId;
-  const editingEvent = editingId
-    ? events.find(event => event.id === editingId)
-      ?? searchableEvents?.find(event => event.id === editingId)
+  const editingRef = route.params?.eventRef;
+  const editingEvent = editingRef
+    ? resolveEventReference([...events, ...(searchableEvents ?? [])], editingRef) ?? undefined
     : undefined;
-  const routeDraft = editingId ? undefined : route.params?.draft;
-  const isEditing = Boolean(editingId);
-  const initDate = editingEvent?.seriesStartDate
-    ?? editingEvent?.startDate
+  const routeDraft = editingRef ? undefined : route.params?.draft;
+  const isEditing = Boolean(editingRef);
+  const initDate = editingEvent?.startDate
     ?? routeDraft?.startDate
     ?? route.params?.date
     ?? todayDateStr();
-  const initEndDate = editingEvent?.seriesEndDate
-    ?? editingEvent?.endDate
+  const initEndDate = editingEvent?.endDate
     ?? routeDraft?.endDate
     ?? route.params?.endDate
     ?? initDate;
@@ -167,6 +164,10 @@ export function AddEventScreen({ navigation, route }: Props) {
   const initEndTime = editingEvent?.endTime ?? routeDraft?.endTime ?? route.params?.endTime ?? '11:00';
   const [saving, setSaving] = React.useState(false);
   const createRequestRef = React.useRef(createClientRequestState('event'));
+  const saveRunRef = React.useRef(0);
+  const saveLockRef = React.useRef(false);
+  const saveWriteStartedRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
 
   const [title, setTitle]       = useState(editingEvent?.title ?? routeDraft?.title ?? '');
   const [dateObj, setDateObj]   = useState<Date>(() => parseDateStr(initDate));
@@ -245,6 +246,16 @@ export function AddEventScreen({ navigation, route }: Props) {
   dirtyRef.current = snapshotKey(currentSnapshot) !== snapshotKey(baselineSnapshotRef.current);
 
   React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      saveRunRef.current += 1;
+      saveLockRef.current = false;
+      saveWriteStartedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!editingEvent) return;
     const snapshot = snapshotFromEvent(editingEvent);
     baselineSnapshotRef.current = snapshot;
@@ -286,9 +297,8 @@ export function AddEventScreen({ navigation, route }: Props) {
     return () => { alive = false; };
   }, [notificationScope, isEditing]);
 
-  const canSave = title.trim().length > 0;
-
   const requestLeave = React.useCallback((action?: NavigationAction) => {
+    if (saveLockRef.current) return;
     if (allowLeaveRef.current || !dirtyRef.current) {
       if (action) navigation.dispatch(action);
       else navigation.goBack();
@@ -323,128 +333,220 @@ export function AddEventScreen({ navigation, route }: Props) {
   }, [navigation, showDialog]);
 
   React.useEffect(() => navigation.addListener('beforeRemove', event => {
-    if (allowLeaveRef.current || !dirtyRef.current) return;
+    if (allowLeaveRef.current) return;
+    if (saveLockRef.current) {
+      event.preventDefault();
+      return;
+    }
+    if (!dirtyRef.current) return;
     event.preventDefault();
     requestLeave(event.data.action);
   }), [navigation, requestLeave]);
 
-  const doSave = async () => {
-    setSaving(true);
+  const buildEventPayload = (): Omit<CalEvent, 'id'> => ({
+    title: title.trim(),
+    startDate: date,
+    endDate: endDate !== date ? endDate : undefined,
+    spanning: endDate !== date,
+    startTime: isAllDay ? undefined : startTime,
+    endTime: isAllDay ? undefined : endTime,
+    isAllDay,
+    repeat: REPEAT_MAP[repeat],
+    description: desc,
+    rawText: routeDraft?.rawText,
+    color: C.primary,
+    category,
+    location: location || undefined,
+    detail: routeDraft?.detail,
+    status: routeDraft?.status,
+    reminderMinutes: isAllDay ? null : reminderMinutes,
+  });
+
+  const isSaveRunActive = (runId: number) => (
+    mountedRef.current
+    && saveLockRef.current
+    && saveRunRef.current === runId
+  );
+
+  const releaseSaveRun = (runId: number) => {
+    if (!isSaveRunActive(runId)) return;
+    saveLockRef.current = false;
+    saveWriteStartedRef.current = false;
+    setSaving(false);
+  };
+
+  const doSave = async (
+    runId: number,
+    payload: Omit<CalEvent, 'id'>,
+    recurrenceScope: EventRecurrenceScope,
+  ) => {
+    let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
+    let syncStatus: Awaited<ReturnType<typeof addEvent>>['syncStatus'] | undefined;
     try {
-      let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
-      const payload: Omit<CalEvent, 'id'> = {
-        title: title.trim(),
-        startDate: date,
-        endDate: endDate !== date ? endDate : undefined,
-        spanning: endDate !== date,
-        startTime: isAllDay ? undefined : startTime,
-        endTime: isAllDay ? undefined : endTime,
-        isAllDay,
-        repeat: REPEAT_MAP[repeat],
-        description: desc,
-        rawText: routeDraft?.rawText,
-        color: C.primary,
-        category,
-        location: location || undefined,
-        detail: routeDraft?.detail,
-        status: routeDraft?.status,
-        reminderMinutes,
-      };
       if (editingEvent) {
-        ({ reminderDelivery } = await updateEvent(editingEvent.id, payload));
+        ({ reminderDelivery, syncStatus } = await updateEvent(
+          eventRefForEvent(editingEvent),
+          payload,
+          recurrenceScope,
+        ));
       } else {
         createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
-        payload.clientRequestId = createRequestRef.current.id;
-        ({ reminderDelivery } = await addEvent(payload));
+        ({ reminderDelivery, syncStatus } = await addEvent({
+          ...payload,
+          clientRequestId: createRequestRef.current.id,
+        }));
       }
-      allowLeaveRef.current = true;
-      navigation.goBack();
-      if (reminderDelivery === 'unavailable') {
-        showDialog({
-          title: '日程已保存',
-          message: await reminderUnavailableMessage(),
-          tone: 'warning',
-        });
-      } else if (reminderDelivery === 'unconfirmed') {
-        showDialog({
-          title: '日程已保存',
-          message: '本机提醒状态未能确认，可重新打开日程并保存提醒。',
-          tone: 'warning',
-        });
+    } catch (error) {
+      if (!isSaveRunActive(runId)) return;
+      releaseSaveRun(runId);
+      showDialog({
+        title: error instanceof HttpResponseError && error.status === 409
+          ? '日程已发生变化'
+          : '保存失败',
+        message: error instanceof HttpResponseError && error.status === 409
+          ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
+          : readableErrorMessage(error, '请检查网络后重试'),
+        tone: error instanceof HttpResponseError && error.status === 409 ? 'warning' : 'error',
+      });
+      return;
+    }
+
+    if (!isSaveRunActive(runId)) return;
+    let reminderWarning: string | undefined;
+    if (syncStatus === 'pending') {
+      reminderWarning = '保存请求已记录，将在网络恢复后自动确认。';
+    } else if (reminderDelivery === 'unavailable') {
+      try {
+        reminderWarning = await reminderUnavailableMessage();
+      } catch {
+        reminderWarning = '本机提醒创建失败，请重新打开日程并保存提醒。';
       }
-    } catch {
-      showDialog({ title: '保存失败', message: '请检查网络后重试', tone: 'error' });
-    } finally {
-      setSaving(false);
+      if (!isSaveRunActive(runId)) return;
+    } else if (reminderDelivery === 'unconfirmed') {
+      reminderWarning = '本机提醒状态未能确认，可重新打开日程并保存提醒。';
+    }
+
+    allowLeaveRef.current = true;
+    navigation.goBack();
+    if (reminderWarning) {
+      showDialog({
+        title: syncStatus === 'pending' ? '日程等待同步' : '日程已保存',
+        message: reminderWarning,
+        tone: 'warning',
+      });
     }
   };
 
-  const handleSave = () => {
-    if (!canSave) {
-      showDialog({ title: '请输入事项标题', tone: 'info' });
+  const startSaveWrite = (
+    runId: number,
+    payload: Omit<CalEvent, 'id'>,
+    recurrenceScope: EventRecurrenceScope,
+  ) => {
+    if (!isSaveRunActive(runId) || saveWriteStartedRef.current) return;
+    saveWriteStartedRef.current = true;
+    setSaving(true);
+    void doSave(runId, payload, recurrenceScope);
+  };
+
+  const checkConflictsAndSave = async (
+    runId: number,
+    payload: Omit<CalEvent, 'id'>,
+    recurrenceScope: EventRecurrenceScope,
+  ) => {
+    let result: Awaited<ReturnType<typeof findConflicts>>;
+    try {
+      result = await findConflicts(payload, editingRef, recurrenceScope);
+    } catch {
+      if (!isSaveRunActive(runId)) return;
+      releaseSaveRun(runId);
+      showDialog({ title: '暂时无法检查日程冲突', message: '请稍后重试', tone: 'warning' });
       return;
     }
+
+    if (!isSaveRunActive(runId)) return;
+    if (result.hasConflict) {
+      const explicit = result.conflicts.some(conflict => conflict.severity === 'overlap');
+      const names = result.conflicts.map(({ event }) => {
+        const time = event.startTime && event.endTime
+          ? `${event.startTime}–${event.endTime}`
+          : event.isAllDay ? '全天' : '无具体时间';
+        return `• ${event.title} (${time})`;
+      }).join('\n');
+      showDialog({
+        title: explicit ? '时间冲突' : '全天安排提示',
+        message: `${explicit ? '该安排与以下日程重叠' : '该日期已有全天或定时安排'}：\n${names}`,
+        hint: result.complete
+          ? '如果确认这些安排可以重叠，仍然可以继续保存。'
+          : '当前只能核对本机已有日程；仍可继续保存。',
+        tone: 'warning',
+        onDismiss: () => releaseSaveRun(runId),
+        actions: [
+          {
+            text: '仍然保存',
+            role: 'primary',
+            onPress: () => startSaveWrite(runId, payload, recurrenceScope),
+          },
+          { text: '取消', role: 'cancel', onPress: () => releaseSaveRun(runId) },
+        ],
+      });
+      return;
+    }
+    startSaveWrite(runId, payload, recurrenceScope);
+  };
+
+  const selectEditScopeAndSave = (
+    runId: number,
+    payload: Omit<CalEvent, 'id'>,
+  ) => {
+    if (editingEvent?.repeat && editingEvent.repeat !== 'once') {
+      showDialog(recurrenceEditDialog(
+        editingEvent,
+        recurrenceScope => {
+          if (!isSaveRunActive(runId)) return;
+          void checkConflictsAndSave(runId, payload, recurrenceScope);
+        },
+        () => releaseSaveRun(runId),
+      ));
+      return;
+    }
+    void checkConflictsAndSave(runId, payload, 'series');
+  };
+
+  const handleSave = () => {
+    if (saveLockRef.current) return;
     if (isEditing && !editingEvent) {
       showDialog({ title: '日程不存在', message: '请返回后重新打开日程', tone: 'warning' });
       return;
     }
 
-    if (endDate < date) {
-      showDialog({ title: '日期不正确', message: '结束日期不能早于开始日期', tone: 'warning' });
+    const payload = buildEventPayload();
+    const validation = validateEventDraft(payload);
+    if (!validation.valid || !validation.value) {
+      const issue = validation.issues[0];
+      if (issue?.code === 'missing-title') showDialog({ title: issue.message, tone: 'info' });
+      else showDialog({ title: '日程信息不完整', message: issue?.message, tone: 'warning' });
       return;
     }
 
-    if (!isAllDay && endDate === date && timeToMinutes(startTime) >= timeToMinutes(endTime)) {
-      showDialog({ title: '时间不正确', message: '结束时间需要晚于开始时间', tone: 'warning' });
-      return;
-    }
-
-    if (!isAllDay && startTime && endTime) {
-      const { hasConflict, conflicts } = checkConflict(events, date, startTime, endTime, editingEvent?.id, endDate);
-      if (hasConflict) {
-        const names = conflicts.map(e => `• ${e.title} (${e.startTime}–${e.endTime})`).join('\n');
-        showDialog({
-          title: '时间冲突',
-          message: `该时间段与以下日程冲突：\n${names}`,
-          hint: '如果确认这些安排可以重叠，仍然可以继续保存。',
-          tone: 'warning',
-          actions: [
-            { text: '仍然保存', role: 'primary', onPress: doSave },
-            { text: '取消', role: 'cancel' },
-          ],
-        });
-        return;
-      }
-    }
-
-    doSave();
+    saveLockRef.current = true;
+    saveWriteStartedRef.current = false;
+    const runId = saveRunRef.current + 1;
+    saveRunRef.current = runId;
+    setSaving(true);
+    selectEditScopeAndSave(runId, validation.value);
   };
 
   const handleDelete = () => {
     if (!editingEvent) return;
-    showDialog({
-      title: '删除日程',
-      message: editingEvent.repeat && editingEvent.repeat !== 'once'
-        ? '这是一条重复日程，删除后整个系列都会被移除。'
-        : `确定删除“${editingEvent.title}”吗？`,
-      tone: 'danger',
-      actions: [
-        {
-          text: '删除',
-          role: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteEvent(editingEvent.id);
-              allowLeaveRef.current = true;
-              navigation.navigate('MainTabs', { screen: 'Schedule' });
-            } catch {
-              showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
-            }
-          },
-        },
-        { text: '取消', role: 'cancel' },
-      ],
-    });
+    showDialog(recurrenceDeleteDialog(editingEvent, async recurrenceScope => {
+      try {
+        await deleteEvent(eventRefForEvent(editingEvent), recurrenceScope);
+        allowLeaveRef.current = true;
+        navigation.navigate('MainTabs', { screen: 'Schedule' });
+      } catch {
+        showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
+      }
+    }));
   };
 
   const openTimeEditor = (target: 'start' | 'end') => {
@@ -472,11 +574,13 @@ export function AddEventScreen({ navigation, route }: Props) {
   if (isEditing && !editingEvent) {
     return (
       <ScreenContainer bg={C.body}>
-        <CalendarDetailTitleBar title="编辑日程" onBack={() => navigation.goBack()} />
-        <View style={s.emptyWrap}>
-          <Text style={s.emptyTitle}>日程不存在</Text>
-          <Text style={s.emptyText}>请返回日程详情后重新打开编辑。</Text>
-        </View>
+        <ResponsiveContentFrame testID="event-editor-content-frame">
+          <CalendarDetailTitleBar title="编辑日程" onBack={() => navigation.goBack()} />
+          <View style={s.emptyWrap}>
+            <Text style={s.emptyTitle}>日程不存在</Text>
+            <Text style={s.emptyText}>请返回日程详情后重新打开编辑。</Text>
+          </View>
+        </ResponsiveContentFrame>
       </ScreenContainer>
     );
   }
@@ -485,25 +589,33 @@ export function AddEventScreen({ navigation, route }: Props) {
     <ScreenContainer bg={C.body}>
       <Animated.View
         style={[s.editorContent, { transform: [{ translateY: editorContentOffset }] }]}
-        pointerEvents={editorOverlayVisible ? 'none' : 'auto'}
-        accessibilityElementsHidden={editorOverlayVisible}
-        importantForAccessibility={editorOverlayVisible ? 'no-hide-descendants' : 'auto'}
+        pointerEvents={editorOverlayVisible || saving ? 'none' : 'auto'}
+        accessibilityElementsHidden={editorOverlayVisible || saving}
+        importantForAccessibility={editorOverlayVisible || saving ? 'no-hide-descendants' : 'auto'}
+        accessibilityState={{ busy: saving }}
         testID="event-editor-main-content"
       >
-        <CalendarEditTitleBar
-          onCancel={() => requestLeave()}
-          onSave={handleSave}
-          saveEnabled
-          saving={saving}
-          saveAccessibilityLabel={isEditing ? '保存日程修改' : '保存到日历'}
-        />
-        <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ResponsiveContentFrame testID="event-editor-content-frame">
+          <CalendarEditTitleBar
+            onCancel={() => requestLeave()}
+            onSave={handleSave}
+            saveEnabled
+            saving={saving}
+            saveAccessibilityLabel={isEditing ? '保存日程修改' : '保存到日历'}
+          />
+          <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <ScrollView
+              testID="event-editor-scroll"
+              style={s.scroll}
+              contentContainerStyle={s.content}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
 
-          {editingEvent?.isExpandedOccurrence ? (
+          {editingEvent?.repeat && editingEvent.repeat !== 'once' ? (
             <View style={s.seriesNotice}>
               <Ionicons name="repeat-outline" size={16} color={C.primary} />
-              <Text style={s.seriesNoticeText}>本次修改将应用到整个重复日程</Text>
+              <Text style={s.seriesNoticeText}>这是重复日程，保存时可选择修改范围</Text>
             </View>
           ) : null}
 
@@ -513,6 +625,7 @@ export function AddEventScreen({ navigation, route }: Props) {
             placeholderTextColor={C.faint}
             value={title}
             onChangeText={setTitle}
+            editable={!saving}
             maxLength={400}
           />
           <View style={s.sectionDivider} />
@@ -647,9 +760,23 @@ export function AddEventScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             </>
           ) : null}
-          </ScrollView>
-        </KeyboardAvoidingView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </ResponsiveContentFrame>
       </Animated.View>
+
+      {saving ? (
+        <View
+          style={s.savingOverlay}
+          accessibilityViewIsModal
+          accessibilityRole="progressbar"
+          accessibilityLabel="正在保存日程"
+          testID="event-saving-overlay"
+        >
+          <ActivityIndicator color={C.primary} />
+          <Text style={s.savingText}>正在保存</Text>
+        </View>
+      ) : null}
 
       <EventTimeEditor
         visible={showTimeEditor}
@@ -711,6 +838,14 @@ export function AddEventScreen({ navigation, route }: Props) {
 const s = StyleSheet.create({
   flex: { flex: 1 },
   editorContent: { flex: 1 },
+  savingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+  },
+  savingText: { marginTop: 10, fontSize: 14, lineHeight: 20, color: C.sub },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.body },
   emptyTitle: { fontSize: 17, lineHeight: 24, fontWeight: '600', color: C.text, marginBottom: 8 },
   emptyText: { fontSize: 14, color: C.sub, lineHeight: 22 },

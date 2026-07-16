@@ -8,10 +8,12 @@ import React, {
 } from 'react';
 import {
   Animated,
+  BackHandler,
   Easing,
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +23,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
+import { useCurrentDate } from '../hooks/useCurrentDate';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
 import {
@@ -99,8 +102,12 @@ function WheelColumn({
     scrollRef.current?.scrollTo({ y: next * WHEEL_ITEM_HEIGHT, animated: false });
   }, [physicalIndexFor, selectedIndex]);
 
-  const settle = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const settle = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+    deferWhileMoving = false,
+  ) => {
     if (!gestureActive.current) return;
+    if (deferWhileMoving && Math.abs(event.nativeEvent.velocity?.y ?? 0) > 0.05) return;
     gestureActive.current = false;
     const next = Math.max(0, Math.min(
       renderedValues.length - 1,
@@ -109,8 +116,9 @@ function WheelColumn({
     const valueIndex = renderedValues[next]?.valueIndex ?? 0;
     const settledIndex = physicalIndexFor(valueIndex);
     setActiveIndex(settledIndex);
-    if (loop && settledIndex !== next) {
-      scrollRef.current?.scrollTo({ y: settledIndex * WHEEL_ITEM_HEIGHT, animated: false });
+    const settledOffset = settledIndex * WHEEL_ITEM_HEIGHT;
+    if (Math.abs(event.nativeEvent.contentOffset.y - settledOffset) > 0.5) {
+      scrollRef.current?.scrollTo({ y: settledOffset, animated: deferWhileMoving });
     }
     onSelect(valueIndex);
   };
@@ -159,7 +167,8 @@ function WheelColumn({
         onScrollBeginDrag={() => {
           gestureActive.current = true;
         }}
-        onMomentumScrollEnd={settle}
+        onScrollEndDrag={event => settle(event, true)}
+        onMomentumScrollEnd={event => settle(event)}
       >
         {renderedValues.map((item, index) => {
           const distance = Math.min(2, Math.abs(index - activeIndex));
@@ -436,7 +445,7 @@ export function QuickDatePanel({
   const previousDy = useRef(0);
   const dragDirection = useRef<-1 | 0 | 1>(0);
   const layoutHeight = useRef(new Animated.Value(entryPanelHeight)).current;
-  const today = useMemo(() => new Date(), []);
+  const today = useCurrentDate();
 
   initialPickerModeRef.current = initialPickerMode;
   entryPanelHeightRef.current = entryPanelHeight;
@@ -512,6 +521,15 @@ export function QuickDatePanel({
       setMounted(false);
     });
   }, [animateTo, layoutHeight, pickerTransition, setProgress, visible]);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onClose, visible]);
 
   const closeFromDrag = useCallback((dy: number) => {
     if (Math.abs(dy) <= DRAG_SLOP || dragDirection.current < 0) onClose();
@@ -603,27 +621,41 @@ export function QuickDatePanel({
   });
 
   return (
-    <Animated.View
-      style={[
-        s.root,
-        { top, height: entryPanelHeight },
-        { height: layoutHeight },
-      ]}
-      {...panResponder.panHandlers}
-      accessibilityViewIsModal
-      testID="quick-date-panel"
+    <View
+      style={s.overlay}
+      pointerEvents="auto"
+      accessibilityViewIsModal={visible}
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'yes' : 'no-hide-descendants'}
+      testID="quick-date-overlay"
     >
-      <Animated.View
-        pointerEvents="none"
-        style={[s.surface, { opacity: progress, transform: [{ translateY: panelTranslateY }] }]}
-        testID="quick-date-panel-surface"
+      <Pressable
+        style={s.dismissLayer}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel={yearMonthOnly ? '关闭年月选择' : '关闭日期选择'}
+        testID="quick-date-dismiss-layer"
       />
       <Animated.View
-        style={[s.contentShell, { transform: [{ translateY: panelTranslateY }] }]}
-        testID="quick-date-panel-content-shell"
+        style={[
+          s.root,
+          { top, height: entryPanelHeight },
+          { height: layoutHeight },
+        ]}
+        {...panResponder.panHandlers}
+        testID="quick-date-panel"
       >
-        <View pointerEvents="none" style={s.contentBackground} />
-        {!yearMonthOnly ? <View style={s.header}>
+        <Animated.View
+          pointerEvents="none"
+          style={[s.surface, { opacity: progress, transform: [{ translateY: panelTranslateY }] }]}
+          testID="quick-date-panel-surface"
+        />
+        <Animated.View
+          style={[s.contentShell, { transform: [{ translateY: panelTranslateY }] }]}
+          testID="quick-date-panel-content-shell"
+        >
+          <View pointerEvents="none" style={s.contentBackground} />
+          {!yearMonthOnly ? <View style={s.header}>
           <TouchableOpacity
             style={s.titleAction}
             onPress={togglePickerMode}
@@ -658,6 +690,8 @@ export function QuickDatePanel({
           </TouchableOpacity>
           <Animated.View
             pointerEvents={pickerMode === 'date' ? 'auto' : 'none'}
+            accessibilityElementsHidden={pickerMode !== 'date'}
+            importantForAccessibility={pickerMode === 'date' ? 'auto' : 'no-hide-descendants'}
             style={[s.monthActions, {
               opacity: pickerTransition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
             }]}
@@ -685,65 +719,87 @@ export function QuickDatePanel({
               </View>
             </TouchableOpacity>
           </Animated.View>
-        </View> : null}
+          </View> : null}
 
-        {!yearMonthOnly ? <Animated.View
-          pointerEvents={pickerMode === 'date' ? 'auto' : 'none'}
-          style={[s.dateContent, {
-            height: dateContentHeight,
-            opacity: pickerTransition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-          }]}
-        >
-          <View style={s.weekdayRow}>
-            {WEEKDAYS.map(day => <Text key={day} style={s.weekday}>{day}</Text>)}
-          </View>
+          {!yearMonthOnly ? <Animated.View
+            pointerEvents={pickerMode === 'date' ? 'auto' : 'none'}
+            accessibilityElementsHidden={pickerMode !== 'date'}
+            importantForAccessibility={pickerMode === 'date' ? 'auto' : 'no-hide-descendants'}
+            style={[s.dateContent, {
+              height: dateContentHeight,
+              opacity: pickerTransition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+            }]}
+            testID="quick-date-date-content"
+          >
+            <View style={s.weekdayRow}>
+              {WEEKDAYS.map(day => <Text key={day} style={s.weekday}>{day}</Text>)}
+            </View>
 
-          <QuickDateMonthPager
-            month={month}
-            selectedDate={selectedDate}
-            today={today}
-            events={events}
-            onSelectDate={selectDate}
-            onMonthChange={onMonthChange}
-          />
-        </Animated.View> : null}
+            <QuickDateMonthPager
+              month={month}
+              selectedDate={selectedDate}
+              today={today}
+              events={events}
+              onSelectDate={selectDate}
+              onMonthChange={onMonthChange}
+            />
+          </Animated.View> : null}
 
-        <Animated.View
-          pointerEvents={pickerMode === 'yearMonth' ? 'auto' : 'none'}
-          style={[s.yearMonthContent, {
-            top: yearMonthOnly ? 8 : HEADER_HEIGHT,
-            opacity: pickerTransition,
-          }]}
-        >
-          <YearMonthPicker month={month} onMonthChange={onMonthChange} />
+          <Animated.View
+            pointerEvents={pickerMode === 'yearMonth' ? 'auto' : 'none'}
+            accessibilityElementsHidden={pickerMode !== 'yearMonth'}
+            importantForAccessibility={pickerMode === 'yearMonth' ? 'auto' : 'no-hide-descendants'}
+            style={[s.yearMonthContent, {
+              top: yearMonthOnly ? 8 : HEADER_HEIGHT,
+              opacity: pickerTransition,
+            }]}
+            testID="quick-date-year-month-content"
+          >
+            <YearMonthPicker month={month} onMonthChange={onMonthChange} />
+          </Animated.View>
+
+          <TouchableOpacity
+            style={s.dragBar}
+            onPress={onClose}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={yearMonthOnly ? '收起年月选择' : '收起日期选择'}
+            {...handlePanResponder.panHandlers}
+          >
+            <Ionicons name="chevron-up" size={18} color={C.border} />
+          </TouchableOpacity>
         </Animated.View>
-
-        <TouchableOpacity
-          style={s.dragBar}
-          onPress={onClose}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={yearMonthOnly ? '收起年月选择' : '收起日期选择'}
-          {...handlePanResponder.panHandlers}
-        >
-          <Ionicons name="chevron-up" size={18} color={C.border} />
-        </TouchableOpacity>
+        <Animated.View
+          pointerEvents="none"
+          style={[s.topDivider, { opacity: progress }]}
+          testID="quick-date-panel-top-divider"
+        />
       </Animated.View>
-      <Animated.View
-        pointerEvents="none"
-        style={[s.topDivider, { opacity: progress }]}
-        testID="quick-date-panel-top-divider"
-      />
-    </Animated.View>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 60,
+  },
+  dismissLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'transparent',
+  },
   root: {
     position: 'absolute',
     left: 0,
     right: 0,
-    zIndex: 60,
     backgroundColor: 'transparent',
     overflow: 'hidden',
   },

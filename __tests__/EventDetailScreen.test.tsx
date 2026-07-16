@@ -1,7 +1,10 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
-import { EventDetailScreen } from '../src/screens/EventDetailScreen';
+import { act, fireEvent, render, within } from '@testing-library/react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import {
+  EventDetailScreen,
+  resolveHeaderSnapTarget,
+} from '../src/screens/EventDetailScreen';
 import { useEvents } from '../src/store/EventsStore';
 
 const mockShowDialog = jest.fn();
@@ -24,11 +27,12 @@ describe('EventDetailScreen source-aligned structure', () => {
   const route = {
     key: 'event-detail',
     name: 'EventDetail' as const,
-    params: { eventId: 'event-1' },
+    params: { eventRef: { sourceEventId: 'event-1', occurrenceDate: '2026-07-20' } },
   } as React.ComponentProps<typeof EventDetailScreen>['route'];
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (useWindowDimensions as jest.Mock).mockReturnValue({ width: 390, height: 844 });
     (useEvents as jest.Mock).mockReturnValue({
       events: [{
         id: 'event-1',
@@ -66,7 +70,10 @@ describe('EventDetailScreen source-aligned structure', () => {
     ]);
 
     fireEvent.press(view.getByLabelText('编辑日程'));
-    expect(navigate).toHaveBeenCalledWith('AddEvent', { date: '2026-07-20', eventId: 'event-1' });
+    expect(navigate).toHaveBeenCalledWith('AddEvent', {
+      date: '2026-07-20',
+      eventRef: { sourceEventId: 'event-1', occurrenceDate: '2026-07-20' },
+    });
   });
 
   it('uses source header geometry and the 0-40-70dp cross-fade thresholds', async () => {
@@ -111,6 +118,45 @@ describe('EventDetailScreen source-aligned structure', () => {
     expect(titleOpacity.config.inputRange).toEqual([40, 70]);
   });
 
+  it('enables Android nested scrolling for the detail content', async () => {
+    const view = await render(<EventDetailScreen navigation={navigation} route={route} />);
+    expect(view.getByTestId('event-detail-scroll').props.nestedScrollEnabled).toBe(true);
+  });
+
+  it.each([
+    { viewport: { width: 320, height: 568 }, expectedWidth: '100%', expectedMaxWidth: undefined },
+    { viewport: { width: 640, height: 360 }, expectedWidth: 608, expectedMaxWidth: 720 },
+  ])('keeps the title bar and reachable detail rows in one frame at $viewport.width x $viewport.height', async ({
+    viewport,
+    expectedWidth,
+    expectedMaxWidth,
+  }) => {
+    (useWindowDimensions as jest.Mock).mockReturnValue(viewport);
+    const view = await render(<EventDetailScreen navigation={navigation} route={route} />);
+    const frame = view.getByTestId('event-detail-content-frame');
+    const frameStyle = StyleSheet.flatten(frame.props.style);
+    const framedContent = within(frame);
+    const scroll = framedContent.getByTestId('event-detail-scroll');
+    const scrollContent = within(scroll);
+
+    expect(frameStyle).toEqual(expect.objectContaining({
+      flex: 1,
+      width: expectedWidth,
+      alignSelf: 'center',
+    }));
+    expect(frameStyle.maxWidth).toBe(expectedMaxWidth);
+    expect(framedContent.getByLabelText('编辑日程')).toBeTruthy();
+    expect(framedContent.getByLabelText('删除日程')).toBeTruthy();
+    expect(scroll.props.nestedScrollEnabled).toBe(true);
+    expect(scrollContent.getByTestId('event-detail-header')).toBeTruthy();
+    expect(scrollContent.getByTestId('event-detail-location-row')).toBeTruthy();
+    expect(scrollContent.getByTestId('event-detail-description-row')).toBeTruthy();
+    expect(scrollContent.getByTestId('event-detail-reminder-row')).toBeTruthy();
+    expect(StyleSheet.flatten(view.getByTestId('event-detail-header-wash').props.style)).toEqual(
+      expect.objectContaining({ position: 'absolute', left: 0, right: 0 }),
+    );
+  });
+
   it('shows date-only and all-day ranges without inventing a separate time row', async () => {
     (useEvents as jest.Mock).mockReturnValue({
       events: [{
@@ -148,7 +194,7 @@ describe('EventDetailScreen source-aligned structure', () => {
     const view = await render(<EventDetailScreen navigation={navigation} route={route} />);
     fireEvent.press(view.getByLabelText('删除日程'));
     expect(mockShowDialog).toHaveBeenCalledWith(expect.objectContaining({
-      title: '删除日程',
+      title: '删除重复日程',
       tone: 'danger',
     }));
   });
@@ -166,10 +212,66 @@ describe('EventDetailScreen source-aligned structure', () => {
       deleteEvent: jest.fn(),
     });
 
-    const view = await render(<EventDetailScreen navigation={navigation} route={route} />);
+    const searchRoute = {
+      ...route,
+      params: { eventRef: { sourceEventId: 'event-1', occurrenceDate: '2025-03-08' } },
+    } as React.ComponentProps<typeof EventDetailScreen>['route'];
+    const view = await render(<EventDetailScreen navigation={navigation} route={searchRoute} />);
     expect(view.getAllByText('历史复盘').length).toBeGreaterThan(0);
     expect(view.queryByText('日程不存在')).toBeNull();
     fireEvent.press(view.getByLabelText('编辑日程'));
-    expect(navigate).toHaveBeenCalledWith('AddEvent', { date: '2025-03-08', eventId: 'event-1' });
+    expect(navigate).toHaveBeenCalledWith('AddEvent', {
+      date: '2025-03-08',
+      eventRef: { sourceEventId: 'event-1', occurrenceDate: '2025-03-08' },
+    });
+  });
+});
+
+describe('event detail header snap contract', () => {
+  const scrollableMetrics = {
+    headerHeight: 116,
+    contentHeight: 900,
+    viewportHeight: 700,
+  };
+
+  it('uses the header midpoint for a low-speed release in either half', () => {
+    expect(resolveHeaderSnapTarget({
+      ...scrollableMetrics,
+      offsetY: 40,
+      releaseVelocityY: 0.1,
+    })).toBe(0);
+    expect(resolveHeaderSnapTarget({
+      ...scrollableMetrics,
+      offsetY: 70,
+      releaseVelocityY: -0.1,
+    })).toBe(116);
+  });
+
+  it('uses the gesture direction for an obvious vertical fling', () => {
+    expect(resolveHeaderSnapTarget({
+      ...scrollableMetrics,
+      offsetY: 30,
+      releaseVelocityY: -0.5,
+    })).toBe(116);
+    expect(resolveHeaderSnapTarget({
+      ...scrollableMetrics,
+      offsetY: 90,
+      releaseVelocityY: 0.5,
+    })).toBe(0);
+  });
+
+  it('does not pull back after the collapse region or when content cannot fully collapse', () => {
+    expect(resolveHeaderSnapTarget({
+      ...scrollableMetrics,
+      offsetY: 150,
+      releaseVelocityY: 0,
+    })).toBeNull();
+    expect(resolveHeaderSnapTarget({
+      offsetY: 70,
+      releaseVelocityY: 0,
+      headerHeight: 116,
+      contentHeight: 760,
+      viewportHeight: 700,
+    })).toBeNull();
   });
 });

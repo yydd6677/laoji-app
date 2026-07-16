@@ -1,12 +1,28 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Animated, StyleSheet } from 'react-native';
 import { ACTION_PANEL_GEOMETRY, AppActionSheet } from '../src/components/AppActionSheet';
 import { Colors as C } from '../src/theme/colors';
 
 function pressableStyle(node: { props: Record<string, unknown> }) {
   const style = node.props.style;
   return StyleSheet.flatten(typeof style === 'function' ? style({ pressed: false }) : style);
+}
+
+function deferTimingAnimations() {
+  const timing = Animated.timing as jest.Mock;
+  const originalImplementation = timing.getMockImplementation();
+  const completions: Array<(result: { finished: boolean }) => void> = [];
+  timing.mockImplementation((value, config) => ({
+    start: jest.fn((completion?: (result: { finished: boolean }) => void) => {
+      value?.setValue?.(config?.toValue);
+      if (completion) completions.push(completion);
+    }),
+  }));
+  return {
+    completions,
+    restore: () => timing.mockImplementation(originalImplementation),
+  };
 }
 
 describe('AppActionSheet', () => {
@@ -56,6 +72,9 @@ describe('AppActionSheet', () => {
     );
     expect(StyleSheet.flatten(screen.getByTestId('app-action-sheet-header-divider').props.style).height).toBe(0.5);
     expect(StyleSheet.flatten(screen.getByTestId('app-action-sheet-item-divider-day').props.style).height).toBe(0.5);
+    expect(StyleSheet.flatten(screen.getByTestId('app-action-sheet-backdrop').props.style)).toEqual(
+      expect.objectContaining({ backgroundColor: C.overlay }),
+    );
     expect(screen.queryByTestId('app-action-sheet-handle')).toBeNull();
 
     await fireEvent.press(screen.getByLabelText('单日视图'));
@@ -81,5 +100,36 @@ describe('AppActionSheet', () => {
     );
     await fireEvent.press(screen.getByText('取消'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes Android back through the complete exit before notifying its owner', async () => {
+    const onClose = jest.fn();
+    const view = await render(
+      <AppActionSheet
+        visible
+        title="新建日程"
+        onClose={onClose}
+        items={[{ key: 'voice', label: '语音输入', onPress: jest.fn() }]}
+      />,
+    );
+    const modal = view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })[0];
+    const deferred = deferTimingAnimations();
+
+    try {
+      await act(() => modal.props.onRequestClose());
+      await act(() => modal.props.onRequestClose());
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByTestId('app-action-sheet-backdrop')).toBeTruthy();
+      expect(screen.getByText('语音输入')).toBeTruthy();
+      expect(deferred.completions).toHaveLength(1);
+
+      await act(() => deferred.completions[0]({ finished: true }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('app-action-sheet-panel')).toBeNull();
+      expect(view.container.queryAll(instance => instance.type === 'Modal', { includeSelf: true })).toHaveLength(0);
+    } finally {
+      deferred.restore();
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { CalEvent } from '../types';
+import { eventCoversDate, eventEffectiveEndDate } from './eventDateSemantics';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const TIME_MAX = Number.MAX_SAFE_INTEGER;
@@ -26,10 +27,11 @@ function relativeDateKey(event: CalEvent, todayDate: Date): SortKey {
   const start = parseLocalDate(event.startDate);
   if (!start) return { bucket: 3, distance: TIME_MAX };
 
-  const end = event.spanning && event.endDate ? parseLocalDate(event.endDate) : null;
+  const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
+  const end = event.endDate ? parseLocalDate(eventEffectiveEndDate(event)) : null;
   if (end) {
     const rangeEnd = end.getTime() < start.getTime() ? start : end;
-    if (start.getTime() <= todayDate.getTime() && todayDate.getTime() <= rangeEnd.getTime()) {
+    if (eventCoversDate(event, todayKey)) {
       return { bucket: 0, distance: 0 };
     }
     if (start.getTime() > todayDate.getTime()) {

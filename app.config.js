@@ -67,6 +67,7 @@ const base = {
     './plugins/withAndroidReleaseOptimizations',
     ['expo-av', { microphonePermission: '老记需要麦克风权限，用于语音输入日程。' }],
     'expo-font',
+    'expo-localization',
     'expo-secure-store',
     ['expo-image-picker', {
       photosPermission: '老记需要访问照片，用于选择账号头像。',

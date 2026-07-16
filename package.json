@@ -10,7 +10,7 @@
     "@react-navigation/bottom-tabs": "^7.18.7",
     "@react-navigation/native": "^7.3.7",
     "@react-navigation/native-stack": "^7.17.9",
-    "expo": "^54.0.0",
+    "expo": "~54.0.36",
     "expo-av": "~16.0.8",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.23",
@@ -18,6 +18,7 @@
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-local-authentication": "~17.0.8",
+    "expo-localization": "~17.0.9",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
@@ -62,6 +63,8 @@
     "audit:public": "node scripts/check_publication_boundary.js --require-gitleaks",
     "typecheck": "tsc --noEmit",
     "test:ci": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage",
+    "verify:release-config": "node scripts/check_release_config.js",
     "verify:android-artifact": "node scripts/check_android_artifact.js",
     "materialize:aab": "node scripts/materialize_aab_for_emulator.js",
     "test": "jest --watchAll=false",
@@ -89,6 +92,7 @@
       "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
       "^expo-file-system/legacy$": "<rootDir>/__mocks__/expo-file-system-legacy.js",
       "^expo-notifications$": "<rootDir>/__mocks__/expo-notifications.js",
+      "^expo-localization$": "<rootDir>/__mocks__/expo-localization.js",
       "^expo-constants$": "<rootDir>/__mocks__/expo-constants.js",
       "^expo-sharing$": "<rootDir>/__mocks__/expo-sharing.js",
       "^react-native-safe-area-context$": "<rootDir>/__mocks__/react-native-safe-area-context.js",
@@ -98,7 +102,19 @@
     "collectCoverageFrom": [
       "src/**/*.{ts,tsx}",
       "!src/**/*.d.ts"
-    ]
+    ],
+    "coverageThreshold": {
+      "global": { "statements": 78, "branches": 67, "functions": 77, "lines": 83 },
+      "./src/utils/eventIdentity.ts": { "statements": 90, "branches": 90, "functions": 100, "lines": 100 },
+      "./src/services/eventDeleteTransactions.ts": { "statements": 92, "branches": 84, "functions": 100, "lines": 95 },
+      "./src/services/eventEditTransactions.ts": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 },
+      "./src/services/eventDeleteCoordinator.ts": { "statements": 80, "branches": 58, "functions": 75, "lines": 85 },
+      "./src/services/eventEditCoordinator.ts": { "statements": 78, "branches": 60, "functions": 80, "lines": 83 },
+      "./src/services/notifications.ts": { "statements": 82, "branches": 70, "functions": 78, "lines": 88 },
+      "./src/services/eventCache.ts": { "statements": 80, "branches": 74, "functions": 84, "lines": 90 },
+      "./src/utils/dayTimelineLayout.ts": { "statements": 95, "branches": 83, "functions": 100, "lines": 100 },
+      "./src/utils/monthEventLayout.ts": { "statements": 90, "branches": 67, "functions": 100, "lines": 95 }
+    }
   },
   "overrides": {
     "postcss": "8.5.10",

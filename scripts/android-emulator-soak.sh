@@ -44,7 +44,17 @@ while [ "$(date +%s)" -lt "$END_TS" ]; do
   log "iteration $iteration start"
   adb_cmd logcat -c || true
 
-  OUT_DIR="$run_dir" RESET_APP_DATA=1 "$SMOKE_SCRIPT" >"$run_dir/smoke.log" 2>&1
+  if [ "$iteration" -eq 1 ]; then
+    reset_app_data=1
+    expect_persisted_session=0
+  else
+    reset_app_data=0
+    expect_persisted_session=1
+  fi
+  OUT_DIR="$run_dir" \
+    RESET_APP_DATA="$reset_app_data" \
+    EXPECT_PERSISTED_SESSION="$expect_persisted_session" \
+    "$SMOKE_SCRIPT" >"$run_dir/smoke.log" 2>&1
   tail -8 "$run_dir/smoke.log" | tee -a "$OUT_DIR/soak.log"
   scan_crashes "$run_dir"
 

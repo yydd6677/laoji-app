@@ -11,5 +11,6 @@ export function AppReadinessGate({ children }: { children: React.ReactNode }) {
     if (!initializing) void SplashScreen.hideAsync().catch(() => {});
   }, [initializing]);
 
+  if (initializing) return null;
   return <>{children}</>;
 }

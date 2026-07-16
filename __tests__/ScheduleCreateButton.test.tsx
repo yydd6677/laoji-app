@@ -6,12 +6,18 @@ import {
   ScheduleCreateButton,
   scheduleCreateTargetAt,
 } from '../src/components/ScheduleCreateButton';
+import { Colors as C } from '../src/theme/colors';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 
 const gesture = (pageX: number, pageY: number, locationX = 24, locationY = 24) => ({
   nativeEvent: { pageX, pageY, locationX, locationY },
 });
+
+function pressableStyle(node: { props: Record<string, unknown> }, pressed: boolean) {
+  const style = node.props.style;
+  return StyleSheet.flatten(typeof style === 'function' ? style({ pressed }) : style);
+}
 
 describe('ScheduleCreateButton', () => {
   it('keeps a tap on the existing create-choice flow', async () => {
@@ -26,6 +32,18 @@ describe('ScheduleCreateButton', () => {
     );
 
     expect(screen.queryByTestId('calendar-create-radial')).toBeNull();
+    const button = screen.getByTestId('calendar-create-button');
+    expect(pressableStyle(button, false)).toEqual(expect.objectContaining({
+      right: 0,
+      bottom: 0,
+      elevation: SCHEDULE_CREATE_GEOMETRY.restElevation,
+    }));
+    expect(pressableStyle(button, true)).toEqual(expect.objectContaining({
+      right: 0,
+      bottom: 0,
+      elevation: SCHEDULE_CREATE_GEOMETRY.pressedElevation,
+      transform: [{ translateY: SCHEDULE_CREATE_GEOMETRY.pressedTranslateY }],
+    }));
     await fireEvent.press(screen.getByLabelText('新建日程'));
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(StyleSheet.flatten(screen.getByTestId('calendar-create-cluster').props.style))
@@ -44,14 +62,40 @@ describe('ScheduleCreateButton', () => {
       />,
     );
 
+    const clusterBefore = StyleSheet.flatten(screen.getByTestId('calendar-create-cluster').props.style);
     const button = screen.getByTestId('calendar-create-button');
     await act(() => button.props.onLongPress(gesture(300, 700)));
     expect(screen.getByTestId('calendar-create-radial')).toBeTruthy();
     expect(screen.getByText('语音')).toBeTruthy();
     expect(screen.getByText('手动')).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByTestId('calendar-create-cluster').props.style)).toEqual(clusterBefore);
+    expect(pressableStyle(screen.getByTestId('calendar-create-button'), false)).toEqual(expect.objectContaining({
+      right: 0,
+      bottom: 0,
+      elevation: SCHEDULE_CREATE_GEOMETRY.pressedElevation,
+      transform: [{ translateY: SCHEDULE_CREATE_GEOMETRY.pressedTranslateY }],
+    }));
+    const iconMotion = StyleSheet.flatten(screen.getByTestId('calendar-create-icon-motion').props.style);
+    expect(iconMotion.transform[0].rotate.config.outputRange).toEqual([
+      '0deg',
+      `${SCHEDULE_CREATE_GEOMETRY.openRotation}deg`,
+    ]);
 
     const voice = SCHEDULE_CREATE_GEOMETRY.targetOffsets.voice;
     await act(() => button.props.onTouchMove(gesture(300 + voice.x, 700 + voice.y)));
+    expect(StyleSheet.flatten(screen.getByTestId('calendar-create-arc').props.style)).toEqual(
+      expect.objectContaining({
+        width: SCHEDULE_CREATE_GEOMETRY.arcRadius,
+        height: SCHEDULE_CREATE_GEOMETRY.arcRadius,
+        borderColor: C.primary,
+      }),
+    );
+    expect(StyleSheet.flatten(screen.getByTestId('calendar-create-target-voice').props.style)).toEqual(
+      expect.objectContaining({
+        backgroundColor: C.primary,
+        transform: [{ scale: SCHEDULE_CREATE_GEOMETRY.hoverScale }],
+      }),
+    );
     await act(() => button.props.onPressOut(gesture(300 + voice.x, 700 + voice.y)));
 
     expect(onVoice).toHaveBeenCalledTimes(1);

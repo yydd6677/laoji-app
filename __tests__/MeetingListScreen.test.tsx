@@ -4,16 +4,13 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MeetingListScreen } from '../src/screens/MeetingListScreen';
 import { useMeetings } from '../src/store/MeetingsStore';
 import { MEETING_LIST_ITEM_GEOMETRY } from '../src/components/MeetingListItem';
+import { BOTTOM_TAB_BAR_GEOMETRY } from '../src/components/BottomTabBar';
 
 const mockShowDialog = jest.fn();
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 jest.mock('../src/components/ScreenContainer', () => ({
   ScreenContainer: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
-}));
-jest.mock('../src/components/BottomTabBar', () => ({
-  BottomTabBar: 'BottomTabBar',
-  BOTTOM_TAB_BAR_GEOMETRY: { scrollContentClearance: 51 },
 }));
 jest.mock('../src/components/CalendarSlidePage', () => ({
   CalendarSlidePage: ({ visible, children, testID }: { visible: boolean; children: React.ReactNode; testID?: string }) => (
@@ -107,6 +104,14 @@ describe('MeetingListScreen Feishu Minutes structure', () => {
     expect(StyleSheet.flatten(screen.getByTestId('meeting-home-list').props.style)).toEqual(expect.objectContaining({
       backgroundColor: '#F8F9FA',
     }));
+    expect(screen.queryByTestId('bottom-tab-bar')).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('meeting-home-list').props.contentContainerStyle))
+      .toEqual(expect.objectContaining({
+        paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance,
+      }));
+    expect(BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance).toBeGreaterThan(
+      BOTTOM_TAB_BAR_GEOMETRY.micDiameter + BOTTOM_TAB_BAR_GEOMETRY.sceneActionBottom,
+    );
   });
 
   it('replaces ordinary metadata with the current recording state', async () => {

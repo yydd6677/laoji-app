@@ -3,6 +3,7 @@ import {
   FlatList,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -29,10 +30,18 @@ const WHEEL_ITEM_HEIGHT = 36;
 const WHEEL_VISIBLE_ITEMS = 7;
 const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ITEMS;
 const WHEEL_PADDING = WHEEL_ITEM_HEIGHT * Math.floor(WHEEL_VISIBLE_ITEMS / 2);
-const DATE_BASE = new Date(2010, 0, 1);
-const DATE_OPTION_COUNT = 22000;
+const DATE_MIN_YEAR = 1900;
+const DATE_MAX_YEAR = 2100;
+const DATE_BASE = new Date(DATE_MIN_YEAR, 0, 1);
+const DATE_MAX = new Date(DATE_MAX_YEAR, 11, 31);
+const DATE_OPTION_COUNT = Math.round(
+  (Date.UTC(DATE_MAX_YEAR + 1, 0, 1) - Date.UTC(DATE_MIN_YEAR, 0, 1)) / 86400000,
+);
 const DATE_OPTIONS = Array.from({ length: DATE_OPTION_COUNT }, (_, index) => index);
-const YEAR_OPTIONS = Array.from({ length: 201 }, (_, index) => 1900 + index);
+const YEAR_OPTIONS = Array.from(
+  { length: DATE_MAX_YEAR - DATE_MIN_YEAR + 1 },
+  (_, index) => DATE_MIN_YEAR + index,
+);
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, index) => index * 5);
@@ -49,6 +58,10 @@ function cloneValue(value: EventTimeValue): EventTimeValue {
     endTime: cloneDate(value.endTime),
     isAllDay: value.isAllDay,
   };
+}
+
+function isValidDate(value: Date): boolean {
+  return value instanceof Date && Number.isFinite(value.getTime());
 }
 
 function startOfDay(value: Date): Date {
@@ -75,6 +88,31 @@ function splitDateTime(value: Date): { date: Date; time: Date } {
 
 function dayNumber(value: Date): number {
   return Math.floor(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()) / 86400000);
+}
+
+function normalizeDate(value: Date, fallback = new Date()): Date {
+  const fallbackDate = isValidDate(fallback) ? fallback : DATE_BASE;
+  const candidate = startOfDay(isValidDate(value) ? value : fallbackDate);
+  if (dayNumber(candidate) < dayNumber(DATE_BASE)) return cloneDate(DATE_BASE);
+  if (dayNumber(candidate) > dayNumber(DATE_MAX)) return cloneDate(DATE_MAX);
+  return candidate;
+}
+
+function normalizeTime(value: Date, fallbackHour: number): Date {
+  const source = isValidDate(value) ? value : new Date(2000, 0, 1, fallbackHour, 0);
+  const minute = Math.max(0, Math.min(55, Math.round(source.getMinutes() / 5) * 5));
+  return new Date(2000, 0, 1, source.getHours(), minute, 0, 0);
+}
+
+function normalizeValue(value: EventTimeValue): EventTimeValue {
+  const startDate = normalizeDate(value.startDate);
+  return {
+    startDate,
+    endDate: normalizeDate(value.endDate, startDate),
+    startTime: normalizeTime(value.startTime, 10),
+    endTime: normalizeTime(value.endTime, 11),
+    isAllDay: Boolean(value.isAllDay),
+  };
 }
 
 function addDays(value: Date, amount: number): Date {
@@ -125,15 +163,25 @@ function TimeWheel({
   onSelect: (value: number, index: number) => void;
 }) {
   const listRef = React.useRef<FlatList<number>>(null);
-  const [activeIndex, setActiveIndex] = React.useState(selectedIndex);
+  const boundedSelectedIndex = Math.max(0, Math.min(values.length - 1, selectedIndex));
+  const [activeIndex, setActiveIndex] = React.useState(boundedSelectedIndex);
+  const activeIndexRef = React.useRef(boundedSelectedIndex);
 
   React.useEffect(() => {
-    setActiveIndex(selectedIndex);
-    listRef.current?.scrollToIndex({ index: selectedIndex, animated: false });
-  }, [selectedIndex]);
+    const next = Math.max(0, Math.min(values.length - 1, selectedIndex));
+    if (activeIndexRef.current === next) return;
+    activeIndexRef.current = next;
+    setActiveIndex(next);
+    listRef.current?.scrollToIndex({ index: next, animated: false });
+  }, [selectedIndex, values.length]);
 
   const choose = React.useCallback((index: number, scroll = true) => {
     const next = Math.max(0, Math.min(values.length - 1, index));
+    if (activeIndexRef.current === next) {
+      if (scroll) listRef.current?.scrollToIndex({ index: next, animated: true });
+      return;
+    }
+    activeIndexRef.current = next;
     setActiveIndex(next);
     if (scroll) listRef.current?.scrollToIndex({ index: next, animated: true });
     onSelect(values[next], next);
@@ -144,11 +192,7 @@ function TimeWheel({
   };
 
   const trackCenterItem = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = Math.max(
-      0,
-      Math.min(values.length - 1, Math.round(event.nativeEvent.contentOffset.y / WHEEL_ITEM_HEIGHT)),
-    );
-    setActiveIndex(current => current === next ? current : next);
+    choose(Math.round(event.nativeEvent.contentOffset.y / WHEEL_ITEM_HEIGHT), false);
   };
 
   return (
@@ -156,7 +200,12 @@ function TimeWheel({
       style={[s.wheelColumn, { flex: weight }]}
       accessibilityRole="adjustable"
       accessibilityLabel={accessibilityLabel}
-      accessibilityValue={{ text: labelForIndex(values[activeIndex], activeIndex) }}
+      accessibilityValue={{
+        min: 0,
+        max: values.length - 1,
+        now: activeIndex,
+        text: labelForIndex(values[activeIndex], activeIndex),
+      }}
       accessibilityActions={[
         { name: 'increment', label: '下一个' },
         { name: 'decrement', label: '上一个' },
@@ -180,6 +229,7 @@ function TimeWheel({
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityState={{ selected: index === activeIndex }}
+              accessibilityLabel={labelForIndex(item, index)}
             >
               <Text style={[
                 s.wheelText,
@@ -202,9 +252,12 @@ function TimeWheel({
         showsVerticalScrollIndicator={false}
         snapToInterval={WHEEL_ITEM_HEIGHT}
         decelerationRate="fast"
+        nestedScrollEnabled
         scrollEventThrottle={16}
         onScroll={trackCenterItem}
+        onScrollEndDrag={settle}
         onMomentumScrollEnd={settle}
+        testID={`${testID}-list`}
         onScrollToIndexFailed={({ index }) => {
           requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, animated: false }));
         }}
@@ -242,14 +295,19 @@ export function EventTimeEditor({
   onDone: (value: EventTimeValue) => void;
   onInvalid: () => void;
 }) {
-  const [draft, setDraft] = React.useState<EventTimeValue>(() => cloneValue(value));
+  const [draft, setDraft] = React.useState<EventTimeValue>(() => normalizeValue(value));
   const [target, setTarget] = React.useState<TimeTarget>(initialTarget);
+  const incomingValueRef = React.useRef(value);
+  const previousVisibleRef = React.useRef(false);
+  incomingValueRef.current = value;
 
   React.useEffect(() => {
-    if (!visible) return;
-    setDraft(cloneValue(value));
+    const opening = visible && !previousVisibleRef.current;
+    previousVisibleRef.current = visible;
+    if (!opening) return;
+    setDraft(normalizeValue(incomingValueRef.current));
     setTarget(initialTarget);
-  }, [initialTarget, value, visible]);
+  }, [initialTarget, visible]);
 
   const startMoment = combineDateAndTime(draft.startDate, draft.startTime);
   const endMoment = combineDateAndTime(draft.endDate, draft.endTime);
@@ -259,58 +317,80 @@ export function EventTimeEditor({
   const activeDate = target === 'start' ? draft.startDate : draft.endDate;
   const activeTime = target === 'start' ? draft.startTime : draft.endTime;
 
-  const updateStartMoment = (nextStart: Date) => {
-    setDraft(current => {
-      const currentStart = combineDateAndTime(current.startDate, current.startTime);
-      const currentEnd = combineDateAndTime(current.endDate, current.endTime);
-      const duration = Math.max(5 * 60000, currentEnd.getTime() - currentStart.getTime());
-      const nextEnd = new Date(nextStart.getTime() + duration);
-      const startParts = splitDateTime(nextStart);
-      const endParts = splitDateTime(nextEnd);
-      return {
-        ...current,
-        startDate: startParts.date,
-        startTime: startParts.time,
-        endDate: endParts.date,
-        endTime: endParts.time,
-      };
-    });
+  const valueWithStartMoment = (current: EventTimeValue, nextStart: Date): EventTimeValue => {
+    const currentStart = combineDateAndTime(current.startDate, current.startTime);
+    const currentEnd = combineDateAndTime(current.endDate, current.endTime);
+    const duration = Math.max(5 * 60000, currentEnd.getTime() - currentStart.getTime());
+    const nextEnd = new Date(nextStart.getTime() + duration);
+    const startParts = splitDateTime(nextStart);
+    const endParts = splitDateTime(nextEnd);
+    return {
+      ...current,
+      startDate: normalizeDate(startParts.date),
+      startTime: normalizeTime(startParts.time, 10),
+      endDate: normalizeDate(endParts.date, startParts.date),
+      endTime: normalizeTime(endParts.time, 11),
+    };
   };
 
   const updateDate = (nextDate: Date) => {
-    if (target === 'start') {
-      setDraft(current => {
+    setDraft(current => {
+      if (target === 'start') {
         if (current.isAllDay) {
           const span = Math.max(0, dayNumber(current.endDate) - dayNumber(current.startDate));
-          return { ...current, startDate: startOfDay(nextDate), endDate: addDays(nextDate, span) };
+          return {
+            ...current,
+            startDate: normalizeDate(nextDate),
+            endDate: normalizeDate(addDays(nextDate, span), nextDate),
+          };
         }
-        return current;
-      });
-      if (!draft.isAllDay) updateStartMoment(combineDateAndTime(nextDate, draft.startTime));
-      return;
-    }
-    setDraft(current => ({ ...current, endDate: startOfDay(nextDate) }));
+        return valueWithStartMoment(current, combineDateAndTime(nextDate, current.startTime));
+      }
+      return { ...current, endDate: normalizeDate(nextDate, current.startDate) };
+    });
   };
 
   const updateHour = (hour: number) => {
-    const nextTime = cloneDate(activeTime);
-    nextTime.setHours(hour, nextTime.getMinutes(), 0, 0);
-    if (target === 'start') updateStartMoment(combineDateAndTime(draft.startDate, nextTime));
-    else setDraft(current => ({ ...current, endTime: nextTime }));
+    setDraft(current => {
+      const currentTime = target === 'start' ? current.startTime : current.endTime;
+      const nextTime = cloneDate(currentTime);
+      nextTime.setHours(hour, nextTime.getMinutes(), 0, 0);
+      if (target === 'start') {
+        return valueWithStartMoment(current, combineDateAndTime(current.startDate, nextTime));
+      }
+      return { ...current, endTime: normalizeTime(nextTime, 11) };
+    });
   };
 
   const updateMinute = (minute: number) => {
-    const nextTime = cloneDate(activeTime);
-    nextTime.setMinutes(minute, 0, 0);
-    if (target === 'start') updateStartMoment(combineDateAndTime(draft.startDate, nextTime));
-    else setDraft(current => ({ ...current, endTime: nextTime }));
+    setDraft(current => {
+      const currentTime = target === 'start' ? current.startTime : current.endTime;
+      const nextTime = cloneDate(currentTime);
+      nextTime.setMinutes(minute, 0, 0);
+      if (target === 'start') {
+        return valueWithStartMoment(current, combineDateAndTime(current.startDate, nextTime));
+      }
+      return { ...current, endTime: normalizeTime(nextTime, 11) };
+    });
   };
 
   const updateAllDayDate = (year?: number, month?: number, day?: number) => {
-    const nextYear = year ?? activeDate.getFullYear();
-    const nextMonth = month ?? activeDate.getMonth() + 1;
-    const nextDay = Math.min(day ?? activeDate.getDate(), daysInMonth(nextYear, nextMonth));
-    updateDate(new Date(nextYear, nextMonth - 1, nextDay));
+    setDraft(current => {
+      const currentDate = target === 'start' ? current.startDate : current.endDate;
+      const nextYear = year ?? currentDate.getFullYear();
+      const nextMonth = month ?? currentDate.getMonth() + 1;
+      const nextDay = Math.min(day ?? currentDate.getDate(), daysInMonth(nextYear, nextMonth));
+      const nextDate = new Date(nextYear, nextMonth - 1, nextDay);
+      if (target === 'start') {
+        const span = Math.max(0, dayNumber(current.endDate) - dayNumber(current.startDate));
+        return {
+          ...current,
+          startDate: normalizeDate(nextDate),
+          endDate: normalizeDate(addDays(nextDate, span), nextDate),
+        };
+      }
+      return { ...current, endDate: normalizeDate(nextDate, current.startDate) };
+    });
   };
 
   const toggleAllDay = (checked: boolean) => {
@@ -328,7 +408,12 @@ export function EventTimeEditor({
       let end = combineDateAndTime(current.endDate, current.endTime);
       if (end.getTime() <= start.getTime()) end = new Date(start.getTime() + 60 * 60000);
       const endParts = splitDateTime(end);
-      return { ...current, isAllDay: false, endDate: endParts.date, endTime: endParts.time };
+      return {
+        ...current,
+        isAllDay: false,
+        endDate: normalizeDate(endParts.date, current.startDate),
+        endTime: normalizeTime(endParts.time, 11),
+      };
     });
   };
 
@@ -336,6 +421,10 @@ export function EventTimeEditor({
     const selected = target === summaryTarget;
     const date = summaryTarget === 'start' ? draft.startDate : draft.endDate;
     const time = summaryTarget === 'start' ? draft.startTime : draft.endTime;
+    const dateText = formatDate(date, date.getFullYear() !== new Date().getFullYear());
+    const valueText = draft.isAllDay
+      ? `${dateText} ${formatWeekday(date)}`
+      : `${dateText} ${formatWeekday(date)} ${formatTime(time)}`;
     const danger = summaryTarget === 'end' && invalid;
     const color = danger ? C.red : selected ? C.primary : C.text;
     return (
@@ -348,13 +437,14 @@ export function EventTimeEditor({
         activeOpacity={0.65}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        accessibilityLabel={summaryTarget === 'start' ? '编辑开始时间' : '编辑结束时间'}
+        accessibilityLabel={`编辑${summaryTarget === 'start' ? '开始' : '结束'}${draft.isAllDay ? '日期' : '时间'}`}
+        accessibilityValue={{ text: valueText }}
       >
         <Text style={[s.summaryMain, { color }]}>
-          {draft.isAllDay ? formatDate(date) : formatTime(time)}
+          {draft.isAllDay ? dateText : formatTime(time)}
         </Text>
         <Text style={[s.summaryMinor, { color }]}>
-          {draft.isAllDay ? formatWeekday(date) : `${formatDate(date)} ${formatWeekday(date)}`}
+          {draft.isAllDay ? formatWeekday(date) : `${dateText} ${formatWeekday(date)}`}
         </Text>
       </TouchableOpacity>
     );
@@ -364,7 +454,7 @@ export function EventTimeEditor({
     () => Array.from({ length: daysInMonth(activeDate.getFullYear(), activeDate.getMonth() + 1) }, (_, index) => index + 1),
     [activeDate],
   );
-  const roundedMinuteIndex = Math.max(0, Math.min(MINUTE_OPTIONS.length - 1, Math.round(activeTime.getMinutes() / 5)));
+  const minuteIndex = Math.max(0, MINUTE_OPTIONS.indexOf(activeTime.getMinutes()));
 
   return (
     <CalendarSlidePage
@@ -386,94 +476,104 @@ export function EventTimeEditor({
         }}
         rightTestID="event-time-done"
       />
-      <View style={s.titleGap} />
-      <View style={s.allDayRow} testID="event-time-all-day-row">
-        <Text style={s.allDayText}>全天</Text>
-        <CalendarSwitch
-          checked={draft.isAllDay}
-          onChange={toggleAllDay}
-          accessibilityLabel="全天日程"
-          testID="event-all-day-toggle"
-        />
-      </View>
-      <View style={s.sectionDivider} />
-
-      <View style={s.summaryRow}>
-        {renderSummary('start')}
-        {renderSummary('end')}
-        <View style={s.summaryArrow}>
-          <EventTimeRangeArrow testID="event-time-range-arrow" />
+      <ScrollView
+        style={s.pageScroll}
+        contentContainerStyle={s.pageContent}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+        testID="event-time-scroll"
+      >
+        <View style={s.titleGap} />
+        <View style={s.allDayRow} testID="event-time-all-day-row">
+          <Text style={s.allDayText}>全天</Text>
+          <CalendarSwitch
+            checked={draft.isAllDay}
+            onChange={toggleAllDay}
+            accessibilityLabel="全天日程"
+            testID="event-all-day-toggle"
+          />
         </View>
-      </View>
+        <View style={s.sectionDivider} />
 
-      <View style={s.pickerWrap}>
-        {draft.isAllDay ? (
-          <View key={`all-day-${target}`} style={s.wheels}>
-            <TimeWheel
-              values={YEAR_OPTIONS}
-              selectedIndex={Math.max(0, Math.min(YEAR_OPTIONS.length - 1, activeDate.getFullYear() - 1900))}
-              labelForIndex={year => `${year}年`}
-              accessibilityLabel="年份"
-              testID="event-time-year-wheel"
-              onSelect={year => updateAllDayDate(year)}
-            />
-            <TimeWheel
-              values={MONTH_OPTIONS}
-              selectedIndex={activeDate.getMonth()}
-              labelForIndex={month => `${month}月`}
-              accessibilityLabel="月份"
-              testID="event-time-month-wheel"
-              onSelect={month => updateAllDayDate(undefined, month)}
-            />
-            <TimeWheel
-              key={`${activeDate.getFullYear()}-${activeDate.getMonth()}`}
-              values={dayOptions}
-              selectedIndex={Math.min(dayOptions.length - 1, activeDate.getDate() - 1)}
-              labelForIndex={day => `${day}日`}
-              accessibilityLabel="日期"
-              testID="event-time-day-wheel"
-              onSelect={day => updateAllDayDate(undefined, undefined, day)}
-            />
+        <View style={s.summaryRow}>
+          {renderSummary('start')}
+          {renderSummary('end')}
+          <View style={s.summaryArrow}>
+            <EventTimeRangeArrow testID="event-time-range-arrow" />
           </View>
-        ) : (
-          <View key={`timed-${target}`} style={s.wheels}>
-            <TimeWheel
-              values={DATE_OPTIONS}
-              selectedIndex={dateOptionIndex(activeDate)}
-              labelForIndex={index => {
-                const date = dateFromOption(index);
-                return `${formatDate(date, date.getFullYear() !== new Date().getFullYear())} ${formatWeekday(date)}`;
-              }}
-              accessibilityLabel="日期"
-              testID="event-time-date-wheel"
-              weight={2}
-              onSelect={index => updateDate(dateFromOption(index))}
-            />
-            <TimeWheel
-              values={HOUR_OPTIONS}
-              selectedIndex={activeTime.getHours()}
-              labelForIndex={hour => String(hour).padStart(2, '0')}
-              accessibilityLabel="小时"
-              testID="event-time-hour-wheel"
-              onSelect={updateHour}
-            />
-            <TimeWheel
-              values={MINUTE_OPTIONS}
-              selectedIndex={roundedMinuteIndex}
-              labelForIndex={minute => String(minute).padStart(2, '0')}
-              accessibilityLabel="分钟"
-              testID="event-time-minute-wheel"
-              onSelect={updateMinute}
-            />
-          </View>
-        )}
-      </View>
-      <View style={s.sectionDivider} />
+        </View>
+
+        <View style={s.pickerWrap}>
+          {draft.isAllDay ? (
+            <View key={`all-day-${target}`} style={s.wheels}>
+              <TimeWheel
+                values={YEAR_OPTIONS}
+                selectedIndex={Math.max(0, Math.min(YEAR_OPTIONS.length - 1, activeDate.getFullYear() - DATE_MIN_YEAR))}
+                labelForIndex={year => `${year}年`}
+                accessibilityLabel="年份"
+                testID="event-time-year-wheel"
+                onSelect={year => updateAllDayDate(year)}
+              />
+              <TimeWheel
+                values={MONTH_OPTIONS}
+                selectedIndex={activeDate.getMonth()}
+                labelForIndex={month => `${month}月`}
+                accessibilityLabel="月份"
+                testID="event-time-month-wheel"
+                onSelect={month => updateAllDayDate(undefined, month)}
+              />
+              <TimeWheel
+                key={`${activeDate.getFullYear()}-${activeDate.getMonth()}`}
+                values={dayOptions}
+                selectedIndex={Math.min(dayOptions.length - 1, activeDate.getDate() - 1)}
+                labelForIndex={day => `${day}日`}
+                accessibilityLabel="日期"
+                testID="event-time-day-wheel"
+                onSelect={day => updateAllDayDate(undefined, undefined, day)}
+              />
+            </View>
+          ) : (
+            <View key={`timed-${target}`} style={s.wheels}>
+              <TimeWheel
+                values={DATE_OPTIONS}
+                selectedIndex={dateOptionIndex(activeDate)}
+                labelForIndex={index => {
+                  const date = dateFromOption(index);
+                  return `${formatDate(date, date.getFullYear() !== new Date().getFullYear())} ${formatWeekday(date)}`;
+                }}
+                accessibilityLabel="日期"
+                testID="event-time-date-wheel"
+                weight={2}
+                onSelect={index => updateDate(dateFromOption(index))}
+              />
+              <TimeWheel
+                values={HOUR_OPTIONS}
+                selectedIndex={activeTime.getHours()}
+                labelForIndex={hour => String(hour).padStart(2, '0')}
+                accessibilityLabel="小时"
+                testID="event-time-hour-wheel"
+                onSelect={updateHour}
+              />
+              <TimeWheel
+                values={MINUTE_OPTIONS}
+                selectedIndex={minuteIndex}
+                labelForIndex={minute => String(minute).padStart(2, '0')}
+                accessibilityLabel="分钟"
+                testID="event-time-minute-wheel"
+                onSelect={updateMinute}
+              />
+            </View>
+          )}
+        </View>
+        <View style={s.sectionDivider} />
+      </ScrollView>
     </CalendarSlidePage>
   );
 }
 
 const s = StyleSheet.create({
+  pageScroll: { flex: 1, backgroundColor: C.body },
+  pageContent: { flexGrow: 1, paddingBottom: 16 },
   titleGap: { height: 12 },
   allDayRow: { minHeight: 22, marginVertical: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
   allDayText: { flex: 1, fontSize: 16, lineHeight: 22, color: C.text },

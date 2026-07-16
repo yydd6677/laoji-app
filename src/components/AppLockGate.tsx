@@ -12,6 +12,7 @@ import {
   savePrivacyPrefs,
   subscribePrivacyPrefs,
 } from '../services/privacy';
+import { setNotificationNavigationUnlocked } from '../navigation/notificationNavigation';
 
 function scopeForAuth(mode: string, userId?: number): string {
   if (mode === 'authenticated' && userId) return `user:${userId}`;
@@ -120,6 +121,13 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     });
     return () => sub.remove();
   }, [mode, prefs?.appLockEnabled, unlock]);
+
+  const notificationNavigationUnlocked = mode === 'signed_out'
+    || Boolean(prefs && !(prefs.appLockEnabled && locked));
+  useEffect(() => {
+    setNotificationNavigationUnlocked(notificationNavigationUnlocked);
+    return () => setNotificationNavigationUnlocked(false);
+  }, [notificationNavigationUnlocked]);
 
   if (mode === 'signed_out') {
     return <>{children}</>;

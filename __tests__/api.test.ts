@@ -16,6 +16,9 @@ import {
   fetchMeetingTranscript,
   saveEvent,
   deleteEvent,
+  commandEventState,
+  commandEventEdit,
+  fetchEventEditCommand,
   updateEvent,
   updateMeeting,
   transcribeAudio,
@@ -537,6 +540,95 @@ describe('deleteEvent', () => {
   it('throws on non-OK response', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 404 });
     await expect(deleteEvent(99)).rejects.toThrow('delete event failed: 404');
+  });
+});
+
+describe('commandEventState', () => {
+  it('sends the stable command key, occurrence anchor, scope, and revision', async () => {
+    const response = {
+      client_request_id: 'event-delete:abc12345',
+      source_event_id: 42,
+      desired_state: 'absent' as const,
+      observed_state: 'absent' as const,
+      scope: 'occurrence' as const,
+      occurrence_date: '2026-07-20',
+      revision: 4,
+      changed: true,
+    };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => response,
+    });
+    await expect(commandEventState(42, {
+      client_request_id: response.client_request_id,
+      desired_state: 'absent',
+      scope: 'occurrence',
+      occurrence_date: '2026-07-20',
+      expected_revision: 3,
+    }, 'token-7')).resolves.toEqual(response);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://203.0.113.10:18035/api/laoji/events/42/commands',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer token-7',
+        },
+        body: JSON.stringify({
+          client_request_id: response.client_request_id,
+          desired_state: 'absent',
+          scope: 'occurrence',
+          occurrence_date: '2026-07-20',
+          expected_revision: 3,
+        }),
+        signal: expect.anything(),
+      }),
+    );
+  });
+});
+
+describe('event edit commands', () => {
+  const response = {
+    client_request_id: 'event-edit:abc12345',
+    source_event_id: 42,
+    canonical_ref: { source_event_id: 42, occurrence_date: '2026-07-20' },
+    scope: 'occurrence' as const,
+    previous_revision: 3,
+    revision: 4,
+    changed: true,
+    event: { id: 42, title: '改后的周会', event_type: 'weekly', start_date: '2026-07-21' },
+    affected_range: { from_occurrence_date: '2026-07-20', through_occurrence_date: '2026-07-20' },
+  };
+
+  it('posts a sparse, revision-guarded occurrence edit', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => response });
+    const command = {
+      client_request_id: response.client_request_id,
+      scope: 'occurrence' as const,
+      occurrence_date: '2026-07-20',
+      expected_revision: 3,
+      patch: { title: '改后的周会', start_date: '2026-07-21' },
+    };
+
+    await expect(commandEventEdit(42, command, 'token-7')).resolves.toEqual(response);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://203.0.113.10:18035/api/laoji/events/42/edit-commands',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-7' },
+        body: JSON.stringify(command),
+        signal: expect.anything(),
+      }),
+    );
+  });
+
+  it('recovers an edit command by its encoded stable request id', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => response });
+    await expect(fetchEventEditCommand('event-edit:key/with space', 'token-7')).resolves.toEqual(response);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://203.0.113.10:18035/api/laoji/event-commands/event-edit%3Akey%2Fwith%20space',
+      expect.objectContaining({ headers: { Authorization: 'Bearer token-7' }, signal: expect.anything() }),
+    );
   });
 });
 

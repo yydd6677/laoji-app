@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Animated, PanResponder, StyleSheet } from 'react-native';
+import { Animated, BackHandler, PanResponder, StyleSheet } from 'react-native';
 import { QuickDatePanel } from '../src/components/QuickDatePanel';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
@@ -149,6 +149,110 @@ describe('Feishu-style calendar overlays', () => {
     });
     expect(onMonthChange).toHaveBeenCalledTimes(1);
     expect(onMonthChange).toHaveBeenLastCalledWith(new Date(2026, 8, 1));
+  });
+
+  it('settles and commits both wheels when a slow drag ends without momentum', async () => {
+    const onMonthChange = jest.fn();
+    await render(
+      <QuickDatePanel
+        visible
+        mode="yearMonthOnly"
+        top={60}
+        month={new Date(2026, 6, 1)}
+        selectedDate={new Date(2026, 6, 13)}
+        events={noEvents}
+        onSelectDate={jest.fn()}
+        onMonthChange={onMonthChange}
+        onClose={jest.fn()}
+      />,
+    );
+
+    const yearWheel = screen.getByTestId('quick-date-year-wheel-scroll');
+    await fireEvent(yearWheel, 'scrollBeginDrag');
+    await fireEvent(yearWheel, 'scrollEndDrag', {
+      nativeEvent: { contentOffset: { x: 0, y: 127 * 48 }, velocity: { x: 0, y: 0 } },
+    });
+    expect(onMonthChange).toHaveBeenLastCalledWith(new Date(2027, 6, 1));
+
+    onMonthChange.mockClear();
+    const monthWheel = screen.getByTestId('quick-date-month-wheel-scroll');
+    await fireEvent(monthWheel, 'scrollBeginDrag');
+    await fireEvent(monthWheel, 'scrollEndDrag', {
+      nativeEvent: { contentOffset: { x: 0, y: 31 * 48 }, velocity: { x: 0, y: 0 } },
+    });
+    expect(onMonthChange).toHaveBeenCalledTimes(1);
+    expect(onMonthChange).toHaveBeenLastCalledWith(new Date(2026, 7, 1));
+  });
+
+  it('uses a full-screen dismiss layer, owns system back, and hides inactive picker pages', async () => {
+    const onClose = jest.fn();
+    const removeBackHandler = jest.fn();
+    (BackHandler.addEventListener as jest.Mock).mockReturnValue({ remove: removeBackHandler });
+    const view = await render(
+      <QuickDatePanel
+        visible
+        top={60}
+        month={new Date(2026, 6, 1)}
+        selectedDate={new Date(2026, 6, 13)}
+        events={noEvents}
+        onSelectDate={jest.fn()}
+        onMonthChange={jest.fn()}
+        onClose={onClose}
+      />,
+    );
+
+    const overlay = screen.getByTestId('quick-date-overlay');
+    expect(StyleSheet.flatten(overlay.props.style)).toEqual(expect.objectContaining({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    }));
+    expect(overlay.props.pointerEvents).toBe('auto');
+    expect(overlay.props.accessibilityViewIsModal).toBe(true);
+    expect(overlay.props.accessibilityElementsHidden).toBe(false);
+
+    const dismissLayer = screen.getByTestId('quick-date-dismiss-layer');
+    expect(StyleSheet.flatten(dismissLayer.props.style)).toEqual(expect.objectContaining({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    }));
+    await fireEvent.press(dismissLayer);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const backHandler = (BackHandler.addEventListener as jest.Mock).mock.calls.at(-1)[1];
+    expect(backHandler()).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    expect(screen.getByTestId('quick-date-date-content').props.accessibilityElementsHidden).toBe(false);
+    expect(screen.getByTestId(
+      'quick-date-year-month-content',
+      { includeHiddenElements: true },
+    ).props.accessibilityElementsHidden).toBe(true);
+    await fireEvent.press(screen.getByTestId('quick-date-picker-toggle'));
+    expect(screen.getByTestId(
+      'quick-date-date-content',
+      { includeHiddenElements: true },
+    ).props.accessibilityElementsHidden).toBe(true);
+    expect(screen.getByTestId('quick-date-year-month-content').props.accessibilityElementsHidden).toBe(false);
+
+    await view.rerender(
+      <QuickDatePanel
+        visible={false}
+        top={60}
+        month={new Date(2026, 6, 1)}
+        selectedDate={new Date(2026, 6, 13)}
+        events={noEvents}
+        onSelectDate={jest.fn()}
+        onMonthChange={jest.fn()}
+        onClose={onClose}
+      />,
+    );
+    expect(removeBackHandler).toHaveBeenCalledTimes(1);
   });
 
   it('opens the month-view title entry directly as the source month-only picker', async () => {

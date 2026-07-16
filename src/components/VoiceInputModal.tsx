@@ -8,7 +8,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, Motion } from '../theme/colors';
 import {
   ApiGuestRealtimeSession,
   clarifyText,
@@ -33,12 +33,11 @@ import {
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
-import { checkConflict } from '../utils/eventUtils';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { diagnosticWarn } from '../services/diagnostics';
-import { isValidScheduleDate } from '../services/localScheduleParser';
 import { reminderUnavailableMessage } from '../services/notifications';
 import { CalEvent, EventDraftParams, RootStackParamList } from '../types';
+import { validateEventDraft } from '../utils/eventDraftValidation';
 
 interface Props {
   visible: boolean;
@@ -68,6 +67,10 @@ export const VOICE_INPUT_GEOMETRY = Object.freeze({
   microphoneTouchSize: 88,
   holdToTalkDelay: HOLD_TO_TALK_DELAY_MS,
   errorSlotHeight: ERROR_SLOT_HEIGHT,
+  backdropDuration: Motion.standard,
+  enterDuration: Motion.panel,
+  exitDuration: Motion.standard,
+  entryOffset: 48,
 });
 
 function VoiceSheetTitleBar({
@@ -189,7 +192,7 @@ async function discardScheduleRecording(uri: string | undefined): Promise<void> 
 }
 
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
-  const { events, addEvent } = useEvents();
+  const { addEvent, findConflicts } = useEvents();
   const { showDialog } = useAppDialog();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [step, setStep]         = useState<Step>('input');
@@ -216,34 +219,29 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const audioLevelRef           = useRef<AudioLevelSummary>({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const [recordingMode, setRecordingMode] = useState<RecordingMode | null>(null);
   const [micInteraction, setMicInteraction] = useState<'idle' | 'latched' | 'holding'>('idle');
+  const [mounted, setMounted]   = useState(visible);
+  const [closing, setClosing]   = useState(false);
+  const mountedRef              = useRef(visible);
+  const closingRef              = useRef(false);
+  const transitionRef           = useRef(0);
+  const onCloseRef              = useRef(onClose);
+  const onSavedRef              = useRef(onSaved);
   const backdropOpacity         = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY         = useRef(new Animated.Value(48)).current;
+  const sheetTranslateY         = useRef(new Animated.Value(VOICE_INPUT_GEOMETRY.entryOffset)).current;
+  onCloseRef.current = onClose;
+  onSavedRef.current = onSaved;
 
-  useEffect(() => {
-    if (!visible) {
-      backdropOpacity.setValue(0);
-      sheetTranslateY.setValue(48);
-      return;
-    }
-    backdropOpacity.setValue(0);
-    sheetTranslateY.setValue(48);
-    Animated.timing(backdropOpacity, {
-      toValue: 1,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
-    Animated.timing(sheetTranslateY, {
-      toValue: 0,
-      duration: 240,
-      useNativeDriver: true,
-    }).start();
-  }, [backdropOpacity, sheetTranslateY, visible]);
-
-  const reset = () => {
+  const invalidatePendingWork = () => {
     operationRunRef.current += 1;
+    recordingRunRef.current += 1;
     if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
     micHoldTimerRef.current = null;
-    recordingRunRef.current += 1;
+    holdReleaseRequestedRef.current = false;
+    micPressStartedStepRef.current = null;
+  };
+
+  const reset = () => {
+    invalidatePendingWork();
     setStep('input');
     setText('');
     setDraft(null);
@@ -260,16 +258,6 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     micPressStartedStepRef.current = null;
     setMicInteraction('idle');
     createRequestRef.current = createClientRequestState('event');
-  };
-  const close = () => {
-    recordingRunRef.current += 1;
-    void stopActiveRecordingSilently();
-    reset();
-    onClose();
-  };
-  const requestClose = () => {
-    if (step === 'saving') return;
-    close();
   };
   const returnToInput = () => {
     operationRunRef.current += 1;
@@ -379,6 +367,83 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     }
     await releaseRealtimeAuthorization(authorization);
   };
+
+  const finishPresentation = (afterExit?: () => void) => {
+    if (!mountedRef.current || closingRef.current) return;
+
+    closingRef.current = true;
+    setClosing(true);
+    invalidatePendingWork();
+    void stopActiveRecordingSilently();
+    const transition = transitionRef.current + 1;
+    transitionRef.current = transition;
+    backdropOpacity.stopAnimation();
+    sheetTranslateY.stopAnimation();
+    Animated.parallel([
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: VOICE_INPUT_GEOMETRY.backdropDuration,
+        useNativeDriver: true,
+      }),
+      Animated.timing(sheetTranslateY, {
+        toValue: VOICE_INPUT_GEOMETRY.entryOffset,
+        duration: VOICE_INPUT_GEOMETRY.exitDuration,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished || transitionRef.current !== transition) return;
+
+      mountedRef.current = false;
+      closingRef.current = false;
+      setMounted(false);
+      setClosing(false);
+      reset();
+      afterExit?.();
+    });
+  };
+
+  const requestClose = () => {
+    if (step === 'saving' || closingRef.current) return;
+    finishPresentation(() => onCloseRef.current());
+  };
+
+  useEffect(() => {
+    if (visible) {
+      const interruptedExit = closingRef.current;
+      transitionRef.current += 1;
+      backdropOpacity.stopAnimation();
+      sheetTranslateY.stopAnimation();
+      closingRef.current = false;
+      mountedRef.current = true;
+      setClosing(false);
+      setMounted(true);
+      if (interruptedExit) reset();
+      backdropOpacity.setValue(0);
+      sheetTranslateY.setValue(VOICE_INPUT_GEOMETRY.entryOffset);
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: VOICE_INPUT_GEOMETRY.backdropDuration,
+          useNativeDriver: true,
+        }),
+        Animated.timing(sheetTranslateY, {
+          toValue: 0,
+          duration: VOICE_INPUT_GEOMETRY.enterDuration,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    finishPresentation();
+  }, [visible]);
+
+  useEffect(() => () => {
+    transitionRef.current += 1;
+    invalidatePendingWork();
+    backdropOpacity.stopAnimation();
+    sheetTranslateY.stopAnimation();
+  }, [backdropOpacity, sheetTranslateY]);
 
   // ── Text submit ────────────────────────────────────────────────────────────
   const handleSubmitText = async () => {
@@ -671,12 +736,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   // ── Save ───────────────────────────────────────────────────────────────────
   const eventPayloadFromDraft = (source: ParseResult): Omit<CalEvent, 'id'> => {
     const category = normalizeEventCategory(source.category);
+    const hasTimedRange = !source.is_all_day && Boolean(source.start_time && source.end_time);
     return {
       title:       source.title.trim(),
       startDate:   source.start_date,
       endDate:     source.end_date ?? undefined,
-      startTime:   source.start_time ?? undefined,
-      endTime:     source.end_time ?? undefined,
+      startTime:   source.is_all_day ? undefined : source.start_time ?? undefined,
+      endTime:     source.is_all_day ? undefined : source.end_time ?? undefined,
       isAllDay:    source.is_all_day,
       repeat:      source.event_type !== 'once' ? source.event_type : undefined,
       description: source.description ?? undefined,
@@ -686,7 +752,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       detail:      source.detail ?? undefined,
       status:      source.status ?? undefined,
       spanning:    source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
-      reminderMinutes: source.reminder_minutes ?? null,
+      reminderMinutes: hasTimedRange ? source.reminder_minutes ?? null : null,
       color:       colorForEvent({ category }),
     };
   };
@@ -712,19 +778,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const validateDraftForSave = (source: ParseResult): boolean => {
-    if (!source.title.trim()) {
-      setError('日程标题不能为空');
-      return false;
-    }
-    if (!isValidScheduleDate(source.start_date)) {
-      setError('请先补充有效日期，再保存日程');
-      return false;
-    }
-    if (source.end_date && (!isValidScheduleDate(source.end_date) || source.end_date < source.start_date)) {
-      setError('结束日期不能早于开始日期');
-      return false;
-    }
-    return true;
+    const result = validateEventDraft(eventPayloadFromDraft(source));
+    if (result.valid) return true;
+    setError(result.issues[0]?.message ?? '日程信息不完整');
+    return false;
   };
 
   const saveDraft = async (eventPayload: Omit<CalEvent, 'id'>) => {
@@ -735,61 +792,75 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', eventPayload);
       const { reminderDelivery } = await addEvent({ ...eventPayload, clientRequestId: createRequestRef.current.id });
       if (operationRunRef.current !== runId) return;
-      onSaved(); close();
-      if (reminderDelivery === 'unavailable') {
-        showDialog({
-          title: '日程已保存',
-          message: await reminderUnavailableMessage(),
-          tone: 'warning',
-        });
-      } else if (reminderDelivery === 'unconfirmed') {
-        showDialog({
-          title: '日程已保存',
-          message: '本机提醒状态未能确认，可重新打开日程并保存提醒。',
-          tone: 'warning',
-        });
-      }
+      finishPresentation(() => {
+        onSavedRef.current();
+        onCloseRef.current();
+        if (reminderDelivery === 'unavailable') {
+          void reminderUnavailableMessage().then(message => showDialog({
+            title: '日程已保存',
+            message,
+            tone: 'warning',
+          }));
+        } else if (reminderDelivery === 'unconfirmed') {
+          showDialog({
+            title: '日程已保存',
+            message: '本机提醒状态未能确认，可重新打开日程并保存提醒。',
+            tone: 'warning',
+          });
+        }
+      });
     } catch {
       if (operationRunRef.current !== runId) return;
       setError('保存失败，请重试'); setStep('confirm');
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!draft || !validateDraftForSave(draft)) return;
     const eventPayload = eventPayloadFromDraft(draft);
-    if (!eventPayload.isAllDay && eventPayload.startTime && eventPayload.endTime) {
-      const { hasConflict, conflicts } = checkConflict(
-        events,
-        eventPayload.startDate,
-        eventPayload.startTime,
-        eventPayload.endTime,
-        undefined,
-        eventPayload.endDate,
-      );
-      if (hasConflict) {
-        const names = conflicts.map(event => `• ${event.title} (${event.startTime}–${event.endTime})`).join('\n');
+    const validation = validateEventDraft(eventPayload);
+    if (!validation.valid || !validation.value) return;
+    const runId = operationRunRef.current + 1;
+    operationRunRef.current = runId;
+    try {
+      const result = await findConflicts(validation.value);
+      if (operationRunRef.current !== runId) return;
+      if (result.hasConflict) {
+        const explicit = result.conflicts.some(conflict => conflict.severity === 'overlap');
+        const names = result.conflicts.map(({ event }) => {
+          const time = event.startTime && event.endTime
+            ? `${event.startTime}–${event.endTime}`
+            : event.isAllDay ? '全天' : '无具体时间';
+          return `• ${event.title} (${time})`;
+        }).join('\n');
         showDialog({
-          title: '时间冲突',
-          message: `该时间段与以下日程冲突：\n${names}`,
-          hint: '如果确认这些安排可以重叠，仍然可以继续保存。',
+          title: explicit ? '时间冲突' : '全天安排提示',
+          message: `${explicit ? '该安排与以下日程重叠' : '该日期已有全天或定时安排'}：\n${names}`,
+          hint: result.complete
+            ? '如果确认这些安排可以重叠，仍然可以继续保存。'
+            : '当前只能核对本机已有日程；仍可继续保存。',
           tone: 'warning',
           actions: [
-            { text: '仍然保存', role: 'primary', onPress: () => saveDraft(eventPayload) },
+            { text: '仍然保存', role: 'primary', onPress: () => saveDraft(validation.value!) },
             { text: '取消', role: 'cancel' },
           ],
         });
         return;
       }
+      await saveDraft(validation.value);
+    } catch {
+      if (operationRunRef.current !== runId) return;
+      setError('暂时无法检查日程冲突，请重试');
     }
-    void saveDraft(eventPayload);
   };
 
   const openDetailedEdit = () => {
     if (!draft || !validateDraftForSave(draft)) return;
     const params = { date: draft.start_date, draft: routeDraftFromParseResult(draft) };
-    close();
-    navigation.navigate('AddEvent', params);
+    finishPresentation(() => {
+      onCloseRef.current();
+      navigation.navigate('AddEvent', params);
+    });
   };
 
   const fmtDate = (dateText: string) => {
@@ -827,32 +898,43 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     return `提前 ${minutes} 分钟提醒`;
   };
 
+  if (!mounted) return null;
+
   return (
     <Modal
-      visible={visible}
+      visible
       transparent
       animationType="none"
       statusBarTranslucent
       onRequestClose={requestClose}
     >
-      <View style={s.modalRoot}>
+      <View style={s.modalRoot} accessibilityViewIsModal>
         <Animated.View
-          pointerEvents="none"
+          pointerEvents="auto"
           style={[s.backdrop, { opacity: backdropOpacity }]}
           testID="schedule-voice-backdrop"
-        />
-      <KeyboardAvoidingView
-        style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <Animated.View
-          style={[s.sheetMotion, { transform: [{ translateY: sheetTranslateY }] }]}
-          testID="schedule-voice-sheet-motion"
         >
-        <SafeAreaView
-          style={[s.sheet, step === 'confirm' && s.confirmSheet]}
-          edges={['bottom']}
-          testID="schedule-voice-sheet"
+          <View
+            style={s.backdropHitShield}
+            accessible={false}
+            testID="schedule-voice-backdrop-hit-shield"
+          />
+        </Animated.View>
+        <KeyboardAvoidingView
+          pointerEvents="box-none"
+          style={s.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          <Animated.View
+            pointerEvents={closing ? 'none' : 'auto'}
+            style={[s.sheetMotion, { transform: [{ translateY: sheetTranslateY }] }]}
+            testID="schedule-voice-sheet-motion"
+          >
+            <SafeAreaView
+              style={[s.sheet, step === 'confirm' && s.confirmSheet]}
+              edges={['bottom']}
+              testID="schedule-voice-sheet"
+            >
           {/* ── Input step ── */}
           {(step === 'input' || step === 'connecting' || step === 'recording') && (
             <View style={s.inputStep}>
@@ -1086,9 +1168,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
               </View>
             </View>
           )}
-        </SafeAreaView>
-        </Animated.View>
-      </KeyboardAvoidingView>
+            </SafeAreaView>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -1097,6 +1179,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 const s = StyleSheet.create({
   modalRoot:    { flex: 1 },
   backdrop:     { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: C.overlay },
+  backdropHitShield: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   overlay:      { flex: 1, justifyContent: 'flex-end' },
   sheetMotion:  { width: '100%' },
   sheet:        {

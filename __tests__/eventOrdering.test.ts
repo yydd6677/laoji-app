@@ -78,4 +78,22 @@ describe('sortEventsForSearch', () => {
       'past-span',
     ]);
   });
+
+  it('treats a midnight end boundary as already past on the stored end date', () => {
+    const result = sortEventsForSearch([
+      {
+        ...base,
+        id: 'ended-at-midnight',
+        title: '零点结束',
+        startDate: '2026-07-08',
+        endDate: '2026-07-09',
+        startTime: '23:00',
+        endTime: '00:00',
+        spanning: true,
+      },
+      { ...base, id: 'today', title: '今天日程', startDate: '2026-07-09', startTime: '09:00' },
+    ], today);
+
+    expect(result.map(event => event.id)).toEqual(['today', 'ended-at-midnight']);
+  });
 });

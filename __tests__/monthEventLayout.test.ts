@@ -70,4 +70,20 @@ describe('Feishu-style month event matrix', () => {
     ], 2).segments[0];
     expect(monthSegment).toEqual(expect.objectContaining({ column: 4, span: 3 }));
   });
+
+  it('does not draw a timed event on its exclusive midnight end date', () => {
+    const layout = layoutMonthWeekEvents([
+      event({
+        id: 'midnight-end',
+        title: '夜间发布',
+        startDate: '2026-07-13',
+        endDate: '2026-07-14',
+        startTime: '23:00',
+        endTime: '00:00',
+      }),
+    ], week, 2);
+
+    expect(layout.segments[0]).toEqual(expect.objectContaining({ column: 1, span: 1 }));
+    expect(layout.eventCounts).toEqual([0, 1, 0, 0, 0, 0, 0]);
+  });
 });
