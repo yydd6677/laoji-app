@@ -21,6 +21,7 @@
 | `CAL-MONTH-EXPAND-HOST-001` | calendar | 已验证 | `keep` | 0 |
 | `CAL-PICKER-WHEEL-TAP-001` | calendar | 已验证 | `keep` | 0 |
 | `UI-ANDROID-COMPOSITION-001` | shell | 已实现 | `business_replace` | 1 |
+| `UI-BOOT-READINESS-001` | shell | 已实现 | `business_replace` | 1 |
 | `UI-CALENDAR-INDICATOR-001` | calendar | 已验证 | `business_replace` | 0 |
 
 <!-- END GENERATED FEISHU EVIDENCE STATUS -->
@@ -40,7 +41,7 @@
 ## 源码库存
 
 - 基线：飞书 Android `7.71.8`，APK SHA-256 由 `source-catalog.json` 锁定。
-- 源码锁：199 个文件，包含 common-shell 24、calendar 42、minutes 69、account-static 8、resources 56。
+- 源码锁：201 个文件，包含 common-shell 24、calendar 42、minutes 69、account-static 8、resources 58。
 - 负面锁：3 个被引用但解码包中不存在的动画资源。缺失正文的曲线不得推断为像素级事实。
 - 能力库存：55 项，全部为当前 Release 必需项；其中 shell 14、calendar 19、minutes 21、account-static 1。
 - 产品决策：keep 25、business_replace 27、delete 3。
@@ -63,7 +64,7 @@
 
 ### P0：先于页面重建
 
-1. `UI-BOOT-READINESS-001`：挂载前配置异常和无上限 readiness 等待仍可能产生永久白屏。必须先提供有界初始化、诊断错误面和重试路径。
+1. `UI-BOOT-READINESS-001`：挂载前配置异常、可见 loading、8 秒总等待上限、认证/导航诊断错误面和整棵运行树重试已实现；仍需 instrumentation 与同一候选 APK 的真机冷启动/进程恢复闭证，当前不能关闭。
 2. `UI-LEGACY-001`：当前 TS AST 报告仍发现 208 个未映射控件，Android UAST/Lint 仍发现大量未映射控件、listener 和动画；旧 Android 表现层与孤立 TSX 尚未清零。
 3. `UI-ROUTES-001`：16 个 Root 路由和 2 个 MainTabs 目的地尚未逐项绑定源码容器、转场、恢复和 View 树合同。
 4. 证据报告与三个 pilot proof 因 catalog、inventory、manifest 和产品范围更新而过期，必须用当前输入重新生成和重签。

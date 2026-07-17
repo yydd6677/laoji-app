@@ -4,7 +4,7 @@
     "id": "feishu-android-7.71.8",
     "version": "7.71.8",
     "description": "Decoded Feishu Android source and resources used as the UI behavior authority.",
-    "catalog_sha256": "d2b9e21e7c7580ff9d0b154b9d841631b92edda8f164e19a87b4a4ed526ff82e"
+    "catalog_sha256": "eae257d18d7b5f14dddd1a6c9f306c91df23c8a03297595c47dc17274b343556"
   },
   "files": [
     {
@@ -882,6 +882,18 @@
       "group": "resources",
       "path": "decoded-resources/res/animator/calendar_append_shadow_move.xml",
       "sha256": "b91019ad3814cc5a1c600aed4401371aba91b0e203bdbe5b2102ffb2ca02a64a"
+    },
+    {
+      "id": "resources-illustration-empty-negative-load-failed-0ef2fa3f",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable-night/illustration_empty_negative_load_failed.xml",
+      "sha256": "d23d2af7a90c9dd46a1e2fad43d8a7ae5e3812f81d15206d4c1660a88e281b0a"
+    },
+    {
+      "id": "resources-illustration-empty-negative-load-failed-3b908197",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/illustration_empty_negative_load_failed.xml",
+      "sha256": "9a50042bd4ca325f13f45c9785d5f98eaa13794940e7be8a9ce4fa7e54691852"
     },
     {
       "id": "resources-activity-about-4827e2d7",

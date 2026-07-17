@@ -106,7 +106,7 @@ Qwen ASR、老记总结、WAV/WorkManager、Media3、游客总结和系统文件
 ## 模块关闭顺序
 
 1. 关闭证据基础设施与 workspace 来源。
-2. 关闭启动 readiness、主底栏、标题栏、Window overlay、FAB、token、图标和通用状态。
+2. 关闭启动 readiness、主底栏、标题栏、Window overlay、FAB、token、图标和通用状态。启动阶段必须先渲染 125dp 状态槽和有界恢复面，配置验证不得在 Error Boundary 外抛出。
 3. 关闭日历 Shell、月视图、QuickChoose、单日组合、全天区、拖动、搜索、详情和编辑。
 4. 关闭妙记列表、搜索、Record V3、音频/上传/ASR、详情 Pager、播放器、声纹、总结和分享。
 5. 关闭账号与法律静态页。

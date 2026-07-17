@@ -29,6 +29,7 @@ export const FEISHU_DIMENSIONS = Object.freeze({
   viewBarHeight: 50,
   fabSize: 48,
   fabInset: 16,
+  startupStateVisualSize: 125,
   emptyIllustrationSize: 100,
   retryButtonWidth: 76,
   retryButtonHeight: 36,

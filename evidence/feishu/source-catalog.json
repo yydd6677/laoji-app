@@ -192,6 +192,8 @@
         "decoded-resources/res/layout/ud_toast_layout.xml",
         "decoded-resources/res/layout/calendar_view_toast_loading.xml",
         "decoded-resources/res/layout/view_calendar_loading.xml",
+        "decoded-resources/res/drawable/illustration_empty_negative_load_failed.xml",
+        "decoded-resources/res/drawable-night/illustration_empty_negative_load_failed.xml",
         "decoded-resources/res/layout/ud_layout_emptystate.xml",
         "decoded-resources/res/layout/mm_fragment_home_list.xml",
         "decoded-resources/res/layout/mm_layout_home_list_empty.xml",

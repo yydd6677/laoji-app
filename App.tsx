@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -20,40 +20,86 @@ import {
   RestorableNavigationContainer,
 } from './src/navigation/NavigationStateCoordinator';
 import { NativePlatformCoordinator } from './src/components/NativePlatformCoordinator';
+import {
+  AppStartupBoundary,
+  AppStartupError,
+} from './src/components/AppStartupBoundary';
 
-assertProductionApiConfig();
-
-export default function App() {
+function RuntimeProviders({ onRestart }: {
+  onRestart: () => void;
+  feishuEvidence?: string;
+}) {
   useEffect(() => {
     void cleanupStaleMeetingShareCache().catch(() => {});
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <NavigationStateProvider>
-          <NativePlatformCoordinator />
-          <AppReadinessGate>
-            <EventsProvider>
-              <MeetingsProvider>
-                <AppLockGate>
-                  <AppDialogProvider>
-                    <NotificationPermissionPrimer />
-                    <View style={{ flex: 1 }}>
-                      <RestorableNavigationContainer>
-                        <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                        <RootNavigator />
-                        <NotificationNavigationHandler />
-                      </RestorableNavigationContainer>
-                      <EventUndoBanner />
-                    </View>
-                  </AppDialogProvider>
-                </AppLockGate>
-              </MeetingsProvider>
-            </EventsProvider>
-          </AppReadinessGate>
-        </NavigationStateProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <AuthProvider>
+      <NavigationStateProvider>
+        <NativePlatformCoordinator />
+        <AppReadinessGate
+          feishuEvidence="feishu:UI-BOOT-READINESS-001:readiness-gate"
+          onRetry={onRestart}
+        >
+          <EventsProvider>
+            <MeetingsProvider>
+              <AppLockGate>
+                <AppDialogProvider>
+                  <NotificationPermissionPrimer />
+                  <View style={{ flex: 1 }}>
+                    <RestorableNavigationContainer>
+                      <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                      <RootNavigator />
+                      <NotificationNavigationHandler />
+                    </RestorableNavigationContainer>
+                    <EventUndoBanner />
+                  </View>
+                </AppDialogProvider>
+              </AppLockGate>
+            </MeetingsProvider>
+          </EventsProvider>
+        </AppReadinessGate>
+      </NavigationStateProvider>
+    </AuthProvider>
+  );
+}
+
+function ValidatedRuntime({ onRestart }: {
+  onRestart: () => void;
+  feishuEvidence?: string;
+}) {
+  // UI-BOOT-READINESS-001 routes configuration failure into the recovery surface.
+  try {
+    assertProductionApiConfig();
+  } catch (error) {
+    throw new AppStartupError('configuration', 'LaoJi runtime configuration is invalid', error);
+  }
+  return (
+    <RuntimeProviders
+      feishuEvidence="feishu:UI-BOOT-READINESS-001:runtime-providers"
+      onRestart={onRestart}
+    />
+  );
+}
+
+export default function App() {
+  const [runtimeGeneration, setRuntimeGeneration] = useState(0);
+  const restart = useCallback(() => {
+    setRuntimeGeneration(value => value + 1);
+  }, []);
+
+  return (
+    <AppStartupBoundary
+      feishuEvidence="feishu:UI-BOOT-READINESS-001:startup-boundary"
+      resetKey={runtimeGeneration}
+      onRetry={restart}
+    >
+      <SafeAreaProvider key={`runtime:${runtimeGeneration}`}>
+        <ValidatedRuntime
+          feishuEvidence="feishu:UI-BOOT-READINESS-001:validated-runtime"
+          onRestart={restart}
+        />
+      </SafeAreaProvider>
+    </AppStartupBoundary>
   );
 }

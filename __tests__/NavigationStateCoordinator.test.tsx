@@ -34,6 +34,7 @@ jest.mock('expo-splash-screen', () => ({
   preventAutoHideAsync: jest.fn(async () => undefined),
   hideAsync: jest.fn(async () => undefined),
 }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 jest.mock('../src/store/AuthStore', () => ({ useAuth: jest.fn() }));
 
 function deferred<T>() {
@@ -62,12 +63,12 @@ function Probe() {
   return <Text testID="navigation-decision">{route.name}</Text>;
 }
 
-describe('NavigationStateProvider cold start and auth switching', () => {
+describe('UI-BOOT-READINESS-001 NavigationStateProvider cold start and auth switching', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('keeps business routes and the splash behind the cold-start restore decision', async () => {
+  it('keeps business routes behind a visible cold-start restore state', async () => {
     (useAuth as jest.Mock).mockReturnValue({
       initializing: false,
       mode: 'authenticated',
@@ -89,7 +90,8 @@ describe('NavigationStateProvider cold start and auth switching', () => {
 
     expect(view.getByTestId('navigation-decision').props.children).toBe('waiting');
     expect(view.queryByTestId('business-route')).toBeNull();
-    expect(SplashScreen.hideAsync).not.toHaveBeenCalled();
+    expect(view.getByTestId('app-startup-loading')).toBeTruthy();
+    expect(SplashScreen.hideAsync).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       read.resolve(eventDetailRecord('user:7', 'cold-event'));

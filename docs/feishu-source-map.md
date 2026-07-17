@@ -18,7 +18,7 @@
 - 权威根：`/home/yydd/文档/apk-analysis/base-feishu-7.71.8`
 - APK：versionName `7.71.8`，versionCode `7710850`
 - APK SHA-256：`3355a2a53543ae1a68fe10844b8ed9884fffa7d1eafdc6bf8622180e43631447`
-- 当前源码锁：199 个文件，其中通用壳层 24、日历 42、妙记 69、账号静态容器 8、资源 56。
+- 当前源码锁：201 个文件，其中通用壳层 24、日历 42、妙记 69、账号静态容器 8、资源 58。
 - 缺失资源负面锁：3 个。它们在代码或 style 中被引用，但解码包没有正文，禁止推断曲线。
 
 同步与验证：
@@ -63,6 +63,15 @@ npm run verify:feishu-source-lock
 - 自管 Toast 不抢焦点、无 dim、由 `UDActionToastManager` FIFO 管理；视觉为最大 295dp、14sp、水平/垂直 padding 20/10dp、单行/多行圆角 20/8dp、200ms alpha。
 
 源码：`UDDialogController.java`、`UDActionPanelBuilder.java`、`UDToast.java`、`UDActionToastManager.java`、`UDToastViewController.java`、`ud_toast_layout.xml`。
+
+### 启动加载与恢复态
+
+- `CalendarLoadingView` 明确拥有 loading panel、error panel、retry action 三种状态，不以 `null` 或永久空白表达初始化。
+- `view_calendar_loading.xml` 的 loading/error 视觉槽均为 125dp；状态正文为 14sp；错误正文上间距 10dp；重试动作最小宽 76dp、上间距 16dp。
+- 错误插图通过浅色与夜间资源分支提供。老记 v1 只启用浅色，并依据结构重建语义图形，不复制飞书专有插图。
+- `CommonUiContainer` 提供 header/content/footer 和可启用 footer action；老记将其容器合同用于配置、账号、存储和导航启动失败的业务替换。
+
+源码：`CalendarLoadingView.java`、`view_calendar_loading.xml`、`illustration_empty_negative_load_failed.xml`、`CommonUiContainer.java`。
 
 ### 状态、Token 与 OEM 原语
 

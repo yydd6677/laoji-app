@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const { scanSource } = require('../feishu_ui_ast_gate');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { activeAndroidTsxFiles, scanSource } = require('../feishu_ui_ast_gate');
 
 const mapped = scanSource(
   "const screen = <Pressable {...feishuEvidence('UI-SHELL-001', 'primary-action')} onPress={save} />;",
@@ -35,5 +38,16 @@ assert.deepStrictEqual(discovered.routes[0], {
   component: 'ProfileScreen',
   line: 4,
 });
+
+const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'laoji-ui-ast-'));
+fs.mkdirSync(path.join(fixture, 'src'));
+fs.writeFileSync(path.join(fixture, 'App.tsx'), 'export default function App() { return null; }');
+fs.writeFileSync(path.join(fixture, 'src', 'Screen.tsx'), 'export const Screen = null;');
+fs.writeFileSync(path.join(fixture, 'src', 'Shadow.tsx'), 'export const Shadow = null;');
+fs.writeFileSync(path.join(fixture, 'src', 'Shadow.android.tsx'), 'export const Shadow = null;');
+const active = activeAndroidTsxFiles(fixture)
+  .map(file => path.relative(fixture, file).split(path.sep).join('/'));
+assert.deepStrictEqual(active, ['App.tsx', 'src/Screen.tsx', 'src/Shadow.android.tsx']);
+fs.rmSync(fixture, { recursive: true, force: true });
 
 console.log('Feishu TypeScript AST contracts: ok');

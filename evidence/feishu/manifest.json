@@ -60,6 +60,52 @@
       "blockers": ["same release APK has not completed the final physical-device matrix"]
     },
     {
+      "id": "UI-BOOT-READINESS-001",
+      "module": "shell",
+      "status": "implemented",
+      "decision": "business_replace",
+      "source_refs": ["account-static-commonuicontainer-552f6bd5", "common-shell-calendarloadingview-ff443c0f", "resources-view-calendar-loading-378b2c48", "resources-illustration-empty-negative-load-failed-3b908197"],
+      "deviation_refs": ["DEV-LAOJI-ACCOUNT-CONTENT-001"],
+      "requirements": {
+        "maximum_readiness_wait_ms": 8000,
+        "native_splash_releases_to_visible_loading": true,
+        "failure_stages": ["configuration", "authentication", "navigation", "runtime"],
+        "retry_remounts_runtime_tree": true,
+        "state_visual_slot_dp": 125,
+        "retry_action_dp": "76x36"
+      },
+      "implementation": [
+        {
+          "path": "App.tsx",
+          "symbols": ["ValidatedRuntime", "App"],
+          "required_patterns": ["UI-BOOT-READINESS-001", "AppStartupBoundary", "AppStartupError"],
+          "forbidden_patterns": ["^assertProductionApiConfig\\(\\);"]
+        },
+        {
+          "path": "src/components/AppReadinessGate.tsx",
+          "symbols": ["AppReadinessGate"],
+          "required_patterns": ["UI-BOOT-READINESS-001", "APP_READINESS_TIMEOUT_MS", "AppStartupStateView"],
+          "forbidden_patterns": ["if \\(initializing \\|\\| !navigationReady\\) return null"]
+        },
+        {
+          "path": "src/components/AppStartupBoundary.tsx",
+          "symbols": ["AppStartupBoundary", "AppStartupError"],
+          "required_patterns": ["AppStartupStateView", "releaseNativeSplash"]
+        },
+        {
+          "path": "src/components/AppStartupStateView.tsx",
+          "symbols": ["AppStartupStateView", "UI_BOOT_READINESS_GEOMETRY"],
+          "required_patterns": ["UI-BOOT-READINESS-001", "startupStateVisualSize", "LAOJI-START-CONFIG", "LAOJI-START-AUTH", "LAOJI-START-NAV", "LAOJI-START-RUNTIME"]
+        }
+      ],
+      "tests": [
+        {"path": "__tests__/AppReadinessGate.test.tsx", "kind": "component"},
+        {"path": "__tests__/AppStartupBoundary.test.tsx", "kind": "component"},
+        {"path": "__tests__/NavigationStateCoordinator.test.tsx", "kind": "integration"}
+      ],
+      "blockers": ["instrumentation and physical-device cold-start recovery are not yet closed"]
+    },
+    {
       "id": "UI-CALENDAR-INDICATOR-001",
       "module": "calendar",
       "status": "verified",

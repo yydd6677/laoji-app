@@ -18,10 +18,10 @@
       "module": "shell",
       "decision": "business_replace",
       "release_required": true,
-      "source_refs": ["account-static-commonuicontainer-552f6bd5"],
+      "source_refs": ["account-static-commonuicontainer-552f6bd5", "common-shell-calendarloadingview-ff443c0f", "resources-view-calendar-loading-378b2c48", "resources-illustration-empty-negative-load-failed-3b908197"],
       "deviation_refs": ["DEV-LAOJI-ACCOUNT-CONTENT-001"],
       "contract": "Startup must render a diagnosable recovery surface for configuration, storage, auth or navigation failure instead of an unbounded blank gate.",
-      "blockers": ["Pre-mount configuration throws and unbounded readiness waits remain possible."]
+      "blockers": ["Current implementation still requires instrumentation and physical cold-start closure."]
     },
     {
       "id": "UI-ANDROID-COMPOSITION-001",
@@ -118,7 +118,7 @@
       "module": "shell",
       "decision": "keep",
       "release_required": true,
-      "source_refs": ["common-shell-calendarloadingview-ff443c0f"],
+      "source_refs": ["common-shell-calendarloadingview-ff443c0f", "resources-view-calendar-loading-378b2c48", "resources-illustration-empty-negative-load-failed-3b908197"],
       "deviation_refs": [],
       "contract": "Loading, empty, error and retry states use source-derived state ownership and dimensions.",
       "blockers": ["App initialization still has a null/blank state rather than a bounded recovery state."]

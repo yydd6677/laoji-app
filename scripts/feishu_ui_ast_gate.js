@@ -166,6 +166,8 @@ function activeAndroidTsxFiles(repoRoot) {
     }
   }
   walk(srcRoot);
+  const rootApp = path.join(repoRoot, 'App.tsx');
+  if (fs.existsSync(rootApp)) files.push(rootApp);
   const androidBases = new Set(
     files
       .filter(file => file.endsWith('.android.tsx'))
@@ -306,5 +308,5 @@ function main() {
   console.log(`Feishu TypeScript AST gate passed (${result.files.length} active Android TSX files).`);
 }
 
-module.exports = { scanSource, runAudit, sha256 };
+module.exports = { activeAndroidTsxFiles, scanSource, runAudit, sha256 };
 if (require.main === module) main();

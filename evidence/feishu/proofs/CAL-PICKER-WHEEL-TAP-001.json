@@ -2,8 +2,8 @@
   "schema_version": 1,
   "evidence_id": "CAL-PICKER-WHEEL-TAP-001",
   "proof_kind": "androidTest",
-  "recorded_at": "2026-07-17T11:05:03.857011+00:00",
-  "input_sha256": "666846327614765150aafed28cb345fb7c0fa68844f397acc88afa0fb97f5de8",
+  "recorded_at": "2026-07-17T11:23:30.342184+00:00",
+  "input_sha256": "1acd539a6129d30a26137f0449b092d23abd6f61335eaa2b110c5ae941b9b536",
   "report": {
     "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
     "sha256": "56c48fbd54f293e5771aa2f6d7616ee073f961c3954c998629c20f43f0e812b1",
@@ -146,7 +146,7 @@
     "typescript_ast": {
       "kind": "typescript_ast",
       "path": "build/feishu-ui-ast-report.json",
-      "sha256": "0bb87dbf03a8b8c6fbbea63beea4b55984d8eb17d836e3dcf63e17f24e883a64",
+      "sha256": "fe3058cc6a4c0c78986a56ab18980cebcb48555f3c0952a30a379e969f4e87f6",
       "error_count": 208
     },
     "android_lint_uast": {
