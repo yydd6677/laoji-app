@@ -104,6 +104,79 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         )
         return source_root, evidence / "manifest.json", manifest
 
+    def write_audit_reports(self, root: Path):
+        ts_source = root / "src/AuditScreen.tsx"
+        ts_source.write_text("export const AuditScreen = () => null;\n", encoding="utf-8")
+        scripts = root / "scripts"
+        scripts.mkdir()
+        ts_scanner = scripts / "feishu_ui_ast_gate.js"
+        ts_scanner.write_text("// fixture scanner\n", encoding="utf-8")
+        lint_parser = scripts / "check_feishu_android_lint.py"
+        lint_parser.write_text("# fixture parser\n", encoding="utf-8")
+        manifest_path = root / "evidence/feishu/manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        product_scope_path = root / manifest["product_scope"]
+
+        build = root / "build"
+        build.mkdir(exist_ok=True)
+        ts_report = build / "feishu-ui-ast-report.json"
+        ts_report.write_text(
+            json.dumps({
+                "schemaVersion": 1,
+                "kind": "typescript-ast",
+                "scanner": {
+                    "path": "scripts/feishu_ui_ast_gate.js",
+                    "sha256": GATE.sha256_file(ts_scanner),
+                    "typescriptVersion": "fixture",
+                },
+                "manifest": {
+                    "path": "evidence/feishu/manifest.json",
+                    "sha256": GATE.sha256_file(manifest_path),
+                },
+                "productScope": {
+                    "path": manifest["product_scope"],
+                    "sha256": GATE.sha256_file(product_scope_path),
+                },
+                "files": [{
+                    "path": "src/AuditScreen.tsx",
+                    "sourceSha256": GATE.sha256_file(ts_source),
+                }],
+                "errors": [],
+            }),
+            encoding="utf-8",
+        )
+
+        lint_xml = root / "reports/lint-results-release.xml"
+        lint_xml.parent.mkdir()
+        lint_xml.write_text("<issues />\n", encoding="utf-8")
+        detector = root / "tools/feishu-evidence-lint.jar"
+        detector.parent.mkdir()
+        detector.write_bytes(b"detector")
+        android_report = build / "feishu-android-uast-report.json"
+        android_report.write_text(
+            json.dumps({
+                "schema_version": 1,
+                "kind": "android-lint-uast",
+                "parser": {
+                    "path": "scripts/check_feishu_android_lint.py",
+                    "sha256": GATE.sha256_file(lint_parser),
+                },
+                "source_report": "reports/lint-results-release.xml",
+                "source_report_sha256": GATE.sha256_file(lint_xml),
+                "detector_jar": {
+                    "path": "tools/feishu-evidence-lint.jar",
+                    "sha256": GATE.sha256_file(detector),
+                },
+                "issue_count": 0,
+                "error_count": 0,
+                "custom_error_count": 0,
+                "counts_by_id": {},
+                "errors": [],
+            }),
+            encoding="utf-8",
+        )
+        return ts_source
+
     def validate(self, root: Path, source_root: Path, manifest_path: Path, mode="static"):
         return GATE.validate(root, manifest_path, mode, source_root)
 
@@ -268,6 +341,59 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             GATE.finalize_attestation(attestation, artifact, sidecar)
             value = json.loads(sidecar.read_text())
             self.assertEqual(hashlib.sha256(b"apk").hexdigest(), value["artifact_sha256"])
+
+    def test_audit_reports_bind_their_real_inputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.write_fixture(root)
+            ts_source = self.write_audit_reports(root)
+            references, errors = GATE.collect_audit_reports(root, require_clean=True, require_all=True)
+            self.assertEqual([], errors)
+            self.assertEqual(
+                {"typescript_ast", "android_lint_uast"},
+                set(references),
+            )
+            ts_source.write_text("export const AuditScreen = () => 'changed';\n", encoding="utf-8")
+            _, errors = GATE.collect_audit_reports(root, require_clean=True, require_all=True)
+            self.assertIn("AUDIT_REPORT_STALE", self.codes(errors))
+
+    def test_recorded_proof_contains_current_ast_report_hashes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _, manifest_path, manifest = self.write_fixture(root)
+            report = root / "build/result.xml"
+            report.parent.mkdir(exist_ok=True)
+            report.write_text(
+                '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+                '<testcase classname="WidgetTest" name="widgetMatchesSource" />'
+                '</testsuite>',
+                encoding="utf-8",
+            )
+            manifest["evidence"][0]["tests"][0]["symbol"] = "widgetMatchesSource"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            GATE.sync_ledger(root, manifest, write=True)
+            self.write_audit_reports(root)
+            proof = root / "evidence/feishu/proofs/UI-TEST-001.json"
+            GATE.record_proof(
+                root,
+                manifest_path,
+                "UI-TEST-001",
+                report,
+                proof,
+                "unit",
+                "host",
+                None,
+                "fixture",
+            )
+            value = json.loads(proof.read_text(encoding="utf-8"))
+            self.assertEqual(
+                {"typescript_ast", "android_lint_uast"},
+                set(value["audit_reports"]),
+            )
+            self.assertEqual(
+                GATE.sha256_file(root / "build/feishu-ui-ast-report.json"),
+                value["audit_reports"]["typescript_ast"]["sha256"],
+            )
 
 
 if __name__ == "__main__":

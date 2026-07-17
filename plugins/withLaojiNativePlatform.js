@@ -1,4 +1,4 @@
-const { withAndroidManifest, withAppBuildGradle } = require('@expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle, withSettingsGradle } = require('@expo/config-plugins');
 
 const RECORDING_SERVICE = 'com.laoji.nativeplatform.audio.LaojiRecordingService';
 const PLAYBACK_SERVICE = 'com.laoji.nativeplatform.media.LaojiMinutesPlaybackService';
@@ -38,7 +38,19 @@ module.exports = function withLaojiNativePlatform(config) {
     return androidConfig;
   });
 
-  return withAppBuildGradle(withServices, androidConfig => {
+  const withEvidenceLint = withSettingsGradle(withServices, androidConfig => {
+    const marker = '// @generated-by-laoji-feishu-evidence-lint';
+    if (androidConfig.modResults.contents.includes(marker)) return androidConfig;
+    androidConfig.modResults.contents += `
+
+${marker}
+include ':feishu-evidence-lint'
+project(':feishu-evidence-lint').projectDir = new File(rootDir, '../tools/feishu-evidence-lint')
+`;
+    return androidConfig;
+  });
+
+  return withAppBuildGradle(withEvidenceLint, androidConfig => {
     const marker = '// @generated-by-laoji-feishu-evidence-gate';
     if (androidConfig.modResults.contents.includes(marker)) return androidConfig;
     androidConfig.modResults.contents += `
@@ -46,14 +58,30 @@ module.exports = function withLaojiNativePlatform(config) {
 ${marker}
 def laojiRepoRoot = rootDir.parentFile
 def laojiPython3 = System.getenv('PYTHON3') ?: 'python3'
+def laojiNode = System.getenv('NODE_BINARY') ?: 'node'
 def laojiParityAssets = layout.buildDirectory.dir('generated/laojiParityAssets').get().asFile
+def laojiTypeScriptAstReport = new File(laojiRepoRoot, 'build/feishu-ui-ast-report.json')
 android.sourceSets.main.assets.srcDir(laojiParityAssets)
+
+tasks.register('verifyLaojiTypeScriptEvidence', Exec) {
+    group = 'verification'
+    description = 'Generates and enforces the Android-active TypeScript AST evidence report.'
+    workingDir laojiRepoRoot
+    outputs.file(laojiTypeScriptAstReport)
+    commandLine laojiNode,
+        'scripts/feishu_ui_ast_gate.js',
+        'check',
+        '--output',
+        laojiTypeScriptAstReport.absolutePath
+}
 
 tasks.register('generateLaojiParityAttestation', Exec) {
     group = 'verification'
     description = 'Fail-closed Feishu evidence verification and embedded release attestation.'
     workingDir laojiRepoRoot
     outputs.file(new File(laojiParityAssets, 'parity-attestation.json'))
+    dependsOn tasks.named('verifyLaojiTypeScriptEvidence')
+    dependsOn ':laoji-native-platform:verifyFeishuEvidenceLint'
     doFirst { laojiParityAssets.mkdirs() }
     commandLine laojiPython3,
         'scripts/feishu_evidence_gate.py',

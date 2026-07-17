@@ -11,6 +11,7 @@ declare const require: (path: string) => ((config: object) => {
     };
   };
   contents?: string;
+  settingsContents?: string;
   }) & { RECORDING_SERVICE: string; PLAYBACK_SERVICE: string };
 
 const mockWithAndroidManifest = jest.fn((
@@ -47,9 +48,19 @@ const mockWithAppBuildGradle = jest.fn((
   return { ...config, contents: androidConfig.modResults.contents };
 });
 
+const mockWithSettingsGradle = jest.fn((
+  config: object,
+  action: (androidConfig: { modResults: { contents: string } }) => void,
+) => {
+  const androidConfig = { modResults: { contents: '' } };
+  action(androidConfig);
+  return { ...config, settingsContents: androidConfig.modResults.contents };
+});
+
 jest.mock('@expo/config-plugins', () => ({
   withAndroidManifest: mockWithAndroidManifest,
   withAppBuildGradle: mockWithAppBuildGradle,
+  withSettingsGradle: mockWithSettingsGradle,
 }));
 
 describe('LaoJi native platform manifest plugin', () => {
@@ -77,6 +88,11 @@ describe('LaoJi native platform manifest plugin', () => {
     ]);
     expect(first.contents).toContain('@generated-by-laoji-feishu-evidence-gate');
     expect(first.contents).toContain('generateLaojiParityAttestation');
+    expect(first.contents).toContain('verifyLaojiTypeScriptEvidence');
+    expect(first.contents).toContain(':laoji-native-platform:verifyFeishuEvidenceLint');
+    expect((first as { settingsContents?: string }).settingsContents).toContain(
+      '@generated-by-laoji-feishu-evidence-lint',
+    );
   });
 
   it('does not duplicate the service when applied twice', () => {
@@ -105,5 +121,19 @@ describe('LaoJi native platform manifest plugin', () => {
 
     const second = plugin({});
     expect(second.contents?.match(/@generated-by-laoji-feishu-evidence-gate/g)).toHaveLength(1);
+  });
+
+  it('adds the evidence lint project idempotently', () => {
+    const plugin = require('../plugins/withLaojiNativePlatform.js');
+    plugin({});
+    const firstContents = mockWithSettingsGradle.mock.results.at(-1)?.value.settingsContents as string;
+    mockWithSettingsGradle.mockImplementationOnce((config, action) => {
+      const androidConfig = { modResults: { contents: firstContents } };
+      action(androidConfig);
+      return { ...config, settingsContents: androidConfig.modResults.contents };
+    });
+
+    const second = plugin({});
+    expect(second.settingsContents?.match(/@generated-by-laoji-feishu-evidence-lint/g)).toHaveLength(1);
   });
 });

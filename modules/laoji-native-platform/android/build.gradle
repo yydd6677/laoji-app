@@ -20,6 +20,9 @@ android {
 
 def laojiRepoRoot = rootProject.projectDir.parentFile
 def laojiPython3 = System.getenv('PYTHON3') ?: 'python3'
+def laojiLintXmlReport = layout.buildDirectory.file('reports/lint-results-release.xml')
+def laojiLintEvidenceReport = new File(laojiRepoRoot, 'build/feishu-android-uast-report.json')
+def laojiLintDetectorJar = new File(laojiRepoRoot, 'tools/feishu-evidence-lint/build/libs/feishu-evidence-lint.jar')
 
 tasks.register('verifyFeishuEvidenceStatic', Exec) {
   group = 'verification'
@@ -32,7 +35,42 @@ tasks.matching { it.name == 'preBuild' }.configureEach {
   dependsOn tasks.named('verifyFeishuEvidenceStatic')
 }
 
+tasks.register('enforceFeishuEvidenceLintReport', Exec) {
+  group = 'verification'
+  description = 'Fails when Android Lint reports any error and writes a deterministic UAST evidence report.'
+  workingDir laojiRepoRoot
+  inputs.file(laojiLintXmlReport)
+  inputs.file(laojiLintDetectorJar)
+  outputs.file(laojiLintEvidenceReport)
+  dependsOn ':feishu-evidence-lint:jar'
+  commandLine laojiPython3,
+    'scripts/check_feishu_android_lint.py',
+    'check',
+    '--report',
+    laojiLintXmlReport.get().asFile.absolutePath,
+    '--detector-jar',
+    laojiLintDetectorJar.absolutePath,
+    '--output',
+    laojiLintEvidenceReport.absolutePath
+}
+
+tasks.matching { it.name == 'lintRelease' }.configureEach {
+  finalizedBy tasks.named('enforceFeishuEvidenceLintReport')
+}
+
+tasks.named('enforceFeishuEvidenceLintReport').configure {
+  mustRunAfter tasks.matching { it.name == 'lintRelease' }
+}
+
+tasks.register('verifyFeishuEvidenceLint') {
+  group = 'verification'
+  description = 'Runs Android Lint and its fail-closed Feishu evidence report parser.'
+  dependsOn tasks.matching { it.name == 'lintRelease' }
+  dependsOn tasks.named('enforceFeishuEvidenceLintReport')
+}
+
 dependencies {
+  lintChecks project(':feishu-evidence-lint')
   implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
   implementation 'androidx.media3:media3-exoplayer:1.10.1'
   implementation 'androidx.media3:media3-session:1.10.1'

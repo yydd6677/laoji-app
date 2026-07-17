@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const ts = require('typescript');
 
 const EVIDENCE_ID = /^(?:CAL|MIN|UI)-[A-Z0-9-]+-[0-9]{3}$/;
@@ -26,6 +27,10 @@ const ANIMATION_NAMES = new Set([
   'withSpring',
   'withTiming',
 ]);
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 function lineOf(sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
@@ -172,16 +177,18 @@ function activeAndroidTsxFiles(repoRoot) {
 }
 
 function runAudit(repoRoot) {
-  const manifest = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, 'evidence/feishu/manifest.json'), 'utf8'),
-  );
-  const productScope = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, manifest.product_scope), 'utf8'),
-  );
+  const scannerSource = fs.readFileSync(__filename, 'utf8');
+  const manifestPath = path.join(repoRoot, 'evidence/feishu/manifest.json');
+  const manifestSource = fs.readFileSync(manifestPath, 'utf8');
+  const manifest = JSON.parse(manifestSource);
+  const productScopePath = path.join(repoRoot, manifest.product_scope);
+  const productScopeSource = fs.readFileSync(productScopePath, 'utf8');
+  const productScope = JSON.parse(productScopeSource);
   const knownEvidence = new Set(manifest.evidence.map(entry => entry.id));
   const files = activeAndroidTsxFiles(repoRoot).map(absolute => {
     const relative = path.relative(repoRoot, absolute).split(path.sep).join('/');
-    return { path: relative, ...scanSource(fs.readFileSync(absolute, 'utf8'), relative) };
+    const source = fs.readFileSync(absolute, 'utf8');
+    return { path: relative, sourceSha256: sha256(source), ...scanSource(source, relative) };
   });
   const errors = [];
 
@@ -246,6 +253,20 @@ function runAudit(repoRoot) {
 
   return {
     schemaVersion: 1,
+    kind: 'typescript-ast',
+    scanner: {
+      path: path.relative(repoRoot, __filename).split(path.sep).join('/'),
+      sha256: sha256(scannerSource),
+      typescriptVersion: ts.version,
+    },
+    manifest: {
+      path: 'evidence/feishu/manifest.json',
+      sha256: sha256(manifestSource),
+    },
+    productScope: {
+      path: path.relative(repoRoot, productScopePath).split(path.sep).join('/'),
+      sha256: sha256(productScopeSource),
+    },
     files,
     routes: [...routeMap.values()].sort((left, right) => left.name.localeCompare(right.name)),
     errors,
@@ -285,5 +306,5 @@ function main() {
   console.log(`Feishu TypeScript AST gate passed (${result.files.length} active Android TSX files).`);
 }
 
-module.exports = { scanSource, runAudit };
+module.exports = { scanSource, runAudit, sha256 };
 if (require.main === module) main();

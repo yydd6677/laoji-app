@@ -31,6 +31,10 @@ STATUS_LABELS = {
     "verified": "已验证",
     "closed": "已关闭",
 }
+AUDIT_REPORT_PATHS = {
+    "typescript_ast": "build/feishu-ui-ast-report.json",
+    "android_lint_uast": "build/feishu-android-uast-report.json",
+}
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,155 @@ def sha256_file(path: Path) -> str:
 def canonical_sha256(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def repo_relative_file(repo_root: Path, relative: str) -> Path:
+    path = Path(relative)
+    if path.is_absolute():
+        raise ValueError(f"path must be repository-relative: {relative}")
+    target = (repo_root / path).resolve()
+    try:
+        target.relative_to(repo_root.resolve())
+    except ValueError as error:
+        raise ValueError(f"path escapes repository root: {relative}") from error
+    return target
+
+
+def validate_audit_report(
+    repo_root: Path,
+    kind: str,
+    relative: str,
+    require_clean: bool,
+) -> tuple[dict[str, Any] | None, list[GateError]]:
+    errors: list[GateError] = []
+    try:
+        path = repo_relative_file(repo_root, relative)
+        report = read_json(path)
+    except ValueError as error:
+        return None, [GateError("AUDIT_REPORT_INVALID", f"{kind}: {error}")]
+
+    error_count = 0
+    if kind == "typescript_ast":
+        if report.get("schemaVersion") != 1 or report.get("kind") != "typescript-ast":
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: schema or kind mismatch"))
+        for label, key in (
+            ("scanner", "scanner"),
+            ("manifest", "manifest"),
+            ("product scope", "productScope"),
+        ):
+            reference = report.get(key)
+            if not isinstance(reference, dict):
+                errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: missing {label} input"))
+                continue
+            input_relative = reference.get("path")
+            expected = reference.get("sha256")
+            try:
+                input_path = repo_relative_file(repo_root, input_relative)
+            except (TypeError, ValueError) as error:
+                errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: {label}: {error}"))
+                continue
+            if not input_path.is_file() or not isinstance(expected, str) or sha256_file(input_path) != expected:
+                errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {input_relative}"))
+        files = report.get("files")
+        if not isinstance(files, list) or not files:
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: no scanned source files"))
+        else:
+            for item in files:
+                if not isinstance(item, dict):
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: invalid source entry"))
+                    continue
+                input_relative = item.get("path")
+                expected = item.get("sourceSha256")
+                try:
+                    input_path = repo_relative_file(repo_root, input_relative)
+                except (TypeError, ValueError) as error:
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: source: {error}"))
+                    continue
+                if not input_path.is_file() or not isinstance(expected, str) or sha256_file(input_path) != expected:
+                    errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {input_relative}"))
+        report_errors = report.get("errors")
+        if not isinstance(report_errors, list):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: errors must be an array"))
+        else:
+            error_count = len(report_errors)
+    elif kind == "android_lint_uast":
+        if report.get("schema_version") != 1 or report.get("kind") != "android-lint-uast":
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: schema or kind mismatch"))
+        parser = report.get("parser")
+        if not isinstance(parser, dict):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: parser is not bound"))
+        else:
+            parser_relative = parser.get("path")
+            parser_sha = parser.get("sha256")
+            try:
+                parser_path = repo_relative_file(repo_root, parser_relative)
+            except (TypeError, ValueError) as error:
+                errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: parser: {error}"))
+            else:
+                if not parser_path.is_file() or not isinstance(parser_sha, str) or sha256_file(parser_path) != parser_sha:
+                    errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {parser_relative}"))
+        source_relative = report.get("source_report")
+        expected = report.get("source_report_sha256")
+        try:
+            source_path = repo_relative_file(repo_root, source_relative)
+        except (TypeError, ValueError) as error:
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: source report: {error}"))
+        else:
+            if not source_path.is_file() or not isinstance(expected, str) or sha256_file(source_path) != expected:
+                errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {source_relative}"))
+        detector = report.get("detector_jar")
+        if not isinstance(detector, dict):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: detector JAR is not bound"))
+        else:
+            detector_relative = detector.get("path")
+            detector_sha = detector.get("sha256")
+            try:
+                detector_path = repo_relative_file(repo_root, detector_relative)
+            except (TypeError, ValueError) as error:
+                errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: detector JAR: {error}"))
+            else:
+                if not detector_path.is_file() or not isinstance(detector_sha, str) or sha256_file(detector_path) != detector_sha:
+                    errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {detector_relative}"))
+        error_count = report.get("error_count", -1)
+        report_errors = report.get("errors")
+        if not isinstance(error_count, int) or error_count < 0 or not isinstance(report_errors, list):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: invalid error inventory"))
+            error_count = 0
+        elif error_count != len(report_errors):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: error count mismatch"))
+    else:
+        errors.append(GateError("AUDIT_REPORT_INVALID", f"unknown audit kind {kind}"))
+
+    if require_clean and error_count:
+        errors.append(GateError("AUDIT_REPORT_FAILED", f"{kind}: {error_count} errors"))
+    reference = {
+        "kind": kind,
+        "path": relative,
+        "sha256": sha256_file(path),
+        "error_count": error_count,
+    }
+    return reference, errors
+
+
+def collect_audit_reports(
+    repo_root: Path,
+    require_clean: bool,
+    require_all: bool,
+) -> tuple[dict[str, dict[str, Any]], list[GateError]]:
+    references: dict[str, dict[str, Any]] = {}
+    errors: list[GateError] = []
+    for kind, relative in AUDIT_REPORT_PATHS.items():
+        path = repo_root / relative
+        if not path.is_file() and not require_all:
+            continue
+        if not path.is_file():
+            errors.append(GateError("AUDIT_REPORT_MISSING", f"{kind}: {relative}"))
+            continue
+        reference, report_errors = validate_audit_report(repo_root, kind, relative, require_clean)
+        errors.extend(report_errors)
+        if reference is not None:
+            references[kind] = reference
+    return references, errors
 
 
 def evidence_input_sha256(
@@ -159,6 +312,36 @@ def validate_proof(
         symbol = test.get("symbol") if isinstance(test, dict) else None
         if symbol and symbol not in testcases:
             errors.append(GateError("VERIFICATION_TESTCASE_MISSING", f"{evidence_id}: {symbol}"))
+    proof_audits = proof.get("audit_reports")
+    if proof_audits is not None or mode == "release":
+        current_audits, audit_errors = collect_audit_reports(
+            repo_root,
+            require_clean=mode == "release",
+            require_all=mode == "release",
+        )
+        errors.extend(
+            GateError(error.code, f"{evidence_id}: {error.message}") for error in audit_errors
+        )
+        if not isinstance(proof_audits, dict):
+            errors.append(GateError("VERIFICATION_AUDIT_PROOF_MISSING", evidence_id))
+        else:
+            if mode == "release":
+                for kind in AUDIT_REPORT_PATHS:
+                    if kind not in proof_audits:
+                        errors.append(
+                            GateError("VERIFICATION_AUDIT_PROOF_MISSING", f"{evidence_id}: {kind}")
+                        )
+            for kind, recorded in proof_audits.items():
+                current = current_audits.get(kind)
+                if not isinstance(recorded, dict) or current is None:
+                    errors.append(
+                        GateError("VERIFICATION_AUDIT_PROOF_INVALID", f"{evidence_id}: {kind}")
+                    )
+                    continue
+                if any(recorded.get(key) != current.get(key) for key in ("path", "sha256", "error_count")):
+                    errors.append(
+                        GateError("VERIFICATION_AUDIT_PROOF_STALE", f"{evidence_id}: {kind}")
+                    )
     if mode == "release":
         report_relative = report.get("path")
         live_report = repo_root / str(report_relative)
@@ -426,6 +609,12 @@ def validate(
                 errors.append(GateError("PHYSICAL_DEVICE_PROOF_MISSING", evidence_id))
 
     if mode == "release":
+        _, audit_errors = collect_audit_reports(
+            repo_root,
+            require_clean=True,
+            require_all=True,
+        )
+        errors.extend(audit_errors)
         coverage = manifest.get("coverage", {})
         if coverage.get("release_inventory_complete") is not True:
             errors.append(GateError("RELEASE_INVENTORY_INCOMPLETE", "full reachable-route inventory is not closed"))
@@ -467,6 +656,13 @@ def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> Non
     deviations_path = repo_root / manifest["deviations"]
     product_scope_path = repo_root / manifest["product_scope"]
     tombstones_path = repo_root / manifest["tombstones"]
+    audit_reports, audit_errors = collect_audit_reports(
+        repo_root,
+        require_clean=True,
+        require_all=True,
+    )
+    if audit_errors:
+        raise ValueError("; ".join(error.render() for error in audit_errors))
     attestation = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -477,6 +673,7 @@ def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> Non
         "deviations_sha256": sha256_file(deviations_path),
         "product_scope_sha256": sha256_file(product_scope_path),
         "tombstones_sha256": sha256_file(tombstones_path),
+        "audit_reports": audit_reports,
         "closed_evidence": sorted(
             entry["id"] for entry in manifest["evidence"] if entry.get("status") == "closed"
         ),
@@ -527,6 +724,13 @@ def record_proof(
     ]
     if missing:
         raise ValueError(f"proof report is missing required testcases: {', '.join(missing)}")
+    audit_reports, audit_errors = collect_audit_reports(
+        repo_root,
+        require_clean=False,
+        require_all=False,
+    )
+    if audit_errors:
+        raise ValueError("; ".join(error.render() for error in audit_errors))
     proof = {
         "schema_version": 1,
         "evidence_id": evidence_id,
@@ -538,6 +742,7 @@ def record_proof(
             "sha256": sha256_file(report_path),
             **result,
         },
+        "audit_reports": audit_reports,
         "runtime": {
             "device_kind": device_kind,
             "api_level": api_level,
@@ -636,7 +841,11 @@ def main() -> int:
         return 1
     if args.command == "attest":
         output = args.output if args.output.is_absolute() else repo_root / args.output
-        write_attestation(repo_root, manifest_path, output)
+        try:
+            write_attestation(repo_root, manifest_path, output)
+        except ValueError as error:
+            print(f"ERROR PARITY_ATTESTATION_INVALID: {error}")
+            return 1
         print(f"Wrote parity attestation to {output}")
     else:
         print(f"Feishu evidence gate passed ({mode}).")

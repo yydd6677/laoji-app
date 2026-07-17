@@ -29,6 +29,7 @@ yarn-debug.*
 yarn-error.*
 /tmp/
 /coverage/
+/build/
 __pycache__/
 *.py[cod]
 
@@ -69,3 +70,4 @@ __pycache__/
 /android
 /modules/**/android/build/
 /modules/**/build/
+/tools/**/build/
