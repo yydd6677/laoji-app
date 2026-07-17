@@ -113,6 +113,19 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         ts_scanner.write_text("// fixture scanner\n", encoding="utf-8")
         lint_parser = scripts / "check_feishu_android_lint.py"
         lint_parser.write_text("# fixture parser\n", encoding="utf-8")
+        workspace_gate = scripts / "check_workspace_source_resolution.js"
+        workspace_gate.write_text("// fixture workspace gate\n", encoding="utf-8")
+        (root / "node_modules").mkdir()
+        package_lock = root / "package-lock.json"
+        package_lock.write_text("{}\n", encoding="utf-8")
+        metro = root / "metro.config.js"
+        metro.write_text("// fixture metro\n", encoding="utf-8")
+        plugin = root / "plugins/withLaojiNativePlatform.js"
+        plugin.parent.mkdir()
+        plugin.write_text("// fixture plugin\n", encoding="utf-8")
+        module_package = root / "modules/laoji-native-platform/package.json"
+        module_package.parent.mkdir(parents=True)
+        module_package.write_text('{"name":"laoji-native-platform"}\n', encoding="utf-8")
         manifest_path = root / "evidence/feishu/manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         product_scope_path = root / manifest["product_scope"]
@@ -171,6 +184,32 @@ class FeishuEvidenceGateTest(unittest.TestCase):
                 "error_count": 0,
                 "custom_error_count": 0,
                 "counts_by_id": {},
+                "errors": [],
+            }),
+            encoding="utf-8",
+        )
+        workspace_report = build / "workspace-source-resolution-report.json"
+        workspace_inputs = [workspace_gate, package_lock, metro, plugin, module_package]
+        workspace_report.write_text(
+            json.dumps({
+                "schemaVersion": 1,
+                "kind": "workspace-source-resolution",
+                "inputs": [{
+                    "path": item.relative_to(root).as_posix(),
+                    "sha256": GATE.sha256_file(item),
+                } for item in workspace_inputs],
+                "nodeModules": {
+                    "path": "node_modules",
+                    "realPath": "node_modules",
+                    "symbolicLink": False,
+                },
+                "resolutions": {
+                    "laoji-native-platform/package.json": "modules/laoji-native-platform/package.json",
+                },
+                "autolinking": {
+                    "moduleCount": 1,
+                    "laojiSourceDir": "modules/laoji-native-platform/android",
+                },
                 "errors": [],
             }),
             encoding="utf-8",
@@ -350,7 +389,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             references, errors = GATE.collect_audit_reports(root, require_clean=True, require_all=True)
             self.assertEqual([], errors)
             self.assertEqual(
-                {"typescript_ast", "android_lint_uast"},
+                {"typescript_ast", "android_lint_uast", "workspace_resolution"},
                 set(references),
             )
             ts_source.write_text("export const AuditScreen = () => 'changed';\n", encoding="utf-8")
@@ -387,7 +426,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             )
             value = json.loads(proof.read_text(encoding="utf-8"))
             self.assertEqual(
-                {"typescript_ast", "android_lint_uast"},
+                {"typescript_ast", "android_lint_uast", "workspace_resolution"},
                 set(value["audit_reports"]),
             )
             self.assertEqual(

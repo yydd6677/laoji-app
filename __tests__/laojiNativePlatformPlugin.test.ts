@@ -89,6 +89,7 @@ describe('LaoJi native platform manifest plugin', () => {
     expect(first.contents).toContain('@generated-by-laoji-feishu-evidence-gate');
     expect(first.contents).toContain('generateLaojiParityAttestation');
     expect(first.contents).toContain('verifyLaojiTypeScriptEvidence');
+    expect(first.contents).toContain('verifyLaojiWorkspaceSource');
     expect(first.contents).toContain(':laoji-native-platform:verifyFeishuEvidenceLint');
     expect((first as { settingsContents?: string }).settingsContents).toContain(
       '@generated-by-laoji-feishu-evidence-lint',

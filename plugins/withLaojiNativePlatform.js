@@ -61,7 +61,20 @@ def laojiPython3 = System.getenv('PYTHON3') ?: 'python3'
 def laojiNode = System.getenv('NODE_BINARY') ?: 'node'
 def laojiParityAssets = layout.buildDirectory.dir('generated/laojiParityAssets').get().asFile
 def laojiTypeScriptAstReport = new File(laojiRepoRoot, 'build/feishu-ui-ast-report.json')
+def laojiWorkspaceSourceReport = new File(laojiRepoRoot, 'build/workspace-source-resolution-report.json')
 android.sourceSets.main.assets.srcDir(laojiParityAssets)
+
+tasks.register('verifyLaojiWorkspaceSource', Exec) {
+    group = 'verification'
+    description = 'Proves Node, Metro and Expo autolinking resolve this worktree.'
+    workingDir laojiRepoRoot
+    outputs.file(laojiWorkspaceSourceReport)
+    commandLine laojiNode,
+        'scripts/check_workspace_source_resolution.js',
+        'check',
+        '--output',
+        laojiWorkspaceSourceReport.absolutePath
+}
 
 tasks.register('verifyLaojiTypeScriptEvidence', Exec) {
     group = 'verification'
@@ -80,6 +93,7 @@ tasks.register('generateLaojiParityAttestation', Exec) {
     description = 'Fail-closed Feishu evidence verification and embedded release attestation.'
     workingDir laojiRepoRoot
     outputs.file(new File(laojiParityAssets, 'parity-attestation.json'))
+    dependsOn tasks.named('verifyLaojiWorkspaceSource')
     dependsOn tasks.named('verifyLaojiTypeScriptEvidence')
     dependsOn ':laoji-native-platform:verifyFeishuEvidenceLint'
     doFirst { laojiParityAssets.mkdirs() }

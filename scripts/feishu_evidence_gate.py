@@ -34,6 +34,7 @@ STATUS_LABELS = {
 AUDIT_REPORT_PATHS = {
     "typescript_ast": "build/feishu-ui-ast-report.json",
     "android_lint_uast": "build/feishu-android-uast-report.json",
+    "workspace_resolution": "build/workspace-source-resolution-report.json",
 }
 
 
@@ -185,6 +186,51 @@ def validate_audit_report(
             error_count = 0
         elif error_count != len(report_errors):
             errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: error count mismatch"))
+    elif kind == "workspace_resolution":
+        if report.get("schemaVersion") != 1 or report.get("kind") != "workspace-source-resolution":
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: schema or kind mismatch"))
+        inputs = report.get("inputs")
+        if not isinstance(inputs, list) or not inputs:
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: no bound inputs"))
+        else:
+            for item in inputs:
+                if not isinstance(item, dict):
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: invalid input"))
+                    continue
+                input_relative = item.get("path")
+                expected = item.get("sha256")
+                try:
+                    input_path = repo_relative_file(repo_root, input_relative)
+                except (TypeError, ValueError) as error:
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: input: {error}"))
+                    continue
+                if not input_path.is_file() or not isinstance(expected, str) or sha256_file(input_path) != expected:
+                    errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {input_relative}"))
+        node_modules = repo_root / "node_modules"
+        node_modules_report = report.get("nodeModules")
+        if (
+            not node_modules.is_dir()
+            or node_modules.is_symlink()
+            or not isinstance(node_modules_report, dict)
+            or node_modules_report.get("symbolicLink") is not False
+            or node_modules_report.get("realPath") != "node_modules"
+        ):
+            errors.append(GateError("AUDIT_REPORT_FAILED", f"{kind}: node_modules is not worktree-local"))
+        resolutions = report.get("resolutions")
+        if not isinstance(resolutions, dict) or resolutions.get("laoji-native-platform/package.json") != (
+            "modules/laoji-native-platform/package.json"
+        ):
+            errors.append(GateError("AUDIT_REPORT_FAILED", f"{kind}: local module resolution mismatch"))
+        autolinking = report.get("autolinking")
+        if not isinstance(autolinking, dict) or autolinking.get("laojiSourceDir") != (
+            "modules/laoji-native-platform/android"
+        ):
+            errors.append(GateError("AUDIT_REPORT_FAILED", f"{kind}: Expo autolinking mismatch"))
+        report_errors = report.get("errors")
+        if not isinstance(report_errors, list):
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: errors must be an array"))
+        else:
+            error_count = len(report_errors)
     else:
         errors.append(GateError("AUDIT_REPORT_INVALID", f"unknown audit kind {kind}"))
 
