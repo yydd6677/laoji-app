@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "deviations": [
+    {
+      "id": "DEV-CALENDAR-VIEW-SCOPE-001",
+      "status": "approved",
+      "module": "calendar",
+      "decision": "Keep month and single-day views only; remove multi-calendar, week, three-day and list views. Reuse the single trailing view-indicator control to switch the two retained modes.",
+      "approval_basis": "User-approved product scope before the source-driven rebuild."
+    },
+    {
+      "id": "DEV-CALENDAR-WEEK-START-001",
+      "status": "approved",
+      "module": "calendar",
+      "decision": "Use Sunday as the first day of the week.",
+      "approval_basis": "Explicit user decision."
+    },
+    {
+      "id": "DEV-EXPO-SINGLE-NATIVE-ROOT-001",
+      "status": "approved",
+      "module": "shell",
+      "decision": "Each active Android main tab owns one exported Expo native root and keeps its bottom bar inside that native tree.",
+      "approval_basis": "Required platform adaptation preserving Feishu single-tree composition behavior."
+    },
+    {
+      "id": "DEV-LAOJI-SCHEDULE-VOICE-001",
+      "status": "approved",
+      "module": "calendar",
+      "decision": "Retain LaoJi voice schedule creation while sourcing its container and motion from the closest Feishu interaction contract.",
+      "approval_basis": "Explicit LaoJi product requirement."
+    },
+    {
+      "id": "DEV-LAOJI-MINUTES-SERVICES-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Use LaoJi Qwen ASR, summary, WAV persistence and Media3 playback in Feishu-derived Minutes containers.",
+      "approval_basis": "Feishu proprietary RTC, CCM and player services are outside LaoJi service capabilities."
+    },
+    {
+      "id": "DEV-LAOJI-GUEST-SUMMARY-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Retain real guest-mode meeting summaries with the existing LaoJi privacy boundary.",
+      "approval_basis": "Explicit user requirement."
+    },
+    {
+      "id": "DEV-LAOJI-SYSTEM-SHARE-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Replace Feishu CCM collaboration sharing with system file sharing for meeting documents, transcripts, summaries and recordings.",
+      "approval_basis": "Explicit user requirement and current service boundary."
+    },
+    {
+      "id": "DEV-LAOJI-LIGHT-THEME-001",
+      "status": "approved",
+      "module": "common",
+      "decision": "Version one supports the Feishu-derived light theme only.",
+      "approval_basis": "Previously confirmed release scope."
+    }
+  ]
+}

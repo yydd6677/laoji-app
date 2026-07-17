@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "id": "feishu-android-7.71.8",
+    "version": "7.71.8",
+    "description": "Decoded Feishu Android source and resources used as the UI behavior authority."
+  },
+  "files": [
+    {
+      "id": "calendar-view-indicator-layout",
+      "path": "decoded-resources/res/layout/view_indicator.xml",
+      "sha256": "eed2954deb906edb58d3ef8ff43a1d123ada6d06c69c92efe9a830ed10e80335"
+    },
+    {
+      "id": "calendar-view-indicator-class",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/ViewIndicator.java",
+      "sha256": "dd3ddcc7160d592dda2ebe3f81a60cad5e4795ae3dbd47811bbd7e603ca9c6c9"
+    },
+    {
+      "id": "universe-wheel-view",
+      "path": "java-sources/com/larksuite/component/universe_design/timepicker/impl/base/WheelView.java",
+      "sha256": "40d1ad920c670173ceb60c6e4704b2e1bc6c8833b1640ccc0870070de870963f"
+    },
+    {
+      "id": "calendar-month-expansion-touch",
+      "path": "java-sources/re3/ViewOnTouchListenerC153853e.java",
+      "sha256": "9617e41e4e37ecbe3cda884da0055f8adeab7c8977377a392a36c2c52f9ccc4f"
+    },
+    {
+      "id": "calendar-month-expansion-layout",
+      "path": "java-sources/re3/C153854f.java",
+      "sha256": "baa471e81852f162497d420888e8e087d8eced242d9b2c25be5779e5be0f80b2"
+    },
+    {
+      "id": "calendar-month-container-pager",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/MonthContainViewPager.java",
+      "sha256": "2ca086460f88d295b6b2a906d6507be46f30fc3b120c7f47b84106213f3ed0f9"
+    },
+    {
+      "id": "calendar-shell-fragment",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/CalendarShellViewFragment.java",
+      "sha256": "9eb80d9cb2bb09d59638b13f4ac17d074f9155c07bbba33c5fd043d5793ea1f0"
+    },
+    {
+      "id": "calendar-shell-view",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/ShellView.java",
+      "sha256": "fef2a4b818e109ca9616c3551bfbdc67b934cb73987046d4497fcd07261231f6"
+    }
+  ]
+}

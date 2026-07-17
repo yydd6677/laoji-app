@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "baseline_id": "feishu-android-7.71.8",
+  "source_lock": "evidence/feishu/source-lock.json",
+  "deviations": "evidence/feishu/deviations.json",
+  "coverage": {
+    "phase": "pilot",
+    "release_inventory_complete": false,
+    "implementation_roots": [
+      "modules/laoji-native-platform/android/src/main",
+      "src/navigation/MainTabs.android.tsx",
+      "src/screens/ScheduleScreen.android.tsx"
+    ]
+  },
+  "required_release_evidence": [
+    "UI-ANDROID-COMPOSITION-001",
+    "UI-CALENDAR-INDICATOR-001",
+    "CAL-PICKER-WHEEL-TAP-001",
+    "CAL-MONTH-EXPAND-HOST-001"
+  ],
+  "evidence": [
+    {
+      "id": "UI-ANDROID-COMPOSITION-001",
+      "module": "shell",
+      "status": "implemented",
+      "decision": "business_replace",
+      "source_refs": ["calendar-shell-fragment", "calendar-shell-view"],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001"],
+      "requirements": {
+        "active_exported_native_roots": 1,
+        "bottom_bar_owner": "active-native-root",
+        "device_verification_required": true
+      },
+      "implementation": [
+        {
+          "path": "src/navigation/MainTabs.android.tsx",
+          "symbols": ["MainTabs"],
+          "required_patterns": ["UI-ANDROID-COMPOSITION-001"],
+          "forbidden_patterns": ["LaojiNativeMainContainer", "LaojiNativeBottomBar"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarHostView.kt",
+          "symbols": ["CalendarHostView"],
+          "required_patterns": ["UI-ANDROID-COMPOSITION-001", "NativeBottomBarView"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/LaojiMinutesView.kt",
+          "symbols": ["LaojiMinutesView"],
+          "required_patterns": ["UI-ANDROID-COMPOSITION-001", "NativeBottomBarView"]
+        }
+      ],
+      "tests": [
+        {"path": "__tests__/androidNativeBoundary.test.ts", "kind": "static"},
+        {"path": "scripts/android-emulator-composition-smoke.sh", "kind": "runtime"}
+      ],
+      "blockers": ["same release APK has not completed the final physical-device matrix"]
+    },
+    {
+      "id": "UI-CALENDAR-INDICATOR-001",
+      "module": "calendar",
+      "status": "verified",
+      "decision": "business_replace",
+      "source_refs": ["calendar-view-indicator-layout", "calendar-view-indicator-class"],
+      "deviation_refs": ["DEV-CALENDAR-VIEW-SCOPE-001"],
+      "requirements": {
+        "container_height_dp": 50,
+        "mode_entry_count": 1,
+        "mode_entry_size_dp": 32,
+        "location": "below-title-bar"
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarChromeViews.kt",
+          "symbols": ["CalendarToolbarView", "CalendarIndicatorView"],
+          "required_patterns": ["UI-CALENDAR-INDICATOR-001", "CalendarIndicatorView", "50f", "32f"],
+          "forbidden_patterns": ["private\\s+val\\s+monthView", "private\\s+val\\s+dayView"]
+        }
+      ],
+      "tests": [
+        {
+          "path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt",
+          "kind": "androidTest",
+          "symbol": "productionHostWheelVisibleItemTapCommitsAndToolbarExposesOneModeToggle",
+          "runtime": "API 35 emulator"
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "CAL-PICKER-WHEEL-TAP-001",
+      "module": "calendar",
+      "status": "verified",
+      "decision": "keep",
+      "source_refs": ["universe-wheel-view"],
+      "deviation_refs": [],
+      "requirements": {
+        "visible_items": 5,
+        "item_height_dp": 48,
+        "tap_non_center_item": "settle-and-commit",
+        "settle_duration_ms": 150
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarChromeViews.kt",
+          "symbols": ["CalendarQuickChooseWheelView"],
+          "required_patterns": ["CAL-PICKER-WHEEL-TAP-001", "performClick"],
+          "forbidden_patterns": ["override\\s+fun\\s+performClick\\(\\):\\s*Boolean\\s*=\\s*super\\.performClick\\(\\)"]
+        }
+      ],
+      "tests": [
+        {
+          "path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt",
+          "kind": "androidTest",
+          "symbol": "productionHostWheelVisibleItemTapCommitsAndToolbarExposesOneModeToggle",
+          "runtime": "API 35 emulator"
+        }
+      ],
+      "blockers": []
+    },
+    {
+      "id": "CAL-MONTH-EXPAND-HOST-001",
+      "module": "calendar",
+      "status": "verified",
+      "decision": "keep",
+      "source_refs": ["calendar-month-expansion-touch", "calendar-month-expansion-layout", "calendar-month-container-pager"],
+      "deviation_refs": [],
+      "requirements": {
+        "snapshot_rebind_preserves_expansion": true,
+        "same_row_switch_preserves_owner": true,
+        "cross_row_transition_ms": 700
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/MonthCalendarViews.kt",
+          "symbols": ["ThreePageMonthPager", "MonthPageView"],
+          "required_patterns": ["CAL-MONTH-EXPAND-HOST-001", "expandedSelection"],
+          "forbidden_patterns": ["fun\\s+setSnapshot\\([^)]*\\)\\s*\\{[\\s\\S]{0,400}?adapter\\.notifyDataSetChanged\\(\\)"]
+        }
+      ],
+      "tests": [
+        {
+          "path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarSurfaceInstrumentedTest.kt",
+          "kind": "androidTest",
+          "symbol": "monthExpansionSurvivesImmediateSelectedDateSnapshotRebind",
+          "runtime": "API 35 emulator"
+        }
+      ],
+      "blockers": []
+    }
+  ]
+}

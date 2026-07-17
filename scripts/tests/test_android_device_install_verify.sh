@@ -12,6 +12,8 @@ rg -q 'firstInstallTime changed; app data was not preserved' "$SCRIPT"
 rg -q 'package UID changed; installation was not an in-place update' "$SCRIPT"
 rg -q 'record_and_verify_apk' "$SCRIPT"
 rg -q 'verify_final_artifact_identity' "$SCRIPT"
+rg -q 'assert_parity_attestation' "$SCRIPT"
+rg -q 'parity-attestation.json' "$SCRIPT"
 
 if rg -q 'shell pm clear|uninstall' "$SCRIPT"; then
   printf 'physical overwrite-install gate contains a destructive package operation\n' >&2
@@ -26,9 +28,35 @@ fi
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 FAKE_APK="$TEMP_DIR/app-release.apk"
+FAKE_ATTESTATION="$FAKE_APK.attestation.json"
 FAKE_ADB="$TEMP_DIR/adb"
 OUT_DIR="$TEMP_DIR/evidence"
-printf 'frozen-apk-bytes\n' >"$FAKE_APK"
+mkdir -p "$TEMP_DIR/apk/assets"
+cat >"$TEMP_DIR/apk/assets/parity-attestation.json" <<'JSON'
+{
+  "schema_version": 1,
+  "git_commit": "fixture",
+  "baseline_id": "feishu-android-7.71.8",
+  "source_lock_sha256": "source",
+  "manifest_sha256": "manifest",
+  "deviations_sha256": "deviations",
+  "artifact_sha256": null,
+  "artifact_hash_location": "sidecar"
+}
+JSON
+(cd "$TEMP_DIR/apk" && zip -q "$FAKE_APK" assets/parity-attestation.json)
+python3 - "$TEMP_DIR/apk/assets/parity-attestation.json" "$FAKE_APK" "$FAKE_ATTESTATION" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+embedded, artifact, sidecar = map(Path, sys.argv[1:])
+value = json.loads(embedded.read_text(encoding="utf-8"))
+value["artifact_sha256"] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+value["artifact_size_bytes"] = artifact.stat().st_size
+sidecar.write_text(json.dumps(value), encoding="utf-8")
+PY
 
 cat >"$FAKE_ADB" <<'MOCK_ADB'
 #!/usr/bin/env bash
@@ -80,7 +108,8 @@ esac
 MOCK_ADB
 chmod +x "$FAKE_ADB"
 
-ADB="$FAKE_ADB" FAKE_APK="$FAKE_APK" DEVICE=phone-serial APK="$FAKE_APK" OUT_DIR="$OUT_DIR" \
+ADB="$FAKE_ADB" FAKE_APK="$FAKE_APK" DEVICE=phone-serial APK="$FAKE_APK" \
+  ATTESTATION="$FAKE_ATTESTATION" OUT_DIR="$OUT_DIR" \
   bash "$SCRIPT" >/dev/null
 
 rg -q '^result=passed$' "$OUT_DIR/result.txt"

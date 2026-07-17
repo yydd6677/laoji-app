@@ -18,6 +18,20 @@ android {
   testBuildType 'release'
 }
 
+def laojiRepoRoot = rootProject.projectDir.parentFile
+def laojiPython3 = System.getenv('PYTHON3') ?: 'python3'
+
+tasks.register('verifyFeishuEvidenceStatic', Exec) {
+  group = 'verification'
+  description = 'Checks Feishu source hashes and implementation evidence before Android compilation.'
+  workingDir laojiRepoRoot
+  commandLine laojiPython3, 'scripts/feishu_evidence_gate.py', 'check', '--mode', 'static'
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach {
+  dependsOn tasks.named('verifyFeishuEvidenceStatic')
+}
+
 dependencies {
   implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
   implementation 'androidx.media3:media3-exoplayer:1.10.1'

@@ -500,6 +500,7 @@ class CalendarSurfaceInstrumentedTest {
   }
 
   @Test
+  // CAL-MONTH-EXPAND-HOST-001
   fun monthExpansionSurvivesImmediateSelectedDateSnapshotRebind() {
     ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
       val day = selectedDay()

@@ -32,6 +32,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -1258,6 +1260,9 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
 
 }
 
+// CAL-MONTH-EXPAND-HOST-001: snapshot refresh rebinds existing pages in place;
+// it must not destroy MonthPageView-owned expandedSelection or active motion.
+@FeishuEvidence("CAL-MONTH-EXPAND-HOST-001")
 class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalendarListener {
   private val pager = ViewPager2(context)
   private val adapter = MonthPageAdapter()
@@ -1280,6 +1285,7 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
   }
 
   init {
+    FeishuEvidenceRuntime.bind(this, "CAL-MONTH-EXPAND-HOST-001", "month-pager", "calendar-month-pager")
     pager.apply {
       orientation = ViewPager2.ORIENTATION_HORIZONTAL
       offscreenPageLimit = MonthPagerContract.PAGE_COUNT
@@ -1307,7 +1313,7 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
 
   fun setSnapshot(snapshot: CalendarSnapshot?) {
     this.snapshot = snapshot
-    adapter.notifyDataSetChanged()
+    adapter.rebindSnapshot()
     if (pendingCrossMonthEpochDay != null) schedulePendingCrossMonthOpen(crossMonthOpenToken, 0)
   }
 
@@ -1358,6 +1364,16 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
     }
 
     fun boundPage(position: Int): MonthPageView? = boundPages[position]
+
+    fun rebindSnapshot() {
+      boundPages.toMap().forEach { (position, page) ->
+        page.bind(
+          CalendarDateMath.addMonths(centerMonthEpochDay, position - MonthPagerContract.CENTER_PAGE, false),
+          snapshot,
+          this@ThreePageMonthPager,
+        )
+      }
+    }
   }
 
   private class MonthPageHolder(val page: MonthPageView) : RecyclerView.ViewHolder(page)

@@ -10,6 +10,7 @@ declare const require: (path: string) => ((config: object) => {
       }>;
     };
   };
+  contents?: string;
   }) & { RECORDING_SERVICE: string; PLAYBACK_SERVICE: string };
 
 const mockWithAndroidManifest = jest.fn((
@@ -37,8 +38,18 @@ const mockWithAndroidManifest = jest.fn((
   return { ...config, modResults: androidConfig.modResults };
 });
 
+const mockWithAppBuildGradle = jest.fn((
+  config: object,
+  action: (androidConfig: { modResults: { contents: string } }) => void,
+) => {
+  const androidConfig = { modResults: { contents: '' } };
+  action(androidConfig);
+  return { ...config, contents: androidConfig.modResults.contents };
+});
+
 jest.mock('@expo/config-plugins', () => ({
   withAndroidManifest: mockWithAndroidManifest,
+  withAppBuildGradle: mockWithAppBuildGradle,
 }));
 
 describe('LaoJi native platform manifest plugin', () => {
@@ -64,6 +75,8 @@ describe('LaoJi native platform manifest plugin', () => {
       'androidx.media3.session.MediaSessionService',
       'android.media.browse.MediaBrowserService',
     ]);
+    expect(first.contents).toContain('@generated-by-laoji-feishu-evidence-gate');
+    expect(first.contents).toContain('generateLaojiParityAttestation');
   });
 
   it('does not duplicate the service when applied twice', () => {
@@ -78,5 +91,19 @@ describe('LaoJi native platform manifest plugin', () => {
 
     const second = plugin({});
     expect(second.modResults.manifest.application[0].service).toHaveLength(2);
+  });
+
+  it('adds the release evidence hook idempotently', () => {
+    const plugin = require('../plugins/withLaojiNativePlatform.js');
+    plugin({});
+    const firstContents = mockWithAppBuildGradle.mock.results.at(-1)?.value.contents as string;
+    mockWithAppBuildGradle.mockImplementationOnce((config, action) => {
+      const androidConfig = { modResults: { contents: firstContents } };
+      action(androidConfig);
+      return { ...config, contents: androidConfig.modResults.contents };
+    });
+
+    const second = plugin({});
+    expect(second.contents?.match(/@generated-by-laoji-feishu-evidence-gate/g)).toHaveLength(1);
   });
 });

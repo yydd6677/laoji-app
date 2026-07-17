@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROUTE_LIBRARY="$ROOT_DIR/scripts/android-emulator-route-smoke.sh"
 DEVICE="${DEVICE:-}"
 APK="${APK:-$ROOT_DIR/android/app/build/outputs/apk/release/app-release.apk}"
+ATTESTATION="${ATTESTATION:-$APK.attestation.json}"
 OUT_DIR="${OUT_DIR:-/tmp/laoji-device-install-$(date '+%Y%m%d-%H%M%S')-$$}"
 INSTALL_APK=1
 RESET_APP_DATA=0
@@ -79,9 +80,36 @@ assert_packaged_ui_visible() {
   fail "MainActivity did not expose a packaged UI tree after overwrite install"
 }
 
+assert_parity_attestation() {
+  local embedded="$OUT_DIR/checkpoints/parity-attestation.json"
+  require_file "$ATTESTATION"
+  command -v unzip >/dev/null 2>&1 || fail "unzip is required to verify the embedded parity attestation"
+  unzip -p "$APK" assets/parity-attestation.json >"$embedded" \
+    || fail "APK has no embedded parity-attestation.json"
+  python3 - "$embedded" "$ATTESTATION" "$APK" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+embedded_path, sidecar_path, artifact_path = map(Path, sys.argv[1:])
+embedded = json.loads(embedded_path.read_text(encoding="utf-8"))
+sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+for key in ("git_commit", "baseline_id", "source_lock_sha256", "manifest_sha256", "deviations_sha256"):
+    if sidecar.get(key) != embedded.get(key):
+        raise SystemExit(f"parity attestation mismatch: {key}")
+digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+if sidecar.get("artifact_sha256") != digest:
+    raise SystemExit("parity attestation artifact hash mismatch")
+if sidecar.get("artifact_size_bytes") != artifact_path.stat().st_size:
+    raise SystemExit("parity attestation artifact size mismatch")
+PY
+}
+
 main() {
   require_file "$APK"
   require_file "$ROUTE_LIBRARY"
+  assert_parity_attestation
   assert_apk_fresh "$APK" "$ROOT_DIR" || fail "rebuild the release APK before physical installation"
   ensure_target_device
   assert_only_target_physical_device

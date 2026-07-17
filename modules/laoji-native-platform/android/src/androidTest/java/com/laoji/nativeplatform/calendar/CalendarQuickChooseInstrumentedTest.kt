@@ -12,6 +12,9 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.evidence.EvidenceNodeContract
+import com.laoji.nativeplatform.evidence.EvidenceTreeContract
+import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import expo.modules.core.ModuleRegistry
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.ModulesProvider
@@ -212,6 +215,7 @@ class CalendarQuickChooseInstrumentedTest {
   }
 
   @Test
+  // UI-CALENDAR-INDICATOR-001 / CAL-PICKER-WHEEL-TAP-001
   fun productionHostWheelVisibleItemTapCommitsAndToolbarExposesOneModeToggle() {
     ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
       val hostRef = AtomicReference<CalendarHostView>()
@@ -220,21 +224,55 @@ class CalendarQuickChooseInstrumentedTest {
       }
       waitForHost(scenario, hostRef)
 
-      scenario.onActivity {
+      scenario.onActivity { activity ->
         val toolbar = hostRef.get().descendants<CalendarToolbarView>().single()
-        val toggles = toolbar.descendants<View>().filter {
+        assertTrue(toolbar.descendants<View>().none {
+          it.contentDescription?.toString()?.startsWith("切换到") == true
+        })
+        val indicator = hostRef.get().descendants<CalendarIndicatorView>().single()
+        assertEquals(activity.dp(50f), indicator.height)
+        val toggles = indicator.descendants<View>().filter {
           it.contentDescription?.toString()?.startsWith("切换到") == true
         }
         assertEquals(1, toggles.size)
         assertEquals("切换到单日视图", toggles.single().contentDescription?.toString())
+        val contract = indicatorEvidenceContract()
+        val productionViolations = FeishuEvidenceRuntime.validate(indicator, contract)
+        assertTrue(productionViolations.joinToString("\n"), productionViolations.isEmpty())
+
+        val unmappedControl = TextView(activity).apply {
+          text = "unexpected"
+          isClickable = true
+        }
+        indicator.addView(unmappedControl)
+        assertTrue(
+          FeishuEvidenceRuntime.validate(indicator, contract).any { it.startsWith("UNMAPPED_VIEW:") },
+        )
+        indicator.removeView(unmappedControl)
+
+        FeishuEvidenceRuntime.bind(
+          toggles.single(),
+          "UI-CALENDAR-INDICATOR-001",
+          "mode-entry",
+          "calendar-tab",
+        )
+        assertTrue(
+          FeishuEvidenceRuntime.validate(indicator, contract).any { it.startsWith("DUPLICATE_SEMANTIC_KEY:") },
+        )
+        FeishuEvidenceRuntime.bind(
+          toggles.single(),
+          "UI-CALENDAR-INDICATOR-001",
+          "mode-entry",
+          "calendar-mode-entry",
+        )
         tap(toggles.single())
       }
       waitUntil(scenario) {
         hostRef.get().descendants<SingleDayCalendarView>().single().visibility == View.VISIBLE
       }
       scenario.onActivity {
-        val toolbar = hostRef.get().descendants<CalendarToolbarView>().single()
-        val toggles = toolbar.descendants<View>().filter {
+        val indicator = hostRef.get().descendants<CalendarIndicatorView>().single()
+        val toggles = indicator.descendants<View>().filter {
           it.contentDescription?.toString()?.startsWith("切换到") == true
         }
         assertEquals(1, toggles.size)
@@ -258,6 +296,39 @@ class CalendarQuickChooseInstrumentedTest {
       }
     }
   }
+
+  private fun indicatorEvidenceContract() = EvidenceTreeContract(
+    evidenceId = "UI-CALENDAR-INDICATOR-001",
+    nodes = listOf(
+      EvidenceNodeContract(
+        semanticKey = "calendar-view-indicator",
+        role = "indicator",
+        parentSemanticKey = null,
+        classSimpleName = "CalendarIndicatorView",
+        heightDp = CalendarIndicatorView.HEIGHT_DP,
+      ),
+      EvidenceNodeContract(
+        semanticKey = "calendar-tab",
+        role = "tab",
+        parentSemanticKey = "calendar-view-indicator",
+        classSimpleName = "TextView",
+      ),
+      EvidenceNodeContract(
+        semanticKey = "calendar-mode-entry",
+        role = "mode-entry",
+        parentSemanticKey = "calendar-view-indicator",
+        classSimpleName = "CalendarViewModeIconView",
+        widthDp = CalendarIndicatorView.MODE_ENTRY_SIZE_DP,
+        heightDp = CalendarIndicatorView.MODE_ENTRY_SIZE_DP,
+      ),
+      EvidenceNodeContract(
+        semanticKey = "calendar-indicator-divider",
+        role = "divider",
+        parentSemanticKey = "calendar-view-indicator",
+        classSimpleName = "View",
+      ),
+    ),
+  )
 
   @Test
   fun productionHostBlocksThroughDragBarActionClosesAndActivityRecreationRestoresSelection() {

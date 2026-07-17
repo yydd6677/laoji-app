@@ -14,6 +14,7 @@ import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import java.util.Calendar
+import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor")
 class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(context, appContext),
@@ -37,6 +38,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   val onTabPress by EventDispatcher<Map<String, Any?>>()
 
   private val toolbar = CalendarToolbarView(context)
+  private val indicator = CalendarIndicatorView(context)
   private val palette = CalendarUi.palette(context)
   private val content = FrameLayout(context)
   private val monthPager = ThreePageMonthPager(context)
@@ -76,7 +78,6 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     clipChildren = true
     installStatusBarInsetPadding()
     toolbar.setListener(this)
-    toolbar.setMode(mode)
     toolbar.setTitle(CalendarUi.monthTitle(selectedEpochDay))
     addView(
       toolbar,
@@ -84,6 +85,15 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
         LayoutParams.MATCH_PARENT,
         CalendarUi.dp(context, CalendarShellContract.TITLE_BAR_HEIGHT_DP).toInt()
       )
+    )
+    indicator.setListener(this)
+    indicator.setMode(mode)
+    addView(
+      indicator,
+      LayoutParams(
+        LayoutParams.MATCH_PARENT,
+        CalendarUi.dp(context, CalendarIndicatorView.HEIGHT_DP).roundToInt(),
+      ),
     )
 
     monthPager.setListener(this)
@@ -393,7 +403,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   private fun updateModeVisibility() {
-    toolbar.setMode(mode)
+    indicator.setMode(mode)
     monthPager.visibility = if (mode == CalendarMode.MONTH) View.VISIBLE else View.GONE
     dayView.visibility = if (mode == CalendarMode.DAY) View.VISIBLE else View.GONE
   }

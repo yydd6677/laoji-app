@@ -23,6 +23,8 @@ import android.widget.Space
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -43,8 +45,6 @@ class CalendarToolbarView(context: Context) : LinearLayout(context) {
   private val titleView = TextView(context)
   private val titleExpandIcon = CalendarTitleExpandIconView(context)
   private val searchView = CalendarShellIconView(context, CalendarShellIcon.SEARCH)
-  private val monthView = TextView(context)
-  private val dayView = TextView(context)
   private var listener: CalendarToolbarListener? = null
 
   init {
@@ -101,12 +101,6 @@ class CalendarToolbarView(context: Context) : LinearLayout(context) {
       )
     )
 
-    configureModeView(monthView, "月", CalendarMode.MONTH)
-    configureModeView(dayView, "日", CalendarMode.DAY)
-    addView(monthView, LayoutParams(CalendarUi.dp(context, 42f).toInt(), CalendarUi.dp(context, 32f).toInt()))
-    addView(dayView, LayoutParams(CalendarUi.dp(context, 42f).toInt(), CalendarUi.dp(context, 32f).toInt()).apply {
-      marginStart = CalendarUi.dp(context, 4f).toInt()
-    })
   }
 
   fun setListener(listener: CalendarToolbarListener?) {
@@ -122,33 +116,118 @@ class CalendarToolbarView(context: Context) : LinearLayout(context) {
     titleExpandIcon.setExpandProgress(progress)
   }
 
-  fun setMode(mode: CalendarMode) {
-    styleModeView(monthView, mode == CalendarMode.MONTH)
-    styleModeView(dayView, mode == CalendarMode.DAY)
-  }
+}
 
-  private fun configureModeView(view: TextView, label: String, mode: CalendarMode) {
-    view.apply {
-      text = label
-      textSize = 14f
-      gravity = Gravity.CENTER
-      isClickable = true
-      isFocusable = true
-      contentDescription = "${label}视图"
-      setOnClickListener { listener?.onModeClicked(mode) }
-    }
+// UI-CALENDAR-INDICATOR-001: view_indicator.xml is a separate 50dp band with
+// one 32dp trailing mode entry. The removed Feishu sidebar is the approved
+// product replacement point for toggling the retained month/day modes.
+@FeishuEvidence("UI-CALENDAR-INDICATOR-001")
+class CalendarIndicatorView(context: Context) : FrameLayout(context) {
+  private val palette = CalendarUi.palette(context)
+  private val label = TextView(context).apply {
+    text = "日历"
+    textSize = 14f
+    gravity = Gravity.CENTER
+    setTextColor(palette.textPrimary)
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
+  private val modeEntry = CalendarViewModeIconView(context)
+  private val divider = View(context).apply { setBackgroundColor(palette.divider) }
+  private var mode = CalendarMode.MONTH
+  private var listener: CalendarToolbarListener? = null
 
-  private fun styleModeView(view: TextView, selected: Boolean) {
-    view.setTextColor(if (selected) palette.accentText else palette.textSecondary)
-    view.typeface = if (selected) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
-    view.background = CalendarUi.background(
-      if (selected) palette.accent else palette.surfaceMuted,
-      6f,
-      context,
-      if (selected) null else palette.divider
+  init {
+    setBackgroundColor(palette.surface)
+    setPadding(0, 0, 0, CalendarUi.dp(context, 10f).roundToInt())
+    FeishuEvidenceRuntime.bind(this, "UI-CALENDAR-INDICATOR-001", "indicator", "calendar-view-indicator")
+    FeishuEvidenceRuntime.bind(label, "UI-CALENDAR-INDICATOR-001", "tab", "calendar-tab")
+    FeishuEvidenceRuntime.bind(modeEntry, "UI-CALENDAR-INDICATOR-001", "mode-entry", "calendar-mode-entry")
+    FeishuEvidenceRuntime.bind(divider, "UI-CALENDAR-INDICATOR-001", "divider", "calendar-indicator-divider")
+    addView(
+      label,
+      LayoutParams(CalendarUi.dp(context, 60f).roundToInt(), LayoutParams.MATCH_PARENT).apply {
+        gravity = Gravity.START
+        marginStart = CalendarUi.dp(context, 10f).roundToInt()
+      },
     )
-    view.isSelected = selected
+    addView(
+      modeEntry,
+      LayoutParams(CalendarUi.dp(context, 32f).roundToInt(), CalendarUi.dp(context, 32f).roundToInt()).apply {
+        gravity = Gravity.END or Gravity.TOP
+        marginEnd = CalendarUi.dp(context, 10f).roundToInt()
+        topMargin = CalendarUi.dp(context, 4f).roundToInt()
+      },
+    )
+    addView(
+      divider,
+      LayoutParams(LayoutParams.MATCH_PARENT, CalendarUi.dp(context, 0.5f).coerceAtLeast(1f).roundToInt()).apply {
+        gravity = Gravity.BOTTOM
+      },
+    )
+    modeEntry.setOnClickListener {
+      listener?.onModeClicked(if (mode == CalendarMode.MONTH) CalendarMode.DAY else CalendarMode.MONTH)
+    }
+    updateModeDescription()
+  }
+
+  fun setListener(listener: CalendarToolbarListener?) {
+    this.listener = listener
+  }
+
+  fun setMode(mode: CalendarMode) {
+    this.mode = mode
+    updateModeDescription()
+  }
+
+  private fun updateModeDescription() {
+    modeEntry.contentDescription = if (mode == CalendarMode.MONTH) "切换到单日视图" else "切换到月视图"
+  }
+
+  companion object {
+    const val HEIGHT_DP = 50f
+    const val MODE_ENTRY_SIZE_DP = 32f
+  }
+}
+
+private class CalendarViewModeIconView(context: Context) : View(context) {
+  private val palette = CalendarUi.palette(context)
+  private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.textSecondary
+    style = Paint.Style.STROKE
+    strokeWidth = CalendarUi.dp(context, 1.5f)
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+  }
+  private val cell = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.textSecondary
+    style = Paint.Style.FILL
+  }
+
+  init {
+    isClickable = true
+    isFocusable = true
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    val left = width / 2f - CalendarUi.dp(context, 9f)
+    val top = height / 2f - CalendarUi.dp(context, 8f)
+    val right = width / 2f + CalendarUi.dp(context, 9f)
+    val bottom = height / 2f + CalendarUi.dp(context, 8f)
+    canvas.drawRoundRect(left, top, right, bottom, CalendarUi.dp(context, 1.5f), CalendarUi.dp(context, 1.5f), stroke)
+    canvas.drawLine(left, top + CalendarUi.dp(context, 4f), right, top + CalendarUi.dp(context, 4f), stroke)
+    val radius = CalendarUi.dp(context, 1.15f)
+    for (row in 0..1) {
+      for (column in 0..2) {
+        canvas.drawCircle(
+          left + CalendarUi.dp(context, 4.5f + column * 4.5f),
+          top + CalendarUi.dp(context, 8f + row * 4.5f),
+          radius,
+          cell,
+        )
+      }
+    }
   }
 }
 
@@ -815,7 +894,9 @@ data class QuickChooseWheelConfiguration(
   val yearMonthHeightPx: Int,
 )
 
-// CAL-PICKER-001: five visible 48dp rows implement bounded year and looping month wheels.
+// CAL-PICKER-001 / CAL-PICKER-WHEEL-TAP-001: five visible 48dp rows implement
+// bounded year and looping month wheels; a short tap settles the touched row.
+@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001")
 internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val centerPaint = CalendarUi.textPaint(context, palette.textPrimary, 17f)
@@ -831,6 +912,7 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
   private var suffix = ""
   private var settledListener: ((Int) -> Unit)? = null
   private var downY = 0f
+  private var tapUpY = 0f
   private var lastY = 0f
   private var dragOffset = 0f
   private var lastSettledValue = 0
@@ -850,6 +932,7 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
     isClickable = true
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    FeishuEvidenceRuntime.bind(this, "CAL-PICKER-WHEEL-TAP-001", "wheel", "quick-choose-wheel")
   }
 
   fun configure(minimum: Int, maximum: Int, loop: Boolean, suffix: String) {
@@ -943,13 +1026,17 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
         val velocity = velocityTracker?.yVelocity ?: 0f
         velocityTracker?.recycle()
         velocityTracker = null
-        if (event.actionMasked == MotionEvent.ACTION_UP && abs(velocity) >= minimumFlingVelocity) {
+        val isTap = event.actionMasked == MotionEvent.ACTION_UP &&
+          abs(event.y - downY) < ViewConfiguration.get(context).scaledTouchSlop
+        if (isTap) {
+          tapUpY = event.y
+          performClick()
+        } else if (event.actionMasked == MotionEvent.ACTION_UP && abs(velocity) >= minimumFlingVelocity) {
           startInertia(velocity)
         } else {
           settleResidualOffset(motionGeneration)
         }
         isPressed = false
-        if (abs(event.y - downY) < ViewConfiguration.get(context).scaledTouchSlop) performClick()
         parent?.requestDisallowInterceptTouchEvent(false)
         return true
       }
@@ -957,7 +1044,20 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
     return super.onTouchEvent(event)
   }
 
-  override fun performClick(): Boolean = super.performClick()
+  override fun performClick(): Boolean {
+    super.performClick()
+    val touchedRow = (tapUpY / itemHeightPx).toInt().coerceIn(0, CalendarQuickChooseContract.VISIBLE_WHEEL_ITEMS - 1)
+    val rowOffset = touchedRow - CalendarQuickChooseContract.VISIBLE_WHEEL_ITEMS / 2
+    val next = valueBySteps(selectedValue, rowOffset)
+    if (next == selectedValue || rowOffset == 0) {
+      settleResidualOffset(motionGeneration)
+      return true
+    }
+    selectedValue = next
+    dragOffset += rowOffset * itemHeightPx
+    animateOffsetToCenter(motionGeneration)
+    return true
+  }
 
   override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
     super.onInitializeAccessibilityNodeInfo(info)
@@ -1080,6 +1180,11 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
         dragOffset -= itemHeightPx
       }
     }
+    animateOffsetToCenter(generation)
+  }
+
+  private fun animateOffsetToCenter(generation: Int) {
+    if (generation != motionGeneration) return
     val startOffset = dragOffset
     settleAnimator?.cancel()
     settleAnimator = ValueAnimator.ofFloat(startOffset, 0f).apply {

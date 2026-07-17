@@ -2,6 +2,25 @@
 
 更新日期：2026-07-17
 
+> 本文件中的机器状态块由 `evidence/feishu/manifest.json` 生成。下方旧表仅保留历史调查信息，不能再用于关闭实现或发布任务。
+
+<!-- BEGIN GENERATED FEISHU EVIDENCE STATUS -->
+
+- Manifest phase: `pilot`
+- Release inventory complete: `no`
+- 未纳入当前 manifest 的既有 UI/交互条目统一视为 `未审阅`。
+
+| 证据 ID | 模块 | 机器状态 | 决策 | 阻断数 |
+| --- | --- | --- | --- | --- |
+| `CAL-MONTH-EXPAND-HOST-001` | calendar | 已验证 | `keep` | 0 |
+| `CAL-PICKER-WHEEL-TAP-001` | calendar | 已验证 | `keep` | 0 |
+| `UI-ANDROID-COMPOSITION-001` | shell | 已实现 | `business_replace` | 1 |
+| `UI-CALENDAR-INDICATOR-001` | calendar | 已验证 | `business_replace` | 0 |
+
+<!-- END GENERATED FEISHU EVIDENCE STATUS -->
+
+## 历史审阅记录（非完成依据）
+
 ## 状态规则
 
 - `未审阅`：尚未形成源码闭包。
