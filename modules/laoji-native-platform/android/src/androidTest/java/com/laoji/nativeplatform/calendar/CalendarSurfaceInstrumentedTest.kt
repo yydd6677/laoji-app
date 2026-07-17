@@ -1,6 +1,6 @@
 package com.laoji.nativeplatform.calendar
 
-// CAL-DAY-PAGER-001 / CAL-ALLDAY-EXPAND-001 / CAL-TIME-PRECISION-001 /
+// UI-SHELL-RESELECT-001 / CAL-DAY-PAGER-001 / CAL-ALLDAY-EXPAND-001 / CAL-TIME-PRECISION-001 /
 // CAL-MONTH-EXPAND-001: API 35 runtime coverage for the source-derived native behavior.
 
 import android.graphics.Rect
@@ -346,6 +346,91 @@ class CalendarSurfaceInstrumentedTest {
         assertNull(layer.readPrivateField("gestureOriginalEvent"))
         assertNull(layer.readPrivateField("gestureOriginalDraft"))
         assertEquals(CalendarGestureOwner.PENDING_EMPTY, layer.readPrivateField("gestureOwner"))
+      }
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectClearsSameDayDraftAndGestureBeforeScrollingToCurrentTime() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val day = selectedDay()
+      val surfaceRef = addDaySurface(scenario, calendarSnapshot(day))
+      waitForDaySurface(scenario, surfaceRef)
+
+      scenario.onActivity {
+        surfaceRef.get().threePageDayPager.scrollToMinuteCentered(60, animate = false)
+      }
+      injectTap(timelinePoint(scenario, surfaceRef::get, day, 900))
+      waitUntil(scenario) { surfaceRef.get().currentDraft() != null }
+      waitUntil(scenario) {
+        centerTimelinePage(surfaceRef.get(), day).gestureLayer.readPrivateField("draftRect") != null
+      }
+
+      val dragStart = handlePoint(scenario, surfaceRef::get, day, "draftRect")
+      val dragEnd = ScreenPoint(
+        dragStart.x,
+        dragStart.y + 30f * InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density,
+      )
+      val down = startPointer(dragStart)
+      movePointer(down, dragEnd)
+      SystemClock.sleep(24L)
+
+      scenario.onActivity { surfaceRef.get().returnToToday(day, 12 * 60) }
+      SystemClock.sleep(DayPagerContract.PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS + 80L)
+      scenario.onActivity { activity ->
+        val surface = surfaceRef.get()
+        val page = centerTimelinePage(surface, day)
+        val layer = page.gestureLayer
+        assertNull(surface.currentDraft())
+        assertNull(layer.readPrivateField("previewEvent"))
+        assertNull(layer.readPrivateField("gestureOriginalEvent"))
+        assertNull(layer.readPrivateField("gestureOriginalDraft"))
+        assertNull(layer.readPrivateField("eventStartHandleRect"))
+        assertNull(layer.readPrivateField("eventEndHandleRect"))
+        assertEquals(CalendarGestureOwner.PENDING_EMPTY, layer.readPrivateField("gestureOwner"))
+
+        val viewportHeightDp = surface.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+        val expectedScreenYDp = DayPagerContract.minuteToTimelineOffsetDp(12 * 60) -
+          DayPagerContract.centeredTimelineOffsetDp(12 * 60, viewportHeightDp)
+        assertEquals(
+          activity.dp(expectedScreenYDp).toFloat(),
+          surface.currentMinuteScreenY(12 * 60),
+          activity.dp(2f).toFloat(),
+        )
+      }
+      cancelPointer(down, dragEnd)
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectUsesOrdinaryTodayTapOnlyWhileMonthPagerIsIdle() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val day = selectedDay()
+      val pagerRef = addMonthSurface(scenario, day, onSelected = {})
+      waitForMonthSurface(scenario, pagerRef, day)
+
+      scenario.onActivity { pagerRef.get().returnToToday(day) }
+      waitUntil(scenario) {
+        visibleMonthPage(pagerRef.get()).let { page ->
+          page.readPrivateField("expandedSelection") != null &&
+            page.readPrivateField("transitioning") == false
+        }
+      }
+      scenario.onActivity { pagerRef.get().returnToToday(day) }
+      waitUntil(scenario) {
+        visibleMonthPage(pagerRef.get()).let { page ->
+          page.readPrivateField("expandedSelection") == null &&
+            page.readPrivateField("transitioning") == false
+        }
+      }
+
+      scenario.onActivity {
+        pagerRef.get().jumpToMonth(day)
+        pagerRef.get().returnToToday(day)
+      }
+      waitForMonthSurface(scenario, pagerRef, day)
+      scenario.onActivity {
+        assertNull(visibleMonthPage(pagerRef.get()).readPrivateField("expandedSelection"))
       }
     }
   }

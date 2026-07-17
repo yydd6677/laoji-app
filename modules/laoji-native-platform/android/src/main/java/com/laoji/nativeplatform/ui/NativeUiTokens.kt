@@ -28,7 +28,6 @@ data class NativeUiPalette(
 )
 
 object NativeUiTokens {
-  const val BOTTOM_BAR_HEIGHT_DP = 65f
   const val ICON_HIT_SIZE_DP = 48f
   const val DIALOG_MAX_WIDTH_DP = 296f
   const val DIALOG_CONTENT_WIDTH_DP = 260f

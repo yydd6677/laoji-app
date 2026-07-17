@@ -15,10 +15,10 @@
 
 ## 基线库存
 
-- 权威根：`/home/yydd/文档/apk-analysis/base-feishu-7.71.8`
+- 权威根：本机 `FEISHU_SOURCE_ROOT` 指向的飞书 7.71.8 解码目录
 - APK：versionName `7.71.8`，versionCode `7710850`
 - APK SHA-256：`3355a2a53543ae1a68fe10844b8ed9884fffa7d1eafdc6bf8622180e43631447`
-- 当前源码锁：201 个文件，其中通用壳层 24、日历 42、妙记 69、账号静态容器 8、资源 58。
+- 当前源码锁：278 个文件，其中通用壳层 31、日历 112、妙记 69、账号静态容器 8、资源 58。
 - 缺失资源负面锁：3 个。它们在代码或 style 中被引用，但解码包没有正文，禁止推断曲线。
 
 同步与验证：
@@ -34,16 +34,36 @@ npm run verify:feishu-source-lock
 
 真实主链为：
 
-`TabPageControllerV3 -> TabPageWidget -> TabBottomBar -> TabBarController -> MainTabItemView`
+`TabPageControllerV3 -> TabPageWidget -> TabBottomBar/TabBarController -> MainTabBarView/MainTabItemView`
 
 关键事实：
 
 - 主底栏高 65dp；默认图标 22dp、文字 12sp。
-- 按压缩放为 `1 -> 0.8 -> 1`，两段各 125ms。
+- 选中目的地变化时，图标缩放为 `1 -> 0.8 -> 1`，两段各 125ms；同 Tab 重选只分发 `onSingleClick()`，不重放选中缩放。
+- 飞书底栏由 `TabPageWidget` 持续持有；老记采用已批准的单活动 Expo 原生根适配，因此目的地变化必须把递增命令交给新活动根完整播放一次，旧根不得先自行改选中态或留下半段动画。
 - 同一 tab 再次点击进入 `onSingleClick()`，由页面实现重选动作。
 - `NavBottomTabBar` 只在 More/更多页由 `NavLauncherContainerFragment` 创建，不是主底栏权威。旧文档把它当作主链的结论作废。
 
-源码：`maintab/view/TabPageControllerV3.java`、`TabPageWidget.java`、`view/bar/TabBottomBar.java`、`TabBarController.java`、`widget/tab/MainTabItemView.java`。
+源码：`maintab/view/TabPageControllerV3.java`、`TabPageWidget.java`、`view/bar/TabBottomBar.java`、`TabBarController.java`、`MainTabBarItemEventListener.java`、`maintab/export/BaseTabFragment.java`、`InterfaceC91823i.java`、`maintab/export/view/MainTabBarView.java`、`widget/tab/MainTabItemView.java`。
+
+### 当前日程 Tab 重选
+
+真实入口与总线为：
+
+`TabBottomBar item click -> TabBarController -> TabPageControllerV3 same-key branch -> CalendarShellViewFragment.onSingleClick() -> CalendarShellViewModel.backToday -> CalendarShellInteractor.backTodayEvent`
+
+关键事实：
+
+- 只有当前 Calendar Fragment 处于 `RESUMED` 时才分发；切换目的地不属于重选。
+- `backTodayEvent` 的闭包包含 QuickChoose、月视图和单日视图；飞书依靠活动 Fragment/Lifecycle 与当前模式决定实际消费者。老记单原生根必须同步更新 QuickChoose，再只驱动 `MONTH` 或 `DAY` 中当前活动的一个 owner，隐藏 owner 不得被改写。
+- QuickChoose 同步把选择日和页月改为设备本地今天，但不关闭面板，也不改变面板展开态。
+- 单日分支现场读取当前时间，清理 `DayInstanceLayout` 自己的拖动态；横向回今天为 300ms，纵向回当前分钟为 250ms，两者可以重叠。`PositionedViewLayout.m230509i()` 在目标超过一页时先把位置钳到目标相邻页，再执行同一段 300ms 动画，因此远距离跳转的视觉起点是“目标相邻页”，不是原始日期。
+- 月分支使用普通“点击今天”状态机：同日已展开则收起、其他行已展开则先收后开；跨月有相邻/非相邻六态，收起约 350ms、分页约 200ms，底栏进度分别为 400/750ms。
+- 同 Tab 重选不发全局 `clearDragEvent`，也不清月缓存或取消既有加载任务。把“关闭 QuickChoose、统一清空所有临时态”作为重选合同属于错误推断。
+
+老记的同 Tab 点击由当前 Calendar 原生底栏在派发语义事件前同步执行；React 不再维护重选序号，也不通过 prop、重挂载或跨 Bridge 往返驱动该动作。原生日期/范围事件仍会促使 React 回写新 generation 快照；若 300/250ms 回今天 motion 尚在运行，单日 owner 只更新绑定数据和 session，并保留 Pager 进度、日期头、全天区和纵向 animator，不能以普通无动画 rebind 截断飞书 motion。跨月返回今天会等待中心月页完成 rebind 后再执行最终展开，避免只换月份而没有落到今天的半完成状态。
+
+该行为闭包锁定 92 个源文件，覆盖主底栏活动 Fragment 选择、共享 Service/RxEvent、QuickChoose、单日 Pager/滚动、sticky clone 与时间尺清理，以及月视图状态/分页/延迟调度；三日、列表和会议室分支因产品范围删除而明确排除。
 
 ### 标题栏与日历视图条
 
@@ -182,5 +202,6 @@ npm run verify:feishu-source-lock
 
 - 飞书：calendar view/search/detail/edit、maintab、Universe Design dialog/toast/shadow/timepicker、Minutes list/record/recordv3/detail/player/speaker/share、passport/mine/profile/settings/about 和相关 layout/value/animator。
 - 老记：16 个 Root 路由名、2 个 MainTabs 目的地、70 个 TSX、全部生产 Kotlin 页面、录音/上传/播放后台任务、Window overlay、通知与分享。
+- 当前日程 Tab 重选：92 文件完整行为闭包，包含三个消费者、生命周期门禁、sticky/时间尺清理、300/250ms 单日 motion 与月视图六态/主线程延迟。
 
 任何新实现必须先在 `capability-inventory.json` 找到证据 ID，再从 `source-lock.json` 取得权威文件；没有这两步的 UI 代码不进入实现阶段。

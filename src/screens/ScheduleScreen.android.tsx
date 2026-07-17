@@ -33,11 +33,14 @@ import { eventRefForEvent, sameEventRef } from '../utils/eventIdentity';
 import { recurrenceEditDialog } from '../services/recurrenceActions';
 import { readableErrorMessage } from '../services/errors';
 import { buildNativeCalendarSearchSnapshot } from '../native/nativeCalendarPages';
+import { useCurrentDate } from '../hooks/useCurrentDate';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
   navigation: ScheduleNavigationProp;
   onTabPress: (event: { nativeEvent: NativeTabPressEvent }) => void;
+  // UI-SHELL-BOTTOM-MAIN-001: destination-change motion for the active native root.
+  bottomBarSelectionCommand: number;
 };
 
 type EpochRange = { start: number; endExclusive: number };
@@ -71,7 +74,11 @@ function monthsInRange(range: EpochRange): Array<{ year: number; month: number }
 }
 
 /** CAL-ROOT-001: Android calendar is a native surface fed only with repository snapshots. */
-export function ScheduleScreen({ navigation, onTabPress }: Props) {
+export function ScheduleScreen({
+  navigation,
+  onTabPress,
+  bottomBarSelectionCommand,
+}: Props) {
   const {
     events,
     searchableEvents,
@@ -80,7 +87,8 @@ export function ScheduleScreen({ navigation, onTabPress }: Props) {
     findConflicts,
   } = useEvents();
   const { showDialog } = useAppDialog();
-  const today = useMemo(() => calendarEpochDay(localCalendarDate()), []);
+  const currentDate = useCurrentDate();
+  const today = useMemo(() => calendarEpochDay(localCalendarDate(currentDate)), [currentDate]);
   const [selectedEpochDay, setSelectedEpochDay] = useState(today);
   const [visibleRange, setVisibleRange] = useState<EpochRange>(() => initialCalendarRange(today));
   const [mode, setMode] = useState<'month' | 'day'>('month');
@@ -277,6 +285,7 @@ export function ScheduleScreen({ navigation, onTabPress }: Props) {
         mode={mode}
         snapshot={snapshot}
         selectedEpochDay={selectedEpochDay}
+        bottomBarSelectionCommand={bottomBarSelectionCommand}
         mutationResolution={mutationResolution}
         onModeChange={event => setMode(event.nativeEvent.mode)}
         onVisibleRangeChange={event => handleVisibleRange(event.nativeEvent)}

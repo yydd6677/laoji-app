@@ -174,6 +174,11 @@ class LaojiCalendarModule : Module() {
         view.setVisibleMonthEpochDay(epochDay)
       }
 
+      // UI-SHELL-BOTTOM-MAIN-001: resume selected-icon motion in the active Expo root.
+      Prop("bottomBarSelectionCommand") { view: CalendarHostView, command: Int? ->
+        view.setBottomBarSelectionCommand(command)
+      }
+
       Prop("dragPrecisionMinutes") { view: CalendarHostView, precision: Int? ->
         view.setDragPrecisionMinutes(precision)
       }

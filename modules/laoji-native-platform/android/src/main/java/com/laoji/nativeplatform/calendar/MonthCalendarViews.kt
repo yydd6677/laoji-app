@@ -1,5 +1,7 @@
 package com.laoji.nativeplatform.calendar
 
+// UI-SHELL-RESELECT-001: the month branch reuses the source ordinary-today-tap state machine.
+
 // CAL-MONTH-001: ViewPager2 uses fixed left/center/right pages and advances exactly one month per gesture.
 // CAL-MONTH-001 DEPENDENCY: The Android module requires androidx.viewpager2:viewpager2:1.1.0.
 // CAL-MONTH-EXPAND-001: Month pages use independent week rows and a dedicated selected-day event owner.
@@ -935,6 +937,35 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     return true
   }
 
+  fun returnToDate(epochDay: Int): Boolean {
+    if (CalendarDateMath.monthStart(epochDay) != monthEpochDay || transitioning || !hasStableOpenGeometry()) {
+      return false
+    }
+    val gridStart = CalendarDateMath.monthGridStart(monthEpochDay)
+    val dayOffset = epochDay - gridStart
+    if (dayOffset !in 0 until weekCount * MonthExpandedLayoutContract.DAY_PAGE_COUNT) return false
+    val selection = MonthExpandedSelection(
+      epochDay = epochDay,
+      row = dayOffset / MonthExpandedLayoutContract.DAY_PAGE_COUNT,
+      column = dayOffset % MonthExpandedLayoutContract.DAY_PAGE_COUNT,
+    )
+    val transition = MonthExpandedLayoutContract.resolveTap(
+      expandedSelection,
+      selection.epochDay,
+      selection.row,
+      selection.column,
+    )
+    when (transition.action) {
+      MonthExpandedTapAction.OPEN -> openSelection(requireNotNull(transition.targetSelection))
+      MonthExpandedTapAction.CLOSE -> closeSelection()
+      MonthExpandedTapAction.SWITCH_WITHIN_ROW -> switchWithinRow(requireNotNull(transition.targetSelection))
+      MonthExpandedTapAction.CLOSE_THEN_OPEN -> closeThenOpen(requireNotNull(transition.targetSelection))
+    }
+    return true
+  }
+
+  fun expandedEpochDay(): Int? = expandedSelection?.epochDay
+
   private fun hasStableOpenGeometry(): Boolean =
     isLaidOut && !isLayoutRequested && !rowsContainer.isLayoutRequested && bodyHeight() > 0 &&
       rowViews.size == weekCount && rowViews.all { row ->
@@ -1319,12 +1350,34 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
 
   fun currentMonthEpochDay(): Int = centerMonthEpochDay
 
+  internal fun currentExpandedEpochDay(): Int? =
+    adapter.boundPage(MonthPagerContract.CENTER_PAGE)?.expandedEpochDay()
+
   fun jumpToMonth(epochDay: Int, notify: Boolean = false) {
     pendingCrossMonthEpochDay = null
     crossMonthOpenToken += 1
     centerMonthEpochDay = CalendarDateMath.monthStart(epochDay)
     recenterToBoundPages()
     if (notify) externalListener?.onMonthChanged(centerMonthEpochDay)
+  }
+
+  fun returnToToday(epochDay: Int) {
+    pendingCrossMonthEpochDay = null
+    val token = ++crossMonthOpenToken
+    val targetMonth = CalendarDateMath.monthStart(epochDay)
+    if (targetMonth != centerMonthEpochDay) {
+      pendingCrossMonthEpochDay = epochDay
+      centerMonthEpochDay = targetMonth
+      recenterToBoundPages()
+      externalListener?.onMonthChanged(centerMonthEpochDay)
+      schedulePendingCrossMonthOpen(token, 0)
+      return
+    }
+    if (pager.scrollState != ViewPager2.SCROLL_STATE_IDLE || recentering) return
+    pager.post {
+      if (token != crossMonthOpenToken) return@post
+      adapter.boundPage(MonthPagerContract.CENTER_PAGE)?.returnToDate(epochDay)
+    }
   }
 
   private fun recenterToBoundPages() {

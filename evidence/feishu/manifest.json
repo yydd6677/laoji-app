@@ -106,6 +106,278 @@
       "blockers": ["instrumentation and physical-device cold-start recovery are not yet closed"]
     },
     {
+      "id": "UI-SHELL-BOTTOM-MAIN-001",
+      "module": "shell",
+      "status": "implemented",
+      "decision": "business_replace",
+      "source_refs": [
+        "common-shell-tabpagecontrollerv3-f795d831",
+        "common-shell-tabpagewidget-9a582f7e",
+        "common-shell-tabbottombar-a43ac9e0",
+        "common-shell-tabbarcontroller-596a0ff9",
+        "common-shell-maintabbarview-deeafaa0",
+        "common-shell-maintabitemview-8e906bb7",
+        "calendar-calendartabview-9bdf9b28",
+        "common-shell-c154346d-3dee041c",
+        "resources-colors-d04fc4c4"
+      ],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001", "DEV-LAOJI-TWO-TAB-SCOPE-001"],
+      "requirements": {
+        "content_height_dp": 65,
+        "divider_height_px": 1,
+        "icon_slot_dp": 22,
+        "label_sp": 12,
+        "item_width_policy": "equal-weight-approved-two-tabs",
+        "press_scale": [1, 0.8, 1],
+        "press_leg_duration_ms": 125,
+        "press_interpolator": "accelerate",
+        "animation_owner": "icon-only",
+        "selection_change_motion_only": true,
+        "selection_motion_survives_active_root_replacement": true,
+        "accessibility_selected_state": true
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeBottomBarView.kt",
+          "symbols": ["LaojiNativeBottomBarView", "NativeBottomTabItemView"],
+          "required_patterns": ["UI-SHELL-BOTTOM-MAIN-001", "FrameLayout\\(context\\)", "ImageView\\(context\\)", "TextView\\(context\\)", "setWillNotDraw\\(false\\)", "isSelected = value", "selectionCommandGate\\.accept\\(command\\)", "post \\{ updateSelection\\(animateTab = selectedTab\\) \\}", "icon\\.startAnimation\\(selectAnimation\\)", "FeishuEvidenceRuntime\\.bind"],
+          "forbidden_patterns": ["CanvasBottomTabItem", "animate\\(\\)\\.scaleX", "selectedTab = tab"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeBottomBarContract.kt",
+          "symbols": ["NativeBottomBarContract", "NativeBottomBarSelectionCommandGate"],
+          "required_patterns": ["CONTENT_HEIGHT_DP = 65f", "DIVIDER_HEIGHT_PX = 1", "ICON_SIZE_DP = 22f", "LABEL_TEXT_SP = 12f", "PRESS_LEG_DURATION_MS = 125L", "command <= 0", "command <= highWatermark"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarHostView.kt",
+          "symbols": ["CalendarHostView"],
+          "required_patterns": ["UI-SHELL-BOTTOM-MAIN-001", "LaojiNativeBottomBarView\\(context, appContext\\)", "setBridgeEventsEnabled\\(false\\)", "fun setBottomBarSelectionCommand\\(command: Int\\?\\)", "bottomBar\\.setSelectionAnimationCommand\\(command\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/LaojiMinutesView.kt",
+          "symbols": ["LaojiMinutesView"],
+          "required_patterns": ["UI-SHELL-BOTTOM-MAIN-001", "LaojiNativeBottomBarView\\(context, appContext\\)", "setBridgeEventsEnabled\\(false\\)", "fun setBottomBarSelectionCommand\\(command: Int\\?\\)", "bottomBar\\.setSelectionAnimationCommand\\(command\\)"]
+        },
+        {
+          "path": "src/navigation/MainTabs.android.tsx",
+          "symbols": ["MainTabsNavigator"],
+          "required_patterns": ["UI-SHELL-BOTTOM-MAIN-001", "bottomBarSelectionCommand: current\\.bottomBarSelectionCommand \\+ 1", "bottomBarSelectionCommand=\\{state\\.bottomBarSelectionCommand\\}"]
+        },
+        {
+          "path": "src/screens/ScheduleScreen.android.tsx",
+          "symbols": ["ScheduleScreen"],
+          "required_patterns": ["bottomBarSelectionCommand", "bottomBarSelectionCommand=\\{bottomBarSelectionCommand\\}"]
+        },
+        {
+          "path": "src/screens/MeetingListScreen.android.tsx",
+          "symbols": ["MeetingListScreen"],
+          "required_patterns": ["bottomBarSelectionCommand", "bottomBarSelectionCommand=\\{bottomBarSelectionCommand\\}"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiCalendarModule.kt",
+          "symbols": ["LaojiCalendarModule"],
+          "required_patterns": ["Prop\\(\"bottomBarSelectionCommand\"\\)", "view\\.setBottomBarSelectionCommand\\(command\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiMinutesModule.kt",
+          "symbols": ["LaojiMinutesModule"],
+          "required_patterns": ["Prop\\(\"bottomBarSelectionCommand\"\\)", "view\\.setBottomBarSelectionCommand\\(command\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/src/calendar.ts",
+          "symbols": ["LaojiCalendarViewProps"],
+          "required_patterns": ["bottomBarSelectionCommand\\?: number \\| null"]
+        },
+        {
+          "path": "modules/laoji-native-platform/src/minutes.ts",
+          "symbols": ["LaojiMinutesViewProps"],
+          "required_patterns": ["bottomBarSelectionCommand\\?: number \\| null"]
+        },
+        {
+          "path": "src/navigation/nativeBottomBarGeometry.ts",
+          "symbols": ["NATIVE_BOTTOM_BAR_CONTENT_HEIGHT", "NATIVE_BOTTOM_BAR_DIVIDER_HEIGHT", "getNativeBottomBarHeight"],
+          "required_patterns": ["UI-SHELL-BOTTOM-MAIN-001", "StyleSheet\\.hairlineWidth", "NATIVE_BOTTOM_BAR_CONTENT_HEIGHT \\+ Math\\.max\\(0, bottomInset\\)"]
+        }
+      ],
+      "tests": [
+        {"path": "__tests__/nativeMainTabsAndroid.test.ts", "kind": "static"},
+        {"path": "__tests__/nativeMainTabsReselect.test.tsx", "kind": "component"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/ui/NativeBottomBarContractTest.kt", "kind": "jvm"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeBottomBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "sourceShapedTreeUsesPhysicalDividerRealSelectedStateAndIconOnlyMotion", "runtime": "API 35 emulator"}
+      ],
+      "blockers": [
+        "Exact retained-destination icons remain blocked by UI-ICON-PRIMITIVES-001.",
+        "Current component and per-root instrumentation do not replace one live Android native root with the other; exactly-once selection-motion replay across a real root replacement remains unproven.",
+        "Final same-hash physical-device geometry and TalkBack validation remain open."
+      ]
+    },
+    {
+      "id": "UI-SHELL-RESELECT-001",
+      "module": "shell",
+      "status": "implemented",
+      "decision": "keep",
+      "source_refs": [
+        "common-shell-tabpagewidget-9a582f7e",
+        "common-shell-tabpagecontrollerv3-f795d831",
+        "common-shell-tabbottombar-a43ac9e0",
+        "common-shell-tabbarcontroller-596a0ff9",
+        "common-shell-maintabbaritemeventlistener-5087f840",
+        "common-shell-c91742d-dcf81469",
+        "common-shell-tabfragmentstateadapter-3cc61014",
+        "common-shell-basetabfragment-5abc2a20",
+        "common-shell-interfacec91823i-36fcf4cb",
+        "common-shell-maintabbarview-deeafaa0",
+        "common-shell-maintabitemview-8e906bb7",
+        "calendar-calendartabview-9bdf9b28",
+        "calendar-shell-fragment",
+        "calendar-diagramcontrolleradapterfragment-f64ae3e8",
+        "calendar-calendarshellviewmodel-9cf2abb6",
+        "calendar-calendarshellinteractor-bd7f83ab",
+        "calendar-calendarshellinteractorforshellview-cee74dd0",
+        "calendar-calendarshellinteractorforcontentview-1253f9b4",
+        "calendar-contentviewexternalservice-a0a20e9b",
+        "calendar-contentviewexternalserviceimpl-1ac1508f",
+        "calendar-calendarappimpl-620b24e4",
+        "calendar-calendarapp-0f61149f",
+        "calendar-calendarshellviewservice-5a735bde",
+        "calendar-quickdatepanelexternalservice-d0f9134b",
+        "calendar-quickdatepanelexternalserviceimpl-aeb1c478",
+        "calendar-quickchoosepanelviewmodel-c77271c3",
+        "calendar-rxevent-a3aa1e8e",
+        "calendar-rxmutableevent-32e2fd14",
+        "calendar-c67568d-118620f7",
+        "calendar-observablelive-ab34a5b8",
+        "calendar-calendardate-3c9234bc",
+        "calendar-calendartabviewmode-2ab908cc",
+        "calendar-c64530g-a9ee81ac",
+        "calendar-idiagramcontroller-86ac3291",
+        "calendar-idiagramdelegate-094356ef",
+        "calendar-idatelogicdata-71b4cbaa",
+        "calendar-singedayview-7962e9d0",
+        "calendar-singledayheaderview-c7d12952",
+        "calendar-singledayviewfragment-c7f3b840",
+        "calendar-singledayviewmodel-37fb59fd",
+        "calendar-singledayviewmodelimpl-184ccf54",
+        "calendar-calendarviewviewmodel-514861c0",
+        "calendar-basecalendarviewviewmodel-db5061b3",
+        "calendar-singledayinstancelayout-8e6e8fb1",
+        "calendar-dayinstancelayout-6d7bf485",
+        "calendar-positionedviewlayout-0dd80f18",
+        "calendar-c64448c-d843d36c",
+        "calendar-associatetouchscrollhelper-b5ed3ff5",
+        "calendar-interfacec64966e-0da43cb2",
+        "calendar-interfacec64967f-616c7c7f",
+        "calendar-touchscrollhelper-45df6102",
+        "calendar-viewscrollextentionskt-72c1b33b",
+        "calendar-c150860h-87ee6fef",
+        "calendar-c140217a-dbb629c0",
+        "calendar-stickyinstancelayoutwrapper-93dfb2f2",
+        "calendar-stickyinstancelayout-d95d55e6",
+        "calendar-singledaystickyinstancelayoutwrapper-cd528f3f",
+        "calendar-irulerview-6c54dc56",
+        "calendar-daytimerulerview-07a2991d",
+        "calendar-auxiliarytimerulerview-18987520",
+        "calendar-c153742a-ad0c9b87",
+        "calendar-calendarfeaturegating-cf5f6016",
+        "calendar-calendarapkutil-cd6cdff2",
+        "calendar-calendartabpageconfig-e3e27280",
+        "calendar-monthdiagramfragment-b12623f1",
+        "calendar-monthdiagrampresenter-346adcda",
+        "calendar-monthdiagrammodel-433a9ddb",
+        "calendar-monthdiagramview-c420e4f7",
+        "calendar-monthdiagrammodel-loadpagedata-1-265efa6a",
+        "calendar-imonthdiagramcontract-operationtype-7e3ac908",
+        "calendar-imonthdiagramcontract-pageposition-9e5f3ac6",
+        "calendar-interfacec64812a-a2684706",
+        "calendar-interfacec64813b-3b0fca2c",
+        "calendar-interfacec64814c-cc38889b",
+        "calendar-interfacec64815d-de0f2657",
+        "calendar-monthviewattr-animatorcallbacktype-331ff811",
+        "calendar-month-container-pager",
+        "calendar-c64822b-e09f13ea",
+        "calendar-monthdayviewpager-991ee863",
+        "calendar-datefetcher-6d18dd30",
+        "calendar-infiniteviewpager-75053b46",
+        "calendar-abstractc65067a-888c2f0c",
+        "calendar-viewpager-d9762691",
+        "calendar-abstractc150917a-f525c655",
+        "calendar-c153910a-34d804fa",
+        "calendar-interfacec152360b-cc3be7ea",
+        "calendar-month-expansion-touch",
+        "calendar-month-expansion-layout",
+        "calendar-c67708d-db8fecca",
+        "calendar-c67718f-8021ac21",
+        "calendar-uicallbackexecutor-18e5a337",
+        "calendar-c43831a-ced07981"
+      ],
+      "deviation_refs": [],
+      "requirements": {
+        "same_schedule_press_is_synchronous_in_active_native_root": true,
+        "tab_change_does_not_reselect": true,
+        "react_reselect_sequence_forbidden": true,
+        "surface_remount_forbidden": true,
+        "calendar_owner_policy": "quick-choose-and-active-mode-only",
+        "target_date": "device-local-today",
+        "quick_choose_behavior": "retain-expand-state-and-commit-device-local-today",
+        "day_interaction_cleanup": "local-day-owner",
+        "day_horizontal_motion_ms": 300,
+        "distant_day_motion_origin": "target-adjacent-page",
+        "day_vertical_motion_ms": 250,
+        "day_timeline_target": "current-minute-centered-with-bounds",
+        "react_snapshot_feedback": "rebind-data-without-cancelling-active-return-motion",
+        "month_selection_behavior": "ordinary-today-tap-with-source-move-state",
+        "cross_month_final_state": "deferred-open-today-after-center-page-rebind"
+      },
+      "implementation": [
+        {
+          "path": "src/navigation/MainTabs.android.tsx",
+          "symbols": ["MainTabsNavigator"],
+          "required_patterns": ["UI-SHELL-RESELECT-001", "active Calendar native root already handled"],
+          "forbidden_patterns": ["scheduleReselectCommand", "key=\\{.*reselect", "navigation.replace"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarHostView.kt",
+          "symbols": ["CalendarHostView", "returnToToday"],
+          "required_patterns": ["UI-SHELL-RESELECT-001", "if \\(tab == NativeBottomTab\\.SCHEDULE\\) returnToToday\\(\\)", "pickerState\\.committedEpochDay != today", "pickerState = pickerState\\.withCommittedEpochDay\\(today\\)", "pickerPanel\\.updateCommittedDate\\(today\\)", "renderSnapshot\\(bindActiveSurface = false\\)", "when \\(mode\\)", "monthPager\\.setSnapshot\\(rendered\\)", "monthPager\\.returnToToday\\(today\\)", "dayView\\.returnToToday\\(rendered, today, minute\\)"],
+          "ordered_patterns": ["if \\(tab == NativeBottomTab\\.SCHEDULE\\) returnToToday\\(\\)", "onTabPress\\(mapOf\\(\"type\" to \"tabPress\""],
+          "forbidden_patterns": ["setReselectCommand", "closePicker\\(\"tab-reselect\"", "monthPager\\.clearTransientSelection\\(\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/DayPagerContract.kt",
+          "symbols": ["DayPagerContract"],
+          "required_patterns": ["UI-SHELL-RESELECT-001", "PROGRAMMATIC_DAY_SWITCH_DURATION_MS = 300L", "PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS = 250L", "fun programmaticStartPosition", "delta > 0L -> DayPageSlot\\.LEFT\\.position", "delta < 0L -> DayPageSlot\\.RIGHT\\.position"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/SingleDayCalendarView.kt",
+          "symbols": ["SingleDayCalendarView", "ThreePageDayPager"],
+          "required_patterns": ["animateFromPreviousDay = true", "DayPagerContract\\.programmaticStartPosition", "PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS", "preserveReturnMotion", "threePageDayPager\\.hasActiveReturnMotion\\(\\)", "scrollToMinuteCentered\\(minute, animate = true\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/MonthCalendarViews.kt",
+          "symbols": ["ThreePageMonthPager"],
+          "required_patterns": ["fun returnToToday\\(epochDay: Int\\)", "pendingCrossMonthEpochDay = epochDay", "schedulePendingCrossMonthOpen\\(token, 0\\)", "fun currentExpandedEpochDay\\(\\): Int\\?", "fun returnToDate\\(epochDay: Int\\)", "MonthExpandedLayoutContract\\.resolveTap"]
+        }
+      ],
+      "tests": [
+        {"path": "__tests__/nativeMainTabsReselect.test.tsx", "kind": "component"},
+        {"path": "__tests__/nativeMainTabsAndroid.test.ts", "kind": "static"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendar/DayPagerContractTest.kt", "kind": "jvm", "symbol": "CAL-DAY-PAGER-001 clamps distant programmatic motion to the target-adjacent page for 300ms"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendar/DayPagerContractTest.kt", "kind": "jvm", "symbol": "UI-SHELL-RESELECT-001 centers the current minute within timeline bounds"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectKeepsQuickChooseOpenCancelsWheelAndReturnsMonthToDeviceToday", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectReturnsDayToTodayAndCentersCurrentMinute", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectMotionSurvivesImmediateReactSnapshotFeedback", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectDoesNotDriveHiddenDayOwner", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarQuickChooseInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectDoesNotToggleHiddenMonthOwner", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarSurfaceInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectClearsSameDayDraftAndGestureBeforeScrollingToCurrentTime", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendar/CalendarSurfaceInstrumentedTest.kt", "kind": "androidTest", "symbol": "activeScheduleReselectUsesOrdinaryTodayTapOnlyWhileMonthPagerIsIdle", "runtime": "API 35 emulator"}
+      ],
+      "blockers": [
+        "Month cross-page move and collapse-before-move timing are not yet source-exact.",
+        "The immediate React snapshot feedback regression is covered at the native host boundary, but a full React/Expo-to-native instrumentation path remains open.",
+        "Final same-hash physical-device reselect and TalkBack validation remain open."
+      ]
+    },
+    {
       "id": "UI-CALENDAR-INDICATOR-001",
       "module": "calendar",
       "status": "verified",

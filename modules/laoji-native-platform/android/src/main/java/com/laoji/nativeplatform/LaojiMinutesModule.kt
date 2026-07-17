@@ -49,6 +49,11 @@ class LaojiMinutesModule : Module() {
         view.setSnapshot(snapshot)
       }
 
+      // UI-SHELL-BOTTOM-MAIN-001: resume selected-icon motion in the active Expo root.
+      Prop("bottomBarSelectionCommand") { view: LaojiMinutesView, command: Int? ->
+        view.setBottomBarSelectionCommand(command)
+      }
+
       OnViewDidUpdateProps<LaojiMinutesView> { view ->
         view.commitProps()
       }

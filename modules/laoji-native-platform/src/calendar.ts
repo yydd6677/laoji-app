@@ -89,6 +89,7 @@ export interface NativeCalendarSemanticEvent {
     | 'mutation-ignored'
     | 'mutation-blocked'
     | 'snapshot-rejected'
+    | 'back-today'
     | `draft-${string}`;
   [key: string]: string | number | boolean | undefined;
 }
@@ -100,6 +101,8 @@ export interface LaojiCalendarViewProps extends ViewProps {
   snapshot?: NativeCalendarRangeSnapshot | null;
   selectedEpochDay?: number | null;
   visibleMonthEpochDay?: number | null;
+  // UI-SHELL-BOTTOM-MAIN-001: selection motion resumes in the newly active native root.
+  bottomBarSelectionCommand?: number | null;
   // CAL-DAY-DRAG-001: Base 15/30 selection; short-event and end-handle rules resolve independently.
   dragPrecisionMinutes?: NativeCalendarDragPrecision;
   mutationResolution?: NativeCalendarMutationResolution | null;

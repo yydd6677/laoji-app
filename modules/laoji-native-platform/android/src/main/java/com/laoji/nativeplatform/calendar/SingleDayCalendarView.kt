@@ -1,8 +1,9 @@
 package com.laoji.nativeplatform.calendar
 
-// CAL-DAY-PAGER-001, CAL-DAY-DRAG-001, CAL-TIME-PRECISION-001:
+// UI-SHELL-RESELECT-001, CAL-DAY-PAGER-001, CAL-DAY-DRAG-001, CAL-TIME-PRECISION-001:
 // the single-day surface composes independent header, all-day, pager, canvas, and gesture owners.
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -334,6 +335,8 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
   private var progressDispatchCount = 0
   private var associatedDragActive = false
   private var associatedDragLastX = 0f
+  private var verticalScrollAnimator: ValueAnimator? = null
+  private var programmaticDayMotionActive = false
 
   private val pageCallback = object : ViewPager2.OnPageChangeCallback() {
     override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
@@ -429,7 +432,15 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
     centerEpochDay: Int,
     sessionId: Long,
     animateFromPreviousDay: Boolean,
+    preserveReturnMotion: Boolean = false,
   ) {
+    if (preserveReturnMotion && hasBinding && centerEpochDay == this.centerEpochDay) {
+      this.snapshot = snapshot
+      this.sessionId = sessionId
+      bindAllPages()
+      pageAdapter.notifyDataSetChanged()
+      return
+    }
     val previousCenter = this.centerEpochDay
     val canAnimate = hasBinding &&
       snapshot != null &&
@@ -464,6 +475,30 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
     }
   }
 
+  fun scrollToMinuteCentered(minute: Int, animate: Boolean = true) {
+    val centerPage = pages[DayPagerContract.CENTER_PAGE]
+    val target = centerPage.centeredScrollOffset(minute)
+    verticalScrollAnimator?.cancel()
+    verticalScrollAnimator = null
+    val start = sharedScrollOffset ?: centerPage.currentScrollOffset()
+    if (!animate || !isLaidOut || start == target) {
+      applySynchronizedScrollOffset(target)
+      return
+    }
+    verticalScrollAnimator = ValueAnimator.ofFloat(start, target).apply {
+      duration = DayPagerContract.PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS
+      interpolator = DecelerateInterpolator()
+      addUpdateListener { applySynchronizedScrollOffset(it.animatedValue as Float) }
+      start()
+    }
+  }
+
+  internal fun currentMinuteScreenY(minute: Int): Float =
+    pages[DayPagerContract.CENTER_PAGE].timelineCanvas.minuteToScreenY(minute)
+
+  internal fun currentTimelineViewportHeight(): Int =
+    pages[DayPagerContract.CENTER_PAGE].timelineCanvas.height
+
   fun currentDraft(): CalendarDraft? = pages[DayPagerContract.CENTER_PAGE].currentDraft()
 
   fun currentCenterEpochDay(): Int = centerEpochDay
@@ -471,6 +506,9 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
   internal fun currentPositionProgress(): Float = positionProgress
 
   internal fun positionProgressDispatchCount(): Int = progressDispatchCount
+
+  internal fun hasActiveReturnMotion(): Boolean =
+    programmaticDayMotionActive || verticalScrollAnimator?.isRunning == true
 
   override fun onTimelineEventOpened(binding: DayPageBinding, event: CalendarEvent) {
     if (acceptsCenter(binding)) externalListener?.onPagerEventOpened(binding, event)
@@ -498,8 +536,9 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
 
   override fun onTimelineScrollChanged(binding: DayPageBinding, scrollOffset: Float) {
     if (!acceptsCenter(binding)) return
-    sharedScrollOffset = scrollOffset
-    pages.forEach { page -> page.setSynchronizedScrollOffset(scrollOffset) }
+    verticalScrollAnimator?.cancel()
+    verticalScrollAnimator = null
+    applySynchronizedScrollOffset(scrollOffset)
   }
 
   override fun onDetachedFromWindow() {
@@ -562,6 +601,8 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
       recenterWithoutAnimation(token)
       return
     }
+    programmaticDayMotionActive = true
+    positionProgress = (startPosition - DayPagerContract.CENTER_PAGE).toFloat()
     pager.isUserInputEnabled = false
     setCurrentItemAfterFakeDrag(startPosition)
     pager.post {
@@ -587,17 +628,26 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
 
   private fun finishProgrammaticAnimation(token: Long) {
     if (token != motionToken) return
+    programmaticDayMotionActive = false
     setCurrentItemAfterFakeDrag(DayPagerContract.CENTER_PAGE)
     pager.isUserInputEnabled = snapshot != null
     recentering = false
   }
 
   private fun prepareForPagerMutation(): Long {
+    programmaticDayMotionActive = false
+    verticalScrollAnimator?.cancel()
+    verticalScrollAnimator = null
     val token = ++motionToken
     recentering = true
     endAssociatedFakeDrag()
     (pager.getChildAt(0) as? RecyclerView)?.stopScroll()
     return token
+  }
+
+  private fun applySynchronizedScrollOffset(value: Float) {
+    sharedScrollOffset = value
+    pages.forEach { page -> page.setSynchronizedScrollOffset(value) }
   }
 
   private fun setCurrentItemAfterFakeDrag(position: Int) {
@@ -712,6 +762,8 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
     }
 
     val normalized = snapshot.normalized()
+    val preserveReturnMotion = selectedEpochDay == normalized.selectedEpochDay &&
+      threePageDayPager.hasActiveReturnMotion()
     val ownershipChanged = this.snapshot == null ||
       this.snapshot?.generation != normalized.generation ||
       selectedEpochDay != normalized.selectedEpochDay
@@ -721,7 +773,10 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
     }
     this.snapshot = normalized
     selectedEpochDay = normalized.selectedEpochDay
-    bindComposition(animateFromPreviousDay = false)
+    bindComposition(
+      animateFromPreviousDay = false,
+      preserveReturnMotion = preserveReturnMotion,
+    )
   }
 
   fun setSelectedEpochDay(epochDay: Int) {
@@ -741,6 +796,38 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
   fun clearDraft(reason: String = "cancelled", emit: Boolean = true) {
     threePageDayPager.clearDraft(reason, emit)
   }
+
+  fun returnToToday(epochDay: Int, minute: Int) {
+    returnToToday(snapshot, epochDay, minute)
+  }
+
+  fun returnToToday(nextSnapshot: CalendarSnapshot?, epochDay: Int, minute: Int) {
+    threePageDayPager.clearTransientState("tab-reselect", emitDraft = true)
+    val normalized = nextSnapshot?.normalized()
+    val previousEpochDay = selectedEpochDay
+    val generationChanged = snapshot?.generation != normalized?.generation
+    snapshot = normalized
+    val targetEpochDay = clampToSnapshotRange(epochDay)
+    if (targetEpochDay != previousEpochDay) {
+      selectedEpochDay = targetEpochDay
+      advanceSession()
+      bindComposition(animateFromPreviousDay = true, previousEpochDay = previousEpochDay)
+    } else {
+      if (generationChanged) advanceSession()
+      bindComposition(animateFromPreviousDay = false)
+    }
+    post { threePageDayPager.scrollToMinuteCentered(minute, animate = true) }
+  }
+
+  internal fun currentSelectedEpochDay(): Int = selectedEpochDay
+
+  internal fun currentMinuteScreenY(minute: Int): Float =
+    threePageDayPager.currentMinuteScreenY(minute)
+
+  internal fun currentTimelineViewportHeight(): Int =
+    threePageDayPager.currentTimelineViewportHeight()
+
+  internal fun hasActiveReturnMotion(): Boolean = threePageDayPager.hasActiveReturnMotion()
 
   fun currentDraft(): CalendarDraft? = threePageDayPager.currentDraft()
 
@@ -809,12 +896,17 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
   private fun bindComposition(
     animateFromPreviousDay: Boolean,
     previousEpochDay: Int? = null,
+    preserveReturnMotion: Boolean = false,
   ) {
-    val initialProgress = previousEpochDay
-      ?.takeIf { animateFromPreviousDay && DayPagerContract.shouldAnimateProgrammaticSwitch(it, selectedEpochDay) }
-      ?.let { DayPagerContract.programmaticStartPosition(it, selectedEpochDay) - DayPagerContract.CENTER_PAGE }
-      ?.toFloat()
-      ?: 0f
+    val initialProgress = if (preserveReturnMotion) {
+      threePageDayPager.currentPositionProgress()
+    } else {
+      previousEpochDay
+        ?.takeIf { animateFromPreviousDay && DayPagerContract.shouldAnimateProgrammaticSwitch(it, selectedEpochDay) }
+        ?.let { DayPagerContract.programmaticStartPosition(it, selectedEpochDay) - DayPagerContract.CENTER_PAGE }
+        ?.toFloat()
+        ?: 0f
+    }
     dayWeekHeaderView.bind(selectedEpochDay, snapshot?.todayEpochDay, initialProgress)
     dayAllDaySectionView.bindPages(
       snapshot?.events.orEmpty(),
@@ -827,6 +919,7 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
       centerEpochDay = selectedEpochDay,
       sessionId = sessionId,
       animateFromPreviousDay = animateFromPreviousDay,
+      preserveReturnMotion = preserveReturnMotion,
     )
     threePageDayPager.setDragPrecisionMinutes(dragPrecisionMinutes)
   }

@@ -51,7 +51,7 @@ function validFixture(): string {
     root,
     file,
     file === 'src/navigation/MainTabs.android.tsx'
-      ? '// UI-ANDROID-COMPOSITION-001\nselectedTab === \'Schedule\' ? (<ScheduleScreen navigation={navigation} onTabPress={handleTabPress} />) : (<MeetingListScreen navigation={navigation} onTabPress={handleTabPress} />)\n'
+      ? '// UI-ANDROID-COMPOSITION-001 / UI-SHELL-BOTTOM-MAIN-001 / UI-SHELL-RESELECT-001\nstate.selectedTab === \'Schedule\' ? (<ScheduleScreen navigation={navigation} onTabPress={handleTabPress} bottomBarSelectionCommand={state.bottomBarSelectionCommand} />) : (<MeetingListScreen navigation={navigation} onTabPress={handleTabPress} bottomBarSelectionCommand={state.bottomBarSelectionCommand} />)\n'
       : '// native semantic adapter\n',
   ));
   REQUIRED_NATIVE_SURFACE_CONTAINERS.forEach(file => {

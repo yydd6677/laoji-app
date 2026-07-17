@@ -176,6 +176,13 @@ internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
     gestureLayer.setSynchronizedScrollOffset(value)
   }
 
+  fun currentScrollOffset(): Float = timelineCanvas.scrollOffset()
+
+  fun centeredScrollOffset(minute: Int): Float =
+    (CalendarGeometry.minuteToY(minute, timelineCanvas.topPadding(), timelineCanvas.hourHeight()) -
+      timelineCanvas.height / 2f)
+      .coerceIn(0f, timelineCanvas.maxScrollOffset(timelineCanvas.height))
+
   override fun dispatchHoverEvent(event: MotionEvent): Boolean =
     timelineCanvas.dispatchTimelineHoverEvent(event) || super.dispatchHoverEvent(event)
 

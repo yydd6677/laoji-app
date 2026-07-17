@@ -1,6 +1,6 @@
 package com.laoji.nativeplatform.calendar
 
-// CAL-DAY-PAGER-001, CAL-DAY-DRAG-001, CAL-TIME-PRECISION-001:
+// UI-SHELL-RESELECT-001, CAL-DAY-PAGER-001, CAL-DAY-DRAG-001, CAL-TIME-PRECISION-001:
 // bounded paging and day interaction rules stay JVM-testable.
 
 import java.util.Locale
@@ -50,6 +50,7 @@ object DayPagerContract {
   const val HOUR_LINE_COUNT = 25
   const val DEFAULT_CREATION_DURATION_MINUTES = 30
   const val PROGRAMMATIC_DAY_SWITCH_DURATION_MS = 300L
+  const val PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS = 250L
   const val TIMELINE_TOTAL_HEIGHT_DP = 1_236f
   const val TIMELINE_PADDING_TOP_DP = 16f
   const val TIMELINE_PADDING_RIGHT_DP = 3f
@@ -97,6 +98,12 @@ object DayPagerContract {
     ((offsetDp - TIMELINE_PADDING_TOP_DP) * 60f / HOUR_HEIGHT_DP)
       .coerceIn(0f, CalendarDateMath.MINUTES_PER_DAY.toFloat())
 
+  fun centeredTimelineOffsetDp(minute: Int, viewportHeightDp: Float): Float {
+    val safeViewport = viewportHeightDp.coerceAtLeast(0f)
+    val maximum = (TIMELINE_TOTAL_HEIGHT_DP - safeViewport).coerceAtLeast(0f)
+    return (minuteToTimelineOffsetDp(minute) - safeViewport / 2f).coerceIn(0f, maximum)
+  }
+
   fun hourLabel(
     hour: Int,
     is24Hour: Boolean,
@@ -138,11 +145,15 @@ object DayPagerContract {
 
   fun programmaticStartPosition(previousEpochDay: Int, nextEpochDay: Int): Int {
     val delta = nextEpochDay.toLong() - previousEpochDay.toLong()
-    return if (delta in -1L..1L) CENTER_PAGE - delta.toInt() else CENTER_PAGE
+    return when {
+      delta > 0L -> DayPageSlot.LEFT.position
+      delta < 0L -> DayPageSlot.RIGHT.position
+      else -> CENTER_PAGE
+    }
   }
 
   fun shouldAnimateProgrammaticSwitch(previousEpochDay: Int, nextEpochDay: Int): Boolean =
-    kotlin.math.abs(nextEpochDay.toLong() - previousEpochDay.toLong()) == 1L
+    previousEpochDay != nextEpochDay
 }
 
 object DayTimeFormatter {

@@ -4,7 +4,7 @@
     "id": "feishu-android-7.71.8",
     "version": "7.71.8",
     "description": "Decoded Feishu Android source and resources used as the UI behavior authority.",
-    "catalog_sha256": "eae257d18d7b5f14dddd1a6c9f306c91df23c8a03297595c47dc17274b343556"
+    "catalog_sha256": "f4300ade76faaa79fb1df8e352bf6a59a16afd55fb9ec295f935b416d39896ff"
   },
   "files": [
     {
@@ -56,6 +56,12 @@
       "sha256": "4d774e970616b59dc32bcbab541aa6eda6c8991bb00dea80937cec5161aedfa4"
     },
     {
+      "id": "calendar-viewpager-d9762691",
+      "group": "calendar",
+      "path": "java-sources/androidx/viewpager/widget/ViewPager.java",
+      "sha256": "e7eca005b151d630333bb77ae8e8010e44d7b3a55fa97820c61637d0af3ca1ac"
+    },
+    {
       "id": "calendar-c6926a-33332e37",
       "group": "calendar",
       "path": "java-sources/bm3/C6926a.java",
@@ -68,10 +74,28 @@
       "sha256": "40d1ad920c670173ceb60c6e4704b2e1bc6c8833b1640ccc0870070de870963f"
     },
     {
+      "id": "calendar-c43831a-ced07981",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/framework/callback/C43831a.java",
+      "sha256": "756bb9054a91908ac4810c532133afcba0f6aa713465238d8f110f4c1df4c91a"
+    },
+    {
+      "id": "calendar-uicallbackexecutor-18e5a337",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/framework/callback/UICallbackExecutor.java",
+      "sha256": "6e1f23ed205fb36d3ad0e2f8f62b19044172a80b7ed21bdf3c26d796f87a0a70"
+    },
+    {
       "id": "calendar-switchview-2d957da3",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendars/sidebar/widget/SwitchView.java",
       "sha256": "ac2f5c3e98416326347a57ee4b947c6f21cb194be63ed1115bc514ae9f15a98a"
+    },
+    {
+      "id": "calendar-c64530g-a9ee81ac",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/C64530g.java",
+      "sha256": "df089f0391415aebc813a476fea38c705327326354c0346b429ec19247caa648"
     },
     {
       "id": "calendar-calendarappendview-5a2f3583",
@@ -80,10 +104,64 @@
       "sha256": "03f62f7e08ae9c844133b7e504bf236066cf591b4a4d04d52e26a20d4e7ce6c5"
     },
     {
+      "id": "calendar-calendardate-3c9234bc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarDate.java",
+      "sha256": "e14d62f0c505a8cef180b1e9d627b219a14f05eb90050a789574b23312c48e4c"
+    },
+    {
       "id": "calendar-calendarmainlauncher-0797a2e5",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarMainLauncher.java",
       "sha256": "660e6adfedca2836a2d37904024bf9396d3b9e56e7fe01ea68fae63772822a59"
+    },
+    {
+      "id": "calendar-calendartabview-9bdf9b28",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarTabView.java",
+      "sha256": "0520c839098c8a22ffcc6c077408d96671b53cd562d63a4a182830c3afa01a91"
+    },
+    {
+      "id": "calendar-calendartabviewmode-2ab908cc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarTabViewMode.java",
+      "sha256": "bb7134c5d126d1c53bef2302d5e0b4058f50c2d2c303aca2170e978176e893ec"
+    },
+    {
+      "id": "calendar-idatelogicdata-71b4cbaa",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDateLogicData.java",
+      "sha256": "189df7fd98a66be45978519efb79716e5e92f9476535e5dbabe98d535085f347"
+    },
+    {
+      "id": "calendar-idiagramcontroller-86ac3291",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDiagramController.java",
+      "sha256": "7a57110e4b6a8462e998293a0935b7e61d243533f219f60a7cf45f87a0d667e9"
+    },
+    {
+      "id": "calendar-idiagramdelegate-094356ef",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDiagramDelegate.java",
+      "sha256": "8d9699ead20af75c83b1a8eac0b7ff1d25ddaa06eb90011c4ee9a4f69ec383c7"
+    },
+    {
+      "id": "calendar-basecalendarviewviewmodel-db5061b3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/base/BaseCalendarViewViewModel.java",
+      "sha256": "eead6a4a0fe1cd94d3ade09911b06bbede4a17e0993aa70ee350bf8c7003091f"
+    },
+    {
+      "id": "calendar-calendarviewviewmodel-514861c0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/base/CalendarViewViewModel.java",
+      "sha256": "82878e2f41f5fb952e91331800dcd2f4fb46857d673f67ff96a2c180733f81b8"
+    },
+    {
+      "id": "calendar-c64448c-d843d36c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/C64448c.java",
+      "sha256": "1262217243be550e1cd29bc3e8e12cbbae394c1734410794d7a34fe939c1549c"
     },
     {
       "id": "calendar-dayinstancelayout-6d7bf485",
@@ -98,6 +176,24 @@
       "sha256": "95df4794ee27febad31264fb73c989379baa586f75eb030f831d66d4645ff080"
     },
     {
+      "id": "calendar-positionedviewlayout-0dd80f18",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/PositionedViewLayout.java",
+      "sha256": "48c63012df596e9bc3a7a2b0cb55334158bcf8c561cb0894760d57c2461f6c38"
+    },
+    {
+      "id": "calendar-stickyinstancelayout-d95d55e6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/sticky/StickyInstanceLayout.java",
+      "sha256": "e86b3ce574152437fca71209cff2a9c159c8eea800626e6428586df433e1e213"
+    },
+    {
+      "id": "calendar-stickyinstancelayoutwrapper-93dfb2f2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/sticky/StickyInstanceLayoutWrapper.java",
+      "sha256": "a0c3d1203b707cf6e4b17db14e1c38df529b6ab1a0eaf783899dd6518930c2b0"
+    },
+    {
       "id": "calendar-singedayview-7962e9d0",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/fragment/SingeDayView.java",
@@ -110,10 +206,40 @@
       "sha256": "28ebc289f8b75c88da37f31a1b526896c4c578831b28caad8ee56f4408283414"
     },
     {
+      "id": "calendar-singledayviewfragment-c7f3b840",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/fragment/SingleDayViewFragment.java",
+      "sha256": "929d0905efae55926552cdad05a3f640ccf6b0a200daa450d7041926d480f22e"
+    },
+    {
       "id": "calendar-alldayinstancelayout-e72cff58",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/AllDayInstanceLayout.java",
       "sha256": "885fb89241c9b9d25ede50573b55a8b4dbef2c7274b47b056bd419d7e12cddfe"
+    },
+    {
+      "id": "calendar-singledayinstancelayout-8e6e8fb1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/SingleDayInstanceLayout.java",
+      "sha256": "5c485247cdd543706ee2ce838fef9b184cdfcc02d15674903832f7f324060f12"
+    },
+    {
+      "id": "calendar-singledaystickyinstancelayoutwrapper-cd528f3f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/sticky/SingleDayStickyInstanceLayoutWrapper.java",
+      "sha256": "eae8fb0f0875e990bd9f549f51439400e8298830f5f42f748245985982757bb6"
+    },
+    {
+      "id": "calendar-singledayviewmodel-37fb59fd",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/viewmodel/SingleDayViewModel.java",
+      "sha256": "7a3d9db68d65c302dd79c4a1db01413592213bbc2b7010aebbef622f0e4fad92"
+    },
+    {
+      "id": "calendar-singledayviewmodelimpl-184ccf54",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/viewmodel/SingleDayViewModelImpl.java",
+      "sha256": "b46cfba8fb8e6ccdec4e40b2d5522684aaaa3a7570a8e1a6b9e613209de52558"
     },
     {
       "id": "calendar-calendarshellviewfragment-onbind-1-7be3cab7",
@@ -126,6 +252,18 @@
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/CalendarShellViewFragment.java",
       "sha256": "9eb80d9cb2bb09d59638b13f4ac17d074f9155c07bbba33c5fd043d5793ea1f0"
+    },
+    {
+      "id": "calendar-diagramcontrolleradapterfragment-f64ae3e8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/DiagramControllerAdapterFragment.java",
+      "sha256": "617384324b973d09bc95314623fda6d013dbec87c717157b92312deca4f5ba54"
+    },
+    {
+      "id": "calendar-monthdiagramfragment-b12623f1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/MonthDiagramFragment.java",
+      "sha256": "3bd2fa1f9c710b52bb2f875b2cd9f35cd01e8609cfbf1d73334a539ace1116df"
     },
     {
       "id": "calendar-shell-view",
@@ -158,10 +296,118 @@
       "sha256": "2296e624437658e6f9d6cdfbf6b95a6fec648a1349a8179b59b2e4b62e9fd4b0"
     },
     {
+      "id": "calendar-calendarshellinteractor-bd7f83ab",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractor.java",
+      "sha256": "c8d85855dddea966d40d8794914c051e55ea103ca309964133db680d3745d877"
+    },
+    {
+      "id": "calendar-calendarshellinteractorforcontentview-1253f9b4",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractorForContentView.java",
+      "sha256": "a188c13bf92aeb0b1a7ecd4422868b03d3c849be59659bc3923c9cc7636fef09"
+    },
+    {
+      "id": "calendar-calendarshellinteractorforshellview-cee74dd0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractorForShellView.java",
+      "sha256": "8ba9c0d19654d47baafe607e12cfafd331bee1bfeb696c324e6ea031500f3a54"
+    },
+    {
+      "id": "calendar-calendarshellviewmodel-9cf2abb6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellViewModel.java",
+      "sha256": "5ae4299e1f624e1e7c903f4156c6b24dbfc87ce8ac729e81a68c5a064f215daa"
+    },
+    {
+      "id": "calendar-calendarshellviewservice-5a735bde",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellViewService.java",
+      "sha256": "7638c1a6290a4a4a99b8aad2ffc623e0416a9b7a0edc65f9ccf450c33ac40c6c"
+    },
+    {
+      "id": "calendar-contentviewexternalservice-a0a20e9b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/ContentViewExternalService.java",
+      "sha256": "dcfc59eb9ab606e9e542f2cf141fa15cbfa688fbc12e8c690980489875fe4b68"
+    },
+    {
+      "id": "calendar-contentviewexternalserviceimpl-1ac1508f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/ContentViewExternalServiceImpl.java",
+      "sha256": "feadde0d8735550703a436d788a2cef3889fe9adfda124b8eb185f49c0667a9d"
+    },
+    {
+      "id": "calendar-quickdatepanelexternalservice-d0f9134b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/QuickDatePanelExternalService.java",
+      "sha256": "5297d7a15ab989fcb65c85a862ff18846129e98f67b392f43d9302f72f4def24"
+    },
+    {
+      "id": "calendar-quickdatepanelexternalserviceimpl-aeb1c478",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/QuickDatePanelExternalServiceImpl.java",
+      "sha256": "6817441b8c9202a789d723270868af31ef8a1f47d295fb14e2ef51bc9f702546"
+    },
+    {
+      "id": "calendar-quickchoosepanelviewmodel-c77271c3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/subviewmodel/QuickChoosePanelViewModel.java",
+      "sha256": "af02c02d713813872cb945926bf6fb0da8d62d3da07beef0b2702f6cec4bdf3f"
+    },
+    {
+      "id": "calendar-imonthdiagramcontract-operationtype-7e3ac908",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/IMonthDiagramContract$OperationType.java",
+      "sha256": "d590c04e61219c17267bef0c76843fa7aace4cbb9646bf62e3bd1f25835bb7d4"
+    },
+    {
+      "id": "calendar-imonthdiagramcontract-pageposition-9e5f3ac6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/IMonthDiagramContract$PagePosition.java",
+      "sha256": "db6ee548e6a45e5d1d9c0c48914e2803660f1ea44df241cf054da411b322a39c"
+    },
+    {
+      "id": "calendar-interfacec64812a-a2684706",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64812a.java",
+      "sha256": "50414c4419bfd34b536e42e969b511e67f9498f2afa2a2cbaf300b96a59ec5d2"
+    },
+    {
+      "id": "calendar-interfacec64813b-3b0fca2c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64813b.java",
+      "sha256": "b6970c16c40d2a8fd55b55480c43f307476faffae47bcd3f61e6309375cd61df"
+    },
+    {
+      "id": "calendar-interfacec64814c-cc38889b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64814c.java",
+      "sha256": "965444a02bfb7973f1056296a907fb6c0e9216c4b7a3a46dbbeba7cb62214dc1"
+    },
+    {
+      "id": "calendar-interfacec64815d-de0f2657",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64815d.java",
+      "sha256": "26c201c273633fa4cc9ab3604315e22f0a424df9f3284cb9cfd0bfdbec0a6b8d"
+    },
+    {
+      "id": "calendar-monthdiagrammodel-loadpagedata-1-265efa6a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramModel$loadPageData$1.java",
+      "sha256": "954c251d4ceb9da4375c25aab3844c45d66873f2621e58c9915d4a0266dc396d"
+    },
+    {
       "id": "calendar-monthdiagrammodel-433a9ddb",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramModel.java",
       "sha256": "dcb67fa1e9a5beb87e388543a1413d63f6fc81b1a5710c438a5c8b280afbb82a"
+    },
+    {
+      "id": "calendar-monthdiagrampresenter-346adcda",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramPresenter.java",
+      "sha256": "cbbe234c51190c4f1a07ecef93f21b8c454fb1746c3528cb96a18d08492a7f5c"
     },
     {
       "id": "calendar-monthdiagramview-c420e4f7",
@@ -170,10 +416,46 @@
       "sha256": "d718b582f82ffb9afd83edd383bfc0f33422b378a5de57709c2776d28fb9cd29"
     },
     {
+      "id": "calendar-monthviewattr-animatorcallbacktype-331ff811",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthViewAttr$AnimatorCallbackType.java",
+      "sha256": "5d22b25ee17e5b984a938a13e8f2e32988ad3922d58896a4f4777cf750dbf34f"
+    },
+    {
+      "id": "calendar-c64822b-e09f13ea",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/C64822b.java",
+      "sha256": "3e3b7b6a51c9e5526727e27b672ed5dccea43b3d795077243ffa7ff7e3f3b7bc"
+    },
+    {
       "id": "calendar-month-container-pager",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/MonthContainViewPager.java",
       "sha256": "2ca086460f88d295b6b2a906d6507be46f30fc3b120c7f47b84106213f3ed0f9"
+    },
+    {
+      "id": "calendar-monthdayviewpager-991ee863",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/MonthDayViewPager.java",
+      "sha256": "8016bb0571e0c2dff77c3621b86a52375b9491fcaa1a82ca2fb5504ab276fd93"
+    },
+    {
+      "id": "calendar-associatetouchscrollhelper-b5ed3ff5",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/AssociateTouchScrollHelper.java",
+      "sha256": "f348ee899aaeb783df4014bbed86c5a622d49b9b64a3187c56aada75a8b99a68"
+    },
+    {
+      "id": "calendar-interfacec64966e-0da43cb2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/InterfaceC64966e.java",
+      "sha256": "84cfe2ae0b6884a71e3d7b2dafb99be83a734d5b7e29731b999d84f031a797d4"
+    },
+    {
+      "id": "calendar-interfacec64967f-616c7c7f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/InterfaceC64967f.java",
+      "sha256": "0d6cd985918fd8c30520d153ed5b78364979a2b9f1049647d76a6a0457ce51ba"
     },
     {
       "id": "calendar-view-indicator-class",
@@ -182,10 +464,58 @@
       "sha256": "dd3ddcc7160d592dda2ebe3f81a60cad5e4795ae3dbd47811bbd7e603ca9c6c9"
     },
     {
+      "id": "calendar-auxiliarytimerulerview-18987520",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/AuxiliaryTimeRulerView.java",
+      "sha256": "2e790d8d1b385d45e12e9261e6a92ef99449d370dab172fed5dc4251ebf4c7c1"
+    },
+    {
       "id": "calendar-daytimerulerview-07a2991d",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/DayTimeRulerView.java",
       "sha256": "6d502f8b179f43b01ef3df2e75e9e17558ddfee8e25d26f56c58007451641184"
+    },
+    {
+      "id": "calendar-irulerview-6c54dc56",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/IRulerView.java",
+      "sha256": "06098433029f54b4cbd2bbf65c1195cf9799a8f1710b33858764aa97551772ff"
+    },
+    {
+      "id": "calendar-calendarfeaturegating-cf5f6016",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/featureswitch/CalendarFeatureGating.java",
+      "sha256": "51ff9cd4c6d9a51e599fb46da8dbf8017b3011fee6d238f8d54fed071c080729"
+    },
+    {
+      "id": "calendar-touchscrollhelper-45df6102",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/TouchScrollHelper.java",
+      "sha256": "e5fa693487fd399f780f322682f5f30918727ddbc787e2374f1e365684275cd6"
+    },
+    {
+      "id": "calendar-viewscrollextentionskt-72c1b33b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/ViewScrollExtentionsKt.java",
+      "sha256": "a083f3ca7310a08c2231a3f8bce174e9dbf8fe06eeec02e45e377b8d481a3302"
+    },
+    {
+      "id": "calendar-datefetcher-6d18dd30",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/calendar/month/DateFetcher.java",
+      "sha256": "c1bcf1a94466309044e67a786d13bb916c0e25e135672213d03377f311c7649a"
+    },
+    {
+      "id": "calendar-abstractc65067a-888c2f0c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/infinitepager/AbstractC65067a.java",
+      "sha256": "a8241750ca3d528b768e12e4c391e47d2b5fbecee982e2b36b4f56a027257213"
+    },
+    {
+      "id": "calendar-infiniteviewpager-75053b46",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/infinitepager/InfiniteViewPager.java",
+      "sha256": "949a58e1541cbca4c894da9ce07f4c491eaa215da035e35c27c8b46ee7e3e0a9"
     },
     {
       "id": "calendar-eventdetailactivity-48a78580",
@@ -254,6 +584,66 @@
       "sha256": "af3c2e566a6fb3daa7b9e94bd998607ade3566bc5786dba1e8d08839218e0b10"
     },
     {
+      "id": "calendar-calendarapp-0f61149f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/usercomponent/CalendarApp.java",
+      "sha256": "968aca714e58d87b8270f66483121425ecc87227bd8964c037da1274233dfacb"
+    },
+    {
+      "id": "calendar-calendarappimpl-620b24e4",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/usercomponent/CalendarAppImpl.java",
+      "sha256": "f3175012df43e70a82a30c02dc2623ac2222d5ef868710fb6a19b5781f0dc510"
+    },
+    {
+      "id": "calendar-c67568d-118620f7",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/C67568d.java",
+      "sha256": "34d348306c3c9d013cf179a9ed6091a3062611930600d7643ad9c62276ab7a6e"
+    },
+    {
+      "id": "calendar-observablelive-ab34a5b8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/ObservableLive.java",
+      "sha256": "bf8b90b15a79907bf4d84f2b0520a0eb46a9a5ff3ce09fcf894b7d21605ee53f"
+    },
+    {
+      "id": "calendar-rxevent-a3aa1e8e",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/RxEvent.java",
+      "sha256": "8826aa37cce7d668bb052135e56e34a4d040c6c7919b030ea41bdc4f9b0c685b"
+    },
+    {
+      "id": "calendar-rxmutableevent-32e2fd14",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/RxMutableEvent.java",
+      "sha256": "c1b403c159d6d66dbba70fb32e887f60a2728f6638fecd42573ccbbd728209b1"
+    },
+    {
+      "id": "calendar-c67708d-db8fecca",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/C67708d.java",
+      "sha256": "ce35c607112d71fc9484d3b57b1c78087d813659ab8ec4168757df43b8e1f339"
+    },
+    {
+      "id": "calendar-c67718f-8021ac21",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/C67718f.java",
+      "sha256": "a1c1f05431416b6b0c924b7f9ac13e403e9011737d76d2dffeb3b0bae7412b13"
+    },
+    {
+      "id": "calendar-calendarapkutil-cd6cdff2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/CalendarApkUtil.java",
+      "sha256": "f283a839cd68ec5f73e4e7801bffe6663320cf3d25bd08f1c118aee1509e9720"
+    },
+    {
+      "id": "calendar-calendartabpageconfig-e3e27280",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/wrapper/tabspec/CalendarTabPageConfig.java",
+      "sha256": "20632d3ee06b8d928583a35402af622144b40663198e9de3cfbdf0bb08dffb24"
+    },
+    {
       "id": "calendar-calendartitleproxynewimpl-f03ad8fa",
       "group": "calendar",
       "path": "java-sources/com/p325ss/android/lark/calendar/impl/wrapper/tabspec/CalendarTitleProxyNewImpl.java",
@@ -264,6 +654,12 @@
       "group": "calendar",
       "path": "java-sources/fg3/AbstractC132495b.java",
       "sha256": "0c9f3397cf080b29cfcaa7c945055be48557aefa2c4179a4fbc2911b4adf6458"
+    },
+    {
+      "id": "calendar-c140217a-dbb629c0",
+      "group": "calendar",
+      "path": "java-sources/ke3/C140217a.java",
+      "sha256": "bf96b165bcee52868e2da8500db749c2fcddff4131a67548998b5f6cc8e9da12"
     },
     {
       "id": "calendar-abstractc150857e-85b019a6",
@@ -284,10 +680,28 @@
       "sha256": "99cc87fbeeaedca7ec2778a148db351704266c0892d6da34f95b15669212136a"
     },
     {
+      "id": "calendar-abstractc150917a-f525c655",
+      "group": "calendar",
+      "path": "java-sources/pe3/AbstractC150917a.java",
+      "sha256": "f5cedf28fb5ae7fc416c35349278cef2b8bfb7a9366772d88dabdd32e66c7685"
+    },
+    {
       "id": "calendar-c152338p-f46d44cd",
       "group": "calendar",
       "path": "java-sources/qd3/C152338p.java",
       "sha256": "76d88067f464e7da7c7ea04739d8093ff9040e86d0012ecbe8711e24bffa1aa7"
+    },
+    {
+      "id": "calendar-interfacec152360b-cc3be7ea",
+      "group": "calendar",
+      "path": "java-sources/qe3/InterfaceC152360b.java",
+      "sha256": "df2e558602c81fea4d77a89bf5cbfaf2c3c5ca445364ab2a212b061431e79a12"
+    },
+    {
+      "id": "calendar-c153742a-ad0c9b87",
+      "group": "calendar",
+      "path": "java-sources/rb3/C153742a.java",
+      "sha256": "cb96ac6568abcdaf27a38d797d2118ac126a8839849daa829c934b71bd87a4a8"
     },
     {
       "id": "calendar-month-expansion-layout",
@@ -300,6 +714,12 @@
       "group": "calendar",
       "path": "java-sources/re3/ViewOnTouchListenerC153853e.java",
       "sha256": "9617e41e4e37ecbe3cda884da0055f8adeab7c8977377a392a36c2c52f9ccc4f"
+    },
+    {
+      "id": "calendar-c153910a-34d804fa",
+      "group": "calendar",
+      "path": "java-sources/rf3/C153910a.java",
+      "sha256": "53dc25f19b992e04ce48f1e3db5525d0c1808d86122e8850233c68a3b936b6e2"
     },
     {
       "id": "calendar-c155132d-11b6d646",
@@ -386,6 +806,36 @@
       "sha256": "b1f6bdefdabb579905116761aafebc41619798dc3d4d6b841e05624224fded5a"
     },
     {
+      "id": "common-shell-c91742d-dcf81469",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/adapter/C91742d.java",
+      "sha256": "01eb17669b85a6c8ebebe9724794eabc60401f7f1c62593233cbd0ebf256fb83"
+    },
+    {
+      "id": "common-shell-tabfragmentstateadapter-3cc61014",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/adapter/TabFragmentStateAdapter.java",
+      "sha256": "c2af59d601fbb14638c4f242d4a96024d9c51be45fcded08f4e0a0c5423547d6"
+    },
+    {
+      "id": "common-shell-basetabfragment-5abc2a20",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/BaseTabFragment.java",
+      "sha256": "8c4bff356e61cb048855068a54c3be7bc7b1ecb671b85f1572c184314b1bafed"
+    },
+    {
+      "id": "common-shell-interfacec91823i-36fcf4cb",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/InterfaceC91823i.java",
+      "sha256": "a640580a1657a0a1dd457acecf1c64c15f2fa42cc8cbff0ce1d0add8889dd19c"
+    },
+    {
+      "id": "common-shell-maintabbarview-deeafaa0",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/view/MainTabBarView.java",
+      "sha256": "137a6f4a72469612ce6e4282574d5fa8b1628b0afd18ee607f3f64141cf7c201"
+    },
+    {
       "id": "common-shell-navlaunchercontainerfragment-48490d94",
       "group": "common-shell",
       "path": "java-sources/com/p325ss/android/lark/maintab/launcher/NavLauncherContainerFragment.java",
@@ -408,6 +858,12 @@
       "group": "common-shell",
       "path": "java-sources/com/p325ss/android/lark/maintab/view/TabPageWidget.java",
       "sha256": "47595464c404cd3a51227ca89d5fb6631078105797a98237e51694ca2d8151c3"
+    },
+    {
+      "id": "common-shell-maintabbaritemeventlistener-5087f840",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/bar/MainTabBarItemEventListener.java",
+      "sha256": "c902caad1150eb60e59386cbcf41271f48f19dd6a27cac3f743fb3b759c16348"
     },
     {
       "id": "common-shell-tabbarcontroller-596a0ff9",
@@ -450,6 +906,12 @@
       "group": "common-shell",
       "path": "java-sources/com/p325ss/android/lark/widget/tab/MainTabItemView.java",
       "sha256": "799bdd3813cef95efb1ee51dcb887bc3cc140a838c78c721820ddadee551ea3d"
+    },
+    {
+      "id": "common-shell-c154346d-3dee041c",
+      "group": "common-shell",
+      "path": "java-sources/rs6/C154346d.java",
+      "sha256": "2d0c9da26807fc6ff20ce212910413732005af896f4fa834e67135c2b9c5665e"
     },
     {
       "id": "minutes-androidmanifest-03d8f9c5",

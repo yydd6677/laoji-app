@@ -27,7 +27,7 @@
 2. **能力库存**：`capability-inventory.json` 为每项能力登记证据 ID、模块、源码引用、产品决定和发布要求。未进入 manifest 只表示实现尚未登记。
 3. **静态实现库存**：TypeScript AST 与 Kotlin UAST/Lint 枚举控件、listener、动画、路由和视觉常量。每个生产元素必须映射证据 ID；旧 UI 引用、未知证据和未批准偏离直接失败。
 4. **运行 View 树**：instrumentation 检查真实节点层级、角色、尺寸、命中范围和 Evidence Tag。重复使用同一 ID 不能掩盖额外控件。
-5. **行为 proof**：测试先由源码合同生成，再绑定实现输入、测试报告、环境和哈希。实现输入变化后必须重签，不能沿用历史通过。
+5. **行为 proof**：测试先由源码合同生成，再绑定实现输入、门禁脚本、测试报告、环境和哈希。实现输入或门禁逻辑变化后必须重签，不能沿用历史通过。文件级静态合同检查登记的关键调用顺序和测试 symbol，可拦截简单交换或名称删除，但不能代替函数作用域 UAST 与运行行为 proof。
 6. **Release attestation**：release 要求所有可达能力关闭，并把源码 catalog、能力库存、manifest、报告和 APK 哈希写入 `parity-attestation.json`。安装入口拒绝过期或来源不一致的 APK。
 
 Debug 允许 `sourced`、`implemented`、`verified` 等中间状态，但不允许未知元素。Release 只接受发布所需能力全部 `closed`、未批准偏离为零、旧表现层引用为零。
@@ -50,9 +50,9 @@ Android 主目的地任一时刻只能有一个导出的 Expo/Fabric 根。底�
 
 ## 通用壳层
 
-`UI-SHELL-BOTTOM-MAIN-001` 以飞书真实主链 `TabPageControllerV3 -> TabPageWidget -> TabBottomBar -> TabBarController` 为依据；More 页的 `NavBottomTabBar` 不得再作为主底栏参考。老记只保留 `Schedule` 与 `Meetings` 两个目的地，这是 `DEV-LAOJI-TWO-TAB-SCOPE-001` 的批准替换。
+`UI-SHELL-BOTTOM-MAIN-001` 以飞书真实主链 `TabPageControllerV3 -> TabPageWidget -> TabBottomBar -> TabBarController` 为依据；More 页的 `NavBottomTabBar` 不得再作为主底栏参考。老记只保留 `Schedule` 与 `Meetings` 两个目的地，这是 `DEV-LAOJI-TWO-TAB-SCOPE-001` 的批准替换。由于 `DEV-EXPO-SINGLE-NATIVE-ROOT-001` 会在目的地变化时替换活动根，旧根只发送语义点击并保持受控状态，新根通过单调命令完整播放一次 125+125ms 选择动画；同 Tab 重选不增加该命令。
 
-`UI-SHELL-RESELECT-001` 要求当前日程 Tab 重选时由活动日历根回到设备本地今天并清理临时态，不允许用 React key、卸载 Surface 或重建 store 模拟。
+`UI-SHELL-RESELECT-001` 由活动 Calendar 原生底栏同步处理，处理完成后才把低频语义点击交给 React 做目的地判断；不得新增 React 重选序号、Bridge prop、React key、Surface 重挂载或 store 重建。动作映射飞书共享 `backTodayEvent`：QuickChoose 保持当前展开态并提交设备本地今天，随后以 `when (mode)` 只驱动当前活动 owner；单日 owner 清理自己的草稿/拖动，远距离日期先钳到目标相邻页，再以 300ms 横向切日、250ms 纵向回当前分钟；该窗口内到达的同目标 React 快照只能重绑数据和 session，不能重置 Pager 进度或取消 animator。月视图复用普通今天点击与六态分页，跨月在中心页 rebind 后完成今天展开。不得自行关闭 QuickChoose、广播全局清拖、修改隐藏 owner 或清空月缓存。
 
 `UI-OVERLAY-WINDOW-001` 规定 page、sheet、dialog、toast 由 Activity content 下的唯一 Window host 分层持有。Sheet 的 window dim 与正文入退场必须独立；键盘、系统栏和导航栏 inset 在宿主内实时处理。核心按钮几何不能因错误、字幕或提示出现而位移。
 

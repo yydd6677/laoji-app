@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -48,10 +49,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private val createFab = CalendarCreateFabView(context)
   // CAL-PICKER-HOST-001: QuickChoose is a full-content transparent touch owner, not a fixed panel.
   private val pickerPanel = CalendarQuickChooseHostView(context)
+  @FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
   private val bottomBar = LaojiNativeBottomBarView(context, appContext).apply {
     setBridgeEventsEnabled(false)
     setSelectedTab(NativeBottomTab.SCHEDULE.wireName)
     setTabPressListener { tab ->
+      if (tab == NativeBottomTab.SCHEDULE) returnToToday()
       onTabPress(mapOf("type" to "tabPress", "tab" to tab.wireName))
     }
   }
@@ -67,6 +70,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private var pendingPickerCloseReason: String? = null
   private var pendingPickerCloseEvent = true
   private var visibleMonthInitialized = false
+  private var nowProvider: () -> Calendar = { Calendar.getInstance() }
   private var disposed = false
 
   init {
@@ -180,6 +184,17 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     monthPager.jumpToMonth(epochDay)
     updateToolbarTitle()
   }
+
+  fun setBottomBarSelectionCommand(command: Int?) {
+    if (disposed) return
+    bottomBar.setSelectionAnimationCommand(command)
+  }
+
+  internal fun setNowProviderForTest(provider: () -> Calendar) {
+    nowProvider = provider
+  }
+
+  internal fun currentSelectedEpochDay(): Int = selectedEpochDay
 
   fun setDragPrecisionMinutes(value: Int?) {
     dayView.setDragPrecisionMinutes(value ?: 15)
@@ -393,6 +408,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     if (mode == next) return
     mode = next
     closePicker("mode-change", emitEvent = false)
+    renderedSnapshot?.let(::bindSnapshotToActiveMode)
     updateModeVisibility()
     updateToolbarTitle()
     if (emit) {
@@ -400,6 +416,47 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
       emitVisibleRange("mode-change")
       emitSemantic("mode-change", mapOf("mode" to mode.bridgeValue))
     }
+  }
+
+  // UI-SHELL-RESELECT-001: mirrors Feishu's shared backToday event without remounting this root.
+  private fun returnToToday() {
+    val now = nowProvider()
+    val today = CalendarDateMath.toEpochDay(
+      now.get(Calendar.YEAR),
+      now.get(Calendar.MONTH) + 1,
+      now.get(Calendar.DAY_OF_MONTH),
+    )
+    val minute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+    val monthGridStart = CalendarDateMath.monthGridStart(today)
+    val monthGridEnd = monthGridStart + CalendarDateMath.monthWeekCount(today) * 7
+    baseSnapshot = baseSnapshot?.let { base ->
+      base.copy(
+        rangeStartEpochDay = minOf(base.rangeStartEpochDay, monthGridStart),
+        rangeEndEpochDayExclusive = maxOf(base.rangeEndEpochDayExclusive, monthGridEnd),
+        selectedEpochDay = today,
+        todayEpochDay = today,
+      )
+    }
+    selectedEpochDay = today
+    if (pickerState.committedEpochDay != today) {
+      pickerState = pickerState.withCommittedEpochDay(today)
+      pickerPanel.updateCommittedDate(today)
+    }
+    visibleMonthInitialized = true
+    val rendered = renderSnapshot(bindActiveSurface = false)
+    when (mode) {
+      CalendarMode.MONTH -> {
+        monthPager.setSnapshot(rendered)
+        monthPager.returnToToday(today)
+      }
+      CalendarMode.DAY -> dayView.returnToToday(rendered, today, minute)
+    }
+    updateToolbarTitle()
+
+    val selection = mapOf("epochDay" to today, "source" to "tab-reselect")
+    onDateSelect(selection)
+    emitVisibleRange("tab-reselect")
+    emitSemantic("back-today", selection)
   }
 
   private fun updateModeVisibility() {
@@ -426,17 +483,24 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     }
   }
 
-  private fun renderSnapshot() {
-    val base = baseSnapshot ?: return
+  private fun renderSnapshot(bindActiveSurface: Boolean = true): CalendarSnapshot? {
+    val base = baseSnapshot ?: return null
     val rendered = base.copy(
       selectedEpochDay = selectedEpochDay,
       events = ledger.overlay(base.events)
     )
     renderedSnapshot = rendered
-    monthPager.setSnapshot(rendered)
-    dayView.setSnapshot(rendered)
+    if (bindActiveSurface) bindSnapshotToActiveMode(rendered)
     pickerPanel.setDateData(CalendarQuickChooseContract.dateData(rendered))
     updateToolbarTitle()
+    return rendered
+  }
+
+  private fun bindSnapshotToActiveMode(snapshot: CalendarSnapshot) {
+    when (mode) {
+      CalendarMode.MONTH -> monthPager.setSnapshot(snapshot)
+      CalendarMode.DAY -> dayView.setSnapshot(snapshot)
+    }
   }
 
   private fun updateToolbarTitle() {

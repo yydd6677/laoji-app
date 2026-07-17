@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.laoji.nativeplatform.media.MinutesPlaybackRegistry
 import com.laoji.nativeplatform.media.MinutesPlaybackState
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
@@ -27,6 +28,7 @@ class LaojiMinutesView(
   private val onTabPress by EventDispatcher<Map<String, Any?>>()
   private val store = MinutesStateStore()
   private val content = FrameLayout(context)
+  @FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
   private val bottomBar = LaojiNativeBottomBarView(context, appContext).apply {
     visibility = View.GONE
     setBridgeEventsEnabled(false)
@@ -60,6 +62,10 @@ class LaojiMinutesView(
 
   fun setSnapshot(value: Map<String, Any?>) {
     snapshot = value
+  }
+
+  fun setBottomBarSelectionCommand(command: Int?) {
+    bottomBar.setSelectionAnimationCommand(command)
   }
 
   fun commitProps() {

@@ -2,12 +2,12 @@
   "schema_version": 1,
   "evidence_id": "CAL-PICKER-WHEEL-TAP-001",
   "proof_kind": "androidTest",
-  "recorded_at": "2026-07-17T11:23:30.342184+00:00",
-  "input_sha256": "1acd539a6129d30a26137f0449b092d23abd6f61335eaa2b110c5ae941b9b536",
+  "recorded_at": "2026-07-17T14:45:27.285059+00:00",
+  "input_sha256": "224c28b1fb47804f38c1b47738183b5683579cf7888c790d5bfcd13e514c571b",
   "report": {
     "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
-    "sha256": "56c48fbd54f293e5771aa2f6d7616ee073f961c3954c998629c20f43f0e812b1",
-    "tests": 32,
+    "sha256": "f453827360084a2db34ae6b45ca97ef951ea0471494d47320d1e777176e2dc9f",
+    "tests": 40,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
@@ -22,11 +22,31 @@
       },
       {
         "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectMotionSurvivesImmediateReactSnapshotFeedback"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectKeepsQuickChooseOpenCancelsWheelAndReturnsMonthToDeviceToday"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
         "name": "productionHostInternalTitlePagerTodayAndEventDotsUseRealViews"
       },
       {
         "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectDoesNotToggleHiddenMonthOwner"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectDoesNotDriveHiddenDayOwner"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
         "name": "productionHostWheelFlingContinuesThenNewDragCancelsAndCommitsSettledValue"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectReturnsDayToTodayAndCentersCurrentMinute"
       },
       {
         "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
@@ -54,7 +74,15 @@
       },
       {
         "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "activeScheduleReselectClearsSameDayDraftAndGestureBeforeScrollingToCurrentTime"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
         "name": "monthUsesPerDayAndEventSemanticsAndClosesWithoutFadingTheDetailPager"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "activeScheduleReselectUsesOrdinaryTodayTapOnlyWhileMonthPagerIsIdle"
       },
       {
         "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
@@ -139,6 +167,10 @@
       {
         "class_name": "com.laoji.nativeplatform.transfer.MeetingDeletionInstrumentedTest",
         "name": "tombstoneSurvivesStoreRecreationAndExpiresFailClosed"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.ui.NativeBottomBarInstrumentedTest",
+        "name": "sourceShapedTreeUsesPhysicalDividerRealSelectedStateAndIconOnlyMotion"
       }
     ]
   },
@@ -146,14 +178,14 @@
     "typescript_ast": {
       "kind": "typescript_ast",
       "path": "build/feishu-ui-ast-report.json",
-      "sha256": "fe3058cc6a4c0c78986a56ab18980cebcb48555f3c0952a30a379e969f4e87f6",
+      "sha256": "544f10ba25ef619ee1374509ad111b06d2afa4428b380fc139a242f894f9793c",
       "error_count": 208
     },
     "android_lint_uast": {
       "kind": "android_lint_uast",
       "path": "build/feishu-android-uast-report.json",
-      "sha256": "33e26a4c4990cc8e63d9d2ea662af43750e51ce585b6a1534c5586a223b80124",
-      "error_count": 735
+      "sha256": "e6e10242514ba6d67f98d8eca8edcba55cc97ed346cc76b0658aa5013f65fb9d",
+      "error_count": 726
     },
     "workspace_resolution": {
       "kind": "workspace_resolution",

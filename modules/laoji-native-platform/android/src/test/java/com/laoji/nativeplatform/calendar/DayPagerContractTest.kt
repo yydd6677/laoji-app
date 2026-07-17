@@ -47,14 +47,32 @@ class DayPagerContractTest {
   }
 
   @Test
-  fun `CAL-DAY-PAGER-001 animates only adjacent programmatic changes for 300ms`() {
+  fun `CAL-DAY-PAGER-001 clamps distant programmatic motion to the target-adjacent page for 300ms`() {
     assertEquals(300L, DayPagerContract.PROGRAMMATIC_DAY_SWITCH_DURATION_MS)
+    assertEquals(250L, DayPagerContract.PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS)
     assertTrue(DayPagerContract.shouldAnimateProgrammaticSwitch(epochDay, epochDay + 1))
     assertTrue(DayPagerContract.shouldAnimateProgrammaticSwitch(epochDay, epochDay - 1))
-    assertFalse(DayPagerContract.shouldAnimateProgrammaticSwitch(epochDay, epochDay + 2))
+    assertTrue(DayPagerContract.shouldAnimateProgrammaticSwitch(epochDay, epochDay + 2))
     assertEquals(DayPageSlot.LEFT.position, DayPagerContract.programmaticStartPosition(epochDay, epochDay + 1))
     assertEquals(DayPageSlot.RIGHT.position, DayPagerContract.programmaticStartPosition(epochDay, epochDay - 1))
-    assertEquals(DayPageSlot.CENTER.position, DayPagerContract.programmaticStartPosition(epochDay, epochDay + 2))
+    assertEquals(DayPageSlot.LEFT.position, DayPagerContract.programmaticStartPosition(epochDay, epochDay + 2))
+    assertEquals(DayPageSlot.RIGHT.position, DayPagerContract.programmaticStartPosition(epochDay, epochDay - 2))
+    val futureTarget = epochDay + 3
+    val pastTarget = epochDay - 3
+    assertEquals(
+      futureTarget - 1,
+      DayPagerContract.epochDayForPosition(
+        futureTarget,
+        DayPagerContract.programmaticStartPosition(epochDay, futureTarget),
+      ),
+    )
+    assertEquals(
+      pastTarget + 1,
+      DayPagerContract.epochDayForPosition(
+        pastTarget,
+        DayPagerContract.programmaticStartPosition(epochDay, pastTarget),
+      ),
+    )
   }
 
   @Test
@@ -129,6 +147,13 @@ class DayPagerContractTest {
       0f,
     )
     assertEquals(25, DayPagerContract.hourLines().map(DayPagerContract::hourLineOffsetDp).size)
+  }
+
+  @Test
+  fun `UI-SHELL-RESELECT-001 centers the current minute within timeline bounds`() {
+    assertEquals(316f, DayPagerContract.centeredTimelineOffsetDp(720, 600f), 0f)
+    assertEquals(0f, DayPagerContract.centeredTimelineOffsetDp(0, 600f), 0f)
+    assertEquals(636f, DayPagerContract.centeredTimelineOffsetDp(1_440, 600f), 0f)
   }
 
   @Test

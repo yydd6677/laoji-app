@@ -20,6 +20,7 @@ import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.ModulesProvider
 import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
+import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -31,7 +32,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-// CAL-PICKER-001 / CAL-PICKER-HOST-001: all gestures enter the production CalendarHostView tree.
+// UI-SHELL-RESELECT-001 / CAL-PICKER-001 / CAL-PICKER-HOST-001:
+// all gestures enter the production CalendarHostView tree.
 @RunWith(AndroidJUnit4::class)
 class CalendarQuickChooseInstrumentedTest {
   private val retainedReactContexts = mutableListOf<Any>()
@@ -404,6 +406,230 @@ class CalendarQuickChooseInstrumentedTest {
     }
   }
 
+  @Test
+  fun activeScheduleReselectKeepsQuickChooseOpenCancelsWheelAndReturnsMonthToDeviceToday() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val today = currentEpochDay()
+      val selected = CalendarDateMath.addMonths(today, -2, preserveDay = true)
+      val hostRef = AtomicReference<CalendarHostView>()
+      scenario.onActivity { activity ->
+        hostRef.set(attachProductionHost(activity, reselectSnapshot(today, selected), CalendarMode.MONTH))
+      }
+      waitForHost(scenario, hostRef)
+      openPicker(scenario, hostRef)
+
+      val valueAtRelease = AtomicInteger()
+      scenario.onActivity {
+        assertEquals(selected, hostRef.get().currentSelectedEpochDay())
+        val wheel = monthWheel(hostRef.get())
+        dispatchVerticalFling(wheel, wheel.height * 0.76f, wheel.height * 0.24f)
+        valueAtRelease.set(wheel.selectedValue)
+      }
+      waitUntil(scenario) { monthWheel(hostRef.get()).selectedValue != valueAtRelease.get() }
+      scenario.onActivity {
+        pressActiveScheduleTab(hostRef.get())
+      }
+      waitUntil(scenario) {
+        picker(hostRef.get()).expandState == CalendarPickerExpandState.OPENED &&
+          hostRef.get().currentSelectedEpochDay() == today &&
+          hostRef.get().descendants<ThreePageMonthPager>().single().currentExpandedEpochDay() == today
+      }
+      SystemClock.sleep(600L)
+      scenario.onActivity {
+        assertEquals(CalendarPickerExpandState.OPENED, picker(hostRef.get()).expandState)
+        assertEquals(CalendarDateMath.fromEpochDay(today).month, monthWheel(hostRef.get()).selectedValue)
+        assertEquals(
+          CalendarDateMath.monthStart(today),
+          hostRef.get().descendants<ThreePageMonthPager>().single().currentMonthEpochDay(),
+        )
+        assertEquals(
+          today,
+          hostRef.get().descendants<ThreePageMonthPager>().single().currentExpandedEpochDay(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectReturnsDayToTodayAndCentersCurrentMinute() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val today = currentEpochDay()
+      val fixedMinute = 12 * 60
+      val hostRef = AtomicReference<CalendarHostView>()
+      scenario.onActivity { activity ->
+        hostRef.set(attachProductionHost(activity, reselectSnapshot(today, today - 3), CalendarMode.DAY))
+        hostRef.get().setNowProviderForTest { calendarAt(today, fixedMinute) }
+      }
+      waitForHost(scenario, hostRef)
+      scenario.onActivity {
+        pressActiveScheduleTab(hostRef.get())
+        val day = hostRef.get().descendants<SingleDayCalendarView>().single()
+        assertEquals(-1f, day.dayWeekHeaderView.currentPositionProgress(), 0.01f)
+      }
+      waitUntil(scenario) {
+        hostRef.get().descendants<SingleDayCalendarView>().single().currentSelectedEpochDay() == today
+      }
+      SystemClock.sleep(DayPagerContract.PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS + 80L)
+      scenario.onActivity { activity ->
+        val day = hostRef.get().descendants<SingleDayCalendarView>().single()
+        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+        val expectedScreenYDp = DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+          DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp)
+        assertEquals(
+          activity.dp(expectedScreenYDp).toFloat(),
+          day.currentMinuteScreenY(fixedMinute),
+          activity.dp(2f).toFloat(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectMotionSurvivesImmediateReactSnapshotFeedback() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val today = currentEpochDay()
+      val fixedMinute = 12 * 60
+      val hostRef = AtomicReference<CalendarHostView>()
+      val progressBeforeInFlightFeedback = AtomicReference<Float>()
+      val verticalDistanceBeforeInFlightFeedback = AtomicReference<Float>()
+      scenario.onActivity { activity ->
+        hostRef.set(attachProductionHost(activity, reselectSnapshot(today, today - 3), CalendarMode.DAY))
+        hostRef.get().setNowProviderForTest { calendarAt(today, fixedMinute) }
+      }
+      waitForHost(scenario, hostRef)
+
+      scenario.onActivity {
+        val host = hostRef.get()
+        pressActiveScheduleTab(host)
+        host.setSnapshot(reselectSnapshot(today, today).copy(generation = 12))
+        val day = host.descendants<SingleDayCalendarView>().single()
+        assertTrue(day.hasActiveReturnMotion())
+        assertEquals(-1f, day.dayWeekHeaderView.currentPositionProgress(), 0.01f)
+        assertEquals(-1f, day.dayAllDaySectionView.currentPositionProgress(), 0.01f)
+      }
+
+      SystemClock.sleep(100L)
+      scenario.onActivity { activity ->
+        val host = hostRef.get()
+        val day = host.descendants<SingleDayCalendarView>().single()
+        val progress = day.dayWeekHeaderView.currentPositionProgress()
+        assertTrue(progress > -0.99f && progress < -0.01f)
+        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+        progressBeforeInFlightFeedback.set(progress)
+
+        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+        val expectedScreenY = activity.dp(
+          DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+            DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
+        ).toFloat()
+        val currentScreenY = day.currentMinuteScreenY(fixedMinute)
+        val distance = kotlin.math.abs(currentScreenY - expectedScreenY)
+        assertTrue(distance > activity.dp(2f))
+        verticalDistanceBeforeInFlightFeedback.set(distance)
+
+        host.setSnapshot(reselectSnapshot(today, today).copy(generation = 13))
+        assertTrue(day.hasActiveReturnMotion())
+        assertEquals(progress, day.dayWeekHeaderView.currentPositionProgress(), 0.02f)
+        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+        assertEquals(currentScreenY, day.currentMinuteScreenY(fixedMinute), activity.dp(2f).toFloat())
+      }
+
+      SystemClock.sleep(70L)
+      scenario.onActivity { activity ->
+        val day = hostRef.get().descendants<SingleDayCalendarView>().single()
+        val progress = day.dayWeekHeaderView.currentPositionProgress()
+        assertTrue(progress > progressBeforeInFlightFeedback.get() && progress < 0f)
+        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+        val expectedScreenY = activity.dp(
+          DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+            DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
+        ).toFloat()
+        assertTrue(
+          kotlin.math.abs(day.currentMinuteScreenY(fixedMinute) - expectedScreenY) <
+            verticalDistanceBeforeInFlightFeedback.get(),
+        )
+      }
+
+      SystemClock.sleep(DayPagerContract.PROGRAMMATIC_DAY_SWITCH_DURATION_MS + 80L)
+      scenario.onActivity { activity ->
+        val day = hostRef.get().descendants<SingleDayCalendarView>().single()
+        assertFalse(day.hasActiveReturnMotion())
+        assertEquals(0f, day.dayWeekHeaderView.currentPositionProgress(), 0.01f)
+        assertEquals(0f, day.dayAllDaySectionView.currentPositionProgress(), 0.01f)
+        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+        val expectedScreenYDp = DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+          DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp)
+        assertEquals(
+          activity.dp(expectedScreenYDp).toFloat(),
+          day.currentMinuteScreenY(fixedMinute),
+          activity.dp(2f).toFloat(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectDoesNotDriveHiddenDayOwner() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val today = currentEpochDay()
+      val hiddenDay = today - 3
+      val hostRef = AtomicReference<CalendarHostView>()
+      scenario.onActivity { activity ->
+        hostRef.set(attachProductionHost(activity, reselectSnapshot(today, hiddenDay), CalendarMode.DAY))
+      }
+      waitForHost(scenario, hostRef)
+      scenario.onActivity { hostRef.get().setMode(CalendarMode.MONTH.bridgeValue) }
+      waitUntil(scenario) {
+        hostRef.get().descendants<ThreePageMonthPager>().single().visibility == View.VISIBLE
+      }
+      scenario.onActivity {
+        val host = hostRef.get()
+        assertEquals(hiddenDay, host.descendants<SingleDayCalendarView>().single().currentSelectedEpochDay())
+        pressActiveScheduleTab(host)
+      }
+      waitUntil(scenario) {
+        hostRef.get().descendants<ThreePageMonthPager>().single().currentExpandedEpochDay() == today
+      }
+      scenario.onActivity {
+        assertEquals(
+          hiddenDay,
+          hostRef.get().descendants<SingleDayCalendarView>().single().currentSelectedEpochDay(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun activeScheduleReselectDoesNotToggleHiddenMonthOwner() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val today = currentEpochDay()
+      val hostRef = AtomicReference<CalendarHostView>()
+      scenario.onActivity { activity ->
+        hostRef.set(attachProductionHost(activity, reselectSnapshot(today, today), CalendarMode.MONTH))
+      }
+      waitForHost(scenario, hostRef)
+      scenario.onActivity {
+        hostRef.get().descendants<ThreePageMonthPager>().single().returnToToday(today)
+      }
+      waitUntil(scenario) {
+        hostRef.get().descendants<ThreePageMonthPager>().single().currentExpandedEpochDay() == today
+      }
+      scenario.onActivity {
+        val host = hostRef.get()
+        host.setMode(CalendarMode.DAY.bridgeValue)
+        pressActiveScheduleTab(host)
+      }
+      SystemClock.sleep(DayPagerContract.PROGRAMMATIC_VERTICAL_SCROLL_DURATION_MS + 80L)
+      scenario.onActivity {
+        assertEquals(
+          today,
+          hostRef.get().descendants<ThreePageMonthPager>().single().currentExpandedEpochDay(),
+        )
+      }
+    }
+  }
+
   private fun attachProductionHost(
     activity: CalendarSurfaceTestActivity,
     snapshot: CalendarSnapshot,
@@ -521,6 +747,37 @@ class CalendarQuickChooseInstrumentedTest {
     )
   }
 
+  private fun reselectSnapshot(today: Int, selected: Int): CalendarSnapshot = CalendarSnapshot(
+    generation = 11,
+    rangeStartEpochDay = today - 120,
+    rangeEndEpochDayExclusive = today + 121,
+    selectedEpochDay = selected,
+    todayEpochDay = today,
+    events = emptyList(),
+  )
+
+  private fun currentEpochDay(): Int {
+    val now = Calendar.getInstance()
+    return CalendarDateMath.toEpochDay(
+      now.get(Calendar.YEAR),
+      now.get(Calendar.MONTH) + 1,
+      now.get(Calendar.DAY_OF_MONTH),
+    )
+  }
+
+  private fun calendarAt(epochDay: Int, minute: Int): Calendar {
+    val date = CalendarDateMath.fromEpochDay(epochDay)
+    return Calendar.getInstance().apply {
+      set(Calendar.YEAR, date.year)
+      set(Calendar.MONTH, date.month - 1)
+      set(Calendar.DAY_OF_MONTH, date.day)
+      set(Calendar.HOUR_OF_DAY, minute / 60)
+      set(Calendar.MINUTE, minute % 60)
+      set(Calendar.SECOND, 0)
+      set(Calendar.MILLISECOND, 0)
+    }
+  }
+
   private fun waitForHost(
     scenario: ActivityScenario<CalendarSurfaceTestActivity>,
     hostRef: AtomicReference<CalendarHostView>,
@@ -568,6 +825,13 @@ class CalendarQuickChooseInstrumentedTest {
 
   private fun picker(host: CalendarHostView): CalendarQuickChooseHostView =
     host.descendants<CalendarQuickChooseHostView>().single()
+
+  private fun pressActiveScheduleTab(host: CalendarHostView) {
+    val scheduleTab = host.descendants<View>().single {
+      it.isClickable && it.contentDescription?.toString() == "日程"
+    }
+    assertTrue(scheduleTab.performClick())
+  }
 
   private fun outerTitle(host: CalendarHostView): View = host.descendants<View>().single {
     it.contentDescription?.toString()?.endsWith("，选择年月") == true

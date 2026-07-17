@@ -20,6 +20,8 @@ type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
   navigation: MeetingListNavigationProp;
   onTabPress: (event: { nativeEvent: NativeTabPressEvent }) => void;
+  // UI-SHELL-BOTTOM-MAIN-001: destination-change motion for the active native root.
+  bottomBarSelectionCommand: number;
 };
 
 function statusTone(label: string): 'neutral' | 'primary' | 'success' | 'warning' | 'danger' {
@@ -31,7 +33,7 @@ function statusTone(label: string): 'neutral' | 'primary' | 'success' | 'warning
 }
 
 /** MIN-ROOT-001 / MIN-SEARCH-001: Android renders the Minutes native list surface. */
-export function MeetingListScreen({ navigation, onTabPress }: Props) {
+export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCommand }: Props) {
   const { meetings, loading, error, deleteMeeting, refreshMeetings } = useMeetings();
   const { showDialog } = useAppDialog();
   const [searching, setSearching] = useState(false);
@@ -163,6 +165,7 @@ export function MeetingListScreen({ navigation, onTabPress }: Props) {
         style={styles.surface}
         surface="list"
         snapshot={snapshot}
+        bottomBarSelectionCommand={bottomBarSelectionCommand}
         onMinutesAction={event => handleAction(event.nativeEvent)}
         onTabPress={onTabPress}
         testID="meeting-native-list"

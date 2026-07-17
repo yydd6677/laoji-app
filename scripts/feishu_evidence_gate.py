@@ -293,6 +293,7 @@ def evidence_input_sha256(
     deviations = repo_root / str(manifest.get("deviations", ""))
     product_scope = repo_root / str(manifest.get("product_scope", ""))
     tombstones = repo_root / str(manifest.get("tombstones", ""))
+    gate_script = repo_root / "scripts/feishu_evidence_gate.py"
     return canonical_sha256(
         {
             "baseline_id": manifest.get("baseline_id"),
@@ -306,6 +307,7 @@ def evidence_input_sha256(
             "deviations_sha256": sha256_file(deviations) if deviations.is_file() else None,
             "product_scope_sha256": sha256_file(product_scope) if product_scope.is_file() else None,
             "tombstones_sha256": sha256_file(tombstones) if tombstones.is_file() else None,
+            "evidence_gate_sha256": sha256_file(gate_script) if gate_script.is_file() else None,
         }
     )
 
@@ -663,6 +665,21 @@ def validate(
             for pattern in implementation.get("required_patterns", []):
                 if re.search(pattern, text, re.MULTILINE) is None:
                     errors.append(GateError("REQUIRED_CONTRACT_MISSING", f"{evidence_id}: {pattern} in {relative}"))
+            ordered_patterns = implementation.get("ordered_patterns", [])
+            if not isinstance(ordered_patterns, list) or not all(
+                isinstance(pattern, str) for pattern in ordered_patterns
+            ):
+                errors.append(GateError("SCHEMA_INVALID", f"{evidence_id}: ordered_patterns in {relative}"))
+            else:
+                cursor = 0
+                for pattern in ordered_patterns:
+                    match = re.search(pattern, text[cursor:], re.MULTILINE)
+                    if match is None:
+                        errors.append(
+                            GateError("ORDERED_CONTRACT_MISSING", f"{evidence_id}: {pattern} in {relative}")
+                        )
+                        break
+                    cursor += match.end()
             for pattern in implementation.get("forbidden_patterns", []):
                 if re.search(pattern, text, re.MULTILINE) is not None:
                     errors.append(GateError("FORBIDDEN_IMPLEMENTATION", f"{evidence_id}: {pattern} in {relative}"))
@@ -676,8 +693,13 @@ def validate(
                 target = repo_root / str(relative)
                 if not isinstance(relative, str) or not target.is_file():
                     errors.append(GateError("TEST_FILE_MISSING", f"{evidence_id}: {relative}"))
-                elif evidence_id not in target.read_text(encoding="utf-8", errors="replace"):
+                    continue
+                test_text = target.read_text(encoding="utf-8", errors="replace")
+                if evidence_id not in test_text:
                     errors.append(GateError("TEST_MARKER_MISSING", f"{evidence_id}: {relative}"))
+                symbol = test.get("symbol") if isinstance(test, dict) else None
+                if isinstance(symbol, str) and symbol not in test_text:
+                    errors.append(GateError("TEST_SYMBOL_MISSING", f"{evidence_id}: {symbol} in {relative}"))
 
         proof_refs = entry.get("proof_refs", [])
         if entry.get("status") in {"verified", "closed"} and not proof_refs:

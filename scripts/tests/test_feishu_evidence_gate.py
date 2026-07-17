@@ -30,7 +30,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         )
         test = root / "tests/WidgetTest.kt"
         test.parent.mkdir(parents=True)
-        test.write_text("// UI-TEST-001\n", encoding="utf-8")
+        test.write_text("// UI-TEST-001\nfun widgetMatchesSource() = Unit\n", encoding="utf-8")
 
         evidence = root / "evidence/feishu"
         evidence.mkdir(parents=True)
@@ -282,6 +282,29 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             )
             self.assertIn("REQUIRED_CONTRACT_MISSING", self.codes(self.validate(root, source_root, manifest)))
 
+    def test_ordered_contract_rejects_reversed_semantic_calls(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root, manifest_path, manifest = self.write_fixture(root)
+            manifest["evidence"][0]["implementation"][0]["ordered_patterns"] = [
+                r"applySourceAction\(\);",
+                r"emitSemanticEvent\(\);",
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (root / "src/Widget.kt").write_text(
+                "// UI-TEST-001\nclass EvidenceWidget {\n"
+                " val height = 50f\n"
+                " fun onClick() { emitSemanticEvent(); applySourceAction() }\n"
+                " fun applySourceAction() = Unit\n"
+                " fun emitSemanticEvent() = Unit\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "ORDERED_CONTRACT_MISSING",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
+
     def test_empty_click_and_destructive_snapshot_patterns_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -315,6 +338,18 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             source_root, manifest, _ = self.write_fixture(root)
             (root / "tests/WidgetTest.kt").write_text("// unrelated\n")
             self.assertIn("TEST_MARKER_MISSING", self.codes(self.validate(root, source_root, manifest)))
+
+    def test_declared_test_symbol_must_exist_in_the_test_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root, manifest_path, manifest = self.write_fixture(root)
+            manifest["evidence"][0]["tests"][0]["symbol"] = "widgetMatchesSource"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (root / "tests/WidgetTest.kt").write_text("// UI-TEST-001\n", encoding="utf-8")
+            self.assertIn(
+                "TEST_SYMBOL_MISSING",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
 
     def test_product_scope_cardinality_and_tombstoned_ids_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -375,6 +410,9 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             manifest["evidence"][0]["tests"][0]["symbol"] = "widgetMatchesSource"
             manifest["evidence"][0]["proof_refs"] = ["evidence/feishu/proofs/UI-TEST-001.json"]
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            gate_script = root / "scripts/feishu_evidence_gate.py"
+            gate_script.parent.mkdir(parents=True)
+            gate_script.write_text("# fixture gate v1\n", encoding="utf-8")
             GATE.sync_ledger(root, manifest, write=True)
             proof = root / "evidence/feishu/proofs/UI-TEST-001.json"
             GATE.record_proof(
@@ -388,6 +426,13 @@ class FeishuEvidenceGateTest(unittest.TestCase):
                 None,
                 "fixture",
             )
+            self.assertEqual([], self.validate(root, source_root, manifest_path))
+            gate_script.write_text("# fixture gate v2\n", encoding="utf-8")
+            self.assertIn(
+                "VERIFICATION_PROOF_STALE",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
+            gate_script.write_text("# fixture gate v1\n", encoding="utf-8")
             self.assertEqual([], self.validate(root, source_root, manifest_path))
             (root / "src/Widget.kt").write_text(
                 "// UI-TEST-001\nclass EvidenceWidget { val height = 50f; val changed = true }\n",
