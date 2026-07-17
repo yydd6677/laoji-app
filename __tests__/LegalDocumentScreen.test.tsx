@@ -12,7 +12,7 @@ jest.mock('../src/components/AppDialog', () => ({
   useAppDialog: () => ({ showDialog: mockShowDialog }),
 }));
 
-describe('LegalDocumentScreen links', () => {
+describe('LegalDocumentScreen links [UI-SHELL-001/UI-TOKENS-001]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (Linking.canOpenURL as jest.Mock).mockResolvedValue(true);
@@ -37,6 +37,16 @@ describe('LegalDocumentScreen links', () => {
       params: { kind: 'version' as const },
     } as React.ComponentProps<typeof LegalDocumentScreen>['route'];
     return { view: await render(<LegalDocumentScreen navigation={navigation} route={route} />), navigation };
+  }
+
+  function renderPrivacy() {
+    const navigation = { goBack: jest.fn() } as unknown as React.ComponentProps<typeof LegalDocumentScreen>['navigation'];
+    const route = {
+      key: 'Legal-privacy',
+      name: 'Legal' as const,
+      params: { kind: 'privacy' as const },
+    } as React.ComponentProps<typeof LegalDocumentScreen>['route'];
+    return render(<LegalDocumentScreen navigation={navigation} route={route} />);
   }
 
   it('opens a supported external link', async () => {
@@ -69,10 +79,19 @@ describe('LegalDocumentScreen links', () => {
 
     expect(StyleSheet.flatten(view.getByTestId('legal-about-logo').props.style))
       .toEqual(expect.objectContaining({ width: 72, height: 72, marginTop: 18, borderRadius: 12 }));
+    expect(StyleSheet.flatten(view.getByTestId('legal-about-version').props.style))
+      .toEqual(expect.objectContaining({ fontSize: 18, lineHeight: 24 }));
     expect(StyleSheet.flatten(view.getByTestId('legal-about-group').props.style))
-      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+      .toEqual(expect.objectContaining({ marginHorizontal: 0, marginTop: 12, borderRadius: 0 }));
 
     fireEvent.press(view.getByText('用户协议'));
     expect(navigation.navigate).toHaveBeenCalledWith('Legal', { kind: 'terms' });
+  });
+
+  it('discloses voiceprint upload and deletion in the built-in privacy policy', async () => {
+    const view = await renderPrivacy();
+    expect(view.getByText('讲话人声纹')).toBeTruthy();
+    expect(view.getByText(/单独勾选同意并点击保存/)).toBeTruthy();
+    expect(view.getByText('更新日期：2026-07-16')).toBeTruthy();
   });
 });

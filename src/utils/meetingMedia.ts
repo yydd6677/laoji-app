@@ -11,9 +11,35 @@ type ResumableMeetingLike = {
   audioLocalUri?: string | null;
 };
 
+const MEETING_STATUS_PRIORITY = [
+  '上传受阻',
+  '待上传',
+  '待同步',
+  '录音中',
+  '处理中',
+  '失败',
+  '已完成',
+  '未开始',
+] as const;
+
+// MIN-PLAYER-001: matches the Feishu 7.71.8 speed picker contract.
+export const MEETING_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
+
+export function nextMeetingPlaybackRate(current: number): number {
+  const index = MEETING_PLAYBACK_RATES.findIndex(rate => Math.abs(rate - current) < 0.001);
+  return MEETING_PLAYBACK_RATES[(index + 1 + MEETING_PLAYBACK_RATES.length)
+    % MEETING_PLAYBACK_RATES.length];
+}
+
 export function canResumeMeetingRecording(meeting: ResumableMeetingLike): boolean {
   if (meeting.audioAvailable || meeting.audioLocalUri) return false;
   return ['created', 'recording', 'failed'].includes(meeting.status ?? 'created');
+}
+
+export function preferredMeetingStatusLabel(tags: ReadonlyArray<{ label: string }>): string {
+  return MEETING_STATUS_PRIORITY.find(label => tags.some(tag => tag.label === label))
+    ?? tags[0]?.label
+    ?? '';
 }
 
 export function latestTranscriptWindow<T>(items: T[], maxItems = 40): {

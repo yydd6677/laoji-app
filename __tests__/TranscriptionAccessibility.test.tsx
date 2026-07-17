@@ -395,7 +395,7 @@ describe('TranscriptionScreen accessibility', () => {
     await render(<TranscriptionScreen navigation={navigation} route={route} />);
     await waitFor(() => expect(screen.getByText('无法读取上次总结任务，点击重试可重新生成。')).toBeTruthy());
     await act(async () => {
-      void screen.getByLabelText('生成会议总结').props.onPress();
+      void screen.getByLabelText('重试会议总结').props.onPress();
       await Promise.resolve();
     });
 

@@ -12,12 +12,18 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { CommonTextTitleBar } from '../components/CalendarTitleBar';
-import { Colors as C } from '../theme/colors';
+import { FeishuSaveAction, FeishuSaveState } from '../components/FeishuForm';
+import { AppToast } from '../components/AppToast';
+import { FeishuTitleBar } from '../components/FeishuShell';
 import { EditableProfileField, RootStackParamList } from '../types';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import { readableErrorMessage } from '../services/errors';
+import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-FORM-001 / UI-SHELL-001: field validation drives the title-bar save state.
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'ProfileField'>;
@@ -92,9 +98,24 @@ export function ProfileFieldScreen({ navigation, route }: Props) {
   const [draft, setDraft] = React.useState(originalValue);
   const [saving, setSaving] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
+  const [validationToast, setValidationToast] = React.useState<{ key: number; message: string } | null>(null);
   const normalizedDraft = draft.trim();
   const changed = normalizedDraft !== originalValue;
-  const saveEnabled = !saving;
+  const currentValidation = validateField(field, normalizedDraft);
+  const saveState: FeishuSaveState = saving
+    ? 'fully-disabled'
+    : currentValidation
+      ? 'disabled-with-toast'
+      : 'enabled';
+
+  const showCurrentValidation = () => {
+    if (currentValidation) {
+      setValidationToast(current => ({
+        key: (current?.key ?? 0) + 1,
+        message: currentValidation.message ?? currentValidation.title,
+      }));
+    }
+  };
 
   const handleSave = async () => {
     const validation = validateField(field, normalizedDraft);
@@ -129,16 +150,29 @@ export function ProfileFieldScreen({ navigation, route }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>
-      <CommonTextTitleBar
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <FeishuTitleBar
         title={config.title}
-        leftText="取消"
-        rightText="保存"
-        onLeft={() => navigation.goBack()}
-        onRight={handleSave}
-        rightEnabled={saveEnabled}
-        rightTestID="profile-field-save"
         testID="profile-field-titlebar"
+        leading={(
+          <TouchableOpacity
+            style={s.cancelAction}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="取消"
+          >
+            <Text style={s.cancelText}>取消</Text>
+          </TouchableOpacity>
+        )}
+        trailing={(
+          <FeishuSaveAction
+            state={saveState}
+            onSave={() => { void handleSave(); }}
+            onDisabledPress={showCurrentValidation}
+            disabledHint={currentValidation?.message ?? currentValidation?.title}
+            testID="profile-field-save"
+          />
+        )}
       />
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View
@@ -157,13 +191,13 @@ export function ProfileFieldScreen({ navigation, route }: Props) {
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={config.placeholder}
-            placeholderTextColor={C.faint}
+            placeholderTextColor={F.textPlaceholder}
             maxLength={config.maxLength}
             keyboardType={config.keyboardType}
             autoCapitalize={config.keyboardType === 'email-address' ? 'none' : 'sentences'}
             autoCorrect={config.keyboardType === 'default'}
             returnKeyType="done"
-            onSubmitEditing={() => { if (saveEnabled) void handleSave(); }}
+            onSubmitEditing={() => { if (saveState !== 'fully-disabled') void handleSave(); }}
             accessibilityLabel={config.title}
             testID="profile-field-input"
           />
@@ -179,7 +213,7 @@ export function ProfileFieldScreen({ navigation, route }: Props) {
             <Ionicons
               name="close-circle"
               size={config.clearIconSize}
-              color={draft && (field !== 'phone' || focused) ? C.faint : 'transparent'}
+              color={draft && (field !== 'phone' || focused) ? F.iconTertiary : 'transparent'}
               testID="profile-field-clear-icon"
             />
           </TouchableOpacity>
@@ -188,6 +222,14 @@ export function ProfileFieldScreen({ navigation, route }: Props) {
           <Text style={s.description} testID="profile-field-description">{config.description}</Text>
         ) : null}
       </KeyboardAvoidingView>
+      <AppToast
+        visible={validationToast !== null}
+        message={validationToast?.message ?? ''}
+        presentationKey={validationToast?.key ?? 0}
+        onDismiss={() => setValidationToast(null)}
+        bottom={24}
+        testID="profile-field-validation-toast"
+      />
     </ScreenContainer>
   );
 }
@@ -202,10 +244,10 @@ const s = StyleSheet.create({
     borderRadius: PROFILE_FIELD_GEOMETRY.inputRadius,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.body,
+    backgroundColor: F.backgroundBody,
   },
-  inputGroupIdle: { borderColor: C.border },
-  inputGroupFocused: { borderColor: C.primary },
+  inputGroupIdle: { borderColor: F.divider },
+  inputGroupFocused: { borderColor: F.primary },
   input: {
     flex: 1,
     minWidth: 0,
@@ -213,7 +255,7 @@ const s = StyleSheet.create({
     paddingVertical: 0,
     fontSize: 16,
     lineHeight: 22,
-    color: C.text,
+    color: F.textTitle,
   },
   clearAction: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
   description: {
@@ -221,6 +263,8 @@ const s = StyleSheet.create({
     marginHorizontal: PROFILE_FIELD_GEOMETRY.horizontalMargin + PROFILE_FIELD_GEOMETRY.descriptionHorizontalInset,
     fontSize: 14,
     lineHeight: 20,
-    color: C.faint,
+    color: F.textCaption,
   },
+  cancelAction: { width: 56, height: FEISHU_DIMENSIONS.titleBarHeight, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontSize: 17, lineHeight: 24, color: F.textTitle },
 });

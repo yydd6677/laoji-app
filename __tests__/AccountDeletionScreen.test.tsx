@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { AccountScreen } from '../src/screens/AccountScreen';
 import {
   ACCOUNT_SECURITY_GEOMETRY,
@@ -8,6 +8,7 @@ import {
 } from '../src/screens/ChangePasswordScreen';
 import { NotificationSettingsScreen } from '../src/screens/NotificationSettingsScreen';
 import { AccountDeletionScreen } from '../src/screens/AccountDeletionScreen';
+import { FEISHU_SAVE_GEOMETRY } from '../src/components/FeishuForm';
 import { useAuth } from '../src/store/AuthStore';
 import { changePassword } from '../src/services/auth';
 import {
@@ -44,7 +45,7 @@ jest.mock('../src/services/notifications', () => ({
   scheduleTestNotification: jest.fn(async () => 'test-notification-id'),
 }));
 
-describe('account security pages', () => {
+describe('account security pages [UI-SHELL-001/UI-FORM-001/UI-TOKENS-001]', () => {
   const deleteAccount = jest.fn();
   const signOut = jest.fn();
   const navigation = {
@@ -88,8 +89,8 @@ describe('account security pages', () => {
     expect(view.queryByText('邮箱')).toBeNull();
     expect(view.queryByText('手机号')).toBeNull();
     expect(StyleSheet.flatten(view.getByTestId('account-settings-group').props.style))
-      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
-    expect(StyleSheet.flatten(view.getByTestId('account-setting-0').props.style).minHeight).toBe(54);
+      .toEqual(expect.objectContaining({ marginHorizontal: 0, marginTop: 12, borderRadius: 0 }));
+    expect(StyleSheet.flatten(view.getByTestId('account-setting-0').props.style).minHeight).toBe(52);
 
     await fireEvent.press(view.getByTestId('account-setting-0'));
     expect(navigation.navigate).toHaveBeenCalledWith('ChangePassword');
@@ -119,7 +120,7 @@ describe('account security pages', () => {
     expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '密码与安全' }));
   });
 
-  it('routes the existing deletion deep link to the dedicated page', async () => {
+  it('routes the account deletion section parameter to the dedicated page', async () => {
     const route = {
       key: 'account-deletion-route',
       name: 'Account' as const,
@@ -142,10 +143,13 @@ describe('account security pages', () => {
 
     expect(StyleSheet.flatten(view.getByTestId('change-password-current-field').props.style).height)
       .toBe(ACCOUNT_SECURITY_GEOMETRY.inputHeight);
-    expect(StyleSheet.flatten(view.getByTestId('change-password-submit').props.style)).toEqual(expect.objectContaining({
-      height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
-      borderRadius: ACCOUNT_SECURITY_GEOMETRY.actionRadius,
-    }));
+    expect(FEISHU_SAVE_GEOMETRY).toEqual({ width: 64, height: 44 });
+    expect(StyleSheet.flatten(view.getByTestId('change-password-footer').props.style))
+      .toEqual(expect.objectContaining({ width: 64, height: 44 }));
+
+    await fireEvent.press(view.getByTestId('change-password-submit'));
+    expect(view.getByTestId('change-password-validation-toast')).toBeTruthy();
+    expect(view.getByText('请填写当前密码、新密码和确认密码')).toBeTruthy();
 
     await fireEvent.changeText(view.getByTestId('change-password-current'), 'OldPassword123');
     await fireEvent.changeText(view.getByTestId('change-password-new'), 'NewPassword123');
@@ -163,6 +167,8 @@ describe('account security pages', () => {
     );
 
     expect(view.getByText('删除后无法恢复')).toBeTruthy();
+    expect(view.getByLabelText('当前密码')).toBeTruthy();
+    expect(view.getByLabelText('删除账号确认文字')).toBeTruthy();
     expect(view.getByTestId('confirm-account-deletion').props.disabled).toBe(true);
     expect(StyleSheet.flatten(view.getByTestId('confirm-account-deletion').props.style)).toEqual(expect.objectContaining({
       height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
@@ -176,8 +182,8 @@ describe('account security pages', () => {
 
     await waitFor(() => {
       expect(deleteAccount).toHaveBeenCalledWith('Password123', '删除账号');
-      expect(navigation.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Login' }] });
     });
+    expect(navigation.reset).not.toHaveBeenCalled();
     expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({
       title: '账号已删除',
       tone: 'success',
@@ -225,6 +231,20 @@ describe('account security pages', () => {
     }));
     expect(view.getByTestId('notification-reminder-15').props.accessibilityState.selected).toBe(true);
     expect(view.getByTestId('notification-reminder-30').props.accessibilityState.selected).toBe(false);
+  });
+
+  it('refreshes notification permission after returning from system settings', async () => {
+    (getNotificationPermissionStatus as jest.Mock)
+      .mockResolvedValueOnce('denied')
+      .mockResolvedValueOnce('granted');
+    const view = await render(
+      <NotificationSettingsScreen navigation={navigation as unknown as React.ComponentProps<typeof NotificationSettingsScreen>['navigation']} />,
+    );
+
+    await waitFor(() => expect(view.getByText('系统通知未开启')).toBeTruthy());
+    const callback = (AppState.addEventListener as jest.Mock).mock.calls.at(-1)?.[1];
+    callback?.('active');
+    await waitFor(() => expect(view.getByText('系统通知已开启')).toBeTruthy());
   });
 
   it('reports notification permission failures without leaving the row busy', async () => {

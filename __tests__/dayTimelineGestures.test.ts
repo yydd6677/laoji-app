@@ -34,6 +34,26 @@ describe('day timeline gesture projection', () => {
     })).toEqual({ start: 600, end: 615 });
   });
 
+  it('supports the 30-minute quick-create snap and minimum duration', () => {
+    expect(projectTimelineEdit({
+      kind: 'move',
+      original: { start: 570, end: 600 },
+      deltaPixels: 20,
+      pixelsPerMinute: 1,
+      snapIntervalMinutes: 30,
+      minDurationMinutes: 30,
+    })).toEqual({ start: 600, end: 630 });
+
+    expect(projectTimelineEdit({
+      kind: 'resize-start',
+      original: { start: 570, end: 600 },
+      deltaPixels: 40,
+      pixelsPerMinute: 1,
+      snapIntervalMinutes: 30,
+      minDurationMinutes: 30,
+    })).toEqual({ start: 570, end: 600 });
+  });
+
   it('requests proportional auto-scroll only inside viewport edges', () => {
     expect(timelineEdgeScrollStep(32, 640)).toBe(-14);
     expect(timelineEdgeScrollStep(320, 640)).toBe(0);

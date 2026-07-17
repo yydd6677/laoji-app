@@ -48,6 +48,9 @@ const base = {
       'INTERNET',
       'ACCESS_NETWORK_STATE',
       'POST_NOTIFICATIONS',
+      'FOREGROUND_SERVICE',
+      'FOREGROUND_SERVICE_MICROPHONE',
+      'FOREGROUND_SERVICE_MEDIA_PLAYBACK',
     ],
     blockedPermissions: [
       'android.permission.READ_MEDIA_IMAGES',
@@ -65,7 +68,12 @@ const base = {
     './plugins/withAndroidCleartextTraffic',
     './plugins/withAndroidReleaseSigning',
     './plugins/withAndroidReleaseOptimizations',
-    ['expo-av', { microphonePermission: '老记需要麦克风权限，用于语音输入日程。' }],
+    './plugins/withLaojiNativePlatform',
+    ['expo-audio', {
+      microphonePermission: '老记需要麦克风权限，用于语音输入日程。',
+      recordAudioAndroid: true,
+    }],
+    'expo-asset',
     'expo-font',
     'expo-localization',
     'expo-secure-store',

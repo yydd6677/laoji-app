@@ -34,6 +34,7 @@ describe('scoped event notification registry', () => {
   let nextNotificationId = 1;
 
   beforeEach(async () => {
+    jest.useRealTimers();
     jest.clearAllMocks();
     storage.clear();
     scheduledNotifications.clear();
@@ -56,6 +57,7 @@ describe('scoped event notification registry', () => {
     (Notifications.getAllScheduledNotificationsAsync as jest.Mock).mockReset().mockImplementation(async () => (
       [...scheduledNotifications.values()]
     ));
+    (Notifications.dismissNotificationAsync as jest.Mock).mockReset().mockResolvedValue(undefined);
     await switchEventNotificationScope(null, null);
     jest.clearAllMocks();
   });
@@ -246,6 +248,82 @@ describe('scoped event notification registry', () => {
     expect([...scheduledNotifications.keys()]).toEqual(['notification-1']);
     const registry = JSON.parse(storage.get(`${REGISTRY_PREFIX}user:duplicates`)!);
     expect(registry[registryEventKey(event)].pendingCancellationIds).toEqual([]);
+  });
+
+  it('does not recreate a late reminder after its scheduled request has fired', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 55, 0));
+    await switchEventNotificationScope(null, 'guest');
+    const event = timedEvent('late-reminder', {
+      startDate: '2026-07-17',
+      startTime: '15:00',
+    });
+
+    const first = await reconcileEventNotifications('guest', [event]);
+    const firstId = first[event.id];
+    expect(firstId).toBe('notification-1');
+    const scheduled = JSON.parse(storage.get(`${REGISTRY_PREFIX}guest`)!)[registryEventKey(event)];
+    expect(scheduled.scheduledFireAt).toBe('2026-07-17T06:55:01.000Z');
+
+    scheduledNotifications.delete(firstId!);
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 55, 2));
+    (Notifications.scheduleNotificationAsync as jest.Mock).mockClear();
+
+    const restored = await reconcileEventNotifications('guest', [event]);
+
+    expect(restored[event.id]).toBe(firstId);
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    const delivered = JSON.parse(storage.get(`${REGISTRY_PREFIX}guest`)!)[registryEventKey(event)];
+    expect(delivered).toEqual(expect.objectContaining({
+      notificationId: firstId,
+      deliveredAt: '2026-07-17T06:55:01.000Z',
+    }));
+  });
+
+  it('reschedules a changed event after an earlier reminder was delivered', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 55, 0));
+    await switchEventNotificationScope(null, 'guest:edited');
+    const event = timedEvent('edited-after-delivery', {
+      startDate: '2026-07-17',
+      startTime: '15:00',
+    });
+    const first = await reconcileEventNotifications('guest:edited', [event]);
+    scheduledNotifications.delete(first[event.id]!);
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 55, 2));
+    await reconcileEventNotifications('guest:edited', [event]);
+    (Notifications.scheduleNotificationAsync as jest.Mock).mockClear();
+
+    const changed = { ...event, startTime: '15:30' };
+    const next = await reconcileEventNotifications('guest:edited', [changed]);
+
+    expect(next[event.id]).toBe('notification-2');
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs a missing OS request when its persisted fire time is still in the future', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 0, 0));
+    await switchEventNotificationScope(null, 'guest:repair');
+    const event = timedEvent('missing-before-fire', {
+      startDate: '2026-07-17',
+      startTime: '15:00',
+    });
+    const first = await reconcileEventNotifications('guest:repair', [event]);
+    scheduledNotifications.delete(first[event.id]!);
+    jest.setSystemTime(new Date(2026, 6, 17, 14, 10, 0));
+    (Notifications.scheduleNotificationAsync as jest.Mock).mockClear();
+
+    const repaired = await reconcileEventNotifications('guest:repair', [event]);
+
+    expect(repaired[event.id]).toBe('notification-2');
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    const registry = JSON.parse(storage.get(`${REGISTRY_PREFIX}guest:repair`)!);
+    expect(registry[registryEventKey(event)]).toEqual(expect.objectContaining({
+      notificationId: 'notification-2',
+      deliveredAt: null,
+      scheduledFireAt: '2026-07-17T06:45:00.000Z',
+    }));
   });
 
   it('retains a registry entry when OS cancellation fails so cleanup can retry', async () => {

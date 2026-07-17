@@ -14,7 +14,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Waveform } from '../components/Common';
@@ -39,6 +39,7 @@ import {
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
+import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -189,7 +190,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, [status]);
 
   const restorePlaybackAudioMode = useCallback(async () => {
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -252,6 +253,15 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           token,
           { fileName: `${meetingIdToUpload}.wav`, mimeType: 'audio/wav' },
         ),
+        enqueuePersistentUpload: (pending, token) => enqueueNativeMeetingUpload({
+          scope: recordingStorageScope,
+          accessToken: token,
+          meetingId: pending.meetingId,
+          operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
+          fileUri: pending.audioUri,
+          mimeType: pending.mimeType,
+          fileName: pending.fileName,
+        }),
         updateStatus: updateMeetingStatus,
         refreshMeetings,
       });
@@ -367,14 +377,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       if (!mountedRef.current) throw new MeetingStartCancelledError();
     };
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       ensureScreenActive();
       if (!permission.granted) {
         setStatus('idle');
         showDialog({ title: '无法录音', message: '请允许麦克风权限后再开始会议。', tone: 'warning' });
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       ensureScreenActive();
       const reusableMeeting = existing ?? (meetingId ? meetings.find(item => item.id === meetingId) : undefined);
       reusableStatus = reusableMeeting?.status ?? 'created';

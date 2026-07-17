@@ -6,8 +6,8 @@ import {
   PROFILE_FIELD_SCREEN_OPTIONS,
   ProfileFieldScreen,
 } from '../src/screens/ProfileFieldScreen';
-import { COMMON_TEXT_TITLE_BAR_GEOMETRY } from '../src/components/CalendarTitleBar';
-import { Colors as C } from '../src/theme/colors';
+import { FEISHU_SHELL_GEOMETRY } from '../src/components/FeishuShell';
+import { FEISHU_LIGHT_COLORS } from '../src/theme/feishuTokens';
 import { useAuth } from '../src/store/AuthStore';
 
 const mockShowDialog = jest.fn();
@@ -30,7 +30,7 @@ const profile = {
   avatarLocalUri: null,
 };
 
-describe('ProfileFieldScreen source-aligned editing flow', () => {
+describe('ProfileFieldScreen source-aligned editing flow [UI-FORM-001/UI-SHELL-001]', () => {
   const updateProfile = jest.fn();
   const goBack = jest.fn();
   const navigation = { goBack } as unknown as React.ComponentProps<typeof ProfileFieldScreen>['navigation'];
@@ -57,18 +57,12 @@ describe('ProfileFieldScreen source-aligned editing flow', () => {
     expect(view.getByLabelText('保存')).toBeTruthy();
     expect(view.getByLabelText('保存').props.accessibilityState).toEqual({ disabled: false });
     expect(PROFILE_FIELD_SCREEN_OPTIONS).toEqual({ animation: 'slide_from_bottom' });
-    expect(COMMON_TEXT_TITLE_BAR_GEOMETRY).toEqual(expect.objectContaining({
-      height: 44,
-      titleSize: 18,
-      actionSize: 17,
-      leftPaddingStart: 15,
-      rightPaddingEnd: 15,
-    }));
+    expect(FEISHU_SHELL_GEOMETRY.titleBarHeight).toBe(44);
     expect(StyleSheet.flatten(view.getByTestId('profile-field-titlebar').props.style)).toEqual(
       expect.objectContaining({ height: 44 }),
     );
     expect(StyleSheet.flatten(view.getByTestId('profile-field-titlebar-title').props.style)).toEqual(
-      expect.objectContaining({ fontSize: 18, fontWeight: '400', left: 66, right: 66 }),
+      expect.objectContaining({ fontSize: 17, fontWeight: '600', left: 64, right: 64 }),
     );
     expect(view.getByTestId('profile-field-input').props.value).toBe('老记用户');
     expect(StyleSheet.flatten(view.getByTestId('profile-field-input-group').props.style)).toEqual(
@@ -77,11 +71,11 @@ describe('ProfileFieldScreen source-aligned editing flow', () => {
         marginHorizontal: 16,
         marginTop: 16,
         borderRadius: 6,
-        borderColor: C.border,
+        borderColor: FEISHU_LIGHT_COLORS.divider,
       }),
     );
     await fireEvent(view.getByTestId('profile-field-input'), 'focus');
-    expect(StyleSheet.flatten(view.getByTestId('profile-field-input-group').props.style).borderColor).toBe(C.primary);
+    expect(StyleSheet.flatten(view.getByTestId('profile-field-input-group').props.style).borderColor).toBe(FEISHU_LIGHT_COLORS.primary);
 
     await fireEvent.press(view.getByLabelText('取消'));
     expect(goBack).toHaveBeenCalledTimes(1);
@@ -100,15 +94,14 @@ describe('ProfileFieldScreen source-aligned editing flow', () => {
     expect(goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps invalid email on the editor page and shows the custom error', async () => {
+  it('keeps invalid email on the editor page and explains the disabled save with UI-OVERLAY-001 toast', async () => {
     const view = await render(<ProfileFieldScreen navigation={navigation} route={route('email')} />);
     await fireEvent.changeText(view.getByTestId('profile-field-input'), 'not-an-email');
     await fireEvent.press(view.getByLabelText('保存'));
 
-    expect(mockShowDialog).toHaveBeenCalledWith(expect.objectContaining({
-      title: '邮箱格式不正确',
-      tone: 'warning',
-    }));
+    expect(view.getByTestId('profile-field-validation-toast')).toBeTruthy();
+    expect(view.getByText('请输入有效邮箱地址，或清空后保存。')).toBeTruthy();
+    expect(mockShowDialog).not.toHaveBeenCalled();
     expect(updateProfile).not.toHaveBeenCalled();
     expect(goBack).not.toHaveBeenCalled();
   });

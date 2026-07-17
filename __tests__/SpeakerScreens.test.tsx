@@ -6,7 +6,7 @@ import { SpeakerEnrollmentScreen } from '../src/screens/SpeakerEnrollmentScreen'
 import { useAuth } from '../src/store/AuthStore';
 import { fetchSpeakers, registerSpeaker } from '../src/services/speakers';
 import { deleteLocalWavRecording, startLocalWavRecording } from '../src/services/realtimeAsr';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
 jest.mock('@react-navigation/native', () => ({
@@ -38,11 +38,9 @@ jest.mock('../src/services/realtimeAsr', () => ({
   deleteLocalWavRecording: jest.fn(async () => undefined),
   startLocalWavRecording: jest.fn(),
 }));
-jest.mock('expo-av', () => ({
-  Audio: {
-    requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
-    setAudioModeAsync: jest.fn(async () => undefined),
-  },
+jest.mock('expo-audio', () => ({
+  requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  setAudioModeAsync: jest.fn(async () => undefined),
 }));
 
 const navigation = {
@@ -169,7 +167,7 @@ describe('speaker management screens', () => {
 
   it('surfaces microphone permission request failures without starting native recording', async () => {
     (useAuth as jest.Mock).mockReturnValue({ isGuest: false, accessToken: 'token-7' });
-    (Audio.requestPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error('permission service unavailable'));
+    (requestRecordingPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error('permission service unavailable'));
     const route = { key: 'speaker', name: 'SpeakerEnrollment', params: undefined } as unknown as React.ComponentProps<typeof SpeakerEnrollmentScreen>['route'];
     const enrollmentNavigation = navigation as unknown as React.ComponentProps<typeof SpeakerEnrollmentScreen>['navigation'];
     await render(<SpeakerEnrollmentScreen navigation={enrollmentNavigation} route={route} />);
@@ -262,9 +260,9 @@ describe('speaker management screens', () => {
       await fireEvent.press(screen.getByLabelText('停止录制音色'));
       expect(await screen.findByText('录音已就绪')).toBeTruthy();
       expect(screen.getByLabelText('重新录制音色')).toBeTruthy();
-      expect(Audio.setAudioModeAsync).toHaveBeenLastCalledWith({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
+      expect(setAudioModeAsync).toHaveBeenLastCalledWith({
+        allowsRecording: false,
+        playsInSilentMode: true,
       });
       await fireEvent.press(screen.getByLabelText('保存新讲话人音色'));
 

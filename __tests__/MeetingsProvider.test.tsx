@@ -507,6 +507,33 @@ describe('MeetingsProvider lifecycle and cache', () => {
     expect(storage.has('@laoji:pendingMeetingAudioUploads:v2:user:9')).toBe(false);
   });
 
+  it('rejects deleting an active recording before any cloud or file cleanup starts', async () => {
+    (useAuth as jest.Mock).mockReturnValue({
+      mode: 'authenticated',
+      session: { user: { id: 9 } },
+      accessToken: 'token-9',
+    });
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    (fetchAllMeetings as jest.Mock).mockResolvedValue([{
+      id: 'active-meeting',
+      title: '正在录制',
+      status: 'recording',
+      created_at: '2026-07-17T04:00:00+08:00',
+      updated_at: '2026-07-17T04:01:00+08:00',
+    }]);
+
+    await render(<MeetingsProvider><Probe /></MeetingsProvider>);
+    await waitFor(() => expect(current?.meetings).toHaveLength(1));
+    await act(async () => {
+      await expect(current?.deleteMeeting('active-meeting'))
+        .rejects.toThrow('请先结束并保存当前会议录音');
+    });
+
+    expect(apiDeleteMeeting).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+    expect(current?.meetings).toHaveLength(1);
+  });
+
   it('does not restore a cloud-deleted meeting when only local audio cleanup fails', async () => {
     (useAuth as jest.Mock).mockReturnValue({
       mode: 'authenticated',

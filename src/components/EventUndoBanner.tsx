@@ -4,8 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
-import { Colors as C } from '../theme/colors';
-import { BOTTOM_TAB_BAR_GEOMETRY, getBottomTabBarFloatingTopInset } from './BottomTabBar';
+import { getFeishuTokens } from '../theme/feishuTokens';
+import { getNativeBottomBarHeight } from '../navigation/nativeBottomBarGeometry';
+
+const tokens = getFeishuTokens('light');
 
 export function EventUndoBanner() {
   const { lastDeleted, undoDelete } = useEvents();
@@ -32,8 +34,7 @@ export function EventUndoBanner() {
       style={[
         s.banner,
         {
-          bottom: getBottomTabBarFloatingTopInset(insets.bottom)
-            + BOTTOM_TAB_BAR_GEOMETRY.floatingOverlayGap,
+          bottom: getNativeBottomBarHeight(insets.bottom) + 12,
         },
       ]}
       accessibilityRole="alert"
@@ -58,7 +59,7 @@ const s = StyleSheet.create({
   banner: {
     position: 'absolute',
     left: 16,
-    right: 76,
+    right: 16,
     minHeight: 50,
     zIndex: 50,
     elevation: 6,
@@ -67,13 +68,13 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: C.text,
+    backgroundColor: tokens.colors.backgroundTips,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.16,
     shadowRadius: 7,
   },
-  text: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '500' },
+  text: { flex: 1, color: tokens.colors.onTips, fontSize: 13, fontWeight: '500' },
   undoButton: { minWidth: 52, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
   undoText: { color: '#8FB4FF', fontSize: 13, fontWeight: '600' },
 });

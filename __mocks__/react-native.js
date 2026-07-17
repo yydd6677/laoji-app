@@ -47,6 +47,7 @@ const FlatList = React.forwardRef((props, ref) => {
 module.exports = {
   Platform: { OS: 'android', select: values => values?.android ?? values?.default },
   StyleSheet: {
+    absoluteFillObject: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
     create: styles => styles,
     flatten: style => Array.isArray(style)
       ? Object.assign({}, ...style.filter(Boolean).map(item => item || {}))
@@ -84,6 +85,11 @@ module.exports = {
   AppState: {
     currentState: 'active',
     addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+  },
+  PermissionsAndroid: {
+    PERMISSIONS: { RECORD_AUDIO: 'android.permission.RECORD_AUDIO' },
+    RESULTS: { GRANTED: 'granted', DENIED: 'denied', NEVER_ASK_AGAIN: 'never_ask_again' },
+    request: jest.fn(async () => 'granted'),
   },
   BackHandler: {
     addEventListener: jest.fn(() => ({ remove: jest.fn() })),

@@ -1,0 +1,13 @@
+{
+  "name": "laoji-native-platform",
+  "version": "1.0.0",
+  "description": "Source-mapped Android presentation and audio runtime for LaoJi.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

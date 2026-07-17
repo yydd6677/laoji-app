@@ -2,7 +2,6 @@ import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation';
 import { AuthProvider } from './src/store/AuthStore';
@@ -17,9 +16,10 @@ import { NotificationPermissionPrimer } from './src/components/NotificationPermi
 import { AppReadinessGate } from './src/components/AppReadinessGate';
 import { NotificationNavigationHandler } from './src/components/NotificationNavigationHandler';
 import {
-  flushPendingNotificationNavigation,
-  navigationRef,
-} from './src/navigation/notificationNavigation';
+  NavigationStateProvider,
+  RestorableNavigationContainer,
+} from './src/navigation/NavigationStateCoordinator';
+import { NativePlatformCoordinator } from './src/components/NativePlatformCoordinator';
 
 assertProductionApiConfig();
 
@@ -31,29 +31,28 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <AppReadinessGate>
-          <EventsProvider>
-            <MeetingsProvider>
-              <AppDialogProvider>
-                <NotificationPermissionPrimer />
+        <NavigationStateProvider>
+          <NativePlatformCoordinator />
+          <AppReadinessGate>
+            <EventsProvider>
+              <MeetingsProvider>
                 <AppLockGate>
-                  <View style={{ flex: 1 }}>
-                    <NavigationContainer
-                      ref={navigationRef}
-                      onReady={() => { void flushPendingNotificationNavigation(); }}
-                      onStateChange={() => { void flushPendingNotificationNavigation(); }}
-                    >
-                      <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                      <RootNavigator />
-                      <NotificationNavigationHandler />
-                    </NavigationContainer>
-                    <EventUndoBanner />
-                  </View>
+                  <AppDialogProvider>
+                    <NotificationPermissionPrimer />
+                    <View style={{ flex: 1 }}>
+                      <RestorableNavigationContainer>
+                        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                        <RootNavigator />
+                        <NotificationNavigationHandler />
+                      </RestorableNavigationContainer>
+                      <EventUndoBanner />
+                    </View>
+                  </AppDialogProvider>
                 </AppLockGate>
-              </AppDialogProvider>
-            </MeetingsProvider>
-          </EventsProvider>
-        </AppReadinessGate>
+              </MeetingsProvider>
+            </EventsProvider>
+          </AppReadinessGate>
+        </NavigationStateProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

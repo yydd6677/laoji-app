@@ -65,7 +65,7 @@ describe('responsive profile and meeting states', () => {
     });
   });
 
-  it('exposes each profile field directly and keeps utility entries behind settings', async () => {
+  it('exposes each profile field in the UI-TOKENS-001 full-width settings surface', async () => {
     const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof ProfileScreen>['navigation'];
     await render(<ProfileScreen navigation={navigation} />);
 
@@ -83,7 +83,7 @@ describe('responsive profile and meeting states', () => {
     expect(screen.queryByLabelText('编辑资料')).toBeNull();
 
     expect(StyleSheet.flatten(screen.getByTestId('profile-settings-group').props.style))
-      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+      .toEqual(expect.objectContaining({ marginHorizontal: 0, marginTop: 12, borderRadius: 0 }));
     expect(StyleSheet.flatten(screen.getByTestId('profile-avatar-picker').props.style).minHeight).toBe(64);
     expect(StyleSheet.flatten(screen.getByTestId('profile-nickname-row').props.style).minHeight).toBe(52);
 

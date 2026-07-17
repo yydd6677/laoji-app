@@ -19,7 +19,7 @@ jest.mock('../src/components/AppDialog', () => ({
 }));
 jest.mock('../src/services/auth', () => ({ requestPasswordReset: jest.fn() }));
 
-describe('LoginScreen accessibility', () => {
+describe('LoginScreen accessibility [UI-SHELL-001/UI-FORM-001]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     signIn.mockResolvedValue(undefined);
@@ -34,16 +34,21 @@ describe('LoginScreen accessibility', () => {
     });
   });
 
-  it('uses the source account geometry before entering the password step', async () => {
+  it('uses the source shell and stable account geometry before entering the password step', async () => {
     const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof LoginScreen>['navigation'];
     await render(<LoginScreen navigation={navigation} />);
 
     expect(StyleSheet.flatten(screen.getByTestId('login-logo').props.style))
       .toEqual(expect.objectContaining({ width: 56, height: 56, borderRadius: 10 }));
+    expect(StyleSheet.flatten(screen.getByTestId('login-titlebar').props.style))
+      .toEqual(expect.objectContaining({ height: 44 }));
     expect(StyleSheet.flatten(screen.getByTestId('login-next').props.style))
       .toEqual(expect.objectContaining({ height: 48, borderRadius: 6, marginTop: 16 }));
     expect(screen.queryByTestId('login-password-input')).toBeNull();
 
+    expect(screen.getByLabelText('同意用户协议和隐私政策').props.accessibilityState)
+      .toEqual({ checked: false });
+    await fireEvent.press(screen.getByTestId('login-terms-checkbox'));
     await fireEvent.changeText(screen.getByTestId('login-account-input'), 'user@example.com');
     await fireEvent.press(screen.getByTestId('login-next'));
 
@@ -57,6 +62,7 @@ describe('LoginScreen accessibility', () => {
     const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof LoginScreen>['navigation'];
     await render(<LoginScreen navigation={navigation} />);
 
+    await fireEvent.press(screen.getByTestId('login-terms-checkbox'));
     await fireEvent.changeText(screen.getByTestId('login-account-input'), 'user@example.com');
     await fireEvent.press(screen.getByTestId('login-next'));
     await waitFor(() => expect(screen.getByTestId('login-password-input')).toBeTruthy());
@@ -72,6 +78,7 @@ describe('LoginScreen accessibility', () => {
     const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof LoginScreen>['navigation'];
     await render(<LoginScreen navigation={navigation} />);
 
+    await fireEvent.press(screen.getByTestId('login-terms-checkbox'));
     await fireEvent.changeText(screen.getByTestId('login-account-input'), 'new@example.com');
     await fireEvent.press(screen.getByText('立即注册'));
     await waitFor(() => expect(screen.getByText('设置密码')).toBeTruthy());
@@ -81,6 +88,21 @@ describe('LoginScreen accessibility', () => {
 
     await waitFor(() => expect(register).toHaveBeenCalledWith('new@example.com', 'Password123'));
     expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it('blocks account and guest continuation until the legal agreement is checked', async () => {
+    const navigation = { navigate: jest.fn() } as unknown as React.ComponentProps<typeof LoginScreen>['navigation'];
+    await render(<LoginScreen navigation={navigation} />);
+
+    await fireEvent.changeText(screen.getByTestId('login-account-input'), 'user@example.com');
+    await fireEvent.press(screen.getByTestId('login-next'));
+    expect(screen.queryByTestId('login-password-step')).toBeNull();
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '请先阅读并同意' }));
+
+    showDialog.mockClear();
+    await fireEvent.press(screen.getByTestId('login-guest'));
+    expect(continueAsGuest).not.toHaveBeenCalled();
+    expect(showDialog).toHaveBeenCalledWith(expect.objectContaining({ title: '请先阅读并同意' }));
   });
 
   it('shows the custom re-login dialog once after session invalidation', async () => {

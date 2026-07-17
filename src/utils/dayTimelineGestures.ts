@@ -11,13 +11,20 @@ export function projectTimelineEdit({
   original,
   deltaPixels,
   pixelsPerMinute,
+  snapIntervalMinutes = TIMELINE_SNAP_MINUTES,
+  minDurationMinutes = TIMELINE_MIN_DURATION_MINUTES,
 }: {
   kind: TimelineEditKind;
   original: TimelineMinuteRange;
   deltaPixels: number;
   pixelsPerMinute: number;
+  snapIntervalMinutes?: number;
+  minDurationMinutes?: number;
 }): TimelineMinuteRange {
-  const deltaMinutes = snapMinutes(deltaPixels / Math.max(Number.EPSILON, pixelsPerMinute));
+  const deltaMinutes = snapMinutes(
+    deltaPixels / Math.max(Number.EPSILON, pixelsPerMinute),
+    snapIntervalMinutes,
+  );
   if (kind === 'move') {
     const duration = original.end - original.start;
     const start = clamp(original.start + deltaMinutes, 0, DAY_MINUTES - duration);
@@ -28,7 +35,7 @@ export function projectTimelineEdit({
       start: clamp(
         original.start + deltaMinutes,
         0,
-        original.end - TIMELINE_MIN_DURATION_MINUTES,
+        original.end - minDurationMinutes,
       ),
       end: original.end,
     };
@@ -37,7 +44,7 @@ export function projectTimelineEdit({
     start: original.start,
     end: clamp(
       original.end + deltaMinutes,
-      original.start + TIMELINE_MIN_DURATION_MINUTES,
+      original.start + minDurationMinutes,
       DAY_MINUTES,
     ),
   };
@@ -59,8 +66,9 @@ export function timelineEdgeScrollStep(
   return 0;
 }
 
-function snapMinutes(value: number): number {
-  return Math.round(value / TIMELINE_SNAP_MINUTES) * TIMELINE_SNAP_MINUTES;
+function snapMinutes(value: number, intervalMinutes: number): number {
+  const safeInterval = Math.max(1, intervalMinutes);
+  return Math.round(value / safeInterval) * safeInterval;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

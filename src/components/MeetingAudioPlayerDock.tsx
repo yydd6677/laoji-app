@@ -9,14 +9,23 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import {
+  AudioPlayer,
+  AudioStatus,
+  createAudioPlayer,
+  setAudioModeAsync,
+} from 'expo-audio';
 import { Colors as C } from '../theme/colors';
 import { Meeting } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from '../services/api';
 import { useAppDialog } from './AppDialog';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from '../services/meetingAudioSecurity';
 import { readableErrorMessage } from '../services/errors';
-import { formatDuration, shouldReplayAudio } from '../utils/meetingMedia';
+import {
+  formatDuration,
+  nextMeetingPlaybackRate,
+  shouldReplayAudio,
+} from '../utils/meetingMedia';
 
 export const MEETING_AUDIO_PLAYER_GEOMETRY = Object.freeze({
   seekSectionHeight: 44,
@@ -61,16 +70,23 @@ export function MeetingAudioPlayerDock({
   const [durationMs, setDurationMs] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [trackWidth, setTrackWidth] = useState(1);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const statusSubscriptionRef = useRef<{ remove(): void } | null>(null);
+
+  const disposePlayer = () => {
+    statusSubscriptionRef.current?.remove();
+    statusSubscriptionRef.current = null;
+    const player = playerRef.current;
+    playerRef.current = null;
+    player?.remove();
+  };
 
   useEffect(() => {
     let alive = true;
     const fallbackAudio = localAudioInfo(meeting.audioLocalUri);
     const knownDurationSec = meeting.audioDurationSec ?? fallbackDurationSec;
 
-    const previousSound = soundRef.current;
-    soundRef.current = null;
-    if (previousSound) void previousSound.unloadAsync().catch(() => {});
+    disposePlayer();
     setPlaying(false);
     setPositionMs(0);
     setDurationMs(knownDurationSec > 0 ? Math.round(knownDurationSec * 1000) : 0);
@@ -105,24 +121,22 @@ export function MeetingAudioPlayerDock({
   }, [accessToken, fallbackDurationSec, isGuest, meeting.audioDurationSec, meeting.audioLocalUri, meeting.id, reloadKey]);
 
   useEffect(() => () => {
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) void sound.unloadAsync().catch(() => {});
+    disposePlayer();
   }, []);
 
-  const handlePlaybackStatus = (status: AVPlaybackStatus) => {
+  const handlePlaybackStatus = (status: AudioStatus) => {
     if (!status.isLoaded) {
       setPlaying(false);
       return;
     }
-    setPlaying(status.isPlaying);
-    setPositionMs(status.positionMillis ?? 0);
-    if (status.durationMillis) setDurationMs(status.durationMillis);
+    setPlaying(status.playing);
+    setPositionMs(Math.round(status.currentTime * 1000));
+    if (status.duration > 0) setDurationMs(Math.round(status.duration * 1000));
   };
 
-  const ensureSound = async (): Promise<Audio.Sound | null> => {
+  const ensurePlayer = async (): Promise<AudioPlayer | null> => {
     if (!audioInfo) return null;
-    if (soundRef.current) return soundRef.current;
+    if (playerRef.current) return playerRef.current;
     setAudioLoading(true);
     setAudioError('');
     try {
@@ -133,16 +147,17 @@ export function MeetingAudioPlayerDock({
           requiresAuth: audioInfo.requires_auth,
           expiresAt: audioInfo.expires_at,
         });
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-      const created = await Audio.Sound.createAsync(
+      await setAudioModeAsync({ playsInSilentMode: true });
+      const created = createAudioPlayer(
         audioInfo.requires_auth && accessToken
           ? { uri: sourceUrl, headers: { Authorization: `Bearer ${accessToken}` } }
           : { uri: sourceUrl },
-        { shouldPlay: false, rate: speed, shouldCorrectPitch: true },
-        handlePlaybackStatus,
+        { updateInterval: 200 },
       );
-      soundRef.current = created.sound;
-      return created.sound;
+      created.setPlaybackRate(speed);
+      statusSubscriptionRef.current = created.addListener('playbackStatusUpdate', handlePlaybackStatus);
+      playerRef.current = created;
+      return created;
     } catch (error) {
       setAudioInfo(null);
       setAudioError(meetingAudioUrlErrorMessage(error) ?? '录音加载失败，请稍后重试');
@@ -153,9 +168,7 @@ export function MeetingAudioPlayerDock({
   };
 
   const failPlayback = async (error: unknown) => {
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) await sound.unloadAsync().catch(() => {});
+    disposePlayer();
     setPlaying(false);
     setAudioInfo(null);
     setAudioError(meetingAudioUrlErrorMessage(error)
@@ -163,9 +176,7 @@ export function MeetingAudioPlayerDock({
   };
 
   const retryAudio = async () => {
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) await sound.unloadAsync().catch(() => {});
+    disposePlayer();
     setPlaying(false);
     setPositionMs(0);
     setAudioError('');
@@ -182,11 +193,13 @@ export function MeetingAudioPlayerDock({
       return;
     }
     try {
-      const sound = await ensureSound();
-      if (!sound) return;
-      if (isPlaying) await sound.pauseAsync();
-      else if (shouldReplayAudio(positionMs, durationMs)) await sound.replayAsync();
-      else await sound.playAsync();
+      const player = await ensurePlayer();
+      if (!player) return;
+      if (isPlaying) player.pause();
+      else {
+        if (shouldReplayAudio(positionMs, durationMs)) await player.seekTo(0);
+        player.play();
+      }
     } catch (error) {
       await failPlayback(error);
     }
@@ -195,10 +208,10 @@ export function MeetingAudioPlayerDock({
   const seekTo = async (nextPositionMs: number) => {
     if (!durationMs || !audioInfo) return;
     try {
-      const sound = await ensureSound();
-      if (!sound) return;
+      const player = await ensurePlayer();
+      if (!player) return;
       const clampedPosition = Math.min(durationMs, Math.max(0, nextPositionMs));
-      await sound.setPositionAsync(clampedPosition);
+      await player.seekTo(clampedPosition / 1000);
       setPositionMs(clampedPosition);
     } catch (error) {
       await failPlayback(error);
@@ -216,11 +229,11 @@ export function MeetingAudioPlayerDock({
   };
 
   const handleSpeed = async () => {
-    const next = speed === 1 ? 1.25 : speed === 1.25 ? 1.5 : 1;
+    const next = nextMeetingPlaybackRate(speed);
     setSpeed(next);
-    if (!soundRef.current) return;
+    if (!playerRef.current) return;
     try {
-      await soundRef.current.setRateAsync(next, true);
+      playerRef.current.setPlaybackRate(next);
     } catch (error) {
       await failPlayback(error);
     }

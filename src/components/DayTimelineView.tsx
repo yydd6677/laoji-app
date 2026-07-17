@@ -16,7 +16,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getCalendars } from 'expo-localization';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
@@ -47,7 +46,8 @@ const DAY_HEADER_HEIGHT = 52;
 const ALL_DAY_ITEM_HEIGHT = 25;
 const ALL_DAY_COLLAPSED_ROWS = 3;
 const ALL_DAY_MAX_EXPANDED_ROWS = 7.5;
-const QUICK_CREATE_MINUTES = 60;
+const QUICK_CREATE_MINUTES = 30;
+const QUICK_CREATE_SNAP_MINUTES = 30;
 const REPEAT_ACTION_GUARD_MS = 700;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -201,6 +201,13 @@ function DayPage({
   const lastCreateRef = useRef<{ key: string; at: number } | null>(null);
   const lastOpenRef = useRef<{ key: string; at: number } | null>(null);
   const timelineScrollYRef = useRef(0);
+  const quickSlotRef = useRef<TimelineMinuteRange | null>(null);
+  const quickGestureRef = useRef<{
+    kind: TimelineEditKind;
+    original: TimelineMinuteRange;
+    scrollStart: number;
+    moved: boolean;
+  } | null>(null);
   const editPreviewRef = useRef<TimelineEditPreview | null>(null);
   const editGestureRef = useRef<{
     kind: TimelineEditKind;
@@ -212,7 +219,6 @@ function DayPage({
   const [quickSlot, setQuickSlot] = useState<{ start: number; end: number } | null>(null);
   const [editPreview, setEditPreview] = useState<TimelineEditPreview | null>(null);
   const allDayHeight = useRef(new Animated.Value(0)).current;
-  const uses24HourClock = systemUses24HourClock();
   const today = now;
   const selectedKey = dateKey(date);
   const selectedEvents = useMemo(
@@ -233,7 +239,14 @@ function DayPage({
   const weekStart = sundayStartOfWeek(date);
   const weekDates = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
   const availableWidth = Math.max(180, width - TIME_GUTTER - 6);
-  const clearQuickSlot = useCallback(() => setQuickSlot(null), []);
+  const updateQuickSlot = useCallback((next: TimelineMinuteRange | null) => {
+    quickSlotRef.current = next;
+    setQuickSlot(next);
+  }, []);
+  const clearQuickSlot = useCallback(() => {
+    quickGestureRef.current = null;
+    updateQuickSlot(null);
+  }, [updateQuickSlot]);
   const updateEditPreview = useCallback((next: TimelineEditPreview | null) => {
     editPreviewRef.current = next;
     setEditPreview(next);
@@ -338,10 +351,10 @@ function DayPage({
   };
 
   const selectQuickSlot = (start: number) => {
-    setQuickSlot({ start, end: start + QUICK_CREATE_MINUTES });
+    updateQuickSlot({ start, end: start + QUICK_CREATE_MINUTES });
   };
 
-  const createFromQuickSlot = (slot: { start: number; end: number }) => {
+  const createFromQuickSlot = useCallback((slot: { start: number; end: number }) => {
     const actionKey = `${selectedKey}:${slot.start}:${slot.end}`;
     const actionTime = Date.now();
     const elapsed = actionTime - (lastCreateRef.current?.at ?? actionTime);
@@ -366,7 +379,7 @@ function DayPage({
       lastCreateRef.current = null;
       throw error;
     }
-  };
+  }, [clearQuickSlot, date, onCreate, selectedKey]);
 
   const canEditTimelineItem = useCallback((item: TimelineEvent) => (
     Boolean(onChangeEventTime)
@@ -469,6 +482,81 @@ function DayPage({
     });
     updateEditPreview({ ...current, ...projected });
   }, [updateEditPreview]);
+
+  const beginQuickGesture = useCallback((kind: TimelineEditKind) => {
+    const current = quickSlotRef.current;
+    if (!current) return;
+    quickGestureRef.current = {
+      kind,
+      original: current,
+      scrollStart: timelineScrollYRef.current,
+      moved: false,
+    };
+  }, []);
+
+  const moveQuickGesture = useCallback((dy: number, moveY: number) => {
+    const gesture = quickGestureRef.current;
+    if (!gesture) return;
+    if (Math.abs(dy) > 2) gesture.moved = true;
+
+    const edgeStep = timelineEdgeScrollStep(moveY, screenHeight);
+    if (edgeStep !== 0 && viewportHeight > 0) {
+      const maxScroll = Math.max(0, DAY_CANVAS_HEIGHT - viewportHeight);
+      const nextScroll = Math.max(0, Math.min(maxScroll, timelineScrollYRef.current + edgeStep));
+      if (nextScroll !== timelineScrollYRef.current) {
+        timelineScrollYRef.current = nextScroll;
+        scrollRef.current?.scrollTo({ y: nextScroll, animated: false });
+      }
+    }
+
+    updateQuickSlot(projectTimelineEdit({
+      kind: gesture.kind,
+      original: gesture.original,
+      deltaPixels: dy + timelineScrollYRef.current - gesture.scrollStart,
+      pixelsPerMinute: HOUR_HEIGHT / 60,
+      snapIntervalMinutes: QUICK_CREATE_SNAP_MINUTES,
+      minDurationMinutes: QUICK_CREATE_MINUTES,
+    }));
+  }, [screenHeight, updateQuickSlot, viewportHeight]);
+
+  const finishQuickGesture = useCallback((kind: TimelineEditKind) => {
+    const gesture = quickGestureRef.current;
+    const current = quickSlotRef.current;
+    quickGestureRef.current = null;
+    if (kind === 'move' && gesture && !gesture.moved && current) {
+      createFromQuickSlot(current);
+    }
+  }, [createFromQuickSlot]);
+
+  const terminateQuickGesture = useCallback(() => {
+    const gesture = quickGestureRef.current;
+    quickGestureRef.current = null;
+    if (gesture) updateQuickSlot(gesture.original);
+  }, [updateQuickSlot]);
+
+  const makeQuickResponder = useCallback((kind: TimelineEditKind) => PanResponder.create({
+    onStartShouldSetPanResponder: () => active && Boolean(quickSlotRef.current),
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      Boolean(quickSlotRef.current) && Math.abs(gesture.dy) > 2
+    ),
+    onPanResponderGrant: () => beginQuickGesture(kind),
+    onPanResponderMove: (_event, gesture) => moveQuickGesture(gesture.dy, gesture.moveY),
+    onPanResponderRelease: () => finishQuickGesture(kind),
+    onPanResponderTerminate: terminateQuickGesture,
+    onPanResponderTerminationRequest: () => false,
+  }), [active, beginQuickGesture, finishQuickGesture, moveQuickGesture, terminateQuickGesture]);
+  const quickMoveResponder = useMemo(
+    () => makeQuickResponder('move'),
+    [makeQuickResponder],
+  );
+  const quickStartResponder = useMemo(
+    () => makeQuickResponder('resize-start'),
+    [makeQuickResponder],
+  );
+  const quickEndResponder = useMemo(
+    () => makeQuickResponder('resize-end'),
+    [makeQuickResponder],
+  );
 
   const makeTimelineResponder = useCallback((kind: TimelineEditKind) => PanResponder.create({
     onStartShouldSetPanResponder: () => kind !== 'move' && Boolean(editPreviewRef.current),
@@ -670,7 +758,7 @@ function DayPage({
                 importantForAccessibility="no"
                 testID={active ? `day-hour-${String(hour).padStart(2, '0')}` : undefined}
               >
-                {formatTimelineHourLabel(hour, uses24HourClock)}
+                {formatTimelineHourLabel(hour)}
               </Text>
               <View
                 style={[s.hourDivider, { top: TOP_SPACE + hour * HOUR_HEIGHT }]}
@@ -685,7 +773,9 @@ function DayPage({
           {Array.from({ length: 48 }, (_, slot) => {
             const start = slot * 30;
             const end = start + QUICK_CREATE_MINUTES;
-            const selected = quickSlot?.start === start;
+            const selected = Boolean(
+              quickSlot && start >= quickSlot.start && start < quickSlot.end,
+            );
             return (
               <TouchableOpacity
                 key={slot}
@@ -698,38 +788,82 @@ function DayPage({
                 accessibilityElementsHidden={!active || selected}
                 importantForAccessibility={active && !selected ? 'yes' : 'no-hide-descendants'}
                 accessibilityState={{ disabled: !active }}
-                accessibilityLabel={`${formatTimelineRange(start, end, uses24HourClock)}，空白时段`}
-                accessibilityHint="双击新建一小时日程"
+                accessibilityLabel={`${formatTimelineRange(start, end)}，空白时段`}
+                accessibilityHint="双击选择半小时时段"
                 testID={active ? `day-slot-${minutesToTime(start)}` : undefined}
               />
             );
           })}
 
           {quickSlot ? (
-            <TouchableOpacity
-              style={[
-                s.quickCreateBlock,
-                {
-                  top: TOP_SPACE + (quickSlot.start / 60) * HOUR_HEIGHT,
-                  height: Math.max(
-                    25,
-                    ((Math.min(quickSlot.end, DAY_MINUTES) - quickSlot.start) / 60) * HOUR_HEIGHT,
-                  ),
-                },
-              ]}
-              onPress={() => createFromQuickSlot(quickSlot)}
-              disabled={!active}
-              activeOpacity={0.72}
-              accessibilityRole="button"
-              accessible={active}
-              accessibilityState={{ disabled: !active }}
-              accessibilityLabel={`${formatTimelineRange(quickSlot.start, quickSlot.end, uses24HourClock)}，新建日程`}
-              accessibilityHint="双击确认，滚动可取消"
-              testID={active ? 'day-quick-create' : undefined}
-            >
-              <Ionicons name="add" size={14} color={C.primary} accessible={false} />
-              <Text style={s.quickCreateText} accessible={false}>新建日程</Text>
-            </TouchableOpacity>
+            <>
+              <Text
+                style={[
+                  s.quickTimeLabel,
+                  { top: TOP_SPACE + (quickSlot.start / 60) * HOUR_HEIGHT - 8 },
+                ]}
+                pointerEvents="none"
+                accessible={false}
+                testID={active ? 'day-quick-start-label' : undefined}
+              >
+                {formatTimelineTime(quickSlot.start)}
+              </Text>
+              <Text
+                style={[
+                  s.quickTimeLabel,
+                  { top: TOP_SPACE + (quickSlot.end / 60) * HOUR_HEIGHT - 8 },
+                ]}
+                pointerEvents="none"
+                accessible={false}
+                testID={active ? 'day-quick-end-label' : undefined}
+              >
+                {formatTimelineTime(quickSlot.end)}
+              </Text>
+              <View
+                style={[
+                  s.quickCreateBlock,
+                  {
+                    top: TOP_SPACE + (quickSlot.start / 60) * HOUR_HEIGHT,
+                    height: Math.max(
+                      25,
+                      ((Math.min(quickSlot.end, DAY_MINUTES) - quickSlot.start) / 60) * HOUR_HEIGHT,
+                    ),
+                  },
+                ]}
+                accessibilityRole="button"
+                accessible={active}
+                accessibilityState={{ disabled: !active }}
+                accessibilityLabel={`${formatTimelineRange(quickSlot.start, quickSlot.end)}，添加日程`}
+                accessibilityHint="双击打开日程编辑，拖动可调整时段"
+                accessibilityActions={[{ name: 'activate', label: '添加日程' }]}
+                onAccessibilityTap={() => createFromQuickSlot(quickSlot)}
+                onAccessibilityAction={event => {
+                  if (event.nativeEvent.actionName === 'activate') {
+                    createFromQuickSlot(quickSlot);
+                  }
+                }}
+                testID={active ? 'day-quick-create' : undefined}
+                {...quickMoveResponder.panHandlers}
+              >
+                <Text style={s.quickCreateText} accessible={false}>添加日程</Text>
+                <View
+                  style={[s.quickHandleTouch, s.quickHandleStartTouch]}
+                  accessible={false}
+                  testID={active ? 'day-quick-start-handle' : undefined}
+                  {...quickStartResponder.panHandlers}
+                >
+                  <View style={s.quickHandleDot} />
+                </View>
+                <View
+                  style={[s.quickHandleTouch, s.quickHandleEndTouch]}
+                  accessible={false}
+                  testID={active ? 'day-quick-end-handle' : undefined}
+                  {...quickEndResponder.panHandlers}
+                >
+                  <View style={s.quickHandleDot} />
+                </View>
+              </View>
+            </>
           ) : null}
 
           {timelineEvents.map(item => {
@@ -766,7 +900,7 @@ function DayPage({
                 accessibilityRole={selectedEdit ? 'adjustable' : 'button'}
                 accessible={active}
                 accessibilityState={{ disabled: !active, busy: Boolean(selectedEdit?.saving) }}
-                accessibilityLabel={`${item.event.title}，${formatTimelineRange(displayStart, displayEnd, uses24HourClock)}`}
+                accessibilityLabel={`${item.event.title}，${formatTimelineRange(displayStart, displayEnd)}`}
                 accessibilityHint={selectedEdit
                   ? '上下调整移动十五分钟，确认保存，取消恢复原时间'
                   : onChangeEventTime && canEditTimelineItem(item)
@@ -796,7 +930,7 @@ function DayPage({
                 </Text>
                 {height >= 39 ? (
                   <Text style={s.timelineEventTime} numberOfLines={1} accessible={false}>
-                    {formatTimelineRange(displayStart, displayEnd, uses24HourClock, ' - ')}
+                    {formatTimelineRange(displayStart, displayEnd, ' - ')}
                   </Text>
                 ) : null}
                 {selectedEdit ? (
@@ -875,55 +1009,28 @@ function CurrentTimeLine({ now }: { now: Date }) {
   );
 }
 
-export function systemUses24HourClock(
-  nativePreference: boolean | null = getCalendars()[0]?.uses24hourClock ?? null,
-): boolean {
-  if (typeof nativePreference === 'boolean') return nativePreference;
-  try {
-    const formatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
-    const options = formatter.resolvedOptions();
-    if (typeof options.hour12 === 'boolean') return !options.hour12;
-    if (options.hourCycle === 'h23' || options.hourCycle === 'h24') return true;
-    if (options.hourCycle === 'h11' || options.hourCycle === 'h12') return false;
-    return !formatter.formatToParts(new Date(2026, 0, 1, 13)).some(part => part.type === 'dayPeriod');
-  } catch {
-    return true;
-  }
-}
-
-export function formatTimelineTime(minutes: number, uses24HourClock: boolean): string {
+export function formatTimelineTime(minutes: number): string {
   const safeMinutes = Math.max(0, Math.round(minutes));
   const dayOffset = Math.floor(safeMinutes / DAY_MINUTES);
   const minuteOfDay = safeMinutes % DAY_MINUTES;
   const hour = Math.floor(minuteOfDay / 60);
   const minute = minuteOfDay % 60;
 
-  if (uses24HourClock) {
-    if (safeMinutes === DAY_MINUTES) return '24:00';
-    const prefix = dayOffset > 0 ? '次日' : '';
-    return `${prefix}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  }
-
+  if (safeMinutes === DAY_MINUTES) return '24:00';
   const prefix = dayOffset > 0 ? '次日' : '';
-  const period = hour < 12 ? '上午' : '下午';
-  const displayHour = hour % 12 || 12;
-  return `${prefix}${period}${displayHour}:${String(minute).padStart(2, '0')}`;
+  return `${prefix}${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-export function formatTimelineHourLabel(hour: number, uses24HourClock: boolean): string {
-  if (uses24HourClock) return `${String(hour).padStart(2, '0')}:00`;
-  if (hour === 24) return '次日12';
-  const period = hour < 12 ? '上午' : '下午';
-  return `${period}${hour % 12 || 12}`;
+export function formatTimelineHourLabel(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`;
 }
 
 function formatTimelineRange(
   start: number,
   end: number,
-  uses24HourClock: boolean,
   separator = '至',
 ): string {
-  return `${formatTimelineTime(start, uses24HourClock)}${separator}${formatTimelineTime(end, uses24HourClock)}`;
+  return `${formatTimelineTime(start)}${separator}${formatTimelineTime(end)}`;
 }
 
 export { sortAllDayEvents } from '../utils/eventAllDay';
@@ -1014,6 +1121,18 @@ const s = StyleSheet.create({
     lineHeight: 16,
     color: C.faint,
   },
+  quickTimeLabel: {
+    position: 'absolute',
+    left: 0,
+    width: TIME_GUTTER,
+    height: 16,
+    zIndex: 8,
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 16,
+    color: C.primary,
+    backgroundColor: C.body,
+  },
   hourDivider: {
     position: 'absolute',
     left: TIME_GUTTER,
@@ -1030,19 +1149,36 @@ const s = StyleSheet.create({
   },
   quickCreateBlock: {
     position: 'absolute',
-    left: TIME_GUTTER + 3,
+    left: TIME_GUTTER,
     right: 3,
-    zIndex: 3,
-    flexDirection: 'row',
+    zIndex: 7,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    borderWidth: 1,
+    borderWidth: 0.5,
     borderColor: C.primary,
-    borderRadius: 2,
-    backgroundColor: C.primaryLight,
+    borderRadius: 4,
+    backgroundColor: 'rgba(20,86,240,0.15)',
+    overflow: 'visible',
   },
-  quickCreateText: { fontSize: 12, lineHeight: 17, color: C.primary },
+  quickCreateText: { fontSize: 13, lineHeight: 18, color: C.primary },
+  quickHandleTouch: {
+    position: 'absolute',
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9,
+  },
+  quickHandleStartTouch: { top: -16, right: '17%' },
+  quickHandleEndTouch: { bottom: -16, left: '17%' },
+  quickHandleDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: C.primary,
+    backgroundColor: C.body,
+  },
   timelineEvent: {
     position: 'absolute',
     zIndex: 4,

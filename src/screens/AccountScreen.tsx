@@ -4,11 +4,15 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { RootStackParamList } from '../types';
-import { BackHeader } from '../components/Common';
-import { SettingsGroup, SettingsRow } from '../components/SettingsGroup';
+import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import { labelForReminder, loadNotificationPrefs, ReminderMinutes } from '../services/notifications';
+import { getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-SHELL-001 / UI-TOKENS-001: account destinations use full-width semantic setting sections.
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Account'>;
@@ -53,7 +57,6 @@ export function AccountScreen({ navigation, route }: Props) {
           role: 'destructive',
           onPress: async () => {
             await signOut();
-            navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
           },
         },
         { text: '取消', role: 'cancel' },
@@ -70,8 +73,8 @@ export function AccountScreen({ navigation, route }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']}>
-      <BackHeader title="账号与安全" onBack={() => navigation.goBack()} />
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar title="账号与安全" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="account-settings-group">
           <SettingsRow

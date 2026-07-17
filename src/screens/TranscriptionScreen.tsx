@@ -914,7 +914,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 <Text style={s.emptyStateText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
               </View>
             )}
-            {!loadingSummary && transcriptItems.length > 0 ? (
+            {!loadingSummary && !summaryError && transcriptItems.length > 0 ? (
               <TouchableOpacity
                 style={[s.generateBtn, summary && s.regenerateBtn]}
                 onPress={handleGenerateSummary}

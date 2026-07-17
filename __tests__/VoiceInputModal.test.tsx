@@ -8,7 +8,7 @@ import {
 } from '../src/services/api';
 import { startRealtimeAsr } from '../src/services/realtimeAsr';
 import { useEvents } from '../src/store/EventsStore';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Animated, StyleSheet } from 'react-native';
 
@@ -22,13 +22,16 @@ jest.mock('@expo/vector-icons', () => {
   Ionicons.glyphMap = {};
   return { Ionicons };
 });
-jest.mock('expo-av', () => ({
-  Audio: {
-    requestPermissionsAsync: jest.fn(),
-    setAudioModeAsync: jest.fn(),
-    Recording: { createAsync: jest.fn() },
-    RecordingOptionsPresets: { HIGH_QUALITY: {} },
-  },
+jest.mock('expo-audio', () => ({
+  RecordingPresets: { HIGH_QUALITY: {} },
+  requestRecordingPermissionsAsync: jest.fn(),
+  setAudioModeAsync: jest.fn(),
+  useAudioRecorder: jest.fn(() => ({
+    prepareToRecordAsync: jest.fn(async () => undefined),
+    record: jest.fn(),
+    stop: jest.fn(async () => undefined),
+    uri: 'file:///data/schedule-fallback.m4a',
+  })),
 }));
 jest.mock('expo-file-system/legacy');
 jest.mock('../src/services/api', () => ({
@@ -96,8 +99,8 @@ describe('VoiceInputModal manual schedule path', () => {
     findConflicts.mockResolvedValue({ hasConflict: false, conflicts: [], complete: true });
     (useEvents as jest.Mock).mockReturnValue({ events: [], addEvent, refreshEvents, findConflicts });
     (parseText as jest.Mock).mockResolvedValue(parsed);
-    (Audio.requestPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
-    (Audio.setAudioModeAsync as jest.Mock).mockResolvedValue(undefined);
+    (requestRecordingPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+    (setAudioModeAsync as jest.Mock).mockResolvedValue(undefined);
     (FileSystem.deleteAsync as jest.Mock).mockResolvedValue(undefined);
     (createGuestRealtimeSession as jest.Mock).mockResolvedValue({
       meeting_id: 'guest-session-schedule-1',
@@ -440,7 +443,7 @@ describe('VoiceInputModal manual schedule path', () => {
     const pendingPermission = new Promise<{ granted: boolean }>(resolve => {
       resolvePermission = resolve;
     });
-    (Audio.requestPermissionsAsync as jest.Mock).mockReturnValue(pendingPermission);
+    (requestRecordingPermissionsAsync as jest.Mock).mockReturnValue(pendingPermission);
     (startRealtimeAsr as jest.Mock).mockResolvedValue({
       stop: jest.fn(),
       meetingId: 'voice-1',
@@ -457,7 +460,7 @@ describe('VoiceInputModal manual schedule path', () => {
       void screen.getByTestId('schedule-voice-connecting').props.onPress();
     });
 
-    expect(Audio.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(requestRecordingPermissionsAsync).toHaveBeenCalledTimes(1);
     expect(startRealtimeAsr).not.toHaveBeenCalled();
     expect(screen.getByText('正在连接语音服务')).toBeTruthy();
 
@@ -528,7 +531,7 @@ describe('VoiceInputModal manual schedule path', () => {
       resolvePermission = resolve;
     });
     const stop = jest.fn(async () => 'file:///data/schedule.wav');
-    (Audio.requestPermissionsAsync as jest.Mock).mockReturnValue(pendingPermission);
+    (requestRecordingPermissionsAsync as jest.Mock).mockReturnValue(pendingPermission);
     (startRealtimeAsr as jest.Mock).mockImplementationOnce(async options => {
       options.onTranscript?.({ text: '明天下午三点开会', raw: {} });
       return { stop, completion: new Promise(() => {}) };

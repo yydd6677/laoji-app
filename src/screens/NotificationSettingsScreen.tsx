@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { SettingsGroup, SettingsRow } from '../components/SettingsGroup';
+import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import {
@@ -17,8 +16,12 @@ import {
   saveNotificationPrefs,
   scheduleTestNotification,
 } from '../services/notifications';
-import { Colors as C } from '../theme/colors';
 import { RootStackParamList } from '../types';
+import { getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-FORM-001 / UI-TOKENS-001: notification actions retain fixed right-side status slots.
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'NotificationSettings'>;
@@ -40,15 +43,23 @@ export function NotificationSettingsScreen({ navigation }: Props) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      loadNotificationPrefs(notificationScope),
-      getNotificationPermissionStatus().catch(() => 'unknown'),
-    ]).then(([prefs, status]) => {
+    const refreshPermission = () => {
+      void getNotificationPermissionStatus().catch(() => 'unknown').then(status => {
+        if (active) setPermissionStatus(status);
+      });
+    };
+    void loadNotificationPrefs(notificationScope).then(prefs => {
       if (!active) return;
       setDefaultReminder(prefs.defaultReminderMinutes);
-      setPermissionStatus(status);
     });
-    return () => { active = false; };
+    refreshPermission();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshPermission();
+    });
+    return () => {
+      active = false;
+      subscription.remove();
+    };
   }, [notificationScope]);
 
   const handleReminderChoice = async (value: ReminderMinutes) => {
@@ -141,8 +152,8 @@ export function NotificationSettingsScreen({ navigation }: Props) {
       : '系统通知状态未知';
 
   return (
-    <ScreenContainer edges={['top', 'bottom']}>
-      <BackHeader title="通知与提醒" onBack={() => navigation.goBack()} />
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar title="通知与提醒" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false} testID="notification-settings-page">
         <Text style={s.sectionLabel}>通知权限</Text>
         <SettingsGroup style={s.groupAfterLabel} testID="notification-permission-group">
@@ -184,7 +195,7 @@ export function NotificationSettingsScreen({ navigation }: Props) {
                 height={52}
                 right={(
                   <View style={s.checkSlot}>
-                    {selected ? <Ionicons name="checkmark" size={24} color={C.primary} /> : null}
+                    {selected ? <Ionicons name="checkmark" size={24} color={F.primary} /> : null}
                   </View>
                 )}
                 testID={`notification-reminder-${option.value ?? 'none'}`}
@@ -200,7 +211,7 @@ export function NotificationSettingsScreen({ navigation }: Props) {
 function BusySlot({ busy }: { busy: boolean }) {
   return (
     <View style={s.busySlot}>
-      {busy ? <ActivityIndicator size="small" color={C.primary} /> : null}
+      {busy ? <ActivityIndicator size="small" color={F.primary} /> : null}
     </View>
   );
 }
@@ -208,9 +219,9 @@ function BusySlot({ busy }: { busy: boolean }) {
 const s = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingBottom: 32 },
-  sectionLabel: { paddingLeft: 20, paddingTop: 16, paddingBottom: 4, fontSize: 14, lineHeight: 20, color: C.faint },
-  sectionHeader: { minHeight: 40, marginTop: 12, paddingLeft: 20, paddingRight: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sectionLabelText: { fontSize: 14, lineHeight: 20, color: C.faint },
+  sectionLabel: { paddingLeft: 16, paddingTop: 16, paddingBottom: 4, fontSize: 14, lineHeight: 20, color: F.textCaption },
+  sectionHeader: { minHeight: 40, marginTop: 8, paddingLeft: 16, paddingRight: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sectionLabelText: { fontSize: 14, lineHeight: 20, color: F.textCaption },
   groupAfterLabel: { marginTop: 0 },
   busySlot: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   checkSlot: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },

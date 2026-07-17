@@ -7,6 +7,7 @@ import {
   getBottomTabBarFloatingTopInset,
 } from '../src/components/BottomTabBar';
 import { EventUndoBanner } from '../src/components/EventUndoBanner';
+import { getNativeBottomBarHeight } from '../src/navigation/nativeBottomBarGeometry';
 import { useEvents } from '../src/store/EventsStore';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
@@ -44,13 +45,15 @@ describe('bottom tab geometry', () => {
     );
   });
 
-  it('positions the undo banner above the full microphone footprint', async () => {
+  it('positions the undo banner above the native bottom bar without a legacy microphone offset', async () => {
     await render(<EventUndoBanner />);
 
     const style = StyleSheet.flatten(screen.getByTestId('event-undo-banner').props.style);
     expect(style.bottom).toBe(
-      getBottomTabBarFloatingTopInset(0) + BOTTOM_TAB_BAR_GEOMETRY.floatingOverlayGap,
+      getNativeBottomBarHeight(0) + 12,
     );
+    expect(style.left).toBe(16);
+    expect(style.right).toBe(16);
   });
 
   it('exposes tab selection and page-specific action purpose to accessibility services', async () => {

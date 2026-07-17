@@ -11,14 +11,18 @@ import {
   View,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { SettingsTitleBar } from '../components/SettingsGroup';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { readableErrorMessage } from '../services/errors';
-import { Colors as C } from '../theme/colors';
 import { RootStackParamList } from '../types';
 import { ACCOUNT_SECURITY_GEOMETRY } from './ChangePasswordScreen';
+import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-FORM-001 / UI-TOKENS-001: destructive confirmation keeps stable input and action slots.
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AccountDeletion'>;
@@ -58,7 +62,6 @@ export function AccountDeletionScreen({ navigation }: Props) {
       const result = await deleteAccount(password, confirmation);
       setPassword('');
       setConfirmation('');
-      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       const localCleanupFailed = result.local_cleanup_failed ?? 0;
       showDialog({
         title: '账号已删除',
@@ -81,8 +84,8 @@ export function AccountDeletionScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']}>
-      <BackHeader title="删除账号" onBack={() => navigation.goBack()} />
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar title="删除账号" onBack={() => navigation.goBack()} />
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={s.flex}
@@ -113,8 +116,9 @@ export function AccountDeletionScreen({ navigation }: Props) {
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="输入当前密码"
-              placeholderTextColor={C.faint}
+              placeholderTextColor={F.textPlaceholder}
               editable={!busy}
+              accessibilityLabel="当前密码"
               testID="account-deletion-password"
             />
             <Text style={[s.fieldLabel, s.confirmLabel]}>输入“删除账号”以确认</Text>
@@ -125,8 +129,9 @@ export function AccountDeletionScreen({ navigation }: Props) {
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="删除账号"
-              placeholderTextColor={C.faint}
+              placeholderTextColor={F.textPlaceholder}
               editable={!busy}
+              accessibilityLabel="删除账号确认文字"
               testID="account-deletion-confirmation"
             />
           </View>
@@ -142,7 +147,7 @@ export function AccountDeletionScreen({ navigation }: Props) {
             accessibilityState={{ busy, disabled: busy || !ready }}
             testID="confirm-account-deletion"
           >
-            <View style={s.busySlot}>{busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}</View>
+            <View style={s.busySlot}>{busy ? <ActivityIndicator size="small" color={F.onPrimary} /> : null}</View>
             <Text style={s.deleteButtonText}>{busy ? '正在删除' : '永久删除账号'}</Text>
             <View style={s.busySlot} />
           </TouchableOpacity>
@@ -156,25 +161,25 @@ const s = StyleSheet.create({
   flex: { flex: 1 },
   content: { paddingBottom: 24 },
   notice: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 4 },
-  noticeTitle: { fontSize: 20, lineHeight: 28, fontWeight: '600', color: C.text },
-  noticeText: { marginTop: 8, fontSize: 14, lineHeight: 22, color: C.sub },
+  noticeTitle: { fontSize: 20, lineHeight: 28, fontWeight: '600', color: F.textTitle },
+  noticeText: { marginTop: 8, fontSize: 14, lineHeight: 22, color: F.textCaption },
   consequenceList: { marginTop: 12, gap: 8 },
   consequenceRow: { minHeight: 22, flexDirection: 'row', alignItems: 'flex-start' },
-  bullet: { width: 4, height: 4, borderRadius: 2, marginTop: 9, marginRight: 10, backgroundColor: C.faint },
-  consequenceText: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 22, color: C.sub },
-  formGroup: { marginHorizontal: 16, marginTop: 16, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, borderRadius: 10, backgroundColor: C.body },
-  fieldLabel: { fontSize: 14, lineHeight: 20, color: C.sub },
+  bullet: { width: 4, height: 4, borderRadius: 2, marginTop: 9, marginRight: 10, backgroundColor: F.iconTertiary },
+  consequenceText: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 22, color: F.textCaption },
+  formGroup: { marginTop: 16, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, backgroundColor: F.backgroundBody },
+  fieldLabel: { fontSize: 14, lineHeight: 20, color: F.textCaption },
   confirmLabel: { marginTop: 16 },
   input: {
     height: ACCOUNT_SECURITY_GEOMETRY.inputHeight,
     paddingHorizontal: 0,
     paddingVertical: 0,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
+    borderBottomWidth: FEISHU_DIMENSIONS.divider,
+    borderBottomColor: F.divider,
     fontSize: 16,
-    color: C.text,
+    color: F.textTitle,
   },
-  footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border, backgroundColor: C.body },
+  footer: { padding: 16, borderTopWidth: FEISHU_DIMENSIONS.divider, borderTopColor: F.divider, backgroundColor: F.backgroundBody },
   deleteButton: {
     height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
     borderRadius: ACCOUNT_SECURITY_GEOMETRY.actionRadius,
@@ -182,9 +187,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: C.red,
+    backgroundColor: F.danger,
   },
   deleteButtonDisabled: { opacity: 0.42 },
-  deleteButtonText: { fontSize: 17, lineHeight: 24, fontWeight: '500', color: '#FFFFFF' },
+  deleteButtonText: { fontSize: 17, lineHeight: 24, fontWeight: '500', color: F.onPrimary },
   busySlot: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
 });

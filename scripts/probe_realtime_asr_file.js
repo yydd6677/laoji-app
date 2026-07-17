@@ -91,6 +91,26 @@ async function revokeGuestSession(baseUrl, session, attempts = 3) {
   throw lastError ?? new Error('guest session cleanup failed');
 }
 
+async function fetchGuestTranscripts(baseUrl, session) {
+  const items = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const response = await fetchDetailed(
+      'guest transcript recovery',
+      `${baseUrl}/api/laoji/meetings/guest-sessions/${encodeURIComponent(session.meeting_id)}/transcripts?offset=${offset}&limit=${limit}`,
+      { headers: { 'X-Guest-Session-Token': session.guest_token } },
+    );
+    if (!response.ok) throw new Error(`guest transcript recovery returned ${response.status}`);
+    const payload = await response.json();
+    const batch = Array.isArray(payload) ? payload : Array.isArray(payload.items) ? payload.items : [];
+    items.push(...batch);
+    offset += batch.length;
+    if (batch.length === 0 || batch.length < limit || (Number.isFinite(payload.total) && offset >= payload.total)) break;
+  }
+  return items;
+}
+
 async function sendPcm(ws, pcm, frameBytes, frameMs) {
   for (let offset = 0; offset < pcm.length; offset += frameBytes) {
     const frame = pcm.subarray(offset, Math.min(offset + frameBytes, pcm.length));
@@ -167,6 +187,7 @@ async function runProbe({
     total_ms: null,
   };
   let cleanupStatus = null;
+  let recoveredTranscripts = [];
 
   try {
     await new Promise((resolve, reject) => {
@@ -263,9 +284,12 @@ async function runProbe({
       });
     });
   } finally {
-    cleanupStatus = session.transient === false
-      ? 'not_applicable'
-      : await revokeGuestSession(normalizedBaseUrl, session);
+    if (session.transient === false) {
+      cleanupStatus = 'not_applicable';
+    } else {
+      recoveredTranscripts = await fetchGuestTranscripts(normalizedBaseUrl, session);
+      cleanupStatus = await revokeGuestSession(normalizedBaseUrl, session);
+    }
   }
 
   timing.total_ms = Math.round(performance.now() - startedAt);
@@ -303,6 +327,7 @@ async function runProbe({
           : timing.ready_to_stop_ms - timing.stop_signal_ms,
     },
     transcripts,
+    recovered_transcripts: recoveredTranscripts,
   };
 }
 
@@ -320,7 +345,14 @@ async function main() {
   console.log(JSON.stringify(report));
 }
 
-module.exports = { decodePcm, describeError, reexecWithoutEnvironmentProxy, revokeGuestSession, runProbe };
+module.exports = {
+  decodePcm,
+  describeError,
+  fetchGuestTranscripts,
+  reexecWithoutEnvironmentProxy,
+  revokeGuestSession,
+  runProbe,
+};
 
 if (require.main === module) {
   const reexecStatus = reexecWithoutEnvironmentProxy();

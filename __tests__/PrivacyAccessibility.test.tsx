@@ -27,7 +27,7 @@ jest.mock('../src/services/privacy', () => ({
   savePrivacyPrefs: jest.fn(),
 }));
 
-describe('PrivacyScreen accessibility', () => {
+describe('PrivacyScreen accessibility [UI-TOKENS-001/UI-MOTION-001]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (useAuth as jest.Mock).mockReturnValue({
@@ -86,7 +86,7 @@ describe('PrivacyScreen accessibility', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('Account');
     expect(screen.queryByText('账号与数据删除')).toBeNull();
     expect(StyleSheet.flatten(screen.getByTestId('privacy-settings-group').props.style))
-      .toEqual(expect.objectContaining({ marginHorizontal: 16, marginTop: 16, borderRadius: 10 }));
+      .toEqual(expect.objectContaining({ marginHorizontal: 0, marginTop: 12, borderRadius: 0 }));
     expect(screen.queryByText('密码、通知、退出与账号删除')).toBeNull();
     expect(screen.queryByText('账号数据按用户隔离，访客数据仅保存在本机')).toBeNull();
   });

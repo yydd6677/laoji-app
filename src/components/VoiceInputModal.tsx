@@ -4,7 +4,12 @@ import {
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
@@ -200,7 +205,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const [draft, setDraft]       = useState<ParseResult | null>(null);
   const [clarifyAnswer, setClarifyAnswer] = useState('');
   const [error, setError]       = useState('');
-  const recordingRef            = useRef<Audio.Recording | null>(null);
+  const fileRecorder            = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const fileRecordingActiveRef  = useRef(false);
   const realtimeRef             = useRef<RealtimeAsrSession | null>(null);
   const realtimeAuthorizationRef = useRef<ApiGuestRealtimeSession | null>(null);
   const recordingModeRef        = useRef<RecordingMode | null>(null);
@@ -343,10 +349,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const stopActiveRecordingSilently = async () => {
     recordingStopRef.current = true;
     const realtime = realtimeRef.current;
-    const recording = recordingRef.current;
+    const fileRecordingActive = fileRecordingActiveRef.current;
     const authorization = realtimeAuthorizationRef.current;
     realtimeRef.current = null;
-    recordingRef.current = null;
+    fileRecordingActiveRef.current = false;
     realtimeAuthorizationRef.current = null;
     recordingModeRef.current = null;
     setRecordingMode(null);
@@ -358,11 +364,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         // Closing the modal should never block on recorder cleanup.
       }
     }
-    if (recording) {
+    if (fileRecordingActive) {
       try {
-        await recording.stopAndUnloadAsync();
+        await fileRecorder.stop();
+        await discardScheduleRecording(fileRecorder.uri ?? undefined);
       } catch {
-        // The recording may already be unloaded.
+        // The recording may already be stopped.
       }
     }
     await releaseRealtimeAuthorization(authorization);
@@ -472,7 +479,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('connecting');
     setError('');
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       if (recordingRunRef.current !== runId) return;
       if (!permission.granted) {
         if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
@@ -482,7 +489,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         showDialog({ title: '无法录音', message: '请在系统设置中允许麦克风权限', tone: 'warning' });
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       if (recordingRunRef.current !== runId) return;
       setError('');
       setText('');
@@ -569,14 +576,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
       }
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      await fileRecorder.prepareToRecordAsync();
+      fileRecorder.record();
       if (recordingRunRef.current !== runId) {
-        await recording.stopAndUnloadAsync().catch(() => {});
+        await fileRecorder.stop().catch(() => {});
+        await discardScheduleRecording(fileRecorder.uri ?? undefined);
         return;
       }
-      recordingRef.current = recording;
+      fileRecordingActiveRef.current = true;
       recordingModeRef.current = 'file';
       setRecordingMode('file');
       setStep('recording');
@@ -639,13 +646,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       return;
     }
 
-    if (!recordingRef.current) return;
+    if (!fileRecordingActiveRef.current) return;
     setStep('parsing');
     try {
-      await recordingRef.current.stopAndUnloadAsync();
+      await fileRecorder.stop();
       if (recordingRunRef.current !== runId) return;
-      const uri = recordingRef.current.getURI();
-      recordingRef.current = null;
+      const uri = fileRecorder.uri;
+      fileRecordingActiveRef.current = false;
       recordingModeRef.current = null;
       setRecordingMode(null);
       if (!uri) throw new Error('recording uri is empty');
@@ -659,7 +666,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       if (recordingRunRef.current !== runId) return;
       diagnosticWarn('voice recognition failed', err);
       setError(voiceErrorText(err)); setStep('input');
-      recordingRef.current = null;
+      fileRecordingActiveRef.current = false;
       recordingModeRef.current = null;
       setRecordingMode(null);
     }

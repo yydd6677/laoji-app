@@ -100,17 +100,12 @@ export function MeetingListScreen({ navigation }: Props) {
       label: '重命名',
       onPress: () => navigation.navigate('Transcription', { meetingId: menuMeeting.id, focus: 'title' }),
     },
-    {
-      key: 'detail',
-      label: '查看详情',
-      onPress: () => openMeeting(menuMeeting.id),
-    },
-    {
+    ...(!canResumeMeetingRecording(menuMeeting) ? [{
       key: 'delete',
       label: '删除',
       destructive: true,
       onPress: () => confirmDelete(menuMeeting.id),
-    },
+    }] : []),
   ] : [];
 
   const renderEmptyState = () => {

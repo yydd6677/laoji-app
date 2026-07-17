@@ -14,6 +14,7 @@ import {
   fetchEvents,
   fetchAllMeetings,
   fetchMeetingTranscript,
+  fetchGuestMeetingTranscript,
   saveEvent,
   deleteEvent,
   commandEventState,
@@ -990,6 +991,35 @@ describe('guest realtime meeting session', () => {
       'http://203.0.113.10:18020/api/laoji/meetings/guest-sessions/guest-session-1',
       expect.objectContaining({
         method: 'DELETE',
+        headers: { 'X-Guest-Session-Token': 'guest-token-1' },
+        signal: expect.anything(),
+      }),
+    );
+  });
+
+  it('paginates recoverable guest transcripts with only the guest session token', async () => {
+    const firstPage = Array.from({ length: 2 }, (_, index) => ({
+      id: `guest-line-${index}`,
+      text: `游客字幕 ${index}`,
+    }));
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: firstPage, total: 3 }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [{ id: 'guest-line-2', text: '游客字幕 2' }], total: 3 }),
+      });
+
+    const transcript = await fetchGuestMeetingTranscript(
+      'guest-session-1',
+      'guest-token-1',
+      { pageSize: 2 },
+    );
+
+    expect(transcript).toHaveLength(3);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      'http://203.0.113.10:18020/api/laoji/meetings/guest-sessions/guest-session-1/transcripts?offset=2&limit=2',
+      expect.objectContaining({
         headers: { 'X-Guest-Session-Token': 'guest-token-1' },
         signal: expect.anything(),
       }),

@@ -58,6 +58,7 @@ describe('MeetingListScreen Feishu Minutes structure', () => {
       date: '2026年7月14日',
       time: '10:00',
       duration: '35:20',
+      status: 'completed',
       tags: [{ label: '项目', color: '#1456F0' }],
       bars: [1, 2, 3],
     },
@@ -67,6 +68,7 @@ describe('MeetingListScreen Feishu Minutes structure', () => {
       date: '2026年7月12日',
       time: '15:30',
       duration: '48:05',
+      status: 'completed',
       tags: [],
       bars: [3, 2, 1],
     },
@@ -147,6 +149,13 @@ describe('MeetingListScreen Feishu Minutes structure', () => {
   });
 
   it('keeps app utilities in the source more menu and item actions on long press', async () => {
+    (useMeetings as jest.Mock).mockReturnValue({
+      meetings: [{ ...meetings[0], status: 'recording' }, meetings[1]],
+      loading: false,
+      error: null,
+      deleteMeeting: jest.fn(),
+      refreshMeetings: jest.fn(),
+    });
     await render(<MeetingListScreen navigation={navigation} />);
 
     await fireEvent.press(screen.getByLabelText('更多会议操作'));
@@ -154,9 +163,12 @@ describe('MeetingListScreen Feishu Minutes structure', () => {
     expect(navigate).toHaveBeenCalledWith('SpeakerManager');
 
     await fireEvent(screen.getByTestId('meeting-list-item-meeting-1'), 'longPress');
-    await waitFor(() => expect(screen.getByLabelText('查看详情')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('重命名')).toBeTruthy());
+    expect(screen.queryByLabelText('查看详情')).toBeNull();
     expect(screen.getByLabelText('重命名')).toBeTruthy();
-    expect(screen.getByLabelText('删除')).toBeTruthy();
+    expect(screen.queryByLabelText('删除')).toBeNull();
+    await fireEvent(screen.getByTestId('meeting-list-item-meeting-2'), 'longPress');
+    await waitFor(() => expect(screen.getByLabelText('删除')).toBeTruthy());
     await fireEvent.press(screen.getByLabelText('删除'));
     expect(mockShowDialog).toHaveBeenCalledWith(expect.objectContaining({
       title: '删除会议',

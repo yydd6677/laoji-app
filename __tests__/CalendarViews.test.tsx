@@ -7,7 +7,6 @@ import {
   formatTimelineTime,
   layoutTimelineEvents,
   sortAllDayEvents,
-  systemUses24HourClock,
 } from '../src/components/DayTimelineView';
 import { MonthCalendarView } from '../src/components/MonthCalendarView';
 import type { CalEvent } from '../src/types';
@@ -454,12 +453,11 @@ describe('Feishu-style calendar views', () => {
     expect(activeDay?.props.accessibilityState).toEqual({ selected: true, disabled: false });
     expect(screen.getByTestId('timeline-event-morning-meeting')).toBeTruthy();
     expect(screen.getByText('全天会议')).toBeTruthy();
-    const uses24HourClock = systemUses24HourClock();
     const hour00 = screen.getByTestId('day-hour-00', { includeHiddenElements: true });
     const hour12 = screen.getByTestId('day-hour-12', { includeHiddenElements: true });
     const hour24 = screen.getByTestId('day-hour-24', { includeHiddenElements: true });
-    expect(hour00.props.children).toBe(formatTimelineHourLabel(0, uses24HourClock));
-    expect(hour24.props.children).toBe(formatTimelineHourLabel(24, uses24HourClock));
+    expect(hour00.props.children).toBe('00:00');
+    expect(hour24.props.children).toBe('24:00');
     expect(hour00.props.accessible).toBe(false);
     expect(hour00.props.accessibilityElementsHidden).toBe(true);
     expect(hour12.props.style[1].top - hour00.props.style[1].top).toBe(600);
@@ -468,23 +466,29 @@ describe('Feishu-style calendar views', () => {
     await fireEvent.press(screen.getByTestId('day-slot-09:30'));
     const quickCreate = screen.getByTestId('day-quick-create');
     expect(quickCreate.props.accessibilityLabel).toBe(
-      `${formatTimelineTime(570, uses24HourClock)}至${formatTimelineTime(630, uses24HourClock)}，新建日程`,
+      '09:30至10:00，添加日程',
     );
-    await fireEvent.press(quickCreate);
+    expect(screen.getByTestId('day-quick-start-label').props.children).toBe('09:30');
+    expect(screen.getByTestId('day-quick-end-label').props.children).toBe('10:00');
+    expect(screen.getByTestId('day-quick-start-handle')).toBeTruthy();
+    expect(screen.getByTestId('day-quick-end-handle')).toBeTruthy();
+    expect(screen.getByText('添加日程')).toBeTruthy();
+    expect(StyleSheet.flatten(quickCreate.props.style).height).toBe(25);
+    await act(() => quickCreate.props.onAccessibilityTap());
     expect(onCreate).toHaveBeenCalledWith(
       new Date(2026, 6, 13),
       '09:30',
       new Date(2026, 6, 13),
-      '10:30',
+      '10:00',
     );
 
     await fireEvent.press(screen.getByTestId('day-slot-23:30'));
-    await fireEvent.press(screen.getByTestId('day-quick-create'));
+    await act(() => screen.getByTestId('day-quick-create').props.onAccessibilityTap());
     expect(onCreate).toHaveBeenLastCalledWith(
       new Date(2026, 6, 13),
       '23:30',
       new Date(2026, 6, 14),
-      '00:30',
+      '00:00',
     );
 
     await fireEvent(activeDay, 'accessibilityAction', {
@@ -548,8 +552,8 @@ describe('Feishu-style calendar views', () => {
     expect(coveredSlot.props.accessibilityElementsHidden).toBe(true);
     const quickCreate = screen.getByTestId('day-quick-create');
     await act(() => {
-      quickCreate.props.onPress();
-      quickCreate.props.onPress();
+      quickCreate.props.onAccessibilityTap();
+      quickCreate.props.onAccessibilityTap();
     });
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('day-quick-create')).toBeNull();
@@ -588,13 +592,12 @@ describe('Feishu-style calendar views', () => {
       />,
     );
 
-    const uses24HourClock = systemUses24HourClock();
     const slot = screen.getByTestId('day-slot-13:30');
     expect(slot.props.accessible).toBe(true);
     expect(slot.props.accessibilityLabel).toBe(
-      `${formatTimelineTime(810, uses24HourClock)}至${formatTimelineTime(870, uses24HourClock)}，空白时段`,
+      '13:30至14:00，空白时段',
     );
-    expect(slot.props.accessibilityHint).toBe('双击新建一小时日程');
+    expect(slot.props.accessibilityHint).toBe('双击选择半小时时段');
 
     const event = screen.getByTestId('timeline-event-morning-meeting');
     expect(event.props.accessible).toBe(true);
@@ -683,32 +686,12 @@ describe('Feishu-style calendar views', () => {
     ).toBe(originalTop));
   });
 
-  it('formats hour labels and cross-midnight ranges for both system clock modes', () => {
-    expect(formatTimelineHourLabel(13, true)).toBe('13:00');
-    expect(formatTimelineTime(570, true)).toBe('09:30');
-    expect(formatTimelineTime(1470, true)).toBe('次日00:30');
-
-    expect(formatTimelineHourLabel(13, false)).toBe('下午1');
-    expect(formatTimelineTime(570, false)).toBe('上午9:30');
-    expect(formatTimelineTime(1470, false)).toBe('次日上午12:30');
-
-    const baseOptions = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions();
-    const resolvedOptions = jest.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions');
-    try {
-      resolvedOptions.mockReturnValue({
-        ...baseOptions,
-        hour12: false,
-        hourCycle: 'h23',
-      });
-      expect(systemUses24HourClock(null)).toBe(true);
-      resolvedOptions.mockReturnValue({
-        ...baseOptions,
-        hour12: true,
-        hourCycle: 'h12',
-      });
-      expect(systemUses24HourClock(null)).toBe(false);
-    } finally {
-      resolvedOptions.mockRestore();
-    }
+  it('uses Feishu-aligned 24-hour labels and cross-midnight ranges', () => {
+    expect(formatTimelineHourLabel(0)).toBe('00:00');
+    expect(formatTimelineHourLabel(13)).toBe('13:00');
+    expect(formatTimelineHourLabel(24)).toBe('24:00');
+    expect(formatTimelineTime(570)).toBe('09:30');
+    expect(formatTimelineTime(1440)).toBe('24:00');
+    expect(formatTimelineTime(1470)).toBe('次日00:30');
   });
 });

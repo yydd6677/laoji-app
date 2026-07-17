@@ -9,7 +9,6 @@ import { LoginScreen }       from '../screens/LoginScreen';
 import { ScheduleScreen }    from '../screens/ScheduleScreen';
 import { MeetingListScreen } from '../screens/MeetingListScreen';
 import { EventDetailScreen } from '../screens/EventDetailScreen';
-import { RecordingScreen }   from '../screens/RecordingScreen';
 import { MeetingLiveScreen } from '../screens/MeetingLiveScreen';
 import { TranscriptionScreen } from '../screens/TranscriptionScreen';
 import { ProfileScreen }     from '../screens/ProfileScreen';
@@ -50,7 +49,6 @@ export function RootNavigator() {
     >
       <Stack.Screen name="MainTabs"      component={MainTabsNavigator} />
       <Stack.Screen name="EventDetail"   component={EventDetailScreen} options={{ animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="Recording"     component={RecordingScreen} />
       <Stack.Screen name="MeetingLive"   component={MeetingLiveScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="Transcription" component={TranscriptionScreen} />
       <Stack.Screen name="SpeakerManager" component={SpeakerManagerScreen} />

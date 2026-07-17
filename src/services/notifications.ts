@@ -54,6 +54,8 @@ interface EventNotificationRegistration {
   notificationId: string | null;
   fingerprint: string;
   pendingCancellationIds: string[];
+  scheduledFireAt: string | null;
+  deliveredAt: string | null;
 }
 
 type EventNotificationRegistry = Record<string, EventNotificationRegistration>;
@@ -227,6 +229,12 @@ async function loadEventNotificationRegistry(scope: string): Promise<EventNotifi
         pendingCancellationIds: Array.isArray(registration.pendingCancellationIds)
           ? uniqueNotificationIds(registration.pendingCancellationIds)
           : [],
+        scheduledFireAt: typeof registration.scheduledFireAt === 'string'
+          ? registration.scheduledFireAt
+          : null,
+        deliveredAt: typeof registration.deliveredAt === 'string'
+          ? registration.deliveredAt
+          : null,
       };
     }
   }
@@ -250,7 +258,20 @@ async function loadEventNotificationRegistry(scope: string): Promise<EventNotifi
         ?? requests.find(request => request.content.data?.fingerprint === persistedFingerprint)
         ?? requests[0];
       if (!canonical) {
+        const fireAtMs = registration.scheduledFireAt
+          ? Date.parse(registration.scheduledFireAt)
+          : Number.NaN;
+        // DEVICE-NOTIFICATION-001: a fired request disappears from the OS
+        // scheduled list. Keep its durable id and mark it delivered so a late
+        // reminder is not recreated every time the app returns to foreground.
+        if (registration.notificationId && Number.isFinite(fireAtMs) && fireAtMs <= Date.now()) {
+          registration.deliveredAt = registration.deliveredAt ?? registration.scheduledFireAt;
+          registration.pendingCancellationIds = [];
+          continue;
+        }
         registration.notificationId = null;
+        registration.scheduledFireAt = null;
+        registration.deliveredAt = null;
         registration.pendingCancellationIds = [];
         continue;
       }
@@ -266,6 +287,10 @@ async function loadEventNotificationRegistry(scope: string): Promise<EventNotifi
       }
       registration.notificationId = canonical.identifier;
       registration.fingerprint = recoveredFingerprint || notificationFingerprint(registration.event);
+      registration.scheduledFireAt = typeof canonical.content.data?.fireAt === 'string'
+        ? canonical.content.data.fireAt
+        : registration.scheduledFireAt;
+      registration.deliveredAt = null;
       registration.pendingCancellationIds = uniqueNotificationIds([
         ...registration.pendingCancellationIds,
         ...requests
@@ -287,6 +312,10 @@ async function loadEventNotificationRegistry(scope: string): Promise<EventNotifi
           ? canonical.content.data.fingerprint
           : notificationFingerprint(event),
         pendingCancellationIds: requests.slice(1).map(request => request.identifier),
+        scheduledFireAt: typeof canonical.content.data?.fireAt === 'string'
+          ? canonical.content.data.fireAt
+          : null,
+        deliveredAt: null,
       };
     }
   } catch {
@@ -327,12 +356,17 @@ async function cancelNotificationIds(ids: Array<string | null | undefined>): Pro
   if (results.some(cancelled => !cancelled)) throw new Error('notification cancellation failed');
 }
 
-async function scheduleForScope(scope: string, event: CalEvent): Promise<string | null> {
-  if (!isDesiredScope(scope)) return null;
-  const notificationId = await scheduleEventNotification(event, scope);
-  if (!notificationId || isDesiredScope(scope)) return notificationId;
+async function scheduleForScope(
+  scope: string,
+  event: CalEvent,
+): Promise<{ notificationId: string | null; fireAt: Date | null }> {
+  if (!isDesiredScope(scope)) return { notificationId: null, fireAt: null };
+  const fireAt = reminderFireDate(event);
+  if (!fireAt) return { notificationId: null, fireAt: null };
+  const notificationId = await scheduleEventNotification(event, scope, fireAt);
+  if (!notificationId || isDesiredScope(scope)) return { notificationId, fireAt };
   await cancelNotificationIds([notificationId]);
-  return null;
+  return { notificationId: null, fireAt: null };
 }
 
 async function syncRegistryEvent(
@@ -347,6 +381,22 @@ async function syncRegistryEvent(
   const unchanged = existing
     && registrationFingerprint(existing) === nextFingerprint;
 
+  if (unchanged && existing.deliveredAt) {
+    await cancelNotificationIds([
+      ...existing.pendingCancellationIds,
+      event.notificationId !== existing.notificationId ? event.notificationId : null,
+    ]);
+    registry[key] = {
+      event: nextSnapshot,
+      notificationId: existing.notificationId,
+      fingerprint: nextFingerprint,
+      pendingCancellationIds: [],
+      scheduledFireAt: existing.scheduledFireAt,
+      deliveredAt: existing.deliveredAt,
+    };
+    return existing.notificationId;
+  }
+
   if (unchanged && existing.notificationId) {
     await cancelNotificationIds([
       ...existing.pendingCancellationIds,
@@ -357,6 +407,8 @@ async function syncRegistryEvent(
       notificationId: existing.notificationId,
       fingerprint: nextFingerprint,
       pendingCancellationIds: [],
+      scheduledFireAt: existing.scheduledFireAt,
+      deliveredAt: null,
     };
     return existing.notificationId;
   }
@@ -366,12 +418,14 @@ async function syncRegistryEvent(
     ...(existing?.pendingCancellationIds ?? []),
     event.notificationId,
   ]);
-  const notificationId = await scheduleForScope(scope, event);
+  const { notificationId, fireAt } = await scheduleForScope(scope, event);
   registry[key] = {
     event: nextSnapshot,
     notificationId,
     fingerprint: nextFingerprint,
     pendingCancellationIds: [],
+    scheduledFireAt: fireAt?.toISOString() ?? null,
+    deliveredAt: null,
   };
   return notificationId;
 }
@@ -384,7 +438,13 @@ async function deactivateNotificationScope(scope: string): Promise<void> {
   ]));
   const inactive = Object.fromEntries(Object.entries(registry).map(([eventId, entry]) => [
     eventId,
-    { ...entry, notificationId: null, pendingCancellationIds: [] },
+    {
+      ...entry,
+      notificationId: null,
+      pendingCancellationIds: [],
+      scheduledFireAt: null,
+      deliveredAt: null,
+    },
   ]));
   await saveEventNotificationRegistry(scope, inactive);
 }
@@ -563,8 +623,12 @@ export async function scheduleTestNotification(): Promise<string> {
   });
 }
 
-export async function scheduleEventNotification(event: CalEvent, scope: string): Promise<string | null> {
-  const fireAt = reminderFireDate(event);
+export async function scheduleEventNotification(
+  event: CalEvent,
+  scope: string,
+  fireAtOverride?: Date,
+): Promise<string | null> {
+  const fireAt = fireAtOverride ?? reminderFireDate(event);
   if (!fireAt) return null;
 
   try {
@@ -596,12 +660,11 @@ export async function scheduleEventNotification(event: CalEvent, scope: string):
 
 export async function cancelEventNotification(notificationId?: string | null): Promise<boolean> {
   if (!notificationId) return true;
-  try {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
-    return true;
-  } catch {
-    return false;
-  }
+  const [scheduled] = await Promise.allSettled([
+    Notifications.cancelScheduledNotificationAsync(notificationId),
+    Notifications.dismissNotificationAsync(notificationId),
+  ]);
+  return scheduled.status === 'fulfilled';
 }
 
 export function switchEventNotificationScope(

@@ -5,6 +5,11 @@ import {
   classifyMeetingAudioUploadFailure,
   MeetingAudioUploadFailureCode,
 } from './meetingAudioUploadFailure';
+import {
+  cancelNativeMeetingUpload,
+  getNativeMeetingUploadState,
+  type NativeMeetingUploadRegistration,
+} from '../native/nativeTransferCoordinator';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v2';
 const LEGACY_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v1';
@@ -22,6 +27,8 @@ export interface FinalizeMeetingRecordingInput {
   accessToken?: string | null;
   audioDurationSec?: number;
   audioBars?: number[];
+  getAudioDurationSec?: () => number | undefined;
+  getAudioBars?: () => number[] | undefined;
   stopAudio: () => Promise<string | undefined>;
   getTranscriptLines?: () => TranscriptLine[];
 }
@@ -29,6 +36,10 @@ export interface FinalizeMeetingRecordingInput {
 export interface FinalizeMeetingRecordingDependencies {
   saveTranscript: (meetingId: string, lines: TranscriptLine[]) => Promise<void>;
   uploadAudio: (meetingId: string, uri: string, accessToken: string) => Promise<unknown>;
+  enqueuePersistentUpload?: (
+    pending: PendingMeetingAudioUpload,
+    accessToken: string,
+  ) => Promise<NativeMeetingUploadRegistration | null>;
   updateStatus: (meetingId: string, status: string, patch: Partial<Meeting>) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
 }
@@ -53,6 +64,9 @@ export interface PendingMeetingAudioUpload {
   failureCode?: MeetingAudioUploadFailureCode;
   failureMessage?: string;
   nextAttemptAt?: string;
+  nativeWorkId?: string;
+  nativeOperationId?: string;
+  nativeGeneration?: number;
 }
 
 type PendingUploadMap = Record<string, PendingMeetingAudioUpload>;
@@ -74,6 +88,11 @@ export interface PendingMeetingAudioRetryOptions {
 
 let pendingStorageMutation: Promise<void> = Promise.resolve();
 const pendingAudioUploadsInFlight = new Map<string, Promise<boolean>>();
+const deletedMeetingAudio = new Set<string>();
+
+function meetingAudioOperationKey(storageScope: string, meetingId: string): string {
+  return `${storageScope}\u001f${meetingId}`;
+}
 
 export function createMeetingRecordingFinalizer(
   finalize: () => Promise<FinalizeMeetingRecordingResult>,
@@ -115,15 +134,35 @@ export async function retryPendingMeetingAudioUpload(
   uploadAudio: PendingAudioUploader,
   options: PendingMeetingAudioRetryOptions = {},
 ): Promise<boolean> {
-  const operationKey = `${storageScope}\u001f${meetingId}`;
+  const operationKey = meetingAudioOperationKey(storageScope, meetingId);
   const existing = pendingAudioUploadsInFlight.get(operationKey);
   if (existing) return existing;
 
   const operation = (async () => {
-    const pending = await getPendingMeetingAudioUpload(storageScope, meetingId);
+    let pending = await getPendingMeetingAudioUpload(storageScope, meetingId);
     if (!pending) return false;
+    if (deletedMeetingAudio.has(operationKey)) return false;
     if (options.automatic && !canAutomaticallyRetryPendingMeetingAudioUpload(pending)) return false;
+    if (pending.nativeWorkId) {
+      const nativeState = await getNativeMeetingUploadState(pending.nativeWorkId).catch(() => null);
+      if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
+        await clearPendingMeetingAudioUpload(storageScope, meetingId);
+        return true;
+      }
+      if (
+        nativeState === null
+        || nativeState.state === 'enqueued'
+        || nativeState.state === 'running'
+        || nativeState.state === 'blocked'
+      ) return false;
+      await clearNativeUploadRegistration(storageScope, meetingId);
+      pending = { ...pending };
+      delete pending.nativeWorkId;
+      delete pending.nativeOperationId;
+      delete pending.nativeGeneration;
+    }
     try {
+      if (deletedMeetingAudio.has(operationKey)) return false;
       await uploadAudio(pending, accessToken);
       await clearPendingMeetingAudioUpload(storageScope, meetingId);
       return true;
@@ -242,14 +281,40 @@ export async function finalizeMeetingRecording(
     audioSyncPending: retryQueued,
     audioSyncBlocked: false,
   };
-  if (input.audioDurationSec) {
-    meetingPatch.audioDurationSec = input.audioDurationSec;
-    meetingPatch.duration = formatDuration(input.audioDurationSec);
+  const audioDurationSec = input.getAudioDurationSec?.() ?? input.audioDurationSec;
+  const audioBars = input.getAudioBars?.() ?? input.audioBars;
+  if (audioDurationSec) {
+    meetingPatch.audioDurationSec = audioDurationSec;
+    meetingPatch.duration = formatDuration(audioDurationSec);
   }
-  if (input.audioBars?.length) meetingPatch.audioBars = input.audioBars;
+  if (audioBars?.length) meetingPatch.audioBars = audioBars;
   const statusSynced = await dependencies.updateStatus(input.meetingId, 'ended', meetingPatch);
 
-  if (pendingAudio && input.accessToken && retryQueued) {
+  let persistentUploadQueued = false;
+  if (
+    pendingAudio
+    && input.accessToken
+    && retryQueued
+    && dependencies.enqueuePersistentUpload
+  ) {
+    try {
+      const registration = await dependencies.enqueuePersistentUpload(pendingAudio, input.accessToken);
+      if (registration) {
+        const attached = await attachNativeUploadRegistration(input.storageScope, input.meetingId, registration)
+          .catch(() => false);
+        if (attached) {
+          persistentUploadQueued = true;
+          uploadInBackground = true;
+        } else {
+          await cancelNativeMeetingUpload(registration.workId).catch(() => {});
+        }
+      }
+    } catch {
+      // Keep the existing JS retry path as a compatibility fallback.
+    }
+  }
+
+  if (pendingAudio && input.accessToken && retryQueued && !persistentUploadQueued) {
     uploadInBackground = true;
     void retryPendingMeetingAudioUpload(
       input.storageScope,
@@ -283,6 +348,9 @@ async function savePendingMeetingAudioUpload(
   storageScope: string,
   pending: PendingMeetingAudioUpload,
 ): Promise<void> {
+  if (deletedMeetingAudio.has(meetingAudioOperationKey(storageScope, pending.meetingId))) {
+    throw new Error('meeting was deleted while audio was finalizing');
+  }
   const attemptedAt = new Date().toISOString();
   await mutatePendingUploads(storageScope, records => {
     const existing = records[pending.meetingId];
@@ -340,6 +408,52 @@ export async function clearPendingMeetingAudioUpload(storageScope: string, meeti
   });
 }
 
+export async function deletePendingMeetingAudioUpload(storageScope: string, meetingId: string): Promise<void> {
+  const operationKey = meetingAudioOperationKey(storageScope, meetingId);
+  deletedMeetingAudio.add(operationKey);
+  let nativeWorkId: string | undefined;
+  await mutatePendingUploads(storageScope, records => {
+    nativeWorkId = records[meetingId]?.nativeWorkId;
+    delete records[meetingId];
+  });
+  if (nativeWorkId) await cancelNativeMeetingUpload(nativeWorkId);
+}
+
+async function attachNativeUploadRegistration(
+  storageScope: string,
+  meetingId: string,
+  registration: NativeMeetingUploadRegistration,
+): Promise<boolean> {
+  const operationKey = meetingAudioOperationKey(storageScope, meetingId);
+  if (deletedMeetingAudio.has(operationKey)) return false;
+  let attached = false;
+  await mutatePendingUploads(storageScope, records => {
+    if (deletedMeetingAudio.has(operationKey)) return;
+    const existing = records[meetingId];
+    if (!existing) return;
+    records[meetingId] = {
+      ...existing,
+      nativeWorkId: registration.workId,
+      nativeOperationId: registration.operationId,
+      nativeGeneration: registration.generation,
+    };
+    attached = true;
+  });
+  return attached;
+}
+
+async function clearNativeUploadRegistration(storageScope: string, meetingId: string): Promise<void> {
+  await mutatePendingUploads(storageScope, records => {
+    const existing = records[meetingId];
+    if (!existing) return;
+    const next = { ...existing };
+    delete next.nativeWorkId;
+    delete next.nativeOperationId;
+    delete next.nativeGeneration;
+    records[meetingId] = next;
+  });
+}
+
 function mutatePendingUploads(storageScope: string, mutator: (records: PendingUploadMap) => void): Promise<void> {
   const storageKey = pendingUploadsKey(storageScope);
   const operation = pendingStorageMutation
@@ -385,6 +499,9 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
         : undefined,
       failureMessage: typeof item.failureMessage === 'string' ? item.failureMessage : undefined,
       nextAttemptAt: typeof item.nextAttemptAt === 'string' ? item.nextAttemptAt : undefined,
+      nativeWorkId: typeof item.nativeWorkId === 'string' ? item.nativeWorkId : undefined,
+      nativeOperationId: typeof item.nativeOperationId === 'string' ? item.nativeOperationId : undefined,
+      nativeGeneration: typeof item.nativeGeneration === 'number' ? item.nativeGeneration : undefined,
     };
   });
   return records;
@@ -399,4 +516,5 @@ function pendingUploadsKey(storageScope: string): string {
 export function resetMeetingRecordingStateForTests(): void {
   pendingStorageMutation = Promise.resolve();
   pendingAudioUploadsInFlight.clear();
+  deletedMeetingAudio.clear();
 }

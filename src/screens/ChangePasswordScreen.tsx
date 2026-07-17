@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,14 +11,20 @@ import {
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { FeishuSaveAction, FeishuSaveState } from '../components/FeishuForm';
+import { AppToast } from '../components/AppToast';
+import { SettingsTitleBar } from '../components/SettingsGroup';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { changePassword } from '../services/auth';
 import { readableErrorMessage } from '../services/errors';
-import { Colors as C } from '../theme/colors';
 import { RootStackParamList } from '../types';
+import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-FORM-001 / UI-SHELL-001: validation and submit lifecycle map to the three save states.
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'ChangePassword'>;
@@ -39,6 +44,27 @@ export function ChangePasswordScreen({ navigation }: Props) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [validationToast, setValidationToast] = useState<{ key: number; message: string } | null>(null);
+  const formValid = Boolean(accessToken)
+    && Boolean(currentPassword)
+    && newPassword.length >= 8
+    && newPassword === confirmPassword;
+  const saveState: FeishuSaveState = busy
+    ? 'fully-disabled'
+    : formValid
+      ? 'enabled'
+      : 'disabled-with-toast';
+
+  const explainDisabledSave = () => {
+    let message = '';
+    if (!accessToken) message = '当前登录状态不可用，请重新登录后再试';
+    else if (!currentPassword || !newPassword || !confirmPassword) message = '请填写当前密码、新密码和确认密码';
+    else if (newPassword.length < 8) message = '新密码至少需要 8 位';
+    else if (newPassword !== confirmPassword) message = '两次输入的新密码不一致';
+    if (message) {
+      setValidationToast(current => ({ key: (current?.key ?? 0) + 1, message }));
+    }
+  };
 
   const handleSubmit = async () => {
     if (!accessToken) {
@@ -74,8 +100,23 @@ export function ChangePasswordScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
-      <BackHeader title="修改密码" onBack={() => navigation.goBack()} />
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar
+        title="修改密码"
+        onBack={() => navigation.goBack()}
+        trailing={(
+          <View style={s.titleActionSlot} testID="change-password-footer">
+            <FeishuSaveAction
+              state={saveState}
+              label={busy ? '保存中' : '保存'}
+              onSave={() => { void handleSubmit(); }}
+              onDisabledPress={explainDisabledSave}
+              disabledHint="填写并确认新密码后保存"
+              testID="change-password-submit"
+            />
+          </View>
+        )}
+      />
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           style={s.flex}
@@ -83,65 +124,60 @@ export function ChangePasswordScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
           testID="change-password-page"
         >
-          <PasswordField
-            label="当前密码"
-            placeholder="输入当前密码"
-            value={currentPassword}
-            onChangeText={setCurrentPassword}
-            editable={!busy}
-            testID="change-password-current"
-          />
-          <PasswordField
-            label="新密码"
-            placeholder="输入新密码，至少 8 位"
-            value={newPassword}
-            onChangeText={setNewPassword}
-            editable={!busy}
-            testID="change-password-new"
-          />
-          <PasswordField
-            label="确认新密码"
-            placeholder="再次输入新密码"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            editable={!busy}
-            testID="change-password-confirm"
-          />
+          <View style={s.formSurface}>
+            <PasswordField
+              label="当前密码"
+              placeholder="输入当前密码"
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              editable={!busy}
+              testID="change-password-current"
+            />
+            <PasswordField
+              label="新密码"
+              placeholder="至少 8 位"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              editable={!busy}
+              testID="change-password-new"
+            />
+            <PasswordField
+              label="确认新密码"
+              placeholder="再次输入"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              editable={!busy}
+              testID="change-password-confirm"
+              last
+            />
+          </View>
         </ScrollView>
-
-        <View style={s.footer} testID="change-password-footer">
-          <TouchableOpacity
-            style={s.primaryButton}
-            onPress={() => { void handleSubmit(); }}
-            disabled={busy}
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityState={{ busy, disabled: busy }}
-            testID="change-password-submit"
-          >
-            <View style={s.buttonBusySlot}>
-              {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
-            </View>
-            <Text style={s.primaryButtonText}>{busy ? '提交中' : '确认修改'}</Text>
-            <View style={s.buttonBusySlot} />
-          </TouchableOpacity>
-        </View>
       </KeyboardAvoidingView>
+      <AppToast
+        visible={validationToast !== null}
+        message={validationToast?.message ?? ''}
+        presentationKey={validationToast?.key ?? 0}
+        onDismiss={() => setValidationToast(null)}
+        bottom={24}
+        testID="change-password-validation-toast"
+      />
     </ScreenContainer>
   );
 }
 
-function PasswordField({ label, placeholder, value, onChangeText, editable, testID }: {
+function PasswordField({ label, placeholder, value, onChangeText, editable, testID, last = false }: {
   label: string;
   placeholder: string;
   value: string;
   onChangeText: (value: string) => void;
   editable: boolean;
   testID: string;
+  last?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   return (
-    <View style={s.field} testID={`${testID}-field`}>
+    <View style={[s.field, last && s.lastField]} testID={`${testID}-field`}>
+      <Text style={s.fieldLabel}>{label}</Text>
       <TextInput
         style={s.input}
         value={value}
@@ -151,7 +187,7 @@ function PasswordField({ label, placeholder, value, onChangeText, editable, test
         autoCapitalize="none"
         autoCorrect={false}
         placeholder={placeholder}
-        placeholderTextColor={C.faint}
+        placeholderTextColor={F.textPlaceholder}
         accessibilityLabel={label}
         testID={testID}
       />
@@ -162,7 +198,7 @@ function PasswordField({ label, placeholder, value, onChangeText, editable, test
         accessibilityRole="button"
         accessibilityLabel={visible ? `隐藏${label}` : `显示${label}`}
       >
-        <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={18} color={C.faint} />
+        <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={18} color={F.iconTertiary} />
       </TouchableOpacity>
     </View>
   );
@@ -170,27 +206,19 @@ function PasswordField({ label, placeholder, value, onChangeText, editable, test
 
 const s = StyleSheet.create({
   flex: { flex: 1 },
-  content: { paddingHorizontal: ACCOUNT_SECURITY_GEOMETRY.pagePadding, paddingTop: 24, paddingBottom: 24 },
+  content: { paddingTop: 12, paddingBottom: 24 },
+  formSurface: { backgroundColor: F.backgroundBody },
   field: {
     height: ACCOUNT_SECURITY_GEOMETRY.inputHeight,
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: C.border,
-    marginBottom: 16,
+    paddingLeft: ACCOUNT_SECURITY_GEOMETRY.pagePadding,
+    borderBottomWidth: FEISHU_DIMENSIONS.divider,
+    borderBottomColor: F.divider,
   },
-  input: { flex: 1, minWidth: 0, height: ACCOUNT_SECURITY_GEOMETRY.inputHeight, paddingVertical: 0, fontSize: 16, color: C.text },
-  visibilityButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
-  footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.border, backgroundColor: C.body },
-  primaryButton: {
-    height: ACCOUNT_SECURITY_GEOMETRY.actionHeight,
-    borderRadius: ACCOUNT_SECURITY_GEOMETRY.actionRadius,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: C.primary,
-  },
-  primaryButtonText: { fontSize: 17, lineHeight: 24, fontWeight: '500', color: '#FFFFFF' },
-  buttonBusySlot: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
+  lastField: { borderBottomWidth: 0 },
+  fieldLabel: { width: 104, fontSize: 16, lineHeight: 22, color: F.textTitle },
+  input: { flex: 1, minWidth: 0, height: ACCOUNT_SECURITY_GEOMETRY.inputHeight, paddingVertical: 0, fontSize: 16, color: F.textTitle },
+  visibilityButton: { width: 44, height: ACCOUNT_SECURITY_GEOMETRY.inputHeight, alignItems: 'center', justifyContent: 'center' },
+  titleActionSlot: { width: FEISHU_DIMENSIONS.saveActionWidth, height: FEISHU_DIMENSIONS.titleBarHeight },
 });

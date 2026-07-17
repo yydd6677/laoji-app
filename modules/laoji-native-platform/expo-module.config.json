@@ -1,0 +1,16 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": [
+      "com.laoji.nativeplatform.LaojiNativePlatformModule",
+      "com.laoji.nativeplatform.LaojiTransferModule",
+      "com.laoji.nativeplatform.LaojiCalendarModule",
+      "com.laoji.nativeplatform.LaojiMinutesModule",
+      "com.laoji.nativeplatform.LaojiRecorderModule",
+      "com.laoji.nativeplatform.calendarpages.LaojiCalendarDetailModule",
+      "com.laoji.nativeplatform.calendarpages.LaojiCalendarEditModule",
+      "com.laoji.nativeplatform.LaojiSpeakerModule",
+      "com.laoji.nativeplatform.ui.LaojiUiModule"
+    ]
+  }
+}

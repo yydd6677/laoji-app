@@ -12,9 +12,9 @@ import {
 } from '../services/api';
 import { useAuth } from './AuthStore';
 import { Colors as C } from '../theme/colors';
-import { formatDuration } from '../utils/meetingMedia';
+import { canResumeMeetingRecording, formatDuration } from '../utils/meetingMedia';
 import {
-  clearPendingMeetingAudioUpload,
+  deletePendingMeetingAudioUpload,
   listPendingMeetingAudioUploads,
   PendingMeetingAudioUpload,
   retryPendingMeetingAudioUploads,
@@ -22,6 +22,7 @@ import {
 import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
 import { HttpResponseError } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
+import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -496,6 +497,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
         const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
         if (!target) return;
+        if (canResumeMeetingRecording(target)) throw new Error('请先结束并保存当前会议录音，再删除会议。');
         const nextMeetings = meetingsRef.current.filter(meeting => meeting.id !== id);
         await persistMeetingsStrict(nextMeetings);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -511,7 +513,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         const cleanupResults = await Promise.allSettled([
           persistTranscripts(),
           persistSummaries(),
-          clearPendingMeetingAudioUpload(scope, id),
+          deletePendingMeetingAudioUpload(scope, id),
+          deleteNativeMeetingArtifacts(scope, id),
           ...(target.audioLocalUri
             ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
             : []),
@@ -525,6 +528,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const previousTranscripts = transcriptCacheRef.current;
     const previousSummaries = summaryCacheRef.current;
     const target = previousMeetings.find(m => m.id === id) ?? null;
+    if (target && canResumeMeetingRecording(target)) {
+      throw new Error('请先结束并保存当前会议录音，再删除会议。');
+    }
     const targetIndex = previousMeetings.findIndex(m => m.id === id);
     const hadTranscript = Object.prototype.hasOwnProperty.call(previousTranscripts, id);
     const previousTranscript = previousTranscripts[id];
@@ -585,7 +591,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       persistMeetingsStrict(nextMeetings),
       persistTranscripts(),
       persistSummaries(),
-      clearPendingMeetingAudioUpload(scope, id),
+      deletePendingMeetingAudioUpload(scope, id),
+      deleteNativeMeetingArtifacts(scope, id),
       ...(target?.audioLocalUri
         ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
         : []),

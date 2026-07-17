@@ -1,0 +1,35 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.laoji'
+version = '1.0.0'
+
+android {
+  namespace 'com.laoji.nativeplatform'
+
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+    testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+  }
+
+  testBuildType 'release'
+}
+
+dependencies {
+  implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+  implementation 'androidx.media3:media3-exoplayer:1.10.1'
+  implementation 'androidx.media3:media3-session:1.10.1'
+  implementation 'androidx.recyclerview:recyclerview:1.4.0'
+  implementation 'androidx.viewpager2:viewpager2:1.1.0'
+  implementation 'androidx.work:work-runtime-ktx:2.10.1'
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+  implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+  testImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'androidx.test:core-ktx:1.6.1'
+  androidTestImplementation 'androidx.test.ext:junit-ktx:1.2.1'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+}

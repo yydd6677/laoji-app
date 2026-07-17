@@ -3,7 +3,10 @@ import {
   canResumeMeetingRecording,
   formatDuration,
   latestTranscriptWindow,
+  MEETING_PLAYBACK_RATES,
+  nextMeetingPlaybackRate,
   pcmDurationSec,
+  preferredMeetingStatusLabel,
   shouldReplayAudio,
   shouldCheckpointTranscript,
   transcriptDurationSec,
@@ -40,6 +43,18 @@ describe('meeting media helpers', () => {
     expect(shouldReplayAudio(42000, 88000)).toBe(false);
   });
 
+  it('cycles through the source-derived seven playback rates', () => {
+    const visited: number[] = [];
+    let current = 1;
+    for (let index = 0; index < MEETING_PLAYBACK_RATES.length; index += 1) {
+      current = nextMeetingPlaybackRate(current);
+      visited.push(current);
+    }
+
+    expect(MEETING_PLAYBACK_RATES).toEqual([0.5, 0.75, 1, 1.25, 1.5, 2, 3]);
+    expect(visited).toEqual([1.25, 1.5, 2, 3, 0.5, 0.75, 1]);
+  });
+
   it('renders only the latest live transcript window without dropping stored lines', () => {
     const all = Array.from({ length: 75 }, (_, index) => ({ id: index + 1 }));
     const result = latestTranscriptWindow(all, 40);
@@ -67,5 +82,17 @@ describe('meeting media helpers', () => {
     expect(canResumeMeetingRecording({ status: 'completed' })).toBe(false);
     expect(canResumeMeetingRecording({ status: 'failed', audioLocalUri: 'file:///meeting.wav' })).toBe(false);
     expect(canResumeMeetingRecording({ status: 'recording', audioAvailable: true })).toBe(false);
+  });
+
+  it('surfaces blocked or pending audio sync ahead of the lifecycle tag', () => {
+    expect(preferredMeetingStatusLabel([
+      { label: '已完成' },
+      { label: '上传受阻' },
+    ])).toBe('上传受阻');
+    expect(preferredMeetingStatusLabel([
+      { label: '录音中' },
+      { label: '待上传' },
+    ])).toBe('待上传');
+    expect(preferredMeetingStatusLabel([{ label: '自定义标签' }])).toBe('自定义标签');
   });
 });

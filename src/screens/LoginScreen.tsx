@@ -12,14 +12,19 @@ import {
   Keyboard,
 } from 'react-native';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { FeishuTitleBar } from '../components/FeishuShell';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
-import { Colors as C } from '../theme/colors';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import { requestPasswordReset } from '../services/auth';
 import { readableErrorMessage } from '../services/errors';
+import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-SHELL-001 / UI-FORM-001: authentication keeps fixed title, input-action and submit slots.
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Login'> };
 type LoginStep = 'account' | 'password';
@@ -35,6 +40,7 @@ export function LoginScreen({ navigation }: Props) {
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [accountFocused, setAccountFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const { signIn, register, continueAsGuest, sessionNotice, clearSessionNotice } = useAuth();
   const { showDialog } = useAppDialog();
   const busy = busyAction !== null;
@@ -66,8 +72,18 @@ export function LoginScreen({ navigation }: Props) {
     return true;
   };
 
+  const validateTerms = () => {
+    if (termsAccepted) return true;
+    showDialog({
+      title: '请先阅读并同意',
+      message: '勾选用户协议和隐私政策后才能继续。',
+      tone: 'warning',
+    });
+    return false;
+  };
+
   const openPasswordStep = (nextIntent: AuthIntent) => {
-    if (!validateAccount()) return;
+    if (!validateAccount() || !validateTerms()) return;
     Keyboard.dismiss();
     setIntent(nextIntent);
     setStep('password');
@@ -79,7 +95,7 @@ export function LoginScreen({ navigation }: Props) {
   };
 
   const handleLogin = async () => {
-    if (!validateAccount() || !validatePassword()) return;
+    if (!validateAccount() || !validatePassword() || !validateTerms()) return;
     setBusyAction('login');
     try {
       await signIn(email.trim(), pwd);
@@ -101,7 +117,7 @@ export function LoginScreen({ navigation }: Props) {
   };
 
   const handleRegister = async () => {
-    if (!validateAccount() || !validatePassword()) return;
+    if (!validateAccount() || !validatePassword() || !validateTerms()) return;
     if (pwd.length < 8) {
       showDialog({ title: '密码过短', message: '注册密码至少需要 8 位。', tone: 'warning' });
       return;
@@ -139,6 +155,7 @@ export function LoginScreen({ navigation }: Props) {
   };
 
   const handleGuest = async () => {
+    if (!validateTerms()) return;
     setBusyAction('guest');
     try {
       await continueAsGuest();
@@ -158,26 +175,42 @@ export function LoginScreen({ navigation }: Props) {
   };
 
   const legalCopy = (
-    <Text style={s.terms}>
-      继续即代表你已阅读并同意
-      <Text
-        style={s.link}
-        onPress={() => navigation.navigate('Legal', { kind: 'terms' })}
+    <View style={s.termsRow}>
+      <TouchableOpacity
+        style={s.checkboxTarget}
+        onPress={() => setTermsAccepted(value => !value)}
+        accessibilityRole="checkbox"
+        accessibilityLabel="同意用户协议和隐私政策"
+        accessibilityState={{ checked: termsAccepted }}
+        testID="login-terms-checkbox"
       >
-        《用户协议》
+        <Ionicons
+          name={termsAccepted ? 'checkbox' : 'square-outline'}
+          size={20}
+          color={termsAccepted ? F.primary : F.iconTertiary}
+        />
+      </TouchableOpacity>
+      <Text style={s.terms}>
+        我已阅读并同意
+        <Text
+          style={s.link}
+          onPress={() => navigation.navigate('Legal', { kind: 'terms' })}
+        >
+          《用户协议》
+        </Text>
+        和
+        <Text
+          style={s.link}
+          onPress={() => navigation.navigate('Legal', { kind: 'privacy' })}
+        >
+          《隐私政策》
+        </Text>
       </Text>
-      和
-      <Text
-        style={s.link}
-        onPress={() => navigation.navigate('Legal', { kind: 'privacy' })}
-      >
-        《隐私政策》
-      </Text>
-    </Text>
+    </View>
   );
 
   return (
-    <ScreenContainer bg={C.body}>
+    <ScreenContainer bg={F.backgroundBody}>
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
           contentContainerStyle={s.scroll}
@@ -186,19 +219,19 @@ export function LoginScreen({ navigation }: Props) {
         >
           {step === 'account' ? (
             <View style={s.page} testID="login-account-step">
-              <View style={s.topBar} />
+              <FeishuTitleBar title="登录" testID="login-titlebar" />
               <View style={s.accountContent}>
                 <View style={s.logo} testID="login-logo">
-                  <Text style={s.logoText}>记</Text>
+                  <Ionicons name="calendar-clear-outline" size={30} color={F.onPrimary} />
                 </View>
-                <Text style={s.title}>欢迎使用老记</Text>
-                <Text style={s.loginTip}>请使用老记账号登录</Text>
+                <Text style={s.title}>老记</Text>
+                <Text style={s.loginTip}>使用邮箱或手机号继续</Text>
 
                 <View style={[s.underlineInput, s.accountInputSpacing, accountFocused && s.underlineInputFocused]}>
                   <TextInput
                     style={s.input}
                     placeholder="邮箱或手机号"
-                    placeholderTextColor={C.faint}
+                    placeholderTextColor={F.textPlaceholder}
                     value={email}
                     onChangeText={handleAccountChange}
                     keyboardType="default"
@@ -219,7 +252,7 @@ export function LoginScreen({ navigation }: Props) {
                         accessibilityRole="button"
                         accessibilityLabel="清除账号"
                       >
-                        <Ionicons name="close-circle" size={16} color={C.faint} />
+                        <Ionicons name="close-circle" size={16} color={F.iconTertiary} />
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -228,7 +261,7 @@ export function LoginScreen({ navigation }: Props) {
                 <TouchableOpacity
                   onPress={() => openPasswordStep('login')}
                   activeOpacity={0.78}
-                  style={s.primaryButton}
+                  style={[s.primaryButton, busy && s.primaryButtonDisabled]}
                   disabled={busy}
                   accessibilityRole="button"
                   testID="login-next"
@@ -262,7 +295,7 @@ export function LoginScreen({ navigation }: Props) {
                   testID="login-guest"
                 >
                   {busyAction === 'guest'
-                    ? <ActivityIndicator size="small" color={C.text} />
+                    ? <ActivityIndicator size="small" color={F.textTitle} />
                     : <Text style={s.secondaryButtonText}>游客体验</Text>}
                 </TouchableOpacity>
                 {legalCopy}
@@ -270,16 +303,20 @@ export function LoginScreen({ navigation }: Props) {
             </View>
           ) : (
             <View style={s.page} testID="login-password-step">
-              <View style={s.passwordTopBar}>
-                <TouchableOpacity
-                  style={s.backButton}
-                  onPress={() => setStep('account')}
-                  accessibilityRole="button"
-                  accessibilityLabel="返回账号输入"
-                >
-                  <Ionicons name="chevron-back" size={22} color={C.text} />
-                </TouchableOpacity>
-              </View>
+              <FeishuTitleBar
+                title={intent === 'register' ? '注册' : '登录'}
+                testID="login-password-titlebar"
+                leading={(
+                  <TouchableOpacity
+                    style={s.backButton}
+                    onPress={() => setStep('account')}
+                    accessibilityRole="button"
+                    accessibilityLabel="返回账号输入"
+                  >
+                    <Ionicons name="chevron-back" size={24} color={F.iconPrimary} />
+                  </TouchableOpacity>
+                )}
+              />
 
               <View style={s.passwordContent}>
                 <Text style={s.title}>{intent === 'register' ? '设置密码' : '输入密码'}</Text>
@@ -289,7 +326,7 @@ export function LoginScreen({ navigation }: Props) {
                   <TextInput
                     style={s.input}
                     placeholder="请输入密码"
-                    placeholderTextColor={C.faint}
+                    placeholderTextColor={F.textPlaceholder}
                     value={pwd}
                     onChangeText={setPwd}
                     secureTextEntry={!showPwd}
@@ -310,7 +347,7 @@ export function LoginScreen({ navigation }: Props) {
                       accessibilityLabel={showPwd ? '隐藏密码' : '显示密码'}
                       testID="login-password-visibility"
                     >
-                      <Ionicons name={showPwd ? 'eye-off-outline' : 'eye-outline'} size={18} color={C.faint} />
+                      <Ionicons name={showPwd ? 'eye-off-outline' : 'eye-outline'} size={18} color={F.iconTertiary} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -329,13 +366,13 @@ export function LoginScreen({ navigation }: Props) {
                 <TouchableOpacity
                   onPress={handlePasswordSubmit}
                   activeOpacity={0.78}
-                  style={[s.primaryButton, busy && s.buttonDisabled]}
+                  style={[s.primaryButton, busy && s.primaryButtonDisabled]}
                   disabled={busy}
                   accessibilityRole="button"
                   testID="login-primary"
                 >
                   {busyAction === intent
-                    ? <ActivityIndicator size="small" color="#fff" />
+                    ? <ActivityIndicator size="small" color={F.onPrimary} />
                     : <Text style={s.primaryButtonText}>{intent === 'register' ? '注册' : '登录'}</Text>}
                 </TouchableOpacity>
 
@@ -352,40 +389,40 @@ export function LoginScreen({ navigation }: Props) {
 const s = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1 },
-  page: { flex: 1, minHeight: 640, backgroundColor: C.body },
-  topBar: { position: 'absolute', left: 0, right: 0, top: 0, height: 44 },
-  accountContent: { paddingHorizontal: 16, paddingTop: 64 },
-  logo: { width: 56, height: 56, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: C.primary },
-  logoText: { fontSize: 24, lineHeight: 30, fontWeight: '700', color: '#fff' },
-  title: { marginTop: 24, fontSize: 26, lineHeight: 34, fontWeight: '700', color: C.text, letterSpacing: 0 },
-  loginTip: { marginTop: 10, fontSize: 12, lineHeight: 18, color: C.faint, textAlign: 'center' },
+  page: { flex: 1, minHeight: 640, backgroundColor: F.backgroundBody },
+  accountContent: { width: '100%', maxWidth: 440, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 40 },
+  logo: { width: 56, height: 56, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: F.primary },
+  title: { marginTop: 20, fontSize: 26, lineHeight: 34, fontWeight: '600', color: F.textTitle, letterSpacing: 0 },
+  loginTip: { marginTop: 6, fontSize: 14, lineHeight: 20, color: F.textCaption },
   accountInputSpacing: { marginTop: 34 },
-  underlineInput: { height: 48, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.border },
-  underlineInputFocused: { borderBottomColor: C.primary, borderBottomWidth: 2 },
-  input: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 12, paddingVertical: 0, fontSize: 17, lineHeight: 24, color: C.text },
+  underlineInput: { height: 48, flexDirection: 'row', alignItems: 'center', borderBottomWidth: FEISHU_DIMENSIONS.divider, borderBottomColor: F.divider },
+  underlineInputFocused: { borderBottomColor: F.primary, borderBottomWidth: 1 },
+  input: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 0, paddingVertical: 0, fontSize: 17, lineHeight: 24, color: F.textTitle },
   inputActionSlot: { width: 36, height: 48, alignItems: 'center', justifyContent: 'center' },
   inputIconButton: { width: 36, height: 44, alignItems: 'center', justifyContent: 'center' },
-  primaryButton: { width: '100%', height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: C.primary },
-  primaryButtonText: { fontSize: 17, lineHeight: 24, fontWeight: '500', color: '#fff' },
+  primaryButton: { width: '100%', height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: F.primary },
+  primaryButtonDisabled: { backgroundColor: F.primaryLoading },
+  primaryButtonText: { fontSize: 17, lineHeight: 24, fontWeight: '500', color: F.onPrimary },
   registerPrompt: { marginTop: 12, minHeight: 28, flexDirection: 'row', alignItems: 'center' },
-  registerPromptText: { fontSize: 14, lineHeight: 20, color: C.sub },
-  registerLink: { paddingVertical: 4, fontSize: 14, lineHeight: 20, color: C.primary },
-  accountFooter: { marginTop: 'auto', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 20 },
+  registerPromptText: { fontSize: 14, lineHeight: 20, color: F.textCaption },
+  registerLink: { paddingVertical: 4, fontSize: 14, lineHeight: 20, color: F.textLink },
+  accountFooter: { width: '100%', maxWidth: 440, alignSelf: 'center', marginTop: 'auto', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 20 },
   divider: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 16 },
-  divLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: C.border },
-  divOr: { marginHorizontal: 10, fontSize: 12, lineHeight: 18, color: C.faint },
-  secondaryButton: { width: '100%', height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, backgroundColor: C.body },
-  secondaryButtonText: { fontSize: 16, lineHeight: 22, fontWeight: '400', color: C.text },
+  divLine: { flex: 1, height: FEISHU_DIMENSIONS.divider, backgroundColor: F.divider },
+  divOr: { marginHorizontal: 10, fontSize: 12, lineHeight: 18, color: F.textCaption },
+  secondaryButton: { width: '100%', height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: F.divider, backgroundColor: F.backgroundBody },
+  secondaryButtonText: { fontSize: 16, lineHeight: 22, fontWeight: '400', color: F.textTitle },
   buttonDisabled: { opacity: 0.5 },
-  terms: { marginTop: 16, fontSize: 12, lineHeight: 18, color: C.faint, textAlign: 'center' },
-  link: { color: C.primary },
-  passwordTopBar: { height: 44, paddingHorizontal: 16, justifyContent: 'center' },
-  backButton: { width: 44, height: 44, marginLeft: -12, alignItems: 'center', justifyContent: 'center' },
-  passwordContent: { paddingHorizontal: 16 },
-  passwordAccount: { marginTop: 10, fontSize: 14, lineHeight: 20, color: C.sub },
+  termsRow: { marginTop: 12, minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  checkboxTarget: { width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },
+  terms: { flexShrink: 1, fontSize: 12, lineHeight: 18, color: F.textCaption },
+  link: { color: F.textLink },
+  backButton: { width: 44, height: FEISHU_DIMENSIONS.titleBarHeight, alignItems: 'center', justifyContent: 'center' },
+  passwordContent: { width: '100%', maxWidth: 440, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 16 },
+  passwordAccount: { marginTop: 8, fontSize: 14, lineHeight: 20, color: F.textCaption },
   passwordInputSpacing: { marginTop: 32 },
   forgot: { alignSelf: 'flex-start', minHeight: 40, justifyContent: 'center', marginTop: 4 },
   forgotPlaceholder: { height: 44 },
-  forgotText: { color: C.primary, fontSize: 14, lineHeight: 20 },
+  forgotText: { color: F.textLink, fontSize: 14, lineHeight: 20 },
   passwordLegal: { marginTop: 8 },
 });

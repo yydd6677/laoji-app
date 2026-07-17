@@ -5,16 +5,14 @@ import { MeetingLiveScreen, MEETING_RECORDING_GEOMETRY } from '../src/screens/Me
 import { useAuth } from '../src/store/AuthStore';
 import { useMeetings } from '../src/store/MeetingsStore';
 import { startRealtimeAsr } from '../src/services/realtimeAsr';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync } from 'expo-audio';
 
 const showDialog = jest.fn();
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: 'Ionicons' }));
-jest.mock('expo-av', () => ({
-  Audio: {
-    requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
-    setAudioModeAsync: jest.fn(async () => undefined),
-  },
+jest.mock('expo-audio', () => ({
+  requestRecordingPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  setAudioModeAsync: jest.fn(async () => undefined),
 }));
 jest.mock('../src/components/ScreenContainer', () => ({ ScreenContainer: 'ScreenContainer' }));
 jest.mock('../src/components/Common', () => ({ Waveform: 'Waveform' }));
@@ -250,9 +248,9 @@ describe('MeetingLiveScreen reliability', () => {
     await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith('Transcription', {
       meetingId: 'meeting-background',
     }));
-    expect(Audio.setAudioModeAsync).toHaveBeenLastCalledWith({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
+    expect(setAudioModeAsync).toHaveBeenLastCalledWith({
+      allowsRecording: false,
+      playsInSilentMode: true,
     });
     expect(updateMeetingStatus).toHaveBeenNthCalledWith(1, 'meeting-background', 'recording');
     expect(updateMeetingStatus).toHaveBeenNthCalledWith(

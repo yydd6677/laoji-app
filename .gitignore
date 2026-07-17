@@ -67,3 +67,5 @@ __pycache__/
 # generated native folders
 /ios
 /android
+/modules/**/android/build/
+/modules/**/build/

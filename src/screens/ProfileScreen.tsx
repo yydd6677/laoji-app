@@ -3,20 +3,31 @@ import { ActivityIndicator, Platform, View, Text, ScrollView, TouchableOpacity, 
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors as C } from '../theme/colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
-import { Avatar, BackHeader } from '../components/Common';
-import { AppActionSheet, AppActionSheetItem } from '../components/AppActionSheet';
-import { SETTINGS_GROUP_GEOMETRY, SettingsGroup, SettingsRow } from '../components/SettingsGroup';
+import { Avatar } from '../components/Common';
+import { FeishuSheet, FeishuOverlayAction } from '../components/FeishuOverlay';
+import {
+  SETTINGS_GROUP_GEOMETRY,
+  SettingsGroup,
+  SettingsRow,
+  SettingsTitleBar,
+} from '../components/SettingsGroup';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import { readableErrorMessage } from '../services/errors';
+import { getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-SHELL-001 / UI-OVERLAY-001: profile editing uses the shared shell and role-based sheet.
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Profile'> };
 
 export function ProfileScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { profile, isGuest, uploadAvatar, deleteAvatar } = useAuth();
   const { showDialog } = useAppDialog();
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -63,26 +74,27 @@ export function ProfileScreen({ navigation }: Props) {
     }
   };
 
-  const avatarActions: AppActionSheetItem[] = [
+  const avatarActions: FeishuOverlayAction[] = [
     {
       key: 'choose-avatar',
       label: '从相册选择',
+      role: 'primary',
       onPress: () => { void handlePickAvatar(); },
     },
     ...((profile.avatarUrl || profile.avatarLocalUri) ? [{
       key: 'remove-avatar',
       label: '移除头像',
-      destructive: true,
+      role: 'destructive' as const,
       onPress: () => { void handleDeleteAvatar(); },
     }] : []),
   ];
 
   return (
-    <ScreenContainer edges={['top', 'bottom']}>
-      <BackHeader
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar
         title="我"
         onBack={() => navigation.goBack()}
-        right={(
+        trailing={(
           <TouchableOpacity
             style={s.headerAction}
             onPress={() => navigation.navigate('Privacy')}
@@ -93,7 +105,7 @@ export function ProfileScreen({ navigation }: Props) {
             <Ionicons
               name="settings-outline"
               size={24}
-              color={C.text}
+              color={F.iconPrimary}
               testID="profile-settings-icon"
             />
           </TouchableOpacity>
@@ -119,7 +131,7 @@ export function ProfileScreen({ navigation }: Props) {
                 <Avatar size={40} profile={profile} />
                 {avatarBusy ? (
                   <View style={s.avatarBusy}>
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={F.onPrimary} />
                   </View>
                 ) : null}
               </View>
@@ -154,11 +166,13 @@ export function ProfileScreen({ navigation }: Props) {
         {isGuest ? <Text style={s.accountState}>未登录账号</Text> : null}
       </ScrollView>
 
-      <AppActionSheet
+      <FeishuSheet
         visible={avatarMenuVisible}
         title="头像"
-        items={avatarActions}
-        onClose={() => setAvatarMenuVisible(false)}
+        actions={avatarActions}
+        bottomInset={insets.bottom}
+        onRequestClose={() => setAvatarMenuVisible(false)}
+        testID="profile-avatar-sheet"
       />
     </ScreenContainer>
   );
@@ -169,6 +183,6 @@ const s = StyleSheet.create({
   content: { paddingBottom: 24 },
   headerAction: { width: 48, height: 44, alignItems: 'center', justifyContent: 'center' },
   avatarPreview: { width: 40, height: 40 },
-  avatarBusy: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 20, backgroundColor: C.overlay, alignItems: 'center', justifyContent: 'center' },
-  accountState: { marginTop: 10, marginHorizontal: 20, fontSize: 12, lineHeight: 18, color: C.faint },
+  avatarBusy: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 20, backgroundColor: F.backgroundMask, alignItems: 'center', justifyContent: 'center' },
+  accountState: { marginTop: 8, marginHorizontal: 16, fontSize: 12, lineHeight: 18, color: F.textCaption },
 });

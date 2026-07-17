@@ -518,6 +518,44 @@ export async function deleteGuestRealtimeSession(meetingId: string, guestToken: 
   }
 }
 
+export async function fetchGuestMeetingTranscript(
+  meetingId: string,
+  guestToken: string,
+  options: FetchMeetingTranscriptOptions = {},
+): Promise<TranscriptLine[]> {
+  const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 1000));
+  const all: TranscriptLine[] = [];
+  const seenIds = new Set<string>();
+  let offset = 0;
+
+  while (true) {
+    const res = await fetch(
+      meetingUrl(`/api/laoji/meetings/guest-sessions/${encodeURIComponent(meetingId)}/transcripts?offset=${offset}&limit=${pageSize}`),
+      { headers: { 'X-Guest-Session-Token': guestToken } },
+    );
+    if (!res.ok) throw await readResponseError('fetch guest meeting transcript failed', res);
+    const data = await res.json();
+    const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
+      ? data.total
+      : undefined;
+    const previousCount = all.length;
+    batch.forEach(line => {
+      if (line.id && seenIds.has(line.id)) return;
+      if (line.id) seenIds.add(line.id);
+      all.push(line);
+    });
+    offset += batch.length;
+    if (batch.length === 0) break;
+    if (total != null && offset >= total) break;
+    if (batch.length < pageSize) break;
+    if (all.length === previousCount) break;
+  }
+
+  const fallbackItems = options.fallbackItems ?? [];
+  return fallbackItems.length > all.length ? fallbackItems : all;
+}
+
 export async function updateMeeting(
   meetingId: string,
   changes: Partial<Pick<ApiMeeting, 'title' | 'description' | 'status' | 'participants' | 'mode'>>,

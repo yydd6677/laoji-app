@@ -1,7 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+jest.mock('../src/native/nativeTransferCoordinator', () => ({
+  cancelNativeMeetingUpload: jest.fn(async () => undefined),
+  getNativeMeetingUploadState: jest.fn(async () => null),
+}));
+
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   createMeetingRecordingFinalizer,
+  deletePendingMeetingAudioUpload,
   finalizeMeetingRecording,
   getPendingMeetingAudioUpload,
   listPendingMeetingAudioUploads,
@@ -11,6 +17,10 @@ import {
   retryPendingMeetingAudioUpload,
   retryPendingMeetingAudioUploads,
 } from '../src/services/meetingRecording';
+import {
+  cancelNativeMeetingUpload,
+  type NativeMeetingUploadRegistration,
+} from '../src/native/nativeTransferCoordinator';
 import { TranscriptLine } from '../src/types';
 import { HttpResponseError } from '../src/services/errors';
 
@@ -77,15 +87,23 @@ describe('meetingRecording', () => {
     deps.uploadAudio.mockImplementationOnce(() => new Promise<object>(resolve => {
       resolveUpload = () => resolve({});
     }));
+    let audioStopped = false;
+    const getAudioBars = jest.fn(() => {
+      expect(audioStopped).toBe(true);
+      return [0.2, 0.8, 0.4];
+    });
     const result = await finalizeMeetingRecording({
       meetingId: 'meeting-1',
       storageScope: 'user:1',
       transcriptLines: lines,
       isGuest: false,
       accessToken: 'token-1',
-      audioDurationSec: 65.4,
-      audioBars: [0.2, 0.8, 0.4],
-      stopAudio: async () => '/data/audio.wav',
+      getAudioDurationSec: () => 65.4,
+      getAudioBars,
+      stopAudio: async () => {
+        audioStopped = true;
+        return '/data/audio.wav';
+      },
     }, deps);
 
     expect(result).toEqual({
@@ -96,6 +114,7 @@ describe('meetingRecording', () => {
       statusSyncPending: false,
     });
     expect(deps.saveTranscript).toHaveBeenCalledWith('meeting-1', lines);
+    expect(getAudioBars).toHaveBeenCalledTimes(1);
     expect(deps.updateStatus).toHaveBeenCalledWith('meeting-1', 'ended', {
       hasTranscript: true,
       audioAvailable: true,
@@ -118,6 +137,84 @@ describe('meetingRecording', () => {
 
     await expect(getPendingMeetingAudioUpload('user:1', 'meeting-1')).resolves.toBeNull();
     expect(deps.refreshMeetings).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses WorkManager registration without starting a duplicate JS upload [MIN-UPLOAD-001]', async () => {
+    const deps = {
+      ...dependencies(),
+      enqueuePersistentUpload: jest.fn(async () => ({
+        scope: 'user:1',
+        generation: 17,
+        workId: 'work-native-1',
+        operationId: 'operation-native-1',
+      })),
+    };
+
+    const result = await finalizeMeetingRecording({
+      meetingId: 'meeting-native-upload',
+      storageScope: 'user:1',
+      transcriptLines: lines,
+      isGuest: false,
+      accessToken: 'token-1',
+      stopAudio: async () => '/data/native-upload.wav',
+    }, deps);
+
+    expect(result.uploadInBackground).toBe(true);
+    expect(deps.enqueuePersistentUpload).toHaveBeenCalledWith(
+      expect.objectContaining({ meetingId: 'meeting-native-upload' }),
+      'token-1',
+    );
+    await flushAsyncOperations();
+    expect(deps.uploadAudio).not.toHaveBeenCalled();
+    await expect(getPendingMeetingAudioUpload('user:1', 'meeting-native-upload')).resolves.toEqual(
+      expect.objectContaining({
+        nativeWorkId: 'work-native-1',
+        nativeOperationId: 'operation-native-1',
+        nativeGeneration: 17,
+      }),
+    );
+  });
+
+  it('cancels a native registration that arrives after meeting deletion [MIN-DELETE-RECOVERY-001]', async () => {
+    let resolveRegistration: ((value: {
+      scope: string;
+      generation: number;
+      workId: string;
+      operationId: string;
+    }) => void) | undefined;
+    let signalEnqueueStarted: (() => void) | undefined;
+    const enqueueStarted = new Promise<void>(resolve => { signalEnqueueStarted = resolve; });
+    const deps = {
+      ...dependencies(),
+      enqueuePersistentUpload: jest.fn(() => new Promise<NativeMeetingUploadRegistration>(resolve => {
+        signalEnqueueStarted?.();
+        resolveRegistration = resolve;
+      })),
+    };
+    const finalizing = finalizeMeetingRecording({
+      meetingId: 'meeting-delete-race',
+      storageScope: 'user:1',
+      transcriptLines: lines,
+      isGuest: false,
+      accessToken: 'token-1',
+      stopAudio: async () => '/data/delete-race.wav',
+    }, deps);
+
+    await enqueueStarted;
+    expect(deps.enqueuePersistentUpload).toHaveBeenCalledTimes(1);
+    await deletePendingMeetingAudioUpload('user:1', 'meeting-delete-race');
+    resolveRegistration?.({
+      scope: 'user:1',
+      generation: 19,
+      workId: 'late-work',
+      operationId: 'late-operation',
+    });
+    await finalizing;
+    await flushAsyncOperations();
+
+    expect(cancelNativeMeetingUpload).toHaveBeenCalledWith('late-work');
+    expect(deps.uploadAudio).not.toHaveBeenCalled();
+    await expect(getPendingMeetingAudioUpload('user:1', 'meeting-delete-race')).resolves.toBeNull();
   });
 
   it('keeps the local meeting usable when cloud audio upload fails', async () => {

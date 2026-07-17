@@ -9,19 +9,65 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { FeishuTitleBar } from './FeishuShell';
+import {
+  FEISHU_DIMENSIONS,
+  FEISHU_FONT_SIZES,
+  getFeishuTokens,
+} from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-SHELL-001 / UI-TOKENS-001: settings pages share the 44dp shell and semantic rows.
 
 export const SETTINGS_GROUP_GEOMETRY = {
-  marginHorizontal: 16,
-  marginTop: 16,
-  radius: 10,
-  rowHeight: 54,
+  marginHorizontal: 0,
+  marginTop: 12,
+  radius: 0,
+  rowHeight: 52,
   avatarRowHeight: 64,
   horizontalPadding: 16,
-  titleSize: 16,
-  valueSize: 14,
+  titleSize: FEISHU_FONT_SIZES.body0,
+  valueSize: FEISHU_FONT_SIZES.body1,
   arrowSize: 16,
+  divider: FEISHU_DIMENSIONS.divider,
 } as const;
+
+export function SettingsTitleBar({
+  title,
+  onBack,
+  trailing,
+  testID = 'app-back-header',
+}: {
+  title: string;
+  onBack: () => void;
+  trailing?: React.ReactNode;
+  testID?: string;
+}) {
+  return (
+    <FeishuTitleBar
+      title={title}
+      testID={testID}
+      leading={(
+        <TouchableOpacity
+          style={s.backButton}
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel="返回"
+          testID={`${testID}-back`}
+        >
+          <Ionicons
+            name="chevron-back"
+            size={24}
+            color={F.iconPrimary}
+            testID="app-back-icon"
+          />
+        </TouchableOpacity>
+      )}
+      trailing={trailing}
+    />
+  );
+}
 
 export function SettingsGroup({
   children,
@@ -95,7 +141,7 @@ export function SettingsRow({
             <Ionicons
               name="chevron-forward"
               size={SETTINGS_GROUP_GEOMETRY.arrowSize}
-              color={C.faint}
+              color={F.iconTertiary}
             />
           ) : null}
         </View>
@@ -132,14 +178,14 @@ const s = StyleSheet.create({
     marginTop: SETTINGS_GROUP_GEOMETRY.marginTop,
     borderRadius: SETTINGS_GROUP_GEOMETRY.radius,
     overflow: 'hidden',
-    backgroundColor: C.body,
+    backgroundColor: F.backgroundBody,
   },
   row: {
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SETTINGS_GROUP_GEOMETRY.horizontalPadding,
-    backgroundColor: C.body,
+    backgroundColor: F.backgroundBody,
   },
   disabled: { opacity: 0.45 },
   label: {
@@ -148,14 +194,14 @@ const s = StyleSheet.create({
     fontSize: SETTINGS_GROUP_GEOMETRY.titleSize,
     lineHeight: 22,
     fontWeight: '400',
-    color: C.text,
+    color: F.textTitle,
   },
   centeredLabel: {
     flex: 1,
     maxWidth: '100%',
     textAlign: 'center',
   },
-  destructiveLabel: { color: C.red },
+  destructiveLabel: { color: F.danger },
   rightArea: {
     flex: 1,
     minWidth: 0,
@@ -171,14 +217,20 @@ const s = StyleSheet.create({
     fontSize: SETTINGS_GROUP_GEOMETRY.valueSize,
     lineHeight: 20,
     fontWeight: '400',
-    color: C.faint,
+    color: F.textCaption,
   },
   divider: {
     position: 'absolute',
     left: SETTINGS_GROUP_GEOMETRY.horizontalPadding,
     right: 0,
     bottom: 0,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: C.divider,
+    height: SETTINGS_GROUP_GEOMETRY.divider,
+    backgroundColor: F.divider,
+  },
+  backButton: {
+    width: 44,
+    height: FEISHU_DIMENSIONS.titleBarHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

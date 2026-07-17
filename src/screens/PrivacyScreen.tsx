@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { Animated, Easing, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import Constants from 'expo-constants';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
-import { BackHeader } from '../components/Common';
-import { CalendarSwitch } from '../components/CalendarSwitch';
-import { SettingsGroup, SettingsRow } from '../components/SettingsGroup';
+import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import {
@@ -19,6 +16,11 @@ import {
 } from '../services/privacy';
 import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
 import { clearAppStorage } from '../services/appStorage';
+import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
+
+const { colors: F } = getFeishuTokens();
+
+// UI-TOKENS-001 / UI-MOTION-001: privacy controls use semantic colors and fixed motion geometry.
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Privacy'> };
 
@@ -28,27 +30,61 @@ function Toggle({
   label,
   on,
   onToggle,
+  disabled,
   testID,
 }: {
   label: string;
   on: boolean;
   onToggle: () => void;
+  disabled: boolean;
   testID: string;
 }) {
+  const progress = React.useRef(new Animated.Value(on ? 1 : 0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(progress, {
+      toValue: on ? 1 : 0,
+      duration: FEISHU_MOTION.fabSegment,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+  }, [on, progress]);
+
   return (
-    <CalendarSwitch
-      checked={on}
-      onChange={onToggle}
+    <TouchableOpacity
+      style={s.toggle}
+      onPress={onToggle}
+      disabled={disabled}
+      activeOpacity={0.8}
+      accessibilityRole="switch"
       accessibilityLabel={label}
       accessibilityHint={`双击以${on ? '关闭' : '开启'}${label}`}
+      accessibilityState={{ checked: on, disabled }}
       testID={testID}
-    />
+    >
+      <View
+        style={[s.toggleTrack, { backgroundColor: on ? F.primary : F.iconDisabled }]}
+        testID={`${testID}-track`}
+      />
+      <Animated.View
+        style={[
+          s.toggleThumb,
+          {
+            transform: [{
+              translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 16] }),
+            }],
+          },
+        ]}
+        testID={`${testID}-thumb`}
+      />
+    </TouchableOpacity>
   );
 }
 
 export function PrivacyScreen({ navigation }: Props) {
   const [faceId, setFaceId] = useState(false);
   const [appLock, setAppLock] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
   const { mode, session, signOut } = useAuth();
   const { showDialog } = useAppDialog();
   const scope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
@@ -93,30 +129,42 @@ export function PrivacyScreen({ navigation }: Props) {
   };
 
   const handleFaceIdToggle = async () => {
-    if (faceId) {
-      if (await persistPrivacy(false, false)) {
-        showDialog({ title: '已关闭系统验证', message: '启动时验证也已同步关闭。', tone: 'success' });
+    if (privacyBusy) return;
+    setPrivacyBusy(true);
+    try {
+      if (faceId) {
+        if (await persistPrivacy(false, false)) {
+          showDialog({ title: '已关闭系统验证', message: '启动时验证也已同步关闭。', tone: 'success' });
+        }
+        return;
       }
-      return;
-    }
-    if (await enableBiometric()) {
-      if (await persistPrivacy(true, appLock)) {
-        showDialog({ title: '已启用系统验证', message: '现在可以用系统生物识别或设备密码验证身份。', tone: 'success' });
+      if (await enableBiometric()) {
+        if (await persistPrivacy(true, appLock)) {
+          showDialog({ title: '已启用系统验证', message: '现在可以用系统生物识别或设备密码验证身份。', tone: 'success' });
+        }
       }
+    } finally {
+      setPrivacyBusy(false);
     }
   };
 
   const handleAppLockToggle = async () => {
-    if (appLock) {
-      if (await persistPrivacy(faceId, false)) {
-        showDialog({ title: '已关闭启动验证', message: '再次打开老记时不会自动要求验证。', tone: 'success' });
+    if (privacyBusy) return;
+    setPrivacyBusy(true);
+    try {
+      if (appLock) {
+        if (await persistPrivacy(faceId, false)) {
+          showDialog({ title: '已关闭启动验证', message: '再次打开老记时不会自动要求验证。', tone: 'success' });
+        }
+        return;
       }
-      return;
-    }
-    const biometricReady = faceId || await enableBiometric();
-    if (!biometricReady) return;
-    if (await persistPrivacy(true, true)) {
-      showDialog({ title: '已开启启动验证', message: '老记进入前台后会要求系统验证。', tone: 'success' });
+      const biometricReady = faceId || await enableBiometric();
+      if (!biometricReady) return;
+      if (await persistPrivacy(true, true)) {
+        showDialog({ title: '已开启启动验证', message: '老记进入前台后会要求系统验证。', tone: 'success' });
+      }
+    } finally {
+      setPrivacyBusy(false);
     }
   };
 
@@ -141,7 +189,6 @@ export function PrivacyScreen({ navigation }: Props) {
             } catch {
               signOutFailed = true;
             }
-            navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
             const failures = cleanupResults.filter(result => result.status === 'rejected').length
               + (signOutFailed ? 1 : 0);
             showDialog(failures > 0
@@ -159,8 +206,8 @@ export function PrivacyScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']}>
-      <BackHeader title="设置" onBack={() => navigation.goBack()} />
+    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+      <SettingsTitleBar title="设置" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="privacy-settings-group">
           <SettingsRow label="账号与安全" onPress={() => navigation.navigate('Account')} />
@@ -183,6 +230,7 @@ export function PrivacyScreen({ navigation }: Props) {
                 label="系统验证"
                 on={faceId}
                 onToggle={handleFaceIdToggle}
+                disabled={privacyBusy}
                 testID="privacy-system-verification-toggle"
               />
             )}
@@ -194,6 +242,7 @@ export function PrivacyScreen({ navigation }: Props) {
                 label="启动时验证"
                 on={appLock}
                 onToggle={handleAppLockToggle}
+                disabled={privacyBusy}
                 testID="privacy-app-lock-toggle"
               />
             )}
@@ -217,4 +266,20 @@ export function PrivacyScreen({ navigation }: Props) {
 const s = StyleSheet.create({
   scroll: { flex: 1 },
   content: { paddingBottom: 32 },
+  toggle: { width: 36, height: 20, justifyContent: 'center' },
+  toggleTrack: { position: 'absolute', left: 0, right: 0, top: 3, height: 14, borderRadius: 7 },
+  toggleThumb: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: F.backgroundFloat,
+    shadowColor: F.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
+  },
 });

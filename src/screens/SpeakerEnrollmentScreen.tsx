@@ -3,7 +3,7 @@ import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, TextInput, T
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAppDialog } from '../components/AppDialog';
@@ -67,7 +67,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }, []);
 
   const restorePlaybackAudioMode = useCallback(async () => {
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
   }, []);
 
   const loadSpeaker = useCallback(async () => {
@@ -171,13 +171,13 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setAudioLevel(0);
     let recordingStarted = false;
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       if (!mountedRef.current || AppState.currentState !== 'active') return;
       if (!permission.granted) {
         showDialog({ title: '无法录制音色', message: '请允许麦克风权限后再录制。', tone: 'warning' });
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       if (!mountedRef.current || AppState.currentState !== 'active') return;
       const id = `speaker-${Date.now()}`;
       const session = await startLocalWavRecording(id, (stats: RealtimeAsrAudioStats) => {
