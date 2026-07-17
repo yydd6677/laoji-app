@@ -3,6 +3,8 @@
   "baseline_id": "feishu-android-7.71.8",
   "source_lock": "evidence/feishu/source-lock.json",
   "deviations": "evidence/feishu/deviations.json",
+  "product_scope": "evidence/feishu/product-scope.json",
+  "tombstones": "evidence/feishu/tombstones.json",
   "coverage": {
     "phase": "pilot",
     "release_inventory_complete": false,

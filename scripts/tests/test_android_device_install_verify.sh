@@ -40,6 +40,8 @@ cat >"$TEMP_DIR/apk/assets/parity-attestation.json" <<'JSON'
   "source_lock_sha256": "source",
   "manifest_sha256": "manifest",
   "deviations_sha256": "deviations",
+  "product_scope_sha256": "product-scope",
+  "tombstones_sha256": "tombstones",
   "artifact_sha256": null,
   "artifact_hash_location": "sidecar"
 }

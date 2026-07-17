@@ -33,8 +33,22 @@
       "id": "DEV-LAOJI-MINUTES-SERVICES-001",
       "status": "approved",
       "module": "minutes",
-      "decision": "Use LaoJi Qwen ASR, summary, WAV persistence and Media3 playback in Feishu-derived Minutes containers.",
+      "decision": "Use LaoJi Qwen ASR, summary and Media3 playback in Feishu-derived Minutes containers.",
       "approval_basis": "Feishu proprietary RTC, CCM and player services are outside LaoJi service capabilities."
+    },
+    {
+      "id": "DEV-LAOJI-UPLOAD-QUEUE-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Use Android WorkManager with network constraints, unique work and exponential retry instead of Feishu's proprietary bounded upload queue.",
+      "approval_basis": "User-approved LaoJi recording recovery requirement and unavailable Feishu upload runtime."
+    },
+    {
+      "id": "DEV-LAOJI-UPLOAD-PAYLOAD-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Persist recoverable PCM16 WAV and upload the completed file instead of Feishu Ogg Opus fragments.",
+      "approval_basis": "User-approved LaoJi audio persistence requirement and the current LaoJi meeting API contract."
     },
     {
       "id": "DEV-LAOJI-GUEST-SUMMARY-001",

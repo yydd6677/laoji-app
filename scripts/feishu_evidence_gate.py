@@ -90,6 +90,8 @@ def evidence_input_sha256(
                 files[relative] = sha256_file(target)
     source_lock = repo_root / str(manifest.get("source_lock", ""))
     deviations = repo_root / str(manifest.get("deviations", ""))
+    product_scope = repo_root / str(manifest.get("product_scope", ""))
+    tombstones = repo_root / str(manifest.get("tombstones", ""))
     return canonical_sha256(
         {
             "baseline_id": manifest.get("baseline_id"),
@@ -97,6 +99,8 @@ def evidence_input_sha256(
             "files": files,
             "source_lock_sha256": sha256_file(source_lock) if source_lock.is_file() else None,
             "deviations_sha256": sha256_file(deviations) if deviations.is_file() else None,
+            "product_scope_sha256": sha256_file(product_scope) if product_scope.is_file() else None,
+            "tombstones_sha256": sha256_file(tombstones) if tombstones.is_file() else None,
         }
     )
 
@@ -254,8 +258,12 @@ def validate(
         manifest = read_json(manifest_path)
         lock_path = repo_root / str(manifest.get("source_lock", ""))
         deviations_path = repo_root / str(manifest.get("deviations", ""))
+        product_scope_path = repo_root / str(manifest.get("product_scope", ""))
+        tombstones_path = repo_root / str(manifest.get("tombstones", ""))
         source_lock = read_json(lock_path)
         deviations_doc = read_json(deviations_path)
+        product_scope = read_json(product_scope_path)
+        tombstones_doc = read_json(tombstones_path)
     except ValueError as error:
         return [GateError("SCHEMA_INVALID", str(error))]
 
@@ -263,11 +271,47 @@ def validate(
         errors.append(GateError("SCHEMA_INVALID", "schema_version must equal 1"))
     if manifest.get("baseline_id") != source_lock.get("baseline", {}).get("id"):
         errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match source lock"))
+    if manifest.get("baseline_id") != product_scope.get("baseline_id"):
+        errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match product scope"))
 
     source_files = unique_objects(source_lock.get("files"), "id", "source files", errors)
     deviations = unique_objects(deviations_doc.get("deviations"), "id", "deviations", errors)
     evidence = unique_objects(manifest.get("evidence"), "id", "evidence", errors)
+    tombstones = unique_objects(tombstones_doc.get("tombstones"), "id", "tombstones", errors)
     errors.extend(sync_ledger(repo_root, manifest, write=False))
+
+    root_routes = product_scope.get("root_routes")
+    tab_destinations = product_scope.get("main_tab_destinations")
+    if not isinstance(root_routes, list) or len(root_routes) != 16 or len(set(root_routes)) != 16:
+        errors.append(GateError("PRODUCT_SCOPE_INVALID", "product scope must contain 16 unique root routes"))
+    if not isinstance(tab_destinations, list) or len(tab_destinations) != 2 or len(set(tab_destinations)) != 2:
+        errors.append(GateError("PRODUCT_SCOPE_INVALID", "product scope must contain 2 unique main-tab destinations"))
+    modules = product_scope.get("module_decisions")
+    expected_modules = {"common-shell", "calendar", "minutes", "account-static"}
+    actual_modules = {
+        item.get("module") for item in modules if isinstance(item, dict)
+    } if isinstance(modules, list) else set()
+    if actual_modules != expected_modules:
+        errors.append(GateError("PRODUCT_SCOPE_INVALID", "all four approved module decisions are required"))
+    if isinstance(modules, list):
+        for module in modules:
+            if not isinstance(module, dict):
+                continue
+            for deviation_id in module.get("deviation_refs", []):
+                if deviation_id not in deviations:
+                    errors.append(GateError("DEVIATION_UNKNOWN", f"product scope: {deviation_id}"))
+
+    for tombstone_id, tombstone in tombstones.items():
+        if not EVIDENCE_ID_RE.fullmatch(tombstone_id):
+            errors.append(GateError("SCHEMA_INVALID", f"invalid tombstone id {tombstone_id}"))
+        replacements = tombstone.get("replaced_by")
+        if not isinstance(replacements, list) or not replacements or any(
+            not isinstance(value, str) or not EVIDENCE_ID_RE.fullmatch(value) or value == tombstone_id
+            for value in replacements
+        ):
+            errors.append(GateError("SCHEMA_INVALID", f"invalid replacements for tombstone {tombstone_id}"))
+        if tombstone_id in evidence:
+            errors.append(GateError("EVIDENCE_ID_TOMBSTONED", tombstone_id))
 
     for identifier, deviation in deviations.items():
         if not DEVIATION_ID_RE.fullmatch(identifier):
@@ -421,6 +465,8 @@ def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> Non
     manifest = read_json(manifest_path)
     lock_path = repo_root / manifest["source_lock"]
     deviations_path = repo_root / manifest["deviations"]
+    product_scope_path = repo_root / manifest["product_scope"]
+    tombstones_path = repo_root / manifest["tombstones"]
     attestation = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -429,6 +475,8 @@ def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> Non
         "source_lock_sha256": sha256_file(lock_path),
         "manifest_sha256": sha256_file(manifest_path),
         "deviations_sha256": sha256_file(deviations_path),
+        "product_scope_sha256": sha256_file(product_scope_path),
+        "tombstones_sha256": sha256_file(tombstones_path),
         "closed_evidence": sorted(
             entry["id"] for entry in manifest["evidence"] if entry.get("status") == "closed"
         ),

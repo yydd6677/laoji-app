@@ -2,8 +2,8 @@
   "schema_version": 1,
   "evidence_id": "CAL-MONTH-EXPAND-HOST-001",
   "proof_kind": "androidTest",
-  "recorded_at": "2026-07-17T09:01:55.215114+00:00",
-  "input_sha256": "c95ef8728f160216869e2eb33532ffedbc9ed4befdb531aa2fd3c9649062b6b1",
+  "recorded_at": "2026-07-17T10:01:37.448567+00:00",
+  "input_sha256": "ae4fcb4540542c5a62aafc8cc8e193e3a76a75baa3b3bfcc8e51028e0d742b56",
   "report": {
     "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
     "sha256": "56c48fbd54f293e5771aa2f6d7616ee073f961c3954c998629c20f43f0e812b1",

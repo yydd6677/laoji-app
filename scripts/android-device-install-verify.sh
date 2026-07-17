@@ -95,7 +95,7 @@ from pathlib import Path
 embedded_path, sidecar_path, artifact_path = map(Path, sys.argv[1:])
 embedded = json.loads(embedded_path.read_text(encoding="utf-8"))
 sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-for key in ("git_commit", "baseline_id", "source_lock_sha256", "manifest_sha256", "deviations_sha256"):
+for key in ("git_commit", "baseline_id", "source_lock_sha256", "manifest_sha256", "deviations_sha256", "product_scope_sha256", "tombstones_sha256"):
     if sidecar.get(key) != embedded.get(key):
         raise SystemExit(f"parity attestation mismatch: {key}")
 digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()

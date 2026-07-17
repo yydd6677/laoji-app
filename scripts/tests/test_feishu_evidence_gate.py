@@ -46,11 +46,24 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             ],
         }
         deviations = {"schema_version": 1, "deviations": []}
+        product_scope = {
+            "schema_version": 1,
+            "baseline_id": "feishu-android-7.71.8",
+            "root_routes": [f"Route{index}" for index in range(16)],
+            "main_tab_destinations": ["Schedule", "Meetings"],
+            "module_decisions": [
+                {"module": name, "status": "approved"}
+                for name in ("common-shell", "calendar", "minutes", "account-static")
+            ],
+        }
+        tombstones = {"schema_version": 1, "tombstones": []}
         manifest = {
             "schema_version": 1,
             "baseline_id": "feishu-android-7.71.8",
             "source_lock": "evidence/feishu/source-lock.json",
             "deviations": "evidence/feishu/deviations.json",
+            "product_scope": "evidence/feishu/product-scope.json",
+            "tombstones": "evidence/feishu/tombstones.json",
             "coverage": {"phase": "pilot", "release_inventory_complete": False},
             "required_release_evidence": ["UI-TEST-001"],
             "evidence": [
@@ -78,6 +91,8 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         for name, value in (
             ("source-lock.json", source_lock),
             ("deviations.json", deviations),
+            ("product-scope.json", product_scope),
+            ("tombstones.json", tombstones),
             ("manifest.json", manifest),
         ):
             (evidence / name).write_text(json.dumps(value), encoding="utf-8")
@@ -159,6 +174,30 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             source_root, manifest, _ = self.write_fixture(root)
             (root / "tests/WidgetTest.kt").write_text("// unrelated\n")
             self.assertIn("TEST_MARKER_MISSING", self.codes(self.validate(root, source_root, manifest)))
+
+    def test_product_scope_cardinality_and_tombstoned_ids_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root, manifest_path, manifest = self.write_fixture(root)
+            product_scope_path = root / manifest["product_scope"]
+            product_scope = json.loads(product_scope_path.read_text())
+            product_scope["root_routes"].pop()
+            product_scope_path.write_text(json.dumps(product_scope), encoding="utf-8")
+            tombstones_path = root / manifest["tombstones"]
+            tombstones_path.write_text(
+                json.dumps({
+                    "schema_version": 1,
+                    "tombstones": [{
+                        "id": "UI-TEST-001",
+                        "reason": "split",
+                        "replaced_by": ["UI-TEST-A-001", "UI-TEST-B-001"],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            codes = self.codes(self.validate(root, source_root, manifest_path))
+            self.assertIn("PRODUCT_SCOPE_INVALID", codes)
+            self.assertIn("EVIDENCE_ID_TOMBSTONED", codes)
 
     def test_release_cannot_be_closed_by_editing_status_only(self):
         with tempfile.TemporaryDirectory() as temp:
