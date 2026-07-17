@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +60,109 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def canonical_sha256(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def evidence_input_sha256(
+    repo_root: Path,
+    manifest: dict[str, Any],
+    entry: dict[str, Any],
+) -> str:
+    stable_entry = {
+        key: value
+        for key, value in entry.items()
+        if key not in {"status", "blockers", "proof_refs"}
+    }
+    files: dict[str, str] = {}
+    for collection in (entry.get("implementation", []), entry.get("tests", [])):
+        if not isinstance(collection, list):
+            continue
+        for item in collection:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            relative = item["path"]
+            target = repo_root / relative
+            if target.is_file():
+                files[relative] = sha256_file(target)
+    source_lock = repo_root / str(manifest.get("source_lock", ""))
+    deviations = repo_root / str(manifest.get("deviations", ""))
+    return canonical_sha256(
+        {
+            "baseline_id": manifest.get("baseline_id"),
+            "entry": stable_entry,
+            "files": files,
+            "source_lock_sha256": sha256_file(source_lock) if source_lock.is_file() else None,
+            "deviations_sha256": sha256_file(deviations) if deviations.is_file() else None,
+        }
+    )
+
+
+def junit_report(report: Path) -> dict[str, Any]:
+    try:
+        root = ET.parse(report).getroot()
+    except (ET.ParseError, OSError) as error:
+        raise ValueError(f"invalid JUnit report {report}: {error}") from error
+    suites = [root] if root.tag == "testsuite" else list(root.findall(".//testsuite"))
+    cases = [
+        {"class_name": case.get("classname", ""), "name": case.get("name", "")}
+        for suite in suites
+        for case in suite.findall("testcase")
+    ]
+    return {
+        "tests": sum(int(suite.get("tests", "0")) for suite in suites),
+        "failures": sum(int(suite.get("failures", "0")) for suite in suites),
+        "errors": sum(int(suite.get("errors", "0")) for suite in suites),
+        "skipped": sum(int(suite.get("skipped", "0")) for suite in suites),
+        "testcases": cases,
+    }
+
+
+def validate_proof(
+    repo_root: Path,
+    manifest: dict[str, Any],
+    evidence_id: str,
+    entry: dict[str, Any],
+    proof_relative: str,
+    mode: str,
+) -> list[GateError]:
+    errors: list[GateError] = []
+    proof_path = repo_root / proof_relative
+    try:
+        proof = read_json(proof_path)
+    except ValueError as error:
+        return [GateError("VERIFICATION_PROOF_INVALID", f"{evidence_id}: {error}")]
+    if proof.get("schema_version") != 1 or proof.get("evidence_id") != evidence_id:
+        errors.append(GateError("VERIFICATION_PROOF_INVALID", f"{evidence_id}: {proof_relative}"))
+        return errors
+    expected_input = evidence_input_sha256(repo_root, manifest, entry)
+    if proof.get("input_sha256") != expected_input:
+        errors.append(GateError("VERIFICATION_PROOF_STALE", f"{evidence_id}: {proof_relative}"))
+    report = proof.get("report", {})
+    if not isinstance(report, dict) or report.get("tests", 0) <= 0:
+        errors.append(GateError("VERIFICATION_PROOF_INVALID", f"{evidence_id}: no executed tests"))
+    if report.get("failures") != 0 or report.get("errors") != 0:
+        errors.append(GateError("VERIFICATION_PROOF_FAILED", f"{evidence_id}: {proof_relative}"))
+    testcases = {
+        case.get("name")
+        for case in report.get("testcases", [])
+        if isinstance(case, dict) and isinstance(case.get("name"), str)
+    }
+    for test in entry.get("tests", []):
+        symbol = test.get("symbol") if isinstance(test, dict) else None
+        if symbol and symbol not in testcases:
+            errors.append(GateError("VERIFICATION_TESTCASE_MISSING", f"{evidence_id}: {symbol}"))
+    if mode == "release":
+        report_relative = report.get("path")
+        live_report = repo_root / str(report_relative)
+        if not isinstance(report_relative, str) or not live_report.is_file():
+            errors.append(GateError("VERIFICATION_REPORT_MISSING", f"{evidence_id}: {report_relative}"))
+        elif sha256_file(live_report) != report.get("sha256"):
+            errors.append(GateError("VERIFICATION_REPORT_STALE", f"{evidence_id}: {report_relative}"))
+    return errors
 
 
 def resolve_source_root(explicit: str | None) -> Path | None:
@@ -248,6 +352,35 @@ def validate(
                 elif evidence_id not in target.read_text(encoding="utf-8", errors="replace"):
                     errors.append(GateError("TEST_MARKER_MISSING", f"{evidence_id}: {relative}"))
 
+        proof_refs = entry.get("proof_refs", [])
+        if entry.get("status") in {"verified", "closed"} and not proof_refs:
+            errors.append(GateError("VERIFICATION_PROOF_MISSING", evidence_id))
+        elif not isinstance(proof_refs, list):
+            errors.append(GateError("SCHEMA_INVALID", f"{evidence_id} proof_refs must be an array"))
+        else:
+            for proof_relative in proof_refs:
+                if not isinstance(proof_relative, str):
+                    errors.append(GateError("SCHEMA_INVALID", f"{evidence_id} proof ref must be a path"))
+                    continue
+                errors.extend(
+                    validate_proof(repo_root, manifest, evidence_id, entry, proof_relative, mode)
+                )
+        if entry.get("status") == "closed":
+            closure_proofs = []
+            for proof_relative in proof_refs if isinstance(proof_refs, list) else []:
+                try:
+                    proof = read_json(repo_root / str(proof_relative))
+                except ValueError:
+                    continue
+                if proof.get("proof_kind") == "closure" and proof.get("independent_review") is True:
+                    closure_proofs.append(proof)
+            if not closure_proofs:
+                errors.append(GateError("CLOSURE_PROOF_MISSING", evidence_id))
+            if entry.get("requirements", {}).get("device_verification_required") is True and not any(
+                proof.get("runtime", {}).get("device_kind") == "physical" for proof in closure_proofs
+            ):
+                errors.append(GateError("PHYSICAL_DEVICE_PROOF_MISSING", evidence_id))
+
     if mode == "release":
         coverage = manifest.get("coverage", {})
         if coverage.get("release_inventory_complete") is not True:
@@ -314,6 +447,60 @@ def finalize_attestation(attestation_path: Path, artifact_path: Path, output: Pa
     output.write_text(json.dumps(attestation, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
 
 
+def record_proof(
+    repo_root: Path,
+    manifest_path: Path,
+    evidence_id: str,
+    report_path: Path,
+    output: Path,
+    proof_kind: str,
+    device_kind: str,
+    api_level: int | None,
+    device_name: str | None,
+) -> None:
+    manifest = read_json(manifest_path)
+    entries = {entry.get("id"): entry for entry in manifest.get("evidence", []) if isinstance(entry, dict)}
+    entry = entries.get(evidence_id)
+    if entry is None:
+        raise ValueError(f"unknown evidence id {evidence_id}")
+    report_path = report_path.resolve()
+    try:
+        report_relative = report_path.relative_to(repo_root).as_posix()
+    except ValueError as error:
+        raise ValueError("proof report must live under the repository root") from error
+    result = junit_report(report_path)
+    if result["tests"] <= 0 or result["failures"] or result["errors"]:
+        raise ValueError("proof report must contain passing executed tests")
+    case_names = {case["name"] for case in result["testcases"]}
+    missing = [
+        test["symbol"]
+        for test in entry.get("tests", [])
+        if isinstance(test, dict) and test.get("symbol") and test["symbol"] not in case_names
+    ]
+    if missing:
+        raise ValueError(f"proof report is missing required testcases: {', '.join(missing)}")
+    proof = {
+        "schema_version": 1,
+        "evidence_id": evidence_id,
+        "proof_kind": proof_kind,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "input_sha256": evidence_input_sha256(repo_root, manifest, entry),
+        "report": {
+            "path": report_relative,
+            "sha256": sha256_file(report_path),
+            **result,
+        },
+        "runtime": {
+            "device_kind": device_kind,
+            "api_level": api_level,
+            "device_name": device_name,
+        },
+        "independent_review": False,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(proof, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
 def print_errors(errors: Iterable[GateError], json_output: bool) -> None:
     values = list(errors)
     if json_output:
@@ -343,6 +530,15 @@ def main() -> int:
     finalize.add_argument("--artifact", type=Path, required=True)
     finalize.add_argument("--output", type=Path, required=True)
 
+    proof = subparsers.add_parser("record-proof")
+    proof.add_argument("--id", required=True)
+    proof.add_argument("--report", type=Path, required=True)
+    proof.add_argument("--output", type=Path)
+    proof.add_argument("--proof-kind", default="androidTest")
+    proof.add_argument("--device-kind", choices=("emulator", "physical", "host"), required=True)
+    proof.add_argument("--api-level", type=int)
+    proof.add_argument("--device-name")
+
     subparsers.add_parser("sync-docs")
 
     args = parser.parse_args()
@@ -351,6 +547,28 @@ def main() -> int:
 
     if args.command == "finalize":
         finalize_attestation(args.attestation, args.artifact, args.output)
+        return 0
+
+    if args.command == "record-proof":
+        report = args.report if args.report.is_absolute() else repo_root / args.report
+        output = args.output or Path(f"evidence/feishu/proofs/{args.id}.json")
+        output = output if output.is_absolute() else repo_root / output
+        try:
+            record_proof(
+                repo_root,
+                manifest_path,
+                args.id,
+                report,
+                output,
+                args.proof_kind,
+                args.device_kind,
+                args.api_level,
+                args.device_name,
+            )
+        except ValueError as error:
+            print(f"ERROR VERIFICATION_PROOF_INVALID: {error}")
+            return 1
+        print(f"Wrote verification proof to {output}")
         return 0
 
     if args.command == "sync-docs":

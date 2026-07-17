@@ -170,6 +170,53 @@ class FeishuEvidenceGateTest(unittest.TestCase):
                 "RELEASE_INVENTORY_INCOMPLETE",
                 self.codes(self.validate(root, source_root, manifest_path, mode="release")),
             )
+            self.assertIn(
+                "VERIFICATION_PROOF_MISSING",
+                self.codes(self.validate(root, source_root, manifest_path, mode="release")),
+            )
+            self.assertIn(
+                "CLOSURE_PROOF_MISSING",
+                self.codes(self.validate(root, source_root, manifest_path, mode="release")),
+            )
+
+    def test_verified_status_requires_current_test_proof(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root, manifest_path, manifest = self.write_fixture(root)
+            report = root / "build/test-results/result.xml"
+            report.parent.mkdir(parents=True)
+            report.write_text(
+                '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+                '<testcase classname="WidgetTest" name="widgetMatchesSource" />'
+                '</testsuite>',
+                encoding="utf-8",
+            )
+            manifest["evidence"][0]["status"] = "verified"
+            manifest["evidence"][0]["tests"][0]["symbol"] = "widgetMatchesSource"
+            manifest["evidence"][0]["proof_refs"] = ["evidence/feishu/proofs/UI-TEST-001.json"]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            GATE.sync_ledger(root, manifest, write=True)
+            proof = root / "evidence/feishu/proofs/UI-TEST-001.json"
+            GATE.record_proof(
+                root,
+                manifest_path,
+                "UI-TEST-001",
+                report,
+                proof,
+                "unit",
+                "host",
+                None,
+                "fixture",
+            )
+            self.assertEqual([], self.validate(root, source_root, manifest_path))
+            (root / "src/Widget.kt").write_text(
+                "// UI-TEST-001\nclass EvidenceWidget { val height = 50f; val changed = true }\n",
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "VERIFICATION_PROOF_STALE",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
 
     def test_artifact_hash_lives_in_non_recursive_sidecar(self):
         with tempfile.TemporaryDirectory() as temp:

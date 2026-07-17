@@ -84,6 +84,7 @@
           "runtime": "API 35 emulator"
         }
       ],
+      "proof_refs": ["evidence/feishu/proofs/UI-CALENDAR-INDICATOR-001.json"],
       "blockers": []
     },
     {
@@ -115,6 +116,7 @@
           "runtime": "API 35 emulator"
         }
       ],
+      "proof_refs": ["evidence/feishu/proofs/CAL-PICKER-WHEEL-TAP-001.json"],
       "blockers": []
     },
     {
@@ -145,6 +147,7 @@
           "runtime": "API 35 emulator"
         }
       ],
+      "proof_refs": ["evidence/feishu/proofs/CAL-MONTH-EXPAND-HOST-001.json"],
       "blockers": []
     }
   ]
