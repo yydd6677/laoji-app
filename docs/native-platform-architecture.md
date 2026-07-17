@@ -50,7 +50,7 @@ Android 主目的地任一时刻只能有一个导出的 Expo/Fabric 根。底�
 
 ## 通用壳层
 
-`UI-SHELL-BOTTOM-MAIN-001` 以飞书真实主链 `TabPageControllerV3 -> TabPageWidget -> TabBottomBar -> TabBarController` 为依据；More 页的 `NavBottomTabBar` 不得再作为主底栏参考。老记只保留 `Schedule` 与 `Meetings` 两个目的地，这是 `DEV-LAOJI-TWO-TAB-SCOPE-001` 的批准替换。由于 `DEV-EXPO-SINGLE-NATIVE-ROOT-001` 会在目的地变化时替换活动根，旧根只发送语义点击并保持受控状态，新根通过单调命令完整播放一次 125+125ms 选择动画；同 Tab 重选不增加该命令。
+`UI-SHELL-BOTTOM-MAIN-001` 以飞书真实主链 `TabPageControllerV3 -> TabPageWidget -> TabBottomBar -> TabBarController` 为依据；More 页的 `NavBottomTabBar` 不得再作为主底栏参考。老记只保留 `Schedule` 与 `Meetings` 两个目的地，这是 `DEV-LAOJI-TWO-TAB-SCOPE-001` 的批准替换。由于 `DEV-EXPO-SINGLE-NATIVE-ROOT-001` 会在目的地变化时替换活动根，旧根只发送语义点击并保持受控状态，新根通过单调命令完整播放一次 125+125ms 选择动画；同 Tab 重选不增加该命令。生产 Calendar/Minutes Android 根的双向替换由 instrumentation 覆盖，测试监听生产 `ScaleAnimation` 的 start/end 回调并在两段完成后才移除根；React/Expo 事件驱动全链归 `UI-ANDROID-COMPOSITION-001` 继续关闭。
 
 `UI-SHELL-RESELECT-001` 由活动 Calendar 原生底栏同步处理，处理完成后才把低频语义点击交给 React 做目的地判断；不得新增 React 重选序号、Bridge prop、React key、Surface 重挂载或 store 重建。动作映射飞书共享 `backTodayEvent`：QuickChoose 保持当前展开态并提交设备本地今天，随后以 `when (mode)` 只驱动当前活动 owner；单日 owner 清理自己的草稿/拖动，远距离日期先钳到目标相邻页，再以 300ms 横向切日、250ms 纵向回当前分钟；该窗口内到达的同目标 React 快照只能重绑数据和 session，不能重置 Pager 进度或取消 animator。月视图复用普通今天点击与六态分页，跨月在中心页 rebind 后完成今天展开。不得自行关闭 QuickChoose、广播全局清拖、修改隐藏 owner 或清空月缓存。
 

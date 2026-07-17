@@ -40,7 +40,7 @@ npm run verify:feishu-source-lock
 
 - 主底栏高 65dp；默认图标 22dp、文字 12sp。
 - 选中目的地变化时，图标缩放为 `1 -> 0.8 -> 1`，两段各 125ms；同 Tab 重选只分发 `onSingleClick()`，不重放选中缩放。
-- 飞书底栏由 `TabPageWidget` 持续持有；老记采用已批准的单活动 Expo 原生根适配，因此目的地变化必须把递增命令交给新活动根完整播放一次，旧根不得先自行改选中态或留下半段动画。
+- 飞书底栏由 `TabPageWidget` 持续持有；老记采用已批准的单活动 Expo 原生根适配，因此目的地变化必须把递增命令交给新活动根完整播放一次，旧根不得先自行改选中态或留下半段动画。API 35 instrumentation 已双向替换生产 `CalendarHostView` 与 `LaojiMinutesView`，通过生产 `ScaleAnimation` 的 start/end 回调验证两段 125ms motion 均完成后才移除新根，并验证命令 `1/2` 只播放一次、重复命令和同 Tab 点击不重播；完整 React/Expo 事件驱动路径仍单独保留。
 - 同一 tab 再次点击进入 `onSingleClick()`，由页面实现重选动作。
 - `NavBottomTabBar` 只在 More/更多页由 `NavLauncherContainerFragment` 创建，不是主底栏权威。旧文档把它当作主链的结论作废。
 

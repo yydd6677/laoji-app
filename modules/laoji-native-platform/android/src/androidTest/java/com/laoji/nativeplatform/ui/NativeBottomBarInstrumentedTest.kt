@@ -5,20 +5,29 @@ import android.graphics.Color
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.Animation
+import android.view.animation.ScaleAnimation
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.laoji.nativeplatform.calendar.CalendarHostView
 import com.laoji.nativeplatform.calendar.CalendarSurfaceTestActivity
 import com.laoji.nativeplatform.evidence.EvidenceNodeContract
 import com.laoji.nativeplatform.evidence.EvidenceTreeContract
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
+import com.laoji.nativeplatform.minutes.LaojiMinutesView
+import com.laoji.nativeplatform.minutes.MinutesSurface
 import expo.modules.core.ModuleRegistry
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.ModulesProvider
 import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,6 +37,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
 class NativeBottomBarInstrumentedTest {
   private val retainedReactContexts = mutableListOf<Any>()
 
@@ -116,6 +126,136 @@ class NativeBottomBarInstrumentedTest {
     }
   }
 
+  @Test
+  fun realCalendarAndMinutesRootReplacementReplaysSelectionMotionExactlyOnce() {
+    ActivityScenario.launch(CalendarSurfaceTestActivity::class.java).use { scenario ->
+      val firstCalendarRef = AtomicReference<CalendarHostView>()
+      val minutesRef = AtomicReference<LaojiMinutesView>()
+      val secondCalendarRef = AtomicReference<CalendarHostView>()
+      val minutesProbeRef = AtomicReference<SelectionMotionProbe>()
+      val calendarProbeRef = AtomicReference<SelectionMotionProbe>()
+      scenario.onActivity { activity ->
+        val (reactApplicationContext, themedReactContext) = createReactContexts(activity)
+        val appContext = testAppContext(reactApplicationContext)
+        firstCalendarRef.set(CalendarHostView(themedReactContext, appContext))
+        activity.root.addView(firstCalendarRef.get(), matchParentLayoutParams())
+      }
+      waitUntil(scenario) {
+        val firstCalendar = firstCalendarRef.get()
+        firstCalendar.isLaidOut && bottomBar(firstCalendar).isLaidOut
+      }
+
+      scenario.onActivity { activity ->
+        val firstCalendar = firstCalendarRef.get()
+        val firstBar = bottomBar(firstCalendar)
+        assertTrue(node(firstBar, "bottom-tab-meetings").performClick())
+        assertTrue(node(firstBar, "bottom-tab-schedule").isSelected)
+        assertFalse(node(firstBar, "bottom-tab-meetings").isSelected)
+        assertEquals(0, firstBar.selectedAnimationPlayCount())
+
+        activity.root.removeView(firstCalendar)
+        val (reactApplicationContext, themedReactContext) = createReactContexts(activity)
+        val appContext = testAppContext(reactApplicationContext)
+        val minutes = LaojiMinutesView(themedReactContext, appContext).apply {
+          setSurface(MinutesSurface.LIST.wireName)
+        }
+        minutesRef.set(minutes)
+        activity.root.addView(minutes, matchParentLayoutParams())
+      }
+      waitUntil(scenario) {
+        val minutes = minutesRef.get()
+        minutes.isLaidOut && bottomBar(minutes).isLaidOut &&
+          node(bottomBar(minutes), "bottom-tab-meetings-icon").isLaidOut
+      }
+      scenario.onActivity {
+        val minutes = minutesRef.get()
+        val minutesBar = bottomBar(minutes)
+        assertEquals(0, minutesBar.selectedAnimationPlayCount())
+        assertNull((node(minutesBar, "bottom-tab-meetings-icon") as ImageView).animation)
+        minutesProbeRef.set(
+          SelectionMotionProbe(selectionAnimation(minutesBar, "bottom-tab-meetings")),
+        )
+        minutes.setBottomBarSelectionCommand(1)
+      }
+      awaitCompletedSelectionMotion(scenario, minutesProbeRef.get())
+
+      scenario.onActivity {
+        val firstBar = bottomBar(firstCalendarRef.get())
+        val minutes = minutesRef.get()
+        val minutesBar = bottomBar(minutes)
+        assertEquals(0, firstBar.selectedAnimationPlayCount())
+        assertTrue(node(firstBar, "bottom-tab-schedule").isSelected)
+        assertFalse(node(firstBar, "bottom-tab-meetings").isSelected)
+        assertFalse(node(minutesBar, "bottom-tab-schedule").isSelected)
+        assertTrue(node(minutesBar, "bottom-tab-meetings").isSelected)
+
+        minutes.setBottomBarSelectionCommand(1)
+        assertEquals(1, minutesBar.selectedAnimationPlayCount())
+        assertTrue(node(minutesBar, "bottom-tab-meetings").performClick())
+        assertEquals(1, minutesBar.selectedAnimationPlayCount())
+        assertTrue(node(minutesBar, "bottom-tab-schedule").performClick())
+        assertFalse(node(minutesBar, "bottom-tab-schedule").isSelected)
+        assertTrue(node(minutesBar, "bottom-tab-meetings").isSelected)
+      }
+      assertNoDelayedSelectionReplay(
+        scenario,
+        root = { minutesRef.get() },
+        probe = minutesProbeRef.get(),
+        expectedPlayCount = 1,
+      )
+
+      scenario.onActivity { activity ->
+        val minutes = minutesRef.get()
+        activity.root.removeView(minutes)
+        val (reactApplicationContext, themedReactContext) = createReactContexts(activity)
+        val secondCalendar = CalendarHostView(
+          themedReactContext,
+          testAppContext(reactApplicationContext),
+        )
+        secondCalendarRef.set(secondCalendar)
+        activity.root.addView(secondCalendar, matchParentLayoutParams())
+      }
+      waitUntil(scenario) {
+        val secondCalendar = secondCalendarRef.get()
+        secondCalendar.isLaidOut && bottomBar(secondCalendar).isLaidOut &&
+          node(bottomBar(secondCalendar), "bottom-tab-schedule-icon").isLaidOut
+      }
+      scenario.onActivity {
+        val secondCalendar = secondCalendarRef.get()
+        val secondBar = bottomBar(secondCalendar)
+        assertEquals(0, secondBar.selectedAnimationPlayCount())
+        assertNull((node(secondBar, "bottom-tab-schedule-icon") as ImageView).animation)
+        calendarProbeRef.set(
+          SelectionMotionProbe(selectionAnimation(secondBar, "bottom-tab-schedule")),
+        )
+        secondCalendar.setBottomBarSelectionCommand(2)
+      }
+      awaitCompletedSelectionMotion(scenario, calendarProbeRef.get())
+
+      scenario.onActivity {
+        val minutesBar = bottomBar(minutesRef.get())
+        val secondCalendar = secondCalendarRef.get()
+        val secondBar = bottomBar(secondCalendar)
+        assertEquals(1, minutesBar.selectedAnimationPlayCount())
+        assertFalse(node(minutesBar, "bottom-tab-schedule").isSelected)
+        assertTrue(node(minutesBar, "bottom-tab-meetings").isSelected)
+        assertTrue(node(secondBar, "bottom-tab-schedule").isSelected)
+        assertFalse(node(secondBar, "bottom-tab-meetings").isSelected)
+
+        secondCalendar.setBottomBarSelectionCommand(2)
+        assertEquals(1, secondBar.selectedAnimationPlayCount())
+        assertTrue(node(secondBar, "bottom-tab-schedule").performClick())
+        assertEquals(1, secondBar.selectedAnimationPlayCount())
+      }
+      assertNoDelayedSelectionReplay(
+        scenario,
+        root = { secondCalendarRef.get() },
+        probe = calendarProbeRef.get(),
+        expectedPlayCount = 1,
+      )
+    }
+  }
+
   private fun bottomBarContract() = EvidenceTreeContract(
     evidenceId = "UI-SHELL-BOTTOM-MAIN-001",
     nodes = listOf(
@@ -136,6 +276,93 @@ class NativeBottomBarInstrumentedTest {
 
   private fun node(root: View, semanticKey: String): View = root.descendants().single {
     FeishuEvidenceRuntime.ref(it)?.semanticKey == semanticKey
+  }
+
+  private fun bottomBar(root: View): LaojiNativeBottomBarView =
+    root.descendants().filterIsInstance<LaojiNativeBottomBarView>().single()
+
+  private fun testAppContext(reactApplicationContext: Any): AppContext {
+    val modulesProvider = object : ModulesProvider {
+      override fun getModulesList() = emptyList<Class<out expo.modules.kotlin.modules.Module>>()
+    }
+    return AppContext::class.java.constructors
+      .single { it.parameterTypes.size == 3 }
+      .newInstance(
+        modulesProvider,
+        ModuleRegistry(emptyList(), emptyList()),
+        WeakReference(reactApplicationContext),
+      ) as AppContext
+  }
+
+  private fun matchParentLayoutParams() = ViewGroup.LayoutParams(
+    ViewGroup.LayoutParams.MATCH_PARENT,
+    ViewGroup.LayoutParams.MATCH_PARENT,
+  )
+
+  private fun selectionAnimation(bar: LaojiNativeBottomBarView, tabSemanticKey: String): Animation {
+    val tab = node(bar, tabSemanticKey)
+    return tab.javaClass.getDeclaredField("selectAnimation").apply { isAccessible = true }
+      .get(tab) as Animation
+  }
+
+  private fun awaitCompletedSelectionMotion(
+    scenario: ActivityScenario<CalendarSurfaceTestActivity>,
+    probe: SelectionMotionProbe,
+  ) {
+    val animation = probe.animation
+    assertTrue(animation is ScaleAnimation)
+    assertEquals(NativeBottomBarContract.PRESS_LEG_DURATION_MS, animation.duration)
+    assertEquals(1, animation.repeatCount)
+    assertEquals(Animation.REVERSE, animation.repeatMode)
+    waitUntil(scenario) { probe.startCount.get() == 1 }
+    waitUntil(scenario, timeoutMs = 1_500L) { probe.endCount.get() == 1 }
+    val minimumElapsed =
+      NativeBottomBarContract.PRESS_LEG_DURATION_MS * (animation.repeatCount + 1) - 34L
+    assertTrue(
+      "selection motion ended before both source legs completed",
+      probe.firstEndAt.get() - probe.firstStartAt.get() >= minimumElapsed,
+    )
+    assertEquals(1, probe.startCount.get())
+    assertEquals(1, probe.endCount.get())
+    assertTrue(animation.hasStarted())
+    assertTrue(animation.hasEnded())
+  }
+
+  private fun assertNoDelayedSelectionReplay(
+    scenario: ActivityScenario<CalendarSurfaceTestActivity>,
+    root: () -> View,
+    probe: SelectionMotionProbe,
+    expectedPlayCount: Int,
+  ) {
+    SystemClock.sleep(NativeBottomBarContract.PRESS_LEG_DURATION_MS * 2 + 50L)
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+    scenario.onActivity {
+      assertEquals(expectedPlayCount, bottomBar(root()).selectedAnimationPlayCount())
+      assertEquals(1, probe.startCount.get())
+      assertEquals(1, probe.endCount.get())
+      assertTrue(probe.animation.hasEnded())
+    }
+  }
+
+  private class SelectionMotionProbe(val animation: Animation) : Animation.AnimationListener {
+    val startCount = AtomicInteger()
+    val endCount = AtomicInteger()
+    val firstStartAt = AtomicLong(-1L)
+    val firstEndAt = AtomicLong(-1L)
+
+    init {
+      animation.setAnimationListener(this)
+    }
+
+    override fun onAnimationStart(animation: Animation?) {
+      if (startCount.incrementAndGet() == 1) firstStartAt.set(SystemClock.uptimeMillis())
+    }
+
+    override fun onAnimationEnd(animation: Animation?) {
+      if (endCount.incrementAndGet() == 1) firstEndAt.set(SystemClock.uptimeMillis())
+    }
+
+    override fun onAnimationRepeat(animation: Animation?) = Unit
   }
 
   private fun createReactContexts(activity: CalendarSurfaceTestActivity): Pair<Any, Context> {

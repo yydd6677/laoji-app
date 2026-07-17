@@ -134,6 +134,8 @@
         "animation_owner": "icon-only",
         "selection_change_motion_only": true,
         "selection_motion_survives_active_root_replacement": true,
+        "production_android_root_replacement_tested": true,
+        "production_android_root_motion_completion_tested": true,
         "accessibility_selected_state": true
       },
       "implementation": [
@@ -203,11 +205,12 @@
         {"path": "__tests__/nativeMainTabsAndroid.test.ts", "kind": "static"},
         {"path": "__tests__/nativeMainTabsReselect.test.tsx", "kind": "component"},
         {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/ui/NativeBottomBarContractTest.kt", "kind": "jvm"},
-        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeBottomBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "sourceShapedTreeUsesPhysicalDividerRealSelectedStateAndIconOnlyMotion", "runtime": "API 35 emulator"}
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeBottomBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "sourceShapedTreeUsesPhysicalDividerRealSelectedStateAndIconOnlyMotion", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeBottomBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "realCalendarAndMinutesRootReplacementReplaysSelectionMotionExactlyOnce", "runtime": "API 35 emulator"}
       ],
       "blockers": [
         "Exact retained-destination icons remain blocked by UI-ICON-PRIMITIVES-001.",
-        "Current component and per-root instrumentation do not replace one live Android native root with the other; exactly-once selection-motion replay across a real root replacement remains unproven.",
+        "Production Calendar/Minutes Android roots now prove replacement replay, while the full React/Expo event-driven replacement path remains owned by UI-ANDROID-COMPOSITION-001.",
         "Final same-hash physical-device geometry and TalkBack validation remain open."
       ]
     },

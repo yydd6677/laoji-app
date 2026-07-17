@@ -50,10 +50,10 @@
         "resources-colors-d04fc4c4"
       ],
       "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001", "DEV-LAOJI-TWO-TAB-SCOPE-001"],
-      "contract": "Use TabPageControllerV3 -> TabPageWidget -> TabBottomBar/TabBarController -> MainTabBarView/MainTabItemView as authority; keep 65dp content plus a separate physical-pixel divider, source item geometry, selected semantics and icon-only 125+125ms motion only when the selected destination changes. Because the approved Expo adaptation replaces the active native root, a monotonic command must replay that motion exactly once in the newly active root while the old root remains controlled. Same-tab reselect is handled synchronously by the active native root before its semantic tab event reaches React and does not replay selection motion. NavBottomTabBar is only a More-page negative reference.",
+      "contract": "Use TabPageControllerV3 -> TabPageWidget -> TabBottomBar/TabBarController -> MainTabBarView/MainTabItemView as authority; keep 65dp content plus a separate physical-pixel divider, source item geometry, selected semantics and icon-only 125+125ms motion only when the selected destination changes. Because the approved Expo adaptation replaces the active native root, a monotonic command must replay that motion exactly once in the newly active root while the old root remains controlled; this is exercised by replacing production Calendar and Minutes Android roots in both directions and waiting for both animation legs to complete before detaching either new root. Same-tab reselect is handled synchronously by the active native root before its semantic tab event reaches React and does not replay selection motion. NavBottomTabBar is only a More-page negative reference.",
       "blockers": [
         "Exact retained-destination icon paths remain owned by UI-ICON-PRIMITIVES-001.",
-        "A real Android Calendar-root to Minutes-root and return replacement test is still required; component and isolated-root tests do not prove exactly-once replay across root replacement.",
+        "The production Android root replacement is covered, but the full React/Expo event-driven replacement path remains owned by UI-ANDROID-COMPOSITION-001.",
         "Physical-device geometry and TalkBack closure remain part of the final same-hash candidate."
       ]
     },
