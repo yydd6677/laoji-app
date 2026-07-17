@@ -1,12 +1,16 @@
 {
   "schema_version": 1,
   "baseline_id": "feishu-android-7.71.8",
+  "source_catalog": "evidence/feishu/source-catalog.json",
   "source_lock": "evidence/feishu/source-lock.json",
+  "capability_inventory": "evidence/feishu/capability-inventory.json",
   "deviations": "evidence/feishu/deviations.json",
   "product_scope": "evidence/feishu/product-scope.json",
   "tombstones": "evidence/feishu/tombstones.json",
   "coverage": {
-    "phase": "pilot",
+    "phase": "source_closure_complete",
+    "source_inventory_complete": true,
+    "implementation_inventory_complete": false,
     "release_inventory_complete": false,
     "implementation_roots": [
       "modules/laoji-native-platform/android/src/main",
@@ -14,12 +18,10 @@
       "src/screens/ScheduleScreen.android.tsx"
     ]
   },
-  "required_release_evidence": [
-    "UI-ANDROID-COMPOSITION-001",
-    "UI-CALENDAR-INDICATOR-001",
-    "CAL-PICKER-WHEEL-TAP-001",
-    "CAL-MONTH-EXPAND-HOST-001"
-  ],
+  "required_release_evidence": {
+    "source": "capability_inventory",
+    "selector": "release_required"
+  },
   "evidence": [
     {
       "id": "UI-ANDROID-COMPOSITION-001",

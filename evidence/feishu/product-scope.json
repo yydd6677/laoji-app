@@ -49,7 +49,11 @@
         "placeholder controls"
       ],
       "business_replace": ["two LaoJi primary destinations inside the Feishu-derived shell"],
-      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001", "DEV-LAOJI-LIGHT-THEME-001"]
+      "deviation_refs": [
+        "DEV-EXPO-SINGLE-NATIVE-ROOT-001",
+        "DEV-LAOJI-LIGHT-THEME-001",
+        "DEV-LAOJI-TWO-TAB-SCOPE-001"
+      ]
     },
     {
       "module": "calendar",
@@ -103,7 +107,8 @@
         "Clip",
         "chapters without a LaoJi service",
         "AI highlight controls without a LaoJi service",
-        "Feishu meeting feed integration"
+        "Feishu meeting feed integration",
+        "paragraph-level speaker mutation without a LaoJi service"
       ],
       "business_replace": [
         "Qwen ASR",
@@ -119,7 +124,9 @@
         "DEV-LAOJI-UPLOAD-QUEUE-001",
         "DEV-LAOJI-UPLOAD-PAYLOAD-001",
         "DEV-LAOJI-GUEST-SUMMARY-001",
-        "DEV-LAOJI-SYSTEM-SHARE-001"
+        "DEV-LAOJI-SYSTEM-SHARE-001",
+        "DEV-LAOJI-MINUTES-PAGE-SCOPE-001",
+        "DEV-LAOJI-SPEAKER-SCOPE-001"
       ]
     },
     {
@@ -137,7 +144,7 @@
       ],
       "delete": ["Feishu SSO QR and organization capabilities unavailable to LaoJi"],
       "business_replace": ["LaoJi auth profile privacy notification and legal content"],
-      "deviation_refs": ["DEV-LAOJI-LIGHT-THEME-001"]
+      "deviation_refs": ["DEV-LAOJI-LIGHT-THEME-001", "DEV-LAOJI-ACCOUNT-CONTENT-001"]
     }
   ]
 }

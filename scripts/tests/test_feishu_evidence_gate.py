@@ -34,9 +34,19 @@ class FeishuEvidenceGateTest(unittest.TestCase):
 
         evidence = root / "evidence/feishu"
         evidence.mkdir(parents=True)
+        source_catalog = {
+            "schema_version": 1,
+            "baseline_id": "feishu-android-7.71.8",
+            "groups": [{"id": "test", "paths": ["java-sources/example/Authority.java"]}],
+        }
+        source_catalog_path = evidence / "source-catalog.json"
+        source_catalog_path.write_text(json.dumps(source_catalog), encoding="utf-8")
         source_lock = {
             "schema_version": 1,
-            "baseline": {"id": "feishu-android-7.71.8"},
+            "baseline": {
+                "id": "feishu-android-7.71.8",
+                "catalog_sha256": hashlib.sha256(source_catalog_path.read_bytes()).hexdigest(),
+            },
             "files": [
                 {
                     "id": "authority",
@@ -46,6 +56,20 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             ],
         }
         deviations = {"schema_version": 1, "deviations": []}
+        capability_inventory = {
+            "schema_version": 1,
+            "baseline_id": "feishu-android-7.71.8",
+            "entries": [{
+                "id": "UI-TEST-001",
+                "module": "test",
+                "decision": "keep",
+                "release_required": True,
+                "source_refs": ["authority"],
+                "deviation_refs": [],
+                "contract": "fixture",
+                "blockers": [],
+            }],
+        }
         product_scope = {
             "schema_version": 1,
             "baseline_id": "feishu-android-7.71.8",
@@ -60,7 +84,9 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         manifest = {
             "schema_version": 1,
             "baseline_id": "feishu-android-7.71.8",
+            "source_catalog": "evidence/feishu/source-catalog.json",
             "source_lock": "evidence/feishu/source-lock.json",
+            "capability_inventory": "evidence/feishu/capability-inventory.json",
             "deviations": "evidence/feishu/deviations.json",
             "product_scope": "evidence/feishu/product-scope.json",
             "tombstones": "evidence/feishu/tombstones.json",
@@ -90,6 +116,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         }
         for name, value in (
             ("source-lock.json", source_lock),
+            ("capability-inventory.json", capability_inventory),
             ("deviations.json", deviations),
             ("product-scope.json", product_scope),
             ("tombstones.json", tombstones),
@@ -116,6 +143,8 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         workspace_gate = scripts / "check_workspace_source_resolution.js"
         workspace_gate.write_text("// fixture workspace gate\n", encoding="utf-8")
         (root / "node_modules").mkdir()
+        package_json = root / "package.json"
+        package_json.write_text("{}\n", encoding="utf-8")
         package_lock = root / "package-lock.json"
         package_lock.write_text("{}\n", encoding="utf-8")
         metro = root / "metro.config.js"
@@ -189,7 +218,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             encoding="utf-8",
         )
         workspace_report = build / "workspace-source-resolution-report.json"
-        workspace_inputs = [workspace_gate, package_lock, metro, plugin, module_package]
+        workspace_inputs = [workspace_gate, package_json, package_lock, metro, plugin, module_package]
         workspace_report.write_text(
             json.dumps({
                 "schemaVersion": 1,

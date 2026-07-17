@@ -2,8 +2,8 @@
   "schema_version": 1,
   "evidence_id": "UI-CALENDAR-INDICATOR-001",
   "proof_kind": "androidTest",
-  "recorded_at": "2026-07-17T10:01:37.463883+00:00",
-  "input_sha256": "35e9a52876d7a59ac772f4cb7c90627a9ad9a5bac927e1bd17378ef92998dcad",
+  "recorded_at": "2026-07-17T11:04:58.945642+00:00",
+  "input_sha256": "c0673b75bcff22ba3ec4067c4337df00c9627f2ac381b1964c5bc8e520222792",
   "report": {
     "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
     "sha256": "56c48fbd54f293e5771aa2f6d7616ee073f961c3954c998629c20f43f0e812b1",
@@ -141,6 +141,26 @@
         "name": "tombstoneSurvivesStoreRecreationAndExpiresFailClosed"
       }
     ]
+  },
+  "audit_reports": {
+    "typescript_ast": {
+      "kind": "typescript_ast",
+      "path": "build/feishu-ui-ast-report.json",
+      "sha256": "0bb87dbf03a8b8c6fbbea63beea4b55984d8eb17d836e3dcf63e17f24e883a64",
+      "error_count": 208
+    },
+    "android_lint_uast": {
+      "kind": "android_lint_uast",
+      "path": "build/feishu-android-uast-report.json",
+      "sha256": "33e26a4c4990cc8e63d9d2ea662af43750e51ce585b6a1534c5586a223b80124",
+      "error_count": 735
+    },
+    "workspace_resolution": {
+      "kind": "workspace_resolution",
+      "path": "build/workspace-source-resolution-report.json",
+      "sha256": "c376d159f33a6a66078ca107107871c78b81fa5056f403c42a4f449e7202f397",
+      "error_count": 0
+    }
   },
   "runtime": {
     "device_kind": "emulator",

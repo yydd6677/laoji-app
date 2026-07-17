@@ -98,6 +98,8 @@ sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
 for key in (
     "git_commit",
     "baseline_id",
+    "source_catalog_sha256",
+    "capability_inventory_sha256",
     "source_lock_sha256",
     "manifest_sha256",
     "deviations_sha256",

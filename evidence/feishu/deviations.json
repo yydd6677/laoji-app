@@ -70,6 +70,34 @@
       "module": "common",
       "decision": "Version one supports the Feishu-derived light theme only.",
       "approval_basis": "Previously confirmed release scope."
+    },
+    {
+      "id": "DEV-LAOJI-TWO-TAB-SCOPE-001",
+      "status": "approved",
+      "module": "common-shell",
+      "decision": "Retain exactly two primary destinations, Schedule and Meetings, inside the source-derived main-tab shell.",
+      "approval_basis": "Explicit user product scope for LaoJi."
+    },
+    {
+      "id": "DEV-LAOJI-MINUTES-PAGE-SCOPE-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Build the Minutes detail pager dynamically from LaoJi capabilities; retain transcript, summary and speaker content while removing chapters, clips and unsupported Feishu pages.",
+      "approval_basis": "User-approved service-capability pruning and source review correction that Feishu does not have a fixed three-tab contract."
+    },
+    {
+      "id": "DEV-LAOJI-SPEAKER-SCOPE-001",
+      "status": "approved",
+      "module": "minutes",
+      "decision": "Retain real voiceprint enrollment and speaker management, but remove paragraph-level speaker mutation because LaoJi has no corresponding service API.",
+      "approval_basis": "User requires real speaker management and forbids placeholder capabilities; current backend has no paragraph mutation contract."
+    },
+    {
+      "id": "DEV-LAOJI-ACCOUNT-CONTENT-001",
+      "status": "approved",
+      "module": "account-static",
+      "decision": "Use Feishu container, geometry and transition contracts while keeping LaoJi authentication, profile, privacy, notification and legal content.",
+      "approval_basis": "The user approved LaoJi business content with whole-App Feishu visual and interaction reconstruction."
     }
   ]
 }

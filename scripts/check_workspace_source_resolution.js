@@ -41,6 +41,7 @@ function inspectWorkspace(root, options = {}) {
   const resolutions = {};
 
   for (const relative of [
+    'package.json',
     'package-lock.json',
     'metro.config.js',
     'plugins/withLaojiNativePlatform.js',

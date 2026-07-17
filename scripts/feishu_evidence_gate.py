@@ -50,7 +50,7 @@ class GateError:
 def read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as error:
+    except OSError as error:
         raise ValueError(f"missing JSON file: {path}") from error
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid JSON file {path}: {error}") from error
@@ -288,6 +288,8 @@ def evidence_input_sha256(
             if target.is_file():
                 files[relative] = sha256_file(target)
     source_lock = repo_root / str(manifest.get("source_lock", ""))
+    source_catalog = repo_root / str(manifest.get("source_catalog", ""))
+    capability_inventory = repo_root / str(manifest.get("capability_inventory", ""))
     deviations = repo_root / str(manifest.get("deviations", ""))
     product_scope = repo_root / str(manifest.get("product_scope", ""))
     tombstones = repo_root / str(manifest.get("tombstones", ""))
@@ -297,6 +299,10 @@ def evidence_input_sha256(
             "entry": stable_entry,
             "files": files,
             "source_lock_sha256": sha256_file(source_lock) if source_lock.is_file() else None,
+            "source_catalog_sha256": sha256_file(source_catalog) if source_catalog.is_file() else None,
+            "capability_inventory_sha256": (
+                sha256_file(capability_inventory) if capability_inventory.is_file() else None
+            ),
             "deviations_sha256": sha256_file(deviations) if deviations.is_file() else None,
             "product_scope_sha256": sha256_file(product_scope) if product_scope.is_file() else None,
             "tombstones_sha256": sha256_file(tombstones) if tombstones.is_file() else None,
@@ -419,8 +425,10 @@ def render_ledger_status(manifest: dict[str, Any]) -> str:
         LEDGER_START,
         "",
         f"- Manifest phase: `{coverage.get('phase', 'unknown')}`",
+        f"- Source inventory complete: `{'yes' if coverage.get('source_inventory_complete') else 'no'}`",
+        f"- Implementation inventory complete: `{'yes' if coverage.get('implementation_inventory_complete') else 'no'}`",
         f"- Release inventory complete: `{'yes' if coverage.get('release_inventory_complete') else 'no'}`",
-        "- 未纳入当前 manifest 的既有 UI/交互条目统一视为 `未审阅`。",
+        "- `capability-inventory.json` 中尚未进入 manifest 的条目表示源码已锁定、实现尚未登记；不得据此宣称已实现或已关闭。",
         "",
         "| 证据 ID | 模块 | 机器状态 | 决策 | 阻断数 |",
         "| --- | --- | --- | --- | --- |",
@@ -485,29 +493,75 @@ def validate(
     errors: list[GateError] = []
     try:
         manifest = read_json(manifest_path)
+        source_catalog_path = repo_root / str(manifest.get("source_catalog", ""))
+        capability_inventory_path = repo_root / str(manifest.get("capability_inventory", ""))
         lock_path = repo_root / str(manifest.get("source_lock", ""))
         deviations_path = repo_root / str(manifest.get("deviations", ""))
         product_scope_path = repo_root / str(manifest.get("product_scope", ""))
         tombstones_path = repo_root / str(manifest.get("tombstones", ""))
         source_lock = read_json(lock_path)
+        source_catalog = read_json(source_catalog_path)
+        capability_inventory = read_json(capability_inventory_path)
         deviations_doc = read_json(deviations_path)
         product_scope = read_json(product_scope_path)
         tombstones_doc = read_json(tombstones_path)
     except ValueError as error:
         return [GateError("SCHEMA_INVALID", str(error))]
 
-    if manifest.get("schema_version") != 1 or source_lock.get("schema_version") != 1:
+    if (
+        manifest.get("schema_version") != 1
+        or source_catalog.get("schema_version") != 1
+        or capability_inventory.get("schema_version") != 1
+        or source_lock.get("schema_version") != 1
+    ):
         errors.append(GateError("SCHEMA_INVALID", "schema_version must equal 1"))
+    if manifest.get("baseline_id") != source_catalog.get("baseline_id"):
+        errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match source catalog"))
+    if manifest.get("baseline_id") != capability_inventory.get("baseline_id"):
+        errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match capability inventory"))
     if manifest.get("baseline_id") != source_lock.get("baseline", {}).get("id"):
         errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match source lock"))
+    if source_lock.get("baseline", {}).get("catalog_sha256") != sha256_file(source_catalog_path):
+        errors.append(GateError("SOURCE_CATALOG_STALE", "source lock was not generated from current catalog"))
     if manifest.get("baseline_id") != product_scope.get("baseline_id"):
         errors.append(GateError("BASELINE_MISMATCH", "manifest baseline does not match product scope"))
 
     source_files = unique_objects(source_lock.get("files"), "id", "source files", errors)
     deviations = unique_objects(deviations_doc.get("deviations"), "id", "deviations", errors)
     evidence = unique_objects(manifest.get("evidence"), "id", "evidence", errors)
+    inventory = unique_objects(capability_inventory.get("entries"), "id", "capability inventory", errors)
     tombstones = unique_objects(tombstones_doc.get("tombstones"), "id", "tombstones", errors)
     errors.extend(sync_ledger(repo_root, manifest, write=False))
+
+    for evidence_id, item in inventory.items():
+        if not EVIDENCE_ID_RE.fullmatch(evidence_id):
+            errors.append(GateError("SCHEMA_INVALID", f"invalid capability inventory id {evidence_id}"))
+        if item.get("decision") not in ALLOWED_DECISIONS:
+            errors.append(GateError("SCHEMA_INVALID", f"{evidence_id} has invalid inventory decision"))
+        if not isinstance(item.get("release_required"), bool):
+            errors.append(GateError("SCHEMA_INVALID", f"{evidence_id} needs release_required"))
+        source_refs = item.get("source_refs")
+        if not isinstance(source_refs, list) or not source_refs:
+            errors.append(GateError("SOURCE_CLOSURE_MISSING", evidence_id))
+        else:
+            for source_id in source_refs:
+                if source_id not in source_files:
+                    errors.append(GateError("SOURCE_REFERENCE_UNKNOWN", f"{evidence_id}: {source_id}"))
+        for deviation_id in item.get("deviation_refs", []):
+            if deviation_id not in deviations:
+                errors.append(GateError("DEVIATION_UNKNOWN", f"{evidence_id}: {deviation_id}"))
+            elif deviations[deviation_id].get("status") != "approved":
+                errors.append(GateError("DEVIATION_UNAPPROVED", f"{evidence_id}: {deviation_id}"))
+
+    for evidence_id, entry in evidence.items():
+        inventory_entry = inventory.get(evidence_id)
+        if inventory_entry is None:
+            errors.append(GateError("CAPABILITY_INVENTORY_MISSING", evidence_id))
+        elif (
+            entry.get("module") != inventory_entry.get("module")
+            or entry.get("decision") != inventory_entry.get("decision")
+        ):
+            errors.append(GateError("CAPABILITY_INVENTORY_MISMATCH", evidence_id))
 
     root_routes = product_scope.get("root_routes")
     tab_destinations = product_scope.get("main_tab_destinations")
@@ -664,7 +718,24 @@ def validate(
         coverage = manifest.get("coverage", {})
         if coverage.get("release_inventory_complete") is not True:
             errors.append(GateError("RELEASE_INVENTORY_INCOMPLETE", "full reachable-route inventory is not closed"))
-        for evidence_id in manifest.get("required_release_evidence", []):
+        required_release = manifest.get("required_release_evidence")
+        if isinstance(required_release, dict):
+            if required_release != {
+                "source": "capability_inventory",
+                "selector": "release_required",
+            }:
+                errors.append(GateError("SCHEMA_INVALID", "invalid required release evidence selector"))
+            required_release_ids = [
+                evidence_id
+                for evidence_id, item in inventory.items()
+                if item.get("release_required") is True
+            ]
+        elif isinstance(required_release, list):
+            required_release_ids = required_release
+        else:
+            errors.append(GateError("SCHEMA_INVALID", "required_release_evidence is invalid"))
+            required_release_ids = []
+        for evidence_id in required_release_ids:
             entry = evidence.get(evidence_id)
             if entry is None:
                 errors.append(GateError("RELEASE_EVIDENCE_MISSING", evidence_id))
@@ -698,6 +769,8 @@ def git_output(repo_root: Path, *args: str) -> str:
 
 def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> None:
     manifest = read_json(manifest_path)
+    source_catalog_path = repo_root / manifest["source_catalog"]
+    capability_inventory_path = repo_root / manifest["capability_inventory"]
     lock_path = repo_root / manifest["source_lock"]
     deviations_path = repo_root / manifest["deviations"]
     product_scope_path = repo_root / manifest["product_scope"]
@@ -714,6 +787,8 @@ def write_attestation(repo_root: Path, manifest_path: Path, output: Path) -> Non
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_output(repo_root, "rev-parse", "HEAD"),
         "baseline_id": manifest["baseline_id"],
+        "source_catalog_sha256": sha256_file(source_catalog_path),
+        "capability_inventory_sha256": sha256_file(capability_inventory_path),
         "source_lock_sha256": sha256_file(lock_path),
         "manifest_sha256": sha256_file(manifest_path),
         "deviations_sha256": sha256_file(deviations_path),

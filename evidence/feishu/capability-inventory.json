@@ -1,0 +1,557 @@
+{
+  "schema_version": 1,
+  "baseline_id": "feishu-android-7.71.8",
+  "review_epoch": "2026-07-17-source-closure-v1",
+  "entries": [
+    {
+      "id": "UI-WORKSPACE-SOURCE-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["common-shell-tabpagecontrollerv3-f795d831"],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001"],
+      "contract": "Node, Metro, Expo autolinking and Gradle must resolve the audited worktree, never another workspace.",
+      "blockers": []
+    },
+    {
+      "id": "UI-BOOT-READINESS-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["account-static-commonuicontainer-552f6bd5"],
+      "deviation_refs": ["DEV-LAOJI-ACCOUNT-CONTENT-001"],
+      "contract": "Startup must render a diagnosable recovery surface for configuration, storage, auth or navigation failure instead of an unbounded blank gate.",
+      "blockers": ["Pre-mount configuration throws and unbounded readiness waits remain possible."]
+    },
+    {
+      "id": "UI-ANDROID-COMPOSITION-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["calendar-shell-fragment", "calendar-shell-view"],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001"],
+      "contract": "The active destination and bottom navigation form one Android view tree.",
+      "blockers": ["Full route implementation inventory and physical-device closure remain open."]
+    },
+    {
+      "id": "UI-SHELL-BOTTOM-MAIN-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["common-shell-tabpagewidget-9a582f7e", "common-shell-tabbottombar-a43ac9e0", "common-shell-maintabitemview-8e906bb7"],
+      "deviation_refs": ["DEV-LAOJI-TWO-TAB-SCOPE-001"],
+      "contract": "Use the real TabPageWidget to TabBottomBar chain as authority; NavBottomTabBar is only a More-page negative reference.",
+      "blockers": ["Current implementation has not been structurally closed by the full UAST and View-tree gates."]
+    },
+    {
+      "id": "UI-SHELL-RESELECT-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["common-shell-tabpagecontrollerv3-f795d831", "calendar-shell-fragment"],
+      "deviation_refs": [],
+      "contract": "Re-selecting the active Schedule tab dispatches the page action that returns Calendar to today.",
+      "blockers": ["MainTabs currently only writes the already-selected state."]
+    },
+    {
+      "id": "UI-TITLE-COMMON-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["common-shell-commontitlebar-ddc35ce9"],
+      "deviation_refs": [],
+      "contract": "Common title bars use source-derived heights, typography, action ownership and save states.",
+      "blockers": ["All reachable title bars are not yet mapped and tokenized."]
+    },
+    {
+      "id": "UI-CALENDAR-INDICATOR-001",
+      "module": "calendar",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["calendar-view-indicator-layout", "calendar-view-indicator-class"],
+      "deviation_refs": ["DEV-CALENDAR-VIEW-SCOPE-001"],
+      "contract": "A separate 50dp band contains one trailing mode control for the retained month/day modes.",
+      "blockers": []
+    },
+    {
+      "id": "UI-CALENDAR-FAB-001",
+      "module": "calendar",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["resources-fragment-calendar-append-event-e4a0711e"],
+      "deviation_refs": ["DEV-LAOJI-SCHEDULE-VOICE-001"],
+      "contract": "The 48dp create FAB preserves source shadow and short-press motion while adding the approved long-press voice/manual arc.",
+      "blockers": ["Source S4 shadow and short-press two-stage motion are missing."]
+    },
+    {
+      "id": "UI-OVERLAY-WINDOW-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["common-shell-uddialogcontroller-59184244"],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001"],
+      "contract": "Temporary pages, sheets, dialogs and toasts have one Activity/window owner.",
+      "blockers": ["Profile sheet, Minutes title dialog and undo banner still bypass the unified owner."]
+    },
+    {
+      "id": "UI-SHEET-DIM-INDEPENDENT-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["common-shell-uddialogcontroller-59184244"],
+      "deviation_refs": [],
+      "contract": "The dim layer and sheet motion have independent ownership and timing.",
+      "blockers": ["Current entry alpha animates the whole host, coupling the mask to the sheet."]
+    },
+    {
+      "id": "UI-TOAST-WINDOW-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["common-shell-udtoast-02678d9e", "common-shell-udtoastviewcontroller-01720022"],
+      "deviation_refs": ["DEV-EXPO-SINGLE-NATIVE-ROOT-001"],
+      "contract": "LaoJi uses one Activity-owned latest-wins text toast while retaining source geometry, timing and lifecycle.",
+      "blockers": ["Full reachable-route mapping remains open."]
+    },
+    {
+      "id": "UI-STATE-EMPTY-ERROR-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["common-shell-calendarloadingview-ff443c0f"],
+      "deviation_refs": [],
+      "contract": "Loading, empty, error and retry states use source-derived state ownership and dimensions.",
+      "blockers": ["App initialization still has a null/blank state rather than a bounded recovery state."]
+    },
+    {
+      "id": "UI-TOKENS-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["resources-colors-d04fc4c4", "resources-dimens-096b312c"],
+      "deviation_refs": ["DEV-LAOJI-LIGHT-THEME-001"],
+      "contract": "Color, type, divider, radius, shadow and spacing tokens derive from locked resources.",
+      "blockers": ["NativeUiTokens, CalendarUi and page-local constants still disagree; dark branches remain in a light-only release."]
+    },
+    {
+      "id": "UI-ICON-PRIMITIVES-001",
+      "module": "shell",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["common-shell-commontitlebar-ddc35ce9"],
+      "deviation_refs": [],
+      "contract": "Product chrome uses packaged stable icons rather than OEM-dependent android.R drawables.",
+      "blockers": ["Minutes title actions and FAB still use android.R.drawable resources."]
+    },
+    {
+      "id": "UI-ACCOUNT-PAGES-001",
+      "module": "account-static",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["account-static-commonuicontainer-552f6bd5", "account-static-loginregisterbaseactivity-f17663e5"],
+      "deviation_refs": ["DEV-LAOJI-ACCOUNT-CONTENT-001", "DEV-LAOJI-LIGHT-THEME-001"],
+      "contract": "All account and legal pages use source-derived containers while retaining LaoJi business content.",
+      "blockers": ["Nine reachable RN pages remain unmapped by the TS AST evidence gate."]
+    },
+    {
+      "id": "UI-ROUTES-001",
+      "module": "shell",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["common-shell-tabpagecontrollerv3-f795d831"],
+      "deviation_refs": ["DEV-LAOJI-TWO-TAB-SCOPE-001"],
+      "contract": "Sixteen unique Root route names and two MainTabs destinations have explicit owners, transitions and recovery behavior.",
+      "blockers": ["Full source-derived route contracts and final physical-device closure remain open."]
+    },
+    {
+      "id": "UI-LEGACY-001",
+      "module": "shell",
+      "decision": "delete",
+      "release_required": true,
+      "source_refs": ["common-shell-tabpagewidget-9a582f7e"],
+      "deviation_refs": [],
+      "contract": "Android production routes contain no legacy LaoJi presentation owners or hidden duplicate controls.",
+      "blockers": ["Thirty-one platform-shadowed or orphaned TSX presentation files still exist and 208 controls are unmapped."]
+    },
+    {
+      "id": "CAL-ROOT-001",
+      "module": "calendar",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["calendar-calendarmainlauncher-0797a2e5", "calendar-shell-fragment"],
+      "deviation_refs": ["DEV-CALENDAR-VIEW-SCOPE-001"],
+      "contract": "Calendar shell retains month and single-day branches from the source mode router.",
+      "blockers": ["Complete implementation evidence mapping remains open."]
+    },
+    {
+      "id": "CAL-MONTH-STEP-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-month-container-pager", "calendar-monthdiagrammodel-433a9ddb"],
+      "deviation_refs": [],
+      "contract": "Left, center and right pages settle by exactly minus one, zero or plus one month.",
+      "blockers": ["Full gesture and restoration proof is not yet bound to this inventory entry."]
+    },
+    {
+      "id": "CAL-MONTH-EXPAND-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-month-expansion-touch", "calendar-month-expansion-layout"],
+      "deviation_refs": [],
+      "contract": "Date expansion follows Open, Close and OpenAfterClosed across same-row, cross-row and cross-month selection.",
+      "blockers": ["Cross-row, cross-month and animation-keyframe closure remains open."]
+    },
+    {
+      "id": "CAL-MONTH-EXPAND-HOST-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-month-expansion-touch", "calendar-month-expansion-layout", "calendar-month-container-pager"],
+      "deviation_refs": [],
+      "contract": "Snapshot rebind preserves the selected-date expansion and active transition.",
+      "blockers": []
+    },
+    {
+      "id": "CAL-MONTH-SPAN-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-c155132d-11b6d646"],
+      "deviation_refs": [],
+      "contract": "Cross-day events are clipped to a week and rendered as one continuous span per occupied row.",
+      "blockers": ["View-tree and geometry evidence are not yet closed."]
+    },
+    {
+      "id": "CAL-DAY-COMPOSE-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-singedayview-7962e9d0", "calendar-dayinstancelayout-6d7bf485"],
+      "deviation_refs": [],
+      "contract": "Date header, all-day region, timeline, event layer and gesture owner retain separate native ownership.",
+      "blockers": ["Full View-tree structure and synchronized pager motion remain open."]
+    },
+    {
+      "id": "CAL-RULER-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-daytimerulerview-07a2991d"],
+      "deviation_refs": [],
+      "contract": "The visible day ruler has 25 whole-hour lines from 00:00 through 24:00; default duration and snap precision are separate contracts.",
+      "blockers": ["No standalone evidence implementation and test mapping exists yet."]
+    },
+    {
+      "id": "CAL-ALLDAY-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-alldayinstancelayout-e72cff58"],
+      "deviation_refs": [],
+      "contract": "All-day content folds to three rows, expands with bounded height and preserves horizontal pager ownership.",
+      "blockers": ["Adjacent-page height and process restoration evidence remain open."]
+    },
+    {
+      "id": "CAL-DRAG-OWNER-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-dayinstancelayout-6d7bf485", "calendar-c150860h-87ee6fef"],
+      "deviation_refs": [],
+      "contract": "One event-area gesture owner arbitrates create, move and resize interactions.",
+      "blockers": ["Ownership and cancellation are not yet closed by instrumentation evidence."]
+    },
+    {
+      "id": "CAL-DRAG-HANDLES-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-abstractc150857e-85b019a6"],
+      "deviation_refs": [],
+      "contract": "Top and bottom handles resize start and end; body drag moves the whole event using the source 15/30-minute rules.",
+      "blockers": ["dragPrecisionMinutes is currently a dead prop and the implementation hardcodes 15 minutes."]
+    },
+    {
+      "id": "CAL-TIMEFORMAT-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-daytimerulerview-07a2991d"],
+      "deviation_refs": [],
+      "contract": "Ruler, month expansion, search, detail and edit use one system 12/24-hour format contract.",
+      "blockers": ["Month expansion and snapshot paths still force HH:mm."]
+    },
+    {
+      "id": "CAL-QC-STATE-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-quickchoosedatepanel-ef325257"],
+      "deviation_refs": [],
+      "contract": "QuickChoose retains closing, opening, closed and opened states plus date/year-month transitions.",
+      "blockers": ["Complete animation and restoration evidence remains open."]
+    },
+    {
+      "id": "CAL-PICKER-WHEEL-TAP-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["universe-wheel-view"],
+      "deviation_refs": [],
+      "contract": "Tapping any visible wheel row settles and commits that value.",
+      "blockers": []
+    },
+    {
+      "id": "CAL-SEARCH-ROUTE-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-calendarsearchfragment-daea737c"],
+      "deviation_refs": [],
+      "contract": "Search input, results, empty state, event open and in/out transitions form one route closure.",
+      "blockers": ["The source animation bodies are absent; exact motion must remain unverified or use approved runtime evidence."]
+    },
+    {
+      "id": "CAL-DETAIL-EDIT-001",
+      "module": "calendar",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["calendar-eventdetailcontainerfragment-9d90dea1", "calendar-editeventactivity-b88d0f8b"],
+      "deviation_refs": ["DEV-CALENDAR-VIEW-SCOPE-001"],
+      "contract": "Detail and edit retain source page structure while deleting unsupported participant, room and meeting linkage regions.",
+      "blockers": ["Current pages remain simplified and are not fully source-mapped."]
+    },
+    {
+      "id": "CAL-REPEAT-RRULE-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["calendar-repeatviewmodel-e7ca5f20"],
+      "deviation_refs": [],
+      "contract": "Repeat editing exposes interval, weekdays and end condition supported by the LaoJi event model.",
+      "blockers": ["The UI currently exposes only coarse repeat presets."]
+    },
+    {
+      "id": "CAL-RES-LOCK-001",
+      "module": "calendar",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["resources-colors-d04fc4c4", "resources-dimens-096b312c"],
+      "deviation_refs": ["DEV-LAOJI-LIGHT-THEME-001"],
+      "contract": "Calendar dimensions, colors, strings and motion resources are locked and mapped to Android resources.",
+      "blockers": ["CalendarUi and CalendarPageUi still contain broad hardcoded constants."]
+    },
+    {
+      "id": "MIN-ROOT-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-minutesapiimpl-3c823eda", "minutes-minuteslistactivity-6c277b12"],
+      "deviation_refs": ["DEV-LAOJI-TWO-TAB-SCOPE-001"],
+      "contract": "Minutes list, search, recording and detail routes originate from one retained LaoJi destination.",
+      "blockers": ["Complete implementation and View-tree evidence mapping remains open."]
+    },
+    {
+      "id": "MIN-SEARCH-001",
+      "module": "minutes",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["minutes-mmjumpopensearchutil-3c5c01e1", "minutes-c95647c-21c7c372"],
+      "deviation_refs": [],
+      "contract": "List search and transcript/detail search remain distinct source-derived workflows.",
+      "blockers": ["Detail transcript search and locate behavior is not implemented."]
+    },
+    {
+      "id": "MIN-REC-LAYOUT-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmtoolbarview-2c67c035"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001"],
+      "contract": "The Record V3 title, subtitle, waveform and operation regions follow the active VC host branch.",
+      "blockers": ["The active Feishu feature-gate branch and full LaoJi View-tree comparison are not yet closed."]
+    },
+    {
+      "id": "MIN-REC-STATE-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmunifiedrecordingapiimpl-67b35481"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001"],
+      "contract": "LaoJi maps start, pause, resume, stop, local save, upload and failure to its AudioRecord service without claiming Feishu state-enum parity.",
+      "blockers": ["State mapping and physical-device lifecycle fixtures remain open."]
+    },
+    {
+      "id": "MIN-REC-WAVE-001",
+      "module": "minutes",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["minutes-mmaudiowavebarview-754ece1b"],
+      "deviation_refs": [],
+      "contract": "Recording waveform geometry and interpolation remain native and source-derived.",
+      "blockers": ["Current UAST and physical-device rendering evidence remain open."]
+    },
+    {
+      "id": "MIN-REC-TRANSCRIPT-001",
+      "module": "minutes",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["minutes-mmsubtitleadapter-3dcceec5"],
+      "deviation_refs": [],
+      "contract": "Partial and final transcript rows update without replacing prior completed speech.",
+      "blockers": ["Full service fixture and View behavior closure remain open."]
+    },
+    {
+      "id": "MIN-AUDIO-RETENTION-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmaudiosavetype-2ad91d6c", "minutes-mmaudiouploader-9be4734b"],
+      "deviation_refs": ["DEV-LAOJI-UPLOAD-PAYLOAD-001"],
+      "contract": "LaoJi defines an explicit local-audio retention policy across upload success, failure, share and meeting deletion.",
+      "blockers": ["Current code generally retains audio until meeting deletion; no approved retention policy exists yet."]
+    },
+    {
+      "id": "MIN-UPLOAD-QUEUE-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordinguploadservice-fecf5de2"],
+      "deviation_refs": ["DEV-LAOJI-UPLOAD-QUEUE-001"],
+      "contract": "WorkManager owns constrained unique upload and exponential retry.",
+      "blockers": ["Kill-process and credential-lease fault matrix is not fully closed."]
+    },
+    {
+      "id": "MIN-UPLOAD-PAYLOAD-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordingaudiopersistent-3221dd58"],
+      "deviation_refs": ["DEV-LAOJI-UPLOAD-PAYLOAD-001"],
+      "contract": "Recoverable PCM16 WAV replaces Feishu Ogg/Opus fragments and uploads as a completed file.",
+      "blockers": ["Golden WAV repair, duration and large-file fixtures remain open."]
+    },
+    {
+      "id": "MIN-UPLOAD-RECOVERY-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordinguploadservice-fecf5de2"],
+      "deviation_refs": ["DEV-LAOJI-UPLOAD-QUEUE-001"],
+      "contract": "Upload work survives process death without duplicate upload, orphan audio or tombstone resurrection.",
+      "blockers": ["Full process-kill state matrix remains open."]
+    },
+    {
+      "id": "MIN-ASR-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordingsubtitlerepo-810f3c74"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001"],
+      "contract": "Qwen ASR supplies partial, delta, completed and reconnect compensation semantics.",
+      "blockers": ["Recorded WebSocket fixtures for disconnect, fetch and ready-to-stop remain open."]
+    },
+    {
+      "id": "MIN-SUMMARY-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordingsummaryentity-3047b3ca"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001", "DEV-LAOJI-GUEST-SUMMARY-001"],
+      "contract": "Summary generation exposes processing, ready, failed, retry and reconnect states for account and guest sessions.",
+      "blockers": ["Current summary failure and retry route requires renewed end-to-end fixtures."]
+    },
+    {
+      "id": "MIN-DETAIL-PAGER-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmdetailcontainerfragment-e5d0f01d", "minutes-c131182b-3c30476f"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-PAGE-SCOPE-001"],
+      "contract": "Detail pages are built from actual LaoJi capabilities; no fixed-three-tab Feishu claim is allowed.",
+      "blockers": ["Generation, recreation, tab-race and independent-scroll closure remain open."]
+    },
+    {
+      "id": "MIN-DETAIL-STICKY-001",
+      "module": "minutes",
+      "decision": "keep",
+      "release_required": true,
+      "source_refs": ["minutes-mmdetailstickynavlayout-43597bf2"],
+      "deviation_refs": [],
+      "contract": "Measured header collapse precedes page scroll; downward expansion occurs only when the active page is at top.",
+      "blockers": ["Non-touch inertia and production-player composition remain open."]
+    },
+    {
+      "id": "MIN-PLAYER-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmvideocontrol-2cdf1ea4"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001"],
+      "contract": "Media3 provides source-equivalent play, pause, seek, speed, focus and background-service semantics.",
+      "blockers": ["Full app MediaSession path and physical audio-focus behavior remain open."]
+    },
+    {
+      "id": "MIN-PLAYER-RECOVERY-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmserviceclient-ea701de3"],
+      "deviation_refs": ["DEV-LAOJI-MINUTES-SERVICES-001"],
+      "contract": "Source, position, speed and the approved playing/paused recovery policy are explicit and encrypted.",
+      "blockers": ["wasPlaying is persisted but ignored; the intended recovery policy is unresolved."]
+    },
+    {
+      "id": "MIN-SPEAKER-VOICEPRINT-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-videochatsettingvoiceprintdialogframe-e4204742"],
+      "deviation_refs": ["DEV-LAOJI-SPEAKER-SCOPE-001"],
+      "contract": "Voiceprint list, enrollment, consent, retry and deletion expose only real LaoJi service capabilities.",
+      "blockers": ["Speaker capture still sends frequent level snapshots through JS and uses text avatar placeholders."]
+    },
+    {
+      "id": "MIN-SPEAKER-SUBTITLE-EDIT-001",
+      "module": "minutes",
+      "decision": "delete",
+      "release_required": true,
+      "source_refs": ["minutes-mmeditspeakerproxy-6f07cca2"],
+      "deviation_refs": ["DEV-LAOJI-SPEAKER-SCOPE-001"],
+      "contract": "Paragraph-level speaker mutation controls are absent until a real service contract exists.",
+      "blockers": ["Native transcript long-press currently emits lineId but JS discards it into global voiceprint CRUD; the misleading path must be removed or replaced."]
+    },
+    {
+      "id": "MIN-GUEST-SUMMARY-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmrecordingsummaryentity-3047b3ca"],
+      "deviation_refs": ["DEV-LAOJI-GUEST-SUMMARY-001"],
+      "contract": "Guest sessions use the real LaoJi public-summary boundary and local recovery.",
+      "blockers": ["Release fixtures for guest token, retry and privacy boundaries remain open."]
+    },
+    {
+      "id": "MIN-SHARE-FILE-001",
+      "module": "minutes",
+      "decision": "business_replace",
+      "release_required": true,
+      "source_refs": ["minutes-mmfileexternalsharehelper-c1a508d8"],
+      "deviation_refs": ["DEV-LAOJI-SYSTEM-SHARE-001"],
+      "contract": "Meeting document, bundle and recording are shared as real files through Android ACTION_SEND.",
+      "blockers": ["Physical share-target and URI permission fixtures remain open."]
+    },
+    {
+      "id": "MIN-SHARE-CCM-001",
+      "module": "minutes",
+      "decision": "delete",
+      "release_required": true,
+      "source_refs": ["minutes-mmdetailtitlebarviewcontrol-a741a622"],
+      "deviation_refs": ["DEV-LAOJI-SYSTEM-SHARE-001"],
+      "contract": "CCM collaboration and permission controls are absent from LaoJi.",
+      "blockers": ["Negative UI and route evidence is not yet registered."]
+    }
+  ]
+}

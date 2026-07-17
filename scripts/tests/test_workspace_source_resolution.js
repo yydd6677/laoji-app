@@ -14,6 +14,7 @@ function write(root, relative, value) {
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'laoji-workspace-source-'));
+  write(root, 'package.json', '{}');
   write(root, 'package-lock.json', '{}');
   write(
     root,
@@ -52,6 +53,7 @@ assert.strictEqual(clean.resolutions['laoji-native-platform/package.json'], 'mod
 const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'laoji-workspace-external-'));
 const linkedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'laoji-workspace-linked-'));
 for (const [relative, value] of [
+  ['package.json', '{}'],
   ['package-lock.json', '{}'],
   ['metro.config.js', "'laoji-native-platform': path.join(__dirname, 'modules/laoji-native-platform')"],
   ['plugins/withLaojiNativePlatform.js', '// plugin'],
