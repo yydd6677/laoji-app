@@ -120,10 +120,7 @@ object DayPagerContract {
       epochDay = epochDay,
       minute = minute.coerceIn(0f, (CalendarDateMath.MINUTES_PER_DAY - 1).toFloat()),
       defaultDurationMinutes = defaultDurationMinutes,
-      precisionMinutes = CalendarGestureMath.precisionForCreation(
-        defaultDurationMinutes,
-        preferredPrecisionMinutes = 15,
-      ),
+      precisionMinutes = CalendarGestureMath.precisionForCreation(defaultDurationMinutes),
     )
 
   fun createThirtyMinuteDraft(epochDay: Int, minute: Float): CalendarDraft =
@@ -132,12 +129,10 @@ object DayPagerContract {
   fun adjustmentPrecision(
     kind: CalendarMutationKind,
     defaultDurationMinutes: Int,
-    preferredPrecisionMinutes: Int = 15,
   ): Int =
     CalendarGestureMath.precisionForGesture(
       kind = kind,
       defaultDurationMinutes = defaultDurationMinutes,
-      preferredPrecisionMinutes = preferredPrecisionMinutes,
     )
 
   fun minimumDuration(defaultDurationMinutes: Int): Int =
@@ -197,6 +192,16 @@ object DayTimeFormatter {
     val minuteOfHour = normalized % 60
     val displayHour = (hour % 12).let { if (it == 0) 12 else it }
     val period = if (hour < 12) amLabel else pmLabel
+    if (locale.language == Locale.CHINESE.language ||
+      amLabel.contains("上午") || amLabel.contains("早上") ||
+      pmLabel.contains("下午") || pmLabel.contains("晚上")
+    ) {
+      return if (minuteOfHour == 0) {
+        "$period${displayHour}点"
+      } else {
+        "$period${displayHour}:${String.format(locale, "%02d", minuteOfHour)}"
+      }
+    }
     val clock = if (minuteOfHour == 0) {
       displayHour.toString()
     } else {

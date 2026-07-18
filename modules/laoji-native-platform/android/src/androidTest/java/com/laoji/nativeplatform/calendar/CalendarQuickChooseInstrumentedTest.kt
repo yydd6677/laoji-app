@@ -21,6 +21,8 @@ import expo.modules.kotlin.ModulesProvider
 import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
 import java.util.Calendar
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -492,13 +494,15 @@ class CalendarQuickChooseInstrumentedTest {
       val hostRef = AtomicReference<CalendarHostView>()
       val progressBeforeInFlightFeedback = AtomicReference<Float>()
       val verticalDistanceBeforeInFlightFeedback = AtomicReference<Float>()
+      val inFlightCheckpoints = CountDownLatch(2)
+      val asynchronousFailure = AtomicReference<Throwable?>()
       scenario.onActivity { activity ->
         hostRef.set(attachProductionHost(activity, reselectSnapshot(today, today - 3), CalendarMode.DAY))
         hostRef.get().setNowProviderForTest { calendarAt(today, fixedMinute) }
       }
       waitForHost(scenario, hostRef)
 
-      scenario.onActivity {
+      scenario.onActivity { activity ->
         val host = hostRef.get()
         pressActiveScheduleTab(host)
         host.setSnapshot(reselectSnapshot(today, today).copy(generation = 12))
@@ -506,50 +510,65 @@ class CalendarQuickChooseInstrumentedTest {
         assertTrue(day.hasActiveReturnMotion())
         assertEquals(-1f, day.dayWeekHeaderView.currentPositionProgress(), 0.01f)
         assertEquals(-1f, day.dayAllDaySectionView.currentPositionProgress(), 0.01f)
+
+        day.postDelayed({
+          try {
+            val progress = day.dayWeekHeaderView.currentPositionProgress()
+            assertTrue(
+              "Expected in-flight horizontal progress, actual=$progress active=${day.hasActiveReturnMotion()}",
+              progress > -0.99f && progress < -0.01f,
+            )
+            assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+            progressBeforeInFlightFeedback.set(progress)
+
+            val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+            val expectedScreenY = activity.dp(
+              DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+                DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
+            ).toFloat()
+            val currentScreenY = day.currentMinuteScreenY(fixedMinute)
+            val distance = kotlin.math.abs(currentScreenY - expectedScreenY)
+            assertTrue(distance > activity.dp(2f))
+            verticalDistanceBeforeInFlightFeedback.set(distance)
+
+            host.setSnapshot(reselectSnapshot(today, today).copy(generation = 13))
+            assertTrue(day.hasActiveReturnMotion())
+            assertEquals(progress, day.dayWeekHeaderView.currentPositionProgress(), 0.02f)
+            assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+            assertEquals(currentScreenY, day.currentMinuteScreenY(fixedMinute), activity.dp(2f).toFloat())
+          } catch (failure: Throwable) {
+            asynchronousFailure.compareAndSet(null, failure)
+          } finally {
+            inFlightCheckpoints.countDown()
+          }
+        }, 100L)
+
+        day.postDelayed({
+          try {
+            if (asynchronousFailure.get() == null) {
+              val progress = day.dayWeekHeaderView.currentPositionProgress()
+              assertTrue(progress > progressBeforeInFlightFeedback.get() && progress < 0f)
+              assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
+              val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
+              val expectedScreenY = activity.dp(
+                DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
+                  DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
+              ).toFloat()
+              assertTrue(
+                kotlin.math.abs(day.currentMinuteScreenY(fixedMinute) - expectedScreenY) <
+                  verticalDistanceBeforeInFlightFeedback.get(),
+              )
+            }
+          } catch (failure: Throwable) {
+            asynchronousFailure.compareAndSet(null, failure)
+          } finally {
+            inFlightCheckpoints.countDown()
+          }
+        }, 170L)
       }
 
-      SystemClock.sleep(100L)
-      scenario.onActivity { activity ->
-        val host = hostRef.get()
-        val day = host.descendants<SingleDayCalendarView>().single()
-        val progress = day.dayWeekHeaderView.currentPositionProgress()
-        assertTrue(progress > -0.99f && progress < -0.01f)
-        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
-        progressBeforeInFlightFeedback.set(progress)
-
-        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
-        val expectedScreenY = activity.dp(
-          DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
-            DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
-        ).toFloat()
-        val currentScreenY = day.currentMinuteScreenY(fixedMinute)
-        val distance = kotlin.math.abs(currentScreenY - expectedScreenY)
-        assertTrue(distance > activity.dp(2f))
-        verticalDistanceBeforeInFlightFeedback.set(distance)
-
-        host.setSnapshot(reselectSnapshot(today, today).copy(generation = 13))
-        assertTrue(day.hasActiveReturnMotion())
-        assertEquals(progress, day.dayWeekHeaderView.currentPositionProgress(), 0.02f)
-        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
-        assertEquals(currentScreenY, day.currentMinuteScreenY(fixedMinute), activity.dp(2f).toFloat())
-      }
-
-      SystemClock.sleep(70L)
-      scenario.onActivity { activity ->
-        val day = hostRef.get().descendants<SingleDayCalendarView>().single()
-        val progress = day.dayWeekHeaderView.currentPositionProgress()
-        assertTrue(progress > progressBeforeInFlightFeedback.get() && progress < 0f)
-        assertEquals(progress, day.dayAllDaySectionView.currentPositionProgress(), 0.02f)
-        val viewportHeightDp = day.currentTimelineViewportHeight() / activity.resources.displayMetrics.density
-        val expectedScreenY = activity.dp(
-          DayPagerContract.minuteToTimelineOffsetDp(fixedMinute) -
-            DayPagerContract.centeredTimelineOffsetDp(fixedMinute, viewportHeightDp),
-        ).toFloat()
-        assertTrue(
-          kotlin.math.abs(day.currentMinuteScreenY(fixedMinute) - expectedScreenY) <
-            verticalDistanceBeforeInFlightFeedback.get(),
-        )
-      }
+      assertTrue("Timed out waiting for in-flight motion checkpoints", inFlightCheckpoints.await(2, TimeUnit.SECONDS))
+      asynchronousFailure.get()?.let { throw it }
 
       SystemClock.sleep(DayPagerContract.PROGRAMMATIC_DAY_SWITCH_DURATION_MS + 80L)
       scenario.onActivity { activity ->

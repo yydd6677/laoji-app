@@ -179,10 +179,6 @@ class LaojiCalendarModule : Module() {
         view.setBottomBarSelectionCommand(command)
       }
 
-      Prop("dragPrecisionMinutes") { view: CalendarHostView, precision: Int? ->
-        view.setDragPrecisionMinutes(precision)
-      }
-
       Prop("mutationResolution") { view: CalendarHostView, resolution: CalendarMutationResolutionRecord? ->
         view.resolveMutation(resolution?.toModel())
       }

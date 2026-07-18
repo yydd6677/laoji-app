@@ -34,12 +34,12 @@ class CalendarGestureMathTest {
     )
     assertEquals(15L, CalendarGestureMath.snapDelta(9L, 15))
     assertEquals(30L, CalendarGestureMath.snapDelta(19L, 30))
-    assertEquals(30, CalendarGestureMath.precisionForCreation(30, 15))
-    assertEquals(15, CalendarGestureMath.precisionForCreation(20, 5))
-    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.MOVE, 60, 30))
-    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_END, 60, 30))
-    assertEquals(30, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_START, 60, 5))
-    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_START, 20, 30))
+    assertEquals(30, CalendarGestureMath.precisionForCreation(30))
+    assertEquals(15, CalendarGestureMath.precisionForCreation(20))
+    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.MOVE, 60))
+    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_END, 60))
+    assertEquals(30, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_START, 60))
+    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_START, 20))
   }
 
   @Test
@@ -68,7 +68,6 @@ class CalendarGestureMathTest {
     val startPrecision = CalendarGestureMath.precisionForGesture(
       CalendarMutationKind.RESIZE_START,
       defaultDurationMinutes = 30,
-      preferredPrecisionMinutes = 5,
     )
     assertEquals(20L, twentyMinuteEvent.endAbsoluteMinute() - twentyMinuteEvent.startAbsoluteMinute())
     assertEquals(30, startPrecision)
@@ -85,8 +84,8 @@ class CalendarGestureMathTest {
     )
     assertEquals(570, resized.startMinutes)
     assertEquals(620, resized.endMinutes)
-    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.MOVE, 30, 5))
-    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_END, 30, 5))
+    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.MOVE, 30))
+    assertEquals(15, CalendarGestureMath.precisionForGesture(CalendarMutationKind.RESIZE_END, 30))
   }
 
   @Test
@@ -107,7 +106,6 @@ class CalendarGestureMathTest {
       precisionMinutes = CalendarGestureMath.precisionForGesture(
         CalendarMutationKind.RESIZE_START,
         defaultDurationMinutes = 60,
-        preferredPrecisionMinutes = 15,
       ),
       minimumDurationMinutes = CalendarGestureMath.minimumDuration(60),
     )

@@ -397,7 +397,7 @@
       "source_refs": ["calendar-daytimerulerview-07a2991d"],
       "deviation_refs": [],
       "contract": "The visible day ruler has 25 whole-hour lines from 00:00 through 24:00; default duration and snap precision are separate contracts.",
-      "blockers": ["No standalone evidence implementation and test mapping exists yet."]
+      "blockers": ["Standalone View-tree and physical-device geometry evidence remain open."]
     },
     {
       "id": "CAL-ALLDAY-001",
@@ -427,7 +427,7 @@
       "source_refs": ["calendar-abstractc150857e-85b019a6"],
       "deviation_refs": [],
       "contract": "Top and bottom handles resize start and end; body drag moves the whole event using the source 15/30-minute rules.",
-      "blockers": ["dragPrecisionMinutes is currently a dead prop and the implementation hardcodes 15 minutes."]
+      "blockers": ["Instrumentation evidence for drag ownership, cancellation and source snap timing remains open."]
     },
     {
       "id": "CAL-TIMEFORMAT-001",
@@ -437,7 +437,7 @@
       "source_refs": ["calendar-daytimerulerview-07a2991d"],
       "deviation_refs": [],
       "contract": "Ruler, month expansion, search, detail and edit use one system 12/24-hour format contract.",
-      "blockers": ["Month expansion and snapshot paths still force HH:mm."]
+      "blockers": ["Search, detail and edit surfaces still contain fixed 24-hour display paths."]
     },
     {
       "id": "CAL-QC-STATE-001",

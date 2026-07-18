@@ -2,6 +2,6 @@
 <resources>
   <style name="LaojiTestNoActionBarTheme" parent="android:style/Theme.Material.Light.NoActionBar">
     <item name="android:windowNoTitle">true</item>
-    <item name="android:colorAccent">#3370FF</item>
+    <item name="android:colorAccent">#1456F0</item>
   </style>
 </resources>

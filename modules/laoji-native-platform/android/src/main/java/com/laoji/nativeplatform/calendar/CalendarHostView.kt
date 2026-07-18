@@ -196,10 +196,6 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
 
   internal fun currentSelectedEpochDay(): Int = selectedEpochDay
 
-  fun setDragPrecisionMinutes(value: Int?) {
-    dayView.setDragPrecisionMinutes(value ?: 15)
-  }
-
   fun resolveMutation(resolution: CalendarMutationResolution?) {
     if (resolution == null || resolution.operationId in handledResolutionIds) return
     val operation = ledger.pendingOperations().firstOrNull { it.operationId == resolution.operationId }

@@ -6,6 +6,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.util.Locale
 
 class DayPagerContractTest {
   private val epochDay = CalendarDateMath.toEpochDay(2026, 7, 17)
@@ -195,6 +196,14 @@ class DayPagerContractTest {
       DayTimeFormatter.formatMinute(0, is24Hour = false),
     )
     assertEquals("12 AM-12:30 AM", DayTimeFormatter.formatRange(0, 30, is24Hour = false))
+    assertEquals(
+      "上午12点",
+      DayTimeFormatter.formatMinute(0, is24Hour = false, amLabel = "上午", pmLabel = "下午", locale = Locale.CHINA),
+    )
+    assertEquals(
+      "下午1:30",
+      DayTimeFormatter.formatMinute(810, is24Hour = false, amLabel = "上午", pmLabel = "下午", locale = Locale.CHINA),
+    )
   }
 
   @Test
@@ -225,7 +234,6 @@ class DayPagerContractTest {
       DayPagerContract.adjustmentPrecision(
         CalendarMutationKind.RESIZE_START,
         defaultDurationMinutes = 20,
-        preferredPrecisionMinutes = 5,
       ),
     )
     assertEquals(
@@ -233,11 +241,10 @@ class DayPagerContractTest {
       DayPagerContract.adjustmentPrecision(
         CalendarMutationKind.RESIZE_START,
         defaultDurationMinutes = 30,
-        preferredPrecisionMinutes = 5,
       ),
     )
-    assertEquals(15, CalendarGestureMath.precisionForCreation(20, 5))
-    assertEquals(30, CalendarGestureMath.precisionForCreation(30, 5))
+    assertEquals(15, CalendarGestureMath.precisionForCreation(20))
+    assertEquals(30, CalendarGestureMath.precisionForCreation(30))
 
     val moved = CalendarGestureMath.projectDraft(
       draft = draft,

@@ -32,17 +32,23 @@ object CalendarGestureMath {
   fun precisionForGesture(
     kind: CalendarMutationKind,
     defaultDurationMinutes: Int,
-    @Suppress("UNUSED_PARAMETER") preferredPrecisionMinutes: Int
   ): Int = when (kind) {
     CalendarMutationKind.MOVE,
-    CalendarMutationKind.RESIZE_END -> 15
-    CalendarMutationKind.RESIZE_START -> if (defaultDurationMinutes < 30) 15 else 30
+    CalendarMutationKind.RESIZE_END -> SOURCE_FIXED_PRECISION_MINUTES
+    CalendarMutationKind.RESIZE_START -> sourceDurationPrecision(defaultDurationMinutes)
   }
 
-  fun precisionForCreation(
-    defaultDurationMinutes: Int,
-    @Suppress("UNUSED_PARAMETER") preferredPrecisionMinutes: Int
-  ): Int = if (defaultDurationMinutes < 30) 15 else 30
+  fun precisionForCreation(defaultDurationMinutes: Int): Int =
+    sourceDurationPrecision(defaultDurationMinutes)
+
+  // AbstractC150857e keeps movement and the end handle on a fixed 15-minute
+  // grid. C150854b/C150859g choose 15 or 30 for creation and the start handle
+  // from the configured default duration. There is no external precision prop
+  // in the Feishu source contract.
+  private const val SOURCE_FIXED_PRECISION_MINUTES = 15
+
+  private fun sourceDurationPrecision(defaultDurationMinutes: Int): Int =
+    if (defaultDurationMinutes < 30) 15 else 30
 
   fun minimumDuration(defaultDurationMinutes: Int): Int =
     defaultDurationMinutes.takeIf { it in 1 until 30 } ?: 30

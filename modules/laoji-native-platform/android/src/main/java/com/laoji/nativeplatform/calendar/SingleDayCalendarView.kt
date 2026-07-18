@@ -246,14 +246,14 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
     private val weekdayView = TextView(context).apply {
       gravity = Gravity.CENTER
       includeFontPadding = false
-      textSize = 10f
+      textSize = 12f
       setTextColor(palette.textSecondary)
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private val dayView = TextView(context).apply {
       gravity = Gravity.CENTER
       includeFontPadding = false
-      textSize = 14f
+      textSize = 16f
       setTypeface(Typeface.DEFAULT, Typeface.BOLD)
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
@@ -273,7 +273,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       )
       addView(
         dayView,
-        LayoutParams(CalendarUi.dp(context, 30f).toInt(), CalendarUi.dp(context, 30f).toInt()),
+        LayoutParams(CalendarUi.dp(context, 32f).toInt(), CalendarUi.dp(context, 32f).toInt()),
       )
     }
 
@@ -282,17 +282,26 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       val date = CalendarDateMath.fromEpochDay(epochDay)
       weekdayView.text = weekdayLabel
       dayView.text = date.day.toString()
+      val marker = MonthExpandedLayoutContract.dateMarker(
+        epochDay = epochDay,
+        selectedEpochDay = epochDay.takeIf { selected },
+        todayEpochDay = epochDay.takeIf { today },
+      )
       dayView.setTextColor(
-        when {
-          selected -> palette.accentText
-          today -> palette.accent
-          else -> palette.textPrimary
+        when (marker) {
+          MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
+          MonthDateMarker.SELECTED -> palette.textPrimary
+          MonthDateMarker.NONE -> palette.textPrimary
         },
       )
-      dayView.background = when {
-        selected -> CalendarUi.background(palette.accent, 15f, context)
-        today -> CalendarUi.background(palette.accentSoft, 15f, context)
-        else -> ColorDrawable(Color.TRANSPARENT)
+      dayView.background = when (marker) {
+        MonthDateMarker.TODAY -> if (selected) {
+          CalendarUi.background(palette.accent, 16f, context)
+        } else {
+          ColorDrawable(Color.TRANSPARENT)
+        }
+        MonthDateMarker.SELECTED -> CalendarUi.background(palette.selectionMarker, 16f, context)
+        MonthDateMarker.NONE -> ColorDrawable(Color.TRANSPARENT)
       }
       isSelected = selected
       contentDescription = buildString {
@@ -325,7 +334,6 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
   private var snapshot: CalendarSnapshot? = null
   private var centerEpochDay = currentEpochDay()
   private var sessionId = 0L
-  private var dragPrecisionMinutes = 15
   private var sharedScrollOffset: Float? = null
   private var externalListener: ThreePageDayPagerListener? = null
   private var hasBinding = false
@@ -460,11 +468,6 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
     }
   }
 
-  fun setDragPrecisionMinutes(value: Int) {
-    dragPrecisionMinutes = CalendarGeometry.normalizePrecision(value)
-    pages.forEach { it.setDragPrecisionMinutes(dragPrecisionMinutes) }
-  }
-
   fun clearDraft(reason: String = "cancelled", emit: Boolean = true) {
     pages[DayPagerContract.CENTER_PAGE].clearDraft(reason, emit)
   }
@@ -558,7 +561,6 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
         ),
         snapshot,
       )
-      page.setDragPrecisionMinutes(dragPrecisionMinutes)
       page.setInteractive(position == DayPagerContract.CENTER_PAGE && snapshot != null)
       sharedScrollOffset?.let(page::setSynchronizedScrollOffset)
     }
@@ -573,7 +575,6 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
       ),
       snapshot,
     )
-    page.setDragPrecisionMinutes(dragPrecisionMinutes)
     page.setInteractive(position == DayPagerContract.CENTER_PAGE && snapshot != null)
     sharedScrollOffset?.let(page::setSynchronizedScrollOffset)
   }
@@ -714,7 +715,6 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
   private var snapshot: CalendarSnapshot? = null
   private var selectedEpochDay = currentEpochDay()
   private var sessionId = 0L
-  private var dragPrecisionMinutes = 15
 
   init {
     orientation = VERTICAL
@@ -786,11 +786,6 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
       animateFromPreviousDay = true,
       reason = "programmatic-date-changed",
     )
-  }
-
-  fun setDragPrecisionMinutes(value: Int) {
-    dragPrecisionMinutes = CalendarGeometry.normalizePrecision(value)
-    threePageDayPager.setDragPrecisionMinutes(dragPrecisionMinutes)
   }
 
   fun clearDraft(reason: String = "cancelled", emit: Boolean = true) {
@@ -921,7 +916,6 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
       animateFromPreviousDay = animateFromPreviousDay,
       preserveReturnMotion = preserveReturnMotion,
     )
-    threePageDayPager.setDragPrecisionMinutes(dragPrecisionMinutes)
   }
 
   private fun accepts(binding: DayPageBinding): Boolean =

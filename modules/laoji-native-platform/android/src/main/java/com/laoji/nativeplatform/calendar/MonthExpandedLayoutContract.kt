@@ -27,6 +27,24 @@ data class MonthExpandedEventsBounds(
   val bottom: Float,
 )
 
+data class MonthEventSpanBounds(
+  val left: Float,
+  val right: Float,
+)
+
+data class MonthEventTimeBounds(
+  val startMinute: Int,
+  val endMinute: Int,
+)
+
+// CAL-MONTH-EXPAND-001: the source draws today's blue marker first and the
+// selected non-today day as a neutral circle behind its date text.
+enum class MonthDateMarker {
+  NONE,
+  TODAY,
+  SELECTED,
+}
+
 object MonthExpandedLayoutContract {
   const val ROW_ANIMATION_DURATION_MS = 350L
   const val TAP_THRESHOLD_DP = 20f
@@ -35,6 +53,52 @@ object MonthExpandedLayoutContract {
   const val GRID_START_MARGIN_DP = 16f
   const val GRID_END_MARGIN_DP = 11.5f
   const val EVENT_ROW_HEIGHT_DP = 48f
+  const val DATE_TEXT_SIZE_SP = 12f
+  const val DATE_TOP_DP = 10f
+  const val DATE_BASELINE_DP = 22f
+  const val DATE_MARKER_CENTER_DP = 18f
+  const val OVERFLOW_BADGE_WIDTH_DP = 19f
+  const val OVERFLOW_BADGE_HEIGHT_DP = 12f
+  const val OVERFLOW_BADGE_RADIUS_DP = 2.5f
+  const val EVENT_HEIGHT_DP = 16f
+  const val EVENT_VERTICAL_GAP_DP = 3f
+  const val EVENT_RIGHT_GAP_DP = 3f
+  const val EVENT_RADIUS_DP = 2.5f
+
+  // CAL-MONTH-SPAN-001: C155132d assigns one width across all occupied day
+  // columns and C152323a subtracts horizontalSpace only at the final edge.
+  fun eventSpanBounds(
+    gridStart: Float,
+    cellWidth: Float,
+    startColumn: Int,
+    endColumn: Int,
+    rightGap: Float,
+  ): MonthEventSpanBounds {
+    require(startColumn in 0 until DAY_PAGE_COUNT)
+    require(endColumn in startColumn until DAY_PAGE_COUNT)
+    return MonthEventSpanBounds(
+      left = gridStart + startColumn * cellWidth,
+      right = gridStart + (endColumn + 1) * cellWidth - rightGap,
+    )
+  }
+
+  // CAL-TIMEFORMAT-001: month expansion uses the same half-open event bounds
+  // as the day owner before passing both values to the shared formatter.
+  fun eventTimeBounds(epochDay: Int, event: CalendarEvent): MonthEventTimeBounds =
+    MonthEventTimeBounds(
+      startMinute = if (epochDay == event.startEpochDay) event.startMinutes ?: 0 else 0,
+      endMinute = if (epochDay == event.endEpochDay) {
+        event.endMinutes ?: CalendarDateMath.MINUTES_PER_DAY
+      } else {
+        CalendarDateMath.MINUTES_PER_DAY
+      },
+    )
+
+  fun dateMarker(epochDay: Int, selectedEpochDay: Int?, todayEpochDay: Int?): MonthDateMarker = when {
+    epochDay == todayEpochDay -> MonthDateMarker.TODAY
+    epochDay == selectedEpochDay -> MonthDateMarker.SELECTED
+    else -> MonthDateMarker.NONE
+  }
 
   fun animationLegCount(action: MonthExpandedTapAction): Int = when (action) {
     MonthExpandedTapAction.SWITCH_WITHIN_ROW -> 0

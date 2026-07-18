@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import android.widget.FrameLayout
 import android.widget.OverScroller
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.text.DateFormatSymbols
 import java.util.Calendar
 import java.util.Locale
@@ -43,10 +44,17 @@ private data class TimelineTouchHit(
   val canCreate: Boolean = false,
 )
 
-private class SystemDayTimeFormatter(private val context: Context) {
+// CAL-TIMEFORMAT-001: every calendar surface reads the same system 12/24-hour
+// preference and locale labels instead of formatting one branch independently.
+internal class CalendarSystemTimeFormatter(private val context: Context) {
   fun hourLine(hour: Int): String = withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
     DayTimeFormatter.formatHourLine(hour, is24Hour, amLabel, pmLabel, locale)
   }
+
+  fun minute(value: Int): String =
+    withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
+      DayTimeFormatter.formatMinute(value, is24Hour, amLabel, pmLabel, locale)
+    }
 
   fun range(startMinute: Int, endMinute: Int): String =
     withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
@@ -158,10 +166,6 @@ internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
     gestureLayer.setInteractive(value)
   }
 
-  fun setDragPrecisionMinutes(value: Int) {
-    gestureLayer.setDragPrecisionMinutes(value)
-  }
-
   fun clearTransientState(reason: String, emitDraft: Boolean) {
     gestureLayer.clearTransientState(reason, emitDraft)
   }
@@ -212,10 +216,18 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     color = palette.destructive
     strokeWidth = CalendarUi.dp(context, 1f)
   }
-  private val timePaint = CalendarUi.textPaint(context, palette.textSecondary, 11f)
+  // CAL-RULER-001: DayTimeRulerView centers 12sp labels in the 56dp ruler
+  // and uses text_placeholder rather than the regular secondary text token.
+  private val timePaint = CalendarUi.textPaint(
+    context,
+    palette.textPlaceholder,
+    DayRulerContract.TEXT_SIZE_SP,
+  ).apply {
+    textAlign = Paint.Align.CENTER
+  }
   private val eventTitlePaint = CalendarUi.textPaint(context, palette.eventText, 11f, true)
   private val eventTimePaint = CalendarUi.textPaint(context, palette.eventText, 9f)
-  private val timeFormatter = SystemDayTimeFormatter(context)
+  private val timeFormatter = CalendarSystemTimeFormatter(context)
   private val accessibilityManager =
     context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
   private val virtualIdByIdentity = linkedMapOf<String, Int>()
@@ -344,6 +356,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     canvas.restoreToCount(save)
   }
 
+  @FeishuEvidence("CAL-RULER-001")
   private fun drawHourRuler(canvas: Canvas) {
     DayPagerContract.hourLines().forEach { hour ->
       val y = timelinePaddingTop + hour * hourHeight
@@ -351,8 +364,12 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
       val label = timeFormatter.hourLine(hour)
       canvas.drawText(
         label,
-        rulerWidth - CalendarUi.dp(context, 8f) - timePaint.measureText(label),
-        y + CalendarUi.dp(context, 4f),
+        DayRulerContract.labelCenterX(rulerWidth),
+        DayRulerContract.centeredBaseline(
+          centerY = y,
+          ascent = timePaint.fontMetrics.ascent,
+          descent = timePaint.fontMetrics.descent,
+        ),
         timePaint,
       )
     }
@@ -811,8 +828,6 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
     if (!value) cancelActiveGesture(emitDraftChange = false, clearSelection = true)
   }
 
-  fun setDragPrecisionMinutes(@Suppress("UNUSED_PARAMETER") value: Int) = Unit
-
   fun currentDraft(): CalendarDraft? = draft
 
   fun clearDraft(reason: String = "cancelled", emit: Boolean = true) {
@@ -971,7 +986,6 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
     val precision = CalendarGestureMath.precisionForGesture(
       kind,
       defaultDurationMinutes(),
-      preferredPrecisionMinutes = 15,
     )
     val projected = CalendarGestureMath.projectEvent(
       event = original,
@@ -997,7 +1011,6 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
     val precision = CalendarGestureMath.precisionForGesture(
       kind,
       defaultDurationMinutes(),
-      preferredPrecisionMinutes = 15,
     )
     val projected = CalendarGestureMath.projectDraft(
       draft = original,

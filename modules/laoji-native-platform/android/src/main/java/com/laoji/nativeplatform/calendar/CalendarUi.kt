@@ -18,9 +18,11 @@ data class CalendarPalette(
   val surfaceMuted: Int,
   val textPrimary: Int,
   val textSecondary: Int,
+  val textPlaceholder: Int,
   val divider: Int,
   val accent: Int,
   val accentSoft: Int,
+  val selectionMarker: Int,
   val accentText: Int,
   val eventFill: Int,
   val eventText: Int,
@@ -41,33 +43,37 @@ object CalendarUi {
       Configuration.UI_MODE_NIGHT_YES
     return if (isDark) {
       CalendarPalette(
-        background = Color.rgb(24, 26, 30),
-        surface = Color.rgb(34, 37, 42),
-        surfaceMuted = Color.rgb(45, 49, 55),
-        textPrimary = Color.rgb(241, 243, 245),
-        textSecondary = Color.rgb(166, 172, 181),
-        divider = Color.rgb(64, 69, 77),
-        accent = Color.rgb(64, 124, 255),
-        accentSoft = Color.rgb(42, 68, 111),
+        background = Color.rgb(26, 26, 26),
+        surface = Color.rgb(10, 10, 10),
+        surfaceMuted = Color.rgb(41, 41, 41),
+        textPrimary = Color.rgb(235, 235, 235),
+        textSecondary = Color.rgb(166, 166, 166),
+        textPlaceholder = DayRulerContract.TEXT_COLOR_DARK,
+        divider = Color.rgb(65, 65, 65),
+        accent = Color.rgb(117, 164, 255),
+        accentSoft = Color.rgb(21, 35, 64),
+        selectionMarker = Color.rgb(67, 67, 67),
         accentText = Color.WHITE,
-        eventFill = Color.rgb(56, 104, 202),
+        eventFill = Color.rgb(76, 136, 255),
         eventText = Color.WHITE,
-        destructive = Color.rgb(255, 109, 118)
+        destructive = Color.rgb(240, 91, 86)
       )
     } else {
       CalendarPalette(
-        background = Color.rgb(250, 251, 252),
+        background = Color.rgb(245, 246, 247),
         surface = Color.WHITE,
-        surfaceMuted = Color.rgb(244, 246, 248),
+        surfaceMuted = Color.rgb(242, 243, 245),
         textPrimary = Color.rgb(31, 35, 41),
         textSecondary = Color.rgb(100, 106, 115),
-        divider = Color.rgb(222, 226, 230),
-        accent = Color.rgb(51, 112, 255),
-        accentSoft = Color.rgb(232, 239, 255),
+        textPlaceholder = DayRulerContract.TEXT_COLOR_LIGHT,
+        divider = Color.argb(38, 31, 35, 41),
+        accent = Color.rgb(20, 86, 240),
+        accentSoft = Color.rgb(240, 244, 255),
+        selectionMarker = Color.rgb(222, 224, 227),
         accentText = Color.WHITE,
-        eventFill = Color.rgb(62, 117, 235),
+        eventFill = Color.rgb(20, 86, 240),
         eventText = Color.WHITE,
-        destructive = Color.rgb(216, 60, 68)
+        destructive = Color.rgb(226, 46, 40)
       )
     }
   }

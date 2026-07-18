@@ -12,7 +12,6 @@ import type {
 import type { NativeTabPressEvent } from './ui';
 
 export type NativeCalendarMode = 'month' | 'day';
-export type NativeCalendarDragPrecision = 5 | 15 | 30;
 
 export interface NativeCalendarModeChangeEvent {
   mode: NativeCalendarMode;
@@ -103,8 +102,6 @@ export interface LaojiCalendarViewProps extends ViewProps {
   visibleMonthEpochDay?: number | null;
   // UI-SHELL-BOTTOM-MAIN-001: selection motion resumes in the newly active native root.
   bottomBarSelectionCommand?: number | null;
-  // CAL-DAY-DRAG-001: Base 15/30 selection; short-event and end-handle rules resolve independently.
-  dragPrecisionMinutes?: NativeCalendarDragPrecision;
   mutationResolution?: NativeCalendarMutationResolution | null;
   onModeChange?: NativeEventHandler<NativeCalendarModeChangeEvent>;
   onVisibleRangeChange?: NativeEventHandler<NativeCalendarVisibleRangeEvent>;

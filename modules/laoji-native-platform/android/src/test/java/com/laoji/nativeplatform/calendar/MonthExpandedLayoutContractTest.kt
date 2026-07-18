@@ -121,6 +121,78 @@ class MonthExpandedLayoutContractTest {
     assertEquals(3, MonthPagerContract.PAGE_COUNT)
   }
 
+  @Test
+  fun `CAL-MONTH-EXPAND-001 gives today precedence over a selected-date marker`() {
+    assertEquals(
+      MonthDateMarker.TODAY,
+      MonthExpandedLayoutContract.dateMarker(10, selectedEpochDay = 10, todayEpochDay = 10),
+    )
+    assertEquals(
+      MonthDateMarker.SELECTED,
+      MonthExpandedLayoutContract.dateMarker(11, selectedEpochDay = 11, todayEpochDay = 10),
+    )
+    assertEquals(
+      MonthDateMarker.NONE,
+      MonthExpandedLayoutContract.dateMarker(12, selectedEpochDay = 11, todayEpochDay = 10),
+    )
+  }
+
+  @Test
+  fun `CAL-MONTH-EXPAND-001 pins source date typography and overflow badge geometry`() {
+    assertEquals(12f, MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP, 0f)
+    assertEquals(10f, MonthExpandedLayoutContract.DATE_TOP_DP, 0f)
+    assertEquals(22f, MonthExpandedLayoutContract.DATE_BASELINE_DP, 0f)
+    assertEquals(19f, MonthExpandedLayoutContract.OVERFLOW_BADGE_WIDTH_DP, 0f)
+    assertEquals(12f, MonthExpandedLayoutContract.OVERFLOW_BADGE_HEIGHT_DP, 0f)
+    assertEquals(2.5f, MonthExpandedLayoutContract.OVERFLOW_BADGE_RADIUS_DP, 0f)
+  }
+
+  @Test
+  fun `CAL-MONTH-SPAN-001 keeps a multi-day event continuous across occupied columns`() {
+    val bounds = MonthExpandedLayoutContract.eventSpanBounds(
+      gridStart = 16f,
+      cellWidth = 50f,
+      startColumn = 1,
+      endColumn = 4,
+      rightGap = 3f,
+    )
+
+    assertEquals(66f, bounds.left, 0f)
+    assertEquals(263f, bounds.right, 0f)
+    assertEquals(197f, bounds.right - bounds.left, 0f)
+    assertEquals(16f, MonthExpandedLayoutContract.EVENT_HEIGHT_DP, 0f)
+    assertEquals(3f, MonthExpandedLayoutContract.EVENT_VERTICAL_GAP_DP, 0f)
+    assertEquals(3f, MonthExpandedLayoutContract.EVENT_RIGHT_GAP_DP, 0f)
+    assertEquals(2.5f, MonthExpandedLayoutContract.EVENT_RADIUS_DP, 0f)
+  }
+
+  @Test
+  fun `CAL-TIMEFORMAT-001 month expansion derives cross-midnight display bounds once`() {
+    val startDay = CalendarDateMath.toEpochDay(2026, 7, 18)
+    val event = CalendarEvent(
+      sourceEventId = "overnight",
+      occurrenceDate = "2026-07-18",
+      title = "夜间维护",
+      startEpochDay = startDay,
+      endEpochDay = startDay + 1,
+      startMinutes = 1_380,
+      endMinutes = 60,
+      timeZoneId = "Asia/Shanghai",
+      allDay = false,
+      editable = true,
+      revision = 1,
+    )
+
+    assertEquals(
+      MonthEventTimeBounds(1_380, CalendarDateMath.MINUTES_PER_DAY),
+      MonthExpandedLayoutContract.eventTimeBounds(startDay, event),
+    )
+    assertEquals(
+      MonthEventTimeBounds(0, 60),
+      MonthExpandedLayoutContract.eventTimeBounds(startDay + 1, event),
+    )
+  }
+
   private fun assertTops(weekCount: Int, selectedRow: Int, vararg expected: Float) {
     assertArrayEquals(
       expected,

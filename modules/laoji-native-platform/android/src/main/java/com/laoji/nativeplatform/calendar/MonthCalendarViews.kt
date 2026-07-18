@@ -12,6 +12,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -103,21 +104,45 @@ private class MonthWeekRowView(context: Context) : View(context) {
 
   private val palette = CalendarUi.palette(context)
   private val density = context.resources.displayMetrics.density
-  private val dayPaint = CalendarUi.textPaint(context, palette.textPrimary, 13f)
-  private val mutedDayPaint = CalendarUi.textPaint(context, palette.textSecondary, 13f)
-  private val selectedDayPaint = CalendarUi.textPaint(context, palette.accentText, 13f, true)
+  private val dayPaint = CalendarUi.textPaint(
+    context,
+    palette.textPrimary,
+    MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
+  )
+  private val mutedDayPaint = CalendarUi.textPaint(
+    context,
+    palette.textSecondary,
+    MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
+  )
+  private val selectedDayPaint = CalendarUi.textPaint(
+    context,
+    palette.textPrimary,
+    MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
+  )
+  private val todayDayPaint = CalendarUi.textPaint(
+    context,
+    palette.accentText,
+    MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
+  )
   private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
   private val eventTextPaint = CalendarUi.textPaint(context, palette.eventText, 10f, true)
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.divider
     strokeWidth = maxOf(1f, 0.5f * density)
   }
-  private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
+  private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.selectionMarker
+    style = Paint.Style.FILL
+  }
   private val todayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.accent
-    style = Paint.Style.STROKE
-    strokeWidth = 1.5f * density
+    style = Paint.Style.FILL
   }
+  private val overflowBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.argb(31, 143, 149, 158)
+    style = Paint.Style.FILL
+  }
+  private val overflowBadgeTextPaint = CalendarUi.textPaint(context, palette.textSecondary, 10f)
   private val eventHits = mutableListOf<MonthEventHit>()
   private val eventVirtualIds = linkedMapOf<String, Int>()
   private val accessibilityManager =
@@ -192,34 +217,42 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val epochDay = rowStartEpochDay + column
       val parts = CalendarDateMath.fromEpochDay(epochDay)
       val centerX = gridStart + column * cellWidth + cellWidth / 2f
-      val centerY = CalendarUi.dp(context, 16f)
-      if (selectedEpochDay == epochDay) {
-        canvas.drawCircle(
-          centerX,
-          centerY - CalendarUi.dp(context, 1f),
-          CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_RADIUS_DP),
-          selectionPaint,
-        )
-      } else if (todayEpochDay == epochDay) {
-        canvas.drawCircle(
-          centerX,
-          centerY - CalendarUi.dp(context, 1f),
-          CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_RADIUS_DP),
-          todayPaint,
-        )
+      when (MonthExpandedLayoutContract.dateMarker(epochDay, selectedEpochDay, todayEpochDay)) {
+        MonthDateMarker.SELECTED -> {
+          canvas.drawCircle(
+            centerX,
+            CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_MARKER_CENTER_DP),
+            CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_RADIUS_DP),
+            selectionPaint,
+          )
+        }
+        MonthDateMarker.TODAY -> {
+          canvas.drawCircle(
+            centerX,
+            CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_MARKER_CENTER_DP),
+            CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_RADIUS_DP),
+            todayPaint,
+          )
+        }
+        MonthDateMarker.NONE -> Unit
       }
       val dayText = parts.day.toString()
-      val paint = when {
-        selectedEpochDay == epochDay -> selectedDayPaint
-        parts.month != monthParts.month -> mutedDayPaint
-        else -> dayPaint
+      val paint = when (MonthExpandedLayoutContract.dateMarker(epochDay, selectedEpochDay, todayEpochDay)) {
+        MonthDateMarker.TODAY -> todayDayPaint
+        MonthDateMarker.SELECTED -> selectedDayPaint
+        MonthDateMarker.NONE -> if (parts.month != monthParts.month) mutedDayPaint else dayPaint
       }
-      canvas.drawText(dayText, centerX - paint.measureText(dayText) / 2f, centerY + CalendarUi.dp(context, 4f), paint)
+      canvas.drawText(
+        dayText,
+        centerX - paint.measureText(dayText) / 2f,
+        CalendarUi.dp(context, MonthExpandedLayoutContract.DATE_BASELINE_DP),
+        paint,
+      )
     }
 
     val chipTopInset = CalendarUi.dp(context, 31f)
-    val chipHeight = CalendarUi.dp(context, 16f)
-    val chipGap = CalendarUi.dp(context, 2f)
+    val chipHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_HEIGHT_DP)
+    val chipGap = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_VERTICAL_GAP_DP)
     val maxLanes = (((height - chipTopInset - CalendarUi.dp(context, 13f)) / (chipHeight + chipGap)).toInt())
       .coerceIn(1, 3)
     val hiddenCounts = mutableMapOf<Int, Int>()
@@ -230,19 +263,17 @@ private class MonthWeekRowView(context: Context) : View(context) {
         }
         return@forEach
       }
-      val left = gridStart + segment.startColumn * cellWidth +
-        if (segment.startsBeforeSegment) 0f else CalendarUi.dp(context, 2f)
-      val right = gridStart + (segment.endColumn + 1) * cellWidth -
-        if (segment.continuesAfterSegment) 0f else CalendarUi.dp(context, 2f)
+      val horizontal = MonthExpandedLayoutContract.eventSpanBounds(
+        gridStart = gridStart,
+        cellWidth = cellWidth,
+        startColumn = segment.startColumn,
+        endColumn = segment.endColumn,
+        rightGap = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_RIGHT_GAP_DP),
+      )
       val top = chipTopInset + segment.lane * (chipHeight + chipGap)
-      val rect = RectF(left, top, right, top + chipHeight)
-      canvas.drawRoundRect(rect, CalendarUi.dp(context, 3f), CalendarUi.dp(context, 3f), eventPaint)
-      if (segment.startsBeforeSegment) {
-        canvas.drawRect(rect.left, rect.top, minOf(rect.right, rect.left + CalendarUi.dp(context, 4f)), rect.bottom, eventPaint)
-      }
-      if (segment.continuesAfterSegment) {
-        canvas.drawRect(maxOf(rect.left, rect.right - CalendarUi.dp(context, 4f)), rect.top, rect.right, rect.bottom, eventPaint)
-      }
+      val rect = RectF(horizontal.left, top, horizontal.right, top + chipHeight)
+      val radius = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_RADIUS_DP)
+      canvas.drawRoundRect(rect, radius, radius, eventPaint)
       val title = CalendarUi.ellipsize(
         segment.event.title.ifBlank { "日程" },
         eventTextPaint,
@@ -254,11 +285,23 @@ private class MonthWeekRowView(context: Context) : View(context) {
     }
 
     hiddenCounts.forEach { (column, count) ->
+      val badgeRight = gridStart + (column + 1) * cellWidth - CalendarUi.dp(context, 3f)
+      val badgeWidth = CalendarUi.dp(context, MonthExpandedLayoutContract.OVERFLOW_BADGE_WIDTH_DP)
+      val badgeHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.OVERFLOW_BADGE_HEIGHT_DP)
+      val badgeTop = height - CalendarUi.dp(context, 16f)
+      val badge = RectF(badgeRight - badgeWidth, badgeTop, badgeRight, badgeTop + badgeHeight)
+      canvas.drawRoundRect(
+        badge,
+        CalendarUi.dp(context, MonthExpandedLayoutContract.OVERFLOW_BADGE_RADIUS_DP),
+        CalendarUi.dp(context, MonthExpandedLayoutContract.OVERFLOW_BADGE_RADIUS_DP),
+        overflowBadgePaint,
+      )
+      val label = if (count > 9) "+N" else "+$count"
       canvas.drawText(
-        "+$count",
-        gridStart + column * cellWidth + CalendarUi.dp(context, 4f),
-        height - CalendarUi.dp(context, 5f),
-        mutedDayPaint,
+        label,
+        badge.centerX() - overflowBadgeTextPaint.measureText(label) / 2f,
+        badge.centerY() - (overflowBadgeTextPaint.ascent() + overflowBadgeTextPaint.descent()) / 2f,
+        overflowBadgeTextPaint,
       )
     }
   }
@@ -545,6 +588,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
 // CAL-MONTH-EXPAND-001: Each day page owns its ScrollView so same-week column changes preserve scroll state.
 private class SelectedDayPageView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
+  private val timeFormatter = CalendarSystemTimeFormatter(context)
   private val eventList = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setBackgroundColor(palette.surface)
@@ -662,18 +706,8 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
 
   private fun eventTimeLabel(epochDay: Int, event: CalendarEvent): String {
     if (event.allDay) return "全天"
-    val start = if (epochDay == event.startEpochDay) event.startMinutes ?: 0 else 0
-    val end = if (epochDay == event.endEpochDay) {
-      event.endMinutes ?: CalendarDateMath.MINUTES_PER_DAY
-    } else {
-      CalendarDateMath.MINUTES_PER_DAY
-    }
-    return "${formatMinute(start)}\n${formatMinute(end)}"
-  }
-
-  private fun formatMinute(minutes: Int): String {
-    val bounded = minutes.coerceIn(0, CalendarDateMath.MINUTES_PER_DAY)
-    return String.format(Locale.getDefault(), "%02d:%02d", bounded / 60, bounded % 60)
+    val bounds = MonthExpandedLayoutContract.eventTimeBounds(epochDay, event)
+    return "${timeFormatter.minute(bounds.startMinute)}\n${timeFormatter.minute(bounds.endMinute)}"
   }
 }
 
