@@ -27,7 +27,7 @@ export function toNativeDialogSnapshot(
 
 export function toNativeActionSheetSnapshot(
   visible: boolean,
-  title: string,
+  title: string | undefined,
   items: AppActionSheetItem[],
 ): NativeActionSheetSnapshot {
   return {
@@ -37,6 +37,7 @@ export function toNativeActionSheetSnapshot(
       key: item.key,
       label: item.label,
       destructive: item.destructive,
+      disabled: item.disabled,
     })),
   };
 }

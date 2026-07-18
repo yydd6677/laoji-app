@@ -106,6 +106,316 @@
       "blockers": ["instrumentation and physical-device cold-start recovery are not yet closed"]
     },
     {
+      "id": "UI-TITLE-COMMON-001",
+      "module": "shell",
+      "status": "implemented",
+      "decision": "keep",
+      "source_refs": [
+        "common-shell-commontitlebar-ddc35ce9",
+        "common-shell-commontitlebar-f524485e",
+        "common-shell-commontitlebarconstants-86fc4a67",
+        "common-shell-iactiontitlebar-0286a9fb",
+        "common-shell-c115153a-5eb0412b",
+        "common-shell-titlebariconsize-95d8f84c",
+        "common-shell-actionwrapper-80949619",
+        "common-shell-titlebarheightupdate-49caed84",
+        "common-shell-abstractc146331f-cedc5cd6",
+        "common-shell-abstractviewonclicklistenerc146329d-bf5842c1",
+        "calendar-edittitlebar-180de5c1",
+        "calendar-savetype-acd315e0",
+        "calendar-editmainviewmodel-98210cd1",
+        "calendar-editmultitimeview-eb77c2e8",
+        "calendar-chooserepeatendfragment-ffb72d87",
+        "calendar-eventtitleviewv2-6ea55e27",
+        "calendar-c8480a-4013440c",
+        "calendar-calendartitleproxynewimpl-f03ad8fa",
+        "calendar-c6926a-33332e37",
+        "minutes-newmmmaintabfragment-5cfa2173",
+        "minutes-mmdetailtitlebar-3300a9e6",
+        "minutes-mmtoolbarview-2c67c035",
+        "minutes-mmrecordingfragment-e26eef78",
+        "minutes-mmfeishuuilayoutprovider-e7180a03",
+        "minutes-mmspeakermarkview-82a11d85",
+        "resources-widget-tab-title-container-45fa7583",
+        "resources-mm-view-title-bar-6ba4ebd3",
+        "resources-office-sdk-mm-view-title-bar-feishu-229caf70",
+        "resources-attrs-8ad57758",
+        "resources-colors-d04fc4c4",
+        "resources-dimens-096b312c",
+        "resources-ud-icon-left-outlined-3c010265",
+        "resources-ud-icon-close-outlined-c18fac70",
+        "resources-ud-icon-edit-outlined-44f49f6a",
+        "resources-ud-icon-delete-trash-outlined-3e9d60d2"
+      ],
+      "deviation_refs": [],
+      "requirements": {
+        "common_family_routes": ["calendar-detail", "calendar-edit", "calendar-repeat-end", "calendar-time-edit"],
+        "full_screen_height_dp": 44,
+        "bottom_sheet_height_dp": 56,
+        "main_title_sp": 18,
+        "action_text_sp": 17,
+        "normal_icon_dp": 24,
+        "small_icon_dp": 20,
+        "normal_right_slot_dp": 48,
+        "small_right_slot_dp": 44,
+        "direct_child_order": ["leading", "secondary-left", "leading-container", "center", "right-actions", "divider"],
+        "secondary_title_measure": "wrap-content",
+        "right_icon_padding_dp": [9, 0, 15, 0],
+        "divider_height_px": 1,
+        "divider_default_visible": false,
+        "dp_conversion": "positive-half-up-per-dimension",
+        "text_font_padding": "theme-default",
+        "calendar_action_debounce": {
+          "duration_ms": 1000,
+          "enabled": ["edit-cancel", "edit-save", "time-done", "repeat-end-cancel", "repeat-end-done", "detail-right-actions"],
+          "direct": ["time-cancel", "detail-back"]
+        },
+        "center_policy": "measured-visible-sides",
+        "system_inset_owner": "parent-unless-explicit-immersive",
+        "ordinary_edit_center_title": false,
+        "ordinary_edit_action_labels": ["取消", "保存"],
+        "ordinary_edit_save_colors": ["#1456F0", "#C2D4FF", "#8F959E"],
+        "invented_saving_label_forbidden": true,
+        "detail_title_placement": "secondary-left",
+        "detail_default_title_color": "#0442D2",
+        "detail_icon_tint": "#000000",
+        "separate_title_families": ["calendar-main", "calendar-search", "minutes-main", "minutes-detail", "minutes-recording", "minutes-speaker", "sheet-header"]
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBar.kt",
+          "symbols": ["CalendarCommonTitleBarContract", "CalendarTitleSaveContract", "CalendarCommonTitleBar"],
+          "required_patterns": ["UI-TITLE-COMMON-001", "class CalendarCommonTitleBar\\(context: Context\\) : LinearLayout", "leftAuxLayout", "calendar-title-leading-container", "FULL_SCREEN_HEIGHT_DP = 44f", "MAIN_TITLE_SP = 18f", "ACTION_TEXT_SP = 17f", "RIGHT_ACTION_END_PADDING_DP = 15f", "ACTION_DEBOUNCE_MS = 1_000L", "class CalendarTitleClickGate", "debounce: Boolean", "centerDefaultTypeface", "fun dpToPx", "fun centerBounds", "Color\\.rgb\\(194, 212, 255\\)", "Color\\.argb\\(38, 31, 35, 41\\)", "FeishuEvidenceRuntime\\.bind", "secondaryTitle\\.measure\\(atMostWidth", "detailTitleBaseEndPadding", "rightActions\\.measuredWidth"],
+          "forbidden_patterns": ["96", "98", "52", "保存中", "Typeface\\.DEFAULT"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarPageUi.kt",
+          "symbols": ["CalendarPagePalette", "CalendarPageStateView"],
+          "required_patterns": ["UI-TOKENS-001", "CalendarCommonTitleBarContract\\.dpToPx"],
+          "forbidden_patterns": ["class CalendarPageTitleBar"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditPageView.kt",
+          "symbols": ["CalendarEditPageView"],
+          "required_patterns": ["UI-TITLE-COMMON-001", "CalendarCommonTitleBar\\(context\\)", "setCenterTitle\\(\"\"\\)", "CalendarTitleSaveContract\\.resolve", "setLeftTextAction\\(\"取消\", debounce = true\\)", "addRightTextAction\\(\"保存\", CalendarTitleSaveContract\\.color\\(saveType\\), debounce = true\\)"],
+          "forbidden_patterns": ["保存中", "setCenterTitle\\(if \\(state\\.editing\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditTimePageView.kt",
+          "symbols": ["CalendarEditTimePageView"],
+          "required_patterns": ["CalendarCommonTitleBar\\(context\\)", "setCenterTitle\\(\"时间\"\\)", "setLeftTextAction\\(\"取消\", debounce = false\\)", "addRightTextAction\\(\"完成\", CalendarPagePalette\\.primary, debounce = true\\)"],
+          "forbidden_patterns": ["CalendarPageTitleBar"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarRepeatEndPageView.kt",
+          "symbols": ["CalendarRepeatEndPageView"],
+          "required_patterns": ["UI-TITLE-COMMON-001", "CalendarCommonTitleBar\\(context\\)", "setCenterTitle\\(\"选择截止时间\"\\)", "setLeftTextAction\\(\"取消\", debounce = true\\)", "addRightTextAction", "debounce = true"],
+          "forbidden_patterns": ["CalendarPageTitleBar"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarDetailPageView.kt",
+          "symbols": ["CalendarDetailPageView"],
+          "required_patterns": ["CalendarCommonTitleBar\\(context\\)", "setTransparentBackground\\(\\)", "setSecondaryLeftTitle", "CalendarPagePalette\\.primaryHeader", "Color\\.BLACK", "CalendarTitleIconSize\\.SMALL", "trailingPaddingDp = 0f", "debounce = false", "debounce = true", "laoji_ic_edit_outline", "laoji_ic_delete_outline"],
+          "forbidden_patterns": ["CalendarPageTitleBar", "android\\.R\\.drawable\\.ic_menu_edit", "android\\.R\\.drawable\\.ic_menu_delete"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/res/drawable/laoji_ic_edit_outline.xml",
+          "required_patterns": ["android:fillColor=\"#FF000000\"", "android:pathData"],
+          "forbidden_patterns": ["android:strokeColor"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/res/drawable/laoji_ic_delete_outline.xml",
+          "required_patterns": ["android:fillColor=\"#FF000000\"", "android:pathData"],
+          "forbidden_patterns": ["android:strokeColor"]
+        }
+      ],
+      "tests": [
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarContractTest.kt", "kind": "jvm"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "timeVariantUsesMeasuredSideCenteringAndSourceTypography", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "productionEditPageKeepsSourceCancelSaveTreeWithoutCenterTitle", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "productionDetailPageUsesSecondaryTitleAndTwoSmallIconActions", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "productionRepeatEndRouteUsesCommonTitleAndCommitsTheSourceDefaultDate", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarEditTimePageInstrumentedTest.kt", "kind": "androidTest", "runtime": "API 35 emulator"}
+      ],
+      "blockers": [
+        "Calendar main/search and Minutes main/detail/recording/speaker title families remain separate implementation closures.",
+        "Exact retained-route icon paths remain owned by UI-ICON-PRIMITIVES-001.",
+        "Physical-device font/theme geometry and TalkBack remain part of the final same-hash candidate."
+      ]
+    },
+    {
+      "id": "CAL-REPEAT-RRULE-001",
+      "module": "calendar",
+      "status": "implemented",
+      "decision": "keep",
+      "source_refs": [
+        "calendar-repeatview-9a6ac846",
+        "calendar-repeatviewmodel-e7ca5f20",
+        "calendar-chooserepeatendfragment-ffb72d87",
+        "calendar-editeventmodel-8140c35a",
+        "calendar-editeventspantype-6fe63d29",
+        "calendar-editpermission-a360374b",
+        "calendar-propertyvisibility-5d191a2a",
+        "calendar-uivisibility-8d143159",
+        "calendar-repeatuistatus-4c13527d",
+        "calendar-c146191e-bd55cf54",
+        "calendar-repeatmodel-4a5c69b5",
+        "calendar-repeatendfragmentdata-f9c62a55",
+        "calendar-repeatviewmodel-onclickrepeatendcontaine-7dd08dd3",
+        "calendar-c136548f-c1742fea",
+        "calendar-pushconstants-c91e9934",
+        "calendar-interfacec139009a-53439227",
+        "calendar-c139112c-ae9f098c",
+        "calendar-c139114e-b8e56b9a",
+        "calendar-c139116g-f937c345",
+        "calendar-wheelview-d2805f70",
+        "calendar-udswitch-e381e0fa",
+        "calendar-c146517b-e232224f",
+        "calendar-c146525j-69f66d7c",
+        "resources-view-event-repeat-container-5701ddcb",
+        "resources-fragment-event-repeat-end-75b5596d",
+        "resources-view-wheels-year-month-day-58961fec",
+        "resources-ud-icon-repeat-outlined-ac559618",
+        "resources-ud-icon-right-bold-outlined-a519c74a",
+        "resources-ud-switch-thumb-drawable-7c3d8fc0",
+        "resources-ud-switch-track-drawable-4066f0ad",
+        "resources-arrays-aaa0cf10",
+        "resources-strings-985392a8"
+      ],
+      "deviation_refs": ["DEV-CALENDAR-DATE-RANGE-SAFETY-001"],
+      "requirements": {
+        "retained_repeat_presets": ["daily", "weekly", "monthly", "yearly"],
+        "source_default_offsets": {
+          "daily": "P1M",
+          "weekly": "P3M",
+          "monthly": "P1Y",
+          "yearly": "P5Y"
+        },
+        "repeat_end_visible_for_repeating_events_only": true,
+        "edit_scope_selected_before_editor": true,
+        "normal_occurrence_repeat_mode": "visible-disabled-displays-no-repeat",
+        "normal_occurrence_repeat_end_mode": "visible-disabled-when-source-rrule-exists",
+        "exception_occurrence_repeat_container": "hidden",
+        "following_and_series_repeat_mode": "visible-editable-with-no-empty-rrule-option",
+        "unresolved_recurring_scope": "hidden-compatibility-fallback",
+        "never_ends_value": null,
+        "end_date_not_before_start": true,
+        "wheel_year_range": [1900, 2100],
+        "wheel_cyclic": ["year", "month", "day"],
+        "day_label_pattern": "D日(周X)",
+        "wheel_visible_items": 7,
+        "switch_geometry_dp": {"width": 36, "thumb": 20, "track_height": 14},
+        "switch_motion_ms": 250,
+        "switch_gesture": "thumb-drag-with-rtl-and-fling-settle",
+        "repeat_end_entry": "second-line-value-and-chevron-only",
+        "cancel_restores_entry_draft": true,
+        "done_commits_native_draft": true,
+        "test_host_activity_recreation_restores_child_page": true,
+        "production_expo_activity_recreation_verified": false
+      },
+      "implementation": [
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarRepeatEndPageView.kt",
+          "symbols": ["CalendarRepeatEndState", "CalendarRepeatEndPageView"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "start\\.plusMonths\\(1\\)", "\"weekly\" -> start\\.plusMonths\\(3\\)", "\"monthly\" -> start\\.plusYears\\(1\\)", "\"yearly\" -> start\\.plusYears\\(5\\)", "recurrenceUntilDate = if \\(neverEnds\\) null", "CalendarEditTimeState\\.MIN_YEAR", "looping = true", "dayWithWeekdayWheelLabel", "CalendarSourceSwitch", "setLeftTextAction\\(\"取消\", debounce = true\\)", "addRightTextAction", "debounce = true"],
+          "forbidden_patterns": ["recurrenceUntilDate = selectedDate\\.toString\\(\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditWheelView.kt",
+          "symbols": ["CalendarEditWheelContract", "CalendarEditWheelView"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "VISIBLE_ITEM_COUNT = 7", "LINE_SPACING_MULTIPLIER = 2.5f", "CENTER_SCALE = 1.176f", "OUTER_ALPHA_POWER = 2.2f", "MAX_FLING_VELOCITY = 2_000", "fun rowTop", "acos\\(cosine\\)", "canvas.clipRect", "canvas.scale\\(1f, CalendarEditWheelContract.CENTER_SCALE\\)", "shortTapOffset", "nearestSnapOffset"],
+          "forbidden_patterns": ["ITEM_HEIGHT_DP = 40", "outerPaint = Paint.*textSize = sp\\(14f\\)"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditPageView.kt",
+          "symbols": ["CalendarEditPageView", "CalendarEditPageSavedState"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "repeatEndRow = repeatChoiceRow", "repeatChoiceRow", "CalendarRecurrenceControlMode.DISABLED", "repeatValue.text = if", "showRepeatEndPage", "cancelRepeatEndPage", "completeRepeatEndPage", "repeatEndPageState", "recurrenceUntilDate"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarPageContracts.kt",
+          "symbols": ["CalendarEditDraft", "CalendarEditValidator", "CalendarEditPageState", "CalendarRecurrenceControlMode"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "val recurrenceUntilDate: String\\?", "val recurrenceScope: CalendarEditRecurrenceScope\\?", "recurrenceException", "CalendarRecurrenceControlMode.DISABLED", "recurrenceUntilDate.*isBefore\\(startDate\\)", "\"recurrenceUntilDate\" to recurrenceUntilDate"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarSourceSwitch.kt",
+          "symbols": ["CalendarSourceSwitch"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "TRACK_WIDTH_DP = 36f", "THUMB_SIZE_DP = 20f", "TRACK_HEIGHT_DP = 14f", "ANIMATION_DURATION_MS = 250L", "ValueAnimator.ofFloat", "VelocityTracker.obtain", "ViewConfiguration.get", "override fun onTouchEvent", "requestDisallowInterceptTouchEvent", "minimumFlingVelocity", "thumbPosition > 0.5f"],
+          "forbidden_patterns": ["import android\\.widget\\.Switch", ": Switch\\b"]
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/res/drawable/laoji_ic_repeat_outline.xml",
+          "required_patterns": ["android:width=\"18dp\"", "android:pathData"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "modules/laoji-native-platform/android/src/main/res/drawable/laoji_ic_chevron_right_bold.xml",
+          "required_patterns": ["android:width=\"12dp\"", "android:fillColor=\"#FF000000\"", "android:pathData=\"M7.586,20.486"],
+          "forbidden_patterns": ["android:strokeWidth", "android:strokeColor"]
+        },
+        {
+          "path": "modules/laoji-native-platform/src/calendarPages.ts",
+          "symbols": ["NativeCalendarEditSnapshot"],
+          "required_patterns": ["recurrenceScope: 'occurrence' \\| 'following' \\| 'series' \\| null"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "src/native/nativeCalendarPages.ts",
+          "symbols": ["nativeCalendarEditDraft"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "recurrenceUntilDate: event\\.repeat"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "src/screens/AddEventScreen.android.tsx",
+          "symbols": ["AddEventScreen"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "selectedRecurrenceScope", "canStopRecurringSeries", "item.value !== 'once'", "recurrenceUntilDate", "item\\.value === 'once' \\? null"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "src/screens/EventDetailScreen.android.tsx",
+          "symbols": ["EventDetailScreen"],
+          "required_patterns": ["recurrenceEditChoices", "recurrenceDeleteChoices", "AppActionSheet", "recurrenceScope", "navigateToEditor"],
+          "forbidden_patterns": ["recurrenceEditDialog"]
+        },
+        {
+          "path": "src/services/recurrenceActions.ts",
+          "symbols": ["recurrenceRuleControlMode", "canStopRecurringSeries", "resolveRecurrenceEditScope"],
+          "required_patterns": ["scope === 'occurrence'", "event\\.isRecurrenceException \\? 'hidden' : 'disabled'", "scope === 'following'", "scope === 'series'"],
+          "forbidden_patterns": []
+        },
+        {
+          "path": "src/utils/eventDraftValidation.ts",
+          "symbols": ["validateEventDraft"],
+          "required_patterns": ["CAL-REPEAT-RRULE-001", "invalid-recurrence-until-date", "recurrence-until-before-start", "draft\\.recurrenceUntilDate < draft\\.startDate"],
+          "forbidden_patterns": []
+        }
+      ],
+      "tests": [
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarRepeatEndStateTest.kt", "kind": "jvm", "symbol": "sourceDefaultsDependOnRepeatFamily"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarEditWheelContractTest.kt", "kind": "jvm", "symbol": "calendar source wheel derives its cylinder from text height"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarEditRecurrenceScopeTest.kt", "kind": "jvm"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarEditValidatorTest.kt", "kind": "jvm"},
+        {"path": "modules/laoji-native-platform/android/src/test/java/com/laoji/nativeplatform/calendarpages/CalendarSourceSwitchContractTest.kt", "kind": "jvm"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "productionRepeatEndRouteUsesCommonTitleAndCommitsTheSourceDefaultDate", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarCommonTitleBarInstrumentedTest.kt", "kind": "androidTest", "symbol": "repeatEndRouteRestoresAcrossActivityRecreationAndBackCancelsToEntryDraft", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarEditRecurrenceScopeInstrumentedTest.kt", "kind": "androidTest", "runtime": "API 35 emulator"},
+        {"path": "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/calendarpages/CalendarEditTimePageInstrumentedTest.kt", "kind": "androidTest", "symbol": "CAL-PICKER-WHEEL-TAP-001_production_wheel_uses_source_cylinder_and_short_tap", "runtime": "API 35 emulator"},
+        {"path": "__tests__/eventDraftValidation.test.ts", "kind": "unit"},
+        {"path": "__tests__/nativeCalendarPages.test.ts", "kind": "unit"},
+        {"path": "__tests__/recurrenceActions.test.ts", "kind": "unit"},
+        {"path": "__tests__/androidNativeBoundary.test.ts", "kind": "gate", "symbol": "rejects an unregistered third native edit child page"}
+      ],
+      "blockers": [
+        "Custom intervals and weekday selection remain coarse presets rather than the complete source RRULE surface.",
+        "The exact horizontal Fragment transition remains blocked because its decoded animation bodies are absent.",
+        "Feishu PART_EDIT, approval, special-schema and attendee-limit disable reasons are not represented by the current LaoJi event permission contract.",
+        "DEV-CALENDAR-DATE-RANGE-SAFETY-001 remains proposed until the product-safety correction is explicitly approved.",
+        "The isolated ComponentActivity test host restores the repeat-end child page; production Expo ReactActivity recreation remains unverified.",
+        "Final physical-device rendering and restoration remain part of the same-hash candidate."
+      ]
+    },
+    {
       "id": "UI-SHELL-BOTTOM-MAIN-001",
       "module": "shell",
       "status": "implemented",

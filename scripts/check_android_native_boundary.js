@@ -668,26 +668,36 @@ const REQUIRED_CAL_EDIT_TIME_CONTRACTS = [
     path: 'modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditPageView.kt',
     patterns: [
       /CalendarEditTimePageView\(/,
+      /CalendarRepeatEndPageView\(/,
       /onCancel = ::cancelTimePage/,
       /onComplete = ::completeTimePage/,
-      /OnBackPressedCallback\(false\)[\s\S]*cancelTimePage\(\)/,
-      /onSaveInstanceState\(\)[\s\S]*timePage\?\.currentState\(\)\?\.toStateBundle\(\)/,
-      /onRestoreInstanceState[\s\S]*showTimePage\(restored\)/,
-      /val entryDraft = page\.currentState\(\)\.baseDraft[\s\S]*draft = entryDraft/,
+      /onCancel = ::cancelRepeatEndPage/,
+      /onComplete = ::completeRepeatEndPage/,
+      /OnBackPressedCallback\(false\)[\s\S]*cancelRepeatEndPage\(\)[\s\S]*cancelTimePage\(\)/,
+      /onSaveInstanceState\(\)[\s\S]*timePage\?\.currentState\(\)\?\.toStateBundle\(\)[\s\S]*repeatEndPage\?\.currentState\(\)\?\.toStateBundle\(\)/,
+      /onRestoreInstanceState[\s\S]*showRepeatEndPage\(restoredRepeatEnd\)[\s\S]*showTimePage\(restoredTime\)/,
+      /cancelTimePage\(\)[\s\S]*val entryDraft = page\.currentState\(\)\.baseDraft[\s\S]*draft = entryDraft/,
+      /cancelRepeatEndPage\(\)[\s\S]*val entryDraft = page\.currentState\(\)\.baseDraft[\s\S]*draft = entryDraft/,
     ],
     fixture: [
       '// CAL-EDIT-TIME-001',
+      'private var timePage: CalendarEditTimePageView? = null',
+      'private var repeatEndPage: CalendarRepeatEndPageView? = null',
       'showTimePage(CalendarEditEndpoint.START)',
       'showTimePage(CalendarEditEndpoint.START)',
       'showTimePage(CalendarEditEndpoint.END)',
       'showTimePage(CalendarEditEndpoint.END)',
       'CalendarEditTimePageView(',
+      'CalendarRepeatEndPageView(',
       'onCancel = ::cancelTimePage',
       'onComplete = ::completeTimePage',
-      'OnBackPressedCallback(false) { cancelTimePage() }',
-      'override fun onSaveInstanceState() { timePage?.currentState()?.toStateBundle() }',
-      'override fun onRestoreInstanceState(value: Any) { showTimePage(restored) }',
-      'val entryDraft = page.currentState().baseDraft; draft = entryDraft',
+      'onCancel = ::cancelRepeatEndPage',
+      'onComplete = ::completeRepeatEndPage',
+      'OnBackPressedCallback(false) { cancelRepeatEndPage(); cancelTimePage() }',
+      'override fun onSaveInstanceState() { timePage?.currentState()?.toStateBundle(); repeatEndPage?.currentState()?.toStateBundle() }',
+      'override fun onRestoreInstanceState(value: Any) { showRepeatEndPage(restoredRepeatEnd); showTimePage(restoredTime) }',
+      'fun cancelTimePage() { val entryDraft = page.currentState().baseDraft; draft = entryDraft }',
+      'fun cancelRepeatEndPage() { val entryDraft = page.currentState().baseDraft; draft = entryDraft }',
     ].join('\n'),
   },
   {
@@ -706,6 +716,44 @@ const REQUIRED_CAL_EDIT_TIME_CONTRACTS = [
       'private val scroller = OverScroller(context)',
       'fun fling() { scroller.fling(',
       'override fun computeScroll() {}',
+    ].join('\n'),
+  },
+  {
+    path: 'modules/laoji-native-platform/android/build.gradle',
+    patterns: [
+      /coreLibraryDesugaringEnabled true/,
+      /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/,
+    ],
+    fixture: [
+      '// CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001',
+      'coreLibraryDesugaringEnabled true',
+      "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'",
+    ].join('\n'),
+  },
+  {
+    path: 'android/app/build.gradle',
+    patterns: [
+      /coreLibraryDesugaringEnabled true/,
+      /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/,
+    ],
+    fixture: [
+      '// @generated-by-laoji-java-time-desugaring',
+      '// CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001',
+      'coreLibraryDesugaringEnabled true',
+      "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'",
+    ].join('\n'),
+  },
+  {
+    path: 'plugins/withLaojiNativePlatform.js',
+    patterns: [
+      /coreLibraryDesugaringEnabled true/,
+      /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/,
+    ],
+    fixture: [
+      '// CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001',
+      "const desugarMarker = '// @generated-by-laoji-java-time-desugaring'",
+      'coreLibraryDesugaringEnabled true',
+      "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'",
     ].join('\n'),
   },
 ];
@@ -1118,6 +1166,18 @@ function auditAndroidNativeBoundary(root) {
   const endEntries = calendarEditSource.match(/showTimePage\(CalendarEditEndpoint\.END\)/g) ?? [];
   if (startEntries.length !== 2 || endEntries.length !== 2) {
     failures.push(`CAL-EDIT-TIME-001 expected four edit-time entries, found ${startEntries.length + endEntries.length}`);
+  }
+  const childPageFields = [...calendarEditSource.matchAll(
+    /private var (\w+Page): ([A-Za-z0-9_]+PageView)\? = null/g,
+  )].map(match => `${match[1]}:${match[2]}`).sort();
+  const expectedChildPageFields = [
+    'repeatEndPage:CalendarRepeatEndPageView',
+    'timePage:CalendarEditTimePageView',
+  ];
+  if (JSON.stringify(childPageFields) !== JSON.stringify(expectedChildPageFields)) {
+    failures.push(
+      `CAL-EDIT-TIME-001/CAL-REPEAT-RRULE-001 unexpected native edit child pages: ${childPageFields.join(', ')}`,
+    );
   }
   const calendarPagesRoot = path.join(
     root,

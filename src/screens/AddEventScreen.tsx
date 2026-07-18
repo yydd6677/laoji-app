@@ -39,7 +39,14 @@ import { createClientRequestState, requestStateForPayload } from '../services/cl
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { validateEventDraft } from '../utils/eventDraftValidation';
-import { recurrenceDeleteDialog, recurrenceEditDialog } from '../services/recurrenceActions';
+import {
+  canEditRecurrenceRule,
+  canStopRecurringSeries,
+  recurrenceDeleteDialog,
+  recurrenceEditDialog,
+  recurrenceRuleControlMode,
+  resolveRecurrenceEditScope,
+} from '../services/recurrenceActions';
 import { HttpResponseError, readableErrorMessage } from '../services/errors';
 
 type Props = {
@@ -57,6 +64,7 @@ type EventEditorSnapshot = {
   endTime: string;
   isAllDay: boolean;
   repeat: typeof REPEAT_OPTIONS[number];
+  recurrenceUntilDate?: string;
   description: string;
   category: EventCategory;
   location: string;
@@ -95,6 +103,7 @@ function snapshotFromEvent(event: CalEvent): EventEditorSnapshot {
     endTime: event.endTime ?? '11:00',
     isAllDay: event.isAllDay ?? false,
     repeat: repeatToOption(event.repeat),
+    recurrenceUntilDate: event.recurrenceUntilDate,
     description: event.description ?? event.detail ?? '',
     category: normalizeEventCategory(event.category),
     location: event.location ?? '',
@@ -152,6 +161,18 @@ export function AddEventScreen({ navigation, route }: Props) {
     : undefined;
   const routeDraft = editingRef ? undefined : route.params?.draft;
   const isEditing = Boolean(editingRef);
+  const selectedRecurrenceScope = editingEvent
+    ? resolveRecurrenceEditScope(editingEvent, route.params?.recurrenceScope)
+    : undefined;
+  const recurrenceRuleEditable = editingEvent
+    ? canEditRecurrenceRule(editingEvent, selectedRecurrenceScope)
+    : true;
+  const recurrenceRuleMode = editingEvent
+    ? recurrenceRuleControlMode(editingEvent, selectedRecurrenceScope)
+    : 'editable';
+  const allowStopRepeating = editingEvent
+    ? canStopRecurringSeries(editingEvent, selectedRecurrenceScope)
+    : true;
   const initDate = editingEvent?.startDate
     ?? routeDraft?.startDate
     ?? route.params?.date
@@ -176,6 +197,9 @@ export function AddEventScreen({ navigation, route }: Props) {
   const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(initEndTime));
   const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? routeDraft?.isAllDay ?? false);
   const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat ?? routeDraft?.repeat));
+  const [recurrenceUntilDate, setRecurrenceUntilDate] = useState(
+    editingEvent?.recurrenceUntilDate ?? routeDraft?.recurrenceUntilDate,
+  );
   const [desc, setDesc]         = useState(editingEvent?.description ?? editingEvent?.detail ?? routeDraft?.description ?? routeDraft?.detail ?? '');
   const [category, setCategory] = useState<EventCategory>(() => normalizeEventCategory(editingEvent?.category ?? routeDraft?.category));
   const [location, setLocation] = useState(editingEvent?.location ?? routeDraft?.location ?? '');
@@ -232,6 +256,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     endTime,
     isAllDay,
     repeat,
+    recurrenceUntilDate,
     description: desc,
     category,
     location,
@@ -268,6 +293,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     setEndObj(parseTimeStr(snapshot.endTime));
     setAllDay(snapshot.isAllDay);
     setRepeat(snapshot.repeat);
+    setRecurrenceUntilDate(snapshot.recurrenceUntilDate);
     setDesc(snapshot.description);
     setCategory(snapshot.category);
     setLocation(snapshot.location);
@@ -352,6 +378,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     endTime: isAllDay ? undefined : endTime,
     isAllDay,
     repeat: REPEAT_MAP[repeat],
+    recurrenceUntilDate: repeat === '不重复' ? undefined : recurrenceUntilDate,
     description: desc,
     rawText: routeDraft?.rawText,
     color: C.primary,
@@ -498,7 +525,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     runId: number,
     payload: Omit<CalEvent, 'id'>,
   ) => {
-    if (editingEvent?.repeat && editingEvent.repeat !== 'once') {
+    if (editingEvent?.repeat && editingEvent.repeat !== 'once' && !selectedRecurrenceScope) {
       showDialog(recurrenceEditDialog(
         editingEvent,
         recurrenceScope => {
@@ -509,7 +536,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       ));
       return;
     }
-    void checkConflictsAndSave(runId, payload, 'series');
+    void checkConflictsAndSave(runId, payload, selectedRecurrenceScope ?? 'series');
   };
 
   const handleSave = () => {
@@ -661,19 +688,25 @@ export function AddEventScreen({ navigation, route }: Props) {
             </View>
           </View>
 
-          <TouchableOpacity
-            style={s.editorRow}
-            onPress={() => setChoicePage('repeat')}
-            activeOpacity={0.65}
-            accessibilityRole="button"
-            accessibilityLabel={`重复 ${repeat}`}
-          >
-            <View style={s.iconLane}>
-              <Ionicons name="repeat-outline" size={18} color={C.faint} />
-            </View>
-            <Text style={s.rowText}>{repeat}</Text>
-              <Ionicons testID="event-repeat-chevron" name="chevron-forward" size={12} color={C.faint} />
-          </TouchableOpacity>
+          {recurrenceRuleMode !== 'hidden' ? (
+            <TouchableOpacity
+              style={[s.editorRow, recurrenceRuleMode === 'disabled' && { opacity: 0.45 }]}
+              onPress={() => {
+                if (recurrenceRuleEditable) setChoicePage('repeat');
+              }}
+              activeOpacity={0.65}
+              accessibilityRole="button"
+              accessibilityLabel={`重复 ${recurrenceRuleMode === 'disabled' ? '不重复' : repeat}`}
+              accessibilityState={{ disabled: !recurrenceRuleEditable }}
+              disabled={!recurrenceRuleEditable}
+            >
+              <View style={s.iconLane}>
+                <Ionicons name="repeat-outline" size={18} color={C.faint} />
+              </View>
+              <Text style={s.rowText}>{recurrenceRuleMode === 'disabled' ? '不重复' : repeat}</Text>
+                <Ionicons testID="event-repeat-chevron" name="chevron-forward" size={12} color={C.faint} />
+            </TouchableOpacity>
+          ) : null}
 
           <View style={s.sectionDivider} />
 
@@ -791,10 +824,16 @@ export function AddEventScreen({ navigation, route }: Props) {
         })}
       />
       <RepeatSelectionPage
-        visible={choicePage === 'repeat'}
+        visible={recurrenceRuleEditable && choicePage === 'repeat'}
         selectedKey={repeat}
-        options={REPEAT_OPTIONS.map(option => ({ key: option, label: option }))}
-        onSelect={key => setRepeat(key as typeof REPEAT_OPTIONS[number])}
+        options={REPEAT_OPTIONS
+          .filter(option => allowStopRepeating || option !== '不重复')
+          .map(option => ({ key: option, label: option }))}
+        onSelect={key => {
+          const next = key as typeof REPEAT_OPTIONS[number];
+          setRepeat(next);
+          if (next === '不重复') setRecurrenceUntilDate(undefined);
+        }}
         onClose={() => setChoicePage(null)}
       />
       <ReminderSelectionPage

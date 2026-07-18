@@ -243,6 +243,8 @@ function validFixture(): string {
       "implementation 'androidx.media3:media3-session:1.10.1'",
       "implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'",
       "implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'",
+      'coreLibraryDesugaringEnabled true',
+      "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'",
     ].join('\n'),
   );
   write(
@@ -297,6 +299,38 @@ describe('UI-LEGACY-001 Android native boundary gate', () => {
       expect(report.failures.join('\n')).toContain('legacy dependency remains: expo-av');
       expect(report.failures.join('\n')).toContain('PanResponder');
       expect(report.failures.join('\n')).toContain('expected one ExoPlayer owner, found 2');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // CAL-REPEAT-RRULE-001: the edit host allows only the two source-mapped child routes.
+  it('rejects an unregistered third native edit child page', () => {
+    const root = validFixture();
+    try {
+      append(
+        root,
+        'modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditPageView.kt',
+        'private var inventedPage: InventedPageView? = null',
+      );
+
+      const report = auditAndroidNativeBoundary(root);
+      expect(report.ok).toBe(false);
+      expect(report.failures.join('\n')).toContain('unexpected native edit child pages');
+      expect(report.failures.join('\n')).toContain('inventedPage:InventedPageView');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an app build that drops API 24 java.time desugaring', () => {
+    const root = validFixture();
+    try {
+      write(root, 'android/app/build.gradle', '// CAL-EDIT-TIME-001 without desugaring\n');
+
+      const report = auditAndroidNativeBoundary(root);
+      expect(report.ok).toBe(false);
+      expect(report.failures.join('\n')).toContain('android/app/build.gradle violates CAL-EDIT-TIME-001');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

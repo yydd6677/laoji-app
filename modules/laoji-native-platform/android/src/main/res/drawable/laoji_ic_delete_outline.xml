@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI-TITLE-COMMON-001: reconstructed from the retained calendar detail delete role. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M8,4a2,2 0,0 1,2,-2h4a2,2 0,0 1,2 2h5v2h-1v14a2,2 0,0 1,-2 2H6a2,2 0,0 1,-2 -2V6H3V4h5zM6,6v14h12V6H6zM9,9h2v8H9zM13,9h2v8h-2z" />
+</vector>

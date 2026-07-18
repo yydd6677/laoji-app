@@ -98,6 +98,13 @@
       "module": "account-static",
       "decision": "Use Feishu container, geometry and transition contracts while keeping LaoJi authentication, profile, privacy, notification and legal content.",
       "approval_basis": "The user approved LaoJi business content with whole-App Feishu visual and interaction reconstruction."
+    },
+    {
+      "id": "DEV-CALENDAR-DATE-RANGE-SAFETY-001",
+      "status": "proposed",
+      "module": "calendar",
+      "decision": "Keep the Feishu 1900..2100 wheel range, clamp generated picker defaults to that range, and reject external start, end, or repeat-until dates outside it so the displayed wheel value and submitted value cannot diverge.",
+      "approval_basis": "Source audit found that Feishu can display 2100 while submitting an unchanged 2200 value. This product-safety correction is recorded explicitly and remains pending final approval."
     }
   ]
 }

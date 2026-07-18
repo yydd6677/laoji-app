@@ -1,5 +1,8 @@
 package com.laoji.nativeplatform.calendarpages
 
+// CAL-EDIT-TIME-001 / UI-TITLE-COMMON-001: the time page keeps the source
+// Cancel / Time / Done CommonTitleBar configuration and native wheel ownership.
+
 // CAL-EDIT-TIME-001: in-root full-screen editor derived from EditMultiTimeView's two-wheel layout.
 
 import android.annotation.SuppressLint
@@ -16,10 +19,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.time.LocalDate
 import java.time.YearMonth
 
 @SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
+@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-TIMEFORMAT-001", "UI-TITLE-COMMON-001")
 internal class CalendarEditTimePageView(
   context: Context,
   initialState: CalendarEditTimeState,
@@ -29,7 +34,7 @@ internal class CalendarEditTimePageView(
   private var state = initialState
   private val is24Hour = DateFormat.is24HourFormat(context)
   private var applyingState = false
-  private val titleBar = CalendarPageTitleBar(context)
+  private val titleBar = CalendarCommonTitleBar(context)
   private val allDaySwitch = Switch(context).apply {
     showText = false
     contentDescription = "全天"
@@ -78,10 +83,16 @@ internal class CalendarEditTimePageView(
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
 
-    titleBar.setTitle("时间")
-    titleBar.addLeftText("取消") { onCancel() }
-    titleBar.addRightText("完成", enabled = true) { onComplete(state.completedDraft()) }
-    addView(titleBar, LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(44)))
+    titleBar.setCenterTitle("时间")
+    titleBar.setDividerVisible(false)
+    titleBar.setLeftTextAction("取消", debounce = false) { onCancel() }
+    titleBar.addRightTextAction("完成", CalendarPagePalette.primary, debounce = true) {
+      onComplete(state.completedDraft())
+    }
+    addView(titleBar, LayoutParams(
+      LayoutParams.MATCH_PARENT,
+      CalendarCommonTitleBarContract.fullScreenHeightPx(context),
+    ))
 
     val scroll = ScrollView(context).apply {
       isFillViewport = true
@@ -163,7 +174,6 @@ internal class CalendarEditTimePageView(
 
   private fun wheelContainer(): View = FrameLayout(context).apply {
     setPadding(0, context.pageDp(20), 0, context.pageDp(20))
-    minimumHeight = context.pageDp(CalendarEditWheelView.ITEM_HEIGHT_DP * CalendarEditWheelView.VISIBLE_ITEM_COUNT + 40)
 
     allDayPanel.addView(allDayYearWheel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     allDayPanel.addView(allDayMonthWheel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))

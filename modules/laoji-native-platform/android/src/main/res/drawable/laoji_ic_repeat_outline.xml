@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CAL-REPEAT-RRULE-001: reconstructed from ud_icon_repeat_outlined. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="18dp"
+    android:height="18dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M13,19.5 L8.5,19.5 A7.5,7.5 0,0 1,5.217 5.255 L6.221,6.993 A5.501,5.501 0,0 0,8.5 17.5 L13,17.5 L13,16.157 A0.525,0.525 0,0 1,13.87 15.762 L16.549,18.105 A0.525,0.525 0,0 1,16.549 18.895 L13.871,21.238 A0.525,0.525 0,0 1,13 20.843 Z M11,6.5 L11,7.843 A0.525,0.525 0,0 1,10.13 8.238 L7.451,5.895 A0.524,0.524 0,0 1,7.451 5.105 L10.128,2.762 A0.525,0.525 0,0 1,10.999 3.157 L10.999,4.5 L15.499,4.5 A7.5,7.5 0,0 1,18.836 18.718 L17.834,16.981 A5.5,5.5 0,0 0,15.5 6.5 Z" />
+</vector>

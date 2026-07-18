@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CAL-REPEAT-RRULE-001: UDSwitch semantic state colors from Feishu 7.71.8. -->
+    <color name="laoji_ud_switch_on_thumb">#1456F0</color>
+    <color name="laoji_ud_switch_on_disabled_thumb">#94B4FF</color>
+    <color name="laoji_ud_switch_off_disabled_thumb">#BBBFC4</color>
+    <color name="laoji_ud_switch_off_thumb">#8F959E</color>
+    <color name="laoji_ud_switch_on_track">#C2D4FF</color>
+    <color name="laoji_ud_switch_on_disabled_track">#E0E9FF</color>
+    <color name="laoji_ud_switch_off_disabled_track">#EFF0F1</color>
+    <color name="laoji_ud_switch_off_track">#DEE0E3</color>
+</resources>

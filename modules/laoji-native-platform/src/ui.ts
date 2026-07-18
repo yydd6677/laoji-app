@@ -37,11 +37,12 @@ export interface NativeSheetItemSnapshot {
   key: string;
   label: string;
   destructive?: boolean;
+  disabled?: boolean;
 }
 
 export interface NativeActionSheetSnapshot {
   visible: boolean;
-  title: string;
+  title?: string;
   items: NativeSheetItemSnapshot[];
 }
 

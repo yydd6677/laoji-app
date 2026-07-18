@@ -1,12 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-  <application android:theme="@style/LaojiTestNoActionBarTheme">
+  <application
+    android:supportsRtl="true"
+    android:theme="@style/LaojiTestNoActionBarTheme">
     <activity
       android:name="com.laoji.nativeplatform.calendar.CalendarSurfaceTestActivity"
       android:exported="false" />
     <activity
       android:name="com.laoji.nativeplatform.calendarpages.CalendarEditPageTestActivity"
+      android:exported="false" />
+    <activity
+      android:name="com.laoji.nativeplatform.calendarpages.CalendarDetailPageTestActivity"
       android:exported="false" />
     <activity
       android:name="com.laoji.nativeplatform.minutes.MinutesSurfaceTestActivity"

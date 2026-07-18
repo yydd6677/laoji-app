@@ -189,6 +189,7 @@ export function buildNativeCalendarDetailSnapshot(
   };
 }
 
+// CAL-EDIT-001 / CAL-REPEAT-RRULE-001: preserve the recurrence end across the native page boundary.
 export function nativeCalendarEditDraft(event: Partial<CalEvent> & Pick<CalEvent, 'startDate'>): NativeCalendarEditDraftSnapshot {
   const allDay = Boolean(event.isAllDay);
   return {
@@ -199,6 +200,9 @@ export function nativeCalendarEditDraft(event: Partial<CalEvent> & Pick<CalEvent
     endTime: allDay ? null : event.endTime ?? null,
     isAllDay: allDay,
     repeat: event.repeat ?? 'once',
+    recurrenceUntilDate: event.repeat && event.repeat !== 'once'
+      ? event.recurrenceUntilDate ?? null
+      : null,
     reminderMinutes: allDay ? null : event.reminderMinutes ?? null,
     location: event.location ?? '',
     notes: event.description ?? event.detail ?? '',
@@ -210,6 +214,7 @@ export function buildNativeCalendarEditSnapshot(input: {
   editing: boolean;
   recurring?: boolean;
   recurrenceException?: boolean;
+  recurrenceScope?: 'occurrence' | 'following' | 'series' | null;
   saving?: boolean;
   dirty?: boolean;
   state?: NativeCalendarEditSnapshot['state'];
@@ -223,6 +228,7 @@ export function buildNativeCalendarEditSnapshot(input: {
     editing: input.editing,
     recurring: Boolean(input.recurring),
     recurrenceException: Boolean(input.recurrenceException),
+    recurrenceScope: input.recurrenceScope ?? null,
     saving: Boolean(input.saving),
     dirty: Boolean(input.dirty),
   };

@@ -304,6 +304,54 @@ describe('AddEventScreen save reliability', () => {
     ));
   });
 
+  it('uses a scope chosen on the detail route and disables series rules for one normal occurrence', async () => {
+    (useEvents as jest.Mock).mockReturnValue({
+      events: [{
+        id: 'series-1@2026-07-20',
+        sourceEventId: 'series-1',
+        occurrenceDate: '2026-07-20',
+        isExpandedOccurrence: true,
+        title: '每周复盘',
+        startDate: '2026-07-20',
+        seriesStartDate: '2026-07-06',
+        startTime: '10:00',
+        endTime: '11:00',
+        repeat: 'weekly',
+        color: '#5B8CFF',
+      }],
+      searchableEvents: [],
+      addEvent,
+      updateEvent,
+      deleteEvent,
+      refreshEvents,
+      findConflicts,
+    });
+    const recurringRoute = {
+      ...route,
+      params: {
+        eventRef: { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' },
+        recurrenceScope: 'occurrence' as const,
+      },
+    } as React.ComponentProps<typeof AddEventScreen>['route'];
+    const view = await render(<AddEventScreen navigation={navigation} route={recurringRoute} />);
+
+    expect(view.queryByLabelText('重复 每周')).toBeNull();
+    expect(view.getByLabelText('重复 不重复').props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(view.getByTestId('event-save'));
+
+    await waitFor(() => expect(findConflicts).toHaveBeenCalledWith(
+      expect.objectContaining({ startDate: '2026-07-20' }),
+      { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' },
+      'occurrence',
+    ));
+    await waitFor(() => expect(updateEvent).toHaveBeenCalledWith(
+      { sourceEventId: 'series-1', occurrenceDate: '2026-07-20' },
+      expect.objectContaining({ startDate: '2026-07-20' }),
+      'occurrence',
+    ));
+    expect(mockShowDialog.mock.calls.some(([dialog]) => dialog.title === '修改重复日程')).toBe(false);
+  });
+
   it('reports a durable pending edit without telling the user to submit it again', async () => {
     updateEvent.mockResolvedValueOnce({ reminderDelivery: 'unconfirmed', syncStatus: 'pending' });
     const view = await render(<AddEventScreen navigation={navigation} route={route} />);

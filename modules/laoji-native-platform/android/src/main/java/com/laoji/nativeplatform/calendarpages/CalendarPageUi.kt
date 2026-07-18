@@ -1,7 +1,7 @@
 package com.laoji.nativeplatform.calendarpages
 
-// UI-SHELL-001 / UI-TOKENS-001 / UI-FORM-001: 44dp title bars, semantic colors,
-// 0.5dp dividers, 100dp empty art and 76x36dp retry actions come from the source closure.
+// UI-TITLE-COMMON-001 / UI-TOKENS-001 / UI-FORM-001: the old fixed-margin
+// title bar is deleted; this file retains shared palette, search helpers and state UI only.
 
 import android.content.Context
 import android.content.res.ColorStateList
@@ -14,12 +14,12 @@ import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.ViewCompat
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 
 internal object CalendarPagePalette {
   val body = Color.WHITE
@@ -38,10 +38,11 @@ internal object CalendarPagePalette {
 }
 
 internal fun Context.pageDp(value: Float): Int =
-  TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics).toInt()
+  CalendarCommonTitleBarContract.dpToPx(value, resources.displayMetrics.density)
 
 internal fun Context.pageDp(value: Int): Int = pageDp(value.toFloat())
 
+@FeishuEvidence("UI-TOKENS-001")
 internal fun Context.pageText(
   value: CharSequence = "",
   sizeSp: Float = 14f,
@@ -70,6 +71,7 @@ internal fun View.pageShape(
   }
 }
 
+@FeishuEvidence("UI-TOKENS-001")
 internal fun Context.pageDivider(startInsetDp: Int = 16): View = View(this).apply {
   setBackgroundColor(CalendarPagePalette.divider)
   minimumHeight = pageDp(0.5f).coerceAtLeast(1)
@@ -79,6 +81,7 @@ internal fun Context.pageDivider(startInsetDp: Int = 16): View = View(this).appl
   ).apply { marginStart = pageDp(startInsetDp) }
 }
 
+@FeishuEvidence("UI-ICON-PRIMITIVES-001")
 internal fun Context.pageIconButton(
   drawableRes: Int,
   description: String,
@@ -95,116 +98,7 @@ internal fun Context.pageIconButton(
   isFocusable = true
 }
 
-internal class CalendarPageTitleBar(context: Context) : FrameLayout(context) {
-  private val title = context.pageText(sizeSp = 17f, weight = Typeface.BOLD).apply {
-    gravity = Gravity.CENTER
-    maxLines = 1
-  }
-  private val left = LinearLayout(context).apply {
-    orientation = LinearLayout.HORIZONTAL
-    gravity = Gravity.CENTER_VERTICAL
-  }
-  private val right = LinearLayout(context).apply {
-    orientation = LinearLayout.HORIZONTAL
-    gravity = Gravity.CENTER_VERTICAL
-  }
-
-  init {
-    setBackgroundColor(CalendarPagePalette.float)
-    minimumHeight = context.pageDp(44)
-    addView(
-      title,
-      LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(44)).apply {
-        leftMargin = context.pageDp(96)
-        rightMargin = context.pageDp(96)
-        gravity = Gravity.CENTER
-      },
-    )
-    addView(left, LayoutParams(LayoutParams.WRAP_CONTENT, context.pageDp(44)).apply {
-      gravity = Gravity.START
-    })
-    addView(right, LayoutParams(LayoutParams.WRAP_CONTENT, context.pageDp(44)).apply {
-      gravity = Gravity.END
-    })
-  }
-
-  fun setTitle(value: String, color: Int = CalendarPagePalette.text, alpha: Float = 1f) {
-    title.text = value
-    title.setTextColor(color)
-    title.alpha = alpha
-  }
-
-  fun setTitleAlpha(value: Float) {
-    title.alpha = value.coerceIn(0f, 1f)
-  }
-
-  fun clearActions() {
-    left.removeAllViews()
-    right.removeAllViews()
-  }
-
-  fun addBack(onClick: () -> Unit) {
-    left.addView(
-      context.pageIconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "返回").apply {
-        setOnClickListener { onClick() }
-      },
-      LinearLayout.LayoutParams(context.pageDp(44), context.pageDp(44)).apply {
-        leftMargin = context.pageDp(6)
-      },
-    )
-  }
-
-  fun addLeftText(label: String, onClick: () -> Unit) {
-    left.addView(context.pageText(label, 16f, CalendarPagePalette.text).apply {
-      gravity = Gravity.CENTER
-      setPadding(context.pageDp(16), 0, context.pageDp(12), 0)
-      setOnClickListener { onClick() }
-      isClickable = true
-      isFocusable = true
-      contentDescription = label
-    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, context.pageDp(44)))
-  }
-
-  fun addRightIcon(
-    drawableRes: Int,
-    description: String,
-    tint: Int = CalendarPagePalette.text,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-  ) {
-    right.addView(
-      context.pageIconButton(drawableRes, description, tint).apply {
-        isEnabled = enabled
-        alpha = if (enabled) 1f else 0.35f
-        setOnClickListener { onClick() }
-      },
-      LinearLayout.LayoutParams(context.pageDp(44), context.pageDp(44)),
-    )
-  }
-
-  fun addRightText(
-    label: String,
-    enabled: Boolean,
-    busy: Boolean = false,
-    onClick: () -> Unit,
-  ) {
-    right.addView(context.pageText(
-      if (busy) "保存中" else label,
-      16f,
-      if (enabled) CalendarPagePalette.primary else CalendarPagePalette.disabled,
-      Typeface.BOLD,
-    ).apply {
-      gravity = Gravity.CENTER
-      setPadding(context.pageDp(12), 0, context.pageDp(16), 0)
-      isEnabled = enabled
-      isClickable = enabled
-      isFocusable = enabled
-      contentDescription = if (busy) "正在保存日程" else label
-      setOnClickListener { onClick() }
-    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, context.pageDp(44)))
-  }
-}
-
+@FeishuEvidence("UI-STATE-EMPTY-ERROR-001")
 internal class CalendarPageEmptyArt(context: Context) : View(context) {
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     style = Paint.Style.STROKE
@@ -222,6 +116,7 @@ internal class CalendarPageEmptyArt(context: Context) : View(context) {
   }
 }
 
+@FeishuEvidence("UI-STATE-EMPTY-ERROR-001")
 internal class CalendarPageStateView(
   context: Context,
   private val onRetry: (() -> Unit)? = null,

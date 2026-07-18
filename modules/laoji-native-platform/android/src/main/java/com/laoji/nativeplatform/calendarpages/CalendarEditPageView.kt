@@ -1,6 +1,7 @@
 package com.laoji.nativeplatform.calendarpages
 
-// CAL-EDIT-001 / CAL-EDIT-TIME-001 / UI-FORM-001: date/time edits stay inside this native root.
+// CAL-EDIT-001 / CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001 / UI-FORM-001:
+// date/time and repeat-end edits stay inside this native root.
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -30,6 +31,7 @@ import android.widget.TextView
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -39,6 +41,12 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 @SuppressLint("ViewConstructor")
+@FeishuEvidence(
+  "CAL-DETAIL-EDIT-001",
+  "CAL-PICKER-WHEEL-TAP-001",
+  "CAL-REPEAT-RRULE-001",
+  "UI-TITLE-COMMON-001",
+)
 class CalendarEditPageView(
   context: Context,
   appContext: AppContext,
@@ -47,7 +55,7 @@ class CalendarEditPageView(
 
   private val onAction by EventDispatcher<Map<String, Any?>>()
   private val root = FrameLayout(context)
-  private val titleBar = CalendarPageTitleBar(context)
+  private val titleBar = CalendarCommonTitleBar(context)
   private val scroll = ScrollView(context).apply {
     isFillViewport = true
     overScrollMode = View.OVER_SCROLL_NEVER
@@ -79,6 +87,12 @@ class CalendarEditPageView(
   private lateinit var startTimeRow: View
   private lateinit var endTimeRow: View
   private val repeatValue = context.pageText(sizeSp = 16f)
+  private lateinit var repeatRow: View
+  private lateinit var repeatIcon: ImageView
+  private lateinit var repeatArrow: ImageView
+  private val repeatEndValue = context.pageText(sizeSp = 16f)
+  private lateinit var repeatEndRow: View
+  private lateinit var repeatEndArrow: ImageView
   private val reminderValue = context.pageText(sizeSp = 16f)
   private val locationInput = EditText(context).apply {
     hint = "添加地点"
@@ -127,9 +141,13 @@ class CalendarEditPageView(
   private var applyingSnapshot = false
   private var lastMessage: String? = null
   private var timePage: CalendarEditTimePageView? = null
+  private var repeatEndPage: CalendarRepeatEndPageView? = null
   private val backCallback = object : OnBackPressedCallback(false) {
     override fun handleOnBackPressed() {
-      cancelTimePage()
+      when {
+        repeatEndPage != null -> cancelRepeatEndPage()
+        timePage != null -> cancelTimePage()
+      }
     }
   }
 
@@ -141,12 +159,15 @@ class CalendarEditPageView(
     scroll.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     val page = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
-      addView(titleBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.pageDp(44)))
+      addView(titleBar, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        CalendarCommonTitleBarContract.fullScreenHeightPx(context),
+      ))
       addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
     root.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     root.addView(stateView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-      topMargin = context.pageDp(44)
+      topMargin = CalendarCommonTitleBarContract.fullScreenHeightPx(context)
     })
     root.addView(busyOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -161,7 +182,7 @@ class CalendarEditPageView(
   fun commitProps() {
     val nextState = CalendarPageSnapshotParser.edit(pendingSnapshot)
     state = nextState
-    if (timePage == null) draft = nextState.draft
+    if (timePage == null && repeatEndPage == null) draft = nextState.draft
     render()
   }
 
@@ -184,9 +205,20 @@ class CalendarEditPageView(
     content.addView(endDateRow)
     content.addView(startTimeRow)
     content.addView(endTimeRow)
-    content.addView(valueRow(android.R.drawable.ic_menu_rotate, "重复", repeatValue) {
-      emitDraftAction("openRepeat")
-    })
+    val builtRepeatRow = repeatChoiceRow(com.laoji.nativeplatform.R.drawable.laoji_ic_repeat_outline, "重复", repeatValue) {
+      if (state.recurrenceRuleEditable) emitDraftAction("openRepeat")
+      else emitFeedback("仅编辑此日程时不能修改重复规则")
+    }
+    repeatRow = builtRepeatRow
+    repeatIcon = builtRepeatRow.getChildAt(0) as ImageView
+    repeatArrow = builtRepeatRow.getChildAt(2) as ImageView
+    content.addView(repeatRow)
+    repeatEndRow = repeatChoiceRow(null, "截止时间", repeatEndValue) {
+      if (state.recurrenceRuleEditable) showRepeatEndPage()
+      else emitFeedback("仅编辑此日程时不能修改截止时间")
+    }
+    repeatEndArrow = (repeatEndRow as ViewGroup).getChildAt(2) as ImageView
+    content.addView(repeatEndRow)
     addSectionDivider()
     content.addView(inputRow(android.R.drawable.ic_menu_mylocation, locationInput, context.pageDp(48)))
     addSectionDivider()
@@ -212,10 +244,21 @@ class CalendarEditPageView(
   private fun render() {
     applyingSnapshot = true
     titleBar.clearActions()
-    titleBar.setTitle(if (state.editing) "编辑日程" else "新建日程")
-    titleBar.addLeftText("取消") { emit("cancel") }
-    titleBar.addRightText("保存", !state.saving && state.loadState == CalendarPageLoadState.READY, state.saving) {
-      requestSave()
+    // UI-TITLE-COMMON-001: ordinary calendar edit has no center title.
+    titleBar.setCenterTitle("")
+    titleBar.setDividerVisible(false)
+    titleBar.setLeftTextAction("取消", debounce = true) { emit("cancel") }
+    val saveType = CalendarTitleSaveContract.resolve(
+      loadState = state.loadState,
+      saving = state.saving,
+      draftValid = CalendarEditValidator.validate(draft).valid,
+    )
+    titleBar.addRightTextAction("保存", CalendarTitleSaveContract.color(saveType), debounce = true) {
+      when (saveType) {
+        CalendarTitleSaveType.ENABLE_SAVE,
+        CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> requestSave()
+        CalendarTitleSaveType.DISABLE_SAVE_TOTALLY -> Unit
+      }
     }
 
     syncText(titleInput, draft.title)
@@ -235,6 +278,7 @@ class CalendarEditPageView(
       emitFeedback(message, 5000)
     }
     timePage?.bringToFront()
+    repeatEndPage?.bringToFront()
   }
 
   private fun updateDraft(value: CalendarEditDraft) {
@@ -251,7 +295,28 @@ class CalendarEditPageView(
     val is24Hour = DateFormat.is24HourFormat(context)
     startTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.startTime), is24Hour)
     endTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.endTime), is24Hour)
-    repeatValue.text = repeatLabel(draft.repeat)
+    val recurrenceMode = state.recurrenceRuleMode
+    repeatValue.text = if (recurrenceMode == CalendarRecurrenceControlMode.DISABLED) {
+      "不重复"
+    } else {
+      repeatLabel(draft.repeat)
+    }
+    repeatEndValue.text = draft.recurrenceUntilDate?.let(::formatDate) ?: "永不截止"
+    repeatRow.visibility = if (recurrenceMode == CalendarRecurrenceControlMode.HIDDEN) View.GONE else View.VISIBLE
+    repeatEndRow.visibility = if (
+      recurrenceMode != CalendarRecurrenceControlMode.HIDDEN && draft.repeat != "once"
+    ) View.VISIBLE else View.GONE
+    repeatRow.isEnabled = true
+    repeatRow.isClickable = true
+    repeatEndRow.isEnabled = true
+    repeatEndRow.isClickable = true
+    val repeatTextColor = if (state.recurrenceRuleEditable) CalendarPagePalette.text else CalendarPagePalette.disabled
+    val repeatIconColor = if (state.recurrenceRuleEditable) CalendarPagePalette.placeholder else CalendarPagePalette.disabled
+    repeatValue.setTextColor(repeatTextColor)
+    repeatEndValue.setTextColor(repeatTextColor)
+    repeatIcon.imageTintList = ColorStateList.valueOf(repeatIconColor)
+    repeatArrow.imageTintList = ColorStateList.valueOf(repeatIconColor)
+    repeatEndArrow.imageTintList = ColorStateList.valueOf(repeatIconColor)
     reminderValue.text = reminderLabel(draft.reminderMinutes)
     val showTime = !draft.allDay && draft.hasTime
     startTimeRow.visibility = if (showTime) View.VISIBLE else View.GONE
@@ -261,6 +326,8 @@ class CalendarEditPageView(
     syncValueRowDescription(endDateRow, "结束日期", endDateValue)
     syncValueRowDescription(startTimeRow, "开始时间", startTimeValue)
     syncValueRowDescription(endTimeRow, "结束时间", endTimeValue)
+    syncValueRowDescription(repeatRow, "重复", repeatValue)
+    syncValueRowDescription(repeatEndRow, "截止时间", repeatEndValue)
     applyingSnapshot = false
   }
 
@@ -289,8 +356,12 @@ class CalendarEditPageView(
   }
 
   private fun showTimePage(endpoint: CalendarEditEndpoint) {
-    if (timePage != null || state.saving || state.loadState != CalendarPageLoadState.READY) return
-    showTimePage(CalendarEditTimeState.fromDraft(draft, endpoint))
+    if (timePage != null || repeatEndPage != null || state.saving || state.loadState != CalendarPageLoadState.READY) return
+    val initial = runCatching { CalendarEditTimeState.fromDraft(draft, endpoint) }.getOrElse {
+      emitFeedback("请选择有效的日期")
+      return
+    }
+    showTimePage(initial)
   }
 
   private fun showTimePage(restoredState: CalendarEditTimeState) {
@@ -332,7 +403,59 @@ class CalendarEditPageView(
     page.dispose()
     root.removeView(page)
     timePage = null
-    backCallback.isEnabled = false
+    backCallback.isEnabled = repeatEndPage != null
+  }
+
+  private fun showRepeatEndPage() {
+    if (!state.recurrenceRuleEditable || draft.repeat == "once" || repeatEndPage != null || timePage != null ||
+      state.saving || state.loadState != CalendarPageLoadState.READY) return
+    val initial = runCatching { CalendarRepeatEndState.fromDraft(draft) }.getOrElse {
+      emitFeedback("请选择有效的截止时间")
+      return
+    }
+    showRepeatEndPage(initial)
+  }
+
+  private fun showRepeatEndPage(restoredState: CalendarRepeatEndState) {
+    if (repeatEndPage != null || timePage != null) return
+    findFocus()?.clearFocus()
+    context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
+    val page = CalendarRepeatEndPageView(
+      context = context,
+      initialState = restoredState,
+      onCancel = ::cancelRepeatEndPage,
+      onComplete = ::completeRepeatEndPage,
+    )
+    repeatEndPage = page
+    root.addView(page, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.MATCH_PARENT,
+    ))
+    page.bringToFront()
+    backCallback.isEnabled = true
+    page.requestFocus()
+  }
+
+  private fun cancelRepeatEndPage() {
+    val page = repeatEndPage ?: return
+    val entryDraft = page.currentState().baseDraft
+    closeRepeatEndPage()
+    draft = entryDraft
+    renderDraftFields()
+  }
+
+  private fun completeRepeatEndPage(value: CalendarEditDraft) {
+    if (repeatEndPage == null) return
+    closeRepeatEndPage()
+    updateDraft(value)
+  }
+
+  private fun closeRepeatEndPage() {
+    val page = repeatEndPage ?: return
+    page.dispose()
+    root.removeView(page)
+    repeatEndPage = null
+    backCallback.isEnabled = timePage != null
   }
 
   private fun emitDraftAction(type: String) {
@@ -370,6 +493,37 @@ class CalendarEditPageView(
       isFocusable = true
       contentDescription = "$label ${value.text}"
     }
+
+  private fun repeatChoiceRow(
+    iconRes: Int?,
+    accessibilityLabel: String,
+    value: TextView,
+    onClick: () -> Unit,
+  ): LinearLayout = LinearLayout(context).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+    minimumHeight = context.pageDp(48)
+    if (iconRes != null) {
+      addIcon(iconRes)
+    } else {
+      addView(View(context), LinearLayout.LayoutParams(context.pageDp(40), context.pageDp(48)))
+    }
+    addView(value.apply {
+      gravity = Gravity.CENTER_VERTICAL
+      maxLines = 1
+      setPadding(context.pageDp(6), context.pageDp(6), context.pageDp(6), context.pageDp(6))
+    }, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+    addView(ImageView(context).apply {
+      setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
+      imageTintList = ColorStateList.valueOf(CalendarPagePalette.placeholder)
+    }, LinearLayout.LayoutParams(context.pageDp(12), context.pageDp(12)).apply {
+      rightMargin = context.pageDp(16)
+    })
+    setOnClickListener { onClick() }
+    isClickable = true
+    isFocusable = true
+    contentDescription = "$accessibilityLabel，${value.text}"
+  }
 
   private fun inputRow(iconRes: Int, input: EditText, height: Int): View =
     LinearLayout(context).apply {
@@ -441,7 +595,7 @@ class CalendarEditPageView(
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
     componentActivity()?.onBackPressedDispatcher?.addCallback(backCallback)
-    backCallback.isEnabled = timePage != null
+    backCallback.isEnabled = timePage != null || repeatEndPage != null
   }
 
   override fun onDetachedFromWindow() {
@@ -452,6 +606,7 @@ class CalendarEditPageView(
   override fun onSaveInstanceState(): Parcelable {
     val savedState = CalendarEditPageSavedState(super.onSaveInstanceState())
     savedState.timePageState = timePage?.currentState()?.toStateBundle()
+    savedState.repeatEndPageState = repeatEndPage?.currentState()?.toStateBundle()
     return savedState
   }
 
@@ -461,9 +616,13 @@ class CalendarEditPageView(
       return
     }
     super.onRestoreInstanceState(value.superState)
-    val restored = value.timePageState?.toTimeState() ?: return
+    val restoredTime = value.timePageState?.toTimeState()
+    val restoredRepeatEnd = value.repeatEndPageState?.toRepeatEndState()
     post {
-      if (timePage == null) showTimePage(restored)
+      when {
+        restoredRepeatEnd != null && repeatEndPage == null -> showRepeatEndPage(restoredRepeatEnd)
+        restoredTime != null && timePage == null -> showTimePage(restoredTime)
+      }
     }
   }
 
@@ -513,16 +672,19 @@ private fun reminderLabel(value: Int?): String = when (value) {
 
 private class CalendarEditPageSavedState : View.BaseSavedState {
   var timePageState: Bundle? = null
+  var repeatEndPageState: Bundle? = null
 
   constructor(superState: Parcelable?) : super(superState)
 
   private constructor(source: Parcel) : super(source) {
     timePageState = source.readBundle(CalendarEditPageSavedState::class.java.classLoader)
+    repeatEndPageState = source.readBundle(CalendarEditPageSavedState::class.java.classLoader)
   }
 
   override fun writeToParcel(out: Parcel, flags: Int) {
     super.writeToParcel(out, flags)
     out.writeBundle(timePageState)
+    out.writeBundle(repeatEndPageState)
   }
 
   companion object CREATOR : Parcelable.Creator<CalendarEditPageSavedState> {
@@ -544,6 +706,12 @@ private fun CalendarEditTimeState.toStateBundle(): Bundle = Bundle().apply {
   putString("selectedEndpoint", selectedEndpoint.name)
 }
 
+private fun CalendarRepeatEndState.toStateBundle(): Bundle = Bundle().apply {
+  putBundle("baseDraft", baseDraft.toStateBundle())
+  putBoolean("neverEnds", neverEnds)
+  putString("selectedDate", selectedDate.toString())
+}
+
 private fun CalendarEditDraft.toStateBundle(): Bundle = Bundle().apply {
   putString("title", title)
   putString("startDate", startDate)
@@ -552,6 +720,7 @@ private fun CalendarEditDraft.toStateBundle(): Bundle = Bundle().apply {
   putString("endTime", endTime)
   putBoolean("allDay", allDay)
   putString("repeat", repeat)
+  putString("recurrenceUntilDate", recurrenceUntilDate)
   putString("reminderMinutes", reminderMinutes?.toString())
   putString("location", location)
   putString("notes", notes)
@@ -574,6 +743,16 @@ private fun Bundle.toTimeState(): CalendarEditTimeState? = runCatching {
   )
 }.getOrNull()
 
+private fun Bundle.toRepeatEndState(): CalendarRepeatEndState? = runCatching {
+  val selectedDate = requireNotNull(parseDate(getString("selectedDate")))
+  require(CalendarEditDateRange.contains(selectedDate))
+  CalendarRepeatEndState(
+    baseDraft = requireNotNull(getBundle("baseDraft")).toEditDraft(),
+    neverEnds = getBoolean("neverEnds"),
+    selectedDate = selectedDate,
+  )
+}.getOrNull()
+
 private fun Bundle.toEditDraft(): CalendarEditDraft = CalendarEditDraft(
   title = getString("title").orEmpty(),
   startDate = getString("startDate").orEmpty(),
@@ -582,6 +761,7 @@ private fun Bundle.toEditDraft(): CalendarEditDraft = CalendarEditDraft(
   endTime = getString("endTime"),
   allDay = getBoolean("allDay"),
   repeat = getString("repeat") ?: "once",
+  recurrenceUntilDate = getString("recurrenceUntilDate"),
   reminderMinutes = getString("reminderMinutes")?.toIntOrNull(),
   location = getString("location").orEmpty(),
   notes = getString("notes").orEmpty(),

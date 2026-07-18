@@ -87,6 +87,9 @@ describe('LaoJi native platform manifest plugin', () => {
       'android.media.browse.MediaBrowserService',
     ]);
     expect(first.contents).toContain('@generated-by-laoji-feishu-evidence-gate');
+    expect(first.contents).toContain('@generated-by-laoji-java-time-desugaring');
+    expect(first.contents).toContain('coreLibraryDesugaringEnabled true');
+    expect(first.contents).toContain("coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'");
     expect(first.contents).toContain('generateLaojiParityAttestation');
     expect(first.contents).toContain('verifyLaojiTypeScriptEvidence');
     expect(first.contents).toContain('verifyLaojiWorkspaceSource');
@@ -122,6 +125,7 @@ describe('LaoJi native platform manifest plugin', () => {
 
     const second = plugin({});
     expect(second.contents?.match(/@generated-by-laoji-feishu-evidence-gate/g)).toHaveLength(1);
+    expect(second.contents?.match(/@generated-by-laoji-java-time-desugaring/g)).toHaveLength(1);
   });
 
   it('adds the evidence lint project idempotently', () => {

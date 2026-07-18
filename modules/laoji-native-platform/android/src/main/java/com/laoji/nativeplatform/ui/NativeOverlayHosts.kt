@@ -430,7 +430,13 @@ class LaojiNativeActionSheetHostView(
       val item = asMap(raw)
       val key = asString(item["key"])
       val label = asString(item["label"])
-      if (key.isBlank() || label.isBlank()) null else NativeSheetItem(key, label, asBoolean(item["destructive"]), index)
+      if (key.isBlank() || label.isBlank()) null else NativeSheetItem(
+        key,
+        label,
+        asBoolean(item["destructive"]),
+        asBoolean(item["disabled"]),
+        index,
+      )
     }
 
     val mask = View(context).apply {
@@ -459,35 +465,40 @@ class LaojiNativeActionSheetHostView(
       background = NativeUiTokens.roundedBackground(context, palette.body, 8f)
       clipChildren = true
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-      contentDescription = title
+      contentDescription = title.ifBlank { "操作菜单" }
       setOnClickListener { /* Consume taps inside the sheet. */ }
     }
     outer.addView(panel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    panel.addView(TextView(context).apply {
-      text = title
-      textSize = 14f
-      setTextColor(palette.textTertiary)
-      gravity = Gravity.CENTER
-      minHeight = NativeUiTokens.dp(context, 52f).toInt()
-      setPadding(NativeUiTokens.dp(context, 12f).toInt(), 0, NativeUiTokens.dp(context, 12f).toInt(), 0)
-      importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, 52f).toInt()))
-    addDivider(panel)
+    if (title.isNotBlank()) {
+      panel.addView(TextView(context).apply {
+        text = title
+        textSize = 14f
+        setTextColor(palette.textTertiary)
+        gravity = Gravity.CENTER
+        minHeight = NativeUiTokens.dp(context, 52f).toInt()
+        setPadding(NativeUiTokens.dp(context, 12f).toInt(), 0, NativeUiTokens.dp(context, 12f).toInt(), 0)
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, 52f).toInt()))
+      addDivider(panel)
+    }
     items.forEachIndexed { index, item ->
       val itemView = TextView(context).apply {
         text = item.label
         textSize = 17f
-        setTextColor(if (item.destructive) palette.danger else palette.textPrimary)
+        setTextColor(if (item.disabled) palette.textDisabled else if (item.destructive) palette.danger else palette.textPrimary)
         gravity = Gravity.CENTER
         minHeight = NativeUiTokens.dp(context, NativeUiTokens.SHEET_ITEM_HEIGHT_DP).toInt()
-        isClickable = true
-        isFocusable = true
+        isEnabled = !item.disabled
+        isClickable = !item.disabled
+        isFocusable = !item.disabled
         contentDescription = item.label
         accessibilityRoleCompat("menuitem")
-        setOnClickListener {
-          performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-          emitItem(mapOf("key" to item.key, "index" to item.index))
-          closeSheet("item")
+        if (!item.disabled) {
+          setOnClickListener {
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            emitItem(mapOf("key" to item.key, "index" to item.index))
+            closeSheet("item")
+          }
         }
       }
       panel.addView(itemView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, NativeUiTokens.SHEET_ITEM_HEIGHT_DP).toInt()))
@@ -542,7 +553,13 @@ class LaojiNativeActionSheetHostView(
     if (bridgeEventsEnabled) onDismiss(payload)
   }
 
-  private data class NativeSheetItem(val key: String, val label: String, val destructive: Boolean, val index: Int)
+  private data class NativeSheetItem(
+    val key: String,
+    val label: String,
+    val destructive: Boolean,
+    val disabled: Boolean,
+    val index: Int,
+  )
 }
 
 private fun Context.componentActivity(): ComponentActivity? {

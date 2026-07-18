@@ -26,7 +26,7 @@ import { useAppDialog } from '../components/AppDialog';
 import { labelForReminder } from '../services/notifications';
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { resolveEventReference } from '../utils/eventRecurrence';
-import { recurrenceDeleteDialog } from '../services/recurrenceActions';
+import { recurrenceDeleteDialog, recurrenceEditDialog } from '../services/recurrenceActions';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -187,10 +187,18 @@ export function EventDetailScreen({ navigation, route }: Props) {
   );
 
   const handleEdit = () => {
-    navigation.navigate('AddEvent', {
-      date: ev.seriesStartDate ?? ev.startDate,
-      eventRef: eventRefForEvent(ev),
-    });
+    const navigateToEditor = (recurrenceScope: 'occurrence' | 'following' | 'series') => {
+      navigation.navigate('AddEvent', {
+        date: ev.seriesStartDate ?? ev.startDate,
+        eventRef: eventRefForEvent(ev),
+        recurrenceScope,
+      });
+    };
+    if (ev.repeat && ev.repeat !== 'once') {
+      showDialog(recurrenceEditDialog(ev, navigateToEditor));
+    } else {
+      navigateToEditor('series');
+    }
   };
 
   const handleDelete = () => {

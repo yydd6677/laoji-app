@@ -2,12 +2,12 @@
   "schema_version": 1,
   "evidence_id": "CAL-MONTH-EXPAND-HOST-001",
   "proof_kind": "androidTest",
-  "recorded_at": "2026-07-17T15:18:14.986712+00:00",
-  "input_sha256": "c985c729793422e4d575763488795249227150e6b38c09afc1f90f61b0cbcf2c",
+  "recorded_at": "2026-07-18T05:10:24.322360+00:00",
+  "input_sha256": "70a941f9703bd2499e4b8339f9db4417357b86c17b2b8cbc51d64ce7da914462",
   "report": {
     "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
-    "sha256": "cbd70ed6a1501c1687bb6f8f9cffe5815c1e7919d9fcba72d59faec2561c3678",
-    "tests": 41,
+    "sha256": "4696f629596db44d62a872c3cc4b4d617fad341393189f1e5cea2619ec965b4d",
+    "tests": 52,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
@@ -93,6 +93,46 @@
         "name": "timelineHorizontalSwipeLetsPagerTakeOwnershipAndClearsPendingGesture"
       },
       {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionRepeatEndRouteUsesCommonTitleAndCommitsTheSourceDefaultDate"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "timeVariantUsesMeasuredSideCenteringAndSourceTypography"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "repeatEndRouteRestoresAcrossActivityRecreationAndBackCancelsToEntryDraft"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionEditPageKeepsSourceCancelSaveTreeWithoutCenterTitle"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "ordinaryEditHasNoInventedCenterOrSavingLabel"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionDetailPageUsesSecondaryTitleAndTwoSmallIconActions"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "detailVariantUsesTransparentSecondaryTitleAndSmallActionSlots"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "sourceSwitchUsesCompoundButtonSemanticsSilentSyncAndRtlGeometry"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "repeatEndUsesSourceSwitchLoopingYearAndARealTouchDrivenDayWheel"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "recurrenceRowsFollowTheSourceNormalOccurrenceAndExceptionMatrix"
+      },
+      {
         "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
         "name": "CAL-EDIT-TIME-001_all_four_rows_open_without_system_picker_windows"
       },
@@ -111,6 +151,10 @@
       {
         "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
         "name": "CAL-EDIT-TIME-001_saved_hierarchy_restores_endpoint_and_selection"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-PICKER-WHEEL-TAP-001_production_wheel_uses_source_cylinder_and_short_tap"
       },
       {
         "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackRecoveryStoreInstrumentedTest",
@@ -182,19 +226,19 @@
     "typescript_ast": {
       "kind": "typescript_ast",
       "path": "build/feishu-ui-ast-report.json",
-      "sha256": "8e4fb1a1599d965667618a8992803e09ab365551627a4c4fc386361d4b42dcd4",
-      "error_count": 208
+      "sha256": "389ccb8a8f778b51970512e9c416d9b2ef112516cff2b2e2248c324fa559265e",
+      "error_count": 205
     },
     "android_lint_uast": {
       "kind": "android_lint_uast",
       "path": "build/feishu-android-uast-report.json",
-      "sha256": "cd96dd22a637f5305cff4c55b618a70bc1d9d65f3f287ce6d401e759492d5178",
-      "error_count": 725
+      "sha256": "9042b446063ff08e6af628c1ccf3fec157896b3755d213c24e024c84df60b1ae",
+      "error_count": 523
     },
     "workspace_resolution": {
       "kind": "workspace_resolution",
       "path": "build/workspace-source-resolution-report.json",
-      "sha256": "c376d159f33a6a66078ca107107871c78b81fa5056f403c42a4f449e7202f397",
+      "sha256": "454935d4feded69f2b789eab234c9a81b16d0f56482acd2b1d63b00766f2f494",
       "error_count": 0
     }
   },

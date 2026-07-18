@@ -9,6 +9,11 @@ version = '1.0.0'
 android {
   namespace 'com.laoji.nativeplatform'
 
+  // CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001: java.time must remain valid on API 24/25.
+  compileOptions {
+    coreLibraryDesugaringEnabled true
+  }
+
   defaultConfig {
     versionCode 1
     versionName '1.0.0'
@@ -70,6 +75,7 @@ tasks.register('verifyFeishuEvidenceLint') {
 }
 
 dependencies {
+  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
   lintChecks project(':feishu-evidence-lint')
   implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
   implementation 'androidx.media3:media3-exoplayer:1.10.1'

@@ -15,6 +15,9 @@ describe('Android native calendar routes [CAL-ROOT-001/CAL-DETAIL-001/CAL-EDIT-0
     expect(schedule).not.toContain('/components/CalendarSearchPage');
     expect(edit).toContain('LaojiCalendarEditView');
     expect(detail).toContain('LaojiCalendarDetailView');
+    expect(detail).toContain('recurrenceEditChoices');
+    expect(detail).toContain('<AppActionSheet');
+    expect(detail).toContain('recurrenceScope');
     for (const value of [schedule, edit, detail]) {
       expect(value).not.toMatch(/\bPanResponder\b|\bModal\b|\bKeyboardAvoidingView\b/);
     }
@@ -25,7 +28,8 @@ describe('Android native calendar routes [CAL-ROOT-001/CAL-DETAIL-001/CAL-EDIT-0
     for (const contract of [
       'validateEventDraft',
       'findConflicts',
-      'recurrenceEditDialog',
+      'recurrenceEditChoices',
+      'recurrenceDeleteChoices',
       'recurrenceDeleteDialog',
       'reminderUnavailableMessage',
       'requestStateForPayload',

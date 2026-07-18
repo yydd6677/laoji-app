@@ -15,6 +15,19 @@ internal enum class CalendarEditEndpoint {
   END,
 }
 
+internal object CalendarEditDateRange {
+  const val MIN_YEAR = 1900
+  const val MAX_YEAR = 2100
+
+  fun contains(value: LocalDate): Boolean = value.year in MIN_YEAR..MAX_YEAR
+
+  fun clamp(value: LocalDate): LocalDate = when {
+    value.year < MIN_YEAR -> LocalDate.of(MIN_YEAR, 1, 1)
+    value.year > MAX_YEAR -> LocalDate.of(MAX_YEAR, 12, 31)
+    else -> value
+  }
+}
+
 internal data class CalendarEditTimeState(
   val baseDraft: CalendarEditDraft,
   val startDate: LocalDate,
@@ -162,8 +175,8 @@ internal data class CalendarEditTimeState(
   }
 
   companion object {
-    const val MIN_YEAR = 1900
-    const val MAX_YEAR = 2100
+    const val MIN_YEAR = CalendarEditDateRange.MIN_YEAR
+    const val MAX_YEAR = CalendarEditDateRange.MAX_YEAR
     const val MINUTE_STEP = 5
     const val MINUTE_ITEM_COUNT = 60 / MINUTE_STEP
     const val DEFAULT_DURATION_MINUTES = 60L
@@ -174,11 +187,14 @@ internal data class CalendarEditTimeState(
     fun fromDraft(
       draft: CalendarEditDraft,
       selectedEndpoint: CalendarEditEndpoint,
-      fallbackDate: LocalDate = LocalDate.now(),
     ): CalendarEditTimeState {
       val normalized = draft.normalized()
-      val startDate = parseDate(normalized.startDate) ?: fallbackDate
-      val parsedEndDate = parseDate(normalized.endDate) ?: startDate
+      val startDate = requireNotNull(parseDate(normalized.startDate)?.takeIf(CalendarEditDateRange::contains)) {
+        "start date is outside the visible wheel range"
+      }
+      val parsedEndDate = requireNotNull(parseDate(normalized.endDate)?.takeIf(CalendarEditDateRange::contains)) {
+        "end date is outside the visible wheel range"
+      }
       val endDate = if (parsedEndDate.isBefore(startDate)) startDate else parsedEndDate
       val parsedStartTime = parseTime(normalized.startTime)
       val parsedEndTime = parseTime(normalized.endTime)
@@ -187,8 +203,8 @@ internal data class CalendarEditTimeState(
       val snappedEnd = snapUp(endDate, parsedEndTime ?: LocalTime.of(11, 0))
       return CalendarEditTimeState(
         baseDraft = normalized,
-        startDate = snappedStart.toLocalDate().coerceCalendarRange(),
-        endDate = snappedEnd.toLocalDate().coerceCalendarRange(),
+        startDate = snappedStart.toLocalDate(),
+        endDate = snappedEnd.toLocalDate(),
         startTime = snappedStart.toLocalTime(),
         endTime = snappedEnd.toLocalTime(),
         allDay = normalized.allDay,
@@ -249,6 +265,9 @@ internal object CalendarEditTimeFormatter {
 
   fun dayWheelLabel(value: Int): String = "${value}日"
 
+  fun dayWithWeekdayWheelLabel(value: LocalDate): String =
+    "${value.dayOfMonth}日(周${weekdays[value.dayOfWeek.value - 1]})"
+
   fun periodWheelLabel(value: Int): String = if (value == 0) "上午" else "下午"
 
   fun hourWheelLabel(value: Int, is24Hour: Boolean): String = if (is24Hour) {
@@ -261,8 +280,4 @@ internal object CalendarEditTimeFormatter {
     String.format(Locale.CHINA, "%02d分", value * CalendarEditTimeState.MINUTE_STEP)
 }
 
-private fun LocalDate.coerceCalendarRange(): LocalDate = when {
-  year < CalendarEditTimeState.MIN_YEAR -> LocalDate.of(CalendarEditTimeState.MIN_YEAR, 1, 1)
-  year > CalendarEditTimeState.MAX_YEAR -> LocalDate.of(CalendarEditTimeState.MAX_YEAR, 12, 31)
-  else -> this
-}
+private fun LocalDate.coerceCalendarRange(): LocalDate = CalendarEditDateRange.clamp(this)

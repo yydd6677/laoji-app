@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI-TITLE-COMMON-001: reconstructed from the retained calendar detail edit role. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M13.6,2.8a2,2 0,0 1,2.8 0l3,3a2,2 0,0 1,0 2.8L8.2,19.8H3v-5.2L13.6,2.8zM6,15.8v1h1l9.7,-9.7 -1.8,-1.8L6,15.8zM3,21h18v2H3z" />
+</vector>

@@ -25,17 +25,21 @@ export type AppActionSheetItem = {
   key: string;
   label: string;
   destructive?: boolean;
+  disabled?: boolean;
   onPress: () => void;
 };
 
 export function AppActionSheet({
+  feishuEvidence,
   visible,
   title,
   items,
   onClose,
 }: {
+  // CAL-REPEAT-RRULE-001: callers attach their source contract to the real modal root.
+  feishuEvidence?: string;
   visible: boolean;
-  title: string;
+  title?: string;
   items: AppActionSheetItem[];
   onClose: () => void;
 }) {
@@ -105,6 +109,7 @@ export function AppActionSheet({
   };
 
   const runItem = (item: AppActionSheetItem) => {
+    if (item.disabled) return;
     finishPresentation(() => {
       onCloseRef.current();
       item.onPress();
@@ -122,7 +127,7 @@ export function AppActionSheet({
       statusBarTranslucent
       onRequestClose={requestClose}
     >
-      <View style={s.root} accessibilityViewIsModal>
+      <View nativeID={feishuEvidence} style={s.root} accessibilityViewIsModal>
         <Animated.View
           pointerEvents="auto"
           style={[s.backdrop, { opacity: progress }]}
@@ -143,23 +148,28 @@ export function AppActionSheet({
             },
           ]}
           accessibilityRole="menu"
-          accessibilityLabel={presented.title}
+          accessibilityLabel={presented.title || '操作菜单'}
         >
           <View style={s.panel} testID="app-action-sheet-panel">
-            <View style={s.header} testID="app-action-sheet-header">
-              <Text style={s.title} numberOfLines={1} testID="app-action-sheet-title">{presented.title}</Text>
-            </View>
-            <View style={s.headerDivider} testID="app-action-sheet-header-divider" />
+            {presented.title ? (
+              <>
+                <View style={s.header} testID="app-action-sheet-header">
+                  <Text style={s.title} numberOfLines={1} testID="app-action-sheet-title">{presented.title}</Text>
+                </View>
+                <View style={s.headerDivider} testID="app-action-sheet-header-divider" />
+              </>
+            ) : null}
             {presented.items.map((item, index) => {
-              const color = item.destructive ? C.red : C.text;
+              const color = item.disabled ? C.disabled : item.destructive ? C.red : C.text;
               return (
                 <Pressable
                   key={item.key}
                   style={({ pressed }) => [s.item, pressed && s.itemPressed]}
                   onPress={() => runItem(item)}
-                  disabled={closing}
+                  disabled={closing || item.disabled}
                   accessibilityRole="menuitem"
                   accessibilityLabel={item.label}
+                  accessibilityState={{ disabled: Boolean(item.disabled) }}
                   testID={`app-action-sheet-item-${item.key}`}
                 >
                   <Text style={[s.itemLabel, { color }]} numberOfLines={1}>{item.label}</Text>

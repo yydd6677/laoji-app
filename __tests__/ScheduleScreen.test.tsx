@@ -188,7 +188,7 @@ describe('Feishu-style schedule shell', () => {
     const pending = dayView.props.onChangeEventTime(event, changes);
     await waitFor(() => expect(showDialog).toHaveBeenCalledTimes(1));
     const scopeDialog = showDialog.mock.calls[0][0];
-    await scopeDialog.actions.find((action: { text: string }) => action.text === '修改此后日程').onPress();
+    await scopeDialog.actions.find((action: { text: string }) => action.text === '编辑此日程及后续日程').onPress();
     await expect(pending).resolves.toBe(true);
 
     expect(findConflicts).toHaveBeenCalledWith(

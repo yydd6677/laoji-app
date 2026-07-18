@@ -126,7 +126,7 @@ describe('native Android overlays [UI-OVERLAY-001/UI-MOTION-001]', () => {
     expect(mockDismissOverlay).toHaveBeenCalledWith('app-dialog-test', 'dialog', 'unmounted');
   });
 
-  it('filters disabled sheet actions and runs the selected item after native dismissal', async () => {
+  it('preserves disabled sheet actions and runs only an enabled item after native dismissal', async () => {
     const close = jest.fn();
     const selected = jest.fn();
     const view = await render(
@@ -143,12 +143,16 @@ describe('native Android overlays [UI-OVERLAY-001/UI-MOTION-001]', () => {
     await waitFor(() => expect(latestPresentation('action-sheet')).toBeTruthy());
     const [ownerId, , snapshot] = latestPresentation('action-sheet')!;
     expect(snapshot.items).toEqual([
-      expect.objectContaining({ key: 'share', label: '分享会议文档' }),
+      expect.objectContaining({ key: 'busy', label: '正在同步', disabled: true }),
+      expect.objectContaining({ key: 'share', label: '分享会议文档', disabled: false }),
     ]);
-    await act(async () => emitAction({ kind: 'action-sheet', ownerId, key: 'share', index: 0 }));
-    expect(close).toHaveBeenCalledTimes(1);
+    await act(async () => emitAction({ kind: 'action-sheet', ownerId, key: 'busy', index: 0 }));
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => emitAction({ kind: 'action-sheet', ownerId, key: 'share', index: 1 }));
+    expect(close).not.toHaveBeenCalled();
     expect(selected).not.toHaveBeenCalled();
     await act(async () => emitDismiss({ kind: 'action-sheet', ownerId, reason: 'item' }));
+    expect(close).toHaveBeenCalledTimes(1);
     expect(selected).toHaveBeenCalledTimes(1);
   });
 

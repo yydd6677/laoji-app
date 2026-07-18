@@ -20,11 +20,13 @@
 | --- | --- | --- | --- | --- |
 | `CAL-MONTH-EXPAND-HOST-001` | calendar | 已验证 | `keep` | 0 |
 | `CAL-PICKER-WHEEL-TAP-001` | calendar | 已验证 | `keep` | 0 |
+| `CAL-REPEAT-RRULE-001` | calendar | 已实现 | `keep` | 6 |
 | `UI-ANDROID-COMPOSITION-001` | shell | 已实现 | `business_replace` | 1 |
 | `UI-BOOT-READINESS-001` | shell | 已实现 | `business_replace` | 1 |
 | `UI-CALENDAR-INDICATOR-001` | calendar | 已验证 | `business_replace` | 0 |
 | `UI-SHELL-BOTTOM-MAIN-001` | shell | 已实现 | `business_replace` | 3 |
 | `UI-SHELL-RESELECT-001` | shell | 已实现 | `keep` | 3 |
+| `UI-TITLE-COMMON-001` | shell | 已实现 | `keep` | 3 |
 
 <!-- END GENERATED FEISHU EVIDENCE STATUS -->
 
@@ -43,7 +45,7 @@
 ## 源码库存
 
 - 基线：飞书 Android `7.71.8`，APK SHA-256 由 `source-catalog.json` 锁定。
-- 源码锁：278 个文件，包含 common-shell 31、calendar 112、minutes 69、account-static 8、resources 58。
+- 源码锁：357 个文件，包含 common-shell 38、calendar 164、minutes 75、account-static 8、resources 72。
 - 负面锁：3 个被引用但解码包中不存在的动画资源。缺失正文的曲线不得推断为像素级事实。
 - 能力库存：55 项，全部为当前 Release 必需项；其中 shell 14、calendar 19、minutes 21、account-static 1。
 - 产品决策：keep 25、business_replace 27、delete 3。
@@ -67,14 +69,16 @@
 ### P0：先于页面重建
 
 1. `UI-BOOT-READINESS-001`：挂载前配置异常、可见 loading、8 秒总等待上限、认证/导航诊断错误面和整棵运行树重试已实现；仍需 instrumentation 与同一候选 APK 的真机冷启动/进程恢复闭证，当前不能关闭。
-2. `UI-LEGACY-001`：当前 TS AST 报告仍发现 208 个未映射错误，Android UAST/Lint 仍发现 725 个未映射错误；旧 Android 表现层与孤立 TSX 尚未清零。
+2. `UI-LEGACY-001`：当前 TS AST 报告仍发现 204 个未映射错误，Android UAST/Lint 仍发现 527 个错误；本批次改动文件的 UAST error 已清零，但旧 Android 表现层与孤立 TSX 尚未清零。
 3. `UI-ROUTES-001`：16 个 Root 路由和 2 个 MainTabs 目的地尚未逐项绑定源码容器、转场、恢复和 View 树合同。
-4. 三个 pilot proof 已使用当前源码锁、manifest、AST/UAST/workspace 报告和 API 35 模拟器 41 项合并 instrumentation 重新签发，其中包含隐藏日/月 owner 不受重选驱动、模拟 React 即时/运行中快照反馈不截断 motion，以及生产 Calendar/Minutes Android 根双向替换的回归用例；后续任一输入变化仍会立即使其过期。
+4. 三个 pilot proof 已使用当前源码锁、manifest、AST/UAST/workspace 报告和 API 35 模拟器 50 项合并 instrumentation 重新签发，其中包含隐藏日/月 owner 不受重选驱动、模拟 React 即时/运行中快照反馈不截断 motion、重复截止开关与循环滚轮，以及生产 Calendar/Minutes Android 根双向替换的回归用例；后续任一输入变化仍会立即使其过期。
 
 ### P1：通用壳层
 
 - 当前日程 Tab 重选已改为活动 Calendar 原生根同步处理，不再经过 React 序号或 Bridge prop；QuickChoose 保持展开并同步今天，`when (mode)` 只驱动当前月/日 owner。独立红队发现 React 日期/范围反馈会以新 generation 快照截断单日 motion；现已改为同目标反馈只重绑数据/session，并新增首帧、100ms 中间态和最终态回归测试。单日 300/250ms motion、远距离目标相邻页起点、同日草稿/活动手势清理、隐藏 owner 不变、同月普通点击状态机、非 idle 丢弃和跨月最终展开今天均有定向测试；完整 React/Expo-to-native instrumentation 与月视图跨页/先收后移精确时序仍未关闭。
 - 主底栏已重建为 65dp 原生内容区、独立物理像素 divider、22dp `ImageView`、12sp `TextView`、真实 selected 语义和仅图标 125+125ms motion；API 35 instrumentation 已双向替换生产 Calendar/Minutes Android 根，并监听生产动画的 start/end 回调，验证旧根保持受控、新根完成两段后恰好播放一次且重复命令/同 Tab 点击不重播。完整 React/Expo 事件驱动替换仍归 `UI-ANDROID-COMPOSITION-001`，最终图标路径和真机 TalkBack 尚未关闭。
+- `UI-TITLE-COMMON-001` 已实现 44dp Common primitive，并恢复飞书六个直接子节点、`wrap-content` secondary-left、按可见左右实测宽度居中、逐尺寸 half-up dp 换算和 9/15dp 右图标 padding。普通编辑保持“取消/保存”且无中心标题或“保存中”，时间页、详情页和真实重复截止子页已接入同一受限家族；API 35 定向 instrumentation 6 项通过。该证据仍为 `implemented`：日历 MainTab/搜索及妙记各标题家族、最终图标、真机字体/OEM 与 TalkBack 均未关闭。
+- `CAL-REPEAT-RRULE-001` 已把作用范围和 `recurrenceUntilDate` 贯穿详情入口、native draft、TypeScript 保存合同和共享校验。普通重复实例的“仅此”显示禁用的“不重复/截止”两行，已有例外实例的“仅此”隐藏重复容器，“此后/全部”可编辑但不提供空 RRULE；重复截止子页已恢复源码两行入口、36/20/14dp 开关、250ms 动画、拇指拖动/RTL/速度收敛，以及日历专用 `pickerview.WheelView` 的 7 行动态圆柱测量、中心 1.176 倍缩放、分区裁剪、短点按定位、惯性吸附和 `D日(周X)` 标签。默认截止按每天 +1 月、每周 +3 月、每月 +1 年、每年 +5 年；生产 Expo `ReactActivity` 恢复、完整自定义间隔/星期、完整权限禁用原因和缺失正文的水平转场仍保持阻断。飞书原版会在越界日期上出现显示/提交分叉，老记的 1900..2100 一致性修复登记为待批准偏离 `DEV-CALENDAR-DATE-RANGE-SAFETY-001`。
 - Sheet dim 与正文入场动画仍耦合。
 - 日历 FAB 缺少源码阴影与短按两段 motion。
 - Profile sheet、Minutes 标题 dialog 和撤销 banner 仍绕过统一 Window owner。

@@ -59,6 +59,7 @@ function actionColor(
 }
 
 export function FeishuToast({
+  nativeID,
   visible,
   message,
   onDismiss,
@@ -70,6 +71,8 @@ export function FeishuToast({
   scheme = 'light',
   testID = 'feishu-toast',
 }: {
+  // CAL-REPEAT-RRULE-001: evidence is carried by the actual native toast layer.
+  nativeID?: string;
   visible: boolean;
   message: string;
   onDismiss: () => void;
@@ -104,6 +107,7 @@ export function FeishuToast({
 
   return (
     <View
+      nativeID={nativeID}
       pointerEvents="box-none"
       style={[styles.toastLayer, { bottom }]}
       testID={`${testID}-layer`}

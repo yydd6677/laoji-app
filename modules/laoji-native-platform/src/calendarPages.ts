@@ -3,7 +3,8 @@ import type { NativeSyntheticEvent, ViewProps } from 'react-native';
 import { Platform, View } from 'react-native';
 import { requireNativeViewManager } from 'expo-modules-core';
 
-// CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: route snapshots are structured and repository-free.
+// CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001 / CAL-REPEAT-RRULE-001:
+// route snapshots are structured and repository-free.
 export const CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export type CalendarPageLoadState = 'loading' | 'ready' | 'empty' | 'error';
 
@@ -58,6 +59,7 @@ export interface NativeCalendarEditDraftSnapshot {
   endTime: string | null;
   isAllDay: boolean;
   repeat: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  recurrenceUntilDate: string | null;
   reminderMinutes: number | null;
   location: string;
   notes: string;
@@ -71,6 +73,7 @@ export interface NativeCalendarEditSnapshot {
   editing: boolean;
   recurring: boolean;
   recurrenceException: boolean;
+  recurrenceScope: 'occurrence' | 'following' | 'series' | null;
   saving: boolean;
   dirty: boolean;
 }

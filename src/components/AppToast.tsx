@@ -6,6 +6,8 @@ import {
 import type { FeishuColorScheme } from '../theme/feishuTokens';
 
 export type AppToastProps = {
+  // CAL-REPEAT-RRULE-001: route-specific evidence is forwarded to the rendered toast layer.
+  feishuEvidence?: string;
   visible: boolean;
   message: string;
   onDismiss: () => void;
@@ -18,6 +20,10 @@ export type AppToastProps = {
   presentationKey?: number | string;
 };
 
-export function AppToast({ presentationKey: _presentationKey, ...props }: AppToastProps) {
-  return <FeishuToast {...props} />;
+export function AppToast({
+  feishuEvidence,
+  presentationKey: _presentationKey,
+  ...props
+}: AppToastProps) {
+  return <FeishuToast nativeID={feishuEvidence} {...props} />;
 }

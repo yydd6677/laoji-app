@@ -5,6 +5,7 @@ import java.time.LocalTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 // CAL-EDIT-TIME-001: pure regression coverage for boundaries and system-format labels.
@@ -98,6 +99,16 @@ class CalendarEditTimeModelTest {
     val dateOnly = initial.setTimedEnabled(false).completedDraft()
     assertNull(dateOnly.startTime)
     assertNull(dateOnly.endTime)
+  }
+
+  @Test
+  fun `CAL-EDIT-TIME-001 rejects external dates outside the visible source wheel`() {
+    assertThrows(IllegalArgumentException::class.java) {
+      CalendarEditTimeState.fromDraft(
+        timedDraft("2200-01-01", "2200-01-01", "10:00", "11:00"),
+        CalendarEditEndpoint.START,
+      )
+    }
   }
 
   private fun timedDraft(

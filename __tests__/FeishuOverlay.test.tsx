@@ -7,7 +7,10 @@ import {
   FeishuSheet,
   FeishuToast,
 } from '../src/components/FeishuOverlay';
+import { AppToast } from '../src/components/AppToast';
 import { FEISHU_DARK_COLORS, FEISHU_DIMENSIONS } from '../src/theme/feishuTokens';
+
+// CAL-REPEAT-RRULE-001: route evidence must survive the AppToast wrapper.
 
 function pressableStyle(node: { props: Record<string, unknown> }, pressed = false) {
   const style = node.props.style;
@@ -19,6 +22,21 @@ function pressableStyle(node: { props: Record<string, unknown> }, pressed = fals
 describe('Feishu controlled toast', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
+
+  it('keeps caller evidence on the rendered native toast layer', async () => {
+    const view = await render(
+      <AppToast
+        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:test-edit-toast"
+        visible
+        message="保存失败"
+        onDismiss={jest.fn()}
+      />,
+    );
+    expect(view.container.queryAll(
+      instance => instance.props.nativeID === 'feishu:CAL-REPEAT-RRULE-001:test-edit-toast',
+      { includeSelf: true },
+    )).toHaveLength(1);
+  });
 
   it('does not present or consume its timeout while the host is backgrounded', async () => {
     const onDismiss = jest.fn();

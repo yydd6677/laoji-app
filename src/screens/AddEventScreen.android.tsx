@@ -27,7 +27,14 @@ import { createClientRequestState, requestStateForPayload } from '../services/cl
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { validateEventDraft } from '../utils/eventDraftValidation';
-import { recurrenceDeleteDialog, recurrenceEditDialog } from '../services/recurrenceActions';
+import {
+  canEditRecurrenceRule,
+  canStopRecurringSeries,
+  recurrenceDeleteChoices,
+  recurrenceDeleteDialog,
+  recurrenceEditChoices,
+  resolveRecurrenceEditScope,
+} from '../services/recurrenceActions';
 import { HttpResponseError, readableErrorMessage } from '../services/errors';
 import {
   buildNativeCalendarEditSnapshot,
@@ -40,6 +47,10 @@ type Props = {
 };
 
 type Choice = 'repeat' | 'reminder' | null;
+type ScopeRequest = {
+  kind: 'edit' | 'delete';
+  onSelect: (scope: EventRecurrenceScope) => void;
+};
 
 function localDateKey(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -73,13 +84,15 @@ function initialDraft(
     endTime: allDay ? undefined : endTime,
     isAllDay: allDay,
     repeat: provided?.repeat ?? 'once',
+    recurrenceUntilDate: provided?.recurrenceUntilDate,
     reminderMinutes: provided?.reminderMinutes ?? defaultReminderForEvent(allDay, explicitTime),
     location: provided?.location,
     description: provided?.description ?? provided?.detail,
   });
 }
 
-// CAL-EDIT-001 / UI-FORM-001: native inputs emit complete drafts; this route owns validation and writes.
+// CAL-EDIT-001 / CAL-REPEAT-RRULE-001 / UI-FORM-001: native inputs emit complete drafts;
+// this route owns validation and writes.
 export function AddEventScreen({ navigation, route }: Props) {
   const { events, searchableEvents, addEvent, updateEvent, deleteEvent, findConflicts } = useEvents();
   const { mode, session } = useAuth();
@@ -89,9 +102,19 @@ export function AddEventScreen({ navigation, route }: Props) {
     ? resolveEventReference([...events, ...(searchableEvents ?? [])], editingRef) ?? undefined
     : undefined;
   const editing = Boolean(editingRef);
+  const selectedRecurrenceScope = editingEvent
+    ? resolveRecurrenceEditScope(editingEvent, route.params?.recurrenceScope)
+    : undefined;
+  const recurrenceRuleEditable = editingEvent
+    ? canEditRecurrenceRule(editingEvent, selectedRecurrenceScope)
+    : true;
+  const allowStopRepeating = editingEvent
+    ? canStopRecurringSeries(editingEvent, selectedRecurrenceScope)
+    : true;
   const [draft, setDraft] = useState<NativeCalendarEditDraftSnapshot>(() => initialDraft(editingEvent, route.params));
   const [saving, setSaving] = useState(false);
   const [choice, setChoice] = useState<Choice>(null);
+  const [scopeRequest, setScopeRequest] = useState<ScopeRequest | null>(null);
   const [feedback, setFeedback] = useState<{ key: number; message: string; durationMs: number } | null>(null);
   const baselineRef = useRef(JSON.stringify(initialDraft(editingEvent, route.params)));
   const draftRef = useRef(draft);
@@ -201,6 +224,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     endTime: value.isAllDay ? undefined : value.endTime ?? undefined,
     isAllDay: value.isAllDay,
     repeat: value.repeat,
+    recurrenceUntilDate: value.repeat === 'once' ? undefined : value.recurrenceUntilDate ?? undefined,
     description: value.notes,
     rawText: route.params?.draft?.rawText,
     color: '#1456F0',
@@ -332,24 +356,25 @@ export function AddEventScreen({ navigation, route }: Props) {
       });
       return;
     }
-    saveLockRef.current = true;
-    saveWriteStartedRef.current = false;
-    const runId = saveRunRef.current + 1;
-    saveRunRef.current = runId;
-    setSaving(true);
     const continueWithScope = (scope: EventRecurrenceScope) => {
-      if (activeSave(runId)) void checkConflicts(runId, validation.value!, scope);
+      if (saveLockRef.current) return;
+      saveLockRef.current = true;
+      saveWriteStartedRef.current = false;
+      const runId = saveRunRef.current + 1;
+      saveRunRef.current = runId;
+      setSaving(true);
+      void checkConflicts(runId, validation.value!, scope);
     };
-    if (editingEvent?.repeat && editingEvent.repeat !== 'once') {
-      showDialog(recurrenceEditDialog(editingEvent, continueWithScope, () => releaseSave(runId)));
+    if (editingEvent?.repeat && editingEvent.repeat !== 'once' && !selectedRecurrenceScope) {
+      setScopeRequest({ kind: 'edit', onSelect: continueWithScope });
     } else {
-      continueWithScope('series');
+      continueWithScope(selectedRecurrenceScope ?? 'series');
     }
-  }, [editingEvent, payloadFromDraft, showDialog]);
+  }, [editingEvent, payloadFromDraft, selectedRecurrenceScope, showDialog]);
 
   const beginDelete = useCallback(() => {
     if (!editingEvent || saving) return;
-    showDialog(recurrenceDeleteDialog(editingEvent, async recurrenceScope => {
+    const remove = async (recurrenceScope: EventRecurrenceScope) => {
       setSaving(true);
       try {
         await deleteEvent(eventRefForEvent(editingEvent), recurrenceScope);
@@ -359,7 +384,12 @@ export function AddEventScreen({ navigation, route }: Props) {
         setSaving(false);
         showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
       }
-    }));
+    };
+    if (editingEvent.repeat && editingEvent.repeat !== 'once') {
+      setScopeRequest({ kind: 'delete', onSelect: scope => { void remove(scope); } });
+    } else {
+      showDialog(recurrenceDeleteDialog(editingEvent, scope => remove(scope)));
+    }
   }, [deleteEvent, editingEvent, navigation, saving, showDialog]);
 
   const handleAction = useCallback((action: NativeCalendarEditAction) => {
@@ -372,7 +402,7 @@ export function AddEventScreen({ navigation, route }: Props) {
         break;
       case 'openRepeat':
         setDraft(action.draft);
-        setChoice('repeat');
+        if (recurrenceRuleEditable) setChoice('repeat');
         break;
       case 'openReminder':
         setDraft(action.draft);
@@ -395,21 +425,38 @@ export function AddEventScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [beginDelete, beginSave, requestLeave]);
+  }, [beginDelete, beginSave, recurrenceRuleEditable, requestLeave]);
 
   const choiceItems = useMemo<AppActionSheetItem[]>(() => {
+    if (scopeRequest && editingEvent) {
+      const choices = scopeRequest.kind === 'edit'
+        ? recurrenceEditChoices(editingEvent)
+        : recurrenceDeleteChoices(editingEvent);
+      return choices.map(item => ({
+        key: `scope-${item.scope}`,
+        label: item.label,
+        destructive: item.destructive,
+        disabled: item.disabled,
+        onPress: () => scopeRequest.onSelect(item.scope),
+      }));
+    }
     if (choice === 'repeat') {
-      const values: Array<{ value: NativeCalendarEditDraftSnapshot['repeat']; label: string }> = [
+      const allValues: Array<{ value: NativeCalendarEditDraftSnapshot['repeat']; label: string }> = [
         { value: 'once', label: '不重复' },
         { value: 'daily', label: '每天' },
         { value: 'weekly', label: '每周' },
         { value: 'monthly', label: '每月' },
         { value: 'yearly', label: '每年' },
       ];
+      const values = allValues.filter(item => allowStopRepeating || item.value !== 'once');
       return values.map(item => ({
         key: item.value,
         label: `${draft.repeat === item.value ? '✓  ' : ''}${item.label}`,
-        onPress: () => setDraft(current => ({ ...current, repeat: item.value })),
+        onPress: () => setDraft(current => ({
+          ...current,
+          repeat: item.value,
+          recurrenceUntilDate: item.value === 'once' ? null : current.recurrenceUntilDate,
+        })),
       }));
     }
     if (choice === 'reminder') {
@@ -420,7 +467,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       }));
     }
     return [];
-  }, [choice, draft.reminderMinutes, draft.repeat]);
+  }, [allowStopRepeating, choice, draft.reminderMinutes, draft.repeat, editingEvent, scopeRequest]);
 
   const missing = editing && !editingEvent;
   const snapshot = useMemo(() => buildNativeCalendarEditSnapshot({
@@ -428,11 +475,12 @@ export function AddEventScreen({ navigation, route }: Props) {
     editing,
     recurring: Boolean(editingEvent?.repeat && editingEvent.repeat !== 'once'),
     recurrenceException: Boolean(editingEvent?.isRecurrenceException),
+    recurrenceScope: selectedRecurrenceScope ?? null,
     saving,
     dirty,
     state: missing ? 'error' : 'ready',
     message: missing ? '日程不存在，请返回日程详情后重新打开编辑。' : undefined,
-  }), [dirty, draft, editing, editingEvent?.isRecurrenceException, editingEvent?.repeat, missing, saving]);
+  }), [dirty, draft, editing, editingEvent?.isRecurrenceException, editingEvent?.repeat, missing, saving, selectedRecurrenceScope]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
@@ -443,6 +491,7 @@ export function AddEventScreen({ navigation, route }: Props) {
         collapsableChildren={false}
       >
         <LaojiCalendarEditView
+          nativeID="feishu:CAL-REPEAT-RRULE-001:calendar-edit-native-surface"
           style={styles.surface}
           snapshot={snapshot}
           onAction={event => handleAction(event.nativeEvent)}
@@ -450,12 +499,17 @@ export function AddEventScreen({ navigation, route }: Props) {
         />
       </View>
       <AppActionSheet
-        visible={choice !== null}
-        title={choice === 'repeat' ? '重复' : '提醒'}
+        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:calendar-edit-repeat-choice-sheet"
+        visible={choice !== null || scopeRequest !== null}
+        title={scopeRequest ? undefined : choice === 'repeat' ? '重复' : '提醒'}
         items={choiceItems}
-        onClose={() => setChoice(null)}
+        onClose={() => {
+          setChoice(null);
+          setScopeRequest(null);
+        }}
       />
       <AppToast
+        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:calendar-edit-feedback-toast"
         visible={feedback !== null}
         message={feedback?.message ?? ''}
         autoHideDurationMs={feedback?.durationMs ?? 3000}

@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,12 @@ SPEC.loader.exec_module(GATE)
 
 
 class FeishuAndroidLintReportTest(unittest.TestCase):
+    def write_android_source(self, root: Path) -> Path:
+        source = root / "modules/laoji-native-platform/android/src/main/java/example/Widget.kt"
+        source.parent.mkdir(parents=True)
+        source.write_text("class Widget\n", encoding="utf-8")
+        return source
+
     def test_missing_or_malformed_report_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -25,6 +32,7 @@ class FeishuAndroidLintReportTest(unittest.TestCase):
     def test_custom_and_platform_errors_are_counted(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            source = self.write_android_source(root)
             report = root / "lint.xml"
             report.write_text(
                 """<?xml version="1.0" encoding="UTF-8"?>
@@ -49,10 +57,15 @@ class FeishuAndroidLintReportTest(unittest.TestCase):
                 {"FeishuUnknownControl": 1, "NewApi": 1, "SetTextI18n": 1},
                 result["counts_by_id"],
             )
+            self.assertEqual(
+                [{"path": source.relative_to(root).as_posix(), "sha256": GATE.sha256_file(source)}],
+                result["inputs"],
+            )
 
     def test_warning_only_report_is_clean(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            self.write_android_source(root)
             report = root / "lint.xml"
             report.write_text(
                 '<issues><issue id="SetTextI18n" severity="Warning" message="literal" /></issues>',
@@ -61,6 +74,18 @@ class FeishuAndroidLintReportTest(unittest.TestCase):
             result = GATE.parse_report(report, root)
             self.assertEqual(0, result["error_count"])
             self.assertEqual(0, result["custom_error_count"])
+
+    def test_report_older_than_android_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_android_source(root)
+            report = root / "lint.xml"
+            report.write_text("<issues />", encoding="utf-8")
+            newer = report.stat().st_mtime_ns + 1_000_000
+            os.utime(source, ns=(newer, newer))
+
+            with self.assertRaisesRegex(GATE.ReportError, "rerun lintRelease"):
+                GATE.parse_report(report, root)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@
 
 1. **源码锁**：catalog 枚举闭包，lock 固定每个源文件 SHA-256，并锁定被引用但不存在的资源。源码变动使后续 proof 全部过期。
 2. **能力库存**：`capability-inventory.json` 为每项能力登记证据 ID、模块、源码引用、产品决定和发布要求。未进入 manifest 只表示实现尚未登记。
-3. **静态实现库存**：TypeScript AST 与 Kotlin UAST/Lint 枚举控件、listener、动画、路由和视觉常量。每个生产元素必须映射证据 ID；旧 UI 引用、未知证据和未批准偏离直接失败。
+3. **静态实现库存**：TypeScript AST 与 Kotlin UAST/Lint 枚举控件、listener、动画、路由和视觉常量。每个生产元素必须映射证据 ID；Kotlin `@FeishuEvidence` 与 `FeishuEvidenceRuntime.bind` 的字面 ID 还必须存在于能力库存。旧 UI 引用、未知证据和未批准偏离直接失败。
 4. **运行 View 树**：instrumentation 检查真实节点层级、角色、尺寸、命中范围和 Evidence Tag。重复使用同一 ID 不能掩盖额外控件。
 5. **行为 proof**：测试先由源码合同生成，再绑定实现输入、门禁脚本、测试报告、环境和哈希。实现输入或门禁逻辑变化后必须重签，不能沿用历史通过。文件级静态合同检查登记的关键调用顺序和测试 symbol，可拦截简单交换或名称删除，但不能代替函数作用域 UAST 与运行行为 proof。
 6. **Release attestation**：release 要求所有可达能力关闭，并把源码 catalog、能力库存、manifest、报告和 APK 哈希写入 `parity-attestation.json`。安装入口拒绝过期或来源不一致的 APK。
@@ -60,6 +60,10 @@ Android 主目的地任一时刻只能有一个导出的 Expo/Fabric 根。底�
 
 Token、图标、空错态和标题栏分别由 `UI-TOKENS-001`、`UI-ICON-PRIMITIVES-001`、`UI-STATE-EMPTY-ERROR-001`、`UI-TITLE-COMMON-001` 约束。v1 仅浅色是批准偏离，但暗色残留分支不得影响浅色资源；OEM `android.R.drawable` 不承担产品图标。
 
+标题栏按源码家族实现，禁止建立一个全 App 万能标题栏。只有日历普通编辑、时间编辑、重复结束和详情使用 44dp Common page primitive；其六个直接子节点固定为 leading text、secondary-left text、leading custom container、center container、right actions 和 divider，空 center container 也保留，secondary-left 只按 `wrap-content` 测量。该 primitive 采用实际左右测量宽度进行物理居中/碰撞避让，动作文字 17sp、中心标题 18sp、图标 24/20dp、右图标 padding 独立换算为 9/0/15/0dp、divider 一物理像素且默认隐藏，system inset 默认由页面父级拥有。1000ms monotonic click gate 由具体 callback 显式选择，不能在 primitive 层统一强加给时间取消或详情返回。普通编辑不显示中心标题，也不把业务 saving 状态改写为“保存中”标题动作；业务层可在 `SaveType` 回调后执行保存、反馈或 no-op，但不能把这项扩展冒称为 `IActionTitlebar` 能力。详情以同一 primitive 做透明、secondary-left B700 title、static-black icon 和 44x20dp 右动作槽的专用配置。
+
+日历 MainTab 标题、日历搜索、妙记 MainTab、妙记详情、妙记录音、讲话人标记和 sheet header 必须分别保留自己的源码技术合同。它们可以共享颜色或尺寸 token，不能共享测量、节点树或路由语义。旧 `CalendarPageTitleBar`、把妙记列表与详情合并的 `MinutesTitleBar`，以及任何固定 96/98/52dp 中心边距均属于待删除表现层。
+
 ## 日历平台
 
 日历 Android 根接收规范化事件快照，只发出选日、创建、打开、移动和缩放语义，不直接写 repository。
@@ -69,6 +73,7 @@ Token、图标、空错态和标题栏分别由 `UI-TOKENS-001`、`UI-ICON-PRIMI
 - 年月 QuickChoose 位于日历页面树内，具有日期/年月双态、可点击 wheel、拖动和中断可逆动画。
 - 标题下方保留 50dp view indicator，尾部只有一个模式入口。月/日两种模式直接切换属于 `DEV-CALENDAR-VIEW-SCOPE-001`，不得重新引入并排模式按钮或二级选择菜单。
 - 详情、编辑、重复、搜索使用各自源码闭包；老记删除参会人、会议室、飞书会议联动等无能力区域后必须重新收拢布局，不保留占位。
+- 重复作用范围必须在详情页进入编辑前确定。普通重复实例的“仅此”保留可见但禁用的重复与截止行，例外实例的“仅此”隐藏整个重复容器，“此后/全部”可修改规则但不能选择“不重复”。重复截止页是编辑原生根内部的子页面，使用源码形状并具备拖动、RTL 和 fling 收敛的开关以及循环年月日滚轮；Cancel 恢复进入页面时的 draft，Done 写回 `recurrenceUntilDate`。隔离 `ComponentActivity` 测试宿主已验证子页面和滚轮日期重建恢复，生产 Expo `ReactActivity` 尚未闭证。基础 preset 的默认截止偏移固定为每天 1 个月、每周 3 个月、每月 1 年、每年 5 年；完整自定义间隔/星期、权限禁用原因和水平转场未关闭前，`CAL-REPEAT-RRULE-001` 只能处于 implemented。
 - 一周从周日开始是 `DEV-CALENDAR-WEEK-START-001`；系统 12/24 小时格式必须贯穿标尺、卡片、详情、编辑和搜索。
 
 日历高频拖动、分页进度、Canvas 绘制和动画不得逐帧跨 Bridge。原生层只能回传最终语义结果或节流后的可访问状态。

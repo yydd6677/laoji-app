@@ -194,6 +194,7 @@ class FeishuEvidenceGateTest(unittest.TestCase):
         detector = root / "tools/feishu-evidence-lint.jar"
         detector.parent.mkdir()
         detector.write_bytes(b"detector")
+        android_input = root / "src/Widget.kt"
         android_report = build / "feishu-android-uast-report.json"
         android_report.write_text(
             json.dumps({
@@ -205,6 +206,10 @@ class FeishuEvidenceGateTest(unittest.TestCase):
                 },
                 "source_report": "reports/lint-results-release.xml",
                 "source_report_sha256": GATE.sha256_file(lint_xml),
+                "inputs": [{
+                    "path": android_input.relative_to(root).as_posix(),
+                    "sha256": GATE.sha256_file(android_input),
+                }],
                 "detector_jar": {
                     "path": "tools/feishu-evidence-lint.jar",
                     "sha256": GATE.sha256_file(detector),
@@ -469,6 +474,78 @@ class FeishuEvidenceGateTest(unittest.TestCase):
             ts_source.write_text("export const AuditScreen = () => 'changed';\n", encoding="utf-8")
             _, errors = GATE.collect_audit_reports(root, require_clean=True, require_all=True)
             self.assertIn("AUDIT_REPORT_STALE", self.codes(errors))
+
+    def test_android_uast_report_stales_when_kotlin_input_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.write_fixture(root)
+            self.write_audit_reports(root)
+            android_input = root / "src/Widget.kt"
+            android_input.write_text(
+                "// UI-TEST-001\nclass EvidenceWidget { val height = 50f; val changed = true }\n",
+                encoding="utf-8",
+            )
+            _, errors = GATE.collect_audit_reports(root, require_clean=True, require_all=True)
+            self.assertIn("AUDIT_REPORT_STALE", self.codes(errors))
+
+    def test_unknown_kotlin_evidence_annotation_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_root, manifest_path, _ = self.write_fixture(root)
+            kotlin = root / (
+                "modules/laoji-native-platform/android/src/main/java/"
+                "com/laoji/nativeplatform/UnknownEvidenceView.kt"
+            )
+            kotlin.parent.mkdir(parents=True)
+            kotlin.write_text(
+                'import com.laoji.nativeplatform.evidence.FeishuEvidence\n'
+                '@FeishuEvidence("UI-NOT-IN-INVENTORY-001")\n'
+                'class UnknownEvidenceView\n',
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "EVIDENCE_REFERENCE_UNKNOWN",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
+            kotlin.write_text(
+                'import com.laoji.nativeplatform.evidence.FeishuEvidence\n'
+                '@FeishuEvidence("UI-TEST-001")\n'
+                'class DynamicEvidenceView {\n'
+                '  fun bind(view: Any, evidenceId: String) = '\
+                'FeishuEvidenceRuntime.bind(view, evidenceId, "role", "key")\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "EVIDENCE_RUNTIME_BIND_INVALID",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
+            kotlin.write_text(
+                'import com.laoji.nativeplatform.evidence.FeishuEvidence\n'
+                '@FeishuEvidence("UI-TEST-001")\n'
+                'class KnownEvidenceView {\n'
+                '  fun bind(view: Any) = FeishuEvidenceRuntime.bind('\
+                'view, "UI-NOT-IN-INVENTORY-001", "role", "key")\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "EVIDENCE_REFERENCE_UNKNOWN",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
+            kotlin.write_text(
+                'import com.laoji.nativeplatform.evidence.FeishuEvidence\n'
+                '@FeishuEvidence("UI-TEST-001")\n'
+                'class KnownEvidenceView {\n'
+                '  fun bind(view: Any) = FeishuEvidenceRuntime.bind('\
+                'view, "UI-TEST-001", "role", "key")\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            self.assertNotIn(
+                "EVIDENCE_REFERENCE_UNKNOWN",
+                self.codes(self.validate(root, source_root, manifest_path)),
+            )
 
     def test_recorded_proof_contains_current_ast_report_hashes(self):
         with tempfile.TemporaryDirectory() as temp:

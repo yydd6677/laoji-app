@@ -44,7 +44,7 @@ export function AppActionSheet({
   onClose,
 }: {
   visible: boolean;
-  title: string;
+  title?: string;
   items: AppActionSheetItem[];
   onClose: () => void;
 }) {
@@ -62,18 +62,19 @@ export function AppActionSheet({
 
   const snapshot = useMemo<NativeActionSheetSnapshot>(() => ({
     visible,
-    title,
-    items: items.filter(item => !item.disabled).map(item => ({
+    title: title || undefined,
+    items: items.map(item => ({
       key: item.key,
       label: item.label,
       destructive: item.destructive === true,
+      disabled: item.disabled === true,
     })),
   }), [items, title, visible]);
 
   const handleItem = useCallback((event: NativeSheetItemEvent) => {
     const item = itemsRef.current.find(candidate => candidate.key === event.key);
-    pendingActionRef.current = item?.onPress ?? null;
-    onCloseRef.current();
+    if (!item || item.disabled) return;
+    pendingActionRef.current = item.onPress;
   }, []);
 
   const handleDismiss = useCallback(() => {

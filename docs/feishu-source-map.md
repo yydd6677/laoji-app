@@ -18,7 +18,7 @@
 - 权威根：本机 `FEISHU_SOURCE_ROOT` 指向的飞书 7.71.8 解码目录
 - APK：versionName `7.71.8`，versionCode `7710850`
 - APK SHA-256：`3355a2a53543ae1a68fe10844b8ed9884fffa7d1eafdc6bf8622180e43631447`
-- 当前源码锁：278 个文件，其中通用壳层 31、日历 112、妙记 69、账号静态容器 8、资源 58。
+- 当前源码锁：357 个文件，其中通用壳层 38、日历 164、妙记 75、账号静态容器 8、资源 72。
 - 缺失资源负面锁：3 个。它们在代码或 style 中被引用，但解码包没有正文，禁止推断曲线。
 
 同步与验证：
@@ -65,14 +65,33 @@ npm run verify:feishu-source-lock
 
 该行为闭包锁定 92 个源文件，覆盖主底栏活动 Fragment 选择、共享 Service/RxEvent、QuickChoose、单日 Pager/滚动、sticky clone 与时间尺清理，以及月视图状态/分页/延迟调度；三日、列表和会议室分支因产品范围删除而明确排除。
 
-### 标题栏与日历视图条
+### 标题栏家族与日历视图条
 
-- 日历主标题由 MainTab host 和 `CalendarTitleProxyNewImpl` 提供，不属于 `ShellView` 自创标题。
-- 通用标题栏动作只物化并绑定一次；全屏标题高 44dp，Sheet 标题高 56dp。
-- 日历 `ViewIndicator` 是标题下方独立 50dp band，尾部只有一个 32dp 入口。
-- 飞书的单一入口打开完整视图集合；老记删除多日历、三日和列表后，将同一入口业务替换为月/日直接切换。
+`CommonTitleBar` 是一个可配置的底层容器，不是所有页面共享的统一标题栏。它的闭包为：构造器属性读取 -> 44dp intrinsic 高度与子节点初始化 -> `IActionTitlebar.Action` 物化 -> 单次 tag/listener 绑定 -> 自定义测量和布局。Java 反编译错误地丢失了部分 `addAction` 布局参数，因此默认 `WRAP_CONTENT x MATCH_PARENT` 和垂直居中以 `CommonTitleBar.smali` 为准。
 
-源码：`CalendarShellViewFragment$onBind$1.java`、`CalendarTitleProxyNewImpl.java`、`CommonTitleBar.java`、`ViewIndicator.java`、`view_indicator.xml`。
+通用容器事实：
+
+- 全屏常量为 44dp、bottom sheet 常量为 56dp；56dp 由外部父布局或 bottom-sheet 高度插值 owner 选择，不是构造器自动模式。另有运行 gate 可把 intrinsic 高度改成 60dp，静态源码不能证明当前产品分支命中。
+- 主标题 18sp、左右 action 17sp、副标题 12sp；默认字体 family 和 weight 继承主题，只有调用方显式设置才加粗。
+- 源码 dp helper 对每个正尺寸独立执行 `density * dp + 0.5` 后取整；不能先合并多个 dp 再换算，也不能直接截断。TextView 没有关闭 Android 默认 font padding。
+- 左图标 normal/small 为 24/20dp。默认左外边距 15dp；纯图标右侧也是 15dp，有文字时为 8dp。右 action 默认 start/end padding 为 9/15dp，因此 24dp 图标形成 48dp槽；small helper 为 44x20dp，但必须由调用方显式使用。
+- 中心标题由实际测量的左右可见宽度决定：空间足够时物理居中，冲突时向占位较小的一侧移动；`isCenterAlways` 才按左右最大宽度做对称避让。固定 96dp 边距不是源码行为。
+- divider 是一物理像素且默认隐藏。源码只在 `isCenterAlways` 分支可靠地布局它，其他模式不能外推为可见分隔线合同。
+- `Action` 只有文字、图标、背景、padding、tag 和点击回调，没有 enabled/loading/saving 字段；禁用、保存中和反馈由调用业务层决定。日历保存三态分别使用 B600 `#1456F0`、B200 `#C2D4FF` 和 N500 `#8F959E`。
+- 日历的 `DebouncingTextAction` 和 `DebouncingClickListener` 各自保存最后接收时间；只有间隔严格大于 1000ms 才再次执行。该门禁属于具体 callback，不属于 `CommonTitleBar`：编辑取消/保存、时间完成和详情右侧 action 使用门禁，时间取消与详情返回仍是普通点击。
+
+真实路由分家：
+
+- 日历主标题由 60dp MainTab host、`CalendarTitleProxyNewImpl`、`C6926a` 和 `widget_tab_title_container.xml` 提供，不属于 `CommonTitleBar`。
+- 日历搜索走通用 SearchActivity 链路，也不复用日历主标题或 `CommonTitleBar`。
+- 普通日历编辑的 `EditTitleBar` 继承 `CommonTitleBar`，只显示“取消/保存”，没有中心标题；Mail 邀请分支才有中心标题。`SaveType` 的三态在 ViewModel 中决定保存、提示或 no-op，Action 本身仍会分发，且不存在“保存中”标题动作。
+- 日历时间页直接把 `CommonTitleBar` 配置为“取消/时间/完成”；重复结束页同样使用 Common 容器。
+- 日历详情的 `EventTitleViewV2` 是透明特化：20dp 返回/关闭图标，标题位于 secondary-left，右侧 action 为 44dp槽和20dp图标，并按 action 实宽动态给标题避让。标题颜色由 `C8480a` 的日历色索引映射，默认索引为 B700 `#0442D2`；浅色 icon tint 是 static black `#000000`，不能把标题色直接套给图标。
+- 妙记主列表是 60dp MainTab 标题；妙记详情是自有 44dp `MmDetailTitleBar`；独立录音是 44dp top bar 加最小 100dp/24sp 标题区；讲话人标记是 50dp 标题栏加 8dp bottom margin。它们均不能因外观相近而改用 `CommonTitleBar`。
+
+日历 `ViewIndicator` 仍是标题下方独立 50dp band，尾部只有一个 32dp 入口。飞书的单一入口打开完整视图集合；老记删除多日历、三日和列表后，将同一入口业务替换为月/日直接切换。
+
+源码：`CommonTitleBar.java/.smali`、`CommonTitleBarConstants.java`、`IActionTitlebar.java`、`C115153a.java`、`TitleBarIconSize.java`、`AbstractC146331f.java`、`AbstractViewOnClickListenerC146329d.java`、`EditTitleBar.java`、`SaveType.java`、`EditMainViewModel.java`、`EditMultiTimeView.java`、`EventTitleViewV2.java`、`C8480a.java`、`CalendarTitleProxyNewImpl.java`、`NewMmMainTabFragment.java`、`MmDetailTitleBar.java`、`MmRecordingFragment.java`、`MmSpeakerMarkView.java`、`ViewIndicator.java`、`view_indicator.xml`。
 
 ### Dialog、Sheet 与 Toast
 
@@ -117,7 +136,11 @@ npm run verify:feishu-source-lock
 | QuickChoose | `QuickChooseDatePanel -> QuickChooseDateComponent -> CalendarYearMonthPicker -> WheelView` | 外层四态；日期/年月双态；可见行点击和滚动都 settle 并提交 | 保留 |
 | 搜索 | `CalendarSearchFragment -> CalendarSearchView` | 输入、筛选、结果、空态、详情跳转和 transaction | 按老记能力裁筛选 |
 | 详情/编辑 | `EventDetailContainerFragment -> EditEventActivity -> SaveProcess` | 创建/编辑分流，时间、重复、删除和保存状态有独立 owner | 删除参会人/会议室等无能力区域 |
-| 重复 | `RepeatView -> RepeatViewModel` | RRULE、自定义间隔、星期与结束条件 | 老记已有数据字段，UI 待完整暴露 |
+| 重复 | `RepeatView -> RepeatViewModel -> ChooseRepeatEndFragment` | RRULE、自定义间隔、星期与结束条件；重复截止页使用 CommonTitleBar、支持拖动和速度判定的 UDSwitch、7 行循环年月日滚轮 | 老记保留基础预设，完整自定义间隔/星期仍待重建 |
+
+基础重复类型在“永不截止”首次切换为具体日期时，以事件开始日为基准生成源码默认值：每天加 1 个月、每周加 3 个月、每月加 1 年、每年加 5 年。具体截止日早于事件开始日时，完成动作切换为禁用色并显示错误；取消和完成都由各自 1000ms 日历防连点 listener 持有。该页面通过 `EditFragmentController` 的水平分支进出，但 `slide_right_in/out` 正文在解码包中缺失，因此只能锁定路由所有权，不能从静态源码宣称动画曲线精确一致。
+
+重复范围不是一个简单的显示/隐藏布尔值：普通重复实例的 `THIS_EVENT` 显示但禁用 Repeat 与 RepeatEnd，并把 Repeat 文案显示为“不重复”；已有例外实例的 `THIS_EVENT` 才整体隐藏；`FUTURE_EVENTS/ALL_EVENTS` 可编辑规则，但隐藏空 RRULE 选项。飞书年份滚轮虽只列出 1900..2100，却可能保留并提交越界原值；老记拒绝这种显示/提交分叉，该差异必须通过 `DEV-CALENDAR-DATE-RANGE-SAFETY-001` 审批，不能宣称为源码等价。
 
 日历强制纠偏：
 

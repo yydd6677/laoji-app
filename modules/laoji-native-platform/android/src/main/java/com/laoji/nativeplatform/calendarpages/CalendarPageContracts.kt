@@ -1,6 +1,7 @@
 package com.laoji.nativeplatform.calendarpages
 
-// CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: normalized snapshots cross the bridge;
+// CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001 / CAL-REPEAT-RRULE-001:
+// normalized snapshots cross the bridge;
 // native calendar pages emit semantic actions and never mutate the event repository.
 
 import java.time.LocalDate
@@ -32,6 +33,24 @@ internal enum class CalendarPageLoadState(val wireName: String) {
       it.wireName == value
     } ?: READY
   }
+}
+
+internal enum class CalendarEditRecurrenceScope(val wireName: String) {
+  OCCURRENCE("occurrence"),
+  FOLLOWING("following"),
+  SERIES("series");
+
+  companion object {
+    fun fromWireName(value: String?): CalendarEditRecurrenceScope? = entries.firstOrNull {
+      it.wireName == value
+    }
+  }
+}
+
+internal enum class CalendarRecurrenceControlMode {
+  HIDDEN,
+  DISABLED,
+  EDITABLE,
 }
 
 internal data class CalendarSearchRow(
@@ -76,6 +95,7 @@ internal data class CalendarEditDraft(
   val endTime: String? = null,
   val allDay: Boolean = false,
   val repeat: String = "once",
+  val recurrenceUntilDate: String? = null,
   val reminderMinutes: Int? = null,
   val location: String = "",
   val notes: String = "",
@@ -87,6 +107,8 @@ internal data class CalendarEditDraft(
     val normalizedStartDate = startDate.trim()
     val normalizedEndDate = endDate.trim().ifEmpty { normalizedStartDate }
     val normalizedTitle = title.trimEnd()
+    val normalizedUntilDate = recurrenceUntilDate?.trim()?.ifEmpty { null }
+      ?.takeUnless { repeat == "once" }
     return if (allDay) {
       copy(
         title = normalizedTitle,
@@ -94,6 +116,7 @@ internal data class CalendarEditDraft(
         endDate = normalizedEndDate,
         startTime = null,
         endTime = null,
+        recurrenceUntilDate = normalizedUntilDate,
         reminderMinutes = null,
       )
     } else {
@@ -103,6 +126,7 @@ internal data class CalendarEditDraft(
         endDate = normalizedEndDate,
         startTime = startTime?.trim()?.ifEmpty { null },
         endTime = endTime?.trim()?.ifEmpty { null },
+        recurrenceUntilDate = normalizedUntilDate,
       )
     }
   }
@@ -115,6 +139,7 @@ internal data class CalendarEditDraft(
     "endTime" to endTime,
     "isAllDay" to allDay,
     "repeat" to repeat,
+    "recurrenceUntilDate" to recurrenceUntilDate,
     "reminderMinutes" to reminderMinutes,
     "location" to location,
     "notes" to notes,
@@ -128,9 +153,24 @@ internal data class CalendarEditPageState(
   val editing: Boolean = false,
   val recurring: Boolean = false,
   val recurrenceException: Boolean = false,
+  val recurrenceScope: CalendarEditRecurrenceScope? = null,
   val saving: Boolean = false,
   val dirty: Boolean = false,
-)
+) {
+  // RepeatViewModel distinguishes a normal one-off edit from an existing exception.
+  val recurrenceRuleMode: CalendarRecurrenceControlMode
+    get() = when {
+      !editing || !recurring -> CalendarRecurrenceControlMode.EDITABLE
+      recurrenceScope == null -> CalendarRecurrenceControlMode.HIDDEN
+      recurrenceScope == CalendarEditRecurrenceScope.OCCURRENCE && recurrenceException ->
+        CalendarRecurrenceControlMode.HIDDEN
+      recurrenceScope == CalendarEditRecurrenceScope.OCCURRENCE -> CalendarRecurrenceControlMode.DISABLED
+      else -> CalendarRecurrenceControlMode.EDITABLE
+    }
+
+  val recurrenceRuleEditable: Boolean
+    get() = recurrenceRuleMode == CalendarRecurrenceControlMode.EDITABLE
+}
 
 internal data class CalendarEditValidation(
   val valid: Boolean,
@@ -146,12 +186,21 @@ internal object CalendarEditValidator {
   fun validate(value: CalendarEditDraft): CalendarEditValidation {
     val draft = value.normalized()
     if (draft.title.isBlank()) return CalendarEditValidation(false, "请输入事项标题")
-    val startDate = parseDate(draft.startDate)
+    val startDate = parseDate(draft.startDate)?.takeIf(CalendarEditDateRange::contains)
       ?: return CalendarEditValidation(false, "请选择有效的开始日期")
-    val endDate = parseDate(draft.endDate)
+    val endDate = parseDate(draft.endDate)?.takeIf(CalendarEditDateRange::contains)
       ?: return CalendarEditValidation(false, "请选择有效的结束日期")
     if (endDate.isBefore(startDate)) return CalendarEditValidation(false, "结束日期不能早于开始日期")
     if (draft.repeat !in repeatValues) return CalendarEditValidation(false, "重复规则不受支持")
+    val recurrenceUntilDate = draft.recurrenceUntilDate
+      ?.let(::parseDate)
+      ?.takeIf(CalendarEditDateRange::contains)
+    if (draft.recurrenceUntilDate != null && recurrenceUntilDate == null) {
+      return CalendarEditValidation(false, "请选择有效的截止时间")
+    }
+    if (draft.repeat != "once" && recurrenceUntilDate != null && recurrenceUntilDate.isBefore(startDate)) {
+      return CalendarEditValidation(false, "截止日期需晚于开始日期")
+    }
     if (draft.reminderMinutes != null && draft.reminderMinutes < 0) {
       return CalendarEditValidation(false, "提醒时间必须为非负分钟数")
     }
@@ -242,6 +291,7 @@ internal object CalendarPageSnapshotParser {
       editing = snapshot.boolean("editing"),
       recurring = snapshot.boolean("recurring"),
       recurrenceException = snapshot.boolean("recurrenceException"),
+      recurrenceScope = CalendarEditRecurrenceScope.fromWireName(snapshot.stringOrNull("recurrenceScope")),
       saving = snapshot.boolean("saving"),
       dirty = snapshot.boolean("dirty"),
     )
@@ -269,6 +319,7 @@ internal object CalendarPageSnapshotParser {
     endTime = value.stringOrNull("endTime"),
     allDay = value.boolean("isAllDay"),
     repeat = value.stringOrNull("repeat") ?: "once",
+    recurrenceUntilDate = value.stringOrNull("recurrenceUntilDate"),
     reminderMinutes = value.intOrNull("reminderMinutes"),
     location = value.string("location"),
     notes = value.string("notes"),

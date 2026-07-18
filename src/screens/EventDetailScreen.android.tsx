@@ -7,12 +7,17 @@ import {
   type NativeCalendarDetailAction,
 } from 'laoji-native-platform';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import { useAppDialog } from '../components/AppDialog';
 import { useEvents } from '../store/EventsStore';
-import type { RootStackParamList } from '../types';
+import type { EventRecurrenceScope, RootStackParamList } from '../types';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { eventRefForEvent } from '../utils/eventIdentity';
-import { recurrenceDeleteDialog } from '../services/recurrenceActions';
+import {
+  recurrenceDeleteChoices,
+  recurrenceDeleteDialog,
+  recurrenceEditChoices,
+} from '../services/recurrenceActions';
 import { buildNativeCalendarDetailSnapshot } from '../native/nativeCalendarPages';
 
 type Props = {
@@ -20,11 +25,17 @@ type Props = {
   route: RouteProp<RootStackParamList, 'EventDetail'>;
 };
 
-// CAL-DETAIL-001 / UI-OVERLAY-001: the route coordinates repository semantics only.
+type ScopeRequest = {
+  kind: 'edit' | 'delete';
+  onSelect: (scope: EventRecurrenceScope) => void;
+};
+
+// CAL-DETAIL-001 / CAL-REPEAT-RRULE-001 / UI-OVERLAY-001: the route coordinates repository semantics only.
 export function EventDetailScreen({ navigation, route }: Props) {
   const { events, searchableEvents, deleteEvent, refreshEvents } = useEvents();
   const { showDialog } = useAppDialog();
   const [deleting, setDeleting] = useState(false);
+  const [scopeRequest, setScopeRequest] = useState<ScopeRequest | null>(null);
   const event = useMemo(() => resolveEventReference(
     [...events, ...(searchableEvents ?? [])],
     route.params.eventRef,
@@ -36,7 +47,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
 
   const removeEvent = useCallback(() => {
     if (!event || deleting) return;
-    showDialog(recurrenceDeleteDialog(event, async recurrenceScope => {
+    const remove = async (recurrenceScope: EventRecurrenceScope) => {
       setDeleting(true);
       try {
         await deleteEvent(eventRefForEvent(event), recurrenceScope);
@@ -45,8 +56,43 @@ export function EventDetailScreen({ navigation, route }: Props) {
         setDeleting(false);
         showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
       }
-    }));
+    };
+    if (event.repeat && event.repeat !== 'once') {
+      setScopeRequest({ kind: 'delete', onSelect: scope => { void remove(scope); } });
+    } else {
+      showDialog(recurrenceDeleteDialog(event, scope => remove(scope)));
+    }
   }, [deleteEvent, deleting, event, navigation, showDialog]);
+
+  const editEvent = useCallback(() => {
+    if (!event) return;
+    const navigateToEditor = (recurrenceScope: 'occurrence' | 'following' | 'series') => {
+      navigation.navigate('AddEvent', {
+        date: event.seriesStartDate ?? event.startDate,
+        eventRef: eventRefForEvent(event),
+        recurrenceScope,
+      });
+    };
+    if (event.repeat && event.repeat !== 'once') {
+      setScopeRequest({ kind: 'edit', onSelect: navigateToEditor });
+    } else {
+      navigateToEditor('series');
+    }
+  }, [event, navigation, showDialog]);
+
+  const scopeItems = useMemo<AppActionSheetItem[]>(() => {
+    if (!event || !scopeRequest) return [];
+    const choices = scopeRequest.kind === 'edit'
+      ? recurrenceEditChoices(event)
+      : recurrenceDeleteChoices(event);
+    return choices.map(item => ({
+      key: `scope-${item.scope}`,
+      label: item.label,
+      destructive: item.destructive,
+      disabled: item.disabled,
+      onPress: () => scopeRequest.onSelect(item.scope),
+    }));
+  }, [event, scopeRequest]);
 
   const handleAction = useCallback((action: NativeCalendarDetailAction) => {
     switch (action.type) {
@@ -54,10 +100,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
         navigation.goBack();
         break;
       case 'edit':
-        if (event) navigation.navigate('AddEvent', {
-          date: event.seriesStartDate ?? event.startDate,
-          eventRef: eventRefForEvent(event),
-        });
+        editEvent();
         break;
       case 'delete':
         removeEvent();
@@ -70,7 +113,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [event, navigation, refreshEvents, removeEvent, route.params.eventRef.occurrenceDate]);
+  }, [editEvent, navigation, refreshEvents, removeEvent, route.params.eventRef.occurrenceDate]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
@@ -81,12 +124,18 @@ export function EventDetailScreen({ navigation, route }: Props) {
         collapsableChildren={false}
       >
         <LaojiCalendarDetailView
+          nativeID="feishu:CAL-REPEAT-RRULE-001:calendar-detail-recurrence-action-surface"
           style={styles.surface}
           snapshot={snapshot}
           onAction={value => handleAction(value.nativeEvent)}
           testID="event-detail-native-surface"
         />
       </View>
+      <AppActionSheet
+        visible={scopeRequest !== null}
+        items={scopeItems}
+        onClose={() => setScopeRequest(null)}
+      />
     </ScreenContainer>
   );
 }

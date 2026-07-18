@@ -4,6 +4,8 @@ import { Animated, StyleSheet } from 'react-native';
 import { ACTION_PANEL_GEOMETRY, AppActionSheet } from '../src/components/AppActionSheet';
 import { Colors as C } from '../src/theme/colors';
 
+// CAL-REPEAT-RRULE-001: caller evidence must reach the rendered modal root.
+
 function pressableStyle(node: { props: Record<string, unknown> }) {
   const style = node.props.style;
   return StyleSheet.flatten(typeof style === 'function' ? style({ pressed: false }) : style);
@@ -29,8 +31,9 @@ describe('AppActionSheet', () => {
   it('uses the source UDActionPanel geometry and flat text-only items', async () => {
     const onClose = jest.fn();
     const onDay = jest.fn();
-    await render(
+    const view = await render(
       <AppActionSheet
+        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:test-repeat-sheet"
         visible
         title="日历视图"
         onClose={onClose}
@@ -40,6 +43,11 @@ describe('AppActionSheet', () => {
         ]}
       />,
     );
+
+    expect(view.container.queryAll(
+      instance => instance.props.nativeID === 'feishu:CAL-REPEAT-RRULE-001:test-repeat-sheet',
+      { includeSelf: true },
+    )).toHaveLength(1);
 
     expect(ACTION_PANEL_GEOMETRY).toEqual({
       edgeMargin: 12,
@@ -100,6 +108,24 @@ describe('AppActionSheet', () => {
     );
     await fireEvent.press(screen.getByText('取消'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports the source no-title panel and keeps disabled choices visible', async () => {
+    const disabledAction = jest.fn();
+    await render(
+      <AppActionSheet
+        visible
+        onClose={jest.fn()}
+        items={[{ key: 'series', label: '编辑所有日程', disabled: true, onPress: disabledAction }]}
+      />,
+    );
+
+    expect(screen.queryByTestId('app-action-sheet-header')).toBeNull();
+    const item = screen.getByTestId('app-action-sheet-item-series');
+    expect(item.props.accessibilityState).toEqual({ disabled: true });
+    expect(StyleSheet.flatten(screen.getByText('编辑所有日程').props.style).color).toBe(C.disabled);
+    await fireEvent.press(item);
+    expect(disabledAction).not.toHaveBeenCalled();
   });
 
   it('routes Android back through the complete exit before notifying its owner', async () => {

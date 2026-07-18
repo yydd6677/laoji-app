@@ -51,6 +51,24 @@ project(':feishu-evidence-lint').projectDir = new File(rootDir, '../tools/feishu
   });
 
   return withAppBuildGradle(withEvidenceLint, androidConfig => {
+    const desugarMarker = '// @generated-by-laoji-java-time-desugaring';
+    if (!androidConfig.modResults.contents.includes(desugarMarker)) {
+      androidConfig.modResults.contents += `
+
+${desugarMarker}
+// CAL-EDIT-TIME-001 / CAL-REPEAT-RRULE-001
+android {
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+}
+`;
+    }
+
     const marker = '// @generated-by-laoji-feishu-evidence-gate';
     if (androidConfig.modResults.contents.includes(marker)) return androidConfig;
     androidConfig.modResults.contents += `

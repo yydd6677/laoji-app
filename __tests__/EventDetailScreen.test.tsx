@@ -70,9 +70,13 @@ describe('EventDetailScreen source-aligned structure', () => {
     ]);
 
     fireEvent.press(view.getByLabelText('编辑日程'));
+    const editDialog = mockShowDialog.mock.calls.at(-1)?.[0];
+    expect(editDialog).toEqual(expect.objectContaining({ title: '修改重复日程' }));
+    editDialog.actions[0].onPress();
     expect(navigate).toHaveBeenCalledWith('AddEvent', {
       date: '2026-07-20',
       eventRef: { sourceEventId: 'event-1', occurrenceDate: '2026-07-20' },
+      recurrenceScope: 'occurrence',
     });
   });
 
@@ -223,6 +227,7 @@ describe('EventDetailScreen source-aligned structure', () => {
     expect(navigate).toHaveBeenCalledWith('AddEvent', {
       date: '2025-03-08',
       eventRef: { sourceEventId: 'event-1', occurrenceDate: '2025-03-08' },
+      recurrenceScope: 'series',
     });
   });
 });

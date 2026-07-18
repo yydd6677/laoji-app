@@ -21,6 +21,16 @@ CUSTOM_ISSUES = {
     "FeishuUnmappedResource",
 }
 
+LINT_INPUT_ROOTS = (
+    Path("modules/laoji-native-platform/android/src/main"),
+    Path("tools/feishu-evidence-lint/src/main"),
+)
+LINT_INPUT_FILES = (
+    Path("modules/laoji-native-platform/android/build.gradle"),
+    Path("tools/feishu-evidence-lint/build.gradle"),
+)
+LINT_INPUT_SUFFIXES = {".java", ".kt", ".xml"}
+
 
 class ReportError(ValueError):
     pass
@@ -39,6 +49,25 @@ def relative_path(path: Path, repo_root: Path) -> str:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def collect_lint_inputs(repo_root: Path) -> list[Path]:
+    inputs: set[Path] = set()
+    for relative_root in LINT_INPUT_ROOTS:
+        source_root = repo_root / relative_root
+        if source_root.is_dir():
+            inputs.update(
+                path.resolve()
+                for path in source_root.rglob("*")
+                if path.is_file() and path.suffix in LINT_INPUT_SUFFIXES
+            )
+    for relative_file in LINT_INPUT_FILES:
+        source_file = repo_root / relative_file
+        if source_file.is_file():
+            inputs.add(source_file.resolve())
+    if not inputs:
+        raise ReportError("Android Lint has no bound Kotlin/Java/XML inputs")
+    return sorted(inputs, key=lambda path: relative_path(path, repo_root))
 
 
 def parse_report(
@@ -78,6 +107,21 @@ def parse_report(
     by_id = Counter(issue["id"] for issue in issues)
     errors = [issue for issue in issues if issue["severity"].lower() in {"error", "fatal"}]
     custom_errors = [issue for issue in errors if issue["custom"]]
+    lint_inputs = collect_lint_inputs(repo_root)
+    freshness_inputs = list(lint_inputs)
+    if detector_jar is not None:
+        if not detector_jar.is_file():
+            raise ReportError(f"Feishu Lint detector JAR is missing: {detector_jar}")
+        freshness_inputs.append(detector_jar.resolve())
+    report_mtime_ns = report.stat().st_mtime_ns
+    newer_inputs = [path for path in freshness_inputs if path.stat().st_mtime_ns > report_mtime_ns]
+    if newer_inputs:
+        stale = ", ".join(relative_path(path, repo_root) for path in newer_inputs[:5])
+        suffix = "" if len(newer_inputs) <= 5 else f" and {len(newer_inputs) - 5} more"
+        raise ReportError(
+            "Android Lint report predates audited source inputs; rerun lintRelease: "
+            f"{stale}{suffix}"
+        )
     result = {
         "schema_version": 1,
         "kind": "android-lint-uast",
@@ -87,6 +131,13 @@ def parse_report(
         },
         "source_report": relative_path(report, repo_root),
         "source_report_sha256": sha256_file(report),
+        "inputs": [
+            {
+                "path": relative_path(path, repo_root),
+                "sha256": sha256_file(path),
+            }
+            for path in lint_inputs
+        ],
         "issue_count": len(issues),
         "error_count": len(errors),
         "custom_error_count": len(custom_errors),
@@ -94,8 +145,6 @@ def parse_report(
         "errors": errors,
     }
     if detector_jar is not None:
-        if not detector_jar.is_file():
-            raise ReportError(f"Feishu Lint detector JAR is missing: {detector_jar}")
         result["detector_jar"] = {
             "path": relative_path(detector_jar, repo_root),
             "sha256": sha256_file(detector_jar),

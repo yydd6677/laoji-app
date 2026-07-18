@@ -107,6 +107,7 @@ export interface EventDraftParams {
   endTime?: string;
   isAllDay: boolean;
   repeat?: CalEvent['repeat'];
+  recurrenceUntilDate?: string;
   description?: string;
   rawText?: string;
   location?: string;
@@ -140,6 +141,7 @@ export type RootStackParamList = {
     startTime?: string;
     endTime?: string;
     eventRef?: EventRef;
+    recurrenceScope?: EventRecurrenceScope;
     draft?: EventDraftParams;
   };
 };

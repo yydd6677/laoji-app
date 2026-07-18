@@ -169,10 +169,49 @@
       "module": "shell",
       "decision": "keep",
       "release_required": true,
-      "source_refs": ["common-shell-commontitlebar-ddc35ce9"],
+      "source_refs": [
+        "common-shell-commontitlebar-ddc35ce9",
+        "common-shell-commontitlebar-f524485e",
+        "common-shell-commontitlebarconstants-86fc4a67",
+        "common-shell-iactiontitlebar-0286a9fb",
+        "common-shell-c115153a-5eb0412b",
+        "common-shell-titlebariconsize-95d8f84c",
+        "common-shell-actionwrapper-80949619",
+        "common-shell-titlebarheightupdate-49caed84",
+        "common-shell-abstractc146331f-cedc5cd6",
+        "common-shell-abstractviewonclicklistenerc146329d-bf5842c1",
+        "calendar-edittitlebar-180de5c1",
+        "calendar-savetype-acd315e0",
+        "calendar-editmainviewmodel-98210cd1",
+        "calendar-editmultitimeview-eb77c2e8",
+        "calendar-chooserepeatendfragment-ffb72d87",
+        "calendar-eventtitleviewv2-6ea55e27",
+        "calendar-c8480a-4013440c",
+        "calendar-calendartitleproxynewimpl-f03ad8fa",
+        "calendar-c6926a-33332e37",
+        "minutes-newmmmaintabfragment-5cfa2173",
+        "minutes-mmdetailtitlebar-3300a9e6",
+        "minutes-mmtoolbarview-2c67c035",
+        "minutes-mmrecordingfragment-e26eef78",
+        "minutes-mmfeishuuilayoutprovider-e7180a03",
+        "minutes-mmspeakermarkview-82a11d85",
+        "resources-widget-tab-title-container-45fa7583",
+        "resources-mm-view-title-bar-6ba4ebd3",
+        "resources-office-sdk-mm-view-title-bar-feishu-229caf70",
+        "resources-attrs-8ad57758",
+        "resources-colors-d04fc4c4",
+        "resources-dimens-096b312c",
+        "resources-ud-icon-left-outlined-3c010265",
+        "resources-ud-icon-close-outlined-c18fac70",
+        "resources-ud-icon-edit-outlined-44f49f6a",
+        "resources-ud-icon-delete-trash-outlined-3e9d60d2"
+      ],
       "deviation_refs": [],
-      "contract": "Common title bars use source-derived heights, typography, action ownership and save states.",
-      "blockers": ["All reachable title bars are not yet mapped and tokenized."]
+      "contract": "Title systems remain source-family-specific. CommonTitleBar applies only to the retained calendar detail, ordinary edit, repeat-end and time-edit families: full-screen height is 44dp, main title is 18sp regular unless a caller explicitly requests another style, left/right action text is 17sp, normal/small icons are 24/20dp, right icon slots are 48x24dp or caller-owned 44x20dp, the divider is one physical pixel and hidden by default, and the parent owns system insets unless immersive mode is explicitly selected. Its direct child order remains leading text, secondary-left text, leading custom container, center container, right actions and divider; the secondary title keeps wrap-content measurement. Source dimensions and the 9/15dp right icon padding are converted independently with positive half-up rounding, while TextView font padding and family remain theme defaults. Center placement is derived from measured visible left/right widths: it is physically centered when space permits and shifts only on collision; fixed 96dp/98dp/52dp center margins are forbidden. Calendar-specialized callbacks opt into an independent 1000ms gate only where their source listener is debounced; time Cancel and detail Back remain direct. Ordinary calendar edit shows Cancel and Save without an invented center title or saving label; SaveType keeps enabled, disabled-with-feedback and totally-disabled business outcomes while IActionTitlebar itself remains an always-dispatched action contract, with source colors B600/B200/N500. Calendar detail is the transparent specialization with a 20dp leading icon, secondary-left B700 title for the retained default-blue scope, black icon tint and 44dp right action slots. Calendar main/search, Minutes main/detail/recording/speaker and sheet headers retain their separate source families and must not reuse this primitive by convenience.",
+      "blockers": [
+        "Calendar main/search and Minutes main/detail/recording/speaker title families remain separate implementation closures.",
+        "Exact retained-route icon paths and physical-device font/theme rendering remain owned by UI-ICON-PRIMITIVES-001 and the final candidate matrix."
+      ]
     },
     {
       "id": "UI-CALENDAR-INDICATOR-001",
@@ -249,7 +288,13 @@
       "module": "shell",
       "decision": "keep",
       "release_required": true,
-      "source_refs": ["common-shell-commontitlebar-ddc35ce9"],
+      "source_refs": [
+        "common-shell-commontitlebar-ddc35ce9",
+        "resources-ud-icon-left-outlined-3c010265",
+        "resources-ud-icon-close-outlined-c18fac70",
+        "resources-ud-icon-edit-outlined-44f49f6a",
+        "resources-ud-icon-delete-trash-outlined-3e9d60d2"
+      ],
       "deviation_refs": [],
       "contract": "Product chrome uses packaged stable icons rather than OEM-dependent android.R drawables.",
       "blockers": ["Minutes title actions and FAB still use android.R.drawable resources."]
@@ -439,10 +484,31 @@
       "module": "calendar",
       "decision": "keep",
       "release_required": true,
-      "source_refs": ["calendar-repeatviewmodel-e7ca5f20"],
-      "deviation_refs": [],
-      "contract": "Repeat editing exposes interval, weekdays and end condition supported by the LaoJi event model.",
-      "blockers": ["The UI currently exposes only coarse repeat presets."]
+      "source_refs": [
+        "calendar-repeatview-9a6ac846",
+        "calendar-repeatviewmodel-e7ca5f20",
+        "calendar-chooserepeatendfragment-ffb72d87",
+        "calendar-editeventmodel-8140c35a",
+        "calendar-editeventspantype-6fe63d29",
+        "calendar-repeatuistatus-4c13527d",
+        "calendar-c136548f-c1742fea",
+        "calendar-pushconstants-c91e9934",
+        "calendar-c139114e-b8e56b9a",
+        "calendar-wheelview-d2805f70",
+        "calendar-udswitch-e381e0fa",
+        "calendar-c146517b-e232224f",
+        "calendar-c146525j-69f66d7c",
+        "resources-view-event-repeat-container-5701ddcb",
+        "resources-fragment-event-repeat-end-75b5596d",
+        "resources-view-wheels-year-month-day-58961fec"
+      ],
+      "deviation_refs": ["DEV-CALENDAR-DATE-RANGE-SAFETY-001"],
+      "contract": "The detail route selects occurrence, following or series before opening the editor. A normal occurrence keeps Repeat and RepeatEnd visible but disabled and displays No Repeat; an existing exception occurrence hides the repeat container; following and series keep the controls editable but do not offer an empty RRULE. For the retained preset families, an unset end date defaults to one month for daily, three months for weekly, one year for monthly and five years for yearly. The repeat-end page uses cyclic 1900..2100 year, month and day wheels, D日(周X) day labels, and the source 36/20/14dp switch with 250ms thumb motion, direct thumb dragging, RTL reversal and fling settling. Never Ends persists null, an end date cannot precede the event start, Cancel restores the entry draft, and Done commits through the native draft boundary.",
+      "blockers": [
+        "The production repeat-end route is implemented, but custom intervals and weekday selection still expose only coarse repeat presets.",
+        "The exact horizontal fragment transition, full PART_EDIT disable-reason model, production Expo activity restoration and final physical-device rendering remain open.",
+        "The date-range safety deviation remains proposed."
+      ]
     },
     {
       "id": "CAL-RES-LOCK-001",

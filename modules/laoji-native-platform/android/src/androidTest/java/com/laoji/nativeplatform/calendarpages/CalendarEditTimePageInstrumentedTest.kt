@@ -15,9 +15,11 @@ import android.widget.TextView
 import android.widget.TimePicker
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.cos
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -25,9 +27,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-// CAL-EDIT-TIME-001: production-view runtime coverage; no test helper mutates wheel selection.
+// CAL-EDIT-TIME-001 / UI-TITLE-COMMON-001: production-view runtime coverage;
+// no test helper mutates wheel selection.
 @RunWith(AndroidJUnit4::class)
+@FeishuEvidence(
+  "CAL-PICKER-WHEEL-TAP-001",
+  "CAL-REPEAT-RRULE-001",
+  "UI-TITLE-COMMON-001",
+)
 class CalendarEditTimePageInstrumentedTest {
+  @Test
+  fun `CAL-PICKER-WHEEL-TAP-001_production_wheel_uses_source_cylinder_and_short_tap`() {
+    ActivityScenario.launch(CalendarEditPageTestActivity::class.java).use { scenario ->
+      scenario.onActivity { it.page.findByDescriptionPrefix("开始日期，").performClick() }
+      waitUntil(scenario) { it.page.descendants<CalendarEditTimePageView>().size == 1 }
+
+      val initialValue = AtomicInteger()
+      scenario.onActivity { activity ->
+        val wheel = activity.timePage().visibleWheel("日期滚轮")
+        val geometry = wheel.geometryForTest()
+        assertEquals(geometry.measuredHeightPx, wheel.measuredHeight)
+        assertEquals(
+          CalendarEditWheelContract.CENTER_SCALE,
+          wheel.centerTextSizeForTest() / wheel.outerTextSizeForTest(),
+          0.001f,
+        )
+        initialValue.set(wheel.selectedValue)
+        val nextArc = geometry.itemHeightPx * 4f
+        val nextRowY = geometry.radiusPx - cos(nextArc / geometry.radiusPx) * geometry.radiusPx
+        dispatchShortTap(wheel, nextRowY)
+      }
+
+      waitUntil(scenario, timeoutMs = 3_000L) { activity ->
+        activity.timePage().visibleWheel("日期滚轮").selectedValue == initialValue.get() + 1
+      }
+    }
+  }
+
   @Test
   fun `CAL-EDIT-TIME-001_all_four_rows_open_without_system_picker_windows`() {
     ActivityScenario.launch(CalendarEditPageTestActivity::class.java).use { scenario ->
@@ -43,7 +79,10 @@ class CalendarEditTimePageInstrumentedTest {
           val child = activity.page.descendants<CalendarEditTimePageView>().single()
           assertTrue(child.isShown)
           assertTrue(child.parent is ViewGroup)
-          assertEquals(activity.pageDp(44), child.descendants<CalendarPageTitleBar>().single().measuredHeight)
+          assertEquals(
+            CalendarCommonTitleBarContract.fullScreenHeightPx(activity),
+            child.descendants<CalendarCommonTitleBar>().single().measuredHeight,
+          )
           assertEquals(baselineWindowCount.get(), globalWindowRoots(activity).size)
           assertNoSystemPicker(globalWindowRoots(activity))
           child.findText("取消").performClick()
@@ -261,6 +300,13 @@ class CalendarEditTimePageInstrumentedTest {
       )
     }
     dispatch(view, downTime, downTime + 162L, MotionEvent.ACTION_UP, x, endY)
+  }
+
+  private fun dispatchShortTap(view: View, y: Float) {
+    val downTime = SystemClock.uptimeMillis()
+    val x = view.width / 2f
+    dispatch(view, downTime, downTime, MotionEvent.ACTION_DOWN, x, y)
+    dispatch(view, downTime, downTime + 80L, MotionEvent.ACTION_UP, x, y)
   }
 
   private fun dispatch(

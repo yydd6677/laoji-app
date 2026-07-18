@@ -1,6 +1,7 @@
 import type { CalEvent } from '../src/types';
 import {
   buildNativeCalendarDetailSnapshot,
+  buildNativeCalendarEditSnapshot,
   buildNativeCalendarSearchSnapshot,
   nativeCalendarEditDraft,
 } from '../src/native/nativeCalendarPages';
@@ -18,7 +19,7 @@ function event(overrides: Partial<CalEvent> = {}): CalEvent {
   };
 }
 
-describe('native calendar page snapshots [CAL-SEARCH-001/CAL-DETAIL-001/CAL-EDIT-001]', () => {
+describe('native calendar page snapshots [CAL-SEARCH-001/CAL-DETAIL-001/CAL-EDIT-001/CAL-REPEAT-RRULE-001]', () => {
   it('keeps today, future, and past search ordering from the shared domain rule', () => {
     const snapshot = buildNativeCalendarSearchSnapshot([
       event({ id: 'past', startDate: '2026-07-14' }),
@@ -45,5 +46,41 @@ describe('native calendar page snapshots [CAL-SEARCH-001/CAL-DETAIL-001/CAL-EDIT
     expect(nativeCalendarEditDraft(event({ startTime: undefined, endTime: undefined }))).toEqual(
       expect.objectContaining({ startDate: '2026-07-16', startTime: null, endTime: null }),
     );
+  });
+
+  it('preserves a repeat end date in the native editor contract', () => {
+    expect(nativeCalendarEditDraft(event({
+      repeat: 'weekly',
+      recurrenceUntilDate: '2026-09-30',
+    }))).toEqual(expect.objectContaining({
+      repeat: 'weekly',
+      recurrenceUntilDate: '2026-09-30',
+    }));
+    expect(nativeCalendarEditDraft(event({
+      repeat: 'once',
+      recurrenceUntilDate: '2026-09-30',
+    })).recurrenceUntilDate).toBeNull();
+  });
+
+  it.each(['occurrence', 'following', 'series'] as const)(
+    'passes the selected recurrence scope %s through the native editor snapshot',
+    recurrenceScope => {
+      const draft = nativeCalendarEditDraft(event({ repeat: 'weekly' }));
+      expect(buildNativeCalendarEditSnapshot({
+        draft,
+        editing: true,
+        recurring: true,
+        recurrenceScope,
+      })).toEqual(expect.objectContaining({ recurrenceScope }));
+    },
+  );
+
+  it('represents an unresolved recurring edit scope explicitly as null', () => {
+    const draft = nativeCalendarEditDraft(event({ repeat: 'weekly' }));
+    expect(buildNativeCalendarEditSnapshot({
+      draft,
+      editing: true,
+      recurring: true,
+    }).recurrenceScope).toBeNull();
   });
 });

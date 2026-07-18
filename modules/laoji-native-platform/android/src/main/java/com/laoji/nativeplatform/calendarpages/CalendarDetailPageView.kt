@@ -1,7 +1,7 @@
 package com.laoji.nativeplatform.calendarpages
 
-// CAL-DETAIL-001 / UI-SHELL-001 / UI-MOTION-001: the event detail page is a
-// native title/header/body hierarchy with native scroll-driven title reveal.
+// CAL-DETAIL-001 / UI-TITLE-COMMON-001 / UI-MOTION-001: the event detail page
+// uses the transparent secondary-left CommonTitleBar source specialization.
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -17,11 +17,13 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.view.ViewGroup
+import com.laoji.nativeplatform.evidence.FeishuEvidence
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 @SuppressLint("ViewConstructor")
+@FeishuEvidence("CAL-DETAIL-EDIT-001", "UI-TITLE-COMMON-001")
 class CalendarDetailPageView(
   context: Context,
   appContext: AppContext,
@@ -30,7 +32,7 @@ class CalendarDetailPageView(
 
   private val onAction by EventDispatcher<Map<String, Any?>>()
   private val root = FrameLayout(context)
-  private val titleBar = CalendarPageTitleBar(context)
+  private val titleBar = CalendarCommonTitleBar(context)
   private val scroll = ScrollView(context).apply {
     isFillViewport = true
     overScrollMode = View.OVER_SCROLL_NEVER
@@ -66,17 +68,20 @@ class CalendarDetailPageView(
     scroll.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     val page = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
-      addView(titleBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.pageDp(44)))
+      addView(titleBar, LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        CalendarCommonTitleBarContract.fullScreenHeightPx(context),
+      ))
       addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     }
     root.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     root.addView(stateView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-      topMargin = context.pageDp(44)
+      topMargin = CalendarCommonTitleBarContract.fullScreenHeightPx(context)
     })
     root.addView(busyOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-      titleBar.setTitleAlpha(((scrollY - context.pageDp(40)) / context.pageDp(30).toFloat()).coerceIn(0f, 1f))
+      titleBar.setTitleAlpha(titleAlphaForScroll(scrollY))
     }
   }
 
@@ -91,16 +96,38 @@ class CalendarDetailPageView(
 
   private fun render() {
     titleBar.clearActions()
-    titleBar.setTitle(state.title, CalendarPagePalette.primaryHeader, 0f)
-    titleBar.addBack { emit("back") }
+    titleBar.setTransparentBackground()
+    titleBar.setDividerVisible(false)
+    titleBar.setSecondaryLeftTitle(
+      state.title,
+      CalendarPagePalette.primaryHeader,
+      titleAlphaForScroll(scroll.scrollY),
+    )
+    titleBar.setLeftIconAction(
+      com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back,
+      "返回",
+      Color.BLACK,
+      CalendarTitleIconSize.SMALL,
+      trailingPaddingDp = 0f,
+      debounce = false,
+    ) { emit("back") }
     if (state.loadState == CalendarPageLoadState.READY && state.editable) {
-      titleBar.addRightIcon(android.R.drawable.ic_menu_edit, "编辑日程") { emit("edit") }
-      titleBar.addRightIcon(
-        android.R.drawable.ic_menu_delete,
+      titleBar.addRightIconAction(
+        com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
+        "编辑日程",
+        Color.BLACK,
+        CalendarTitleIconSize.SMALL,
+        debounce = true,
+      ) { emit("edit") }
+      titleBar.addRightIconAction(
+        com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
         "删除日程",
-        CalendarPagePalette.danger,
-        enabled = !state.deleting,
-      ) { requestDelete() }
+        Color.BLACK,
+        CalendarTitleIconSize.SMALL,
+        debounce = true,
+      ) {
+        if (!state.deleting) requestDelete()
+      }
     }
 
     val ready = state.loadState == CalendarPageLoadState.READY && state.ref != null
@@ -189,6 +216,9 @@ class CalendarDetailPageView(
   private fun requestDelete() {
     emit("delete")
   }
+
+  private fun titleAlphaForScroll(scrollY: Int): Float =
+    ((scrollY - context.pageDp(40)) / context.pageDp(30).toFloat()).coerceIn(0f, 1f)
 
   private fun emit(type: String, extras: Map<String, Any?> = emptyMap()) {
     val ref = state.ref?.toBridge().orEmpty()

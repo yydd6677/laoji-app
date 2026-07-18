@@ -10,6 +10,8 @@ export type EventDraftValidationCode =
   | 'invalid-end-time'
   | 'end-not-after-start'
   | 'invalid-repeat'
+  | 'invalid-recurrence-until-date'
+  | 'recurrence-until-before-start'
   | 'all-day-has-time'
   | 'all-day-reminder-unsupported'
   | 'untimed-reminder-unsupported'
@@ -35,6 +37,7 @@ export type EventDraftForValidation = Pick<
   | 'endTime'
   | 'isAllDay'
   | 'repeat'
+  | 'recurrenceUntilDate'
   | 'reminderMinutes'
   | 'spanning'
 >;
@@ -55,6 +58,9 @@ const REPEAT_VALUES = new Set<CalEvent['repeat']>([
   'yearly',
 ]);
 
+export const EVENT_DATE_MIN_YEAR = 1900;
+export const EVENT_DATE_MAX_YEAR = 2100;
+
 export function isValidEventDate(value: string | undefined): value is string {
   if (!value) return false;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -62,6 +68,7 @@ export function isValidEventDate(value: string | undefined): value is string {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
+  if (year < EVENT_DATE_MIN_YEAR || year > EVENT_DATE_MAX_YEAR) return false;
   const date = new Date(year, month - 1, day);
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
@@ -80,6 +87,7 @@ export function eventDateTimeValue(date: string, time: string): number | null {
   return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
 }
 
+// CAL-EDIT-001 / CAL-REPEAT-RRULE-001: one shared validator owns native and JS save boundaries.
 export function validateEventDraft<T extends EventDraftForValidation>(draft: T): EventDraftValidationResult<T> {
   const issues: EventDraftValidationIssue[] = [];
   const add = (code: EventDraftValidationCode, message: string) => issues.push({ code, message });
@@ -118,6 +126,15 @@ export function validateEventDraft<T extends EventDraftForValidation>(draft: T):
   }
 
   if (!REPEAT_VALUES.has(draft.repeat)) add('invalid-repeat', '重复规则不受支持');
+  if (draft.recurrenceUntilDate && !isValidEventDate(draft.recurrenceUntilDate)) {
+    add('invalid-recurrence-until-date', '请选择有效的截止时间');
+  }
+  if (draft.repeat && draft.repeat !== 'once'
+    && isValidEventDate(draft.startDate)
+    && isValidEventDate(draft.recurrenceUntilDate)
+    && draft.recurrenceUntilDate < draft.startDate) {
+    add('recurrence-until-before-start', '截止日期需晚于开始日期');
+  }
   if (draft.reminderMinutes != null && (
     !Number.isSafeInteger(draft.reminderMinutes) || draft.reminderMinutes < 0
   )) {
@@ -131,6 +148,9 @@ export function validateEventDraft<T extends EventDraftForValidation>(draft: T):
     endDate,
     isAllDay: draft.isAllDay ?? false,
     repeat: draft.repeat ?? 'once',
+    recurrenceUntilDate: draft.repeat && draft.repeat !== 'once'
+      ? draft.recurrenceUntilDate
+      : undefined,
     reminderMinutes: draft.reminderMinutes ?? null,
     spanning: Boolean(endDate),
   } as T : null;

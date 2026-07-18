@@ -166,6 +166,23 @@ def validate_audit_report(
         else:
             if not source_path.is_file() or not isinstance(expected, str) or sha256_file(source_path) != expected:
                 errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {source_relative}"))
+        inputs = report.get("inputs")
+        if not isinstance(inputs, list) or not inputs:
+            errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: no bound Kotlin/Java/XML inputs"))
+        else:
+            for item in inputs:
+                if not isinstance(item, dict):
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: invalid source input"))
+                    continue
+                input_relative = item.get("path")
+                input_sha = item.get("sha256")
+                try:
+                    input_path = repo_relative_file(repo_root, input_relative)
+                except (TypeError, ValueError) as error:
+                    errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: source input: {error}"))
+                    continue
+                if not input_path.is_file() or not isinstance(input_sha, str) or sha256_file(input_path) != input_sha:
+                    errors.append(GateError("AUDIT_REPORT_STALE", f"{kind}: {input_relative}"))
         detector = report.get("detector_jar")
         if not isinstance(detector, dict):
             errors.append(GateError("AUDIT_REPORT_INVALID", f"{kind}: detector JAR is not bound"))
@@ -486,6 +503,71 @@ def unique_objects(items: Any, key: str, label: str, errors: list[GateError]) ->
     return result
 
 
+def validate_kotlin_evidence_references(
+    repo_root: Path,
+    known_ids: set[str],
+) -> list[GateError]:
+    errors: list[GateError] = []
+    source_root = repo_root / "modules/laoji-native-platform/android/src"
+    if not source_root.is_dir():
+        return errors
+    annotation_re = re.compile(r"@FeishuEvidence\s*\((.*?)\)", re.DOTALL)
+    runtime_call_re = re.compile(r"FeishuEvidenceRuntime\.bind\s*\(")
+    runtime_bind_re = re.compile(
+        r'FeishuEvidenceRuntime\.bind\s*\([^,]+,\s*"([^"]+)"',
+        re.DOTALL,
+    )
+    string_re = re.compile(r'"([^"\\]*(?:\\.[^"\\]*)*)"')
+    for path in sorted((*source_root.rglob("*.kt"), *source_root.rglob("*.java"))):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        relative = path.relative_to(repo_root).as_posix()
+        for annotation in annotation_re.finditer(text):
+            line = text.count("\n", 0, annotation.start()) + 1
+            identifiers = string_re.findall(annotation.group(1))
+            non_literal = re.sub(r"[\s,]", "", string_re.sub("", annotation.group(1)))
+            if not identifiers or non_literal:
+                errors.append(GateError(
+                    "EVIDENCE_ANNOTATION_INVALID",
+                    f"{relative}:{line}: @FeishuEvidence requires literal IDs",
+                ))
+                if not identifiers:
+                    continue
+            for identifier in identifiers:
+                if not EVIDENCE_ID_RE.fullmatch(identifier):
+                    errors.append(GateError(
+                        "EVIDENCE_ANNOTATION_INVALID",
+                        f"{relative}:{line}: {identifier}",
+                    ))
+                elif identifier not in known_ids:
+                    errors.append(GateError(
+                        "EVIDENCE_REFERENCE_UNKNOWN",
+                        f"{relative}:{line}: {identifier}",
+                    ))
+        runtime_binds = list(runtime_bind_re.finditer(text))
+        matched_starts = {runtime_bind.start() for runtime_bind in runtime_binds}
+        for runtime_call in runtime_call_re.finditer(text):
+            if runtime_call.start() not in matched_starts:
+                line = text.count("\n", 0, runtime_call.start()) + 1
+                errors.append(GateError(
+                    "EVIDENCE_RUNTIME_BIND_INVALID",
+                    f"{relative}:{line}: runtime evidence ID must be literal",
+                ))
+        for runtime_bind in runtime_binds:
+            line = text.count("\n", 0, runtime_bind.start()) + 1
+            identifier = runtime_bind.group(1)
+            if not EVIDENCE_ID_RE.fullmatch(identifier):
+                errors.append(GateError(
+                    "EVIDENCE_RUNTIME_BIND_INVALID",
+                    f"{relative}:{line}: {identifier}",
+                ))
+            elif identifier not in known_ids:
+                errors.append(GateError(
+                    "EVIDENCE_REFERENCE_UNKNOWN",
+                    f"{relative}:{line}: {identifier}",
+                ))
+    return errors
+
+
 def validate(
     repo_root: Path,
     manifest_path: Path,
@@ -534,6 +616,7 @@ def validate(
     inventory = unique_objects(capability_inventory.get("entries"), "id", "capability inventory", errors)
     tombstones = unique_objects(tombstones_doc.get("tombstones"), "id", "tombstones", errors)
     errors.extend(sync_ledger(repo_root, manifest, write=False))
+    errors.extend(validate_kotlin_evidence_references(repo_root, set(inventory)))
 
     for evidence_id, item in inventory.items():
         if not EVIDENCE_ID_RE.fullmatch(evidence_id):
