@@ -9,13 +9,15 @@ package com.laoji.nativeplatform.calendar
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.TextUtils
@@ -30,6 +32,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -46,6 +49,7 @@ interface MonthCalendarListener {
   fun onMonthChanged(monthEpochDay: Int)
   fun onDateSelected(epochDay: Int)
   fun onEventOpened(event: CalendarEvent)
+  fun onEmptyCreateRequested(epochDay: Int)
 }
 
 private interface MonthWeekRowListener {
@@ -63,6 +67,7 @@ private data class MonthEventHit(
 )
 
 // CAL-MONTH-EXPAND-001: Weekday chrome stays outside the independently moving week rows.
+@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class MonthWeekdayHeaderView(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val weekdayPaint = CalendarUi.textPaint(context, palette.textSecondary, 12f, true)
@@ -95,6 +100,8 @@ private class MonthWeekdayHeaderView(context: Context) : View(context) {
 }
 
 // CAL-MONTH-EXPAND-001: Each visible week is its own View and owns only that row's date/event drawing.
+// CAL-MONTH-SPAN-001: one MonthEventSegment maps to one continuous week-local hit/draw rectangle.
+@FeishuEvidence("CAL-MONTH-SPAN-001")
 private class MonthWeekRowView(context: Context) : View(context) {
   companion object {
     private const val DATE_VIRTUAL_ID_BASE = 1
@@ -111,7 +118,8 @@ private class MonthWeekRowView(context: Context) : View(context) {
   )
   private val mutedDayPaint = CalendarUi.textPaint(
     context,
-    palette.textSecondary,
+    // Feishu re3/C153854f uses ud_N400 for dates outside the displayed month.
+    palette.textDisabled,
     MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
   )
   private val selectedDayPaint = CalendarUi.textPaint(
@@ -125,7 +133,15 @@ private class MonthWeekRowView(context: Context) : View(context) {
     MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
   )
   private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
-  private val eventTextPaint = CalendarUi.textPaint(context, palette.eventText, 10f, true)
+  private val eventTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.eventText
+    // Feishu's compact month canvas uses a dp-sized paint, independently from
+    // the 14sp title used by the expanded event list and day timeline.
+    textSize = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_TEXT_SIZE_DP)
+  }
+  // [INFERENCE] LaoJi currently has one calendar color, so the source
+  // EventChipView calendar-color strip maps to the Calendar accent token.
+  private val eventStripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.divider
     strokeWidth = maxOf(1f, 0.5f * density)
@@ -176,6 +192,12 @@ private class MonthWeekRowView(context: Context) : View(context) {
     segments: List<MonthEventSegment>,
     listener: MonthWeekRowListener?,
   ) {
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-MONTH-SPAN-001",
+      "month-week-row",
+      "calendar-month-week-row-$monthEpochDay-$rowIndex",
+    )
     this.monthEpochDay = monthEpochDay
     this.rowStartEpochDay = rowStartEpochDay
     this.rowIndex = rowIndex
@@ -274,12 +296,22 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val rect = RectF(horizontal.left, top, horizontal.right, top + chipHeight)
       val radius = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_RADIUS_DP)
       canvas.drawRoundRect(rect, radius, radius, eventPaint)
-      val title = CalendarUi.ellipsize(
-        segment.event.title.ifBlank { "日程" },
-        eventTextPaint,
-        rect.width() - CalendarUi.dp(context, 8f),
+      val stripInset = CalendarUi.dp(context, 0.5f)
+      val stripLeft = rect.left + stripInset
+      canvas.drawRect(
+        stripLeft,
+        rect.top + stripInset,
+        stripLeft + CalendarUi.dp(context, 2f),
+        rect.bottom - stripInset,
+        eventStripPaint,
       )
-      canvas.drawText(title, rect.left + CalendarUi.dp(context, 4f), rect.top + CalendarUi.dp(context, 11.5f), eventTextPaint)
+      val title = CalendarUi.ellipsize(
+        CalendarUi.listEventTitle(segment.event.title),
+        eventTextPaint,
+        rect.width() - CalendarUi.dp(context, 10f),
+      )
+      val titleBaseline = rect.centerY() - (eventTextPaint.ascent() + eventTextPaint.descent()) / 2f
+      canvas.drawText(title, rect.left + CalendarUi.dp(context, 6f), titleBaseline, eventTextPaint)
       eventHits += MonthEventHit(CalendarRect(rect.left, rect.top, rect.right, rect.bottom), segment.event)
       eventVirtualIds.getOrPut(segment.event.identity) { EVENT_VIRTUAL_ID_BASE + eventVirtualIds.size }
     }
@@ -438,7 +470,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
     val description = when {
       virtualId in DATE_VIRTUAL_ID_BASE until DATE_VIRTUAL_ID_BASE + MonthExpandedLayoutContract.DAY_PAGE_COUNT ->
         dateDescription(virtualId - DATE_VIRTUAL_ID_BASE)
-      else -> eventHitForVirtualId(virtualId)?.event?.title?.ifBlank { "日程" }
+      else -> eventHitForVirtualId(virtualId)?.event?.title?.let(CalendarUi::listEventTitle)
     } ?: return
     val event = AccessibilityEvent.obtain(eventType).apply {
       packageName = context.packageName
@@ -478,7 +510,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val (parentBounds, screenBounds) = clippedAccessibilityBounds(bounds) ?: return null
       val description = dateColumn?.let(::dateDescription)
         ?: requireNotNull(eventHit).event.let { hitEvent ->
-          "${hitEvent.title.ifBlank { "日程" }}，${dateDescription(hitEvent.startEpochDay.coerceIn(rowStartEpochDay, rowStartEpochDay + 6) - rowStartEpochDay)}"
+          "${CalendarUi.listEventTitle(hitEvent.title)}，${dateDescription(hitEvent.startEpochDay.coerceIn(rowStartEpochDay, rowStartEpochDay + 6) - rowStartEpochDay)}"
         }
       return AccessibilityNodeInfo.obtain().apply {
         setSource(this@MonthWeekRowView, virtualViewId)
@@ -586,12 +618,13 @@ private class MonthWeekRowView(context: Context) : View(context) {
 }
 
 // CAL-MONTH-EXPAND-001: Each day page owns its ScrollView so same-week column changes preserve scroll state.
+@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class SelectedDayPageView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
-  private val timeFormatter = CalendarSystemTimeFormatter(context)
+  private val timeFormatter = CalendarTimeFormatter()
   private val eventList = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
-    setBackgroundColor(palette.surface)
+    setBackgroundColor(palette.surfaceMuted)
   }
   private val scrollView = ScrollView(context).apply {
     isFillViewport = true
@@ -601,20 +634,55 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
       LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
     )
   }
-  private val emptyView = TextView(context).apply {
-    text = "暂无日程"
+  private val emptyView = LinearLayout(context).apply {
+    orientation = LinearLayout.VERTICAL
     gravity = Gravity.CENTER
-    setTextColor(palette.textSecondary)
-    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+    setBackgroundColor(palette.background)
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    contentDescription = "暂无日程安排"
+  }
+  private val emptyImage = ImageView(context).apply {
+    setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_empty)
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+  private val emptyMessage = LinearLayout(context).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER
+  }
+  private val emptyMessageText = TextView(context).apply {
+    text = "暂无日程安排，"
+    setTextColor(palette.textSecondary)
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+  }
+  private val emptyCreateText = TextView(context).apply {
+    text = "点击创建"
+    setTextColor(palette.accent)
+    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+    isClickable = true
+    isFocusable = true
+    contentDescription = "点击创建日程"
   }
   private var boundEpochDay: Int? = null
   private var bindGeneration = 0
 
   init {
-    setBackgroundColor(palette.surface)
+    setBackgroundColor(palette.surfaceMuted)
     addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    emptyMessage.addView(emptyMessageText)
+    emptyMessage.addView(emptyCreateText)
+    emptyView.addView(
+      emptyImage,
+      LinearLayout.LayoutParams(
+        CalendarUi.dp(context, 100f).roundToInt(),
+        CalendarUi.dp(context, 100f).roundToInt(),
+      ),
+    )
+    emptyView.addView(emptyMessage, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+      topMargin = CalendarUi.dp(context, 12f).roundToInt()
+    })
     addView(emptyView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    emptyImage.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    emptyMessageText.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
 
   fun bind(
@@ -633,16 +701,14 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     eventList.removeAllViews()
     emptyView.visibility = if (events.isEmpty()) VISIBLE else GONE
     scrollView.visibility = if (events.isEmpty()) GONE else VISIBLE
+    emptyCreateText.setOnClickListener { listener?.onEmptyCreateRequested(epochDay) }
     val date = CalendarDateMath.fromEpochDay(epochDay)
     contentDescription = String.format(Locale.getDefault(), "%d-%d-%d", date.year, date.month, date.day)
 
-    events.forEachIndexed { index, event ->
-      if (index > 0) {
-        eventList.addView(View(context).apply { setBackgroundColor(palette.divider) }, rowLayoutParams(1f))
-      }
+    events.forEach { event ->
       eventList.addView(
         createEventRow(epochDay, event, listener),
-        rowLayoutParams(MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP),
+        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
       )
     }
     scrollView.post {
@@ -657,61 +723,90 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     event: CalendarEvent,
     listener: MonthCalendarListener?,
   ): View = LinearLayout(context).apply {
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-MONTH-EXPAND-001",
+      "selected-event-row",
+      "calendar-selected-event-${event.identity}",
+    )
     orientation = LinearLayout.HORIZONTAL
-    gravity = Gravity.CENTER_VERTICAL
+    gravity = Gravity.TOP
+    minimumHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP).roundToInt()
     setPadding(
-      CalendarUi.dp(context, 12f).roundToInt(),
-      CalendarUi.dp(context, 6f).roundToInt(),
-      CalendarUi.dp(context, 12f).roundToInt(),
+      0,
+      0,
+      0,
       CalendarUi.dp(context, 6f).roundToInt(),
     )
     isClickable = true
     isFocusable = true
-    background = CalendarUi.background(palette.surface, 0f, context)
-    contentDescription = "${eventTimeLabel(epochDay, event)} ${event.title.ifBlank { "日程" }}"
+    background = StateListDrawable().apply {
+      addState(
+        intArrayOf(android.R.attr.state_pressed),
+        CalendarUi.background(palette.fillPressed, 0f, context),
+      )
+      addState(intArrayOf(), CalendarUi.background(palette.surfaceMuted, 0f, context))
+    }
+    contentDescription = "${CalendarUi.listEventTitle(event.title)}，${eventTimeLabel(epochDay, event)}"
     setOnClickListener { listener?.onEventOpened(event) }
 
     addView(
-      View(context).apply { background = CalendarUi.background(palette.eventFill, 2f, context) },
+      // [SOURCE] EventChipView draws a 2dp calendar strip from almost the
+      // full chip top to bottom. [INFERENCE] LaoJi maps its sole calendar
+      // color to the Calendar accent token.
+      View(context).apply { setBackgroundColor(palette.accent) },
       LinearLayout.LayoutParams(
-        CalendarUi.dp(context, 3f).roundToInt(),
-        CalendarUi.dp(context, 32f).roundToInt(),
-      ).apply { marginEnd = CalendarUi.dp(context, 9f).roundToInt() },
+        CalendarUi.dp(context, 2f).roundToInt(),
+        CalendarUi.dp(
+          context,
+          MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP - 14f,
+        ).roundToInt(),
+      ).apply {
+        marginStart = CalendarUi.dp(context, 20f).roundToInt()
+        topMargin = CalendarUi.dp(context, 7f).roundToInt()
+      },
     )
     addView(
-      TextView(context).apply {
-        text = eventTimeLabel(epochDay, event)
-        gravity = Gravity.CENTER_VERTICAL
-        setTextColor(palette.textSecondary)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-        maxLines = 2
+      LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(
+          TextView(context).apply {
+            text = CalendarUi.listEventTitle(event.title)
+            setTextColor(palette.textPrimary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+          },
+          LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+        )
+        addView(
+          TextView(context).apply {
+            text = eventTimeLabel(epochDay, event)
+            setTextColor(palette.textPrimary)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+          },
+          LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+        )
       },
-      LinearLayout.LayoutParams(CalendarUi.dp(context, 64f).roundToInt(), LayoutParams.MATCH_PARENT),
-    )
-    addView(
-      TextView(context).apply {
-        text = event.title.ifBlank { "日程" }
-        gravity = Gravity.CENTER_VERTICAL
-        setTextColor(palette.textPrimary)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        maxLines = 2
-        ellipsize = TextUtils.TruncateAt.END
+      LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
+        marginStart = CalendarUi.dp(context, 14f).roundToInt()
+        marginEnd = CalendarUi.dp(context, 14f).roundToInt()
+        topMargin = CalendarUi.dp(context, 7f).roundToInt()
       },
-      LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f),
     )
   }
-
-  private fun rowLayoutParams(heightDp: Float): LinearLayout.LayoutParams =
-    LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, CalendarUi.dp(context, heightDp).roundToInt().coerceAtLeast(1))
 
   private fun eventTimeLabel(epochDay: Int, event: CalendarEvent): String {
     if (event.allDay) return "全天"
     val bounds = MonthExpandedLayoutContract.eventTimeBounds(epochDay, event)
-    return "${timeFormatter.minute(bounds.startMinute)}\n${timeFormatter.minute(bounds.endMinute)}"
+    return timeFormatter.range(bounds.startMinute, bounds.endMinute)
   }
 }
 
 // CAL-MONTH-EXPAND-001: The middle owner is a fixed seven-page pager, matching one page per weekday.
+@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val pager = ViewPager2(context)
@@ -736,7 +831,7 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
     setBackgroundColor(palette.surface)
     pager.apply {
       adapter = this@SelectedDayEventsOwner.adapter
-      offscreenPageLimit = MonthExpandedLayoutContract.DAY_PAGE_COUNT
+      setSourceOffscreenPageLimit(this)
       isSaveEnabled = false
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
       registerOnPageChangeCallback(pageCallback)
@@ -745,6 +840,11 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
     (pager.getChildAt(0) as? RecyclerView)?.apply {
       setItemViewCacheSize(MonthExpandedLayoutContract.DAY_PAGE_COUNT)
       overScrollMode = OVER_SCROLL_NEVER
+      // Data rebinding is part of a date tap, not a page transition. The
+      // default RecyclerView change animator can move/reveal the old page
+      // while notifyItemRangeChanged runs, which looks like an unintended
+      // right-swipe even when ViewPager2 is told to jump without smoothing.
+      itemAnimator = null
       setOnTouchListener { _, event ->
         if (event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL) {
           this@SelectedDayEventsOwner.parent?.requestDisallowInterceptTouchEvent(true)
@@ -753,7 +853,14 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
       }
     }
     visibility = INVISIBLE
-    alpha = 0f
+    alpha = 1f
+  }
+
+  // ViewPager2's lint annotation only accepts its sentinel constant, while the
+  // source uses a positive cache size to retain all seven selected-day pages.
+  @SuppressLint("WrongConstant")
+  private fun setSourceOffscreenPageLimit(target: ViewPager2) {
+    target.offscreenPageLimit = MonthExpandedLayoutContract.DAY_PAGE_COUNT
   }
 
   fun bindWeek(
@@ -770,11 +877,23 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
     this.pageListener = pageListener
     suppressPageCallbacks = true
     val generation = ++selectionGeneration
+    if (!smoothColumn) {
+      // ViewPager2 can draw the previously attached page for one frame after a
+      // non-animated setCurrentItem/adapter rebind. Hide only its content until
+      // RecyclerView has completed two frame passes so a date tap cannot look
+      // like a right-swipe.
+      pager.visibility = INVISIBLE
+    }
     adapter.bindWeek(weekStartEpochDay, sourceEvents, calendarListener, sameWeek)
     selectedColumn = selection.column.coerceIn(0, MonthExpandedLayoutContract.DAY_PAGE_COUNT - 1)
     pager.setCurrentItem(selectedColumn, smoothColumn && sameWeek)
-    pager.post {
-      if (generation == selectionGeneration) suppressPageCallbacks = false
+    pager.postOnAnimation {
+      pager.postOnAnimation {
+        if (generation == selectionGeneration) {
+          suppressPageCallbacks = false
+          pager.visibility = VISIBLE
+        }
+      }
     }
   }
 
@@ -787,6 +906,7 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
     pageListener = null
     adapter.reset()
     pager.setCurrentItem(0, false)
+    pager.visibility = INVISIBLE
   }
 
   private inner class SelectedDayPageAdapter : RecyclerView.Adapter<SelectedDayPageHolder>() {
@@ -848,6 +968,7 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
 }
 
 // CAL-MONTH-EXPAND-001: A month page composes 4-6 week Views plus one selected-day events owner.
+@FeishuEvidence("CAL-MONTH-EXPAND-001", "CAL-MONTH-EXPAND-HOST-001", "CAL-MONTH-SPAN-001")
 private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekRowListener, SelectedDayPageListener {
   private val palette = CalendarUi.palette(context)
   private val weekdayHeight = CalendarUi.dp(context, 34f).roundToInt()
@@ -924,7 +1045,16 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
     super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     val measuredBodyHeight = (measuredHeight - weekdayHeight).coerceAtLeast(0)
-    var geometryChanged = updateBaseRowLayoutParams(measuredBodyHeight)
+    var geometryChanged = updateRowHeightLayoutParams(measuredBodyHeight)
+    if (!transitioning) {
+      geometryChanged = updateRowTopLayoutParams(
+        MonthExpandedLayoutContract.rowTargetTops(
+          measuredBodyHeight.toFloat(),
+          weekCount,
+          expandedSelection?.row,
+        ),
+      ) || geometryChanged
+    }
     expandedSelection?.let { selection ->
       geometryChanged = updateEventOwnerLayoutParams(selection, measuredBodyHeight) || geometryChanged
     }
@@ -946,12 +1076,23 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     }
     val transition = MonthExpandedLayoutContract.resolveTap(expandedSelection, epochDay, row, column)
     when (transition.action) {
-      MonthExpandedTapAction.OPEN -> openSelection(requireNotNull(transition.targetSelection))
-      MonthExpandedTapAction.CLOSE -> closeSelection()
-      MonthExpandedTapAction.SWITCH_WITHIN_ROW -> switchWithinRow(requireNotNull(transition.targetSelection))
-      MonthExpandedTapAction.CLOSE_THEN_OPEN -> closeThenOpen(requireNotNull(transition.targetSelection))
+      MonthExpandedTapAction.OPEN -> {
+        openSelection(requireNotNull(transition.targetSelection))
+        listener?.onDateSelected(epochDay)
+      }
+      MonthExpandedTapAction.CLOSE -> {
+        closeSelection()
+        listener?.onDateSelected(closeSelectionEpochDay())
+      }
+      MonthExpandedTapAction.SWITCH_WITHIN_ROW -> {
+        switchWithinRow(requireNotNull(transition.targetSelection))
+        listener?.onDateSelected(epochDay)
+      }
+      MonthExpandedTapAction.CLOSE_THEN_OPEN -> {
+        closeThenOpen(requireNotNull(transition.targetSelection))
+        listener?.onDateSelected(epochDay)
+      }
     }
-    listener?.onDateSelected(epochDay)
   }
 
   fun openCrossMonthSelection(epochDay: Int): Boolean {
@@ -1053,19 +1194,28 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     expandedSelection = selection
     displayedSelectedEpochDay = selection.epochDay
     bindWeekRows()
-    bindEventOwner(selection, smoothColumn = true)
+    // Feishu's month click path updates the selected column and data in place;
+    // it does not run the MonthDayViewPager's horizontal gesture animation.
+    // Keep horizontal motion reserved for an actual user swipe so a date tap
+    // cannot make the event list appear to slide in from the right.
+    bindEventOwner(selection, smoothColumn = false)
     applyGeometryImmediately()
   }
 
   private fun closeThenOpen(selection: MonthExpandedSelection) {
     pendingSelection = selection
     expandedSelection = null
-    displayedSelectedEpochDay = null
-    selectionClearedByClose = true
+    displayedSelectedEpochDay = selection.epochDay
+    selectionClearedByClose = false
     bindWeekRows()
-    hideEventOwnerImmediately()
+    // A cross-row change owns one vertical close/open motion. The selected-day
+    // pager must jump to the new column here; animating it and rebinding it
+    // again after the close produces the visible double right-swipe.
+    bindEventOwner(selection, smoothColumn = false)
+    eventOwner.visibility = VISIBLE
+    eventOwner.alpha = 1f
     transitioning = true
-    animateRows(null) {
+    animateRows(null, keepEventOwnerVisible = true) {
       pendingSelection = null
       selectionClearedByClose = false
       displayedSelectedEpochDay = selection.epochDay
@@ -1187,15 +1337,13 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
   private fun applyGeometryImmediately() {
     cancelActiveAnimation()
     transitioning = false
-    updateBaseRowLayouts()
+    updateRowHeights()
     val selection = expandedSelection
     val targets = MonthExpandedLayoutContract.rowTargetTops(bodyHeight().toFloat(), weekCount, selection?.row)
-    rowViews.forEachIndexed { index, row ->
-      row.translationY = targets[index] - rowBaseTop(index)
-    }
+    updateRowTops(targets)
     if (selection == null) {
       eventOwner.visibility = INVISIBLE
-      eventOwner.alpha = 0f
+      eventOwner.alpha = 1f
     } else {
       updateEventOwnerLayout(selection)
       eventOwner.visibility = VISIBLE
@@ -1203,31 +1351,43 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     }
   }
 
-  private fun animateRows(selection: MonthExpandedSelection?, onEnd: () -> Unit) {
+  private fun animateRows(
+    selection: MonthExpandedSelection?,
+    keepEventOwnerVisible: Boolean = false,
+    onEnd: () -> Unit,
+  ) {
     cancelActiveAnimation()
-    updateBaseRowLayouts()
+    updateRowHeights()
     if (selection != null) {
       updateEventOwnerLayout(selection)
-      if (eventOwner.visibility != VISIBLE) {
-        eventOwner.alpha = 0f
-        eventOwner.visibility = VISIBLE
-      }
+      eventOwner.visibility = VISIBLE
+      eventOwner.alpha = 1f
     }
 
     val targets = MonthExpandedLayoutContract.rowTargetTops(bodyHeight().toFloat(), weekCount, selection?.row)
     if (bodyHeight() == 0 || rowViews.isEmpty()) {
-      rowViews.forEachIndexed { index, row -> row.translationY = targets[index] - rowBaseTop(index) }
-      finishOwnerVisibility(selection)
+      updateRowTops(targets)
+      finishOwnerVisibility(selection, keepEventOwnerVisible)
       onEnd()
       return
     }
 
     val animators = mutableListOf<Animator>()
     rowViews.forEachIndexed { index, row ->
-      animators += ObjectAnimator.ofFloat(row, View.TRANSLATION_Y, targets[index] - rowBaseTop(index))
-    }
-    if (selection != null) {
-      animators += ObjectAnimator.ofFloat(eventOwner, View.ALPHA, 1f)
+      row.translationY = 0f
+      val targetTop = targets[index].roundToInt()
+      val startTop = row.top.takeIf { row.isLaidOut } ?: (row.layoutParams as LayoutParams).topMargin
+      animators += ValueAnimator.ofInt(startTop, targetTop).apply {
+        addUpdateListener { animation ->
+          val top = animation.animatedValue as Int
+          val params = row.layoutParams as LayoutParams
+          if (params.leftMargin != 0 || params.topMargin != top) {
+            params.leftMargin = 0
+            params.topMargin = top
+            row.layoutParams = params
+          }
+        }
+      }
     }
 
     val generation = ++animationGeneration
@@ -1240,7 +1400,8 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
         override fun onAnimationEnd(animation: Animator) {
           if (generation != animationGeneration) return
           transitionAnimator = null
-          finishOwnerVisibility(selection)
+          updateRowTops(targets)
+          finishOwnerVisibility(selection, keepEventOwnerVisible)
           onEnd()
         }
       })
@@ -1248,10 +1409,13 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     }
   }
 
-  private fun finishOwnerVisibility(selection: MonthExpandedSelection?) {
-    if (selection == null) {
+  private fun finishOwnerVisibility(
+    selection: MonthExpandedSelection?,
+    keepEventOwnerVisible: Boolean = false,
+  ) {
+    if (selection == null && !keepEventOwnerVisible) {
       eventOwner.visibility = INVISIBLE
-      eventOwner.alpha = 0f
+      eventOwner.alpha = 1f
     } else {
       eventOwner.visibility = VISIBLE
       eventOwner.alpha = 1f
@@ -1260,15 +1424,15 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
 
   private fun hideEventOwnerImmediately() {
     eventOwner.visibility = INVISIBLE
-    eventOwner.alpha = 0f
+    eventOwner.alpha = 1f
     eventOwner.reset()
   }
 
-  private fun updateBaseRowLayouts() {
-    if (updateBaseRowLayoutParams(bodyHeight())) rowsContainer.requestLayout()
+  private fun updateRowHeights() {
+    if (updateRowHeightLayoutParams(bodyHeight())) rowsContainer.requestLayout()
   }
 
-  private fun updateBaseRowLayoutParams(availableHeight: Int): Boolean {
+  private fun updateRowHeightLayoutParams(availableHeight: Int): Boolean {
     val rowHeight = availableHeight.toFloat() / weekCount
     var changed = false
     rowViews.forEachIndexed { index, row ->
@@ -1276,9 +1440,27 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
       val bottom = ((index + 1) * rowHeight).roundToInt()
       val params = row.layoutParams as LayoutParams
       val nextHeight = (bottom - top).coerceAtLeast(1)
-      if (params.width != LayoutParams.MATCH_PARENT || params.height != nextHeight || params.topMargin != top) {
+      if (params.width != LayoutParams.MATCH_PARENT || params.height != nextHeight) {
         params.width = LayoutParams.MATCH_PARENT
         params.height = nextHeight
+        changed = true
+      }
+    }
+    return changed
+  }
+
+  private fun updateRowTops(targets: List<Float>) {
+    if (updateRowTopLayoutParams(targets)) rowsContainer.requestLayout()
+  }
+
+  private fun updateRowTopLayoutParams(targets: List<Float>): Boolean {
+    var changed = false
+    rowViews.forEachIndexed { index, row ->
+      row.translationY = 0f
+      val top = targets[index].roundToInt()
+      val params = row.layoutParams as LayoutParams
+      if (params.leftMargin != 0 || params.topMargin != top) {
+        params.leftMargin = 0
         params.topMargin = top
         changed = true
       }
@@ -1312,10 +1494,14 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     return true
   }
 
-  private fun rowBaseTop(index: Int): Float =
-    (rowViews[index].layoutParams as LayoutParams).topMargin.toFloat()
-
   private fun bodyHeight(): Int = (height - weekdayHeight).coerceAtLeast(0)
+
+  private fun closeSelectionEpochDay(): Int = MonthExpandedLayoutContract.closeSelectionEpochDay(
+    todayEpochDay = snapshot?.todayEpochDay,
+    monthEpochDay = monthEpochDay,
+    gridStartEpochDay = CalendarDateMath.monthGridStart(monthEpochDay),
+    weekCount = weekCount,
+  )
 
   private fun cancelActiveAnimation() {
     animationGeneration += 1
@@ -1353,7 +1539,7 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
     FeishuEvidenceRuntime.bind(this, "CAL-MONTH-EXPAND-HOST-001", "month-pager", "calendar-month-pager")
     pager.apply {
       orientation = ViewPager2.ORIENTATION_HORIZONTAL
-      offscreenPageLimit = MonthPagerContract.PAGE_COUNT
+      setSourceOffscreenPageLimit(this)
       adapter = this@ThreePageMonthPager.adapter
       isSaveEnabled = false
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -1370,6 +1556,13 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
     clipChildren = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     recenterToBoundPages()
+  }
+
+  // The source keeps the fixed left/center/right month pages warm. A positive
+  // limit is valid at runtime even though lint cannot infer that contract.
+  @SuppressLint("WrongConstant")
+  private fun setSourceOffscreenPageLimit(target: ViewPager2) {
+    target.offscreenPageLimit = MonthPagerContract.PAGE_COUNT
   }
 
   fun setListener(listener: MonthCalendarListener?) {
@@ -1481,6 +1674,10 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
 
   override fun onEventOpened(event: CalendarEvent) {
     externalListener?.onEventOpened(event)
+  }
+
+  override fun onEmptyCreateRequested(epochDay: Int) {
+    externalListener?.onEmptyCreateRequested(epochDay)
   }
 
   private fun schedulePendingCrossMonthOpen(token: Int, attempt: Int) {

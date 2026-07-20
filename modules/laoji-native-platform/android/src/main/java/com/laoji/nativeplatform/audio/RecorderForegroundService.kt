@@ -331,10 +331,10 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val channel = NotificationChannel(
       NOTIFICATION_CHANNEL_ID,
-      "LaoJi recording",
+      "会议录音",
       NotificationManager.IMPORTANCE_LOW,
     ).apply {
-      description = "Active microphone recording"
+      description = "正在使用麦克风录制会议"
       setSound(null, null)
       enableVibration(false)
     }
@@ -343,10 +343,13 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
 
   private fun buildNotification(state: RecorderState, mode: RecorderMode): Notification {
     val text = when (state) {
-      RecorderState.PREPARING -> "Preparing microphone"
-      RecorderState.PAUSED -> "Recording paused"
-      RecorderState.STOPPING -> "Saving recording"
-      else -> if (mode == RecorderMode.LOCAL_ONLY) "Local recording active" else "Recording and transcription active"
+      RecorderState.IDLE -> "等待开始录音"
+      RecorderState.PREPARING -> "正在准备麦克风"
+      RecorderState.RECORDING -> if (mode == RecorderMode.LOCAL_ONLY) "正在录音" else "正在录音并转写"
+      RecorderState.PAUSED -> "录音已暂停"
+      RecorderState.STOPPING -> "正在保存会议记录"
+      RecorderState.LOCAL_SAVED -> "会议录音已保存在本机"
+      RecorderState.FAILED -> "会议录音出现问题"
     }
     val icon = applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
@@ -360,7 +363,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
     }
     return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
       .setSmallIcon(icon)
-      .setContentTitle("LaoJi")
+      .setContentTitle("老记")
       .setContentText(text)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)

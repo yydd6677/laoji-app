@@ -1,7 +1,6 @@
 import type { CalEvent } from '../types';
 
 export type EventDraftValidationCode =
-  | 'missing-title'
   | 'invalid-start-date'
   | 'invalid-end-date'
   | 'end-before-start'
@@ -92,7 +91,6 @@ export function validateEventDraft<T extends EventDraftForValidation>(draft: T):
   const issues: EventDraftValidationIssue[] = [];
   const add = (code: EventDraftValidationCode, message: string) => issues.push({ code, message });
 
-  if (!draft.title.trim()) add('missing-title', '请输入事项标题');
   if (!isValidEventDate(draft.startDate)) add('invalid-start-date', '请选择有效的开始日期');
   if (draft.endDate && !isValidEventDate(draft.endDate)) add('invalid-end-date', '请选择有效的结束日期');
   if (isValidEventDate(draft.startDate) && draft.endDate && isValidEventDate(draft.endDate)

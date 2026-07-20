@@ -35,6 +35,7 @@ import {
   sundayStartOfWeek,
   timeToMinutes,
 } from '../utils/calendarDate';
+import { eventListTitle } from '../utils/eventTitle';
 
 const TIME_GUTTER = 56;
 const DAY_CANVAS_HEIGHT = 1236;
@@ -685,10 +686,10 @@ function DayPage({
                   accessibilityRole="button"
                   accessible={active}
                   accessibilityState={{ disabled: !active }}
-                  accessibilityLabel={`${event.title}，全天`}
+                  accessibilityLabel={`${eventListTitle(event.title)}，全天`}
                   accessibilityHint="双击查看日程详情"
                 >
-                  <Text style={s.allDayTitle} numberOfLines={1} accessible={false}>{event.title}</Text>
+                  <Text style={s.allDayTitle} numberOfLines={1} accessible={false}>{eventListTitle(event.title)}</Text>
                 </TouchableOpacity>
               ))}
               {!allDayExpanded && allDayEvents.length > ALL_DAY_COLLAPSED_ROWS ? (
@@ -900,7 +901,7 @@ function DayPage({
                 accessibilityRole={selectedEdit ? 'adjustable' : 'button'}
                 accessible={active}
                 accessibilityState={{ disabled: !active, busy: Boolean(selectedEdit?.saving) }}
-                accessibilityLabel={`${item.event.title}，${formatTimelineRange(displayStart, displayEnd)}`}
+                accessibilityLabel={`${eventListTitle(item.event.title)}，${formatTimelineRange(displayStart, displayEnd)}`}
                 accessibilityHint={selectedEdit
                   ? '上下调整移动十五分钟，确认保存，取消恢复原时间'
                   : onChangeEventTime && canEditTimelineItem(item)
@@ -926,7 +927,7 @@ function DayPage({
                 {...(selectedEdit ? moveTimelineResponder.panHandlers : {})}
               >
                 <Text style={s.timelineEventTitle} numberOfLines={height < 39 ? 1 : 2} accessible={false}>
-                  {item.event.title}
+                  {eventListTitle(item.event.title)}
                 </Text>
                 {height >= 39 ? (
                   <Text style={s.timelineEventTime} numberOfLines={1} accessible={false}>

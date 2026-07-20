@@ -84,6 +84,8 @@ export function nativeCalendarEventSnapshot(
     allDay,
     editable: true,
     revision: Number.isInteger(event.revision) ? event.revision! : 0,
+    // CAL-DAY-COMPOSE-001: preserve a server/source rectangle without recomputing it in JS.
+    instanceLayout: event.instanceLayout ?? null,
   };
 }
 

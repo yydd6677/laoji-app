@@ -39,6 +39,15 @@ export interface CalEvent {
   clientRequestId?: string;
   reminderMinutes?: number | null;
   notificationId?: string | null;
+  /** Optional native event-layer rectangle; absent events use the native fallback. */
+  instanceLayout?: {
+    xOffsetPercent: number;
+    yOffsetPercent: number;
+    widthPercent: number;
+    heightPercent: number;
+    zIndex?: number;
+    fullDisplayWidthPercent?: number | null;
+  } | null;
 }
 
 export type EventRecurrenceScope = 'occurrence' | 'following' | 'series';

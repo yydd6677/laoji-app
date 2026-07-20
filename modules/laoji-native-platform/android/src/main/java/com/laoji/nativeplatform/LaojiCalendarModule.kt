@@ -3,6 +3,7 @@ package com.laoji.nativeplatform
 // CAL-ROOT-001: Expo props carry snapshots and resolutions; events carry semantic user operations.
 
 import com.laoji.nativeplatform.calendar.CalendarEvent
+import com.laoji.nativeplatform.calendar.CalendarInstanceLayout
 import com.laoji.nativeplatform.calendar.CalendarHostView
 import com.laoji.nativeplatform.calendar.CalendarMutationResolution
 import com.laoji.nativeplatform.calendar.CalendarSettings
@@ -23,6 +24,37 @@ class CalendarSettingsRecord : Record {
     defaultEventDurationMinutes = defaultEventDurationMinutes,
     firstDayOfWeek = firstDayOfWeek
   )
+}
+
+// CAL-DAY-COMPOSE-001: the bridge accepts the same percentage rectangle that
+// Feishu's Rust-backed InstanceLayout adapter produces.
+class CalendarInstanceLayoutRecord : Record {
+  @Field
+  var xOffsetPercent: Double = 0.0
+
+  @Field
+  var yOffsetPercent: Double = 0.0
+
+  @Field
+  var widthPercent: Double = 0.0
+
+  @Field
+  var heightPercent: Double = 0.0
+
+  @Field
+  var zIndex: Int = 0
+
+  @Field
+  var fullDisplayWidthPercent: Double? = null
+
+  fun toModel(): CalendarInstanceLayout = CalendarInstanceLayout(
+    xOffsetPercent = xOffsetPercent.toFloat(),
+    yOffsetPercent = yOffsetPercent.toFloat(),
+    widthPercent = widthPercent.toFloat(),
+    heightPercent = heightPercent.toFloat(),
+    zIndex = zIndex,
+    fullDisplayWidthPercent = fullDisplayWidthPercent?.toFloat(),
+  ).normalized()
 }
 
 class CalendarEventRecord : Record {
@@ -62,6 +94,9 @@ class CalendarEventRecord : Record {
   @Field
   var revision: Int = 0
 
+  @Field
+  var instanceLayout: CalendarInstanceLayoutRecord? = null
+
   fun toModel(): CalendarEvent = CalendarEvent(
     sourceEventId = sourceEventId,
     occurrenceDate = occurrenceDate,
@@ -74,7 +109,8 @@ class CalendarEventRecord : Record {
     timeZoneId = timeZoneId,
     allDay = allDay,
     editable = editable,
-    revision = revision
+    revision = revision,
+    instanceLayout = instanceLayout?.toModel(),
   )
 }
 

@@ -5,12 +5,12 @@ package com.laoji.nativeplatform.calendar
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Bundle
-import android.text.format.DateFormat
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.VelocityTracker
@@ -23,7 +23,7 @@ import android.view.accessibility.AccessibilityNodeProvider
 import android.widget.FrameLayout
 import android.widget.OverScroller
 import com.laoji.nativeplatform.evidence.FeishuEvidence
-import java.text.DateFormatSymbols
+import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -44,35 +44,19 @@ private data class TimelineTouchHit(
   val canCreate: Boolean = false,
 )
 
-// CAL-TIMEFORMAT-001: every calendar surface reads the same system 12/24-hour
-// preference and locale labels instead of formatting one branch independently.
-internal class CalendarSystemTimeFormatter(private val context: Context) {
-  fun hourLine(hour: Int): String = withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
-    DayTimeFormatter.formatHourLine(hour, is24Hour, amLabel, pmLabel, locale)
-  }
+// CAL-TIMEFORMAT-001: LaoJi Calendar has one product-level 24-hour clock. Its
+// labels do not switch to 上午/下午 when the Android system uses a 12-hour clock.
+internal class CalendarTimeFormatter {
+  private val locale = Locale.SIMPLIFIED_CHINESE
+
+  fun hourLine(hour: Int): String =
+    DayTimeFormatter.formatHourLine(hour, true, locale = locale)
 
   fun minute(value: Int): String =
-    withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
-      DayTimeFormatter.formatMinute(value, is24Hour, amLabel, pmLabel, locale)
-    }
+    DayTimeFormatter.formatMinute(value, true, locale = locale)
 
   fun range(startMinute: Int, endMinute: Int): String =
-    withSystemLabels { is24Hour, amLabel, pmLabel, locale ->
-      DayTimeFormatter.formatRange(startMinute, endMinute, is24Hour, amLabel, pmLabel, locale)
-    }
-
-  private fun <T> withSystemLabels(
-    block: (Boolean, String, String, Locale) -> T,
-  ): T {
-    val locale = Locale.getDefault()
-    val periods = DateFormatSymbols.getInstance(locale).amPmStrings
-    return block(
-      DateFormat.is24HourFormat(context),
-      periods.getOrNull(0).orEmpty().ifBlank { "AM" },
-      periods.getOrNull(1).orEmpty().ifBlank { "PM" },
-      locale,
-    )
-  }
+    DayTimeFormatter.formatRange(startMinute, endMinute, true, locale = locale)
 }
 
 internal interface DayTimelinePageListener {
@@ -88,6 +72,7 @@ internal interface DayTimelinePageListener {
   fun onTimelineScrollChanged(binding: DayPageBinding, scrollOffset: Float)
 }
 
+@FeishuEvidence("CAL-DAY-COMPOSE-001", "CAL-DRAG-OWNER-001")
 internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   val timelineCanvas = DayTimelineCanvasView(context)
   val gestureLayer = DayTimelineGestureLayer(context)
@@ -193,6 +178,7 @@ internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   private fun accepts(callbackBinding: DayPageBinding): Boolean = binding == callbackBinding
 }
 
+@FeishuEvidence("CAL-DAY-COMPOSE-001")
 internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val hourHeight = CalendarUi.dp(context, DayPagerContract.HOUR_HEIGHT_DP)
@@ -200,17 +186,20 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   private val timelinePaddingTop = CalendarUi.dp(context, DayPagerContract.TIMELINE_PADDING_TOP_DP)
   private val timelinePaddingRight = CalendarUi.dp(context, DayPagerContract.TIMELINE_PADDING_RIGHT_DP)
   private val timelineTotalHeight = CalendarUi.dp(context, DayPagerContract.TIMELINE_TOTAL_HEIGHT_DP)
-  private val eventGap = CalendarUi.dp(context, 2f)
+  private val eventFallbackGap = CalendarUi.dp(context, 2f)
   private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.divider
     strokeWidth = maxOf(1f, CalendarUi.dp(context, 0.5f))
   }
   private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surface }
   private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
-  private val eventSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.accent
-    style = Paint.Style.STROKE
-    strokeWidth = CalendarUi.dp(context, 2f)
+  private val eventPressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.argb(
+      (255f * DayEventVisualContract.PRESSED_OVERLAY_ALPHA).toInt(),
+      Color.red(palette.eventPressedOverlay),
+      Color.green(palette.eventPressedOverlay),
+      Color.blue(palette.eventPressedOverlay),
+    )
   }
   private val currentTimePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.destructive
@@ -225,9 +214,17 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   ).apply {
     textAlign = Paint.Align.CENTER
   }
-  private val eventTitlePaint = CalendarUi.textPaint(context, palette.eventText, 11f, true)
-  private val eventTimePaint = CalendarUi.textPaint(context, palette.eventText, 9f)
-  private val timeFormatter = CalendarSystemTimeFormatter(context)
+  private val eventTitlePaint = CalendarUi.textPaint(
+    context,
+    palette.eventText,
+    DayEventVisualContract.TITLE_TEXT_SIZE_SP,
+  )
+  private val eventTimePaint = CalendarUi.textPaint(
+    context,
+    palette.eventText,
+    DayEventVisualContract.DESCRIPTION_TEXT_SIZE_SP,
+  )
+  private val timeFormatter = CalendarTimeFormatter()
   private val accessibilityManager =
     context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
   private val virtualIdByIdentity = linkedMapOf<String, Int>()
@@ -262,6 +259,12 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-DAY-COMPOSE-001",
+      "day-timed-event-layer",
+      "calendar-day-timed-event-layer-${binding.epochDay}",
+    )
     val changedOwner = this.binding != binding
     this.binding = binding
     this.snapshot = snapshot
@@ -375,10 +378,13 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     }
   }
 
+  // CAL-DAY-COMPOSE-001: timed events are rendered from the geometry contract;
+  // layout, text insets and pressed state stay in this native owner.
   private fun drawEvent(canvas: Canvas, geometry: TimelineEventGeometry) {
     val rect = geometry.contentRect
     val androidRect = RectF(rect.left, rect.top, rect.right, rect.bottom)
-    canvas.drawRoundRect(androidRect, CalendarUi.dp(context, 4f), CalendarUi.dp(context, 4f), eventPaint)
+    val radius = CalendarUi.dp(context, DayEventVisualContract.EVENT_RADIUS_DP)
+    canvas.drawRoundRect(androidRect, radius, radius, eventPaint)
     if (geometry.segment.startsBeforeDay) {
       canvas.drawRect(rect.left, rect.top, rect.right, rect.top + CalendarUi.dp(context, 4f), eventPaint)
     }
@@ -386,33 +392,43 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
       canvas.drawRect(rect.left, rect.bottom - CalendarUi.dp(context, 4f), rect.right, rect.bottom, eventPaint)
     }
     if (selectedEventIdentity == geometry.segment.event.identity) {
-      canvas.drawRoundRect(
-        androidRect,
-        CalendarUi.dp(context, 4f),
-        CalendarUi.dp(context, 4f),
-        eventSelectedPaint,
-      )
+      canvas.drawRoundRect(androidRect, radius, radius, eventPressedPaint)
     }
 
+    val textRect = CalendarRect(
+      left = rect.left + CalendarUi.dp(context, DayEventVisualContract.TEXT_MARGIN_LEFT_DP),
+      top = rect.top + CalendarUi.dp(context, DayEventVisualContract.TEXT_MARGIN_TOP_DP),
+      right = rect.right - CalendarUi.dp(context, DayEventVisualContract.TEXT_MARGIN_RIGHT_DP),
+      bottom = rect.bottom - CalendarUi.dp(context, DayEventVisualContract.TEXT_MARGIN_BOTTOM_DP),
+    )
+    if (textRect.width <= 0f || textRect.height <= 0f) return
     val title = CalendarUi.ellipsize(
-      geometry.segment.event.title.ifBlank { "日程" },
+      CalendarUi.listEventTitle(geometry.segment.event.title),
       eventTitlePaint,
-      rect.width - CalendarUi.dp(context, 8f),
+      textRect.width,
     )
-    canvas.drawText(
-      title,
-      rect.left + CalendarUi.dp(context, 4f),
-      rect.top + CalendarUi.dp(context, 13f),
-      eventTitlePaint,
-    )
-    if (rect.height >= CalendarUi.dp(context, 33f)) {
-      canvas.drawText(
+    val save = canvas.save()
+    canvas.clipRect(textRect.left, textRect.top, textRect.right, textRect.bottom)
+    val titleMetrics = eventTitlePaint.fontMetrics
+    canvas.drawText(title, textRect.left, textRect.top - titleMetrics.top, eventTitlePaint)
+    val titleLineHeight = titleMetrics.bottom - titleMetrics.top
+    val descriptionMetrics = eventTimePaint.fontMetrics
+    val descriptionTop = textRect.top + titleLineHeight +
+      CalendarUi.dp(context, DayEventVisualContract.TEXT_VERTICAL_SPACE_DP)
+    if (descriptionTop + (descriptionMetrics.bottom - descriptionMetrics.top) <= textRect.bottom) {
+      val description = CalendarUi.ellipsize(
         formatTimeRange(geometry.segment.startMinute, geometry.segment.endMinute),
-        rect.left + CalendarUi.dp(context, 4f),
-        rect.top + CalendarUi.dp(context, 26f),
+        eventTimePaint,
+        textRect.width,
+      )
+      canvas.drawText(
+        description,
+        textRect.left,
+        descriptionTop - descriptionMetrics.top,
         eventTimePaint,
       )
     }
+    canvas.restoreToCount(save)
   }
 
   private fun drawCurrentTime(canvas: Canvas) {
@@ -421,8 +437,11 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     val now = Calendar.getInstance()
     val minute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
     val y = CalendarGeometry.minuteToY(minute, timelinePaddingTop, hourHeight)
-    canvas.drawLine(rulerWidth, y, width - timelinePaddingRight, y, currentTimePaint)
-    canvas.drawCircle(rulerWidth, y, CalendarUi.dp(context, 3.5f), currentTimePaint)
+    val dotRadius = CalendarUi.dp(context, DayEventVisualContract.CURRENT_TIME_DOT_RADIUS_DP)
+    val dotCenterX = rulerWidth + dotRadius
+    val lineStartX = dotCenterX + CalendarUi.dp(context, DayEventVisualContract.CURRENT_TIME_LINE_GAP_DP) + dotRadius
+    canvas.drawLine(lineStartX, y, width - timelinePaddingRight, y, currentTimePaint)
+    canvas.drawCircle(dotCenterX, y, dotRadius, currentTimePaint)
   }
 
   private fun rebuildEventGeometry(notifyAccessibility: Boolean = true) {
@@ -436,17 +455,29 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     eventGeometry = CalendarGeometry.daySegments(displayEvents(), activeBinding.epochDay).map { segment ->
       val columnWidth = usableWidth / segment.columnCount.coerceAtLeast(1)
       val left = rulerWidth + segment.column * columnWidth
-      val right = left + columnWidth - eventGap
+      val right = maxOf(
+        left + 1f,
+        rulerWidth + (segment.column + segment.columnSpan) * columnWidth - eventFallbackGap,
+      )
       val naturalTop = CalendarGeometry.minuteToY(segment.startMinute, timelinePaddingTop, hourHeight)
       val naturalBottom = CalendarGeometry.minuteToY(segment.endMinute, timelinePaddingTop, hourHeight)
+      val fallbackRect = CalendarRect(
+        left = left,
+        top = naturalTop,
+        right = right,
+        bottom = maxOf(naturalBottom, naturalTop + CalendarUi.dp(context, 20f)),
+      )
       TimelineEventGeometry(
         segment = segment,
-        contentRect = CalendarRect(
-          left = left,
-          top = naturalTop,
-          right = right,
-          bottom = maxOf(naturalBottom, naturalTop + CalendarUi.dp(context, 20f)),
-        ),
+        contentRect = segment.instanceLayout?.let { layout ->
+          DayEventVisualContract.instanceLayoutRect(
+            layout = layout,
+            eventAreaLeft = rulerWidth,
+            eventAreaWidth = usableWidth,
+            timelineTop = timelinePaddingTop,
+            timelineHeight = timelineTotalHeight,
+          ).takeIf { it.width > 0f && it.height > 0f }
+        } ?: fallbackRect,
       )
     }
     syncVirtualEventIds(notifyAccessibility)
@@ -476,7 +507,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     val dateText = date?.let { "${it.year}年${it.month}月${it.day}日" }.orEmpty()
     val mutability = if (geometry.segment.event.canMutateInDayView()) "可调整" else "只读"
     return listOf(
-      geometry.segment.event.title.ifBlank { "日程" },
+      CalendarUi.listEventTitle(geometry.segment.event.title),
       dateText,
       formatTimeRange(geometry.segment.startMinute, geometry.segment.endMinute),
       mutability,
@@ -570,7 +601,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     val event = AccessibilityEvent.obtain(eventType).apply {
       packageName = context.packageName
       className = "android.widget.Button"
-      text.add(geometry.segment.event.title.ifBlank { "日程" })
+      text.add(CalendarUi.listEventTitle(geometry.segment.event.title))
       contentDescription = eventAccessibilityDescription(binding, geometry)
       isEnabled = this@DayTimelineCanvasView.isEnabled
       setSource(this@DayTimelineCanvasView, virtualId)
@@ -623,7 +654,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
         setParent(this@DayTimelineCanvasView)
         packageName = context.packageName
         className = "android.widget.Button"
-        text = geometry.segment.event.title.ifBlank { "日程" }
+        text = CalendarUi.listEventTitle(geometry.segment.event.title)
         contentDescription = eventAccessibilityDescription(binding, geometry)
         setBoundsInParent(parentBounds)
         setBoundsInScreen(screenBounds)
@@ -719,6 +750,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
 }
 
+@FeishuEvidence("CAL-DRAG-OWNER-001", "CAL-DRAG-HANDLES-001")
 internal class DayTimelineGestureLayer(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
@@ -814,6 +846,12 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-DRAG-OWNER-001",
+      "day-gesture-owner",
+      "calendar-day-gesture-owner-${binding.epochDay}",
+    )
     val changedOwner = this.binding != binding
     if (changedOwner) clearTransientState("page-rebound", emitDraft = false)
     this.binding = binding
@@ -879,7 +917,9 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
     val canvas = timelineCanvas ?: return
     if (!didInitialScroll && h > 0) {
       didInitialScroll = true
-      setScrollOffset(canvas.topPadding() + 7f * canvas.hourHeight(), notify = false)
+      // Keep the first visible ruler label fully inside the viewport. Scrolling
+      // to the line itself placed its centered 12sp glyph half above the clip.
+      setScrollOffset(7f * canvas.hourHeight(), notify = false)
     } else {
       setScrollOffset(canvas.scrollOffset(), notify = false)
     }

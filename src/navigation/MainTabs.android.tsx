@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { NativeTabPressEvent } from 'laoji-native-platform';
 import { ScheduleScreen } from '../screens/ScheduleScreen.android';
@@ -52,17 +53,39 @@ export function MainTabsNavigator({ navigation, route }: Props) {
     });
   };
 
-  return state.selectedTab === 'Schedule' ? (
-    <ScheduleScreen
-      navigation={navigation}
-      onTabPress={handleTabPress}
-      bottomBarSelectionCommand={state.bottomBarSelectionCommand}
-    />
-  ) : (
-    <MeetingListScreen
-      navigation={navigation}
-      onTabPress={handleTabPress}
-      bottomBarSelectionCommand={state.bottomBarSelectionCommand}
-    />
+  return (
+    <View style={styles.root}>
+      <View
+        style={[styles.page, state.selectedTab === 'Schedule' ? styles.visible : styles.hidden]}
+        pointerEvents={state.selectedTab === 'Schedule' ? 'auto' : 'none'}
+        accessibilityElementsHidden={state.selectedTab !== 'Schedule'}
+        importantForAccessibility={state.selectedTab === 'Schedule' ? 'auto' : 'no-hide-descendants'}
+      >
+        <ScheduleScreen
+          navigation={navigation}
+          onTabPress={handleTabPress}
+          bottomBarSelectionCommand={state.bottomBarSelectionCommand}
+        />
+      </View>
+      <View
+        style={[styles.page, state.selectedTab === 'Meetings' ? styles.visible : styles.hidden]}
+        pointerEvents={state.selectedTab === 'Meetings' ? 'auto' : 'none'}
+        accessibilityElementsHidden={state.selectedTab !== 'Meetings'}
+        importantForAccessibility={state.selectedTab === 'Meetings' ? 'auto' : 'no-hide-descendants'}
+      >
+        <MeetingListScreen
+          navigation={navigation}
+          onTabPress={handleTabPress}
+          bottomBarSelectionCommand={state.bottomBarSelectionCommand}
+        />
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  page: StyleSheet.absoluteFillObject,
+  visible: { opacity: 1, zIndex: 1 },
+  hidden: { opacity: 0, zIndex: 0 },
+});

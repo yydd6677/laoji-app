@@ -82,9 +82,10 @@ export class NativeMinutesPageGenerationClock {
 
   constructor(initial: Partial<NativeMinutesPageGenerations> = {}) {
     this.values = {
-      transcript: pageGeneration(initial.transcript),
-      summary: pageGeneration(initial.summary),
-      speakers: pageGeneration(initial.speakers),
+    transcript: pageGeneration(initial.transcript),
+    summary: pageGeneration(initial.summary),
+    speakers: pageGeneration(initial.speakers),
+      info: pageGeneration(initial.info),
     };
   }
 
@@ -322,7 +323,7 @@ export function nativeMinutesSpeakers(
   }));
 }
 
-const DETAIL_TABS: readonly MinutesDetailTab[] = ['transcript', 'summary', 'speakers'];
+const DETAIL_TABS: readonly MinutesDetailTab[] = ['transcript', 'summary', 'speakers', 'info'];
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -404,6 +405,7 @@ export function normalizeNativeMinutesDetailPageStates(
     transcript: contentBackedPageState(hasTextRows(transcript), '暂无文字记录'),
     summary: contentBackedPageState(hasTextRows(summary), '该会议暂未生成纪要'),
     speakers: contentBackedPageState(hasObjectRows(speakers), '暂无发言人信息'),
+    info: { phase: 'ready', message: '', generation: 0, cached: false },
   };
   legacy[activeTab] = {
     phase: minutesContentPhase(detail.contentPhase),
@@ -417,6 +419,7 @@ export function normalizeNativeMinutesDetailPageStates(
     transcript: normalizedPageState(pageStates?.transcript, legacy.transcript),
     summary: normalizedPageState(pageStates?.summary, legacy.summary),
     speakers: normalizedPageState(pageStates?.speakers, legacy.speakers),
+    info: normalizedPageState(pageStates?.info, legacy.info),
   };
 }
 
@@ -443,6 +446,7 @@ function detailContentState(
       ? { phase: 'ready', message: '' }
       : { phase: 'empty', message: '该会议暂未生成纪要' };
   }
+  if (tab === 'info') return { phase: 'ready', message: '' };
   return detail.speakers.length > 0
     ? { phase: 'ready', message: '' }
     : { phase: 'empty', message: '暂无发言人信息' };
@@ -516,6 +520,11 @@ export function buildNativeMinutesDetailSnapshot(
         ...detailContentState(input, detail, 'speakers'),
         generation: pageGeneration(input.pageGenerations?.speakers),
         cached: input.pageCached?.speakers === true,
+      },
+      info: {
+        ...detailContentState(input, detail, 'info'),
+        generation: pageGeneration(input.pageGenerations?.info),
+        cached: input.pageCached?.info === true,
       },
     },
   });

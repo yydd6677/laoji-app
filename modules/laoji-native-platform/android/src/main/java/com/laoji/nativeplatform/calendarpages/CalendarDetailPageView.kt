@@ -139,13 +139,13 @@ class CalendarDetailPageView(
     body.removeAllViews()
     body.addView(buildHeader(), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     state.location?.takeIf(String::isNotBlank)?.let {
-      body.addView(detailRow(android.R.drawable.ic_menu_mylocation, it, false))
+      body.addView(detailRow(com.laoji.nativeplatform.R.drawable.laoji_ic_location_outline, it, false))
     }
     state.notes?.takeIf(String::isNotBlank)?.let {
-      body.addView(detailRow(android.R.drawable.ic_menu_sort_by_size, it, true))
+      body.addView(detailRow(com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline, it, true))
     }
     state.reminderLabel?.takeIf(String::isNotBlank)?.let {
-      body.addView(detailRow(android.R.drawable.ic_lock_idle_alarm, it, false))
+      body.addView(detailRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, it, false))
     }
   }
 

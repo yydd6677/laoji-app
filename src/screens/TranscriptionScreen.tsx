@@ -206,7 +206,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           : await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
         if (mountedRef.current) {
           setPendingAudioUpload(stillPending);
-          setPendingAudioError(stillPending?.failureMessage ?? '');
+          setPendingAudioError(stillPending?.failureMessage
+            ? readableErrorMessage(stillPending.failureMessage, '自动同步未完成，录音仍保存在本机')
+            : '');
         }
         if (uploaded) await refreshMeetings();
         if (uploaded && notifyUser && mountedRef.current) {
@@ -217,7 +219,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           const stillPending = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
           if (mountedRef.current) {
             setPendingAudioUpload(stillPending);
-            setPendingAudioError(stillPending?.failureMessage ?? '自动同步未完成，录音仍保存在本机');
+            setPendingAudioError(readableErrorMessage(
+              stillPending?.failureMessage,
+              '自动同步未完成，录音仍保存在本机',
+            ));
           }
         } catch {
           if (mountedRef.current) {
@@ -229,7 +234,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           const latest = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId).catch(() => null);
           showDialog({
             title: latest?.uploadState === 'blocked' ? '录音上传受阻' : '上传失败',
-            message: latest?.failureMessage ?? '录音仍保存在本机，可稍后再次重试。',
+            message: readableErrorMessage(
+              latest?.failureMessage,
+              '录音仍保存在本机，可稍后再次重试。',
+            ),
             tone: 'error',
           });
         }
@@ -337,7 +345,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     void getPendingMeetingAudioUpload(recordingStorageScope, m.id).then(pending => {
       if (!alive) return;
       setPendingAudioUpload(pending);
-      setPendingAudioError(pending?.failureMessage ?? '');
+      setPendingAudioError(pending?.failureMessage
+        ? readableErrorMessage(pending.failureMessage, '自动同步未完成，录音仍保存在本机')
+        : '');
       if (pending && accessToken) {
         const automaticKey = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
         if (automaticAudioUploadKeyRef.current !== automaticKey) {

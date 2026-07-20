@@ -17,6 +17,7 @@ internal data class MinutesDetailPersistedViewState(
   val transcript: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
   val summary: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
   val speakers: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
+  val info: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
 )
 
 internal class MinutesDetailViewStateStore(context: Context) {
@@ -36,6 +37,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
       transcript = readPage(prefix, "transcript"),
       summary = readPage(prefix, "summary"),
       speakers = readPage(prefix, "speakers"),
+      info = readPage(prefix, "info"),
     )
   }
 
@@ -50,6 +52,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
       .putPage(prefix, "transcript", state.transcript)
       .putPage(prefix, "summary", state.summary)
       .putPage(prefix, "speakers", state.speakers)
+      .putPage(prefix, "info", state.info)
     if (synchronous) editor.commit() else editor.apply()
   }
 

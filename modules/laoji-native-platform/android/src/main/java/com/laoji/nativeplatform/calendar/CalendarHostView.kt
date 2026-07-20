@@ -124,6 +124,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     pickerPanel.setListener(this)
     addView(content, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
     addView(bottomBar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    pickerPanel.prepare(selectedEpochDay, mode)
     updateModeVisibility()
   }
 
@@ -363,6 +364,11 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     )
   }
 
+  override fun onEmptyCreateRequested(epochDay: Int) {
+    selectDate(epochDay, source = "month-empty-create", emit = true)
+    emitSemantic("create-manual", mapOf("epochDay" to epochDay))
+  }
+
   override fun onCreateRequested(draft: CalendarDraft) {
     onCreateEvent(draftPayload(draft))
     emitSemantic("create-request", draftPayload(draft))
@@ -404,6 +410,9 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     if (mode == next) return
     mode = next
     closePicker("mode-change", emitEvent = false)
+    if (pickerPanel.expandState == CalendarPickerExpandState.CLOSED) {
+      pickerPanel.prepare(selectedEpochDay, mode)
+    }
     renderedSnapshot?.let(::bindSnapshotToActiveMode)
     updateModeVisibility()
     updateToolbarTitle()

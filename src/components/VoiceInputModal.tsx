@@ -40,9 +40,11 @@ import { useAppDialog } from './AppDialog';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { diagnosticWarn } from '../services/diagnostics';
+import { readableErrorMessage } from '../services/errors';
 import { reminderUnavailableMessage } from '../services/notifications';
 import { CalEvent, EventDraftParams, RootStackParamList } from '../types';
 import { validateEventDraft } from '../utils/eventDraftValidation';
+import { eventListTitle } from '../utils/eventTitle';
 
 interface Props {
   visible: boolean;
@@ -197,7 +199,7 @@ async function discardScheduleRecording(uri: string | undefined): Promise<void> 
 }
 
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
-  const { addEvent, findConflicts } = useEvents();
+  const { addEvent } = useEvents();
   const { showDialog } = useAppDialog();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [step, setStep]         = useState<Step>('input');
@@ -284,12 +286,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     const message = err instanceof Error ? err.message : String(err ?? '');
     if (message.includes('无法从语音中提取日程')) return '未识别到明确日程，请靠近麦克风再说一次';
     if (message.includes('实时语音流')) return '当前运行环境不支持实时语音，请使用开发版或正式包';
-    if (message.includes('realtime ASR') || message.includes('websocket')) return '实时语音接口连接失败，请确认手机网络能访问服务器';
-    if (message.includes('Network request failed')) return '语音接口连接失败，请确认手机网络能访问服务器';
+    if (message.includes('realtime ASR') || message.includes('websocket')) return '暂时无法识别语音，请检查网络后重试';
+    if (message.includes('Network request failed')) return '暂时无法识别语音，请检查网络后重试';
     if (message.includes('read audio failed')) return '录音文件读取失败，请重新录音';
     if (message.includes('permission')) return '没有麦克风权限，请在系统设置中允许录音';
     if (message.includes('timed out')) return '语音识别超时，请稍后重试';
-    return message ? `语音识别失败：${message}` : '语音识别失败，请重试';
+    return readableErrorMessage(err, '语音识别失败，请重试');
   };
 
   const setTranscriptSegments = (segments: ScheduleTranscriptSegment[]) => {
@@ -553,7 +555,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           if (transcribed) setText(transcribed);
           setError(transcribed
             ? '实时连接已断开，已保留识别内容，可直接解析或重新录音'
-            : '实时语音接口连接失败，请确认手机网络能访问服务器');
+            : '暂时无法识别语音，请检查网络后重试');
           setMicInteraction('idle');
           setStep('input');
         }).catch(err => {
@@ -597,7 +599,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setStep('input');
         const message = err instanceof Error && err.message.includes('microphone is already in use')
           ? '麦克风正在被另一个录音任务使用，请先结束后再试'
-          : '请检查麦克风权限';
+          : readableErrorMessage(err, '录音启动失败，请稍后重试。');
         showDialog({ title: '无法录音', message, tone: 'warning' });
       }
     } finally {
@@ -827,38 +829,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     const eventPayload = eventPayloadFromDraft(draft);
     const validation = validateEventDraft(eventPayload);
     if (!validation.valid || !validation.value) return;
-    const runId = operationRunRef.current + 1;
-    operationRunRef.current = runId;
-    try {
-      const result = await findConflicts(validation.value);
-      if (operationRunRef.current !== runId) return;
-      if (result.hasConflict) {
-        const explicit = result.conflicts.some(conflict => conflict.severity === 'overlap');
-        const names = result.conflicts.map(({ event }) => {
-          const time = event.startTime && event.endTime
-            ? `${event.startTime}–${event.endTime}`
-            : event.isAllDay ? '全天' : '无具体时间';
-          return `• ${event.title} (${time})`;
-        }).join('\n');
-        showDialog({
-          title: explicit ? '时间冲突' : '全天安排提示',
-          message: `${explicit ? '该安排与以下日程重叠' : '该日期已有全天或定时安排'}：\n${names}`,
-          hint: result.complete
-            ? '如果确认这些安排可以重叠，仍然可以继续保存。'
-            : '当前只能核对本机已有日程；仍可继续保存。',
-          tone: 'warning',
-          actions: [
-            { text: '仍然保存', role: 'primary', onPress: () => saveDraft(validation.value!) },
-            { text: '取消', role: 'cancel' },
-          ],
-        });
-        return;
-      }
-      await saveDraft(validation.value);
-    } catch {
-      if (operationRunRef.current !== runId) return;
-      setError('暂时无法检查日程冲突，请重试');
-    }
+    await saveDraft(validation.value);
   };
 
   const openDetailedEdit = () => {
@@ -1125,7 +1096,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 )}
 
                 <View style={s.draftForm} testID="schedule-voice-draft-form">
-                  <Text style={s.draftTitle} testID="schedule-voice-draft-title">{draft.title}</Text>
+                  <Text style={s.draftTitle} testID="schedule-voice-draft-title">{eventListTitle(draft.title)}</Text>
                   <View style={s.formDivider} />
                   <ParsedFieldRow
                     icon="calendar-outline"

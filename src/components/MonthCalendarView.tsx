@@ -26,6 +26,7 @@ import {
   startOfMonth,
 } from '../utils/calendarDate';
 import { useCurrentDate } from '../hooks/useCurrentDate';
+import { eventListTitle } from '../utils/eventTitle';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_HEIGHT = 32;
@@ -34,7 +35,7 @@ const GRID_SIDE_END = 11.5;
 const DATE_TOP = 10;
 const DATE_CIRCLE = 22;
 const EVENT_TOP = 29;
-const EVENT_HEIGHT = 16;
+const EVENT_HEIGHT = 20;
 const EVENT_GAP = 3;
 const ROW_ANIMATION_MS = 350;
 const PROGRAMMATIC_MONTH_ANIMATION_MS = 400;
@@ -516,7 +517,7 @@ function MonthWeekRow({
             ]}
             testID={`calendar-event-chip-${segment.event.id}-${row[segment.column].key}`}
           >
-            <Text style={s.eventChipText} numberOfLines={1}>{segment.event.title}</Text>
+            <Text style={s.eventChipText} numberOfLines={1}>{eventListTitle(segment.event.title)}</Text>
           </View>
         ))}
       </View>
@@ -713,11 +714,11 @@ function ExpandedDayPage({
           onPress={() => onOpenEvent(event)}
           activeOpacity={0.74}
           accessibilityRole="button"
-          accessibilityLabel={`${event.title}，${eventTimeLabel(event)}`}
+          accessibilityLabel={`${eventListTitle(event.title)}，${eventTimeLabel(event)}`}
         >
           <View style={s.expandedEventDot} />
           <View style={s.expandedEventCopy}>
-            <Text style={s.expandedEventTitle} numberOfLines={1}>{event.title}</Text>
+            <Text style={s.expandedEventTitle} numberOfLines={1}>{eventListTitle(event.title)}</Text>
             <Text style={s.expandedEventMeta} numberOfLines={1}>
               {[eventTimeLabel(event), event.location].filter(Boolean).join(' · ')}
             </Text>
@@ -811,7 +812,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  eventChipText: { fontSize: 11, lineHeight: 14, color: C.primaryPressed },
+  eventChipText: { fontSize: 14, lineHeight: 20, color: C.primaryPressed },
   expandedPanel: {
     position: 'absolute',
     left: 0,
@@ -821,19 +822,19 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   expandedPage: { height: '100%', backgroundColor: C.appBg },
-  expandedListContent: { paddingVertical: 5 },
-  expandedEventRow: { height: 48, flexDirection: 'row', alignItems: 'flex-start' },
+  expandedListContent: { paddingVertical: 0 },
+  expandedEventRow: { minHeight: 48, paddingBottom: 6, flexDirection: 'row', alignItems: 'flex-start' },
   expandedEventDot: {
     width: 7,
     height: 7,
-    borderRadius: 3.5,
+    borderRadius: 2,
     marginLeft: 20,
     marginTop: 14,
     backgroundColor: C.primary,
   },
   expandedEventCopy: { flex: 1, minWidth: 0, marginLeft: 14, marginRight: 14, paddingTop: 7 },
   expandedEventTitle: { fontSize: 14, lineHeight: 20, color: C.text },
-  expandedEventMeta: { fontSize: 12, lineHeight: 17, color: C.sub },
+  expandedEventMeta: { fontSize: 12, lineHeight: 17, color: C.text },
   expandedEmpty: { alignItems: 'center', justifyContent: 'center', gap: 12 },
   expandedEmptyImage: { width: 125, height: 94 },
   emptyCopy: { flexDirection: 'row', alignItems: 'center' },

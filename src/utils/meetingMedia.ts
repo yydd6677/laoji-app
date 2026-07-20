@@ -78,7 +78,9 @@ export function transcriptDurationSec(items: TranscriptLike[]): number | undefin
 
 export function formatDuration(seconds?: number): string {
   if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return '—';
-  const total = Math.max(0, Math.round(seconds));
+  // Native playback clocks advance only after a complete second. Keep list and
+  // detail durations on that same floor-based clock.
+  const total = Math.max(0, Math.floor(seconds));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;

@@ -23,6 +23,7 @@ import { isValidEventDate } from '../utils/eventDraftValidation';
 import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
+import { eventListTitle } from '../utils/eventTitle';
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -422,7 +423,7 @@ function SearchEventRow({
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
         accessibilityRole="button"
-        accessibilityLabel={`${event.title}，${event.startDate}，${eventTimeLabel(event)}`}
+        accessibilityLabel={`${eventListTitle(event.title)}，${event.startDate}，${eventTimeLabel(event)}`}
         testID={`calendar-search-chip-${event.id}`}
       >
         <View
@@ -434,7 +435,7 @@ function SearchEventRow({
           testID={`calendar-search-copy-${event.id}`}
         >
           <HighlightedText
-            text={event.title}
+            text={eventListTitle(event.title)}
             query={query}
             style={s.eventTitle}
             testID={`calendar-search-title-${event.id}`}

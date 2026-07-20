@@ -60,6 +60,12 @@ object MonthExpandedLayoutContract {
   const val OVERFLOW_BADGE_WIDTH_DP = 19f
   const val OVERFLOW_BADGE_HEIGHT_DP = 12f
   const val OVERFLOW_BADGE_RADIUS_DP = 2.5f
+  // [SOURCE] The compact month-grid branch is not EventChipView's 14dp day
+  // branch. MonthAllDayInstanceDrawableData delegates to C153808d.m522727f,
+  // which sets MONTH_VIEW_TEXT_SIZE_DP to 11.
+  const val EVENT_TEXT_SIZE_DP = 11f
+  // [SOURCE] re3/C153854f initializes the month instance block to 16dp with a
+  // 3dp lane gap; C153808d.m522727f passes a 2.5dp month-view radius.
   const val EVENT_HEIGHT_DP = 16f
   const val EVENT_VERTICAL_GAP_DP = 3f
   const val EVENT_RIGHT_GAP_DP = 3f
@@ -137,6 +143,21 @@ object MonthExpandedLayoutContract {
       current.epochDay == tappedEpochDay -> MonthExpandedTapTransition(MonthExpandedTapAction.CLOSE, null)
       current.row == tappedRow -> MonthExpandedTapTransition(MonthExpandedTapAction.SWITCH_WITHIN_ROW, target)
       else -> MonthExpandedTapTransition(MonthExpandedTapAction.CLOSE_THEN_OPEN, target)
+    }
+  }
+
+  fun closeSelectionEpochDay(
+    todayEpochDay: Int?,
+    monthEpochDay: Int,
+    gridStartEpochDay: Int,
+    weekCount: Int,
+  ): Int {
+    require(weekCount in 4..6) { "weekCount must be in 4..6" }
+    val today = todayEpochDay ?: return monthEpochDay
+    return if (today in gridStartEpochDay until gridStartEpochDay + weekCount * DAY_PAGE_COUNT) {
+      today
+    } else {
+      monthEpochDay
     }
   }
 

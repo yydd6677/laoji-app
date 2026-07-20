@@ -51,7 +51,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       setDeleting(true);
       try {
         await deleteEvent(eventRefForEvent(event), recurrenceScope);
-        navigation.navigate('MainTabs', { screen: 'Schedule' });
+        navigation.popTo('MainTabs', { screen: 'Schedule' });
       } catch {
         setDeleting(false);
         showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });

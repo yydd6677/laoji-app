@@ -10,6 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
@@ -23,6 +24,7 @@ import android.view.animation.ScaleAnimation
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.graphics.PathParser
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import expo.modules.kotlin.AppContext
@@ -155,8 +157,8 @@ private class NativeBottomTabItemView(
     NativeBottomBarContract.dpToPx(value, resources.displayMetrics.density)
 }
 
-// UI-ICON-PRIMITIVES-001: slot and state are source-shaped; these neutral
-// destination glyph paths remain an explicit release blocker until that closure.
+// UI-ICON-PRIMITIVES-001: the retained Meetings destination uses the source
+// Minutes tab silhouette while LaoJi keeps its own Chinese product label.
 private class NativeBottomTabIconDrawable(
   private val tab: NativeBottomTab,
   private val normalColor: Int,
@@ -167,6 +169,9 @@ private class NativeBottomTabIconDrawable(
     strokeCap = Paint.Cap.ROUND
     strokeJoin = Paint.Join.ROUND
   }
+  private val meetingsPath: Path = requireNotNull(PathParser.createPathFromPathData(
+    "M10.466 8.146l-3.444 7.402a0.831 0.831 0 0 1-1.104 0.403l-3.514-1.639A0.831 0.831 0 0 1 2 13.21l3.443-7.4a2.77 2.77 0 0 1 5.022 2.337zm-2.017 6.743l1.212 3.33a2.489 2.489 0 0 0 3.189 1.489l0.012-0.005a2.478 2.478 0 0 0 1.018-0.695c0.15-0.163 0.277-0.351 0.376-0.562l3.309-7.096a2.216 2.216 0 0 0-4.016-1.873l-0.988 2.119-1.133-3.113-2.98 6.406zm10.599-1.307l0.784-1.681a1.662 1.662 0 1 1 3.011 1.405l-2.492 5.345a1.946 1.946 0 0 1-1.13 1.081l-0.027 0.01a1.939 1.939 0 0 1-2.485-1.159l-0.654-1.797 2.336-5.009 0.657 1.805zM5.544 18.187l-2.986 1.57a0.564 0.564 0 0 1-0.815-0.38l-0.729-3.302a0.565 0.565 0 0 1 0.791-0.635l3.715 1.734a0.566 0.566 0 0 1 0.024 1.013z",
+  ))
   private var selected = false
 
   fun setSelected(value: Boolean) {
@@ -196,14 +201,13 @@ private class NativeBottomTabIconDrawable(
   }
 
   private fun drawMeetings(canvas: Canvas, centerX: Float, centerY: Float, scale: Float) {
-    canvas.drawCircle(centerX, centerY - 4f * scale, 3.5f * scale, paint)
-    canvas.drawArc(
-      RectF(centerX - 8f * scale, centerY + scale, centerX + 8f * scale, centerY + 10f * scale),
-      200f,
-      140f,
-      false,
-      paint,
-    )
+    val saved = canvas.save()
+    canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+    canvas.scale(bounds.width() / 24f, bounds.height() / 24f)
+    paint.style = Paint.Style.FILL
+    canvas.drawPath(meetingsPath, paint)
+    paint.style = Paint.Style.STROKE
+    canvas.restoreToCount(saved)
   }
 
   override fun setAlpha(alpha: Int) {
@@ -229,7 +233,7 @@ class LaojiNativeBottomBarView(
   override val shouldUseAndroidLayout: Boolean = true
 
   private val palette = NativeUiTokens.palette(context)
-  private var navigationInset = 0
+  private var navigationInset = currentNavigationBarInsetBottom()
   private var selectedTab = NativeBottomTab.SCHEDULE
   private val selectionCommandGate = NativeBottomBarSelectionCommandGate()
   private var bridgeEventsEnabled = true
@@ -259,13 +263,11 @@ class LaojiNativeBottomBarView(
     addView(meetingsItem)
     updateSelection(animateTab = null)
     setOnApplyWindowInsetsListener { _, insets ->
-      navigationInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
-      } else {
-        @Suppress("DEPRECATION")
-        insets.systemWindowInsetBottom
+      val nextNavigationInset = insets.navigationBarInsetBottom()
+      if (navigationInset != nextNavigationInset) {
+        navigationInset = nextNavigationInset
+        requestLayout()
       }
-      requestLayout()
       insets
     }
     requestInsetsWhenAttached()

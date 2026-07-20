@@ -1,5 +1,5 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import type { NavigationProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainTabsParamList, RootStackParamList } from '../types';
 
 type MainTabName = keyof MainTabsParamList;
@@ -29,12 +29,12 @@ export function openMeetingRecorder(navigation: MainTabBarNavigation) {
   navigation.navigate('MeetingLive');
 }
 
-type RootNavigation = Pick<NavigationProp<RootStackParamList>, 'navigate'>;
+type RootNavigation = Pick<NativeStackNavigationProp<RootStackParamList>, 'popTo'>;
 
 export function openScheduleTab(navigation: RootNavigation) {
-  navigation.navigate('MainTabs', { screen: 'Schedule' });
+  navigation.popTo('MainTabs', { screen: 'Schedule' });
 }
 
 export function openMeetingsTab(navigation: RootNavigation) {
-  navigation.navigate('MainTabs', { screen: 'Meetings' });
+  navigation.popTo('MainTabs', { screen: 'Meetings' });
 }

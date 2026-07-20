@@ -20,6 +20,7 @@ internal class MinutesDetailPagerAdapter(
     MinutesDetailTab.TRANSCRIPT to MinutesTranscriptPage(context, onAction),
     MinutesDetailTab.SUMMARY to MinutesSummaryPage(context, onAction),
     MinutesDetailTab.SPEAKERS to MinutesSpeakersPage(context, onAction),
+    MinutesDetailTab.INFO to MinutesInfoPage(context, onAction),
   )
 
   init {
@@ -41,6 +42,7 @@ internal class MinutesDetailPagerAdapter(
     (pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage).render(state)
     (pageFor(MinutesDetailTab.SUMMARY) as MinutesSummaryPage).render(state)
     (pageFor(MinutesDetailTab.SPEAKERS) as MinutesSpeakersPage).render(state)
+    (pageFor(MinutesDetailTab.INFO) as MinutesInfoPage).render(state)
   }
 
   fun pageFor(tab: MinutesDetailTab): MinutesDetailPage = requireNotNull(pages[tab])
@@ -56,6 +58,7 @@ internal class MinutesDetailPagerAdapter(
     pageFor(MinutesDetailTab.TRANSCRIPT).restoreScrollPosition(state.transcript)
     pageFor(MinutesDetailTab.SUMMARY).restoreScrollPosition(state.summary)
     pageFor(MinutesDetailTab.SPEAKERS).restoreScrollPosition(state.speakers)
+    pageFor(MinutesDetailTab.INFO).restoreScrollPosition(state.info)
   }
 
   internal class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(FrameLayout(parent.context)) {
@@ -70,19 +73,36 @@ internal class MinutesDetailPagerAdapter(
 internal class MinutesDetailTabBar(
   context: Context,
   onTabSelected: (MinutesDetailTab) -> Unit,
-) : LinearLayout(context) {
+) : FrameLayout(context) {
   private val tabViews = linkedMapOf<MinutesDetailTab, TabView>()
+  private val tabs = LinearLayout(context)
+  private val divider = View(context)
 
   init {
-    orientation = HORIZONTAL
     setBackgroundColor(MinutesPalette.surface)
+    tabs.orientation = LinearLayout.HORIZONTAL
+    tabs.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+    addView(
+      tabs,
+      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+        leftMargin = context.dp(10)
+      },
+    )
     MinutesDetailTab.entries.forEach { tab ->
       val view = TabView(context, tab.label).apply {
         setOnClickListener { onTabSelected(tab) }
       }
       tabViews[tab] = view
-      addView(view, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+      tabs.addView(view, LinearLayout.LayoutParams(context.dp(84), ViewGroup.LayoutParams.MATCH_PARENT))
     }
+    divider.setBackgroundColor(MinutesPalette.divider)
+    addView(
+      divider,
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1, Gravity.BOTTOM).apply {
+        leftMargin = context.dp(10)
+        rightMargin = context.dp(10)
+      },
+    )
   }
 
   fun select(tab: MinutesDetailTab) {
@@ -98,7 +118,7 @@ internal class MinutesDetailTabBar(
       isFocusable = true
       contentDescription = label
       addView(text, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-      addView(indicator, LayoutParams(context.dp(28), context.dp(2), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+      addView(indicator, LayoutParams(context.dp(24), context.dp(2), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
     }
 
     fun setSelectedState(selected: Boolean) {

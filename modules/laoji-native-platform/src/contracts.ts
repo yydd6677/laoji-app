@@ -35,6 +35,18 @@ export interface NativeCalendarEventSnapshot {
   allDay: boolean;
   editable: boolean;
   revision: number;
+  /** Optional Feishu-compatible timed-event rectangle in percentages. */
+  instanceLayout?: NativeCalendarInstanceLayout | null;
+}
+
+// CAL-DAY-COMPOSE-001: source-shaped percentage rectangle for the native timed-event layer.
+export interface NativeCalendarInstanceLayout {
+  xOffsetPercent: number;
+  yOffsetPercent: number;
+  widthPercent: number;
+  heightPercent: number;
+  zIndex?: number;
+  fullDisplayWidthPercent?: number | null;
 }
 
 export interface NativeCalendarSettings {

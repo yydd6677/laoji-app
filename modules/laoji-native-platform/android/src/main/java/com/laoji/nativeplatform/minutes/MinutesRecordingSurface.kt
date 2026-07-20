@@ -5,10 +5,15 @@ package com.laoji.nativeplatform.minutes
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.text.InputFilter
+import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -32,11 +37,13 @@ internal class MinutesRecordingSurface(
   private val topBar = FrameLayout(context)
   private val backButton = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "返回")
   private val titleSection = ConstraintLayout(context)
+  private val titleContainer = FrameLayout(context).apply { id = View.generateViewId() }
   private val title = context.textView(textSizeSp = 24, weight = Typeface.BOLD)
+  private val titleEditor = EditText(context)
   private val timeIcon = ImageView(context).apply { id = View.generateViewId() }
   private val startedAt = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val tabBar = FrameLayout(context)
-  private val transcriptTab = context.textView("文字记录", textSizeSp = 14, weight = Typeface.BOLD)
+  private val transcriptTab = context.textView("文字记录", textSizeSp = 16, weight = Typeface.BOLD)
   private val tabIndicator = View(context)
   private val divider = View(context)
   private val content = FrameLayout(context)
@@ -50,10 +57,7 @@ internal class MinutesRecordingSurface(
   private val timer = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val waveContainer = FrameLayout(context)
   private val waveform = MinutesRecordingWaveformView(context)
-  private val actionRow = LinearLayout(context)
-  private val statusPill = LinearLayout(context)
-  private val statusDot = View(context)
-  private val statusText = context.textView(textSizeSp = 16, color = MinutesPalette.secondary)
+  private val actionRow = ConstraintLayout(context)
   private val pauseButton = ImageButton(context)
   private val stopButton = ImageButton(context)
   private val layoutManager = LinearLayoutManager(context)
@@ -64,6 +68,7 @@ internal class MinutesRecordingSurface(
   private var collectingSessionId: String? = null
   private var surfaceVisible = false
   private var nativeElapsedMs = 0L
+  private var editingTitle = false
 
   init {
     setBackgroundColor(MinutesPalette.surface)
@@ -107,13 +112,15 @@ internal class MinutesRecordingSurface(
       },
     )
 
-    title.id = View.generateViewId()
     title.minimumHeight = context.dp(36)
     title.maxLines = 2
     title.ellipsize = TextUtils.TruncateAt.END
     title.gravity = Gravity.CENTER_VERTICAL
+    title.contentDescription = "编辑会议标题"
+    title.isClickable = true
+    title.isFocusable = true
     titleSection.addView(
-      title,
+      titleContainer,
       LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
         topToTop = LayoutParams.PARENT_ID
         startToStart = LayoutParams.PARENT_ID
@@ -123,13 +130,37 @@ internal class MinutesRecordingSurface(
         marginEnd = context.dp(10)
       },
     )
+    titleContainer.addView(
+      title,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    titleEditor.apply {
+      setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 24f)
+      setTextColor(MinutesPalette.text)
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      includeFontPadding = false
+      background = null
+      gravity = Gravity.CENTER_VERTICAL
+      maxLines = 2
+      minHeight = context.dp(36)
+      setPadding(0, 0, 0, 0)
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+      imeOptions = EditorInfo.IME_ACTION_DONE
+      filters = arrayOf(InputFilter.LengthFilter(200))
+      visibility = View.GONE
+      contentDescription = "会议标题"
+    }
+    titleContainer.addView(
+      titleEditor,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
 
     startedAt.id = View.generateViewId()
     startedAt.gravity = Gravity.CENTER_VERTICAL
     titleSection.addView(
       startedAt,
       LayoutParams(0, context.dp(22)).apply {
-        topToBottom = title.id
+        topToBottom = titleContainer.id
         startToEnd = timeIcon.id
         endToEnd = LayoutParams.PARENT_ID
         bottomToBottom = LayoutParams.PARENT_ID
@@ -166,10 +197,7 @@ internal class MinutesRecordingSurface(
     )
     transcriptTab.gravity = Gravity.CENTER
     transcriptTab.setTextColor(MinutesPalette.text)
-    tabBar.addView(
-      transcriptTab,
-      FrameLayout.LayoutParams(context.dp(72), context.dp(40), Gravity.START),
-    )
+    tabBar.addView(transcriptTab, FrameLayout.LayoutParams(context.dp(82), context.dp(44), Gravity.START))
     tabIndicator.backgroundShape(MinutesPalette.primary, radiusDp = 1)
     tabBar.addView(
       tabIndicator,
@@ -206,6 +234,12 @@ internal class MinutesRecordingSurface(
 
     transcript.layoutManager = layoutManager
     transcript.adapter = transcriptAdapter
+    // Final transcript reconciliation can replace provisional rows immediately
+    // before this recording surface is replaced by the detail surface. The
+    // default item-removal animator may then finish after detach and ask
+    // RecyclerView to recycle a still-attached row, crashing the main thread.
+    // Live transcript updates prioritize continuity over decorative row motion.
+    transcript.itemAnimator = null
     transcript.clipChildren = false
     transcript.clipToPadding = false
     transcript.setPadding(context.dp(20), 0, context.dp(20), 0)
@@ -238,20 +272,25 @@ internal class MinutesRecordingSurface(
       },
     )
 
+    latestButton.minimumWidth = 0
+    latestButton.minimumHeight = 0
+    latestButton.setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
     latestButton.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
     latestButton.backgroundShape(MinutesPalette.surface, radiusDp = 22)
     latestButton.elevation = context.dp(4).toFloat()
     latestButton.visibility = View.GONE
     content.addView(
       latestButton,
-      FrameLayout.LayoutParams(context.dp(44), context.dp(44), Gravity.END or Gravity.BOTTOM).apply {
+      FrameLayout.LayoutParams(context.dp(38), context.dp(38), Gravity.END or Gravity.BOTTOM).apply {
         rightMargin = context.dp(16)
-        bottomMargin = context.dp(16)
+        bottomMargin = context.dp(12)
       },
     )
   }
 
   private fun buildBottomPanel() {
+    pauseButton.id = View.generateViewId()
+    stopButton.id = View.generateViewId()
     bottomPanel.setBackgroundColor(MinutesPalette.surface)
     addView(
       bottomPanel,
@@ -264,95 +303,101 @@ internal class MinutesRecordingSurface(
 
     timer.id = View.generateViewId()
     timer.gravity = Gravity.CENTER
+    timer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+    timer.setTextColor(MinutesPalette.secondary)
+    timer.typeface = Typeface.MONOSPACE
     bottomPanel.addView(
       timer,
-      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(MinutesRecordingV3Contract.DURATION_HEIGHT_DP)).apply {
+      LayoutParams(0, context.dp(MinutesRecordingV3Contract.DURATION_HEIGHT_DP)).apply {
         topToTop = LayoutParams.PARENT_ID
         startToStart = LayoutParams.PARENT_ID
         endToEnd = LayoutParams.PARENT_ID
-        topMargin = context.dp(10)
       },
     )
 
     waveContainer.id = View.generateViewId()
-    waveContainer.setPadding(context.dp(16), 0, context.dp(16), 0)
+    waveContainer.setPadding(context.dp(4), context.dp(6), context.dp(4), 0)
     bottomPanel.addView(
       waveContainer,
       LayoutParams(0, context.dp(MinutesRecordingV3Contract.WAVE_CONTAINER_HEIGHT_DP)).apply {
         topToBottom = timer.id
         startToStart = LayoutParams.PARENT_ID
         endToEnd = LayoutParams.PARENT_ID
-        topMargin = context.dp(4)
       },
     )
     waveContainer.addView(
       waveform,
-      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(MinutesRecordingV3Contract.WAVE_HEIGHT_DP), Gravity.CENTER_VERTICAL),
+      FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        context.dp(MinutesRecordingV3Contract.WAVE_HEIGHT_DP),
+        Gravity.TOP,
+      ),
     )
 
     actionRow.id = View.generateViewId()
-    actionRow.orientation = LinearLayout.HORIZONTAL
-    actionRow.gravity = Gravity.CENTER_VERTICAL
-    actionRow.setPadding(
-      context.dp(MinutesRecordingV3Contract.ACTION_HORIZONTAL_PADDING_DP),
-      context.dp(10),
-      context.dp(MinutesRecordingV3Contract.ACTION_HORIZONTAL_PADDING_DP),
-      context.dp(10),
-    )
     bottomPanel.addView(
       actionRow,
       LayoutParams(0, context.dp(MinutesRecordingV3Contract.ACTION_ROW_HEIGHT_DP)).apply {
         topToBottom = waveContainer.id
+        bottomToBottom = LayoutParams.PARENT_ID
         startToStart = LayoutParams.PARENT_ID
         endToEnd = LayoutParams.PARENT_ID
       },
     )
 
-    statusPill.orientation = LinearLayout.HORIZONTAL
-    statusPill.gravity = Gravity.CENTER_VERTICAL
-    statusPill.setPadding(context.dp(20), 0, context.dp(12), 0)
-    statusPill.backgroundShape(MinutesPalette.page, radiusDp = 100)
-    statusPill.isClickable = false
-    statusDot.backgroundShape(MinutesPalette.primary, radiusDp = 4)
-    statusPill.addView(statusDot, LinearLayout.LayoutParams(context.dp(8), context.dp(8)))
-    statusText.maxLines = 1
-    statusText.ellipsize = TextUtils.TruncateAt.END
-    statusPill.addView(
-      statusText,
-      LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-        leftMargin = context.dp(8)
-      },
-    )
-    actionRow.addView(
-      statusPill,
-      LinearLayout.LayoutParams(0, context.dp(MinutesRecordingV3Contract.ACTION_HEIGHT_DP), 1f),
-    )
-
     configureActionButton(pauseButton)
     actionRow.addView(
       pauseButton,
-      LinearLayout.LayoutParams(context.dp(78), context.dp(MinutesRecordingV3Contract.ACTION_HEIGHT_DP)).apply {
-        leftMargin = context.dp(MinutesRecordingV3Contract.ACTION_GAP_DP)
+      LayoutParams(
+        context.dp(MinutesRecordingV3Contract.PAUSE_WIDTH_DP),
+        context.dp(MinutesRecordingV3Contract.PAUSE_HEIGHT_DP),
+      ).apply {
+        startToStart = LayoutParams.PARENT_ID
+        endToStart = stopButton.id
+        topToTop = LayoutParams.PARENT_ID
+        bottomToBottom = LayoutParams.PARENT_ID
+        marginEnd = context.dp(MinutesRecordingV3Contract.ACTION_GAP_DP / 2)
+        horizontalChainStyle = LayoutParams.CHAIN_PACKED
       },
     )
     configureActionButton(stopButton)
     actionRow.addView(
       stopButton,
-      LinearLayout.LayoutParams(context.dp(78), context.dp(MinutesRecordingV3Contract.ACTION_HEIGHT_DP)).apply {
-        leftMargin = context.dp(MinutesRecordingV3Contract.ACTION_GAP_DP)
+      LayoutParams(
+        context.dp(MinutesRecordingV3Contract.STOP_WIDTH_DP),
+        context.dp(MinutesRecordingV3Contract.STOP_HEIGHT_DP),
+      ).apply {
+        startToEnd = pauseButton.id
+        endToEnd = LayoutParams.PARENT_ID
+        topToTop = LayoutParams.PARENT_ID
+        bottomToBottom = LayoutParams.PARENT_ID
+        marginStart = context.dp(MinutesRecordingV3Contract.ACTION_GAP_DP / 2)
       },
     )
   }
 
   private fun configureActionButton(button: ImageButton) {
     button.scaleType = ImageView.ScaleType.CENTER
-    button.setPadding(context.dp(13), context.dp(13), context.dp(13), context.dp(13))
+    button.background = null
     button.isFocusable = true
   }
 
   private fun bindActions() {
     backButton.setOnClickListener {
+      if (editingTitle) {
+        commitTitleEdit()
+        return@setOnClickListener
+      }
       onAction(mapOf("type" to "back", "meetingId" to renderedState.meetingId))
+    }
+    title.setOnClickListener { beginTitleEdit() }
+    titleEditor.setOnEditorActionListener { _, actionId, _ ->
+      if (actionId != EditorInfo.IME_ACTION_DONE) return@setOnEditorActionListener false
+      commitTitleEdit()
+      true
+    }
+    titleEditor.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+      if (!hasFocus && editingTitle) commitTitleEdit()
     }
     pauseButton.setOnClickListener {
       onAction(
@@ -381,7 +426,7 @@ internal class MinutesRecordingSurface(
       nativeElapsedMs = maxOf(nativeElapsedMs, state.elapsedMs.coerceAtLeast(0L))
     }
     renderedState = state
-    title.text = state.title.ifBlank { "会议记录" }
+    if (!editingTitle) title.text = state.title.ifBlank { "新录音" }
     startedAt.text = state.startedAtLabel
     val showTime = state.startedAtLabel.isNotBlank()
     startedAt.visibility = if (showTime) View.VISIBLE else View.INVISIBLE
@@ -404,10 +449,8 @@ internal class MinutesRecordingSurface(
       0,
     )
 
-    renderStatus(state)
     renderPauseButton(state)
     renderStopButton(state)
-    applyResponsiveActionWidths(width)
     updateLevelCollection()
   }
 
@@ -485,34 +528,12 @@ internal class MinutesRecordingSurface(
     timer.contentDescription = "${renderedState.statusLabel}，已录制 $clock"
   }
 
-  private fun renderStatus(state: MinutesRecordingState) {
-    statusText.text = state.statusLabel.ifBlank {
-      when (state.phase) {
-        MinutesRecordingPhase.PREPARING -> "正在连接"
-        MinutesRecordingPhase.RECORDING -> "实时转写中"
-        MinutesRecordingPhase.PAUSED -> "录音已暂停"
-        MinutesRecordingPhase.STOPPING -> "正在停止"
-        MinutesRecordingPhase.SAVING -> "正在保存"
-        MinutesRecordingPhase.FAILED -> "录音失败"
-        else -> "准备录音"
-      }
-    }
-    val tone = when (state.phase) {
-      MinutesRecordingPhase.RECORDING -> MinutesPalette.primary
-      MinutesRecordingPhase.PAUSED -> MinutesPalette.warning
-      MinutesRecordingPhase.FAILED -> MinutesPalette.danger
-      else -> MinutesPalette.faint
-    }
-    statusDot.backgroundShape(tone, radiusDp = 4)
-    statusText.setTextColor(if (state.phase == MinutesRecordingPhase.FAILED) MinutesPalette.danger else MinutesPalette.secondary)
-    statusPill.contentDescription = statusText.text
-  }
-
   private fun renderPauseButton(state: MinutesRecordingState) {
     val enabled = state.canPause
     pauseButton.isEnabled = enabled
-    pauseButton.alpha = if (enabled) 1f else 0.45f
+    pauseButton.alpha = if (enabled) 1f else 0.5f
     pauseButton.backgroundShape(if (enabled) MinutesPalette.primarySoft else MinutesPalette.page, radiusDp = 100)
+    pauseButton.setPadding(context.dp(27), context.dp(16), context.dp(27), context.dp(16))
     pauseButton.imageTintList = ColorStateList.valueOf(if (enabled) MinutesPalette.primary else MinutesPalette.disabled)
     pauseButton.setImageResource(
       if (state.phase == MinutesRecordingPhase.PAUSED) com.laoji.nativeplatform.R.drawable.laoji_ic_play_filled
@@ -524,9 +545,23 @@ internal class MinutesRecordingSurface(
   private fun renderStopButton(state: MinutesRecordingState) {
     val enabled = state.canStop || state.canStart
     stopButton.isEnabled = enabled
-    stopButton.alpha = if (enabled) 1f else 0.45f
-    stopButton.backgroundShape(MinutesPalette.page, radiusDp = 100)
-    stopButton.imageTintList = ColorStateList.valueOf(if (enabled) MinutesPalette.text else MinutesPalette.disabled)
+    stopButton.alpha = if (enabled) 1f else 0.5f
+    stopButton.backgroundShape(
+      when {
+        state.canStop -> MinutesPalette.page
+        enabled -> MinutesPalette.primarySoft
+        else -> MinutesPalette.page
+      },
+      radiusDp = 100,
+    )
+    stopButton.setPadding(context.dp(27), context.dp(16), context.dp(27), context.dp(16))
+    stopButton.imageTintList = ColorStateList.valueOf(
+      when {
+        !enabled -> MinutesPalette.disabled
+        state.canStop -> MinutesPalette.text
+        else -> MinutesPalette.primary
+      },
+    )
     when {
       state.canStop -> stopButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_stop_filled)
       state.phase == MinutesRecordingPhase.FAILED -> stopButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_refresh)
@@ -534,7 +569,7 @@ internal class MinutesRecordingSurface(
     }
     stopButton.contentDescription = when {
       state.canStop -> "结束并保存会议录音"
-      state.phase == MinutesRecordingPhase.FAILED -> "重试开始会议录音"
+      state.phase == MinutesRecordingPhase.FAILED -> "重新开始会议录音"
       else -> "开始会议录音"
     }
   }
@@ -544,24 +579,38 @@ internal class MinutesRecordingSurface(
     onAction(mapOf("type" to type, "meetingId" to renderedState.meetingId))
   }
 
-  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-    super.onSizeChanged(w, h, oldw, oldh)
-    applyResponsiveActionWidths(w)
+  private fun beginTitleEdit() {
+    if (editingTitle) return
+    editingTitle = true
+    titleEditor.setText(title.text)
+    titleEditor.setSelection(titleEditor.text.length)
+    title.visibility = View.INVISIBLE
+    titleEditor.visibility = View.VISIBLE
+    titleEditor.requestFocus()
+    titleEditor.post {
+      context.getSystemService(InputMethodManager::class.java)
+        ?.showSoftInput(titleEditor, InputMethodManager.SHOW_IMPLICIT)
+    }
   }
 
-  private fun applyResponsiveActionWidths(widthPx: Int) {
-    if (widthPx <= 0) return
-    val widthDp = (widthPx / resources.displayMetrics.density).toInt()
-    val widths = MinutesRecordingV3Contract.actionWidths(widthDp)
-    statusPill.layoutParams = (statusPill.layoutParams as LinearLayout.LayoutParams).apply {
-      width = widths.statusWidthDp?.let(context::dp) ?: 0
-      weight = if (widths.statusWidthDp == null) 1f else 0f
-    }
-    for (button in listOf(pauseButton, stopButton)) {
-      button.layoutParams = (button.layoutParams as LinearLayout.LayoutParams).apply {
-        width = context.dp(widths.actionWidthDp)
-        weight = 0f
-      }
+  private fun commitTitleEdit() {
+    if (!editingTitle) return
+    val previous = renderedState.title.ifBlank { "新录音" }
+    val next = titleEditor.text.toString().trim().ifBlank { previous }
+    editingTitle = false
+    titleEditor.clearFocus()
+    context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(titleEditor.windowToken, 0)
+    titleEditor.visibility = View.GONE
+    title.visibility = View.VISIBLE
+    title.text = next
+    if (next != previous) {
+      onAction(
+        mapOf(
+          "type" to "saveTitle",
+          "meetingId" to renderedState.meetingId,
+          "title" to next,
+        ),
+      )
     }
   }
 

@@ -189,10 +189,13 @@ internal class WindowOverlayController(
       currentActivity.findViewById<ViewGroup>(android.R.id.content).addView(root, matchParentParams())
       backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-          val top = entries[WindowOverlayKind.SCHEDULE_VOICE]
-            ?: entries[WindowOverlayKind.CALENDAR_SEARCH]
-            ?: return
-          emitAction(top.kind, top.ownerId, mapOf("type" to "close"))
+          val top = topModalEntry() ?: return
+          if (
+            top.kind == WindowOverlayKind.SCHEDULE_VOICE ||
+            top.kind == WindowOverlayKind.CALENDAR_SEARCH
+          ) {
+            emitAction(top.kind, top.ownerId, mapOf("type" to "close"))
+          }
           dismiss(top.ownerId, top.kind.wireName, "system-back")
         }
       }.also { callback ->
@@ -300,8 +303,18 @@ internal class WindowOverlayController(
 
   private fun updateHostVisibility() {
     host?.visibility = if (entries.isNotEmpty()) View.VISIBLE else View.GONE
-    backCallback?.isEnabled = entries.contains(WindowOverlayKind.SCHEDULE_VOICE) ||
-      entries.contains(WindowOverlayKind.CALENDAR_SEARCH)
+    val modalEntry = topModalEntry()
+    backCallback?.let { callback ->
+      callback.isEnabled = false
+      if (modalEntry != null) {
+        // [INFERENCE] Activity-owned overlays must be the last registered
+        // callback so an underlying native page cannot consume the same Back
+        // press and leave a sheet visible over a hidden exit confirmation.
+        callback.remove()
+        (activity as? ComponentActivity)?.onBackPressedDispatcher?.addCallback(callback)
+        callback.isEnabled = true
+      }
+    }
     updateAccessibilityIsolation()
     host?.bringToFront()
   }

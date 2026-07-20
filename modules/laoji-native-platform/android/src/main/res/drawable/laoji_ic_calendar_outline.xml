@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- [SOURCE] Feishu 7.71.8 ud_icon_calendar_27_outlined. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#2B2F36" android:pathData="M11.83,17.5h-5.4c0.01,-1.295 0.379,-2.41 1.705,-3.179l1.232,-0.716c0.642,-0.379 0.895,-0.726 0.895,-1.274 0,-0.589 -0.443,-1.042 -1.074,-1.042 -0.726,0 -1.19,0.495 -1.19,1.222 0,0.115 0.01,0.273 0.053,0.41l-1.495,-0.042a2.495,2.495 0,0 1,-0.052,-0.537c0,-1.305 1.01,-2.463 2.684,-2.463 1.631,0 2.652,1.105 2.652,2.421 0,0.958 -0.484,1.747 -1.442,2.295l-1.484,0.863c-0.337,0.2 -0.526,0.442 -0.6,0.705h3.516V17.5zM14.984,17.5h-1.642c0.252,-2.99 1.779,-5.242 2.79,-6.126H12.3v-1.337h5.537v1.42c-0.79,0.706 -2.558,2.611 -2.853,6.043z" />
+    <path android:fillColor="#2B2F36" android:pathData="M2,4a2,2 0,0 1,2,-2h16a2,2 0,0 1,2,2v16a2,2 0,0 1,-2,2H4a2,2 0,0 1,-2,-2V4zM4,4v2h16V4H4zM20,8H4v12h16V8z" />
+</vector>

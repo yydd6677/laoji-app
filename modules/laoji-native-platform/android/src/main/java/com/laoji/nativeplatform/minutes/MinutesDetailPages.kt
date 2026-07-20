@@ -1,6 +1,6 @@
 package com.laoji.nativeplatform.minutes
 
-// MIN-DETAIL-PAGER-001: transcript, summary and speaker pages keep independent native owners.
+// MIN-DETAIL-PAGER-001: each detail tab keeps an independent native owner.
 
 import android.content.Context
 import android.graphics.Color
@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -24,13 +25,17 @@ internal abstract class MinutesDetailPage(
   private val body = LinearLayout(context)
   private val contentHost = FrameLayout(context)
   private val stateOverlay = LinearLayout(context)
+  private val emptyImage = ImageView(context)
   private val progress = ProgressBar(context)
   private val stateMessage = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val retry = context.textView("重试", 16, MinutesPalette.primary, Typeface.BOLD)
   private val summaryAction = context.textView("生成总结", 16, MinutesPalette.primary, Typeface.BOLD)
   private val warning = LinearLayout(context)
   private val warningText = context.textView(textSizeSp = 13, color = MinutesPalette.danger)
-  private val warningRetry = context.iconButton(android.R.drawable.ic_popup_sync, "重试加载当前内容")
+  private val warningRetry = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_refresh,
+    "重试加载当前内容",
+  )
   private lateinit var content: View
 
   internal var renderedPageState: MinutesDetailPageState = MinutesDetailPageState()
@@ -56,6 +61,9 @@ internal abstract class MinutesDetailPage(
     stateOverlay.gravity = Gravity.CENTER
     stateOverlay.setPadding(context.dp(24), context.dp(24), context.dp(24), context.dp(24))
     stateOverlay.setBackgroundColor(MinutesPalette.surface)
+    emptyImage.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_minutes_empty)
+    emptyImage.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    stateOverlay.addView(emptyImage, LinearLayout.LayoutParams(context.dp(100), context.dp(100)))
     stateMessage.gravity = Gravity.CENTER
     stateMessage.setLineSpacing(0f, 1.25f)
     stateOverlay.addView(progress, LinearLayout.LayoutParams(context.dp(24), context.dp(24)))
@@ -123,6 +131,9 @@ internal abstract class MinutesDetailPage(
     stateOverlay.visibility = if (showBlockingState) View.VISIBLE else View.GONE
     content.visibility = if (!hasContent && showBlockingState) View.INVISIBLE else View.VISIBLE
     progress.visibility = if (phase == MinutesContentPhase.LOADING) View.VISIBLE else View.GONE
+    emptyImage.visibility = if (
+      phase == MinutesContentPhase.READY || phase == MinutesContentPhase.EMPTY
+    ) View.VISIBLE else View.GONE
     retry.visibility = if (phase == MinutesContentPhase.ERROR) View.VISIBLE else View.GONE
     val showSummaryAction = tab == MinutesDetailTab.SUMMARY && canGenerateSummary && phase != MinutesContentPhase.LOADING
     summaryAction.visibility = if (showSummaryAction) View.VISIBLE else View.GONE
@@ -190,7 +201,7 @@ internal class MinutesTranscriptPage(
   }
 
   fun render(state: MinutesDetailState) {
-    rows.replace(state.transcript, state.canManageSpeakers)
+    rows.replace(state.transcript)
     renderPageChrome(
       pageState = state.pageState(tab),
       hasContent = state.transcript.isNotEmpty(),
@@ -340,27 +351,124 @@ internal class MinutesSpeakersPage(
   }
 }
 
+/**
+ * Feishu's detail surface exposes recording metadata as a real tab. Keep the
+ * information useful for LaoJi rather than showing a decorative placeholder:
+ * every value below is derived from the current detail snapshot.
+ */
+internal class MinutesInfoPage(
+  context: Context,
+  onAction: (Map<String, Any?>) -> Unit,
+) : MinutesDetailPage(context, MinutesDetailTab.INFO, onAction) {
+  private val scroll = NestedScrollView(context)
+  private val rows = LinearLayout(context).apply {
+    orientation = LinearLayout.VERTICAL
+    setPadding(context.dp(20), context.dp(12), context.dp(20), context.dp(40))
+  }
+  private var renderedKey = ""
+
+  override val scrollingChild: View
+    get() = scroll
+
+  init {
+    scroll.isFillViewport = true
+    scroll.overScrollMode = View.OVER_SCROLL_NEVER
+    scroll.addView(rows, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    installContent(scroll)
+  }
+
+  override fun captureScrollPosition(): MinutesDetailPageScrollPosition =
+    MinutesDetailPageScrollPosition(offsetPx = scroll.scrollY)
+
+  override fun restoreScrollPosition(position: MinutesDetailPageScrollPosition) {
+    scroll.post { scroll.scrollTo(0, position.offsetPx.coerceAtLeast(0)) }
+  }
+
+  override fun setScrollStateListener(listener: () -> Unit) {
+    scroll.setOnScrollChangeListener { _, _, _, _, _ -> listener() }
+  }
+
+  fun render(state: MinutesDetailState) {
+    val duration = state.playerSource?.durationMsHint?.takeIf { it > 0 }?.let(::formatMinutesInfoDuration)
+      ?: "暂无"
+    val audio = when {
+      state.audioErrorMessage.isNotBlank() -> state.audioErrorMessage
+      state.playerSource == null -> "暂无可播放录音"
+      state.playerSource.uri.startsWith("http", ignoreCase = true) -> "云端录音"
+      else -> "已保存在本机"
+    }
+    val sync = state.audioErrorMessage.ifBlank {
+      state.audioStatusMessage.ifBlank { if (state.playerSource != null) "可播放" else "仅有文字记录" }
+    }
+    val values = listOf(
+      "录制时间" to state.dateTimeLabel.ifBlank { "未记录" },
+      "录音时长" to duration,
+      "录音文件" to audio,
+      "同步状态" to sync,
+      "内容" to "${state.transcript.size} 段文字记录 · ${state.speakers.size} 位发言人",
+    )
+    val key = values.joinToString("|") { "${it.first}=${it.second}" }
+    if (key != renderedKey) {
+      renderedKey = key
+      val retainedScroll = scroll.scrollY
+      rows.removeAllViews()
+      values.forEachIndexed { index, (label, value) ->
+        val row = LinearLayout(context).apply {
+          orientation = LinearLayout.VERTICAL
+          setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
+          backgroundShape(MinutesPalette.surface, radiusDp = if (index == 0) 12 else 0)
+        }
+        row.addView(context.textView(label, 13, MinutesPalette.secondary))
+        row.addView(context.textView(value, 16, MinutesPalette.text).apply {
+          setLineSpacing(0f, 1.2f)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+          topMargin = context.dp(6)
+        })
+        rows.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+          topMargin = if (index == 0) 0 else context.dp(1)
+        })
+      }
+      scroll.post { scroll.scrollTo(0, retainedScroll.coerceAtMost(rows.height)) }
+    }
+    renderPageChrome(
+      pageState = state.pageState(tab),
+      hasContent = state.available,
+      emptyMessage = "暂无录音信息",
+    )
+  }
+}
+
+private fun formatMinutesInfoDuration(durationMs: Long): String {
+  val totalSeconds = (durationMs.coerceAtLeast(0L) / 1_000L).toInt()
+  val hours = totalSeconds / 3_600
+  val minutes = (totalSeconds % 3_600) / 60
+  val seconds = totalSeconds % 60
+  return if (hours > 0) {
+    "%02d:%02d:%02d".format(hours, minutes, seconds)
+  } else {
+    "%02d:%02d".format(minutes, seconds)
+  }
+}
+
 private class MinutesTranscriptPageAdapter(
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : RecyclerView.Adapter<MinutesTranscriptPageAdapter.Holder>() {
   private var rows: List<MinutesTranscriptLine> = emptyList()
-  private var canManageSpeakers = false
 
   init {
     setHasStableIds(true)
   }
 
-  fun replace(next: List<MinutesTranscriptLine>, canManage: Boolean) {
-    if (rows == next && canManageSpeakers == canManage) return
+  fun replace(next: List<MinutesTranscriptLine>) {
+    if (rows == next) return
     rows = next.toList()
-    canManageSpeakers = canManage
     notifyDataSetChanged()
   }
 
   override fun getItemCount(): Int = rows.size
   override fun getItemId(position: Int): Long = rows[position].id.hashCode().toLong()
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(parent)
-  override fun onBindViewHolder(holder: Holder, position: Int) = holder.bind(rows[position], canManageSpeakers, onAction)
+  override fun onBindViewHolder(holder: Holder, position: Int) = holder.bind(rows[position], onAction)
 
   internal class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(LinearLayout(parent.context)) {
     private val root = itemView as LinearLayout
@@ -368,36 +476,44 @@ private class MinutesTranscriptPageAdapter(
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
     }
-    private val avatar = TextView(parent.context).apply {
-      gravity = Gravity.CENTER
-      text = "人"
-      setTextSize(10f)
-      typeface = Typeface.DEFAULT_BOLD
-    }
+    private val avatar = FrameLayout(parent.context)
     private val speaker = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val separator = View(parent.context)
     private val time = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
     private val body = parent.context.textView(textSizeSp = 16)
 
     init {
       root.orientation = LinearLayout.VERTICAL
-      root.setPadding(parent.context.dp(20), parent.context.dp(18), parent.context.dp(20), parent.context.dp(12))
-      metaRow.addView(avatar, LinearLayout.LayoutParams(parent.context.dp(18), parent.context.dp(18)))
-      metaRow.addView(speaker, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+      root.setPadding(parent.context.dp(20), parent.context.dp(20), parent.context.dp(20), parent.context.dp(12))
+      avatar.addView(
+        ImageView(parent.context).apply {
+          setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_person_filled)
+          importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },
+        FrameLayout.LayoutParams(parent.context.dp(14), parent.context.dp(14), Gravity.CENTER),
+      )
+      metaRow.addView(avatar, LinearLayout.LayoutParams(parent.context.dp(24), parent.context.dp(24)))
+      metaRow.addView(speaker, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
         leftMargin = parent.context.dp(8)
       })
+      separator.backgroundShape(MinutesPalette.disabled, radiusDp = 2)
+      metaRow.addView(separator, LinearLayout.LayoutParams(parent.context.dp(3), parent.context.dp(3)).apply {
+        leftMargin = parent.context.dp(12)
+        rightMargin = parent.context.dp(12)
+      })
       metaRow.addView(time, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-      root.addView(metaRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, parent.context.dp(22)))
+      root.addView(metaRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, parent.context.dp(24)))
       body.setLineSpacing(0f, 1.35f)
       body.setTextIsSelectable(true)
       root.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-        topMargin = parent.context.dp(8)
+        topMargin = parent.context.dp(10)
       })
     }
 
-    fun bind(line: MinutesTranscriptLine, canManage: Boolean, onAction: (Map<String, Any?>) -> Unit) {
+    fun bind(line: MinutesTranscriptLine, onAction: (Map<String, Any?>) -> Unit) {
       val tone = minutesSpeakerTone(line.speakerId.ifBlank { line.speakerLabel })
-      avatar.backgroundShape(tone.first, radiusDp = 9)
-      avatar.setTextColor(tone.second)
+      avatar.backgroundShape(tone.first, radiusDp = 12)
+      (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
       speaker.text = line.speakerLabel
       time.text = line.timestampLabel
       body.text = line.text
@@ -406,12 +522,8 @@ private class MinutesTranscriptPageAdapter(
       root.setOnClickListener {
         onAction(mapOf("type" to "seekTranscript", "lineId" to line.id, "positionMs" to line.startMs))
       }
-      root.setOnLongClickListener(if (canManage) {
-        View.OnLongClickListener {
-          onAction(mapOf("type" to "requestSpeakerAction", "lineId" to line.id, "speakerId" to line.speakerId))
-          true
-        }
-      } else null)
+      root.setOnLongClickListener(null)
+      root.isLongClickable = false
     }
   }
 }
@@ -438,20 +550,26 @@ private class MinutesSpeakersPageAdapter(
 
   internal class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(FrameLayout(parent.context)) {
     private val root = itemView as FrameLayout
-    private val avatar = TextView(parent.context).apply {
-      gravity = Gravity.CENTER
-      text = "人"
-      setTextSize(14f)
-      typeface = Typeface.DEFAULT_BOLD
-    }
+    private val avatar = FrameLayout(parent.context)
     private val labels = LinearLayout(parent.context).apply { orientation = LinearLayout.VERTICAL }
     private val name = parent.context.textView(textSizeSp = 16, weight = Typeface.BOLD)
     private val meta = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-    private val chevron = parent.context.textView("›", 24, MinutesPalette.faint).apply { gravity = Gravity.CENTER }
+    private val chevron = ImageView(parent.context).apply {
+      setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
+      imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.faint)
+      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
 
     init {
       root.minimumHeight = parent.context.dp(68)
       root.setPadding(parent.context.dp(20), parent.context.dp(8), parent.context.dp(16), parent.context.dp(8))
+      avatar.addView(
+        ImageView(parent.context).apply {
+          setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_person_filled)
+          importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        },
+        FrameLayout.LayoutParams(parent.context.dp(22), parent.context.dp(22), Gravity.CENTER),
+      )
       root.addView(avatar, FrameLayout.LayoutParams(parent.context.dp(44), parent.context.dp(44), Gravity.CENTER_VERTICAL))
       labels.addView(name)
       labels.addView(meta, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -467,7 +585,7 @@ private class MinutesSpeakersPageAdapter(
     fun bind(speaker: MinutesSpeaker, onAction: (Map<String, Any?>) -> Unit) {
       val tone = minutesSpeakerTone(speaker.id)
       avatar.backgroundShape(tone.first, radiusDp = 22)
-      avatar.setTextColor(tone.second)
+      (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
       name.text = speaker.label
       meta.text = listOf("${speaker.segmentCount} 段", speaker.durationLabel).filter { it.isNotBlank() }.joinToString(" · ")
       chevron.visibility = if (speaker.canManage) View.VISIBLE else View.INVISIBLE

@@ -27,6 +27,7 @@ import { labelForReminder } from '../services/notifications';
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { recurrenceDeleteDialog, recurrenceEditDialog } from '../services/recurrenceActions';
+import { eventDetailTitle } from '../utils/eventTitle';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -243,7 +244,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       />
       <ResponsiveContentFrame testID="event-detail-content-frame">
         <CalendarDetailTitleBar
-          title={ev.title}
+          title={eventDetailTitle(ev.title)}
           titleOpacity={titleOpacity}
           titleAlignment="leading"
           titleColor={DEFAULT_CALENDAR_TITLE_COLOR}
@@ -290,7 +291,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
               testID="event-detail-summary-row"
             >
               <View testID="event-detail-color" style={s.colorSymbol} />
-              <Text style={s.summary} numberOfLines={2}>{ev.title}</Text>
+              <Text style={s.summary} numberOfLines={2}>{eventDetailTitle(ev.title)}</Text>
             </Animated.View>
             <Animated.Text
               testID="event-detail-time"

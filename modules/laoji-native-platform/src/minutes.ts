@@ -18,7 +18,7 @@ export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
 export type MinutesContentPhase = 'ready' | 'loading' | 'empty' | 'error';
-export type MinutesDetailTab = 'transcript' | 'summary' | 'speakers';
+export type MinutesDetailTab = 'transcript' | 'summary' | 'speakers' | 'info';
 export type MinutesRecordingPhase =
   | 'idle'
   | 'preparing'
@@ -45,6 +45,10 @@ export interface MinutesMeetingSnapshot {
   statusLabel?: string;
   statusTone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
   canResume?: boolean;
+  /** [INFERENCE] LaoJi derives a Feishu-shaped cover from locally available content. */
+  coverType?: 'default' | 'summary' | 'speakerSummary';
+  coverTitle?: string;
+  coverText?: string;
 }
 
 export interface MinutesTranscriptLineSnapshot {
@@ -83,6 +87,7 @@ export interface MinutesDetailPageStatesSnapshot {
   transcript: MinutesDetailPageStateSnapshot;
   summary: MinutesDetailPageStateSnapshot;
   speakers: MinutesDetailPageStateSnapshot;
+  info: MinutesDetailPageStateSnapshot;
 }
 
 export interface MinutesPlayerSourceSnapshot {
@@ -158,14 +163,14 @@ export type MinutesSemanticAction =
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
   | { type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording'; surface: MinutesSurface; meetingId: string }
   | { type: 'startRecording'; surface: MinutesSurface; meetingId?: string }
-  | { type: 'saveTitle'; surface: 'detail'; meetingId: string; title: string }
+  | { type: 'saveTitle'; surface: 'detail' | 'recording'; meetingId: string; title: string }
   | { type: 'openMeetingMenu'; surface: MinutesSurface; meetingId: string; canResume: boolean }
+  | { type: 'renameMeeting' | 'deleteMeeting'; surface: 'list'; meetingId: string }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
   | { type: 'setFollowLatest'; surface: MinutesSurface; meetingId: string; followLatest: boolean }
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
   | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
-  | { type: 'requestSpeakerAction'; surface: MinutesSurface; meetingId: string; lineId: string; speakerId: string }
   | { type: 'manageSpeaker'; surface: MinutesSurface; meetingId: string; speakerId: string }
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }

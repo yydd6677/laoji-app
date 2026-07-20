@@ -52,7 +52,7 @@ class CalendarSearchPageView(
     setPadding(context.pageDp(4), 0, context.pageDp(4), 0)
   }
   private val clearButton = context.pageIconButton(
-    android.R.drawable.ic_menu_close_clear_cancel,
+    com.laoji.nativeplatform.R.drawable.laoji_ic_close,
     "清空搜索",
     CalendarPagePalette.placeholder,
   )
@@ -93,7 +93,7 @@ class CalendarSearchPageView(
       )
       addView(
         context.pageIconButton(
-          android.R.drawable.ic_menu_search,
+          com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,
           "搜索",
           CalendarPagePalette.placeholder,
         ).apply { isClickable = false },

@@ -5,6 +5,7 @@
   },
   "exclude": [
     "android",
+    "archive",
     "docs",
     "node_modules"
   ]

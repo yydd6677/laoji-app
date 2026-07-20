@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler } from 'react-native';
 import {
   addNativeWindowOverlayActionListener,
   addNativeWindowOverlayDismissListener,
@@ -50,6 +51,7 @@ export function AppActionSheet({
 }) {
   const [mounted, setMounted] = useState(visible);
   const pendingActionRef = useRef<(() => void) | null>(null);
+  const backDismissRequestedRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const itemsRef = useRef(items);
   const ownerId = useMemo(() => createNativeOverlayOwnerId('action-sheet'), []);
@@ -57,7 +59,10 @@ export function AppActionSheet({
   itemsRef.current = items;
 
   useEffect(() => {
-    if (visible) setMounted(true);
+    if (visible) {
+      backDismissRequestedRef.current = false;
+      setMounted(true);
+    }
   }, [visible]);
 
   const snapshot = useMemo<NativeActionSheetSnapshot>(() => ({
@@ -78,12 +83,29 @@ export function AppActionSheet({
   }, []);
 
   const handleDismiss = useCallback(() => {
+    backDismissRequestedRef.current = false;
     setMounted(false);
     onCloseRef.current();
     const action = pendingActionRef.current;
     pendingActionRef.current = null;
     action?.();
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!backDismissRequestedRef.current) {
+        backDismissRequestedRef.current = true;
+        void dismissNativeWindowOverlay(ownerId, 'action-sheet', 'system-back').catch(() => {
+          backDismissRequestedRef.current = false;
+          setMounted(false);
+          onCloseRef.current();
+        });
+      }
+      return true;
+    });
+    return () => subscription.remove();
+  }, [mounted, ownerId]);
 
   useEffect(() => {
     const matchesOwner = (event: NativeWindowOverlayEvent) => (

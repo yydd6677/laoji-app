@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "evidence_id": "UI-CALENDAR-INDICATOR-001",
+  "proof_kind": "androidTest",
+  "recorded_at": "2026-07-18T09:41:59.003381+00:00",
+  "input_sha256": "cff890b94b74daf948d42869aa5bae2252a5674911998ef73654aebb73df5218",
+  "report": {
+    "path": "modules/laoji-native-platform/android/build/outputs/androidTest-results/connected/release/TEST-LaoJi_API_35(AVD) - 15-_laoji-native-platform-.xml",
+    "sha256": "ad3404250bb3eb5988c3d6b48bfc2e80cf27797fd1c723768275469c955be864",
+    "tests": 54,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "testcases": [
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "productionHostBlocksThroughDragBarActionClosesAndActivityRecreationRestoresSelection"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "productionHostWheelVisibleItemTapCommitsAndToolbarExposesOneModeToggle"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectMotionSurvivesImmediateReactSnapshotFeedback"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectKeepsQuickChooseOpenCancelsWheelAndReturnsMonthToDeviceToday"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "productionHostInternalTitlePagerTodayAndEventDotsUseRealViews"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectDoesNotToggleHiddenMonthOwner"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectDoesNotDriveHiddenDayOwner"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "productionHostWheelFlingContinuesThenNewDragCancelsAndCommitsSettledValue"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "activeScheduleReselectReturnsDayToTodayAndCentersCurrentMinute"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarQuickChooseInstrumentedTest",
+        "name": "productionHostTitleTracksContinuousProgressAndInvalidOpenedDragStaysOpen"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "eventMoveBothResizesAndDraftCancelDetachRestoreTransientState"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "createFabAccessibilityBoundsMatchItsRealTouchTarget"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "singleDayComposesOwnersUsesMeasuredAllDayHeightAndCreatesWithSnapshotDuration"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "monthCrossRowRunsTwoLegsAndCrossMonthOrInterruptionCannotRestoreStaleSelection"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "headerAndAllDayGesturesDriveContinuousPagerAndKeepAdjacentHeightStable"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "activeScheduleReselectClearsSameDayDraftAndGestureBeforeScrollingToCurrentTime"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "monthUsesPerDayAndEventSemanticsAndClosesWithoutFadingTheDetailPager"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "activeScheduleReselectUsesOrdinaryTodayTapOnlyWhileMonthPagerIsIdle"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "CAL_DAY_COMPOSE_001_usesSourceRoundedInstanceLayoutInProductionView"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "monthExpansionSurvivesImmediateSelectedDateSnapshotRebind"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "CAL_MONTH_SPAN_001_rendersOneWeekLocalAccessibilityRectAcrossOccupiedColumns"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendar.CalendarSurfaceInstrumentedTest",
+        "name": "timelineHorizontalSwipeLetsPagerTakeOwnershipAndClearsPendingGesture"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionRepeatEndRouteUsesCommonTitleAndCommitsTheSourceDefaultDate"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "timeVariantUsesMeasuredSideCenteringAndSourceTypography"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "repeatEndRouteRestoresAcrossActivityRecreationAndBackCancelsToEntryDraft"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionEditPageKeepsSourceCancelSaveTreeWithoutCenterTitle"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "ordinaryEditHasNoInventedCenterOrSavingLabel"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "productionDetailPageUsesSecondaryTitleAndTwoSmallIconActions"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarCommonTitleBarInstrumentedTest",
+        "name": "detailVariantUsesTransparentSecondaryTitleAndSmallActionSlots"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "sourceSwitchUsesCompoundButtonSemanticsSilentSyncAndRtlGeometry"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "repeatEndUsesSourceSwitchLoopingYearAndARealTouchDrivenDayWheel"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditRecurrenceScopeInstrumentedTest",
+        "name": "recurrenceRowsFollowTheSourceNormalOccurrenceAndExceptionMatrix"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-EDIT-TIME-001_all_four_rows_open_without_system_picker_windows"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-EDIT-TIME-001_cancel_and_Android_Back_restore_entry_draft"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-EDIT-TIME-001_switches_endpoints_all_day_and_commits_real_drag"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-EDIT-TIME-001_accessibility_and_optional_time_use_production_controls"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-EDIT-TIME-001_saved_hierarchy_restores_endpoint_and_selection"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.calendarpages.CalendarEditTimePageInstrumentedTest",
+        "name": "CAL-PICKER-WHEEL-TAP-001_production_wheel_uses_source_cylinder_and_short_tap"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackRecoveryStoreInstrumentedTest",
+        "name": "localAndCloudRestoreButScopeExpiryAndHttpFailClosed"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackRecoveryStoreInstrumentedTest",
+        "name": "encryptedFileContainsNoPlaintextUriBearerTokenOrHeaderName"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackRecoveryStoreInstrumentedTest",
+        "name": "corruptionAndKeyLossFailClosedAndDeleteTheRecord"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackServiceRecoveryInstrumentedTest",
+        "name": "sameScopeReconnectKeepsServiceStateButUserSwitchAndSignOutClearImmediately"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.media.MinutesPlaybackServiceRecoveryInstrumentedTest",
+        "name": "realLocalWavRestoresSourcePositionAndRatePausedAfterControlledServiceRecreation"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "unavailableRenderClosesTitleEditorAndRejectsDetachedSaveCallback"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "detailOwnsPersistentPagesNonOverlayWarningAndExplicitNoAudioState"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "activityRecreateRestoresMeetingScopedTabHeaderAndAllPageScrollPositions"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "pagerKeepsPageInstancesScrollAndIndependentStateAcrossSwitchAndRender"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "stickyConsumesHeaderBeforePageAndOnlyExpandsForPageAtTop"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesDetailSurfaceInstrumentedTest",
+        "name": "productionPlayerConnectsToMediaSessionLoadsLocalWavAndClearsOnDetach"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.minutes.MinutesRecordingSurfaceInstrumentedTest",
+        "name": "currentSessionDrivesNativeTimerAndWaveformUntilPausedOrDetached"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.transfer.MeetingDeletionInstrumentedTest",
+        "name": "exactSessionDeletionDoesNotTouchAnotherMeetingAndRejectsActiveSession"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.transfer.MeetingDeletionInstrumentedTest",
+        "name": "tombstoneSurvivesStoreRecreationAndExpiresFailClosed"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.ui.NativeBottomBarInstrumentedTest",
+        "name": "realCalendarAndMinutesRootReplacementReplaysSelectionMotionExactlyOnce"
+      },
+      {
+        "class_name": "com.laoji.nativeplatform.ui.NativeBottomBarInstrumentedTest",
+        "name": "sourceShapedTreeUsesPhysicalDividerRealSelectedStateAndIconOnlyMotion"
+      }
+    ]
+  },
+  "audit_reports": {
+    "typescript_ast": {
+      "kind": "typescript_ast",
+      "path": "build/feishu-ui-ast-report.json",
+      "sha256": "22cb003fe216da850802e35de6c01a66f505e78aff0870bea032b229c1dc9b21",
+      "error_count": 205
+    },
+    "android_lint_uast": {
+      "kind": "android_lint_uast",
+      "path": "build/feishu-android-uast-report.json",
+      "sha256": "702be0bce7de6e933c7ebc5a7a1533bb85056e688b7e081a419add492754e0a7",
+      "error_count": 464
+    },
+    "workspace_resolution": {
+      "kind": "workspace_resolution",
+      "path": "build/workspace-source-resolution-report.json",
+      "sha256": "454935d4feded69f2b789eab234c9a81b16d0f56482acd2b1d63b00766f2f494",
+      "error_count": 0
+    }
+  },
+  "runtime": {
+    "device_kind": "emulator",
+    "api_level": 35,
+    "device_name": "LaoJi_API_35"
+  },
+  "independent_review": false
+}

@@ -152,7 +152,7 @@ function formatEditorDate(d: Date): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AddEventScreen({ navigation, route }: Props) {
-  const { events, searchableEvents, addEvent, updateEvent, deleteEvent, findConflicts } = useEvents();
+  const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
   const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingRef = route.params?.eventRef;
@@ -475,52 +475,6 @@ export function AddEventScreen({ navigation, route }: Props) {
     void doSave(runId, payload, recurrenceScope);
   };
 
-  const checkConflictsAndSave = async (
-    runId: number,
-    payload: Omit<CalEvent, 'id'>,
-    recurrenceScope: EventRecurrenceScope,
-  ) => {
-    let result: Awaited<ReturnType<typeof findConflicts>>;
-    try {
-      result = await findConflicts(payload, editingRef, recurrenceScope);
-    } catch {
-      if (!isSaveRunActive(runId)) return;
-      releaseSaveRun(runId);
-      showDialog({ title: '暂时无法检查日程冲突', message: '请稍后重试', tone: 'warning' });
-      return;
-    }
-
-    if (!isSaveRunActive(runId)) return;
-    if (result.hasConflict) {
-      const explicit = result.conflicts.some(conflict => conflict.severity === 'overlap');
-      const names = result.conflicts.map(({ event }) => {
-        const time = event.startTime && event.endTime
-          ? `${event.startTime}–${event.endTime}`
-          : event.isAllDay ? '全天' : '无具体时间';
-        return `• ${event.title} (${time})`;
-      }).join('\n');
-      showDialog({
-        title: explicit ? '时间冲突' : '全天安排提示',
-        message: `${explicit ? '该安排与以下日程重叠' : '该日期已有全天或定时安排'}：\n${names}`,
-        hint: result.complete
-          ? '如果确认这些安排可以重叠，仍然可以继续保存。'
-          : '当前只能核对本机已有日程；仍可继续保存。',
-        tone: 'warning',
-        onDismiss: () => releaseSaveRun(runId),
-        actions: [
-          {
-            text: '仍然保存',
-            role: 'primary',
-            onPress: () => startSaveWrite(runId, payload, recurrenceScope),
-          },
-          { text: '取消', role: 'cancel', onPress: () => releaseSaveRun(runId) },
-        ],
-      });
-      return;
-    }
-    startSaveWrite(runId, payload, recurrenceScope);
-  };
-
   const selectEditScopeAndSave = (
     runId: number,
     payload: Omit<CalEvent, 'id'>,
@@ -530,13 +484,13 @@ export function AddEventScreen({ navigation, route }: Props) {
         editingEvent,
         recurrenceScope => {
           if (!isSaveRunActive(runId)) return;
-          void checkConflictsAndSave(runId, payload, recurrenceScope);
+          startSaveWrite(runId, payload, recurrenceScope);
         },
         () => releaseSaveRun(runId),
       ));
       return;
     }
-    void checkConflictsAndSave(runId, payload, selectedRecurrenceScope ?? 'series');
+    startSaveWrite(runId, payload, selectedRecurrenceScope ?? 'series');
   };
 
   const handleSave = () => {
@@ -550,8 +504,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     const validation = validateEventDraft(payload);
     if (!validation.valid || !validation.value) {
       const issue = validation.issues[0];
-      if (issue?.code === 'missing-title') showDialog({ title: issue.message, tone: 'info' });
-      else showDialog({ title: '日程信息不完整', message: issue?.message, tone: 'warning' });
+      showDialog({ title: '日程信息不完整', message: issue?.message, tone: 'warning' });
       return;
     }
 
@@ -569,7 +522,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       try {
         await deleteEvent(eventRefForEvent(editingEvent), recurrenceScope);
         allowLeaveRef.current = true;
-        navigation.navigate('MainTabs', { screen: 'Schedule' });
+        navigation.popTo('MainTabs', { screen: 'Schedule' });
       } catch {
         showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
       }

@@ -84,7 +84,6 @@ export function ScheduleScreen({
     searchableEvents,
     refreshEvents,
     updateEvent,
-    findConflicts,
   } = useEvents();
   const { showDialog } = useAppDialog();
   const currentDate = useCurrentDate();
@@ -136,29 +135,6 @@ export function ScheduleScreen({
     });
   }, [showDialog]);
 
-  const confirmConflicts = useCallback((conflicts: Awaited<ReturnType<typeof findConflicts>>) => (
-    new Promise<boolean>(resolve => {
-      let settled = false;
-      const finish = (confirmed: boolean) => {
-        if (settled) return;
-        settled = true;
-        resolve(confirmed);
-      };
-      const names = conflicts.conflicts.map(({ event }) => `• ${event.title}`).join('\n');
-      showDialog({
-        title: '时间冲突',
-        message: `调整后与以下日程重叠：\n${names}`,
-        hint: conflicts.complete ? '确认这些安排可以重叠后再保存。' : '当前只能核对本机已有日程。',
-        tone: 'warning',
-        onDismiss: () => finish(false),
-        actions: [
-          { text: '仍然保存', role: 'primary', onPress: () => finish(true) },
-          { text: '取消', role: 'cancel', onPress: () => finish(false) },
-        ],
-      });
-    })
-  ), [showDialog]);
-
   const handleMutation = useCallback(async (mutation: NativeCalendarMutationRequest) => {
     const targetRef = {
       sourceEventId: mutation.sourceEventId,
@@ -176,12 +152,6 @@ export function ScheduleScreen({
         return;
       }
       const changes = nativeCalendarMutationChanges(mutation);
-      const { id: _id, ...candidate } = { ...target, ...changes };
-      const conflicts = await findConflicts(candidate, targetRef, scope);
-      if (conflicts.hasConflict && !await confirmConflicts(conflicts)) {
-        setMutationResolution({ operationId: mutation.operationId, accepted: false, message: '原日程时间已保留。' });
-        return;
-      }
       await updateEvent(targetRef, changes, scope);
       setMutationResolution({ operationId: mutation.operationId, accepted: true });
     } catch (error) {
@@ -191,15 +161,15 @@ export function ScheduleScreen({
         message: readableErrorMessage(error, '修改失败，原日程时间已保留。'),
       });
     }
-  }, [chooseEditScope, confirmConflicts, events, findConflicts, updateEvent]);
+  }, [chooseEditScope, events, updateEvent]);
 
-  const openCreate = useCallback((draft?: NativeCalendarCreateEvent) => {
+  const openCreate = useCallback((draft?: NativeCalendarCreateEvent, epochDay = selectedEpochDay) => {
     navigation.navigate('AddEvent', draft ? {
       date: calendarDateFromEpochDay(draft.startEpochDay),
       endDate: calendarDateFromEpochDay(draft.endEpochDay + (draft.endMinutes === 1440 ? 1 : 0)),
       startTime: calendarTimeFromMinutes(draft.startMinutes),
       endTime: calendarTimeFromMinutes(draft.endMinutes),
-    } : { date: calendarDateFromEpochDay(selectedEpochDay) });
+    } : { date: calendarDateFromEpochDay(epochDay) });
   }, [navigation, selectedEpochDay]);
 
   const handleSemantic = useCallback((event: NativeCalendarSemanticEvent) => {
@@ -217,12 +187,12 @@ export function ScheduleScreen({
         setVoiceVisible(true);
         break;
       case 'create-manual':
-        openCreate();
+        openCreate(undefined, typeof event.epochDay === 'number' ? event.epochDay : selectedEpochDay);
         break;
       default:
         break;
     }
-  }, [navigation, openCreate]);
+  }, [navigation, openCreate, selectedEpochDay]);
 
   const handleVisibleRange = (event: NativeCalendarVisibleRangeEvent) => {
     setSelectedEpochDay(event.selectedEpochDay);

@@ -108,8 +108,23 @@ export function readableErrorMessage(err: unknown, fallback: string): string {
   const message = raw.trim();
   if (!message || message === '[object Object]') return fallback;
   if (isUnauthorizedResponseError(err)) return '登录已过期，请重新登录。';
-  if (/Network request failed|Failed to fetch|timeout/i.test(message)) {
+  const cleaned = message.replace(/^[^:]+:\s*\d{3}\s*/, '').trim();
+  if (/Network request failed|Failed to fetch|connection refused/i.test(cleaned)) {
     return '暂时无法连接老记服务，请检查网络后重试。';
   }
-  return message.replace(/^[^:]+:\s*\d{3}\s*/, '').trim() || fallback;
+  if (/timeout|timed out/i.test(cleaned)) return '请求超时，请稍后重试。';
+  if (/401|unauthorized|token expired/i.test(cleaned)) return '登录已过期，请重新登录。';
+  if (/microphone|permission|recording|audio input/i.test(cleaned)) {
+    return '录音暂时不可用，请稍后重试。';
+  }
+  if (/parse|schedule/i.test(cleaned)) return '日程解析失败，请检查输入后重试。';
+  if (/audio|playback/i.test(cleaned)) return '音频暂时无法播放，请稍后重试。';
+  if (/server|500|502|503/i.test(cleaned)) return '老记服务暂时不可用，请稍后重试。';
+
+  // A wholly Chinese backend message can be useful. Mixed Chinese/English is
+  // still raw transport/provider copy and must not bypass the fallback merely
+  // because it contains one Chinese phrase.
+  return /[\u3400-\u9fff]/.test(cleaned) && !/[A-Za-z]/.test(cleaned)
+    ? cleaned
+    : fallback;
 }

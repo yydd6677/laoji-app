@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -52,6 +53,19 @@ internal fun View.backgroundShape(
   }
 }
 
+internal fun View.backgroundHorizontalGradient(
+  startColor: Int,
+  endColor: Int,
+  radiusDp: Int,
+) {
+  background = GradientDrawable(
+    GradientDrawable.Orientation.LEFT_RIGHT,
+    intArrayOf(startColor, endColor),
+  ).apply {
+    cornerRadius = context.dp(radiusDp).toFloat()
+  }
+}
+
 internal fun Context.textView(
   text: CharSequence = "",
   textSizeSp: Int = 14,
@@ -85,6 +99,13 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     gravity = Gravity.CENTER
     maxLines = 1
   }
+  private val editTitleContainer = LinearLayout(context).apply {
+    orientation = LinearLayout.VERTICAL
+    gravity = Gravity.CENTER_VERTICAL
+    visibility = View.GONE
+  }
+  private val editTitle = context.textView(textSizeSp = 17, weight = Typeface.BOLD).apply { maxLines = 1 }
+  private val editStatus = context.textView("已保存", textSizeSp = 12, color = MinutesPalette.faint).apply { maxLines = 1 }
   private val leftActions = LinearLayout(context).apply {
     orientation = LinearLayout.HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
@@ -95,6 +116,16 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
   }
   private var actionConfiguration = ""
   private var actionHandler: ((String) -> Unit)? = null
+  private var doneAction: View? = null
+
+  val activeDoneAction: View?
+    get() = doneAction
+
+  fun setEditDirty(value: Boolean) {
+    editStatus.text = if (value) "未保存" else "已保存"
+    editStatus.setTextColor(if (value) MinutesPalette.warning else MinutesPalette.faint)
+    editStatus.contentDescription = editStatus.text
+  }
 
   init {
     setBackgroundColor(MinutesPalette.surface)
@@ -107,13 +138,32 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
         gravity = Gravity.CENTER
       },
     )
+    editTitleContainer.addView(
+      editTitle,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    editTitleContainer.addView(
+      editStatus,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    addView(
+      editTitleContainer,
+      LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        leftMargin = context.dp(16)
+        rightMargin = context.dp(82)
+      },
+    )
     addView(
       leftActions,
       LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44)).apply { gravity = Gravity.START },
     )
     addView(
       rightActions,
-      LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44)).apply { gravity = Gravity.END },
+      LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+        gravity = Gravity.END
+        rightMargin = context.dp(6)
+      },
     )
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
   }
@@ -125,16 +175,21 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     showShare: Boolean = false,
     showMore: Boolean = false,
     shareEnabled: Boolean = true,
+    showDone: Boolean = false,
     onAction: (String) -> Unit,
   ) {
     if (titleView.text.toString() != title) titleView.text = title
+    if (editTitle.text.toString() != title) editTitle.text = title
+    titleView.visibility = if (showDone) View.GONE else View.VISIBLE
+    editTitleContainer.visibility = if (showDone) View.VISIBLE else View.GONE
     actionHandler = onAction
-    val nextConfiguration = listOf(showBack, showSearch, showShare, showMore, shareEnabled).joinToString("|")
+    val nextConfiguration = listOf(showBack, showSearch, showShare, showMore, shareEnabled, showDone).joinToString("|")
     if (nextConfiguration == actionConfiguration) return
     actionConfiguration = nextConfiguration
     leftActions.removeAllViews()
     rightActions.removeAllViews()
-    if (showBack) {
+    doneAction = null
+    if (showBack && !showDone) {
       leftActions.addView(
         context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "返回").apply {
           setOnClickListener { actionHandler?.invoke("back") }
@@ -142,14 +197,29 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
         LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { leftMargin = context.dp(6) },
       )
     }
-    if (showSearch) {
-      addRightAction(android.R.drawable.ic_menu_search, "搜索会议记录", action = "search")
-    }
-    if (showShare) {
-      addRightAction(android.R.drawable.ic_menu_share, "分享会议资料", shareEnabled, "share")
-    }
-    if (showMore) {
-      addRightAction(android.R.drawable.ic_menu_more, "更多会议操作", action = "more")
+    if (showDone) {
+      doneAction = context.textView("完成", 17, MinutesPalette.primary).apply {
+        gravity = Gravity.CENTER
+        isClickable = true
+        isFocusable = true
+        contentDescription = "完成编辑会议记录标题"
+        setOnClickListener { actionHandler?.invoke("done") }
+      }
+      (rightActions.layoutParams as? LayoutParams)?.rightMargin = context.dp(20)
+      rightActions.requestLayout()
+      rightActions.addView(doneAction, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)))
+    } else {
+      (rightActions.layoutParams as? LayoutParams)?.rightMargin = context.dp(6)
+      rightActions.requestLayout()
+      if (showMore) {
+        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline, "更多会议记录操作", action = "more")
+      }
+      if (showSearch) {
+        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline, "搜索会议记录", action = "search")
+      }
+      if (showShare) {
+        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline, "分享会议资料", shareEnabled, "share")
+      }
     }
   }
 
@@ -165,6 +235,81 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
         alpha = if (enabled) 1f else 0.35f
         setOnClickListener { actionHandler?.invoke(action) }
       },
+      LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+    )
+  }
+}
+
+/** Main-tab title mirrors MmInviteTitleBar in the in-main-tab, left-title branch. */
+internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
+  private val titleView = context.textView(textSizeSp = 20, weight = Typeface.BOLD).apply {
+    gravity = Gravity.CENTER
+    maxLines = 1
+  }
+  private val actions = LinearLayout(context).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+  }
+  private var actionHandler: ((String) -> Unit)? = null
+  private val viewModeButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_list_outline,
+    "切换到列表视图",
+  )
+
+  init {
+    setBackgroundColor(MinutesPalette.page)
+    minimumHeight = context.dp(44)
+    addView(
+      titleView,
+      LayoutParams(LayoutParams.MATCH_PARENT, context.dp(44)).apply {
+        gravity = Gravity.CENTER
+        // mm_view_invite_titlebar.xml gives the title a centered lane between
+        // the 44dp leading slot and the two trailing actions.
+        leftMargin = context.dp(98)
+        rightMargin = context.dp(98)
+      },
+    )
+    addView(
+      actions,
+      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT).apply {
+        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        rightMargin = context.dp(6)
+      },
+    )
+  }
+
+  fun configure(title: String, viewMode: MinutesHomeViewMode, onAction: (String) -> Unit) {
+    titleView.text = title
+    actionHandler = onAction
+    viewModeButton.setImageResource(
+      if (viewMode == MinutesHomeViewMode.GRID) {
+        com.laoji.nativeplatform.R.drawable.laoji_ic_list_outline
+      } else {
+        com.laoji.nativeplatform.R.drawable.laoji_ic_grid_outline
+      },
+    )
+    viewModeButton.contentDescription = if (viewMode == MinutesHomeViewMode.GRID) {
+      "切换到列表视图"
+    } else {
+      "切换到网格视图"
+    }
+    if (actions.childCount != 0) return
+    actions.addView(
+      context.iconButton(
+        com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,
+        "搜索会议记录",
+      ).apply { setOnClickListener { actionHandler?.invoke("search") } },
+      LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+    )
+    actions.addView(
+      viewModeButton.apply { setOnClickListener { actionHandler?.invoke("toggleViewMode") } },
+      LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+    )
+    actions.addView(
+      context.iconButton(
+        com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
+        "更多会议记录操作",
+      ).apply { setOnClickListener { actionHandler?.invoke("more") } },
       LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
     )
   }

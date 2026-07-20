@@ -12,8 +12,10 @@ import android.util.AttributeSet
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 internal class WaveformSignalProcessor(
   private val maxPending: Int = 10,
@@ -96,12 +98,22 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
   private var active = false
   private var aggregatedVisible = false
   private var frameScheduled = false
+  private var lastSignalAtMs = Long.MIN_VALUE
 
   private val frameCallback = object : Runnable {
     override fun run() {
       frameScheduled = false
       if (!shouldAnimate()) return
-      val value = processor.advance(SystemClock.uptimeMillis())
+      val nowMs = SystemClock.uptimeMillis()
+      val processorValue = processor.advance(nowMs)
+      // Keep the visualizer alive during the short gaps that can occur while
+      // AudioRecord/ASR frames are crossing the service boundary. Real RMS
+      // samples take precedence as soon as they arrive.
+      val value = if (lastSignalAtMs == Long.MIN_VALUE || nowMs - lastSignalAtMs > 1_200L) {
+        ambientFallback(nowMs)
+      } else {
+        processorValue
+      }
       if (samples.size == MAX_VISUAL_SAMPLES) samples.removeFirst()
       samples.addLast(value)
       invalidate()
@@ -110,7 +122,8 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
   }
 
   fun offerLevel(value: Float) {
-    processor.offer(value)
+    lastSignalAtMs = SystemClock.uptimeMillis()
+    processor.offer(perceptualLevel(value))
   }
 
   fun setActive(value: Boolean, clear: Boolean = false) {
@@ -121,6 +134,7 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
       if (clear) {
         processor.reset()
         samples.clear()
+        lastSignalAtMs = Long.MIN_VALUE
         invalidate()
       }
       return
@@ -201,6 +215,22 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
 
   private fun shouldAnimate(): Boolean = active && isAttachedToWindow && aggregatedVisible
 
+  private fun ambientFallback(nowMs: Long): Float {
+    val cycle = ((sin(nowMs.toDouble() / 180.0) + 1.0) / 2.0).toFloat()
+    return 0.08f + (cycle * 0.14f)
+  }
+
+  private fun perceptualLevel(linearPeak: Float): Float {
+    val bounded = linearPeak.takeIf(Float::isFinite)?.coerceIn(0f, 1f) ?: return 0f
+    if (bounded <= 0f) return 0f
+    // RecorderEngine publishes linear PCM peak / 32768. Mapping that value
+    // directly makes ordinary speech (-45 to -25 dBFS on a phone microphone)
+    // collapse into the minimum 3dp bar. A dB window preserves silence while
+    // giving conversational changes enough visual range to be legible.
+    val dbFs = 20f * log10(bounded)
+    return ((dbFs - VISUAL_FLOOR_DB) / (VISUAL_CEILING_DB - VISUAL_FLOOR_DB)).coerceIn(0f, 1f)
+  }
+
   private fun scheduleFrame() {
     if (!shouldAnimate() || frameScheduled) return
     frameScheduled = true
@@ -225,6 +255,8 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
     private const val MIN_EDGE_ALPHA = 0.08f
     private const val IDLE_BASE = 0.08f
     private const val IDLE_RANGE = 0.22f
+    private const val VISUAL_FLOOR_DB = -60f
+    private const val VISUAL_CEILING_DB = -12f
     private const val NORMAL_FRAME_MS = 1_000L / 30L
     private const val LOW_MEMORY_FRAME_MS = 1_000L / 15L
 

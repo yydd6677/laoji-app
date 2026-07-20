@@ -10,6 +10,7 @@ import {
   eventRefNotificationData,
 } from '../utils/eventIdentity';
 import { expandEventsForMonths } from '../utils/eventRecurrence';
+import { eventListTitle } from '../utils/eventTitle';
 
 export const DEFAULT_REMINDER_MINUTES = 15;
 export const SOON_REMINDER_DELAY_MS = 1_000;
@@ -638,7 +639,7 @@ export async function scheduleEventNotification(
     return await Notifications.scheduleNotificationAsync({
       content: {
         title: '老记日程提醒',
-        body: event.title,
+        body: eventListTitle(event.title),
         sound: 'default',
         data: {
           kind: 'event',

@@ -1,0 +1,2341 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "id": "feishu-android-7.71.8",
+    "version": "7.71.8",
+    "description": "Decoded Feishu Android source and resources used as the UI behavior authority.",
+    "catalog_sha256": "8b4391c944e877adb735599ed29914f27987a13b3d51c8f495624b7700b5b6e6"
+  },
+  "files": [
+    {
+      "id": "account-static-mineactivity-2e96dbf9",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/android/lark/mine/impl/index/MineActivity.java",
+      "sha256": "29a2c6bacbee4d75f0ac449c6f49c2579cfa464c83f28f0a79248ed9b59a1851"
+    },
+    {
+      "id": "account-static-profilesettingfragment-971e2203",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/android/lark/profile/func/profile_setting/ProfileSettingFragment.java",
+      "sha256": "8e992d47b8330d6c076d12301a3c9ec70cfd3181344e78614504d09afb6ff679"
+    },
+    {
+      "id": "account-static-settingpagefragment-729d5ce6",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/android/lark/setting/page/function/SettingPageFragment.java",
+      "sha256": "db892bf34e377ff049644bb12b6e9c572ef35eafe47deb51db600465bae96c8d"
+    },
+    {
+      "id": "account-static-aboutactivity-8e0a3746",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/android/lark/upgrade/setting/about/AboutActivity.java",
+      "sha256": "ec47fce90256b89c185b82bf0c4ff5f676b99feac43ba42c34a39e578aed3cac"
+    },
+    {
+      "id": "account-static-commonuicontainer-552f6bd5",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/lark/android/passport/biz/base/ui/CommonUiContainer.java",
+      "sha256": "44931ab3a915fbb34f38a36aee6b49372147df2735643b14846b1d3a83d4ea1b"
+    },
+    {
+      "id": "account-static-loginregisterbaseactivity-f17663e5",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/lark/android/passport/biz/feature/login_register_base/LoginRegisterBaseActivity.java",
+      "sha256": "b438e4e0598b261a24eb69a5d0cc3806a4157aa2bde831271e31b69a4646afd6"
+    },
+    {
+      "id": "account-static-loginregisterbasefragment-9a55eb17",
+      "group": "account-static",
+      "path": "java-sources/com/p325ss/lark/android/passport/biz/feature/login_register_base/LoginRegisterBaseFragment.java",
+      "sha256": "86b961c1b9973ad5c0f05d7d4984b45c7b2a3635930258797b19952bba981122"
+    },
+    {
+      "id": "account-static-abstractc155388d0-cf2db617",
+      "group": "account-static",
+      "path": "java-sources/sh7/AbstractC155388d0.java",
+      "sha256": "4d774e970616b59dc32bcbab541aa6eda6c8991bb00dea80937cec5161aedfa4"
+    },
+    {
+      "id": "calendar-c0731m-47432611",
+      "group": "calendar",
+      "path": "java-sources/ah3/C0731m.java",
+      "sha256": "d50fa0b53659e50fa08ca58c779cee2e0b33d0d58ce5c159a5e7dd66c798d89a"
+    },
+    {
+      "id": "calendar-c0744z-cebc0df3",
+      "group": "calendar",
+      "path": "java-sources/ah3/C0744z.java",
+      "sha256": "083008617f143f4557b5a8c94f05b4d1869471049c13bb1ec06e37d6422e5b6e"
+    },
+    {
+      "id": "calendar-viewpager-d9762691",
+      "group": "calendar",
+      "path": "java-sources/androidx/viewpager/widget/ViewPager.java",
+      "sha256": "e7eca005b151d630333bb77ae8e8010e44d7b3a55fa97820c61637d0af3ca1ac"
+    },
+    {
+      "id": "calendar-c6926a-33332e37",
+      "group": "calendar",
+      "path": "java-sources/bm3/C6926a.java",
+      "sha256": "5dfd4b6ea03d83c7cc5d7652bf2221b6b1b9527f65b60895940eecc69ef823ea"
+    },
+    {
+      "id": "calendar-c8480a-4013440c",
+      "group": "calendar",
+      "path": "java-sources/cl3/C8480a.java",
+      "sha256": "a96ebeb6df0855b75b3c4d5e4aef30e71996b205186cbdfd17781b16ac26c5b4"
+    },
+    {
+      "id": "calendar-calendarevent-0227651b",
+      "group": "calendar",
+      "path": "java-sources/com/bytedance/lark/p151pb/calendar/p157v1/CalendarEvent.java",
+      "sha256": "34a90424cf23a48cdb21d950bdfa4b9c2458be77fc916d2bdb7d79e9250c6b13"
+    },
+    {
+      "id": "calendar-instancelayout-d1e1b21c",
+      "group": "calendar",
+      "path": "java-sources/com/bytedance/lark/p151pb/calendar/p157v1/InstanceLayout.java",
+      "sha256": "fc0c968c80f04db776bae1f7a9223b6c37fbe65e2ac7b76c329e3cdff3b544d4"
+    },
+    {
+      "id": "universe-wheel-view",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/component/universe_design/timepicker/impl/base/WheelView.java",
+      "sha256": "40d1ad920c670173ceb60c6e4704b2e1bc6c8833b1640ccc0870070de870963f"
+    },
+    {
+      "id": "calendar-udswitch-e381e0fa",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/component/universe_design/udswitch/UDSwitch.java",
+      "sha256": "d7a5b276767764b3b545a3d5ee71989e1f2f11f3b039e0439ce707be3d609aa7"
+    },
+    {
+      "id": "calendar-c43831a-ced07981",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/framework/callback/C43831a.java",
+      "sha256": "756bb9054a91908ac4810c532133afcba0f6aa713465238d8f110f4c1df4c91a"
+    },
+    {
+      "id": "calendar-uicallbackexecutor-18e5a337",
+      "group": "calendar",
+      "path": "java-sources/com/larksuite/framework/callback/UICallbackExecutor.java",
+      "sha256": "6e1f23ed205fb36d3ad0e2f8f62b19044172a80b7ed21bdf3c26d796f87a0a70"
+    },
+    {
+      "id": "calendar-pushconstants-c91e9934",
+      "group": "calendar",
+      "path": "java-sources/com/meizu/cloud/pushsdk/constants/PushConstants.java",
+      "sha256": "43b1842f8a811fd03a27204963d93859c42834c1f37782c7bf517c2b3805624b"
+    },
+    {
+      "id": "calendar-switchview-2d957da3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendars/sidebar/widget/SwitchView.java",
+      "sha256": "ac2f5c3e98416326347a57ee4b947c6f21cb194be63ed1115bc514ae9f15a98a"
+    },
+    {
+      "id": "calendar-c64530g-a9ee81ac",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/C64530g.java",
+      "sha256": "df089f0391415aebc813a476fea38c705327326354c0346b429ec19247caa648"
+    },
+    {
+      "id": "calendar-calendarappendview-5a2f3583",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarAppendView.java",
+      "sha256": "03f62f7e08ae9c844133b7e504bf236066cf591b4a4d04d52e26a20d4e7ce6c5"
+    },
+    {
+      "id": "calendar-calendardate-3c9234bc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarDate.java",
+      "sha256": "e14d62f0c505a8cef180b1e9d627b219a14f05eb90050a789574b23312c48e4c"
+    },
+    {
+      "id": "calendar-calendarmainlauncher-0797a2e5",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarMainLauncher.java",
+      "sha256": "660e6adfedca2836a2d37904024bf9396d3b9e56e7fe01ea68fae63772822a59"
+    },
+    {
+      "id": "calendar-calendartabview-9bdf9b28",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarTabView.java",
+      "sha256": "0520c839098c8a22ffcc6c077408d96671b53cd562d63a4a182830c3afa01a91"
+    },
+    {
+      "id": "calendar-calendartabviewmode-2ab908cc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/CalendarTabViewMode.java",
+      "sha256": "bb7134c5d126d1c53bef2302d5e0b4058f50c2d2c303aca2170e978176e893ec"
+    },
+    {
+      "id": "calendar-idatelogicdata-71b4cbaa",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDateLogicData.java",
+      "sha256": "189df7fd98a66be45978519efb79716e5e92f9476535e5dbabe98d535085f347"
+    },
+    {
+      "id": "calendar-idiagramcontroller-86ac3291",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDiagramController.java",
+      "sha256": "7a57110e4b6a8462e998293a0935b7e61d243533f219f60a7cf45f87a0d667e9"
+    },
+    {
+      "id": "calendar-idiagramdelegate-094356ef",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/IDiagramDelegate.java",
+      "sha256": "8d9699ead20af75c83b1a8eac0b7ff1d25ddaa06eb90011c4ee9a4f69ec383c7"
+    },
+    {
+      "id": "calendar-basecalendarviewviewmodel-db5061b3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/base/BaseCalendarViewViewModel.java",
+      "sha256": "eead6a4a0fe1cd94d3ade09911b06bbede4a17e0993aa70ee350bf8c7003091f"
+    },
+    {
+      "id": "calendar-calendarviewviewmodel-514861c0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/base/CalendarViewViewModel.java",
+      "sha256": "82878e2f41f5fb952e91331800dcd2f4fb46857d673f67ff96a2c180733f81b8"
+    },
+    {
+      "id": "calendar-c64448c-d843d36c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/C64448c.java",
+      "sha256": "1262217243be550e1cd29bc3e8e12cbbae394c1734410794d7a34fe939c1549c"
+    },
+    {
+      "id": "calendar-dayinstancelayout-6d7bf485",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/DayInstanceLayout.java",
+      "sha256": "d51ffc12640b381dcd09301c7920a99e1908d4cb2efd3ac4ba128035d24adb4d"
+    },
+    {
+      "id": "calendar-dayinstanceview-1a895515",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/DayInstanceView.java",
+      "sha256": "95df4794ee27febad31264fb73c989379baa586f75eb030f831d66d4645ff080"
+    },
+    {
+      "id": "calendar-positionedviewlayout-0dd80f18",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/PositionedViewLayout.java",
+      "sha256": "48c63012df596e9bc3a7a2b0cb55334158bcf8c561cb0894760d57c2461f6c38"
+    },
+    {
+      "id": "calendar-stickyinstancelayout-d95d55e6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/sticky/StickyInstanceLayout.java",
+      "sha256": "e86b3ce574152437fca71209cff2a9c159c8eea800626e6428586df433e1e213"
+    },
+    {
+      "id": "calendar-stickyinstancelayoutwrapper-93dfb2f2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/common/widget/sticky/StickyInstanceLayoutWrapper.java",
+      "sha256": "a0c3d1203b707cf6e4b17db14e1c38df529b6ab1a0eaf783899dd6518930c2b0"
+    },
+    {
+      "id": "calendar-singedayview-7962e9d0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/fragment/SingeDayView.java",
+      "sha256": "ad09960f26afae9aa4b6f1253400d60b88dc616980f3918e4071bcceb75687f2"
+    },
+    {
+      "id": "calendar-singledayheaderview-c7d12952",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/fragment/SingleDayHeaderView.java",
+      "sha256": "28ebc289f8b75c88da37f31a1b526896c4c578831b28caad8ee56f4408283414"
+    },
+    {
+      "id": "calendar-singledayviewfragment-c7f3b840",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/fragment/SingleDayViewFragment.java",
+      "sha256": "929d0905efae55926552cdad05a3f640ccf6b0a200daa450d7041926d480f22e"
+    },
+    {
+      "id": "calendar-alldayinstancelayout-e72cff58",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/AllDayInstanceLayout.java",
+      "sha256": "885fb89241c9b9d25ede50573b55a8b4dbef2c7274b47b056bd419d7e12cddfe"
+    },
+    {
+      "id": "calendar-alldayinstanceview-9daa8138",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/AllDayInstanceView.java",
+      "sha256": "e56e2f882ab3e07a6ac146c2ed2d8e7674546ea61a2cdcdde5bfb9bb876b4e93"
+    },
+    {
+      "id": "calendar-singledayinstancelayout-8e6e8fb1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/SingleDayInstanceLayout.java",
+      "sha256": "5c485247cdd543706ee2ce838fef9b184cdfcc02d15674903832f7f324060f12"
+    },
+    {
+      "id": "calendar-singledaystickyinstancelayoutwrapper-cd528f3f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/view/sticky/SingleDayStickyInstanceLayoutWrapper.java",
+      "sha256": "eae8fb0f0875e990bd9f549f51439400e8298830f5f42f748245985982757bb6"
+    },
+    {
+      "id": "calendar-singledayviewmodel-37fb59fd",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/viewmodel/SingleDayViewModel.java",
+      "sha256": "7a3d9db68d65c302dd79c4a1db01413592213bbc2b7010aebbef622f0e4fad92"
+    },
+    {
+      "id": "calendar-singledayviewmodelimpl-184ccf54",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/daysview/singleday/viewmodel/SingleDayViewModelImpl.java",
+      "sha256": "b46cfba8fb8e6ccdec4e40b2d5522684aaaa3a7570a8e1a6b9e613209de52558"
+    },
+    {
+      "id": "calendar-dayeventinstancedrawabledata-549f037a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/DayEventInstanceDrawableData.java",
+      "sha256": "51873537f30d968e74de4b9acf689ba55d466c5b9a8651f5f95f14f672204751"
+    },
+    {
+      "id": "calendar-eventinstancedata-ac992bbe",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/EventInstanceData.java",
+      "sha256": "eb408983a51ba5d816485ea4cbfbc731007938cfa878724bbc266f4c72142e5e"
+    },
+    {
+      "id": "calendar-eventinstancedatamapper-29e20c48",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/EventInstanceDataMapper.java",
+      "sha256": "ec34dbb4f668a43e9e37f20368ca5058ce4d88ef89b7cc4296ed736b54525440"
+    },
+    {
+      "id": "calendar-eventinstancedrawabledata-107f084b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/EventInstanceDrawableData.java",
+      "sha256": "281de34baa1b2161acced71e7ecb870a8627e05347d7e91bb2d0b264b0d6d210"
+    },
+    {
+      "id": "calendar-eventinstancelayer-e899da23",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/EventInstanceLayer.java",
+      "sha256": "cb825809ff3b14d93700bd38f7f4828c1192a641583347259c1a34a458402162"
+    },
+    {
+      "id": "calendar-eventinstanceviewdata-8f746467",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/instancelayer/calendareventlayer/EventInstanceViewData.java",
+      "sha256": "af1fa14194b5585a2f9f4578cd8711bd9cfeb15d0c4591e57541d793ac17ea6f"
+    },
+    {
+      "id": "calendar-calendarshellviewfragment-onbind-1-7be3cab7",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/CalendarShellViewFragment$onBind$1.java",
+      "sha256": "c7db96275d154eea3863f2ad4c26e6f3a32482ec48f5695400fd22d74f1275eb"
+    },
+    {
+      "id": "calendar-shell-fragment",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/CalendarShellViewFragment.java",
+      "sha256": "9eb80d9cb2bb09d59638b13f4ac17d074f9155c07bbba33c5fd043d5793ea1f0"
+    },
+    {
+      "id": "calendar-diagramcontrolleradapterfragment-f64ae3e8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/DiagramControllerAdapterFragment.java",
+      "sha256": "617384324b973d09bc95314623fda6d013dbec87c717157b92312deca4f5ba54"
+    },
+    {
+      "id": "calendar-monthdiagramfragment-b12623f1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/MonthDiagramFragment.java",
+      "sha256": "3bd2fa1f9c710b52bb2f875b2cd9f35cd01e8609cfbf1d73334a539ace1116df"
+    },
+    {
+      "id": "calendar-shell-view",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/fragments/ShellView.java",
+      "sha256": "fef2a4b818e109ca9616c3551bfbdc67b934cb73987046d4497fcd07261231f6"
+    },
+    {
+      "id": "calendar-quickchoosedatepanel-ef325257",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/view/QuickChooseDatePanel.java",
+      "sha256": "168e7775f9b837fd78398d133169cf2bf5ab83c752d34f0a713cdd66b9b9d145"
+    },
+    {
+      "id": "calendar-quickchoosedatecomponent-3b11b6e0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/view/quickchoosedatecomponent/QuickChooseDateComponent.java",
+      "sha256": "a6e8013cc2cdaecf6149c16c2ac52bfdd0ef825acd5205d1113c2d264718d14b"
+    },
+    {
+      "id": "calendar-calendaryearmonthpicker-78d1e2cf",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/view/quickchoosedatecomponent/yearmonthpicker/CalendarYearMonthPicker.java",
+      "sha256": "5c04a177ea5495dead2ccae04b1f6d0014cd9f5108fe7b0b2d7c3eb6fc8d6fbd"
+    },
+    {
+      "id": "calendar-titlebariconview-b1295471",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/view/widget/TitleBarIconView.java",
+      "sha256": "2296e624437658e6f9d6cdfbf6b95a6fec648a1349a8179b59b2e4b62e9fd4b0"
+    },
+    {
+      "id": "calendar-calendarshellinteractor-bd7f83ab",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractor.java",
+      "sha256": "c8d85855dddea966d40d8794914c051e55ea103ca309964133db680d3745d877"
+    },
+    {
+      "id": "calendar-calendarshellinteractorforcontentview-1253f9b4",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractorForContentView.java",
+      "sha256": "a188c13bf92aeb0b1a7ecd4422868b03d3c849be59659bc3923c9cc7636fef09"
+    },
+    {
+      "id": "calendar-calendarshellinteractorforshellview-cee74dd0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellInteractorForShellView.java",
+      "sha256": "8ba9c0d19654d47baafe607e12cfafd331bee1bfeb696c324e6ea031500f3a54"
+    },
+    {
+      "id": "calendar-calendarshellviewmodel-9cf2abb6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellViewModel.java",
+      "sha256": "5ae4299e1f624e1e7c903f4156c6b24dbfc87ce8ac729e81a68c5a064f215daa"
+    },
+    {
+      "id": "calendar-calendarshellviewservice-5a735bde",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/CalendarShellViewService.java",
+      "sha256": "7638c1a6290a4a4a99b8aad2ffc623e0416a9b7a0edc65f9ccf450c33ac40c6c"
+    },
+    {
+      "id": "calendar-contentviewexternalservice-a0a20e9b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/ContentViewExternalService.java",
+      "sha256": "dcfc59eb9ab606e9e542f2cf141fa15cbfa688fbc12e8c690980489875fe4b68"
+    },
+    {
+      "id": "calendar-contentviewexternalserviceimpl-1ac1508f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/ContentViewExternalServiceImpl.java",
+      "sha256": "feadde0d8735550703a436d788a2cef3889fe9adfda124b8eb185f49c0667a9d"
+    },
+    {
+      "id": "calendar-quickdatepanelexternalservice-d0f9134b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/QuickDatePanelExternalService.java",
+      "sha256": "5297d7a15ab989fcb65c85a862ff18846129e98f67b392f43d9302f72f4def24"
+    },
+    {
+      "id": "calendar-quickdatepanelexternalserviceimpl-aeb1c478",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/QuickDatePanelExternalServiceImpl.java",
+      "sha256": "6817441b8c9202a789d723270868af31ef8a1f47d295fb14e2ef51bc9f702546"
+    },
+    {
+      "id": "calendar-quickchoosepanelviewmodel-c77271c3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/main/viewmodel/subviewmodel/QuickChoosePanelViewModel.java",
+      "sha256": "af02c02d713813872cb945926bf6fb0da8d62d3da07beef0b2702f6cec4bdf3f"
+    },
+    {
+      "id": "calendar-imonthdiagramcontract-operationtype-7e3ac908",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/IMonthDiagramContract$OperationType.java",
+      "sha256": "d590c04e61219c17267bef0c76843fa7aace4cbb9646bf62e3bd1f25835bb7d4"
+    },
+    {
+      "id": "calendar-imonthdiagramcontract-pageposition-9e5f3ac6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/IMonthDiagramContract$PagePosition.java",
+      "sha256": "db6ee548e6a45e5d1d9c0c48914e2803660f1ea44df241cf054da411b322a39c"
+    },
+    {
+      "id": "calendar-interfacec64812a-a2684706",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64812a.java",
+      "sha256": "50414c4419bfd34b536e42e969b511e67f9498f2afa2a2cbaf300b96a59ec5d2"
+    },
+    {
+      "id": "calendar-interfacec64813b-3b0fca2c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64813b.java",
+      "sha256": "b6970c16c40d2a8fd55b55480c43f307476faffae47bcd3f61e6309375cd61df"
+    },
+    {
+      "id": "calendar-interfacec64814c-cc38889b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64814c.java",
+      "sha256": "965444a02bfb7973f1056296a907fb6c0e9216c4b7a3a46dbbeba7cb62214dc1"
+    },
+    {
+      "id": "calendar-interfacec64815d-de0f2657",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/InterfaceC64815d.java",
+      "sha256": "26c201c273633fa4cc9ab3604315e22f0a424df9f3284cb9cfd0bfdbec0a6b8d"
+    },
+    {
+      "id": "calendar-monthdiagrammodel-loadpagedata-1-265efa6a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramModel$loadPageData$1.java",
+      "sha256": "954c251d4ceb9da4375c25aab3844c45d66873f2621e58c9915d4a0266dc396d"
+    },
+    {
+      "id": "calendar-monthdiagrammodel-433a9ddb",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramModel.java",
+      "sha256": "dcb67fa1e9a5beb87e388543a1413d63f6fc81b1a5710c438a5c8b280afbb82a"
+    },
+    {
+      "id": "calendar-monthdiagrampresenter-346adcda",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramPresenter.java",
+      "sha256": "cbbe234c51190c4f1a07ecef93f21b8c454fb1746c3528cb96a18d08492a7f5c"
+    },
+    {
+      "id": "calendar-monthdiagramview-c420e4f7",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthDiagramView.java",
+      "sha256": "d718b582f82ffb9afd83edd383bfc0f33422b378a5de57709c2776d28fb9cd29"
+    },
+    {
+      "id": "calendar-monthviewattr-animatorcallbacktype-331ff811",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/MonthViewAttr$AnimatorCallbackType.java",
+      "sha256": "5d22b25ee17e5b984a938a13e8f2e32988ad3922d58896a4f4777cf750dbf34f"
+    },
+    {
+      "id": "calendar-c64822b-e09f13ea",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/C64822b.java",
+      "sha256": "3e3b7b6a51c9e5526727e27b672ed5dccea43b3d795077243ffa7ff7e3f3b7bc"
+    },
+    {
+      "id": "calendar-month-container-pager",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/MonthContainViewPager.java",
+      "sha256": "2ca086460f88d295b6b2a906d6507be46f30fc3b120c7f47b84106213f3ed0f9"
+    },
+    {
+      "id": "calendar-monthdayviewpager-991ee863",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/month/view/MonthDayViewPager.java",
+      "sha256": "8016bb0571e0c2dff77c3621b86a52375b9491fcaa1a82ca2fb5504ab276fd93"
+    },
+    {
+      "id": "calendar-associatetouchscrollhelper-b5ed3ff5",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/AssociateTouchScrollHelper.java",
+      "sha256": "f348ee899aaeb783df4014bbed86c5a622d49b9b64a3187c56aada75a8b99a68"
+    },
+    {
+      "id": "calendar-interfacec64966e-0da43cb2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/InterfaceC64966e.java",
+      "sha256": "84cfe2ae0b6884a71e3d7b2dafb99be83a734d5b7e29731b999d84f031a797d4"
+    },
+    {
+      "id": "calendar-interfacec64967f-616c7c7f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/InterfaceC64967f.java",
+      "sha256": "0d6cd985918fd8c30520d153ed5b78364979a2b9f1049647d76a6a0457ce51ba"
+    },
+    {
+      "id": "calendar-view-indicator-class",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/ViewIndicator.java",
+      "sha256": "dd3ddcc7160d592dda2ebe3f81a60cad5e4795ae3dbd47811bbd7e603ca9c6c9"
+    },
+    {
+      "id": "calendar-auxiliarytimerulerview-18987520",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/AuxiliaryTimeRulerView.java",
+      "sha256": "2e790d8d1b385d45e12e9261e6a92ef99449d370dab172fed5dc4251ebf4c7c1"
+    },
+    {
+      "id": "calendar-daytimerulerview-07a2991d",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/DayTimeRulerView.java",
+      "sha256": "6d502f8b179f43b01ef3df2e75e9e17558ddfee8e25d26f56c58007451641184"
+    },
+    {
+      "id": "calendar-irulerview-6c54dc56",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/calendarview/widget/timerulerview/IRulerView.java",
+      "sha256": "06098433029f54b4cbd2bbf65c1195cf9799a8f1710b33858764aa97551772ff"
+    },
+    {
+      "id": "calendar-calendarfeaturegating-cf5f6016",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/featureswitch/CalendarFeatureGating.java",
+      "sha256": "51ff9cd4c6d9a51e599fb46da8dbf8017b3011fee6d238f8d54fed071c080729"
+    },
+    {
+      "id": "calendar-touchscrollhelper-45df6102",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/TouchScrollHelper.java",
+      "sha256": "e5fa693487fd399f780f322682f5f30918727ddbc787e2374f1e365684275cd6"
+    },
+    {
+      "id": "calendar-viewscrollextentionskt-72c1b33b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/ViewScrollExtentionsKt.java",
+      "sha256": "a083f3ca7310a08c2231a3f8bce174e9dbf8fe06eeec02e45e377b8d481a3302"
+    },
+    {
+      "id": "calendar-datefetcher-6d18dd30",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/calendar/month/DateFetcher.java",
+      "sha256": "c1bcf1a94466309044e67a786d13bb916c0e25e135672213d03377f311c7649a"
+    },
+    {
+      "id": "calendar-abstractc65067a-888c2f0c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/infinitepager/AbstractC65067a.java",
+      "sha256": "a8241750ca3d528b768e12e4c391e47d2b5fbecee982e2b36b4f56a027257213"
+    },
+    {
+      "id": "calendar-infiniteviewpager-75053b46",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/infinitepager/InfiniteViewPager.java",
+      "sha256": "949a58e1541cbca4c894da9ce07f4c491eaa215da035e35c27c8b46ee7e3e0a9"
+    },
+    {
+      "id": "calendar-eventdetailactivity-48a78580",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/EventDetailActivity.java",
+      "sha256": "87d2c6eae06bcc756d4c2ea5cb7a1a5266a986f6e63a48e3b9eea4cf8ee059e8"
+    },
+    {
+      "id": "calendar-eventdetailactivityv2-0f5b326e",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/EventDetailActivityV2.java",
+      "sha256": "5df3db4a6a3206e43fbc4c0af3648c49f7f69ca018cc553b8f4ecc595c05f853"
+    },
+    {
+      "id": "calendar-eventdetailcontainerfragment-9d90dea1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/EventDetailContainerFragment.java",
+      "sha256": "706cb54eb747176248c7125fe59e2e1b3061349165ff3b02e9634f8c4d8512cb"
+    },
+    {
+      "id": "calendar-titlebaruibinder-7434c2ea",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/controller/title/TitleBarUiBinder.java",
+      "sha256": "d18ec288060d9411b5ba6be2c239481e48a0efb834f9ec8192c1e66936de0084"
+    },
+    {
+      "id": "calendar-deletedialogview-showexceptionaleventdel-07e507e0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/controller/title/view/DeleteDialogView$showExceptionalEventDeleteChooseSpanPanel$1.java",
+      "sha256": "11aa9a9ddf267fa97a6e4ca953966681526b4928c8e45a85b6f2fd9c9fdab274"
+    },
+    {
+      "id": "calendar-deletedialogview-showrepeateventdeletesp-e79bfabb",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/controller/title/view/DeleteDialogView$showRepeatEventDeleteSpanChoosePanel$1.java",
+      "sha256": "36c7cadf558e7d0cc486f48abe48b63cd86957e2c684d854fe889de4011152c1"
+    },
+    {
+      "id": "calendar-eventtitleviewv2-6ea55e27",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/controller/title/view/EventTitleViewV2.java",
+      "sha256": "1ca838fd831a767779a722e77d4caedb2191db3d9f8a7d2e1608d463dad19097"
+    },
+    {
+      "id": "calendar-titlebarviewmodelv2-1e86689b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/detail2/controller/title/vmv2/TitleBarViewModelV2.java",
+      "sha256": "e39d379240092017eb559af13412466d53486eb42fce253aea0363a05e927f99"
+    },
+    {
+      "id": "calendar-editactivityentrance-79dc4bc0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/EditActivityEntrance.java",
+      "sha256": "ca7f637b7650f5694d13c288c2ae434d26a759d5dc8e72fcdd378896b83eff3f"
+    },
+    {
+      "id": "calendar-editeventactivity-b88d0f8b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/EditEventActivity.java",
+      "sha256": "580e450a56ad8039319c99b47b018d3b0cc571b72e3973a5abddf5577a9eaae7"
+    },
+    {
+      "id": "calendar-editeventmodel-8140c35a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/EditEventModel.java",
+      "sha256": "22b72f0bc2c9490ff792961b2303e0406cfbe53085eead1e850b7ac951db55e5"
+    },
+    {
+      "id": "calendar-editeventviewmodel-2de76817",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/EditEventViewModel.java",
+      "sha256": "e9083eb6f3d15b56fce6dd2ba46160cd64edb52e1af6c4d033d4964628f34663"
+    },
+    {
+      "id": "calendar-editview-837baac6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/EditView.java",
+      "sha256": "d0f45f17661307d281e943d09007717eb29cac072ebc5933885754a41ad2e1a8"
+    },
+    {
+      "id": "calendar-editeventspantype-6fe63d29",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/data/EditEventSpanType.java",
+      "sha256": "110bcd35caeb618322f0b97d44a4d8d11bf744ff03639a25b0e4fcbe53719a9d"
+    },
+    {
+      "id": "calendar-editpermission-a360374b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/data/EditPermission.java",
+      "sha256": "f726fda202181a6a23391f7231c64b244b1a62b5a61a0feaf8d95238289480e0"
+    },
+    {
+      "id": "calendar-propertyvisibility-5d191a2a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/data/PropertyVisibility.java",
+      "sha256": "e3e345a1b9a4cef79c7e1f60529ff6e1d5a6cb1750ad15d0a26fedf782cd6fda"
+    },
+    {
+      "id": "calendar-repeatdisablereason-416bad2c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/data/RepeatDisableReason.java",
+      "sha256": "053b1a58ea611cee83c03ce11fca881c3239e140838666ddee26e45b5a8735fb"
+    },
+    {
+      "id": "calendar-uivisibility-8d143159",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/data/UIVisibility.java",
+      "sha256": "721e4730ab82bcf1f58d07cf2332a34b58246d83481e0495bdf1f180e25947aa"
+    },
+    {
+      "id": "calendar-editmainviewmodel-98210cd1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/main/EditMainViewModel.java",
+      "sha256": "3e3c6bda77bc06a6185deb0da4b2816e68196e52377f31a00b76d901a2548964"
+    },
+    {
+      "id": "calendar-edittitlebar-180de5c1",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/main/EditTitleBar.java",
+      "sha256": "1c866c3a6c7af57420830a8702093e5f32d2eada81279f85465b89f1d3be8560"
+    },
+    {
+      "id": "calendar-savetype-acd315e0",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/main/SaveType.java",
+      "sha256": "2f0184fc35d9b3dc2c91e0cced8fbf826d70b4e1a44c9705ba84d6e31d1f6a5d"
+    },
+    {
+      "id": "calendar-repeatcontainer-0865ba02",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatContainer.java",
+      "sha256": "dd440390c4b2d7a38eb7591dfeb0fecc26b11ebd560f5cfb33a31276a831dee1"
+    },
+    {
+      "id": "calendar-repeatmodel-4a5c69b5",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatModel.java",
+      "sha256": "eb5c742dfb8cf3e5f5b61da8b53f3d228b765ccddca19145686d1ce93c411a58"
+    },
+    {
+      "id": "calendar-repeatuistatus-4c13527d",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatUIStatus.java",
+      "sha256": "13652bedb1e79ece455ee98100874106d0513d7b41cbc0ba396d151f4fb9bc99"
+    },
+    {
+      "id": "calendar-repeatview-initview-4-7657ceaa",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatView$initView$4.java",
+      "sha256": "9c3b6eb89d82b78a26190d581e60680433118587c30d1006cfd551aa65c12ca1"
+    },
+    {
+      "id": "calendar-repeatview-initview-5-6850fd79",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatView$initView$5.java",
+      "sha256": "8b6eb99833204ca3b0f32ff4a0fc4867f614f9a76dd9f3f5cf783a8d0e690792"
+    },
+    {
+      "id": "calendar-repeatview-9a6ac846",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatView.java",
+      "sha256": "8d8b62bd100b9900b3bce0b7e1dec216d0c7fc3ba2cfc56a33053c45bd0e1364"
+    },
+    {
+      "id": "calendar-repeatviewmodel-initflowobserve-1-3c6ce45a",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$initFlowObserve$1.java",
+      "sha256": "2fca9cbe54ac9c23d624ea116addfc41c122cc2c50696bdf581487c5c1b069b6"
+    },
+    {
+      "id": "calendar-repeatviewmodel-initflowobserve-2-823ea888",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$initFlowObserve$2.java",
+      "sha256": "5296bb0db079b2a897346f87d3c0d4df523d7e944f96f4e799c14b4e91add4e8"
+    },
+    {
+      "id": "calendar-repeatviewmodel-initflowobserve-3-9de75a04",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$initFlowObserve$3.java",
+      "sha256": "db6e34715a8298d44570deaf1a503a0a7f717c9a68a1958a3cb3fe5957118dee"
+    },
+    {
+      "id": "calendar-repeatviewmodel-initflowobserve-4-f22cdbe6",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$initFlowObserve$4.java",
+      "sha256": "0abe2d9bf252afc88f6150befe4f2de852b2a69ee480ae2ae0b00232a32d28dd"
+    },
+    {
+      "id": "calendar-repeatviewmodel-onclickrepeatendcontaine-7dd08dd3",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$onClickRepeatEndContainer$1.java",
+      "sha256": "36c3c417e0d0b06ed8970b3a5568c2ebdaadbe9e57704d17631f38642929a094"
+    },
+    {
+      "id": "calendar-repeatviewmodel-openrepeatactivity-1-b9e1ba9d",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel$openRepeatActivity$1.java",
+      "sha256": "fa11bdc9ac687beab7e3f24c338400fe2812ef6c1e58ab1c9441cb101a5c6477"
+    },
+    {
+      "id": "calendar-repeatviewmodel-e7ca5f20",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/RepeatViewModel.java",
+      "sha256": "677776b87b2dc59eeebb02db5e5c3f072c2984cb7da0e8b471bf40012f9aa09f"
+    },
+    {
+      "id": "calendar-chooserepeatendfragment-ffb72d87",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/fragment/ChooseRepeatEndFragment.java",
+      "sha256": "ec2c1021af8c09002fa006ca7f1c50b37b7cae23ac3ee92079585f699ab69d64"
+    },
+    {
+      "id": "calendar-repeatendfragmentdata-f9c62a55",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/fragment/RepeatEndFragmentData.java",
+      "sha256": "6e3307d00e68cc49d30ed7db404922d3e98a314247e79699dc18622436f979b8"
+    },
+    {
+      "id": "calendar-repeatfragmentdata-4795cf5d",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/repeat/fragment/RepeatFragmentData.java",
+      "sha256": "8851bdbc0944975db273c4d061591016b67e10d03b2e7524124108d42ed705f3"
+    },
+    {
+      "id": "calendar-editmultitimeview-eb77c2e8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/feature/time/fragment/EditMultiTimeView.java",
+      "sha256": "9f58f2c19e461ef35bc8805c48c2c76b5679ff53a691f320de35e5d056463faf"
+    },
+    {
+      "id": "calendar-saveprocess-165e97ad",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/events/edit/process/SaveProcess.java",
+      "sha256": "f09361172ef9542e14b415b6db3d8198ba2f90a788f51d4207a08edb00ecc563"
+    },
+    {
+      "id": "calendar-calendarsearchview-010e22fc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/search/CalendarSearchView.java",
+      "sha256": "7dfebf030bda7f463d75ffbb19ed733d8ef60f0be94fd73709e34ec0411b1f46"
+    },
+    {
+      "id": "calendar-calendarsearchfragment-daea737c",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/search/fragment/CalendarSearchFragment.java",
+      "sha256": "af3c2e566a6fb3daa7b9e94bd998607ade3566bc5786dba1e8d08839218e0b10"
+    },
+    {
+      "id": "calendar-calendarapp-0f61149f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/usercomponent/CalendarApp.java",
+      "sha256": "968aca714e58d87b8270f66483121425ecc87227bd8964c037da1274233dfacb"
+    },
+    {
+      "id": "calendar-calendarappimpl-620b24e4",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/usercomponent/CalendarAppImpl.java",
+      "sha256": "f3175012df43e70a82a30c02dc2623ac2222d5ef868710fb6a19b5781f0dc510"
+    },
+    {
+      "id": "calendar-c67568d-118620f7",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/C67568d.java",
+      "sha256": "34d348306c3c9d013cf179a9ed6091a3062611930600d7643ad9c62276ab7a6e"
+    },
+    {
+      "id": "calendar-observablelive-ab34a5b8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/ObservableLive.java",
+      "sha256": "bf8b90b15a79907bf4d84f2b0520a0eb46a9a5ff3ce09fcf894b7d21605ee53f"
+    },
+    {
+      "id": "calendar-rxevent-a3aa1e8e",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/RxEvent.java",
+      "sha256": "8826aa37cce7d668bb052135e56e34a4d040c6c7919b030ea41bdc4f9b0c685b"
+    },
+    {
+      "id": "calendar-rxmutableevent-32e2fd14",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/viewmodel/RxMutableEvent.java",
+      "sha256": "c1b403c159d6d66dbba70fb32e887f60a2728f6638fecd42573ccbbd728209b1"
+    },
+    {
+      "id": "calendar-c67584d-87bbd28b",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/C67584d.java",
+      "sha256": "63b9bd3f49ab1e9c8e21cfbd093d254f19a20fc7af63a8a129df666be6259f13"
+    },
+    {
+      "id": "calendar-c67585e-95e9b115",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/C67585e.java",
+      "sha256": "9614ea09019d3ff29f55444a09e55f12fb5fc3671690f06f55e35e2071199dd0"
+    },
+    {
+      "id": "calendar-c67588h-62a0c4a9",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/C67588h.java",
+      "sha256": "8c511e615a8870416a3469bb37fa0106e11647ee2705846b7250591d5902b1cc"
+    },
+    {
+      "id": "calendar-handlerc67586f-6b50e497",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/HandlerC67586f.java",
+      "sha256": "7e64ddd3dc0ed47a3bb92801b2fd6126e6152d95b2da7b70b8d519eb2aa1cd9a"
+    },
+    {
+      "id": "calendar-runnablec67587g-bfc91af9",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/RunnableC67587g.java",
+      "sha256": "1452db741bdd45777cf08bd635a6772fc6c248dc112204b1c9607cd2463ba985"
+    },
+    {
+      "id": "calendar-wheelview-d2805f70",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/pickerview/WheelView.java",
+      "sha256": "728a993f5b4d072332849930060790ce93e7f768a8d08c49f09413625b2f4aa3"
+    },
+    {
+      "id": "calendar-instancelayout-86b0c96f",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/rustadapter/doentity/InstanceLayout.java",
+      "sha256": "851673cf71dd12cbd5b1ab1341f00d68b9cc4e2752fbaade9e9b54eca7d2e071"
+    },
+    {
+      "id": "calendar-c67707c1-75b836c8",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/C67707c1.java",
+      "sha256": "9877035e83624e35e463d413317c5dd9ce5aef41f9e1acb211b2070d7ea7e454"
+    },
+    {
+      "id": "calendar-c67708d-db8fecca",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/C67708d.java",
+      "sha256": "ce35c607112d71fc9484d3b57b1c78087d813659ab8ec4168757df43b8e1f339"
+    },
+    {
+      "id": "calendar-c67718f-8021ac21",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/C67718f.java",
+      "sha256": "a1c1f05431416b6b0c924b7f9ac13e403e9011737d76d2dffeb3b0bae7412b13"
+    },
+    {
+      "id": "calendar-calendarapkutil-cd6cdff2",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/CalendarApkUtil.java",
+      "sha256": "f283a839cd68ec5f73e4e7801bffe6663320cf3d25bd08f1c118aee1509e9720"
+    },
+    {
+      "id": "calendar-repeatmode-71a4c3de",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/RepeatMode.java",
+      "sha256": "bc02232064d7a729362e44f4d39179b55e481a3e9ac3d95d0e33099e83a40bb5"
+    },
+    {
+      "id": "calendar-eventrepeattype-0bfda7bc",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/utils/event/EventRepeatType.java",
+      "sha256": "9fddc3cbeef0acfbbc92d6691d86e77ea84142aeaaf5476fc74f9679a88b6c7d"
+    },
+    {
+      "id": "calendar-calendartabpageconfig-e3e27280",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/wrapper/tabspec/CalendarTabPageConfig.java",
+      "sha256": "20632d3ee06b8d928583a35402af622144b40663198e9de3cfbdf0bb08dffb24"
+    },
+    {
+      "id": "calendar-calendartitleproxynewimpl-f03ad8fa",
+      "group": "calendar",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/wrapper/tabspec/CalendarTitleProxyNewImpl.java",
+      "sha256": "ffc262f7125b77f114159bffd349c3f60778d6d750e109de57faa0aed5dea3d0"
+    },
+    {
+      "id": "calendar-abstractc132495b-87dd7db2",
+      "group": "calendar",
+      "path": "java-sources/fg3/AbstractC132495b.java",
+      "sha256": "0c9f3397cf080b29cfcaa7c945055be48557aefa2c4179a4fbc2911b4adf6458"
+    },
+    {
+      "id": "calendar-c136548f-c1742fea",
+      "group": "calendar",
+      "path": "java-sources/il3/C136548f.java",
+      "sha256": "0de4e454e37035533338732d8ad5fb78b7a1e407628fc094cc082d767baf9f22"
+    },
+    {
+      "id": "calendar-interfacec139009a-53439227",
+      "group": "calendar",
+      "path": "java-sources/jh3/InterfaceC139009a.java",
+      "sha256": "82d3cbc5885bfb643f9f40dab6e229e50472f9f0e1359fd4f76f8378b270cb62"
+    },
+    {
+      "id": "calendar-c139112c-ae9f098c",
+      "group": "calendar",
+      "path": "java-sources/jl3/C139112c.java",
+      "sha256": "fdd708f925a48bd142b218862748c5f86f850c5e809f72953220520b8c961aa2"
+    },
+    {
+      "id": "calendar-c139114e-b8e56b9a",
+      "group": "calendar",
+      "path": "java-sources/jl3/C139114e.java",
+      "sha256": "242cf9a40511f49d2dbebdb67cc52db8ef92db9d180ed4f3f84d43bc74588a67"
+    },
+    {
+      "id": "calendar-c139116g-f937c345",
+      "group": "calendar",
+      "path": "java-sources/jl3/C139116g.java",
+      "sha256": "bbf1b0acee029b81ac73cb2dbe9e9d18c8f203251c8a62d1be258fb03866d004"
+    },
+    {
+      "id": "calendar-c140217a-dbb629c0",
+      "group": "calendar",
+      "path": "java-sources/ke3/C140217a.java",
+      "sha256": "bf96b165bcee52868e2da8500db749c2fcddff4131a67548998b5f6cc8e9da12"
+    },
+    {
+      "id": "calendar-abstractc146187a-4d9b49c1",
+      "group": "calendar",
+      "path": "java-sources/mi3/AbstractC146187a.java",
+      "sha256": "b8a0d7e9855c9369d48cc50e51f0c115debc9d2bd9e4e7184c137b10e88eda1a"
+    },
+    {
+      "id": "calendar-abstractc146188b-1d31c7b2",
+      "group": "calendar",
+      "path": "java-sources/mi3/AbstractC146188b.java",
+      "sha256": "93572d5def0c7a39c6dadac6c55468880d438e50744506fef9c509704a8e4278"
+    },
+    {
+      "id": "calendar-c146189c-0698f71a",
+      "group": "calendar",
+      "path": "java-sources/mi3/C146189c.java",
+      "sha256": "ce74b983d859223e102a62ad6fab8727372b06d2f82d123cb32f84bc54d727b4"
+    },
+    {
+      "id": "calendar-c146191e-bd55cf54",
+      "group": "calendar",
+      "path": "java-sources/mi3/C146191e.java",
+      "sha256": "69445561a1998fbfa80fe608d757e1e120813423d1bd017da9f472b18e9d3ca7"
+    },
+    {
+      "id": "calendar-interfacec146190d-25040524",
+      "group": "calendar",
+      "path": "java-sources/mi3/InterfaceC146190d.java",
+      "sha256": "547a57d0473fc36a640114950b8b38325e90a3064cd80d445f5558430bc1d1f9"
+    },
+    {
+      "id": "calendar-c146517b-e232224f",
+      "group": "calendar",
+      "path": "java-sources/mp1/C146517b.java",
+      "sha256": "240143c3ab42ade3aa0018a545ca9a952b0ce66ba82d9bd05c83de292917c7e5"
+    },
+    {
+      "id": "calendar-c146525j-69f66d7c",
+      "group": "calendar",
+      "path": "java-sources/mp1/C146525j.java",
+      "sha256": "c4bef3ddddb192e68c6664ce31df84f8386ad1fcf19bce75f755d53228a1182d"
+    },
+    {
+      "id": "calendar-abstractc150857e-85b019a6",
+      "group": "calendar",
+      "path": "java-sources/pd3/AbstractC150857e.java",
+      "sha256": "a39fd8c4eb5d320298f6ab5be8deeb9e207899ffd4ab078073f8e37be04e5857"
+    },
+    {
+      "id": "calendar-c150859g-ed3b8772",
+      "group": "calendar",
+      "path": "java-sources/pd3/C150859g.java",
+      "sha256": "5e57a891e67c9225c35bb0d281605f60f6be21811df3d53127167b6425018286"
+    },
+    {
+      "id": "calendar-c150860h-87ee6fef",
+      "group": "calendar",
+      "path": "java-sources/pd3/C150860h.java",
+      "sha256": "99cc87fbeeaedca7ec2778a148db351704266c0892d6da34f95b15669212136a"
+    },
+    {
+      "id": "calendar-abstractc150917a-f525c655",
+      "group": "calendar",
+      "path": "java-sources/pe3/AbstractC150917a.java",
+      "sha256": "f5cedf28fb5ae7fc416c35349278cef2b8bfb7a9366772d88dabdd32e66c7685"
+    },
+    {
+      "id": "calendar-c151213a-901154f1",
+      "group": "calendar",
+      "path": "java-sources/pl3/C151213a.java",
+      "sha256": "ed1058fb8520d2d323aa7b48a7f08b823e686baf8ed9e672e6e6dc579415fd39"
+    },
+    {
+      "id": "calendar-month-span-layout-formula",
+      "group": "calendar",
+      "path": "java-sources/qd3/C152323a.java",
+      "sha256": "3e9268f5f35b75708d4ad04cf2abf053ec593ddd9bc29c43c6a708f707a14d0a"
+    },
+    {
+      "id": "calendar-c152338p-f46d44cd",
+      "group": "calendar",
+      "path": "java-sources/qd3/C152338p.java",
+      "sha256": "76d88067f464e7da7c7ea04739d8093ff9040e86d0012ecbe8711e24bffa1aa7"
+    },
+    {
+      "id": "calendar-month-span-layout-contract",
+      "group": "calendar",
+      "path": "java-sources/qd3/InterfaceC152324b.java",
+      "sha256": "b1ca141a8519f2ea3314edd06dd6d715ecc971ddcb009b24309ff52e893c899b"
+    },
+    {
+      "id": "calendar-interfacec152360b-cc3be7ea",
+      "group": "calendar",
+      "path": "java-sources/qe3/InterfaceC152360b.java",
+      "sha256": "df2e558602c81fea4d77a89bf5cbfaf2c3c5ca445364ab2a212b061431e79a12"
+    },
+    {
+      "id": "calendar-c153742a-ad0c9b87",
+      "group": "calendar",
+      "path": "java-sources/rb3/C153742a.java",
+      "sha256": "cb96ac6568abcdaf27a38d797d2118ac126a8839849daa829c934b71bd87a4a8"
+    },
+    {
+      "id": "calendar-c153805a-8121b8af",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153805a.java",
+      "sha256": "b720aeccd0538cef69d32cd83661455a02e4d647d36f4e80976bd48f4421e673"
+    },
+    {
+      "id": "calendar-c153806b-5d14e497",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153806b.java",
+      "sha256": "78654267a27feed4d860b624c1380775f6a19259712b0097ac66978cb12ecbd9"
+    },
+    {
+      "id": "calendar-c153807c-8e0dbebb",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153807c.java",
+      "sha256": "fd1f4db2e6325478248bb508eaa95123591a5edab602d09fe9d4f9fae6adc7c0"
+    },
+    {
+      "id": "calendar-c153808d-c8c10e95",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153808d.java",
+      "sha256": "4687934e05806f1531c1db48688ea40110bd2f361d31095b1d6d1e5b7a16b9d4"
+    },
+    {
+      "id": "calendar-c153809e-095ed98d",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153809e.java",
+      "sha256": "b56e092577c97ac395897f541b75b29c585b6905e3f8ad9fac09ffec15428186"
+    },
+    {
+      "id": "calendar-c153812h-f631a424",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153812h.java",
+      "sha256": "d0efe9fc389bbbf7406401fc072e89c9879d2260dea19ffd7acab48633a59827"
+    },
+    {
+      "id": "calendar-c153815k-b45bd9be",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153815k.java",
+      "sha256": "4eb393b8993decca1650f3134ed1fd84350eb2028e834db7296d4c50e49ec544"
+    },
+    {
+      "id": "calendar-c153816l-73e8ba3a",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153816l.java",
+      "sha256": "78bde4567707aa56c7262bebe685683866f31b26b358650a93947d6f78c6c253"
+    },
+    {
+      "id": "calendar-c153817m-775390c7",
+      "group": "calendar",
+      "path": "java-sources/rd3/C153817m.java",
+      "sha256": "ec0c324bbab026527a5f11ebf1c02ff500e04193db0b5558e7d9c28a0d48ffaf"
+    },
+    {
+      "id": "calendar-month-expansion-layout",
+      "group": "calendar",
+      "path": "java-sources/re3/C153854f.java",
+      "sha256": "baa471e81852f162497d420888e8e087d8eced242d9b2c25be5779e5be0f80b2"
+    },
+    {
+      "id": "calendar-month-expansion-touch",
+      "group": "calendar",
+      "path": "java-sources/re3/ViewOnTouchListenerC153853e.java",
+      "sha256": "9617e41e4e37ecbe3cda884da0055f8adeab7c8977377a392a36c2c52f9ccc4f"
+    },
+    {
+      "id": "calendar-c153910a-34d804fa",
+      "group": "calendar",
+      "path": "java-sources/rf3/C153910a.java",
+      "sha256": "53dc25f19b992e04ce48f1e3db5525d0c1808d86122e8850233c68a3b936b6e2"
+    },
+    {
+      "id": "calendar-c155129a-31ece49c",
+      "group": "calendar",
+      "path": "java-sources/sd3/C155129a.java",
+      "sha256": "570735e9819ddc3970385d7138e01a0b431c56b09870bb5e5684e501e6ffdea2"
+    },
+    {
+      "id": "calendar-c155132d-11b6d646",
+      "group": "calendar",
+      "path": "java-sources/sd3/C155132d.java",
+      "sha256": "a5ea0f5dcd209af460f155dea174736cc04b6b6507442171c59d0f2606f1ff31"
+    },
+    {
+      "id": "calendar-c158890k6-830edd1c",
+      "group": "calendar",
+      "path": "java-sources/vb3/C158890k6.java",
+      "sha256": "dacc7bacfa32302596d1d15d247809bc3d8814b5bcdc1b6e981f13f41470bb47"
+    },
+    {
+      "id": "calendar-c162788d-dd700736",
+      "group": "calendar",
+      "path": "java-sources/yc3/C162788d.java",
+      "sha256": "b613270125c8000004875edcd7bd2f316b21eafa99053d600fd5eb4cd3434a3a"
+    },
+    {
+      "id": "common-shell-uddialog-d80c476f",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/dialog/UDDialog.java",
+      "sha256": "36882f9ebb5f40976d6e9eb7525ec1d946569df795d591de2610fc4fd2a111f0"
+    },
+    {
+      "id": "common-shell-uddialogcontroller-59184244",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/dialog/UDDialogController.java",
+      "sha256": "49d8e0f07815afa3075f272b1aa78897d5b5b2231a67e14b944e9d9d00879576"
+    },
+    {
+      "id": "common-shell-udactionpanelbuilder-ec00ea7a",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/dialog/actionpanel/UDActionPanelBuilder.java",
+      "sha256": "23c7d51cf8d914190e4a7d0b86cbbe417e01d0785eafdf9ea79bde1ba2547aad"
+    },
+    {
+      "id": "common-shell-udemptystate-aa4b8345",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/emptystate/UDEmptyState.java",
+      "sha256": "86339e3d296b8024f27e98d7b584b3d5111143a2e4ddd12591bb9fcb924bf2a8"
+    },
+    {
+      "id": "common-shell-udshadowlayout-7500b478",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/shadow/UDShadowLayout.java",
+      "sha256": "165bf2494fb037a37c7c6aa6ec4adf570247f6067e0eacc344216f656706d0a7"
+    },
+    {
+      "id": "common-shell-c43662c-94c57204",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/toast/C43662c.java",
+      "sha256": "dca9c1cf2d32f2b4c66d1cbc93cf5c96a4c276612b241b30d1cbc5ca121fdcc7"
+    },
+    {
+      "id": "common-shell-c43665f-860434d7",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/toast/C43665f.java",
+      "sha256": "f18d60fe8a6f031c4e5c961f8213481f039df64386496c317a0a38bf4e17ebe5"
+    },
+    {
+      "id": "common-shell-udactiontoastmanager-58ddfd60",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/toast/UDActionToastManager.java",
+      "sha256": "1d706c73896cd0664f1d29bbf82d279382fbb683f51e58ecfddbd1c0acbcf9ca"
+    },
+    {
+      "id": "common-shell-udtoast-02678d9e",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/toast/UDToast.java",
+      "sha256": "3da57eae29279709cda2b8039d22c4424cbe43e0e39b738cc094126c6afcce9a"
+    },
+    {
+      "id": "common-shell-udtoastviewcontroller-01720022",
+      "group": "common-shell",
+      "path": "java-sources/com/larksuite/component/universe_design/toast/UDToastViewController.java",
+      "sha256": "2f9591c1fb67f94b19d39438486ab4b5b83ad9ed270aa2a706521e98ec84fd0a"
+    },
+    {
+      "id": "common-shell-titlebarheightupdate-49caed84",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/bottomsheet/view/TitleBarHeightUpdate.java",
+      "sha256": "1093ffc0265b4fe731e8666bb43c81e5f3d666ec05c91f924d62c3cbd196ba22"
+    },
+    {
+      "id": "common-shell-toastloadingview-1e84c7cd",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/features/common/widget/ToastLoadingView.java",
+      "sha256": "a2f2819884e8915236e35e18c9640e73b5934d60d64c242b9cdaa46754898374"
+    },
+    {
+      "id": "common-shell-calendarloadingview-ff443c0f",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/calendar/impl/framework/widget/CalendarLoadingView.java",
+      "sha256": "a83f40dc40bb874b0b0b7164465e204f4724368fee74c82698fd9d5471fa1a10"
+    },
+    {
+      "id": "common-shell-windowinsetsutils-9ec627aa",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/insets/WindowInsetsUtils.java",
+      "sha256": "b1f6bdefdabb579905116761aafebc41619798dc3d4d6b841e05624224fded5a"
+    },
+    {
+      "id": "common-shell-c91742d-dcf81469",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/adapter/C91742d.java",
+      "sha256": "01eb17669b85a6c8ebebe9724794eabc60401f7f1c62593233cbd0ebf256fb83"
+    },
+    {
+      "id": "common-shell-tabfragmentstateadapter-3cc61014",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/adapter/TabFragmentStateAdapter.java",
+      "sha256": "c2af59d601fbb14638c4f242d4a96024d9c51be45fcded08f4e0a0c5423547d6"
+    },
+    {
+      "id": "common-shell-basetabfragment-5abc2a20",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/BaseTabFragment.java",
+      "sha256": "8c4bff356e61cb048855068a54c3be7bc7b1ecb671b85f1572c184314b1bafed"
+    },
+    {
+      "id": "common-shell-interfacec91823i-36fcf4cb",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/InterfaceC91823i.java",
+      "sha256": "a640580a1657a0a1dd457acecf1c64c15f2fa42cc8cbff0ce1d0add8889dd19c"
+    },
+    {
+      "id": "common-shell-maintabbarview-deeafaa0",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/export/view/MainTabBarView.java",
+      "sha256": "137a6f4a72469612ce6e4282574d5fa8b1628b0afd18ee607f3f64141cf7c201"
+    },
+    {
+      "id": "common-shell-navlaunchercontainerfragment-48490d94",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/launcher/NavLauncherContainerFragment.java",
+      "sha256": "f4e04da591282d8764795ad1d896fe1b8c015e2ccb30e4cada96115873b9fe34"
+    },
+    {
+      "id": "common-shell-navbottomtabbar-87c4c3c7",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/launcher/widget/NavBottomTabBar.java",
+      "sha256": "b2aa258ce459458bb4c1963631f7ddc893057e2c415a0d7961dd5c899aecbbcb"
+    },
+    {
+      "id": "common-shell-tabpagecontrollerv3-f795d831",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/TabPageControllerV3.java",
+      "sha256": "5eba5fc942b876c4b73038bca7fca52856ea3d5b2e0d2d60731e8fa74d90c104"
+    },
+    {
+      "id": "common-shell-tabpagewidget-9a582f7e",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/TabPageWidget.java",
+      "sha256": "47595464c404cd3a51227ca89d5fb6631078105797a98237e51694ca2d8151c3"
+    },
+    {
+      "id": "common-shell-maintabbaritemeventlistener-5087f840",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/bar/MainTabBarItemEventListener.java",
+      "sha256": "c902caad1150eb60e59386cbcf41271f48f19dd6a27cac3f743fb3b759c16348"
+    },
+    {
+      "id": "common-shell-tabbarcontroller-596a0ff9",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/bar/TabBarController.java",
+      "sha256": "d26e7a1b520832483f797150ff72a2b0c746013076a92c241bf01bcb6e120866"
+    },
+    {
+      "id": "common-shell-tabbottombar-a43ac9e0",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/maintab/view/bar/TabBottomBar.java",
+      "sha256": "7d246e7475abda3e8576002b27e9cd10c019d7a87b619b97f3485213e1776215"
+    },
+    {
+      "id": "common-shell-c95695e0-743e44ba",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/utils/C95695e0.java",
+      "sha256": "138fae683ce586cd4112cca90cb2f5962dc5d703d5fe5dd4259d439006bb36c8"
+    },
+    {
+      "id": "common-shell-actionwrapper-80949619",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/ActionWrapper.java",
+      "sha256": "b267c388b4c1a37a75306e74d4f354b8db8a2454f36e7a231f54bddcb420dddb"
+    },
+    {
+      "id": "common-shell-c115153a-5eb0412b",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/C115153a.java",
+      "sha256": "5d5a1b70310071d47f52c4790a0cb07dbb660984aba966d4aaf87fc5e0a95adc"
+    },
+    {
+      "id": "common-shell-commontitlebar-ddc35ce9",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/CommonTitleBar.java",
+      "sha256": "3fe4b24ffaa00d7dfc02b44d4d6b85c3d9db53a3aa934cb00bccef4659b2837f"
+    },
+    {
+      "id": "common-shell-commontitlebarconstants-86fc4a67",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/CommonTitleBarConstants.java",
+      "sha256": "9f3982d2a1246871a3f60a11241ca7f38298c13e75f3c7faf1d651cdac3e7b5c"
+    },
+    {
+      "id": "common-shell-iactiontitlebar-0286a9fb",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/IActionTitlebar.java",
+      "sha256": "254432674b18b26133dc3e9c22e055f7f4de2d2d884c7f0d88e407db6ca02b78"
+    },
+    {
+      "id": "common-shell-titlebariconsize-95d8f84c",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/ui/TitleBarIconSize.java",
+      "sha256": "d4cb94c9e41b8dd25c7d92e02682e981e37dfdc8cd97235f62faab13b1aa10da"
+    },
+    {
+      "id": "common-shell-maintabitemview-8e906bb7",
+      "group": "common-shell",
+      "path": "java-sources/com/p325ss/android/lark/widget/tab/MainTabItemView.java",
+      "sha256": "799bdd3813cef95efb1ee51dcb887bc3cc140a838c78c721820ddadee551ea3d"
+    },
+    {
+      "id": "common-shell-abstractc146331f-cedc5cd6",
+      "group": "common-shell",
+      "path": "java-sources/ml3/AbstractC146331f.java",
+      "sha256": "383f26e82fee00c700cfa2c98bb4d82ad8afbcf8b03c4856db89bd4a294942b4"
+    },
+    {
+      "id": "common-shell-abstractviewonclicklistenerc146329d-bf5842c1",
+      "group": "common-shell",
+      "path": "java-sources/ml3/AbstractViewOnClickListenerC146329d.java",
+      "sha256": "3c388f99a60d097fd1a5b54765751323475a8bde8f95207246220eb757d9d797"
+    },
+    {
+      "id": "common-shell-c154346d-3dee041c",
+      "group": "common-shell",
+      "path": "java-sources/rs6/C154346d.java",
+      "sha256": "2d0c9da26807fc6ff20ce212910413732005af896f4fa834e67135c2b9c5665e"
+    },
+    {
+      "id": "common-shell-commontitlebar-f524485e",
+      "group": "common-shell",
+      "path": "smali/smali_classes20/com/ss/android/lark/ui/CommonTitleBar.smali",
+      "sha256": "ce04bf6c3fe2212ea2134d136a6eda5776be0c89d50069aa9ad89694e5bb60b7"
+    },
+    {
+      "id": "minutes-androidmanifest-03d8f9c5",
+      "group": "minutes",
+      "path": "decoded-resources/AndroidManifest.xml",
+      "sha256": "97222d22e0aa7018db570d5be725ca60be3033c5d53bd196928091c6cc7ee4e9"
+    },
+    {
+      "id": "minutes-playerstatus-01650f0e",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/inno/common/player/constants/PlayerStatus.java",
+      "sha256": "c5ad2ff64cfd73534a0b65880a93e1c2ae1b56f09653578aaa94364fb4ba776c"
+    },
+    {
+      "id": "minutes-c82790k-08b3f988",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/integrator/minutes/C82790k.java",
+      "sha256": "0ccb524d51624d67d7c804402ba3e466b9c04a8cb617eacce12700ef21dce935"
+    },
+    {
+      "id": "minutes-minutesapiimpl-3c823eda",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/integrator/minutes/MinutesApiImpl.java",
+      "sha256": "3250160a00d6a5fe9be46663d67c0dcbce7dee851091bc7333e3dd35354335a7"
+    },
+    {
+      "id": "minutes-minutesdependencyinjector-d8e52b8e",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/integrator/minutes/MinutesDependencyInjector.java",
+      "sha256": "41fbd0cc3d60cc97e54657ca2fbb004cb4476a611013c4d505db856429b56c2c"
+    },
+    {
+      "id": "minutes-mmunifiedrecordingapiimpl-67b35481",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/integrator/minutes/officesdk/recording/MmUnifiedRecordingApiImpl.java",
+      "sha256": "e9927e9144f5cc7db074cf67211dfb94435ec0c1fa5cae63266bd036b2cd34f7"
+    },
+    {
+      "id": "minutes-mmrecordingfragment-e26eef78",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/p463ui/record/recording/base/MmRecordingFragment.java",
+      "sha256": "b422619762d5b0084d242c7c7546d8c56efdaa7d34366e2e6f1614fb2683ce80"
+    },
+    {
+      "id": "minutes-mmsubtitleadapter-3dcceec5",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/p463ui/record/recording/subtitle/ui/MmSubtitleAdapter.java",
+      "sha256": "0a3c40a42d97c312fbfbe0033cc0a08d2eb617aceb64f4b64f8eb008199422cb"
+    },
+    {
+      "id": "minutes-mmspeakermarkview-82a11d85",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/p463ui/record/speaker/MmSpeakerMarkView.java",
+      "sha256": "57075baf0f224e777e38478fc2fa75b467cfa4ba49fbaa1f354cd2a5ee239059"
+    },
+    {
+      "id": "minutes-mmspeakermarkviewmodel-37de4470",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/p463ui/record/speaker/MmSpeakerMarkViewModel.java",
+      "sha256": "1d16ac91ff7e5ba54afc1247ca8146fac397df741e7f588dfcfa5462f7260214"
+    },
+    {
+      "id": "minutes-mmfeishuuilayoutprovider-e7180a03",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/p463ui/style/provider/MmFeishuUILayoutProvider.java",
+      "sha256": "c7d5b412003306db01f920a88f9d5c4d9b72475e40736d7c7e0b461573205c94"
+    },
+    {
+      "id": "minutes-mmrecordfilehelper-3fe276fc",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/foundation/utils/cache/file/MmRecordFileHelper.java",
+      "sha256": "18a615af111e085467028348627be7542338c4b17151851118118a12d593b0ca"
+    },
+    {
+      "id": "minutes-mmrecordingnethelper-a5f21785",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/foundation/utils/net/MmRecordingNetHelper.java",
+      "sha256": "3c28bc51787ce35aaf4fdbfa0a6b548eeb6a125edbb246fadc92619561b6402a"
+    },
+    {
+      "id": "minutes-mmrecordingsession-3d492b54",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/MmRecordingSession.java",
+      "sha256": "b37aeabf1bbf3c2865c0be9f259ad7e8496bc275411c7d92f9a5274a22faecf9"
+    },
+    {
+      "id": "minutes-minutesforegroundservice-7548b5cf",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/service/MinutesForegroundService.java",
+      "sha256": "8f5d11a4981baaae100a0ad6e998b2ea6cf7a65d3b46d0f559a393b2e17b143f"
+    },
+    {
+      "id": "minutes-mmrecordingaudiopersistent-3221dd58",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/service/adudio/MmRecordingAudioPersistent.java",
+      "sha256": "0d09a82128931b0ba763db6f89a0641f3d7ebb520f11fb51bf8fe6d634f9f303"
+    },
+    {
+      "id": "minutes-mmrecordinguploadservice-fecf5de2",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/service/upload/MmRecordingUploadService.java",
+      "sha256": "14b0630a38453179c7076ee313e1f1ce576b3e81bde6732fa900bd098b7f5000"
+    },
+    {
+      "id": "minutes-mmrecordinguploadtask-1e980dcf",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/service/upload/MmRecordingUploadTask.java",
+      "sha256": "df6a49c2845a14ad13b69f6c4dee5bfaa388a4c7e313aab76bf6fbe7b2d43b75"
+    },
+    {
+      "id": "minutes-mmrecordingretrypolicy-1a2e8d52",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/service/upload/retry/MmRecordingRetryPolicy.java",
+      "sha256": "38ca732f2a9ee845a65144f81f45cab067569970144bb3b24ee063c2007100ac"
+    },
+    {
+      "id": "minutes-mmrecordingsessionstatemachine-0903f0e9",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/core/statemachine/MmRecordingSessionStateMachine.java",
+      "sha256": "aa1a845954edeed908c60b01fe1c7f063681732e9d05e256335310a7409be93c"
+    },
+    {
+      "id": "minutes-mmaudiosavetype-2ad91d6c",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/audiosave/MmAudioSaveType.java",
+      "sha256": "56fc8bfd14c54f5da3816010bdbfda00d02b9236a48a4f68b68790e2b047f312"
+    },
+    {
+      "id": "minutes-mmrecordingspeakercandidate-b00b21f8",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/speaker/MmRecordingSpeakerCandidate.java",
+      "sha256": "e7521a6307125c192fdc105a3acb982a8b1f3ab62c15aa8bab80555d85bdc8e0"
+    },
+    {
+      "id": "minutes-mmspeakermarkresult-4f7d81f8",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/speaker/MmSpeakerMarkResult.java",
+      "sha256": "1399661d678ff6dffc1c68ecc763d70b187033762530b426e042e576a435dcc7"
+    },
+    {
+      "id": "minutes-mmrecordingsubtitlerepo-810f3c74",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/subtitle/MmRecordingSubtitleRepo.java",
+      "sha256": "87a71682082e182220038543525f8494e112dd200305c9d7643ad2c3227248fe"
+    },
+    {
+      "id": "minutes-mmrecordingsummaryentity-3047b3ca",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/summary/MmRecordingSummaryEntity.java",
+      "sha256": "2ba5037157a0234bedf7f87cb6e88f0f52f2b9a0806649e04b32ea93e453185a"
+    },
+    {
+      "id": "minutes-mmsummarystatus-85fbcfcb",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/summary/MmSummaryStatus.java",
+      "sha256": "ac8f3e4d9c9ca4d34daedc0a63fc9a23f8ffc6cf3a78083ff3c1877eee5f1fbd"
+    },
+    {
+      "id": "minutes-mmsummarynetreconnecthelper-47efc43e",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/summary/helper/MmSummaryNetReconnectHelper.java",
+      "sha256": "6ed1e155e0e05f9dcdb45e8179ee1d6bad81ca65ed0818156917f8e143707d61"
+    },
+    {
+      "id": "minutes-mmsummaryretryhelper-da3583c7",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/officesdk/minutes/service/recording/common/repo/summary/helper/MmSummaryRetryHelper.java",
+      "sha256": "58a8c52775546575b9e723d7145be5aece6b9a199e8fac0fb9bad65963c88712"
+    },
+    {
+      "id": "minutes-mmdetailactivity-77f773a7",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/MmDetailActivity.java",
+      "sha256": "83917c1b7a3246d7be2ff7fd9564491cc79bb1ff3e2fd1e89be6eaf7fc67ad23"
+    },
+    {
+      "id": "minutes-mmdetailcontainerfragment-e5d0f01d",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/MmDetailContainerFragment.java",
+      "sha256": "024d29c5d7cc999cd382494cba386d2f3c7edf5deed1072a0a5780dffd098db2"
+    },
+    {
+      "id": "minutes-mmdetailtabfragmenttype-8cdab6aa",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/audio/tab/MMDetailTabFragmentType.java",
+      "sha256": "37160c56674005d7945b45c108a0f5f30187e755b50829c2e323fee44721ecfa"
+    },
+    {
+      "id": "minutes-downloadstate-82881dfb",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/baseinfo/DownloadState.java",
+      "sha256": "02cd901013bce602ab6de02b7d9dbdf2d941b3388fc3a9e74a90eec977150d1c"
+    },
+    {
+      "id": "minutes-mmdetailfiledownloadmanager-841879a5",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/baseinfo/MmDetailFileDownloadManager.java",
+      "sha256": "5856bb96b33eb8ebdc14396d4333c62ed72e10a489715597ce51fccdda2a9f06"
+    },
+    {
+      "id": "minutes-mmdetailfiledownloadrepo-9d746b93",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/baseinfo/MmDetailFileDownloadRepo.java",
+      "sha256": "df31b4697dd559140d8f707159ad902b5e6b63537c2eb833a00ef3dcf02c1d83"
+    },
+    {
+      "id": "minutes-mmfileexternalsharehelper-c1a508d8",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/baseinfo/MmFileExternalShareHelper.java",
+      "sha256": "9147d035fd5d2ceca2d116c41bf71f26e99d4c35ccc8b1b41bd5fa597841dfb0"
+    },
+    {
+      "id": "minutes-mmdetailstickynavlayout-43597bf2",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/main/MmDetailStickyNavLayout.java",
+      "sha256": "8b5bfca3e9b6d167d6d8f9a7d0e0df54f048da0341dfcaea0f70a198b23bcfe1"
+    },
+    {
+      "id": "minutes-mmdetailviewcontrol-3a95d651",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/main/MmDetailViewControl.java",
+      "sha256": "86ff5fa908e626b94964fdfed360e7ebaa5876692c3cbfc3bcd7a329aa849e38"
+    },
+    {
+      "id": "minutes-mmdetailmoremenufragment-036c585b",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/menu/MmDetailMoreMenuFragment.java",
+      "sha256": "2592a77003ce1bf0665eb088bf6460df918526d2fe2ff507f126ad66fa39e411"
+    },
+    {
+      "id": "minutes-mmsubtitleadaptercallbackimpl-9e4a77d0",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/MmSubtitleAdapterCallbackImpl.java",
+      "sha256": "8bb3a0c92ef231df62c788193309dfcd35660f031139d77a13bc4c70130fd4e3"
+    },
+    {
+      "id": "minutes-mmeditspeakerproxy-6f07cca2",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/MmEditSpeakerProxy.java",
+      "sha256": "dbd11c330bf37e03b903c865b565d3fdf5ff650f9cc13c728dd8c7c327b457ca"
+    },
+    {
+      "id": "minutes-mmeditenteringstate-d8c98e81",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/state/MmEditEnteringState.java",
+      "sha256": "6fffcf567b1e376e69cf25d52d90605adc1cd11844cf711aa505953f43eb8e42"
+    },
+    {
+      "id": "minutes-mmeditrefreshsubtitlestate-51f14c3d",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/state/MmEditRefreshSubtitleState.java",
+      "sha256": "2d27eebc7f28d6e4c1bba6e8c2f388e7982233e5a29207baff3249f895e00fb5"
+    },
+    {
+      "id": "minutes-mmeditstate-2343f897",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/state/MmEditState.java",
+      "sha256": "521db440259a30666e3594fb9fc6bf29734b644e235d410a69d76a1aa1024a51"
+    },
+    {
+      "id": "minutes-mmeditstatemanager-0e98447e",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/state/MmEditStateManager.java",
+      "sha256": "19c21d6fad4d15de177ffb030886f5fc600f63f5957932c685dcebecc3f9db80"
+    },
+    {
+      "id": "minutes-mmeditingstate-7f223424",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/subtitles/speaker/edit/state/MmEditingState.java",
+      "sha256": "2b17b972ea4d8c3044f331123fddf767201d5f295dae789931c9a1bba46fcd69"
+    },
+    {
+      "id": "minutes-mmdetailtitlebarviewcontrol-a741a622",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/detail/titlebar/MmDetailTitleBarViewControl.java",
+      "sha256": "21fd9bc178a25470d4b59e3d6257007601c805274d26098bb609632bf150d3ab"
+    },
+    {
+      "id": "minutes-minuteslistactivity-6c277b12",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/list/base/MinutesListActivity.java",
+      "sha256": "448fe4b80be4e04026d7b55c7361ae8a91c23f4c3c7a714e77675159fea86f8a"
+    },
+    {
+      "id": "minutes-mmvideocontrol-2cdf1ea4",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/player/MmVideoControl.java",
+      "sha256": "707ee299ac0917f5afb3a7eea109bcd1ad9fdb3fd81144aac7715b3c1e8bf1d6"
+    },
+    {
+      "id": "minutes-mmserviceclient-ea701de3",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/player/notification/MmServiceClient.java",
+      "sha256": "562fb0766686316cca962b7143d03a25b25aac847b5e5687141329fcdf2ef754"
+    },
+    {
+      "id": "minutes-mmvideoservice-70528bf9",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/player/notification/MmVideoService.java",
+      "sha256": "a819c32ec72abca7fc9d80b486c96111cb895ed8bdb643dd8c44ecd171b3e104"
+    },
+    {
+      "id": "minutes-mmrecordsettingshelper-c29be8ec",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/recordv2/core/settings/MmRecordSettingsHelper.java",
+      "sha256": "287a61214b933f58d8d4d783d0c500ed670473e85e66b91c53eea47f5d57c6a9"
+    },
+    {
+      "id": "minutes-mmaudiouploader-9be4734b",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/recordv2/core/uploader/MmAudioUploader.java",
+      "sha256": "5f6bc63b1f64ef06a6433694d0f057840542bf4930f1596b894864071a6c3f24"
+    },
+    {
+      "id": "minutes-mmaudiorecordingservicev2-1365dc0a",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/recordv2/p453ui/foregroundservice/MmAudioRecordingServiceV2.java",
+      "sha256": "444ec27a1c003d3ccc85e74dcb54027b8512e46446611c351f4ad80b9bea1de5"
+    },
+    {
+      "id": "minutes-mmtoolbarview-2c67c035",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/recordv3/MMToolBarView.java",
+      "sha256": "8e5b4441d1c5f1138504cb33db5aba443e483bef57b8552838d9ffb5e6368a22"
+    },
+    {
+      "id": "minutes-mmaudiowavebarview-754ece1b",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/recordv3/wavebar2/MmAudioWaveBarView.java",
+      "sha256": "45f51880e0d0838572f4f73c991ea91db25d64dc195dca9acee7f2cc1079b935"
+    },
+    {
+      "id": "minutes-mminvitetitlebar-7c19d170",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/share/invite/MmInviteTitleBar.java",
+      "sha256": "86e2270f26a767925027a9b6f5824a6b60d0145539cd3da3989986d2f20b73ad"
+    },
+    {
+      "id": "minutes-newmmmaintabfragment-5cfa2173",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/module/tab2/NewMmMainTabFragment.java",
+      "sha256": "b9d570a125bca6e8ecb8b418b938b4d3570da14f7a97ebda82a1bb00b17ca7a0"
+    },
+    {
+      "id": "minutes-c95647c-21c7c372",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/net/api/C95647c.java",
+      "sha256": "e9907856caf9eab3525f6c9ea70575c4dcd28a7b03b93b3e7ff448570a4a8f4f"
+    },
+    {
+      "id": "minutes-mmjumpopensearchutil-3c5c01e1",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/utils/MmJumpOpenSearchUtil.java",
+      "sha256": "740f812e628b61de1737ea2d2af00fd2d08be1784339758699d39e9a792502b5"
+    },
+    {
+      "id": "minutes-mmmeetinghosthelper-c09cacf2",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/vcapi/MMMeetingHostHelper.java",
+      "sha256": "f689740004c369a4bab9b7ec69d20d19d3c49d538966530376b0e39b9319d901"
+    },
+    {
+      "id": "minutes-mmdetailtitlebar-3300a9e6",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p446mm/widget/MmDetailTitleBar.java",
+      "sha256": "b13a0f2588a68e6ba2f4c0dc28fdb183cdd672d0d79141965b2fdc8d1938ae5a"
+    },
+    {
+      "id": "minutes-recordingsubtitledata-83703bf2",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p481pb/minutes/p484v1/RecordingSubtitleData.java",
+      "sha256": "dabac37d6409019eb893e874b0984669b93adfe6690d55099620a9d793b89460"
+    },
+    {
+      "id": "minutes-ivcapi-491af69c",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/p514vc/api/IVCApi.java",
+      "sha256": "3867c3aa86874fb5c15984b5ee16f2149c8a0964b8ac6e206908948a0e251961"
+    },
+    {
+      "id": "minutes-vcapiimpl-a390b709",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/lark/vcintegrator/VCApiImpl.java",
+      "sha256": "20ec51a0f9c3dc6b0a2f4900fa3d890fd211c7bc4267214780e267dc77b7b2eb"
+    },
+    {
+      "id": "minutes-videochatsettingvoiceprintdialogframe-e4204742",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/p523vc/lark/setting/VideoChatSettingVoicePrintDialogFrame.java",
+      "sha256": "9047f25bdc67ecad70f7689c63fa15bb49829ef35d3029d28138d7d9479fe591"
+    },
+    {
+      "id": "minutes-mmrecordhostmanager-c7db23e0",
+      "group": "minutes",
+      "path": "java-sources/com/p325ss/android/p523vc/meeting/module/multi/mmapi/MMRecordHostManager.java",
+      "sha256": "1909ce6d7f61a8d89c71854f5ef1a326573fc0c6ffbb420ded766a62256649af"
+    },
+    {
+      "id": "minutes-c129895a-8a0d0ebc",
+      "group": "minutes",
+      "path": "java-sources/dg5/C129895a.java",
+      "sha256": "678fdf1b911d94683a461ec0e989f41da101f9c9a46e3e388b738e8910ed1062"
+    },
+    {
+      "id": "minutes-c131182b-3c30476f",
+      "group": "minutes",
+      "path": "java-sources/ef5/C131182b.java",
+      "sha256": "bac031ef777acc443b390684b2e0706644a5603b9352a24a7073d1dca1fccdbe"
+    },
+    {
+      "id": "minutes-c131183c-d053307e",
+      "group": "minutes",
+      "path": "java-sources/ef5/C131183c.java",
+      "sha256": "023beb03c93037800c1a1ae02b61cc7f95a7b8d77c75e670cada0ef003c91f83"
+    },
+    {
+      "id": "minutes-c131266b0-9f73f992",
+      "group": "minutes",
+      "path": "java-sources/eh5/C131266b0.java",
+      "sha256": "ccf848a847adc18f7791099481e26a39c8e7c82faaa0bc64ca5401cf6b09660f"
+    },
+    {
+      "id": "minutes-c131279o-72c0ce63",
+      "group": "minutes",
+      "path": "java-sources/eh5/C131279o.java",
+      "sha256": "0a47832e8c528adedcb95d946b79f942a2dc75f1521c3f6e817cae5c4e5c42d0"
+    },
+    {
+      "id": "minutes-c141692d-18f8df0e",
+      "group": "minutes",
+      "path": "java-sources/kq5/C141692d.java",
+      "sha256": "5f3a114d8d1d42e10a72606c70acfed6f89c21e36239e7cc7dc773a60f4ee0d5"
+    },
+    {
+      "id": "minutes-interfacec150923a-c1b44c62",
+      "group": "minutes",
+      "path": "java-sources/pe5/InterfaceC150923a.java",
+      "sha256": "2e6817ccbb31ba2b3acf01a292e2837becc203a88adeb61e4aeedc4a649cb38b"
+    },
+    {
+      "id": "minutes-c160505c-47e8bc91",
+      "group": "minutes",
+      "path": "java-sources/wh5/C160505c.java",
+      "sha256": "2fac2b813eb1ab0bad60200b1f1cf0adfc5a1ac2c53cae75e05765df642ef567"
+    },
+    {
+      "id": "minutes-interfacec160504b-9e8de589",
+      "group": "minutes",
+      "path": "java-sources/wh5/InterfaceC160504b.java",
+      "sha256": "c8710cf99a2fd7648a7da81c700abf28bc857ea997cf19fc04f4b26d23ee3be2"
+    },
+    {
+      "id": "resources-ud-translate-to-bottom-af9afff7",
+      "group": "resources",
+      "path": "decoded-resources/res/anim/ud_translate_to_bottom.xml",
+      "sha256": "1c4360ebfa95d1bb15410f38634deaa405ba1487d2411e1e0137d0258cf7c077"
+    },
+    {
+      "id": "resources-calendar-append-button-move-929cd00a",
+      "group": "resources",
+      "path": "decoded-resources/res/animator/calendar_append_button_move.xml",
+      "sha256": "115294c0df5d02aec4e12a8e81643e74885ca4b02b926386ec34d6b1e9d0b1c0"
+    },
+    {
+      "id": "resources-calendar-append-shadow-move-9d1076b7",
+      "group": "resources",
+      "path": "decoded-resources/res/animator/calendar_append_shadow_move.xml",
+      "sha256": "b91019ad3814cc5a1c600aed4401371aba91b0e203bdbe5b2102ffb2ca02a64a"
+    },
+    {
+      "id": "resources-illustration-empty-negative-load-failed-0ef2fa3f",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable-night/illustration_empty_negative_load_failed.xml",
+      "sha256": "d23d2af7a90c9dd46a1e2fad43d8a7ae5e3812f81d15206d4c1660a88e281b0a"
+    },
+    {
+      "id": "resources-illustration-empty-negative-load-failed-3b908197",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/illustration_empty_negative_load_failed.xml",
+      "sha256": "9a50042bd4ca325f13f45c9785d5f98eaa13794940e7be8a9ce4fa7e54691852"
+    },
+    {
+      "id": "resources-ud-icon-close-outlined-c18fac70",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_close_outlined.xml",
+      "sha256": "bfbcf88598a8e77545d278cf823cc954282313fb13504d773088bb6326a2a07d"
+    },
+    {
+      "id": "resources-ud-icon-delete-trash-outlined-3e9d60d2",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_delete_trash_outlined.xml",
+      "sha256": "a8c5419f898992e2eeb7d1c7464aca117e118200601704556780774e6c658ea7"
+    },
+    {
+      "id": "resources-ud-icon-edit-outlined-44f49f6a",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_edit_outlined.xml",
+      "sha256": "5c401bc0e5e7200c87cade1aeef8c32fc1f89ac10bd64bee625d7fd5313a8d5f"
+    },
+    {
+      "id": "resources-ud-icon-left-outlined-3c010265",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_left_outlined.xml",
+      "sha256": "c9eca8446ace94a5850eed374b373921542be077629411831045a94850690154"
+    },
+    {
+      "id": "resources-ud-icon-repeat-outlined-ac559618",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_repeat_outlined.xml",
+      "sha256": "d58c9b20a7515eb07655cb76eb8829151fbd3985707749da9025a06af687b312"
+    },
+    {
+      "id": "resources-ud-icon-right-bold-outlined-a519c74a",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_icon_right_bold_outlined.xml",
+      "sha256": "a5e23d63749def54f98a0b9eae10ef8aa86ccbb2e7694976a5abb6910256090d"
+    },
+    {
+      "id": "resources-ud-switch-thumb-drawable-7c3d8fc0",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_switch_thumb_drawable.xml",
+      "sha256": "2a96f3783a984eab678d9570e72f280b0cf358bf87c77a2218e63e68d63bca05"
+    },
+    {
+      "id": "resources-ud-switch-track-drawable-4066f0ad",
+      "group": "resources",
+      "path": "decoded-resources/res/drawable/ud_switch_track_drawable.xml",
+      "sha256": "a0aaf42f350b11aabefcd589356fec89bd99818ea422ca71bb8c9adc0b972e8c"
+    },
+    {
+      "id": "resources-activity-about-4827e2d7",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/activity_about.xml",
+      "sha256": "c20d5455b7316ad16369e58d48a19024ad557564e6e756fcd731358c26d647c6"
+    },
+    {
+      "id": "resources-activity-choose-repeat-page-7bc65a6a",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/activity_choose_repeat_page.xml",
+      "sha256": "11ab35b31474c1882fd6e08291fba04bbde9defac91da6bebc7cb46e75cc607d"
+    },
+    {
+      "id": "resources-activity-event-detail-main-view-v2-988fc40d",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/activity_event_detail_main_view_v2.xml",
+      "sha256": "a598a139d29f5463bdb19cab49d35d6873bd7716577fb07ab8c949597701e279"
+    },
+    {
+      "id": "resources-activity-profile-setting-00b71d91",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/activity_profile_setting.xml",
+      "sha256": "1111c511b66ce7c72d17a97cc9e5e04b042bbf4c07e4d56927fb232b1fecccf6"
+    },
+    {
+      "id": "resources-activity-setting-page-layout-c3d3686e",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/activity_setting_page_layout.xml",
+      "sha256": "55ae785c043ee318131d49de1cfd33bb9d0d5603dcd0548958fd0b5b19edc906"
+    },
+    {
+      "id": "resources-calendar-fragment-edit-event-container-b0447d85",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/calendar_fragment_edit_event_container.xml",
+      "sha256": "4fdfa8f0218135dbcb6246b12dd54fb402775c7318feb731732429940d688d60"
+    },
+    {
+      "id": "resources-calendar-month-general-view-0487454f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/calendar_month_general_view.xml",
+      "sha256": "ccf400d5393e9cc35535414ebb17464ad8518787ceeced909a2a5ef8f467fc96"
+    },
+    {
+      "id": "resources-calendar-view-toast-loading-deca7018",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/calendar_view_toast_loading.xml",
+      "sha256": "1facf6acebbc80a6f565f67b3889ff1fa33a0e7f05024bce51cde7ab5aded3f3"
+    },
+    {
+      "id": "resources-fragment-calendar-append-event-e4a0711e",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/fragment_calendar_append_event.xml",
+      "sha256": "46a9e2a2d4c35c744f94fce4bde6b85debd26675db07176f6e08b9215cb0b154"
+    },
+    {
+      "id": "resources-fragment-calendar-search-930fdae2",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/fragment_calendar_search.xml",
+      "sha256": "e128aa4dcdbdd4b2b99bb4762d12ec48211133f298a978ee4d07a37de00d785d"
+    },
+    {
+      "id": "resources-fragment-choose-custom-repeat-d33d64a0",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/fragment_choose_custom_repeat.xml",
+      "sha256": "a491a283da027983371b2c3716708f68cc93ace0d7505f5eca92d787031cf60c"
+    },
+    {
+      "id": "resources-fragment-choose-multi-time-890f74b2",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/fragment_choose_multi_time.xml",
+      "sha256": "3bca7a06320d385a061acc2075c6db9a1650f0355365e9c9db7ff9a81155ce61"
+    },
+    {
+      "id": "resources-fragment-event-repeat-end-75b5596d",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/fragment_event_repeat_end.xml",
+      "sha256": "946ba3d578f95bf4b005c62402ddd52f3a0aea518e9db5376f8b29841e3c2ecf"
+    },
+    {
+      "id": "resources-item-choose-repeat-e0c961e1",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/item_choose_repeat.xml",
+      "sha256": "906e08cfaaafe90c6d0efec88e3fb2dd111e15d861e24ef04cc6794ae49dc9fe"
+    },
+    {
+      "id": "resources-mm-detail-audio-header-79021430",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_detail_audio_header.xml",
+      "sha256": "de66479bd40d6dcff557aaca8eab994507bedd57ecc0023b2b955c1a9014a096"
+    },
+    {
+      "id": "resources-mm-detail-audio-toolbar-130ca5ba",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_detail_audio_toolbar.xml",
+      "sha256": "a78ccc45ac9f2727b091844f3aca5d72fcf225e3063c26b773fd1b6506bf6302"
+    },
+    {
+      "id": "resources-mm-detail-container-a609cf3f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_detail_container.xml",
+      "sha256": "478b3ea15384ea93fecfea24f6226a2fb5168e1a21fa0e39b87f1da331ba944d"
+    },
+    {
+      "id": "resources-mm-fragment-detail-summary-audio-b4ff2d4f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_fragment_detail_summary_audio.xml",
+      "sha256": "dcccd30ad1232e223354c0bb5b217b38a5970c33ca8f25a20461f97bdb43bd3a"
+    },
+    {
+      "id": "resources-mm-fragment-home-list-72fad0e8",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_fragment_home_list.xml",
+      "sha256": "154411c2b59b19b741b6d0bd62a9caf3bf87e7f18cb7b48e36946cecaf31fec1"
+    },
+    {
+      "id": "resources-mm-fragment-speaker-timeline-4a32bc78",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_fragment_speaker_timeline.xml",
+      "sha256": "15f994b7a2ea48bcae3512f815b814560cf1df33a465efd4776ddf94735c4f14"
+    },
+    {
+      "id": "resources-mm-fragment-transcription-25a2c32c",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_fragment_transcription.xml",
+      "sha256": "888e938374d3a673873dfe6d1f8af020195c0c34f6df00b7e845f042ea025206"
+    },
+    {
+      "id": "resources-mm-home-layout-operation-right-b531bb9f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_home_layout_operation_right.xml",
+      "sha256": "31ba75e0e897f70bc8a3f0368a12e7316d77f21d08845b36f2f0b9b8cf2b1ef4"
+    },
+    {
+      "id": "resources-mm-layout-home-list-empty-e0bb2a09",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_home_list_empty.xml",
+      "sha256": "06d55b2f9544ad40bbf13f73ed8fd10d25d131a2cadeda0a9526a36f2598ef24"
+    },
+    {
+      "id": "resources-mm-layout-home-list-error-19af33f1",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_home_list_error.xml",
+      "sha256": "30aed11d2337fb37192a6569587623c4b7a330eb5d3de8e75aa25e93265eada8"
+    },
+    {
+      "id": "resources-mm-layout-record-detail-title-bar-08ece604",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_record_detail_title_bar.xml",
+      "sha256": "110ed00e924425e46e607017c6679b92a0977413f3464fe14044b1219ee0fb61"
+    },
+    {
+      "id": "resources-mm-layout-record-title-bar-3-9f284b12",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_record_title_bar_3.xml",
+      "sha256": "51b443e17bb0dfe6d5fe054b2ed66df678deb3168b92667ac41cb1781f25e73c"
+    },
+    {
+      "id": "resources-mm-layout-record-title-name-3-d3855106",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_record_title_name_3.xml",
+      "sha256": "d092661cdc5c9ffbc137887dd89ad604e5d8f78c3eb940e059e987411e0b9015"
+    },
+    {
+      "id": "resources-mm-layout-record-toolbar-bar-3-new-b51ffc3e",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_layout_record_toolbar_bar_3_new.xml",
+      "sha256": "084797d84bcea136334682de9ffc5f7cfc6dc9cd291cd333d67cf84e982494a4"
+    },
+    {
+      "id": "resources-mm-view-invite-titlebar-fa1bc95c",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_view_invite_titlebar.xml",
+      "sha256": "aea1a388961d4a9096ca8ef05246ac27d915f3ce8ec032f010e390bae993781f"
+    },
+    {
+      "id": "resources-mm-view-title-bar-6ba4ebd3",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/mm_view_title_bar.xml",
+      "sha256": "d2e31fc0a8f801f0717ee84dacd022657e113e9a4a15847f56a3d0d995aa0ca2"
+    },
+    {
+      "id": "resources-multi-time-view-wheels-year-month-date-6c988cad",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/multi_time_view_wheels_year_month_date.xml",
+      "sha256": "40dbabdb9a58ca16bc7c8d3f7dcdc3813406f56b2ada9b0dde061a7a0b498f1a"
+    },
+    {
+      "id": "resources-office-sdk-mm-view-title-bar-feishu-229caf70",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/office_sdk_mm_view_title_bar_feishu.xml",
+      "sha256": "9bae3c3f5b1fd6ef996daf9e93045956b824d3503b63c1116d6f51436a6abb79"
+    },
+    {
+      "id": "resources-office-sdk-mm-view-title-bar-secondary-f-5b9b2338",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/office_sdk_mm_view_title_bar_secondary_feishu.xml",
+      "sha256": "db1a04d93f813288da4b76270dd543225f3e0baa436b254538d3cf58f42558e5"
+    },
+    {
+      "id": "resources-quick-choose-date-component-5e29dff5",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/quick_choose_date_component.xml",
+      "sha256": "f35eba41ae723a4a6f69e72a6429607b37c28511adcf1551a956c9d2b7207a19"
+    },
+    {
+      "id": "resources-quick-choose-date-panel-layout-3a67d9e7",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/quick_choose_date_panel_layout.xml",
+      "sha256": "54b83fd8abc2013b60cf41d8d3987da39a7ce9bde70910424758fb3e8d2ec3ba"
+    },
+    {
+      "id": "resources-quick-choose-date-picker-calendar-view-l-b7727ed7",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/quick_choose_date_picker_calendar_view_list_day.xml",
+      "sha256": "5c918b8348c2ac4e710c17afee92b31fe03cdd28bdf7d4bdb587cc2d2323e7d8"
+    },
+    {
+      "id": "resources-signin-sdk-activity-login-input-f5cb7abd",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/signin_sdk_activity_login_input.xml",
+      "sha256": "361dc8a5dc2eb74050523ab0e5fb12e582649d09196710975bdec44563471209"
+    },
+    {
+      "id": "resources-ud-layout-emptystate-a9c2a4a6",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/ud_layout_emptystate.xml",
+      "sha256": "91a2d91386fe2596bc0f29e00af268baea25d30a283b95a4e988504409adc43d"
+    },
+    {
+      "id": "resources-ud-toast-layout-c3163416",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/ud_toast_layout.xml",
+      "sha256": "0c0cdd7cdeff78b5222e43f094ae2f293087098cf992a6293aab070004249bed"
+    },
+    {
+      "id": "resources-vc-fragment-mm-ui-skeleton2-6a32707f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/vc_fragment_mm_ui_skeleton2.xml",
+      "sha256": "e1bd397c670786aaee6e7e038f579f9733471f20f4fc6b28a889e4f7b3ebd949"
+    },
+    {
+      "id": "resources-vc-mm-subtitle-fragment-0a2f7886",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/vc_mm_subtitle_fragment.xml",
+      "sha256": "e443fb604173defd3747e073c85d5c12c61704f0d120cfe8638ba43b6af73ba4"
+    },
+    {
+      "id": "resources-vc-mm-subtitle-normal-item-6e8535d2",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/vc_mm_subtitle_normal_item.xml",
+      "sha256": "7127389af6be4ca9168bf2cfda48fb391cb042541c34ddbf7ab7fd4d92f7f3f6"
+    },
+    {
+      "id": "resources-vc-pre-settings-view-voiceprint-dialog-fc220933",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/vc_pre_settings_view_voiceprint_dialog.xml",
+      "sha256": "fc71e2820e473ce25dd7641c2615a3158f76c0a0d763b3bac8ae7cec8996cdf1"
+    },
+    {
+      "id": "resources-view-calendar-loading-378b2c48",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_calendar_loading.xml",
+      "sha256": "6ccf76a156858dacafe6065548ea62b609e7a1ae99f382bf6524b0ec1f77b570"
+    },
+    {
+      "id": "resources-view-edit-detail-new-33bd68e0",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_edit_detail_new.xml",
+      "sha256": "a4444b10a91563fd3ac93fd6135632fbcde4d71a63907d49b1a0dd9d0dd0a4e3"
+    },
+    {
+      "id": "resources-view-event-repeat-container-5701ddcb",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_event_repeat_container.xml",
+      "sha256": "138e6d4dd9e1ea0e1b4ff5e2bcd51daddd8162b3ea785cefd2225357a6a20977"
+    },
+    {
+      "id": "calendar-view-indicator-layout",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_indicator.xml",
+      "sha256": "eed2954deb906edb58d3ef8ff43a1d123ada6d06c69c92efe9a830ed10e80335"
+    },
+    {
+      "id": "resources-view-switcher-d6dc1d9f",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_switcher.xml",
+      "sha256": "3f074b9e064f8d023e04d740d822224d9a7dd15c6f57a9e91cec6c6e1db85dd0"
+    },
+    {
+      "id": "resources-view-wheels-year-month-day-58961fec",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/view_wheels_year_month_day.xml",
+      "sha256": "ad9841aa2947da54ffa079aca7270c243e87d9e36169fe525079637ed2d5694d"
+    },
+    {
+      "id": "resources-widget-tab-title-container-45fa7583",
+      "group": "resources",
+      "path": "decoded-resources/res/layout/widget_tab_title_container.xml",
+      "sha256": "bd659978f2f5c5bd366a87c3964031dc1c7dded3568201858248717eb8e1747a"
+    },
+    {
+      "id": "resources-colors-6ea3976c",
+      "group": "resources",
+      "path": "decoded-resources/res/values-night/colors.xml",
+      "sha256": "b946da388005afdd5b9f413093836f19d9c1ba2cbc0b0c7924fc98610eef75a9"
+    },
+    {
+      "id": "resources-strings-985392a8",
+      "group": "resources",
+      "path": "decoded-resources/res/values-zh-rCN/strings.xml",
+      "sha256": "18725393e98dc313a3d1a8f7fc2415f5341ebc1cbe3846cc5ef6d2a1525216cc"
+    },
+    {
+      "id": "resources-arrays-aaa0cf10",
+      "group": "resources",
+      "path": "decoded-resources/res/values/arrays.xml",
+      "sha256": "f8caaf0602797227a133342c1b9e836f1b1b9cddc1842400657467b54d5c230a"
+    },
+    {
+      "id": "resources-attrs-8ad57758",
+      "group": "resources",
+      "path": "decoded-resources/res/values/attrs.xml",
+      "sha256": "f46f19231da8a377a226e77e6c004b18190985bf3469b0391d94b69505daf7c2"
+    },
+    {
+      "id": "resources-colors-d04fc4c4",
+      "group": "resources",
+      "path": "decoded-resources/res/values/colors.xml",
+      "sha256": "5bb61165d3b2828691712f8f227df2a4eb1fcd9d60111dd96688777ffb116dd4"
+    },
+    {
+      "id": "resources-dimens-096b312c",
+      "group": "resources",
+      "path": "decoded-resources/res/values/dimens.xml",
+      "sha256": "e247f101aae10118c01b3aa81f361cf736b3090022059bcb323b3f8f5435e53f"
+    },
+    {
+      "id": "resources-public-0e20497d",
+      "group": "resources",
+      "path": "decoded-resources/res/values/public.xml",
+      "sha256": "9e8bb9c2f3fbb4b30d46327320b6f9e10ab67757a750c3e8cb9dfedd9b584db3"
+    },
+    {
+      "id": "resources-strings-8a9bec1f",
+      "group": "resources",
+      "path": "decoded-resources/res/values/strings.xml",
+      "sha256": "acd914b5b63c53370f5bd323d3e7f58c879f0dc04a568f0485a30f10025803b4"
+    },
+    {
+      "id": "resources-styles-8b1f9ee5",
+      "group": "resources",
+      "path": "decoded-resources/res/values/styles.xml",
+      "sha256": "07166f6f903f93b41978773b698a37e99084917919362743d8548196609bb3a0"
+    }
+  ],
+  "absent": [
+    {
+      "path": "decoded-resources/res/anim/slide_right_in.xml",
+      "reason": "Calendar search references the resource ID but the decoded animation body is absent."
+    },
+    {
+      "path": "decoded-resources/res/anim/slide_right_out.xml",
+      "reason": "Calendar search references the resource ID but the decoded animation body is absent."
+    },
+    {
+      "path": "decoded-resources/res/anim/ud_translate_from_bottom.xml",
+      "reason": "Referenced by styles.xml but absent from the decoded package; entry motion must remain unverified."
+    }
+  ]
+}

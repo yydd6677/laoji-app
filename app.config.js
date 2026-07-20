@@ -30,12 +30,13 @@ const base = {
     bundleIdentifier: 'com.laoji.app',
     infoPlist: {
       NSMicrophoneUsageDescription: '老记需要麦克风权限，用于语音输入日程。',
+      NSLocationWhenInUseUsageDescription: '老记需要位置权限，用于把当前位置添加到日程。',
       NSPhotoLibraryUsageDescription: '老记需要访问照片，用于选择账号头像。',
     },
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 80,
+    versionCode: 88,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
@@ -47,6 +48,8 @@ const base = {
       'RECORD_AUDIO',
       'INTERNET',
       'ACCESS_NETWORK_STATE',
+      'ACCESS_COARSE_LOCATION',
+      'ACCESS_FINE_LOCATION',
       'POST_NOTIFICATIONS',
       'FOREGROUND_SERVICE',
       'FOREGROUND_SERVICE_MICROPHONE',
@@ -65,6 +68,9 @@ const base = {
   web: { favicon: './assets/favicon.png' },
   plugins: [
     '@react-native-community/datetimepicker',
+    ['expo-location', {
+      locationWhenInUsePermission: '老记需要位置权限，用于把当前位置添加到日程。',
+    }],
     './plugins/withAndroidCleartextTraffic',
     './plugins/withAndroidReleaseSigning',
     './plugins/withAndroidReleaseOptimizations',

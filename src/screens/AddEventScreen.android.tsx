@@ -36,6 +36,7 @@ import {
   resolveRecurrenceEditScope,
 } from '../services/recurrenceActions';
 import { HttpResponseError, readableErrorMessage } from '../services/errors';
+import { CurrentAddressError, getCurrentAddress } from '../services/currentAddress';
 import {
   buildNativeCalendarEditSnapshot,
   nativeCalendarEditDraft,
@@ -94,7 +95,7 @@ function initialDraft(
 // CAL-EDIT-001 / CAL-REPEAT-RRULE-001 / UI-FORM-001: native inputs emit complete drafts;
 // this route owns validation and writes.
 export function AddEventScreen({ navigation, route }: Props) {
-  const { events, searchableEvents, addEvent, updateEvent, deleteEvent, findConflicts } = useEvents();
+  const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
   const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingRef = route.params?.eventRef;
@@ -116,6 +117,8 @@ export function AddEventScreen({ navigation, route }: Props) {
   const [choice, setChoice] = useState<Choice>(null);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest | null>(null);
   const [feedback, setFeedback] = useState<{ key: number; message: string; durationMs: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const locatingRef = useRef(false);
   const baselineRef = useRef(JSON.stringify(initialDraft(editingEvent, route.params)));
   const draftRef = useRef(draft);
   const mountedRef = useRef(true);
@@ -304,45 +307,6 @@ export function AddEventScreen({ navigation, route }: Props) {
     void writeEvent(runId, payload, recurrenceScope);
   };
 
-  const checkConflicts = async (
-    runId: number,
-    payload: Omit<CalEvent, 'id'>,
-    recurrenceScope: EventRecurrenceScope,
-  ) => {
-    let result: Awaited<ReturnType<typeof findConflicts>>;
-    try {
-      result = await findConflicts(payload, editingRef, recurrenceScope);
-    } catch {
-      if (!activeSave(runId)) return;
-      releaseSave(runId);
-      showDialog({ title: '暂时无法检查日程冲突', message: '请稍后重试', tone: 'warning' });
-      return;
-    }
-    if (!activeSave(runId)) return;
-    if (!result.hasConflict) {
-      startWrite(runId, payload, recurrenceScope);
-      return;
-    }
-    const explicit = result.conflicts.some(conflict => conflict.severity === 'overlap');
-    const names = result.conflicts.map(({ event }) => {
-      const time = event.startTime && event.endTime
-        ? `${event.startTime}-${event.endTime}`
-        : event.isAllDay ? '全天' : '无具体时间';
-      return `• ${event.title} (${time})`;
-    }).join('\n');
-    showDialog({
-      title: explicit ? '时间冲突' : '全天安排提示',
-      message: `${explicit ? '该安排与以下日程重叠' : '该日期已有安排'}：\n${names}`,
-      hint: result.complete ? '确认这些安排可以重叠后再保存。' : '当前只能核对本机已有日程。',
-      tone: 'warning',
-      onDismiss: () => releaseSave(runId),
-      actions: [
-        { text: '仍然保存', role: 'primary', onPress: () => startWrite(runId, payload, recurrenceScope) },
-        { text: '取消', role: 'cancel', onPress: () => releaseSave(runId) },
-      ],
-    });
-  };
-
   const beginSave = useCallback((value: NativeCalendarEditDraftSnapshot) => {
     if (saveLockRef.current) return;
     const payload = payloadFromDraft(value);
@@ -350,9 +314,9 @@ export function AddEventScreen({ navigation, route }: Props) {
     if (!validation.valid || !validation.value) {
       const issue = validation.issues[0];
       showDialog({
-        title: issue?.code === 'missing-title' ? issue.message : '日程信息不完整',
-        message: issue?.code === 'missing-title' ? undefined : issue?.message,
-        tone: issue?.code === 'missing-title' ? 'info' : 'warning',
+        title: '日程信息不完整',
+        message: issue?.message,
+        tone: 'warning',
       });
       return;
     }
@@ -363,7 +327,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       const runId = saveRunRef.current + 1;
       saveRunRef.current = runId;
       setSaving(true);
-      void checkConflicts(runId, validation.value!, scope);
+      startWrite(runId, validation.value!, scope);
     };
     if (editingEvent?.repeat && editingEvent.repeat !== 'once' && !selectedRecurrenceScope) {
       setScopeRequest({ kind: 'edit', onSelect: continueWithScope });
@@ -379,7 +343,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       try {
         await deleteEvent(eventRefForEvent(editingEvent), recurrenceScope);
         allowLeaveRef.current = true;
-        navigation.navigate('MainTabs', { screen: 'Schedule' });
+        navigation.popTo('MainTabs', { screen: 'Schedule' });
       } catch {
         setSaving(false);
         showDialog({ title: '删除失败', message: '请检查网络后重试', tone: 'error' });
@@ -391,6 +355,37 @@ export function AddEventScreen({ navigation, route }: Props) {
       showDialog(recurrenceDeleteDialog(editingEvent, scope => remove(scope)));
     }
   }, [deleteEvent, editingEvent, navigation, saving, showDialog]);
+
+  const requestCurrentLocation = useCallback(async (value: NativeCalendarEditDraftSnapshot) => {
+    if (locatingRef.current) return;
+    locatingRef.current = true;
+    setLocating(true);
+    setDraft(value);
+    try {
+      const result = await getCurrentAddress();
+      if (!mountedRef.current) return;
+      setDraft(current => ({ ...current, location: result.address }));
+      if (result.usedCoordinateFallback) {
+        setFeedback(current => ({
+          key: (current?.key ?? 0) + 1,
+          message: '未能解析详细地址，已填入当前位置坐标。',
+          durationMs: 4000,
+        }));
+      }
+    } catch (reason) {
+      if (!mountedRef.current) return;
+      setFeedback(current => ({
+        key: (current?.key ?? 0) + 1,
+        message: reason instanceof CurrentAddressError
+          ? reason.message
+          : '暂时无法获取当前位置，请稍后重试。',
+        durationMs: 4000,
+      }));
+    } finally {
+      locatingRef.current = false;
+      if (mountedRef.current) setLocating(false);
+    }
+  }, []);
 
   const handleAction = useCallback((action: NativeCalendarEditAction) => {
     switch (action.type) {
@@ -407,6 +402,9 @@ export function AddEventScreen({ navigation, route }: Props) {
       case 'openReminder':
         setDraft(action.draft);
         setChoice('reminder');
+        break;
+      case 'requestCurrentLocation':
+        void requestCurrentLocation(action.draft);
         break;
       case 'save':
         setDraft(action.draft);
@@ -425,7 +423,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [beginDelete, beginSave, recurrenceRuleEditable, requestLeave]);
+  }, [beginDelete, beginSave, recurrenceRuleEditable, requestCurrentLocation, requestLeave]);
 
   const choiceItems = useMemo<AppActionSheetItem[]>(() => {
     if (scopeRequest && editingEvent) {
@@ -478,9 +476,10 @@ export function AddEventScreen({ navigation, route }: Props) {
     recurrenceScope: selectedRecurrenceScope ?? null,
     saving,
     dirty,
+    locating,
     state: missing ? 'error' : 'ready',
     message: missing ? '日程不存在，请返回日程详情后重新打开编辑。' : undefined,
-  }), [dirty, draft, editing, editingEvent?.isRecurrenceException, editingEvent?.repeat, missing, saving, selectedRecurrenceScope]);
+  }), [dirty, draft, editing, editingEvent?.isRecurrenceException, editingEvent?.repeat, locating, missing, saving, selectedRecurrenceScope]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">

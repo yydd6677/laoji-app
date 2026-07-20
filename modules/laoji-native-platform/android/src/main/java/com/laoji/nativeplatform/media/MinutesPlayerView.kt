@@ -4,18 +4,16 @@ package com.laoji.nativeplatform.media
 
 import android.content.Context
 import android.content.res.ColorStateList
-import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.constraintlayout.widget.ConstraintLayout
 import com.laoji.nativeplatform.minutes.MinutesPalette
 import com.laoji.nativeplatform.minutes.MinutesPlayerSource
-import com.laoji.nativeplatform.minutes.backgroundShape
+import com.laoji.nativeplatform.minutes.backgroundHorizontalGradient
 import com.laoji.nativeplatform.minutes.dp
 import com.laoji.nativeplatform.minutes.formatClock
 import com.laoji.nativeplatform.minutes.iconButton
@@ -24,17 +22,28 @@ import com.laoji.nativeplatform.minutes.textView
 class MinutesPlayerView(
   context: Context,
   private val onStateChanged: (MinutesPlaybackState) -> Unit,
-) : LinearLayout(context) {
+) : FrameLayout(context) {
   private val controller = MinutesPlaybackRegistry.controller(context)
-  private val seekArea = FrameLayout(context)
-  private val position = context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
-  private val duration = context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
+  private val speedSheet = MinutesPlaybackSpeedSheet(context)
+  private val content = ConstraintLayout(context).apply { id = View.generateViewId() }
+  private val seekArea = ConstraintLayout(context).apply { id = View.generateViewId() }
+  private val position = context.textView(textSizeSp = 12, color = MinutesPalette.faint)
+  private val duration = context.textView(textSizeSp = 12, color = MinutesPalette.faint)
   private val seekBar = SeekBar(context)
-  private val controls = FrameLayout(context)
-  private val speed = context.textView("1x", 14, MinutesPalette.text, Typeface.BOLD)
-  private val rewind = context.iconButton(android.R.drawable.ic_media_rew, "后退 15 秒")
-  private val playPause = context.iconButton(android.R.drawable.ic_media_play, "播放会议录音")
-  private val forward = context.iconButton(android.R.drawable.ic_media_ff, "前进 15 秒")
+  private val controls = ConstraintLayout(context).apply { id = View.generateViewId() }
+  private val speed = context.textView("1x", 16, MinutesPalette.text)
+  private val rewind = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_back_15s,
+    "后退 15 秒",
+  )
+  private val playPause = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_play_filled,
+    "播放会议录音",
+  )
+  private val forward = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_forward_15s,
+    "前进 15 秒",
+  )
   private val error = context.textView(textSizeSp = 13, color = MinutesPalette.danger)
   private var latestState = MinutesPlaybackState()
   private var trackingSeek = false
@@ -49,31 +58,64 @@ class MinutesPlayerView(
   }
 
   init {
-    orientation = VERTICAL
     setBackgroundColor(MinutesPalette.surface)
-    elevation = context.dp(3).toFloat()
-    addView(seekArea, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
-    addView(controls, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56)))
+    content.setBackgroundColor(MinutesPalette.surface)
+    addView(
+      content,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    content.addView(
+      seekArea,
+      ConstraintLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        topMargin = context.dp(4)
+      },
+    )
+    content.addView(
+      controls,
+      ConstraintLayout.LayoutParams(0, context.dp(48)).apply {
+        topToBottom = seekArea.id
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        topMargin = context.dp(8)
+        bottomMargin = context.dp(32)
+      },
+    )
 
+    position.id = View.generateViewId()
     position.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+    duration.id = View.generateViewId()
     duration.gravity = Gravity.END or Gravity.CENTER_VERTICAL
     seekArea.addView(
       position,
-      FrameLayout.LayoutParams(context.dp(58), context.dp(20), Gravity.START or Gravity.TOP).apply {
+      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         leftMargin = context.dp(20)
-        topMargin = context.dp(3)
       },
     )
     seekArea.addView(
       duration,
-      FrameLayout.LayoutParams(context.dp(58), context.dp(20), Gravity.END or Gravity.TOP).apply {
+      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
         rightMargin = context.dp(20)
-        topMargin = context.dp(3)
       },
     )
+    seekBar.id = View.generateViewId()
+    seekBar.minimumHeight = 0
+    // [SOURCE] Feishu's 16dp synchronized thumb is positioned inside the
+    // progress host. A plain Android SeekBar needs the equivalent 8dp inset
+    // or the endpoint thumbs are clipped by its bounds.
+    seekBar.setPadding(context.dp(8), 0, context.dp(8), 0)
     seekBar.max = SEEK_RANGE
-    seekBar.progressTintList = ColorStateList.valueOf(MinutesPalette.primary)
-    seekBar.thumbTintList = ColorStateList.valueOf(MinutesPalette.primary)
+    seekBar.progressBackgroundTintList = ColorStateList.valueOf(PLAYER_TRACK_COLOR)
+    seekBar.secondaryProgressTintList = ColorStateList.valueOf(PLAYER_BUFFER_COLOR)
+    seekBar.progressTintList = ColorStateList.valueOf(PLAYER_GRADIENT_START)
+    seekBar.thumbTintList = ColorStateList.valueOf(PLAYER_GRADIENT_START)
     seekBar.contentDescription = "录音播放进度"
     seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
       override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -95,42 +137,76 @@ class MinutesPlayerView(
     })
     seekArea.addView(
       seekBar,
-      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(32), Gravity.BOTTOM).apply {
-        leftMargin = context.dp(12)
-        rightMargin = context.dp(12)
+      ConstraintLayout.LayoutParams(0, context.dp(24)).apply {
+        topToBottom = position.id
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        leftMargin = context.dp(20)
+        rightMargin = context.dp(20)
+        bottomMargin = context.dp(13)
       },
     )
 
+    speed.id = View.generateViewId()
+    rewind.id = View.generateViewId()
+    playPause.id = View.generateViewId()
+    forward.id = View.generateViewId()
     speed.gravity = Gravity.CENTER
+    speed.minimumWidth = context.dp(40)
     speed.isClickable = true
     speed.isFocusable = true
     speed.contentDescription = "选择播放速度"
     speed.setOnClickListener { showSpeedMenu() }
     controls.addView(
       speed,
-      FrameLayout.LayoutParams(context.dp(48), context.dp(44), Gravity.START or Gravity.CENTER_VERTICAL).apply {
-        leftMargin = context.dp(8)
+      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(40)).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToStart = rewind.id
+        leftMargin = context.dp(20)
+        horizontalChainStyle = ConstraintLayout.LayoutParams.CHAIN_SPREAD
       },
     )
+    rewind.minimumWidth = 0
+    rewind.minimumHeight = 0
     rewind.setOnClickListener { controller.seekBy(-MINUTES_SKIP_INTERVAL_MS) }
+    rewind.setPadding(context.dp(8), context.dp(8), context.dp(8), context.dp(8))
     controls.addView(
       rewind,
-      FrameLayout.LayoutParams(context.dp(44), context.dp(44), Gravity.CENTER_VERTICAL).apply {
-        leftMargin = context.dp(64)
+      ConstraintLayout.LayoutParams(context.dp(40), context.dp(40)).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToEnd = speed.id
+        endToStart = playPause.id
       },
     )
-    playPause.backgroundShape(MinutesPalette.primary, radiusDp = 24)
+    playPause.backgroundHorizontalGradient(PLAYER_GRADIENT_START, PLAYER_GRADIENT_END, radiusDp = 24)
     playPause.imageTintList = ColorStateList.valueOf(android.graphics.Color.WHITE)
+    playPause.setPadding(context.dp(28), context.dp(12), context.dp(28), context.dp(12))
     playPause.setOnClickListener { controller.toggle() }
     controls.addView(
       playPause,
-      FrameLayout.LayoutParams(context.dp(80), context.dp(48), Gravity.CENTER),
+      ConstraintLayout.LayoutParams(context.dp(80), context.dp(48)).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToEnd = rewind.id
+        endToStart = forward.id
+      },
     )
+    forward.minimumWidth = 0
+    forward.minimumHeight = 0
     forward.setOnClickListener { controller.seekBy(MINUTES_SKIP_INTERVAL_MS) }
+    forward.setPadding(context.dp(8), context.dp(8), context.dp(8), context.dp(8))
     controls.addView(
       forward,
-      FrameLayout.LayoutParams(context.dp(44), context.dp(44), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-        rightMargin = context.dp(64)
+      ConstraintLayout.LayoutParams(context.dp(40), context.dp(40)).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToEnd = playPause.id
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+        rightMargin = context.dp(20)
       },
     )
     error.maxLines = 2
@@ -141,12 +217,21 @@ class MinutesPlayerView(
     error.isFocusable = true
     error.contentDescription = "录音播放失败，点击重试"
     error.setOnClickListener { controller.play() }
-    controls.addView(error, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56)))
+    controls.addView(
+      error,
+      ConstraintLayout.LayoutParams(0, 0).apply {
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+      },
+    )
     render(controller.state)
   }
 
   fun setSource(source: MinutesPlayerSource?) {
     controller.setSource(source)
+    if (source == null) speedSheet.dismiss()
     visibility = if (source == null) View.GONE else View.VISIBLE
   }
 
@@ -163,6 +248,7 @@ class MinutesPlayerView(
   }
 
   override fun onDetachedFromWindow() {
+    speedSheet.dismiss()
     if (attached) {
       attached = false
       controller.removeListener(listener)
@@ -188,7 +274,8 @@ class MinutesPlayerView(
     }
     speed.text = "${rateLabel(state.rate)}x"
     playPause.setImageResource(
-      if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+      if (state.isPlaying) com.laoji.nativeplatform.R.drawable.laoji_ic_pause_filled
+      else com.laoji.nativeplatform.R.drawable.laoji_ic_play_filled,
     )
     playPause.contentDescription = if (state.isPlaying) "暂停会议录音" else "播放会议录音"
     val enabled = state.sourceId != null && state.phase != MinutesPlaybackPhase.PREPARING
@@ -201,22 +288,16 @@ class MinutesPlayerView(
   }
 
   private fun showSpeedMenu() {
-    PopupMenu(context, speed).apply {
-      MINUTES_PLAYBACK_RATES.forEachIndexed { index, rate ->
-        menu.add(0, index, index, "${rateLabel(rate)}x").isCheckable = true
-      }
-      menu.findItem(MINUTES_PLAYBACK_RATES.indexOfFirst { it == latestState.rate }.coerceAtLeast(0))?.isChecked = true
-      setOnMenuItemClickListener { item ->
-        MINUTES_PLAYBACK_RATES.getOrNull(item.itemId)?.let(controller::setRate)
-        true
-      }
-      show()
-    }
+    speedSheet.show(latestState.rate, controller::setRate)
   }
 
   private fun rateLabel(rate: Float): String = if (rate % 1f == 0f) rate.toInt().toString() else rate.toString()
 
   companion object {
     private const val SEEK_RANGE = 1_000
+    private val PLAYER_GRADIENT_START = android.graphics.Color.rgb(85, 95, 242)
+    private val PLAYER_GRADIENT_END = android.graphics.Color.rgb(139, 118, 245)
+    private val PLAYER_BUFFER_COLOR = android.graphics.Color.argb(77, 85, 95, 242)
+    private val PLAYER_TRACK_COLOR = android.graphics.Color.argb(26, 31, 35, 41)
   }
 }

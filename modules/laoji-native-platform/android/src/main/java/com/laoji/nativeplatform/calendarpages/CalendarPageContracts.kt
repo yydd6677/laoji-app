@@ -156,6 +156,7 @@ internal data class CalendarEditPageState(
   val recurrenceScope: CalendarEditRecurrenceScope? = null,
   val saving: Boolean = false,
   val dirty: Boolean = false,
+  val locating: Boolean = false,
 ) {
   // RepeatViewModel distinguishes a normal one-off edit from an existing exception.
   val recurrenceRuleMode: CalendarRecurrenceControlMode
@@ -185,7 +186,6 @@ internal object CalendarEditValidator {
   // CAL-EDIT-001: date is mandatory, while a non-all-day event may intentionally have no time.
   fun validate(value: CalendarEditDraft): CalendarEditValidation {
     val draft = value.normalized()
-    if (draft.title.isBlank()) return CalendarEditValidation(false, "请输入事项标题")
     val startDate = parseDate(draft.startDate)?.takeIf(CalendarEditDateRange::contains)
       ?: return CalendarEditValidation(false, "请选择有效的开始日期")
     val endDate = parseDate(draft.endDate)?.takeIf(CalendarEditDateRange::contains)
@@ -294,6 +294,7 @@ internal object CalendarPageSnapshotParser {
       recurrenceScope = CalendarEditRecurrenceScope.fromWireName(snapshot.stringOrNull("recurrenceScope")),
       saving = snapshot.boolean("saving"),
       dirty = snapshot.boolean("dirty"),
+      locating = snapshot.boolean("locating"),
     )
   }
 

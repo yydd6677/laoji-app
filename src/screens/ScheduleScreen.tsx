@@ -66,7 +66,6 @@ export function ScheduleScreen({ navigation }: Props) {
     cacheRecoveryNotice,
     dismissCacheRecoveryNotice,
     updateEvent,
-    findConflicts,
     refreshEvents,
   } = useEvents();
   const { showDialog } = useAppDialog();
@@ -216,57 +215,12 @@ export function ScheduleScreen({ navigation }: Props) {
     });
   };
 
-  const confirmTimelineConflicts = (
-    conflicts: Awaited<ReturnType<typeof findConflicts>>,
-  ): Promise<boolean> => new Promise(resolve => {
-    let settled = false;
-    const finish = (confirmed: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(confirmed);
-    };
-    const explicit = conflicts.conflicts.some(conflict => conflict.severity === 'overlap');
-    const names = conflicts.conflicts.map(({ event }) => {
-      const time = event.startTime && event.endTime
-        ? `${event.startTime}-${event.endTime}`
-        : event.isAllDay ? '全天' : '无具体时间';
-      return `• ${event.title} (${time})`;
-    }).join('\n');
-    showDialog({
-      title: explicit ? '时间冲突' : '全天安排提示',
-      message: `${explicit ? '调整后与以下日程重叠' : '该日期已有全天或定时安排'}：\n${names}`,
-      hint: conflicts.complete
-        ? '确认这些安排可以重叠后再保存。'
-        : '当前只能核对本机已有日程；确认后仍可保存。',
-      tone: 'warning',
-      onDismiss: () => finish(false),
-      actions: [
-        { text: '仍然保存', role: 'primary', onPress: () => finish(true) },
-        { text: '取消', role: 'cancel', onPress: () => finish(false) },
-      ],
-    });
-  });
-
   const changeTimelineEventTime = async (
     event: CalEvent,
     changes: Pick<CalEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'>,
   ): Promise<boolean> => {
     const scope = await chooseTimelineEditScope(event);
     if (!scope) return false;
-    const { id: _id, ...candidate } = { ...event, ...changes };
-    let conflicts: Awaited<ReturnType<typeof findConflicts>>;
-    try {
-      conflicts = await findConflicts(candidate, eventRefForEvent(event), scope);
-    } catch {
-      showDialog({
-        title: '暂时无法检查日程冲突',
-        message: '时间未修改，请稍后重试。',
-        tone: 'warning',
-      });
-      return false;
-    }
-    if (conflicts.hasConflict && !await confirmTimelineConflicts(conflicts)) return false;
-
     try {
       await updateEvent(eventRefForEvent(event), changes, scope);
       return true;

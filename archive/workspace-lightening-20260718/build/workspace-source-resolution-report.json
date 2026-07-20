@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "kind": "workspace-source-resolution",
+  "inputs": [
+    {
+      "path": "metro.config.js",
+      "sha256": "f1bad2260456e4d4079849bf364b83b3d75ffd6c7bccafd964cc46d8c3716884"
+    },
+    {
+      "path": "modules/laoji-native-platform/package.json",
+      "sha256": "f5390606d8c6e1ac8205b687ed60c5af5060c0a43827479db04139176d3012f4"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "fa9be37eaa8c10bc5a6615de5c1dc985c6474f32fd827dcee004fa2b1883025f"
+    },
+    {
+      "path": "package.json",
+      "sha256": "00c8cb1b477f01432a66f5c379ee28847ae9e96fcb74df1b17069d21434c096e"
+    },
+    {
+      "path": "plugins/withLaojiNativePlatform.js",
+      "sha256": "861a3866139dec1f53e2e6415c04cc1afa98dc5be66cc94b229db2039978f07c"
+    },
+    {
+      "path": "scripts/check_workspace_source_resolution.js",
+      "sha256": "6fb7babd08c90d854987a35cc27221d795f3c2f81aca3228270106571d252e82"
+    }
+  ],
+  "nodeModules": {
+    "path": "node_modules",
+    "realPath": "node_modules",
+    "symbolicLink": false
+  },
+  "resolutions": {
+    "laoji-native-platform/package.json": "modules/laoji-native-platform/package.json",
+    "expo/package.json": "node_modules/expo/package.json",
+    "react-native/package.json": "node_modules/react-native/package.json"
+  },
+  "autolinking": {
+    "moduleCount": 20,
+    "laojiSourceDir": "modules/laoji-native-platform/android"
+  },
+  "errors": []
+}

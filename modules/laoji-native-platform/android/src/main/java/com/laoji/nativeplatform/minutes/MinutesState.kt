@@ -19,7 +19,8 @@ enum class MinutesSurface(val wireName: String) {
 enum class MinutesDetailTab(val wireName: String, val label: String) {
   TRANSCRIPT("transcript", "文字记录"),
   SUMMARY("summary", "纪要"),
-  SPEAKERS("speakers", "发言人");
+  SPEAKERS("speakers", "发言人"),
+  INFO("info", "录音信息");
 
   companion object {
     fun fromWireName(value: String?): MinutesDetailTab =
@@ -67,17 +68,20 @@ data class MinutesDetailPageStates(
   val transcript: MinutesDetailPageState = MinutesDetailPageState(),
   val summary: MinutesDetailPageState = MinutesDetailPageState(),
   val speakers: MinutesDetailPageState = MinutesDetailPageState(),
+  val info: MinutesDetailPageState = MinutesDetailPageState(),
 ) {
   operator fun get(tab: MinutesDetailTab): MinutesDetailPageState = when (tab) {
     MinutesDetailTab.TRANSCRIPT -> transcript
     MinutesDetailTab.SUMMARY -> summary
     MinutesDetailTab.SPEAKERS -> speakers
+    MinutesDetailTab.INFO -> info
   }
 
   fun normalized(): MinutesDetailPageStates = copy(
     transcript = transcript.normalized(),
     summary = summary.normalized(),
     speakers = speakers.normalized(),
+    info = info.normalized(),
   )
 
   companion object {
@@ -93,12 +97,14 @@ data class MinutesDetailPageStates(
         transcript = contentBackedState(transcriptHasContent, "暂无文字记录"),
         summary = contentBackedState(summaryHasContent, "该会议暂未生成纪要"),
         speakers = contentBackedState(speakersHaveContent, "暂无发言人信息"),
+        info = MinutesDetailPageState(),
       )
       val activeState = MinutesDetailPageState(contentPhase, contentMessage)
       return when (activeTab) {
         MinutesDetailTab.TRANSCRIPT -> inferred.copy(transcript = activeState)
         MinutesDetailTab.SUMMARY -> inferred.copy(summary = activeState)
         MinutesDetailTab.SPEAKERS -> inferred.copy(speakers = activeState)
+        MinutesDetailTab.INFO -> inferred.copy(info = activeState)
       }
     }
 
@@ -118,7 +124,22 @@ data class MinutesMeeting(
   val statusLabel: String = "",
   val statusTone: String = "neutral",
   val canResume: Boolean = false,
+  val coverType: MinutesListCoverType = MinutesListCoverType.DEFAULT,
+  val coverTitle: String = "",
+  val coverText: String = "",
 )
+
+enum class MinutesListCoverType(val wireName: String) {
+  DEFAULT("default"),
+  SUMMARY("summary"),
+  SPEAKER_SUMMARY("speakerSummary");
+
+  companion object {
+    fun fromWireName(value: String?): MinutesListCoverType = entries.firstOrNull {
+      it.wireName == value
+    } ?: DEFAULT
+  }
+}
 
 data class MinutesTranscriptLine(
   val id: String,
@@ -307,12 +328,14 @@ object MinutesStateReducer {
     val transcriptFresh = fresh(MinutesDetailTab.TRANSCRIPT)
     val summaryFresh = fresh(MinutesDetailTab.SUMMARY)
     val speakersFresh = fresh(MinutesDetailTab.SPEAKERS)
+    val infoFresh = fresh(MinutesDetailTab.INFO)
     val tabFresh = nextDetail.tabGeneration > currentDetail.tabGeneration ||
       (nextDetail.tabGeneration == currentDetail.tabGeneration && nextDetail.activeTab == currentDetail.activeTab)
     val pageStates = MinutesDetailPageStates(
       transcript = if (transcriptFresh) nextDetail.pageStates.transcript else currentDetail.pageStates.transcript,
       summary = if (summaryFresh) nextDetail.pageStates.summary else currentDetail.pageStates.summary,
       speakers = if (speakersFresh) nextDetail.pageStates.speakers else currentDetail.pageStates.speakers,
+      info = if (infoFresh) nextDetail.pageStates.info else currentDetail.pageStates.info,
     )
     val activeTab = if (tabFresh) nextDetail.activeTab else currentDetail.activeTab
 

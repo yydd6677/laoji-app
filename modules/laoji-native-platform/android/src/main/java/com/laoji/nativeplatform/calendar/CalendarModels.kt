@@ -22,6 +22,30 @@ data class CalendarSettings(
   )
 }
 
+// CAL-DAY-COMPOSE-001: mirrors Feishu's InstanceLayout payload. Percentages are
+// relative to the timed-event surface; a null value means the local fallback
+// allocator is used until the source supplies the rectangle.
+data class CalendarInstanceLayout(
+  val xOffsetPercent: Float,
+  val yOffsetPercent: Float,
+  val widthPercent: Float,
+  val heightPercent: Float,
+  val zIndex: Int = 0,
+  val fullDisplayWidthPercent: Float? = null,
+) {
+  fun normalized(): CalendarInstanceLayout {
+    val x = xOffsetPercent.coerceIn(0f, 100f)
+    val y = yOffsetPercent.coerceIn(0f, 100f)
+    return copy(
+      xOffsetPercent = x,
+      yOffsetPercent = y,
+      widthPercent = widthPercent.coerceIn(0f, 100f - x),
+      heightPercent = heightPercent.coerceIn(0f, 100f - y),
+      fullDisplayWidthPercent = fullDisplayWidthPercent?.coerceIn(0f, 100f),
+    )
+  }
+}
+
 data class CalendarEvent(
   val sourceEventId: String,
   val occurrenceDate: String,
@@ -34,7 +58,8 @@ data class CalendarEvent(
   val timeZoneId: String,
   val allDay: Boolean,
   val editable: Boolean,
-  val revision: Int
+  val revision: Int,
+  val instanceLayout: CalendarInstanceLayout? = null,
 ) {
   val identity: String
     get() = "$sourceEventId@$occurrenceDate"
@@ -49,7 +74,8 @@ data class CalendarEvent(
         endEpochDay = maxOf(startEpochDay, endEpochDay),
         endEpochDayExclusive = normalizedExclusiveEnd,
         startMinutes = null,
-        endMinutes = null
+        endMinutes = null,
+        instanceLayout = null,
       )
     }
 
@@ -63,7 +89,8 @@ data class CalendarEvent(
         endEpochDay = normalizedEndDay,
         endEpochDayExclusive = null,
         startMinutes = normalizedStart,
-        endMinutes = normalizedEnd
+        endMinutes = normalizedEnd,
+        instanceLayout = instanceLayout?.normalized(),
       )
     }
 
@@ -73,7 +100,8 @@ data class CalendarEvent(
       startMinutes = normalizedStart,
       endEpochDay = canonicalEnd.epochDay,
       endEpochDayExclusive = null,
-      endMinutes = canonicalEnd.minutes
+      endMinutes = canonicalEnd.minutes,
+      instanceLayout = instanceLayout?.normalized(),
     )
   }
 
@@ -348,6 +376,18 @@ object CalendarShellContract {
   const val ICON_HIT_SIZE_DP = 40f
   const val FAB_SIZE_DP = 48f
   const val FAB_EDGE_MARGIN_DP = 16f
-  const val FAB_GESTURE_SURFACE_DP = 160f
-  const val FAB_EXPANSION_DURATION_MS = 170L
+  // Product interaction retained from the original LaoJi radial-create design.
+  const val FAB_GESTURE_SURFACE_DP = 236f
+  const val FAB_OPTION_SIZE_DP = 60f
+  const val FAB_ARC_RADIUS_DP = 116f
+  const val FAB_TARGET_HIT_RADIUS_DP = 42f
+  const val FAB_LONG_PRESS_DELAY_MS = 350L
+  const val FAB_EXPANSION_DURATION_MS = 180L
+  const val FAB_COLLAPSE_DURATION_MS = 120L
+  const val FAB_OPEN_ROTATION_DEGREES = 45f
+  const val FAB_HOVER_SCALE = 1.12f
+  const val FAB_VOICE_OFFSET_X_DP = -98f
+  const val FAB_VOICE_OFFSET_Y_DP = -58f
+  const val FAB_MANUAL_OFFSET_X_DP = -34f
+  const val FAB_MANUAL_OFFSET_Y_DP = -112f
 }

@@ -9,7 +9,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
-import android.text.format.DateFormat
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -17,13 +16,12 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.time.LocalDate
 import java.time.YearMonth
 
-@SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
+@SuppressLint("ViewConstructor")
 @FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-TIMEFORMAT-001", "UI-TITLE-COMMON-001")
 internal class CalendarEditTimePageView(
   context: Context,
@@ -32,15 +30,13 @@ internal class CalendarEditTimePageView(
   private val onComplete: (CalendarEditDraft) -> Unit,
 ) : LinearLayout(context) {
   private var state = initialState
-  private val is24Hour = DateFormat.is24HourFormat(context)
+  private val is24Hour = true
   private var applyingState = false
   private val titleBar = CalendarCommonTitleBar(context)
-  private val allDaySwitch = Switch(context).apply {
-    showText = false
+  private val allDaySwitch = CalendarSourceSwitch(context).apply {
     contentDescription = "全天"
   }
-  private val timeSwitch = Switch(context).apply {
-    showText = false
+  private val timeSwitch = CalendarSourceSwitch(context).apply {
     contentDescription = "具体时间"
   }
   private val timeSwitchRow = toggleRow("具体时间", timeSwitch)
@@ -311,7 +307,7 @@ internal class CalendarEditTimePageView(
     else -> CalendarEditTimeFormatter.timeLabel(state.timeFor(endpoint), is24Hour)
   }
 
-  private fun toggleRow(label: String, toggle: Switch): LinearLayout = LinearLayout(context).apply {
+  private fun toggleRow(label: String, toggle: CalendarSourceSwitch): LinearLayout = LinearLayout(context).apply {
     orientation = HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
     minimumHeight = context.pageDp(52)

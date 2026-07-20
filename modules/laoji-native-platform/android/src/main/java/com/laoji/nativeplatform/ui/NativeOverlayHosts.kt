@@ -510,6 +510,10 @@ class LaojiNativeActionSheetHostView(
       textSize = 17f
       setTextColor(palette.textPrimary)
       gravity = Gravity.CENTER
+      // The cancel action is a separate Feishu-style rounded surface. Without
+      // an explicit drawable TextView defaults to transparent and the overlay
+      // mask shows through, which makes the button look missing.
+      background = NativeUiTokens.roundedBackground(context, palette.body, 8f)
       minHeight = NativeUiTokens.dp(context, NativeUiTokens.SHEET_CANCEL_HEIGHT_DP).toInt()
       isClickable = true
       isFocusable = true

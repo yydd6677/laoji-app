@@ -76,6 +76,7 @@ export interface NativeCalendarEditSnapshot {
   recurrenceScope: 'occurrence' | 'following' | 'series' | null;
   saving: boolean;
   dirty: boolean;
+  locating: boolean;
 }
 
 export type NativeCalendarSearchAction =
@@ -88,7 +89,7 @@ export type NativeCalendarDetailAction =
 
 export type NativeCalendarEditAction =
   | { type: 'cancel' | 'delete' | 'retry' }
-  | { type: 'save' | 'openRepeat' | 'openReminder'; draft: NativeCalendarEditDraftSnapshot }
+  | { type: 'save' | 'openRepeat' | 'openReminder' | 'requestCurrentLocation'; draft: NativeCalendarEditDraftSnapshot }
   | { type: 'draftChange'; draft: NativeCalendarEditDraftSnapshot }
   | { type: 'feedback'; message: string; durationMs?: number };
 

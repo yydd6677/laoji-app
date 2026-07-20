@@ -313,7 +313,9 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
     get() = quickChooseContent.contentState
 
   init {
-    visibility = GONE
+    // Feishu keeps the panel in the measured tree while its content is translated
+    // off-screen. INVISIBLE preserves that contract without accepting touches.
+    visibility = INVISIBLE
     isClickable = true
     isFocusable = false
     clipChildren = false
@@ -374,6 +376,17 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
     this.listener = listener
   }
 
+  /**
+   * Bind the closed-state content before the first open so the panel has a stable
+   * measured size and the first title tap does not depend on a late remeasure.
+   */
+  fun prepare(committedEpochDay: Int, mode: CalendarMode) {
+    if (expandState != CalendarPickerExpandState.CLOSED) return
+    quickChooseContent.bind(committedEpochDay, mode)
+    applyExpandProgress(0f)
+    visibility = INVISIBLE
+  }
+
   fun open(committedEpochDay: Int, mode: CalendarMode) {
     quickChooseContent.bind(committedEpochDay, mode)
     visibility = VISIBLE
@@ -401,7 +414,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
     setListener(null)
     expandProgress = 0f
     setExpandState(CalendarPickerExpandState.CLOSED)
-    visibility = GONE
+    visibility = INVISIBLE
   }
 
   fun measuredPanelHeight(): Int = panel.measuredHeight
@@ -504,7 +517,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
     lastExpandAnimationDurationMs = duration
     if (duration == 0L) {
       applyExpandProgress(target)
-      if (target == 0f) visibility = GONE
+      if (target == 0f) visibility = INVISIBLE
       return
     }
     setExpandState(
@@ -524,7 +537,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
           if (cancelled || expandAnimator !== animation) return
           expandAnimator = null
           applyExpandProgress(target)
-          if (target == 0f) visibility = GONE
+          if (target == 0f) visibility = INVISIBLE
         }
       })
     }
@@ -1416,7 +1429,7 @@ private class CalendarQuickChooseMonthPageView(context: Context) : LinearLayout(
             setTextColor(
               when {
                 isSelected -> palette.accentText
-                isToday -> palette.accentText
+                isToday -> palette.accent
                 else -> palette.textPrimary
               },
             )
@@ -1440,30 +1453,6 @@ private class CalendarQuickChooseMonthPageView(context: Context) : LinearLayout(
               Gravity.CENTER,
             ).apply { bottomMargin = CalendarUi.dp(context, 2f).roundToInt() },
           )
-          if (eventCount > 0) {
-            val dots = LinearLayout(context).apply {
-              orientation = HORIZONTAL
-              gravity = Gravity.CENTER
-              importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            repeat(eventCount.coerceAtMost(3)) {
-              dots.addView(
-                View(context).apply {
-                  background = CalendarUi.background(if (isSelected) palette.surface else palette.accent, 2f, context)
-                  importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-                },
-                LinearLayout.LayoutParams(CalendarUi.dp(context, 4f).roundToInt(), CalendarUi.dp(context, 4f).roundToInt()).apply {
-                  if (it > 0) marginStart = CalendarUi.dp(context, 2f).roundToInt()
-                },
-              )
-            }
-            cell.addView(
-              dots,
-              FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, CalendarUi.dp(context, 4f).roundToInt(), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
-                bottomMargin = CalendarUi.dp(context, 1f).roundToInt()
-              },
-            )
-          }
         }
         row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
       }

@@ -73,6 +73,14 @@ function reminderLabel(value: number | null | undefined): string {
   return `提前 ${value} 分钟`;
 }
 
+function scheduleVoiceErrorMessage(reason: unknown, fallback: string): string {
+  const message = readableErrorMessage(reason, fallback);
+  if (/无法从语音中提取日程|未识别到有效日期|未识别到语音内容/.test(message)) {
+    return '未识别到日程，请重试。';
+  }
+  return message;
+}
+
 function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<CalEvent, 'id'> {
   const category = normalizeEventCategory(source.category);
   const hasTimedRange = !source.is_all_day && Boolean(source.start_time && source.end_time);
@@ -130,7 +138,7 @@ function stopResultFromError(error: unknown): NativeRecorderStopResult | null {
 export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
-  const { addEvent, findConflicts } = useEvents();
+  const { addEvent } = useEvents();
   const { showDialog } = useAppDialog();
   const [phase, setPhase] = useState<Phase>('input');
   const [text, setText] = useState('');
@@ -160,17 +168,31 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       addNativeRecorderStateListener(event => {
         if (event.sessionId !== activeRef.current?.sessionId || !mountedRef.current) return;
         if (event.state === 'preparing') setPhase('preparing');
-        if (event.state === 'recording') setPhase('recording');
-        if (event.state === 'failed') setError(event.errorMessage || '语音输入暂时不可用');
+        if (event.state === 'recording') {
+          setPhase('recording');
+          setError('');
+        }
+        if (event.state === 'failed') {
+          setError(scheduleVoiceErrorMessage(event.errorMessage, '语音输入暂时不可用'));
+        }
       }),
       addNativeRecorderTranscriptListener(event => {
         if (event.sessionId !== activeRef.current?.sessionId || !event.text.trim()) return;
         transcriptRef.current.set(event.segmentId, { text: event.text, startMs: event.startMs });
-        if (mountedRef.current) setText(currentTranscript());
+        if (mountedRef.current) {
+          setText(currentTranscript());
+          setError('');
+        }
       }),
       addNativeRecorderErrorListener(event => {
         if (event.sessionId && event.sessionId !== activeRef.current?.sessionId) return;
-        if (mountedRef.current) setError(event.errorMessage || '语音输入暂时不可用');
+        // Realtime ASR may reconnect while local recording remains healthy.
+        // A recoverable transport event is not a microphone failure and must
+        // not compete visually with an active recording/transcript state.
+        if (event.recoverable) return;
+        if (mountedRef.current) {
+          setError(scheduleVoiceErrorMessage(event.errorMessage, '语音输入暂时不可用'));
+        }
       }),
     ];
     return () => subscriptions.forEach(subscription => subscription.remove());
@@ -230,7 +252,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const startRecording = useCallback(async () => {
     if (activeRef.current || phase !== 'input') return;
     if (!hasNativeRecorder()) {
-      setError('当前安装包未包含原生录音模块');
+      setError('当前版本暂时无法录音，请更新后重试');
       return;
     }
     const runId = ++runRef.current;
@@ -287,7 +309,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       }
       if (mountedRef.current && runRef.current === runId) {
         setPhase('input');
-        setError(readableErrorMessage(reason, '语音服务连接失败，请稍后重试。'));
+        setError(scheduleVoiceErrorMessage(reason, '语音服务连接失败，请稍后重试。'));
       }
     }
   }, [phase, releaseGuestSession, showDialog]);
@@ -334,7 +356,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       } catch (reason) {
         if (mountedRef.current && runRef.current === runId) {
           setPhase('input');
-          setError(readableErrorMessage(reason, '未识别到语音内容，请重新录制。'));
+          setError(scheduleVoiceErrorMessage(reason, '未识别到日程，请重试。'));
         }
         return null;
       } finally {
@@ -361,7 +383,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setPhase('confirm');
     } catch (reason) {
       if (runRef.current !== runId) return;
-      setError(readableErrorMessage(reason, '日程解析失败，请检查输入后重试。'));
+      setError(scheduleVoiceErrorMessage(reason, '日程解析失败，请检查输入后重试。'));
       setPhase('input');
     }
   }, [parseSourceText, phase, text]);
@@ -400,27 +422,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setError(validation.issues[0]?.message ?? '日程信息不完整');
       return;
     }
-    try {
-      const conflicts = await findConflicts(validation.value);
-      if (!conflicts.hasConflict) {
-        await persistDraft(validation.value);
-        return;
-      }
-      const names = conflicts.conflicts.map(({ event }) => `• ${event.title}`).join('\n');
-      showDialog({
-        title: '时间冲突',
-        message: `该安排与以下日程重叠：\n${names}`,
-        hint: conflicts.complete ? '确认可以重叠后仍可保存。' : '当前只能核对本机已有日程。',
-        tone: 'warning',
-        actions: [
-          { text: '仍然保存', role: 'primary', onPress: () => { void persistDraft(validation.value!); } },
-          { text: '取消', role: 'cancel' },
-        ],
-      });
-    } catch (reason) {
-      setError(readableErrorMessage(reason, '暂时无法检查日程冲突，请重试。'));
-    }
-  }, [draft, findConflicts, persistDraft, showDialog, text]);
+    await persistDraft(validation.value);
+  }, [draft, persistDraft, text]);
 
   const openDetails = useCallback(() => {
     if (!draft) return;
@@ -470,9 +473,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       text,
       errorMessage: error,
       statusLabel: phase === 'preparing'
-        ? '正在连接语音服务'
-        : phase === 'recording'
-          ? '实时识别中，轻点或松开结束'
+          ? '正在连接语音服务'
+          : phase === 'recording'
+          ? '正在识别'
           : phase === 'parsing'
             ? '正在解析日程'
             : phase === 'saving'
@@ -481,7 +484,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       title: draft?.title,
       fields,
       canParse: Boolean(text.trim()),
-      canSave: Boolean(draft?.title.trim() && draft.start_date),
+      canSave: Boolean(draft?.start_date),
       canEditDetails: Boolean(draft?.start_date),
     };
   }, [draft, error, phase, text]);

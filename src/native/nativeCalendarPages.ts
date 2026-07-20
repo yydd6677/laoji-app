@@ -14,6 +14,7 @@ import {
 import { isValidEventDate } from '../utils/eventDraftValidation';
 import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { labelForReminder } from '../services/notifications';
+import { eventDetailTitle, eventListTitle } from '../utils/eventTitle';
 
 // CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: pure builders keep native pages deterministic.
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -113,7 +114,8 @@ export function buildNativeCalendarSearchSnapshot(
 ): NativeCalendarSearchSnapshot {
   const normalized = query.trim();
   if (!normalized) {
-    return { schemaVersion: 1, query, state: 'empty', message: '', results: [] };
+    // An untouched search field is a ready input state, not an empty-result state.
+    return { schemaVersion: 1, query, state: 'ready', message: '', results: [] };
   }
   const matches = searchMatches(events, query, today);
   const previousDate = new Map<number, string>();
@@ -124,7 +126,7 @@ export function buildNativeCalendarSearchSnapshot(
     previousDate.set(index, event.startDate);
     return {
       ...ref,
-      title: event.title,
+      title: eventListTitle(event.title),
       dateLabel: `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`,
       timeLabel: eventTimeLabel(event),
       monthLabel: formatMonthTitle(date),
@@ -176,7 +178,7 @@ export function buildNativeCalendarDetailSnapshot(
     deleting,
     event: {
       ...eventRefForEvent(event),
-      title: event.title,
+      title: eventDetailTitle(event.title),
       timeLabel: nativeCalendarDetailTimeLabel(event),
       repeatLabel: event.repeat && event.repeat !== 'once' ? repeatLabels[event.repeat] : undefined,
       location: event.location,
@@ -217,6 +219,7 @@ export function buildNativeCalendarEditSnapshot(input: {
   recurrenceScope?: 'occurrence' | 'following' | 'series' | null;
   saving?: boolean;
   dirty?: boolean;
+  locating?: boolean;
   state?: NativeCalendarEditSnapshot['state'];
   message?: string;
 }): NativeCalendarEditSnapshot {
@@ -231,5 +234,6 @@ export function buildNativeCalendarEditSnapshot(input: {
     recurrenceScope: input.recurrenceScope ?? null,
     saving: Boolean(input.saving),
     dirty: Boolean(input.dirty),
+    locating: Boolean(input.locating),
   };
 }

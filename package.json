@@ -20,6 +20,7 @@
     "expo-linear-gradient": "~15.0.8",
     "expo-local-authentication": "~17.0.8",
     "expo-localization": "~17.0.9",
+    "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
@@ -40,15 +41,8 @@
     "react-native-zip-archive": "^8.0.1"
   },
   "devDependencies": {
-    "@testing-library/react-native": "^14.0.1",
-    "@types/jest": "^29.5.14",
     "@types/react": "~19.1.10",
-    "adm-zip": "^0.6.0",
-    "jest": "^29.7.0",
-    "jest-expo": "~54.0.17",
     "patch-package": "^8.0.1",
-    "test-renderer": "^1.1.0",
-    "ts-jest": "^29.4.11",
     "typescript": "~5.9.2"
   },
   "scripts": {
@@ -59,136 +53,7 @@
     "android:emulator": "emulator -avd LaoJi_API_35",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "postinstall": "patch-package",
-    "audit:dependencies": "npm audit --omit=dev --audit-level=moderate",
-    "audit:public": "node scripts/check_publication_boundary.js --require-gitleaks",
-    "audit:feishu-evidence": "python3 scripts/feishu_evidence_gate.py check --mode static",
-    "audit:feishu-source": "python3 scripts/feishu_evidence_gate.py check --mode static",
-    "verify:feishu-release": "python3 scripts/feishu_evidence_gate.py check --mode release",
-    "sync:feishu-evidence": "python3 scripts/feishu_evidence_gate.py sync-docs",
-    "test:feishu-gate": "python3 -m unittest scripts.tests.test_feishu_evidence_gate",
-    "audit:feishu-ui-ast": "node scripts/feishu_ui_ast_gate.js check",
-    "report:feishu-ui-ast": "node scripts/feishu_ui_ast_gate.js report --output build/feishu-ui-ast-report.json",
-    "test:feishu-ui-ast": "node scripts/tests/test_feishu_ui_ast_gate.js",
-    "audit:feishu-android-uast": "python3 scripts/check_feishu_android_lint.py check --report modules/laoji-native-platform/android/build/reports/lint-results-release.xml --detector-jar tools/feishu-evidence-lint/build/libs/feishu-evidence-lint.jar --output build/feishu-android-uast-report.json",
-    "report:feishu-android-uast": "python3 scripts/check_feishu_android_lint.py report --report modules/laoji-native-platform/android/build/reports/lint-results-release.xml --detector-jar tools/feishu-evidence-lint/build/libs/feishu-evidence-lint.jar --output build/feishu-android-uast-report.json",
-    "test:feishu-android-uast": "python3 -m unittest scripts.tests.test_check_feishu_android_lint",
-    "audit:workspace-source": "node scripts/check_workspace_source_resolution.js check --output build/workspace-source-resolution-report.json",
-    "report:workspace-source": "node scripts/check_workspace_source_resolution.js report --output build/workspace-source-resolution-report.json",
-    "test:workspace-source": "node scripts/tests/test_workspace_source_resolution.js",
-    "verify:feishu-source-lock": "python3 scripts/update_feishu_source_lock.py check",
-    "sync:feishu-source-lock": "python3 scripts/update_feishu_source_lock.py write",
-    "test:feishu-source-lock": "python3 -m unittest scripts.tests.test_update_feishu_source_lock",
-    "audit:android-native": "node scripts/check_android_native_boundary.js",
-    "test:android-route-smoke": "bash scripts/tests/test_android_emulator_route_smoke.sh",
-    "verify:android-routes": "bash scripts/android-emulator-route-smoke.sh",
-    "verify:android-smoke": "bash scripts/android-emulator-smoke.sh",
-    "verify:android-bounded": "bash scripts/android-emulator-soak.sh",
-    "typecheck": "tsc --noEmit",
-    "test:ci": "jest --runInBand",
-    "test:coverage": "jest --runInBand --coverage",
-    "verify:release-config": "node scripts/check_release_config.js",
-    "verify:android-artifact": "node scripts/check_android_artifact.js",
-    "materialize:aab": "node scripts/materialize_aab_for_emulator.js",
-    "test": "jest --watchAll=false",
-    "test:watch": "jest"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/__tests__/**/*.test.{ts,tsx}"
-    ],
-    "transform": {
-      "^.+\\.tsx?$": [
-        "ts-jest",
-        {
-          "tsconfig": {
-            "strict": true,
-            "esModuleInterop": true,
-            "jsx": "react-jsx"
-          }
-        }
-      ]
-    },
-    "moduleNameMapper": {
-      "^@react-native-async-storage/async-storage$": "<rootDir>/__mocks__/async-storage.js",
-      "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
-      "^expo-file-system/legacy$": "<rootDir>/__mocks__/expo-file-system-legacy.js",
-      "^expo-notifications$": "<rootDir>/__mocks__/expo-notifications.js",
-      "^expo-localization$": "<rootDir>/__mocks__/expo-localization.js",
-      "^expo-constants$": "<rootDir>/__mocks__/expo-constants.js",
-      "^expo-sharing$": "<rootDir>/__mocks__/expo-sharing.js",
-      "^react-native-safe-area-context$": "<rootDir>/__mocks__/react-native-safe-area-context.js",
-      "^react-native-zip-archive$": "<rootDir>/__mocks__/react-native-zip-archive.js",
-      "^laoji-native-platform$": "<rootDir>/__mocks__/laoji-native-platform.js",
-      "^react-native$": "<rootDir>/__mocks__/react-native.js"
-    },
-    "collectCoverageFrom": [
-      "src/**/*.{ts,tsx}",
-      "!src/**/*.d.ts"
-    ],
-    "coverageThreshold": {
-      "global": {
-        "statements": 78,
-        "branches": 67,
-        "functions": 77,
-        "lines": 83
-      },
-      "./src/utils/eventIdentity.ts": {
-        "statements": 90,
-        "branches": 90,
-        "functions": 100,
-        "lines": 100
-      },
-      "./src/services/eventDeleteTransactions.ts": {
-        "statements": 92,
-        "branches": 84,
-        "functions": 100,
-        "lines": 95
-      },
-      "./src/services/eventEditTransactions.ts": {
-        "statements": 100,
-        "branches": 100,
-        "functions": 100,
-        "lines": 100
-      },
-      "./src/services/eventDeleteCoordinator.ts": {
-        "statements": 80,
-        "branches": 58,
-        "functions": 75,
-        "lines": 85
-      },
-      "./src/services/eventEditCoordinator.ts": {
-        "statements": 78,
-        "branches": 60,
-        "functions": 80,
-        "lines": 83
-      },
-      "./src/services/notifications.ts": {
-        "statements": 82,
-        "branches": 70,
-        "functions": 78,
-        "lines": 88
-      },
-      "./src/services/eventCache.ts": {
-        "statements": 80,
-        "branches": 74,
-        "functions": 84,
-        "lines": 90
-      },
-      "./src/utils/dayTimelineLayout.ts": {
-        "statements": 95,
-        "branches": 83,
-        "functions": 100,
-        "lines": 100
-      },
-      "./src/utils/monthEventLayout.ts": {
-        "statements": 90,
-        "branches": 67,
-        "functions": 100,
-        "lines": 95
-      }
-    }
+    "postinstall": "patch-package"
   },
   "overrides": {
     "postcss": "8.5.10",

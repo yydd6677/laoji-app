@@ -2,17 +2,20 @@ package com.laoji.nativeplatform.minutes
 
 // MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001: source-mapped native detail surface.
 
-import android.app.Dialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.viewpager2.widget.ViewPager2
 import com.laoji.nativeplatform.media.MinutesPlaybackState
@@ -49,7 +52,11 @@ internal class MinutesDetailSurface(
   internal val player: View = playerOwner.view
   internal val audioNotice: TextView = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
 
+  private val titleContainer = FrameLayout(context)
   private val title = context.textView(textSizeSp = 24, weight = Typeface.BOLD)
+  private val titleEditor = EditText(context)
+  private val subtitleRow = LinearLayout(context)
+  private val dateTimeIcon = ImageView(context)
   private val dateTime = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val pagerAdapter = MinutesDetailPagerAdapter(context, ::handleContentAction)
   private val tabBar = MinutesDetailTabBar(context, ::requestUserTab)
@@ -58,16 +65,15 @@ internal class MinutesDetailSurface(
   private var pendingTabCommand: TabCommand? = null
   private var localTabGeneration = 0
   private var renderedMeetingId = ""
-  private var titleDialog: Dialog? = null
-  private var titleDialogSaveAction: View? = null
+  private var editingTitle = false
   private var consumedTitleEditRequestId = 0
   private val persistRunnable = Runnable { persistViewState(synchronous = false) }
 
   internal val titleEditorShowing: Boolean
-    get() = titleDialog?.isShowing == true
+    get() = editingTitle
 
   internal val activeTitleDialogSaveAction: View?
-    get() = titleDialogSaveAction
+    get() = titleBar.activeDoneAction
 
   private data class TabCommand(
     val generation: Int,
@@ -94,11 +100,58 @@ internal class MinutesDetailSurface(
     title.isClickable = true
     title.isFocusable = true
     title.contentDescription = "编辑会议标题"
-    title.setOnClickListener { showTitleEditor() }
-    audioHeader.addView(title, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    audioHeader.addView(
+    title.setOnClickListener { beginTitleEdit() }
+    titleContainer.addView(
+      title,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    titleEditor.apply {
+      setTextSize(24f)
+      setTextColor(MinutesPalette.text)
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      background = null
+      setPadding(0, 0, 0, 0)
+      maxLines = 2
+      imeOptions = EditorInfo.IME_ACTION_SEND
+      visibility = View.GONE
+      setOnEditorActionListener { _, actionId, _ ->
+        if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
+          finishTitleEdit(save = true)
+          true
+        } else {
+          false
+        }
+      }
+      addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(value: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(value: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        override fun afterTextChanged(value: Editable?) {
+          if (editingTitle) {
+            titleBar.setEditDirty(value.toString().trim() != renderedState.title)
+          }
+        }
+      })
+    }
+    titleContainer.addView(
+      titleEditor,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    audioHeader.addView(titleContainer, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    subtitleRow.orientation = HORIZONTAL
+    subtitleRow.gravity = Gravity.CENTER_VERTICAL
+    dateTimeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline)
+    dateTimeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    dateTimeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    subtitleRow.addView(dateTimeIcon, LayoutParams(context.dp(12), context.dp(12)))
+    subtitleRow.addView(
       dateTime,
-      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(22)).apply {
+        leftMargin = context.dp(4)
+      },
+    )
+    audioHeader.addView(
+      subtitleRow,
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(22)).apply {
         topMargin = context.dp(MinutesDetailLayoutContract.SUBTITLE_TOP_MARGIN_DP)
       },
     )
@@ -169,21 +222,14 @@ internal class MinutesDetailSurface(
     }
     localTabGeneration = maxOf(localTabGeneration, acceptedGeneration)
     renderedState = state.selectTab(acceptedTab, acceptedGeneration)
-    if (titleDialog?.isShowing == true && (!state.available || meetingChanged)) titleDialog?.dismiss()
-    titleBar.configure(
-      title = "",
-      showBack = true,
-      showShare = renderedState.available && renderedState.canShare,
-      showMore = renderedState.available,
-      shareEnabled = renderedState.available && renderedState.canShare,
-      onAction = { onAction(mapOf("type" to it, "meetingId" to renderedState.meetingId)) },
-    )
-    title.text = renderedState.title
+    if (editingTitle && (!state.available || meetingChanged)) finishTitleEdit(save = false)
+    configureTitleBar()
+    if (!editingTitle) title.text = renderedState.title
     title.isClickable = renderedState.available
     title.isFocusable = renderedState.available
     title.contentDescription = if (renderedState.available) "编辑会议标题" else null
     dateTime.text = renderedState.dateTimeLabel
-    dateTime.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
+    subtitleRow.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
     renderAudioState(renderedState)
     pagerAdapter.render(renderedState)
     issueTabCommand(
@@ -200,7 +246,7 @@ internal class MinutesDetailSurface(
     }
     if (renderedState.available && renderedState.titleEditRequestId > consumedTitleEditRequestId) {
       consumedTitleEditRequestId = renderedState.titleEditRequestId
-      post { showTitleEditor() }
+      post { beginTitleEdit() }
     }
   }
 
@@ -305,6 +351,7 @@ internal class MinutesDetailSurface(
         transcript = requireNotNull(scroll[MinutesDetailTab.TRANSCRIPT]),
         summary = requireNotNull(scroll[MinutesDetailTab.SUMMARY]),
         speakers = requireNotNull(scroll[MinutesDetailTab.SPEAKERS]),
+        info = requireNotNull(scroll[MinutesDetailTab.INFO]),
       ),
       synchronous = synchronous,
     )
@@ -317,95 +364,59 @@ internal class MinutesDetailSurface(
     onAction(action + mapOf("meetingId" to renderedState.meetingId))
   }
 
-  private fun showTitleEditor() {
-    if (!renderedState.available || !isAttachedToWindow || renderedState.meetingId.isBlank() || titleDialog?.isShowing == true) return
-    val dialog = Dialog(context)
-    val dialogMeetingId = renderedState.meetingId
-    val panel = LinearLayout(context).apply {
-      orientation = VERTICAL
-      setPadding(context.dp(20), context.dp(18), context.dp(20), context.dp(12))
-      backgroundShape(MinutesPalette.surface, radiusDp = 6)
-    }
-    panel.addView(
-      context.textView("修改标题", 17, MinutesPalette.text, Typeface.BOLD).apply { gravity = Gravity.CENTER },
-      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(28)),
+  private fun configureTitleBar() {
+    titleBar.configure(
+      title = if (editingTitle) renderedState.title else "",
+      showBack = !editingTitle,
+      showShare = !editingTitle && renderedState.available && renderedState.canShare,
+      showMore = !editingTitle && renderedState.available,
+      shareEnabled = renderedState.available && renderedState.canShare,
+      showDone = editingTitle,
+      onAction = { action ->
+        if (action == "done") finishTitleEdit(save = true)
+        else onAction(mapOf("type" to action, "meetingId" to renderedState.meetingId))
+      },
     )
-    val input = EditText(context).apply {
-      setText(renderedState.title)
-      setSelection(text.length)
-      setTextSize(16f)
-      setTextColor(MinutesPalette.text)
-      setHintTextColor(MinutesPalette.faint)
-      hint = "输入会议标题"
-      maxLines = 2
-      backgroundShape(MinutesPalette.page, radiusDp = 6)
-      setPadding(context.dp(12), context.dp(8), context.dp(12), context.dp(8))
-    }
-    panel.addView(input, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(52)).apply { topMargin = context.dp(14) })
-    val error = context.textView(textSizeSp = 12, color = MinutesPalette.danger).apply {
-      gravity = Gravity.CENTER_VERTICAL
-      visibility = View.INVISIBLE
-    }
-    panel.addView(error, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(28)))
-    val actions = LinearLayout(context).apply { orientation = HORIZONTAL }
-    val cancel = context.textView("取消", 16, MinutesPalette.text).apply {
-      gravity = Gravity.CENTER
-      isClickable = true
-      isFocusable = true
-      setOnClickListener { dialog.dismiss() }
-    }
-    val save = context.textView("保存", 16, MinutesPalette.primary, Typeface.BOLD).apply {
-      gravity = Gravity.CENTER
-      isClickable = true
-      isFocusable = true
-      setOnClickListener {
-        if (!renderedState.available || renderedState.meetingId != dialogMeetingId) {
-          dialog.dismiss()
-          return@setOnClickListener
-        }
-        val value = input.text.toString().trim()
-        if (value.isBlank()) {
-          error.text = "标题不能为空"
-          error.visibility = View.VISIBLE
-          return@setOnClickListener
-        }
-        onAction(mapOf("type" to "saveTitle", "meetingId" to renderedState.meetingId, "title" to value))
-        dialog.dismiss()
-      }
-    }
-    titleDialogSaveAction = save
-    actions.addView(cancel, LayoutParams(0, context.dp(48), 1f))
-    actions.addView(save, LayoutParams(0, context.dp(48), 1f))
-    panel.addView(actions, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(48)))
+  }
 
-    dialog.setContentView(panel)
-    dialog.setCanceledOnTouchOutside(true)
-    dialog.setOnDismissListener {
-      titleDialog = null
-      titleDialogSaveAction = null
-    }
-    dialog.window?.apply {
-      setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
-      addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-      attributes = attributes.apply { dimAmount = 0.42f }
-      setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-    }
-    titleDialog = dialog
-    dialog.show()
-    val width = (context.resources.displayMetrics.widthPixels - context.dp(56)).coerceAtMost(context.dp(360))
-    dialog.window?.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
-    input.post {
-      input.requestFocus()
+  private fun beginTitleEdit() {
+    if (!renderedState.available || !isAttachedToWindow || renderedState.meetingId.isBlank() || editingTitle) return
+    editingTitle = true
+    titleEditor.setText(renderedState.title)
+    titleEditor.setSelection(titleEditor.text.length)
+    title.visibility = View.INVISIBLE
+    titleEditor.visibility = View.VISIBLE
+    configureTitleBar()
+    titleBar.setEditDirty(false)
+    titleEditor.post {
+      titleEditor.requestFocus()
       (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-        ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        ?.showSoftInput(titleEditor, InputMethodManager.SHOW_IMPLICIT)
     }
+  }
+
+  private fun finishTitleEdit(save: Boolean) {
+    if (!editingTitle) return
+    val value = titleEditor.text.toString().trim()
+    val shouldSave = save && value.isNotBlank() && value != renderedState.title && isAttachedToWindow
+    if (shouldSave) {
+      title.text = value
+      onAction(mapOf("type" to "saveTitle", "meetingId" to renderedState.meetingId, "title" to value))
+    } else {
+      title.text = renderedState.title
+    }
+    editingTitle = false
+    titleEditor.clearFocus()
+    titleEditor.visibility = View.GONE
+    title.visibility = View.VISIBLE
+    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+      ?.hideSoftInputFromWindow(windowToken, 0)
+    configureTitleBar()
   }
 
   override fun onDetachedFromWindow() {
     persistViewState(synchronous = true)
-    titleDialog?.dismiss()
-    titleDialog = null
-    titleDialogSaveAction = null
+    finishTitleEdit(save = false)
     super.onDetachedFromWindow()
   }
 

@@ -38,7 +38,7 @@ internal class MinutesRecordingTranscriptAdapter :
 
     init {
       root.orientation = LinearLayout.VERTICAL
-      root.setPadding(0, parent.context.dp(16), 0, parent.context.dp(12))
+      root.setPadding(0, parent.context.dp(32), 0, 0)
 
       metaRow.orientation = LinearLayout.HORIZONTAL
       metaRow.gravity = Gravity.CENTER_VERTICAL
@@ -69,14 +69,13 @@ internal class MinutesRecordingTranscriptAdapter :
       metaRow.addView(
         separator,
         LinearLayout.LayoutParams(parent.context.dp(3), parent.context.dp(3)).apply {
-          leftMargin = parent.context.dp(2)
+          leftMargin = parent.context.dp(12)
+          rightMargin = parent.context.dp(12)
         },
       )
       metaRow.addView(
         timestamp,
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, parent.context.dp(20)).apply {
-          leftMargin = parent.context.dp(8)
-        },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, parent.context.dp(20)),
       )
       root.addView(metaRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 

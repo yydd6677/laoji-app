@@ -45,6 +45,7 @@ import {
   type FinalizeMeetingRecordingResult,
 } from '../services/meetingRecording';
 import { buildRealtimeAsrUrl } from '../services/realtimeAsr';
+import { readableErrorMessage } from '../services/errors';
 import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
 import {
   buildNativeMinutesRecordingSnapshot,
@@ -70,7 +71,7 @@ interface ActiveNativeRecording {
 
 function defaultTitle(): string {
   const now = new Date();
-  return `会议 ${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return `新录音 ${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
 function formatMeetingStart(value: Date): string {
@@ -93,7 +94,7 @@ function statusLabel(phase: MinutesRecordingPhase): string {
   if (phase === 'recording') return '实时转写中';
   if (phase === 'paused') return '录音已暂停';
   if (phase === 'stopping') return '正在停止录音';
-  if (phase === 'saving') return '正在保存会议';
+  if (phase === 'saving') return '正在保存会议记录';
   if (phase === 'failed') return '录音需要重试';
   return '准备开始录音';
 }
@@ -112,6 +113,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     createMeeting,
     deleteMeeting,
     updateMeetingStatus,
+    updateMeetingTitle,
     getCachedTranscript,
     saveCachedTranscript,
     refreshMeetings,
@@ -126,6 +128,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const [phase, setPhase] = useState<MinutesRecordingPhase>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState('');
+  const [activeSessionId, setActiveSessionId] = useState('');
   const [transcript, setTranscript] = useState<NativeMinutesTranscriptLine[]>(
     () => existing ? getCachedTranscript(existing.id) : [],
   );
@@ -135,6 +138,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const currentSessionIdRef = useRef('');
   const activeMeetingIdRef = useRef(meetingId);
   const recorderSnapshotRef = useRef<NativeRecorderSnapshot | null>(null);
+  const recorderErrorVisibleRef = useRef(false);
   const transcriptRef = useRef<NativeMinutesTranscriptLine[]>(transcript);
   const nativeAudioBarsRef = useRef<number[]>([]);
   const titleRef = useRef(title);
@@ -166,7 +170,15 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     if (!mountedRef.current) return;
     setPhase(recordingPhase(snapshot.state));
     setElapsedMs(snapshot.durationMs);
-    if (snapshot.errorMessage) setError(snapshot.errorMessage);
+    if (snapshot.state === 'recording' || snapshot.state === 'paused') {
+      if (recorderErrorVisibleRef.current) {
+        recorderErrorVisibleRef.current = false;
+        setError('');
+      }
+    } else if (snapshot.state === 'failed' && snapshot.errorMessage) {
+      recorderErrorVisibleRef.current = true;
+      setError(readableErrorMessage(snapshot.errorMessage, '录音暂时不可用，请稍后重试。'));
+    }
   }, []);
 
   const checkpointTranscript = useCallback((next: NativeMinutesTranscriptLine[]) => {
@@ -179,8 +191,24 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     checkpointRef.current = { lineCount: finalLines.length, savedAtMs: now };
     void saveCachedTranscript(id, finalLines).catch(() => {
       if (checkpointRef.current.lineCount === finalLines.length) checkpointRef.current = previous;
-      if (mountedRef.current) setError('转写正在显示，但本机 checkpoint 暂时写入失败；结束时会再次保存');
+      if (mountedRef.current) setError('转写正在显示，但本机缓存暂时写入失败；结束时会再次保存');
     });
+  }, [saveCachedTranscript]);
+
+  const retryTranscriptCache = useCallback(async () => {
+    const id = activeMeetingIdRef.current;
+    if (!id) {
+      if (mountedRef.current) setError('当前会议记录尚未建立，请重新开始录音');
+      return;
+    }
+    const finalLines = finalizedNativeMinutesTranscript(transcriptRef.current);
+    try {
+      await saveCachedTranscript(id, finalLines);
+      checkpointRef.current = { lineCount: finalLines.length, savedAtMs: Date.now() };
+      if (mountedRef.current) setError('');
+    } catch {
+      if (mountedRef.current) setError('本机缓存仍未写入，请检查存储空间后重试');
+    }
   }, [saveCachedTranscript]);
 
   useEffect(() => {
@@ -197,7 +225,13 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }),
       addNativeRecorderErrorListener(event => {
         if (event.sessionId && event.sessionId !== currentSessionIdRef.current) return;
-        if (mountedRef.current) setError(event.errorMessage || '原生录音暂时不可用');
+        // Local audio remains valid while the realtime channel reconnects.
+        // Do not present a recoverable ASR event as a microphone failure.
+        if (event.recoverable) return;
+        if (mountedRef.current) {
+          recorderErrorVisibleRef.current = true;
+          setError(readableErrorMessage(event.errorMessage, '录音暂时不可用，请稍后重试'));
+        }
       }),
     ];
     return () => subscriptions.forEach(subscription => subscription.remove());
@@ -270,7 +304,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
             merged = mergePersistedMinutesTranscript(local, remote);
             if (remote.length > 0 && remote.length >= local.length) break;
           } catch {
-            if (mountedRef.current) setError('游客服务端字幕暂时不可用，已保留本机最终字幕');
+            if (mountedRef.current) setError('实时转写暂时不可用，已保留现有文字记录');
             break;
           }
         }
@@ -284,7 +318,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           if (remote.length > 0 && remote.length >= local.length) break;
         } catch {
           if (mountedRef.current) {
-            setError('录音已保存在本机，服务端字幕补齐暂时失败；详情页会继续同步');
+            setError('录音已保存，文字记录暂未补全；详情页会继续同步');
           }
           break;
         }
@@ -336,7 +370,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     let operation: Promise<boolean> | null = null;
     operation = active.finalize()
       .then(() => {
-        if (activeRef.current === active) activeRef.current = null;
+        if (activeRef.current === active) {
+          activeRef.current = null;
+          if (mountedRef.current) setActiveSessionId('');
+        }
         if (!mountedRef.current) return true;
         setPhase('saving');
         setError('');
@@ -348,7 +385,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       .catch(reason => {
         if (!mountedRef.current) return false;
         setPhase('failed');
-        const message = reason instanceof Error ? reason.message : '会议录音保存失败';
+        const message = readableErrorMessage(reason, '会议录音保存失败，请稍后重试。');
         setError(message);
         showDialog({ title: '保存失败', message, tone: 'error' });
         return false;
@@ -371,6 +408,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       setTranscript(getCachedTranscript(existing.id));
       applyRecorderSnapshot(current);
       activeRef.current = createActiveRecording(existing.id);
+      setActiveSessionId(existing.id);
       return true;
     }
 
@@ -406,11 +444,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     if (startInFlightRef.current || activeRef.current || finalizationRef.current) return;
     if (!hasNativeRecorder()) {
       setPhase('failed');
-      setError('当前安装包未包含原生录音模块，请安装完整 Android 版本');
+      setError('当前版本暂时无法录音，请安装最新完整版本');
       return;
     }
     startInFlightRef.current = true;
     setPhase('preparing');
+    recorderErrorVisibleRef.current = false;
     setError('');
     nativeAudioBarsRef.current = [];
     let createdForAttempt = false;
@@ -479,6 +518,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       });
       applyRecorderSnapshot(snapshot);
       activeRef.current = createActiveRecording(meeting.id, guestSession);
+      setActiveSessionId(meeting.id);
       setPhase('recording');
     } catch (reason) {
       if (guestSession) {
@@ -494,7 +534,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
       }
       if (mountedRef.current) {
-        const message = reason instanceof Error ? reason.message : '启动原生会议录音失败';
+        const message = readableErrorMessage(reason, '启动会议录音失败，请稍后重试。');
+        recorderErrorVisibleRef.current = true;
         setPhase('failed');
         setError(message);
         showDialog({ title: '启动失败', message, tone: 'error' });
@@ -520,7 +561,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         : await pauseNativeRecorder(active.sessionId);
       applyRecorderSnapshot(snapshot);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '录音状态切换失败，请重试');
+      setError(readableErrorMessage(reason, '录音状态切换失败，请重试。'));
     }
   }, [applyRecorderSnapshot, phase]);
 
@@ -535,15 +576,31 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     autoStartAttemptedRef.current = true;
     void (async () => {
       if (await restoreNativeSession()) return;
+      if (requestedMeetingId && existing) {
+        // A server/local row marked "recording" is not proof that Android still
+        // owns a live AudioRecord session. Opening such a row must never start
+        // the microphone implicitly. Reconcile the stale state and require an
+        // explicit tap before creating a new native recording session.
+        setElapsedMs(0);
+        if (existing.status === 'recording') {
+          setPhase('failed');
+          setError('上次录音会话已中断，点击下方按钮可重新开始');
+          await updateMeetingStatus(existing.id, 'failed').catch(() => {});
+        } else {
+          setPhase(existing.status === 'failed' ? 'failed' : 'idle');
+          setError(existing.status === 'failed' ? '上次录音未完成，点击下方按钮可重新开始' : '点击下方按钮开始录音');
+        }
+        return;
+      }
       await startRecording();
     })();
-  }, [existing, meetingsLoading, requestedMeetingId, restoreNativeSession, startRecording]);
+  }, [existing, meetingsLoading, requestedMeetingId, restoreNativeSession, startRecording, updateMeetingStatus]);
 
   const confirmStop = useCallback(() => {
     if (!activeRef.current) return;
     showDialog({
       title: '结束录音？',
-      message: '结束后将先落盘录音，再保存文字记录并安排后台同步。',
+      message: '结束后将先保存录音，再保存文字记录并安排后台同步。',
       tone: 'warning',
       actions: [
         { text: '结束录音', role: 'primary', onPress: async () => { await stopRecording(true); } },
@@ -558,9 +615,16 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         navigation.goBack();
         break;
       case 'startRecording':
+        void startRecording();
+        break;
       case 'retryRecording':
-        if (activeRef.current && phase === 'failed') void stopRecording(false);
-        else void startRecording();
+        if (activeRef.current && ['recording', 'paused'].includes(phase)) {
+          void retryTranscriptCache();
+        } else if (activeRef.current && phase === 'failed') {
+          void stopRecording(false);
+        } else {
+          void startRecording();
+        }
         break;
       case 'stopRecording':
         confirmStop();
@@ -571,12 +635,28 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       case 'setFollowLatest':
         setFollowingLatest(action.followLatest);
         break;
+      case 'saveTitle': {
+        const nextTitle = action.title.trim();
+        if (!nextTitle) break;
+        setTitle(nextTitle);
+        titleRef.current = nextTitle;
+        const id = action.meetingId || activeMeetingIdRef.current;
+        if (id) {
+          void updateMeetingTitle(id, nextTitle).catch(() => {
+            if (mountedRef.current) setError('会议标题暂时未能保存，请稍后重试');
+          });
+        }
+        break;
+      }
       default:
         break;
     }
-  }, [confirmStop, navigation, phase, startRecording, stopRecording, togglePause]);
+  }, [confirmStop, navigation, phase, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
 
-  const hasActive = Boolean(activeRef.current);
+  // Refs protect async recorder commands, but assigning a ref does not render
+  // the native snapshot. Keep a small reactive identity so pause/stop become
+  // enabled on the same frame that recording begins.
+  const hasActive = Boolean(activeSessionId);
   const requestedMeetingMissing = Boolean(requestedMeetingId && !meetingsLoading && !existing);
   const canPause = hasActive && ['recording', 'paused'].includes(phase);
   const canStop = hasActive && ['recording', 'paused', 'failed'].includes(phase);

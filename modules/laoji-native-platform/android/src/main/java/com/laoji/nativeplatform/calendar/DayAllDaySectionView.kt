@@ -8,29 +8,20 @@ import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
-import android.text.TextUtils
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 
 interface DayAllDaySectionListener {
   fun onAllDayEventOpened(event: CalendarEvent)
@@ -126,6 +117,7 @@ internal data class DayAllDaySectionState(
     copy(expanded = value && (expanded || overflow))
 }
 
+@FeishuEvidence("CAL-ALLDAY-001")
 class DayAllDaySectionView(context: Context) : FrameLayout(context) {
   companion object {
     private const val MAX_SCROLL_OFFSET_ENTRIES = 32
@@ -135,9 +127,6 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
   private val density = resources.displayMetrics.density
   private val touchRouter = AssociatedDayPagerTouchRouter(context)
   private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
-  private val expandHitSizePx =
-    CalendarUi.dp(context, DayAllDaySectionContract.EXPAND_HIT_SIZE_DP).roundToInt()
-  private val expandEndMarginPx = CalendarUi.dp(context, 4f).roundToInt()
   private val track = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
   private val trackViewport = FrameLayout(context).apply {
     clipChildren = true
@@ -162,33 +151,13 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
   private var heightAnimator: ValueAnimator? = null
   private var heightAnimationTargetPx: Int? = null
 
-  private val expandButton = ImageButton(context).apply {
-    id = View.generateViewId()
-    setImageDrawable(DayAllDayChevronDrawable(palette.textSecondary))
-    background = expandButtonBackground()
-    scaleType = ImageView.ScaleType.CENTER
-    minimumWidth = 0
-    minimumHeight = 0
-    setPadding(0, 0, 0, 0)
-    isClickable = true
-    isFocusable = true
-    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-    visibility = View.GONE
-    setOnClickListener { setExpanded(!isExpanded()) }
-  }
-
   init {
+    FeishuEvidenceRuntime.bind(this, "CAL-ALLDAY-001", "all-day-pager", "calendar-all-day-pager")
     clipChildren = true
     clipToPadding = true
     setBackgroundColor(palette.surfaceMuted)
     pages.forEach(track::addView)
     addView(trackViewport, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-    addView(
-      expandButton,
-      LayoutParams(expandHitSizePx, expandHitSizePx, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-        marginEnd = expandEndMarginPx
-      },
-    )
     updatePresentation()
   }
 
@@ -332,14 +301,6 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
 
   private fun updatePresentation() {
     val overflow = state.overflow
-    expandButton.visibility = if (overflow) View.VISIBLE else View.GONE
-    expandButton.rotation = if (state.expanded) 180f else 0f
-    expandButton.isSelected = state.expanded
-    expandButton.contentDescription = if (state.expanded) {
-      "收起全天日程，共${state.eventCount}项"
-    } else {
-      "展开全天日程，共${state.eventCount}项"
-    }
     pages.forEach { page -> page.setExpanded(state.expanded, overflow) }
   }
 
@@ -403,25 +364,188 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
     listener?.onAllDayExpandedChanged(state.expanded, state.overflow)
   }
 
-  private fun expandButtonBackground(): StateListDrawable = StateListDrawable().apply {
-    addState(
-      intArrayOf(android.R.attr.state_pressed),
-      CalendarUi.background(palette.accentSoft, 24f, context),
+}
+
+// CAL-ALLDAY-001: one native drawable owner renders the source-shaped all-day
+// instance list and the overflow instance; the pager/height owner stays above it.
+@FeishuEvidence("CAL-ALLDAY-001")
+internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
+  private val palette = CalendarUi.palette(context)
+  private val density = resources.displayMetrics.density
+  private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
+  private val horizontalGapPx = DayAllDaySectionContract.horizontalSpacePx(density)
+  private val textPaint = CalendarUi.textPaint(context, palette.eventText, 11f, true)
+  private val overflowTextPaint = CalendarUi.textPaint(context, palette.textSecondary, 11f, true)
+  private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
+  private val overflowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surface }
+  private val overflowStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.divider
+    style = Paint.Style.STROKE
+    strokeWidth = maxOf(1f, CalendarUi.dp(context, 0.5f))
+  }
+  private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.argb(26, Color.red(palette.eventPressedOverlay), Color.green(palette.eventPressedOverlay), Color.blue(palette.eventPressedOverlay))
+  }
+  private val chevronPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.textSecondary
+    style = Paint.Style.STROKE
+    strokeWidth = maxOf(1.5f, CalendarUi.dp(context, 1.5f))
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+  }
+  private val chevronPath = Path()
+  private var events: List<CalendarEvent> = emptyList()
+  private var overflowCount = 0
+  private var pressedRow = -1
+  private var boundEpochDay: Int? = null
+  private var onEventOpened: ((CalendarEvent) -> Unit)? = null
+  private var onExpandRequested: (() -> Unit)? = null
+
+  init {
+    setWillNotDraw(false)
+    isClickable = true
+    isFocusable = true
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+  }
+
+  fun bind(
+    epochDay: Int,
+    events: List<CalendarEvent>,
+    overflowCount: Int,
+    onEventOpened: ((CalendarEvent) -> Unit)?,
+    onExpandRequested: (() -> Unit)?,
+  ) {
+    this.boundEpochDay = epochDay
+    this.events = events
+    this.overflowCount = overflowCount.coerceAtLeast(0)
+    this.onEventOpened = onEventOpened
+    this.onExpandRequested = onExpandRequested
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-ALLDAY-001",
+      "all-day-instance-layer",
+      "calendar-all-day-instance-layer-$epochDay",
     )
-    addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+    contentDescription = buildString {
+      append("全天日程")
+      if (events.isNotEmpty()) append("，${events.size}项")
+      if (this@DayAllDayInstanceCanvasView.overflowCount > 0) append("，还有${this@DayAllDayInstanceCanvasView.overflowCount}项，点击展开")
+    }
+    pressedRow = -1
+    invalidate()
+  }
+
+  internal fun labelsForTest(): List<String> = buildList {
+    addAll(events.map { CalendarUi.listEventTitle(it.title) })
+    if (overflowCount > 0) add("还有 $overflowCount 项")
+  }
+
+  internal fun performOverflowClickForTest(): Boolean {
+    if (overflowCount <= 0) return false
+    onExpandRequested?.invoke()
+    return true
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    val rowWidth = (width - horizontalGapPx).coerceAtLeast(1).toFloat()
+    events.forEachIndexed { index, event ->
+      drawChip(canvas, index, rowWidth, CalendarUi.listEventTitle(event.title), eventPaint, textPaint, false)
+    }
+    if (overflowCount > 0) {
+      drawChip(
+        canvas,
+        events.size,
+        rowWidth,
+        "还有 $overflowCount 项",
+        overflowPaint,
+        overflowTextPaint,
+        true,
+      )
+    }
+  }
+
+  private fun drawChip(
+    canvas: Canvas,
+    row: Int,
+    rowWidth: Float,
+    label: String,
+    fill: Paint,
+    text: Paint,
+    overflow: Boolean,
+  ) {
+    val top = row * rowHeightPx.toFloat()
+    val rect = android.graphics.RectF(0f, top, rowWidth, top + rowHeightPx)
+    canvas.drawRoundRect(rect, CalendarUi.dp(context, 3f), CalendarUi.dp(context, 3f), fill)
+    if (overflow) canvas.drawRoundRect(rect, CalendarUi.dp(context, 3f), CalendarUi.dp(context, 3f), overflowStrokePaint)
+    if (pressedRow == row) canvas.drawRoundRect(rect, CalendarUi.dp(context, 3f), CalendarUi.dp(context, 3f), pressedPaint)
+    val textLeft = CalendarUi.dp(context, 9f)
+    val available = (rowWidth - textLeft - CalendarUi.dp(context, 26f)).coerceAtLeast(1f)
+    val clipped = CalendarUi.ellipsize(label, text, available)
+    val metrics = text.fontMetrics
+    val baseline = top + rowHeightPx / 2f - (metrics.ascent + metrics.descent) / 2f
+    canvas.drawText(clipped, textLeft, baseline, text)
+    if (overflow) {
+      val centerX = rowWidth - CalendarUi.dp(context, 13f)
+      val centerY = top + rowHeightPx / 2f
+      chevronPath.reset()
+      chevronPath.moveTo(centerX - CalendarUi.dp(context, 3f), centerY - CalendarUi.dp(context, 2f))
+      chevronPath.lineTo(centerX, centerY + CalendarUi.dp(context, 2f))
+      chevronPath.lineTo(centerX + CalendarUi.dp(context, 3f), centerY - CalendarUi.dp(context, 2f))
+      canvas.drawPath(chevronPath, chevronPaint)
+    }
+  }
+
+  override fun onTouchEvent(event: MotionEvent): Boolean {
+    val row = (event.y / rowHeightPx.coerceAtLeast(1)).toInt()
+    val rowCount = events.size + if (overflowCount > 0) 1 else 0
+    if (row !in 0 until rowCount) {
+      if (event.actionMasked != MotionEvent.ACTION_DOWN) pressedRow = -1
+      invalidate()
+      return false
+    }
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        pressedRow = row
+        invalidate()
+        return true
+      }
+      MotionEvent.ACTION_MOVE -> {
+        if (pressedRow != row) pressedRow = -1
+        invalidate()
+        return true
+      }
+      MotionEvent.ACTION_UP -> {
+        val clicked = pressedRow == row
+        pressedRow = -1
+        invalidate()
+        if (!clicked) return true
+        if (row == events.size && overflowCount > 0) onExpandRequested?.invoke()
+        else events.getOrNull(row)?.let { onEventOpened?.invoke(it) }
+        performClick()
+        return true
+      }
+      MotionEvent.ACTION_CANCEL -> {
+        pressedRow = -1
+        invalidate()
+        return true
+      }
+    }
+    return true
+  }
+
+  override fun performClick(): Boolean {
+    super.performClick()
+    return true
   }
 }
 
+@FeishuEvidence("CAL-ALLDAY-001")
 internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val density = resources.displayMetrics.density
   private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
   private val rowHorizontalSpacePx = DayAllDaySectionContract.horizontalSpacePx(density)
-  private val rowHorizontalPaddingPx = CalendarUi.dp(context, 8f).roundToInt()
-  private val expandSpacePx = CalendarUi.dp(
-    context,
-    DayAllDaySectionContract.EXPAND_HIT_SIZE_DP + 4f,
-  ).roundToInt()
   private val contentColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
   private val scrollView = DayAllDayScrollView(context).apply {
     isFillViewport = false
@@ -433,6 +557,7 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
   private var events: List<CalendarEvent> = emptyList()
   private var expanded = false
   private var reserveExpandSpace = false
+  private var instanceCanvas: DayAllDayInstanceCanvasView? = null
   private var bindGeneration = 0L
   internal var boundEpochDay: Int? = null
     private set
@@ -461,6 +586,18 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
     val restoreToken = ++bindGeneration
     boundEpochDay = epochDay
     boundGeneration = generation
+    FeishuEvidenceRuntime.bind(
+      this,
+      "CAL-ALLDAY-001",
+      "all-day-page",
+      "calendar-all-day-page-$epochDay",
+    )
+    FeishuEvidenceRuntime.bind(
+      scrollView,
+      "CAL-ALLDAY-001",
+      "all-day-scroll",
+      "calendar-all-day-scroll-$epochDay",
+    )
     this.events = events
     this.expanded = expanded
     this.reserveExpandSpace = reserveExpandSpace
@@ -483,15 +620,43 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
 
   fun scrollToTop() = scrollView.scrollTo(0, 0)
 
+  internal fun visibleLabelsForTest(): List<String> = instanceCanvas?.labelsForTest().orEmpty()
+
+  internal fun performOverflowClickForTest(): Boolean = instanceCanvas?.performOverflowClickForTest() == true
+
   private fun render() {
-    contentColumn.removeAllViews()
     val collapsedContent = DayAllDaySectionContract.collapsedContent(events.size)
     val visibleEvents = if (expanded) events else events.take(collapsedContent.visibleEventCount)
-    visibleEvents.forEach { event -> contentColumn.addView(createEventRow(event), rowLayoutParams()) }
-    if (!expanded && collapsedContent.hasMoreRow) {
-      contentColumn.addView(createMoreRow(collapsedContent.remainingCount), rowLayoutParams())
+    val remainingCount = if (!expanded && collapsedContent.hasMoreRow) collapsedContent.remainingCount else 0
+    val rows = visibleEvents.size + if (remainingCount > 0) 1 else 0
+    // Feishu's AllDayInstanceLayout keeps its PositionedViewLayout owners alive
+    // while only rebinding the drawable list. Reusing this Canvas preserves the
+    // pressed layer and accessibility owner across the 100ms height transition.
+    val canvas = instanceCanvas ?: DayAllDayInstanceCanvasView(context).also { created ->
+      instanceCanvas = created
+      contentColumn.addView(
+        created,
+        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0).apply {
+          marginEnd = rowHorizontalSpacePx
+        },
+      )
     }
-    contentColumn.setPadding(0, 0, if (reserveExpandSpace) expandSpacePx else 0, 0)
+    canvas.bind(
+      epochDay = boundEpochDay ?: 0,
+      events = visibleEvents,
+      overflowCount = remainingCount,
+      onEventOpened = this@DayAllDayPageView.onEventOpened,
+      onExpandRequested = this@DayAllDayPageView.onExpandRequested,
+    )
+    (canvas.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
+      val nextHeight = rows * rowHeightPx
+      if (params.height != nextHeight || params.marginEnd != rowHorizontalSpacePx) {
+        params.height = nextHeight
+        params.marginEnd = rowHorizontalSpacePx
+        canvas.layoutParams = params
+      }
+    }
+    contentColumn.setPadding(0, 0, 0, 0)
     val scrollable = expanded && DayAllDaySectionContract.isExpandedScrollable(events.size, rowHeightPx)
     scrollView.userScrollingEnabled = scrollable
     scrollView.isVerticalScrollBarEnabled = scrollable
@@ -503,74 +668,12 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
     if (!scrollable) scrollView.scrollTo(0, 0)
   }
 
-  private fun createEventRow(event: CalendarEvent): TextView {
-    val label = event.title.ifBlank { "日程" }
-    return TextView(context).apply {
-      id = View.generateViewId()
-      text = label
-      contentDescription = "全天日程：$label"
-      setTextColor(palette.eventText)
-      textSize = 11f
-      setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-      gravity = Gravity.CENTER_VERTICAL
-      includeFontPadding = false
-      maxLines = 1
-      ellipsize = TextUtils.TruncateAt.END
-      setPadding(rowHorizontalPaddingPx, 0, rowHorizontalPaddingPx, 0)
-      background = eventRowBackground()
-      isClickable = true
-      isFocusable = true
-      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-      setOnClickListener { onEventOpened?.invoke(event) }
-    }
-  }
-
-  private fun createMoreRow(remainingCount: Int): TextView = TextView(context).apply {
-    id = View.generateViewId()
-    text = "还有 $remainingCount 项"
-    contentDescription = "还有 $remainingCount 项全天日程，点击展开"
-    setTextColor(palette.textSecondary)
-    textSize = 11f
-    setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-    gravity = Gravity.CENTER_VERTICAL
-    includeFontPadding = false
-    maxLines = 1
-    ellipsize = TextUtils.TruncateAt.END
-    setPadding(rowHorizontalPaddingPx, 0, rowHorizontalPaddingPx, 0)
-    background = moreRowBackground()
-    isClickable = true
-    isFocusable = true
-    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-    setOnClickListener { onExpandRequested?.invoke() }
-  }
-
-  private fun rowLayoutParams(): LinearLayout.LayoutParams =
-    LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, rowHeightPx).apply {
-      marginEnd = rowHorizontalSpacePx
-    }
-
   private fun maxScrollY(): Int = (contentColumn.measuredHeight - scrollView.height).coerceAtLeast(0)
 
-  private fun eventRowBackground(): StateListDrawable = StateListDrawable().apply {
-    addState(
-      intArrayOf(android.R.attr.state_pressed),
-      CalendarUi.background(palette.accent, 3f, context),
-    )
-    addState(intArrayOf(), CalendarUi.background(palette.eventFill, 3f, context))
-  }
-
-  private fun moreRowBackground(): StateListDrawable = StateListDrawable().apply {
-    addState(
-      intArrayOf(android.R.attr.state_pressed),
-      CalendarUi.background(palette.accentSoft, 3f, context),
-    )
-    addState(
-      intArrayOf(),
-      CalendarUi.background(palette.surface, 3f, context, palette.divider),
-    )
-  }
+  internal fun instanceLayerForTest(): DayAllDayInstanceCanvasView? = instanceCanvas
 }
 
+@FeishuEvidence("CAL-ALLDAY-001")
 internal class DayAllDayScrollView(context: Context) : ScrollView(context) {
   var userScrollingEnabled = false
 
@@ -593,39 +696,4 @@ internal class DayAllDayScrollView(context: Context) : ScrollView(context) {
     }
     return super.performAccessibilityAction(action, arguments)
   }
-}
-
-private class DayAllDayChevronDrawable(color: Int) : Drawable() {
-  private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    this.color = color
-    style = Paint.Style.STROKE
-    strokeCap = Paint.Cap.ROUND
-    strokeJoin = Paint.Join.ROUND
-  }
-  private val path = Path()
-
-  override fun draw(canvas: Canvas) {
-    val centerX = bounds.exactCenterX()
-    val centerY = bounds.exactCenterY()
-    val size = min(bounds.width(), bounds.height()).toFloat()
-    val halfWidth = size * 0.18f
-    val halfHeight = size * 0.1f
-    paint.strokeWidth = maxOf(2f, size * 0.07f)
-    path.reset()
-    path.moveTo(centerX - halfWidth, centerY - halfHeight)
-    path.lineTo(centerX, centerY + halfHeight)
-    path.lineTo(centerX + halfWidth, centerY - halfHeight)
-    canvas.drawPath(path, paint)
-  }
-
-  override fun setAlpha(alpha: Int) {
-    paint.alpha = alpha
-  }
-
-  override fun setColorFilter(colorFilter: ColorFilter?) {
-    paint.colorFilter = colorFilter
-  }
-
-  @Deprecated("Deprecated in Java")
-  override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }

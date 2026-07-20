@@ -40,6 +40,7 @@ import {
 } from '../utils/meetingMedia';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
+import { readableErrorMessage } from '../services/errors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -439,7 +440,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           });
         },
         onError: err => {
-          if (mountedRef.current) setError(err.message || '实时转写异常');
+          if (mountedRef.current) setError(readableErrorMessage(err, '实时转写暂时不可用'));
         },
       });
       const active: ActiveRecording = {
@@ -482,7 +483,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
       if (mountedRef.current) {
         setStatus('failed');
-        const message = err instanceof Error ? err.message : '启动会议录音失败';
+        const message = readableErrorMessage(err, '启动会议录音失败，请稍后重试');
         setError(message);
         showDialog({ title: '启动失败', message, tone: 'error' });
       }
@@ -521,7 +522,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
     } catch (reason) {
       const fallback = isPaused ? '继续录音失败，请重试。' : '暂停录音失败，请重试。';
-      setError(reason instanceof Error && reason.message ? reason.message : fallback);
+      setError(readableErrorMessage(reason, fallback));
     } finally {
       if (mountedRef.current) setPauseTransitioning(false);
     }

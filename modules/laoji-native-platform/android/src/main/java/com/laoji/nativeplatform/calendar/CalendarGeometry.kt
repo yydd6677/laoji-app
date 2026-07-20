@@ -1,6 +1,7 @@
 package com.laoji.nativeplatform.calendar
 
-// CAL-SPAN-001: Month spans and timed overlaps use deterministic, JVM-testable lane allocation.
+// CAL-DAY-COMPOSE-001: Month spans and timed overlaps use deterministic, JVM-testable
+// fallback allocation while the production layout remains an explicit InstanceLayout input.
 
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -34,6 +35,8 @@ data class DayEventSegment(
   val endMinute: Int,
   val column: Int,
   val columnCount: Int,
+  val columnSpan: Int = 1,
+  val instanceLayout: CalendarInstanceLayout? = null,
   val startsBeforeDay: Boolean,
   val continuesAfterDay: Boolean
 )
@@ -63,6 +66,9 @@ object CalendarGeometry {
     else -> 30
   }
 
+  // CAL-MONTH-SPAN-001: C155132d clips each instance to its seven-day matrix,
+  // takes the first free row at the start column, and occupies that row for the
+  // complete clipped width before the Canvas formula maps column/width to one rect.
   fun monthSegments(
     events: List<CalendarEvent>,
     gridStartEpochDay: Int,
@@ -129,6 +135,7 @@ object CalendarGeometry {
           endMinute = end,
           column = -1,
           columnCount = 1,
+          instanceLayout = event.instanceLayout,
           startsBeforeDay = event.startEpochDay < epochDay,
           continuesAfterDay = event.coveredEndEpochDayExclusive() > epochDay + 1
         )
@@ -160,7 +167,23 @@ object CalendarGeometry {
         segment.copy(column = lane)
       }
       val count = laneEnds.size.coerceAtLeast(1)
-      output += assigned.map { it.copy(columnCount = count) }
+      // The Rust layout returns an independent rectangle for every instance.
+      // A later event may use columns freed by an earlier one, so a single
+      // cluster-wide width would leave visible empty space at the tail.
+      output += assigned.map { segment ->
+        val span = (segment.column until count)
+          .takeWhile { lane ->
+            assigned.none { other ->
+              other.column == lane &&
+                other.event.identity != segment.event.identity &&
+                other.startMinute < segment.endMinute &&
+                other.endMinute > segment.startMinute
+            }
+          }
+          .count()
+          .coerceAtLeast(1)
+        segment.copy(columnCount = count, columnSpan = span)
+      }
       cluster = mutableListOf()
       clusterEnd = -1
     }

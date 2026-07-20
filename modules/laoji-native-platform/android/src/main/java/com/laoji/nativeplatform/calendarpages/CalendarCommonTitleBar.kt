@@ -8,6 +8,8 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.os.SystemClock
 import android.text.TextUtils
 import android.util.TypedValue
@@ -275,6 +277,8 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     leftAction.isClickable = false
     leftAction.isFocusable = false
     leftAction.contentDescription = null
+    leftAction.background = null
+    leftAction.minimumHeight = 0
     rightActions.removeAllViews()
     nextActionIndex = 0
     requestLayout()
@@ -288,12 +292,33 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   ) {
     configureActionText(leftAction, label, color)
     leftAction.setCompoundDrawables(null, null, null, null)
-    leftAction.setPadding(
-      context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP),
-      0,
-      context.dp(CalendarCommonTitleBarContract.LEFT_TEXT_END_PADDING_DP),
-      0,
-    )
+    if (label == "取消") {
+      // The source app uses a text-only cancel action, but LaoJi's edit page
+      // deliberately makes this destructive-to-navigation escape hatch read as
+      // a control. Keep the pill inside the 44dp title bar so it does not alter
+      // title alignment or the save action's geometry.
+      val pill = GradientDrawable().apply {
+        setColor(Color.rgb(242, 243, 245))
+        cornerRadius = context.dp(18f).toFloat()
+      }
+      val outerInset = context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP)
+      leftAction.background = InsetDrawable(pill, outerInset, context.dp(5f), 0, context.dp(5f))
+      leftAction.minimumHeight = context.dp(34f)
+      // The action view still owns the edge-to-edge 44dp hit region, while the
+      // visible capsule begins at the same 15dp margin as every other leading
+      // title-bar action. Without this inset the rounded shape is visibly cut
+      // off by the left edge of the screen.
+      leftAction.setPadding(outerInset + context.dp(10f), 0, context.dp(10f), 0)
+    } else {
+      leftAction.background = null
+      leftAction.minimumHeight = 0
+      leftAction.setPadding(
+        context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP),
+        0,
+        context.dp(CalendarCommonTitleBarContract.LEFT_TEXT_END_PADDING_DP),
+        0,
+      )
+    }
     bindClick(leftAction, label, debounce, onClick)
     leftAction.visibility = VISIBLE
     requestLayout()

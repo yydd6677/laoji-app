@@ -357,23 +357,31 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           : await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
         if (mountedRef.current) {
           setPendingAudioUpload(stillPending);
-          setPendingAudioError(stillPending?.failureMessage ?? '');
+          setPendingAudioError(stillPending?.failureMessage
+            ? readableErrorMessage(stillPending.failureMessage, '自动同步未完成，录音仍保存在本机')
+            : '');
         }
         if (uploaded) await refreshMeetings();
         if (notifyUser && mountedRef.current) {
           showDialog(uploaded
             ? { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' }
-            : { title: '正在后台同步', message: '录音上传任务已由 Android 后台队列接管。', tone: 'info' });
+            : { title: '正在后台同步', message: '录音将在后台继续上传。', tone: 'info' });
         }
       } catch {
         const latest = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId).catch(() => null);
         if (mountedRef.current) {
           setPendingAudioUpload(latest);
-          setPendingAudioError(latest?.failureMessage ?? '自动同步未完成，录音仍保存在本机');
+          setPendingAudioError(readableErrorMessage(
+            latest?.failureMessage,
+            '自动同步未完成，录音仍保存在本机',
+          ));
           if (notifyUser) {
             showDialog({
               title: latest?.uploadState === 'blocked' ? '录音上传受阻' : '上传失败',
-              message: latest?.failureMessage ?? '录音仍保存在本机，可稍后再次重试。',
+              message: readableErrorMessage(
+                latest?.failureMessage,
+                '录音仍保存在本机，可稍后再次重试。',
+              ),
               tone: 'error',
             });
           }
@@ -398,7 +406,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     void getPendingMeetingAudioUpload(recordingStorageScope, meeting.id).then(pending => {
       if (!alive) return;
       setPendingAudioUpload(pending);
-      setPendingAudioError(pending?.failureMessage ?? '');
+      setPendingAudioError(pending?.failureMessage
+        ? readableErrorMessage(pending.failureMessage, '自动同步未完成，录音仍保存在本机')
+        : '');
       if (!pending || !accessToken) return;
       const key = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
       if (automaticAudioUploadKeyRef.current === key) return;
@@ -641,7 +651,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             } catch (reason) {
               if (reason instanceof MeetingDeletionCleanupError) {
                 openMeetingsTab(navigation);
-                showDialog({ title: '会议已删除，清理未完成', message: reason.message, tone: 'warning' });
+                showDialog({
+                  title: '会议已删除，清理未完成',
+                  message: readableErrorMessage(reason, '会议已删除，但本机清理尚未完成。'),
+                  tone: 'warning',
+                });
               } else {
                 showDialog({
                   title: '删除失败',
@@ -710,7 +724,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (action.meetingId !== route.params.meetingId) break;
         void runSummaryTask({ forceRegenerate: Boolean(summary) });
         break;
-      case 'requestSpeakerAction':
       case 'manageSpeaker':
         manageSpeaker(action.speakerId);
         break;
@@ -756,10 +769,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ...(!isGuest && accessToken
         ? [{ key: 'speakers', label: '管理讲话人', onPress: () => manageSpeaker() }]
         : []),
-      { key: 'bundle', label: '分享完整资料包', onPress: () => { void runShare('bundle'); } },
-      ...(meeting.audioAvailable || meeting.audioLocalUri
-        ? [{ key: 'audio', label: '分享录音文件', onPress: () => { void runShare('audio'); } }]
-        : []),
       ...(pendingAudioUpload
         ? [{
             key: 'retry-upload',
@@ -770,7 +779,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, runShare]);
+  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">

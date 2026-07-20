@@ -9,7 +9,7 @@ internal object MinutesDetailLayoutContract {
   const val HEADER_TOP_PADDING_DP = 20
   const val HEADER_BOTTOM_PADDING_DP = 16
   const val SUBTITLE_TOP_MARGIN_DP = 6
-  const val PAGE_COUNT = 3
+  const val PAGE_COUNT = 4
 
   data class PreScrollResult(
     val collapseOffsetPx: Int,

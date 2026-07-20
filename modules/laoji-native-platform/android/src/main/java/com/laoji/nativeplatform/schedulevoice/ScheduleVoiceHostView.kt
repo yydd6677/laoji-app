@@ -4,23 +4,29 @@ package com.laoji.nativeplatform.schedulevoice
 
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.SystemClock
 import android.text.Editable
+import android.text.TextUtils
 import android.text.TextWatcher
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -29,24 +35,97 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.laoji.nativeplatform.ui.NativeUiPalette
+import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.ui.NativeUserMessages
+import com.laoji.nativeplatform.ui.currentNavigationBarInsetBottom
 import com.laoji.nativeplatform.ui.requestInsetsWhenAttached
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 private object VoiceUi {
-  const val ACCENT = 0xff1456f0.toInt()
-  const val TEXT = 0xff1f2329.toInt()
-  const val SECONDARY = 0xff646a73.toInt()
-  const val BORDER = 0xffdee0e3.toInt()
-  const val MUTED = 0xfff5f6f7.toInt()
-  const val ERROR = 0xfff54a45.toInt()
-  fun dp(context: Context, value: Float): Int = (value * context.resources.displayMetrics.density + 0.5f).toInt()
+  fun dp(context: Context, value: Float): Int = (NativeUiTokens.dp(context, value) + 0.5f).toInt()
+
+  // [PRODUCT] The recording feedback radius is 1.4x the original treatment.
+  // Keep both geometry and density integral: 2 rings * 1.4 rounds to 3 rings,
+  // while 43dp + 17dp preserves the requested 60dp outer radius.
+  const val PULSE_RING_COUNT = 3
+  const val PULSE_START_RADIUS_DP = 43f
+  const val PULSE_TRAVEL_RADIUS_DP = 17f
+}
+
+private enum class VoiceButtonStyle { PRIMARY, SECONDARY, TEXT }
+
+private class VoiceButton(context: Context) : TextView(context) {
+  override fun getAccessibilityClassName(): CharSequence = "android.widget.Button"
+}
+
+private fun voiceButtonBackground(
+  context: Context,
+  palette: NativeUiPalette,
+  style: VoiceButtonStyle,
+): StateListDrawable {
+  fun shape(color: Int, stroke: Int? = null) = GradientDrawable().apply {
+    shape = GradientDrawable.RECTANGLE
+    setColor(color)
+    cornerRadius = NativeUiTokens.dp(context, 6f)
+    stroke?.let { setStroke(VoiceUi.dp(context, 1f).coerceAtLeast(1), it) }
+  }
+  return StateListDrawable().apply {
+    when (style) {
+      VoiceButtonStyle.PRIMARY -> {
+        addState(intArrayOf(-android.R.attr.state_enabled), shape(palette.textDisabled))
+        addState(intArrayOf(android.R.attr.state_pressed), shape(palette.primaryPressed))
+        addState(intArrayOf(), shape(palette.primary))
+      }
+      VoiceButtonStyle.SECONDARY -> {
+        addState(intArrayOf(-android.R.attr.state_enabled), shape(palette.surface, palette.divider))
+        addState(intArrayOf(android.R.attr.state_pressed), shape(palette.surfaceOverlay, palette.divider))
+        addState(intArrayOf(), shape(palette.surface, palette.divider))
+      }
+      VoiceButtonStyle.TEXT -> {
+        addState(intArrayOf(-android.R.attr.state_enabled), shape(Color.TRANSPARENT))
+        addState(intArrayOf(android.R.attr.state_pressed), shape(palette.primarySoft))
+        addState(intArrayOf(), shape(Color.TRANSPARENT))
+      }
+    }
+  }
+}
+
+private fun VoiceButton.applyFeishuStyle(palette: NativeUiPalette, style: VoiceButtonStyle) {
+  gravity = Gravity.CENTER
+  includeFontPadding = false
+  isClickable = true
+  isFocusable = true
+  setTextSize(TypedValue.COMPLEX_UNIT_SP, if (style == VoiceButtonStyle.TEXT) 16f else 17f)
+  typeface = android.graphics.Typeface.DEFAULT
+  val horizontalPadding = VoiceUi.dp(context, if (style == VoiceButtonStyle.TEXT) 16f else 28f)
+  setPadding(horizontalPadding, 0, horizontalPadding, 0)
+  background = voiceButtonBackground(context, palette, style)
+  setTextColor(
+    when (style) {
+      VoiceButtonStyle.PRIMARY -> ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(palette.surface, palette.surface),
+      )
+      VoiceButtonStyle.SECONDARY -> ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(palette.textDisabled, palette.textPrimary),
+      )
+      VoiceButtonStyle.TEXT -> ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(palette.textDisabled, palette.primary),
+      )
+    },
+  )
 }
 
 private class VoiceIconView(context: Context, private val kind: String) : View(context) {
+  private val palette = NativeUiTokens.palette(context)
+  private val background = Paint(Paint.ANTI_ALIAS_FLAG)
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = VoiceUi.TEXT
+    color = palette.textPrimary
     style = Paint.Style.STROKE
     strokeWidth = VoiceUi.dp(context, 2f).toFloat()
     strokeCap = Paint.Cap.ROUND
@@ -60,19 +139,50 @@ private class VoiceIconView(context: Context, private val kind: String) : View(c
   override fun onDraw(canvas: Canvas) {
     val cx = width / 2f
     val cy = height / 2f
+    background.color = when {
+      !isEnabled -> palette.surfaceOverlay
+      isPressed -> palette.primarySoft
+      else -> Color.TRANSPARENT
+    }
+    canvas.drawRoundRect(
+      RectF(
+        cx - VoiceUi.dp(context, 18f),
+        cy - VoiceUi.dp(context, 18f),
+        cx + VoiceUi.dp(context, 18f),
+        cy + VoiceUi.dp(context, 18f),
+      ),
+      VoiceUi.dp(context, 6f).toFloat(),
+      VoiceUi.dp(context, 6f).toFloat(),
+      background,
+    )
+    paint.color = if (isEnabled) palette.textPrimary else palette.textDisabled
     if (kind == "close") {
       val inset = VoiceUi.dp(context, 7f).toFloat()
       canvas.drawLine(cx - inset, cy - inset, cx + inset, cy + inset, paint)
       canvas.drawLine(cx + inset, cy - inset, cx - inset, cy + inset, paint)
     }
   }
+
+  override fun drawableStateChanged() {
+    super.drawableStateChanged()
+    invalidate()
+  }
 }
 
 private class VoiceMicView(context: Context) : View(context) {
+  private val palette = NativeUiTokens.palette(context)
+  private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    style = Paint.Style.STROKE
+    strokeWidth = VoiceUi.dp(context, 1.5f).toFloat()
+  }
+  private var pulseProgress = 0f
+  private var pulseAnimator: ValueAnimator? = null
   var recording: Boolean = false
     set(value) {
+      if (field == value) return
       field = value
       contentDescription = if (value) "停止语音输入" else "开始语音输入"
+      if (value) startPulse() else stopPulse()
       invalidate()
     }
   private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -92,8 +202,28 @@ private class VoiceMicView(context: Context) : View(context) {
   override fun onDraw(canvas: Canvas) {
     val cx = width / 2f
     val cy = height / 2f
-    fill.color = if (recording) VoiceUi.ERROR else VoiceUi.ACCENT
-    canvas.drawCircle(cx, cy, VoiceUi.dp(context, 32f).toFloat(), fill)
+    if (recording) {
+      repeat(VoiceUi.PULSE_RING_COUNT) { index ->
+        drawPulseRing(
+          canvas,
+          cx,
+          cy,
+          (pulseProgress + index.toFloat() / VoiceUi.PULSE_RING_COUNT) % 1f,
+        )
+      }
+    }
+    fill.color = when {
+      !isEnabled -> palette.surfaceOverlay
+      recording -> palette.danger
+      isPressed -> palette.primary
+      else -> palette.primarySoft
+    }
+    canvas.drawCircle(cx, cy, VoiceUi.dp(context, 24f).toFloat(), fill)
+    icon.color = when {
+      !isEnabled -> palette.textDisabled
+      recording || isPressed -> Color.WHITE
+      else -> palette.primary
+    }
     val mic = RectF(
       cx - VoiceUi.dp(context, 6f),
       cy - VoiceUi.dp(context, 13f),
@@ -111,6 +241,45 @@ private class VoiceMicView(context: Context) : View(context) {
     canvas.drawLine(cx, cy + VoiceUi.dp(context, 13f), cx, cy + VoiceUi.dp(context, 19f), icon)
     canvas.drawLine(cx - VoiceUi.dp(context, 7f), cy + VoiceUi.dp(context, 19f), cx + VoiceUi.dp(context, 7f), cy + VoiceUi.dp(context, 19f), icon)
   }
+
+  private fun drawPulseRing(canvas: Canvas, cx: Float, cy: Float, progress: Float) {
+    ring.color = palette.danger
+    ring.alpha = ((1f - progress) * 170f).toInt().coerceIn(0, 170)
+    canvas.drawCircle(
+      cx,
+      cy,
+      VoiceUi.dp(
+        context,
+        VoiceUi.PULSE_START_RADIUS_DP + (VoiceUi.PULSE_TRAVEL_RADIUS_DP * progress),
+      ).toFloat(),
+      ring,
+    )
+  }
+
+  private fun startPulse() {
+    pulseAnimator?.cancel()
+    pulseAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+      duration = 960L
+      repeatCount = ValueAnimator.INFINITE
+      interpolator = LinearInterpolator()
+      addUpdateListener {
+        pulseProgress = it.animatedValue as Float
+        invalidate()
+      }
+      start()
+    }
+  }
+
+  private fun stopPulse() {
+    pulseAnimator?.cancel()
+    pulseAnimator = null
+    pulseProgress = 0f
+  }
+
+  override fun onDetachedFromWindow() {
+    stopPulse()
+    super.onDetachedFromWindow()
+  }
 }
 
 @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
@@ -120,12 +289,13 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
   private var bridgeEventsEnabled = true
   private var actionListener: ((Map<String, Any>) -> Unit)? = null
 
+  private val palette = NativeUiTokens.palette(context)
   private val overlayRoot = FrameLayout(context)
-  private val backdrop = View(context).apply { setBackgroundColor(0x66000000) }
+  private val backdrop = View(context).apply { setBackgroundColor(palette.mask) }
   private val sheet = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     background = GradientDrawable().apply {
-      setColor(Color.WHITE)
+      setColor(palette.surface)
       cornerRadii = floatArrayOf(
         VoiceUi.dp(context, 12f).toFloat(), VoiceUi.dp(context, 12f).toFloat(),
         VoiceUi.dp(context, 12f).toFloat(), VoiceUi.dp(context, 12f).toFloat(),
@@ -136,20 +306,19 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
   }
   private val title = TextView(context)
   private val close = VoiceIconView(context, "close")
+  private val parseAction = VoiceButton(context)
   private val inputPanel = LinearLayout(context)
   private val input = EditText(context)
-  private val error = TextView(context)
-  private val status = TextView(context)
+  private val feedback = TextView(context)
   private val mic = VoiceMicView(context)
-  private val parseButton = Button(context)
   private val busyPanel = LinearLayout(context)
   private val busyLabel = TextView(context)
   private val confirmPanel = LinearLayout(context)
   private val confirmTitle = TextView(context)
   private val fields = LinearLayout(context)
-  private val retryButton = Button(context)
-  private val detailButton = Button(context)
-  private val saveButton = Button(context)
+  private val retryButton = VoiceButton(context)
+  private val detailButton = VoiceButton(context)
+  private val saveButton = VoiceButton(context)
   private var rendering = false
   private var snapshot = ScheduleVoiceSnapshot()
   private var touchStartedAt = 0L
@@ -160,6 +329,8 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     setWillNotDraw(false)
     clipToPadding = false
     orientation = VERTICAL
+    sheet.translationY = resources.displayMetrics.heightPixels.toFloat()
+    sheet.setPadding(0, 0, 0, sheet.currentNavigationBarInsetBottom())
     addView(
       overlayRoot,
       LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
@@ -205,45 +376,54 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       ?.hideSoftInputFromWindow(windowToken, 0)
     backdrop.animate().cancel()
     sheet.animate().cancel()
-    backdrop.animate().alpha(0f).setDuration(170L).start()
+    backdrop.animate().alpha(0f).setDuration(NativeUiTokens.SHEET_DURATION_MS).start()
     sheet.animate()
-      .translationY(VoiceUi.dp(context, 48f).toFloat())
-      .setDuration(170L)
+      .translationY(sheet.height.toFloat().coerceAtLeast(1f))
+      .setDuration(NativeUiTokens.SHEET_DURATION_MS)
+      .setInterpolator(DecelerateInterpolator())
       .withEndAction(onClosed)
       .start()
   }
 
   private fun buildHeader() {
     val row = FrameLayout(context)
-    title.text = "语音新建日程"
+    title.text = "新建日程"
     title.textSize = 17f
-    title.setTextColor(VoiceUi.TEXT)
+    title.setTextColor(palette.textPrimary)
     title.gravity = Gravity.CENTER
-    title.typeface = android.graphics.Typeface.DEFAULT_BOLD
+    title.typeface = android.graphics.Typeface.DEFAULT
     row.addView(title, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-    close.contentDescription = "关闭语音新建日程"
+    close.contentDescription = "关闭新建日程"
     row.addView(
       close,
-      FrameLayout.LayoutParams(VoiceUi.dp(context, 48f), VoiceUi.dp(context, 48f), Gravity.END or Gravity.CENTER_VERTICAL),
+      FrameLayout.LayoutParams(VoiceUi.dp(context, 48f), VoiceUi.dp(context, 48f), Gravity.START or Gravity.CENTER_VERTICAL),
     )
-    sheet.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 50f)))
+    parseAction.text = "解析"
+    parseAction.contentDescription = "解析日程"
+    parseAction.applyFeishuStyle(palette, VoiceButtonStyle.TEXT)
+    parseAction.setOnClickListener { emit("parse") }
+    row.addView(
+      parseAction,
+      FrameLayout.LayoutParams(VoiceUi.dp(context, 68f), VoiceUi.dp(context, 48f), Gravity.END or Gravity.CENTER_VERTICAL),
+    )
+    sheet.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 52f)))
   }
 
   private fun buildInputPanel() {
     inputPanel.orientation = LinearLayout.VERTICAL
-    inputPanel.setPadding(VoiceUi.dp(context, 20f), VoiceUi.dp(context, 8f), VoiceUi.dp(context, 20f), VoiceUi.dp(context, 14f))
-    input.hint = "输入或说出日程内容"
+    inputPanel.setPadding(VoiceUi.dp(context, 16f), VoiceUi.dp(context, 4f), VoiceUi.dp(context, 16f), VoiceUi.dp(context, 14f))
+    input.hint = "日程内容"
     input.textSize = 16f
-    input.setTextColor(VoiceUi.TEXT)
-    input.setHintTextColor(0xff8f959e.toInt())
+    input.setTextColor(palette.textPrimary)
+    input.setHintTextColor(palette.textTertiary)
     input.gravity = Gravity.TOP or Gravity.START
-    input.setPadding(VoiceUi.dp(context, 12f), VoiceUi.dp(context, 10f), VoiceUi.dp(context, 12f), VoiceUi.dp(context, 10f))
+    input.includeFontPadding = false
+    input.setPadding(VoiceUi.dp(context, 12f), VoiceUi.dp(context, 12f), VoiceUi.dp(context, 12f), VoiceUi.dp(context, 10f))
     input.background = GradientDrawable().apply {
-      setColor(VoiceUi.MUTED)
-      setStroke(VoiceUi.dp(context, 1f), VoiceUi.BORDER)
-      cornerRadius = VoiceUi.dp(context, 6f).toFloat()
+      setColor(palette.surfaceOverlay)
+      cornerRadius = VoiceUi.dp(context, 8f).toFloat()
     }
-    input.maxLines = 5
+    input.maxLines = 4
     input.imeOptions = EditorInfo.IME_ACTION_DONE
     input.addTextChangedListener(object : TextWatcher {
       override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -252,43 +432,33 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       }
       override fun afterTextChanged(s: Editable?) = Unit
     })
-    inputPanel.addView(input, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 108f)))
+    inputPanel.addView(input, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 72f)))
 
-    error.textSize = 12f
-    error.setTextColor(VoiceUi.ERROR)
-    error.gravity = Gravity.CENTER_VERTICAL
-    error.maxLines = 2
-    inputPanel.addView(error, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 38f)))
-
-    status.textSize = 13f
-    status.setTextColor(VoiceUi.SECONDARY)
-    status.gravity = Gravity.CENTER
-    inputPanel.addView(status, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 24f)))
+    feedback.textSize = 13f
+    feedback.setTextColor(palette.textSecondary)
+    feedback.gravity = Gravity.CENTER
+    feedback.includeFontPadding = false
+    feedback.maxLines = 1
+    feedback.ellipsize = TextUtils.TruncateAt.END
+    inputPanel.addView(feedback, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 28f)))
 
     val micDock = FrameLayout(context)
     micDock.addView(
       mic,
-      FrameLayout.LayoutParams(VoiceUi.dp(context, 88f), VoiceUi.dp(context, 88f), Gravity.CENTER),
+      FrameLayout.LayoutParams(VoiceUi.dp(context, 128f), VoiceUi.dp(context, 128f), Gravity.CENTER),
     )
-    inputPanel.addView(micDock, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 94f)))
+    inputPanel.addView(micDock, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 128f)))
     mic.setOnTouchListener { _, event -> handleMicTouch(event) }
-
-    parseButton.text = "解析日程"
-    parseButton.textSize = 16f
-    parseButton.setTextColor(Color.WHITE)
-    parseButton.setBackgroundColor(VoiceUi.ACCENT)
-    parseButton.setOnClickListener { emit("parse") }
-    inputPanel.addView(parseButton, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)))
     sheet.addView(inputPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
   }
 
   private fun buildBusyPanel() {
     busyPanel.orientation = LinearLayout.VERTICAL
     busyPanel.gravity = Gravity.CENTER
-    busyPanel.setPadding(VoiceUi.dp(context, 20f), VoiceUi.dp(context, 28f), VoiceUi.dp(context, 20f), VoiceUi.dp(context, 42f))
+    busyPanel.setPadding(VoiceUi.dp(context, 16f), VoiceUi.dp(context, 28f), VoiceUi.dp(context, 16f), VoiceUi.dp(context, 42f))
     busyPanel.addView(ProgressBar(context), LinearLayout.LayoutParams(VoiceUi.dp(context, 36f), VoiceUi.dp(context, 36f)))
     busyLabel.textSize = 14f
-    busyLabel.setTextColor(VoiceUi.SECONDARY)
+    busyLabel.setTextColor(palette.textSecondary)
     busyLabel.gravity = Gravity.CENTER
     busyPanel.addView(busyLabel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 52f)))
     sheet.addView(busyPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 184f)))
@@ -296,29 +466,42 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
 
   private fun buildConfirmPanel() {
     confirmPanel.orientation = LinearLayout.VERTICAL
-    confirmPanel.setPadding(VoiceUi.dp(context, 20f), VoiceUi.dp(context, 6f), VoiceUi.dp(context, 20f), VoiceUi.dp(context, 14f))
-    confirmTitle.textSize = 20f
-    confirmTitle.setTextColor(VoiceUi.TEXT)
-    confirmTitle.typeface = android.graphics.Typeface.DEFAULT_BOLD
+    confirmPanel.setPadding(VoiceUi.dp(context, 16f), VoiceUi.dp(context, 12f), VoiceUi.dp(context, 16f), VoiceUi.dp(context, 16f))
+    confirmTitle.textSize = 17f
+    confirmTitle.setTextColor(palette.textPrimary)
+    confirmTitle.typeface = android.graphics.Typeface.DEFAULT
     confirmTitle.gravity = Gravity.CENTER_VERTICAL
-    confirmPanel.addView(confirmTitle, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)))
+    confirmTitle.includeFontPadding = false
+    confirmPanel.addView(confirmTitle, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 36f)))
 
     fields.orientation = LinearLayout.VERTICAL
-    val scroll = ScrollView(context).apply { addView(fields) }
+    val scroll = ScrollView(context).apply {
+      // Reserve the scrollbar lane instead of drawing it over long field values.
+      scrollBarStyle = View.SCROLLBARS_INSIDE_INSET
+      isVerticalScrollBarEnabled = true
+      addView(fields)
+    }
+    fields.setPadding(0, 0, VoiceUi.dp(context, 12f), 0)
     confirmPanel.addView(scroll, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
 
-    val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    val actions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     retryButton.text = "重新输入"
     detailButton.text = "详细编辑"
     saveButton.text = "保存"
     retryButton.setOnClickListener { emit("retry-input") }
     detailButton.setOnClickListener { emit("edit-details") }
     saveButton.setOnClickListener { emit("save") }
-    for (button in listOf(retryButton, detailButton, saveButton)) {
-      button.textSize = 15f
-      actions.addView(button, LinearLayout.LayoutParams(0, VoiceUi.dp(context, 48f), 1f))
-    }
-    confirmPanel.addView(actions, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)))
+    retryButton.applyFeishuStyle(palette, VoiceButtonStyle.TEXT)
+    detailButton.applyFeishuStyle(palette, VoiceButtonStyle.SECONDARY)
+    saveButton.applyFeishuStyle(palette, VoiceButtonStyle.PRIMARY)
+    actions.addView(retryButton, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 36f)))
+    actions.addView(detailButton, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)).apply {
+      topMargin = VoiceUi.dp(context, 4f)
+    })
+    actions.addView(saveButton, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)).apply {
+      topMargin = VoiceUi.dp(context, 8f)
+    })
+    confirmPanel.addView(actions, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     sheet.addView(confirmPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 430f)))
   }
 
@@ -329,16 +512,24 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     confirmPanel.visibility = if (value.phase == ScheduleVoicePhase.CONFIRM) View.VISIBLE else View.GONE
     if (input.text.toString() != value.text) input.setText(value.text)
     input.isEnabled = value.phase == ScheduleVoicePhase.INPUT
-    error.text = value.errorMessage
-    status.text = value.statusLabel
+    val readableError = value.errorMessage.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, "日程解析失败，请检查输入后重试。")
+    }.orEmpty()
+    val readableStatus = value.statusLabel.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, "")
+    }.orEmpty()
+    feedback.text = readableError.ifBlank { readableStatus }
+    feedback.setTextColor(if (readableError.isNotBlank()) palette.danger else palette.textSecondary)
     mic.recording = value.phase == ScheduleVoicePhase.RECORDING
     mic.isEnabled = value.phase in setOf(ScheduleVoicePhase.INPUT, ScheduleVoicePhase.RECORDING)
-    parseButton.isEnabled = value.canParse && value.phase == ScheduleVoicePhase.INPUT
-    parseButton.alpha = if (parseButton.isEnabled) 1f else 0.4f
-    busyLabel.text = value.statusLabel.ifBlank {
-      if (value.phase == ScheduleVoicePhase.SAVING) "正在保存" else "正在解析"
-    }
-    confirmTitle.text = value.title.ifBlank { "未命名日程" }
+    parseAction.isEnabled = value.canParse && value.phase == ScheduleVoicePhase.INPUT
+    parseAction.visibility = if (value.phase in setOf(ScheduleVoicePhase.INPUT, ScheduleVoicePhase.PREPARING, ScheduleVoicePhase.RECORDING)) View.VISIBLE else View.INVISIBLE
+    title.text = if (value.phase == ScheduleVoicePhase.CONFIRM) "确认日程" else "新建日程"
+    busyLabel.text = NativeUserMessages.readable(
+      value.statusLabel,
+      if (value.phase == ScheduleVoicePhase.SAVING) "正在保存日程" else "正在解析日程",
+    )
+    confirmTitle.text = value.title.ifBlank { "(无主题)" }
     fields.removeAllViews()
     value.fields.forEach { field ->
       val row = LinearLayout(context).apply {
@@ -348,17 +539,17 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       val label = TextView(context).apply {
         text = field.label
         textSize = 14f
-        setTextColor(VoiceUi.SECONDARY)
+        setTextColor(palette.textSecondary)
       }
       val content = TextView(context).apply {
         text = field.value
         textSize = 15f
-        setTextColor(VoiceUi.TEXT)
+        setTextColor(palette.textPrimary)
         gravity = Gravity.END or Gravity.CENTER_VERTICAL
       }
       row.addView(label, LinearLayout.LayoutParams(VoiceUi.dp(context, 86f), LayoutParams.MATCH_PARENT))
       row.addView(content, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-      fields.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 48f)))
+      fields.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 44f)))
     }
     saveButton.isEnabled = value.canSave
     detailButton.isEnabled = value.canEditDetails
@@ -405,14 +596,18 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
 
   private fun animateEntrance() {
     backdrop.alpha = 0f
-    sheet.translationY = VoiceUi.dp(context, 48f).toFloat()
-    AnimatorSet().apply {
-      playTogether(
-        ObjectAnimator.ofFloat(backdrop, View.ALPHA, 0f, 1f),
-        ObjectAnimator.ofFloat(sheet, View.TRANSLATION_Y, sheet.translationY, 0f),
-      )
-      duration = 170L
-      start()
+    sheet.post {
+      if (!isAttachedToWindow) return@post
+      sheet.translationY = sheet.height.toFloat().coerceAtLeast(1f)
+      AnimatorSet().apply {
+        playTogether(
+          ObjectAnimator.ofFloat(backdrop, View.ALPHA, 0f, 1f),
+          ObjectAnimator.ofFloat(sheet, View.TRANSLATION_Y, sheet.translationY, 0f),
+        )
+        duration = NativeUiTokens.SHEET_DURATION_MS
+        interpolator = DecelerateInterpolator()
+        start()
+      }
     }
   }
 

@@ -3,6 +3,8 @@ package com.laoji.nativeplatform.minutes
 // MIN-ROOT-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // defensive structured snapshot parsing drives native state.
 
+import com.laoji.nativeplatform.ui.NativeUserMessages
+
 object MinutesSnapshotParser {
   fun parse(raw: Map<String, Any?>, surfaceOverride: String? = null): MinutesUiState {
     val surface = MinutesSurface.fromWireName(surfaceOverride ?: raw.string("surface"))
@@ -16,12 +18,16 @@ object MinutesSnapshotParser {
     return MinutesStateReducer.normalize(state)
   }
 
-  private fun parseList(raw: Map<String, Any?>): MinutesListState = MinutesListState(
+  private fun parseList(raw: Map<String, Any?>): MinutesListState {
+    val phase = MinutesContentPhase.fromWireName(raw.string("phase"))
+    return MinutesListState(
     title = raw.string("title").orDefault("会议记录"),
     searching = raw.boolean("searching"),
     query = raw.string("query").orEmpty(),
-    phase = MinutesContentPhase.fromWireName(raw.string("phase")),
-    message = raw.string("message").orEmpty(),
+    phase = phase,
+    message = raw.string("message")?.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, listFallback(phase))
+    }.orEmpty(),
     showingCachedData = raw.boolean("showingCachedData"),
     meetings = raw.maps("meetings").mapIndexed { index, item ->
       MinutesMeeting(
@@ -32,29 +38,42 @@ object MinutesSnapshotParser {
         statusLabel = item.string("statusLabel").orEmpty(),
         statusTone = item.string("statusTone").orDefault("neutral"),
         canResume = item.boolean("canResume"),
+        coverType = MinutesListCoverType.fromWireName(item.string("coverType")),
+        coverTitle = item.string("coverTitle").orEmpty(),
+        coverText = item.string("coverText").orEmpty(),
       )
     },
-  )
+    )
+  }
 
-  private fun parseRecording(raw: Map<String, Any?>): MinutesRecordingState = MinutesRecordingState(
+  private fun parseRecording(raw: Map<String, Any?>): MinutesRecordingState {
+    val phase = MinutesRecordingPhase.fromWireName(raw.string("phase"))
+    return MinutesRecordingState(
     meetingId = raw.string("meetingId").orEmpty(),
     title = raw.string("title").orDefault("会议记录"),
     startedAtLabel = raw.string("startedAtLabel").orEmpty(),
-    phase = MinutesRecordingPhase.fromWireName(raw.string("phase")),
+    phase = phase,
     elapsedMs = raw.long("elapsedMs"),
-    statusLabel = raw.string("statusLabel").orEmpty(),
-    errorMessage = raw.string("errorMessage").orEmpty(),
+    statusLabel = raw.string("statusLabel")?.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, recordingFallback(phase))
+    }.orEmpty(),
+    errorMessage = raw.string("errorMessage")?.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, "录音暂时不可用，请稍后重试。")
+    }.orEmpty(),
     canPause = raw.boolean("canPause"),
     canStop = raw.boolean("canStop"),
     canStart = raw.boolean("canStart", true),
     followLatest = raw.boolean("followLatest", true),
     transcript = parseTranscript(raw.maps("transcript")),
-  )
+    )
+  }
 
   private fun parseDetail(raw: Map<String, Any?>): MinutesDetailState {
     val activeTab = MinutesDetailTab.fromWireName(raw.string("activeTab"))
     val contentPhase = MinutesContentPhase.fromWireName(raw.string("contentPhase"))
-    val contentMessage = raw.string("contentMessage").orEmpty()
+    val contentMessage = raw.string("contentMessage")?.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, "会议记录暂时无法加载，请稍后重试。")
+    }.orEmpty()
     val transcript = parseTranscript(raw.maps("transcript"))
     val summary = raw.maps("summary").mapIndexed { index, item ->
       MinutesSummaryBlock(
@@ -101,8 +120,12 @@ object MinutesSnapshotParser {
       summary = summary,
       speakers = speakers,
       playerSource = raw.mapOrNull("playerSource")?.let(::parsePlayerSource),
-      audioStatusMessage = raw.string("audioStatusMessage").orEmpty(),
-      audioErrorMessage = raw.string("audioErrorMessage").orEmpty(),
+      audioStatusMessage = raw.string("audioStatusMessage")?.takeIf { it.isNotBlank() }?.let {
+        NativeUserMessages.readable(it, "录音状态暂时无法获取，请稍后重试。")
+      }.orEmpty(),
+      audioErrorMessage = raw.string("audioErrorMessage")?.takeIf { it.isNotBlank() }?.let {
+        NativeUserMessages.readable(it, "音频暂时无法播放，请稍后重试。")
+      }.orEmpty(),
       pageStates = parseDetailPageStates(raw.mapOrNull("pageStates"), legacyPageStates),
     )
   }
@@ -114,6 +137,7 @@ object MinutesSnapshotParser {
     transcript = parseDetailPageState(raw?.mapOrNull("transcript"), fallback.transcript),
     summary = parseDetailPageState(raw?.mapOrNull("summary"), fallback.summary),
     speakers = parseDetailPageState(raw?.mapOrNull("speakers"), fallback.speakers),
+    info = parseDetailPageState(raw?.mapOrNull("info"), fallback.info),
   )
 
   private fun parseDetailPageState(
@@ -127,7 +151,11 @@ object MinutesSnapshotParser {
       } else {
         fallback.phase
       },
-      message = if (raw.containsKey("message")) raw.string("message").orEmpty() else fallback.message,
+      message = if (raw.containsKey("message")) {
+        raw.string("message")?.takeIf { it.isNotBlank() }?.let {
+          NativeUserMessages.readable(it, "会议记录暂时无法加载，请稍后重试。")
+        }.orEmpty()
+      } else fallback.message,
       generation = if (raw.containsKey("generation")) {
         raw["generation"].pageGeneration()
       } else {
@@ -149,6 +177,22 @@ object MinutesSnapshotParser {
         isFinal = item.boolean("isFinal", true),
       )
     }
+
+  private fun listFallback(phase: MinutesContentPhase): String = when (phase) {
+    MinutesContentPhase.LOADING -> "正在加载会议记录"
+    MinutesContentPhase.ERROR -> "会议记录暂时无法加载，请稍后重试。"
+    else -> "暂无会议记录"
+  }
+
+  private fun recordingFallback(phase: MinutesRecordingPhase): String = when (phase) {
+    MinutesRecordingPhase.PREPARING -> "正在准备录音"
+    MinutesRecordingPhase.RECORDING -> "正在录音"
+    MinutesRecordingPhase.PAUSED -> "录音已暂停"
+    MinutesRecordingPhase.STOPPING -> "正在停止录音"
+    MinutesRecordingPhase.SAVING -> "正在保存会议记录"
+    MinutesRecordingPhase.FAILED -> "录音需要重试"
+    MinutesRecordingPhase.IDLE -> "准备开始录音"
+  }
 
   private fun parsePlayerSource(raw: Map<String, Any?>): MinutesPlayerSource = MinutesPlayerSource(
     sourceId = raw.string("sourceId").orEmpty(),

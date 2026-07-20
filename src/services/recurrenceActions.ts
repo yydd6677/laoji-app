@@ -1,5 +1,6 @@
 import type { AppDialogOptions } from '../components/AppDialog';
 import type { CalEvent, EventRecurrenceScope } from '../types';
+import { eventListTitle } from '../utils/eventTitle';
 
 // CAL-REPEAT-RRULE-001: scope policy follows Feishu's normal/exception instance matrix.
 export type RecurrenceRuleControlMode = 'hidden' | 'disabled' | 'editable';
@@ -103,7 +104,7 @@ export function recurrenceDeleteDialog(
   if (!event.repeat || event.repeat === 'once') {
     return {
       title: '删除日程',
-      message: `确定删除“${event.title}”吗？`,
+      message: `确定删除“${eventListTitle(event.title)}”吗？`,
       tone: 'danger',
       actions: [
         { text: '删除', role: 'destructive', onPress: () => onDelete('series') },

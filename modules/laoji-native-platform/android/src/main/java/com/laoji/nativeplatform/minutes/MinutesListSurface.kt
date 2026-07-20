@@ -6,12 +6,15 @@ import android.content.res.ColorStateList
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.ImageView
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import android.text.Editable
 import android.text.TextWatcher
@@ -20,24 +23,32 @@ internal class MinutesListSurface(
   context: Context,
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : LinearLayout(context) {
-  private val titleBar = MinutesTitleBar(context)
+  private val titleBar = MinutesMainTitleBar(context)
   private val searchBar = LinearLayout(context)
   private val searchBack = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "退出搜索")
   private val searchInput = EditText(context)
-  private val searchClear = context.iconButton(android.R.drawable.ic_menu_close_clear_cancel, "清除搜索")
+  private val searchClear = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_close, "清除搜索")
   private val content = FrameLayout(context)
   private val list = RecyclerView(context)
   private val adapter = MinutesMeetingAdapter(onAction)
   private val stateOverlay = LinearLayout(context)
   private val progress = ProgressBar(context)
+  private val emptyImage = ImageView(context)
   private val stateMessage = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val retryButton = context.textView("重试", 16, MinutesPalette.primary, Typeface.BOLD)
   private val cachedError = LinearLayout(context)
   private val cachedMessage = context.textView(textSizeSp = 14, color = MinutesPalette.danger)
-  private val cachedRetry = context.iconButton(android.R.drawable.ic_popup_sync, "重新同步会议记录")
-  // UI-SHELL-001 / MIN-REC-STATE-001: this is the list's single recording entry.
-  private val recordButton = context.iconButton(android.R.drawable.ic_btn_speak_now, "开始录音")
+  private val cachedRetry = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_refresh, "重新同步会议记录")
+  // The retained LaoJi recording action uses Feishu's bottom operation-panel geometry.
+  private val recordButton = LinearLayout(context)
+  private val recordIcon = ImageView(context)
+  private val recordLabel = context.textView("录音", 16, MinutesPalette.surface)
   private var renderingSearch = false
+  private var wasSearching = false
+  private var renderedTitle = "会议记录"
+  // Feishu's home V2 opens in the two-column cover grid; the list is an
+  // explicit secondary mode exposed by the trailing switch icon.
+  private var viewMode = MinutesHomeViewMode.GRID
 
   init {
     orientation = VERTICAL
@@ -47,10 +58,16 @@ internal class MinutesListSurface(
     addView(searchBar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
     addView(content, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-    list.layoutManager = LinearLayoutManager(context)
+    adapter.setViewMode(viewMode)
+    list.layoutManager = GridLayoutManager(context, 2)
     list.adapter = adapter
+    list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+      override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+        if (newState == RecyclerView.SCROLL_STATE_DRAGGING) MinutesSwipeMenuLayout.closeOpenMenu()
+      }
+    })
     list.clipToPadding = false
-    list.setPadding(0, context.dp(12), 0, context.dp(24))
+    list.setPadding(0, 0, 0, context.dp(84))
     list.setBackgroundColor(MinutesPalette.page)
     list.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
     content.addView(list, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -58,6 +75,9 @@ internal class MinutesListSurface(
     stateOverlay.orientation = VERTICAL
     stateOverlay.gravity = Gravity.CENTER
     stateOverlay.setPadding(context.dp(24), context.dp(24), context.dp(24), context.dp(24))
+    emptyImage.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_minutes_empty)
+    emptyImage.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    stateOverlay.addView(emptyImage, LayoutParams(context.dp(100), context.dp(100)))
     stateMessage.gravity = Gravity.CENTER
     stateMessage.setLineSpacing(0f, 1.25f)
     stateOverlay.addView(progress, LayoutParams(context.dp(24), context.dp(24)))
@@ -99,29 +119,44 @@ internal class MinutesListSurface(
       },
     )
 
-    recordButton.apply {
-      imageTintList = ColorStateList.valueOf(MinutesPalette.surface)
-      backgroundShape(MinutesPalette.primary, 32)
-      elevation = context.dp(6).toFloat()
-      setOnClickListener { onAction(mapOf("type" to "startRecording")) }
-    }
+    recordButton.orientation = HORIZONTAL
+    recordButton.gravity = Gravity.CENTER
+    recordButton.minimumWidth = context.dp(88)
+    recordButton.setPadding(context.dp(12), 0, context.dp(12), 0)
+    recordButton.backgroundHorizontalGradient(
+      startColor = android.graphics.Color.rgb(85, 95, 242),
+      endColor = android.graphics.Color.rgb(139, 118, 245),
+      radiusDp = 24,
+    )
+    // Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
+    // 8% neutral shadow. Native elevation 2 is the closest platform rendering
+    // without introducing a second custom shadow owner.
+    recordButton.elevation = context.dp(2).toFloat()
+    recordButton.isClickable = true
+    recordButton.isFocusable = true
+    recordButton.contentDescription = "开始录音"
+    recordButton.setOnClickListener { onAction(mapOf("type" to "startRecording")) }
+    recordIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_outlined)
+    recordIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.surface)
+    recordIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    recordButton.addView(recordIcon, LayoutParams(context.dp(16), context.dp(16)))
+    recordButton.addView(recordLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(24)).apply {
+      leftMargin = context.dp(4)
+    })
     content.addView(
       recordButton,
-      FrameLayout.LayoutParams(context.dp(64), context.dp(64), Gravity.END or Gravity.BOTTOM).apply {
-        marginEnd = context.dp(16)
-        bottomMargin = context.dp(20)
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
+        bottomMargin = context.dp(16)
       },
     )
   }
 
   fun render(state: MinutesListState) {
-    titleBar.configure(
-      title = state.title,
-      showBack = false,
-      showSearch = true,
-      showMore = true,
-      onAction = { onAction(mapOf("type" to it)) },
-    )
+    renderedTitle = state.title
+    titleBar.configure(state.title, viewMode) { action ->
+      if (action == "toggleViewMode") toggleViewMode()
+      else onAction(mapOf("type" to action))
+    }
     titleBar.visibility = if (state.searching) View.GONE else View.VISIBLE
     searchBar.visibility = if (state.searching) View.VISIBLE else View.GONE
     renderingSearch = true
@@ -130,6 +165,20 @@ internal class MinutesListSurface(
       searchInput.setSelection(searchInput.text.length)
     }
     renderingSearch = false
+    if (state.searching && !wasSearching) {
+      searchInput.post {
+        if (!isAttachedToWindow || searchBar.visibility != View.VISIBLE) return@post
+        searchInput.requestFocus()
+        searchInput.setSelection(searchInput.text.length)
+        context.getSystemService(InputMethodManager::class.java)
+          ?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
+      }
+    } else if (!state.searching && wasSearching) {
+      searchInput.clearFocus()
+      context.getSystemService(InputMethodManager::class.java)
+        ?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+    }
+    wasSearching = state.searching
     searchClear.visibility = if (state.query.isBlank()) View.INVISIBLE else View.VISIBLE
     val normalizedQuery = state.query.trim()
     val visibleMeetings = if (normalizedQuery.isBlank()) state.meetings else state.meetings.filter {
@@ -146,13 +195,16 @@ internal class MinutesListSurface(
     list.visibility = if (showStateOverlay) View.INVISIBLE else View.VISIBLE
     stateOverlay.visibility = if (showStateOverlay) View.VISIBLE else View.GONE
     progress.visibility = if (!showNoSearchResults && state.phase == MinutesContentPhase.LOADING) View.VISIBLE else View.GONE
+    emptyImage.visibility = if (
+      showNoSearchResults || state.phase == MinutesContentPhase.READY || state.phase == MinutesContentPhase.EMPTY
+    ) View.VISIBLE else View.GONE
     retryButton.visibility = if (!showNoSearchResults && state.phase == MinutesContentPhase.ERROR) View.VISIBLE else View.GONE
     stateMessage.text = if (showNoSearchResults) {
       "未找到相关会议记录"
     } else state.message.ifBlank {
       when (state.phase) {
         MinutesContentPhase.LOADING -> "正在加载会议记录"
-        MinutesContentPhase.ERROR -> "会议服务暂时不可用"
+        MinutesContentPhase.ERROR -> "会议记录服务暂时不可用"
         else -> "暂无会议记录"
       }
     }
@@ -164,8 +216,29 @@ internal class MinutesListSurface(
       View.GONE
     }
     cachedMessage.text = state.message.ifBlank { "同步失败，正在显示本机缓存" }
-    list.setPadding(0, if (cachedError.visibility == View.VISIBLE) context.dp(68) else context.dp(12), 0, context.dp(24))
+    list.setPadding(
+      0,
+      if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
+      0,
+      context.dp(84),
+    )
     recordButton.visibility = if (state.searching) View.GONE else View.VISIBLE
+  }
+
+  private fun toggleViewMode() {
+    val firstVisible = (list.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition() ?: 0
+    viewMode = if (viewMode == MinutesHomeViewMode.LIST) MinutesHomeViewMode.GRID else MinutesHomeViewMode.LIST
+    adapter.setViewMode(viewMode)
+    list.layoutManager = if (viewMode == MinutesHomeViewMode.GRID) {
+      GridLayoutManager(context, 2)
+    } else {
+      LinearLayoutManager(context)
+    }
+    titleBar.configure(renderedTitle, viewMode) { action ->
+      if (action == "toggleViewMode") toggleViewMode()
+      else onAction(mapOf("type" to action))
+    }
+    list.scrollToPosition(firstVisible.coerceAtLeast(0))
   }
 
   private fun configureSearchBar() {

@@ -8,6 +8,9 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.os.Parcel
 import android.os.Parcelable
@@ -15,7 +18,6 @@ import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
-import android.text.format.DateFormat
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -102,8 +104,42 @@ class CalendarEditPageView(
     background = null
     isSingleLine = true
     maxLines = 1
-    setPadding(0, 0, context.pageDp(16), 0)
+    setPadding(0, 0, 0, 0)
+    filters = arrayOf(InputFilter.LengthFilter(400))
     imeOptions = EditorInfo.IME_ACTION_NEXT
+  }
+  private val locateIcon = ImageView(context).apply {
+    setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_located_outline)
+    imageTintList = ColorStateList.valueOf(CalendarPagePalette.primary)
+    setPadding(context.pageDp(12), context.pageDp(12), context.pageDp(12), context.pageDp(12))
+    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+  private val locateProgress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall).apply {
+    indeterminateTintList = ColorStateList.valueOf(CalendarPagePalette.primary)
+    visibility = View.GONE
+    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+  private val locateAction = FrameLayout(context).apply {
+    minimumWidth = context.pageDp(48)
+    minimumHeight = context.pageDp(48)
+    isClickable = true
+    isFocusable = true
+    contentDescription = "获取当前位置"
+    background = RippleDrawable(
+      ColorStateList.valueOf(CalendarPagePalette.primarySoft),
+      null,
+      GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(Color.WHITE)
+      },
+    )
+    addView(locateIcon, FrameLayout.LayoutParams(context.pageDp(48), context.pageDp(48), Gravity.CENTER))
+    addView(locateProgress, FrameLayout.LayoutParams(context.pageDp(20), context.pageDp(20), Gravity.CENTER))
+    setOnClickListener {
+      if (!state.locating && !state.saving && state.loadState == CalendarPageLoadState.READY) {
+        emitDraftAction("requestCurrentLocation")
+      }
+    }
   }
   private val notesInput = EditText(context).apply {
     hint = "添加备注"
@@ -119,7 +155,7 @@ class CalendarEditPageView(
     setPadding(0, context.pageDp(12), context.pageDp(16), context.pageDp(12))
   }
   private val deleteRow = buildActionRow(
-    android.R.drawable.ic_menu_delete,
+    com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
     "删除日程",
     CalendarPagePalette.danger,
   ) { requestDelete() }
@@ -139,6 +175,8 @@ class CalendarEditPageView(
   private var state = CalendarEditPageState()
   private var draft = CalendarEditDraft()
   private var applyingSnapshot = false
+  private var hasCommittedSnapshot = false
+  private var hasRequestedInitialTitleFocus = false
   private var lastMessage: String? = null
   private var timePage: CalendarEditTimePageView? = null
   private var repeatEndPage: CalendarRepeatEndPageView? = null
@@ -181,24 +219,26 @@ class CalendarEditPageView(
 
   fun commitProps() {
     val nextState = CalendarPageSnapshotParser.edit(pendingSnapshot)
+    hasCommittedSnapshot = true
     state = nextState
     if (timePage == null && repeatEndPage == null) draft = nextState.draft
     render()
+    requestInitialTitleFocusIfNeeded()
   }
 
   private fun buildForm() {
     content.addView(titleInput, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     addSectionDivider()
-    startDateRow = valueRow(android.R.drawable.ic_menu_today, "开始日期", startDateValue) {
+    startDateRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline, "开始日期", startDateValue) {
       showTimePage(CalendarEditEndpoint.START)
     }
-    endDateRow = valueRow(android.R.drawable.ic_menu_today, "结束日期", endDateValue) {
+    endDateRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline, "结束日期", endDateValue) {
       showTimePage(CalendarEditEndpoint.END)
     }
-    startTimeRow = valueRow(android.R.drawable.ic_lock_idle_alarm, "开始时间", startTimeValue) {
+    startTimeRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "开始时间", startTimeValue) {
       showTimePage(CalendarEditEndpoint.START)
     }
-    endTimeRow = valueRow(android.R.drawable.ic_lock_idle_alarm, "结束时间", endTimeValue) {
+    endTimeRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "结束时间", endTimeValue) {
       showTimePage(CalendarEditEndpoint.END)
     }
     content.addView(startDateRow)
@@ -220,11 +260,16 @@ class CalendarEditPageView(
     repeatEndArrow = (repeatEndRow as ViewGroup).getChildAt(2) as ImageView
     content.addView(repeatEndRow)
     addSectionDivider()
-    content.addView(inputRow(android.R.drawable.ic_menu_mylocation, locationInput, context.pageDp(48)))
+    content.addView(inputRow(
+      com.laoji.nativeplatform.R.drawable.laoji_ic_location_outline,
+      locationInput,
+      context.pageDp(48),
+      locateAction,
+    ))
     addSectionDivider()
-    content.addView(inputRow(android.R.drawable.ic_menu_sort_by_size, notesInput, context.pageDp(88)))
+    content.addView(inputRow(com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline, notesInput, context.pageDp(88)))
     addSectionDivider()
-    content.addView(valueRow(android.R.drawable.ic_lock_idle_alarm, "提醒", reminderValue) {
+    content.addView(valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "提醒", reminderValue) {
       if (draft.allDay || !draft.hasTime) {
         emitFeedback("设置具体时间后才能添加提醒")
       } else {
@@ -239,6 +284,20 @@ class CalendarEditPageView(
     titleInput.watch { updateDraft(draft.copy(title = it)) }
     locationInput.watch { updateDraft(draft.copy(location = it)) }
     notesInput.watch { updateDraft(draft.copy(notes = it)) }
+  }
+
+  private fun requestInitialTitleFocusIfNeeded() {
+    if (!hasCommittedSnapshot || hasRequestedInitialTitleFocus || state.editing ||
+      state.loadState != CalendarPageLoadState.READY) return
+    if (!isAttachedToWindow) return
+    hasRequestedInitialTitleFocus = true
+    titleInput.post {
+      if (!isAttachedToWindow || state.editing || state.loadState != CalendarPageLoadState.READY) return@post
+      titleInput.requestFocus()
+      titleInput.setSelection(titleInput.text.length)
+      context.getSystemService(InputMethodManager::class.java)
+        ?.showSoftInput(titleInput, InputMethodManager.SHOW_IMPLICIT)
+    }
   }
 
   private fun render() {
@@ -269,6 +328,10 @@ class CalendarEditPageView(
     applyingSnapshot = false
 
     val ready = state.loadState == CalendarPageLoadState.READY
+    locateAction.isEnabled = ready && !state.saving && !state.locating
+    locateAction.contentDescription = if (state.locating) "正在获取当前位置" else "获取当前位置"
+    locateIcon.visibility = if (state.locating) View.INVISIBLE else View.VISIBLE
+    locateProgress.visibility = if (state.locating) View.VISIBLE else View.GONE
     scroll.visibility = if (ready) View.VISIBLE else View.GONE
     stateView.render(state.loadState, state.message)
     busyOverlay.visibility = if (state.saving) View.VISIBLE else View.GONE
@@ -292,9 +355,8 @@ class CalendarEditPageView(
     applyingSnapshot = true
     startDateValue.text = formatDate(draft.startDate)
     endDateValue.text = formatDate(draft.endDate)
-    val is24Hour = DateFormat.is24HourFormat(context)
-    startTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.startTime), is24Hour)
-    endTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.endTime), is24Hour)
+    startTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.startTime), true)
+    endTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.endTime), true)
     val recurrenceMode = state.recurrenceRuleMode
     repeatValue.text = if (recurrenceMode == CalendarRecurrenceControlMode.DISABLED) {
       "不重复"
@@ -525,13 +587,16 @@ class CalendarEditPageView(
     contentDescription = "$accessibilityLabel，${value.text}"
   }
 
-  private fun inputRow(iconRes: Int, input: EditText, height: Int): View =
+  private fun inputRow(iconRes: Int, input: EditText, height: Int, trailing: View? = null): View =
     LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.TOP
       minimumHeight = height
       addIcon(iconRes)
       addView(input, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+      trailing?.let {
+        addView(it, LinearLayout.LayoutParams(context.pageDp(48), context.pageDp(48)))
+      }
     }
 
   private fun buildActionRow(iconRes: Int, label: String, color: Int, onClick: () -> Unit): View =
@@ -596,6 +661,7 @@ class CalendarEditPageView(
     super.onAttachedToWindow()
     componentActivity()?.onBackPressedDispatcher?.addCallback(backCallback)
     backCallback.isEnabled = timePage != null || repeatEndPage != null
+    requestInitialTitleFocusIfNeeded()
   }
 
   override fun onDetachedFromWindow() {
