@@ -8,6 +8,8 @@ import kotlin.math.floor
 
 object DayEventVisualContract {
   const val EVENT_RADIUS_DP = 4f
+  const val CALENDAR_STRIPE_WIDTH_DP = 2.5f
+  const val CALENDAR_STRIPE_ALPHA = 0.4f
   const val TEXT_MARGIN_LEFT_DP = 9f
   const val TEXT_MARGIN_TOP_DP = 3f
   const val TEXT_MARGIN_RIGHT_DP = 1.5f

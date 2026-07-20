@@ -63,7 +63,7 @@ function inferredMeetingCover(summary: MeetingSummary | null, transcript: readon
   if (summaryText.length >= 8) {
     return {
       coverType: 'summary' as const,
-      coverTitle: '会议总结',
+      coverTitle: '总结',
       coverText: summaryText.slice(0, 220),
     };
   }
@@ -101,8 +101,31 @@ function inferredMeetingCover(summary: MeetingSummary | null, transcript: readon
 }
 
 function compactMeetingDateTime(date: string, time?: string): string {
-  const currentYearPrefix = `${new Date().getFullYear()}年`;
-  const compactDate = date.startsWith(currentYearPrefix) ? date.slice(currentYearPrefix.length) : date;
+  const match = date.trim().match(/^(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日$/);
+  let compactDate = date;
+  if (match) {
+    const now = new Date();
+    const year = match[1] ? Number(match[1]) : now.getFullYear();
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+    const isValid = parsed.getFullYear() === year
+      && parsed.getMonth() === month - 1
+      && parsed.getDate() === day;
+    if (isValid) {
+      const localDayNumber = (value: Date) => Date.UTC(
+        value.getFullYear(),
+        value.getMonth(),
+        value.getDate(),
+      ) / 86_400_000;
+      const dayOffset = localDayNumber(parsed) - localDayNumber(now);
+      compactDate = dayOffset === 0
+        ? '今天'
+        : dayOffset === -1
+          ? '昨天'
+          : `${year === now.getFullYear() ? '' : `${year}年`}${month}月${day}日`;
+    }
+  }
   return [compactDate, time].filter(Boolean).join(' ');
 }
 
@@ -235,9 +258,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         : '',
       showingCachedData: Boolean(error && meetings.length > 0),
       meetings: meetings.map(meeting => {
-        const statusLabel = staleRecordingIds.has(meeting.id)
+        const rawStatusLabel = staleRecordingIds.has(meeting.id)
           ? '录音中断'
           : preferredMeetingStatusLabel(meeting.tags);
+        const statusLabel = rawStatusLabel === '已完成' ? '' : rawStatusLabel;
         const cover = inferredMeetingCover(
           getCachedSummary(meeting.id),
           getCachedTranscript(meeting.id),

@@ -71,7 +71,7 @@ internal class MinutesListSurface(
       }
     })
     list.clipToPadding = false
-    list.setPadding(0, 0, 0, context.dp(84))
+    applyListPadding()
     list.setBackgroundColor(MinutesPalette.page)
     list.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
     content.addView(list, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -220,11 +220,8 @@ internal class MinutesListSurface(
       View.GONE
     }
     cachedMessage.text = state.message.ifBlank { "同步失败，正在显示本机缓存" }
-    list.setPadding(
-      0,
-      if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
-      0,
-      context.dp(84),
+    applyListPadding(
+      topPadding = if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
     )
     recordButton.visibility = if (state.searching) View.GONE else View.VISIBLE
   }
@@ -243,6 +240,7 @@ internal class MinutesListSurface(
     } else {
       LinearLayoutManager(context)
     }
+    applyListPadding(topPadding = list.paddingTop)
     titleBar.configure(renderedTitle, viewMode) { action ->
       if (action == "toggleViewMode") toggleViewMode()
       else onAction(mapOf("type" to action))
@@ -256,6 +254,11 @@ internal class MinutesListSurface(
       // MmStaggeredGridLayoutManager for the cover mode.
       gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
     }
+
+  private fun applyListPadding(topPadding: Int = 0) {
+    val sidePadding = if (viewMode == MinutesHomeViewMode.GRID) context.dp(7) else 0
+    list.setPadding(sidePadding, topPadding, sidePadding, context.dp(84))
+  }
 
   private fun configureSearchBar() {
     // MIN-SEARCH-001: search remains a native list state instead of routing to the legacy RN page.

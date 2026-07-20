@@ -6,6 +6,7 @@ package com.laoji.nativeplatform.minutes
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -65,8 +66,11 @@ internal class MinutesMeetingAdapter(
     private val cover = FrameLayout(parent.context)
     private val coverIcon = ImageView(parent.context)
     private val coverContent = LinearLayout(parent.context)
+    private val coverHeader = LinearLayout(parent.context)
+    private val coverHeaderIcon = ImageView(parent.context)
     private val coverTitle = parent.context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
     private val coverText = parent.context.textView(textSizeSp = 14)
+    private val coverQuote = ImageView(parent.context)
     private val textColumn = LinearLayout(parent.context)
     private val title = parent.context.textView()
     private val metaRow = LinearLayout(parent.context).apply {
@@ -89,8 +93,8 @@ internal class MinutesMeetingAdapter(
       root.backgroundShape(MinutesPalette.surface, radiusDp = 12)
       root.clipToOutline = true
 
-      cover.backgroundShape(Color.rgb(220, 229, 250))
-      coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_filled)
+      cover.backgroundShape(MinutesPalette.coverDefault)
+      coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
       coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
       coverIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
       cover.addView(
@@ -99,19 +103,41 @@ internal class MinutesMeetingAdapter(
       )
       coverContent.orientation = LinearLayout.VERTICAL
       coverContent.gravity = Gravity.CENTER_VERTICAL
+      coverHeader.orientation = LinearLayout.HORIZONTAL
+      coverHeader.gravity = Gravity.CENTER_VERTICAL
+      coverHeaderIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+      coverHeader.addView(
+        coverHeaderIcon,
+        LinearLayout.LayoutParams(parent.context.dp(13), parent.context.dp(13)),
+      )
       coverTitle.maxLines = 1
       coverTitle.ellipsize = TextUtils.TruncateAt.END
+      coverHeader.addView(
+        coverTitle,
+        LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+          leftMargin = parent.context.dp(3)
+        },
+      )
       coverText.maxLines = 5
       coverText.ellipsize = TextUtils.TruncateAt.END
       coverText.setLineSpacing(parent.context.dp(4).toFloat(), 1f)
       coverContent.addView(
-        coverTitle,
+        coverHeader,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
       coverContent.addView(
         coverText,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
           topMargin = parent.context.dp(6)
+        },
+      )
+      coverQuote.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_quote_filled)
+      coverQuote.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+      coverContent.addView(
+        coverQuote,
+        LinearLayout.LayoutParams(parent.context.dp(20), parent.context.dp(20)).apply {
+          gravity = Gravity.END
+          topMargin = parent.context.dp(8)
         },
       )
       cover.addView(
@@ -126,7 +152,7 @@ internal class MinutesMeetingAdapter(
       title.ellipsize = TextUtils.TruncateAt.END
       textColumn.addView(title)
 
-      typeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_filled)
+      typeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
       typeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.faint)
       typeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
       metaRow.addView(typeIcon)
@@ -185,7 +211,7 @@ internal class MinutesMeetingAdapter(
           1f,
         )
       } else {
-        host.setPadding(context.dp(6), context.dp(6), context.dp(6), context.dp(6))
+        host.setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
         root.orientation = LinearLayout.VERTICAL
         root.gravity = Gravity.START
         root.minimumHeight = 0
@@ -249,17 +275,20 @@ internal class MinutesMeetingAdapter(
           .filter { it.isNotBlank() }
           .joinToString(" · ")
       }
-      val hasStatus = meeting.statusLabel.isNotBlank()
+      // The source SUCCESS branch hides itemStatus. Keep app-specific active,
+      // processing, failure, and sync states, but do not add a success badge.
+      val visibleStatus = meeting.statusLabel.takeUnless { it == "已完成" }.orEmpty()
+      val hasStatus = visibleStatus.isNotBlank()
       divider.visibility = if (hasStatus && mode == MinutesHomeViewMode.LIST) View.VISIBLE else View.GONE
       status.visibility = if (hasStatus) View.VISIBLE else View.GONE
-      status.text = meeting.statusLabel
+      status.text = visibleStatus
       status.setTextColor(statusToneColor(meeting.statusTone))
       root.contentDescription = listOf(
         meeting.title,
         meeting.coverTitle,
         meeting.coverText,
         meta.text,
-        meeting.statusLabel,
+        visibleStatus,
       )
         .filter { it.isNotBlank() }
         .joinToString("，")
@@ -285,33 +314,42 @@ internal class MinutesMeetingAdapter(
       when (effectiveType) {
         MinutesListCoverType.DEFAULT -> {
           applyDefaultCoverGeometry()
-          cover.backgroundShape(Color.rgb(220, 229, 250))
+          cover.backgroundShape(MinutesPalette.coverDefault)
+          coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
+          coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
           coverIcon.visibility = View.VISIBLE
           coverContent.visibility = View.GONE
         }
         MinutesListCoverType.SUMMARY -> {
-          applyDynamicCoverGeometry(topPaddingDp = 24)
-          cover.backgroundShape(MinutesPalette.primarySoft)
+          applyDynamicCoverGeometry(topPaddingDp = 24, bottomPaddingDp = 28)
+          cover.backgroundShape(MinutesPalette.coverSummary)
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
-          coverTitle.text = meeting.coverTitle.ifBlank { "会议总结" }
+          coverHeaderIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book)
+          coverHeaderIcon.background = null
+          coverTitle.text = meeting.coverTitle.ifBlank { "总结" }
           coverTitle.setTextColor(MinutesPalette.secondary)
+          coverText.maxLines = 5
           coverText.text = usableText
           coverText.setTextColor(MinutesPalette.text)
+          coverQuote.visibility = View.GONE
         }
         MinutesListCoverType.SPEAKER_SUMMARY -> {
-          applyDynamicCoverGeometry(topPaddingDp = 16)
-          cover.backgroundHorizontalGradient(
-            startColor = Color.rgb(85, 95, 242),
-            endColor = Color.rgb(139, 118, 245),
-            radiusDp = 0,
-          )
+          // LaoJi infers a representative transcript line locally. Its nearest
+          // source surface is mm_item_list_cover_content, not the separate
+          // blue-gray server-selected speaker-summary cover.
+          applyDynamicCoverGeometry(topPaddingDp = 26, bottomPaddingDp = 20)
+          cover.backgroundShape(MinutesPalette.coverContent)
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
+          coverHeaderIcon.setImageDrawable(null)
+          coverHeaderIcon.background = speakerAvatarBackground(meeting.coverTitle)
           coverTitle.text = meeting.coverTitle.ifBlank { "发言人" }
-          coverTitle.setTextColor(Color.argb(204, 255, 255, 255))
+          coverTitle.setTextColor(MinutesPalette.secondary)
+          coverText.maxLines = 4
           coverText.text = usableText
-          coverText.setTextColor(Color.WHITE)
+          coverText.setTextColor(MinutesPalette.text)
+          coverQuote.visibility = View.VISIBLE
         }
       }
     }
@@ -325,10 +363,10 @@ internal class MinutesMeetingAdapter(
       )
     }
 
-    private fun applyDynamicCoverGeometry(topPaddingDp: Int) {
+    private fun applyDynamicCoverGeometry(topPaddingDp: Int, bottomPaddingDp: Int) {
       val context = itemView.context
-      // [SOURCE] Summary and speaker-summary covers are wrap_content with
-      // 24dp horizontal padding, a 6dp title gap, and up to five text lines.
+      // [SOURCE] Dynamic cover layouts use wrap_content, 24dp horizontal
+      // padding, and a 6dp title-to-content gap.
       cover.minimumHeight = 0
       cover.layoutParams = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -339,12 +377,23 @@ internal class MinutesMeetingAdapter(
         context.dp(24),
         context.dp(topPaddingDp),
         context.dp(24),
-        context.dp(28),
+        context.dp(bottomPaddingDp),
       )
       coverContent.layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
       )
+    }
+
+    private fun speakerAvatarBackground(seed: String): GradientDrawable {
+      val colors = if ((seed.hashCode() and 1) == 0) {
+        intArrayOf(Color.rgb(193, 188, 255), Color.rgb(226, 224, 255))
+      } else {
+        intArrayOf(Color.rgb(167, 232, 224), Color.rgb(210, 247, 241))
+      }
+      return GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
+        shape = GradientDrawable.OVAL
+      }
     }
 
     fun recycle() {
