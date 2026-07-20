@@ -31,6 +31,7 @@ internal class MinutesListSurface(
   private val content = FrameLayout(context)
   private val list = RecyclerView(context)
   private val itemContextMenu = MinutesItemContextMenu(context, onAction)
+  private val mainMenu = MinutesMainMenu(context, onAction)
   private val adapter = MinutesMeetingAdapter(onAction, itemContextMenu::show)
   private val stateOverlay = LinearLayout(context)
   private val progress = ProgressBar(context)
@@ -67,6 +68,7 @@ internal class MinutesListSurface(
         if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
           MinutesSwipeMenuLayout.closeOpenMenu()
           itemContextMenu.dismiss()
+          mainMenu.dismiss()
         }
       }
     })
@@ -159,9 +161,11 @@ internal class MinutesListSurface(
     renderedTitle = state.title
     titleBar.configure(state.title, viewMode) { action ->
       if (action == "toggleViewMode") toggleViewMode()
+      else if (action == "more") mainMenu.show(titleBar.moreAnchor())
       else onAction(mapOf("type" to action))
     }
     titleBar.visibility = if (state.searching) View.GONE else View.VISIBLE
+    if (state.searching) mainMenu.dismiss()
     searchBar.visibility = if (state.searching) View.VISIBLE else View.GONE
     renderingSearch = true
     if (searchInput.text.toString() != state.query) {
@@ -228,6 +232,7 @@ internal class MinutesListSurface(
 
   private fun toggleViewMode() {
     itemContextMenu.dismiss()
+    mainMenu.dismiss()
     val firstVisible = when (val layoutManager = list.layoutManager) {
       is StaggeredGridLayoutManager -> layoutManager.findFirstVisibleItemPositions(null).minOrNull() ?: 0
       is LinearLayoutManager -> layoutManager.findFirstVisibleItemPosition()
@@ -243,6 +248,7 @@ internal class MinutesListSurface(
     applyListPadding(topPadding = list.paddingTop)
     titleBar.configure(renderedTitle, viewMode) { action ->
       if (action == "toggleViewMode") toggleViewMode()
+      else if (action == "more") mainMenu.show(titleBar.moreAnchor())
       else onAction(mapOf("type" to action))
     }
     list.scrollToPosition(firstVisible.coerceAtLeast(0))
@@ -292,6 +298,7 @@ internal class MinutesListSurface(
 
   override fun onDetachedFromWindow() {
     itemContextMenu.dismiss()
+    mainMenu.dismiss()
     super.onDetachedFromWindow()
   }
 }

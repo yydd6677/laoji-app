@@ -56,6 +56,7 @@ import {
 } from '../native/nativeMinutesSnapshots';
 import type { RootStackParamList } from '../types';
 import { canResumeMeetingRecording, shouldCheckpointTranscript } from '../utils/meetingMedia';
+import { defaultMeetingTitle, displayMeetingTitle } from '../utils/meetingTitle';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -67,11 +68,6 @@ interface ActiveNativeRecording {
   sessionId: string;
   guestSession?: ApiGuestRealtimeSession;
   finalize: () => Promise<FinalizeMeetingRecordingResult>;
-}
-
-function defaultTitle(): string {
-  const now = new Date();
-  return `新录音 ${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
 function formatMeetingStart(value: Date): string {
@@ -124,7 +120,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     ? meetings.find(meeting => meeting.id === requestedMeetingId)
     : undefined;
   const [meetingId, setMeetingId] = useState(existing?.id ?? '');
-  const [title, setTitle] = useState(existing?.title ?? defaultTitle());
+  const [title, setTitle] = useState(displayMeetingTitle(existing?.title ?? defaultMeetingTitle()));
   const [phase, setPhase] = useState<MinutesRecordingPhase>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState('');
@@ -161,7 +157,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   useEffect(() => { activeMeetingIdRef.current = meetingId; }, [meetingId]);
   useEffect(() => {
     if (!existing?.title) return;
-    setTitle(existing.title);
+    setTitle(displayMeetingTitle(existing.title));
   }, [existing?.title]);
 
   const applyRecorderSnapshot = useCallback((snapshot: NativeRecorderSnapshot) => {
@@ -404,7 +400,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     const current = await getNativeRecorderState(existing.id).catch(() => null);
     if (current && ['preparing', 'recording', 'paused', 'failed'].includes(current.state)) {
       setMeetingId(existing.id);
-      setTitle(existing.title);
+      setTitle(displayMeetingTitle(existing.title));
       setTranscript(getCachedTranscript(existing.id));
       applyRecorderSnapshot(current);
       activeRef.current = createActiveRecording(existing.id);
@@ -416,7 +412,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     const recovered = recovery?.recordings.find(item => item.sessionId === existing.id);
     if (!recovered) return false;
     setMeetingId(existing.id);
-    setTitle(existing.title);
+    setTitle(displayMeetingTitle(existing.title));
     setElapsedMs(recovered.durationMs);
     setPhase('saving');
     recorderSnapshotRef.current = {
@@ -466,7 +462,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       if (reusable && !canResumeMeetingRecording(reusable)) {
         throw new Error('该会议已有录音，不能继续写入同一份会议文件');
       }
-      const meetingPayload = { title: titleRef.current.trim() || defaultTitle(), mode: 'realtime' as const };
+      const meetingPayload = { title: titleRef.current.trim() || defaultMeetingTitle(), mode: 'realtime' as const };
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'meeting', meetingPayload);
       const meeting = reusable ?? await createMeeting(meetingPayload.title, {
         mode: meetingPayload.mode,

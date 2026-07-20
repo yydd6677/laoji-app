@@ -12,7 +12,6 @@ import {
   hasNativeRecorder,
   recoverNativeRecordings,
 } from 'laoji-native-platform';
-import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import { useAppDialog } from '../components/AppDialog';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
@@ -20,6 +19,7 @@ import { readableErrorMessage } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
 import { canResumeMeetingRecording, formatDuration, preferredMeetingStatusLabel } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -145,7 +145,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
-  const [appMenuVisible, setAppMenuVisible] = useState(false);
   const [staleRecordingIds, setStaleRecordingIds] = useState<ReadonlySet<string>>(new Set());
 
   // A cached/local resumable row is not enough to describe the native session.
@@ -268,7 +267,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         );
         return {
           id: meeting.id,
-          title: meeting.title,
+          title: displayMeetingTitle(meeting.title),
           dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
           durationLabel: meeting.audioDurationSec
             ? formatDuration(meeting.audioDurationSec)
@@ -353,35 +352,29 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         void refreshMeetings();
         break;
       case 'more':
-        setAppMenuVisible(true);
+        // The native title bar owns its source-matched anchored menu.
+        break;
+      case 'openSpeakers':
+        navigation.navigate('SpeakerManager');
+        break;
+      case 'openProfile':
+        navigation.navigate('Profile');
         break;
       default:
         break;
     }
   };
 
-  const appMenuItems: AppActionSheetItem[] = [
-    { key: 'speakers', label: '管理讲话人', onPress: () => navigation.navigate('SpeakerManager') },
-    { key: 'profile', label: '个人资料', onPress: () => navigation.navigate('Profile') },
-  ];
   return (
-    <>
-      <LaojiMinutesView
-        style={styles.surface}
-        surface="list"
-        snapshot={snapshot}
-        bottomBarSelectionCommand={bottomBarSelectionCommand}
-        onMinutesAction={event => handleAction(event.nativeEvent)}
-        onTabPress={onTabPress}
-        testID="meeting-native-list"
-      />
-      <AppActionSheet
-        visible={appMenuVisible}
-        title="会议记录"
-        items={appMenuItems}
-        onClose={() => setAppMenuVisible(false)}
-      />
-    </>
+    <LaojiMinutesView
+      style={styles.surface}
+      surface="list"
+      snapshot={snapshot}
+      bottomBarSelectionCommand={bottomBarSelectionCommand}
+      onMinutesAction={event => handleAction(event.nativeEvent)}
+      onTabPress={onTabPress}
+      testID="meeting-native-list"
+    />
   );
 }
 

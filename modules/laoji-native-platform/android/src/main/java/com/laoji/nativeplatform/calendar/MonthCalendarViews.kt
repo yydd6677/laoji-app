@@ -71,7 +71,8 @@ private data class MonthEventHit(
 @FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class MonthWeekdayHeaderView(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
-  private val weekdayPaint = CalendarUi.textPaint(context, palette.textSecondary, 12f, true)
+  private val weekdayPaint = CalendarUi.textPaint(context, palette.textPrimary, 12f, true)
+  private var todayWeekdayIndex: Int? = null
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.divider
     strokeWidth = maxOf(1f, CalendarUi.dp(context, 0.5f))
@@ -82,6 +83,16 @@ private class MonthWeekdayHeaderView(context: Context) : View(context) {
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
 
+  fun bind(monthEpochDay: Int, todayEpochDay: Int?) {
+    val gridStart = CalendarDateMath.monthGridStart(monthEpochDay)
+    val gridEndExclusive = gridStart + CalendarDateMath.monthWeekCount(monthEpochDay) *
+      MonthExpandedLayoutContract.DAY_PAGE_COUNT
+    todayWeekdayIndex = todayEpochDay
+      ?.takeIf { it in gridStart until gridEndExclusive }
+      ?.let { (it - gridStart) % MonthExpandedLayoutContract.DAY_PAGE_COUNT }
+    invalidate()
+  }
+
   override fun onDraw(canvas: Canvas) {
     super.onDraw(canvas)
     val labels = CalendarUi.weekdayLabels()
@@ -89,6 +100,7 @@ private class MonthWeekdayHeaderView(context: Context) : View(context) {
     val gridEnd = CalendarUi.dp(context, MonthExpandedLayoutContract.GRID_END_MARGIN_DP)
     val cellWidth = ((width - gridStart - gridEnd) / MonthExpandedLayoutContract.DAY_PAGE_COUNT).coerceAtLeast(1f)
     labels.forEachIndexed { index, label ->
+      weekdayPaint.color = if (index == todayWeekdayIndex) palette.accent else palette.textPrimary
       canvas.drawText(
         label,
         gridStart + index * cellWidth + (cellWidth - weekdayPaint.measureText(label)) / 2f,
@@ -1066,6 +1078,7 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     this.snapshot = snapshot
     this.listener = listener
     weekCount = CalendarDateMath.monthWeekCount(normalizedMonth)
+    weekdayHeader.bind(normalizedMonth, snapshot?.todayEpochDay)
     ensureWeekRows()
     if (!transitioning) {
       displayedSelectedEpochDay = expandedSelection?.epochDay

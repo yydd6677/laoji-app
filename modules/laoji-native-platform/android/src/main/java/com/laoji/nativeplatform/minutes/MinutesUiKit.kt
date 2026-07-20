@@ -264,6 +264,12 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
     com.laoji.nativeplatform.R.drawable.laoji_ic_list_outline,
     "切换到列表视图",
   )
+  private val moreButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
+    "更多会议记录操作",
+  )
+
+  fun moreAnchor(): View = moreButton
 
   init {
     setBackgroundColor(MinutesPalette.page)
@@ -315,10 +321,7 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
       LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
     )
     actions.addView(
-      context.iconButton(
-        com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
-        "更多会议记录操作",
-      ).apply { setOnClickListener { actionHandler?.invoke("more") } },
+      moreButton.apply { setOnClickListener { actionHandler?.invoke("more") } },
       LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
     )
   }

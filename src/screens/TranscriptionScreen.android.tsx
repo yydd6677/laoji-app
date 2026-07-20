@@ -23,6 +23,7 @@ import {
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
@@ -741,7 +742,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
     available: Boolean(meeting),
-    title: meeting?.title ?? '会议记录不存在',
+    title: meeting ? displayMeetingTitle(meeting.title) : '会议记录不存在',
     dateTimeLabel: meeting ? compactMeetingDateTime(meeting.date, meeting.time) : '',
     activeTab,
     tabGeneration,

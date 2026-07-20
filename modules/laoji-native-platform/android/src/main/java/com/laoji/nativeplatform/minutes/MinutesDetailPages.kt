@@ -369,9 +369,10 @@ internal class MinutesSpeakersPage(
 }
 
 /**
- * Feishu's detail surface exposes recording metadata as a real tab. Keep the
- * information useful for LaoJi rather than showing a decorative placeholder:
- * every value below is derived from the current detail snapshot.
+ * [SOURCE] Feishu's information tab presents user-semantic creation metadata,
+ * not local-file, sync, or transcript implementation state. LaoJi currently
+ * has no real owner/participant/location field, so only its true creation time
+ * is shown; missing capabilities are not represented by invented placeholders.
  */
 internal class MinutesInfoPage(
   context: Context,
@@ -406,24 +407,9 @@ internal class MinutesInfoPage(
   }
 
   fun render(state: MinutesDetailState) {
-    val duration = state.playerSource?.durationMsHint?.takeIf { it > 0 }?.let(::formatMinutesInfoDuration)
-      ?: "暂无"
-    val audio = when {
-      state.audioErrorMessage.isNotBlank() -> state.audioErrorMessage
-      state.playerSource == null -> "暂无可播放录音"
-      state.playerSource.uri.startsWith("http", ignoreCase = true) -> "云端录音"
-      else -> "已保存在本机"
+    val values = buildList {
+      state.dateTimeLabel.takeIf { it.isNotBlank() }?.let { add("创建时间" to it) }
     }
-    val sync = state.audioErrorMessage.ifBlank {
-      state.audioStatusMessage.ifBlank { if (state.playerSource != null) "可播放" else "仅有文字记录" }
-    }
-    val values = listOf(
-      "创建时间" to state.dateTimeLabel.ifBlank { "未记录" },
-      "录音时长" to duration,
-      "录音文件" to audio,
-      "同步状态" to sync,
-      "内容" to "${state.transcript.size} 段文字记录 · ${state.speakers.size} 位发言人",
-    )
     val key = values.joinToString("|") { "${it.first}=${it.second}" }
     if (key != renderedKey) {
       renderedKey = key
@@ -449,21 +435,9 @@ internal class MinutesInfoPage(
     }
     renderPageChrome(
       pageState = state.pageState(tab),
-      hasContent = state.available,
+      hasContent = values.isNotEmpty(),
       emptyMessage = "暂无录音信息",
     )
-  }
-}
-
-private fun formatMinutesInfoDuration(durationMs: Long): String {
-  val totalSeconds = (durationMs.coerceAtLeast(0L) / 1_000L).toInt()
-  val hours = totalSeconds / 3_600
-  val minutes = (totalSeconds % 3_600) / 60
-  val seconds = totalSeconds % 60
-  return if (hours > 0) {
-    "%02d:%02d:%02d".format(hours, minutes, seconds)
-  } else {
-    "%02d:%02d".format(minutes, seconds)
   }
 }
 

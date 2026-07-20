@@ -162,6 +162,7 @@ export interface MinutesViewSnapshot {
 
 export type MinutesSemanticAction =
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
+  | { type: 'openSpeakers' | 'openProfile'; surface: 'list' }
   | { type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording'; surface: MinutesSurface; meetingId: string }
   | { type: 'startRecording'; surface: MinutesSurface; meetingId?: string }
   | { type: 'saveTitle'; surface: 'detail' | 'recording'; meetingId: string; title: string }

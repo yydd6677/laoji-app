@@ -236,6 +236,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
           weekdayLabel = weekdayLabels[index],
           selected = epochDay == selectedEpochDay,
           today = epochDay == todayEpochDay,
+          todayEpochDay = todayEpochDay,
         )
       }
     }
@@ -277,7 +278,13 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       )
     }
 
-    fun bind(epochDay: Int, weekdayLabel: String, selected: Boolean, today: Boolean) {
+    fun bind(
+      epochDay: Int,
+      weekdayLabel: String,
+      selected: Boolean,
+      today: Boolean,
+      todayEpochDay: Int?,
+    ) {
       this.epochDay = epochDay
       val date = CalendarDateMath.fromEpochDay(epochDay)
       weekdayView.text = weekdayLabel
@@ -287,11 +294,20 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
         selectedEpochDay = epochDay.takeIf { selected },
         todayEpochDay = epochDay.takeIf { today },
       )
+      // [SOURCE] DayHeaderPage.m230609b: today uses primary blue, dates before
+      // today use ud_N500, and future dates use text_title. A gray selection
+      // marker on a non-today date does not override that temporal text color.
+      val temporalTextColor = when {
+        today -> palette.accent
+        epochDay < (todayEpochDay ?: Int.MIN_VALUE) -> palette.textPlaceholder
+        else -> palette.textPrimary
+      }
+      weekdayView.setTextColor(temporalTextColor)
       dayView.setTextColor(
         when (marker) {
           MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
-          MonthDateMarker.SELECTED -> palette.textPrimary
-          MonthDateMarker.NONE -> palette.textPrimary
+          MonthDateMarker.SELECTED -> temporalTextColor
+          MonthDateMarker.NONE -> temporalTextColor
         },
       )
       dayView.background = when (marker) {
@@ -886,6 +902,11 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
     advanceSession()
     bindComposition(animateFromPreviousDay, previousEpochDay)
     if (emitSelection) listener?.onDateSelected(nextEpochDay)
+    if (reason == "header-date-changed" && nextEpochDay == snapshot?.todayEpochDay) {
+      val now = Calendar.getInstance()
+      val currentMinute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+      post { threePageDayPager.scrollToMinuteCentered(currentMinute, animate = true) }
+    }
   }
 
   private fun bindComposition(
