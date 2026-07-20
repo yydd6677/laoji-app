@@ -556,7 +556,7 @@ private class MinutesSpeakersPageAdapter(
     private val root = itemView as FrameLayout
     private val avatar = FrameLayout(parent.context)
     private val labels = LinearLayout(parent.context).apply { orientation = LinearLayout.VERTICAL }
-    private val name = parent.context.textView(textSizeSp = 16, weight = Typeface.BOLD)
+    private val name = parent.context.textView(textSizeSp = 16)
     private val meta = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
     private val chevron = ImageView(parent.context).apply {
       setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
