@@ -5,6 +5,11 @@ package com.laoji.nativeplatform.minutes
 internal object MinutesDetailLayoutContract {
   const val TITLE_BAR_HEIGHT_DP = 44
   const val TAB_BAR_HEIGHT_DP = 41
+  const val TAB_MIN_WIDTH_DP = 60
+  const val TAB_HORIZONTAL_PADDING_DP = 10
+  const val TAB_INDICATOR_HEIGHT_DP = 2
+  const val TAB_DIVIDER_LEFT_MARGIN_DP = 20
+  const val TAB_DIVIDER_RIGHT_MARGIN_DP = 10
   const val HEADER_HORIZONTAL_PADDING_DP = 20
   const val HEADER_TOP_PADDING_DP = 20
   const val HEADER_BOTTOM_PADDING_DP = 16

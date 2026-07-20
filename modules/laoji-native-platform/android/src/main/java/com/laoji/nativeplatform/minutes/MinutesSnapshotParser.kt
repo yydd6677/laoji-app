@@ -173,6 +173,7 @@ object MinutesSnapshotParser {
         speakerLabel = item.string("speakerLabel").orDefault("发言人"),
         timestampLabel = item.string("timestampLabel").orDefault("00:00"),
         startMs = item.long("startMs"),
+        endMs = maxOf(item.long("startMs"), item.long("endMs")),
         text = item.string("text").orEmpty(),
         isFinal = item.boolean("isFinal", true),
       )

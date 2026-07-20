@@ -93,15 +93,22 @@ internal class MinutesDetailTabBar(
         setOnClickListener { onTabSelected(tab) }
       }
       tabViews[tab] = view
-      tabs.addView(view, LinearLayout.LayoutParams(context.dp(84), ViewGroup.LayoutParams.MATCH_PARENT))
+      tabs.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
     divider.setBackgroundColor(MinutesPalette.divider)
     addView(
       divider,
       LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1, Gravity.BOTTOM).apply {
-        leftMargin = context.dp(10)
-        rightMargin = context.dp(10)
+        leftMargin = context.dp(MinutesDetailLayoutContract.TAB_DIVIDER_LEFT_MARGIN_DP)
+        rightMargin = context.dp(MinutesDetailLayoutContract.TAB_DIVIDER_RIGHT_MARGIN_DP)
       },
+    )
+  }
+
+  fun render(state: MinutesDetailState) {
+    tabViews[MinutesDetailTab.SPEAKERS]?.setLabel(
+      if (state.speakers.isEmpty()) MinutesDetailTab.SPEAKERS.label
+      else "${MinutesDetailTab.SPEAKERS.label}(${state.speakers.size})",
     )
   }
 
@@ -110,21 +117,68 @@ internal class MinutesDetailTabBar(
   }
 
   private class TabView(context: Context, label: String) : FrameLayout(context) {
-    private val text = context.textView(label, 14, MinutesPalette.secondary).apply { gravity = Gravity.CENTER }
+    private val text = context.textView(label, 14, MinutesPalette.secondary).apply {
+      gravity = Gravity.CENTER
+      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      // [DEVICE] Matches Feishu's theme-resolved glyph advance on the same 420 dpi device.
+      textScaleX = 1.025f
+    }
+    // [SOURCE] ud_tab_item_layout.xml keeps an INVISIBLE bold copy so selection never changes tab width.
+    private val boldMeasureText = context.textView(label, 14, MinutesPalette.secondary, Typeface.BOLD).apply {
+      gravity = Gravity.CENTER
+      typeface = Typeface.create("sans-serif", Typeface.BOLD)
+      textScaleX = 1.025f
+      visibility = View.INVISIBLE
+      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
     private val indicator = View(context).apply { backgroundShape(MinutesPalette.primary, radiusDp = 1) }
 
     init {
       isClickable = true
       isFocusable = true
       contentDescription = label
-      addView(text, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-      addView(indicator, LayoutParams(context.dp(24), context.dp(2), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+      minimumWidth = context.dpRounded(MinutesDetailLayoutContract.TAB_MIN_WIDTH_DP)
+      setPadding(
+        context.dp(MinutesDetailLayoutContract.TAB_HORIZONTAL_PADDING_DP),
+        0,
+        context.dp(MinutesDetailLayoutContract.TAB_HORIZONTAL_PADDING_DP),
+        0,
+      )
+      addView(
+        boldMeasureText,
+        LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER),
+      )
+      addView(
+        text,
+        LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER),
+      )
+      addView(
+        indicator,
+        LayoutParams(0, context.dp(MinutesDetailLayoutContract.TAB_INDICATOR_HEIGHT_DP), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
+      )
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+      super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+      val contentWidth = maxOf(text.measuredWidth, boldMeasureText.measuredWidth)
+      if (indicator.layoutParams.width != contentWidth) {
+        indicator.layoutParams = indicator.layoutParams.apply { width = contentWidth }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+      }
+    }
+
+    fun setLabel(label: String) {
+      if (text.text.toString() == label) return
+      text.text = label
+      boldMeasureText.text = label
+      contentDescription = label
     }
 
     fun setSelectedState(selected: Boolean) {
       isSelected = selected
-      text.setTextColor(if (selected) MinutesPalette.text else MinutesPalette.secondary)
-      text.typeface = Typeface.create(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
+      text.isSelected = selected
+      text.setTextColor(if (selected) MinutesPalette.primary else MinutesPalette.secondary)
+      text.typeface = Typeface.create("sans-serif", if (selected) Typeface.BOLD else Typeface.NORMAL)
       indicator.visibility = if (selected) View.VISIBLE else View.INVISIBLE
     }
   }

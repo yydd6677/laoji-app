@@ -67,6 +67,12 @@ type Props = {
   route: RouteProp<RootStackParamList, 'Transcription'>;
 };
 
+function compactMeetingDateTime(date: string, time?: string): string {
+  const currentYearPrefix = `${new Date().getFullYear()}年`;
+  const compactDate = date.startsWith(currentYearPrefix) ? date.slice(currentYearPrefix.length) : date;
+  return [compactDate, time].filter(Boolean).join(' ');
+}
+
 function localPlayerSource(
   meetingId: string,
   title: string,
@@ -736,7 +742,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     meetingId: meeting?.id ?? route.params.meetingId,
     available: Boolean(meeting),
     title: meeting?.title ?? '会议记录不存在',
-    dateTimeLabel: meeting ? [meeting.date, meeting.time].filter(Boolean).join(' ') : '',
+    dateTimeLabel: meeting ? compactMeetingDateTime(meeting.date, meeting.time) : '',
     activeTab,
     tabGeneration,
     activeTabIsExplicit: route.params.focus === 'summary' || route.params.focus === 'transcript',

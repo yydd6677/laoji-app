@@ -43,7 +43,7 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     this.tabs = tabs
     this.pager = pager
     addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-    addView(tabs, LayoutParams(LayoutParams.MATCH_PARENT, context.dp(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)))
+    addView(tabs, LayoutParams(LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)))
     addView(pager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
   }
 
@@ -80,7 +80,7 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     header.measure(exactWidth, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
     val maxCollapse = if (topViewNotScroll) 0 else header.measuredHeight
     headerCollapseOffsetPx = if (forceHideTopView) maxCollapse else headerCollapseOffsetPx.coerceIn(0, maxCollapse)
-    val tabHeight = context.dp(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)
+    val tabHeight = context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)
     tabs.measure(exactWidth, MeasureSpec.makeMeasureSpec(tabHeight, MeasureSpec.EXACTLY))
     val pagerHeight = MinutesDetailLayoutContract.pagerHeightPx(
       stickyHeightPx = height,

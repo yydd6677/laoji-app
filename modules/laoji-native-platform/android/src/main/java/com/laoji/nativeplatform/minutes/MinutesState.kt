@@ -147,6 +147,7 @@ data class MinutesTranscriptLine(
   val speakerLabel: String = "发言人",
   val timestampLabel: String = "00:00",
   val startMs: Long = 0L,
+  val endMs: Long = startMs,
   val text: String,
   val isFinal: Boolean = true,
 )

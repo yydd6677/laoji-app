@@ -15,6 +15,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.roundToInt
 
 internal object MinutesPalette {
   val page = Color.rgb(248, 249, 250)
@@ -24,6 +25,7 @@ internal object MinutesPalette {
   val faint = Color.rgb(143, 149, 158)
   val disabled = Color.rgb(187, 191, 196)
   val divider = Color.rgb(222, 224, 227)
+  val timelineTrack = Color.argb(13, 31, 35, 41)
   val primary = Color.rgb(20, 86, 240)
   val primarySoft = Color.rgb(240, 244, 255)
   val danger = Color.rgb(226, 46, 40)
@@ -34,6 +36,10 @@ internal object MinutesPalette {
 
 internal fun Context.dp(value: Int): Int =
   TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).toInt()
+
+/** Android XML dimension resources round to the nearest device pixel. */
+internal fun Context.dpRounded(value: Int): Int =
+  TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).roundToInt()
 
 internal fun Context.sp(value: Int): Float =
   TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value.toFloat(), resources.displayMetrics)

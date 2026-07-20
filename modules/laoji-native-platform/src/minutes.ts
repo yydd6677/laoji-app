@@ -57,6 +57,7 @@ export interface MinutesTranscriptLineSnapshot {
   speakerLabel?: string;
   timestampLabel?: string;
   startMs?: number;
+  endMs?: number;
   text: string;
   isFinal?: boolean;
 }

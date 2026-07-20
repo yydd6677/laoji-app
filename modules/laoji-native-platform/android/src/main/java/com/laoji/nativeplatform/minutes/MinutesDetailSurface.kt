@@ -86,15 +86,15 @@ internal class MinutesDetailSurface(
     setBackgroundColor(MinutesPalette.surface)
     addView(
       titleBar,
-      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(MinutesDetailLayoutContract.TITLE_BAR_HEIGHT_DP)),
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.TITLE_BAR_HEIGHT_DP)),
     )
 
     audioHeader.orientation = VERTICAL
     audioHeader.setPadding(
-      context.dp(MinutesDetailLayoutContract.HEADER_HORIZONTAL_PADDING_DP),
-      context.dp(MinutesDetailLayoutContract.HEADER_TOP_PADDING_DP),
-      context.dp(MinutesDetailLayoutContract.HEADER_HORIZONTAL_PADDING_DP),
-      context.dp(MinutesDetailLayoutContract.HEADER_BOTTOM_PADDING_DP),
+      context.dpRounded(MinutesDetailLayoutContract.HEADER_HORIZONTAL_PADDING_DP),
+      context.dpRounded(MinutesDetailLayoutContract.HEADER_TOP_PADDING_DP),
+      context.dpRounded(MinutesDetailLayoutContract.HEADER_HORIZONTAL_PADDING_DP),
+      context.dpRounded(MinutesDetailLayoutContract.HEADER_BOTTOM_PADDING_DP),
     )
     title.maxLines = 2
     title.isClickable = true
@@ -142,17 +142,17 @@ internal class MinutesDetailSurface(
     dateTimeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline)
     dateTimeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
     dateTimeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-    subtitleRow.addView(dateTimeIcon, LayoutParams(context.dp(12), context.dp(12)))
+    subtitleRow.addView(dateTimeIcon, LayoutParams(context.dpRounded(12), context.dpRounded(12)))
     subtitleRow.addView(
       dateTime,
-      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(22)).apply {
-        leftMargin = context.dp(4)
+      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dpRounded(22)).apply {
+        leftMargin = context.dpRounded(4)
       },
     )
     audioHeader.addView(
       subtitleRow,
-      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(22)).apply {
-        topMargin = context.dp(MinutesDetailLayoutContract.SUBTITLE_TOP_MARGIN_DP)
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dpRounded(22)).apply {
+        topMargin = context.dpRounded(MinutesDetailLayoutContract.SUBTITLE_TOP_MARGIN_DP)
       },
     )
 
@@ -232,6 +232,7 @@ internal class MinutesDetailSurface(
     subtitleRow.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
     renderAudioState(renderedState)
     pagerAdapter.render(renderedState)
+    tabBar.render(renderedState)
     issueTabCommand(
       tab = acceptedTab,
       generation = acceptedGeneration,

@@ -16,6 +16,7 @@ import android.widget.TextView
 import androidx.core.widget.NestedScrollView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlin.math.roundToInt
 
 internal abstract class MinutesDetailPage(
   context: Context,
@@ -342,7 +343,23 @@ internal class MinutesSpeakersPage(
   }
 
   fun render(state: MinutesDetailState) {
-    rows.replace(state.speakers)
+    val mediaDurationMs = maxOf(
+      state.playerSource?.durationMsHint ?: 0L,
+      state.transcript.maxOfOrNull { maxOf(it.startMs, it.endMs) } ?: 0L,
+    )
+    rows.replace(
+      state.speakers.mapIndexed { index, speaker ->
+        MinutesSpeakerTimelineRow(
+          speaker = speaker,
+          segments = state.transcript.filter { line ->
+            line.speakerId == speaker.id ||
+              (line.speakerId == "unknown" && line.speakerLabel == speaker.label)
+          },
+          mediaDurationMs = mediaDurationMs,
+          colorIndex = index,
+        )
+      },
+    )
     renderPageChrome(
       pageState = state.pageState(tab),
       hasContent = state.speakers.isNotEmpty(),
@@ -363,7 +380,7 @@ internal class MinutesInfoPage(
   private val scroll = NestedScrollView(context)
   private val rows = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
-    setPadding(context.dp(20), context.dp(12), context.dp(20), context.dp(40))
+    setPadding(0, context.dp(14), 0, context.dp(40))
   }
   private var renderedKey = ""
 
@@ -401,7 +418,7 @@ internal class MinutesInfoPage(
       state.audioStatusMessage.ifBlank { if (state.playerSource != null) "可播放" else "仅有文字记录" }
     }
     val values = listOf(
-      "录制时间" to state.dateTimeLabel.ifBlank { "未记录" },
+      "创建时间" to state.dateTimeLabel.ifBlank { "未记录" },
       "录音时长" to duration,
       "录音文件" to audio,
       "同步状态" to sync,
@@ -415,17 +432,17 @@ internal class MinutesInfoPage(
       values.forEachIndexed { index, (label, value) ->
         val row = LinearLayout(context).apply {
           orientation = LinearLayout.VERTICAL
-          setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
-          backgroundShape(MinutesPalette.surface, radiusDp = if (index == 0) 12 else 0)
+          setPadding(context.dp(16), 0, context.dp(16), 0)
+          minimumHeight = context.dp(66)
         }
-        row.addView(context.textView(label, 13, MinutesPalette.secondary))
+        row.addView(context.textView(label, 14, MinutesPalette.secondary))
         row.addView(context.textView(value, 16, MinutesPalette.text).apply {
           setLineSpacing(0f, 1.2f)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-          topMargin = context.dp(6)
+          topMargin = context.dp(8)
         })
         rows.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-          topMargin = if (index == 0) 0 else context.dp(1)
+          topMargin = if (index == 0) 0 else context.dp(14)
         })
       }
       scroll.post { scroll.scrollTo(0, retainedScroll.coerceAtMost(rows.height)) }
@@ -532,76 +549,158 @@ private class MinutesTranscriptPageAdapter(
   }
 }
 
+private data class MinutesSpeakerTimelineRow(
+  val speaker: MinutesSpeaker,
+  val segments: List<MinutesTranscriptLine>,
+  val mediaDurationMs: Long,
+  val colorIndex: Int,
+) {
+  val spokenDurationMs: Long
+    get() = segments.sumOf { line -> (line.endMs - line.startMs).coerceAtLeast(0L) }
+
+  val percent: Int
+    get() = if (mediaDurationMs > 0L) {
+      ((spokenDurationMs.toDouble() / mediaDurationMs.toDouble()) * 100.0).roundToInt().coerceIn(0, 100)
+    } else {
+      0
+    }
+}
+
 private class MinutesSpeakersPageAdapter(
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : RecyclerView.Adapter<MinutesSpeakersPageAdapter.Holder>() {
-  private var rows: List<MinutesSpeaker> = emptyList()
+  private var rows: List<MinutesSpeakerTimelineRow> = emptyList()
 
   init {
     setHasStableIds(true)
   }
 
-  fun replace(next: List<MinutesSpeaker>) {
+  fun replace(next: List<MinutesSpeakerTimelineRow>) {
     if (rows == next) return
     rows = next.toList()
     notifyDataSetChanged()
   }
 
   override fun getItemCount(): Int = rows.size
-  override fun getItemId(position: Int): Long = rows[position].id.hashCode().toLong()
+  override fun getItemId(position: Int): Long = rows[position].speaker.id.hashCode().toLong()
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(parent)
   override fun onBindViewHolder(holder: Holder, position: Int) = holder.bind(rows[position], onAction)
 
   internal class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(FrameLayout(parent.context)) {
     private val root = itemView as FrameLayout
     private val avatar = FrameLayout(parent.context)
-    private val labels = LinearLayout(parent.context).apply { orientation = LinearLayout.VERTICAL }
-    private val name = parent.context.textView(textSizeSp = 16)
-    private val meta = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-    private val chevron = ImageView(parent.context).apply {
-      setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
-      imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.faint)
-      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-    }
+    private val name = parent.context.textView(textSizeSp = 14)
+    private val percent = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val timeline = MinutesSpeakerTimelineView(parent.context)
 
     init {
       root.layoutParams = RecyclerView.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
       )
-      root.minimumHeight = parent.context.dp(68)
-      root.setPadding(parent.context.dp(20), parent.context.dp(8), parent.context.dp(16), parent.context.dp(8))
       avatar.addView(
         ImageView(parent.context).apply {
           setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_person_filled)
           importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         },
-        FrameLayout.LayoutParams(parent.context.dp(22), parent.context.dp(22), Gravity.CENTER),
+        FrameLayout.LayoutParams(parent.context.dp(14), parent.context.dp(14), Gravity.CENTER),
       )
-      root.addView(avatar, FrameLayout.LayoutParams(parent.context.dp(44), parent.context.dp(44), Gravity.CENTER_VERTICAL))
-      labels.addView(name)
-      labels.addView(meta, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-        topMargin = parent.context.dp(4)
+      root.addView(avatar, FrameLayout.LayoutParams(parent.context.dp(24), parent.context.dp(24)).apply {
+        leftMargin = parent.context.dp(16)
       })
-      root.addView(labels, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL).apply {
-        leftMargin = parent.context.dp(58)
-        rightMargin = parent.context.dp(36)
+      root.addView(name, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, parent.context.dp(24)).apply {
+        leftMargin = parent.context.dp(48)
+        rightMargin = parent.context.dp(54)
       })
-      root.addView(chevron, FrameLayout.LayoutParams(parent.context.dp(32), parent.context.dp(44), Gravity.END or Gravity.CENTER_VERTICAL))
+      percent.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+      root.addView(percent, FrameLayout.LayoutParams(parent.context.dp(46), parent.context.dp(24), Gravity.END).apply {
+        rightMargin = parent.context.dp(16)
+      })
+      root.addView(timeline, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, parent.context.dp(25)).apply {
+        topMargin = parent.context.dp(24)
+      })
+      root.setPadding(0, 0, 0, parent.context.dp(16))
     }
 
-    fun bind(speaker: MinutesSpeaker, onAction: (Map<String, Any?>) -> Unit) {
+    fun bind(row: MinutesSpeakerTimelineRow, onAction: (Map<String, Any?>) -> Unit) {
+      val speaker = row.speaker
       val tone = minutesSpeakerTone(speaker.id)
+      val timelineColor = minutesSpeakerTimelineColors[row.colorIndex % minutesSpeakerTimelineColors.size]
       avatar.backgroundShape(tone.first, radiusDp = 22)
       (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
       name.text = speaker.label
-      meta.text = listOf("${speaker.segmentCount} 段", speaker.durationLabel).filter { it.isNotBlank() }.joinToString(" · ")
-      chevron.visibility = if (speaker.canManage) View.VISIBLE else View.INVISIBLE
+      percent.text = "${row.percent}%"
+      timeline.bind(row, timelineColor) { positionMs ->
+        onAction(mapOf("type" to "seekTranscript", "positionMs" to positionMs))
+      }
       root.isClickable = speaker.canManage
       root.isFocusable = speaker.canManage
+      root.contentDescription = "${speaker.label}，发言占比${row.percent}%"
       root.setOnClickListener(if (speaker.canManage) {
         View.OnClickListener { onAction(mapOf("type" to "manageSpeaker", "speakerId" to speaker.id)) }
       } else null)
+    }
+  }
+}
+
+private class MinutesSpeakerTimelineView(context: Context) : FrameLayout(context) {
+  private var row: MinutesSpeakerTimelineRow? = null
+  private var segmentColor: Int = MinutesPalette.primary
+  private var onSeek: (Long) -> Unit = {}
+
+  fun bind(
+    row: MinutesSpeakerTimelineRow,
+    segmentColor: Int,
+    onSeek: (Long) -> Unit,
+  ) {
+    this.row = row
+    this.segmentColor = segmentColor
+    this.onSeek = onSeek
+    rebuild()
+    post { if (this.row === row) rebuild() }
+  }
+
+  override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+    super.onSizeChanged(width, height, oldWidth, oldHeight)
+    if (width != oldWidth || height != oldHeight) rebuild()
+  }
+
+  private fun rebuild() {
+    removeAllViews()
+    if (width <= 0 || height <= 0) return
+    val sideMargin = context.dp(16)
+    val trackHeight = context.dp(5).coerceAtLeast(1)
+    val trackTop = (height - trackHeight) / 2
+    val trackWidth = (width - sideMargin * 2).coerceAtLeast(0)
+    addView(
+      View(context).apply { backgroundShape(MinutesPalette.timelineTrack, radiusDp = 3) },
+      LayoutParams(trackWidth, trackHeight).apply {
+        leftMargin = sideMargin
+        topMargin = trackTop
+      },
+    )
+    val current = row ?: return
+    val durationMs = current.mediaDurationMs.coerceAtLeast(1L)
+    current.segments.forEach { segment ->
+      val startMs = segment.startMs.coerceIn(0L, durationMs)
+      val endMs = maxOf(startMs + 1L, segment.endMs).coerceIn(startMs, durationMs)
+      val left = sideMargin + ((startMs.toDouble() / durationMs) * trackWidth).roundToInt()
+      val desiredWidth = (((endMs - startMs).toDouble() / durationMs) * trackWidth).roundToInt()
+      val segmentWidth = desiredWidth.coerceAtLeast(context.dp(2)).coerceAtMost((sideMargin + trackWidth - left).coerceAtLeast(0))
+      if (segmentWidth <= 0) return@forEach
+      addView(
+        View(context).apply {
+          backgroundShape(segmentColor, radiusDp = 3)
+          isClickable = true
+          isFocusable = true
+          contentDescription = "跳转到${segment.timestampLabel}"
+          setOnClickListener { onSeek(segment.startMs) }
+        },
+        LayoutParams(segmentWidth, trackHeight).apply {
+          leftMargin = left
+          topMargin = trackTop
+        },
+      )
     }
   }
 }
@@ -613,6 +712,17 @@ private val minutesSpeakerTones = listOf(
   Color.rgb(255, 240, 226) to Color.rgb(240, 124, 43),
   Color.rgb(225, 246, 245) to Color.rgb(22, 156, 150),
   Color.rgb(253, 234, 242) to Color.rgb(214, 79, 130),
+)
+
+// [SOURCE] MmSpeakerTimelineViewModel.COLOR_ARRAY, indexed by sorted speaker row position.
+private val minutesSpeakerTimelineColors = intArrayOf(
+  Color.rgb(80, 131, 251),
+  Color.rgb(50, 166, 69),
+  Color.rgb(117, 125, 240),
+  Color.rgb(16, 168, 147),
+  Color.rgb(207, 94, 207),
+  Color.rgb(18, 149, 202),
+  Color.rgb(159, 111, 241),
 )
 
 private fun minutesSpeakerTone(key: String): Pair<Int, Int> =

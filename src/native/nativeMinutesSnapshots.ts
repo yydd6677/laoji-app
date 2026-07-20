@@ -221,6 +221,7 @@ export function toNativeMinutesTranscript(
       speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
       timestampLabel: formatNativeMinutesTimestamp(line.start_time),
       startMs: Math.round(finiteSeconds(line.start_time) * 1000),
+      endMs: Math.round(Math.max(finiteSeconds(line.start_time), finiteSeconds(line.end_time)) * 1000),
       text: line.text.trim(),
       isFinal: line.isFinal !== false,
     }));
