@@ -50,6 +50,7 @@ import { MeetingAudioPlayerDock } from '../components/MeetingAudioPlayerDock';
 import { MeetingSummaryContent } from '../components/MeetingSummaryContent';
 import { openMeetingsTab } from '../navigation/tabTargets';
 import { transcriptDurationSec } from '../utils/meetingMedia';
+import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -874,7 +875,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                       />
                     </View>
                     <Text style={s.transcriptSpeaker} numberOfLines={1}>
-                      {line.speaker_label || '讲话人'}
+                      {speakerDisplayLabel(line.speaker_label, line.speaker_id, '讲话人')}
                     </Text>
                     <View style={s.transcriptDot} />
                     <Text style={s.transcriptTime}>{transcriptTimestamp(line.start_time)}</Text>

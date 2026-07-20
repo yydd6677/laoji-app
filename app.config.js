@@ -36,7 +36,7 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 90,
+    versionCode: 91,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',

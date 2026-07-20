@@ -41,6 +41,7 @@ import {
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
 import { readableErrorMessage } from '../services/errors';
+import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -720,7 +721,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
                     <View style={s.speakerAvatar} testID="meeting-live-speaker-avatar">
                       <Ionicons name="person" size={10} color={C.faint} />
                     </View>
-                    <Text style={s.speaker} numberOfLines={1}>{line.speaker_label ?? '发言人'}</Text>
+                    <Text style={s.speaker} numberOfLines={1}>
+                      {speakerDisplayLabel(line.speaker_label, line.speaker_id)}
+                    </Text>
                     <View style={s.lineDot} />
                     <Text style={s.lineTime}>{formatTranscriptTime(line.start_time)}</Text>
                   </View>

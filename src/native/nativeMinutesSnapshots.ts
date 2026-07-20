@@ -12,6 +12,7 @@ import {
 } from 'laoji-native-platform';
 import type { TranscriptLine } from '../types';
 import { formatDuration } from '../utils/meetingMedia';
+import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 export type NativeMinutesTranscriptLine = TranscriptLine & {
   isFinal?: boolean;
@@ -217,7 +218,7 @@ export function toNativeMinutesTranscript(
     .map((line, index) => ({
       id: line.id || `line-${index}`,
       speakerId: line.speaker_id || 'unknown',
-      speakerLabel: line.speaker_label || '发言人',
+      speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
       timestampLabel: formatNativeMinutesTimestamp(line.start_time),
       startMs: Math.round(finiteSeconds(line.start_time) * 1000),
       text: line.text.trim(),
@@ -304,7 +305,7 @@ export function nativeMinutesSpeakers(
   transcript.forEach(line => {
     if (!line.text.trim()) return;
     const id = line.speaker_id?.trim() || line.speaker_label?.trim() || 'unknown';
-    const label = line.speaker_label?.trim() || (id === 'unknown' ? '发言人' : id);
+    const label = speakerDisplayLabel(line.speaker_label, line.speaker_id);
     const previous = grouped.get(id) ?? { label, count: 0, durationSec: 0 };
     const start = finiteSeconds(line.start_time);
     const end = finiteSeconds(line.end_time);

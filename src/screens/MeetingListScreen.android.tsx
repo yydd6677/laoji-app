@@ -19,6 +19,7 @@ import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../type
 import { readableErrorMessage } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
 import { canResumeMeetingRecording, formatDuration, preferredMeetingStatusLabel } from '../utils/meetingMedia';
+import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -73,8 +74,9 @@ function inferredMeetingCover(summary: MeetingSummary | null, transcript: readon
     if (text.length < 4) return;
     const speakerId = line.speaker_id?.trim();
     const speakerLabel = line.speaker_label?.trim();
-    const namedLabel = speakerLabel && !['发言人', '未知发言人', '未知'].includes(speakerLabel)
-      ? speakerLabel
+    const displayLabel = speakerDisplayLabel(speakerLabel, speakerId);
+    const namedLabel = !['发言人', '讲话人', '说话人', '未知发言人', '未知讲话人', '未知说话人', '未知'].includes(displayLabel)
+      ? displayLabel
       : '';
     const identity = speakerId && speakerId !== 'unknown' ? speakerId : namedLabel;
     if (!identity || !namedLabel) return;

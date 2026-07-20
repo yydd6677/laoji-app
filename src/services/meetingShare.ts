@@ -4,6 +4,7 @@ import { BEST_SPEED, zip } from 'react-native-zip-archive';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
+import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 export type MeetingShareKind = 'bundle' | 'document' | 'audio';
 export type MeetingShareErrorCode = 'NO_AUDIO' | 'NO_MEETING_CONTENT' | 'SHARING_UNAVAILABLE';
@@ -62,7 +63,7 @@ export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
     .filter(line => line.text.trim())
     .map(line => {
       const time = formatTranscriptTime(line.start_time);
-      const speaker = line.speaker_label ?? line.speaker_id ?? '发言人';
+      const speaker = speakerDisplayLabel(line.speaker_label, line.speaker_id);
       return `${time ? `[${time}] ` : ''}${speaker}：${line.text.trim()}`;
     })
     .join('\n');
