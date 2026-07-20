@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaojiMinutesSheetAnimation">
+        <item name="android:windowEnterAnimation">@anim/laoji_minutes_sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/laoji_minutes_sheet_exit</item>
+    </style>
+</resources>

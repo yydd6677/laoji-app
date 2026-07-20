@@ -4,6 +4,11 @@ package com.laoji.nativeplatform.media
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -66,7 +71,7 @@ class MinutesPlayerView(
     )
     content.addView(
       seekArea,
-      ConstraintLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+      ConstraintLayout.LayoutParams(0, context.dp(45)).apply {
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
@@ -86,13 +91,15 @@ class MinutesPlayerView(
     )
 
     position.id = View.generateViewId()
+    position.includeFontPadding = true
     position.gravity = Gravity.START or Gravity.CENTER_VERTICAL
     duration.id = View.generateViewId()
+    duration.includeFontPadding = true
     duration.gravity = Gravity.END or Gravity.CENTER_VERTICAL
     seekArea.addView(
       position,
       ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         leftMargin = context.dp(20)
       },
@@ -100,7 +107,7 @@ class MinutesPlayerView(
     seekArea.addView(
       duration,
       ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
         rightMargin = context.dp(20)
       },
@@ -115,7 +122,12 @@ class MinutesPlayerView(
     seekBar.progressBackgroundTintList = ColorStateList.valueOf(PLAYER_TRACK_COLOR)
     seekBar.secondaryProgressTintList = ColorStateList.valueOf(PLAYER_BUFFER_COLOR)
     seekBar.progressTintList = ColorStateList.valueOf(PLAYER_GRADIENT_START)
-    seekBar.thumbTintList = ColorStateList.valueOf(PLAYER_GRADIENT_START)
+    seekBar.thumbTintList = null
+    seekBar.thumbTintMode = null
+    seekBar.thumb = MinutesSeekThumbDrawable(context)
+    seekBar.thumbTintList = null
+    seekBar.thumbTintMode = null
+    seekBar.splitTrack = false
     seekBar.contentDescription = "录音播放进度"
     seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
       override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -138,12 +150,13 @@ class MinutesPlayerView(
     seekArea.addView(
       seekBar,
       ConstraintLayout.LayoutParams(0, context.dp(24)).apply {
-        topToBottom = position.id
+        topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
         leftMargin = context.dp(20)
         rightMargin = context.dp(20)
+        topMargin = context.dp(8)
         bottomMargin = context.dp(13)
       },
     )
@@ -153,7 +166,8 @@ class MinutesPlayerView(
     playPause.id = View.generateViewId()
     forward.id = View.generateViewId()
     speed.gravity = Gravity.CENTER
-    speed.minimumWidth = context.dp(40)
+    speed.minimumWidth = 0
+    speed.setPadding(context.dp(4), 0, context.dp(4), 0)
     speed.isClickable = true
     speed.isFocusable = true
     speed.contentDescription = "选择播放速度"
@@ -164,9 +178,7 @@ class MinutesPlayerView(
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
-        endToStart = rewind.id
         leftMargin = context.dp(20)
-        horizontalChainStyle = ConstraintLayout.LayoutParams.CHAIN_SPREAD
       },
     )
     rewind.minimumWidth = 0
@@ -178,21 +190,21 @@ class MinutesPlayerView(
       ConstraintLayout.LayoutParams(context.dp(40), context.dp(40)).apply {
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-        startToEnd = speed.id
         endToStart = playPause.id
+        rightMargin = context.dp(36)
       },
     )
     playPause.backgroundHorizontalGradient(PLAYER_GRADIENT_START, PLAYER_GRADIENT_END, radiusDp = 24)
     playPause.imageTintList = ColorStateList.valueOf(android.graphics.Color.WHITE)
-    playPause.setPadding(context.dp(28), context.dp(12), context.dp(28), context.dp(12))
+    playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
     playPause.setOnClickListener { controller.toggle() }
     controls.addView(
       playPause,
       ConstraintLayout.LayoutParams(context.dp(80), context.dp(48)).apply {
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-        startToEnd = rewind.id
-        endToStart = forward.id
+        startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
       },
     )
     forward.minimumWidth = 0
@@ -205,8 +217,7 @@ class MinutesPlayerView(
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToEnd = playPause.id
-        endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
-        rightMargin = context.dp(20)
+        leftMargin = context.dp(36)
       },
     )
     error.maxLines = 2
@@ -277,8 +288,14 @@ class MinutesPlayerView(
       if (state.isPlaying) com.laoji.nativeplatform.R.drawable.laoji_ic_pause_filled
       else com.laoji.nativeplatform.R.drawable.laoji_ic_play_filled,
     )
+    if (state.isPlaying) {
+      playPause.setPadding(context.dp(29), context.dp(13), context.dp(29), context.dp(13))
+    } else {
+      // Feishu offsets the asymmetric play glyph 1dp to the right.
+      playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
+    }
     playPause.contentDescription = if (state.isPlaying) "暂停会议录音" else "播放会议录音"
-    val enabled = state.sourceId != null && state.phase != MinutesPlaybackPhase.PREPARING
+    val enabled = state.sourceId != null
     listOf(speed, rewind, playPause, forward, seekBar).forEach {
       it.isEnabled = enabled
       it.alpha = if (enabled) 1f else 0.35f
@@ -300,4 +317,45 @@ class MinutesPlayerView(
     private val PLAYER_BUFFER_COLOR = android.graphics.Color.argb(77, 85, 95, 242)
     private val PLAYER_TRACK_COLOR = android.graphics.Color.argb(26, 31, 35, 41)
   }
+}
+
+/** Keeps the source asset's three colors even when the platform theme tints SeekBar thumbs. */
+private class MinutesSeekThumbDrawable(context: Context) : Drawable() {
+  private val sizePx = context.dp(16)
+  private val ringInsetPx = context.dp(1).toFloat()
+  private val coreInsetPx = context.dp(3).toFloat()
+  private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = android.graphics.Color.rgb(204, 216, 251)
+  }
+  private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = android.graphics.Color.WHITE
+  }
+  private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = android.graphics.Color.rgb(73, 83, 230)
+  }
+
+  override fun draw(canvas: Canvas) {
+    val centerX = bounds.exactCenterX()
+    val centerY = bounds.exactCenterY()
+    val radius = minOf(bounds.width(), bounds.height()) / 2f
+    canvas.drawCircle(centerX, centerY, radius, outerPaint)
+    canvas.drawCircle(centerX, centerY, (radius - ringInsetPx).coerceAtLeast(0f), ringPaint)
+    canvas.drawCircle(centerX, centerY, (radius - coreInsetPx).coerceAtLeast(0f), corePaint)
+  }
+
+  override fun setAlpha(alpha: Int) {
+    outerPaint.alpha = alpha
+    ringPaint.alpha = alpha
+    corePaint.alpha = alpha
+    invalidateSelf()
+  }
+
+  override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+
+  @Suppress("DEPRECATION")
+  override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+  override fun getIntrinsicWidth(): Int = sizePx
+
+  override fun getIntrinsicHeight(): Int = sizePx
 }
