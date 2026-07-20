@@ -62,6 +62,7 @@ import {
 } from '../native/nativeMinutesRequestCoordinator';
 import type { RootStackParamList, TranscriptLine } from '../types';
 import { transcriptDurationSec } from '../utils/meetingMedia';
+import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCache';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -310,31 +311,35 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
     setLoadingAudio(true);
     void fetchMeetingAudioInfo(meeting.id, accessToken)
-      .then(info => {
+      .then(async info => {
         if (!alive || !info) return;
         if (!playbackStorageScope) return;
-        const parsedExpiry = info.expires_at ? Date.parse(info.expires_at) : Number.NaN;
+        const localUri = await materializeMeetingPlaybackAudio({
+          meetingId: meeting.id,
+          meetingUpdatedAt: meeting.updatedAt,
+          audio: info,
+          accessToken,
+        });
+        if (!alive) return;
         setPlayerSource({
           sourceId: `cloud:${meeting.id}`,
-          uri: info.url,
-          headers: info.requires_auth ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          uri: localUri,
           title: meeting.title,
           durationMsHint: info.duration_sec ? Math.round(info.duration_sec * 1000) : undefined,
           retainForBackground: true,
           storageScope: playbackStorageScope,
-          expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
         });
         setPlayerSourceError('');
       })
       .catch(() => {
         if (alive) {
           setPlayerSource(null);
-          setPlayerSourceError('录音信息获取失败，请稍后重试。');
+          setPlayerSourceError('录音文件加载失败，请稍后重试。');
         }
       })
       .finally(() => { if (alive) setLoadingAudio(false); });
     return () => { alive = false; };
-  }, [accessToken, isGuest, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, playbackStorageScope, reloadKey, transcript]);
+  }, [accessToken, isGuest, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, playbackStorageScope, reloadKey, transcript]);
 
   const performPendingAudioUpload = useCallback((
     pending: PendingMeetingAudioUpload,

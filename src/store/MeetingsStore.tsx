@@ -23,6 +23,7 @@ import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
 import { HttpResponseError } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
 import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
+import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -523,6 +524,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           persistSummaries(),
           deletePendingMeetingAudioUpload(scope, id),
           deleteNativeMeetingArtifacts(scope, id),
+          deleteMeetingPlaybackCache(id),
           ...(target.audioLocalUri
             ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
             : []),
@@ -599,6 +601,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       persistSummaries(),
       deletePendingMeetingAudioUpload(scope, id),
       deleteNativeMeetingArtifacts(scope, id),
+      deleteMeetingPlaybackCache(id),
       ...(target?.audioLocalUri
         ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
         : []),

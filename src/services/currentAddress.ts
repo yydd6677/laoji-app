@@ -1,8 +1,16 @@
 import * as Location from 'expo-location';
+import { Platform } from 'react-native';
+import { getNativeCurrentLocation } from 'laoji-native-platform';
 
 const CURRENT_LOCATION_TIMEOUT_MS = 12_000;
+const NATIVE_LOCATION_TIMEOUT_MS = 10_000;
 const LAST_KNOWN_MAX_AGE_MS = 5 * 60_000;
 const LAST_KNOWN_REQUIRED_ACCURACY_METERS = 500;
+
+type CurrentCoordinates = {
+  latitude: number;
+  longitude: number;
+};
 
 export type CurrentAddressResult = {
   address: string;
@@ -69,22 +77,50 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
-async function position(): Promise<Location.LocationObject> {
-  try {
-    return await withTimeout(
-      Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-        mayShowUserSettingsDialog: true,
-      }),
-      CURRENT_LOCATION_TIMEOUT_MS,
-    );
-  } catch {
-    const cached = await Location.getLastKnownPositionAsync({
-      maxAge: LAST_KNOWN_MAX_AGE_MS,
-      requiredAccuracy: LAST_KNOWN_REQUIRED_ACCURACY_METERS,
+async function firstSuccessful<T>(promises: Array<Promise<T>>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let remaining = promises.length;
+    let lastError: unknown = new Error('no-location-provider');
+    promises.forEach(promise => {
+      promise.then(resolve).catch(reason => {
+        lastError = reason;
+        remaining -= 1;
+        if (remaining === 0) reject(lastError);
+      });
     });
-    if (cached) return cached;
-    throw new CurrentAddressError('unavailable', '暂时无法获取当前位置，请到开阔处后重试。');
+  });
+}
+
+async function position(): Promise<CurrentCoordinates> {
+  const cached = await Location.getLastKnownPositionAsync({
+    maxAge: LAST_KNOWN_MAX_AGE_MS,
+    requiredAccuracy: LAST_KNOWN_REQUIRED_ACCURACY_METERS,
+  }).catch(() => null);
+  if (cached) return cached.coords;
+
+  const candidates: Array<Promise<CurrentCoordinates>> = [
+    Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+      mayShowUserSettingsDialog: true,
+    }).then(value => value.coords),
+  ];
+  if (Platform.OS === 'android') {
+    candidates.push(
+      getNativeCurrentLocation(
+        LAST_KNOWN_MAX_AGE_MS,
+        LAST_KNOWN_REQUIRED_ACCURACY_METERS,
+        NATIVE_LOCATION_TIMEOUT_MS,
+      ).then(value => {
+        if (!value) throw new Error('android-location-unavailable');
+        return { latitude: value.latitude, longitude: value.longitude };
+      }),
+    );
+  }
+
+  try {
+    return await withTimeout(firstSuccessful(candidates), CURRENT_LOCATION_TIMEOUT_MS);
+  } catch {
+    throw new CurrentAddressError('unavailable', '系统定位器暂未返回位置，请稍后重试。');
   }
 }
 
@@ -111,8 +147,8 @@ export async function getCurrentAddress(): Promise<CurrentAddressResult> {
   try {
     const results = await withTimeout(
       Location.reverseGeocodeAsync({
-        latitude: current.coords.latitude,
-        longitude: current.coords.longitude,
+        latitude: current.latitude,
+        longitude: current.longitude,
       }),
       CURRENT_LOCATION_TIMEOUT_MS,
     );
@@ -123,7 +159,7 @@ export async function getCurrentAddress(): Promise<CurrentAddressResult> {
   }
 
   return {
-    address: `${current.coords.latitude.toFixed(6)}, ${current.coords.longitude.toFixed(6)}`,
+    address: `${current.latitude.toFixed(6)}, ${current.longitude.toFixed(6)}`,
     usedCoordinateFallback: true,
   };
 }
