@@ -157,7 +157,11 @@ class LaojiRecorderModule : Module() {
     AsyncFunction("recover") { promise: Promise ->
       try {
         settle(
-          RecorderRecovery.recover(requireContext(), RecorderServiceClient.currentSessionId()),
+          RecorderRecovery.recover(
+            requireContext(),
+            RecorderServiceClient.currentSessionId(),
+            includeFinalized = true,
+          ),
           promise,
         ) { report -> report.toMap() }
       } catch (error: Exception) {

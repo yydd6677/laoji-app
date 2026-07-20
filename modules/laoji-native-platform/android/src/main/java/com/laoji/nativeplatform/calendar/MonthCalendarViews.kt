@@ -15,6 +15,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.StateListDrawable
@@ -154,6 +155,19 @@ private class MonthWeekRowView(context: Context) : View(context) {
     color = palette.accent
     style = Paint.Style.FILL
   }
+  private val collapseOverlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.surfaceMuted
+    alpha = 230
+    style = Paint.Style.FILL
+  }
+  private val collapseChevronPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.textPlaceholder
+    style = Paint.Style.STROKE
+    strokeWidth = CalendarUi.dp(context, 1.6f)
+    strokeCap = Paint.Cap.SQUARE
+    strokeJoin = Paint.Join.MITER
+  }
+  private val collapseChevronPath = Path()
   private val overflowBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.argb(31, 143, 149, 158)
     style = Paint.Style.FILL
@@ -170,6 +184,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
   private var rowStartEpochDay = 0
   private var rowIndex = 0
   private var selectedEpochDay: Int? = null
+  private var collapseColumn: Int? = null
   private var todayEpochDay: Int? = null
   private var segments: List<MonthEventSegment> = emptyList()
   private var listener: MonthWeekRowListener? = null
@@ -188,6 +203,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
     rowStartEpochDay: Int,
     rowIndex: Int,
     selectedEpochDay: Int?,
+    collapseColumn: Int?,
     todayEpochDay: Int?,
     segments: List<MonthEventSegment>,
     listener: MonthWeekRowListener?,
@@ -202,6 +218,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
     this.rowStartEpochDay = rowStartEpochDay
     this.rowIndex = rowIndex
     this.selectedEpochDay = selectedEpochDay
+    this.collapseColumn = collapseColumn
     this.todayEpochDay = todayEpochDay
     this.segments = segments
     this.listener = listener
@@ -336,6 +353,27 @@ private class MonthWeekRowView(context: Context) : View(context) {
         overflowBadgeTextPaint,
       )
     }
+
+    drawCollapseControl(canvas, gridStart, cellWidth)
+  }
+
+  private fun drawCollapseControl(canvas: Canvas, gridStart: Float, cellWidth: Float) {
+    val column = collapseColumn ?: return
+    val left = gridStart + column * cellWidth
+    val top = CalendarUi.dp(context, MonthExpandedLayoutContract.COLLAPSE_OVERLAY_TOP_DP)
+      .coerceAtMost(height.toFloat())
+    val right = left + cellWidth
+    canvas.drawRect(left, top, right, height.toFloat(), collapseOverlayPaint)
+
+    val centerX = (left + right) / 2f
+    val centerY = top + (height - top) / 2f
+    val halfWidth = CalendarUi.dp(context, MonthExpandedLayoutContract.COLLAPSE_CHEVRON_HALF_WIDTH_DP)
+    val halfHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.COLLAPSE_CHEVRON_HALF_HEIGHT_DP)
+    collapseChevronPath.reset()
+    collapseChevronPath.moveTo(centerX - halfWidth, centerY + halfHeight)
+    collapseChevronPath.lineTo(centerX, centerY - halfHeight)
+    collapseChevronPath.lineTo(centerX + halfWidth, centerY + halfHeight)
+    canvas.drawPath(collapseChevronPath, collapseChevronPaint)
   }
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -428,6 +466,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
       append(String.format(Locale.getDefault(), "%d年%d月%d日", parts.year, parts.month, parts.day))
       if (epochDay == todayEpochDay) append("，今天")
       if (epochDay == selectedEpochDay) append("，已选择")
+      if (column == collapseColumn) append("，再次点击收起日程")
       if (eventCount > 0) append("，$eventCount 项日程")
     }
   }
@@ -1327,6 +1366,7 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
         rowStartEpochDay = gridStart + row * 7,
         rowIndex = row,
         selectedEpochDay = displayedSelectedEpochDay,
+        collapseColumn = expandedSelection?.takeIf { it.row == row }?.column,
         todayEpochDay = snapshot?.todayEpochDay,
         segments = allSegments.filter { it.weekIndex == row },
         listener = this,

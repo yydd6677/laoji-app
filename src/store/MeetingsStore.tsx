@@ -12,7 +12,7 @@ import {
 } from '../services/api';
 import { useAuth } from './AuthStore';
 import { Colors as C } from '../theme/colors';
-import { canResumeMeetingRecording, formatDuration } from '../utils/meetingMedia';
+import { formatDuration } from '../utils/meetingMedia';
 import {
   deletePendingMeetingAudioUpload,
   listPendingMeetingAudioUploads,
@@ -137,6 +137,14 @@ async function loadJson<T>(key: string, fallback: T): Promise<T> {
 
 async function persistJson(key: string, value: unknown): Promise<void> {
   await writeAppStorageJson(key, value, { bestEffort: true });
+}
+
+function assertMeetingDeletionAllowed(meeting: Meeting): void {
+  // Failed and not-yet-started records remain resumable, but they do not own an
+  // active recorder and must still be deletable from the long-press menu.
+  if (meeting.status === 'recording') {
+    throw new Error('请先结束并保存当前会议录音，再删除会议。');
+  }
 }
 
 interface MeetingsContextType {
@@ -497,7 +505,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
         const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
         if (!target) return;
-        if (canResumeMeetingRecording(target)) throw new Error('请先结束并保存当前会议录音，再删除会议。');
+        assertMeetingDeletionAllowed(target);
         const nextMeetings = meetingsRef.current.filter(meeting => meeting.id !== id);
         await persistMeetingsStrict(nextMeetings);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -528,9 +536,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const previousTranscripts = transcriptCacheRef.current;
     const previousSummaries = summaryCacheRef.current;
     const target = previousMeetings.find(m => m.id === id) ?? null;
-    if (target && canResumeMeetingRecording(target)) {
-      throw new Error('请先结束并保存当前会议录音，再删除会议。');
-    }
+    if (target) assertMeetingDeletionAllowed(target);
     const targetIndex = previousMeetings.findIndex(m => m.id === id);
     const hadTranscript = Object.prototype.hasOwnProperty.call(previousTranscripts, id);
     const previousTranscript = previousTranscripts[id];

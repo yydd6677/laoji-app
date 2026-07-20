@@ -11,27 +11,33 @@ object RecorderRecovery {
     Thread(runnable, "laoji-recorder-recovery").apply { isDaemon = true }
   }
 
-  fun recover(context: Context, excludedSessionId: String? = null): CompletableFuture<RecordingRecoveryReport> {
+  fun recover(
+    context: Context,
+    excludedSessionId: String? = null,
+    includeFinalized: Boolean = false,
+  ): CompletableFuture<RecordingRecoveryReport> {
     val future = CompletableFuture<RecordingRecoveryReport>()
     executor.execute {
       try {
-        val report = RecordingRepository(context).recover(excludedSessionId)
-        report.recordings.forEach { recording ->
-          RecorderEventBus.emit(RecorderEvents.RECOVERED, recording.toMap())
-        }
-        report.failures.forEach { failure ->
-          RecorderEventBus.emit(
-            RecorderEvents.ERROR,
-            mapOf(
-              "sessionId" to null,
-              "errorCode" to failure.code.wireValue,
-              "errorMessage" to failure.message,
-              "fileName" to failure.fileName,
-              "recoverable" to true,
-              "localUri" to null,
-              "transcriptRecoveryRequired" to false,
-            ),
-          )
+        val report = RecordingRepository(context).recover(excludedSessionId, includeFinalized)
+        if (!includeFinalized) {
+          report.recordings.forEach { recording ->
+            RecorderEventBus.emit(RecorderEvents.RECOVERED, recording.toMap())
+          }
+          report.failures.forEach { failure ->
+            RecorderEventBus.emit(
+              RecorderEvents.ERROR,
+              mapOf(
+                "sessionId" to null,
+                "errorCode" to failure.code.wireValue,
+                "errorMessage" to failure.message,
+                "fileName" to failure.fileName,
+                "recoverable" to true,
+                "localUri" to null,
+                "transcriptRecoveryRequired" to false,
+              ),
+            )
+          }
         }
         future.complete(report)
       } catch (_: Exception) {

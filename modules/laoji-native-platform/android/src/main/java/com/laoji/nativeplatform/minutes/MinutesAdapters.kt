@@ -24,6 +24,7 @@ internal enum class MinutesHomeViewMode {
 
 internal class MinutesMeetingAdapter(
   private val onAction: (Map<String, Any?>) -> Unit,
+  private val onLongPress: (View, MinutesMeeting) -> Unit,
 ) : ListAdapter<MinutesMeeting, MinutesMeetingAdapter.Holder>(DIFF) {
   private var viewMode = MinutesHomeViewMode.LIST
 
@@ -47,7 +48,7 @@ internal class MinutesMeetingAdapter(
   )
 
   override fun onBindViewHolder(holder: Holder, position: Int) {
-    holder.bind(getItem(position), onAction)
+    holder.bind(getItem(position), onAction, onLongPress)
   }
 
   override fun onViewRecycled(holder: Holder) {
@@ -86,6 +87,7 @@ internal class MinutesMeetingAdapter(
       root.isClickable = true
       root.isFocusable = true
       root.backgroundShape(MinutesPalette.surface, radiusDp = 12)
+      root.clipToOutline = true
 
       cover.backgroundShape(Color.rgb(220, 229, 250))
       coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_filled)
@@ -97,30 +99,24 @@ internal class MinutesMeetingAdapter(
       )
       coverContent.orientation = LinearLayout.VERTICAL
       coverContent.gravity = Gravity.CENTER_VERTICAL
-      coverContent.setPadding(
-        parent.context.dp(16),
-        parent.context.dp(12),
-        parent.context.dp(16),
-        parent.context.dp(12),
-      )
       coverTitle.maxLines = 1
       coverTitle.ellipsize = TextUtils.TruncateAt.END
-      coverText.maxLines = 3
+      coverText.maxLines = 5
       coverText.ellipsize = TextUtils.TruncateAt.END
-      coverText.setLineSpacing(parent.context.dp(2).toFloat(), 1f)
+      coverText.setLineSpacing(parent.context.dp(4).toFloat(), 1f)
       coverContent.addView(
         coverTitle,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
       coverContent.addView(
         coverText,
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
-          topMargin = parent.context.dp(4)
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+          topMargin = parent.context.dp(6)
         },
       )
       cover.addView(
         coverContent,
-        FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
       root.addView(cover)
 
@@ -237,7 +233,11 @@ internal class MinutesMeetingAdapter(
       }
     }
 
-    fun bind(meeting: MinutesMeeting, onAction: (Map<String, Any?>) -> Unit) {
+    fun bind(
+      meeting: MinutesMeeting,
+      onAction: (Map<String, Any?>) -> Unit,
+      onLongPress: (View, MinutesMeeting) -> Unit,
+    ) {
       title.text = meeting.title
       bindCover(meeting)
       meta.text = if (mode == MinutesHomeViewMode.GRID) {
@@ -272,28 +272,25 @@ internal class MinutesMeetingAdapter(
         )
       }
       root.setOnLongClickListener {
-        onAction(
-          mapOf(
-            "type" to "openMeetingMenu",
-            "meetingId" to meeting.id,
-            "canResume" to meeting.canResume,
-          ),
-        )
+        onLongPress(root, meeting)
         true
       }
     }
 
     private fun bindCover(meeting: MinutesMeeting) {
+      if (mode != MinutesHomeViewMode.GRID) return
       val usableText = meeting.coverText.trim()
       val effectiveType = meeting.coverType.takeIf { usableText.isNotEmpty() }
         ?: MinutesListCoverType.DEFAULT
       when (effectiveType) {
         MinutesListCoverType.DEFAULT -> {
+          applyDefaultCoverGeometry()
           cover.backgroundShape(Color.rgb(220, 229, 250))
           coverIcon.visibility = View.VISIBLE
           coverContent.visibility = View.GONE
         }
         MinutesListCoverType.SUMMARY -> {
+          applyDynamicCoverGeometry(topPaddingDp = 24)
           cover.backgroundShape(MinutesPalette.primarySoft)
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
@@ -303,6 +300,7 @@ internal class MinutesMeetingAdapter(
           coverText.setTextColor(MinutesPalette.text)
         }
         MinutesListCoverType.SPEAKER_SUMMARY -> {
+          applyDynamicCoverGeometry(topPaddingDp = 16)
           cover.backgroundHorizontalGradient(
             startColor = Color.rgb(85, 95, 242),
             endColor = Color.rgb(139, 118, 245),
@@ -316,6 +314,37 @@ internal class MinutesMeetingAdapter(
           coverText.setTextColor(Color.WHITE)
         }
       }
+    }
+
+    private fun applyDefaultCoverGeometry() {
+      val context = itemView.context
+      cover.minimumHeight = 0
+      cover.layoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        context.dp(108),
+      )
+    }
+
+    private fun applyDynamicCoverGeometry(topPaddingDp: Int) {
+      val context = itemView.context
+      // [SOURCE] Summary and speaker-summary covers are wrap_content with
+      // 24dp horizontal padding, a 6dp title gap, and up to five text lines.
+      cover.minimumHeight = 0
+      cover.layoutParams = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
+      coverContent.gravity = Gravity.TOP
+      coverContent.setPadding(
+        context.dp(24),
+        context.dp(topPaddingDp),
+        context.dp(24),
+        context.dp(28),
+      )
+      coverContent.layoutParams = FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
     }
 
     fun recycle() {

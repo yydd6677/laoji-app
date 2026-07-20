@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiMinutesView,
@@ -9,6 +10,7 @@ import {
   type NativeTabPressEvent,
   getNativeRecorderState,
   hasNativeRecorder,
+  recoverNativeRecordings,
 } from 'laoji-native-platform';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import { useAppDialog } from '../components/AppDialog';
@@ -115,46 +117,106 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     getCachedSummary,
   } = useMeetings();
   const { showDialog } = useAppDialog();
+  const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
   const [appMenuVisible, setAppMenuVisible] = useState(false);
-  const [meetingMenuId, setMeetingMenuId] = useState<string | null>(null);
   const [staleRecordingIds, setStaleRecordingIds] = useState<ReadonlySet<string>>(new Set());
-  const menuMeeting = meetings.find(meeting => meeting.id === meetingMenuId);
 
-  // A cached/local row marked `recording` is not enough to claim that this
-  // Android process still owns an AudioRecord session. Resolve that ambiguity
-  // on the list surface so an interrupted recording is not presented as live
-  // until the user opens it.
+  // A cached/local resumable row is not enough to describe the native session.
+  // Reconcile active, finalized-local, and interrupted states on the visible
+  // list so neither a live recording nor a saved WAV is presented as failed.
   useEffect(() => {
-    if (!hasNativeRecorder()) return;
-    const candidates = meetings.filter(meeting =>
-      meeting.status === 'recording'
-      && !meeting.audioAvailable
-      && !meeting.audioLocalUri,
-    );
+    // The list remains mounted underneath the recording page. Checking before
+    // that page finishes starting AudioRecord races the native session and can
+    // persist a live recording as failed. Reconcile only while the list itself
+    // is visible, then require the inactive result to remain stable.
+    if (!isFocused || !hasNativeRecorder()) return;
+    const candidates = meetings.filter(canResumeMeetingRecording);
     if (candidates.length === 0) {
       setStaleRecordingIds(current => current.size === 0 ? current : new Set());
       return;
     }
     let cancelled = false;
+    const candidateStatusById = new Map(candidates.map(meeting => [meeting.id, meeting.status]));
     void Promise.all(candidates.map(async meeting => {
       try {
-        const snapshot = await getNativeRecorderState(meeting.id);
-        return snapshot && ACTIVE_RECORDER_STATES.has(snapshot.state) ? null : meeting.id;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const snapshot = await getNativeRecorderState(meeting.id);
+          if (snapshot && ACTIVE_RECORDER_STATES.has(snapshot.state)) {
+            return { meetingId: meeting.id, kind: 'active' as const };
+          }
+          if (snapshot?.localUri) {
+            return {
+              meetingId: meeting.id,
+              kind: 'recovered' as const,
+              localUri: snapshot.localUri,
+              durationMs: snapshot.durationMs,
+            };
+          }
+          if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 600));
+          if (cancelled) return { meetingId: meeting.id, kind: 'unknown' as const };
+        }
+        return { meetingId: meeting.id, kind: 'inactive' as const };
       } catch {
         // An unavailable/temporarily disconnected native bridge is not proof
         // that the server-side recording is stale.
-        return null;
+        return { meetingId: meeting.id, kind: 'unknown' as const };
       }
-    })).then(async ids => {
+    })).then(async resolutions => {
       if (cancelled) return;
-      const staleIds = ids.filter((id): id is string => Boolean(id));
+      const inactiveIds = resolutions
+        .filter(result => result.kind === 'inactive')
+        .map(result => result.meetingId);
+      const recovery = inactiveIds.length > 0
+        ? await recoverNativeRecordings().catch(() => null)
+        : null;
+      if (cancelled) return;
+      const recoveredById = new Map(
+        recovery?.recordings
+          .filter(item => item.purpose === 'meeting' && inactiveIds.includes(item.sessionId))
+          .map(item => [item.sessionId, item]) ?? [],
+      );
+      const recovered = [
+        ...resolutions
+          .filter(result => result.kind === 'recovered')
+          .map(result => ({
+            sessionId: result.meetingId,
+            localUri: result.localUri,
+            durationMs: result.durationMs,
+          })),
+        ...recoveredById.values(),
+      ];
+      const recoveredIds = new Set(recovered.map(item => item.sessionId));
+      const staleIds = inactiveIds.filter(id => (
+        !recoveredIds.has(id) && candidateStatusById.get(id) === 'recording'
+      ));
+      const activeIdsToRepair = resolutions
+        .filter(result => (
+          result.kind === 'active' && candidateStatusById.get(result.meetingId) !== 'recording'
+        ))
+        .map(result => result.meetingId);
       setStaleRecordingIds(new Set(staleIds));
-      await Promise.all(staleIds.map(id => updateMeetingStatus(id, 'failed').catch(() => false)));
+      for (const id of activeIdsToRepair) {
+        await updateMeetingStatus(id, 'recording').catch(() => false);
+      }
+      for (const item of recovered) {
+        const durationSec = item.durationMs > 0 ? item.durationMs / 1000 : undefined;
+        await updateMeetingStatus(item.sessionId, 'ended', {
+          audioAvailable: true,
+          audioLocalUri: item.localUri,
+          ...(durationSec ? {
+            audioDurationSec: durationSec,
+            duration: formatDuration(durationSec),
+          } : {}),
+        }).catch(() => false);
+      }
+      for (const id of staleIds) {
+        await updateMeetingStatus(id, 'failed').catch(() => false);
+      }
     });
     return () => { cancelled = true; };
-  }, [meetings, updateMeetingStatus]);
+  }, [isFocused, meetings, updateMeetingStatus]);
 
   const snapshot = useMemo<MinutesViewSnapshot>(() => ({
     schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
@@ -236,7 +298,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         navigation.navigate('MeetingLive', { meetingId: action.meetingId });
         break;
       case 'openMeetingMenu':
-        setMeetingMenuId(action.meetingId);
         break;
       case 'renameMeeting':
         navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'title' });
@@ -277,20 +338,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     { key: 'speakers', label: '管理讲话人', onPress: () => navigation.navigate('SpeakerManager') },
     { key: 'profile', label: '个人资料', onPress: () => navigation.navigate('Profile') },
   ];
-  const meetingMenuItems: AppActionSheetItem[] = menuMeeting ? [
-    ...(canResumeMeetingRecording(menuMeeting) ? [{
-      key: 'resume',
-      label: '继续录音',
-      onPress: () => navigation.navigate('MeetingLive', { meetingId: menuMeeting.id }),
-    }] : []),
-    {
-      key: 'rename',
-      label: '重命名',
-      onPress: () => navigation.navigate('Transcription', { meetingId: menuMeeting.id, focus: 'title' }),
-    },
-    { key: 'delete', label: '删除', destructive: true, onPress: () => confirmDelete(menuMeeting.id) },
-  ] : [];
-
   return (
     <>
       <LaojiMinutesView
@@ -307,12 +354,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         title="会议记录"
         items={appMenuItems}
         onClose={() => setAppMenuVisible(false)}
-      />
-      <AppActionSheet
-        visible={Boolean(menuMeeting)}
-        title={menuMeeting?.title ?? ''}
-        items={meetingMenuItems}
-        onClose={() => setMeetingMenuId(null)}
       />
     </>
   );

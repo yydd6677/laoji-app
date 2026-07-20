@@ -135,7 +135,7 @@ export interface NativeRecoveredRecording {
   localUri: string;
   bytesRecorded: number;
   durationMs: number;
-  recovered: true;
+  recovered: boolean;
 }
 
 export interface NativeRecorderRecoveryFailure {

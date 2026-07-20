@@ -14,8 +14,8 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.ImageView
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import android.text.Editable
 import android.text.TextWatcher
 
@@ -30,7 +30,8 @@ internal class MinutesListSurface(
   private val searchClear = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_close, "清除搜索")
   private val content = FrameLayout(context)
   private val list = RecyclerView(context)
-  private val adapter = MinutesMeetingAdapter(onAction)
+  private val itemContextMenu = MinutesItemContextMenu(context, onAction)
+  private val adapter = MinutesMeetingAdapter(onAction, itemContextMenu::show)
   private val stateOverlay = LinearLayout(context)
   private val progress = ProgressBar(context)
   private val emptyImage = ImageView(context)
@@ -59,11 +60,14 @@ internal class MinutesListSurface(
     addView(content, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
     adapter.setViewMode(viewMode)
-    list.layoutManager = GridLayoutManager(context, 2)
+    list.layoutManager = createGridLayoutManager()
     list.adapter = adapter
     list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
       override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-        if (newState == RecyclerView.SCROLL_STATE_DRAGGING) MinutesSwipeMenuLayout.closeOpenMenu()
+        if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+          MinutesSwipeMenuLayout.closeOpenMenu()
+          itemContextMenu.dismiss()
+        }
       }
     })
     list.clipToPadding = false
@@ -226,11 +230,16 @@ internal class MinutesListSurface(
   }
 
   private fun toggleViewMode() {
-    val firstVisible = (list.layoutManager as? LinearLayoutManager)?.findFirstVisibleItemPosition() ?: 0
+    itemContextMenu.dismiss()
+    val firstVisible = when (val layoutManager = list.layoutManager) {
+      is StaggeredGridLayoutManager -> layoutManager.findFirstVisibleItemPositions(null).minOrNull() ?: 0
+      is LinearLayoutManager -> layoutManager.findFirstVisibleItemPosition()
+      else -> 0
+    }
     viewMode = if (viewMode == MinutesHomeViewMode.LIST) MinutesHomeViewMode.GRID else MinutesHomeViewMode.LIST
     adapter.setViewMode(viewMode)
     list.layoutManager = if (viewMode == MinutesHomeViewMode.GRID) {
-      GridLayoutManager(context, 2)
+      createGridLayoutManager()
     } else {
       LinearLayoutManager(context)
     }
@@ -240,6 +249,13 @@ internal class MinutesListSurface(
     }
     list.scrollToPosition(firstVisible.coerceAtLeast(0))
   }
+
+  private fun createGridLayoutManager(): StaggeredGridLayoutManager =
+    StaggeredGridLayoutManager(2, RecyclerView.VERTICAL).apply {
+      // [SOURCE] MmHomeListBaseFragment uses a two-column
+      // MmStaggeredGridLayoutManager for the cover mode.
+      gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
+    }
 
   private fun configureSearchBar() {
     // MIN-SEARCH-001: search remains a native list state instead of routing to the legacy RN page.
@@ -269,5 +285,10 @@ internal class MinutesListSurface(
     searchBar.addView(searchInput, LayoutParams(0, context.dp(44), 1f))
     searchClear.setOnClickListener { onAction(mapOf("type" to "updateSearchQuery", "query" to "")) }
     searchBar.addView(searchClear, LayoutParams(context.dp(44), context.dp(44)))
+  }
+
+  override fun onDetachedFromWindow() {
+    itemContextMenu.dismiss()
+    super.onDetachedFromWindow()
   }
 }

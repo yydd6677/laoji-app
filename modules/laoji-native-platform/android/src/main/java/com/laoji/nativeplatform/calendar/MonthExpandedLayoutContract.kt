@@ -57,6 +57,11 @@ object MonthExpandedLayoutContract {
   const val DATE_TOP_DP = 10f
   const val DATE_BASELINE_DP = 22f
   const val DATE_MARKER_CENTER_DP = 18f
+  // [SOURCE] C153854f.m522905h covers the selected column below its date
+  // lane with ud_N100 at 90% opacity and centers an upward UD chevron.
+  const val COLLAPSE_OVERLAY_TOP_DP = 28.5f
+  const val COLLAPSE_CHEVRON_HALF_WIDTH_DP = 7f
+  const val COLLAPSE_CHEVRON_HALF_HEIGHT_DP = 3.5f
   const val OVERFLOW_BADGE_WIDTH_DP = 19f
   const val OVERFLOW_BADGE_HEIGHT_DP = 12f
   const val OVERFLOW_BADGE_RADIUS_DP = 2.5f

@@ -244,7 +244,10 @@ class RecordingRepository(context: Context) {
       }
     }
 
-  fun recover(excludedSessionId: String? = null): RecordingRecoveryReport = synchronized(recordingIoLock) {
+  fun recover(
+    excludedSessionId: String? = null,
+    includeFinalized: Boolean = false,
+  ): RecordingRecoveryReport = synchronized(recordingIoLock) {
     ensureRoot()
     recoverJournalWriteTemps()
     val recovered = mutableListOf<FinalizedRecording>()
@@ -280,21 +283,24 @@ class RecordingRepository(context: Context) {
                 entry.uploadState != RecordingPersistencePolicy.completedUploadState(entry.mode) ||
                   entry.asrState != JournalAsrState.NOT_REQUIRED
                 )
-              if (
+              val needsRecovery =
                 entry.state != JournalState.LOCAL_SAVED ||
                 entry.pcmBytes != pcmBytes ||
                 localPolicyMismatch
-              ) {
-                val updated = entry.copy(
+              val finalizedEntry = if (needsRecovery) {
+                entry.copy(
                   state = JournalState.LOCAL_SAVED,
                   pcmBytes = pcmBytes,
                   updatedAtMs = System.currentTimeMillis(),
                   recovered = true,
                   uploadState = RecordingPersistencePolicy.completedUploadState(entry.mode),
                   asrState = RecordingPersistencePolicy.recoveredAsrState(entry.mode),
-                )
-                writeJournal(journalFile, updated)
-                recovered += finalizedRecording(updated, finalFile)
+                ).also { writeJournal(journalFile, it) }
+              } else {
+                entry
+              }
+              if (needsRecovery || includeFinalized) {
+                recovered += finalizedRecording(finalizedEntry, finalFile)
               }
             }
             tempFile.isFile -> {
