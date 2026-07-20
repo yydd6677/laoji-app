@@ -483,6 +483,10 @@ private class MinutesTranscriptPageAdapter(
     private val body = parent.context.textView(textSizeSp = 16)
 
     init {
+      root.layoutParams = RecyclerView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
       root.orientation = LinearLayout.VERTICAL
       root.setPadding(parent.context.dp(20), parent.context.dp(20), parent.context.dp(20), parent.context.dp(12))
       avatar.addView(
@@ -561,6 +565,10 @@ private class MinutesSpeakersPageAdapter(
     }
 
     init {
+      root.layoutParams = RecyclerView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
       root.minimumHeight = parent.context.dp(68)
       root.setPadding(parent.context.dp(20), parent.context.dp(8), parent.context.dp(16), parent.context.dp(8))
       avatar.addView(

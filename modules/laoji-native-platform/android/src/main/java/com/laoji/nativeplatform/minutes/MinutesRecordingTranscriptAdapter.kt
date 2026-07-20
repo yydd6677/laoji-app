@@ -37,6 +37,10 @@ internal class MinutesRecordingTranscriptAdapter :
     private val body = parent.context.textView(textSizeSp = 16)
 
     init {
+      root.layoutParams = RecyclerView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
       root.orientation = LinearLayout.VERTICAL
       root.setPadding(0, parent.context.dp(32), 0, 0)
 

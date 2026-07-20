@@ -116,6 +116,10 @@ private class SpeakerProfileAdapter(
     private val chevron = parent.context.speakerText("›", 24, SpeakerPalette.tertiary)
 
     init {
+      root.layoutParams = RecyclerView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      )
       root.orientation = LinearLayout.HORIZONTAL
       root.gravity = Gravity.CENTER_VERTICAL
       root.minimumHeight = parent.context.speakerDp(66)
