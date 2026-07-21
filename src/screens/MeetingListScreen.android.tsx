@@ -58,10 +58,8 @@ function cleanCoverText(value: string): string {
  */
 function inferredMeetingCover(summary: MeetingSummary | null, transcript: readonly TranscriptLine[]) {
   const summaryText = [
-    briefGreetingSummaryText(transcript),
-    summary?.overview,
-    summary?.full_text,
     meetingSummaryToText(summary),
+    briefGreetingSummaryText(transcript),
   ]
     .map(value => cleanCoverText(value ?? ''))
     .find(value => value.length >= 8) ?? '';

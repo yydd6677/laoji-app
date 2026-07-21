@@ -104,6 +104,7 @@ export interface MeetingSummary {
   overview?: string;
   full_text?: string;
   markdown?: string | null;
+  raw_json?: unknown;
   key_decisions?: string[];
   action_items?: { id?: string; content: string; assignee?: string | null; due_date?: string | null; status?: string }[];
   generated_at?: string | null;

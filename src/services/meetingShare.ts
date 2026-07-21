@@ -4,6 +4,7 @@ import { BEST_SPEED, zip } from 'react-native-zip-archive';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
+import { meetingSummaryTextToPlainText } from './meetingSummaryFormat';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 export type MeetingShareKind = 'bundle' | 'document' | 'audio';
@@ -77,10 +78,11 @@ export function buildMeetingDocumentText(
   summaryText?: string | null,
 ): string {
   const transcript = buildMeetingTranscriptText(transcriptLines);
+  const summary = meetingSummaryTextToPlainText(summaryText?.trim() ?? '');
   return [
     '老记会议文档',
     buildMeetingInfoText(meeting),
-    summaryText?.trim() ? `会议总结\n${summaryText.trim()}` : '',
+    summary ? `会议总结\n${summary}` : '',
     transcript ? `会议转写\n${transcript}` : '',
   ].filter(Boolean).join('\n\n--------------------\n\n');
 }
@@ -229,7 +231,7 @@ async function shareFile(uri: string, mimeType: string, dialogTitle: string, UTI
 export async function shareMeetingArtifact(kind: MeetingShareKind, input: MeetingShareInput): Promise<void> {
   await cleanupStaleMeetingShareCache().catch(() => {});
   const { directoryUri, baseName } = await createShareDirectory(input.meeting);
-  const summary = input.summaryText?.trim() ?? '';
+  const summary = meetingSummaryTextToPlainText(input.summaryText?.trim() ?? '');
   const transcript = buildMeetingTranscriptText(input.transcriptLines);
   let archiveUri: string | null = null;
   let shareCompleted = false;

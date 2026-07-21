@@ -662,19 +662,6 @@ export async function fetchMeetingTranscript(
   return fallbackItems.length > all.length ? fallbackItems : all;
 }
 
-function summaryValueToText(value: unknown): string {
-  if (typeof value === 'string') return value.trim();
-  if (Array.isArray(value)) {
-    return value.map(summaryValueToText).filter(Boolean).join('\n\n').trim();
-  }
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const fields = ['overview', 'summary', 'content', 'markdown', 'full_text', 'text'];
-    return fields.map(field => summaryValueToText(obj[field])).filter(Boolean).join('\n\n').trim();
-  }
-  return '';
-}
-
 export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string, signal?: AbortSignal): Promise<MeetingSummary | null> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/final`),
@@ -683,19 +670,6 @@ export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?:
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, accessToken);
   return res.json();
-}
-
-export async function fetchMeetingSummary(meetingId: string, accessToken?: string): Promise<string> {
-  const data = await fetchMeetingSummaryDetail(meetingId, accessToken);
-  if (!data) return '';
-  return (
-    summaryValueToText((data as any).summary) ||
-    summaryValueToText((data as any).content) ||
-    summaryValueToText(data.markdown) ||
-    summaryValueToText(data.full_text) ||
-    summaryValueToText(data.overview) ||
-    summaryValueToText(data)
-  );
 }
 
 export async function generateMeetingSummary(

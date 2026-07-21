@@ -8,6 +8,16 @@ import {
 } from './api';
 import { MeetingSummary, TranscriptLine } from '../types';
 import { HttpResponseError } from './errors';
+import {
+  meetingSummaryToText,
+  normalizeMeetingSummaryResult,
+} from './meetingSummaryFormat';
+
+export {
+  meetingSummaryTextToPlainText,
+  meetingSummaryToText,
+  normalizeMeetingSummaryResult,
+} from './meetingSummaryFormat';
 
 const MAX_POLL_DURATION_MS = 180_000;
 const SUMMARY_LONG_POLL_MS = 5_000;
@@ -107,11 +117,6 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export function meetingSummaryToText(summary: MeetingSummary | null): string {
-  if (!summary) return '';
-  return (summary.markdown || summary.full_text || summary.overview || '').trim();
-}
-
 export function meetingDateForSummary(dateLabel?: string, createdAt?: string): string | undefined {
   const label = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/.exec((dateLabel ?? '').trim());
   if (label) {
@@ -121,24 +126,6 @@ export function meetingDateForSummary(dateLabel?: string, createdAt?: string): s
   const value = new Date(createdAt);
   if (Number.isNaN(value.getTime())) return undefined;
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-}
-
-export function normalizeMeetingSummaryResult(meetingId: string, value: unknown): MeetingSummary | null {
-  if (!value || typeof value !== 'object') return null;
-  const result = value as Record<string, unknown>;
-  const overview = typeof result.overview === 'string' ? result.overview.trim() : '';
-  const fullText = typeof result.full_text === 'string' ? result.full_text.trim() : overview;
-  const markdown = typeof result.markdown === 'string' ? result.markdown.trim() : fullText;
-  if (!(overview || fullText || markdown)) return null;
-  return {
-    meeting_id: typeof result.meeting_id === 'string' ? result.meeting_id : meetingId,
-    overview,
-    full_text: fullText,
-    markdown,
-    key_decisions: Array.isArray(result.key_decisions) ? result.key_decisions.filter(item => typeof item === 'string') as string[] : [],
-    action_items: Array.isArray(result.action_items) ? result.action_items as MeetingSummary['action_items'] : [],
-    generated_at: typeof result.generated_at === 'string' ? result.generated_at : new Date().toISOString(),
-  };
 }
 
 export const normalizeGuestSummaryResult = normalizeMeetingSummaryResult;

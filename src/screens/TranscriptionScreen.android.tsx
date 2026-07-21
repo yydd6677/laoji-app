@@ -18,7 +18,7 @@ import { useAuth } from '../store/AuthStore';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import {
   fetchMeetingAudioInfo,
-  fetchMeetingSummary,
+  fetchMeetingSummaryDetail,
   fetchMeetingTranscript,
   uploadMeetingAudio,
 } from '../services/api';
@@ -36,6 +36,7 @@ import {
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
+  normalizeMeetingSummaryResult,
   shouldDiscardPendingMeetingSummaryTask,
 } from '../services/meetingSummary';
 import {
@@ -250,17 +251,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       const summaryRequest = beginPageRequest(meeting.id, 'summary');
       setLoadingSummary(true);
       setSummaryProgress('正在同步总结');
-      fetchMeetingSummary(meeting.id, accessToken)
-        .then(text => {
+      fetchMeetingSummaryDetail(meeting.id, accessToken)
+        .then(value => {
           if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+          const normalized = normalizeMeetingSummaryResult(meeting.id, value);
+          const text = meetingSummaryToText(normalized);
           setSummary(text || cachedSummary);
           setSummaryCached(!text && Boolean(cachedSummary));
-          if (text) {
-            void saveCachedSummary(meeting.id, {
-              meeting_id: meeting.id,
-              full_text: text,
-              generated_at: new Date().toISOString(),
-            }).catch(() => {
+          if (normalized && text) {
+            void saveCachedSummary(meeting.id, normalized).catch(() => {
               if (alive && isCurrentPageRequest(summaryRequest)) {
                 setSummaryError('总结已同步，但本机缓存写入失败。');
               }
@@ -633,7 +632,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     () => briefGreetingSummaryText(transcript),
     [transcript],
   );
-  const displayedSummary = briefSummary ?? summary;
+  const displayedSummary = summary || briefSummary || '';
 
   const runShare = useCallback(async (kind: MeetingShareKind) => {
     if (!meeting || sharing) return;

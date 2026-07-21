@@ -19,7 +19,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList, TranscriptLine } from '../types';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
-import { fetchMeetingTranscript, fetchMeetingSummary, uploadMeetingAudio } from '../services/api';
+import { fetchMeetingTranscript, fetchMeetingSummaryDetail, uploadMeetingAudio } from '../services/api';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
@@ -31,6 +31,7 @@ import {
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
+  normalizeMeetingSummaryResult,
   shouldDiscardPendingMeetingSummaryTask,
 } from '../services/meetingSummary';
 import {
@@ -304,16 +305,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (m.hasSummary && !isGuest && accessToken) {
       setLoadingSummary(true);
       setSummaryProgress('正在同步总结');
-      fetchMeetingSummary(m.id, accessToken)
-        .then(text => {
+      fetchMeetingSummaryDetail(m.id, accessToken)
+        .then(value => {
           if (!alive) return;
+          const normalized = normalizeMeetingSummaryResult(m.id, value);
+          const text = meetingSummaryToText(normalized);
           setSummary(text || cachedSummary);
-          if (text) {
-            void saveCachedSummary(m.id, {
-              meeting_id: m.id,
-              full_text: text,
-              generated_at: new Date().toISOString(),
-            }).catch(() => {
+          if (normalized && text) {
+            void saveCachedSummary(m.id, normalized).catch(() => {
               if (alive) setSummaryError('总结已同步，但本机缓存写入失败。');
             });
           }
