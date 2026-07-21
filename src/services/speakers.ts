@@ -17,6 +17,8 @@ interface SpeakerListResponse {
   total?: number;
 }
 
+const SPEAKER_CAPTURE_PROFILE = 'android-voice-communication-v1';
+
 export interface SpeakerMutationResponse {
   success: boolean;
   speaker: SpeakerProfile;
@@ -48,6 +50,7 @@ export async function fetchSpeakers(accessToken: string): Promise<SpeakerProfile
 function voiceForm(audioUri: string, fileName: string, name?: string): FormData {
   const form = new FormData();
   if (name != null) form.append('name', name);
+  form.append('capture_profile', SPEAKER_CAPTURE_PROFILE);
   form.append('audio', { uri: audioUri, name: fileName, type: 'audio/wav' } as any);
   return form;
 }

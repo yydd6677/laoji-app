@@ -25,7 +25,8 @@ object AudioRuntimeContract {
 enum class AudioPurpose(val wireValue: String, val audioSource: Int) {
   SCHEDULE("schedule", MediaRecorder.AudioSource.VOICE_RECOGNITION),
   MEETING("meeting", MediaRecorder.AudioSource.VOICE_COMMUNICATION),
-  SPEAKER("speaker", MediaRecorder.AudioSource.VOICE_RECOGNITION);
+  // Enrollment and inference must use the same device-side audio processing domain.
+  SPEAKER("speaker", MediaRecorder.AudioSource.VOICE_COMMUNICATION);
 
   companion object {
     fun fromWireValue(value: String): AudioPurpose = entries.firstOrNull { it.wireValue == value }
