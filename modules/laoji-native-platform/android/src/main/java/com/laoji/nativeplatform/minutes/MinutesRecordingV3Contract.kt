@@ -4,7 +4,7 @@ package com.laoji.nativeplatform.minutes
 
 internal object MinutesRecordingV3Contract {
   const val TOP_BAR_HEIGHT_DP = 44
-  const val TITLE_MIN_HEIGHT_DP = 100
+  const val TITLE_MIN_HEIGHT_DP = 136
   const val TAB_HEIGHT_DP = 44
   // mm_layout_record_toolbar_bar_3_new.xml: centered duration, 32dp waveform,
   // then the operation row. The retained two actions are packed in the same

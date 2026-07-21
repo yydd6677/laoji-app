@@ -32,6 +32,7 @@ import {
 } from '../services/meetingRecording';
 import {
   generateSummaryForMeeting,
+  briefGreetingSummaryText,
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
@@ -628,6 +629,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [route.params.focus, route.params.meetingId]);
 
+  const briefSummary = useMemo(
+    () => briefGreetingSummaryText(transcript),
+    [transcript],
+  );
+  const displayedSummary = briefSummary ?? summary;
+
   const runShare = useCallback(async (kind: MeetingShareKind) => {
     if (!meeting || sharing) return;
     setSharing(true);
@@ -635,7 +642,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       await shareMeetingArtifact(kind, {
         meeting,
         transcriptLines: transcript,
-        summaryText: summary || meetingSummaryToText(getCachedSummary(meeting.id)),
+        summaryText: displayedSummary || meetingSummaryToText(getCachedSummary(meeting.id)),
         isGuest,
         accessToken,
       });
@@ -644,7 +651,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setSharing(false);
     }
-  }, [accessToken, getCachedSummary, isGuest, meeting, sharing, showDialog, summary, transcript]);
+  }, [accessToken, displayedSummary, getCachedSummary, isGuest, meeting, sharing, showDialog, transcript]);
 
   const confirmDelete = useCallback(() => {
     if (!meeting) return;
@@ -749,15 +756,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     available: Boolean(meeting),
     title: meeting ? displayMeetingTitle(meeting.title) : '会议记录不存在',
     dateTimeLabel: meeting ? compactMeetingDateTime(meeting.date, meeting.time) : '',
+    location: meeting?.location ?? '',
     activeTab,
     tabGeneration,
     activeTabIsExplicit: route.params.focus === 'summary' || route.params.focus === 'transcript',
     transcript,
-    summaryText: summary,
+    summaryText: displayedSummary,
     transcriptLoading: Boolean(meeting && loadingTranscript),
-    summaryLoading: Boolean(meeting && loadingSummary),
+    summaryLoading: Boolean(meeting && loadingSummary && !briefSummary),
     transcriptError: meeting ? transcriptError : '请返回会议列表后重新打开。',
-    summaryError,
+    summaryError: briefSummary ? '' : summaryError,
     summaryProgress,
     canShare: Boolean(meeting && !sharing),
     canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
@@ -773,7 +781,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     playerSource,
     audioStatusMessage: loadingAudio ? '正在加载录音' : (!playerSource ? '仅有转写，无录音文件' : ''),
     audioErrorMessage: pendingAudioError || playerSourceError,
-  }), [accessToken, activeTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, meeting, pageGenerations, pendingAudioError, playerSource, playerSourceError, route.params.focus, route.params.meetingId, sharing, summary, summaryCached, summaryError, summaryProgress, tabGeneration, transcript, transcriptCached, transcriptError]);
+  }), [accessToken, activeTab, briefSummary, displayedSummary, isGuest, loadingAudio, loadingSummary, loadingTranscript, meeting, pageGenerations, pendingAudioError, playerSource, playerSourceError, route.params.focus, route.params.meetingId, sharing, summaryCached, summaryError, summaryProgress, tabGeneration, transcript, transcriptCached, transcriptError]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];

@@ -42,6 +42,9 @@ internal class MinutesRecordingSurface(
   private val titleEditor = EditText(context)
   private val timeIcon = ImageView(context).apply { id = View.generateViewId() }
   private val startedAt = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+  private val locationRow = LinearLayout(context).apply { id = View.generateViewId() }
+  private val locationIcon = ImageView(context)
+  private val locationText = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val tabBar = FrameLayout(context)
   private val transcriptTab = context.textView("文字记录", textSizeSp = 16, weight = Typeface.BOLD)
   private val tabIndicator = View(context)
@@ -163,9 +166,7 @@ internal class MinutesRecordingSurface(
         topToBottom = titleContainer.id
         startToEnd = timeIcon.id
         endToEnd = LayoutParams.PARENT_ID
-        bottomToBottom = LayoutParams.PARENT_ID
         topMargin = context.dp(6)
-        bottomMargin = context.dp(16)
         marginStart = context.dp(4)
         marginEnd = context.dp(20)
       },
@@ -181,6 +182,36 @@ internal class MinutesRecordingSurface(
         topToTop = startedAt.id
         bottomToBottom = startedAt.id
         marginStart = context.dp(20)
+      },
+    )
+
+    locationRow.orientation = LinearLayout.HORIZONTAL
+    locationRow.gravity = Gravity.CENTER_VERTICAL
+    locationRow.minimumHeight = context.dp(36)
+    locationRow.setPadding(0, 0, 0, 0)
+    locationIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_location_outline)
+    locationIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    locationIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    locationRow.addView(
+      locationIcon,
+      LinearLayout.LayoutParams(context.dp(14), context.dp(14)),
+    )
+    locationRow.addView(
+      locationText,
+      LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+        marginStart = context.dp(4)
+      },
+    )
+    titleSection.addView(
+      locationRow,
+      LayoutParams(0, context.dp(36)).apply {
+        topToBottom = startedAt.id
+        startToStart = LayoutParams.PARENT_ID
+        endToEnd = LayoutParams.PARENT_ID
+        bottomToBottom = LayoutParams.PARENT_ID
+        marginStart = context.dp(20)
+        marginEnd = context.dp(20)
+        bottomMargin = context.dp(10)
       },
     )
 
@@ -416,6 +447,15 @@ internal class MinutesRecordingSurface(
       setFollowingLatest(true, emit = true)
       scrollToLatest()
     }
+    locationRow.setOnClickListener {
+      if (!renderedState.canEditLocation || renderedState.locationLoading) return@setOnClickListener
+      onAction(
+        mapOf(
+          "type" to "requestMeetingLocation",
+          "meetingId" to renderedState.meetingId,
+        ),
+      )
+    }
   }
 
   fun render(state: MinutesRecordingState) {
@@ -431,6 +471,18 @@ internal class MinutesRecordingSurface(
     val showTime = state.startedAtLabel.isNotBlank()
     startedAt.visibility = if (showTime) View.VISIBLE else View.INVISIBLE
     timeIcon.visibility = if (showTime) View.VISIBLE else View.INVISIBLE
+    val locationLabel = when {
+      state.locationLoading -> "正在定位"
+      state.location.isNotBlank() -> state.location
+      else -> "添加地点"
+    }
+    locationText.text = locationLabel
+    locationText.setTextColor(if (state.location.isBlank()) MinutesPalette.faint else MinutesPalette.secondary)
+    locationRow.isEnabled = state.canEditLocation && !state.locationLoading
+    locationRow.isClickable = locationRow.isEnabled
+    locationRow.isFocusable = locationRow.isEnabled
+    locationRow.alpha = if (state.locationLoading) 0.72f else 1f
+    locationRow.contentDescription = if (state.locationLoading) "正在获取当前位置" else locationLabel
 
     renderTimer()
 

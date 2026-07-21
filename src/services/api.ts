@@ -401,10 +401,12 @@ export async function fetchEventEditCommand(
 export interface ApiMeeting {
   id: string;
   title: string;
-  description?: string;
+  description?: string | null;
   status: string;
   mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
   participants?: string[];
+  location?: string | null;
+  recorded_at?: string | null;
   created_at: string;
   updated_at: string;
   audio_available?: boolean;
@@ -473,6 +475,8 @@ export async function createMeeting(
     participants?: string[];
     mode?: ApiMeeting['mode'];
     clientRequestId?: string;
+    location?: string | null;
+    recordedAt?: string | null;
   },
   accessToken?: string,
 ): Promise<ApiMeeting> {
@@ -485,6 +489,8 @@ export async function createMeeting(
       participants: payload.participants ?? [],
       mode: payload.mode ?? 'realtime',
       client_request_id: payload.clientRequestId ?? null,
+      location: payload.location ?? null,
+      recorded_at: payload.recordedAt ?? null,
     }),
   });
   if (!res.ok) throw await apiResponseError('create meeting failed', res, accessToken);
@@ -558,7 +564,7 @@ export async function fetchGuestMeetingTranscript(
 
 export async function updateMeeting(
   meetingId: string,
-  changes: Partial<Pick<ApiMeeting, 'title' | 'description' | 'status' | 'participants' | 'mode'>>,
+  changes: Partial<Pick<ApiMeeting, 'title' | 'description' | 'status' | 'participants' | 'mode' | 'location'>>,
   accessToken?: string,
 ): Promise<ApiMeeting> {
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}`), {
@@ -567,6 +573,47 @@ export async function updateMeeting(
     body: JSON.stringify(changes),
   });
   if (!res.ok) throw await apiResponseError('update meeting failed', res, accessToken);
+  return res.json();
+}
+
+export interface GuestMeetingImportResult {
+  meeting_id: string;
+  transcript_count: number;
+  summary_imported: boolean;
+  already_imported: boolean;
+}
+
+export async function importGuestMeetingData(
+  meetingId: string,
+  payload: {
+    sourceMeetingId: string;
+    transcripts: TranscriptLine[];
+    summary: MeetingSummary | null;
+  },
+  accessToken: string,
+): Promise<GuestMeetingImportResult> {
+  const res = await fetch(
+    meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}/imports/guest`),
+    {
+      method: 'POST',
+      headers: jsonHeaders(accessToken),
+      body: JSON.stringify({
+        source_meeting_id: payload.sourceMeetingId,
+        transcripts: payload.transcripts.map(line => ({
+          id: line.id,
+          speaker_id: line.speaker_id ?? null,
+          speaker_label: line.speaker_label ?? null,
+          text: line.text,
+          start_time: line.start_time ?? null,
+          end_time: line.end_time ?? null,
+          confidence: line.confidence ?? null,
+          created_at: line.created_at ?? null,
+        })),
+        summary: payload.summary,
+      }),
+    },
+  );
+  if (!res.ok) throw await apiResponseError('import guest meeting failed', res, accessToken);
   return res.json();
 }
 

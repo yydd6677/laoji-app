@@ -8,6 +8,7 @@ import { AuthProvider } from './src/store/AuthStore';
 import { EventsProvider } from './src/store/EventsStore';
 import { MeetingsProvider } from './src/store/MeetingsStore';
 import { AppDialogProvider } from './src/components/AppDialog';
+import { GuestDataMigrationProvider } from './src/components/GuestDataMigrationProvider';
 import { AppLockGate } from './src/components/AppLockGate';
 import { assertProductionApiConfig } from './src/services/config';
 import { EventUndoBanner } from './src/components/EventUndoBanner';
@@ -45,15 +46,17 @@ function RuntimeProviders({ onRestart }: {
             <MeetingsProvider>
               <AppLockGate>
                 <AppDialogProvider>
-                  <NotificationPermissionPrimer />
-                  <View style={{ flex: 1 }}>
-                    <RestorableNavigationContainer>
-                      <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                      <RootNavigator />
-                      <NotificationNavigationHandler />
-                    </RestorableNavigationContainer>
-                    <EventUndoBanner />
-                  </View>
+                  <GuestDataMigrationProvider>
+                    <NotificationPermissionPrimer />
+                    <View style={{ flex: 1 }}>
+                      <RestorableNavigationContainer>
+                        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                        <RootNavigator />
+                        <NotificationNavigationHandler />
+                      </RestorableNavigationContainer>
+                      <EventUndoBanner />
+                    </View>
+                  </GuestDataMigrationProvider>
                 </AppDialogProvider>
               </AppLockGate>
             </MeetingsProvider>

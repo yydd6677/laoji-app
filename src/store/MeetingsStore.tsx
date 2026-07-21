@@ -78,7 +78,8 @@ function tagsForAudioSync(tags: Meeting['tags'], pending: boolean, blocked = fal
 }
 
 function serverToLocal(m: ApiMeeting): Meeting {
-  const { date, time } = formatDateTime(m.created_at);
+  const recordedAt = m.recorded_at ?? m.created_at;
+  const { date, time } = formatDateTime(recordedAt);
   const audioDurationSec = typeof m.audio_duration_sec === 'number' && m.audio_duration_sec > 0
     ? m.audio_duration_sec
     : undefined;
@@ -95,7 +96,8 @@ function serverToLocal(m: ApiMeeting): Meeting {
     status: m.status,
     mode: m.mode ?? 'realtime',
     description: m.description ?? null,
-    createdAt: m.created_at,
+    location: m.location ?? null,
+    createdAt: recordedAt,
     updatedAt: m.updated_at,
     audioAvailable: Boolean(m.audio_available),
     audioSyncPending: false,
@@ -106,7 +108,12 @@ function serverToLocal(m: ApiMeeting): Meeting {
   };
 }
 
-function createGuestMeeting(title: string, clientRequestId?: string, now = new Date()): Meeting {
+function createGuestMeeting(
+  title: string,
+  clientRequestId?: string,
+  now = new Date(),
+  location?: string | null,
+): Meeting {
   return {
     id: `guest-meeting-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title,
@@ -119,6 +126,7 @@ function createGuestMeeting(title: string, clientRequestId?: string, now = new D
     hasSummary: false,
     status: 'created',
     mode: 'realtime',
+    location: location ?? null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     audioAvailable: false,
@@ -157,9 +165,15 @@ interface MeetingsContextType {
     participants?: string[];
     mode?: ApiMeeting['mode'];
     clientRequestId?: string;
+    location?: string | null;
+    recordedAt?: string | null;
   }) => Promise<Meeting>;
   deleteMeeting: (id: string) => Promise<void>;
   updateMeetingTitle: (id: string, title: string) => Promise<void>;
+  updateMeetingDetails: (
+    id: string,
+    changes: Partial<Pick<Meeting, 'title' | 'description' | 'participants' | 'mode' | 'location'>>,
+  ) => Promise<void>;
   updateMeetingStatus: (id: string, status: string, patch?: Partial<Meeting>) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   getCachedTranscript: (id: string) => TranscriptLine[];
@@ -461,6 +475,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       participants?: string[];
       mode?: ApiMeeting['mode'];
       clientRequestId?: string;
+      location?: string | null;
+      recordedAt?: string | null;
     } = {},
   ): Promise<Meeting> => {
     const operationGeneration = generationRef.current;
@@ -469,7 +485,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
-        const local = createGuestMeeting(cleanTitle, options.clientRequestId);
+        const local = createGuestMeeting(
+          cleanTitle,
+          options.clientRequestId,
+          options.recordedAt ? new Date(options.recordedAt) : new Date(),
+          options.location,
+        );
         const next = [local, ...meetingsRef.current];
         await persistMeetingsStrict(next);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return local;
@@ -485,6 +506,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       participants: options.participants ?? [],
       mode: options.mode ?? 'realtime',
       clientRequestId: options.clientRequestId,
+      location: options.location ?? null,
+      recordedAt: options.recordedAt ?? null,
     }, accessToken));
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return created;
     setMeetings(prev => {
@@ -671,6 +694,74 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
+  const updateMeetingDetails = useCallback(async (
+    id: string,
+    changes: Partial<Pick<Meeting, 'title' | 'description' | 'participants' | 'mode' | 'location'>>,
+  ) => {
+    const operationGeneration = generationRef.current;
+    if (activeScopeRef.current !== scope) return;
+    const normalized = {
+      ...changes,
+      ...(Object.prototype.hasOwnProperty.call(changes, 'title')
+        ? { title: changes.title?.trim() || '未命名会议' }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(changes, 'location')
+        ? { location: changes.location?.trim() || null }
+        : {}),
+    };
+    const previous = meetingsRef.current.find(meeting => meeting.id === id);
+    if (!previous) throw new Error('会议记录不存在');
+
+    const optimistic = meetingsRef.current.map(meeting => meeting.id === id
+      ? { ...meeting, ...normalized, updatedAt: new Date().toISOString() }
+      : meeting);
+    await persistMeetingsStrict(optimistic);
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    meetingsRef.current = optimistic;
+    setMeetings(optimistic);
+
+    if (mode === 'guest') return;
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    try {
+      const updated = serverToLocal(await apiUpdateMeeting(id, {
+        title: normalized.title,
+        description: normalized.description,
+        participants: normalized.participants,
+        mode: normalized.mode,
+        location: normalized.location,
+      }, accessToken));
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      const next = meetingsRef.current.map(meeting => meeting.id === id
+        ? {
+            ...meeting,
+            ...updated,
+            audioLocalUri: meeting.audioLocalUri,
+            audioBars: meeting.audioBars,
+            audioSyncPending: meeting.audioSyncPending,
+            audioSyncBlocked: meeting.audioSyncBlocked,
+            statusSyncPending: meeting.statusSyncPending,
+            tags: tagsForAudioSync(
+              meeting.statusSyncPending ? tagsWithPendingSync(updated.tags) : updated.tags,
+              Boolean(meeting.audioSyncPending),
+              Boolean(meeting.audioSyncBlocked),
+            ),
+          }
+        : meeting);
+      await persistMeetingsStrict(next);
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      meetingsRef.current = next;
+      setMeetings(next);
+    } catch (error) {
+      if (generationRef.current === operationGeneration && activeScopeRef.current === scope) {
+        const rolledBack = meetingsRef.current.map(meeting => meeting.id === id ? previous : meeting);
+        meetingsRef.current = rolledBack;
+        setMeetings(rolledBack);
+        await persistMeetingsStrict(rolledBack).catch(() => {});
+      }
+      throw error;
+    }
+  }, [accessToken, mode, persistMeetingsStrict, scope]);
+
   const updateMeetingStatus = useCallback(async (id: string, status: string, patch: Partial<Meeting> = {}) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return false;
@@ -794,6 +885,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         createMeeting,
         deleteMeeting,
         updateMeetingTitle,
+        updateMeetingDetails,
         updateMeetingStatus,
         refreshMeetings,
         getCachedTranscript,

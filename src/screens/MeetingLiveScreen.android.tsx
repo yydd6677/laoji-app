@@ -57,6 +57,7 @@ import {
 import type { RootStackParamList } from '../types';
 import { canResumeMeetingRecording, shouldCheckpointTranscript } from '../utils/meetingMedia';
 import { defaultMeetingTitle, displayMeetingTitle } from '../utils/meetingTitle';
+import { CurrentAddressError, getCurrentAddress } from '../services/currentAddress';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -110,6 +111,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     deleteMeeting,
     updateMeetingStatus,
     updateMeetingTitle,
+    updateMeetingDetails,
     getCachedTranscript,
     saveCachedTranscript,
     refreshMeetings,
@@ -121,6 +123,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     : undefined;
   const [meetingId, setMeetingId] = useState(existing?.id ?? '');
   const [title, setTitle] = useState(displayMeetingTitle(existing?.title ?? defaultMeetingTitle()));
+  const [location, setLocation] = useState(existing?.location ?? '');
+  const [locationLoading, setLocationLoading] = useState(false);
   const [phase, setPhase] = useState<MinutesRecordingPhase>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState('');
@@ -138,6 +142,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const transcriptRef = useRef<NativeMinutesTranscriptLine[]>(transcript);
   const nativeAudioBarsRef = useRef<number[]>([]);
   const titleRef = useRef(title);
+  const locationRef = useRef(location);
   const finalizationRef = useRef<Promise<boolean> | null>(null);
   const navigateAfterFinalizeRef = useRef(false);
   const autoStartAttemptedRef = useRef(false);
@@ -154,11 +159,16 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { titleRef.current = title; }, [title]);
+  useEffect(() => { locationRef.current = location; }, [location]);
   useEffect(() => { activeMeetingIdRef.current = meetingId; }, [meetingId]);
   useEffect(() => {
     if (!existing?.title) return;
     setTitle(displayMeetingTitle(existing.title));
   }, [existing?.title]);
+  useEffect(() => {
+    if (existing?.location == null) return;
+    setLocation(existing.location);
+  }, [existing?.location]);
 
   const applyRecorderSnapshot = useCallback((snapshot: NativeRecorderSnapshot) => {
     if (snapshot.sessionId !== currentSessionIdRef.current) return;
@@ -467,6 +477,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const meeting = reusable ?? await createMeeting(meetingPayload.title, {
         mode: meetingPayload.mode,
         clientRequestId: createRequestRef.current.id,
+        location: locationRef.current || null,
       });
       createdForAttempt = !reusable;
       startedMeetingId = meeting.id;
@@ -605,6 +616,41 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     });
   }, [showDialog, stopRecording]);
 
+  const requestMeetingLocation = useCallback(async () => {
+    if (locationLoading) return;
+    setLocationLoading(true);
+    const previous = locationRef.current;
+    try {
+      const result = await getCurrentAddress();
+      if (!mountedRef.current) return;
+      locationRef.current = result.address;
+      setLocation(result.address);
+      const id = activeMeetingIdRef.current;
+      if (id) await updateMeetingDetails(id, { location: result.address });
+      if (result.usedCoordinateFallback && mountedRef.current) {
+        showDialog({
+          title: '已记录当前位置',
+          message: '系统未返回详细地址，已保存当前位置坐标。',
+          tone: 'info',
+        });
+      }
+    } catch (reason) {
+      locationRef.current = previous;
+      if (mountedRef.current) {
+        setLocation(previous);
+        showDialog({
+          title: '无法获取位置',
+          message: reason instanceof CurrentAddressError
+            ? reason.message
+            : readableErrorMessage(reason, '暂时无法获取当前位置，请稍后重试。'),
+          tone: 'warning',
+        });
+      }
+    } finally {
+      if (mountedRef.current) setLocationLoading(false);
+    }
+  }, [locationLoading, showDialog, updateMeetingDetails]);
+
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'back':
@@ -628,6 +674,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       case 'toggleRecordingPause':
         void togglePause();
         break;
+      case 'requestMeetingLocation':
+        void requestMeetingLocation();
+        break;
       case 'setFollowLatest':
         setFollowingLatest(action.followLatest);
         break;
@@ -647,7 +696,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [confirmStop, navigation, phase, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
+  }, [confirmStop, navigation, phase, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
 
   // Refs protect async recorder commands, but assigning a ref does not render
   // the native snapshot. Keep a small reactive identity so pause/stop become
@@ -666,6 +715,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     startedAtLabel: existing
       ? formatStoredMeetingStart(existing.date, existing.time)
       : formatMeetingStart(startedAtRef.current),
+    location,
+    locationLoading,
+    canEditLocation: !['stopping', 'saving'].includes(phase),
     phase,
     elapsedMs,
     statusLabel: statusLabel(phase),
@@ -675,7 +727,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     canStart,
     followLatest: followingLatest,
     transcript,
-  }), [canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, meetingId, phase, requestedMeetingId, title, transcript]);
+  }), [canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, meetingId, phase, requestedMeetingId, title, transcript]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">

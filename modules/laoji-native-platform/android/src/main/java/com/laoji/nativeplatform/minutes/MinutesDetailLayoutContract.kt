@@ -44,13 +44,12 @@ internal object MinutesDetailLayoutContract {
 
   fun pagerHeightPx(
     stickyHeightPx: Int,
-    headerHeightPx: Int,
-    collapseOffsetPx: Int,
     tabHeightPx: Int,
   ): Int {
-    val headerHeight = headerHeightPx.coerceAtLeast(0)
-    val visibleHeader = headerHeight - collapseOffsetPx.coerceIn(0, headerHeight)
-    return (stickyHeightPx - tabHeightPx.coerceAtLeast(0) - visibleHeader).coerceAtLeast(0)
+    // The page keeps its fully-collapsed viewport height throughout a gesture.
+    // The parent clips the covered portion while the header is visible. This
+    // avoids remeasuring RecyclerView/ViewPager on every collapse offset.
+    return (stickyHeightPx - tabHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
   }
 
   fun tabIndex(tab: MinutesDetailTab): Int = MinutesDetailTab.entries.indexOf(tab).coerceAtLeast(0)

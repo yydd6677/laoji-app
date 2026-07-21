@@ -12,6 +12,21 @@ import { HttpResponseError } from './errors';
 const MAX_POLL_DURATION_MS = 180_000;
 const SUMMARY_LONG_POLL_MS = 5_000;
 
+export const BRIEF_GREETING_SUMMARY = '本次录音仅包含简短问候，暂无可总结的议题、决定或行动项。';
+
+const BRIEF_GREETING_PATTERN = /^(?:(?:喂+|你(?:们)?好|(?:大家|各位)(?:早上|上午|中午|下午|晚上)?好|早上好|上午好|中午好|下午好|晚上好|哈(?:喽|啰|罗)|hello|hi|测试(?:一下)?|试音|听得到吗|能听到吗|嗯+|啊+|哦+|诶+)[\s，。！？、,.!?啊呀哦吧吗呢哈]*)+$/i;
+
+export function briefGreetingSummaryText(
+  transcript: readonly Pick<TranscriptLine, 'text'>[],
+): string | null {
+  const texts = transcript.map(line => line.text.trim()).filter(Boolean);
+  if (texts.length === 0 || texts.length > 8) return null;
+  if (texts.reduce((total, text) => total + text.length, 0) > 80) return null;
+  return texts.every(text => BRIEF_GREETING_PATTERN.test(text))
+    ? BRIEF_GREETING_SUMMARY
+    : null;
+}
+
 export interface MeetingSummaryProgress {
   attempt: number;
   status: string;

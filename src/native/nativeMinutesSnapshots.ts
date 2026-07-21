@@ -37,6 +37,9 @@ export interface BuildNativeRecordingSnapshotInput {
   meetingId: string;
   title: string;
   startedAtLabel?: string;
+  location?: string;
+  locationLoading?: boolean;
+  canEditLocation?: boolean;
   phase: MinutesRecordingPhase;
   elapsedMs: number;
   statusLabel?: string;
@@ -53,6 +56,7 @@ export interface BuildNativeDetailSnapshotInput {
   available?: boolean;
   title: string;
   dateTimeLabel?: string;
+  location?: string;
   activeTab: MinutesDetailTab;
   tabGeneration?: number;
   activeTabIsExplicit?: boolean;
@@ -465,6 +469,9 @@ export function buildNativeMinutesRecordingSnapshot(
       meetingId: input.meetingId,
       title: input.title,
       startedAtLabel: input.startedAtLabel,
+      location: input.location,
+      locationLoading: input.locationLoading ?? false,
+      canEditLocation: input.canEditLocation ?? true,
       phase: input.phase,
       elapsedMs: Math.max(0, input.elapsedMs),
       statusLabel: input.statusLabel,
@@ -489,6 +496,7 @@ export function buildNativeMinutesDetailSnapshot(
     available: input.available ?? true,
     title: input.title,
     dateTimeLabel: input.dateTimeLabel,
+    location: input.location,
     activeTab: input.activeTab,
     tabGeneration: pageGeneration(input.tabGeneration),
     activeTabIsExplicit: input.activeTabIsExplicit ?? false,

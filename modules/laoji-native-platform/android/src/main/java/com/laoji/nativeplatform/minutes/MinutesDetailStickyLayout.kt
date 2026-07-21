@@ -84,8 +84,6 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     tabs.measure(exactWidth, MeasureSpec.makeMeasureSpec(tabHeight, MeasureSpec.EXACTLY))
     val pagerHeight = MinutesDetailLayoutContract.pagerHeightPx(
       stickyHeightPx = height,
-      headerHeightPx = header.measuredHeight,
-      collapseOffsetPx = headerCollapseOffsetPx,
       tabHeightPx = tabHeight,
     )
     pager.measure(exactWidth, MeasureSpec.makeMeasureSpec(pagerHeight, MeasureSpec.EXACTLY))
@@ -150,7 +148,14 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     headerCollapseOffsetPx = next
     accumulateDirection(delta)
     listener?.onCollapseOffsetChanged(next)
-    requestLayout()
+    if (ViewCompat.isLaidOut(this)) {
+      header.offsetTopAndBottom(-delta)
+      tabs.offsetTopAndBottom(-delta)
+      pager.offsetTopAndBottom(-delta)
+      invalidate()
+    } else {
+      requestLayout()
+    }
   }
 
   private fun accumulateDirection(delta: Int) {

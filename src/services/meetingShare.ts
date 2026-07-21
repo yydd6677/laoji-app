@@ -48,11 +48,13 @@ function formatTranscriptTime(seconds?: number): string {
 export function buildMeetingInfoText(meeting: Meeting): string {
   const participants = meeting.participants?.filter(Boolean).join('、') || '未记录';
   const status = meeting.tags.map(tag => tag.label).filter(Boolean).join('、') || meeting.status || '未记录';
+  const location = meeting.location?.trim() || '未记录';
   return [
     `会议标题：${meeting.title}`,
     `会议日期：${meeting.date}`,
     `会议时间：${meeting.time || '未记录'}`,
     `会议时长：${meeting.duration || '未记录'}`,
+    `会议地址：${location}`,
     `参与人员：${participants}`,
     `会议状态：${status}`,
   ].join('\n');

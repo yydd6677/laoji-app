@@ -17,6 +17,7 @@ import {
 import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
 import { clearAppStorage } from '../services/appStorage';
 import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
+import { useGuestDataMigration } from '../components/GuestDataMigrationProvider';
 
 const { colors: F } = getFeishuTokens();
 
@@ -87,6 +88,7 @@ export function PrivacyScreen({ navigation }: Props) {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const { mode, session, signOut } = useAuth();
   const { showDialog } = useAppDialog();
+  const { migrationBusy, mergeGuestData } = useGuestDataMigration();
   const scope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
 
   useEffect(() => {
@@ -223,6 +225,13 @@ export function PrivacyScreen({ navigation }: Props) {
             label="文件分享说明"
             onPress={() => showDialog({ title: '文件分享说明', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })}
           />
+          {mode === 'authenticated' ? (
+            <SettingsRow
+              label="合并访客数据"
+              value={migrationBusy ? '正在合并' : undefined}
+              onPress={() => { void mergeGuestData(); }}
+            />
+          ) : null}
           <SettingsRow
             label="系统验证"
             right={(

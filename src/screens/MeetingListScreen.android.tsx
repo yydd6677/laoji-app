@@ -16,7 +16,7 @@ import { useAppDialog } from '../components/AppDialog';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { readableErrorMessage } from '../services/errors';
-import { meetingSummaryToText } from '../services/meetingSummary';
+import { briefGreetingSummaryText, meetingSummaryToText } from '../services/meetingSummary';
 import { canResumeMeetingRecording, formatDuration, preferredMeetingStatusLabel } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
@@ -57,7 +57,12 @@ function cleanCoverText(value: string): string {
  * a usable summary wins; otherwise use a named dominant speaker and one representative line.
  */
 function inferredMeetingCover(summary: MeetingSummary | null, transcript: readonly TranscriptLine[]) {
-  const summaryText = [summary?.overview, summary?.full_text, meetingSummaryToText(summary)]
+  const summaryText = [
+    briefGreetingSummaryText(transcript),
+    summary?.overview,
+    summary?.full_text,
+    meetingSummaryToText(summary),
+  ]
     .map(value => cleanCoverText(value ?? ''))
     .find(value => value.length >= 8) ?? '';
   if (summaryText.length >= 8) {

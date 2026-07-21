@@ -52,6 +52,9 @@ object MinutesSnapshotParser {
     meetingId = raw.string("meetingId").orEmpty(),
     title = raw.string("title").orDefault("会议记录"),
     startedAtLabel = raw.string("startedAtLabel").orEmpty(),
+    location = raw.string("location").orEmpty(),
+    locationLoading = raw.boolean("locationLoading"),
+    canEditLocation = raw.boolean("canEditLocation", true),
     phase = phase,
     elapsedMs = raw.long("elapsedMs"),
     statusLabel = raw.string("statusLabel")?.takeIf { it.isNotBlank() }?.let {
@@ -105,6 +108,7 @@ object MinutesSnapshotParser {
       available = raw.boolean("available", true),
       title = raw.string("title").orDefault("会议记录"),
       dateTimeLabel = raw.string("dateTimeLabel").orEmpty(),
+      location = raw.string("location").orEmpty(),
       activeTab = activeTab,
       tabGeneration = raw["tabGeneration"].pageGeneration(),
       activeTabIsExplicit = raw.boolean("activeTabIsExplicit"),

@@ -73,6 +73,7 @@ export interface Meeting {
   statusSyncPending?: boolean;
   mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
   description?: string | null;
+  location?: string | null;
   createdAt?: string;
   updatedAt?: string;
   audioAvailable?: boolean;

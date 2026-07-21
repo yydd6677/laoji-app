@@ -371,8 +371,7 @@ internal class MinutesSpeakersPage(
 /**
  * [SOURCE] Feishu's information tab presents user-semantic creation metadata,
  * not local-file, sync, or transcript implementation state. LaoJi currently
- * has no real owner/participant/location field, so only its true creation time
- * is shown; missing capabilities are not represented by invented placeholders.
+ * Missing capabilities are not represented by invented placeholders.
  */
 internal class MinutesInfoPage(
   context: Context,
@@ -409,6 +408,7 @@ internal class MinutesInfoPage(
   fun render(state: MinutesDetailState) {
     val values = buildList {
       state.dateTimeLabel.takeIf { it.isNotBlank() }?.let { add("创建时间" to it) }
+      state.location.takeIf { it.isNotBlank() }?.let { add("地址" to it) }
     }
     val key = values.joinToString("|") { "${it.first}=${it.second}" }
     if (key != renderedKey) {
@@ -609,7 +609,7 @@ private class MinutesSpeakersPageAdapter(
       }
       root.isClickable = speaker.canManage
       root.isFocusable = speaker.canManage
-      root.contentDescription = "${speaker.label}，发言占比${row.percent}%"
+      root.contentDescription = "${speaker.label}，发言时长占完整录音${row.percent}%"
       root.setOnClickListener(if (speaker.canManage) {
         View.OnClickListener { onAction(mapOf("type" to "manageSpeaker", "speakerId" to speaker.id)) }
       } else null)

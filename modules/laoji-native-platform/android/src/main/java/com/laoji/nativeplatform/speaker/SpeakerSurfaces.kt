@@ -177,7 +177,11 @@ internal class SpeakerEnrollmentSurface(
   private val stateProgress = ProgressBar(context)
   private val stateMessage = context.speakerText(sizeSp = 14, color = SpeakerPalette.secondary)
   private val stateAction = context.speakerText("重试", 14, SpeakerPalette.primary, Typeface.BOLD)
-  private val bottom = LinearLayout(context)
+  private val bottom = FrameLayout(context)
+  private val singleAction = context.speakerText(sizeSp = 16, weight = Typeface.BOLD)
+  private val dualActions = LinearLayout(context)
+  private val secondaryAction = context.speakerText(sizeSp = 16, weight = Typeface.BOLD)
+  private val primaryAction = context.speakerText(sizeSp = 16, weight = Typeface.BOLD)
   private var applying = false
   private var rendered = SpeakerEnrollmentState(
     guest = false,
@@ -226,6 +230,7 @@ internal class SpeakerEnrollmentSurface(
     addView(statePanel, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     addView(bottom, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(72)))
     buildContent()
+    buildBottomActions()
   }
 
   private fun buildContent() {
@@ -282,6 +287,7 @@ internal class SpeakerEnrollmentSurface(
     if (nameInput.text.toString() != value.name) nameInput.setText(value.name)
     applying = false
     nameInput.isEnabled = value.nameEditable && value.enrollmentPhase !in setOf("recording", "saving")
+    saveName.visibility = if (value.speakerId.isNotBlank()) View.VISIBLE else View.GONE
     saveName.isEnabled = value.nameSaveEnabled
     saveName.alpha = if (value.nameSaveEnabled) 1f else 0.35f
     prompt.text = value.voiceprintText
@@ -313,35 +319,104 @@ internal class SpeakerEnrollmentSurface(
   }
 
   private fun renderActions(value: SpeakerEnrollmentState) {
-    bottom.removeAllViews()
-    bottom.orientation = HORIZONTAL
-    bottom.gravity = Gravity.CENTER
-    bottom.setPadding(context.speakerDp(20), context.speakerDp(10), context.speakerDp(20), context.speakerDp(14))
-    bottom.speakerBackground(SpeakerPalette.surface)
+    val showDualActions = !value.guest && value.enrollmentPhase == "ready" && value.canSubmit
+    singleAction.visibility = if (showDualActions) View.GONE else View.VISIBLE
+    dualActions.visibility = if (showDualActions) View.VISIBLE else View.GONE
+    if (showDualActions) {
+      bindBottomAction(secondaryAction, "重新录制", "retake", primary = false)
+      bindBottomAction(
+        primaryAction,
+        "保存声纹",
+        "submitRecording",
+        primary = true,
+        enabled = value.voiceprintConsentAccepted,
+      )
+      return
+    }
     when {
-      value.guest -> addBottomAction("登录账号", "login", primary = true)
-      value.enrollmentPhase == "recording" -> addBottomAction("停止录制", "stopRecording", primary = false, danger = true)
-      value.enrollmentPhase == "ready" && value.canSubmit -> {
-        addBottomAction("重新录制", "retake", primary = false, weight = 1f)
-        addBottomAction(
-          "保存声纹",
-          "submitRecording",
-          primary = true,
-          enabled = value.voiceprintConsentAccepted,
-          weight = 1.4f,
-        )
-      }
-      else -> addBottomAction("开始录制", "startRecording", primary = true, enabled = value.canRecord)
+      value.guest -> bindBottomAction(singleAction, "登录账号", "login", primary = true)
+      value.enrollmentPhase == "recording" -> bindBottomAction(
+        singleAction,
+        "停止录制",
+        "stopRecording",
+        primary = false,
+        danger = true,
+      )
+      value.enrollmentPhase == "preparing" -> bindBottomAction(
+        singleAction,
+        "正在准备",
+        "startRecording",
+        primary = true,
+        enabled = false,
+      )
+      value.enrollmentPhase == "stopping" -> bindBottomAction(
+        singleAction,
+        "正在保存录音",
+        "stopRecording",
+        primary = true,
+        enabled = false,
+      )
+      value.enrollmentPhase == "saving" -> bindBottomAction(
+        singleAction,
+        "正在保存声纹",
+        "submitRecording",
+        primary = true,
+        enabled = false,
+      )
+      else -> bindBottomAction(
+        singleAction,
+        "开始录制",
+        "startRecording",
+        primary = true,
+        enabled = value.canRecord,
+      )
     }
   }
 
-  private fun addBottomAction(
+  private fun buildBottomActions() {
+    bottom.speakerBackground(SpeakerPalette.surface)
+    singleAction.gravity = Gravity.CENTER
+    singleAction.setOnClickListener { emitBottomAction(singleAction) }
+    bottom.addView(singleAction, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      context.speakerDp(48),
+      Gravity.CENTER_VERTICAL,
+    ).apply {
+      leftMargin = context.speakerDp(20)
+      rightMargin = context.speakerDp(20)
+      topMargin = context.speakerDp(10)
+      bottomMargin = context.speakerDp(14)
+    })
+
+    dualActions.orientation = HORIZONTAL
+    dualActions.gravity = Gravity.CENTER
+    dualActions.setPadding(context.speakerDp(20), context.speakerDp(10), context.speakerDp(20), context.speakerDp(14))
+    secondaryAction.gravity = Gravity.CENTER
+    secondaryAction.setOnClickListener { emitBottomAction(secondaryAction) }
+    primaryAction.gravity = Gravity.CENTER
+    primaryAction.setOnClickListener { emitBottomAction(primaryAction) }
+    dualActions.addView(secondaryAction, LayoutParams(0, context.speakerDp(48), 1f))
+    dualActions.addView(primaryAction, LayoutParams(0, context.speakerDp(48), 1.4f).apply {
+      leftMargin = context.speakerDp(10)
+    })
+    bottom.addView(dualActions, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.MATCH_PARENT,
+    ))
+  }
+
+  private fun emitBottomAction(button: TextView) {
+    val action = button.tag as? String ?: return
+    onAction(mapOf("type" to action, "speakerId" to rendered.speakerId))
+  }
+
+  private fun bindBottomAction(
+    button: TextView,
     label: String,
     action: String,
     primary: Boolean,
     danger: Boolean = false,
     enabled: Boolean = true,
-    weight: Float = 1f,
   ) {
     val color = when {
       primary -> SpeakerPalette.primary
@@ -353,19 +428,15 @@ internal class SpeakerEnrollmentSurface(
       danger -> SpeakerPalette.danger
       else -> SpeakerPalette.text
     }
-    val button = context.speakerText(label, 16, textColor, Typeface.BOLD).apply {
-      gravity = Gravity.CENTER
-      speakerBackground(color, 6)
-      isClickable = enabled
-      isFocusable = enabled
-      isEnabled = enabled
-      alpha = if (enabled) 1f else 0.35f
-      contentDescription = label
-      setOnClickListener { onAction(mapOf("type" to action, "speakerId" to rendered.speakerId)) }
-    }
-    bottom.addView(button, LayoutParams(0, context.speakerDp(48), weight).apply {
-      if (bottom.childCount > 0) leftMargin = context.speakerDp(10)
-    })
+    button.text = label
+    button.tag = action
+    button.setTextColor(textColor)
+    button.speakerBackground(color, 6)
+    button.isClickable = enabled
+    button.isFocusable = enabled
+    button.isEnabled = enabled
+    button.alpha = if (enabled) 1f else 0.35f
+    button.contentDescription = label
   }
 
   private fun phaseLabel(phase: String): String = when (phase) {
