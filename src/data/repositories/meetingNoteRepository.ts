@@ -48,6 +48,8 @@ export interface MeetingListProjectionItem {
   startedAtMs: number | null;
   updatedAtMs: number;
   currentSummaryVersionId: string | null;
+  activeTranscriptSegmentCount: number;
+  currentSummaryReady: boolean;
   stages: readonly ProcessingStage[];
 }
 
@@ -138,6 +140,75 @@ export interface TranscriptSegmentRecord {
   createdAtMs: number;
 }
 
+export interface TranscriptRevisionRecord {
+  id: string;
+  meetingId: string;
+  kind: 'realtime_draft' | 'final' | 'reprocessed';
+  status: 'realtime_draft' | 'finalizing' | 'ready' | 'failed' | 'archived';
+  sourceProvider: string | null;
+  sourceModel: string | null;
+  isActive: boolean;
+  createdAtMs: number;
+  finalizedAtMs: number | null;
+}
+
+export interface SaveTranscriptRevisionOptions {
+  activate: boolean;
+  replaceSegments: boolean;
+}
+
+export interface SummaryVersionRecord {
+  id: string;
+  meetingId: string;
+  templateId: string;
+  templateRevision: number;
+  inputFingerprint: string;
+  transcriptRevisionId: string | null;
+  manualNoteRevision: number;
+  scheduleSnapshotHash: string | null;
+  status: 'queued' | 'generating' | 'ready' | 'failed' | 'stale';
+  generatedBy: string | null;
+  userEdited: boolean;
+  supersedesVersionId: string | null;
+  createdAtMs: number;
+  completedAtMs: number | null;
+}
+
+export interface SummarySectionRecord {
+  id: string;
+  versionId: string;
+  stableKey: string;
+  kind: string;
+  title: string | null;
+  generatedText: string;
+  userText: string | null;
+  ordinal: number;
+  userEditedAtMs: number | null;
+}
+
+export interface ActionItemRecord {
+  id: string;
+  meetingId: string;
+  remoteId: string | null;
+  content: string;
+  status: 'pending' | 'completed' | 'dismissed';
+  assigneeText: string | null;
+  dueAtMs: number | null;
+  sourceKind: 'generated' | 'manual' | 'marker';
+  sourceSummaryVersionId: string | null;
+  sourceSegmentId: string | null;
+  sourceStartMs: number | null;
+  generationFingerprint: string | null;
+  userEditedAtMs: number | null;
+  completedAtMs: number | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface SaveSummaryVersionOptions {
+  activate: boolean;
+}
+
 export interface SyncOperationRecord {
   operationId: string;
   scopeKey: ScopeKey;
@@ -162,13 +233,35 @@ export interface MeetingTransaction {
     stage: ProcessingStage['stage'],
   ): Promise<ProcessingStage | null>;
   getPrimaryRecording(meetingId: string, scopeKey: ScopeKey): Promise<RecordingAssetRecord | null>;
+  getTranscriptRevision(id: string, scopeKey: ScopeKey): Promise<TranscriptRevisionRecord | null>;
+  getActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionRecord | null>;
+  getSummaryVersion(id: string, scopeKey: ScopeKey): Promise<SummaryVersionRecord | null>;
+  getCurrentSummaryVersion(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionRecord | null>;
   insertMeeting(note: NewMeetingNote): Promise<void>;
   updateMeeting(id: string, scopeKey: ScopeKey, patch: MeetingRootPatch): Promise<void>;
   bindOccurrence(link: OccurrenceLinkRecord, snapshot: ScheduleSnapshot): Promise<void>;
   upsertStage(stage: ProcessingStage, scopeKey: ScopeKey): Promise<void>;
   saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void>;
   saveRecordingAsset(asset: RecordingAssetRecord, scopeKey: ScopeKey): Promise<void>;
-  appendTranscriptSegments(revisionId: string, segments: readonly TranscriptSegmentRecord[]): Promise<void>;
+  saveTranscriptRevision(
+    revision: TranscriptRevisionRecord,
+    segments: readonly TranscriptSegmentRecord[],
+    scopeKey: ScopeKey,
+    options: SaveTranscriptRevisionOptions,
+  ): Promise<void>;
+  saveSummaryVersion(
+    version: SummaryVersionRecord,
+    sections: readonly SummarySectionRecord[],
+    actions: readonly ActionItemRecord[],
+    scopeKey: ScopeKey,
+    options: SaveSummaryVersionOptions,
+  ): Promise<void>;
   insertOutbox(operation: SyncOperationRecord): Promise<void>;
 }
 
@@ -180,6 +273,14 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
   ): Promise<MeetingNoteAggregate | null>;
   findByNativeSessionId(sessionId: string, scopeKey: ScopeKey): Promise<MeetingNoteAggregate | null>;
+  getActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionRecord | null>;
+  getCurrentSummaryVersion(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionRecord | null>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;

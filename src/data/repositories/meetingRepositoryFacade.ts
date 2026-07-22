@@ -16,6 +16,13 @@ export interface MeetingDualReadReport {
   titleMismatches: number;
   lifecycleMismatches: number;
   invalidStageSets: number;
+  transcriptCountMismatches: number;
+  summaryAvailabilityMismatches: number;
+}
+
+export interface LegacyMeetingContentProjection {
+  transcriptLineCounts: Readonly<Record<string, number>>;
+  summaryReady: Readonly<Record<string, boolean>>;
 }
 
 function lifecycleForLegacy(meeting: Meeting): MeetingLifecycle {
@@ -51,6 +58,7 @@ export class MeetingRepositoryFacade {
   async compareLegacySnapshot(
     scopeKey: ScopeKey,
     legacyMeetings: readonly Meeting[],
+    content?: LegacyMeetingContentProjection,
   ): Promise<MeetingDualReadReport> {
     assertScopeKey(scopeKey);
     const repositoryItems: MeetingListProjectionItem[] = [];
@@ -84,6 +92,8 @@ export class MeetingRepositoryFacade {
     let missingFromRepository = 0;
     let titleMismatches = 0;
     let lifecycleMismatches = 0;
+    let transcriptCountMismatches = 0;
+    let summaryAvailabilityMismatches = 0;
     legacyById.forEach((legacy, id) => {
       const repositoryItem = repositoryByIdentity.get(id);
       if (!repositoryItem) {
@@ -92,6 +102,15 @@ export class MeetingRepositoryFacade {
       }
       if (repositoryItem.title !== (legacy.title ?? '')) titleMismatches += 1;
       if (repositoryItem.lifecycle !== lifecycleForLegacy(legacy)) lifecycleMismatches += 1;
+      if (content) {
+        const legacyTranscriptCount = Math.max(0, Math.trunc(content.transcriptLineCounts[id] ?? 0));
+        if (repositoryItem.activeTranscriptSegmentCount !== legacyTranscriptCount) {
+          transcriptCountMismatches += 1;
+        }
+        if (repositoryItem.currentSummaryReady !== Boolean(content.summaryReady[id])) {
+          summaryAvailabilityMismatches += 1;
+        }
+      }
     });
     let extraInRepository = 0;
     repositoryByIdentity.forEach((_, identity) => {
@@ -99,7 +118,8 @@ export class MeetingRepositoryFacade {
     });
     const invalidStageSets = repositoryItems.filter(item => !hasCompleteStageSet(item)).length;
     const mismatchCount = missingFromRepository + extraInRepository + duplicateRepositoryIdentities
-      + titleMismatches + lifecycleMismatches + invalidStageSets;
+      + titleMismatches + lifecycleMismatches + invalidStageSets
+      + transcriptCountMismatches + summaryAvailabilityMismatches;
     return {
       status: mismatchCount === 0 ? 'consistent' : 'mismatch',
       legacyMeetings: legacyById.size,
@@ -110,6 +130,8 @@ export class MeetingRepositoryFacade {
       titleMismatches,
       lifecycleMismatches,
       invalidStageSets,
+      transcriptCountMismatches,
+      summaryAvailabilityMismatches,
     };
   }
 }

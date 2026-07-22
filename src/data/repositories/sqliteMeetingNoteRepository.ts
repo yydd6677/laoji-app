@@ -8,6 +8,7 @@ import type {
 import { assertProcessingStage, assertScopeKey } from '../../domain/meeting';
 import { withMeetingDatabaseTransaction, openMeetingDatabase } from '../db/openDatabase';
 import type {
+  ActionItemRecord,
   ManualNoteRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
@@ -19,7 +20,12 @@ import type {
   NewMeetingNote,
   OccurrenceLinkRecord,
   RecordingAssetRecord,
+  SaveSummaryVersionOptions,
+  SaveTranscriptRevisionOptions,
+  SummarySectionRecord,
+  SummaryVersionRecord,
   SyncOperationRecord,
+  TranscriptRevisionRecord,
   TranscriptSegmentRecord,
   Unsubscribe,
 } from './meetingNoteRepository';
@@ -40,6 +46,8 @@ type MeetingRow = {
   created_at_ms: number;
   updated_at_ms: number;
   deleted_at_ms: number | null;
+  active_transcript_segment_count?: number;
+  current_summary_ready?: number;
 };
 
 type RecordingAssetRow = {
@@ -87,6 +95,64 @@ type StageRow = {
   updated_at_ms: number;
 };
 
+type TranscriptRevisionRow = {
+  id: string;
+  meeting_id: string;
+  kind: TranscriptRevisionRecord['kind'];
+  status: TranscriptRevisionRecord['status'];
+  source_provider: string | null;
+  source_model: string | null;
+  is_active: number;
+  created_at_ms: number;
+  finalized_at_ms: number | null;
+};
+
+type TranscriptSegmentRow = {
+  id: string;
+  revision_id: string;
+  meeting_id: string;
+  ordinal: number;
+  start_ms: number;
+  end_ms: number;
+  speaker_cluster_id: string | null;
+  speaker_profile_id: string | null;
+  speaker_label: string | null;
+  text: string;
+  normalized_text: string;
+  confidence: number | null;
+  is_final: number;
+  created_at_ms: number;
+};
+
+type SummaryVersionRow = {
+  id: string;
+  meeting_id: string;
+  template_id: string;
+  template_revision: number;
+  input_fingerprint: string;
+  transcript_revision_id: string | null;
+  manual_note_revision: number;
+  schedule_snapshot_hash: string | null;
+  status: SummaryVersionRecord['status'];
+  generated_by: string | null;
+  user_edited: number;
+  supersedes_version_id: string | null;
+  created_at_ms: number;
+  completed_at_ms: number | null;
+};
+
+type SummarySectionRow = {
+  id: string;
+  version_id: string;
+  stable_key: string;
+  kind: string;
+  title: string | null;
+  generated_text: string;
+  user_text: string | null;
+  ordinal: number;
+  user_edited_at_ms: number | null;
+};
+
 type OccurrenceRow = {
   calendar_source_event_id: string;
   occurrence_date: string;
@@ -111,6 +177,15 @@ const RECORDING_LOCAL_STATES = new Set<RecordingAssetRecord['localState']>([
   'local_ready',
   'remote_only',
   'missing',
+]);
+const TRANSCRIPT_REVISION_KINDS = new Set<TranscriptRevisionRecord['kind']>([
+  'realtime_draft', 'final', 'reprocessed',
+]);
+const TRANSCRIPT_REVISION_STATUSES = new Set<TranscriptRevisionRecord['status']>([
+  'realtime_draft', 'finalizing', 'ready', 'failed', 'archived',
+]);
+const SUMMARY_VERSION_STATUSES = new Set<SummaryVersionRecord['status']>([
+  'queued', 'generating', 'ready', 'failed', 'stale',
 ]);
 
 function noteFromRow(row: MeetingRow): MeetingNote {
@@ -191,6 +266,60 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
     updatedAtMs: row.updated_at_ms,
     lastVerifiedAtMs: row.last_verified_at_ms,
   };
+}
+
+function transcriptRevisionFromRow(row: TranscriptRevisionRow): TranscriptRevisionRecord {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    kind: row.kind,
+    status: row.status,
+    sourceProvider: row.source_provider,
+    sourceModel: row.source_model,
+    isActive: row.is_active === 1,
+    createdAtMs: row.created_at_ms,
+    finalizedAtMs: row.finalized_at_ms,
+  };
+}
+
+function summaryVersionFromRow(row: SummaryVersionRow): SummaryVersionRecord {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    templateId: row.template_id,
+    templateRevision: row.template_revision,
+    inputFingerprint: row.input_fingerprint,
+    transcriptRevisionId: row.transcript_revision_id,
+    manualNoteRevision: row.manual_note_revision,
+    scheduleSnapshotHash: row.schedule_snapshot_hash,
+    status: row.status,
+    generatedBy: row.generated_by,
+    userEdited: row.user_edited === 1,
+    supersedesVersionId: row.supersedes_version_id,
+    createdAtMs: row.created_at_ms,
+    completedAtMs: row.completed_at_ms,
+  };
+}
+
+function assertRecordId(value: string, field: string): void {
+  if (!value.trim() || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`${field} is invalid`);
+  }
+}
+
+function assertNonNegativeInteger(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${field} is invalid`);
+}
+
+function assertOptionalNonNegativeInteger(value: number | null, field: string): void {
+  if (value !== null) assertNonNegativeInteger(value, field);
+}
+
+function actionStatus(value: ActionItemRecord['status']): ActionItemRecord['status'] {
+  if (value !== 'pending' && value !== 'completed' && value !== 'dismissed') {
+    throw new Error('meeting action status is invalid');
+  }
+  return value;
 }
 
 function participantsFromJson(value: string): readonly string[] {
@@ -313,6 +442,69 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       scopeKey,
     );
     return row ? recordingAssetFromRow(row) : null;
+  }
+
+  async getTranscriptRevision(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionRecord | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.id = ? AND meeting.scope_key = ?`,
+      id,
+      scopeKey,
+    );
+    return row ? transcriptRevisionFromRow(row) : null;
+  }
+
+  async getActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionRecord | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.meeting_id = ? AND meeting.scope_key = ? AND revision.is_active = 1
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return row ? transcriptRevisionFromRow(row) : null;
+  }
+
+  async getSummaryVersion(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionRecord | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<SummaryVersionRow>(
+      `SELECT version.* FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE version.id = ? AND meeting.scope_key = ?`,
+      id,
+      scopeKey,
+    );
+    return row ? summaryVersionFromRow(row) : null;
+  }
+
+  async getCurrentSummaryVersion(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionRecord | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<SummaryVersionRow>(
+      `SELECT version.* FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE meeting.id = ? AND meeting.scope_key = ?
+         AND meeting.current_summary_version_id = version.id
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return row ? summaryVersionFromRow(row) : null;
   }
 
   private async assertMeetingInScope(meetingId: string, scopeKey: ScopeKey): Promise<void> {
@@ -546,35 +738,433 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(asset.meetingId);
   }
 
-  async appendTranscriptSegments(
-    revisionId: string,
+  async saveTranscriptRevision(
+    revision: TranscriptRevisionRecord,
     segments: readonly TranscriptSegmentRecord[],
+    scopeKey: ScopeKey,
+    options: SaveTranscriptRevisionOptions,
   ): Promise<void> {
-    for (const segment of segments) {
-      await this.database.runAsync(
-        `INSERT INTO transcript_segments (
-           id, revision_id, meeting_id, ordinal, start_ms, end_ms,
-           speaker_cluster_id, speaker_profile_id, speaker_label,
-           speaker_label_override, text, normalized_text, confidence,
-           is_final, created_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
-        segment.id,
-        revisionId,
-        segment.meetingId,
-        segment.ordinal,
-        segment.startMs,
-        segment.endMs,
-        segment.speakerClusterId,
-        segment.speakerProfileId,
-        segment.speakerLabel,
-        segment.text,
-        segment.normalizedText,
-        segment.confidence,
-        segment.isFinal ? 1 : 0,
-        segment.createdAtMs,
-      );
-      this.touchedMeetingIds.add(segment.meetingId);
+    assertScopeKey(scopeKey);
+    assertRecordId(revision.id, 'transcript revision ID');
+    assertRecordId(revision.meetingId, 'meeting ID');
+    if (!TRANSCRIPT_REVISION_KINDS.has(revision.kind) || !TRANSCRIPT_REVISION_STATUSES.has(revision.status)) {
+      throw new Error('transcript revision state is invalid');
     }
+    assertNonNegativeInteger(revision.createdAtMs, 'transcript revision creation time');
+    assertOptionalNonNegativeInteger(revision.finalizedAtMs, 'transcript revision finalization time');
+    if (revision.finalizedAtMs !== null && revision.finalizedAtMs < revision.createdAtMs) {
+      throw new Error('transcript revision finalization precedes creation');
+    }
+    if (revision.isActive !== options.activate) {
+      throw new Error('transcript revision activation contract is inconsistent');
+    }
+    if (revision.kind !== 'realtime_draft' && segments.length === 0) {
+      throw new Error('final transcript revision cannot be empty');
+    }
+    const meeting = await this.getMeeting(revision.meetingId, scopeKey);
+    if (!meeting || meeting.lifecycle === 'deleted') {
+      throw new Error('meeting does not accept transcript content in active scope');
+    }
+    const segmentIds = new Set<string>();
+    const ordinals = new Set<number>();
+    for (const segment of segments) {
+      assertRecordId(segment.id, 'transcript segment ID');
+      if (segment.meetingId !== revision.meetingId) {
+        throw new Error('transcript segment belongs to a different meeting');
+      }
+      assertNonNegativeInteger(segment.ordinal, 'transcript segment ordinal');
+      assertNonNegativeInteger(segment.startMs, 'transcript segment start');
+      assertNonNegativeInteger(segment.endMs, 'transcript segment end');
+      assertNonNegativeInteger(segment.createdAtMs, 'transcript segment creation time');
+      if (segment.endMs < segment.startMs) throw new Error('transcript segment end precedes start');
+      if (segment.confidence !== null && (
+        !Number.isFinite(segment.confidence) || segment.confidence < 0 || segment.confidence > 1
+      )) {
+        throw new Error('transcript segment confidence is invalid');
+      }
+      if (segmentIds.has(segment.id) || ordinals.has(segment.ordinal)) {
+        throw new Error('transcript revision contains duplicate segment identity');
+      }
+      segmentIds.add(segment.id);
+      ordinals.add(segment.ordinal);
+    }
+    if (segments.some((segment, index) => segment.ordinal !== index)) {
+      throw new Error('transcript segment ordinals must be contiguous and ordered');
+    }
+
+    const existingRow = await this.database.getFirstAsync<TranscriptRevisionRow>(
+      'SELECT * FROM transcript_revisions WHERE id = ?',
+      revision.id,
+    );
+    if (existingRow && existingRow.meeting_id !== revision.meetingId) {
+      throw new Error('transcript revision belongs to a different meeting');
+    }
+    if (existingRow && existingRow.kind !== revision.kind) {
+      throw new Error('transcript revision kind cannot be changed');
+    }
+    if (existingRow && revision.kind !== 'realtime_draft') {
+      const existing = transcriptRevisionFromRow(existingRow);
+      if (
+        existing.kind !== revision.kind ||
+        existing.status !== revision.status ||
+        existing.sourceProvider !== revision.sourceProvider ||
+        existing.sourceModel !== revision.sourceModel ||
+        existing.createdAtMs !== revision.createdAtMs ||
+        existing.finalizedAtMs !== revision.finalizedAtMs
+      ) {
+        throw new Error('immutable transcript revision cannot be replaced');
+      }
+      const rows = await this.database.getAllAsync<TranscriptSegmentRow>(
+        'SELECT * FROM transcript_segments WHERE revision_id = ? ORDER BY ordinal',
+        revision.id,
+      );
+      const matches = rows.length === segments.length && rows.every((row, index) => {
+        const segment = segments[index];
+        return row.id === segment.id && row.meeting_id === segment.meetingId
+          && row.ordinal === segment.ordinal && row.start_ms === segment.startMs
+          && row.end_ms === segment.endMs && row.speaker_cluster_id === segment.speakerClusterId
+          && row.speaker_profile_id === segment.speakerProfileId
+          && row.speaker_label === segment.speakerLabel && row.text === segment.text
+          && row.normalized_text === segment.normalizedText && row.confidence === segment.confidence
+          && row.is_final === (segment.isFinal ? 1 : 0) && row.created_at_ms === segment.createdAtMs;
+      });
+      if (!matches) throw new Error('immutable transcript segments cannot be replaced');
+    }
+
+    if (options.activate) {
+      await this.database.runAsync(
+        'UPDATE transcript_revisions SET is_active = 0 WHERE meeting_id = ? AND id != ?',
+        revision.meetingId,
+        revision.id,
+      );
+    }
+    if (!existingRow) {
+      await this.database.runAsync(
+        `INSERT INTO transcript_revisions (
+           id, meeting_id, kind, status, source_provider, source_model,
+           is_active, created_at_ms, finalized_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        revision.id,
+        revision.meetingId,
+        revision.kind,
+        revision.status,
+        revision.sourceProvider,
+        revision.sourceModel,
+        options.activate ? 1 : 0,
+        revision.createdAtMs,
+        revision.finalizedAtMs,
+      );
+    } else if (revision.kind === 'realtime_draft') {
+      if (!options.replaceSegments) {
+        throw new Error('mutable transcript revision requires an explicit segment replacement');
+      }
+      const citationCount = Number((await this.database.getFirstAsync<{ count: number }>(
+        `SELECT (
+           (SELECT COUNT(*) FROM summary_citations citation
+            INNER JOIN transcript_segments segment ON segment.id = citation.segment_id
+            WHERE segment.revision_id = ?) +
+           (SELECT COUNT(*) FROM action_item_citations citation
+            INNER JOIN transcript_segments segment ON segment.id = citation.segment_id
+            WHERE segment.revision_id = ?)
+         ) AS count`,
+        revision.id,
+        revision.id,
+      ))?.count ?? 0);
+      if (citationCount > 0) throw new Error('cited transcript draft cannot be replaced');
+      await this.database.runAsync('DELETE FROM transcript_segments WHERE revision_id = ?', revision.id);
+      await this.database.runAsync(
+        `UPDATE transcript_revisions SET
+           status = ?, source_provider = ?, source_model = ?, is_active = ?, finalized_at_ms = ?
+         WHERE id = ?`,
+        revision.status,
+        revision.sourceProvider,
+        revision.sourceModel,
+        options.activate ? 1 : 0,
+        revision.finalizedAtMs,
+        revision.id,
+      );
+    } else if (existingRow.is_active !== (options.activate ? 1 : 0)) {
+      await this.database.runAsync(
+        'UPDATE transcript_revisions SET is_active = ? WHERE id = ?',
+        options.activate ? 1 : 0,
+        revision.id,
+      );
+    }
+
+    if (!existingRow || revision.kind === 'realtime_draft') {
+      for (const segment of segments) {
+        await this.database.runAsync(
+          `INSERT INTO transcript_segments (
+             id, revision_id, meeting_id, ordinal, start_ms, end_ms,
+             speaker_cluster_id, speaker_profile_id, speaker_label,
+             speaker_label_override, text, normalized_text, confidence,
+             is_final, created_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+          segment.id,
+          revision.id,
+          segment.meetingId,
+          segment.ordinal,
+          segment.startMs,
+          segment.endMs,
+          segment.speakerClusterId,
+          segment.speakerProfileId,
+          segment.speakerLabel,
+          segment.text,
+          segment.normalizedText,
+          segment.confidence,
+          segment.isFinal ? 1 : 0,
+          segment.createdAtMs,
+        );
+      }
+    }
+    this.touchedMeetingIds.add(revision.meetingId);
+  }
+
+  async saveSummaryVersion(
+    version: SummaryVersionRecord,
+    sections: readonly SummarySectionRecord[],
+    actions: readonly ActionItemRecord[],
+    scopeKey: ScopeKey,
+    options: SaveSummaryVersionOptions,
+  ): Promise<void> {
+    assertScopeKey(scopeKey);
+    assertRecordId(version.id, 'summary version ID');
+    assertRecordId(version.meetingId, 'meeting ID');
+    if (!version.templateId.trim() || !version.inputFingerprint.trim()) {
+      throw new Error('summary version contract is invalid');
+    }
+    if (!SUMMARY_VERSION_STATUSES.has(version.status)) throw new Error('summary version state is invalid');
+    assertNonNegativeInteger(version.templateRevision, 'summary template revision');
+    assertNonNegativeInteger(version.manualNoteRevision, 'summary note revision');
+    assertNonNegativeInteger(version.createdAtMs, 'summary creation time');
+    assertOptionalNonNegativeInteger(version.completedAtMs, 'summary completion time');
+    if (version.completedAtMs !== null && version.completedAtMs < version.createdAtMs) {
+      throw new Error('summary completion precedes creation');
+    }
+    if (options.activate && version.status !== 'ready' && version.status !== 'stale') {
+      throw new Error('only a readable summary version can be activated');
+    }
+    const meeting = await this.getMeeting(version.meetingId, scopeKey);
+    if (!meeting || meeting.lifecycle === 'deleted') {
+      throw new Error('meeting does not accept summary content in active scope');
+    }
+    if (version.transcriptRevisionId) {
+      const transcript = await this.getTranscriptRevision(version.transcriptRevisionId, scopeKey);
+      if (!transcript || transcript.meetingId !== version.meetingId) {
+        throw new Error('summary transcript revision is outside the active meeting scope');
+      }
+    }
+    if (version.supersedesVersionId) {
+      const superseded = await this.getSummaryVersion(version.supersedesVersionId, scopeKey);
+      if (!superseded || superseded.meetingId !== version.meetingId) {
+        throw new Error('superseded summary version is outside the active meeting scope');
+      }
+    }
+    const sectionIds = new Set<string>();
+    const sectionKeys = new Set<string>();
+    const sectionOrdinals = new Set<number>();
+    for (const section of sections) {
+      assertRecordId(section.id, 'summary section ID');
+      if (section.versionId !== version.id || !section.stableKey.trim() || !section.kind.trim()) {
+        throw new Error('summary section contract is invalid');
+      }
+      assertNonNegativeInteger(section.ordinal, 'summary section ordinal');
+      assertOptionalNonNegativeInteger(section.userEditedAtMs, 'summary section edit time');
+      if (
+        sectionIds.has(section.id) || sectionKeys.has(section.stableKey)
+        || sectionOrdinals.has(section.ordinal)
+      ) {
+        throw new Error('summary version contains duplicate section identity');
+      }
+      sectionIds.add(section.id);
+      sectionKeys.add(section.stableKey);
+      sectionOrdinals.add(section.ordinal);
+    }
+    if (sections.some((section, index) => section.ordinal !== index)) {
+      throw new Error('summary section ordinals must be contiguous and ordered');
+    }
+    if (version.status === 'ready' && sections.length === 0) {
+      throw new Error('ready summary version cannot be empty');
+    }
+    const actionIds = new Set<string>();
+    for (const action of actions) {
+      assertRecordId(action.id, 'meeting action ID');
+      if (action.meetingId !== version.meetingId || !action.content.trim()) {
+        throw new Error('meeting action contract is invalid');
+      }
+      if (action.sourceKind !== 'generated' && action.sourceKind !== 'manual' && action.sourceKind !== 'marker') {
+        throw new Error('meeting action source is invalid');
+      }
+      if (action.sourceKind === 'generated' && action.sourceSummaryVersionId !== version.id) {
+        throw new Error('generated action must reference its summary version');
+      }
+      actionStatus(action.status);
+      assertOptionalNonNegativeInteger(action.dueAtMs, 'meeting action due time');
+      assertOptionalNonNegativeInteger(action.sourceStartMs, 'meeting action source time');
+      assertOptionalNonNegativeInteger(action.userEditedAtMs, 'meeting action edit time');
+      assertOptionalNonNegativeInteger(action.completedAtMs, 'meeting action completion time');
+      assertNonNegativeInteger(action.createdAtMs, 'meeting action creation time');
+      assertNonNegativeInteger(action.updatedAtMs, 'meeting action update time');
+      if (action.status === 'completed' && action.completedAtMs === null) {
+        throw new Error('completed meeting action requires a completion time');
+      }
+      if (actionIds.has(action.id)) throw new Error('summary version contains duplicate action identity');
+      actionIds.add(action.id);
+      if (action.sourceSegmentId) {
+        const source = await this.database.getFirstAsync<{ meeting_id: string }>(
+          `SELECT segment.meeting_id FROM transcript_segments segment
+           INNER JOIN meeting_notes meeting ON meeting.id = segment.meeting_id
+           WHERE segment.id = ? AND meeting.scope_key = ?`,
+          action.sourceSegmentId,
+          scopeKey,
+        );
+        if (!source || source.meeting_id !== version.meetingId) {
+          throw new Error('meeting action source segment is outside the active meeting scope');
+        }
+      }
+    }
+
+    const existingRow = await this.database.getFirstAsync<SummaryVersionRow>(
+      'SELECT * FROM summary_versions WHERE id = ?',
+      version.id,
+    );
+    if (existingRow && existingRow.meeting_id !== version.meetingId) {
+      throw new Error('summary version belongs to a different meeting');
+    }
+    if (existingRow) {
+      const existing = summaryVersionFromRow(existingRow);
+      if (
+        existing.inputFingerprint !== version.inputFingerprint
+        || existing.templateId !== version.templateId
+        || existing.templateRevision !== version.templateRevision
+        || existing.transcriptRevisionId !== version.transcriptRevisionId
+        || existing.manualNoteRevision !== version.manualNoteRevision
+        || existing.scheduleSnapshotHash !== version.scheduleSnapshotHash
+        || existing.status !== version.status
+        || existing.generatedBy !== version.generatedBy
+        || existing.supersedesVersionId !== version.supersedesVersionId
+        || existing.createdAtMs !== version.createdAtMs
+        || existing.completedAtMs !== version.completedAtMs
+      ) {
+        throw new Error('immutable summary version cannot be replaced');
+      }
+      const rows = await this.database.getAllAsync<SummarySectionRow>(
+        'SELECT * FROM summary_sections WHERE version_id = ? ORDER BY ordinal',
+        version.id,
+      );
+      const sectionsMatch = rows.length === sections.length && rows.every((row, index) => {
+        const section = sections[index];
+        return row.id === section.id && row.version_id === section.versionId
+          && row.stable_key === section.stableKey && row.kind === section.kind
+          && row.title === section.title && row.generated_text === section.generatedText
+          && row.ordinal === section.ordinal;
+      });
+      if (!sectionsMatch) throw new Error('immutable summary sections cannot be replaced');
+    } else {
+      await this.database.runAsync(
+        `INSERT INTO summary_versions (
+           id, meeting_id, template_id, template_revision, input_fingerprint,
+           transcript_revision_id, manual_note_revision, schedule_snapshot_hash,
+           status, generated_by, user_edited, supersedes_version_id,
+           created_at_ms, completed_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        version.id,
+        version.meetingId,
+        version.templateId,
+        version.templateRevision,
+        version.inputFingerprint,
+        version.transcriptRevisionId,
+        version.manualNoteRevision,
+        version.scheduleSnapshotHash,
+        version.status,
+        version.generatedBy,
+        version.userEdited ? 1 : 0,
+        version.supersedesVersionId,
+        version.createdAtMs,
+        version.completedAtMs,
+      );
+      for (const section of sections) {
+        await this.database.runAsync(
+          `INSERT INTO summary_sections (
+             id, version_id, stable_key, kind, title, generated_text,
+             user_text, ordinal, user_edited_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          section.id,
+          section.versionId,
+          section.stableKey,
+          section.kind,
+          section.title,
+          section.generatedText,
+          section.userText,
+          section.ordinal,
+          section.userEditedAtMs,
+        );
+      }
+    }
+
+    for (const action of actions) {
+      const existingAction = await this.database.getFirstAsync<{
+        meeting_id: string;
+        status: ActionItemRecord['status'];
+        user_edited_at_ms: number | null;
+        generation_fingerprint: string | null;
+      }>(
+        'SELECT meeting_id, status, user_edited_at_ms, generation_fingerprint FROM action_items WHERE id = ?',
+        action.id,
+      );
+      if (existingAction && existingAction.meeting_id !== action.meetingId) {
+        throw new Error('meeting action belongs to a different meeting');
+      }
+      if (
+        existingAction?.generation_fingerprint && action.generationFingerprint
+        && existingAction.generation_fingerprint !== action.generationFingerprint
+      ) {
+        throw new Error('meeting action identity changed its generation fingerprint');
+      }
+      if (!existingAction) {
+        await this.database.runAsync(
+          `INSERT INTO action_items (
+             id, meeting_id, remote_id, content, status, assignee_text, due_at_ms,
+             source_kind, source_summary_version_id, source_segment_id, source_start_ms,
+             generation_fingerprint, user_edited_at_ms, completed_at_ms,
+             created_at_ms, updated_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          action.id,
+          action.meetingId,
+          action.remoteId,
+          action.content,
+          action.status,
+          action.assigneeText,
+          action.dueAtMs,
+          action.sourceKind,
+          action.sourceSummaryVersionId,
+          action.sourceSegmentId,
+          action.sourceStartMs,
+          action.generationFingerprint,
+          action.userEditedAtMs,
+          action.completedAtMs,
+          action.createdAtMs,
+          action.updatedAtMs,
+        );
+      } else if (existingAction.user_edited_at_ms === null && existingAction.status === 'pending') {
+        await this.database.runAsync(
+          `UPDATE action_items SET
+             source_summary_version_id = ?, generation_fingerprint = ?, updated_at_ms = ?
+           WHERE id = ?`,
+          action.sourceSummaryVersionId,
+          action.generationFingerprint,
+          action.updatedAtMs,
+          action.id,
+        );
+      }
+    }
+    if (options.activate) {
+      await this.updateMeeting(version.meetingId, scopeKey, {
+        currentSummaryVersionId: version.id,
+        updatedAtMs: Math.max(meeting.updatedAtMs, version.completedAtMs ?? version.createdAtMs),
+      });
+    }
+    this.touchedMeetingIds.add(version.meetingId);
   }
 
   async insertOutbox(operation: SyncOperationRecord): Promise<void> {
@@ -677,6 +1267,41 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return this.aggregateFromRow(database, noteRow, scopeKey);
   }
 
+  async getActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionRecord | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.meeting_id = ? AND meeting.scope_key = ? AND revision.is_active = 1
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return row ? transcriptRevisionFromRow(row) : null;
+  }
+
+  async getCurrentSummaryVersion(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionRecord | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<SummaryVersionRow>(
+      `SELECT version.* FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE meeting.id = ? AND meeting.scope_key = ?
+         AND meeting.current_summary_version_id = version.id
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return row ? summaryVersionFromRow(row) : null;
+  }
+
   async listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection> {
     assertScopeKey(scopeKey);
     const database = await openMeetingDatabase();
@@ -684,18 +1309,29 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     const limit = Number.isFinite(requestedLimit)
       ? Math.max(1, Math.min(200, requestedLimit))
       : 50;
-    const conditions = ['scope_key = ?'];
+    const conditions = ['meeting.scope_key = ?'];
     const params: Array<string | number> = [scopeKey];
-    if (!query.includeDeleted) conditions.push("lifecycle != 'deleted'");
+    if (!query.includeDeleted) conditions.push("meeting.lifecycle != 'deleted'");
     if (query.before) {
-      conditions.push('(updated_at_ms < ? OR (updated_at_ms = ? AND id < ?))');
+      conditions.push('(meeting.updated_at_ms < ? OR (meeting.updated_at_ms = ? AND meeting.id < ?))');
       params.push(query.before.updatedAtMs, query.before.updatedAtMs, query.before.id);
     }
     params.push(limit + 1);
     const rows = await database.getAllAsync<MeetingRow>(
-      `SELECT * FROM meeting_notes
+      `SELECT meeting.*,
+         (SELECT COUNT(*) FROM transcript_revisions revision
+          INNER JOIN transcript_segments segment ON segment.revision_id = revision.id
+          WHERE revision.meeting_id = meeting.id AND revision.is_active = 1
+         ) AS active_transcript_segment_count,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM summary_versions version
+           WHERE version.id = meeting.current_summary_version_id
+             AND version.meeting_id = meeting.id
+             AND version.status IN ('ready', 'stale')
+         ) THEN 1 ELSE 0 END AS current_summary_ready
+       FROM meeting_notes meeting
        WHERE ${conditions.join(' AND ')}
-       ORDER BY updated_at_ms DESC, id DESC
+       ORDER BY meeting.updated_at_ms DESC, meeting.id DESC
        LIMIT ?`,
       params,
     );
@@ -726,6 +1362,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       startedAtMs: row.started_at_ms,
       updatedAtMs: row.updated_at_ms,
       currentSummaryVersionId: row.current_summary_version_id,
+      activeTranscriptSegmentCount: Number(row.active_transcript_segment_count ?? 0),
+      currentSummaryReady: row.current_summary_ready === 1,
       stages: stagesByMeeting.get(row.id) ?? [],
     }));
     return { items, hasMore: rows.length > limit };

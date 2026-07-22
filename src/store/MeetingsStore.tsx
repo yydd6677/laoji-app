@@ -38,6 +38,10 @@ import {
   mirrorLegacyMeetingDeletion,
   mirrorLegacyMeetingStageState,
 } from '../services/meetingStageMirror';
+import {
+  mirrorLegacySummaryContent,
+  mirrorLegacyTranscriptContent,
+} from '../services/meetingContentMirror';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -61,9 +65,23 @@ function mirrorMeetingProjections(scope: string, meetings: readonly Meeting[]): 
   })();
 }
 
-async function auditShadowRepositoryRead(scopeKey: ScopeKey, legacyMeetings: readonly Meeting[]): Promise<void> {
+async function auditShadowRepositoryRead(
+  scopeKey: ScopeKey,
+  legacyMeetings: readonly Meeting[],
+  transcripts: Readonly<Record<string, readonly TranscriptLine[]>>,
+  summaries: Readonly<Record<string, MeetingSummary | null>>,
+): Promise<void> {
   try {
-    const report = await meetingRepositoryFacade.compareLegacySnapshot(scopeKey, legacyMeetings);
+    const transcriptLineCounts = Object.fromEntries(
+      Object.entries(transcripts).map(([id, lines]) => [id, lines.length]),
+    );
+    const summaryReady = Object.fromEntries(
+      Object.entries(summaries).map(([id, summary]) => [id, Boolean(meetingSummaryToText(summary))]),
+    );
+    const report = await meetingRepositoryFacade.compareLegacySnapshot(scopeKey, legacyMeetings, {
+      transcriptLineCounts,
+      summaryReady,
+    });
     diagnosticAudit('meeting_db_repository_read', {
       status: report.status,
       scope: scopeKey === 'guest' ? 'guest' : 'account',
@@ -75,6 +93,8 @@ async function auditShadowRepositoryRead(scopeKey: ScopeKey, legacyMeetings: rea
       title_mismatches: report.titleMismatches,
       lifecycle_mismatches: report.lifecycleMismatches,
       invalid_stage_sets: report.invalidStageSets,
+      transcript_count_mismatches: report.transcriptCountMismatches,
+      summary_availability_mismatches: report.summaryAvailabilityMismatches,
     });
   } catch (error) {
     diagnosticWarn('[meeting-db] repository shadow read failed', error);
@@ -555,7 +575,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               summaries: counts.summaryVersions,
               recordings: counts.recordingAssets,
             });
-            void auditShadowRepositoryRead(scope, cachedMeetings);
+            void auditShadowRepositoryRead(scope, cachedMeetings, cachedTranscripts, cachedSummaries);
             void reconcileNativeMeetingRecordings(scope, { force: true });
           }).catch(error => {
             diagnosticWarn('[meeting-db] shadow import failed', error);
@@ -966,6 +986,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    const contentMeeting = meetingsRef.current.find(meeting => meeting.id === id);
+    if (contentMeeting && isScopeKey(scope)) {
+      void mirrorLegacyTranscriptContent(scope, contentMeeting, transcript);
+    }
     setMeetings(prev => {
       const next = prev.map(m => m.id === id ? { ...m, hasTranscript: transcript.length > 0 } : m);
       meetingsRef.current = next;
@@ -990,6 +1014,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    const contentMeeting = meetingsRef.current.find(meeting => meeting.id === id);
+    if (contentMeeting && isScopeKey(scope)) {
+      void mirrorLegacySummaryContent(scope, contentMeeting, usableSummary);
+    }
     setMeetings(prev => {
       const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(usableSummary) } : m);
       meetingsRef.current = next;

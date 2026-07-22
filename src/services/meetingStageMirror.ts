@@ -179,10 +179,12 @@ export async function mirrorLegacyMeetingStageState(
       if (legacyMeeting.hasTranscript || legacyMeeting.status === 'processing') {
         const transcript = await transaction.getStage(note.id, scopeKey, 'transcript');
         if (!transcript) throw new Error('meeting transcript processing stage is missing');
+        const realtimeDraft = legacyMeeting.hasTranscript
+          && (legacyMeeting.status === 'recording' || legacyMeeting.status === 'paused');
         await transaction.upsertStage(transitionProcessingStage(transcript, {
           stage: 'transcript',
-          status: legacyMeeting.hasTranscript ? 'ready' : 'finalizing',
-          progress: legacyMeeting.hasTranscript ? 1 : null,
+          status: realtimeDraft ? 'realtime_draft' : legacyMeeting.hasTranscript ? 'ready' : 'finalizing',
+          progress: legacyMeeting.hasTranscript && !realtimeDraft ? 1 : null,
         }, Math.max(nowMs, transcript.updatedAtMs)), scopeKey);
       }
       if (legacyMeeting.hasSummary) {
