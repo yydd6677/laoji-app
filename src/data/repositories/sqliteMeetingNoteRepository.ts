@@ -104,6 +104,16 @@ type StageRow = {
   updated_at_ms: number;
 };
 
+type SyncOutboxRow = {
+  operation_id: string;
+  scope_key: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  operation_type: string;
+  base_revision: number | null;
+  payload_json: string;
+};
+
 type TranscriptRevisionRow = {
   id: string;
   meeting_id: string;
@@ -1401,23 +1411,51 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(version.meetingId);
   }
 
-  async insertOutbox(operation: SyncOperationRecord): Promise<void> {
+  async insertOutbox(operation: SyncOperationRecord): Promise<boolean> {
     assertScopeKey(operation.scopeKey);
+    const operationId = operation.operationId.trim();
+    const aggregateType = operation.aggregateType.trim();
+    const aggregateId = operation.aggregateId.trim();
+    const operationType = operation.operationType.trim();
+    if (!operationId || !aggregateType || !aggregateId || !operationType) {
+      throw new Error('meeting sync operation identity is invalid');
+    }
+    if (!Number.isSafeInteger(operation.createdAtMs) || operation.createdAtMs < 0) {
+      throw new Error('meeting sync operation time is invalid');
+    }
+    if (!operation.payloadJson) throw new Error('meeting sync operation payload is invalid');
+    const existing = await this.database.getFirstAsync<SyncOutboxRow>(
+      `SELECT operation_id, scope_key, aggregate_type, aggregate_id,
+              operation_type, base_revision, payload_json
+       FROM sync_outbox WHERE operation_id = ?`,
+      operationId,
+    );
+    if (existing) {
+      const unchanged = existing.scope_key === operation.scopeKey
+        && existing.aggregate_type === aggregateType
+        && existing.aggregate_id === aggregateId
+        && existing.operation_type === operationType
+        && existing.base_revision === operation.baseRevision
+        && existing.payload_json === operation.payloadJson;
+      if (!unchanged) throw new Error('meeting sync operation identity was reused');
+      return false;
+    }
     await this.database.runAsync(
       `INSERT INTO sync_outbox (
          operation_id, scope_key, aggregate_type, aggregate_id, operation_type,
          base_revision, payload_json, status, attempt_count, created_at_ms, updated_at_ms
        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-      operation.operationId,
+      operationId,
       operation.scopeKey,
-      operation.aggregateType,
-      operation.aggregateId,
-      operation.operationType,
+      aggregateType,
+      aggregateId,
+      operationType,
       operation.baseRevision,
       operation.payloadJson,
       operation.createdAtMs,
       operation.createdAtMs,
     );
+    return true;
   }
 }
 

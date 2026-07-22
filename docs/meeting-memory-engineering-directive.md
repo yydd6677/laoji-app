@@ -604,6 +604,7 @@ interface MeetingTransaction {
 ```
 
 - mutation 与对应 outbox 必须同 transaction commit，避免本机已改但永不上传。
+- `operation_id` 是不可变幂等键：完全相同的 operation 重试必须是 no-op；同一 ID 的 scope、aggregate、operation type、base revision 或 payload 任一变化必须拒绝整个 transaction。已经 ACK 的 operation 重放不得再次推进领域状态。
 - repository 内部序列化同一 meeting 的写操作；不同 meeting 可以并行。
 - React 使用 `useSyncExternalStore` 或等价稳定订阅读取 projection，不能在每个 render 执行 SQL。
 - 查询返回只读 projection；UI 不直接 mutate entity 后再整对象覆盖。
@@ -652,7 +653,7 @@ interface MeetingTransaction {
 ### 7.3 切换策略
 
 - Release A：SQLite shadow import + 只读一致性报告，UI 仍读旧 store。
-- Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成，非法/重复身份、可见顺序、meeting/context、Transcript 逐行语义和 Summary 展示文本全部一致，且结果仍属于同 scope 的最新读请求，才从 SQLite 构建旧界面兼容投影；任一 mismatch、repository 提交导致的在途读取失效、分页漂移或内容读取异常立即保留旧 Store 快照。`deleted` 墓碑只计入脱敏诊断，不进入可见列表或 `extra`。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
+- Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成，非法/重复身份、可见顺序、meeting/context、Transcript 逐行语义和 Summary 展示文本全部一致，且结果仍属于同 scope 的最新读请求，才从 SQLite 构建旧界面兼容投影；任一 mismatch、repository 提交导致的在途读取失效、分页漂移或内容读取异常立即保留旧 Store 快照。`deleted` 墓碑只计入脱敏诊断，不进入可见列表或 `extra`。首次 canonical mutation 必须与 scope write ownership 和单调 canonical revision 在同一 SQLite transaction 提交；旧模型镜像成功后用 revision CAS 标记 clean，强杀恢复时根据 owner/revision 修复，不得仅靠两次存储写入的先后顺序猜测事实源。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
 - Release C：停止旧字段写入，但保留只读 legacy backup 两个安装版本；确认真机升级后再清理。
 - 新增的人工笔记、引用、行动项版本不能降级到旧结构；回滚 Release B 时必须保留 SQLite 文件，旧 APK不可清理本机数据。
 

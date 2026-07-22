@@ -305,7 +305,8 @@ export interface MeetingTransaction {
     scopeKey: ScopeKey,
     options: SaveSummaryVersionOptions,
   ): Promise<void>;
-  insertOutbox(operation: SyncOperationRecord): Promise<void>;
+  /** Returns true only when this transaction inserted a new operation. */
+  insertOutbox(operation: SyncOperationRecord): Promise<boolean>;
 }
 
 export interface MeetingNoteRepository {

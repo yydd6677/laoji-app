@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、additive v3 会议上下文、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账、Transcript/Summary repository 读写契约，以及默认关闭、可自动回退的 Store canonical read 接线。界面和远端拉取仍先写旧 Store，SQLite 仍由同内容影子写驱动；生产配置没有启用 canonical read，canonical write 尚未开始。
+Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、additive v3 会议上下文、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账、Transcript/Summary repository 读写契约、默认关闭且可自动回退的 Store canonical read 接线，以及尚未接 Store 的根字段更新/软删除 canonical mutation 原语。界面和远端拉取仍先写旧 Store，SQLite 仍由同内容影子写驱动；生产配置没有启用 canonical read，canonical write 所有权切换尚未开始。
 
 Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因此 MeetingNote v2 线上写入继续保持关闭。详见 [`phase-0-meeting-contract-snapshot.md`](phase-0-meeting-contract-snapshot.md)。
 
@@ -13,6 +13,9 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 | 范围 | 当前合同 |
 |---|---|
 | MeetingNote 创建 | Meeting、空人工笔记、五个处理阶段、可选 occurrence/snapshot、可选主录音资产和账号 outbox 在一个事务中提交 |
+| 根字段 mutation | 标题允许空字符串；描述、参与人、地点、模式和录制时间统一归一化。账号 mutation 缺少同事务 sync operation 时拒绝提交，游客 mutation 不创建远端 outbox |
+| 软删除 | 只写 MeetingNote tombstone，不删除录音、Transcript、Summary 或行动项；preparing/recording/paused/finalizing capture 拒绝删除。账号 tombstone 与 delete outbox 同事务提交 |
+| Outbox 幂等 | 同一 operation ID 与完全相同的 scope/aggregate/type/base revision/payload 重试返回既有操作且不重复 mutation；复用 ID 携带不同语义时整个 transaction 拒绝 |
 | ID 与幂等 | 本机 ID 只允许安全 UUID；同一 occurrence 的非删除 MeetingNote 被重复创建时复用现有聚合 |
 | 空标题 | 空字符串是合法数据；“未命名会议”或“新录音”只在展示边界生成，不写回真实标题 |
 | 独立状态 | capture、upload、transcript、summary、speaker 分表保存并独立转换、重试和报告 |
@@ -38,7 +41,7 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 ## 已执行验证
 
 - `npx tsc --noEmit --pretty false`：通过。
-- `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、2 个 outbox；录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
+- `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、4 个 outbox；覆盖账号根字段 mutation 必须携带同事务 outbox、空标题与其他上下文归一化、相同 operation 重试不重复、不同 payload 复用 ID 被拒绝、active capture 拒绝删除、软删除保留 recording asset 及 tombstone 重试幂等。录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
 - `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3 原行保留与安全默认值、canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影、删除墓碑隔离、重复旧身份拒绝、可见字段漂移拒绝、同数量 Transcript 正文漂移拒绝和 mismatch 自动回退，以及 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留和内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
 - Expo public config：默认输出 `localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=false`；显式 opt-in 可变为 true；基础 DB flag=false 时 canonical read 即使请求 true 也被强制为 false。
 - `git diff --check`：通过。
@@ -65,7 +68,8 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 
 ## 未决项与停线边界
 
-1. Transcript/Summary repository 写接口、精确兼容对账和 Store read 接线已存在，但当前调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
-2. canonical read 只在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退验证，生产 flag 继续保持关闭。尚未完成大数据量性能、账号云刷新/离线回滚以及授权真机 opt-in 验证，不得默认开启。
-3. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
-4. 线上契约未验证，不得发送 MeetingNote v2 探测性写请求，也不得开启 v2 capability。
+1. 根字段更新/软删除、Transcript/Summary repository 写接口、精确兼容对账和 Store read 接线已存在，但当前 Store 调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
+2. SQLite 与 AsyncStorage 没有共同事务。直接翻转双写顺序会在强杀窗口留下 canonical 新值与 legacy 旧值；Store 接线前必须先实现事务化的 scope write ownership、单调 canonical revision 和可 CAS 的 legacy mirror 状态，启动时才能确定以哪一侧修复另一侧。
+3. canonical read 只在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退验证，生产 flag 继续保持关闭。尚未完成大数据量性能、账号云刷新/离线回滚以及授权真机 opt-in 验证，不得默认开启。
+4. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
+5. 线上契约未验证，不得发送 MeetingNote v2 探测性写请求，也不得开启 v2 capability；本批新增 outbox 仅有本机持久化契约，没有新增发送器。
