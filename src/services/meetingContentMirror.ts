@@ -86,16 +86,38 @@ export function mirrorLegacyTranscriptContent(
   if (!getFeatureFlags().localMeetingDbV1) return Promise.resolve();
   return enqueueMeetingWrite(scopeKey, legacyMeeting.id, async () => {
     try {
+      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
+      if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
       if (transcript.length === 0) {
+        let status = 'unchanged_empty';
+        await sqliteMeetingNoteRepository.transaction(async transaction => {
+          const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
+          if (!note || note.lifecycle === 'deleted') return;
+          const current = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+          if (current && !isLegacyProvider(current.sourceProvider)) {
+            status = 'preserved_canonical';
+            return;
+          }
+          if (current) await transaction.setActiveTranscriptRevision(note.id, scopeKey, null);
+          const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
+          if (!stage) throw new Error('meeting transcript processing stage is missing');
+          const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+          await transaction.upsertStage(transitionProcessingStage(stage, {
+            stage: 'transcript',
+            status: legacyMeeting.status === 'processing' ? 'finalizing' : 'none',
+            progress: null,
+            inputFingerprint: null,
+          }, nowMs), scopeKey);
+          await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+          status = current ? 'cleared_legacy_projection' : 'unchanged_empty';
+        });
         diagnosticAudit('meeting_transcript_shadow_write', {
-          status: 'skipped_empty',
+          status,
           scope: scopeKey === 'guest' ? 'guest' : 'account',
           segments: 0,
         });
         return;
       }
-      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
-      if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
       const normalizedLines = transcript.map((line, ordinal) => ({
         ordinal,
         sourceId: typeof line.id === 'string' ? line.id.trim() : '',
@@ -135,6 +157,7 @@ export function mirrorLegacyTranscriptContent(
         speakerClusterId: line.speakerId,
         speakerProfileId: null,
         speakerLabel: line.speakerLabel,
+        speakerLabelOverride: null,
         text: line.text,
         normalizedText: normalizeTranscriptText(line.text),
         confidence: line.confidence,
@@ -193,8 +216,36 @@ export function mirrorLegacySummaryContent(
     try {
       const normalized = summary ? normalizeMeetingSummaryResult(legacyMeeting.id, summary) : null;
       if (!normalized || !meetingSummaryToText(normalized)) {
+        const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
+        let status = 'unchanged_empty';
+        if (aggregate && aggregate.note.lifecycle !== 'deleted') {
+          await sqliteMeetingNoteRepository.transaction(async transaction => {
+            const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
+            if (!note || note.lifecycle === 'deleted') return;
+            const current = await transaction.getCurrentSummaryVersion(note.id, scopeKey);
+            if (!current) return;
+            if (!isLegacyProvider(current.generatedBy) || current.userEdited) {
+              status = 'preserved_canonical';
+              return;
+            }
+            const stage = await transaction.getStage(note.id, scopeKey, 'summary');
+            if (!stage) throw new Error('meeting summary processing stage is missing');
+            const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+            await transaction.updateMeeting(note.id, scopeKey, {
+              currentSummaryVersionId: null,
+              updatedAtMs: nowMs,
+            });
+            await transaction.upsertStage(transitionProcessingStage(stage, {
+              stage: 'summary',
+              status: 'none',
+              progress: null,
+              inputFingerprint: null,
+            }, nowMs), scopeKey);
+            status = 'cleared_legacy_projection';
+          });
+        }
         diagnosticAudit('meeting_summary_shadow_write', {
-          status: 'skipped_empty',
+          status,
           scope: scopeKey === 'guest' ? 'guest' : 'account',
           sections: 0,
           actions: 0,

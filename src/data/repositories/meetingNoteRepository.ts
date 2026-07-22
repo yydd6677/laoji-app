@@ -133,11 +133,17 @@ export interface TranscriptSegmentRecord {
   speakerClusterId: string | null;
   speakerProfileId: string | null;
   speakerLabel: string | null;
+  speakerLabelOverride: string | null;
   text: string;
   normalizedText: string;
   confidence: number | null;
   isFinal: boolean;
   createdAtMs: number;
+}
+
+export interface TranscriptRevisionProjection {
+  revision: TranscriptRevisionRecord;
+  segments: readonly TranscriptSegmentRecord[];
 }
 
 export interface TranscriptRevisionRecord {
@@ -209,6 +215,12 @@ export interface SaveSummaryVersionOptions {
   activate: boolean;
 }
 
+export interface SummaryVersionProjection {
+  version: SummaryVersionRecord;
+  sections: readonly SummarySectionRecord[];
+  meetingActions: readonly ActionItemRecord[];
+}
+
 export interface SyncOperationRecord {
   operationId: string;
   scopeKey: ScopeKey;
@@ -243,6 +255,11 @@ export interface MeetingTransaction {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<SummaryVersionRecord | null>;
+  setActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    revisionId: string | null,
+  ): Promise<void>;
   insertMeeting(note: NewMeetingNote): Promise<void>;
   updateMeeting(id: string, scopeKey: ScopeKey, patch: MeetingRootPatch): Promise<void>;
   bindOccurrence(link: OccurrenceLinkRecord, snapshot: ScheduleSnapshot): Promise<void>;
@@ -281,6 +298,22 @@ export interface MeetingNoteRepository {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<SummaryVersionRecord | null>;
+  getTranscriptRevisionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null>;
+  getActiveTranscriptContent(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null>;
+  getSummaryVersionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionProjection | null>;
+  getCurrentSummaryContent(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionProjection | null>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;

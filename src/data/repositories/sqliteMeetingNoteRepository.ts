@@ -24,7 +24,9 @@ import type {
   SaveTranscriptRevisionOptions,
   SummarySectionRecord,
   SummaryVersionRecord,
+  SummaryVersionProjection,
   SyncOperationRecord,
+  TranscriptRevisionProjection,
   TranscriptRevisionRecord,
   TranscriptSegmentRecord,
   Unsubscribe,
@@ -117,6 +119,7 @@ type TranscriptSegmentRow = {
   speaker_cluster_id: string | null;
   speaker_profile_id: string | null;
   speaker_label: string | null;
+  speaker_label_override: string | null;
   text: string;
   normalized_text: string;
   confidence: number | null;
@@ -139,6 +142,7 @@ type SummaryVersionRow = {
   supersedes_version_id: string | null;
   created_at_ms: number;
   completed_at_ms: number | null;
+  effective_user_edited?: number;
 };
 
 type SummarySectionRow = {
@@ -151,6 +155,25 @@ type SummarySectionRow = {
   user_text: string | null;
   ordinal: number;
   user_edited_at_ms: number | null;
+};
+
+type ActionItemRow = {
+  id: string;
+  meeting_id: string;
+  remote_id: string | null;
+  content: string;
+  status: ActionItemRecord['status'];
+  assignee_text: string | null;
+  due_at_ms: number | null;
+  source_kind: ActionItemRecord['sourceKind'];
+  source_summary_version_id: string | null;
+  source_segment_id: string | null;
+  source_start_ms: number | null;
+  generation_fingerprint: string | null;
+  user_edited_at_ms: number | null;
+  completed_at_ms: number | null;
+  created_at_ms: number;
+  updated_at_ms: number;
 };
 
 type OccurrenceRow = {
@@ -187,6 +210,19 @@ const TRANSCRIPT_REVISION_STATUSES = new Set<TranscriptRevisionRecord['status']>
 const SUMMARY_VERSION_STATUSES = new Set<SummaryVersionRecord['status']>([
   'queued', 'generating', 'ready', 'failed', 'stale',
 ]);
+const SUMMARY_EFFECTIVE_USER_EDITED_SQL = `CASE WHEN
+  version.user_edited = 1
+  OR EXISTS (
+    SELECT 1 FROM summary_sections ownership_section
+    WHERE ownership_section.version_id = version.id
+      AND (ownership_section.user_text IS NOT NULL OR ownership_section.user_edited_at_ms IS NOT NULL)
+  )
+  OR EXISTS (
+    SELECT 1 FROM action_items ownership_action
+    WHERE ownership_action.source_summary_version_id = version.id
+      AND ownership_action.user_edited_at_ms IS NOT NULL
+  )
+  THEN 1 ELSE 0 END AS effective_user_edited`;
 
 function noteFromRow(row: MeetingRow): MeetingNote {
   assertScopeKey(row.scope_key);
@@ -269,6 +305,9 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
 }
 
 function transcriptRevisionFromRow(row: TranscriptRevisionRow): TranscriptRevisionRecord {
+  if (!TRANSCRIPT_REVISION_KINDS.has(row.kind) || !TRANSCRIPT_REVISION_STATUSES.has(row.status)) {
+    throw new Error('stored transcript revision state is invalid');
+  }
   return {
     id: row.id,
     meetingId: row.meeting_id,
@@ -283,6 +322,7 @@ function transcriptRevisionFromRow(row: TranscriptRevisionRow): TranscriptRevisi
 }
 
 function summaryVersionFromRow(row: SummaryVersionRow): SummaryVersionRecord {
+  if (!SUMMARY_VERSION_STATUSES.has(row.status)) throw new Error('stored summary version state is invalid');
   return {
     id: row.id,
     meetingId: row.meeting_id,
@@ -294,10 +334,68 @@ function summaryVersionFromRow(row: SummaryVersionRow): SummaryVersionRecord {
     scheduleSnapshotHash: row.schedule_snapshot_hash,
     status: row.status,
     generatedBy: row.generated_by,
-    userEdited: row.user_edited === 1,
+    userEdited: (row.effective_user_edited ?? row.user_edited) === 1,
     supersedesVersionId: row.supersedes_version_id,
     createdAtMs: row.created_at_ms,
     completedAtMs: row.completed_at_ms,
+  };
+}
+
+function transcriptSegmentFromRow(row: TranscriptSegmentRow): TranscriptSegmentRecord {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    ordinal: row.ordinal,
+    startMs: row.start_ms,
+    endMs: row.end_ms,
+    speakerClusterId: row.speaker_cluster_id,
+    speakerProfileId: row.speaker_profile_id,
+    speakerLabel: row.speaker_label,
+    speakerLabelOverride: row.speaker_label_override,
+    text: row.text,
+    normalizedText: row.normalized_text,
+    confidence: row.confidence,
+    isFinal: row.is_final === 1,
+    createdAtMs: row.created_at_ms,
+  };
+}
+
+function summarySectionFromRow(row: SummarySectionRow): SummarySectionRecord {
+  return {
+    id: row.id,
+    versionId: row.version_id,
+    stableKey: row.stable_key,
+    kind: row.kind,
+    title: row.title,
+    generatedText: row.generated_text,
+    userText: row.user_text,
+    ordinal: row.ordinal,
+    userEditedAtMs: row.user_edited_at_ms,
+  };
+}
+
+function actionItemFromRow(row: ActionItemRow): ActionItemRecord {
+  actionStatus(row.status);
+  if (row.source_kind !== 'generated' && row.source_kind !== 'manual' && row.source_kind !== 'marker') {
+    throw new Error('stored meeting action source is invalid');
+  }
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    remoteId: row.remote_id,
+    content: row.content,
+    status: row.status,
+    assigneeText: row.assignee_text,
+    dueAtMs: row.due_at_ms,
+    sourceKind: row.source_kind,
+    sourceSummaryVersionId: row.source_summary_version_id,
+    sourceSegmentId: row.source_segment_id,
+    sourceStartMs: row.source_start_ms,
+    generationFingerprint: row.generation_fingerprint,
+    userEditedAtMs: row.user_edited_at_ms,
+    completedAtMs: row.completed_at_ms,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
   };
 }
 
@@ -481,7 +579,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
   ): Promise<SummaryVersionRecord | null> {
     assertScopeKey(scopeKey);
     const row = await this.database.getFirstAsync<SummaryVersionRow>(
-      `SELECT version.* FROM summary_versions version
+      `SELECT version.*, ${SUMMARY_EFFECTIVE_USER_EDITED_SQL} FROM summary_versions version
        INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
        WHERE version.id = ? AND meeting.scope_key = ?`,
       id,
@@ -496,7 +594,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
   ): Promise<SummaryVersionRecord | null> {
     assertScopeKey(scopeKey);
     const row = await this.database.getFirstAsync<SummaryVersionRow>(
-      `SELECT version.* FROM summary_versions version
+      `SELECT version.*, ${SUMMARY_EFFECTIVE_USER_EDITED_SQL} FROM summary_versions version
        INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
        WHERE meeting.id = ? AND meeting.scope_key = ?
          AND meeting.current_summary_version_id = version.id
@@ -505,6 +603,52 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       scopeKey,
     );
     return row ? summaryVersionFromRow(row) : null;
+  }
+
+  async setActiveTranscriptRevision(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    revisionId: string | null,
+  ): Promise<void> {
+    assertScopeKey(scopeKey);
+    const meeting = await this.getMeeting(meetingId, scopeKey);
+    if (!meeting || meeting.lifecycle === 'deleted') {
+      throw new Error('meeting does not accept transcript activation in active scope');
+    }
+    if (revisionId) {
+      const revision = await this.getTranscriptRevision(revisionId, scopeKey);
+      if (!revision || revision.meetingId !== meetingId) {
+        throw new Error('active transcript revision is outside the active meeting scope');
+      }
+      if (!['realtime_draft', 'finalizing', 'ready'].includes(revision.status)) {
+        throw new Error('inactive transcript state cannot become active');
+      }
+      if (revision.kind !== 'realtime_draft') {
+        const segmentCount = Number((await this.database.getFirstAsync<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM transcript_segments segment
+           INNER JOIN transcript_revisions stored ON stored.id = segment.revision_id
+           INNER JOIN meeting_notes scoped ON scoped.id = stored.meeting_id
+           WHERE stored.id = ? AND stored.meeting_id = ? AND scoped.scope_key = ?`,
+          revisionId,
+          meetingId,
+          scopeKey,
+        ))?.count ?? 0);
+        if (segmentCount === 0) throw new Error('empty final transcript revision cannot become active');
+      }
+    }
+    await this.database.runAsync(
+      'UPDATE transcript_revisions SET is_active = 0 WHERE meeting_id = ?',
+      meetingId,
+    );
+    if (revisionId) {
+      const result = await this.database.runAsync(
+        'UPDATE transcript_revisions SET is_active = 1 WHERE id = ? AND meeting_id = ?',
+        revisionId,
+        meetingId,
+      );
+      if (result.changes !== 1) throw new Error('active transcript revision disappeared');
+    }
+    this.touchedMeetingIds.add(meetingId);
   }
 
   private async assertMeetingInScope(meetingId: string, scopeKey: ScopeKey): Promise<void> {
@@ -758,6 +902,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     if (revision.isActive !== options.activate) {
       throw new Error('transcript revision activation contract is inconsistent');
     }
+    if (options.activate && !['realtime_draft', 'finalizing', 'ready'].includes(revision.status)) {
+      throw new Error('inactive transcript state cannot become active');
+    }
     if (revision.kind !== 'realtime_draft' && segments.length === 0) {
       throw new Error('final transcript revision cannot be empty');
     }
@@ -899,7 +1046,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
              speaker_cluster_id, speaker_profile_id, speaker_label,
              speaker_label_override, text, normalized_text, confidence,
              is_final, created_at_ms
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           segment.id,
           revision.id,
           segment.meetingId,
@@ -909,6 +1056,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           segment.speakerClusterId,
           segment.speakerProfileId,
           segment.speakerLabel,
+          segment.speakerLabelOverride,
           segment.text,
           segment.normalizedText,
           segment.confidence,
@@ -1291,7 +1439,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     assertScopeKey(scopeKey);
     const database = await openMeetingDatabase();
     const row = await database.getFirstAsync<SummaryVersionRow>(
-      `SELECT version.* FROM summary_versions version
+      `SELECT version.*, ${SUMMARY_EFFECTIVE_USER_EDITED_SQL} FROM summary_versions version
        INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
        WHERE meeting.id = ? AND meeting.scope_key = ?
          AND meeting.current_summary_version_id = version.id
@@ -1300,6 +1448,73 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       scopeKey,
     );
     return row ? summaryVersionFromRow(row) : null;
+  }
+
+  async getTranscriptRevisionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const revision = await database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.id = ? AND meeting.scope_key = ?`,
+      id,
+      scopeKey,
+    );
+    return revision ? this.transcriptProjectionFromRow(database, revision, scopeKey) : null;
+  }
+
+  async getActiveTranscriptContent(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const revision = await database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.meeting_id = ? AND meeting.scope_key = ? AND revision.is_active = 1
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return revision ? this.transcriptProjectionFromRow(database, revision, scopeKey) : null;
+  }
+
+  async getSummaryVersionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionProjection | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const version = await database.getFirstAsync<SummaryVersionRow>(
+      `SELECT version.*, ${SUMMARY_EFFECTIVE_USER_EDITED_SQL} FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE version.id = ? AND meeting.scope_key = ?`,
+      id,
+      scopeKey,
+    );
+    return version ? this.summaryProjectionFromRow(database, version, scopeKey) : null;
+  }
+
+  async getCurrentSummaryContent(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionProjection | null> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const version = await database.getFirstAsync<SummaryVersionRow>(
+      `SELECT version.*, ${SUMMARY_EFFECTIVE_USER_EDITED_SQL} FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE meeting.id = ? AND meeting.scope_key = ?
+         AND meeting.current_summary_version_id = version.id
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return version ? this.summaryProjectionFromRow(database, version, scopeKey) : null;
   }
 
   async listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection> {
@@ -1400,6 +1615,61 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return () => {
       listeners?.delete(listener);
       if (listeners?.size === 0) this.listListeners.delete(scopeKey);
+    };
+  }
+
+  private async transcriptProjectionFromRow(
+    database: SQLiteDatabase,
+    revision: TranscriptRevisionRow,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection> {
+    const rows = await database.getAllAsync<TranscriptSegmentRow>(
+      `SELECT segment.* FROM transcript_segments segment
+       INNER JOIN transcript_revisions revision ON revision.id = segment.revision_id
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE segment.revision_id = ? AND revision.meeting_id = ? AND meeting.scope_key = ?
+       ORDER BY segment.ordinal, segment.id`,
+      revision.id,
+      revision.meeting_id,
+      scopeKey,
+    );
+    return {
+      revision: transcriptRevisionFromRow(revision),
+      segments: rows.map(transcriptSegmentFromRow),
+    };
+  }
+
+  private async summaryProjectionFromRow(
+    database: SQLiteDatabase,
+    version: SummaryVersionRow,
+    scopeKey: ScopeKey,
+  ): Promise<SummaryVersionProjection> {
+    const [sectionRows, actionRows] = await Promise.all([
+      database.getAllAsync<SummarySectionRow>(
+        `SELECT section.* FROM summary_sections section
+         INNER JOIN summary_versions version ON version.id = section.version_id
+         INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+         WHERE section.version_id = ? AND version.meeting_id = ? AND meeting.scope_key = ?
+         ORDER BY section.ordinal, section.id`,
+        version.id,
+        version.meeting_id,
+        scopeKey,
+      ),
+      database.getAllAsync<ActionItemRow>(
+        `SELECT action.* FROM action_items action
+         INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
+         WHERE action.meeting_id = ? AND meeting.scope_key = ?
+         ORDER BY CASE action.status WHEN 'pending' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,
+           CASE WHEN action.due_at_ms IS NULL THEN 1 ELSE 0 END,
+           action.due_at_ms, action.created_at_ms, action.id`,
+        version.meeting_id,
+        scopeKey,
+      ),
+    ]);
+    return {
+      version: summaryVersionFromRow(version),
+      sections: sectionRows.map(summarySectionFromRow),
+      meetingActions: actionRows.map(actionItemFromRow),
     };
   }
 

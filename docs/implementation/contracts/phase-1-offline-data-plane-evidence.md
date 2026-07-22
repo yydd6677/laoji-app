@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账，以及 Transcript/Summary 的 repository 写契约。界面和远端拉取仍先写旧 Store，SQLite 目前只接收同内容的增量影子写，尚未完成 canonical read/write cutover。
+Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账，以及 Transcript/Summary 的 repository 读写契约。界面和远端拉取仍先写旧 Store，SQLite 目前只接收同内容的增量影子写，尚未完成 canonical read/write cutover。
 
 Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因此 MeetingNote v2 线上写入继续保持关闭。详见 [`phase-0-meeting-contract-snapshot.md`](phase-0-meeting-contract-snapshot.md)。
 
@@ -25,12 +25,15 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 | Summary 写入 | 每次结果写不可变 version 和有序 section；旧 JSON 只经归一化后成为 paragraph/bullets/action section，不作为展示正文；只有 ready/stale version 可激活 |
 | 行动项保护 | 新 Summary 可复用相同生成 fingerprint 的 pending action；已编辑、已完成或已忽略 action 的内容、状态和来源不会被新版本覆盖或复活 |
 | 内容级双读 | 除 meeting/title/lifecycle/五阶段外，对每场 active Transcript segment 数量和 current Summary 可用性做脱敏比较 |
+| 内容读取 | 可按 scope 读取指定或 active Transcript revision 的有序 segments，以及指定或 current Summary version 的有序 sections 和 meeting-level actions；不存在或跨 scope 时返回空 |
+| 用户覆盖层 | Transcript 同时保留原说话人标签和覆盖标签；Summary 同时返回 generated/user text。读取 current version 时从 section/action 实际编辑字段推导用户所有权，不只信根标记 |
+| 空内容语义 | 旧缓存变空时只取消 legacy active/current 指针并重置对应阶段；历史 revision、version、action 不删除。server revision 或任何用户接管的 Summary 保持当前状态 |
 
 ## 已执行验证
 
 - `npx tsc --noEmit --pretty false`：通过。
 - `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、2 个 outbox；录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
-- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写、结构化 Summary、用户行动项保护、镜像写入顺序，以及 Transcript/Summary 内容级 mismatch 检出。该脚本和临时数据库不纳入轻量工作树。
+- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留，以及 Transcript/Summary 内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
 - `git diff --check`：通过。
 - SQLite v1 到 v2 迁移：18 张表、13 个显式索引、外键检查为 0；第二个 primary recording 被唯一索引拒绝。
 - Kotlin release 编译和 Android Preview 构建：通过。
@@ -43,14 +46,14 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
 - 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：89,584,447 bytes
-- SHA-256：`c57a898a491c7fea2d62acf436ef59669dd9c88c3fc47869b73fedcb3071049b`
-- 构建时间：`2026-07-22 18:29:54 +0800`
+- 大小：89,591,795 bytes
+- SHA-256：`9356a8528ca61502369ca7ee83eca0acf47dc302a92be6d35ba280b5d6e6537d`
+- 构建时间：`2026-07-22 18:58:48 +0800`
 
 ## 未决项与停线边界
 
 1. 真机当前未连接，本批 APK 尚未覆盖安装；不得以模拟器结果代替真机数据保留验证。
 2. 覆盖安装真机后，原有脱敏基线计数 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 均不得减少；不得清除真机数据。
 3. Transcript/Summary repository 写接口和内容级对账已存在，但当前调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
-4. repository 尚缺完整 Transcript revision/segment 与 Summary version/section 的读取 projection。UI 仍由旧 Store 提供事实；在读取接口、空内容语义、真机升级计数和故障恢复通过前，不得切换读源。
+4. Transcript/Summary 读取 projection 和空内容语义已经存在，但尚未接入 Store。Meeting 列表/详情 projection 也尚未完整承载临时会议的位置、描述、参与人和兼容展示元数据；在补齐这些字段、增加可关闭的 cutover flag、通过真机升级计数和故障恢复前，不得切换读源。
 5. 线上契约未验证，不得发送 MeetingNote v2 探测性写请求，也不得开启 v2 capability。
