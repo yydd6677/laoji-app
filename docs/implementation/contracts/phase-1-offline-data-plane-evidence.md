@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、additive v3 会议上下文、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账，以及 Transcript/Summary 的 repository 读写契约。界面和远端拉取仍先写旧 Store，SQLite 目前只接收同内容的增量影子写，尚未完成 canonical read/write cutover。
+Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、additive v3 会议上下文、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账、Transcript/Summary repository 读写契约，以及默认关闭、可自动回退的 Store canonical read 接线。界面和远端拉取仍先写旧 Store，SQLite 仍由同内容影子写驱动；生产配置没有启用 canonical read，canonical write 尚未开始。
 
 Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因此 MeetingNote v2 线上写入继续保持关闭。详见 [`phase-0-meeting-contract-snapshot.md`](phase-0-meeting-contract-snapshot.md)。
 
@@ -19,25 +19,27 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 | SQLite v2/v3 | v2 新增 `legacy_source_id`、`native_session_id`、`last_verified_at_ms` 和三项唯一不变量；v3 additive 增加描述、参与人、地点、录制模式、客户端请求 ID、录制时间，不重建旧表 |
 | 会议上下文 | canonical `(scope_key, client_request_id)` 唯一，旧影子行豁免历史重复；`date/time/duration/tags` 分别从时间、录音资产和独立阶段派生，不重复落根表 |
 | 旧数据导入 | v4 只重建 `entry_point='legacy_store'` 行；canonical 行不会因 AsyncStorage source hash 变化被删除；已有 canonical identity 会排除对应旧行；`Meeting.createdAt` 对账为 `recorded_at_ms` |
-| 双读对账 | 对 missing、extra、重复身份、标题、lifecycle、六项上下文和五阶段集合输出脱敏诊断，不记录正文、标题值、位置、URI 或账号 ID |
+| 双读对账 | 对非法/重复旧身份、missing、extra、重复 repository 身份、可见顺序、标题、lifecycle、六项上下文和五阶段集合输出脱敏诊断，不记录正文、标题值、位置、URI 或账号 ID |
+| 删除墓碑 | `deleted` 行不计入可见 meeting/extra，也不进入 canonical 列表；墓碑数量单独脱敏报告，五阶段完整性仍接受检查。legacy shadow 墓碑会在下一次 v4 全量影子重建时随旧影子行回收，非 legacy canonical 行不受该重建影响 |
 | 游客创建 | 描述、参与人、地点、录制模式、请求 ID 和录制时间先完整写入旧 Store，再按相同归一化规则增量镜像，避免切换前数据先行丢失 |
 | 录音恢复 | 以 exact native session ID 和 scope 对账；只有 journal 明确证明所属 scope 时才为孤儿录音创建恢复 MeetingNote；无 scope 或其他 scope 的 journal 不被当前账号收养 |
 | 文件缺失 | 只更新 recording asset 和 capture 阶段，不覆盖已存在的 Transcript、Summary 或其他处理阶段 |
 | Transcript 写入 | realtime draft 可以显式替换完整 segment snapshot；final/reprocessed revision 不可原地覆盖；同一场只允许一个 active revision；revision、segment 和 source reference 全部按 scope 校验 |
 | Summary 写入 | 每次结果写不可变 version 和有序 section；旧 JSON 只经归一化后成为 paragraph/bullets/action section，不作为展示正文；只有 ready/stale version 可激活 |
 | 行动项保护 | 新 Summary 可复用相同生成 fingerprint 的 pending action；已编辑、已完成或已忽略 action 的内容、状态和来源不会被新版本覆盖或复活 |
-| 内容级双读 | 除 meeting/title/lifecycle/五阶段外，对每场 active Transcript segment 数量和 current Summary 可用性做脱敏比较 |
+| 内容级双读 | 前置报告比较 active Transcript segment 数量和 current Summary 可用性；构建投影后再比较会议可见字段、逐行 Transcript 的说话人/正文/时间/置信度语义和最终 Summary 展示文本。同数量但正文不同仍拒绝切换 |
 | 内容读取 | 可按 scope 读取指定或 active Transcript revision 的有序 segments，以及指定或 current Summary version 的有序 sections 和 meeting-level actions；不存在或跨 scope 时返回空 |
 | 用户覆盖层 | Transcript 同时保留原说话人标签和覆盖标签；Summary 同时返回 generated/user text。读取 current version 时从 section/action 实际编辑字段推导用户所有权，不只信根标记 |
 | 空内容语义 | 旧缓存变空时只取消 legacy active/current 指针并重置对应阶段；历史 revision、version、action 不删除。server revision 或任何用户接管的 Summary 保持当前状态 |
-| 读切换前置 | 新增默认关闭的 `localMeetingDbCanonicalReadV1`；基础 DB flag 关闭时强制关闭。列表投影补齐旧身份、根时间/同步状态和主录音资产，可重建旧界面的会议、Transcript、Summary 兼容投影 |
-| 自动回退 | 只有双读完全一致才返回 SQLite 投影；missing/extra/重复身份/阶段/上下文/内容 mismatch、分页漂移或内容读取异常均返回原旧 Store 快照，不把兼容投影写回旧缓存 |
+| 读切换接线 | 默认关闭的 `localMeetingDbCanonicalReadV1` 已接入 `MeetingsStore` 的列表及同步 Transcript/Summary getter；基础 DB flag 关闭时强制关闭。SQLite 投影和旧 Store refs 分离，不把兼容投影写回旧缓存或旧写模型 |
+| 写后再验证 | 旧路径写入前立即撤销 canonical getter；repository 提交通知会同步使所有在途读取失效，30 ms 合并后用最新旧 Store 快照重新 preflight。上传待处理状态也先镜像独立阶段，再尝试恢复 SQLite 读取 |
+| 自动回退 | 只有双读和最终兼容投影全部一致且仍是同 scope 的最新请求才返回 SQLite 投影；非法/重复身份、missing/extra、顺序、阶段、上下文、可见字段、同数量正文漂移、分页变化或读取异常均恢复原旧 Store 快照 |
 
 ## 已执行验证
 
 - `npx tsc --noEmit --pretty false`：通过。
 - `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、2 个 outbox；录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
-- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3 原行保留与安全默认值、canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影/mismatch 自动回退，以及 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留和内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
+- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3 原行保留与安全默认值、canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影、删除墓碑隔离、重复旧身份拒绝、可见字段漂移拒绝、同数量 Transcript 正文漂移拒绝和 mismatch 自动回退，以及 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留和内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
 - Expo public config：默认输出 `localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=false`；显式 opt-in 可变为 true；基础 DB flag=false 时 canonical read 即使请求 true 也被强制为 false。
 - `git diff --check`：通过。
 - SQLite v1→v2→v3 迁移：既有 MeetingNote 原行保留，六个新字段取得安全默认值，外键检查为 0；第二个 primary recording 和 canonical 重复请求 ID 被唯一索引拒绝，legacy 重复请求 ID可导入。
@@ -45,6 +47,8 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 - 模拟器保留数据升级：`PRAGMA user_version` 从 1 升为 2，预置 canonical MeetingNote 保留，新列存在，外键检查为 0；人为制造的 legacy 0 / repository 1 差异被双读报告识别。
 - 模拟器清空后的独立重装：影子导入为 `completed`，repository 为 `consistent`，录音对账为 `completed`，没有应用进程 FATAL EXCEPTION。破坏性验证只发生在模拟器。
 - 最新 Preview 在空数据模拟器独立安装并启动：应用进程持续存活；meeting、stage、Transcript count、Summary availability 均为 `consistent`，录音对账为 `completed`，没有应用进程 FATAL EXCEPTION。
+- 显式开启 canonical read 的模拟器 Preview：空数据启动为 `active`；创建失败态会议后可见 meeting 为 1，非法/重复身份、missing/extra、顺序、标题、lifecycle、阶段、上下文、可见字段、Transcript 正文和 Summary 文本 mismatch 全为 0，读源保持 `active`。
+- 同一模拟器长按删除后旧 Store 和可见 repository meeting 均为 0，SQLite 保留 1 个 legacy 删除墓碑；墓碑未被计为 `extra`、未泄漏到列表，读源继续为 `active`。再次冷启动时 v4 影子重建按设计回收该 legacy shadow 墓碑，计数回到 0，读源仍为 `active`。
 - 真机无清数据覆盖安装 SQLite v3 Preview：升级前后脱敏计数均为 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset；首次启动 shadow v4 为 `completed`，missing/extra/duplicate/title/lifecycle/stage/Transcript/Summary/context mismatch 全为 0，应用进程持续存活。
 - 真机再次冷启动：shadow v4 为 `unchanged`，上述计数与全部 mismatch 继续为 0，证明 source hash 与实际 v3 投影计数一致后可幂等跳过。
 
@@ -59,7 +63,7 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 
 ## 未决项与停线边界
 
-1. Transcript/Summary repository 写接口和内容级对账已存在，但当前调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
-2. 可关闭的 canonical read flag、Meeting/Transcript/Summary 旧模型兼容投影和 preflight 自动回退已经存在，但尚未接入 `MeetingsStore` 的活动读源；当前 flag 保持关闭。在完成 Store 接线、进程内回退和故障恢复验证前，不得切换读源。
-3. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持同一计数下限且不得清除真机数据。
+1. Transcript/Summary repository 写接口、精确兼容对账和 Store read 接线已存在，但当前调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
+2. canonical read 只在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退验证，生产 flag 继续保持关闭。尚未完成大数据量性能、账号云刷新/离线回滚以及授权真机 opt-in 验证，不得默认开启。
+3. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
 4. 线上契约未验证，不得发送 MeetingNote v2 探测性写请求，也不得开启 v2 capability。

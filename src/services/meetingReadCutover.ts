@@ -34,13 +34,21 @@ export type MeetingReadCutoverReason =
   | 'disabled'
   | 'preflight_mismatch'
   | 'canonical_projection_ready'
+  | 'canonical_projection_mismatch'
   | 'projection_failed';
+
+export interface MeetingReadCompatibilityReport {
+  meetingMismatches: number;
+  transcriptContentMismatches: number;
+  summaryContentMismatches: number;
+}
 
 export interface MeetingReadCutoverResult {
   source: 'legacy' | 'sqlite';
   reason: MeetingReadCutoverReason;
   projection: MeetingReadProjection;
   preflight: MeetingDualReadReport | null;
+  compatibility: MeetingReadCompatibilityReport | null;
   errorCode: string | null;
 }
 
@@ -101,7 +109,7 @@ function compatibilityTags(
 ): Meeting['tags'] {
   const tags: Meeting['tags'] = [statusTag(status)];
   if (scopeKey === 'guest') tags.push({ label: '本机', color: C.teal });
-  if (item.mode) {
+  if (scopeKey !== 'guest' && item.mode) {
     tags.push({ label: item.mode === 'offline' ? '离线' : '实时', color: C.blue });
   }
   if (item.syncState === 'pending') tags.push({ label: '待同步', color: C.orange });
@@ -236,6 +244,94 @@ async function canonicalProjection(
   return { meetings, transcripts, summaries, canonicalIdByLegacyId };
 }
 
+function normalizedTimestamp(value: string | undefined): number | null {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+}
+
+function normalizedStatus(value: string | undefined): string {
+  const status = value?.toLowerCase();
+  if (['completed', 'ended', 'done', 'processed'].includes(status ?? '')) return 'completed';
+  return status || 'created';
+}
+
+function normalizedDurationSeconds(value: number | undefined): number | null {
+  return Number.isFinite(value) ? Math.round(Number(value) * 1000) : null;
+}
+
+function normalizedMeetingCompatibility(meeting: Meeting, scopeKey: ScopeKey): unknown {
+  return {
+    id: meeting.id,
+    title: meeting.title,
+    date: meeting.date,
+    time: meeting.time ?? null,
+    duration: meeting.duration,
+    tags: meeting.tags.map(tag => ({ label: tag.label, color: tag.color })),
+    participants: (meeting.participants ?? []).map(value => value.trim()).filter(Boolean),
+    hasTranscript: Boolean(meeting.hasTranscript),
+    hasSummary: Boolean(meeting.hasSummary),
+    status: normalizedStatus(meeting.status),
+    statusSyncPending: Boolean(meeting.statusSyncPending),
+    mode: meeting.mode ?? 'realtime',
+    description: meeting.description ?? null,
+    location: meeting.location?.trim() || null,
+    createdAtMs: normalizedTimestamp(meeting.createdAt),
+    audioAvailable: Boolean(meeting.audioAvailable),
+    audioSyncPending: Boolean(meeting.audioSyncPending),
+    audioSyncBlocked: Boolean(meeting.audioSyncBlocked),
+    audioLocalUri: meeting.audioLocalUri ?? null,
+    audioDurationMs: normalizedDurationSeconds(meeting.audioDurationSec),
+    audioBars: meeting.audioBars ?? [],
+    clientRequestId: meeting.clientRequestId?.trim() || null,
+    source: meeting.source ?? (scopeKey === 'guest' ? 'guest' : 'cloud'),
+  };
+}
+
+function normalizedTranscriptCompatibility(lines: readonly TranscriptLine[]): unknown {
+  return lines.map(line => ({
+    speakerId: line.speaker_id ?? null,
+    speakerLabel: line.speaker_label ?? null,
+    text: line.text,
+    startMs: Number.isFinite(line.start_time) ? Math.round(Number(line.start_time) * 1000) : 0,
+    endMs: Number.isFinite(line.end_time) ? Math.round(Number(line.end_time) * 1000) : 0,
+    confidence: Number.isFinite(line.confidence) ? Number(line.confidence) : null,
+  }));
+}
+
+export function compareMeetingReadCompatibility(
+  legacy: MeetingReadSnapshot,
+  canonical: MeetingReadProjection,
+  scopeKey: ScopeKey,
+): MeetingReadCompatibilityReport {
+  let meetingMismatches = Math.abs(legacy.meetings.length - canonical.meetings.length);
+  for (let index = 0; index < Math.min(legacy.meetings.length, canonical.meetings.length); index += 1) {
+    const legacyMeeting = legacy.meetings[index];
+    const canonicalMeeting = canonical.meetings[index];
+    if (
+      JSON.stringify(normalizedMeetingCompatibility(legacyMeeting, scopeKey))
+      !== JSON.stringify(normalizedMeetingCompatibility(canonicalMeeting, scopeKey))
+    ) meetingMismatches += 1;
+  }
+
+  const identities = new Set([
+    ...legacy.meetings.map(meeting => meeting.id),
+    ...canonical.meetings.map(meeting => meeting.id),
+  ]);
+  let transcriptContentMismatches = 0;
+  let summaryContentMismatches = 0;
+  identities.forEach(id => {
+    if (
+      JSON.stringify(normalizedTranscriptCompatibility(legacy.transcripts[id] ?? []))
+      !== JSON.stringify(normalizedTranscriptCompatibility(canonical.transcripts[id] ?? []))
+    ) transcriptContentMismatches += 1;
+    if (
+      meetingSummaryToText(legacy.summaries[id] ?? null)
+      !== meetingSummaryToText(canonical.summaries[id] ?? null)
+    ) summaryContentMismatches += 1;
+  });
+  return { meetingMismatches, transcriptContentMismatches, summaryContentMismatches };
+}
+
 export async function resolveMeetingReadCutover(
   input: ResolveMeetingReadCutoverInput,
 ): Promise<MeetingReadCutoverResult> {
@@ -246,6 +342,7 @@ export async function resolveMeetingReadCutover(
       reason: 'disabled',
       projection: fallback,
       preflight: null,
+      compatibility: null,
       errorCode: null,
     };
   }
@@ -267,6 +364,7 @@ export async function resolveMeetingReadCutover(
         reason: 'preflight_mismatch',
         projection: fallback,
         preflight,
+        compatibility: null,
         errorCode: null,
       };
     }
@@ -274,11 +372,27 @@ export async function resolveMeetingReadCutover(
     if (projection.meetings.length !== preflight.repositoryMeetings) {
       throw new Error('meeting canonical projection changed during pagination');
     }
+    const compatibility = compareMeetingReadCompatibility(input.legacy, projection, input.scopeKey);
+    if (
+      compatibility.meetingMismatches > 0
+      || compatibility.transcriptContentMismatches > 0
+      || compatibility.summaryContentMismatches > 0
+    ) {
+      return {
+        source: 'legacy',
+        reason: 'canonical_projection_mismatch',
+        projection: fallback,
+        preflight,
+        compatibility,
+        errorCode: null,
+      };
+    }
     return {
       source: 'sqlite',
       reason: 'canonical_projection_ready',
       projection,
       preflight,
+      compatibility,
       errorCode: null,
     };
   } catch (error) {
@@ -287,6 +401,7 @@ export async function resolveMeetingReadCutover(
       reason: 'projection_failed',
       projection: fallback,
       preflight: input.preflight ?? null,
+      compatibility: null,
       errorCode: error instanceof Error ? error.name : 'UnknownError',
     };
   }

@@ -5,7 +5,7 @@
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
-> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。业务界面仍以旧 Store 为事实源，SQLite 已具备双读对账、增量影子写和录音 journal 对账，但尚未完成 canonical cutover。
+> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证，生产配置仍以旧 Store 为事实源；canonical write、真机 opt-in 和线上契约尚未完成。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 
@@ -652,7 +652,7 @@ interface MeetingTransaction {
 ### 7.3 切换策略
 
 - Release A：SQLite shadow import + 只读一致性报告，UI 仍读旧 store。
-- Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成且 meeting/content/context 双读全部一致，才从 SQLite 构建旧界面兼容投影；任一 mismatch、分页漂移或内容读取异常立即保留旧 Store 快照。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
+- Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成，非法/重复身份、可见顺序、meeting/context、Transcript 逐行语义和 Summary 展示文本全部一致，且结果仍属于同 scope 的最新读请求，才从 SQLite 构建旧界面兼容投影；任一 mismatch、repository 提交导致的在途读取失效、分页漂移或内容读取异常立即保留旧 Store 快照。`deleted` 墓碑只计入脱敏诊断，不进入可见列表或 `extra`。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
 - Release C：停止旧字段写入，但保留只读 legacy backup 两个安装版本；确认真机升级后再清理。
 - 新增的人工笔记、引用、行动项版本不能降级到旧结构；回滚 Release B 时必须保留 SQLite 文件，旧 APK不可清理本机数据。
 

@@ -31,7 +31,11 @@ import {
 import { isScopeKey, secureClientIdFactory, type ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
 import { getFeatureFlags } from '../config/featureFlags';
-import { MeetingRepositoryFacade, sqliteMeetingNoteRepository } from '../data/repositories';
+import {
+  MeetingRepositoryFacade,
+  sqliteMeetingNoteRepository,
+  type MeetingDualReadReport,
+} from '../data/repositories';
 import { reconcileNativeMeetingRecordings } from '../services/meetingRecordingReconciliation';
 import {
   mirrorLegacyMeetingCreated,
@@ -42,6 +46,10 @@ import {
   mirrorLegacySummaryContent,
   mirrorLegacyTranscriptContent,
 } from '../services/meetingContentMirror';
+import {
+  resolveMeetingReadCutover,
+  type MeetingReadProjection,
+} from '../services/meetingReadCutover';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -49,20 +57,18 @@ const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
 
 const meetingRepositoryFacade = new MeetingRepositoryFacade(sqliteMeetingNoteRepository);
 
-function mirrorMeetingProjection(scope: string, meeting: Meeting | undefined): void {
-  if (!meeting || !isScopeKey(scope)) return;
-  void mirrorLegacyMeetingStageState(scope, meeting);
+function mirrorMeetingProjection(scope: string, meeting: Meeting | undefined): Promise<void> {
+  if (!meeting || !isScopeKey(scope)) return Promise.resolve();
+  return mirrorLegacyMeetingStageState(scope, meeting);
 }
 
-function mirrorMeetingProjections(scope: string, meetings: readonly Meeting[]): void {
+async function mirrorMeetingProjections(scope: string, meetings: readonly Meeting[]): Promise<void> {
   if (!isScopeKey(scope)) return;
-  void (async () => {
-    for (let offset = 0; offset < meetings.length; offset += 4) {
-      await Promise.all(
-        meetings.slice(offset, offset + 4).map(meeting => mirrorLegacyMeetingStageState(scope, meeting)),
-      );
-    }
-  })();
+  for (let offset = 0; offset < meetings.length; offset += 4) {
+    await Promise.all(
+      meetings.slice(offset, offset + 4).map(meeting => mirrorLegacyMeetingStageState(scope, meeting)),
+    );
+  }
 }
 
 async function auditShadowRepositoryRead(
@@ -70,7 +76,7 @@ async function auditShadowRepositoryRead(
   legacyMeetings: readonly Meeting[],
   transcripts: Readonly<Record<string, readonly TranscriptLine[]>>,
   summaries: Readonly<Record<string, MeetingSummary | null>>,
-): Promise<void> {
+): Promise<MeetingDualReadReport | null> {
   try {
     const transcriptLineCounts = Object.fromEntries(
       Object.entries(transcripts).map(([id, lines]) => [id, lines.length]),
@@ -87,9 +93,13 @@ async function auditShadowRepositoryRead(
       scope: scopeKey === 'guest' ? 'guest' : 'account',
       legacy_meetings: report.legacyMeetings,
       projected_meetings: report.repositoryMeetings,
+      tombstones: report.repositoryTombstones,
+      invalid_legacy_identities: report.invalidLegacyIdentities,
       missing: report.missingFromRepository,
       extra: report.extraInRepository,
+      duplicate_legacy_identities: report.duplicateLegacyIdentities,
       duplicate_identities: report.duplicateRepositoryIdentities,
+      order_mismatches: report.orderMismatches,
       title_mismatches: report.titleMismatches,
       lifecycle_mismatches: report.lifecycleMismatches,
       invalid_stage_sets: report.invalidStageSets,
@@ -97,6 +107,7 @@ async function auditShadowRepositoryRead(
       summary_availability_mismatches: report.summaryAvailabilityMismatches,
       context_mismatches: report.contextMismatches,
     });
+    return report;
   } catch (error) {
     diagnosticWarn('[meeting-db] repository shadow read failed', error);
     diagnosticAudit('meeting_db_repository_read', {
@@ -104,6 +115,7 @@ async function auditShadowRepositoryRead(
       scope: scopeKey === 'guest' ? 'guest' : 'account',
       error_code: error instanceof Error ? error.name : 'UnknownError',
     });
+    return null;
   }
 }
 
@@ -272,6 +284,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const transcriptCacheRef = useRef<Record<string, TranscriptLine[]>>({});
   const summaryCacheRef = useRef<Record<string, MeetingSummary | null>>({});
   const meetingsRef = useRef<Meeting[]>([]);
+  const canonicalReadProjectionRef = useRef<MeetingReadProjection | null>(null);
+  const canonicalReadRequestRef = useRef(0);
   const generationRef = useRef(0);
   const activeScopeRef = useRef<string | null>(null);
   const guestMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -294,6 +308,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     meetingsRef.current = [];
     transcriptCacheRef.current = {};
     summaryCacheRef.current = {};
+    canonicalReadRequestRef.current += 1;
+    canonicalReadProjectionRef.current = null;
     setMeetings([]);
     setError(null);
     setLoading(false);
@@ -318,10 +334,98 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, []);
 
+  const deactivateCanonicalRead = useCallback(() => {
+    canonicalReadRequestRef.current += 1;
+    canonicalReadProjectionRef.current = null;
+  }, []);
+
+  const applyMeetingReadCutover = useCallback(async (
+    legacyMeetings: readonly Meeting[],
+    preflight?: MeetingDualReadReport | null,
+  ): Promise<'legacy' | 'sqlite'> => {
+    const readRequest = ++canonicalReadRequestRef.current;
+    const flags = getFeatureFlags();
+    if (!flags.localMeetingDbCanonicalReadV1 || !isScopeKey(scope)) {
+      canonicalReadProjectionRef.current = null;
+      return 'legacy';
+    }
+    const operationGeneration = generationRef.current;
+    const result = await resolveMeetingReadCutover({
+      enabled: true,
+      repository: sqliteMeetingNoteRepository,
+      scopeKey: scope,
+      legacy: {
+        meetings: legacyMeetings,
+        transcripts: transcriptCacheRef.current,
+        summaries: summaryCacheRef.current,
+      },
+      preflight,
+    });
+    if (
+      generationRef.current !== operationGeneration
+      || activeScopeRef.current !== scope
+      || canonicalReadRequestRef.current !== readRequest
+    ) return 'legacy';
+    diagnosticAudit('meeting_db_read_cutover', {
+      status: result.source === 'sqlite' ? 'active' : 'fallback',
+      scope: scope === 'guest' ? 'guest' : 'account',
+      reason: result.reason,
+      meetings: result.projection.meetings.length,
+      ...(result.preflight ? {
+        repository_meetings: result.preflight.repositoryMeetings,
+        tombstones: result.preflight.repositoryTombstones,
+        invalid_legacy_identities: result.preflight.invalidLegacyIdentities,
+        missing: result.preflight.missingFromRepository,
+        extra: result.preflight.extraInRepository,
+        duplicate_legacy_identities: result.preflight.duplicateLegacyIdentities,
+        duplicate_identities: result.preflight.duplicateRepositoryIdentities,
+        order_mismatches: result.preflight.orderMismatches,
+        title_mismatches: result.preflight.titleMismatches,
+        lifecycle_mismatches: result.preflight.lifecycleMismatches,
+        invalid_stage_sets: result.preflight.invalidStageSets,
+        context_mismatches: result.preflight.contextMismatches,
+        transcript_count_mismatches: result.preflight.transcriptCountMismatches,
+        summary_availability_mismatches: result.preflight.summaryAvailabilityMismatches,
+      } : {}),
+      ...(result.compatibility ? {
+        meeting_projection_mismatches: result.compatibility.meetingMismatches,
+        transcript_content_mismatches: result.compatibility.transcriptContentMismatches,
+        summary_content_mismatches: result.compatibility.summaryContentMismatches,
+      } : {}),
+      ...(result.errorCode ? { error_code: result.errorCode } : {}),
+    });
+    if (result.source === 'sqlite') {
+      canonicalReadProjectionRef.current = result.projection;
+      setMeetings(result.projection.meetings);
+      return 'sqlite';
+    }
+    canonicalReadProjectionRef.current = null;
+    setMeetings(result.projection.meetings);
+    return 'legacy';
+  }, [scope]);
+
+  useEffect(() => {
+    if (!getFeatureFlags().localMeetingDbCanonicalReadV1 || !isScopeKey(scope)) return undefined;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = sqliteMeetingNoteRepository.observeList(scope, () => {
+      deactivateCanonicalRead();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void applyMeetingReadCutover(meetingsRef.current);
+      }, 30);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [applyMeetingReadCutover, deactivateCanonicalRead, scope]);
+
   const refreshMeetingsFromCloud = useCallback(async () => {
     const requestGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
     if (mode === 'signed_out') {
+      deactivateCanonicalRead();
       meetingsRef.current = [];
       setMeetings([]);
       return;
@@ -331,6 +435,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     if (!accessToken) return;
 
+    deactivateCanonicalRead();
     setLoading(true);
     try {
       const data = await fetchAllMeetings(accessToken);
@@ -398,7 +503,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       meetingsRef.current = local;
       setMeetings(local);
       await persistMeetings(local);
-      mirrorMeetingProjections(scope, local);
+      const mirrorOperation = mirrorMeetingProjections(scope, local);
+      if (getFeatureFlags().localMeetingDbCanonicalReadV1) {
+        await mirrorOperation;
+        if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
+        await applyMeetingReadCutover(local);
+      } else {
+        void mirrorOperation;
+      }
       if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
       setError(null);
     } catch (err) {
@@ -409,7 +521,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
     }
-  }, [accessToken, mode, persistMeetings, scope]);
+  }, [accessToken, applyMeetingReadCutover, deactivateCanonicalRead, mode, persistMeetings, scope]);
 
   const reconcilePendingAudioUploads = useCallback(async (
     pendingUploads: PendingMeetingAudioUpload[],
@@ -438,10 +550,19 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       return { ...meeting, audioSyncPending, audioSyncBlocked, tags };
     });
     if (!changed) return;
+    deactivateCanonicalRead();
     meetingsRef.current = next;
     setMeetings(next);
     await persistMeetings(next);
-  }, [persistMeetings, scope]);
+    const mirrorOperation = mirrorMeetingProjections(scope, next);
+    if (getFeatureFlags().localMeetingDbCanonicalReadV1) {
+      await mirrorOperation;
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      await applyMeetingReadCutover(next);
+    } else {
+      void mirrorOperation;
+    }
+  }, [applyMeetingReadCutover, deactivateCanonicalRead, persistMeetings, scope]);
 
   const resumePendingAudioUploads = useCallback((force = false): Promise<void> => {
     if (mode !== 'authenticated' || !accessToken || activeScopeRef.current !== scope) {
@@ -555,15 +676,19 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         });
         meetingsRef.current = hydratedMeetings;
         setMeetings(hydratedMeetings);
-        if (getFeatureFlags().localMeetingDbV1 && isScopeKey(scope)) {
-          void runLegacyMeetingShadowImport({
-            scopeKey: scope,
-            meetings: cachedMeetings,
-            transcripts: cachedTranscripts,
-            summaries: cachedSummaries,
-            pendingAudioUploads,
-            pendingSummaryTasks,
-          }).then(report => {
+        const flags = getFeatureFlags();
+        const synchronizeMeetingDb = async (legacyMeetings: readonly Meeting[]) => {
+          if (!flags.localMeetingDbV1 || !isScopeKey(scope)) return;
+          try {
+            const report = await runLegacyMeetingShadowImport({
+              scopeKey: scope,
+              meetings: legacyMeetings,
+              transcripts: transcriptCacheRef.current,
+              summaries: summaryCacheRef.current,
+              pendingAudioUploads,
+              pendingSummaryTasks,
+            });
+            if (!isCurrent()) return;
             const counts = report.counts;
             diagnosticInfo(
               `[meeting-db] shadow ${report.skipped ? 'unchanged' : 'completed'}: `
@@ -578,25 +703,68 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               summaries: counts.summaryVersions,
               recordings: counts.recordingAssets,
             });
-            void auditShadowRepositoryRead(scope, cachedMeetings, cachedTranscripts, cachedSummaries);
+            const preflight = await auditShadowRepositoryRead(
+              scope,
+              legacyMeetings,
+              transcriptCacheRef.current,
+              summaryCacheRef.current,
+            );
+            if (!isCurrent()) return;
+            if (flags.localMeetingDbCanonicalReadV1) {
+              if (preflight) await applyMeetingReadCutover(legacyMeetings, preflight);
+              else {
+                deactivateCanonicalRead();
+                setMeetings([...legacyMeetings]);
+                diagnosticAudit('meeting_db_read_cutover', {
+                  status: 'fallback',
+                  scope: scope === 'guest' ? 'guest' : 'account',
+                  reason: 'preflight_failed',
+                });
+              }
+            }
             void reconcileNativeMeetingRecordings(scope, { force: true });
-          }).catch(error => {
+          } catch (error) {
+            if (!isCurrent()) return;
+            deactivateCanonicalRead();
+            setMeetings([...legacyMeetings]);
             diagnosticWarn('[meeting-db] shadow import failed', error);
             diagnosticAudit('meeting_db_shadow_import', {
               status: 'failed',
               scope: scope === 'guest' ? 'guest' : 'account',
               error_code: error instanceof Error ? error.name : 'UnknownError',
             });
-          });
+            if (flags.localMeetingDbCanonicalReadV1) {
+              diagnosticAudit('meeting_db_read_cutover', {
+                status: 'fallback',
+                scope: scope === 'guest' ? 'guest' : 'account',
+                reason: 'shadow_import_failed',
+              });
+            }
+          }
+        };
+        if (flags.localMeetingDbCanonicalReadV1) {
+          if (mode === 'authenticated') await refreshMeetings();
+          if (isCurrent()) await synchronizeMeetingDb(meetingsRef.current);
+        } else {
+          void synchronizeMeetingDb(cachedMeetings);
+          if (mode === 'authenticated') await refreshMeetings();
         }
-        if (mode === 'authenticated') await refreshMeetings();
       } finally {
         if (isCurrent()) setLoading(false);
       }
     }
     void loadForScope();
     return () => { alive = false; };
-  }, [meetingsKey, mode, refreshMeetings, scope, summaryKey, transcriptKey]);
+  }, [
+    applyMeetingReadCutover,
+    deactivateCanonicalRead,
+    meetingsKey,
+    mode,
+    refreshMeetings,
+    scope,
+    summaryKey,
+    transcriptKey,
+  ]);
 
   const createMeeting = useCallback(async (
     title: string,
@@ -608,6 +776,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
+        deactivateCanonicalRead();
         const requestedRecordedAt = options.recordedAt ? new Date(options.recordedAt) : new Date();
         const recordedAt = Number.isNaN(requestedRecordedAt.getTime()) ? new Date() : requestedRecordedAt;
         const local = createGuestMeeting(cleanTitle, options, recordedAt);
@@ -631,13 +800,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       recordedAt: options.recordedAt ?? null,
     }, accessToken));
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return created;
+    deactivateCanonicalRead();
     const next = [created, ...meetingsRef.current.filter(item => item.id !== created.id)];
     meetingsRef.current = next;
     setMeetings(next);
     void persistMeetings(next);
     if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, created);
     return created;
-  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
+  }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
   const deleteMeeting = useCallback(async (id: string) => {
     const operationGeneration = generationRef.current;
@@ -650,6 +820,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
         if (!target) return;
         assertMeetingDeletionAllowed(target);
+        deactivateCanonicalRead();
         const nextMeetings = meetingsRef.current.filter(meeting => meeting.id !== id);
         await persistMeetingsStrict(nextMeetings);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -683,6 +854,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const previousSummaries = summaryCacheRef.current;
     const target = previousMeetings.find(m => m.id === id) ?? null;
     if (target) assertMeetingDeletionAllowed(target);
+    deactivateCanonicalRead();
     const targetIndex = previousMeetings.findIndex(m => m.id === id);
     const hadTranscript = Object.prototype.hasOwnProperty.call(previousTranscripts, id);
     const previousTranscript = previousTranscripts[id];
@@ -754,7 +926,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     ]);
     const failures = cleanupResults.filter(result => result.status === 'rejected').length;
     if (failures > 0) throw new MeetingDeletionCleanupError(failures);
-  }, [accessToken, enqueueGuestMutation, meetingsKey, mode, persistMeetings, persistMeetingsStrict, persistSummaries, persistTranscripts, scope, summaryKey, transcriptKey]);
+  }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, meetingsKey, mode, persistMeetings, persistMeetingsStrict, persistSummaries, persistTranscripts, scope, summaryKey, transcriptKey]);
 
   const updateMeetingTitle = useCallback(async (id: string, title: string) => {
     const operationGeneration = generationRef.current;
@@ -763,6 +935,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+        deactivateCanonicalRead();
         const next = meetingsRef.current.map(meeting => (
           meeting.id === id ? { ...meeting, title: cleanTitle, updatedAt: new Date().toISOString() } : meeting
         ));
@@ -775,37 +948,36 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     if (!accessToken) throw new Error('not authenticated');
     const previousMeeting = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
+    deactivateCanonicalRead();
     const optimisticUpdatedAt = new Date().toISOString();
-    setMeetings(prev => {
-      const next = prev.map(m => m.id === id ? { ...m, title: cleanTitle, updatedAt: optimisticUpdatedAt } : m);
-      meetingsRef.current = next;
-      return next;
-    });
+    const optimistic = meetingsRef.current.map(m => (
+      m.id === id ? { ...m, title: cleanTitle, updatedAt: optimisticUpdatedAt } : m
+    ));
+    meetingsRef.current = optimistic;
+    setMeetings(optimistic);
     if (previousMeeting) {
       mirrorMeetingProjection(scope, { ...previousMeeting, title: cleanTitle, updatedAt: optimisticUpdatedAt });
     }
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { title: cleanTitle }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
-      setMeetings(prev => {
-        const next = prev.map(m => m.id === id
-          ? {
-              ...m,
-              ...updated,
-              audioSyncPending: m.audioSyncPending,
-              audioSyncBlocked: m.audioSyncBlocked,
-              tags: tagsForAudioSync(
-                updated.tags,
-                Boolean(m.audioSyncPending),
-                Boolean(m.audioSyncBlocked),
-              ),
-            }
-          : m);
-        meetingsRef.current = next;
-        void persistMeetings(next);
-        mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
-        return next;
-      });
+      const next = meetingsRef.current.map(m => m.id === id
+        ? {
+            ...m,
+            ...updated,
+            audioSyncPending: m.audioSyncPending,
+            audioSyncBlocked: m.audioSyncBlocked,
+            tags: tagsForAudioSync(
+              updated.tags,
+              Boolean(m.audioSyncPending),
+              Boolean(m.audioSyncBlocked),
+            ),
+          }
+        : m);
+      meetingsRef.current = next;
+      setMeetings(next);
+      void persistMeetings(next);
+      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
     } catch (err) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) throw err;
       if (previousMeeting) {
@@ -820,7 +992,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
       throw err;
     }
-  }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
+  }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
   const updateMeetingDetails = useCallback(async (
     id: string,
@@ -840,6 +1012,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const previous = meetingsRef.current.find(meeting => meeting.id === id);
     if (!previous) throw new Error('会议记录不存在');
 
+    deactivateCanonicalRead();
     const optimistic = meetingsRef.current.map(meeting => meeting.id === id
       ? { ...meeting, ...normalized, updatedAt: new Date().toISOString() }
       : meeting);
@@ -891,7 +1064,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
       throw error;
     }
-  }, [accessToken, mode, persistMeetingsStrict, scope]);
+  }, [accessToken, deactivateCanonicalRead, mode, persistMeetingsStrict, scope]);
 
   const updateMeetingStatus = useCallback(async (id: string, status: string, patch: Partial<Meeting> = {}) => {
     const operationGeneration = generationRef.current;
@@ -899,6 +1072,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
+        deactivateCanonicalRead();
         const next = meetingsRef.current.map(meeting => meeting.id === id
           ? { ...meeting, ...patch, status, tags: [statusTag(status), { label: '本机', color: C.teal }], updatedAt: new Date().toISOString() }
           : meeting);
@@ -911,6 +1085,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       });
     }
     if (!accessToken) throw new Error('not authenticated');
+    deactivateCanonicalRead();
     const local = meetingsRef.current.map(meeting => {
       if (meeting.id !== id) return meeting;
       const audioSyncPending = Boolean(patch.audioSyncPending ?? meeting.audioSyncPending);
@@ -963,12 +1138,16 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return false;
     }
-  }, [accessToken, enqueueGuestMutation, mode, persistMeetingsStrict, scope]);
+  }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetingsStrict, scope]);
 
-  const getCachedTranscript = useCallback((id: string) => transcriptCacheRef.current[id] ?? [], []);
+  const getCachedTranscript = useCallback((id: string) => {
+    const canonical = canonicalReadProjectionRef.current;
+    return canonical ? canonical.transcripts[id] ?? [] : transcriptCacheRef.current[id] ?? [];
+  }, []);
   const saveCachedTranscript = useCallback(async (id: string, transcript: TranscriptLine[]) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
+    deactivateCanonicalRead();
     const previous = transcriptCacheRef.current;
     const next = { ...previous, [id]: transcript };
     transcriptCacheRef.current = next;
@@ -983,19 +1162,23 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (contentMeeting && isScopeKey(scope)) {
       void mirrorLegacyTranscriptContent(scope, contentMeeting, transcript);
     }
-    setMeetings(prev => {
-      const next = prev.map(m => m.id === id ? { ...m, hasTranscript: transcript.length > 0 } : m);
-      meetingsRef.current = next;
-      void persistMeetings(next);
-      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
-      return next;
-    });
-  }, [persistMeetings, persistTranscripts, scope]);
+    const nextMeetings = meetingsRef.current.map(m => (
+      m.id === id ? { ...m, hasTranscript: transcript.length > 0 } : m
+    ));
+    meetingsRef.current = nextMeetings;
+    setMeetings(nextMeetings);
+    void persistMeetings(nextMeetings);
+    mirrorMeetingProjection(scope, nextMeetings.find(meeting => meeting.id === id));
+  }, [deactivateCanonicalRead, persistMeetings, persistTranscripts, scope]);
 
-  const getCachedSummary = useCallback((id: string) => summaryCacheRef.current[id] ?? null, []);
+  const getCachedSummary = useCallback((id: string) => {
+    const canonical = canonicalReadProjectionRef.current;
+    return canonical ? canonical.summaries[id] ?? null : summaryCacheRef.current[id] ?? null;
+  }, []);
   const saveCachedSummary = useCallback(async (id: string, summary: MeetingSummary | null) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
+    deactivateCanonicalRead();
     const usableSummary = summary && meetingSummaryToText(summary) ? summary : null;
     const previous = summaryCacheRef.current;
     const next = { ...previous, [id]: usableSummary };
@@ -1011,14 +1194,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (contentMeeting && isScopeKey(scope)) {
       void mirrorLegacySummaryContent(scope, contentMeeting, usableSummary);
     }
-    setMeetings(prev => {
-      const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(usableSummary) } : m);
-      meetingsRef.current = next;
-      void persistMeetings(next);
-      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
-      return next;
-    });
-  }, [persistMeetings, persistSummaries, scope]);
+    const nextMeetings = meetingsRef.current.map(m => (
+      m.id === id ? { ...m, hasSummary: Boolean(usableSummary) } : m
+    ));
+    meetingsRef.current = nextMeetings;
+    setMeetings(nextMeetings);
+    void persistMeetings(nextMeetings);
+    mirrorMeetingProjection(scope, nextMeetings.find(meeting => meeting.id === id));
+  }, [deactivateCanonicalRead, persistMeetings, persistSummaries, scope]);
 
   return (
     <MeetingsContext.Provider

@@ -10,9 +10,13 @@ export interface MeetingDualReadReport {
   status: 'consistent' | 'mismatch';
   legacyMeetings: number;
   repositoryMeetings: number;
+  repositoryTombstones: number;
+  invalidLegacyIdentities: number;
   missingFromRepository: number;
   extraInRepository: number;
+  duplicateLegacyIdentities: number;
   duplicateRepositoryIdentities: number;
+  orderMismatches: number;
   titleMismatches: number;
   lifecycleMismatches: number;
   invalidStageSets: number;
@@ -91,13 +95,22 @@ export class MeetingRepositoryFacade {
     }
 
     const legacyById = new Map<string, Meeting>();
+    let invalidLegacyIdentities = 0;
+    let duplicateLegacyIdentities = 0;
     legacyMeetings.forEach(meeting => {
       const id = meeting.id?.trim();
-      if (id) legacyById.set(id, meeting);
+      if (!id) {
+        invalidLegacyIdentities += 1;
+        return;
+      }
+      if (legacyById.has(id)) duplicateLegacyIdentities += 1;
+      else legacyById.set(id, meeting);
     });
+    const comparableRepositoryItems = repositoryItems.filter(item => item.lifecycle !== 'deleted');
+    const repositoryTombstones = repositoryItems.length - comparableRepositoryItems.length;
     const repositoryByIdentity = new Map<string, MeetingListProjectionItem>();
     let duplicateRepositoryIdentities = 0;
-    repositoryItems.forEach(item => {
+    comparableRepositoryItems.forEach(item => {
       const identity = legacyIdentityForRepositoryItem(item, scopeKey);
       if (repositoryByIdentity.has(identity)) duplicateRepositoryIdentities += 1;
       else repositoryByIdentity.set(identity, item);
@@ -138,17 +151,30 @@ export class MeetingRepositoryFacade {
     repositoryByIdentity.forEach((_, identity) => {
       if (!legacyById.has(identity)) extraInRepository += 1;
     });
+    const legacyOrder = [...legacyById.keys()];
+    const repositoryOrder = comparableRepositoryItems
+      .map(item => legacyIdentityForRepositoryItem(item, scopeKey));
+    let orderMismatches = Math.abs(legacyOrder.length - repositoryOrder.length);
+    for (let index = 0; index < Math.min(legacyOrder.length, repositoryOrder.length); index += 1) {
+      if (legacyOrder[index] !== repositoryOrder[index]) orderMismatches += 1;
+    }
     const invalidStageSets = repositoryItems.filter(item => !hasCompleteStageSet(item)).length;
-    const mismatchCount = missingFromRepository + extraInRepository + duplicateRepositoryIdentities
+    const mismatchCount = invalidLegacyIdentities + missingFromRepository + extraInRepository
+      + duplicateLegacyIdentities + duplicateRepositoryIdentities
+      + orderMismatches
       + titleMismatches + lifecycleMismatches + invalidStageSets
       + transcriptCountMismatches + summaryAvailabilityMismatches + contextMismatches;
     return {
       status: mismatchCount === 0 ? 'consistent' : 'mismatch',
       legacyMeetings: legacyById.size,
-      repositoryMeetings: repositoryItems.length,
+      repositoryMeetings: comparableRepositoryItems.length,
+      repositoryTombstones,
+      invalidLegacyIdentities,
       missingFromRepository,
       extraInRepository,
+      duplicateLegacyIdentities,
       duplicateRepositoryIdentities,
+      orderMismatches,
       titleMismatches,
       lifecycleMismatches,
       invalidStageSets,

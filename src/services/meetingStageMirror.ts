@@ -239,7 +239,10 @@ export async function mirrorLegacyMeetingStageState(
         lifecycle,
         ...(lifecycle === 'active' && note.startedAtMs === null ? { startedAtMs: nowMs } : {}),
         ...(lifecycle === 'ended' && note.endedAtMs === null ? { endedAtMs: nowMs } : {}),
-        updatedAtMs: nowMs,
+        updatedAtMs: Math.max(
+          note.updatedAtMs,
+          timestamp(legacyMeeting.updatedAt, note.updatedAtMs),
+        ),
       });
     });
     diagnosticAudit('meeting_stage_shadow_write', {
