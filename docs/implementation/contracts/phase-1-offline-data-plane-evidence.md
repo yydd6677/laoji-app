@@ -57,9 +57,11 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
 - 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：89,597,155 bytes
-- SHA-256：`a5eccda469957274739f5b0a28c0c3388dfd62f9c2df713cc3ca9a943861a408`
-- 构建时间：`2026-07-22 19:15:15 +0800`
+- 大小：89,611,215 bytes
+- SHA-256：`77aa870153cbbcf80e5dd1c5f2ec4d535c7f1c42dc3fe5a4b758e9c036409c65`
+- 构建时间：`2026-07-22 20:14:40 +0800`
+- 内嵌开关：`localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=false`
+- 安装状态：本包已完成构建和模拟器实验版等价路径验证，尚待真机重新连接后无损覆盖与 4/7/1/4 基线复核
 
 ## 未决项与停线边界
 
