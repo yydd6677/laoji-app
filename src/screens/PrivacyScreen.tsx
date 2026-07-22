@@ -18,6 +18,7 @@ import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/
 import { clearAppStorage } from '../services/appStorage';
 import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
 import { useGuestDataMigration } from '../components/GuestDataMigrationProvider';
+import { deleteMeetingDatabase } from '../data/db/openDatabase';
 
 const { colors: F } = getFeishuTokens();
 
@@ -180,17 +181,18 @@ export function PrivacyScreen({ navigation }: Props) {
           text: '清除',
           role: 'destructive',
           onPress: async () => {
-            const cleanupResults = await Promise.allSettled([
-              clearLocalAppFiles(),
-              clearScheduledAppNotifications(),
-              clearAppStorage(),
-            ]);
             let signOutFailed = false;
             try {
               await signOut();
             } catch {
               signOutFailed = true;
             }
+            const cleanupResults = await Promise.allSettled([
+              clearLocalAppFiles(),
+              clearScheduledAppNotifications(),
+              clearAppStorage(),
+              deleteMeetingDatabase(),
+            ]);
             const failures = cleanupResults.filter(result => result.status === 'rejected').length
               + (signOutFailed ? 1 : 0);
             showDialog(failures > 0

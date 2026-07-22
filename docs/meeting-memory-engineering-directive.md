@@ -4,7 +4,7 @@
 >
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
-> 实施状态：方向已确认；本文件落盘时尚未开始功能代码改造。
+> 实施状态：Phase 0 进行中；业务界面仍保持稳定基线行为，SQLite 仅执行影子导入。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 
@@ -89,7 +89,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 9. 游客迁移没有持久化“游客日程 source ID → 云端日程 ID”映射；增加 occurrence 绑定后会丢失关联。
 10. 移动端 `createMeeting` 已发送 `location`、`recorded_at`、`client_request_id`，本机 `server-work` 的会议模型副本并未完整声明这些字段；`force` 总结参数也存在相同版本差异。开始新接口前必须先做线上契约盘点。
 11. Android manifest 没有音频 `ACTION_SEND` / `ACTION_OPEN_DOCUMENT` 接收入口、App Widget 或 Quick Settings Tile。
-12. `android/app/build.gradle` 仍含指向本机工作树的绝对 ProGuard 路径，违反 Linux/Windows 共用仓库要求，必须在第一阶段改为项目相对解析。
+12. 稳定基线的生成版 `android/app/build.gradle` 曾含指向本机工作树的绝对 ProGuard 路径。Phase 0 已改为由配置插件生成 `rootProject.file(...)` 相对路径；后续预构建仍必须执行跨平台路径检查，防止回归。
 
 ## 4. 完整优化登记表
 
@@ -1304,6 +1304,8 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 - event create/edit command 的 idempotency 和返回 ID。
 
 将结果保存为不含凭据和私人正文的版本化 contract snapshot。发现不一致时先兼容服务端，不以移动端当前 TypeScript interface 作为事实。
+
+当前 Phase 0 契约证据记录在 [`implementation/contracts/phase-0-meeting-contract-snapshot.md`](implementation/contracts/phase-0-meeting-contract-snapshot.md)。该记录明确区分线上探测、本机部署副本和目标 v2 提案；线上契约未确认前不得开启 v2 写入。
 
 ### 12.2 能力协商
 

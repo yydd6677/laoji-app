@@ -83,6 +83,7 @@ const base = {
     'expo-font',
     'expo-localization',
     'expo-secure-store',
+    'expo-sqlite',
     ['expo-image-picker', {
       photosPermission: '老记需要访问照片，用于选择账号头像。',
       cameraPermission: false,
@@ -178,6 +179,9 @@ module.exports = () => {
   const realtimeAsrProvider = String(
     process.env.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || 'qwen',
   ).trim().toLowerCase();
+  const localMeetingDbV1 = !['0', 'false', 'no', 'off'].includes(
+    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
+  );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
   );
@@ -216,6 +220,9 @@ module.exports = () => {
       privacyPolicyUrl,
       termsOfServiceUrl,
       accountDeletionUrl,
+      featureFlags: {
+        localMeetingDbV1,
+      },
     },
   };
 };

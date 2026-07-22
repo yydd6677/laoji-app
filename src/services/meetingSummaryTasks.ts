@@ -76,6 +76,16 @@ export async function getPendingMeetingSummaryTask(
   return task;
 }
 
+export async function listPendingMeetingSummaryTasks(
+  storageScope: string,
+): Promise<PendingMeetingSummaryTask[]> {
+  await pendingStorageMutation.catch(() => {});
+  return Object.values(await readPendingTasks(storageScope)).sort((left, right) => (
+    left.createdAt.localeCompare(right.createdAt)
+    || left.meetingId.localeCompare(right.meetingId)
+  ));
+}
+
 export async function savePendingMeetingSummaryTask(
   storageScope: string,
   task: Omit<PendingMeetingSummaryTask, 'createdAt' | 'updatedAt'> & Partial<Pick<PendingMeetingSummaryTask, 'createdAt'>>,

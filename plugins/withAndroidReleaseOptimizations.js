@@ -41,10 +41,9 @@ module.exports = function withAndroidReleaseOptimizations(config) {
     if (!fs.existsSync(rulesPath)) {
       throw new Error(`expo-notifications ProGuard rules do not exist: ${rulesPath}`);
     }
-    const gradlePath = rulesPath.replace(/\\/g, '/').replace(/"/g, '\\"');
     source = source.replace(
       PROGUARD_ANCHOR,
-      `${PROGUARD_ANCHOR}, file("${gradlePath}") ${NOTIFICATIONS_PROGUARD_MARKER}`,
+      `${PROGUARD_ANCHOR}, rootProject.file("../node_modules/expo-notifications/android/proguard-rules.pro") ${NOTIFICATIONS_PROGUARD_MARKER}`,
     );
     gradleConfig.modResults.contents = source;
     return gradleConfig;

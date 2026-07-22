@@ -35,6 +35,7 @@ import { isStoredSessionExpired, shouldRefreshStoredSession } from '../services/
 import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
 import { clearAppStorage, getAppStorageItem, setAppStorageItem } from '../services/appStorage';
 import { setUnauthorizedHandler } from '../services/authInvalidation';
+import { deleteMeetingDatabase } from '../data/db/openDatabase';
 
 const AUTH_MODE_KEY = '@laoji:authMode:v1';
 
@@ -342,6 +343,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearLocalAppFiles(),
       clearScheduledAppNotifications(),
       clearAppStorage(),
+      deleteMeetingDatabase(),
     ]);
     return {
       ...result,

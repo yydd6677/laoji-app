@@ -24,6 +24,11 @@ import { HttpResponseError } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
 import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
+import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
+import { runLegacyMeetingShadowImport } from '../data/db/legacyImport';
+import { isScopeKey } from '../domain/meeting';
+import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
+import { getFeatureFlags } from '../config/featureFlags';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -432,13 +437,20 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'signed_out') return;
       setLoading(true);
       try {
-        const [cachedMeetings, cachedTranscripts, cachedSummaries, pendingAudioUploads] = await Promise.all([
+        const [
+          cachedMeetings,
+          cachedTranscripts,
+          cachedSummaries,
+          pendingAudioUploads,
+          pendingSummaryTasks,
+        ] = await Promise.all([
           loadJson<Meeting[]>(meetingsKey, []),
           loadJson<Record<string, TranscriptLine[]>>(transcriptKey, {}),
           loadJson<Record<string, MeetingSummary | null>>(summaryKey, {}),
           mode === 'authenticated'
             ? listPendingMeetingAudioUploads(scope).catch(() => [])
             : Promise.resolve([]),
+          listPendingMeetingSummaryTasks(scope).catch(() => []),
         ]);
         if (!isCurrent()) return;
         transcriptCacheRef.current = cachedTranscripts;
@@ -459,6 +471,38 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         });
         meetingsRef.current = hydratedMeetings;
         setMeetings(hydratedMeetings);
+        if (getFeatureFlags().localMeetingDbV1 && isScopeKey(scope)) {
+          void runLegacyMeetingShadowImport({
+            scopeKey: scope,
+            meetings: cachedMeetings,
+            transcripts: cachedTranscripts,
+            summaries: cachedSummaries,
+            pendingAudioUploads,
+            pendingSummaryTasks,
+          }).then(report => {
+            const counts = report.counts;
+            diagnosticInfo(
+              `[meeting-db] shadow ${report.skipped ? 'unchanged' : 'completed'}: `
+              + `${counts.meetingNotes} meetings, ${counts.transcriptSegments} transcript segments, `
+              + `${counts.summaryVersions} summaries, ${counts.recordingAssets} recordings`,
+            );
+            diagnosticAudit('meeting_db_shadow_import', {
+              status: report.skipped ? 'unchanged' : 'completed',
+              scope: scope === 'guest' ? 'guest' : 'account',
+              meetings: counts.meetingNotes,
+              transcript_segments: counts.transcriptSegments,
+              summaries: counts.summaryVersions,
+              recordings: counts.recordingAssets,
+            });
+          }).catch(error => {
+            diagnosticWarn('[meeting-db] shadow import failed', error);
+            diagnosticAudit('meeting_db_shadow_import', {
+              status: 'failed',
+              scope: scope === 'guest' ? 'guest' : 'account',
+              error_code: error instanceof Error ? error.name : 'UnknownError',
+            });
+          });
+        }
         if (mode === 'authenticated') await refreshMeetings();
       } finally {
         if (isCurrent()) setLoading(false);
