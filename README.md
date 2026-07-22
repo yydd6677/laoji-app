@@ -36,7 +36,7 @@ npm run audit:public
 
 ## 当前开发目标
 
-当前实施顺序、已确认裁剪和待拍板事项见 [当前工作目标](docs/current-work-goal.md)。飞书日历重构的长期边界见 [基线合同](docs/feishu-calendar-baseline-contract.md)，老记语音创建入口见 [语音交互合同](docs/voice-schedule-interaction-contract.md)。
+日历与会议记录后续优化的目标架构、数据契约和阶段路线见 [工程实施指示](docs/meeting-memory-engineering-directive.md)，老记语音创建入口见 [语音交互合同](docs/voice-schedule-interaction-contract.md)。
 
 ## 构建
 
