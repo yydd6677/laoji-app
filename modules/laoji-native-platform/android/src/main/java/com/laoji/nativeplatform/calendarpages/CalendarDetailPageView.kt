@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -138,6 +139,16 @@ class CalendarDetailPageView(
 
     body.removeAllViews()
     body.addView(buildHeader(), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    state.meetingAction?.let { action ->
+      body.addView(
+        buildMeetingAction(action),
+        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(48)).apply {
+          leftMargin = context.pageDp(16)
+          rightMargin = context.pageDp(16)
+          bottomMargin = context.pageDp(16)
+        },
+      )
+    }
     state.location?.takeIf(String::isNotBlank)?.let {
       body.addView(detailRow(com.laoji.nativeplatform.R.drawable.laoji_ic_location_outline, it, false))
     }
@@ -211,6 +222,49 @@ class CalendarDetailPageView(
       addView(context.pageText(value, 16f).apply {
         maxLines = if (multiline) Int.MAX_VALUE else 2
       }, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+  private fun buildMeetingAction(action: CalendarMeetingAction): TextView =
+    context.pageText(action.label, 17f, Color.WHITE).apply {
+      gravity = Gravity.CENTER
+      isEnabled = action.enabled
+      isClickable = action.enabled
+      isFocusable = action.enabled
+      contentDescription = listOf(action.label, action.statusLabel)
+        .filter(String::isNotBlank)
+        .joinToString("，")
+      background = StateListDrawable().apply {
+        addState(
+          intArrayOf(android.R.attr.state_pressed),
+          GradientDrawable().apply {
+            setColor(CalendarPagePalette.primaryPressed)
+            cornerRadius = context.pageDp(6).toFloat()
+          },
+        )
+        addState(
+          intArrayOf(-android.R.attr.state_enabled),
+          GradientDrawable().apply {
+            setColor(CalendarPagePalette.primarySoft)
+            cornerRadius = context.pageDp(6).toFloat()
+          },
+        )
+        addState(
+          intArrayOf(),
+          GradientDrawable().apply {
+            setColor(CalendarPagePalette.primary)
+            cornerRadius = context.pageDp(6).toFloat()
+          },
+        )
+      }
+      setTextColor(
+        android.content.res.ColorStateList(
+          arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+          intArrayOf(CalendarPagePalette.disabled, Color.WHITE),
+        ),
+      )
+      setOnClickListener {
+        if (action.enabled) emit("meetingAction", mapOf("meetingActionKind" to action.kind))
+      }
     }
 
   private fun requestDelete() {

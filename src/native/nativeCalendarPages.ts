@@ -162,6 +162,7 @@ export function nativeCalendarDetailTimeLabel(event: CalEvent): string {
 export function buildNativeCalendarDetailSnapshot(
   event: CalEvent | undefined,
   deleting = false,
+  meetingAction?: NativeCalendarDetailSnapshot['meetingAction'],
 ): NativeCalendarDetailSnapshot {
   if (!event) {
     return { schemaVersion: 1, state: 'error', message: '日程不存在，请返回日历后重新打开。' };
@@ -176,6 +177,7 @@ export function buildNativeCalendarDetailSnapshot(
     schemaVersion: 1,
     state: 'ready',
     deleting,
+    meetingAction,
     event: {
       ...eventRefForEvent(event),
       title: eventDetailTitle(event.title),

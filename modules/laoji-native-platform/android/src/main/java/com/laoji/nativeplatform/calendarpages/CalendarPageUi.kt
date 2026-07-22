@@ -31,6 +31,7 @@ internal object CalendarPagePalette {
   val disabled = Color.rgb(187, 191, 196)
   val divider = Color.rgb(222, 224, 227)
   val primary = Color.rgb(20, 86, 240)
+  val primaryPressed = Color.rgb(4, 66, 210)
   val primaryHeader = Color.rgb(4, 66, 210)
   val primarySoft = Color.rgb(240, 244, 255)
   val danger = Color.rgb(226, 46, 40)

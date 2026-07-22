@@ -264,6 +264,7 @@ function noteFromRow(row: MeetingRow): MeetingNote {
     id: row.id,
     scopeKey: row.scope_key,
     remoteId: row.remote_id,
+    legacySourceId: row.legacy_source_id,
     origin: row.origin,
     entryPoint: row.entry_point,
     title: row.title,
@@ -862,20 +863,52 @@ class SqliteMeetingTransaction implements MeetingTransaction {
   async bindOccurrence(link: OccurrenceLinkRecord, snapshot: ScheduleSnapshot): Promise<void> {
     assertScopeKey(link.scopeKey);
     await this.assertMeetingInScope(link.meetingId, link.scopeKey);
-    await this.database.runAsync(
-      `INSERT INTO meeting_occurrence_links (
-         meeting_id, scope_key, calendar_source_event_id, occurrence_date,
-         calendar_revision, recurrence_segment_id, series_key, link_state, linked_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
-      link.meetingId,
+    const existing = await this.database.getFirstAsync<{ meeting_id: string; lifecycle: MeetingNote['lifecycle'] }>(
+      `SELECT occurrence.meeting_id, meeting.lifecycle
+       FROM meeting_occurrence_links occurrence
+       INNER JOIN meeting_notes meeting ON meeting.id = occurrence.meeting_id
+       WHERE occurrence.scope_key = ?
+         AND occurrence.calendar_source_event_id = ?
+         AND occurrence.occurrence_date = ?`,
       link.scopeKey,
       link.sourceEventId,
       link.occurrenceDate,
-      link.calendarRevision,
-      link.recurrenceSegmentId,
-      link.seriesKey,
-      link.linkedAtMs,
     );
+    if (existing?.meeting_id === link.meetingId) return;
+    if (existing && existing.lifecycle !== 'deleted') {
+      throw new Error('calendar occurrence already belongs to another meeting');
+    }
+    if (existing) {
+      const rebound = await this.database.runAsync(
+        `UPDATE meeting_occurrence_links SET
+           meeting_id = ?, calendar_revision = ?, recurrence_segment_id = ?,
+           series_key = ?, link_state = 'active', linked_at_ms = ?
+         WHERE meeting_id = ? AND scope_key = ?`,
+        link.meetingId,
+        link.calendarRevision,
+        link.recurrenceSegmentId,
+        link.seriesKey,
+        link.linkedAtMs,
+        existing.meeting_id,
+        link.scopeKey,
+      );
+      if (rebound.changes !== 1) throw new Error('calendar occurrence changed during binding');
+    } else {
+      await this.database.runAsync(
+        `INSERT INTO meeting_occurrence_links (
+           meeting_id, scope_key, calendar_source_event_id, occurrence_date,
+           calendar_revision, recurrence_segment_id, series_key, link_state, linked_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+        link.meetingId,
+        link.scopeKey,
+        link.sourceEventId,
+        link.occurrenceDate,
+        link.calendarRevision,
+        link.recurrenceSegmentId,
+        link.seriesKey,
+        link.linkedAtMs,
+      );
+    }
     await this.database.runAsync(
       `INSERT INTO meeting_schedule_snapshots (
          meeting_id, event_title, planned_start_ms, planned_end_ms, all_day,

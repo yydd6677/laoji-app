@@ -8,6 +8,7 @@ import {
 import { getFeatureFlags } from '../config/featureFlags';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
+import type { CalendarMeetingContext } from './occurrenceMeeting';
 
 function legacyCaptureStatus(meeting: Meeting, hasAsset: boolean): CaptureStatus | null {
   const status = meeting.status?.toLowerCase();
@@ -53,7 +54,11 @@ function legacyLocalId(scopeKey: ScopeKey, legacyMeetingId: string): string {
   return `legacy:${encodeURIComponent(scopeKey)}:${encodeURIComponent(legacyMeetingId)}`;
 }
 
-export async function mirrorLegacyMeetingCreated(scopeKey: ScopeKey, meeting: Meeting): Promise<void> {
+export async function mirrorLegacyMeetingCreated(
+  scopeKey: ScopeKey,
+  meeting: Meeting,
+  calendarContext?: CalendarMeetingContext,
+): Promise<void> {
   if (!getFeatureFlags().localMeetingDbV1) return;
   try {
     const existing = await sqliteMeetingNoteRepository.findByNativeSessionId(meeting.id, scopeKey);
@@ -70,8 +75,8 @@ export async function mirrorLegacyMeetingCreated(scopeKey: ScopeKey, meeting: Me
           scopeKey,
           remoteId: meeting.source === 'cloud' ? meeting.id : null,
           legacySourceId: meeting.id,
-          origin: 'ad_hoc',
-          entryPoint: 'legacy_store',
+          origin: calendarContext ? 'calendar' : 'ad_hoc',
+          entryPoint: calendarContext ? 'calendar_detail' : 'legacy_store',
           title: meeting.title ?? '',
           description: meeting.description ?? null,
           participants: normalizedParticipants(meeting),
@@ -96,6 +101,17 @@ export async function mirrorLegacyMeetingCreated(scopeKey: ScopeKey, meeting: Me
         }, scopeKey);
         for (const processingStage of createInitialProcessingStages(localId, scopeKey, updatedAtMs)) {
           await transaction.upsertStage(processingStage, scopeKey);
+        }
+        if (calendarContext) {
+          await transaction.bindOccurrence({
+            meetingId: localId,
+            scopeKey,
+            ...calendarContext.occurrence,
+            calendarRevision: calendarContext.snapshot.capturedEventRevision,
+            recurrenceSegmentId: calendarContext.recurrenceSegmentId,
+            seriesKey: calendarContext.seriesKey,
+            linkedAtMs: calendarContext.snapshot.capturedAtMs,
+          }, calendarContext.snapshot);
         }
         if (updatedAtMs !== createdAtMs) {
           await transaction.updateMeeting(localId, scopeKey, { updatedAtMs });

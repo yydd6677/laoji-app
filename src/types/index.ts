@@ -134,7 +134,7 @@ export type RootStackParamList = {
   Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
   EventDetail: { eventRef: EventRef };
-  MeetingLive: { meetingId?: string } | undefined;
+  MeetingLive: { meetingId?: string; startRequested?: boolean } | undefined;
   Transcription: { meetingId: string; focus?: 'transcript' | 'summary' | 'title' };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;

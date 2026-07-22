@@ -21,6 +21,7 @@ export interface MeetingNote {
   id: string;
   scopeKey: ScopeKey;
   remoteId: string | null;
+  legacySourceId: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint | null;
   title: string;

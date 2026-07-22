@@ -85,6 +85,14 @@ internal data class CalendarDetailPageState(
   val recurrenceException: Boolean = false,
   val editable: Boolean = true,
   val deleting: Boolean = false,
+  val meetingAction: CalendarMeetingAction? = null,
+)
+
+internal data class CalendarMeetingAction(
+  val kind: String,
+  val label: String,
+  val statusLabel: String = "",
+  val enabled: Boolean = true,
 )
 
 internal data class CalendarEditDraft(
@@ -260,6 +268,14 @@ internal object CalendarPageSnapshotParser {
       )
     }
     val event = snapshot.map("event")
+    val meetingAction = snapshot.map("meetingAction")?.let { action ->
+      CalendarMeetingAction(
+        kind = action.string("kind"),
+        label = action.string("label"),
+        statusLabel = action.string("statusLabel"),
+        enabled = action.boolean("enabled"),
+      )
+    }?.takeIf { it.label.isNotBlank() }
     return CalendarDetailPageState(
       loadState = CalendarPageLoadState.fromWireName(snapshot.stringOrNull("state")),
       message = snapshot.stringOrNull("message"),
@@ -274,6 +290,7 @@ internal object CalendarPageSnapshotParser {
       recurrenceException = event?.boolean("recurrenceException") ?: false,
       editable = event?.boolean("editable") ?: true,
       deleting = snapshot.boolean("deleting"),
+      meetingAction = meetingAction,
     )
   }
 

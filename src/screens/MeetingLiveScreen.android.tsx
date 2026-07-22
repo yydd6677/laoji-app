@@ -108,7 +108,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     meetings,
     loading: meetingsLoading,
     createMeeting,
-    deleteMeeting,
     updateMeetingStatus,
     updateMeetingTitle,
     updateMeetingDetails,
@@ -118,6 +117,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   } = useMeetings();
   const { showDialog } = useAppDialog();
   const requestedMeetingId = route.params?.meetingId;
+  const startRequested = route.params?.startRequested === true;
   const existing = requestedMeetingId
     ? meetings.find(meeting => meeting.id === requestedMeetingId)
     : undefined;
@@ -458,7 +458,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     recorderErrorVisibleRef.current = false;
     setError('');
     nativeAudioBarsRef.current = [];
-    let createdForAttempt = false;
     let startedMeetingId = '';
     let guestSession: ApiGuestRealtimeSession | undefined;
     try {
@@ -479,9 +478,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         clientRequestId: createRequestRef.current.id,
         location: locationRef.current || null,
       });
-      createdForAttempt = !reusable;
       startedMeetingId = meeting.id;
-      navigation.setParams({ meetingId: meeting.id });
+      navigation.setParams({ meetingId: meeting.id, startRequested: false });
       setMeetingId(meeting.id);
       activeMeetingIdRef.current = meeting.id;
       currentSessionIdRef.current = meeting.id;
@@ -533,13 +531,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
       }
       if (startedMeetingId) {
-        if (createdForAttempt) {
-          await deleteMeeting(startedMeetingId).catch(async () => {
-            await updateMeetingStatus(startedMeetingId, 'failed').catch(() => {});
-          });
-        } else {
-          await updateMeetingStatus(startedMeetingId, 'failed').catch(() => {});
-        }
+        // The local MeetingNote and its occurrence link are already durable.
+        // A recorder/ASR startup failure must stay resumable instead of
+        // deleting the record and losing the user's calendar entry point.
+        await updateMeetingStatus(startedMeetingId, 'failed').catch(() => {});
       }
       if (mountedRef.current) {
         const message = readableErrorMessage(reason, '启动会议录音失败，请稍后重试。');
@@ -551,7 +546,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } finally {
       startInFlightRef.current = false;
     }
-  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, deleteMeeting, existing, getCachedTranscript, isGuest, meetingId, meetings, navigation, showDialog, updateMeetingStatus]);
+  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, existing, getCachedTranscript, isGuest, meetingId, meetings, navigation, showDialog, updateMeetingStatus]);
 
   const stopRecording = useCallback((navigateAfter = true) => {
     const active = activeRef.current;
@@ -584,6 +579,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     autoStartAttemptedRef.current = true;
     void (async () => {
       if (await restoreNativeSession()) return;
+      if (requestedMeetingId && existing && startRequested) {
+        await startRecording();
+        return;
+      }
       if (requestedMeetingId && existing) {
         // A server/local row marked "recording" is not proof that Android still
         // owns a live AudioRecord session. Opening such a row must never start
@@ -602,7 +601,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
       await startRecording();
     })();
-  }, [existing, meetingsLoading, requestedMeetingId, restoreNativeSession, startRecording, updateMeetingStatus]);
+  }, [existing, meetingsLoading, requestedMeetingId, restoreNativeSession, startRecording, startRequested, updateMeetingStatus]);
 
   const confirmStop = useCallback(() => {
     if (!activeRef.current) return;

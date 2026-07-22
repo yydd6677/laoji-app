@@ -49,6 +49,12 @@ export interface NativeCalendarDetailSnapshot {
   message?: string;
   event?: NativeCalendarDetailEventSnapshot;
   deleting?: boolean;
+  meetingAction?: {
+    kind: 'start' | 'continue' | 'view' | 'loading' | 'retry';
+    label: string;
+    statusLabel?: string;
+    enabled: boolean;
+  };
 }
 
 export interface NativeCalendarEditDraftSnapshot {
@@ -85,7 +91,7 @@ export type NativeCalendarSearchAction =
   | ({ type: 'openEvent' } & CalendarPageEventRefSnapshot);
 
 export type NativeCalendarDetailAction =
-  | ({ type: 'back' | 'edit' | 'delete' | 'retry' } & Partial<CalendarPageEventRefSnapshot>);
+  | ({ type: 'back' | 'edit' | 'delete' | 'retry' | 'meetingAction' } & Partial<CalendarPageEventRefSnapshot>);
 
 export type NativeCalendarEditAction =
   | { type: 'cancel' | 'delete' | 'retry' }

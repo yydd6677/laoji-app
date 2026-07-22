@@ -50,6 +50,7 @@ import {
   resolveMeetingReadCutover,
   type MeetingReadProjection,
 } from '../services/meetingReadCutover';
+import type { CalendarMeetingContext } from '../services/occurrenceMeeting';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
@@ -198,13 +199,14 @@ function serverToLocal(m: ApiMeeting): Meeting {
   };
 }
 
-interface CreateMeetingOptions {
+export interface CreateMeetingOptions {
   description?: string | null;
   participants?: string[];
   mode?: ApiMeeting['mode'];
   clientRequestId?: string;
   location?: string | null;
   recordedAt?: string | null;
+  calendarContext?: CalendarMeetingContext;
 }
 
 function createGuestMeeting(
@@ -785,7 +787,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return local;
         meetingsRef.current = next;
         setMeetings(next);
-        if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, local);
+        if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, local, options.calendarContext);
         return local;
       });
     }
@@ -805,7 +807,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     meetingsRef.current = next;
     setMeetings(next);
     void persistMeetings(next);
-    if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, created);
+    if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, created, options.calendarContext);
     return created;
   }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
