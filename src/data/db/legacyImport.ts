@@ -8,7 +8,7 @@ import type { PendingMeetingSummaryTask } from '../../services/meetingSummaryTas
 import { meetingSummaryToText } from '../../services/meetingSummaryFormat';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from './openDatabase';
 
-const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v2';
+const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v3';
 const PROCESSING_STAGES = ['capture', 'upload', 'transcript', 'summary', 'speaker'] as const;
 
 export interface LegacyMeetingShadowSource {
@@ -255,13 +255,13 @@ async function countImported(
     const scopedDirect = table === 'meeting_notes';
     const row = scopedDirect
       ? await activeDatabase.getFirstAsync<{ count: number }>(
-        'SELECT COUNT(*) AS count FROM meeting_notes WHERE scope_key = ?',
+        "SELECT COUNT(*) AS count FROM meeting_notes WHERE scope_key = ? AND entry_point = 'legacy_store'",
         scopeKey,
       )
       : await activeDatabase.getFirstAsync<{ count: number }>(
         `SELECT COUNT(*) AS count FROM ${table} child
          INNER JOIN meeting_notes meeting ON meeting.id = child.meeting_id
-         WHERE meeting.scope_key = ?`,
+         WHERE meeting.scope_key = ? AND meeting.entry_point = 'legacy_store'`,
         scopeKey,
       );
     return Number(row?.count ?? 0);
@@ -278,7 +278,7 @@ async function countImported(
       `SELECT COUNT(*) AS count FROM summary_sections section
        INNER JOIN summary_versions version ON version.id = section.version_id
        INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
-       WHERE meeting.scope_key = ?`,
+       WHERE meeting.scope_key = ? AND meeting.entry_point = 'legacy_store'`,
       scopeKey,
     ))?.count ?? 0),
     actionItems: await query('action_items'),
@@ -291,7 +291,7 @@ function countsMatch(left: LegacyMeetingImportCounts, right: LegacyMeetingImport
 }
 
 function migrationId(scopeKey: ScopeKey): string {
-  return `legacy-shadow-v2:${encodedPart(scopeKey)}`;
+  return `legacy-shadow-v3:${encodedPart(scopeKey)}`;
 }
 
 async function insertPreparedMeeting(
@@ -312,13 +312,14 @@ async function insertPreparedMeeting(
 
   await database.runAsync(
     `INSERT INTO meeting_notes (
-       id, scope_key, remote_id, origin, entry_point, title, lifecycle,
+       id, scope_key, remote_id, legacy_source_id, origin, entry_point, title, lifecycle,
        started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
        sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-     ) VALUES (?, ?, ?, 'ad_hoc', 'legacy_store', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, 'ad_hoc', 'legacy_store', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
     localId,
     scopeKey,
     remoteId,
+    item.legacyId,
     meeting.title ?? '',
     lifecycle,
     createdAtMs,
@@ -375,11 +376,13 @@ async function insertPreparedMeeting(
     const assetCreatedAtMs = timestamp(pendingAudio?.createdAt, createdAtMs);
     await database.runAsync(
       `INSERT INTO recording_assets (
-         id, meeting_id, role, origin, local_uri, remote_asset_id, mime_type,
-         file_name, duration_ms, waveform_json, local_state, created_at_ms, updated_at_ms
-       ) VALUES (?, ?, 'primary', 'captured', ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+         id, meeting_id, role, origin, native_session_id, local_uri, remote_asset_id, mime_type,
+         file_name, duration_ms, waveform_json, local_state, created_at_ms, updated_at_ms,
+         last_verified_at_ms
+       ) VALUES (?, ?, 'primary', 'captured', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
       `${localId}:recording:primary`,
       localId,
+      item.legacyId,
       localUri,
       pendingAudio?.mimeType ?? 'audio/wav',
       pendingAudio?.fileName ?? `${item.legacyId}.wav`,
@@ -388,6 +391,7 @@ async function insertPreparedMeeting(
       localUri ? 'local_ready' : 'remote_only',
       assetCreatedAtMs,
       updatedAtMs,
+      localUri ? updatedAtMs : null,
     );
   }
 
@@ -502,7 +506,24 @@ export async function runLegacyMeetingShadowImport(
   const id = migrationId(input.scopeKey);
   const nowMs = Date.now();
   const prepared = await prepareSource(input, nowMs);
-  const expected = expectedCounts(prepared);
+  const canonicalIdentities = await database.getAllAsync<{
+    id: string;
+    remote_id: string | null;
+    legacy_source_id: string | null;
+  }>(
+    `SELECT id, remote_id, legacy_source_id
+     FROM meeting_notes
+     WHERE scope_key = ? AND entry_point != 'legacy_store'`,
+    input.scopeKey,
+  );
+  const representedLegacyIds = new Set<string>();
+  canonicalIdentities.forEach(row => {
+    representedLegacyIds.add(row.id);
+    if (row.remote_id) representedLegacyIds.add(row.remote_id);
+    if (row.legacy_source_id) representedLegacyIds.add(row.legacy_source_id);
+  });
+  const legacyItems = prepared.filter(item => !representedLegacyIds.has(item.legacyId));
+  const expected = expectedCounts(legacyItems);
   const previous = await database.getFirstAsync<{
     source_hash: string | null;
     phase: string;
@@ -520,8 +541,11 @@ export async function runLegacyMeetingShadowImport(
   }
   try {
     await withMeetingDatabaseTransaction(async transactionDatabase => {
-      await transactionDatabase.runAsync('DELETE FROM meeting_notes WHERE scope_key = ?', input.scopeKey);
-      for (const item of prepared) {
+      await transactionDatabase.runAsync(
+        "DELETE FROM meeting_notes WHERE scope_key = ? AND entry_point = 'legacy_store'",
+        input.scopeKey,
+      );
+      for (const item of legacyItems) {
         await insertPreparedMeeting(transactionDatabase, input.scopeKey, item, nowMs);
       }
       const imported = await countImported(input.scopeKey, transactionDatabase);

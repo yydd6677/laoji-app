@@ -3,6 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Meeting } from '../types';
 import { Colors as C } from '../theme/colors';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 
 export const MEETING_LIST_ITEM_GEOMETRY = Object.freeze({
   minHeight: 72,
@@ -48,6 +49,7 @@ export function MeetingListItem({
   onLongPress: () => void;
 }) {
   const meta = meetingMeta(meeting);
+  const displayTitle = displayMeetingTitle(meeting.title);
 
   return (
     <TouchableOpacity
@@ -58,10 +60,10 @@ export function MeetingListItem({
       delayLongPress={320}
       activeOpacity={0.65}
       accessibilityRole="button"
-      accessibilityLabel={meeting.title}
+      accessibilityLabel={displayTitle}
       accessibilityHint="打开会议详情，长按显示更多操作"
     >
-      <Text style={s.title} numberOfLines={2}>{meeting.title}</Text>
+      <Text style={s.title} numberOfLines={2}>{displayTitle}</Text>
       <View style={s.metaRow} testID={`meeting-list-meta-${meeting.id}`}>
         <Ionicons name={meta.icon} size={14} color={meta.color} />
         <Text style={[s.metaText, { color: meta.color }]} numberOfLines={1}>{meta.text}</Text>

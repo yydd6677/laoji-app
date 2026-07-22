@@ -23,7 +23,6 @@ import {
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
-import { displayMeetingTitle } from '../utils/meetingTitle';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
@@ -64,6 +63,7 @@ import {
 } from '../native/nativeMinutesRequestCoordinator';
 import type { RootStackParamList, TranscriptLine } from '../types';
 import { transcriptDurationSec } from '../utils/meetingMedia';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCache';
 
 type Props = {
@@ -297,7 +297,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setLoadingAudio(false);
       setPlayerSource(localPlayerSource(
         meeting.id,
-        meeting.title,
+        displayMeetingTitle(meeting.title),
         meeting.audioLocalUri,
         playbackStorageScope,
         meeting.audioDurationSec ?? transcriptDurationSec(transcript),
@@ -324,7 +324,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         setPlayerSource({
           sourceId: `cloud:${meeting.id}`,
           uri: localUri,
-          title: meeting.title,
+          title: displayMeetingTitle(meeting.title),
           durationMsHint: info.duration_sec ? Math.round(info.duration_sec * 1000) : undefined,
           retainForBackground: true,
           storageScope: playbackStorageScope,
@@ -753,7 +753,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
     available: Boolean(meeting),
-    title: meeting ? displayMeetingTitle(meeting.title) : '会议记录不存在',
+    title: meeting ? meeting.title : '会议记录不存在',
     dateTimeLabel: meeting ? compactMeetingDateTime(meeting.date, meeting.time) : '',
     location: meeting?.location ?? '',
     activeTab,

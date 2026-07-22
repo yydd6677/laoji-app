@@ -42,6 +42,7 @@ import { createClientRequestState, requestStateForPayload } from '../services/cl
 import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
 import { readableErrorMessage } from '../services/errors';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -223,10 +224,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, [title]);
 
   useEffect(() => {
-    if (!existing?.title) return;
-    titleRef.current = existing.title;
-    setTitle(existing.title);
-    if (!titleEditing) setTitleDraft(existing.title);
+    if (!existing) return;
+    const nextTitle = existing.title ?? '';
+    titleRef.current = nextTitle;
+    setTitle(nextTitle);
+    if (!titleEditing) setTitleDraft(nextTitle);
   }, [existing?.id, existing?.title]);
 
   const persistStoppedSession = useCallback(async (
@@ -391,7 +393,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const reusableMeeting = existing ?? (meetingId ? meetings.find(item => item.id === meetingId) : undefined);
       reusableStatus = reusableMeeting?.status ?? 'created';
       createdForAttempt = !reusableMeeting;
-      const meetingPayload = { title: titleRef.current.trim() || defaultTitle(), mode: 'realtime' as const };
+      const meetingPayload = { title: titleRef.current.trim(), mode: 'realtime' as const };
       createRequestRef.current = requestStateForPayload(createRequestRef.current, 'meeting', meetingPayload);
       const meeting = reusableMeeting ?? await createMeeting(meetingPayload.title, {
         mode: meetingPayload.mode,
@@ -418,6 +420,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
       const session = await startRealtimeAsr({
         meetingId: guestSession?.meeting_id ?? meeting.id,
+        storageScope: recordingStorageScope,
         accessToken: isGuest ? null : accessToken,
         guestToken: guestSession?.guest_token,
         onStatus: next => {
@@ -539,7 +542,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     const previousTitle = titleRef.current;
     const nextTitle = titleDraft.trim();
     setTitleEditing(false);
-    if (!nextTitle || nextTitle === previousTitle) {
+    if (nextTitle === previousTitle) {
       setTitleDraft(previousTitle);
       return;
     }
@@ -666,7 +669,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
               accessibilityRole="button"
               accessibilityLabel="编辑会议标题"
             >
-              <Text style={s.titleText} testID="meeting-live-title">{title}</Text>
+              <Text style={s.titleText} testID="meeting-live-title">{displayMeetingTitle(title)}</Text>
             </TouchableOpacity>
           )}
         </View>

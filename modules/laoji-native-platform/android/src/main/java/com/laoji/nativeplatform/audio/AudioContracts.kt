@@ -117,6 +117,7 @@ class RecorderStartConfig(
   val sessionId: String,
   val purpose: AudioPurpose,
   val mode: RecorderMode,
+  val storageScope: String?,
   val websocketUrl: String?,
   val credentials: RecorderCredentials?,
   val allowInsecureDevelopment: Boolean,
@@ -126,6 +127,7 @@ class RecorderStartConfig(
 ) {
   override fun toString(): String =
     "RecorderStartConfig(sessionId=$sessionId, purpose=${purpose.wireValue}, mode=${mode.wireValue}, " +
+      "storageScope=[REDACTED], " +
       "websocketUrl=[REDACTED], " +
       "credentials=$credentials, allowInsecureDevelopment=$allowInsecureDevelopment, " +
       "connectionTimeoutMs=$connectionTimeoutMs, " +
@@ -135,6 +137,7 @@ class RecorderStartConfig(
     fun create(
       sessionId: String,
       purpose: String,
+      storageScope: String?,
       websocketUrl: String,
       accessToken: String?,
       guestToken: String?,
@@ -155,6 +158,7 @@ class RecorderStartConfig(
         sessionId = normalizedSessionId,
         purpose = normalizedPurpose,
         mode = RecorderMode.REALTIME,
+        storageScope = normalizeStorageScope(storageScope),
         websocketUrl = validateWebSocketUrl(websocketUrl, allowInsecureDevelopment),
         credentials = RecorderCredentials.create(accessToken, guestToken),
         allowInsecureDevelopment = allowInsecureDevelopment,
@@ -189,6 +193,7 @@ class RecorderStartConfig(
       sessionId = validateSessionId(sessionId),
       purpose = AudioPurpose.SPEAKER,
       mode = RecorderMode.LOCAL_ONLY,
+      storageScope = null,
       websocketUrl = null,
       credentials = null,
       allowInsecureDevelopment = false,
@@ -218,6 +223,15 @@ class RecorderStartConfig(
         .trim('_')
         .take(64)
       return normalized.ifEmpty { "laoji-recording" }
+    }
+
+    fun normalizeStorageScope(value: String?): String? {
+      val scope = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+      val valid = scope == "guest" || (scope.startsWith("user:") && scope.removePrefix("user:").isNotBlank())
+      if (!valid || scope.length > 256 || scope.any { it.isISOControl() }) {
+        throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "invalid storageScope")
+      }
+      return scope
     }
 
     fun validateWebSocketUrl(value: String, allowInsecureDevelopment: Boolean = false): String {

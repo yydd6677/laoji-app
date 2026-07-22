@@ -68,6 +68,7 @@ export interface LocalWavRecordingSession {
 
 export interface StartRealtimeAsrOptions {
   meetingId?: string;
+  storageScope?: string;
   provider?: RealtimeAsrProvider;
   purpose?: RealtimeAsrPurpose;
   host?: string;
@@ -236,6 +237,7 @@ export async function startRealtimeAsr(
     await startNativeRecorder({
       sessionId: meetingId,
       purpose,
+      storageScope: options.storageScope,
       websocketUrl: url,
       ...(accessToken ? { accessToken } : { guestToken: guestToken! }),
       allowInsecureDevelopment,

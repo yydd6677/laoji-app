@@ -15,6 +15,7 @@ export * from './ui';
 interface LaojiNativePlatformModule {
   evidenceSchemaVersion: number;
   implementation: string;
+  createRandomUuid(): string;
   getCapabilities(): Promise<NativePlatformCapabilities>;
 }
 
@@ -24,6 +25,10 @@ const nativeModule = requireOptionalNativeModule<LaojiNativePlatformModule>(
 
 export function hasLaojiNativePlatform(): boolean {
   return nativeModule !== null;
+}
+
+export function createNativeRandomUuid(): string | null {
+  return nativeModule?.createRandomUuid() ?? null;
 }
 
 export async function getNativePlatformCapabilities(): Promise<NativePlatformCapabilities> {

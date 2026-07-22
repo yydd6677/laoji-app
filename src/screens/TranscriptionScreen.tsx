@@ -52,6 +52,7 @@ import { MeetingSummaryContent } from '../components/MeetingSummaryContent';
 import { openMeetingsTab } from '../navigation/tabTargets';
 import { transcriptDurationSec } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
+import { displayMeetingTitle } from '../utils/meetingTitle';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -577,12 +578,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   const commitTitle = async () => {
     const t = titleEdit.trim();
-    if (!t) {
-      setTitleEdit(m.title);
-      setTitleEditing(false);
-      showDialog({ title: '标题不能为空', message: '已恢复原会议标题。', tone: 'warning' });
-      return false;
-    }
     if (titleSaving) return false;
     if (t === m.title) {
       setTitleEditing(false);
@@ -721,10 +716,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               activeOpacity={0.72}
               accessibilityRole="button"
               accessibilityLabel="编辑会议标题"
-              accessibilityValue={{ text: m.title }}
+              accessibilityValue={{ text: displayMeetingTitle(m.title) }}
               testID="meeting-title-display"
             >
-              <Text style={s.titleDisplay} numberOfLines={2}>{m.title}</Text>
+              <Text style={s.titleDisplay} numberOfLines={2}>{displayMeetingTitle(m.title)}</Text>
             </TouchableOpacity>
           )}
           <View style={s.metaRow}>
@@ -951,7 +946,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       {moreVisible ? (
         <AppActionSheet
           visible
-          title={m.title}
+          title={displayMeetingTitle(m.title)}
           onClose={() => setMoreVisible(false)}
           items={[
             {

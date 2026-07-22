@@ -27,49 +27,54 @@ import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
 import {
   runLegacyMeetingShadowImport,
-  type LegacyMeetingImportCounts,
 } from '../data/db/legacyImport';
-import { isScopeKey, type ScopeKey } from '../domain/meeting';
+import { isScopeKey, secureClientIdFactory, type ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
 import { getFeatureFlags } from '../config/featureFlags';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { MeetingRepositoryFacade, sqliteMeetingNoteRepository } from '../data/repositories';
+import { reconcileNativeMeetingRecordings } from '../services/meetingRecordingReconciliation';
+import {
+  mirrorLegacyMeetingCreated,
+  mirrorLegacyMeetingDeletion,
+  mirrorLegacyMeetingStageState,
+} from '../services/meetingStageMirror';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
 const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
 
-async function auditShadowRepositoryRead(
-  scopeKey: ScopeKey,
-  expected: LegacyMeetingImportCounts,
-): Promise<void> {
+const meetingRepositoryFacade = new MeetingRepositoryFacade(sqliteMeetingNoteRepository);
+
+function mirrorMeetingProjection(scope: string, meeting: Meeting | undefined): void {
+  if (!meeting || !isScopeKey(scope)) return;
+  void mirrorLegacyMeetingStageState(scope, meeting);
+}
+
+function mirrorMeetingProjections(scope: string, meetings: readonly Meeting[]): void {
+  if (!isScopeKey(scope)) return;
+  void (async () => {
+    for (let offset = 0; offset < meetings.length; offset += 4) {
+      await Promise.all(
+        meetings.slice(offset, offset + 4).map(meeting => mirrorLegacyMeetingStageState(scope, meeting)),
+      );
+    }
+  })();
+}
+
+async function auditShadowRepositoryRead(scopeKey: ScopeKey, legacyMeetings: readonly Meeting[]): Promise<void> {
   try {
-    const projection = await sqliteMeetingNoteRepository.listProjection(scopeKey, {
-      limit: 200,
-      includeDeleted: true,
-    });
-    const stageCountsMatch = projection.items.every(item => item.stages.length === 5);
-    const first = projection.items[0];
-    const aggregate = first
-      ? await sqliteMeetingNoteRepository.get(first.id, scopeKey)
-      : null;
-    const aggregateMatches = !first || Boolean(
-      aggregate
-      && aggregate.note.id === first.id
-      && aggregate.note.scopeKey === scopeKey
-      && aggregate.processingStages.length === 5,
-    );
-    const status = projection.hasMore
-      ? 'partial'
-      : projection.items.length === expected.meetingNotes && stageCountsMatch && aggregateMatches
-        ? 'consistent'
-        : 'mismatch';
+    const report = await meetingRepositoryFacade.compareLegacySnapshot(scopeKey, legacyMeetings);
     diagnosticAudit('meeting_db_repository_read', {
-      status,
+      status: report.status,
       scope: scopeKey === 'guest' ? 'guest' : 'account',
-      projected_meetings: projection.items.length,
-      has_more: projection.hasMore,
-      five_stage_rows: stageCountsMatch,
-      aggregate_read: aggregateMatches,
+      legacy_meetings: report.legacyMeetings,
+      projected_meetings: report.repositoryMeetings,
+      missing: report.missingFromRepository,
+      extra: report.extraInRepository,
+      duplicate_identities: report.duplicateRepositoryIdentities,
+      title_mismatches: report.titleMismatches,
+      lifecycle_mismatches: report.lifecycleMismatches,
+      invalid_stage_sets: report.invalidStageSets,
     });
   } catch (error) {
     diagnosticWarn('[meeting-db] repository shadow read failed', error);
@@ -167,7 +172,7 @@ function createGuestMeeting(
   location?: string | null,
 ): Meeting {
   return {
-    id: `guest-meeting-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: secureClientIdFactory.create(),
     title,
     date: `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`,
     time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
@@ -370,6 +375,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       meetingsRef.current = local;
       setMeetings(local);
       await persistMeetings(local);
+      mirrorMeetingProjections(scope, local);
       if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
       setError(null);
     } catch (err) {
@@ -475,6 +481,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken, mode, resumePendingAudioUploads]);
 
   useEffect(() => {
+    if (!isScopeKey(scope)) return undefined;
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') void reconcileNativeMeetingRecordings(scope);
+    });
+    return () => subscription.remove();
+  }, [scope]);
+
+  useEffect(() => {
     let alive = true;
     const loadGeneration = generationRef.current;
     const isCurrent = () => alive
@@ -541,7 +555,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               summaries: counts.summaryVersions,
               recordings: counts.recordingAssets,
             });
-            void auditShadowRepositoryRead(scope, counts);
+            void auditShadowRepositoryRead(scope, cachedMeetings);
+            void reconcileNativeMeetingRecordings(scope, { force: true });
           }).catch(error => {
             diagnosticWarn('[meeting-db] shadow import failed', error);
             diagnosticAudit('meeting_db_shadow_import', {
@@ -573,7 +588,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   ): Promise<Meeting> => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
-    const cleanTitle = title.trim() || '未命名会议';
+    const cleanTitle = title.trim();
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
@@ -588,6 +603,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return local;
         meetingsRef.current = next;
         setMeetings(next);
+        if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, local);
         return local;
       });
     }
@@ -602,12 +618,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       recordedAt: options.recordedAt ?? null,
     }, accessToken));
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return created;
-    setMeetings(prev => {
-      const next = [created, ...prev.filter(item => item.id !== created.id)];
-      meetingsRef.current = next;
-      void persistMeetings(next);
-      return next;
-    });
+    const next = [created, ...meetingsRef.current.filter(item => item.id !== created.id)];
+    meetingsRef.current = next;
+    setMeetings(next);
+    void persistMeetings(next);
+    if (isScopeKey(scope)) await mirrorLegacyMeetingCreated(scope, created);
     return created;
   }, [accessToken, enqueueGuestMutation, mode, persistMeetings, persistMeetingsStrict, scope]);
 
@@ -634,6 +649,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         transcriptCacheRef.current = nextTranscripts;
         summaryCacheRef.current = nextSummaries;
         setMeetings(nextMeetings);
+        if (isScopeKey(scope)) void mirrorLegacyMeetingDeletion(scope, id);
         const cleanupResults = await Promise.allSettled([
           persistTranscripts(),
           persistSummaries(),
@@ -710,6 +726,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (isScopeKey(scope)) void mirrorLegacyMeetingDeletion(scope, id);
+
     const cleanupResults = await Promise.allSettled([
       persistMeetingsStrict(nextMeetings),
       persistTranscripts(),
@@ -729,7 +747,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
     const cleanTitle = title.trim();
-    if (!cleanTitle) return;
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -740,6 +757,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
         meetingsRef.current = next;
         setMeetings(next);
+        mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
       });
     }
     if (!accessToken) throw new Error('not authenticated');
@@ -750,6 +768,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       meetingsRef.current = next;
       return next;
     });
+    if (previousMeeting) {
+      mirrorMeetingProjection(scope, { ...previousMeeting, title: cleanTitle, updatedAt: optimisticUpdatedAt });
+    }
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { title: cleanTitle }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -769,6 +790,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           : m);
         meetingsRef.current = next;
         void persistMeetings(next);
+        mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
         return next;
       });
     } catch (err) {
@@ -781,6 +803,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         ));
         meetingsRef.current = rolledBack;
         setMeetings(rolledBack);
+        mirrorMeetingProjection(scope, rolledBack.find(meeting => meeting.id === id));
       }
       throw err;
     }
@@ -795,7 +818,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const normalized = {
       ...changes,
       ...(Object.prototype.hasOwnProperty.call(changes, 'title')
-        ? { title: changes.title?.trim() || '未命名会议' }
+        ? { title: changes.title?.trim() ?? '' }
         : {}),
       ...(Object.prototype.hasOwnProperty.call(changes, 'location')
         ? { location: changes.location?.trim() || null }
@@ -811,6 +834,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
     meetingsRef.current = optimistic;
     setMeetings(optimistic);
+    mirrorMeetingProjection(scope, optimistic.find(meeting => meeting.id === id));
 
     if (mode === 'guest') return;
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
@@ -843,11 +867,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       meetingsRef.current = next;
       setMeetings(next);
+      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
     } catch (error) {
       if (generationRef.current === operationGeneration && activeScopeRef.current === scope) {
         const rolledBack = meetingsRef.current.map(meeting => meeting.id === id ? previous : meeting);
         meetingsRef.current = rolledBack;
         setMeetings(rolledBack);
+        mirrorMeetingProjection(scope, rolledBack.find(meeting => meeting.id === id));
         await persistMeetingsStrict(rolledBack).catch(() => {});
       }
       throw error;
@@ -867,6 +893,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
         meetingsRef.current = next;
         setMeetings(next);
+        mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
         return true;
       });
     }
@@ -895,6 +922,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
     meetingsRef.current = local;
     setMeetings(local);
+    mirrorMeetingProjection(scope, local.find(meeting => meeting.id === id));
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
@@ -917,6 +945,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
       meetingsRef.current = synced;
       setMeetings(synced);
+      mirrorMeetingProjection(scope, synced.find(meeting => meeting.id === id));
       return true;
     } catch {
       return false;
@@ -941,6 +970,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const next = prev.map(m => m.id === id ? { ...m, hasTranscript: transcript.length > 0 } : m);
       meetingsRef.current = next;
       void persistMeetings(next);
+      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
       return next;
     });
   }, [persistMeetings, persistTranscripts, scope]);
@@ -964,6 +994,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const next = prev.map(m => m.id === id ? { ...m, hasSummary: Boolean(usableSummary) } : m);
       meetingsRef.current = next;
       void persistMeetings(next);
+      mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
       return next;
     });
   }, [persistMeetings, persistSummaries, scope]);

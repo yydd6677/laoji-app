@@ -93,6 +93,7 @@ data class RecordingJournalEntry(
   val sessionId: String,
   val purpose: AudioPurpose,
   val mode: RecorderMode,
+  val storageScope: String?,
   val state: JournalState,
   val tempFileName: String,
   val finalFileName: String,
@@ -108,6 +109,7 @@ data class RecordingJournalEntry(
     .put("session_id", sessionId)
     .put("purpose", purpose.wireValue)
     .put("mode", mode.wireValue)
+    .put("storage_scope", storageScope)
     .put("state", state.wireValue)
     .put("temp_file", tempFileName)
     .put("final_file", finalFileName)
@@ -131,6 +133,9 @@ data class RecordingJournalEntry(
         sessionId = sessionId,
         purpose = purpose,
         mode = RecorderMode.fromWireValue(json.optString("mode", RecorderMode.REALTIME.wireValue)),
+        storageScope = RecorderStartConfig.normalizeStorageScope(
+          json.optString("storage_scope", "").trim().takeIf { it.isNotEmpty() },
+        ),
         state = JournalState.fromWireValue(json.optString("state")),
         tempFileName = tempFileName,
         finalFileName = finalFileName,
@@ -164,6 +169,7 @@ data class FinalizedRecording(
   val sessionId: String,
   val purpose: AudioPurpose,
   val mode: RecorderMode,
+  val storageScope: String?,
   val uri: String,
   val pcmBytes: Long,
   val durationMs: Long,
@@ -173,6 +179,7 @@ data class FinalizedRecording(
     "sessionId" to sessionId,
     "purpose" to purpose.wireValue,
     "mode" to mode.wireValue,
+    "storageScope" to storageScope,
     "localUri" to uri,
     "bytesRecorded" to pcmBytes.toDouble(),
     "durationMs" to durationMs.toDouble(),
@@ -181,11 +188,13 @@ data class FinalizedRecording(
 }
 
 data class RecoveryFailure(
+  val sessionId: String?,
   val fileName: String,
   val code: RecorderErrorCode,
   val message: String,
 ) {
   fun toMap(): Map<String, Any?> = mapOf(
+    "sessionId" to sessionId,
     "fileName" to fileName,
     "errorCode" to code.wireValue,
     "errorMessage" to message,
@@ -224,6 +233,7 @@ class RecordingRepository(context: Context) {
           sessionId = config.sessionId,
           purpose = config.purpose,
           mode = config.mode,
+          storageScope = config.storageScope,
           state = JournalState.PREPARING,
           tempFileName = tempFile.name,
           finalFileName = finalFile.name,
@@ -263,6 +273,7 @@ class RecordingRepository(context: Context) {
           readJournal(journalFile)
         } catch (_: Exception) {
           failures += RecoveryFailure(
+            null,
             journalFile.name,
             RecorderErrorCode.RECOVERY_FAILED,
             "recording journal is invalid",
@@ -319,6 +330,7 @@ class RecordingRepository(context: Context) {
               recovered += finalizedRecording(updated, finalized.file)
             }
             else -> failures += RecoveryFailure(
+              entry.sessionId,
               journalFile.name,
               RecorderErrorCode.RECOVERY_FAILED,
               "recording journal has no local audio file",
@@ -326,6 +338,7 @@ class RecordingRepository(context: Context) {
           }
         } catch (_: Exception) {
           failures += RecoveryFailure(
+            entry.sessionId,
             journalFile.name,
             RecorderErrorCode.RECOVERY_FAILED,
             "recording file could not be repaired",
@@ -347,6 +360,7 @@ class RecordingRepository(context: Context) {
             sessionId = recoverySessionId(baseName),
             purpose = AudioPurpose.SPEAKER,
             mode = RecorderMode.LOCAL_ONLY,
+            storageScope = null,
             state = JournalState.LOCAL_SAVED,
             tempFileName = tempFile.name,
             finalFileName = finalized.file.name,
@@ -362,6 +376,7 @@ class RecordingRepository(context: Context) {
           recovered += finalizedRecording(entry, finalized.file)
         } catch (_: Exception) {
           failures += RecoveryFailure(
+            null,
             tempFile.name,
             RecorderErrorCode.RECOVERY_FAILED,
             "orphan recording file could not be repaired",
@@ -383,6 +398,7 @@ class RecordingRepository(context: Context) {
             sessionId = recoverySessionId(baseName),
             purpose = AudioPurpose.SPEAKER,
             mode = RecorderMode.LOCAL_ONLY,
+            storageScope = null,
             state = JournalState.LOCAL_SAVED,
             tempFileName = "$baseName$PART_SUFFIX",
             finalFileName = wavFile.name,
@@ -397,6 +413,7 @@ class RecordingRepository(context: Context) {
           recovered += finalizedRecording(entry, wavFile)
         } catch (_: Exception) {
           failures += RecoveryFailure(
+            null,
             wavFile.name,
             RecorderErrorCode.RECOVERY_FAILED,
             "unregistered WAV file could not be repaired",
@@ -506,6 +523,7 @@ class RecordingRepository(context: Context) {
       sessionId = entry.sessionId,
       purpose = entry.purpose,
       mode = entry.mode,
+      storageScope = entry.storageScope,
       uri = Uri.fromFile(file).toString(),
       pcmBytes = entry.pcmBytes,
       durationMs = entry.pcmBytes * 1_000L / AudioRuntimeContract.BYTES_PER_SECOND,
@@ -636,6 +654,7 @@ class RecordingFileSession internal constructor(
       sessionId = entry.sessionId,
       purpose = entry.purpose,
       mode = entry.mode,
+      storageScope = entry.storageScope,
       uri = Uri.fromFile(finalFile).toString(),
       pcmBytes = actualPcmBytes,
       durationMs = actualPcmBytes * 1_000L / AudioRuntimeContract.BYTES_PER_SECOND,

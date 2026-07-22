@@ -44,6 +44,7 @@ export type NativeRecorderErrorCode =
 interface NativeRecorderStartBase {
   sessionId: string;
   purpose: NativeRealtimeRecorderPurpose;
+  storageScope?: string;
   websocketUrl: string;
   allowInsecureDevelopment?: boolean;
   connectionTimeoutMs?: number;
@@ -132,6 +133,7 @@ export interface NativeRecoveredRecording {
   sessionId: string;
   purpose: NativeRecorderPurpose;
   mode: NativeRecorderMode;
+  storageScope: string | null;
   localUri: string;
   bytesRecorded: number;
   durationMs: number;
@@ -139,6 +141,7 @@ export interface NativeRecoveredRecording {
 }
 
 export interface NativeRecorderRecoveryFailure {
+  sessionId: string | null;
   fileName: string;
   errorCode: 'recovery_failed';
   errorMessage: string;
@@ -238,6 +241,7 @@ export function normalizeNativeRecorderStartOptions(
   const normalizedBase: NativeRecorderStartBase = {
     sessionId,
     purpose: options.purpose,
+    storageScope: normalizeStorageScope(options.storageScope),
     websocketUrl,
     allowInsecureDevelopment,
     connectionTimeoutMs: boundedInteger(
@@ -253,6 +257,19 @@ export function normalizeNativeRecorderStartOptions(
   return accessToken !== undefined
     ? { ...normalizedBase, accessToken }
     : { ...normalizedBase, guestToken: guestToken! };
+}
+
+function normalizeStorageScope(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const scope = value.trim();
+  if (
+    scope.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(scope) ||
+    (scope !== 'guest' && (!scope.startsWith('user:') || !scope.slice('user:'.length).trim()))
+  ) {
+    throw new TypeError('invalid storageScope');
+  }
+  return scope;
 }
 
 export async function startNativeRecorder(

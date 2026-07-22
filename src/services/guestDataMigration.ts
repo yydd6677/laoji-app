@@ -247,7 +247,7 @@ export async function migrateGuestData(
     try {
       if (!state.created || !state.cloudMeetingId) {
         const created = await createMeeting({
-          title: meeting.title?.trim() || '未命名会议',
+          title: meeting.title?.trim() ?? '',
           description: meeting.description ?? null,
           participants: meeting.participants ?? [],
           mode: meeting.mode ?? 'realtime',

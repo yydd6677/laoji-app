@@ -224,7 +224,7 @@ internal class MinutesDetailSurface(
     renderedState = state.selectTab(acceptedTab, acceptedGeneration)
     if (editingTitle && (!state.available || meetingChanged)) finishTitleEdit(save = false)
     configureTitleBar()
-    if (!editingTitle) title.text = renderedState.title
+    if (!editingTitle) title.text = renderedState.title.ifBlank { "未命名会议" }
     title.isClickable = renderedState.available
     title.isFocusable = renderedState.available
     title.contentDescription = if (renderedState.available) "编辑会议标题" else null
@@ -399,12 +399,12 @@ internal class MinutesDetailSurface(
   private fun finishTitleEdit(save: Boolean) {
     if (!editingTitle) return
     val value = titleEditor.text.toString().trim()
-    val shouldSave = save && value.isNotBlank() && value != renderedState.title && isAttachedToWindow
+    val shouldSave = save && value != renderedState.title && isAttachedToWindow
     if (shouldSave) {
-      title.text = value
+      title.text = value.ifBlank { "未命名会议" }
       onAction(mapOf("type" to "saveTitle", "meetingId" to renderedState.meetingId, "title" to value))
     } else {
-      title.text = renderedState.title
+      title.text = renderedState.title.ifBlank { "未命名会议" }
     }
     editingTitle = false
     titleEditor.clearFocus()

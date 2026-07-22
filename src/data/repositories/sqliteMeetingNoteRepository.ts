@@ -5,7 +5,7 @@ import type {
   ScheduleSnapshot,
   ScopeKey,
 } from '../../domain/meeting';
-import { assertScopeKey } from '../../domain/meeting';
+import { assertProcessingStage, assertScopeKey } from '../../domain/meeting';
 import { withMeetingDatabaseTransaction, openMeetingDatabase } from '../db/openDatabase';
 import type {
   ManualNoteRecord,
@@ -14,9 +14,11 @@ import type {
   MeetingListQuery,
   MeetingNoteAggregate,
   MeetingNoteRepository,
+  MeetingRootPatch,
   MeetingTransaction,
   NewMeetingNote,
   OccurrenceLinkRecord,
+  RecordingAssetRecord,
   SyncOperationRecord,
   TranscriptSegmentRecord,
   Unsubscribe,
@@ -38,6 +40,26 @@ type MeetingRow = {
   created_at_ms: number;
   updated_at_ms: number;
   deleted_at_ms: number | null;
+};
+
+type RecordingAssetRow = {
+  id: string;
+  meeting_id: string;
+  role: 'primary' | 'secondary';
+  origin: RecordingAssetRecord['origin'];
+  native_session_id: string | null;
+  local_uri: string | null;
+  remote_asset_id: string | null;
+  mime_type: string | null;
+  file_name: string | null;
+  byte_size: number | null;
+  duration_ms: number | null;
+  checksum_sha256: string | null;
+  waveform_json: string | null;
+  local_state: RecordingAssetRecord['localState'];
+  created_at_ms: number;
+  updated_at_ms: number;
+  last_verified_at_ms: number | null;
 };
 
 type ManualNoteRow = {
@@ -83,6 +105,14 @@ type ScheduleSnapshotRow = {
   captured_at_ms: number;
 };
 
+const RECORDING_LOCAL_STATES = new Set<RecordingAssetRecord['localState']>([
+  'capturing',
+  'ingesting',
+  'local_ready',
+  'remote_only',
+  'missing',
+]);
+
 function noteFromRow(row: MeetingRow): MeetingNote {
   assertScopeKey(row.scope_key);
   return {
@@ -117,7 +147,7 @@ function manualNoteFromRow(row: ManualNoteRow): ManualNoteRecord {
 }
 
 function stageFromRow(row: StageRow): ProcessingStage {
-  return {
+  const stage: ProcessingStage = {
     meetingId: row.meeting_id,
     stage: row.stage,
     status: row.status,
@@ -130,6 +160,36 @@ function stageFromRow(row: StageRow): ProcessingStage {
     retryable: row.retryable === 1,
     nextRetryAtMs: row.next_retry_at_ms,
     updatedAtMs: row.updated_at_ms,
+  };
+  assertProcessingStage(stage);
+  return stage;
+}
+
+function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
+  if (
+    (row.role !== 'primary' && row.role !== 'secondary') ||
+    !RECORDING_LOCAL_STATES.has(row.local_state)
+  ) {
+    throw new Error('recording asset is invalid');
+  }
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    role: row.role,
+    origin: row.origin,
+    nativeSessionId: row.native_session_id,
+    localUri: row.local_uri,
+    remoteAssetId: row.remote_asset_id,
+    mimeType: row.mime_type,
+    fileName: row.file_name,
+    byteSize: row.byte_size,
+    durationMs: row.duration_ms,
+    checksumSha256: row.checksum_sha256,
+    waveformJson: row.waveform_json,
+    localState: row.local_state,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+    lastVerifiedAtMs: row.last_verified_at_ms,
   };
 }
 
@@ -164,30 +224,166 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 
   constructor(private readonly database: SQLiteDatabase) {}
 
+  async getMeeting(id: string, scopeKey: ScopeKey): Promise<MeetingNote | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<MeetingRow>(
+      'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ?',
+      id,
+      scopeKey,
+    );
+    return row ? noteFromRow(row) : null;
+  }
+
+  async findMeetingByOccurrence(
+    reference: { sourceEventId: string; occurrenceDate: string },
+    scopeKey: ScopeKey,
+  ): Promise<MeetingNote | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<MeetingRow>(
+      `SELECT meeting.* FROM meeting_notes meeting
+       INNER JOIN meeting_occurrence_links link ON link.meeting_id = meeting.id
+       WHERE meeting.scope_key = ?
+         AND link.scope_key = ?
+         AND link.calendar_source_event_id = ?
+         AND link.occurrence_date = ?
+         AND link.link_state = 'active'
+       LIMIT 1`,
+      scopeKey,
+      scopeKey,
+      reference.sourceEventId,
+      reference.occurrenceDate,
+    );
+    return row ? noteFromRow(row) : null;
+  }
+
+  async findMeetingByNativeSessionId(
+    sessionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingNote | null> {
+    assertScopeKey(scopeKey);
+    const normalized = sessionId.trim();
+    if (!normalized) return null;
+    const row = await this.database.getFirstAsync<MeetingRow>(
+      `SELECT DISTINCT meeting.* FROM meeting_notes meeting
+       LEFT JOIN recording_assets asset ON asset.meeting_id = meeting.id
+       WHERE meeting.scope_key = ? AND (
+         asset.native_session_id = ? OR meeting.id = ? OR
+         meeting.remote_id = ? OR meeting.legacy_source_id = ?
+       )
+       ORDER BY CASE WHEN asset.native_session_id = ? THEN 0 ELSE 1 END
+       LIMIT 1`,
+      scopeKey,
+      normalized,
+      normalized,
+      normalized,
+      normalized,
+      normalized,
+    );
+    return row ? noteFromRow(row) : null;
+  }
+
+  async getStage(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    stageName: ProcessingStage['stage'],
+  ): Promise<ProcessingStage | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<StageRow>(
+      `SELECT stage.* FROM processing_stages stage
+       INNER JOIN meeting_notes meeting ON meeting.id = stage.meeting_id
+       WHERE stage.meeting_id = ? AND meeting.scope_key = ? AND stage.stage = ?`,
+      meetingId,
+      scopeKey,
+      stageName,
+    );
+    return row ? stageFromRow(row) : null;
+  }
+
+  async getPrimaryRecording(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<RecordingAssetRecord | null> {
+    assertScopeKey(scopeKey);
+    const row = await this.database.getFirstAsync<RecordingAssetRow>(
+      `SELECT asset.* FROM recording_assets asset
+       INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+       WHERE asset.meeting_id = ? AND meeting.scope_key = ? AND asset.role = 'primary'
+       LIMIT 1`,
+      meetingId,
+      scopeKey,
+    );
+    return row ? recordingAssetFromRow(row) : null;
+  }
+
+  private async assertMeetingInScope(meetingId: string, scopeKey: ScopeKey): Promise<void> {
+    if (!await this.getMeeting(meetingId, scopeKey)) {
+      throw new Error('meeting does not exist in active scope');
+    }
+  }
+
   async insertMeeting(note: NewMeetingNote): Promise<void> {
     assertScopeKey(note.scopeKey);
     await this.database.runAsync(
       `INSERT INTO meeting_notes (
-         id, scope_key, remote_id, origin, entry_point, title, lifecycle,
+         id, scope_key, remote_id, legacy_source_id, origin, entry_point, title, lifecycle,
          started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
          sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, NULL)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL)`,
       note.id,
       note.scopeKey,
+      note.remoteId ?? null,
+      note.legacySourceId ?? null,
       note.origin,
       note.entryPoint,
       note.title,
       note.lifecycle,
       note.startedAtMs,
-      note.scopeKey === 'guest' ? 'local' : 'pending',
+      note.endedAtMs,
+      note.syncState ?? (note.scopeKey === 'guest' ? 'local' : 'pending'),
       note.createdAtMs,
       note.createdAtMs,
     );
     this.touchedMeetingIds.add(note.id);
   }
 
+  async updateMeeting(id: string, scopeKey: ScopeKey, patch: MeetingRootPatch): Promise<void> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(patch.updatedAtMs) || patch.updatedAtMs < 0) {
+      throw new Error('meeting update time is invalid');
+    }
+    const assignments: string[] = [];
+    const values: Array<string | number | null> = [];
+    const add = (column: string, value: string | number | null) => {
+      assignments.push(`${column} = ?`);
+      values.push(value);
+    };
+    if (Object.prototype.hasOwnProperty.call(patch, 'title')) add('title', patch.title!);
+    if (Object.prototype.hasOwnProperty.call(patch, 'remoteId')) add('remote_id', patch.remoteId ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, 'lifecycle')) add('lifecycle', patch.lifecycle!);
+    if (Object.prototype.hasOwnProperty.call(patch, 'startedAtMs')) add('started_at_ms', patch.startedAtMs ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, 'endedAtMs')) add('ended_at_ms', patch.endedAtMs ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, 'currentSummaryVersionId')) {
+      add('current_summary_version_id', patch.currentSummaryVersionId ?? null);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'remoteRevision')) {
+      add('remote_revision', patch.remoteRevision ?? null);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'syncState')) add('sync_state', patch.syncState!);
+    if (Object.prototype.hasOwnProperty.call(patch, 'deletedAtMs')) add('deleted_at_ms', patch.deletedAtMs ?? null);
+    add('updated_at_ms', patch.updatedAtMs);
+    const result = await this.database.runAsync(
+      `UPDATE meeting_notes SET ${assignments.join(', ')} WHERE id = ? AND scope_key = ?`,
+      ...values,
+      id,
+      scopeKey,
+    );
+    if (result.changes !== 1) throw new Error('meeting does not exist in active scope');
+    this.touchedMeetingIds.add(id);
+  }
+
   async bindOccurrence(link: OccurrenceLinkRecord, snapshot: ScheduleSnapshot): Promise<void> {
     assertScopeKey(link.scopeKey);
+    await this.assertMeetingInScope(link.meetingId, link.scopeKey);
     await this.database.runAsync(
       `INSERT INTO meeting_occurrence_links (
          meeting_id, scope_key, calendar_source_event_id, occurrence_date,
@@ -223,7 +419,10 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(link.meetingId);
   }
 
-  async upsertStage(stage: ProcessingStage): Promise<void> {
+  async upsertStage(stage: ProcessingStage, scopeKey: ScopeKey): Promise<void> {
+    assertScopeKey(scopeKey);
+    assertProcessingStage(stage);
+    await this.assertMeetingInScope(stage.meetingId, scopeKey);
     await this.database.runAsync(
       `INSERT INTO processing_stages (
          meeting_id, stage, status, attempt_count, progress, job_id,
@@ -257,7 +456,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(stage.meetingId);
   }
 
-  async saveManualNote(note: ManualNoteRecord): Promise<void> {
+  async saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void> {
+    assertScopeKey(scopeKey);
+    await this.assertMeetingInScope(note.meetingId, scopeKey);
     await this.database.runAsync(
       `INSERT INTO manual_notes (
          meeting_id, content, format, revision, base_remote_revision,
@@ -279,6 +480,70 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       note.userEditedAtMs,
     );
     this.touchedMeetingIds.add(note.meetingId);
+  }
+
+  async saveRecordingAsset(asset: RecordingAssetRecord, scopeKey: ScopeKey): Promise<void> {
+    assertScopeKey(scopeKey);
+    await this.assertMeetingInScope(asset.meetingId, scopeKey);
+    if (!asset.id.trim() || !asset.meetingId.trim()) throw new Error('recording asset identity is invalid');
+    if (asset.role !== 'primary' && asset.role !== 'secondary') throw new Error('recording asset role is invalid');
+    if (!RECORDING_LOCAL_STATES.has(asset.localState)) throw new Error('recording asset state is invalid');
+    if (!Number.isSafeInteger(asset.createdAtMs) || !Number.isSafeInteger(asset.updatedAtMs)) {
+      throw new Error('recording asset time is invalid');
+    }
+    if (asset.durationMs !== null && (!Number.isSafeInteger(asset.durationMs) || asset.durationMs < 0)) {
+      throw new Error('recording asset duration is invalid');
+    }
+    if (asset.byteSize !== null && (!Number.isSafeInteger(asset.byteSize) || asset.byteSize < 0)) {
+      throw new Error('recording asset size is invalid');
+    }
+    const existingOwner = await this.database.getFirstAsync<{ meeting_id: string }>(
+      'SELECT meeting_id FROM recording_assets WHERE id = ?',
+      asset.id,
+    );
+    if (existingOwner && existingOwner.meeting_id !== asset.meetingId) {
+      throw new Error('recording asset belongs to a different meeting');
+    }
+    await this.database.runAsync(
+      `INSERT INTO recording_assets (
+         id, meeting_id, role, origin, native_session_id, local_uri, remote_asset_id,
+         mime_type, file_name, byte_size, duration_ms, checksum_sha256, waveform_json,
+         local_state, created_at_ms, updated_at_ms, last_verified_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         role = excluded.role,
+         origin = excluded.origin,
+         native_session_id = excluded.native_session_id,
+         local_uri = excluded.local_uri,
+         remote_asset_id = excluded.remote_asset_id,
+         mime_type = excluded.mime_type,
+         file_name = excluded.file_name,
+         byte_size = excluded.byte_size,
+         duration_ms = excluded.duration_ms,
+         checksum_sha256 = excluded.checksum_sha256,
+         waveform_json = excluded.waveform_json,
+         local_state = excluded.local_state,
+         updated_at_ms = excluded.updated_at_ms,
+         last_verified_at_ms = excluded.last_verified_at_ms`,
+      asset.id,
+      asset.meetingId,
+      asset.role,
+      asset.origin,
+      asset.nativeSessionId,
+      asset.localUri,
+      asset.remoteAssetId,
+      asset.mimeType,
+      asset.fileName,
+      asset.byteSize,
+      asset.durationMs,
+      asset.checksumSha256,
+      asset.waveformJson,
+      asset.localState,
+      asset.createdAtMs,
+      asset.updatedAtMs,
+      asset.lastVerifiedAtMs,
+    );
+    this.touchedMeetingIds.add(asset.meetingId);
   }
 
   async appendTranscriptSegments(
@@ -384,6 +649,34 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return this.aggregateFromRow(database, noteRow, scopeKey);
   }
 
+  async findByNativeSessionId(
+    sessionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingNoteAggregate | null> {
+    assertScopeKey(scopeKey);
+    const normalized = sessionId.trim();
+    if (!normalized) return null;
+    const database = await openMeetingDatabase();
+    const noteRow = await database.getFirstAsync<MeetingRow>(
+      `SELECT DISTINCT meeting.* FROM meeting_notes meeting
+       LEFT JOIN recording_assets asset ON asset.meeting_id = meeting.id
+       WHERE meeting.scope_key = ? AND (
+         asset.native_session_id = ? OR meeting.id = ? OR
+         meeting.remote_id = ? OR meeting.legacy_source_id = ?
+       )
+       ORDER BY CASE WHEN asset.native_session_id = ? THEN 0 ELSE 1 END
+       LIMIT 1`,
+      scopeKey,
+      normalized,
+      normalized,
+      normalized,
+      normalized,
+      normalized,
+    );
+    if (!noteRow) return null;
+    return this.aggregateFromRow(database, noteRow, scopeKey);
+  }
+
   async listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection> {
     assertScopeKey(scopeKey);
     const database = await openMeetingDatabase();
@@ -477,7 +770,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     noteRow: MeetingRow,
     scopeKey: ScopeKey,
   ): Promise<MeetingNoteAggregate> {
-    const [manualNoteRow, occurrenceRow, snapshotRow, stageRows] = await Promise.all([
+    const [manualNoteRow, occurrenceRow, snapshotRow, stageRows, recordingRows] = await Promise.all([
       database.getFirstAsync<ManualNoteRow>(
         `SELECT note.* FROM manual_notes note
          INNER JOIN meeting_notes meeting ON meeting.id = note.meeting_id
@@ -508,6 +801,14 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         noteRow.id,
         scopeKey,
       ),
+      database.getAllAsync<RecordingAssetRow>(
+        `SELECT asset.* FROM recording_assets asset
+         INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+         WHERE asset.meeting_id = ? AND meeting.scope_key = ?
+         ORDER BY CASE WHEN asset.role = 'primary' THEN 0 ELSE 1 END, asset.created_at_ms, asset.id`,
+        noteRow.id,
+        scopeKey,
+      ),
     ]);
     if (!manualNoteRow) throw new Error('meeting manual note is missing');
     return {
@@ -521,6 +822,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       scheduleSnapshot: snapshotRow ? snapshotFromRow(snapshotRow) : null,
       manualNote: manualNoteFromRow(manualNoteRow),
       processingStages: stageRows.map(stageFromRow),
+      recordingAssets: recordingRows.map(recordingAssetFromRow),
     };
   }
 

@@ -634,7 +634,7 @@ internal class MinutesRecordingSurface(
   private fun beginTitleEdit() {
     if (editingTitle) return
     editingTitle = true
-    titleEditor.setText(title.text)
+    titleEditor.setText(renderedState.title)
     titleEditor.setSelection(titleEditor.text.length)
     title.visibility = View.INVISIBLE
     titleEditor.visibility = View.VISIBLE
@@ -647,14 +647,14 @@ internal class MinutesRecordingSurface(
 
   private fun commitTitleEdit() {
     if (!editingTitle) return
-    val previous = renderedState.title.ifBlank { "新录音" }
-    val next = titleEditor.text.toString().trim().ifBlank { previous }
+    val previous = renderedState.title
+    val next = titleEditor.text.toString().trim()
     editingTitle = false
     titleEditor.clearFocus()
     context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(titleEditor.windowToken, 0)
     titleEditor.visibility = View.GONE
     title.visibility = View.VISIBLE
-    title.text = next
+    title.text = next.ifBlank { "新录音" }
     if (next != previous) {
       onAction(
         mapOf(

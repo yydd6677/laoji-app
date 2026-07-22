@@ -5,7 +5,7 @@
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
-> 实施状态：Phase 0 进行中；业务界面仍保持稳定基线行为，SQLite 仅执行影子导入。
+> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。业务界面仍以旧 Store 为事实源，SQLite 已具备双读对账、增量影子写和录音 journal 对账，但尚未完成 canonical cutover。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 

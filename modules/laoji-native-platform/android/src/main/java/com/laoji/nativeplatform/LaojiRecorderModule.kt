@@ -29,6 +29,9 @@ class RecorderStartOptions : Record {
   var purpose: String = "meeting"
 
   @Field
+  var storageScope: String? = null
+
+  @Field
   var websocketUrl: String = ""
 
   @Field
@@ -52,6 +55,7 @@ class RecorderStartOptions : Record {
   fun toConfig(): RecorderStartConfig = RecorderStartConfig.create(
     sessionId = sessionId,
     purpose = purpose,
+    storageScope = storageScope,
     websocketUrl = websocketUrl,
     accessToken = accessToken,
     guestToken = guestToken,
@@ -62,7 +66,7 @@ class RecorderStartOptions : Record {
   )
 
   override fun toString(): String =
-    "RecorderStartOptions(sessionId=$sessionId, purpose=$purpose, websocketUrl=[REDACTED], " +
+    "RecorderStartOptions(sessionId=$sessionId, purpose=$purpose, storageScope=[REDACTED], websocketUrl=[REDACTED], " +
       "accessToken=[REDACTED], guestToken=[REDACTED], " +
       "allowInsecureDevelopment=$allowInsecureDevelopment, connectionTimeoutMs=$connectionTimeoutMs, " +
       "stopTimeoutMs=$stopTimeoutMs, levelIntervalMs=$levelIntervalMs)"

@@ -27,6 +27,7 @@ export interface MeetingNoteAggregate {
   scheduleSnapshot: ScheduleSnapshot | null;
   manualNote: ManualNoteRecord;
   processingStages: readonly ProcessingStage[];
+  recordingAssets: readonly RecordingAssetRecord[];
 }
 
 export interface MeetingListQuery {
@@ -58,12 +59,58 @@ export interface MeetingListProjection {
 export interface NewMeetingNote {
   id: string;
   scopeKey: ScopeKey;
+  remoteId?: string | null;
+  legacySourceId?: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint;
   title: string;
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
+  endedAtMs: number | null;
+  syncState?: MeetingNote['syncState'];
   createdAtMs: number;
+}
+
+export type RecordingAssetOrigin = 'captured' | 'imported' | 'recovered';
+
+export type RecordingAssetLocalState =
+  | 'capturing'
+  | 'ingesting'
+  | 'local_ready'
+  | 'remote_only'
+  | 'missing';
+
+export interface RecordingAssetRecord {
+  id: string;
+  meetingId: string;
+  role: 'primary' | 'secondary';
+  origin: RecordingAssetOrigin;
+  nativeSessionId: string | null;
+  localUri: string | null;
+  remoteAssetId: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  byteSize: number | null;
+  durationMs: number | null;
+  checksumSha256: string | null;
+  waveformJson: string | null;
+  localState: RecordingAssetLocalState;
+  createdAtMs: number;
+  updatedAtMs: number;
+  lastVerifiedAtMs: number | null;
+}
+
+export interface MeetingRootPatch {
+  title?: string;
+  remoteId?: string | null;
+  lifecycle?: MeetingLifecycle;
+  startedAtMs?: number | null;
+  endedAtMs?: number | null;
+  currentSummaryVersionId?: string | null;
+  remoteRevision?: number | null;
+  syncState?: MeetingNote['syncState'];
+  deletedAtMs?: number | null;
+  updatedAtMs: number;
 }
 
 export interface OccurrenceLinkRecord extends OccurrenceReference {
@@ -103,10 +150,24 @@ export interface SyncOperationRecord {
 }
 
 export interface MeetingTransaction {
+  getMeeting(id: string, scopeKey: ScopeKey): Promise<MeetingNote | null>;
+  findMeetingByOccurrence(
+    reference: OccurrenceReference,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingNote | null>;
+  findMeetingByNativeSessionId(sessionId: string, scopeKey: ScopeKey): Promise<MeetingNote | null>;
+  getStage(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    stage: ProcessingStage['stage'],
+  ): Promise<ProcessingStage | null>;
+  getPrimaryRecording(meetingId: string, scopeKey: ScopeKey): Promise<RecordingAssetRecord | null>;
   insertMeeting(note: NewMeetingNote): Promise<void>;
+  updateMeeting(id: string, scopeKey: ScopeKey, patch: MeetingRootPatch): Promise<void>;
   bindOccurrence(link: OccurrenceLinkRecord, snapshot: ScheduleSnapshot): Promise<void>;
-  upsertStage(stage: ProcessingStage): Promise<void>;
-  saveManualNote(note: ManualNoteRecord): Promise<void>;
+  upsertStage(stage: ProcessingStage, scopeKey: ScopeKey): Promise<void>;
+  saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void>;
+  saveRecordingAsset(asset: RecordingAssetRecord, scopeKey: ScopeKey): Promise<void>;
   appendTranscriptSegments(revisionId: string, segments: readonly TranscriptSegmentRecord[]): Promise<void>;
   insertOutbox(operation: SyncOperationRecord): Promise<void>;
 }
@@ -118,6 +179,7 @@ export interface MeetingNoteRepository {
     reference: OccurrenceReference,
     scopeKey: ScopeKey,
   ): Promise<MeetingNoteAggregate | null>;
+  findByNativeSessionId(sessionId: string, scopeKey: ScopeKey): Promise<MeetingNoteAggregate | null>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;

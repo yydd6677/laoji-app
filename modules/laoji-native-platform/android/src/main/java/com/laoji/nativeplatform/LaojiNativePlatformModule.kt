@@ -4,6 +4,7 @@ package com.laoji.nativeplatform
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import java.util.UUID
 
 class LaojiNativePlatformModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -11,6 +12,8 @@ class LaojiNativePlatformModule : Module() {
 
     Constant("evidenceSchemaVersion") { 1 }
     Constant("implementation") { "android-classic-view" }
+
+    Function("createRandomUuid") { UUID.randomUUID().toString() }
 
     AsyncFunction("getCapabilities") {
       mapOf(

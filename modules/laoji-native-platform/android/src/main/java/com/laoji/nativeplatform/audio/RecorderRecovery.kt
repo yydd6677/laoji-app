@@ -28,7 +28,7 @@ object RecorderRecovery {
             RecorderEventBus.emit(
               RecorderEvents.ERROR,
               mapOf(
-                "sessionId" to null,
+                "sessionId" to failure.sessionId,
                 "errorCode" to failure.code.wireValue,
                 "errorMessage" to failure.message,
                 "fileName" to failure.fileName,
