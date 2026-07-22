@@ -36,6 +36,7 @@ type MeetingRow = {
   id: string;
   scope_key: string;
   remote_id: string | null;
+  legacy_source_id: string | null;
   origin: MeetingNote['origin'];
   entry_point: MeetingNote['entryPoint'];
   title: string;
@@ -1638,25 +1639,41 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     const visibleRows = rows.slice(0, limit);
     const ids = visibleRows.map(row => row.id);
     const stagesByMeeting = new Map<string, ProcessingStage[]>();
+    const primaryRecordingByMeeting = new Map<string, RecordingAssetRecord>();
     if (ids.length > 0) {
       const placeholders = ids.map(() => '?').join(',');
-      const stageRows = await database.getAllAsync<StageRow>(
-        `SELECT stage.* FROM processing_stages stage
-         INNER JOIN meeting_notes meeting ON meeting.id = stage.meeting_id
-         WHERE meeting.scope_key = ? AND stage.meeting_id IN (${placeholders})
-         ORDER BY stage.meeting_id, stage.stage`,
-        [scopeKey, ...ids],
-      );
+      const [stageRows, recordingRows] = await Promise.all([
+        database.getAllAsync<StageRow>(
+          `SELECT stage.* FROM processing_stages stage
+           INNER JOIN meeting_notes meeting ON meeting.id = stage.meeting_id
+           WHERE meeting.scope_key = ? AND stage.meeting_id IN (${placeholders})
+           ORDER BY stage.meeting_id, stage.stage`,
+          [scopeKey, ...ids],
+        ),
+        database.getAllAsync<RecordingAssetRow>(
+          `SELECT asset.* FROM recording_assets asset
+           INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+           WHERE meeting.scope_key = ? AND asset.meeting_id IN (${placeholders})
+             AND asset.role = 'primary'
+           ORDER BY asset.meeting_id`,
+          [scopeKey, ...ids],
+        ),
+      ]);
       stageRows.forEach(row => {
         const stages = stagesByMeeting.get(row.meeting_id) ?? [];
         stages.push(stageFromRow(row));
         stagesByMeeting.set(row.meeting_id, stages);
       });
+      recordingRows.forEach(row => {
+        primaryRecordingByMeeting.set(row.meeting_id, recordingAssetFromRow(row));
+      });
     }
     const items: MeetingListProjectionItem[] = visibleRows.map(row => ({
       id: row.id,
       remoteId: row.remote_id,
+      legacySourceId: row.legacy_source_id,
       origin: row.origin,
+      entryPoint: row.entry_point,
       title: row.title,
       description: row.description,
       participants: participantsFromJson(row.participants_json),
@@ -1666,10 +1683,15 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       recordedAtMs: row.recorded_at_ms,
       lifecycle: row.lifecycle,
       startedAtMs: row.started_at_ms,
+      endedAtMs: row.ended_at_ms,
+      syncState: row.sync_state,
+      createdAtMs: row.created_at_ms,
       updatedAtMs: row.updated_at_ms,
+      deletedAtMs: row.deleted_at_ms,
       currentSummaryVersionId: row.current_summary_version_id,
       activeTranscriptSegmentCount: Number(row.active_transcript_segment_count ?? 0),
       currentSummaryReady: row.current_summary_ready === 1,
+      primaryRecording: primaryRecordingByMeeting.get(row.id) ?? null,
       stages: stagesByMeeting.get(row.id) ?? [],
     }));
     return { items, hasMore: rows.length > limit };

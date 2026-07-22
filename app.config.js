@@ -182,6 +182,9 @@ module.exports = () => {
   const localMeetingDbV1 = !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
   );
+  const localMeetingDbCanonicalReadV1 = localMeetingDbV1 && ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_READ_V1 ?? 'false').trim().toLowerCase(),
+  );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
   );
@@ -222,6 +225,7 @@ module.exports = () => {
       accountDeletionUrl,
       featureFlags: {
         localMeetingDbV1,
+        localMeetingDbCanonicalReadV1,
       },
     },
   };

@@ -34,8 +34,12 @@ function lifecycleForLegacy(meeting: Meeting): MeetingLifecycle {
   return 'draft';
 }
 
-function legacyIdentityForRepositoryItem(item: MeetingListProjectionItem, scopeKey: ScopeKey): string {
-  if (item.remoteId) return item.remoteId;
+export function legacyIdentityForRepositoryItem(
+  item: MeetingListProjectionItem,
+  scopeKey: ScopeKey,
+): string {
+  if (item.legacySourceId) return item.legacySourceId;
+  if (item.entryPoint === 'legacy_store' && item.remoteId) return item.remoteId;
   const prefix = `legacy:${encodeURIComponent(scopeKey)}:`;
   if (item.id.startsWith(prefix)) {
     try {

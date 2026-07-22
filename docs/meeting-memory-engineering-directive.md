@@ -652,7 +652,7 @@ interface MeetingTransaction {
 ### 7.3 切换策略
 
 - Release A：SQLite shadow import + 只读一致性报告，UI 仍读旧 store。
-- Release B：SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
+- Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成且 meeting/content/context 双读全部一致，才从 SQLite 构建旧界面兼容投影；任一 mismatch、分页漂移或内容读取异常立即保留旧 Store 快照。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
 - Release C：停止旧字段写入，但保留只读 legacy backup 两个安装版本；确认真机升级后再清理。
 - 新增的人工笔记、引用、行动项版本不能降级到旧结构；回滚 Release B 时必须保留 SQLite 文件，旧 APK不可清理本机数据。
 
@@ -1759,6 +1759,7 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 至少分：
 
 - `local_meeting_db_v1`
+- `local_meeting_db_canonical_read_v1`
 - `occurrence_meeting_link`
 - `manual_notes`
 - `transcript_audio_link`
@@ -1770,7 +1771,7 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 - `series_memory`
 - `speaker_feedback_v2`
 
-数据 schema 不随 UI flag 回滚；关闭 flag 只隐藏/停止新写入路径，已有数据仍可导出和恢复。
+`local_meeting_db_v1` 只控制 Release A 的 schema/shadow/reconciliation；`local_meeting_db_canonical_read_v1` 必须显式 opt-in，默认关闭，且基础 DB flag 关闭时强制关闭。数据 schema 不随 UI flag 回滚；关闭 canonical read 或其自动 preflight 失败时立即保留旧 Store 读取，关闭其他 flag 只隐藏/停止对应新写入路径，已有数据仍可导出和恢复。
 
 ### 17.2 自动停线条件
 

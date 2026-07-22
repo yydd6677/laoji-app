@@ -43,7 +43,9 @@ export interface MeetingListQuery {
 export interface MeetingListProjectionItem {
   id: string;
   remoteId: string | null;
+  legacySourceId: string | null;
   origin: MeetingOrigin;
+  entryPoint: MeetingEntryPoint | null;
   title: string;
   description: string | null;
   participants: readonly string[];
@@ -53,10 +55,15 @@ export interface MeetingListProjectionItem {
   recordedAtMs: number | null;
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
+  endedAtMs: number | null;
+  syncState: MeetingNote['syncState'];
+  createdAtMs: number;
   updatedAtMs: number;
+  deletedAtMs: number | null;
   currentSummaryVersionId: string | null;
   activeTranscriptSegmentCount: number;
   currentSummaryReady: boolean;
+  primaryRecording: RecordingAssetRecord | null;
   stages: readonly ProcessingStage[];
 }
 

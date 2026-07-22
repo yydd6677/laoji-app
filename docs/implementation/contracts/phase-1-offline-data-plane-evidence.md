@@ -30,12 +30,15 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 | 内容读取 | 可按 scope 读取指定或 active Transcript revision 的有序 segments，以及指定或 current Summary version 的有序 sections 和 meeting-level actions；不存在或跨 scope 时返回空 |
 | 用户覆盖层 | Transcript 同时保留原说话人标签和覆盖标签；Summary 同时返回 generated/user text。读取 current version 时从 section/action 实际编辑字段推导用户所有权，不只信根标记 |
 | 空内容语义 | 旧缓存变空时只取消 legacy active/current 指针并重置对应阶段；历史 revision、version、action 不删除。server revision 或任何用户接管的 Summary 保持当前状态 |
+| 读切换前置 | 新增默认关闭的 `localMeetingDbCanonicalReadV1`；基础 DB flag 关闭时强制关闭。列表投影补齐旧身份、根时间/同步状态和主录音资产，可重建旧界面的会议、Transcript、Summary 兼容投影 |
+| 自动回退 | 只有双读完全一致才返回 SQLite 投影；missing/extra/重复身份/阶段/上下文/内容 mismatch、分页漂移或内容读取异常均返回原旧 Store 快照，不把兼容投影写回旧缓存 |
 
 ## 已执行验证
 
 - `npx tsc --noEmit --pretty false`：通过。
 - `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、2 个 outbox；录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
-- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3 原行保留与安全默认值、canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账，以及 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留和内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
+- `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3 原行保留与安全默认值、canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影/mismatch 自动回退，以及 draft 完整替换、final 不可覆盖、唯一 active revision、跨 scope 拒写/读取、结构化 Summary、用户行动项保护、说话人/用户文本覆盖层、镜像写入顺序、空投影历史保留和内容级 mismatch 检出。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
+- Expo public config：默认输出 `localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=false`；显式 opt-in 可变为 true；基础 DB flag=false 时 canonical read 即使请求 true 也被强制为 false。
 - `git diff --check`：通过。
 - SQLite v1→v2→v3 迁移：既有 MeetingNote 原行保留，六个新字段取得安全默认值，外键检查为 0；第二个 primary recording 和 canonical 重复请求 ID 被唯一索引拒绝，legacy 重复请求 ID可导入。
 - Kotlin release 编译和 Android Preview 构建：通过。
@@ -57,6 +60,6 @@ Phase 0 的线上 OpenAPI 和实际部署 migration 版本仍不可读取，因�
 ## 未决项与停线边界
 
 1. Transcript/Summary repository 写接口和内容级对账已存在，但当前调用仍是 AsyncStorage 成功后再影子写 SQLite；失败不会影响旧界面，因此还不是 canonical write path。
-2. Transcript/Summary 读取 projection 和空内容语义已经存在，但尚未接入 Store。Meeting 列表/详情 projection 已承载切换所需的六项临时会议上下文；在增加可关闭的 cutover flag、完成旧模型兼容投影和故障恢复验证前，不得切换读源。
+2. 可关闭的 canonical read flag、Meeting/Transcript/Summary 旧模型兼容投影和 preflight 自动回退已经存在，但尚未接入 `MeetingsStore` 的活动读源；当前 flag 保持关闭。在完成 Store 接线、进程内回退和故障恢复验证前，不得切换读源。
 3. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持同一计数下限且不得清除真机数据。
 4. 线上契约未验证，不得发送 MeetingNote v2 探测性写请求，也不得开启 v2 capability。
