@@ -4,6 +4,7 @@
 >
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
+> 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
 > 实施状态：Phase 0 进行中；业务界面仍保持稳定基线行为，SQLite 仅执行影子导入。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
@@ -938,7 +939,7 @@ interface MinutesTranscriptLineSnapshot {
     {
       "content": "整理验证清单",
       "assignee": "王芳",
-      "due_at": "2026-08-03T10:00:00+08:00",
+      "due_at": "<RFC3339 timestamp with timezone>",
       "citations": [{ "segment_id": "seg-456", "start_ms": 88000 }]
     }
   ]
@@ -1351,17 +1352,17 @@ Content-Type: application/json
   "client_note_id": "local-uuid",
   "origin": "calendar",
   "title": "",
-  "recorded_at": "2026-07-22T10:00:00+08:00",
+  "recorded_at": "<RFC3339 timestamp with timezone>",
   "occurrence_ref": {
     "calendar_source_event_id": "1234",
-    "occurrence_date": "2026-07-22",
+    "occurrence_date": "<local YYYY-MM-DD>",
     "calendar_revision": 8,
     "recurrence_segment_id": "2"
   },
   "schedule_snapshot": {
     "title": "项目同步",
-    "planned_start": "2026-07-22T10:00:00+08:00",
-    "planned_end": "2026-07-22T11:00:00+08:00",
+    "planned_start": "<RFC3339 timestamp with timezone>",
+    "planned_end": "<RFC3339 timestamp with timezone>",
     "timezone": "Asia/Shanghai",
     "location": "会议室 A",
     "participants": []
@@ -1612,26 +1613,26 @@ openOccurrenceMeeting
 
 ## 15. 分阶段实施计划
 
-### 15.1 估算假设
+### 15.1 执行原则
 
-- 以一个主开发者/代理、Android 优先、每个阶段包含服务端适配和真机验证计算。
-- 工作日是相对工作量估算，不是对未知服务部署和真实数据效果的工期承诺。
-- 每 5–7 个有效工作日必须产出一个可安装 APK；阶段过长时拆 feature flag，不等待整阶段全部完成。
+- 以 Android 优先，每个阶段包含必要的服务端适配和真机验证。
+- 路线只规定依赖顺序、交付物和退出条件，不设日历日期或固定工作日承诺；实际节奏由当期风险、外部能力和验证结果决定。
+- 每个阶段尽早产出可安装 APK；范围较大时使用 feature flag 拆分可验证纵向路径，不等待整阶段所有功能一次完成。
 - 不并行修改 recorder 核心、SQLite cutover 和 Summary 协议三个高风险面；可以并行做只读 UI、服务端 additive schema 和证据采集。
 
 ### 15.2 路线
 
-| 阶段 | 工作日 | 交付物 | 退出条件 |
-|---|---:|---|---|
-| Phase 0：契约冻结 | 5 | 线上 API snapshot、相对构建路径、DB schema/migration runner、能力协商骨架 | 当前 APK 行为不变；Linux/Windows 路径无硬编码；shadow import 计数一致 |
-| Phase 1：数据平面与独立状态 | 10 | SQLite canonical、repository facade、processing stages、原生 journal 对账 | 旧数据无损；断网上传/转写/总结可独立表达；首个安装验证包 |
-| Phase 2：日程绑定与我的笔记 | 9 | occurrence 唯一绑定、事件动作、计划快照、notes autosave、游客迁移 v2 | 重复日程真实任务通过；强杀后笔记保留；第二个验证包 |
-| Phase 3：文字精确回听 | 9 | Draft/Final revision、搜索、匹配跳转、段落高亮、长按复制/分享 | 60 分钟中文会议性能/精度通过；第三个验证包 |
-| Phase 4：整理结果与行动 | 15 | sections、immutable versions、citations、action object、提醒/后续日程 | 重生成不覆盖；引用可回听；action 编辑/完成/提醒通过；第四个验证包 |
-| Phase 5：导入、Marker、分享 | 10 | 文件/系统分享摄取、Marker、分层分享、同步感知删除 | URI/强杀/断网上传恢复通过；默认不泄露额外内容；第五个验证包 |
-| Phase 6：快速入口与系列记忆 | 10 | 会前动作通知、Widget projection、Tile、四模板、确定性系列记忆 | occurrence 去重、App Lock、过期投影、历史 action 来源通过 |
-| Phase 7：说话人闭环 | 12 | segment/cluster/profile 修正、反馈 API、旧会议重匹配 job | 中文多人样本达到阈值；手工 assignment 不被覆盖 |
-| Phase 8：P2 实验 | 按门槛 | 单场问答→标签/检索→轻协作→片段/附件 | 每项按真实使用指标单独决定扩量 |
+| 阶段 | 交付物 | 退出条件 |
+|---|---|---|
+| Phase 0：契约冻结 | 线上 API snapshot、相对构建路径、DB schema/migration runner、能力协商骨架 | 当前 APK 行为不变；Linux/Windows 路径无硬编码；shadow import 计数一致 |
+| Phase 1：数据平面与独立状态 | SQLite canonical、repository facade、processing stages、原生 journal 对账 | 旧数据无损；断网上传/转写/总结可独立表达；产出安装验证包 |
+| Phase 2：日程绑定与我的笔记 | occurrence 唯一绑定、事件动作、计划快照、notes autosave、游客迁移 v2 | 重复日程真实任务通过；强杀后笔记保留；产出安装验证包 |
+| Phase 3：文字精确回听 | Draft/Final revision、搜索、匹配跳转、段落高亮、长按复制/分享 | 60 分钟中文会议性能/精度通过；产出安装验证包 |
+| Phase 4：整理结果与行动 | sections、immutable versions、citations、action object、提醒/后续日程 | 重生成不覆盖；引用可回听；action 编辑/完成/提醒通过；产出安装验证包 |
+| Phase 5：导入、Marker、分享 | 文件/系统分享摄取、Marker、分层分享、同步感知删除 | URI/强杀/断网上传恢复通过；默认不泄露额外内容；产出安装验证包 |
+| Phase 6：快速入口与系列记忆 | 会前动作通知、Widget projection、Tile、四模板、确定性系列记忆 | occurrence 去重、App Lock、过期投影、历史 action 来源通过；产出安装验证包 |
+| Phase 7：说话人闭环 | segment/cluster/profile 修正、反馈 API、旧会议重匹配 job | 中文多人样本达到阈值；手工 assignment 不被覆盖；产出安装验证包 |
+| Phase 8：P2 实验 | 单场问答→标签/检索→轻协作→片段/附件 | 每项按真实使用指标单独决定扩量 |
 
 ### 15.3 依赖路径
 
@@ -1655,7 +1656,7 @@ NOTE-01 + SUM-01 + TRN-01 ── SHARE-01
 ### 15.4 每阶段交付节奏
 
 1. 开始：冻结当期 schema、snapshot 和 API contract，写 evidence notes。
-2. 第 2–3 天：打通纵向最小路径，feature flag 默认关。
+2. 最小路径：打通可独立构建和验证的纵向闭环，feature flag 默认关。
 3. 中点：安装内部 APK，验证数据不丢和错误恢复；通过后才补完整 UI。
 4. 结束前：服务端 additive 部署、移动端开 flag、真机任务录像。
 5. 结束：归档验证资料、记录未决项和实际耗时；不得把临时脚本/大截图留在轻量主树。
@@ -1839,3 +1840,12 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 ```
 
 任何阶段只要无法说明“事实源在哪里、失败后保留什么、重试只重跑什么、用户修改如何不被覆盖”，就不满足本文件的工程完成定义。
+
+## 21. 作为目标模式附件时的执行协议
+
+1. 目标必须指向本文件的整体完成定义，不得把“完成当前 Phase”或“产出一个 APK”误当整体目标完成。
+2. 用户最新明确指令高于本文件；已验证的源码、线上契约和真机事实高于文档推断。产生偏差时必须记录原因并更新相应契约，不得为了贴合旧文字而忽略新证据。
+3. 每次续做先读取 Git 状态、最近提交、文档顶部实施状态和当期契约证据；从最后一个已验证检查点继续，不重做已完成工作。
+4. 每个可恢复纵向切片单独提交；涉及产品行为的阶段必须有可安装包和对应真机任务证据。代码写完不等于通过退出条件。
+5. 外部服务或设备一时不可用时，关闭对应写能力并记录未验证项；只要仍有不依赖该外部条件的有意义工作，就继续推进，不把局部阻塞误报为整体目标阻塞。
+6. 稳定版验证用 `git rev-parse stable-before-meeting-memory-roadmap^{}`，应返回 `cde96f9d5266961e380957893ecba39855aea39b`。需要回溯时使用 `git worktree add --detach <target-directory> stable-before-meeting-memory-roadmap`，不得通过重置当前开发工作树来验证稳定版。

@@ -62,3 +62,16 @@
 - SQLite repository 能读出全部 4 个列表投影、每场 5 个独立处理阶段以及首个完整 aggregate，结果为 `consistent`。
 - 脱敏计数为 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset；未把标题、正文、地点、账号 ID、文件名或 URI写入日志。
 - 本轮没有把 SQLite 切为 UI 事实源，也没有改变录音、上传、转写或总结调用路径。
+
+## 清除后重建证据
+
+- 只在指定 Android 模拟器执行破坏性验证，未清除用户真机数据。
+- 在设置页执行“清除本机数据”后，应用退出活动 guest scope 并回到登录页。
+- 重新进入游客 scope 后，影子导入结果为 `completed`，MeetingNote、Transcript segment、Summary version 和 Recording asset 计数全部为 0。
+- repository 状态为 `consistent`，五阶段结构检查和 aggregate read 成功，无老记进程 FATAL EXCEPTION。
+
+## 开发主机兼容证据
+
+- Linux 主机下 TypeScript 编译和 Preview Android 构建通过。
+- Windows 10 用户态环境中，使用官方 Windows Node.js `v20.20.2` 执行 TypeScript 编译通过。
+- Windows Node.js 下动态配置可解析，SQLite plugin 和 feature flag 存在，生成的 Gradle 配置使用项目相对路径，未重新引入个人 Linux 绝对路径。
