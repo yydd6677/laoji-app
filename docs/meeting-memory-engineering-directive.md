@@ -5,7 +5,7 @@
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
-> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证，生产配置仍以旧 Store 为事实源；canonical write、真机 opt-in 和线上契约尚未完成。
+> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已落地但尚未接 Store。生产配置仍以旧 Store 为事实源；真机 opt-in 和线上契约尚未完成。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 
@@ -521,6 +521,17 @@ CREATE TABLE sync_outbox (
 
 CREATE INDEX idx_outbox_ready
   ON sync_outbox(scope_key, status, next_attempt_at_ms, created_at_ms);
+
+CREATE TABLE meeting_scope_write_state (
+  scope_key TEXT PRIMARY KEY,
+  write_owner TEXT NOT NULL CHECK(write_owner IN ('legacy','canonical')),
+  canonical_revision INTEGER NOT NULL CHECK(canonical_revision >= 0),
+  legacy_mirror_revision INTEGER NOT NULL CHECK(legacy_mirror_revision >= 0),
+  legacy_mirror_status TEXT NOT NULL CHECK(legacy_mirror_status IN ('clean','pending','failed')),
+  last_error_code TEXT,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK(legacy_mirror_revision <= canonical_revision)
+);
 
 CREATE TABLE sync_conflicts (
   id TEXT PRIMARY KEY,
@@ -1761,6 +1772,7 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 
 - `local_meeting_db_v1`
 - `local_meeting_db_canonical_read_v1`
+- `local_meeting_db_canonical_write_v1`
 - `occurrence_meeting_link`
 - `manual_notes`
 - `transcript_audio_link`
@@ -1772,7 +1784,7 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 - `series_memory`
 - `speaker_feedback_v2`
 
-`local_meeting_db_v1` 只控制 Release A 的 schema/shadow/reconciliation；`local_meeting_db_canonical_read_v1` 必须显式 opt-in，默认关闭，且基础 DB flag 关闭时强制关闭。数据 schema 不随 UI flag 回滚；关闭 canonical read 或其自动 preflight 失败时立即保留旧 Store 读取，关闭其他 flag 只隐藏/停止对应新写入路径，已有数据仍可导出和恢复。
+`local_meeting_db_v1` 只控制 Release A 的 schema/shadow/reconciliation；`local_meeting_db_canonical_read_v1` 必须显式 opt-in，默认关闭，且基础 DB flag 关闭时强制关闭。`local_meeting_db_canonical_write_v1` 还必须依赖 canonical read，默认关闭；只有 scope 完成 preflight 且所有活动 mutation 表面都支持 ownership revision 和 legacy mirror 恢复后才可开启，不能只为单个按钮翻转写入顺序。数据 schema 不随 UI flag 回滚；关闭 canonical read 或其自动 preflight 失败时立即保留旧 Store 读取，关闭其他 flag 只隐藏/停止对应新写入路径，已有数据仍可导出和恢复。
 
 ### 17.2 自动停线条件
 

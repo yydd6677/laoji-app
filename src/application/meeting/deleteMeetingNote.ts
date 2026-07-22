@@ -7,11 +7,13 @@ export interface DeleteMeetingNoteInput {
   meetingId: string;
   scopeKey: ScopeKey;
   syncOperation?: MeetingRootSyncOperation | null;
+  canonicalWrite?: boolean;
 }
 
 export interface DeleteMeetingNoteResult {
   aggregate: MeetingNoteAggregate;
   deleted: boolean;
+  canonicalRevision: number | null;
 }
 
 export interface DeleteMeetingNoteDependencies {
@@ -49,6 +51,7 @@ export class DeleteMeetingNoteUseCase {
     if (!meetingId) throw new Error('meeting ID is invalid');
     const syncOperation = normalizeSyncOperation(input.scopeKey, input.syncOperation);
     let deleted = false;
+    let canonicalRevision: number | null = null;
 
     await this.repository.transaction(async transaction => {
       const meeting = await transaction.getMeeting(meetingId, input.scopeKey);
@@ -100,6 +103,9 @@ export class DeleteMeetingNoteUseCase {
         });
         if (!inserted) return;
       }
+      if (input.canonicalWrite) {
+        canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, deletedAtMs);
+      }
       await transaction.updateMeeting(meetingId, input.scopeKey, {
         lifecycle: 'deleted',
         syncState: input.scopeKey === 'guest' ? 'deleted' : 'pending',
@@ -111,6 +117,6 @@ export class DeleteMeetingNoteUseCase {
 
     const aggregate = await this.repository.get(meetingId, input.scopeKey);
     if (!aggregate) throw new Error('meeting deletion transaction lost tombstone');
-    return { aggregate, deleted };
+    return { aggregate, deleted, canonicalRevision };
   }
 }

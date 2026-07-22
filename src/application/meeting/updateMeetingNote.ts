@@ -25,6 +25,13 @@ export interface UpdateMeetingNoteInput {
   scopeKey: ScopeKey;
   changes: UpdateMeetingNoteChanges;
   syncOperation?: MeetingRootSyncOperation | null;
+  canonicalWrite?: boolean;
+}
+
+export interface UpdateMeetingNoteResult {
+  aggregate: MeetingNoteAggregate;
+  applied: boolean;
+  canonicalRevision: number | null;
 }
 
 export interface UpdateMeetingNoteDependencies {
@@ -121,12 +128,14 @@ export class UpdateMeetingNoteUseCase {
     this.now = dependencies.now ?? Date.now;
   }
 
-  async execute(input: UpdateMeetingNoteInput): Promise<MeetingNoteAggregate> {
+  async execute(input: UpdateMeetingNoteInput): Promise<UpdateMeetingNoteResult> {
     assertScopeKey(input.scopeKey);
     const meetingId = input.meetingId.trim();
     if (!meetingId) throw new Error('meeting ID is invalid');
     const changes = normalizeChanges(input.changes);
     const syncOperation = normalizeSyncOperation(input.scopeKey, input.syncOperation);
+    let applied = false;
+    let canonicalRevision: number | null = null;
 
     await this.repository.transaction(async transaction => {
       const meeting = await transaction.getMeeting(meetingId, input.scopeKey);
@@ -156,15 +165,19 @@ export class UpdateMeetingNoteUseCase {
         // committed; do not advance timestamps or reapply it after an ACK.
         if (!inserted) return;
       }
+      if (input.canonicalWrite) {
+        canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, updatedAtMs);
+      }
       await transaction.updateMeeting(meetingId, input.scopeKey, {
         ...changes,
         syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
+      applied = true;
     });
 
     const aggregate = await this.repository.get(meetingId, input.scopeKey);
     if (!aggregate) throw new Error('meeting update transaction lost aggregate');
-    return aggregate;
+    return { aggregate, applied, canonicalRevision };
   }
 }

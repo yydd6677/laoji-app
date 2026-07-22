@@ -208,7 +208,7 @@ async function listAllMeetings(
   throw new Error('meeting canonical projection exceeds read limit');
 }
 
-async function canonicalProjection(
+export async function buildCanonicalMeetingReadProjection(
   repository: MeetingNoteRepository,
   scopeKey: ScopeKey,
 ): Promise<MeetingReadProjection> {
@@ -368,7 +368,7 @@ export async function resolveMeetingReadCutover(
         errorCode: null,
       };
     }
-    const projection = await canonicalProjection(input.repository, input.scopeKey);
+    const projection = await buildCanonicalMeetingReadProjection(input.repository, input.scopeKey);
     if (projection.meetings.length !== preflight.repositoryMeetings) {
       throw new Error('meeting canonical projection changed during pagination');
     }

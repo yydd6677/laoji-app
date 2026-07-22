@@ -16,6 +16,7 @@ import type {
   MeetingNoteAggregate,
   MeetingNoteRepository,
   MeetingRootPatch,
+  MeetingScopeWriteState,
   MeetingTransaction,
   NewMeetingNote,
   OccurrenceLinkRecord,
@@ -112,6 +113,16 @@ type SyncOutboxRow = {
   operation_type: string;
   base_revision: number | null;
   payload_json: string;
+};
+
+type MeetingScopeWriteStateRow = {
+  scope_key: string;
+  write_owner: MeetingScopeWriteState['writeOwner'];
+  canonical_revision: number;
+  legacy_mirror_revision: number;
+  legacy_mirror_status: MeetingScopeWriteState['legacyMirrorStatus'];
+  last_error_code: string | null;
+  updated_at_ms: number;
 };
 
 type TranscriptRevisionRow = {
@@ -271,6 +282,41 @@ function noteFromRow(row: MeetingRow): MeetingNote {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     deletedAtMs: row.deleted_at_ms,
+  };
+}
+
+function scopeWriteStateFromRow(row: MeetingScopeWriteStateRow): MeetingScopeWriteState {
+  assertScopeKey(row.scope_key);
+  if (
+    !['legacy', 'canonical'].includes(row.write_owner)
+    || !['clean', 'pending', 'failed'].includes(row.legacy_mirror_status)
+    || !Number.isSafeInteger(row.canonical_revision)
+    || row.canonical_revision < 0
+    || !Number.isSafeInteger(row.legacy_mirror_revision)
+    || row.legacy_mirror_revision < 0
+    || row.legacy_mirror_revision > row.canonical_revision
+    || !Number.isSafeInteger(row.updated_at_ms)
+    || row.updated_at_ms < 0
+  ) throw new Error('stored meeting scope write state is invalid');
+  if (
+    row.write_owner === 'legacy'
+    && (
+      row.canonical_revision !== 0
+      || row.legacy_mirror_revision !== 0
+      || row.legacy_mirror_status !== 'clean'
+    )
+  ) throw new Error('legacy meeting scope has canonical write state');
+  if (row.write_owner === 'canonical' && row.canonical_revision < 1) {
+    throw new Error('canonical meeting scope has no write revision');
+  }
+  return {
+    scopeKey: row.scope_key,
+    writeOwner: row.write_owner,
+    canonicalRevision: row.canonical_revision,
+    legacyMirrorRevision: row.legacy_mirror_revision,
+    legacyMirrorStatus: row.legacy_mirror_status,
+    lastErrorCode: row.last_error_code,
+    updatedAtMs: row.updated_at_ms,
   };
 }
 
@@ -1457,6 +1503,93 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     );
     return true;
   }
+
+  async advanceCanonicalWrite(scopeKey: ScopeKey, updatedAtMs: number): Promise<number> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(updatedAtMs) || updatedAtMs < 0) {
+      throw new Error('meeting canonical write time is invalid');
+    }
+    const existingRow = await this.database.getFirstAsync<MeetingScopeWriteStateRow>(
+      'SELECT * FROM meeting_scope_write_state WHERE scope_key = ?',
+      scopeKey,
+    );
+    if (!existingRow) {
+      await this.database.runAsync(
+        `INSERT INTO meeting_scope_write_state (
+           scope_key, write_owner, canonical_revision, legacy_mirror_revision,
+           legacy_mirror_status, last_error_code, updated_at_ms
+         ) VALUES (?, 'canonical', 1, 0, 'pending', NULL, ?)`,
+        scopeKey,
+        updatedAtMs,
+      );
+      return 1;
+    }
+    const existing = scopeWriteStateFromRow(existingRow);
+    const canonicalRevision = existing.canonicalRevision + 1;
+    if (!Number.isSafeInteger(canonicalRevision)) {
+      throw new Error('meeting canonical revision overflow');
+    }
+    const result = await this.database.runAsync(
+      `UPDATE meeting_scope_write_state SET
+         write_owner = 'canonical',
+         canonical_revision = ?,
+         legacy_mirror_status = 'pending',
+         last_error_code = NULL,
+         updated_at_ms = ?
+       WHERE scope_key = ? AND canonical_revision = ?`,
+      canonicalRevision,
+      Math.max(existing.updatedAtMs, updatedAtMs),
+      scopeKey,
+      existing.canonicalRevision,
+    );
+    if (result.changes !== 1) throw new Error('meeting canonical revision changed during transaction');
+    return canonicalRevision;
+  }
+
+  async markLegacyMirror(
+    scopeKey: ScopeKey,
+    canonicalRevision: number,
+    status: 'clean' | 'failed',
+    errorCode: string | null,
+    updatedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(canonicalRevision) || canonicalRevision < 1) {
+      throw new Error('meeting canonical revision is invalid');
+    }
+    if (!Number.isSafeInteger(updatedAtMs) || updatedAtMs < 0) {
+      throw new Error('meeting legacy mirror time is invalid');
+    }
+    const normalizedError = errorCode?.trim() || null;
+    if (
+      status === 'clean' && normalizedError !== null
+      || status === 'failed' && (
+        normalizedError === null
+        || normalizedError.length > 160
+        || /[\u0000-\u001f\u007f]/.test(normalizedError)
+      )
+    ) throw new Error('meeting legacy mirror error code is invalid');
+    const result = await this.database.runAsync(
+      `UPDATE meeting_scope_write_state SET
+         legacy_mirror_revision = CASE WHEN ? = 'clean' THEN ? ELSE legacy_mirror_revision END,
+         legacy_mirror_status = ?,
+         last_error_code = ?,
+         updated_at_ms = MAX(updated_at_ms, ?)
+       WHERE scope_key = ?
+         AND write_owner = 'canonical'
+         AND canonical_revision = ?
+         AND (legacy_mirror_status != 'clean' OR ? = 'clean')`,
+      status,
+      canonicalRevision,
+      status,
+      normalizedError,
+      updatedAtMs,
+      scopeKey,
+      canonicalRevision,
+      status,
+    );
+    return result.changes === 1;
+  }
 }
 
 export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
@@ -1471,7 +1604,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       touchedMeetingIds = [...transaction.touchedMeetingIds];
       return value;
     });
-    this.notify(touchedMeetingIds);
+    if (touchedMeetingIds.length > 0) this.notify(touchedMeetingIds);
     return result;
   }
 
@@ -1572,6 +1705,24 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       scopeKey,
     );
     return row ? summaryVersionFromRow(row) : null;
+  }
+
+  async getScopeWriteState(scopeKey: ScopeKey): Promise<MeetingScopeWriteState> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<MeetingScopeWriteStateRow>(
+      'SELECT * FROM meeting_scope_write_state WHERE scope_key = ?',
+      scopeKey,
+    );
+    return row ? scopeWriteStateFromRow(row) : {
+      scopeKey,
+      writeOwner: 'legacy',
+      canonicalRevision: 0,
+      legacyMirrorRevision: 0,
+      legacyMirrorStatus: 'clean',
+      lastErrorCode: null,
+      updatedAtMs: 0,
+    };
   }
 
   async getTranscriptRevisionContent(

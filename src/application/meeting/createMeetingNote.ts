@@ -56,11 +56,13 @@ export interface CreateMeetingNoteInput {
   scheduleSnapshot?: ScheduleSnapshot | null;
   recordingAsset?: InitialRecordingAssetInput | null;
   initialStageStatuses?: Partial<MeetingProcessingStatuses>;
+  canonicalWrite?: boolean;
 }
 
 export interface CreateMeetingNoteResult {
   aggregate: MeetingNoteAggregate;
   created: boolean;
+  canonicalRevision: number | null;
 }
 
 export interface CreateMeetingNoteDependencies {
@@ -215,6 +217,7 @@ export class CreateMeetingNoteUseCase {
     const recordedAtMs = validTimestamp(input.recordedAtMs, 'meeting recorded time');
     let resolvedId = requestedId;
     let created = false;
+    let canonicalRevision: number | null = null;
 
     await this.repository.transaction(async transaction => {
       if (occurrence) {
@@ -349,6 +352,9 @@ export class CreateMeetingNoteUseCase {
           createdAtMs: nowMs,
         });
       }
+      if (input.canonicalWrite) {
+        canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, nowMs);
+      }
       created = true;
     });
 
@@ -357,6 +363,6 @@ export class CreateMeetingNoteUseCase {
     if (aggregate.processingStages.length !== 5) {
       throw new Error('meeting create transaction committed without all processing stages');
     }
-    return { aggregate, created };
+    return { aggregate, created, canonicalRevision };
   }
 }

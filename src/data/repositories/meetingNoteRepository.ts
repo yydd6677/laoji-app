@@ -258,6 +258,18 @@ export interface SyncOperationRecord {
   createdAtMs: number;
 }
 
+export type LegacyMirrorStatus = 'clean' | 'pending' | 'failed';
+
+export interface MeetingScopeWriteState {
+  scopeKey: ScopeKey;
+  writeOwner: 'legacy' | 'canonical';
+  canonicalRevision: number;
+  legacyMirrorRevision: number;
+  legacyMirrorStatus: LegacyMirrorStatus;
+  lastErrorCode: string | null;
+  updatedAtMs: number;
+}
+
 export interface MeetingTransaction {
   getMeeting(id: string, scopeKey: ScopeKey): Promise<MeetingNote | null>;
   findMeetingByOccurrence(
@@ -307,6 +319,14 @@ export interface MeetingTransaction {
   ): Promise<void>;
   /** Returns true only when this transaction inserted a new operation. */
   insertOutbox(operation: SyncOperationRecord): Promise<boolean>;
+  advanceCanonicalWrite(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
+  markLegacyMirror(
+    scopeKey: ScopeKey,
+    canonicalRevision: number,
+    status: 'clean' | 'failed',
+    errorCode: string | null,
+    updatedAtMs: number,
+  ): Promise<boolean>;
 }
 
 export interface MeetingNoteRepository {
@@ -341,6 +361,7 @@ export interface MeetingNoteRepository {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<SummaryVersionProjection | null>;
+  getScopeWriteState(scopeKey: ScopeKey): Promise<MeetingScopeWriteState>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;
