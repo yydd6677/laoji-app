@@ -4,6 +4,7 @@ import { meetingDatabaseMigrations } from './migrations';
 const MEETING_DATABASE_NAME = 'laoji-meeting-memory.db';
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
+let writeDatabasePromise: Promise<SQLiteDatabase> | null = null;
 let writeTail: Promise<void> = Promise.resolve();
 
 async function currentSchemaVersion(database: SQLiteDatabase): Promise<number> {
@@ -64,19 +65,44 @@ export function openMeetingDatabase(): Promise<SQLiteDatabase> {
   return databasePromise;
 }
 
+function openMeetingWriteDatabase(): Promise<SQLiteDatabase> {
+  if (!writeDatabasePromise) {
+    const pending = openMeetingDatabase().then(async () => {
+      const database = await openDatabaseAsync(MEETING_DATABASE_NAME, { useNewConnection: true });
+      try {
+        await database.execAsync(`
+          PRAGMA foreign_keys = ON;
+          PRAGMA synchronous = NORMAL;
+          PRAGMA busy_timeout = 5000;
+        `);
+        return database;
+      } catch (error) {
+        await database.closeAsync().catch(() => undefined);
+        throw error;
+      }
+    });
+    writeDatabasePromise = pending;
+    void pending.catch(() => {
+      if (writeDatabasePromise === pending) writeDatabasePromise = null;
+    });
+  }
+  return writeDatabasePromise;
+}
+
 export function withMeetingDatabaseTransaction<T>(
   work: (database: SQLiteDatabase) => Promise<T>,
 ): Promise<T> {
   const operation = writeTail.catch(() => undefined).then(async () => {
-    const database = await openMeetingDatabase();
-    let result: T | undefined;
-    let completed = false;
-    await database.withTransactionAsync(async () => {
-      result = await work(database);
-      completed = true;
-    });
-    if (!completed) throw new Error('meeting database transaction did not complete');
-    return result as T;
+    const database = await openMeetingWriteDatabase();
+    await database.execAsync('BEGIN IMMEDIATE;');
+    try {
+      const result = await work(database);
+      await database.execAsync('COMMIT;');
+      return result;
+    } catch (error) {
+      await database.execAsync('ROLLBACK;').catch(() => undefined);
+      throw error;
+    }
   });
   writeTail = operation.then(() => undefined, () => undefined);
   return operation;
@@ -84,11 +110,18 @@ export function withMeetingDatabaseTransaction<T>(
 
 export async function closeMeetingDatabaseForTests(): Promise<void> {
   const operation = writeTail.catch(() => undefined).then(async () => {
-    const pending = databasePromise;
+    const pendingRead = databasePromise;
+    const pendingWrite = writeDatabasePromise;
     databasePromise = null;
-    if (!pending) return;
-    const database = await pending.catch(() => null);
-    await database?.closeAsync();
+    writeDatabasePromise = null;
+    const [readDatabase, writeDatabase] = await Promise.all([
+      pendingRead?.catch(() => null) ?? null,
+      pendingWrite?.catch(() => null) ?? null,
+    ]);
+    await Promise.all([
+      readDatabase?.closeAsync(),
+      writeDatabase?.closeAsync(),
+    ]);
   });
   writeTail = operation.then(() => undefined, () => undefined);
   await operation;
@@ -96,10 +129,18 @@ export async function closeMeetingDatabaseForTests(): Promise<void> {
 
 export async function deleteMeetingDatabase(): Promise<void> {
   const operation = writeTail.catch(() => undefined).then(async () => {
-    const pending = databasePromise;
+    const pendingRead = databasePromise;
+    const pendingWrite = writeDatabasePromise;
     databasePromise = null;
-    const database = pending ? await pending.catch(() => null) : null;
-    await database?.closeAsync();
+    writeDatabasePromise = null;
+    const [readDatabase, writeDatabase] = await Promise.all([
+      pendingRead?.catch(() => null) ?? null,
+      pendingWrite?.catch(() => null) ?? null,
+    ]);
+    await Promise.all([
+      readDatabase?.closeAsync(),
+      writeDatabase?.closeAsync(),
+    ]);
     try {
       await deleteDatabaseAsync(MEETING_DATABASE_NAME);
     } catch (error) {

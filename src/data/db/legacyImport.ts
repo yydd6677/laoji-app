@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Meeting, MeetingSummary, TranscriptLine } from '../../types';
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
@@ -7,7 +8,7 @@ import type { PendingMeetingSummaryTask } from '../../services/meetingSummaryTas
 import { meetingSummaryToText } from '../../services/meetingSummaryFormat';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from './openDatabase';
 
-const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v1';
+const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v2';
 const PROCESSING_STAGES = ['capture', 'upload', 'transcript', 'summary', 'speaker'] as const;
 
 export interface LegacyMeetingShadowSource {
@@ -245,16 +246,19 @@ function expectedCounts(prepared: readonly PreparedMeeting[]): LegacyMeetingImpo
   });
 }
 
-async function countImported(scopeKey: ScopeKey): Promise<LegacyMeetingImportCounts> {
-  const database = await openMeetingDatabase();
+async function countImported(
+  scopeKey: ScopeKey,
+  database?: SQLiteDatabase,
+): Promise<LegacyMeetingImportCounts> {
+  const activeDatabase = database ?? await openMeetingDatabase();
   const query = async (table: string): Promise<number> => {
     const scopedDirect = table === 'meeting_notes';
     const row = scopedDirect
-      ? await database.getFirstAsync<{ count: number }>(
+      ? await activeDatabase.getFirstAsync<{ count: number }>(
         'SELECT COUNT(*) AS count FROM meeting_notes WHERE scope_key = ?',
         scopeKey,
       )
-      : await database.getFirstAsync<{ count: number }>(
+      : await activeDatabase.getFirstAsync<{ count: number }>(
         `SELECT COUNT(*) AS count FROM ${table} child
          INNER JOIN meeting_notes meeting ON meeting.id = child.meeting_id
          WHERE meeting.scope_key = ?`,
@@ -270,7 +274,7 @@ async function countImported(scopeKey: ScopeKey): Promise<LegacyMeetingImportCou
     transcriptRevisions: await query('transcript_revisions'),
     transcriptSegments: await query('transcript_segments'),
     summaryVersions: await query('summary_versions'),
-    summarySections: Number((await database.getFirstAsync<{ count: number }>(
+    summarySections: Number((await activeDatabase.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) AS count FROM summary_sections section
        INNER JOIN summary_versions version ON version.id = section.version_id
        INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
@@ -287,15 +291,15 @@ function countsMatch(left: LegacyMeetingImportCounts, right: LegacyMeetingImport
 }
 
 function migrationId(scopeKey: ScopeKey): string {
-  return `legacy-shadow-v1:${encodedPart(scopeKey)}`;
+  return `legacy-shadow-v2:${encodedPart(scopeKey)}`;
 }
 
 async function insertPreparedMeeting(
+  database: SQLiteDatabase,
   scopeKey: ScopeKey,
   item: PreparedMeeting,
   nowMs: number,
 ): Promise<void> {
-  const database = await openMeetingDatabase();
   const { meeting, localId, pendingAudio, pendingSummaryTask, transcript, summary } = item;
   const createdAtMs = timestamp(meeting.createdAt, nowMs);
   const updatedAtMs = timestamp(meeting.updatedAt, createdAtMs);
@@ -518,9 +522,9 @@ export async function runLegacyMeetingShadowImport(
     await withMeetingDatabaseTransaction(async transactionDatabase => {
       await transactionDatabase.runAsync('DELETE FROM meeting_notes WHERE scope_key = ?', input.scopeKey);
       for (const item of prepared) {
-        await insertPreparedMeeting(input.scopeKey, item, nowMs);
+        await insertPreparedMeeting(transactionDatabase, input.scopeKey, item, nowMs);
       }
-      const imported = await countImported(input.scopeKey);
+      const imported = await countImported(input.scopeKey, transactionDatabase);
       if (!countsMatch(imported, expected)) throw new Error('legacy meeting shadow count mismatch');
       const foreignKeyIssues = await transactionDatabase.getAllAsync<{ table: string }>('PRAGMA foreign_key_check');
       if (foreignKeyIssues.length > 0) throw new Error('legacy meeting shadow foreign key mismatch');

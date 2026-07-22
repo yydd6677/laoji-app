@@ -25,14 +25,61 @@ import { meetingSummaryToText } from '../services/meetingSummary';
 import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
-import { runLegacyMeetingShadowImport } from '../data/db/legacyImport';
-import { isScopeKey } from '../domain/meeting';
+import {
+  runLegacyMeetingShadowImport,
+  type LegacyMeetingImportCounts,
+} from '../data/db/legacyImport';
+import { isScopeKey, type ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
 import { getFeatureFlags } from '../config/featureFlags';
+import { sqliteMeetingNoteRepository } from '../data/repositories';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
 const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
+
+async function auditShadowRepositoryRead(
+  scopeKey: ScopeKey,
+  expected: LegacyMeetingImportCounts,
+): Promise<void> {
+  try {
+    const projection = await sqliteMeetingNoteRepository.listProjection(scopeKey, {
+      limit: 200,
+      includeDeleted: true,
+    });
+    const stageCountsMatch = projection.items.every(item => item.stages.length === 5);
+    const first = projection.items[0];
+    const aggregate = first
+      ? await sqliteMeetingNoteRepository.get(first.id, scopeKey)
+      : null;
+    const aggregateMatches = !first || Boolean(
+      aggregate
+      && aggregate.note.id === first.id
+      && aggregate.note.scopeKey === scopeKey
+      && aggregate.processingStages.length === 5,
+    );
+    const status = projection.hasMore
+      ? 'partial'
+      : projection.items.length === expected.meetingNotes && stageCountsMatch && aggregateMatches
+        ? 'consistent'
+        : 'mismatch';
+    diagnosticAudit('meeting_db_repository_read', {
+      status,
+      scope: scopeKey === 'guest' ? 'guest' : 'account',
+      projected_meetings: projection.items.length,
+      has_more: projection.hasMore,
+      five_stage_rows: stageCountsMatch,
+      aggregate_read: aggregateMatches,
+    });
+  } catch (error) {
+    diagnosticWarn('[meeting-db] repository shadow read failed', error);
+    diagnosticAudit('meeting_db_repository_read', {
+      status: 'failed',
+      scope: scopeKey === 'guest' ? 'guest' : 'account',
+      error_code: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
 
 export class MeetingDeletionCleanupError extends Error {
   constructor(public readonly failureCount: number) {
@@ -494,6 +541,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               summaries: counts.summaryVersions,
               recordings: counts.recordingAssets,
             });
+            void auditShadowRepositoryRead(scope, counts);
           }).catch(error => {
             diagnosticWarn('[meeting-db] shadow import failed', error);
             diagnosticAudit('meeting_db_shadow_import', {

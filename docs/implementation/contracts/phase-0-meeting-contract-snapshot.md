@@ -6,8 +6,8 @@
 
 | 证据 | 状态 | 可用于什么 |
 |---|---|---|
-| 配置中的日程服务 OpenAPI | `/openapi.json` 与 `/api/openapi.json` 均返回 HTTP 502 | 只能证明当前无法读取，不能推断线上路由或模型 |
-| 配置中的会议服务 OpenAPI | `/openapi.json` 与 `/api/openapi.json` 均返回 HTTP 502 | 只能证明当前无法读取，不能推断线上路由或模型 |
+| 配置中的日程服务 OpenAPI | 经本机代理返回 HTTP 502；绕过代理直连失败；手机网络直连未收到 HTTP 响应 | 只能证明当前无法读取，不能推断线上路由或模型 |
+| 配置中的会议服务 OpenAPI | 经本机代理返回 HTTP 502；绕过代理直连失败；手机网络直连未收到 HTTP 响应 | 只能证明当前无法读取，不能推断线上路由或模型 |
 | 移动端当前源码 | 已读取 | 证明客户端实际发送和消费的字段 |
 | `server-work` 会议 API 副本 | 已读取并固定 SHA-256 | 证明该本机副本的行为，不等同线上 |
 | `server-staging` 总结生成副本 | 已读取并固定 SHA-256 | 证明该本机副本的输出归一化逻辑，不等同线上 |
@@ -57,6 +57,8 @@
 
 - Preview 原生构建成功，自动链接清单包含 `expo-sqlite` 与 `expo-crypto`。
 - 使用覆盖安装保留原有账号数据，应用首屏正常显示且进程持续存活，没有老记进程的 FATAL EXCEPTION。
+- 使用独立 WAL 读连接与串行写连接完成影子导入；写连接内重新计数并通过外键检查后才提交。
 - 首次启动已完成影子导入；第二次启动返回 `unchanged`，证明 source hash 和实际数据库计数一致后走幂等跳过。
+- SQLite repository 能读出全部 4 个列表投影、每场 5 个独立处理阶段以及首个完整 aggregate，结果为 `consistent`。
 - 脱敏计数为 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset；未把标题、正文、地点、账号 ID、文件名或 URI写入日志。
 - 本轮没有把 SQLite 切为 UI 事实源，也没有改变录音、上传、转写或总结调用路径。

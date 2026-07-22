@@ -31,7 +31,10 @@ export interface MeetingNoteAggregate {
 
 export interface MeetingListQuery {
   limit: number;
-  beforeUpdatedAtMs?: number | null;
+  before?: {
+    updatedAtMs: number;
+    id: string;
+  } | null;
   includeDeleted?: boolean;
 }
 
