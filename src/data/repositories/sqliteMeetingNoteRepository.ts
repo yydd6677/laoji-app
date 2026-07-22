@@ -39,6 +39,12 @@ type MeetingRow = {
   origin: MeetingNote['origin'];
   entry_point: MeetingNote['entryPoint'];
   title: string;
+  description: string | null;
+  participants_json: string;
+  location: string | null;
+  mode: MeetingNote['mode'];
+  client_request_id: string | null;
+  recorded_at_ms: number | null;
   lifecycle: MeetingNote['lifecycle'];
   started_at_ms: number | null;
   ended_at_ms: number | null;
@@ -201,6 +207,9 @@ const RECORDING_LOCAL_STATES = new Set<RecordingAssetRecord['localState']>([
   'remote_only',
   'missing',
 ]);
+const MEETING_CAPTURE_MODES = new Set<NonNullable<MeetingNote['mode']>>([
+  'realtime', 'offline', 'whisper', 'qwen',
+]);
 const TRANSCRIPT_REVISION_KINDS = new Set<TranscriptRevisionRecord['kind']>([
   'realtime_draft', 'final', 'reprocessed',
 ]);
@@ -226,6 +235,9 @@ const SUMMARY_EFFECTIVE_USER_EDITED_SQL = `CASE WHEN
 
 function noteFromRow(row: MeetingRow): MeetingNote {
   assertScopeKey(row.scope_key);
+  if (row.mode !== null && !MEETING_CAPTURE_MODES.has(row.mode)) {
+    throw new Error('stored meeting mode is invalid');
+  }
   return {
     id: row.id,
     scopeKey: row.scope_key,
@@ -233,6 +245,12 @@ function noteFromRow(row: MeetingRow): MeetingNote {
     origin: row.origin,
     entryPoint: row.entry_point,
     title: row.title,
+    description: row.description,
+    participants: participantsFromJson(row.participants_json),
+    location: row.location,
+    mode: row.mode,
+    clientRequestId: row.client_request_id,
+    recordedAtMs: row.recorded_at_ms,
     lifecycle: row.lifecycle,
     startedAtMs: row.started_at_ms,
     endedAtMs: row.ended_at_ms,
@@ -411,6 +429,24 @@ function assertNonNegativeInteger(value: number, field: string): void {
 
 function assertOptionalNonNegativeInteger(value: number | null, field: string): void {
   if (value !== null) assertNonNegativeInteger(value, field);
+}
+
+function assertNullableBoundedText(value: string | null, maximum: number, field: string): void {
+  if (value !== null && (value.length > maximum || /[\u0000]/.test(value))) {
+    throw new Error(`${field} is invalid`);
+  }
+}
+
+function assertMeetingParticipants(value: readonly string[]): void {
+  if (value.length > 500 || value.some(item => (
+    typeof item !== 'string' || !item.trim() || item.length > 1000 || /[\u0000]/.test(item)
+  ))) {
+    throw new Error('meeting participants are invalid');
+  }
+}
+
+function assertMeetingMode(value: MeetingNote['mode']): void {
+  if (value !== null && !MEETING_CAPTURE_MODES.has(value)) throw new Error('meeting mode is invalid');
 }
 
 function actionStatus(value: ActionItemRecord['status']): ActionItemRecord['status'] {
@@ -659,12 +695,25 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 
   async insertMeeting(note: NewMeetingNote): Promise<void> {
     assertScopeKey(note.scopeKey);
+    const description = note.description ?? null;
+    const participants = note.participants ?? [];
+    const location = note.location ?? null;
+    const mode = note.mode ?? null;
+    const clientRequestId = note.clientRequestId?.trim() || null;
+    const recordedAtMs = note.recordedAtMs ?? null;
+    assertNullableBoundedText(description, 100_000, 'meeting description');
+    assertMeetingParticipants(participants);
+    assertNullableBoundedText(location, 2_000, 'meeting location');
+    assertMeetingMode(mode);
+    if (clientRequestId) assertRecordId(clientRequestId, 'meeting client request ID');
+    assertOptionalNonNegativeInteger(recordedAtMs, 'meeting recorded time');
     await this.database.runAsync(
       `INSERT INTO meeting_notes (
-         id, scope_key, remote_id, legacy_source_id, origin, entry_point, title, lifecycle,
+         id, scope_key, remote_id, legacy_source_id, origin, entry_point, title,
+         description, participants_json, location, mode, client_request_id, recorded_at_ms, lifecycle,
          started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
          sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL)`,
       note.id,
       note.scopeKey,
       note.remoteId ?? null,
@@ -672,6 +721,12 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       note.origin,
       note.entryPoint,
       note.title,
+      description,
+      JSON.stringify(participants),
+      location,
+      mode,
+      clientRequestId,
+      recordedAtMs,
       note.lifecycle,
       note.startedAtMs,
       note.endedAtMs,
@@ -694,6 +749,36 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       values.push(value);
     };
     if (Object.prototype.hasOwnProperty.call(patch, 'title')) add('title', patch.title!);
+    if (Object.prototype.hasOwnProperty.call(patch, 'description')) {
+      const value = patch.description ?? null;
+      assertNullableBoundedText(value, 100_000, 'meeting description');
+      add('description', value);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'participants')) {
+      const value = patch.participants ?? [];
+      assertMeetingParticipants(value);
+      add('participants_json', JSON.stringify(value));
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'location')) {
+      const value = patch.location ?? null;
+      assertNullableBoundedText(value, 2_000, 'meeting location');
+      add('location', value);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'mode')) {
+      const value = patch.mode ?? null;
+      assertMeetingMode(value);
+      add('mode', value);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'clientRequestId')) {
+      const value = patch.clientRequestId?.trim() || null;
+      if (value) assertRecordId(value, 'meeting client request ID');
+      add('client_request_id', value);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'recordedAtMs')) {
+      const value = patch.recordedAtMs ?? null;
+      assertOptionalNonNegativeInteger(value, 'meeting recorded time');
+      add('recorded_at_ms', value);
+    }
     if (Object.prototype.hasOwnProperty.call(patch, 'remoteId')) add('remote_id', patch.remoteId ?? null);
     if (Object.prototype.hasOwnProperty.call(patch, 'lifecycle')) add('lifecycle', patch.lifecycle!);
     if (Object.prototype.hasOwnProperty.call(patch, 'startedAtMs')) add('started_at_ms', patch.startedAtMs ?? null);
@@ -1573,6 +1658,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       remoteId: row.remote_id,
       origin: row.origin,
       title: row.title,
+      description: row.description,
+      participants: participantsFromJson(row.participants_json),
+      location: row.location,
+      mode: row.mode,
+      clientRequestId: row.client_request_id,
+      recordedAtMs: row.recorded_at_ms,
       lifecycle: row.lifecycle,
       startedAtMs: row.started_at_ms,
       updatedAtMs: row.updated_at_ms,

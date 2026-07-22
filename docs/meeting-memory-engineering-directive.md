@@ -262,6 +262,12 @@ CREATE TABLE meeting_notes (
   origin TEXT NOT NULL CHECK(origin IN ('calendar','ad_hoc','file_import','share_intent')),
   entry_point TEXT,
   title TEXT NOT NULL DEFAULT '',
+  description TEXT,
+  participants_json TEXT NOT NULL DEFAULT '[]',
+  location TEXT,
+  mode TEXT,
+  client_request_id TEXT,
+  recorded_at_ms INTEGER,
   lifecycle TEXT NOT NULL CHECK(lifecycle IN ('draft','active','ended','deleted')),
   started_at_ms INTEGER,
   ended_at_ms INTEGER,
@@ -273,6 +279,14 @@ CREATE TABLE meeting_notes (
   deleted_at_ms INTEGER,
   UNIQUE(scope_key, remote_id)
 );
+
+CREATE UNIQUE INDEX idx_meeting_canonical_client_request_unique
+  ON meeting_notes(scope_key, client_request_id)
+  WHERE client_request_id IS NOT NULL
+    AND COALESCE(entry_point, '') != 'legacy_store';
+
+CREATE INDEX idx_meeting_recorded_at
+  ON meeting_notes(scope_key, recorded_at_ms DESC, id DESC);
 
 CREATE TABLE meeting_occurrence_links (
   meeting_id TEXT PRIMARY KEY REFERENCES meeting_notes(id) ON DELETE CASCADE,
@@ -538,6 +552,8 @@ CREATE TABLE migration_runs (
   completed_at_ms INTEGER
 );
 ```
+
+已安装 SQLite v1/v2 的设备必须通过 additive v3 migration 增加上述六个会议上下文字段和两个索引，不重建 `meeting_notes`，也不移动既有稳定标签。`date/time` 从 `recorded_at_ms` 或时间字段派生，`duration` 从主录音资产派生，展示标签从 lifecycle/processing stage 派生，均不在会议根表重复保存。旧 Store 影子行允许历史重复 `client_request_id`；只有 canonical 行按 `(scope_key, client_request_id)` 唯一，避免脏历史阻塞无损导入。
 
 `transcript_words` 只在服务端确有词级时间戳时写入；没有词级时间戳时只做段落高亮，不得伪造逐词效果。
 

@@ -33,6 +33,22 @@ function timestamp(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : fallback;
 }
 
+function normalizedParticipants(meeting: Meeting): readonly string[] {
+  if (!Array.isArray(meeting.participants)) return [];
+  return meeting.participants
+    .filter((value): value is string => typeof value === 'string')
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function normalizedLocation(meeting: Meeting): string | null {
+  return typeof meeting.location === 'string' ? meeting.location.trim() || null : null;
+}
+
+function normalizedClientRequestId(meeting: Meeting): string | null {
+  return typeof meeting.clientRequestId === 'string' ? meeting.clientRequestId.trim() || null : null;
+}
+
 function legacyLocalId(scopeKey: ScopeKey, legacyMeetingId: string): string {
   return `legacy:${encodeURIComponent(scopeKey)}:${encodeURIComponent(legacyMeetingId)}`;
 }
@@ -57,6 +73,12 @@ export async function mirrorLegacyMeetingCreated(scopeKey: ScopeKey, meeting: Me
           origin: 'ad_hoc',
           entryPoint: 'legacy_store',
           title: meeting.title ?? '',
+          description: meeting.description ?? null,
+          participants: normalizedParticipants(meeting),
+          location: normalizedLocation(meeting),
+          mode: meeting.mode ?? null,
+          clientRequestId: normalizedClientRequestId(meeting),
+          recordedAtMs: timestamp(meeting.createdAt, createdAtMs),
           lifecycle,
           startedAtMs: createdAtMs,
           endedAtMs: lifecycle === 'ended' ? updatedAtMs : null,
@@ -205,6 +227,15 @@ export async function mirrorLegacyMeetingStageState(
           : note.lifecycle;
       await transaction.updateMeeting(note.id, scopeKey, {
         title: legacyMeeting.title ?? '',
+        description: legacyMeeting.description ?? null,
+        participants: normalizedParticipants(legacyMeeting),
+        location: normalizedLocation(legacyMeeting),
+        mode: legacyMeeting.mode ?? null,
+        clientRequestId: normalizedClientRequestId(legacyMeeting),
+        recordedAtMs: timestamp(
+          legacyMeeting.createdAt,
+          note.recordedAtMs ?? note.createdAtMs,
+        ),
         lifecycle,
         ...(lifecycle === 'active' && note.startedAtMs === null ? { startedAtMs: nowMs } : {}),
         ...(lifecycle === 'ended' && note.endedAtMs === null ? { endedAtMs: nowMs } : {}),

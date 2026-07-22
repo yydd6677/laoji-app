@@ -1,5 +1,6 @@
 import type {
   MeetingEntryPoint,
+  MeetingCaptureMode,
   MeetingLifecycle,
   MeetingNote,
   MeetingOrigin,
@@ -44,6 +45,12 @@ export interface MeetingListProjectionItem {
   remoteId: string | null;
   origin: MeetingOrigin;
   title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: MeetingCaptureMode | null;
+  clientRequestId: string | null;
+  recordedAtMs: number | null;
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
   updatedAtMs: number;
@@ -66,6 +73,12 @@ export interface NewMeetingNote {
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint;
   title: string;
+  description?: string | null;
+  participants?: readonly string[];
+  location?: string | null;
+  mode?: MeetingCaptureMode | null;
+  clientRequestId?: string | null;
+  recordedAtMs?: number | null;
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
   endedAtMs: number | null;
@@ -104,6 +117,12 @@ export interface RecordingAssetRecord {
 
 export interface MeetingRootPatch {
   title?: string;
+  description?: string | null;
+  participants?: readonly string[];
+  location?: string | null;
+  mode?: MeetingCaptureMode | null;
+  clientRequestId?: string | null;
+  recordedAtMs?: number | null;
   remoteId?: string | null;
   lifecycle?: MeetingLifecycle;
   startedAtMs?: number | null;

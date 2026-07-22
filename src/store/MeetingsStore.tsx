@@ -95,6 +95,7 @@ async function auditShadowRepositoryRead(
       invalid_stage_sets: report.invalidStageSets,
       transcript_count_mismatches: report.transcriptCountMismatches,
       summary_availability_mismatches: report.summaryAvailabilityMismatches,
+      context_mismatches: report.contextMismatches,
     });
   } catch (error) {
     diagnosticWarn('[meeting-db] repository shadow read failed', error);
@@ -185,11 +186,19 @@ function serverToLocal(m: ApiMeeting): Meeting {
   };
 }
 
+interface CreateMeetingOptions {
+  description?: string | null;
+  participants?: string[];
+  mode?: ApiMeeting['mode'];
+  clientRequestId?: string;
+  location?: string | null;
+  recordedAt?: string | null;
+}
+
 function createGuestMeeting(
   title: string,
-  clientRequestId?: string,
-  now = new Date(),
-  location?: string | null,
+  options: CreateMeetingOptions,
+  now: Date,
 ): Meeting {
   return {
     id: secureClientIdFactory.create(),
@@ -198,16 +207,17 @@ function createGuestMeeting(
     time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
     duration: '—',
     tags: [statusTag('created'), { label: '本机', color: C.teal }],
-    participants: [],
+    participants: options.participants ?? [],
     hasTranscript: false,
     hasSummary: false,
     status: 'created',
-    mode: 'realtime',
-    location: location ?? null,
+    mode: options.mode ?? 'realtime',
+    description: options.description ?? null,
+    location: options.location ?? null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     audioAvailable: false,
-    clientRequestId,
+    clientRequestId: options.clientRequestId,
     source: 'guest',
   };
 }
@@ -237,14 +247,7 @@ interface MeetingsContextType {
   meetings: Meeting[];
   loading: boolean;
   error: string | null;
-  createMeeting: (title: string, options?: {
-    description?: string | null;
-    participants?: string[];
-    mode?: ApiMeeting['mode'];
-    clientRequestId?: string;
-    location?: string | null;
-    recordedAt?: string | null;
-  }) => Promise<Meeting>;
+  createMeeting: (title: string, options?: CreateMeetingOptions) => Promise<Meeting>;
   deleteMeeting: (id: string) => Promise<void>;
   updateMeetingTitle: (id: string, title: string) => Promise<void>;
   updateMeetingDetails: (
@@ -597,14 +600,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   const createMeeting = useCallback(async (
     title: string,
-    options: {
-      description?: string | null;
-      participants?: string[];
-      mode?: ApiMeeting['mode'];
-      clientRequestId?: string;
-      location?: string | null;
-      recordedAt?: string | null;
-    } = {},
+    options: CreateMeetingOptions = {},
   ): Promise<Meeting> => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
@@ -612,12 +608,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode === 'guest') {
       return enqueueGuestMutation(async () => {
         if (activeScopeRef.current !== scope) throw new Error('meeting scope changed');
-        const local = createGuestMeeting(
-          cleanTitle,
-          options.clientRequestId,
-          options.recordedAt ? new Date(options.recordedAt) : new Date(),
-          options.location,
-        );
+        const requestedRecordedAt = options.recordedAt ? new Date(options.recordedAt) : new Date();
+        const recordedAt = Number.isNaN(requestedRecordedAt.getTime()) ? new Date() : requestedRecordedAt;
+        const local = createGuestMeeting(cleanTitle, options, recordedAt);
         const next = [local, ...meetingsRef.current];
         await persistMeetingsStrict(next);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return local;

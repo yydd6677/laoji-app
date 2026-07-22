@@ -18,6 +18,7 @@ export interface MeetingDualReadReport {
   invalidStageSets: number;
   transcriptCountMismatches: number;
   summaryAvailabilityMismatches: number;
+  contextMismatches: number;
 }
 
 export interface LegacyMeetingContentProjection {
@@ -50,6 +51,15 @@ function hasCompleteStageSet(item: MeetingListProjectionItem): boolean {
   if (item.stages.length !== PROCESSING_STAGE_NAMES.length) return false;
   const names = new Set<ProcessingStageName>(item.stages.map(stage => stage.stage));
   return PROCESSING_STAGE_NAMES.every(name => names.has(name));
+}
+
+function normalizedParticipants(value: readonly string[] | undefined): readonly string[] {
+  return (value ?? []).map(item => item.trim()).filter(Boolean);
+}
+
+function legacyRecordedAtMs(meeting: Meeting): number | null {
+  const parsed = meeting.createdAt ? Date.parse(meeting.createdAt) : Number.NaN;
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
 }
 
 export class MeetingRepositoryFacade {
@@ -94,6 +104,7 @@ export class MeetingRepositoryFacade {
     let lifecycleMismatches = 0;
     let transcriptCountMismatches = 0;
     let summaryAvailabilityMismatches = 0;
+    let contextMismatches = 0;
     legacyById.forEach((legacy, id) => {
       const repositoryItem = repositoryByIdentity.get(id);
       if (!repositoryItem) {
@@ -102,6 +113,13 @@ export class MeetingRepositoryFacade {
       }
       if (repositoryItem.title !== (legacy.title ?? '')) titleMismatches += 1;
       if (repositoryItem.lifecycle !== lifecycleForLegacy(legacy)) lifecycleMismatches += 1;
+      const contextMatches = repositoryItem.description === (legacy.description ?? null)
+        && JSON.stringify(repositoryItem.participants) === JSON.stringify(normalizedParticipants(legacy.participants))
+        && repositoryItem.location === (legacy.location?.trim() || null)
+        && repositoryItem.mode === (legacy.mode ?? null)
+        && repositoryItem.clientRequestId === (legacy.clientRequestId?.trim() || null)
+        && repositoryItem.recordedAtMs === legacyRecordedAtMs(legacy);
+      if (!contextMatches) contextMismatches += 1;
       if (content) {
         const legacyTranscriptCount = Math.max(0, Math.trunc(content.transcriptLineCounts[id] ?? 0));
         if (repositoryItem.activeTranscriptSegmentCount !== legacyTranscriptCount) {
@@ -119,7 +137,7 @@ export class MeetingRepositoryFacade {
     const invalidStageSets = repositoryItems.filter(item => !hasCompleteStageSet(item)).length;
     const mismatchCount = missingFromRepository + extraInRepository + duplicateRepositoryIdentities
       + titleMismatches + lifecycleMismatches + invalidStageSets
-      + transcriptCountMismatches + summaryAvailabilityMismatches;
+      + transcriptCountMismatches + summaryAvailabilityMismatches + contextMismatches;
     return {
       status: mismatchCount === 0 ? 'consistent' : 'mismatch',
       legacyMeetings: legacyById.size,
@@ -132,6 +150,7 @@ export class MeetingRepositoryFacade {
       invalidStageSets,
       transcriptCountMismatches,
       summaryAvailabilityMismatches,
+      contextMismatches,
     };
   }
 }

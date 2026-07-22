@@ -1,6 +1,7 @@
 import type {
   ClientIdFactory,
   MeetingEntryPoint,
+  MeetingCaptureMode,
   MeetingLifecycle,
   MeetingOrigin,
   MeetingProcessingStatuses,
@@ -42,6 +43,12 @@ export interface CreateMeetingNoteInput {
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint;
   title?: string | null;
+  description?: string | null;
+  participants?: readonly string[];
+  location?: string | null;
+  mode?: MeetingCaptureMode | null;
+  clientRequestId?: string | null;
+  recordedAtMs?: number | null;
   lifecycle?: MeetingLifecycle;
   startedAtMs?: number | null;
   endedAtMs?: number | null;
@@ -80,6 +87,37 @@ function requiredTimestamp(value: number | null | undefined, field: string): num
   const normalized = validTimestamp(value, field);
   if (normalized === null) throw new Error(`${field} is required`);
   return normalized;
+}
+
+function normalizeOptionalText(
+  value: string | null | undefined,
+  maximum: number,
+  field: string,
+): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > maximum || /[\u0000]/.test(normalized)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return normalized;
+}
+
+function normalizeParticipants(values: readonly string[] | undefined): readonly string[] {
+  if (!values) return [];
+  const normalized = values.map(value => value.trim()).filter(Boolean);
+  if (normalized.length > 500 || normalized.some(value => value.length > 1000 || /[\u0000]/.test(value))) {
+    throw new Error('meeting participants are invalid');
+  }
+  return [...new Set(normalized)];
+}
+
+function normalizeMode(value: MeetingCaptureMode | null | undefined): MeetingCaptureMode | null {
+  if (value === null || value === undefined) return null;
+  if (!['realtime', 'offline', 'whisper', 'qwen'].includes(value)) {
+    throw new Error('meeting mode is invalid');
+  }
+  return value;
 }
 
 function normalizeOccurrence(reference: OccurrenceReference): OccurrenceReference {
@@ -165,6 +203,16 @@ export class CreateMeetingNoteUseCase {
     const occurrence = input.occurrence ? normalizeOccurrence(input.occurrence) : null;
     const snapshot = input.scheduleSnapshot ? normalizeSnapshot(input.scheduleSnapshot) : null;
     const title = input.title?.trim() ?? '';
+    const description = normalizeOptionalText(input.description, 100_000, 'meeting description');
+    const participants = normalizeParticipants(input.participants);
+    const location = normalizeOptionalText(input.location, 2_000, 'meeting location');
+    const mode = normalizeMode(input.mode);
+    const clientRequestId = normalizeOptionalText(
+      input.clientRequestId,
+      512,
+      'meeting client request ID',
+    ) ?? requestedId;
+    const recordedAtMs = validTimestamp(input.recordedAtMs, 'meeting recorded time');
     let resolvedId = requestedId;
     let created = false;
 
@@ -182,6 +230,9 @@ export class CreateMeetingNoteUseCase {
       const existing = await transaction.getMeeting(requestedId, input.scopeKey);
       if (existing) {
         if (existing.origin !== input.origin) throw new Error('meeting create retry changed origin');
+        if (existing.clientRequestId && existing.clientRequestId !== clientRequestId) {
+          throw new Error('meeting create retry changed client request identity');
+        }
         resolvedId = existing.id;
         return;
       }
@@ -192,6 +243,12 @@ export class CreateMeetingNoteUseCase {
         origin: input.origin,
         entryPoint: input.entryPoint,
         title,
+        description,
+        participants,
+        location,
+        mode,
+        clientRequestId,
+        recordedAtMs,
         lifecycle,
         startedAtMs,
         endedAtMs,
@@ -279,6 +336,12 @@ export class CreateMeetingNoteUseCase {
             origin: input.origin,
             entry_point: input.entryPoint,
             title,
+            description,
+            participants,
+            location,
+            mode,
+            client_request_id: clientRequestId,
+            recorded_at_ms: recordedAtMs,
             started_at_ms: startedAtMs,
             occurrence_ref: occurrence,
             schedule_snapshot: snapshot,

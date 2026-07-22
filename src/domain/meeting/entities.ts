@@ -15,6 +15,8 @@ export type MeetingEntryPoint =
 
 export type MeetingLifecycle = 'draft' | 'active' | 'ended' | 'deleted';
 
+export type MeetingCaptureMode = 'realtime' | 'offline' | 'whisper' | 'qwen';
+
 export interface MeetingNote {
   id: string;
   scopeKey: ScopeKey;
@@ -22,6 +24,12 @@ export interface MeetingNote {
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint | null;
   title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: MeetingCaptureMode | null;
+  clientRequestId: string | null;
+  recordedAtMs: number | null;
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
   endedAtMs: number | null;

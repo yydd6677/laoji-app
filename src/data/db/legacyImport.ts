@@ -8,7 +8,7 @@ import type { PendingMeetingSummaryTask } from '../../services/meetingSummaryTas
 import { meetingSummaryToText } from '../../services/meetingSummaryFormat';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from './openDatabase';
 
-const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v3';
+const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v4';
 const PROCESSING_STAGES = ['capture', 'upload', 'transcript', 'summary', 'speaker'] as const;
 
 export interface LegacyMeetingShadowSource {
@@ -291,7 +291,7 @@ function countsMatch(left: LegacyMeetingImportCounts, right: LegacyMeetingImport
 }
 
 function migrationId(scopeKey: ScopeKey): string {
-  return `legacy-shadow-v3:${encodedPart(scopeKey)}`;
+  return `legacy-shadow-v4:${encodedPart(scopeKey)}`;
 }
 
 async function insertPreparedMeeting(
@@ -312,15 +312,22 @@ async function insertPreparedMeeting(
 
   await database.runAsync(
     `INSERT INTO meeting_notes (
-       id, scope_key, remote_id, legacy_source_id, origin, entry_point, title, lifecycle,
+       id, scope_key, remote_id, legacy_source_id, origin, entry_point, title,
+       description, participants_json, location, mode, client_request_id, recorded_at_ms, lifecycle,
        started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
        sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-     ) VALUES (?, ?, ?, ?, 'ad_hoc', 'legacy_store', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, 'ad_hoc', 'legacy_store', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
     localId,
     scopeKey,
     remoteId,
     item.legacyId,
     meeting.title ?? '',
+    meeting.description ?? null,
+    JSON.stringify((meeting.participants ?? []).map(value => value.trim()).filter(Boolean)),
+    meeting.location?.trim() || null,
+    meeting.mode ?? null,
+    meeting.clientRequestId?.trim() || null,
+    createdAtMs,
     lifecycle,
     createdAtMs,
     lifecycle === 'ended' ? updatedAtMs : null,
