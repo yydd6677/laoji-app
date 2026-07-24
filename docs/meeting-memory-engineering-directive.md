@@ -1096,6 +1096,8 @@ interface MinutesTranscriptLineSnapshot {
 
 录音结束第六层纵切补齐 native stop 的 scope ownership 和桥接异常兜底。`RecorderSnapshot` 现在从 `RecorderStartConfig` 原样携带 `storageScope`，start/state/event/stop 都跨桥返回；Android 页面只接纳同时满足 exact session ID 与 exact current scope 的活动 snapshot、失败 stop result 和 finalized journal。`ready_to_stop_timeout` 等带 `localSaved` 的既有结果继续直接提交；若桥接或前台服务异常只抛错误而没有 result，则立即扫描 finalized journal，只在 purpose=`meeting`、mode=`realtime`、session 与 scope 全部一致且 recovery report 提供非空 URI 时合成本机 `localSaved` snapshot 并继续 capture commit；同身份有多个候选时按 PCM 字节数、时长和 URI 确定性择优，波形结果未知时不伪造。无 scope 的旧 journal、其他账号、speaker 文件或近似时间文件不得由页面直接接管，仍交给集中 reconciler 的保守策略。纯函数合同已覆盖 session/scope/purpose/mode/无 scope 拒绝、重复候选择优和恢复 snapshot；TypeScript、1870 模块 Android bundle、`:app:compilePreviewKotlin`（232 tasks，9 executed）通过。真实 stop timeout、服务销毁竞态、恢复后可播放性和 USB 真机仍未验证，因此不能把源码兜底写成运行验收。
 
+录音结束第七层纵切移除 manual note 对 capture stop 的前置阻塞。用户确认结束后先启动当前笔记 `flush()`，但不再 `await` 它才调用 native finalize；笔记仍使用既有 SQLite 原子事务、400 ms autosave、App background/unmount flush 和中文失败状态，录音则立即进入 journal stop/local commit。这样数据库锁或异常慢写最多延后笔记落账，不能继续占用麦克风或把录音停止伪装成笔记保存操作。本层只有 TypeScript 与源码顺序证据，尚未注入真实 SQLite 长锁、强杀未落盘 draft 或真机停止并发，因此 NOTE-01 的强杀退出条件仍未满足。
+
 这一切片不改变事实源边界：Android recorder/journal 仍唯一负责采集状态、音频字节、本机文件、停止结果和进程恢复；控制器不缓存或推断 native capture state。`FinalizeNativeMeetingRecordingUseCase` 现在拥有“本机提交、启动远端 Transcript 补全、补全后清理游客会话”的顺序，`useNativeMeetingRecordingFinalizer` 组装 Store/API/WorkManager 依赖，`MeetingLiveScreen.android.tsx` 不再直接组装这些结束依赖或实现补全算法；页面仍负责创建会议、启动原生录音、订阅状态、用户动作和可见反馈，因此尚未达到纯状态订阅者的最终形态。当前只有 TypeScript、Android JS bundle 和临时窄合同证据，没有模拟器冒烟、强杀、停止超时、长录音或 USB 真机证据，这些仍属于后续退出条件。
 
 ## 10. P1 功能详细设计

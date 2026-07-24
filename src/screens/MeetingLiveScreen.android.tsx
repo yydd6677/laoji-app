@@ -759,7 +759,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
   const stopRecording = useCallback(async (navigateAfter = true) => {
     if (!recordingControllerRef.current.current()) return false;
-    await manualNote.flush();
+    const noteFlush = manualNote.flush();
+    void noteFlush.catch(reason => {
+      diagnosticWarn('flush manual note while stopping recording failed', reason);
+    });
     return finalizeActiveRecording(navigateAfter);
   }, [finalizeActiveRecording, manualNote.flush]);
 
