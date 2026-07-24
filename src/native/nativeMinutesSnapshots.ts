@@ -7,8 +7,10 @@ import {
   type MinutesDetailTab,
   type MinutesMarkerSnapshot,
   type MinutesPlayerSourceSnapshot,
+  type MinutesProcessingStage,
   type MinutesRecordingPhase,
   type MinutesRecordingContent,
+  type MinutesStatusTone,
   type MinutesSummarySectionSnapshot,
   type MinutesViewSnapshot,
 } from 'laoji-native-platform';
@@ -120,6 +122,10 @@ export interface BuildNativeDetailSnapshotInput {
   playerSource?: MinutesPlayerSourceSnapshot | null;
   audioStatusMessage?: string;
   audioErrorMessage?: string;
+  processingStatusLabel?: string;
+  processingStatusTone?: MinutesStatusTone;
+  processingRetryStage?: MinutesProcessingStage;
+  processingRetrying?: boolean;
 }
 
 export type NativeMinutesPageGenerations = Record<MinutesDetailTab, number>;
@@ -651,6 +657,10 @@ export function buildNativeMinutesDetailSnapshot(
     playerSource: input.playerSource ?? null,
     audioStatusMessage: input.audioStatusMessage ?? '',
     audioErrorMessage: input.audioErrorMessage ?? '',
+    processingStatusLabel: input.processingStatusLabel ?? '',
+    processingStatusTone: input.processingStatusTone ?? 'neutral',
+    processingRetryStage: input.processingRetryStage,
+    processingRetrying: input.processingRetrying ?? false,
   };
   const pageStates = normalizeNativeMinutesDetailPageStates({
     ...detail,

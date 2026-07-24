@@ -52,6 +52,7 @@ internal class MinutesDetailSurface(
   private val playerOwner = playerOwnerFactory(context, ::handlePlaybackState)
   internal val player: View = playerOwner.view
   internal val audioNotice: TextView = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  internal val processingNotice = LinearLayout(context)
 
   private val titleContainer = FrameLayout(context)
   private val title = context.textView(textSizeSp = 24, weight = Typeface.BOLD)
@@ -59,6 +60,8 @@ internal class MinutesDetailSurface(
   private val subtitleRow = LinearLayout(context)
   private val dateTimeIcon = ImageView(context)
   private val dateTime = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+  private val processingNoticeText = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  private val processingRetry = context.textView("重试", textSizeSp = 14, color = MinutesPalette.primary, weight = Typeface.BOLD)
   private val tabBar = MinutesDetailTabBar(context, ::requestUserTab)
   private val viewStateStore = MinutesDetailViewStateStore(context)
   private var renderedState = MinutesDetailState()
@@ -191,6 +194,40 @@ internal class MinutesDetailSurface(
     audioNotice.visibility = View.GONE
     addView(audioNotice, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+    // [INFERENCE] LaoJi's independent processing stages use the existing
+    // Minutes cached/error banner family. The 44dp slot and text action keep
+    // retry visible without turning a background task into a blocking dialog.
+    processingNotice.orientation = HORIZONTAL
+    processingNotice.gravity = Gravity.CENTER_VERTICAL
+    processingNotice.setPadding(context.dp(16), 0, context.dp(4), 0)
+    processingNotice.visibility = View.GONE
+    processingNoticeText.maxLines = 2
+    processingNotice.addView(
+      processingNoticeText,
+      LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+    )
+    processingRetry.gravity = Gravity.CENTER
+    processingRetry.isClickable = true
+    processingRetry.isFocusable = true
+    processingRetry.setOnClickListener {
+      val stage = renderedState.processingRetryStage ?: return@setOnClickListener
+      if (!processingRetry.isEnabled) return@setOnClickListener
+      onAction(
+        mapOf(
+          "type" to "retryProcessingStage",
+          "meetingId" to renderedState.meetingId,
+          "stage" to stage.wireName,
+        ),
+      )
+    }
+    processingNotice.addView(processingRetry, LayoutParams(context.dp(76), context.dp(44)))
+    audioHeader.addView(
+      processingNotice,
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)).apply {
+        topMargin = context.dp(12)
+      },
+    )
+
     // Feishu owns the audio toolbar outside the sticky container. WRAP_CONTENT lets the player
     // measure its real controls and system inset instead of imposing the old 100dp surface slot.
     addView(player, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -233,6 +270,7 @@ internal class MinutesDetailSurface(
     dateTime.text = renderedState.dateTimeLabel
     subtitleRow.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
     pagerAdapter.render(renderedState)
+    renderProcessingState(renderedState)
     renderAudioState(renderedState)
     tabBar.render(renderedState)
     issueTabCommand(
@@ -358,6 +396,33 @@ internal class MinutesDetailSurface(
     )
     audioNotice.contentDescription = message.takeIf { it.isNotBlank() }
     audioNotice.visibility = if (message.isBlank()) View.GONE else View.VISIBLE
+  }
+
+  private fun renderProcessingState(state: MinutesDetailState) {
+    val label = state.processingStatusLabel.trim()
+    val retryStage = state.processingRetryStage
+    val actionColor = if (state.processingStatusTone == "danger") MinutesPalette.danger else MinutesPalette.primary
+    processingNoticeText.text = label
+    processingNoticeText.setTextColor(statusToneColor(state.processingStatusTone))
+    processingNotice.backgroundShape(
+      when (state.processingStatusTone) {
+        "danger" -> MinutesPalette.dangerSoft
+        "primary" -> MinutesPalette.primarySoft
+        else -> MinutesPalette.page
+      },
+      radiusDp = 6,
+    )
+    processingRetry.visibility = if (retryStage == null) View.GONE else View.VISIBLE
+    processingRetry.isEnabled = retryStage != null && !state.processingRetrying
+    processingRetry.text = if (state.processingRetrying) "重试中" else "重试"
+    processingRetry.setTextColor(
+      statefulIconTint(actionColor, actionColor, MinutesPalette.disabled),
+    )
+    processingRetry.contentDescription = if (retryStage == null) null else {
+      if (state.processingRetrying) "$label，正在重试" else "$label，重试"
+    }
+    processingNotice.contentDescription = label.takeIf { it.isNotBlank() }
+    processingNotice.visibility = if (label.isBlank()) View.GONE else View.VISIBLE
   }
 
   private fun playableSource(state: MinutesDetailState): MinutesPlayerSource? =

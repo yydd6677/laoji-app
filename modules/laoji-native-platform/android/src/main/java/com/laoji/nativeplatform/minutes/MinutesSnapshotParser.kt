@@ -222,6 +222,14 @@ object MinutesSnapshotParser {
       audioErrorMessage = raw.string("audioErrorMessage")?.takeIf { it.isNotBlank() }?.let {
         NativeUserMessages.readable(it, "音频暂时无法播放，请稍后重试。")
       }.orEmpty(),
+      processingStatusLabel = raw.string("processingStatusLabel")?.takeIf { it.isNotBlank() }?.let {
+        NativeUserMessages.readable(it, "会议处理状态暂时无法获取，请稍后重试。")
+      }.orEmpty(),
+      processingStatusTone = raw.string("processingStatusTone")
+        ?.takeIf { it == "neutral" || it == "primary" || it == "success" || it == "warning" || it == "danger" }
+        ?: "neutral",
+      processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
+      processingRetrying = raw.boolean("processingRetrying"),
       pageStates = parseDetailPageStates(raw.mapOrNull("pageStates"), legacyPageStates),
     )
   }

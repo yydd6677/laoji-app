@@ -13,12 +13,14 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 9 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 10 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
 export type MinutesContentPhase = 'ready' | 'loading' | 'empty' | 'error';
 export type MinutesDetailTab = 'notes' | 'transcript' | 'summary' | 'speakers' | 'info';
+export type MinutesProcessingStage = 'capture' | 'upload' | 'transcript' | 'summary' | 'speaker';
+export type MinutesStatusTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
 export type MinutesRecordingContent = 'notes' | 'transcript';
 export type MinutesRecordingPhase =
   | 'idle'
@@ -44,7 +46,7 @@ export interface MinutesMeetingSnapshot {
   dateTimeLabel: string;
   durationLabel?: string;
   statusLabel?: string;
-  statusTone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
+  statusTone?: MinutesStatusTone;
   canResume?: boolean;
   /** [INFERENCE] LaoJi derives a Feishu-shaped cover from locally available content. */
   coverType?: 'default' | 'summary' | 'speakerSummary';
@@ -228,6 +230,10 @@ export interface MinutesDetailSnapshot {
   playerSource?: MinutesPlayerSourceSnapshot | null;
   audioStatusMessage?: string;
   audioErrorMessage?: string;
+  processingStatusLabel?: string;
+  processingStatusTone?: MinutesStatusTone;
+  processingRetryStage?: MinutesProcessingStage;
+  processingRetrying?: boolean;
 }
 
 export interface MinutesViewSnapshot {
@@ -257,6 +263,7 @@ export type MinutesSemanticAction =
   | { type: 'openManualNoteConflict'; surface: 'detail' | 'recording'; meetingId: string }
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
+  | { type: 'retryProcessingStage'; surface: 'detail'; meetingId: string; stage: MinutesProcessingStage }
   | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
   | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
   | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }

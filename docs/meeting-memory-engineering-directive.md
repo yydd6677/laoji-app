@@ -751,7 +751,7 @@ type SpeakerStatus =
 
 列表、日程详情和会议详情必须调用同一个 `deriveMeetingPresentationState()`，不得各写一套条件。
 
-当前第一纵切已补全严格的五阶段聚合与统一 label/tone/retryStage，并接入 canonical list projection、occurrence 日程动作和旧 `Meeting` DTO 的列表兼容投影；旧 DTO 只根据粗粒度 status、显式上传/内容字段作保守重建，canonical 第一标签仍优先。详情页现有 upload/transcript/summary 分页状态尚未改成统一 stage snapshot，也尚未提供通用 `retryProcessingStage` 操作，不能把本纵切表述为 PROC-01 完整 UI。
+当前前两层纵切已补全严格的五阶段聚合与统一 label/tone/retryStage，并接入 canonical list projection、occurrence 日程动作、详情页和旧 `Meeting` DTO 兼容投影；旧 DTO 只根据粗粒度 status、显式上传/内容字段作保守重建，canonical 阶段可读时优先。Minutes snapshot v10 在详情头部增加紧凑状态槽，Transcript/Summary 分页的 loading/error 与同一 stage snapshot 对齐；页面和状态槽的重试统一分派到录音恢复、现有上传 registry、Transcript 重新同步或 Summary pending-task 恢复，不复制后台任务实现。当前讲话人处理仍没有可验证的独立重试通道，远端运行与多阶段同时失败的真实收敛尚未验证，不能把本纵切表述为 PROC-01 完整 UI。
 
 ### 8.3 错误合同
 
@@ -1245,7 +1245,7 @@ type MeetingTemplate = {
 
 migration v13 的 `meeting_series_carry_imports` 以 `(target_meeting_id, source_kind, source_item_id)` 唯一标识一次来源导入，并固化来源 meeting/occurrence/title/content、负责人、截止时间、segment 与 start time 快照。ledger insert 与人工笔记 CAS 必须在同一事务；只渲染本次成功插入的项目。删除目标 meeting 级联删除 ledger；来源 meeting 不设外键，删除来源后仍保留已写入笔记的解释快照。v13 之前的纯文本块不反向猜测 ledger；Summary 重生成若改变决定 identity，语义相同文本仍可能成为新来源项目。模拟器以“决定 A + 事项 B”后再选“事项 B + 决定 C”验证最终三条 ledger、笔记 revision 2、事项 B 正文一次。
 
-决定 citation 只在可证明映射时用于精确回跳：section 仅一条决定时保留其引用；多条决定必须与按 ordinal 排序的 citation 数量相等并按位置一一绑定，否则该决定不携带精确来源。可靠映射进入来源会议“文字记录”并按 segment/source time 定位；歧义或缺失时退回来源“整理结果”。Calendar detail snapshot 为 v2；Minutes snapshot v9 提供初始 Transcript 定位 request。合法 `laoji://` 冷/热深链不会被媒体导入 inbox 抢占。本机合同和模拟器证据见 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
+决定 citation 只在可证明映射时用于精确回跳：section 仅一条决定时保留其引用；多条决定必须与按 ordinal 排序的 citation 数量相等并按位置一一绑定，否则该决定不携带精确来源。可靠映射进入来源会议“文字记录”并按 segment/source time 定位；歧义或缺失时退回来源“整理结果”。Calendar detail snapshot 为 v2；Minutes snapshot v10 保留初始 Transcript 定位 request，并增加详情处理状态与阶段重试语义。合法 `laoji://` 冷/热深链不会被媒体导入 inbox 抢占。本机合同和模拟器证据见 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
 
 #### Summary 使用
 
@@ -1612,9 +1612,9 @@ Outbox 调度：
 
 实施每个 surface 前必须补短 evidence note，包含 `[PRODUCT]/[SOURCE]/[DEVICE]/[INFERENCE]`。没有直对应组件时不得声称“飞书就是这样”。
 
-### 13.3 Minutes snapshot v9 与后续扩展
+### 13.3 Minutes snapshot v10 与后续扩展
 
-当前运行合同为 v9：列表已包含 `mediaImporting` 与 `importMedia`，录音页已包含人工笔记和 Marker 状态，详情已包含 page states、结构化 sections/citations、actions、markers、播放器、action focus，以及 `focusTranscriptSegmentId`、`focusTranscriptPositionMs`、`focusTranscriptRequestId` 初始来源定位。TypeScript 和 Kotlin 必须同步使用版本常量，旧 schema 不得静默按当前字段解释；focus request 只有实际找到目标或可靠时间回退后才能消费，避免 Transcript 尚未加载时永久丢失定位。
+当前运行合同为 v10：列表已包含 `mediaImporting` 与 `importMedia`，录音页已包含人工笔记和 Marker 状态，详情已包含 page states、结构化 sections/citations、actions、markers、播放器、action focus、处理状态 label/tone/retry stage，以及 `focusTranscriptSegmentId`、`focusTranscriptPositionMs`、`focusTranscriptRequestId` 初始来源定位。TypeScript 和 Kotlin 必须同步使用版本常量，未知 retry stage 必须 fail closed；focus request 只有实际找到目标或可靠时间回退后才能消费，避免 Transcript 尚未加载时永久丢失定位。
 
 后续 processing stage、版本选择和同步字段仍按当期纵切逐次增加；目标补充形状如下：
 

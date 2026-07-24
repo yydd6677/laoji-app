@@ -11,6 +11,7 @@ import {
   LaojiMinutesView,
   type MinutesDetailTab,
   type MinutesPlayerSourceSnapshot,
+  type MinutesProcessingStage,
   type MinutesSemanticAction,
 } from 'laoji-native-platform';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
@@ -94,19 +95,25 @@ import {
 import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import {
   DEFAULT_MEETING_TEMPLATE,
+  deriveMeetingPresentationState,
   meetingTemplateById,
+  processingStatusesFromStages,
   secureClientIdFactory,
+  type MeetingProcessingStatuses,
   type MeetingTemplate,
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingSummaryActionCandidate,
   type MeetingSummaryDocument,
+  type ProcessingStage,
   type ScopeKey,
 } from '../domain/meeting';
 import {
+  canResumeMeetingRecording,
   meetingRemoteIdentity,
   requireMeetingRemoteIdentity,
   transcriptDurationSec,
 } from '../utils/meetingMedia';
+import { legacyMeetingProcessingStatuses } from '../services/meetingPresentation';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCache';
 import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
@@ -183,6 +190,20 @@ type SpeakerAssignmentTarget = EditTranscriptSpeakerAction & {
   clusterCount: number;
 };
 
+type CanonicalProcessingSnapshot = {
+  meetingId: string;
+  scopeKey: ScopeKey;
+  stages: readonly ProcessingStage[];
+};
+
+const EMPTY_PROCESSING_STATUSES: MeetingProcessingStatuses = {
+  capture: 'not_started',
+  upload: 'not_required',
+  transcript: 'none',
+  summary: 'none',
+  speaker: 'none',
+};
+
 function compactMeetingDateTime(date: string, time?: string): string {
   const currentYearPrefix = `${new Date().getFullYear()}年`;
   const compactDate = date.startsWith(currentYearPrefix) ? date.slice(currentYearPrefix.length) : date;
@@ -191,6 +212,17 @@ function compactMeetingDateTime(date: string, time?: string): string {
 
 function explicitDetailTab(focus: RootStackParamList['Transcription']['focus']): MinutesDetailTab | null {
   return focus === 'notes' || focus === 'transcript' || focus === 'summary' ? focus : null;
+}
+
+function processingStageCanRetry(
+  statuses: MeetingProcessingStatuses,
+  stage: MinutesProcessingStage,
+): boolean {
+  if (stage === 'capture') return statuses.capture === 'failed_recoverable';
+  if (stage === 'upload') return statuses.upload === 'failed_retryable' || statuses.upload === 'blocked';
+  if (stage === 'transcript') return statuses.transcript === 'failed_retryable';
+  if (stage === 'summary') return statuses.summary === 'failed_retryable';
+  return false;
 }
 
 function transcriptSpeakerClusterId(line: TranscriptLine): string {
@@ -357,6 +389,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [playerSourceError, setPlayerSourceError] = useState('');
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
+  const [canonicalProcessingSnapshot, setCanonicalProcessingSnapshot] = useState<CanonicalProcessingSnapshot | null>(null);
   const [updatingActionId, setUpdatingActionId] = useState<string | null>(null);
   const [editingAction, setEditingAction] = useState<MeetingActionEditorValue | null>(null);
   const [actionEditorSaving, setActionEditorSaving] = useState(false);
@@ -405,6 +438,31 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     : session
       ? `user:${session.user.id}`
       : null;
+  const processingStatuses = useMemo<MeetingProcessingStatuses>(() => {
+    if (
+      canonicalProcessingSnapshot
+      && meeting
+      && meetingScopeKey
+      && canonicalProcessingSnapshot.meetingId === meeting.id
+      && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+    ) {
+      try {
+        return processingStatusesFromStages(canonicalProcessingSnapshot.stages);
+      } catch {
+        // A partial or malformed canonical aggregate must not make the detail
+        // page disappear. The old DTO remains the conservative projection.
+      }
+    }
+    return meeting ? legacyMeetingProcessingStatuses(meeting) : EMPTY_PROCESSING_STATUSES;
+  }, [canonicalProcessingSnapshot, meeting, meetingScopeKey]);
+  const processingPresentation = useMemo(
+    () => deriveMeetingPresentationState(processingStatuses),
+    [processingStatuses],
+  );
+  const processingStatusLabel = processingPresentation.label === '已完成'
+    || processingPresentation.label === '未开始'
+    ? ''
+    : processingPresentation.label;
   activeMeetingIdRef.current = meeting?.id ?? null;
   activeMeetingScopeRef.current = meetingScopeKey;
   const speakerNameCandidates = useMemo(() => {
@@ -598,6 +656,62 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       summaryAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    const requestedMeetingId = meeting?.id;
+    const requestedScopeKey = meetingScopeKey;
+    let active = true;
+    let observedCanonicalId = '';
+    let loadGeneration = 0;
+    let unsubscribe: (() => void) | null = null;
+    setCanonicalProcessingSnapshot(null);
+    if (!requestedMeetingId || !requestedScopeKey) return () => { active = false; };
+
+    const load = async () => {
+      const generation = loadGeneration + 1;
+      loadGeneration = generation;
+      try {
+        const direct = await sqliteMeetingNoteRepository.get(requestedMeetingId, requestedScopeKey);
+        const aggregate = direct ?? await sqliteMeetingNoteRepository.findByNativeSessionId(
+          requestedMeetingId,
+          requestedScopeKey,
+        );
+        if (
+          !active
+          || generation !== loadGeneration
+          || routeMeetingIdRef.current !== requestedMeetingId
+          || activeMeetingScopeRef.current !== requestedScopeKey
+        ) return;
+        if (!aggregate) {
+          setCanonicalProcessingSnapshot(null);
+          return;
+        }
+        setCanonicalProcessingSnapshot({
+          meetingId: requestedMeetingId,
+          scopeKey: requestedScopeKey,
+          stages: aggregate.processingStages,
+        });
+        if (observedCanonicalId !== aggregate.note.id) {
+          unsubscribe?.();
+          observedCanonicalId = aggregate.note.id;
+          unsubscribe = sqliteMeetingNoteRepository.observeMeeting(
+            aggregate.note.id,
+            requestedScopeKey,
+            () => { void load(); },
+          );
+        }
+      } catch (reason) {
+        if (!active || generation !== loadGeneration) return;
+        setCanonicalProcessingSnapshot(null);
+        diagnosticWarn('load detail meeting processing stages failed', reason);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [meeting?.id, meetingScopeKey]);
 
   useEffect(() => {
     setEditingAction(null);
@@ -2165,6 +2279,74 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [markers, showDialog, transcript]);
 
+  function retryProcessingStage(stage: MinutesProcessingStage): void {
+    if (!meeting || !processingStageCanRetry(processingStatuses, stage)) {
+      setReloadKey(value => value + 1);
+      void refreshMeetings().catch(() => {});
+      return;
+    }
+    if (stage === 'capture') {
+      if (!canResumeMeetingRecording(meeting)) {
+        showDialog({
+          title: '无法重新开始录音',
+          message: '当前会议已有录音文件，不能继续写入同一份记录。',
+          tone: 'warning',
+        });
+        return;
+      }
+      const requestedMeetingId = meeting.id;
+      void manualNote.flush().finally(() => {
+        if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+        navigation.replace('MeetingLive', { meetingId: requestedMeetingId, startRequested: true });
+      });
+      return;
+    }
+    if (stage === 'upload') {
+      if (retryingAudioUpload) return;
+      if (!accessToken) {
+        showDialog({
+          title: '暂时无法重试上传',
+          message: '登录状态已失效，请重新登录后再试。',
+          tone: 'warning',
+        });
+        return;
+      }
+      const requestedMeetingId = meeting.id;
+      void (async () => {
+        const pending = pendingAudioUpload ?? await getPendingMeetingAudioUpload(
+          recordingStorageScope,
+          requestedMeetingId,
+        ).catch(() => null);
+        if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+        if (!pending) {
+          await refreshMeetings().catch(() => {});
+          if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+          setReloadKey(value => value + 1);
+          showDialog({
+            title: '待上传状态已变化',
+            message: '未找到可重试的本机录音，已重新读取会议状态。',
+            tone: 'info',
+          });
+          return;
+        }
+        await performPendingAudioUpload(pending, true);
+      })();
+      return;
+    }
+    if (stage === 'transcript') {
+      if (loadingTranscript) return;
+      setTranscriptError('');
+      setReloadKey(value => value + 1);
+      return;
+    }
+    if (stage === 'summary') {
+      if (loadingSummary) return;
+      setSummaryError('');
+      void runSummaryTask();
+      return;
+    }
+  }
+
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'back':
@@ -2207,12 +2389,24 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         break;
       case 'retryDetailContent':
         if (action.meetingId !== route.params.meetingId) break;
+        if (action.tab === 'transcript' && processingStatuses.transcript === 'failed_retryable') {
+          retryProcessingStage('transcript');
+          break;
+        }
+        if (action.tab === 'summary' && processingStatuses.summary === 'failed_retryable') {
+          retryProcessingStage('summary');
+          break;
+        }
         const retryPlan = nativeMinutesDetailRetryPlan(action.tab, Boolean(summary));
         if (retryPlan.kind === 'generateSummary') {
           void runSummaryTask({ forceRegenerate: retryPlan.forceRegenerate });
         } else {
           setReloadKey(value => value + 1);
         }
+        break;
+      case 'retryProcessingStage':
+        if (action.meetingId !== route.params.meetingId) break;
+        retryProcessingStage(action.stage);
         break;
       case 'generateSummary':
         if (action.meetingId !== route.params.meetingId) break;
@@ -2257,7 +2451,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, removeMarker, route.params.meetingId, sharing, showDialog, summary, toggleMeetingAction]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, sharing, showDialog, summary, toggleMeetingAction]);
+
+  const transcriptStageLoading = processingStatuses.transcript === 'realtime_draft'
+    || processingStatuses.transcript === 'finalizing';
+  const transcriptStageMessage = processingStatuses.transcript === 'realtime_draft'
+    ? '文字记录仍在补全'
+    : processingStatuses.transcript === 'finalizing'
+      ? '正在生成文字记录'
+      : '';
+  const transcriptStageError = processingStatuses.transcript === 'failed_retryable'
+    ? '文字处理失败，可重试'
+    : '';
+  const summaryStageLoading = processingStatuses.summary === 'queued'
+    || processingStatuses.summary === 'generating';
+  const summaryStageError = processingStatuses.summary === 'failed_retryable'
+    ? '整理失败，可重试'
+    : '';
+  const processingRetrying = processingPresentation.retryStage === 'upload'
+    ? retryingAudioUpload
+    : processingPresentation.retryStage === 'transcript'
+      ? loadingTranscript
+      : processingPresentation.retryStage === 'summary'
+        ? loadingSummary
+        : false;
 
   const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
@@ -2287,12 +2504,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })),
     summaryDocument: displayedSummaryDocument,
     summaryText: displayedSummary,
-    transcriptLoading: Boolean(meeting && loadingTranscript),
-    transcriptStatusMessage: transcriptCompleting ? '文字记录仍在补全' : '',
-    summaryLoading: Boolean(meeting && loadingSummary && !briefSummary),
-    transcriptError: meeting ? transcriptError : '请返回会议列表后重新打开。',
-    summaryError: briefSummary ? '' : summaryError,
-    summaryProgress,
+    transcriptLoading: Boolean(meeting && (loadingTranscript || transcriptStageLoading)),
+    transcriptStatusMessage: transcriptStageMessage || (transcriptCompleting ? '文字记录仍在补全' : ''),
+    summaryLoading: Boolean(meeting && (loadingSummary || summaryStageLoading)),
+    transcriptError: meeting
+      ? transcriptStageError || transcriptError
+      : '请返回会议列表后重新打开。',
+    summaryError: summaryStageError || (briefSummary ? '' : summaryError),
+    summaryProgress: summaryStageLoading ? '正在整理会议记录' : summaryProgress,
     canShare: Boolean(meeting && !sharing),
     canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
@@ -2301,7 +2520,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       && meetingScopeKey
       && (displayedSummaryDocument || displayedActionCandidates.length > 0),
     ),
-    summaryGenerating: loadingSummary,
+    summaryGenerating: loadingSummary || summaryStageLoading,
     updatingActionId,
     focusActionId: route.params.actionId,
     focusActionRequestId: route.params.actionFocusRequestId,
@@ -2322,7 +2541,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     playerSource,
     audioStatusMessage: loadingAudio ? '正在加载录音' : (!playerSource ? '仅有转写，无录音文件' : ''),
     audioErrorMessage: pendingAudioError || playerSourceError,
-  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, updatingActionId]);
+    processingStatusLabel,
+    processingStatusTone: processingPresentation.tone,
+    processingRetryStage: processingPresentation.retryStage ?? undefined,
+    processingRetrying,
+  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
