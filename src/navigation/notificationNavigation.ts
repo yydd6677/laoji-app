@@ -7,6 +7,7 @@ import type { OccurrenceMeetingOpenTarget } from '../application/meeting';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from '../services/appStorage';
 import {
   EVENT_START_OR_RESUME_ACTION_IDENTIFIER,
+  MEETING_PLANNED_END_NOTIFICATION_KIND,
   resolveLegacyNotificationEventRef,
 } from '../services/notifications';
 import {
@@ -265,6 +266,16 @@ export async function queueNotificationResponse(response: NotificationResponse):
   const lastHandled = await getAppStorageItem(LAST_HANDLED_RESPONSE_KEY).catch(() => null);
   if (lastHandled === responseKey) {
     lastHandledResponseKey = responseKey;
+    return;
+  }
+  if (defaultAction && data?.kind === MEETING_PLANNED_END_NOTIFICATION_KIND) {
+    const notificationId = response.notification.request.identifier || null;
+    if (notificationId) {
+      await Notifications.dismissNotificationAsync(notificationId).catch(() => undefined);
+    }
+    await setAppStorageItem(LAST_HANDLED_RESPONSE_KEY, responseKey).catch(() => undefined);
+    lastHandledResponseKey = responseKey;
+    await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
     return;
   }
   const notificationScope = typeof data?.notificationScope === 'string' ? data.notificationScope : null;

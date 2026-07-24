@@ -767,6 +767,8 @@ type SpeakerStatus =
 - 用户手动停止、系统无法继续采集、达到明确存储上限时才结束。
 - 若应用进程/界面消失，前台服务继续按现有 journal 合同运行。
 
+`[INFERENCE]` 当前 Android 第一纵切只增加系统提醒，不改 recorder command/state machine：`startNativeRecorder()` 成功后才从 canonical schedule snapshot 读取 `planned_end_ms`；仍在未来时，以稳定 session ID 在独立低重要性通道幂等调度“日程已到结束时间 / 会议录音仍在继续”。录音启动不申请通知权限，未授权或无计划结束时间时静默跳过；活动 native session 恢复时补调度并去重，native capture 进入 `localSaved/failed`、恢复出已结束文件或手动 finalize 成功后取消并移除提醒。通知不包含会议标题、地点、参与人或正文；点击只按系统默认行为打开 App并消费该 response，当前不伪装成 event/meeting-action 导航目标。计划结束时间已经过去时不补发追溯提醒。
+
 ## 9. P0 功能详细设计
 
 ### 9.1 SRC-01：统一 MeetingNote 来源模型

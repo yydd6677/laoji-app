@@ -47,6 +47,8 @@ const EVENT_NOTIFICATION_REGISTRY_KEY = '@laoji:eventNotificationRegistry:v1';
 const ACTIVE_NOTIFICATION_SCOPE_KEY = '@laoji:activeNotificationScope:v1';
 const EVENT_NOTIFICATION_CHANNEL_ID = 'laoji-events';
 const MEETING_ACTION_NOTIFICATION_CHANNEL_ID = 'laoji-meeting-actions';
+const MEETING_PLANNED_END_NOTIFICATION_CHANNEL_ID = 'laoji-meeting-planned-end';
+export const MEETING_PLANNED_END_NOTIFICATION_KIND = 'meeting-planned-end';
 export const EVENT_NOTIFICATION_CATEGORY_IDENTIFIER = 'laoji-event-reminder';
 export const EVENT_START_OR_RESUME_ACTION_IDENTIFIER = 'start-or-resume-meeting';
 
@@ -630,6 +632,21 @@ async function prepareMeetingActionNotificationChannel(): Promise<void> {
   });
 }
 
+async function prepareMeetingPlannedEndNotificationChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(MEETING_PLANNED_END_NOTIFICATION_CHANNEL_ID, {
+    name: '会议录音提示',
+    description: '日程结束时安静提醒会议录音仍在继续',
+    importance: Notifications.AndroidImportance.LOW,
+    sound: null,
+    vibrationPattern: null,
+    enableVibrate: false,
+    showBadge: false,
+    bypassDnd: false,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+  });
+}
+
 export async function ensureNotificationPermission(): Promise<boolean> {
   await prepareNotificationChannel();
   const current = await getNotificationPermissionState();
@@ -719,6 +736,131 @@ export async function cancelEventNotification(notificationId?: string | null): P
     Notifications.dismissNotificationAsync(notificationId),
   ]);
   return scheduled.status === 'fulfilled';
+}
+
+function meetingPlannedEndNotificationId(sessionId: string): string {
+  return `laoji-meeting-planned-end:${sessionId}`;
+}
+
+function isMeetingPlannedEndNotification(
+  request: Awaited<ReturnType<typeof Notifications.getAllScheduledNotificationsAsync>>[number],
+  sessionId: string,
+): boolean {
+  const data = request.content.data;
+  return data?.kind === MEETING_PLANNED_END_NOTIFICATION_KIND
+    && data.sessionId === sessionId;
+}
+
+async function cancelMeetingPlannedEndReminderNow(sessionId: string): Promise<void> {
+  const notificationIds = new Set([meetingPlannedEndNotificationId(sessionId)]);
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    scheduled
+      .filter(request => isMeetingPlannedEndNotification(request, sessionId))
+      .forEach(request => notificationIds.add(request.identifier));
+  } catch (error) {
+    diagnosticWarn('read meeting planned end reminders failed', error);
+  }
+  const results = await Promise.all([...notificationIds].map(cancelEventNotification));
+  if (results.some(cancelled => !cancelled)) {
+    diagnosticWarn('cancel meeting planned end reminder failed');
+  }
+}
+
+/**
+ * REC-01: schedule only after Android has established a real native recording
+ * session. This reads notification permission but never requests it.
+ */
+export function reconcileMeetingPlannedEndReminder(
+  sessionId: string,
+  scopeKey: ScopeKey,
+  nowMs?: number,
+): Promise<string | null> {
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedSessionId) return Promise.resolve(null);
+  return enqueueNotificationOperation(async () => {
+    try {
+      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
+        normalizedSessionId,
+        scopeKey,
+      );
+      const plannedEndMs = aggregate?.scheduleSnapshot?.plannedEndMs ?? null;
+      if (plannedEndMs === null) {
+        await cancelMeetingPlannedEndReminderNow(normalizedSessionId);
+        return null;
+      }
+      if (!Number.isSafeInteger(plannedEndMs) || plannedEndMs < 0) {
+        await cancelMeetingPlannedEndReminderNow(normalizedSessionId);
+        return null;
+      }
+      // A recording started after its schedule already ended does not generate
+      // a retroactive notification. Crucially, this branch never changes the
+      // native capture state or sends a recorder command.
+      if (plannedEndMs <= (nowMs ?? Date.now())) return null;
+
+      const permission = await getNotificationPermissionState().catch(() => null);
+      if (!permission?.granted) return null;
+      await prepareMeetingPlannedEndNotificationChannel();
+
+      const notificationId = meetingPlannedEndNotificationId(normalizedSessionId);
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      const existing = scheduled.filter(request => (
+        isMeetingPlannedEndNotification(request, normalizedSessionId)
+      ));
+      const canonical = existing.find(request => (
+        request.identifier === notificationId
+        && request.content.data?.plannedEndMs === plannedEndMs
+      ));
+      if (canonical) {
+        await Promise.all(
+          existing
+            .filter(request => request.identifier !== canonical.identifier)
+            .map(request => cancelEventNotification(request.identifier)),
+        );
+        return canonical.identifier;
+      }
+
+      await Promise.all([
+        cancelEventNotification(notificationId),
+        ...existing.map(request => cancelEventNotification(request.identifier)),
+      ]);
+      return await Notifications.scheduleNotificationAsync({
+        identifier: notificationId,
+        content: {
+          title: '日程已到结束时间',
+          body: '会议录音仍在继续',
+          sound: false,
+          priority: 'low',
+          interruptionLevel: 'passive',
+          data: {
+            kind: MEETING_PLANNED_END_NOTIFICATION_KIND,
+            version: 1,
+            sessionId: normalizedSessionId,
+            plannedEndMs,
+          },
+        },
+        trigger: notificationDateTrigger(
+          new Date(plannedEndMs),
+          MEETING_PLANNED_END_NOTIFICATION_CHANNEL_ID,
+        ),
+      });
+    } catch (error) {
+      // A reminder is supplementary. Notification or repository failures must
+      // never prevent recording from starting or alter its capture state.
+      diagnosticWarn('reconcile meeting planned end reminder failed', error);
+      return null;
+    }
+  });
+}
+
+export function cancelMeetingPlannedEndReminder(sessionId: string): Promise<void> {
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedSessionId) return Promise.resolve();
+  return enqueueNotificationOperation(async () => {
+    await cancelMeetingPlannedEndReminderNow(normalizedSessionId).catch(error => {
+      diagnosticWarn('cancel meeting planned end reminder failed', error);
+    });
+  });
 }
 
 function meetingActionNotificationKey(canonicalMeetingId: string, actionId: string): string {
