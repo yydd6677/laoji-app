@@ -1078,6 +1078,10 @@ interface MinutesTranscriptLineSnapshot {
 
 应用层不得把数据库写、上传、最终 Transcript 拉取和 Summary 生成串成一个必须全部成功的 `try`。每阶段完成后立即 commit，自身失败只改变自身 stage。
 
+当前 Android 录音页已经完成第一层控制器收敛：`RecordingSessionController` 只持有 JS 侧启动 token、当前 native session handle、结束中的共享 Promise，以及多个结束请求合并后的跳转意图。重复开始会被拒绝；重复结束复用同一次 finalize；finalize 失败保留 active handle 供重试，成功后才释放。原生录音已经启动后，即使 JS 接管或计划结束提醒调度失败，也不得删除游客实时会话、把 meeting 标成 `failed`，或向用户伪报麦克风失败。
+
+这一切片不改变事实源边界：Android recorder/journal 仍唯一负责采集状态、音频字节、本机文件、停止结果和进程恢复；控制器不缓存或推断 native capture state。`MeetingLiveScreen.android.tsx` 目前仍组装创建、持久化、Transcript 补全与上传依赖，尚未完成代码改造地图中“仅作为订阅者”的最终形态。当前仅有 TypeScript、无落盘窄状态合同和模拟器冒烟证据；强杀、停止超时与真机长录音仍属于后续退出条件。
+
 ## 10. P1 功能详细设计
 
 ### 10.1 IMP-01：音视频文件与系统分享导入

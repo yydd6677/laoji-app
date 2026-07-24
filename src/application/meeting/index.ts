@@ -8,6 +8,7 @@ export * from './linkMeetingActionFollowupEvent';
 export * from './mergeAccountMeetingRemoteSnapshot';
 export * from './openOccurrenceMeeting';
 export * from './recordingReconciler';
+export * from './recordingSessionController';
 export * from './reconcileMeetingAudioUpload';
 export * from './resolveMeetingActionSyncConflict';
 export * from './resolveMeetingManualNoteSyncConflict';

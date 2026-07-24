@@ -79,6 +79,7 @@ import {
 } from '../services/transcriptCompleteness';
 import {
   MeetingManualNoteSyncConflictChangedError,
+  RecordingSessionController,
   ResolveMeetingManualNoteSyncConflictUseCase,
 } from '../application/meeting';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
@@ -179,7 +180,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const [manualNoteConflictSaving, setManualNoteConflictSaving] = useState(false);
   const [manualNoteConflictError, setManualNoteConflictError] = useState('');
   const mountedRef = useRef(true);
-  const activeRef = useRef<ActiveNativeRecording | null>(null);
+  const recordingControllerRef = useRef(
+    new RecordingSessionController<FinalizeMeetingRecordingResult, ActiveNativeRecording>(),
+  );
   const currentSessionIdRef = useRef('');
   const activeMeetingIdRef = useRef(meetingId);
   const recorderSnapshotRef = useRef<NativeRecorderSnapshot | null>(null);
@@ -188,12 +191,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const nativeAudioBarsRef = useRef<number[]>([]);
   const titleRef = useRef(title);
   const locationRef = useRef(location);
-  const finalizationRef = useRef<Promise<boolean> | null>(null);
+  const finalizationUiRef = useRef<Promise<boolean> | null>(null);
   const markerCreateQueueRef = useRef<Promise<void>>(Promise.resolve());
   const manualNoteConflictRequestGenerationRef = useRef(0);
-  const navigateAfterFinalizeRef = useRef(false);
   const autoStartAttemptedRef = useRef(false);
-  const startInFlightRef = useRef(false);
   const startedAtRef = useRef(new Date());
   const checkpointRef = useRef({ lineCount: finalizedNativeMinutesTranscript(transcript).length, savedAtMs: Date.now() });
   const createRequestRef = useRef(createClientRequestState('meeting'));
@@ -584,24 +585,31 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     };
   }, [applyRecorderSnapshot, persistNativeRecording, syncPersistedTranscript]);
 
-  const finalizeActiveRecording = useCallback((active: ActiveNativeRecording, navigateAfter: boolean) => {
-    navigateAfterFinalizeRef.current ||= navigateAfter;
-    if (finalizationRef.current) return finalizationRef.current;
+  const finalizeActiveRecording = useCallback((navigateAfter: boolean) => {
+    const controller = recordingControllerRef.current;
+    if (finalizationUiRef.current) {
+      controller.finalizeActive(navigateAfter);
+      return finalizationUiRef.current;
+    }
+    const finalization = controller.finalizeActive(navigateAfter);
+    if (!finalization) return Promise.resolve(false);
     setPhase('stopping');
     let operation: Promise<boolean> | null = null;
-    operation = active.finalize()
-      .then(async () => {
-        await cancelMeetingPlannedEndReminder(active.sessionId);
-        if (activeRef.current === active) {
-          activeRef.current = null;
-          if (mountedRef.current) setActiveSessionId('');
-        }
+    operation = finalization
+      .then(async completed => {
+        await cancelMeetingPlannedEndReminder(completed.session.sessionId).catch(reason => {
+          // The recording is already durable at this point. A reminder
+          // registry failure must not be mislabeled as a save failure or make
+          // the completed native session appear retryable.
+          diagnosticWarn('cancel planned meeting end reminder after finalize failed', reason);
+        });
+        if (mountedRef.current) setActiveSessionId('');
         if (!mountedRef.current) return true;
         setPhase('saving');
         setError('');
-        const shouldNavigate = navigateAfterFinalizeRef.current;
-        navigateAfterFinalizeRef.current = false;
-        if (shouldNavigate) navigation.replace('Transcription', { meetingId: active.meetingId });
+        if (completed.navigateAfter) {
+          navigation.replace('Transcription', { meetingId: completed.session.meetingId });
+        }
         return true;
       })
       .catch(reason => {
@@ -613,9 +621,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         return false;
       })
       .finally(() => {
-        if (finalizationRef.current === operation) finalizationRef.current = null;
+        if (finalizationUiRef.current === operation) finalizationUiRef.current = null;
       });
-    finalizationRef.current = operation;
+    finalizationUiRef.current = operation;
     return operation;
   }, [navigation, showDialog]);
 
@@ -629,10 +637,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       setTitle(existing.title ?? '');
       setTranscript(getCachedTranscript(existing.id));
       applyRecorderSnapshot(current);
-      activeRef.current = createActiveRecording(
+      const recoveredSession = createActiveRecording(
         existing.id,
         isGuest ? null : meetingRemoteIdentity(existing),
       );
+      if (!recordingControllerRef.current.attachRecovered(recoveredSession)) return false;
       setActiveSessionId(existing.id);
       if (meetingScopeKey && current.state !== 'failed') {
         await reconcileMeetingPlannedEndReminder(existing.id, meetingScopeKey);
@@ -672,19 +681,21 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, [applyRecorderSnapshot, createActiveRecording, existing, getCachedTranscript, isGuest, manualNote.flush, meetingScopeKey, navigation, persistNativeRecording, syncPersistedTranscript]);
 
   const startRecording = useCallback(async () => {
-    if (startInFlightRef.current || activeRef.current || finalizationRef.current) return;
     if (!hasNativeRecorder()) {
       setPhase('failed');
       setError('当前版本暂时无法录音，请安装最新完整版本');
       return;
     }
-    startInFlightRef.current = true;
+    const startToken = recordingControllerRef.current.beginStart();
+    if (startToken === null) return;
     setPhase('preparing');
     recorderErrorVisibleRef.current = false;
     setError('');
     nativeAudioBarsRef.current = [];
     let startedMeetingId = '';
     let guestSession: ApiGuestRealtimeSession | undefined;
+    let nativeCaptureStarted = false;
+    let startedSession: ActiveNativeRecording | null = null;
     try {
       const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
       if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
@@ -749,14 +760,46 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         allowInsecureDevelopment,
         ...credentials,
       });
+      nativeCaptureStarted = true;
       applyRecorderSnapshot(snapshot);
-      activeRef.current = createActiveRecording(meeting.id, remoteMeetingId, guestSession);
+      const active = createActiveRecording(meeting.id, remoteMeetingId, guestSession);
+      startedSession = active;
+      if (!recordingControllerRef.current.completeStart(startToken, active)) {
+        // Android has already opened the recorder. Never turn a JS ownership
+        // mismatch into a fake microphone failure or delete its remote ASR
+        // session. Drop the stale start token and attach the native session as
+        // a recovery handle so the user can still pause or stop it.
+        recordingControllerRef.current.abandonStart(startToken);
+        if (!recordingControllerRef.current.attachRecovered(active)) {
+          throw new Error('录音已开始，但页面状态暂未同步；请返回后重新打开本记录');
+        }
+      }
       setActiveSessionId(meeting.id);
       setPhase('recording');
       if (meetingScopeKey) {
-        await reconcileMeetingPlannedEndReminder(meeting.id, meetingScopeKey);
+        await reconcileMeetingPlannedEndReminder(meeting.id, meetingScopeKey).catch(reason => {
+          diagnosticWarn('reconcile planned meeting end reminder after recorder start failed', reason);
+        });
       }
     } catch (reason) {
+      if (nativeCaptureStarted) {
+        const controller = recordingControllerRef.current;
+        controller.abandonStart(startToken);
+        const attached = startedSession
+          ? controller.attachRecovered(startedSession)
+          : controller.current()?.sessionId === startedMeetingId;
+        diagnosticWarn('native recorder started before JS session ownership completed', reason);
+        if (mountedRef.current) {
+          setActiveSessionId(attached ? startedMeetingId : '');
+          setPhase('recording');
+          const message = attached
+            ? '录音仍在继续，页面部分状态暂未同步。'
+            : '录音仍在继续，请返回后重新打开本记录。';
+          setError(message);
+          showDialog({ title: '录音仍在继续', message, tone: 'warning' });
+        }
+        return;
+      }
       if (guestSession) {
         await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
       }
@@ -774,19 +817,18 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         showDialog({ title: '启动失败', message, tone: 'error' });
       }
     } finally {
-      startInFlightRef.current = false;
+      recordingControllerRef.current.abandonStart(startToken);
     }
   }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, entryPoint, existing, getCachedTranscript, isGuest, meetingId, meetingScopeKey, meetings, navigation, showDialog, updateMeetingStatus]);
 
   const stopRecording = useCallback(async (navigateAfter = true) => {
-    const active = activeRef.current;
-    if (!active) return false;
+    if (!recordingControllerRef.current.current()) return false;
     await manualNote.flush();
-    return finalizeActiveRecording(active, navigateAfter);
+    return finalizeActiveRecording(navigateAfter);
   }, [finalizeActiveRecording, manualNote.flush]);
 
   const togglePause = useCallback(async () => {
-    const active = activeRef.current;
+    const active = recordingControllerRef.current.current();
     if (!active || !['recording', 'paused'].includes(phase)) return;
     setError('');
     try {
@@ -839,7 +881,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, [existing, meetingsLoading, requestedMeetingId, restoreNativeSession, startRecording, startRequested, updateMeetingStatus]);
 
   const confirmStop = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!recordingControllerRef.current.current()) return;
     showDialog({
       title: '结束录音？',
       message: '结束后将先保存录音，再保存文字记录并安排后台同步。',
@@ -975,9 +1017,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         void startRecording();
         break;
       case 'retryRecording':
-        if (activeRef.current && ['recording', 'paused'].includes(phase)) {
+        if (recordingControllerRef.current.current() && ['recording', 'paused'].includes(phase)) {
           void retryTranscriptCache();
-        } else if (activeRef.current && phase === 'failed') {
+        } else if (recordingControllerRef.current.current() && phase === 'failed') {
           void stopRecording(false);
         } else {
           void startRecording();
