@@ -7,6 +7,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -20,6 +21,7 @@ import kotlin.math.roundToInt
 internal object MinutesPalette {
   val page = Color.rgb(248, 249, 250)
   val surface = Color.WHITE
+  val filler = Color.rgb(239, 240, 241)
   val text = Color.rgb(31, 35, 41)
   val secondary = Color.rgb(100, 106, 115)
   val faint = Color.rgb(143, 149, 158)
@@ -28,6 +30,8 @@ internal object MinutesPalette {
   val timelineTrack = Color.argb(13, 31, 35, 41)
   val primary = Color.rgb(20, 86, 240)
   val primarySoft = Color.rgb(240, 244, 255)
+  val primaryTransparent = Color.argb(38, 51, 109, 244)
+  val primaryTransparentStrong = Color.argb(76, 51, 109, 244)
   val coverDefault = Color.rgb(220, 229, 250)
   val coverSummary = Color.rgb(230, 238, 247)
   val coverContent = Color.rgb(240, 241, 242)
@@ -74,6 +78,33 @@ internal fun View.backgroundHorizontalGradient(
     cornerRadius = context.dp(radiusDp).toFloat()
   }
 }
+
+internal fun Context.roundedStateBackground(
+  defaultColor: Int,
+  pressedColor: Int,
+  disabledColor: Int,
+  radiusDp: Int,
+): StateListDrawable {
+  fun shape(color: Int) = GradientDrawable().apply {
+    setColor(color)
+    cornerRadius = dp(radiusDp).toFloat()
+  }
+  return StateListDrawable().apply {
+    addState(intArrayOf(-android.R.attr.state_enabled), shape(disabledColor))
+    addState(intArrayOf(android.R.attr.state_pressed), shape(pressedColor))
+    addState(intArrayOf(), shape(defaultColor))
+  }
+}
+
+internal fun statefulIconTint(defaultColor: Int, pressedColor: Int, disabledColor: Int): ColorStateList =
+  ColorStateList(
+    arrayOf(
+      intArrayOf(-android.R.attr.state_enabled),
+      intArrayOf(android.R.attr.state_pressed),
+      intArrayOf(),
+    ),
+    intArrayOf(disabledColor, pressedColor, defaultColor),
+  )
 
 internal fun Context.textView(
   text: CharSequence = "",

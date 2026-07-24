@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="laoji_widget_brand">老记</string>
+    <string name="laoji_widget_name">近期日程</string>
+    <string name="laoji_widget_preview_weekday">周一</string>
+    <string name="laoji_widget_preview_day">18</string>
+    <string name="laoji_widget_empty">未来 24 小时没有日程</string>
+    <string name="laoji_widget_stale">打开老记查看</string>
+    <string name="laoji_widget_loading">正在更新日程</string>
+    <string name="laoji_quick_tile_name">会议录音</string>
+</resources>

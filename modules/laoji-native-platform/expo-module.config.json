@@ -6,11 +6,13 @@
       "com.laoji.nativeplatform.LaojiTransferModule",
       "com.laoji.nativeplatform.LaojiCalendarModule",
       "com.laoji.nativeplatform.LaojiMinutesModule",
+      "com.laoji.nativeplatform.LaojiMediaImportModule",
       "com.laoji.nativeplatform.LaojiRecorderModule",
       "com.laoji.nativeplatform.LaojiLocationModule",
       "com.laoji.nativeplatform.calendarpages.LaojiCalendarDetailModule",
       "com.laoji.nativeplatform.calendarpages.LaojiCalendarEditModule",
       "com.laoji.nativeplatform.LaojiSpeakerModule",
+      "com.laoji.nativeplatform.LaojiSystemEntriesModule",
       "com.laoji.nativeplatform.ui.LaojiUiModule"
     ]
   }

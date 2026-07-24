@@ -2,6 +2,17 @@ import { meetingMemorySchemaV1 } from './0001MeetingMemorySchema';
 import { meetingMemoryPhase1 } from './0002MeetingMemoryPhase1';
 import { meetingContextV3 } from './0003MeetingContext';
 import { meetingWriteOwnershipV4 } from './0004MeetingWriteOwnership';
+import { summaryCitationIdentityV5 } from './0005SummaryCitationIdentity';
+import { actionRemindersV6 } from './0006ActionReminders';
+import { actionRemoteRevisionV7 } from './0007ActionRemoteRevision';
+import { actionOutboxTransportV8 } from './0008ActionOutboxTransport';
+import { actionMarkerSourceV9 } from './0009ActionMarkerSource';
+import { meetingSeriesIdentityV10 } from './0010MeetingSeriesIdentity';
+import { speakerAssignmentsV11 } from './0011SpeakerAssignments';
+import { speakerCorrectionSyncV12 } from './0012SpeakerCorrectionSync';
+import { seriesCarryImportsV13 } from './0013SeriesCarryImports';
+import { actionPullCursorV14 } from './0014ActionPullCursor';
+import { occurrenceLinkSyncV15 } from './0015OccurrenceLinkSync';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -9,10 +20,32 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingMemoryPhase1,
   meetingContextV3,
   meetingWriteOwnershipV4,
+  summaryCitationIdentityV5,
+  actionRemindersV6,
+  actionRemoteRevisionV7,
+  actionOutboxTransportV8,
+  actionMarkerSourceV9,
+  meetingSeriesIdentityV10,
+  speakerAssignmentsV11,
+  speakerCorrectionSyncV12,
+  seriesCarryImportsV13,
+  actionPullCursorV14,
+  occurrenceLinkSyncV15,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
 export { MEETING_MEMORY_PHASE_1_SQL } from './0002MeetingMemoryPhase1';
 export { MEETING_CONTEXT_V3_SQL } from './0003MeetingContext';
 export { MEETING_WRITE_OWNERSHIP_V4_SQL } from './0004MeetingWriteOwnership';
+export { SUMMARY_CITATION_IDENTITY_V5_SQL } from './0005SummaryCitationIdentity';
+export { ACTION_REMINDERS_V6_SQL } from './0006ActionReminders';
+export { ACTION_REMOTE_REVISION_V7_SQL } from './0007ActionRemoteRevision';
+export { ACTION_OUTBOX_TRANSPORT_V8_SQL } from './0008ActionOutboxTransport';
+export { ACTION_MARKER_SOURCE_V9_SQL } from './0009ActionMarkerSource';
+export { MEETING_SERIES_IDENTITY_V10_SQL } from './0010MeetingSeriesIdentity';
+export { SPEAKER_ASSIGNMENTS_V11_SQL } from './0011SpeakerAssignments';
+export { SPEAKER_CORRECTION_SYNC_V12_SQL } from './0012SpeakerCorrectionSync';
+export { SERIES_CARRY_IMPORTS_V13_SQL } from './0013SeriesCarryImports';
+export { ACTION_PULL_CURSOR_V14_SQL } from './0014ActionPullCursor';
+export { OCCURRENCE_LINK_SYNC_V15_SQL } from './0015OccurrenceLinkSync';
 export type { MeetingDatabaseMigration } from './types';

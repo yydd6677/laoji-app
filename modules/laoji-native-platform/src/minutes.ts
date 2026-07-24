@@ -13,12 +13,13 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 9 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
 export type MinutesContentPhase = 'ready' | 'loading' | 'empty' | 'error';
-export type MinutesDetailTab = 'transcript' | 'summary' | 'speakers' | 'info';
+export type MinutesDetailTab = 'notes' | 'transcript' | 'summary' | 'speakers' | 'info';
+export type MinutesRecordingContent = 'notes' | 'transcript';
 export type MinutesRecordingPhase =
   | 'idle'
   | 'preparing'
@@ -54,12 +55,26 @@ export interface MinutesMeetingSnapshot {
 export interface MinutesTranscriptLineSnapshot {
   id: string;
   speakerId?: string;
+  speakerClusterId?: string;
   speakerLabel?: string;
   timestampLabel?: string;
   startMs?: number;
   endMs?: number;
   text: string;
   isFinal?: boolean;
+  active?: boolean;
+  searchRanges?: readonly { start: number; end: number }[];
+  selectedSearchMatch?: boolean;
+  revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
+}
+
+export interface MinutesMarkerSnapshot {
+  id: string;
+  positionMs: number;
+  timestampLabel: string;
+  segmentId?: string;
+  label?: string;
+  deleting?: boolean;
 }
 
 export interface MinutesSummaryBlockSnapshot {
@@ -67,6 +82,39 @@ export interface MinutesSummaryBlockSnapshot {
   kind?: 'paragraph' | 'heading' | 'bullet' | 'ordered' | 'task' | 'quote' | 'code';
   text: string;
   checked?: boolean;
+}
+
+export interface MinutesSummaryCitationSnapshot {
+  id: string;
+  segmentId: string;
+  startMs: number;
+  endMs?: number;
+  label?: string;
+}
+
+export interface MinutesSummarySectionSnapshot {
+  id: string;
+  stableKey: string;
+  kind?: string;
+  title?: string | null;
+  text: string;
+  citations?: readonly MinutesSummaryCitationSnapshot[];
+}
+
+export interface MinutesActionItemSnapshot {
+  id: string;
+  content: string;
+  status: 'pending' | 'completed' | 'dismissed';
+  assigneeLabel?: string;
+  dueLabel?: string;
+  reminderLabel?: string;
+  followupEventSourceId?: string;
+  hasSource?: boolean;
+  sourceSegmentId?: string;
+  sourceStartMs?: number;
+  updatedAtMs?: number;
+  updating?: boolean;
+  syncConflict?: boolean;
 }
 
 export interface MinutesSpeakerSnapshot {
@@ -85,6 +133,7 @@ export interface MinutesDetailPageStateSnapshot {
 }
 
 export interface MinutesDetailPageStatesSnapshot {
+  notes: MinutesDetailPageStateSnapshot;
   transcript: MinutesDetailPageStateSnapshot;
   summary: MinutesDetailPageStateSnapshot;
   speakers: MinutesDetailPageStateSnapshot;
@@ -106,6 +155,7 @@ export interface MinutesListSnapshot {
   title?: string;
   searching?: boolean;
   query?: string;
+  mediaImporting?: boolean;
   phase?: MinutesContentPhase;
   message?: string;
   showingCachedData?: boolean;
@@ -126,7 +176,16 @@ export interface MinutesRecordingSnapshot {
   canPause?: boolean;
   canStop?: boolean;
   canStart?: boolean;
+  canCreateMarker?: boolean;
   followLatest?: boolean;
+  activeContent?: MinutesRecordingContent;
+  manualNote?: string;
+  manualNoteLoading?: boolean;
+  manualNoteSaving?: boolean;
+  manualNoteEnabled?: boolean;
+  manualNoteError?: string;
+  manualNoteRetryable?: boolean;
+  manualNoteConflict?: boolean;
   transcript: readonly MinutesTranscriptLineSnapshot[];
 }
 
@@ -145,11 +204,26 @@ export interface MinutesDetailSnapshot {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
+  canCreateAction?: boolean;
   summaryGenerating?: boolean;
   summaryActionLabel?: string;
   titleEditRequestId?: number;
+  focusActionId?: string;
+  focusActionRequestId?: number;
+  focusTranscriptSegmentId?: string;
+  focusTranscriptPositionMs?: number;
+  focusTranscriptRequestId?: number;
+  manualNote?: string;
+  manualNoteLoading?: boolean;
+  manualNoteSaving?: boolean;
+  manualNoteEnabled?: boolean;
+  manualNoteError?: string;
+  manualNoteRetryable?: boolean;
+  manualNoteConflict?: boolean;
   transcript: readonly MinutesTranscriptLineSnapshot[];
-  summary: readonly MinutesSummaryBlockSnapshot[];
+  markers?: readonly MinutesMarkerSnapshot[];
+  summary: readonly MinutesSummarySectionSnapshot[];
+  actions?: readonly MinutesActionItemSnapshot[];
   speakers: readonly MinutesSpeakerSnapshot[];
   playerSource?: MinutesPlayerSourceSnapshot | null;
   audioStatusMessage?: string;
@@ -167,17 +241,43 @@ export interface MinutesViewSnapshot {
 export type MinutesSemanticAction =
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
   | { type: 'openSpeakers' | 'openProfile'; surface: 'list' }
+  | { type: 'importMedia'; surface: 'list' }
   | { type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording'; surface: MinutesSurface; meetingId: string }
   | { type: 'startRecording'; surface: MinutesSurface; meetingId?: string }
   | { type: 'saveTitle'; surface: 'detail' | 'recording'; meetingId: string; title: string }
   | { type: 'openMeetingMenu'; surface: MinutesSurface; meetingId: string; canResume: boolean }
   | { type: 'renameMeeting' | 'deleteMeeting'; surface: 'list'; meetingId: string }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
+  | { type: 'createMarker'; surface: 'recording'; meetingId: string; positionMs: number }
   | { type: 'requestMeetingLocation'; surface: 'recording'; meetingId?: string }
   | { type: 'setFollowLatest'; surface: MinutesSurface; meetingId: string; followLatest: boolean }
+  | { type: 'selectRecordingContent'; surface: 'recording'; meetingId: string; content: MinutesRecordingContent }
+  | { type: 'updateManualNote'; surface: 'detail' | 'recording'; meetingId: string; content: string }
+  | { type: 'retryManualNote'; surface: 'detail' | 'recording'; meetingId: string }
+  | { type: 'openManualNoteConflict'; surface: 'detail' | 'recording'; meetingId: string }
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
   | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
+  | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
+  | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }
+  | { type: 'deleteMarker'; surface: 'detail'; meetingId: string; markerId: string }
+  | { type: 'seekSummaryCitation'; surface: 'detail'; meetingId: string; segmentId: string; positionMs: number }
+  | { type: 'toggleAction'; surface: 'detail'; meetingId: string; actionId: string; completed: boolean }
+  | { type: 'createAction'; surface: 'detail'; meetingId: string }
+  | { type: 'editAction'; surface: 'detail'; meetingId: string; actionId: string }
+  | { type: 'actionToEvent'; surface: 'detail'; meetingId: string; actionId: string }
+  | { type: 'openActionSource'; surface: 'detail'; meetingId: string; actionId: string; segmentId?: string; positionMs: number }
+  | {
+      type: 'editTranscriptSpeaker';
+      surface: 'detail';
+      meetingId: string;
+      lineId: string;
+      speakerId: string;
+      speakerClusterId?: string;
+      speakerLabel: string;
+      positionMs: number;
+      revisionKind: 'realtimeDraft' | 'final' | 'reprocessed';
+    }
   | { type: 'manageSpeaker'; surface: MinutesSurface; meetingId: string; speakerId: string }
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }

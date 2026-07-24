@@ -14,7 +14,7 @@ internal object MinutesDetailLayoutContract {
   const val HEADER_TOP_PADDING_DP = 20
   const val HEADER_BOTTOM_PADDING_DP = 16
   const val SUBTITLE_TOP_MARGIN_DP = 6
-  const val PAGE_COUNT = 4
+  const val PAGE_COUNT = 5
 
   data class PreScrollResult(
     val collapseOffsetPx: Int,
@@ -55,6 +55,6 @@ internal object MinutesDetailLayoutContract {
   fun tabIndex(tab: MinutesDetailTab): Int = MinutesDetailTab.entries.indexOf(tab).coerceAtLeast(0)
 
   fun tabAt(index: Int): MinutesDetailTab = MinutesDetailTab.entries.getOrElse(index) {
-    MinutesDetailTab.TRANSCRIPT
+    MinutesDetailTab.NOTES
   }
 }

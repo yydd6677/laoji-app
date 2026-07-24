@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/laoji_widget_event_root"
+    android:layout_width="match_parent"
+    android:layout_height="38dp"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/laoji_widget_event_background"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:layout_width="3dp"
+        android:layout_height="match_parent"
+        android:background="@color/laoji_widget_primary" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="8dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/laoji_widget_event_title"
+            android:layout_width="match_parent"
+            android:layout_height="18dp"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/laoji_widget_text_primary"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/laoji_widget_event_time"
+            android:layout_width="match_parent"
+            android:layout_height="15dp"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/laoji_widget_text_secondary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/laoji_widget_event_action"
+        android:layout_width="64dp"
+        android:layout_height="30dp"
+        android:layout_marginHorizontal="4dp"
+        android:background="@drawable/laoji_widget_action_background"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="@color/laoji_widget_primary"
+        android:textSize="11sp" />
+</LinearLayout>

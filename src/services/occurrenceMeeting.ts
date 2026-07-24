@@ -9,7 +9,7 @@ import type {
   ScheduleSnapshot,
   ScopeKey,
 } from '../domain/meeting';
-import { assertScopeKey } from '../domain/meeting';
+import { assertScopeKey, calendarMeetingSeriesKey } from '../domain/meeting';
 import { eventRefForEvent } from '../utils/eventIdentity';
 
 export type OccurrenceMeetingActionKind = 'start' | 'continue' | 'view';
@@ -20,6 +20,7 @@ export interface OccurrenceMeetingProjection {
   action: OccurrenceMeetingActionKind;
   label: '开始记录' | '继续记录' | '查看记录';
   statusLabel: string;
+  syncConflict: boolean;
 }
 
 export interface CalendarMeetingContext {
@@ -36,7 +37,12 @@ function localTimestamp(date: string | undefined, time: string | undefined): num
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-export function calendarMeetingContext(event: CalEvent, nowMs = Date.now()): CalendarMeetingContext {
+export function calendarMeetingContext(
+  event: CalEvent,
+  scopeKey: ScopeKey,
+  nowMs = Date.now(),
+): CalendarMeetingContext {
+  assertScopeKey(scopeKey);
   const occurrence = eventRefForEvent(event);
   const allDay = Boolean(event.isAllDay || (!event.startTime && !event.endTime));
   return {
@@ -59,7 +65,7 @@ export function calendarMeetingContext(event: CalEvent, nowMs = Date.now()): Cal
     recurrenceSegmentId: event.recurrenceSegmentId == null
       ? null
       : String(event.recurrenceSegmentId),
-    seriesKey: occurrence.sourceEventId,
+    seriesKey: calendarMeetingSeriesKey(scopeKey, occurrence.sourceEventId),
   };
 }
 
@@ -71,7 +77,11 @@ function legacyFacingMeetingId(aggregate: MeetingNoteAggregate): string {
 
 function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingProjection {
   const capture = aggregate.processingStages.find(stage => stage.stage === 'capture');
-  const hasContent = aggregate.recordingAssets.length > 0
+  const hasContent = aggregate.recordingAssets.some(asset => (
+    asset.localState === 'local_ready'
+    || asset.localState === 'remote_only'
+    || Boolean(asset.localUri || asset.remoteAssetId)
+  ))
     || aggregate.note.currentSummaryVersionId !== null
     || aggregate.processingStages.some(stage => (
       stage.stage === 'transcript' && stage.status !== 'none'
@@ -87,6 +97,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       action: 'continue',
       label: '继续记录',
       statusLabel: capture?.status === 'paused' ? '录音已暂停' : '记录尚未结束',
+      syncConflict: false,
     };
   }
   if (aggregate.note.lifecycle === 'ended' || hasContent) {
@@ -96,6 +107,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       action: 'view',
       label: '查看记录',
       statusLabel: '已有会议记录',
+      syncConflict: false,
     };
   }
   return {
@@ -104,6 +116,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
     action: 'start',
     label: '开始记录',
     statusLabel: '尚未开始',
+    syncConflict: false,
   };
 }
 
@@ -115,7 +128,11 @@ export async function resolveOccurrenceMeeting(
   assertScopeKey(scopeKey);
   const aggregate = await repository.findByOccurrence(occurrence, scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
-  return projectAggregate(aggregate);
+  const projection = projectAggregate(aggregate);
+  return {
+    ...projection,
+    syncConflict: await repository.hasOccurrenceSyncConflict(occurrence, scopeKey),
+  };
 }
 
 export async function bindLegacyMeetingToOccurrence(
@@ -138,7 +155,7 @@ export async function bindLegacyMeetingToOccurrence(
       ...context.occurrence,
       calendarRevision: context.snapshot.capturedEventRevision,
       recurrenceSegmentId: context.recurrenceSegmentId,
-      seriesKey: context.seriesKey,
+      seriesKey: calendarMeetingSeriesKey(scopeKey, context.occurrence.sourceEventId),
       linkedAtMs: context.snapshot.capturedAtMs,
     }, context.snapshot);
   });

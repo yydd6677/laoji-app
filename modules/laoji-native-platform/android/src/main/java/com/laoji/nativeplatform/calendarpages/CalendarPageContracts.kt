@@ -10,7 +10,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
-internal const val CALENDAR_PAGE_SCHEMA_VERSION = 1
+internal const val CALENDAR_PAGE_SCHEMA_VERSION = 2
 
 internal data class CalendarPageEventRef(
   val sourceEventId: String,
@@ -86,6 +86,7 @@ internal data class CalendarDetailPageState(
   val editable: Boolean = true,
   val deleting: Boolean = false,
   val meetingAction: CalendarMeetingAction? = null,
+  val seriesMemory: CalendarSeriesMemory? = null,
 )
 
 internal data class CalendarMeetingAction(
@@ -93,6 +94,37 @@ internal data class CalendarMeetingAction(
   val label: String,
   val statusLabel: String = "",
   val enabled: Boolean = true,
+)
+
+internal data class CalendarSeriesMeeting(
+  val meetingId: String,
+  val title: String,
+  val dateLabel: String,
+)
+
+internal data class CalendarSeriesDecision(
+  val id: String,
+  val content: String,
+  val meetingId: String,
+  val sourceSegmentId: String?,
+  val sourceStartMs: Long?,
+)
+
+internal data class CalendarSeriesAction(
+  val id: String,
+  val content: String,
+  val metaLabel: String?,
+  val meetingId: String,
+  val sourceSegmentId: String?,
+  val sourceStartMs: Long?,
+)
+
+internal data class CalendarSeriesMemory(
+  val loadState: CalendarPageLoadState,
+  val message: String?,
+  val previousMeeting: CalendarSeriesMeeting?,
+  val decisions: List<CalendarSeriesDecision>,
+  val actions: List<CalendarSeriesAction>,
 )
 
 internal data class CalendarEditDraft(
@@ -276,6 +308,7 @@ internal object CalendarPageSnapshotParser {
         enabled = action.boolean("enabled"),
       )
     }?.takeIf { it.label.isNotBlank() }
+    val seriesMemory = snapshot.map("seriesMemory")?.let(::seriesMemory)
     return CalendarDetailPageState(
       loadState = CalendarPageLoadState.fromWireName(snapshot.stringOrNull("state")),
       message = snapshot.stringOrNull("message"),
@@ -291,6 +324,7 @@ internal object CalendarPageSnapshotParser {
       editable = event?.boolean("editable") ?: true,
       deleting = snapshot.boolean("deleting"),
       meetingAction = meetingAction,
+      seriesMemory = seriesMemory,
     )
   }
 
@@ -342,6 +376,59 @@ internal object CalendarPageSnapshotParser {
     location = value.string("location"),
     notes = value.string("notes"),
   )
+
+  private fun seriesMemory(value: Map<String, Any?>): CalendarSeriesMemory {
+    val state = CalendarPageLoadState.fromWireName(value.stringOrNull("state"))
+    val previous = value.map("previousMeeting")?.let { meeting ->
+      val meetingId = meeting.string("meetingId")
+      if (meetingId.isBlank()) null else CalendarSeriesMeeting(
+        meetingId = meetingId,
+        title = meeting.string("title"),
+        dateLabel = meeting.string("dateLabel"),
+      )
+    }
+    if (state == CalendarPageLoadState.READY && previous == null) {
+      return CalendarSeriesMemory(
+        loadState = CalendarPageLoadState.ERROR,
+        message = "上次会议数据暂时无法读取",
+        previousMeeting = null,
+        decisions = emptyList(),
+        actions = emptyList(),
+      )
+    }
+    val decisions = value.mapList("decisions").take(3).mapNotNull { item ->
+      val id = item.string("id")
+      val content = item.string("content")
+      val meetingId = item.string("meetingId")
+      if (id.isBlank() || content.isBlank() || meetingId.isBlank()) null else CalendarSeriesDecision(
+        id = id,
+        content = content,
+        meetingId = meetingId,
+        sourceSegmentId = item.stringOrNull("sourceSegmentId"),
+        sourceStartMs = item.longOrNull("sourceStartMs"),
+      )
+    }
+    val actions = value.mapList("actions").take(5).mapNotNull { item ->
+      val id = item.string("id")
+      val content = item.string("content")
+      val meetingId = item.string("meetingId")
+      if (id.isBlank() || content.isBlank() || meetingId.isBlank()) null else CalendarSeriesAction(
+        id = id,
+        content = content,
+        metaLabel = item.stringOrNull("metaLabel"),
+        meetingId = meetingId,
+        sourceSegmentId = item.stringOrNull("sourceSegmentId"),
+        sourceStartMs = item.longOrNull("sourceStartMs"),
+      )
+    }
+    return CalendarSeriesMemory(
+      loadState = state,
+      message = value.stringOrNull("message"),
+      previousMeeting = previous,
+      decisions = decisions,
+      actions = actions,
+    )
+  }
 }
 
 private fun Map<String, Any?>.eventRef(): CalendarPageEventRef? {
@@ -365,3 +452,4 @@ private fun Map<String, Any?>.stringOrNull(key: String): String? =
 private fun Map<String, Any?>.boolean(key: String): Boolean = this[key] as? Boolean ?: false
 private fun Map<String, Any?>.int(key: String, fallback: Int): Int = intOrNull(key) ?: fallback
 private fun Map<String, Any?>.intOrNull(key: String): Int? = (this[key] as? Number)?.toInt()
+private fun Map<String, Any?>.longOrNull(key: String): Long? = (this[key] as? Number)?.toLong()

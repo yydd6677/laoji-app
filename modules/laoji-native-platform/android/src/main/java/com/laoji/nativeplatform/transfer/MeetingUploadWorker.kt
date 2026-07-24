@@ -26,6 +26,7 @@ internal class MeetingUploadWorker(
     val scope = inputData.getString(KEY_SCOPE) ?: return@withContext failure("invalid-input")
     val generation = inputData.getLong(KEY_GENERATION, -1)
     val meetingId = inputData.getString(KEY_MEETING_ID) ?: return@withContext failure("invalid-input")
+    val remoteMeetingId = inputData.getString(KEY_REMOTE_MEETING_ID) ?: meetingId
     val operationId = inputData.getString(KEY_OPERATION_ID) ?: return@withContext failure("invalid-input")
     val fileUri = inputData.getString(KEY_FILE_URI) ?: return@withContext failure("invalid-input")
     val mimeType = inputData.getString(KEY_MIME_TYPE) ?: "audio/wav"
@@ -37,7 +38,7 @@ internal class MeetingUploadWorker(
     }
     val lease = CredentialLeaseStore(applicationContext).get(scope, generation)
       ?: return@withContext failure("credential-expired", operationId)
-    val endpoint = runCatching { uploadEndpoint(lease.apiBaseUrl, meetingId) }
+    val endpoint = runCatching { uploadEndpoint(lease.apiBaseUrl, remoteMeetingId) }
       .getOrElse { return@withContext failure("invalid-endpoint", operationId) }
     val uri = Uri.parse(fileUri)
     val body = ContentUriRequestBody(
@@ -104,6 +105,7 @@ internal class MeetingUploadWorker(
     const val KEY_SCOPE = "scope"
     const val KEY_GENERATION = "generation"
     const val KEY_MEETING_ID = "meetingId"
+    const val KEY_REMOTE_MEETING_ID = "remoteMeetingId"
     const val KEY_OPERATION_ID = "operationId"
     const val KEY_FILE_URI = "fileUri"
     const val KEY_MIME_TYPE = "mimeType"

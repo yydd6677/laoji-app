@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/laoji_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layoutDirection="ltr"
+    android:orientation="horizontal"
+    android:padding="15dp"
+    android:background="@drawable/laoji_widget_background">
+
+    <LinearLayout
+        android:layout_width="54dp"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/laoji_widget_weekday"
+            android:layout_width="wrap_content"
+            android:layout_height="16dp"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/laoji_widget_preview_weekday"
+            android:textColor="@color/laoji_widget_primary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/laoji_widget_day"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/laoji_widget_preview_day"
+            android:textColor="@color/laoji_widget_text_primary"
+            android:textSize="36sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="bottom"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/laoji_widget_brand"
+            android:textColor="@color/laoji_widget_text_tertiary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="9dp"
+        android:layout_weight="1">
+
+        <ListView
+            android:id="@+id/laoji_widget_event_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:divider="@null"
+            android:scrollbars="none" />
+
+        <TextView
+            android:id="@+id/laoji_widget_state"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="2"
+            android:paddingHorizontal="8dp"
+            android:text="@string/laoji_widget_empty"
+            android:textColor="@color/laoji_widget_text_tertiary"
+            android:textSize="12sp" />
+    </FrameLayout>
+</LinearLayout>

@@ -5,10 +5,13 @@ package com.laoji.nativeplatform.minutes
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -46,10 +49,14 @@ internal class MinutesRecordingSurface(
   private val locationIcon = ImageView(context)
   private val locationText = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val tabBar = FrameLayout(context)
-  private val transcriptTab = context.textView("文字记录", textSizeSp = 16, weight = Typeface.BOLD)
+  private val notesTab = context.textView("我的笔记", textSizeSp = 16)
+  private val transcriptTab = context.textView("实时文字", textSizeSp = 16, weight = Typeface.BOLD)
   private val tabIndicator = View(context)
   private val divider = View(context)
   private val content = FrameLayout(context)
+  private val manualNoteRoot = LinearLayout(context)
+  private val manualNoteStatus = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  private val manualNoteEditor = EditText(context)
   private val transcript = RecyclerView(context)
   private val transcriptAdapter = MinutesRecordingTranscriptAdapter()
   private val errorBanner = LinearLayout(context)
@@ -61,6 +68,7 @@ internal class MinutesRecordingSurface(
   private val waveContainer = FrameLayout(context)
   private val waveform = MinutesRecordingWaveformView(context)
   private val actionRow = ConstraintLayout(context)
+  private val markerButton = ImageButton(context)
   private val pauseButton = ImageButton(context)
   private val stopButton = ImageButton(context)
   private val layoutManager = LinearLayoutManager(context)
@@ -72,13 +80,14 @@ internal class MinutesRecordingSurface(
   private var surfaceVisible = false
   private var nativeElapsedMs = 0L
   private var editingTitle = false
+  private var applyingManualNoteSnapshot = false
 
   init {
     setBackgroundColor(MinutesPalette.surface)
     clipChildren = false
     buildTopBar()
     buildTitleSection()
-    buildTranscriptArea()
+    buildContentArea()
     buildBottomPanel()
     bindActions()
   }
@@ -226,9 +235,21 @@ internal class MinutesRecordingSurface(
         marginEnd = context.dp(20)
       },
     )
+    notesTab.gravity = Gravity.CENTER
+    notesTab.isClickable = true
+    notesTab.isFocusable = true
+    notesTab.contentDescription = "切换到我的笔记"
+    tabBar.addView(notesTab, FrameLayout.LayoutParams(context.dp(82), context.dp(44), Gravity.START))
     transcriptTab.gravity = Gravity.CENTER
-    transcriptTab.setTextColor(MinutesPalette.text)
-    tabBar.addView(transcriptTab, FrameLayout.LayoutParams(context.dp(82), context.dp(44), Gravity.START))
+    transcriptTab.isClickable = true
+    transcriptTab.isFocusable = true
+    transcriptTab.contentDescription = "切换到实时文字"
+    tabBar.addView(
+      transcriptTab,
+      FrameLayout.LayoutParams(context.dp(82), context.dp(44), Gravity.START).apply {
+        leftMargin = context.dp(82)
+      },
+    )
     tabIndicator.backgroundShape(MinutesPalette.primary, radiusDp = 1)
     tabBar.addView(
       tabIndicator,
@@ -251,7 +272,7 @@ internal class MinutesRecordingSurface(
     )
   }
 
-  private fun buildTranscriptArea() {
+  private fun buildContentArea() {
     content.id = View.generateViewId()
     addView(
       content,
@@ -261,6 +282,57 @@ internal class MinutesRecordingSurface(
         startToStart = LayoutParams.PARENT_ID
         endToEnd = LayoutParams.PARENT_ID
       },
+    )
+
+    manualNoteRoot.orientation = LinearLayout.VERTICAL
+    manualNoteStatus.gravity = Gravity.CENTER_VERTICAL
+    manualNoteStatus.setPadding(context.dp(20), 0, context.dp(20), 0)
+    manualNoteStatus.visibility = View.INVISIBLE
+    manualNoteStatus.isClickable = true
+    manualNoteStatus.isFocusable = true
+    manualNoteRoot.addView(
+      manualNoteStatus,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(32)),
+    )
+    manualNoteEditor.apply {
+      setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+      setTextColor(MinutesPalette.text)
+      setHintTextColor(MinutesPalette.faint)
+      hint = "记录想法"
+      gravity = Gravity.TOP or Gravity.START
+      background = null
+      setPadding(context.dp(20), context.dp(12), context.dp(20), context.dp(40))
+      inputType = InputType.TYPE_CLASS_TEXT or
+        InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+      filters = arrayOf(InputFilter.LengthFilter(200_000))
+      setLineSpacing(0f, 1.25f)
+      isVerticalScrollBarEnabled = false
+      overScrollMode = View.OVER_SCROLL_NEVER
+      contentDescription = "我的笔记"
+      addTextChangedListener(object : TextWatcher {
+        override fun beforeTextChanged(value: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(value: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        override fun afterTextChanged(value: Editable?) {
+          if (!applyingManualNoteSnapshot) {
+            onAction(
+              mapOf(
+                "type" to "updateManualNote",
+                "meetingId" to renderedState.meetingId,
+                "content" to value.toString(),
+              ),
+            )
+          }
+        }
+      })
+    }
+    manualNoteRoot.addView(
+      manualNoteEditor,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+    )
+    content.addView(
+      manualNoteRoot,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
     )
 
     transcript.layoutManager = layoutManager
@@ -320,6 +392,7 @@ internal class MinutesRecordingSurface(
   }
 
   private fun buildBottomPanel() {
+    markerButton.id = View.generateViewId()
     pauseButton.id = View.generateViewId()
     stopButton.id = View.generateViewId()
     bottomPanel.setBackgroundColor(MinutesPalette.surface)
@@ -376,6 +449,19 @@ internal class MinutesRecordingSurface(
       },
     )
 
+    configureActionButton(markerButton)
+    actionRow.addView(
+      markerButton,
+      LayoutParams(
+        context.dp(MinutesRecordingV3Contract.MARKER_SIZE_DP),
+        context.dp(MinutesRecordingV3Contract.MARKER_SIZE_DP),
+      ).apply {
+        startToStart = LayoutParams.PARENT_ID
+        topToTop = LayoutParams.PARENT_ID
+        bottomToBottom = LayoutParams.PARENT_ID
+        marginStart = context.dp(12)
+      },
+    )
     configureActionButton(pauseButton)
     actionRow.addView(
       pauseButton,
@@ -430,12 +516,39 @@ internal class MinutesRecordingSurface(
     titleEditor.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
       if (!hasFocus && editingTitle) commitTitleEdit()
     }
+    notesTab.setOnClickListener { selectRecordingContent(MinutesRecordingContent.NOTES, emit = true) }
+    transcriptTab.setOnClickListener { selectRecordingContent(MinutesRecordingContent.TRANSCRIPT, emit = true) }
+    manualNoteStatus.setOnClickListener {
+      if (manualNoteStatus.isEnabled) {
+        onAction(
+          mapOf(
+            "type" to if (renderedState.manualNoteConflict) {
+              "openManualNoteConflict"
+            } else {
+              "retryManualNote"
+            },
+            "meetingId" to renderedState.meetingId,
+          ),
+        )
+      }
+    }
     pauseButton.setOnClickListener {
       onAction(
         mapOf(
           "type" to "toggleRecordingPause",
           "meetingId" to renderedState.meetingId,
           "resume" to (renderedState.phase == MinutesRecordingPhase.PAUSED),
+        ),
+      )
+    }
+    markerButton.setOnClickListener {
+      if (!renderedState.canCreateMarker) return@setOnClickListener
+      markerButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+      onAction(
+        mapOf(
+          "type" to "createMarker",
+          "meetingId" to renderedState.meetingId,
+          "positionMs" to nativeElapsedMs,
         ),
       )
     }
@@ -484,6 +597,9 @@ internal class MinutesRecordingSurface(
     locationRow.alpha = if (state.locationLoading) 0.72f else 1f
     locationRow.contentDescription = if (state.locationLoading) "正在获取当前位置" else locationLabel
 
+    renderManualNote(state)
+    selectRecordingContent(state.activeContent, emit = false)
+
     renderTimer()
 
     transcriptAdapter.submitList(state.transcript) {
@@ -494,6 +610,7 @@ internal class MinutesRecordingSurface(
 
     errorText.text = state.errorMessage
     errorBanner.visibility = if (state.errorMessage.isBlank()) View.GONE else View.VISIBLE
+    manualNoteRoot.setPadding(0, if (state.errorMessage.isBlank()) 0 else context.dp(52), 0, 0)
     transcript.setPadding(
       context.dp(20),
       if (state.errorMessage.isBlank()) 0 else context.dp(52),
@@ -503,7 +620,79 @@ internal class MinutesRecordingSurface(
 
     renderPauseButton(state)
     renderStopButton(state)
+    renderMarkerButton(state)
     updateLevelCollection()
+  }
+
+  private fun renderManualNote(state: MinutesRecordingState) {
+    if (manualNoteEditor.text.toString() != state.manualNote) {
+      val selection = manualNoteEditor.selectionStart.coerceAtLeast(0)
+      applyingManualNoteSnapshot = true
+      manualNoteEditor.setText(state.manualNote)
+      manualNoteEditor.setSelection(selection.coerceAtMost(manualNoteEditor.text.length))
+      applyingManualNoteSnapshot = false
+    }
+    val enabled = state.meetingId.isNotBlank() && state.manualNoteEnabled && !state.manualNoteLoading
+    manualNoteEditor.isEnabled = enabled
+    manualNoteEditor.isFocusableInTouchMode = enabled
+    manualNoteEditor.alpha = if (enabled) 1f else 0.72f
+    val statusText = when {
+      state.manualNoteConflict -> "笔记同步冲突，点击处理"
+      state.manualNoteError.isNotBlank() -> state.manualNoteError +
+        if (state.manualNoteRetryable) " 点击重试" else ""
+      state.manualNoteLoading -> "正在读取我的笔记"
+      state.manualNoteSaving -> "正在保存"
+      else -> ""
+    }
+    manualNoteStatus.text = statusText
+    manualNoteStatus.visibility = if (statusText.isBlank()) View.INVISIBLE else View.VISIBLE
+    manualNoteStatus.isEnabled = state.manualNoteConflict ||
+      (state.manualNoteError.isNotBlank() && state.manualNoteRetryable)
+    manualNoteStatus.setTextColor(
+      if (state.manualNoteConflict || state.manualNoteError.isNotBlank()) {
+        MinutesPalette.danger
+      } else {
+        MinutesPalette.secondary
+      },
+    )
+    manualNoteStatus.contentDescription = statusText.takeIf(String::isNotBlank)
+  }
+
+  private fun selectRecordingContent(target: MinutesRecordingContent, emit: Boolean) {
+    val changed = renderedState.activeContent != target
+    if (changed) renderedState = renderedState.copy(activeContent = target)
+    val showNotes = target == MinutesRecordingContent.NOTES
+    manualNoteRoot.visibility = if (showNotes) View.VISIBLE else View.INVISIBLE
+    transcript.visibility = if (showNotes) View.INVISIBLE else View.VISIBLE
+    notesTab.setTextColor(if (showNotes) MinutesPalette.primary else MinutesPalette.secondary)
+    notesTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.BOLD else Typeface.NORMAL)
+    transcriptTab.setTextColor(if (showNotes) MinutesPalette.secondary else MinutesPalette.primary)
+    transcriptTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.NORMAL else Typeface.BOLD)
+    latestButton.visibility = if (
+      !showNotes && !followingLatest && transcriptAdapter.itemCount > 0
+    ) View.VISIBLE else View.GONE
+    val selected = if (showNotes) notesTab else transcriptTab
+    tabIndicator.post {
+      val width = selected.paint.measureText(selected.text.toString()).toInt().coerceAtLeast(context.dp(24))
+      val params = tabIndicator.layoutParams as FrameLayout.LayoutParams
+      params.width = width
+      params.leftMargin = selected.left + ((selected.width - width) / 2)
+      tabIndicator.layoutParams = params
+    }
+    if (!showNotes && manualNoteEditor.hasFocus()) {
+      manualNoteEditor.clearFocus()
+      context.getSystemService(InputMethodManager::class.java)
+        ?.hideSoftInputFromWindow(manualNoteEditor.windowToken, 0)
+    }
+    if (emit && changed) {
+      onAction(
+        mapOf(
+          "type" to "selectRecordingContent",
+          "meetingId" to renderedState.meetingId,
+          "content" to target.wireName,
+        ),
+      )
+    }
   }
 
   override fun onAttachedToWindow() {
@@ -626,6 +815,24 @@ internal class MinutesRecordingSurface(
     }
   }
 
+  private fun renderMarkerButton(state: MinutesRecordingState) {
+    markerButton.isEnabled = state.canCreateMarker
+    markerButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ud_icon_flag_outlined)
+    markerButton.setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
+    markerButton.background = context.roundedStateBackground(
+      defaultColor = MinutesPalette.primarySoft,
+      pressedColor = MinutesPalette.primaryTransparent,
+      disabledColor = MinutesPalette.page,
+      radiusDp = MinutesRecordingV3Contract.MARKER_SIZE_DP / 2,
+    )
+    markerButton.imageTintList = statefulIconTint(
+      defaultColor = MinutesPalette.primary,
+      pressedColor = MinutesPalette.primary,
+      disabledColor = MinutesPalette.disabled,
+    )
+    markerButton.contentDescription = if (state.canCreateMarker) "标记当前时刻" else "当前无法添加标记"
+  }
+
   private fun emitStopOrStart() {
     val type = if (renderedState.canStop) "stopRecording" else "startRecording"
     onAction(mapOf("type" to type, "meetingId" to renderedState.meetingId))
@@ -674,7 +881,11 @@ internal class MinutesRecordingSurface(
   private fun setFollowingLatest(value: Boolean, emit: Boolean) {
     if (followingLatest == value) return
     followingLatest = value
-    latestButton.visibility = if (!value && transcriptAdapter.itemCount > 0) View.VISIBLE else View.GONE
+    latestButton.visibility = if (
+      renderedState.activeContent == MinutesRecordingContent.TRANSCRIPT &&
+      !value &&
+      transcriptAdapter.itemCount > 0
+    ) View.VISIBLE else View.GONE
     if (emit) {
       onAction(
         mapOf(

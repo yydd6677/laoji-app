@@ -53,6 +53,7 @@ class MinutesPlayerView(
   private var latestState = MinutesPlaybackState()
   private var trackingSeek = false
   private var attached = false
+  private var boundSource: MinutesPlayerSource? = null
 
   private val listener = MinutesPlaybackListener { state ->
     post {
@@ -227,7 +228,10 @@ class MinutesPlayerView(
     error.isClickable = true
     error.isFocusable = true
     error.contentDescription = "录音播放失败，点击重试"
-    error.setOnClickListener { controller.play() }
+    error.setOnClickListener {
+      boundSource?.let(controller::setSource)
+      controller.play()
+    }
     controls.addView(
       error,
       ConstraintLayout.LayoutParams(0, 0).apply {
@@ -240,8 +244,14 @@ class MinutesPlayerView(
     render(controller.state)
   }
 
-  fun setSource(source: MinutesPlayerSource?) {
-    controller.setSource(source)
+  /**
+   * Bind this detail toolbar to its snapshot without taking ownership of the global MediaSession.
+   * A null snapshot is common while React resolves a local/cloud asset after returning from the
+   * background; it hides this toolbar but must not erase the service-owned source and position.
+  */
+  fun bindSource(source: MinutesPlayerSource?) {
+    boundSource = source
+    if (source != null) controller.setSource(source)
     if (source == null) speedSheet.dismiss()
     visibility = if (source == null) View.GONE else View.VISIBLE
   }

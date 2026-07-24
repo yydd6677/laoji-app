@@ -1,0 +1,330 @@
+import * as Crypto from 'expo-crypto';
+import type {
+  MeetingNoteRepository,
+  TranscriptRevisionProjection,
+  TranscriptRevisionRecord,
+  TranscriptSegmentRecord,
+} from '../../data/repositories';
+import { transitionProcessingStage } from '../../domain/meeting/processing';
+import { assertScopeKey, type ScopeKey } from '../../domain/meeting';
+import type { TranscriptLine } from '../../types';
+import {
+  evaluateTranscriptCandidate,
+  type TranscriptCandidateDecision,
+  type TranscriptCandidateKind,
+  type TranscriptServerCompleteness,
+} from '../../services/transcriptCompleteness';
+
+interface NormalizedTranscriptLine {
+  ordinal: number;
+  sourceId: string;
+  speakerId: string | null;
+  speakerLabel: string | null;
+  text: string;
+  startMs: number;
+  endMs: number;
+  confidence: number | null;
+  createdAtMs: number;
+}
+
+export interface SaveMeetingTranscriptInput {
+  meetingId: string;
+  scopeKey?: ScopeKey;
+  transcript: readonly TranscriptLine[];
+  candidateKind: TranscriptCandidateKind;
+  serverCompleteness?: TranscriptServerCompleteness;
+  remoteRevisionId?: string | null;
+  canonicalWrite?: boolean;
+}
+
+export type SaveGuestMeetingTranscriptInput = SaveMeetingTranscriptInput;
+
+export interface SaveMeetingTranscriptResult {
+  activeTranscript: TranscriptRevisionProjection | null;
+  decision: TranscriptCandidateDecision;
+  canonicalRevision: number | null;
+  activeContentChanged: boolean;
+}
+
+export type SaveGuestMeetingTranscriptResult = SaveMeetingTranscriptResult;
+
+export interface SaveMeetingTranscriptDependencies {
+  repository: MeetingNoteRepository;
+  digest?: (value: string) => Promise<string>;
+  now?: () => number;
+}
+
+export type SaveGuestMeetingTranscriptDependencies = SaveMeetingTranscriptDependencies;
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter(key => record[key] !== undefined)
+    .sort()
+    .map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
+}
+
+async function sha256(value: string): Promise<string> {
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, value);
+}
+
+function normalizedId(value: string | null | undefined, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return normalized;
+}
+
+function secondsToMs(value: number | null | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(Number(value) * 1000)) : 0;
+}
+
+function timestamp(value: string | null | undefined, fallback: number): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : fallback;
+}
+
+function normalizeText(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('zh-CN');
+}
+
+function normalizeLines(
+  transcript: readonly TranscriptLine[],
+  fallbackCreatedAtMs: number,
+): NormalizedTranscriptLine[] {
+  return transcript
+    .filter(line => typeof line.text === 'string' && line.text.trim().length > 0)
+    .map((line, ordinal) => {
+      const startMs = secondsToMs(line.start_time);
+      return {
+        ordinal,
+        sourceId: typeof line.id === 'string' ? line.id.trim() : '',
+        speakerId: line.speaker_id?.trim() || null,
+        speakerLabel: line.speaker_label?.trim() || null,
+        text: line.text,
+        startMs,
+        endMs: Math.max(startMs, secondsToMs(line.end_time)),
+        confidence: Number.isFinite(line.confidence)
+          && Number(line.confidence) >= 0
+          && Number(line.confidence) <= 1
+          ? Number(line.confidence)
+          : null,
+        createdAtMs: timestamp(line.created_at, fallbackCreatedAtMs),
+      };
+    });
+}
+
+function sameActiveContent(
+  current: TranscriptRevisionProjection | null,
+  revisionId: string,
+  lines: readonly NormalizedTranscriptLine[],
+): boolean {
+  if (!current || current.revision.id !== revisionId || current.segments.length !== lines.length) {
+    return false;
+  }
+  return current.segments.every((segment, index) => {
+    const line = lines[index];
+    return segment.ordinal === line.ordinal
+      && (segment.sourceId ?? '') === line.sourceId
+      && segment.speakerClusterId === line.speakerId
+      && segment.speakerLabel === line.speakerLabel
+      && segment.text === line.text
+      && segment.startMs === line.startMs
+      && segment.endMs === line.endMs
+      && segment.confidence === line.confidence
+      && segment.createdAtMs === line.createdAtMs;
+  });
+}
+
+function transcriptStageStatus(
+  meetingLifecycle: 'draft' | 'active' | 'ended' | 'deleted',
+  current: TranscriptRevisionRecord | null,
+  candidateKind: TranscriptCandidateKind,
+  completeness: TranscriptServerCompleteness,
+  hasCandidate: boolean,
+  activate: boolean,
+  decision: TranscriptCandidateDecision,
+): 'none' | 'realtime_draft' | 'finalizing' | 'ready' {
+  if (!hasCandidate) {
+    if (current?.kind === 'realtime_draft') {
+      return meetingLifecycle === 'active' ? 'realtime_draft' : 'finalizing';
+    }
+    if (current?.status === 'ready') return 'ready';
+    if (candidateKind === 'realtime_draft' && meetingLifecycle === 'active') return 'realtime_draft';
+    return completeness === 'incomplete' ? 'finalizing' : 'none';
+  }
+  if (activate) {
+    if (candidateKind !== 'realtime_draft') return 'ready';
+    return completeness === 'incomplete' && meetingLifecycle !== 'active'
+      ? 'finalizing'
+      : 'realtime_draft';
+  }
+  if (candidateKind !== 'realtime_draft' && decision.clearlyShorter) return 'finalizing';
+  if (current?.kind === 'realtime_draft') {
+    return meetingLifecycle === 'active' ? 'realtime_draft' : 'finalizing';
+  }
+  return current?.status === 'ready' ? 'ready' : 'finalizing';
+}
+
+export class SaveGuestMeetingTranscriptUseCase {
+  private readonly repository: MeetingNoteRepository;
+  private readonly digest: (value: string) => Promise<string>;
+  private readonly now: () => number;
+
+  constructor(dependencies: SaveMeetingTranscriptDependencies) {
+    this.repository = dependencies.repository;
+    this.digest = dependencies.digest ?? sha256;
+    this.now = dependencies.now ?? Date.now;
+  }
+
+  async execute(input: SaveMeetingTranscriptInput): Promise<SaveMeetingTranscriptResult> {
+    const meetingId = normalizedId(input.meetingId, 'meeting ID');
+    if (!meetingId) throw new Error('meeting ID is invalid');
+    const scopeKey = input.scopeKey ?? 'guest';
+    assertScopeKey(scopeKey);
+    if (!['realtime_draft', 'final', 'reprocessed'].includes(input.candidateKind)) {
+      throw new Error('transcript candidate kind is invalid');
+    }
+    const serverCompleteness = input.serverCompleteness ?? 'unknown';
+    if (!['complete', 'incomplete', 'unknown'].includes(serverCompleteness)) {
+      throw new Error('transcript completeness is invalid');
+    }
+    const remoteRevisionId = normalizedId(input.remoteRevisionId, 'transcript remote revision ID');
+    const aggregate = await this.repository.get(meetingId, scopeKey);
+    if (!aggregate || aggregate.note.lifecycle === 'deleted') {
+      throw new Error('meeting does not accept transcript content in active scope');
+    }
+    const lines = normalizeLines(input.transcript, aggregate.note.createdAtMs);
+    const fingerprint = await this.digest(stableJson(lines));
+    const realtimeDraft = input.candidateKind === 'realtime_draft';
+    const revisionId = realtimeDraft
+      ? `${meetingId}:transcript:canonical-live`
+      : input.candidateKind === 'reprocessed'
+        ? `${meetingId}:transcript:canonical-reprocessed:${fingerprint}`
+        : `${meetingId}:transcript:canonical-final:${fingerprint}`;
+    const segmentFingerprints = await Promise.all(lines.map(line => this.digest(stableJson(line))));
+    const segments: TranscriptSegmentRecord[] = lines.map((line, ordinal) => ({
+      id: `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
+      meetingId,
+      sourceId: line.sourceId || null,
+      ordinal,
+      startMs: line.startMs,
+      endMs: line.endMs,
+      speakerClusterId: line.speakerId,
+      speakerProfileId: null,
+      speakerLabel: line.speakerLabel,
+      speakerLabelOverride: null,
+      text: line.text,
+      normalizedText: normalizeText(line.text),
+      confidence: line.confidence,
+      isFinal: !realtimeDraft,
+      createdAtMs: line.createdAtMs,
+    }));
+    const createdAtMs = lines.reduce(
+      (minimum, line) => Math.min(minimum, line.createdAtMs),
+      aggregate.note.createdAtMs,
+    );
+    const finalizedAtMs = realtimeDraft
+      ? null
+      : lines.reduce(
+        (maximum, line) => Math.max(maximum, line.createdAtMs),
+        createdAtMs,
+      );
+    let canonicalRevision: number | null = null;
+    let decision: TranscriptCandidateDecision | null = null;
+    let activeContentChanged = false;
+
+    await this.repository.transaction(async transaction => {
+      const meeting = await transaction.getMeeting(meetingId, scopeKey);
+      if (!meeting || meeting.lifecycle === 'deleted') {
+        throw new Error('meeting does not accept transcript content in active scope');
+      }
+      const stage = await transaction.getStage(meetingId, scopeKey, 'transcript');
+      if (!stage) throw new Error('meeting transcript processing stage is missing');
+      const clockMs = this.now();
+      if (!Number.isSafeInteger(clockMs) || clockMs < 0) {
+        throw new Error('meeting clock is invalid');
+      }
+      let updatedAtMs = Math.max(clockMs, meeting.updatedAtMs, stage.updatedAtMs);
+      const currentContent = await transaction.getActiveTranscriptContent(meetingId, scopeKey);
+      const current = currentContent?.revision ?? null;
+      decision = evaluateTranscriptCandidate(currentContent?.segments ?? [], segments, {
+        candidateKind: input.candidateKind,
+        serverCompleteness,
+      });
+      const stableFinalBlocksLateDraft = Boolean(
+        current && current.kind !== 'realtime_draft' && realtimeDraft,
+      );
+      const activate = lines.length > 0
+        && decision.useCandidate
+        && !stableFinalBlocksLateDraft;
+      const replacingDraftWithShorterCandidate = Boolean(
+        current?.id === revisionId && realtimeDraft && !decision.useCandidate,
+      );
+      if (lines.length > 0 && !replacingDraftWithShorterCandidate) {
+        const revision: TranscriptRevisionRecord = {
+          id: revisionId,
+          meetingId,
+          remoteId: remoteRevisionId,
+          kind: input.candidateKind,
+          status: realtimeDraft ? 'realtime_draft' : 'ready',
+          sourceProvider: scopeKey === 'guest' ? 'canonical-guest' : 'canonical-account',
+          sourceModel: null,
+          isActive: activate,
+          createdAtMs,
+          finalizedAtMs,
+        };
+        activeContentChanged = activate && !sameActiveContent(currentContent, revisionId, lines);
+        await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
+          activate,
+          replaceSegments: realtimeDraft,
+        });
+        if (activeContentChanged && await transaction.markCurrentSummaryStale(meetingId, scopeKey)) {
+          const summaryStage = await transaction.getStage(meetingId, scopeKey, 'summary');
+          if (!summaryStage) throw new Error('meeting summary processing stage is missing');
+          updatedAtMs = Math.max(updatedAtMs, summaryStage.updatedAtMs);
+          await transaction.upsertStage(transitionProcessingStage(summaryStage, {
+            stage: 'summary',
+            status: 'stale',
+            progress: null,
+          }, updatedAtMs), scopeKey);
+        }
+      }
+
+      const stageStatus = transcriptStageStatus(
+        meeting.lifecycle,
+        current,
+        input.candidateKind,
+        serverCompleteness,
+        lines.length > 0,
+        activate,
+        decision,
+      );
+      await transaction.upsertStage(transitionProcessingStage(stage, {
+        stage: 'transcript',
+        status: stageStatus,
+        progress: stageStatus === 'ready' ? 1 : null,
+        inputFingerprint: lines.length > 0 ? `sha256:${fingerprint}` : null,
+      }, updatedAtMs), scopeKey);
+      await transaction.updateMeeting(meetingId, scopeKey, {
+        syncState: scopeKey === 'guest' ? 'local' : meeting.syncState,
+        updatedAtMs,
+      });
+      if (input.canonicalWrite) {
+        canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, updatedAtMs);
+      }
+    });
+
+    if (!decision) throw new Error('transcript transaction did not evaluate candidate');
+    const activeTranscript = await this.repository.getActiveTranscriptContent(meetingId, scopeKey);
+    return { activeTranscript, decision, canonicalRevision, activeContentChanged };
+  }
+}
+
+export { SaveGuestMeetingTranscriptUseCase as SaveMeetingTranscriptUseCase };

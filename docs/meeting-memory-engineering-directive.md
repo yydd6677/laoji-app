@@ -5,7 +5,13 @@
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
-> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已落地但尚未接 Store。生产配置仍以旧 Store 为事实源；真机 opt-in 和线上契约尚未完成。
+> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已由媒体导入、游客会议创建、游客会议标题/详情、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 及游客 Summary version/section/action 七个受控 canonical-first 纵切接入 Store，并完成游客模拟器 clean mirror、写入期稳定投影、删除后 occurrence 动作恢复、录音启动失败的可恢复资产保留与冷启动 owner 恢复。游客 Transcript 纵切已把 draft 原位替换、immutable final/reprocessed、stable final 防迟到 draft 降级、较短 final 保留、Summary stale、Marker 对账和 canonical revision 收入同一事务语义。游客 Summary 纵切复用 schema v2 归一化与 immutable version 管线，保护用户编辑/已处理 action，拒绝 realtime draft、主键错配和显式 Transcript revision 错配；事务内发现输入 revision 已过期时只保存历史候选，不替换当前版本或阶段 fingerprint。账号录音上传保留 AsyncStorage registry/WorkManager 的唯一调度权，SQLite 只记录 RecordingAsset、upload phase、attempt、operation ID 和 credential generation；同 operation 的 uploaded 不被迟到失败或延迟远端列表降级。账号 MeetingNote 根 outbox 已补齐逐会议真实插入顺序、陈旧 claim 回收、complete/retry/blocked/permanent/conflict 终态和旧 API 消费器；同 scope drain 进程内串行，本机主键保持不变，远端 UUID 只写 `remote_id`，create 复用稳定 `client_request_id`，PATCH 只发送设值字段，DELETE 404 视为幂等完成。独立账号根写开关下，普通 Store 创建/编辑/删除、录音根状态、Transcript/Summary、远端刷新合并和 ASR/上传/读取/播放/分享的 local/remote ID 边界均已接入 canonical 路径；远端 merge 保护未完成 mutation、墓碑和本机内容，列表缺项不解释为删除。目标部署源码与实际 SQLite 已确认空标题、`client_request_id/location/recorded_at`、用户内幂等和 PATCH 显式清空合同并完成源码同步，但配置中的 18020/18035 服务仍未运行，账号鉴权读写、真实 WorkManager、跨设备恢复和冲突闭环尚未验证，因此普通构建的 canonical write、账号根写和账号上传写开关继续关闭。Phase 2 已形成 occurrence 与“我的笔记”的本机纵向闭环、游客迁移 journal v2、账号日程 ID 映射及账号作用域 sidecar 迁移；人工笔记和 occurrence 的服务端窄 v2 源码合同也已同步，occurrence 现有独立 outbox、按 occurrence 回查、安全附着、冲突保留和 orphan 状态。但目标服务未启动，真实账号迁移、鉴权运行、双设备收敛、待合并录音处理和真机验证仍未完成，因此 Phase 2 尚未满足退出条件。按“先框架和功能、后严格门禁”的目标执行顺序，Phase 3 已完成第二个本机纵向切片：单场 Unicode 搜索、循环匹配导航、范围/播放段落高亮、无音频 seek 保护、选择复制/分享、snapshot v3，以及 Draft/Final 完整性判定、inactive final 持久化和条件式 active revision 切换已实现；详情暂态不再清除后台 MediaSession、相同 source 命令幂等、同录音 URL 更新保位及 stale callback 防护也已落地。服务端明确 completeness 字段、60 分钟真机精度与带有效录音的后台返回录像仍待完成。
+> Phase 4 已进入连续纵向切片：schema v2 sections/citations、immutable version、受保护版本不自动覆盖、本机候选/历史版本选择、snapshot v5、可定位引用、本机行动项手动创建/编辑/完成/忽略恢复/来源/提醒/后续日程，以及 capability 默认关闭的 action outbox 消费骨架已接通。SUM-02 的服务端 segment-ID prompt、compact/Map-Reduce 来源保留、canonical 时间/quote 校验、唯一 quote 回填、漂移哈希与来源感知 action identity 已同步到目标源码。服务端 `action_items_v2` 已完成稳定 ID、幂等重放、entity revision、If-Match/If-None-Match、409/412 当前版本返回和可靠 upsert；客户端已完成冲突可见、版本选择、旧 operation 取代、云端字段应用和本机版本新 operation 的原子闭环。新增会议级 action collection 使用不透明 `(updated_at, id)` cursor，并以独立 `action_items_pull_v2` capability 控制详情页 pull；客户端已接通完整 provenance 解析、cursor CAS、新建/单调更新/精确附着/冲突保留、active Transcript segment 唯一映射和提醒对账。上行来源也已改用 provider/server 稳定 segment identity，不再发送本机主键。目标服务未启动，新表尚未实例化，因此真实模型引用质量、运行合同、账号 ACK/重试、真实冲突选择和跨设备收敛仍未验证。全账号 change feed、全局 `sync_cursor`、batch、action tombstone 和跨会议同步仍未完成。验证遵循“轻测试、轻校验”，严格样本与归档门禁后置。
+> Phase 5 已完成四个本机纵向切片。Marker 已接通录音中/暂停态固定入口、canonical SQLite 事务、active Transcript 覆盖段对账、详情定位/删除、显式转待办和最小披露文字分享。文件选择与 Android 系统分享已接通持久 Intent inbox、原生流式摄取、可恢复 journal、`MeetingNote + RecordingAsset(imported)`、统一详情/播放器和 snapshot v8；专用确认页已接通标题、录制时间、可选 occurrence、作用域持久 draft 与已有会议拒绝，模拟器已验证系统“文件”的冷/热启动分享、短窗口 URI 去重、多选中文拒绝、日期/时间 picker、键盘稳定、日程冲突、播放器与重启对账。分层分享已接通内容级勾选、安全默认、私人笔记二次确认、文档/音频/ZIP 产物和最小审计；模拟器已验证默认文档、显式音频 ZIP、默认状态复位和全不选禁用。删除语义首个纵切已统一四个入口：本机/未同步会议明确永久删除，当前没有服务端回收站证据时不虚构可恢复；录音中、暂停和 finalize 状态在 UI 与 Store 双层阻止。当前线上 capability 与会议端口不可达且没有 USB 真机；服务端上传/转写、处理语言合同、视频、已有会议显式合并、强杀/大文件/格式矩阵、真实录音 Marker、Marker/附件分享、分享链接、远端删除 tombstone 重试及真实 soft-delete/回收站仍未完成，因此 Phase 5 尚未满足退出条件。
+> Phase 6 已完成 ENTRY-01、ENTRY-02、TPL-01 与 SERIES-01 会前记忆的本机纵向切片。ENTRY-01 已接通日程通知中文 action、默认查看/明确记录语义、pending intent、App Lock 后置执行、统一 occurrence 用例和去重；ENTRY-02 已接通固定 scheme、严格语义链接、最小未来日程投影、近期日程 Widget、隐私标题和临时会议 Quick Settings Tile；TPL-01 已接通四个版本化内置模板、模板感知的任务身份/恢复/结果校验、不可变 Summary version 保护，以及详情页模板选择 sheet；SERIES-01 已接通规范系列身份、最近 ended 会议、最多三条决定、最多五条同系列 pending action、来源跳转、可靠决定 citation 定位、用户明确选择后带入新会议人工笔记，以及与笔记授权分离的新 Summary 历史参考选择。授权 request ID、完整项目 identity、模板和 Transcript 进入同一任务 fingerprint/pending 恢复链，服务端校验账号来源归属并回传同一 identity；有授权时不走无法接收上下文的 compact 快路径。migration v13 的逐来源实体 ledger 已实测覆盖部分重叠选择，完成原 action 后会前投影同步消失。模板与 carry-forward additive 适配已同步到共享服务器目标工作区；模板批次通过 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，carry-forward 隔离候选另通过 56 项相关合同。目标 18020/18035 服务没有启动或重启。App Lock 生物识别实测、真机/不同 ROM、成功持续录音、Tile active、ended 详情、过期投影跨时钟、账号并发冲突、真实模型四模板/历史参考输出、远端运行和新授权 sheet 的恢复数据设备交互仍未完成，因此 Phase 6 尚未满足退出条件。证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)、[`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md) 与 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
+> Phase 7 已完成 SPK-01 的本场修正纵向切片，并建立 capability-gated 账号 correction outbox 客户端框架。migration v11/v12、匿名 speaker cluster、不可变 correction/assignment、段落与本场同簇更名、游客本机名称、Summary stale 保护、realtime draft 阻止、飞书来源的修改讲话人 sheet、独立远端 Transcript revision 映射、幂等提交/退避/冲突记录均已接通；本场更名不会建立声纹资料，缺少服务端 segment 身份时也不会上传本机 hash。模拟器已完成本场修改、持久化、v10→v11→v12 迁移和最终 v13 无夹具恢复验证。远端当前不可达（先前返回 502，最终直连无 HTTP 响应），因此 capability 开启、真实账号 correction、跨设备同步、`future_profile`、旧会议重新匹配、真实中文多人准确率改善和 USB 真机仍未完成，Phase 7 尚未满足退出条件。证据见 [`implementation/contracts/phase-7-speaker-assignment-evidence.md`](implementation/contracts/phase-7-speaker-assignment-evidence.md)。
+
+> NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同写成线上或跨设备已验收；Occurrence 双会议冲突的待合并录音处理仍未完成。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 
@@ -88,7 +94,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 7. 服务端读取 Summary 时临时为行动项生成 UUID，导致同一行动项每次请求 ID 都不同；它不是可编辑对象。
 8. 分享的“完整资料”默认打包信息、总结、Transcript 和音频，没有内容级授权。
 9. 游客迁移没有持久化“游客日程 source ID → 云端日程 ID”映射；增加 occurrence 绑定后会丢失关联。
-10. 移动端 `createMeeting` 已发送 `location`、`recorded_at`、`client_request_id`，本机 `server-work` 的会议模型副本并未完整声明这些字段；`force` 总结参数也存在相同版本差异。开始新接口前必须先做线上契约盘点。
+10. 移动端 `createMeeting` 发送 `location`、`recorded_at`、`client_request_id`。2026-07-24 已从目标部署源码、生成 OpenAPI 和实际 SQLite schema 确认这些字段、用户内唯一索引、空标题及 PATCH 显式清空合同；但 18020/18035 未运行，不能把源码合同写成线上端到端已通过。开始新接口前仍必须复核运行实例。
 11. Android manifest 没有音频 `ACTION_SEND` / `ACTION_OPEN_DOCUMENT` 接收入口、App Widget 或 Quick Settings Tile。
 12. 稳定基线的生成版 `android/app/build.gradle` 曾含指向本机工作树的绝对 ProGuard 路径。Phase 0 已改为由配置插件生成 `rootProject.file(...)` 相对路径；后续预构建仍必须执行跨平台路径检查，防止回归。
 
@@ -467,6 +473,7 @@ CREATE TABLE action_items (
   reminder_notification_id TEXT,
   followup_event_source_id TEXT,
   source_kind TEXT NOT NULL CHECK(source_kind IN ('generated','manual','marker')),
+  source_marker_id TEXT REFERENCES markers(id) ON DELETE SET NULL,
   source_summary_version_id TEXT,
   source_segment_id TEXT,
   source_start_ms INTEGER,
@@ -479,6 +486,10 @@ CREATE TABLE action_items (
 
 CREATE INDEX idx_actions_due
   ON action_items(meeting_id, status, due_at_ms);
+
+CREATE INDEX idx_actions_marker_source
+  ON action_items(meeting_id, source_marker_id)
+  WHERE source_marker_id IS NOT NULL;
 
 CREATE TABLE action_item_citations (
   action_item_id TEXT NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
@@ -515,6 +526,8 @@ CREATE TABLE sync_outbox (
   attempt_count INTEGER NOT NULL DEFAULT 0,
   next_attempt_at_ms INTEGER,
   last_error_code TEXT,
+  request_payload_json TEXT,
+  claim_token TEXT,
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL
 );
@@ -667,6 +680,7 @@ interface MeetingTransaction {
 - Release B：`local_meeting_db_canonical_read_v1` 显式开启后，只有当前 scope 的 shadow import 完成，非法/重复身份、可见顺序、meeting/context、Transcript 逐行语义和 Summary 展示文本全部一致，且结果仍属于同 scope 的最新读请求，才从 SQLite 构建旧界面兼容投影；任一 mismatch、repository 提交导致的在途读取失效、分页漂移或内容读取异常立即保留旧 Store 快照。`deleted` 墓碑只计入脱敏诊断，不进入可见列表或 `extra`。首次 canonical mutation 必须与 scope write ownership 和单调 canonical revision 在同一 SQLite transaction 提交；旧模型镜像成功后用 revision CAS 标记 clean，强杀恢复时根据 owner/revision 修复，不得仅靠两次存储写入的先后顺序猜测事实源。随后 SQLite 成为 canonical；旧模型支持的字段继续 shadow write，保证短期降级可见。
 - Release C：停止旧字段写入，但保留只读 legacy backup 两个安装版本；确认真机升级后再清理。
 - 新增的人工笔记、引用、行动项版本不能降级到旧结构；回滚 Release B 时必须保留 SQLite 文件，旧 APK不可清理本机数据。
+- 实施期间可以在可恢复的模拟器快照上显式开启 read/write，逐个验证 canonical-first 纵切、revision CAS 和强杀恢复；这类单纵切 opt-in 只属于工程验证，不构成 Release B 扩量，也不得进入普通交付包。
 
 ### 7.4 游客登录迁移 v2
 
@@ -847,6 +861,15 @@ resolveOccurrenceMeeting(scopeKey, {
 - SQLite 写失败时内存 draft 不清空，固定错误槽显示中文并提供重试；下一次生命周期 flush 再尝试。
 - 同步只上传已落盘 revision。服务端以 `base_remote_revision` 做乐观并发；冲突产生“本机版本/云端版本”两个候选，不允许 last-write-wins 静默覆盖。
 
+#### 当前同步实现
+
+- 账号笔记实际变化与 SQLite 保存同事务写入 `manual_note.upsert`；旧 dirty 笔记缺少 operation 时由 scheduler 幂等补齐。
+- 只有实时获取的 `manual_notes_v2` capability 允许网络写入。创建使用 `If-None-Match: *`，更新使用 `If-Match`；重试复用持久请求快照和 operation ID。
+- 完成旧 claim 时只确认该请求快照。若用户在请求进行中继续输入，新 draft 保持 dirty，后续 operation 以刚确认的云端 revision 继续提交。
+- 详情页和录制页进入及回前台执行会议级 GET。完全相同的内容、编辑时间和客户端时间可以安全附着；存在未完成 outbox 或 unresolved conflict 时，不同云端内容不得覆盖本机。
+- 409/412 或 pull 分歧进入同一 `manual_note` conflict。旧 operation 被阻塞，状态槽显示“笔记同步冲突，点击处理”；版本 sheet 只提供本机/云端两个候选和一个提交动作。
+- 选择本机时先推进本机 revision/clock，再以当前云端 revision 创建新 operation；选择云端时原子应用云端内容或明确接受云端空白，并使当前 Summary 进入 `stale`。
+
 #### Summary 输入
 
 总结 input fingerprint 必须包含：
@@ -881,6 +904,10 @@ speaker assignment revision
 - 会后精加工完成后创建 `final` revision 并切为 active；保留 draft 直到 final 完整性验证成功。
 - 完整性验证比较最晚时间、总字数、非空段数和服务端声明；final 明显短于 draft 时不自动替换，显示“文字记录仍在补全”。
 - 说话人更名是 assignment/override，不重写原始 ASR 文本。
+
+当前移动端实现将“明显短于”收敛为可复用纯函数，而不是页面内按行数猜测：NFKC 后非空 Unicode code point、非空段数、最大 `start/end` 时间共同参与；分段数单独减少永不构成拒绝，因为 final 可能合并 draft 段。`[INFERENCE]` 第一版要求至少两项显著回退，或时间/文字出现极端回退才保留 active draft。阈值集中在 `transcriptCompleteness.ts`，后续真实 10/30/60 分钟样本只调整这一处。服务端明确 `incomplete/processing/finalizing` 时，候选只能更新 `realtime_draft` 并保持补全状态；明确 complete 也不能绕过本机截断检测；无声明时按本机指标 fail-safe。
+
+final 候选与当前 active revision 的读取、候选 revision 保存、active 切换和 processing stage 更新必须位于同一 SQLite transaction。被拒绝的 immutable final 仍以 inactive revision 保存，不能写入旧缓存覆盖当前可读 draft；相同内容后续仅声明从 incomplete 变 complete 时，不得通过修改 immutable revision 元数据伪造新版本。当前兼容层把 incomplete 内容写入可替换的 `legacy-live` draft，只有得到 final 候选且完整性通过时才创建并激活 immutable final。
 
 #### 单场搜索
 
@@ -1025,6 +1052,10 @@ interface MinutesTranscriptLineSnapshot {
 - action 使用 entity revision。字段冲突时：完成状态按显式最近用户操作合并；content/due 同时变化则生成冲突副本并要求选择。
 - 服务端必须返回稳定 action ID；当前 `_get_app_final_summary` 临时 UUID 逻辑必须移除。
 
+当前 additive 纵切已在目标服务源码落地可靠上行 upsert：`MeetingActionItem` 保存稳定远端 ID 和单调 revision，`MeetingActionOperation` 持久保存幂等请求哈希及原成功响应；首次创建、同 key 重放、revision 更新、陈旧写拒绝均有窄合同。客户端把 409/412 的错误码与当前云端 payload 一起持久化，详情行显式标记冲突并暂停会产生新版本的完成/后续日程命令。用户选择本机版本时，旧未完成 operation 全部标记为被取代，并以云端当前 revision 创建新 operation；选择云端版本时，只覆盖当前协议能安全表达的字段，保留本机来源/创建身份，清除设备通知 ID 后对账。冲突状态、action、outbox、meeting sync state 和 canonical revision 同事务更新，CAS 或 payload 校验失败时保持 unresolved。会议级 action list/cursor/pull 现已完成源码切片：整页严格解析，本机不存在则插入，有未完成 outbox/冲突时只允许全字段相同的安全附着，无本机待写时只应用单调更高 revision，其余均生成可见冲突。来源 segment 只在 active Transcript revision 唯一映射时保留链接。该切片仍没有全账号 change feed、全局 sync cursor、batch、action tombstone 或运行中跨设备证据，不得据此宣称完整双向/跨设备同步。目标进程未启动，新表和 capability 尚未在运行实例生效。
+
+为避免 pull 丢失用户语义，action v2 envelope 携带 `client_created_at_ms`、`user_edited_at_ms`、`completed_at_ms` 与 `generation_fingerprint`。创建时间、source kind、source Summary/segment/time 和 generation fingerprint 是 identity/provenance，首次创建或旧表一次性补全后不得被普通更新改变；content/status/assignee/due/reminder/follow-up 和相应用户时间是 revision 管理字段。completed 必须有处于 action 生命周期内的完成时间，非 pending 不保留提醒，manual/marker 不携带 generated fingerprint。字段已同步到目标源码并通过窄合同，远端读取与 active Transcript 来源 ID 映射已有客户端源码闭环；真实旧表升级、账号拉取和跨设备收敛仍没有运行证据。
+
 #### 验收
 
 编辑内容、设截止、完成、重新生成 Summary、重启 App、换账号再返回；用户编辑和完成状态必须保持。点击来源能跳到正确段落，创建提醒后系统通知标题与正文均为中文。
@@ -1050,7 +1081,7 @@ interface MinutesTranscriptLineSnapshot {
 
 1. UI 文件选择使用与当前 Expo SDK 匹配的 Document Picker，调用 `ACTION_OPEN_DOCUMENT`，MIME 初筛 `audio/*` 和受支持 `video/*`。
 2. `MainActivity` 增加 `ACTION_SEND`/`ACTION_VIEW` 接收，但只接受单文件；多选第一阶段明确拒绝并用中文提示。
-3. `singleTask` Activity 必须同时处理 cold-start initial intent 和 `onNewIntent`；同一 URI + size + lastModified 在短窗口内只消费一次。
+3. `singleTask` Activity 必须同时处理 cold-start initial intent 和 `onNewIntent`；短窗口去重使用小写 scheme/authority 与解码后的 path/query 形成规范 URI 身份。size/lastModified 只用于预检和来源变化判断，不参与短窗口身份，因为等价 URI 的编码或 grant 状态会让 ContentProvider 元数据暂时缺失。
 4. Android 组件和 intent-filter 通过现有 config plugin 生成，避免 `expo prebuild` 覆盖手改 manifest。
 
 #### 摄取而非长期依赖 URI
@@ -1071,15 +1102,17 @@ interface MinutesTranscriptLineSnapshot {
 
 ```text
 选取/分享 URI
+  -> ContentResolver 检查真实元数据
+  -> 用户确认标题/时间/可选关联日程
+  -> 持久化 scope/title/time/calendar draft
   -> 本机流式摄取
   -> 创建 MeetingNote + RecordingAsset(imported)
-  -> 用户确认标题/语言/时间/可选关联日程
   -> 上传
   -> 转写
   -> 整理
 ```
 
-来源 `file_import/share_intent` 复用同一播放器、Transcript、Summary、Action 和分享页面。日历关联是可选后续动作；若关联 occurrence 已有会议，提示合并或取消，不自动覆盖。
+来源 `file_import/share_intent` 复用同一播放器、Transcript、Summary、Action 和分享页面。日历关联是可选动作；若 occurrence 已有会议，当前明确要求选择其他日程或不关联，不自动覆盖。显式合并必须等目标会议选择、资产归属和冲突回滚合同完成后另行开放。处理语言没有可验证的请求字段前不得展示无效控件。
 
 #### 验收
 
@@ -1111,25 +1144,33 @@ interface MinutesTranscriptLineSnapshot {
 
 `quote_hash` 用于发现 Transcript revision 后内容漂移，不作为加密或权限边界。切换 final/reprocessed Transcript 时，旧 Summary 仍引用其原 revision；用户点击旧引用应加载对应 revision 或提示该版本文字已归档，不能把引用悄悄指向新段落。
 
+当前纵向实现采用任务输入 Transcript 作为唯一 canonical 索引：模型时间一律忽略，服务端用真实 segment 秒值换算毫秒；合法 ID 也必须与同段逐字 quote 相符。空 quote、未知/重复/不可映射 ID、无效时间和多义 quote 均 fail closed。无声明 citation 的确定性 fallback 只有在最终文本作为短 quote 唯一命中一个稳定 segment 时才回填；模型显式声明了空或错误 citation 时不得借 fallback 洗成有效引用。`quote_hash` 对完整 segment 文本计算 SHA-256；action identity 使用排序后的来源 segment IDs。compact、普通总结和 Map-Reduce 都保留来源，游客请求也传递本机 line ID，避免服务端自造 ID 无法映射锁定 revision。源码与窄合同已同步，运行中服务与真实模型样本仍是退出条件。
+
 ### 10.4 ENTRY-01：会前通知和 occurrence 直达
 
-当前 event reminder registry 继续负责去重、取消和 occurrence identity。扩展 notification data：
+当前 event reminder registry 继续负责去重、取消和 occurrence identity。实际 version 3 notification data 保持 event-only，不预先写 meeting ID 或把点击动作塞进业务 payload：
 
 ```ts
 type MeetingStartNotificationData = {
-  notificationKind: 'event-reminder';
-  sourceEventId: string;
-  occurrenceDate: string;
-  primaryAction: 'open-event' | 'start-or-resume-meeting';
+  kind: 'event';
+  version: 3;
+  eventSourceId: string;
+  eventOccurrenceDate: string;
+  notificationScope: ScopeKey;
+  fingerprint: string;
   eventSnapshot: NotificationEventSnapshot;
 };
 ```
 
-- 通知标题和正文均为中文，例如标题“日程即将开始”，正文使用用户日程标题；空标题使用“未命名日程”。
-- 通知 action 只携 occurrence ref，不携 meeting ID；打开后 `BindOrResumeOccurrenceMeetingUseCase` 原子解析，避免旧通知指向过期 meeting。
+- 通知标题和正文均为中文：标题“日程即将开始”，正文使用用户日程标题；空标题沿用日历展示层的 `(无主题)`，不得回写领域标题。
+- Android category action identifier `start-or-resume-meeting` 与默认 action 分别解析为 `start-or-resume-meeting/open-event`；semantic intent 与 occurrence ref 在响应后持久化，兼容旧 pending event 缺 intent 的情况。
+- 通知 action 只携 occurrence ref，不携 meeting ID；打开后 `openOccurrenceMeeting()` 原子解析，避免旧通知指向过期 meeting。详情页与通知必须调用同一用例。
 - App Lock 开启时先通过 gate，再执行 pending semantic action；认证失败不创建 meeting。
 - 点击通知时若已有 active recording，直接继续；已有 ended 记录则查看；没有才创建。
 - 通知被重复投递或用户连点不会创建重复 meeting。
+- 响应成功后按原 notification ID 移除系统卡片；默认点击仍只打开日程详情，不能隐式创建 meeting。
+
+当前本机实现与模拟器证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)。服务端冲突裁决、App Lock 生物识别任务和真机/不同 ROM 仍是退出条件，不因本机纵切通过而视为 Phase 6 完成。
 
 ### 10.5 ENTRY-02：Widget 与 Quick Settings Tile
 
@@ -1168,6 +1209,10 @@ type MeetingTemplate = {
 
 模板只影响 Summary schema 和 prompt，不改变录音、上传、转写或权限。默认 `general`。更换模板创建新 Summary version；现有人工编辑版本继续保留。第一阶段不开放自由 prompt 编辑器，避免把模型错误直接暴露给用户。
 
+当前移动端实现以 `templates.ts` 作为唯一内置注册表，模板键进入请求、pending task、v2 input fingerprint、恢复匹配和响应校验；登录态成功轮询优先消费该 task 自身结果，避免快速切换模板时读取到另一版本。Android 原生详情与通用详情均从“生成/重新生成”打开同一模板 sheet，更换模板继续沿用 immutable Summary version 保护，不覆盖人工编辑版本。
+
+服务端采用严格 `id@revision` 白名单，把模板 prompt 作为临时 suffix 传入既有模型 CLI，并把固定 `template_sections` 归一化为 schema v2。真实 `FinalSummary` 表尚无模板列，因此兼容阶段将 v2 envelope 存入输出 JSON 的 `_laoji_structured_summary`，不伪造已完成的数据库迁移。补丁已与共享服务器目标工作区当前源码三方合并并同步，保留任务隔离、幂等、删除保护和总结质量清洗；服务未启动，因此真实四模板模型输出、账号链路和运行 OpenAPI 仍是未完成项。合同和模拟器证据见 [`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md)。
+
 ### 10.7 SERIES-01：重复会议系列记忆
 
 #### 系列身份
@@ -1187,9 +1232,17 @@ type MeetingTemplate = {
 
 这是确定性查询，不先引入跨会议 LLM。会前内容默认只读；用户选择“带入我的笔记”时才复制为新会议人工笔记，且复制内容标明来源，不能自动污染新笔记。
 
+当前本机纵切以 `calendarMeetingSeriesKey()` 统一生成规范 key，migration v10 回填旧 link；repository 严格按 scope、active link、当前 occurrence 之前和 ended lifecycle 查询最近会议与原始 pending action。未来重复 occurrence 的日历详情以无卡片嵌套的信息组展示上次会议、最多三条决定和最多五条事项；事项跳转携带原 action ID，完成后下一次查询自然移除。用户可在默认不勾选的 bottom sheet 中明确选择决定/事项；写入前重新查询并校验来源 ID，通过统一 occurrence 用例找到或创建目标会议，以 revision CAS 在保留已有正文的前提下追加带日期、标题、负责人和截止时间的来源块，不复制 action 对象。
+
+migration v13 的 `meeting_series_carry_imports` 以 `(target_meeting_id, source_kind, source_item_id)` 唯一标识一次来源导入，并固化来源 meeting/occurrence/title/content、负责人、截止时间、segment 与 start time 快照。ledger insert 与人工笔记 CAS 必须在同一事务；只渲染本次成功插入的项目。删除目标 meeting 级联删除 ledger；来源 meeting 不设外键，删除来源后仍保留已写入笔记的解释快照。v13 之前的纯文本块不反向猜测 ledger；Summary 重生成若改变决定 identity，语义相同文本仍可能成为新来源项目。模拟器以“决定 A + 事项 B”后再选“事项 B + 决定 C”验证最终三条 ledger、笔记 revision 2、事项 B 正文一次。
+
+决定 citation 只在可证明映射时用于精确回跳：section 仅一条决定时保留其引用；多条决定必须与按 ordinal 排序的 citation 数量相等并按位置一一绑定，否则该决定不携带精确来源。可靠映射进入来源会议“文字记录”并按 segment/source time 定位；歧义或缺失时退回来源“整理结果”。Calendar detail snapshot 为 v2；Minutes snapshot v9 提供初始 Transcript 定位 request。合法 `laoji://` 冷/热深链不会被媒体导入 inbox 抢占。本机合同和模拟器证据见 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
+
 #### Summary 使用
 
 新 Summary 可以接收用户明确选择的 carry-forward actions；未选择的历史内容不进入 prompt。由新会议确认完成旧行动项时，修改的是同一个 action，而不是复制一条同名任务。
+
+“带入我的笔记”只授权写入私人笔记，不自动授权把内容发送给模型。当前 Summary carry-forward 在模板选择后重新查询候选：默认零选择，取消终止生成，“不引用”显式继续；只有独立勾选的项目进入请求。授权 request ID、项目快照、模板和 Transcript 固化进 input fingerprint 与 pending task；恢复、任务丢失重提及结果校验保持同一 identity。账号服务校验来源会议归当前用户；历史内容只作为背景，不得冒充本场 Transcript 或生成本场引用。目标服务尚未运行，因此真实模型利用质量和未选内容隔离仍需运行证据。
 
 ### 10.8 SHARE-01：分层分享
 
@@ -1207,7 +1260,7 @@ type MeetingTemplate = {
 | 我的笔记 | 关 | 用户显式开启，需二次强调它是私人原文 |
 | Marker/附件 | 关 | P1/P2 可选 |
 
-不得保留当前 `bundle` 一键无提示包含全部资料的语义。可以保留“完整资料”，但必须先展示以上勾选项，且默认仍只选基本信息与整理结果。
+不得保留当前 `bundle` 一键无提示包含全部资料的语义。可以保留“完整资料”，但必须先展示以上勾选项；默认只选当前可用的基本信息、整理结果和行动项，后三类原始/私人内容始终默认关闭。
 
 #### 导出 manifest
 
@@ -1262,6 +1315,8 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 - 会后 diarization/identification 产生 final assignments。
 - “重新匹配旧会议”是用户触发的 batch job；创建新 transcript/speaker revision，不覆盖手工 assignment。
 - 每次模型版本和 profile revision 写入处理元数据，便于判断结果是否可比较。
+
+当前本机纵切实现 active 稳定 Transcript 的“仅此段 / 本场同一匿名簇”修正。migration v11 保存不可变 correction/assignment 历史，当前显示通过 override 投影；migration v12 增加独立服务端 Transcript revision 映射和 correction 同步结果。游客只产生 `local_only` 名称；账号 correction 仅在具备服务端 segment IDs 时与 outbox 同事务写入，真正发送还必须具备服务端 Meeting/Transcript revision IDs，并由实时远端 capability 明确开启。请求使用 correction ID 幂等，支持失败退避和 409/412 冲突记录；本机 canonical hash 不作为远端 ID。两种作用域都不创建 profile。修改会把当前 Summary 标为 `stale` 但保留正文；realtime draft 直接以中文阻止。实现合同、飞书来源分类、SQLite 计数和模拟器恢复证据见 [`implementation/contracts/phase-7-speaker-assignment-evidence.md`](implementation/contracts/phase-7-speaker-assignment-evidence.md)。远端当前不可达，故真实账号反馈、future profile、跨设备同步和旧会议重匹配仍按本节目标保留为未完成项。
 
 ### 10.10 PRIV-01：默认私有与删除语义
 
@@ -1352,6 +1407,8 @@ GET /api/laoji/capabilities
   "meeting_notes_v2": true,
   "structured_summary_v2": true,
   "summary_citations": true,
+  "action_items_v2": true,
+  "action_items_pull_v2": true,
   "speaker_corrections": false,
   "media_import": {
     "mime_types": ["audio/wav", "audio/mpeg", "audio/mp4"],
@@ -1363,6 +1420,8 @@ GET /api/laoji/capabilities
 ```
 
 移动端按能力显示功能；服务端未开放时不展示死按钮。capability 缓存带获取时间，网络失败使用上次值，但会改变数据的操作必须在服务端再次校验。
+
+当前目标源码已有该 endpoint 的保守子集：只有 action 表可查询时才报告 `action_items_v2=true` 和独立 `action_items_pull_v2=true`；未实现的 `meeting_notes_v2`、全局 `sync_cursor`、`speaker_corrections` 继续返回 false，`media_import` 与 `soft_delete_days` 返回未知。目标服务尚未启动，因此客户端仍必须按缺失能力处理，不能用源码存在代替运行时协商。
 
 ### 12.3 MeetingNote v2 endpoint
 
@@ -1476,20 +1535,31 @@ Idempotency-Key: {client_request_id}
 ### 12.7 Action、Marker 与同步
 
 ```text
-POST/PATCH /v2/meeting-notes/{id}/action-items
+PUT        /api/laoji/v2/meeting-notes/{id}/action-items/{client_action_id}
+GET        /api/laoji/v2/meeting-notes/{id}/action-items?cursor=&limit=
 POST/PATCH /v2/meeting-notes/{id}/markers
 GET        /v2/sync/changes?cursor=&scope=meeting
 POST       /v2/sync/batch
 ```
+
+Action upsert 使用本机稳定 action ID 作为 `client_action_id`。首次创建发送 `If-None-Match: *`；已有远端实体发送 `If-Match: {remote_revision}`。`Idempotency-Key` 使用本次合并 cohort 中最后一个不可变 operation ID，成功响应必须返回稳定远端 ID、相同 client action ID 和单调整数 revision。409/412 必须返回可保存为冲突副本的当前远端 payload/revision，不得由客户端静默 last-write-wins。
+
+当前服务端纵切严格实现上述单项 upsert：同一用户内持久化 Idempotency-Key 重放，key 与不同请求复用返回 409，已存在/缺失/陈旧 revision 返回 412 和当前实体；operation 结果不自动清理，满足至少 30 天去重窗口。同一纵切新增会议所有权保护的 collection GET，按 `(updated_at, id)` 升序分页并返回不透明 cursor；已越过 cursor 的 action 后续更新会推进服务端 `updated_at` 并再次出现。目标服务启动时由既有 `create_all + ensure_app_meeting_schema()` additive 路径建表/索引。此次只同步源码并运行 Python 编译与 3 项窄合同，没有启动/重启目标服务，也没有把 8020 旧工作区当作该合同的运行证据。
+
+客户端当前只在会议详情页进入/回到前台时拉取该会议 action，不扫描全账号。migration v14 将 cursor 与 canonical meeting/remote meeting/scope 绑定，每页数据合并和 cursor CAS 同事务提交。本机存在未完成 outbox 或未解决冲突时不静默覆盖；只有所有 wire 字段完全一致才收敛为已满足，否则写入冲突并阻止继续上行。无本机待写时只接受更高 remote revision；同 revision 不同 payload fail closed。pull 后统一重建/取消当前作用域的设备提醒。
 
 `sync/batch` 每个 operation 独立返回 success/conflict/permanent_error/retryable_error，不能因一项失败回滚整个客户端 batch。服务端保存 `operation_id` 去重结果至少 30 天。
 
 Outbox 调度：
 
 - 同一 aggregate 串行，不同 meeting 最多并发 3。
+- 首次 claim 将当前最终 action 状态固化到 `request_payload_json`；网络结果不明确、进程中断或 token 切换后的重试必须复用该快照和同一 Idempotency-Key。后续本机编辑进入新 cohort，不能改写在途请求。
+- `claim_token` 保护迟到响应：只有仍持有同一 token 的 `in_flight` cohort 可以 ACK、转 retry 或写 conflict；过期 claim 由新 token 回收。
 - 网络恢复、App foreground、用户手动刷新触发。
 - 自动重试遵守 next_attempt；手动重试可以绕过时间但不绕过 blocked。
 - scope/token generation 改变时旧请求停止，不能把用户 A 的操作发送到用户 B。
+- 客户端只有在本次实时 `GET /api/laoji/capabilities` 明确返回 `action_items_v2=true` 时才 claim/send；404、断网、旧缓存或缺字段均不发写请求，本机 mutation 不回滚。
+- 409/412 不自动覆盖：冲突记录必须保留本机发送快照、云端 current payload/revision 和错误码。用户选择本机版本后用新 operation/Idempotency-Key 对云端 current revision 重试；选择云端版本后取消该 action 所有旧未完成 operation。损坏 payload、身份错配或 revision 漂移时保持 unresolved，不允许推测字段。
 - 日志只记 ID、stage、状态、耗时和错误码，不记标题、笔记、Transcript、Summary 正文或 token。
 
 ### 12.8 服务端表与迁移原则
@@ -1533,9 +1603,11 @@ Outbox 调度：
 
 实施每个 surface 前必须补短 evidence note，包含 `[PRODUCT]/[SOURCE]/[DEVICE]/[INFERENCE]`。没有直对应组件时不得声称“飞书就是这样”。
 
-### 13.3 Minutes snapshot v2
+### 13.3 Minutes snapshot v9 与后续扩展
 
-建议一次只增加当期字段，但目标形状如下：
+当前运行合同为 v9：列表已包含 `mediaImporting` 与 `importMedia`，录音页已包含人工笔记和 Marker 状态，详情已包含 page states、结构化 sections/citations、actions、markers、播放器、action focus，以及 `focusTranscriptSegmentId`、`focusTranscriptPositionMs`、`focusTranscriptRequestId` 初始来源定位。TypeScript 和 Kotlin 必须同步使用版本常量，旧 schema 不得静默按当前字段解释；focus request 只有实际找到目标或可靠时间回退后才能消费，避免 Transcript 尚未加载时永久丢失定位。
+
+后续 processing stage、版本选择和同步字段仍按当期纵切逐次增加；目标补充形状如下：
 
 ```ts
 type MinutesDetailTab = 'notes' | 'transcript' | 'summary' | 'speakers' | 'info';
@@ -1563,6 +1635,9 @@ interface MinutesActionItemSnapshot {
   completed: boolean;
   dueLabel?: string;
   sourceTimeLabel?: string;
+  hasSource?: boolean;
+  sourceSegmentId?: string;
+  sourceStartMs?: number;
   canEdit: boolean;
 }
 
@@ -1625,7 +1700,7 @@ openOccurrenceMeeting
 | `EventsStore.tsx` | 保持 recurrence 事务；增加 occurrence meeting projection 查询，不把 meeting 塞回 CalEvent |
 | `MeetingLiveScreen.android.tsx` | 收敛为 `RecordingSessionController` 订阅者；移出创建/停止/上传/同步长流程 |
 | `TranscriptionScreen.android.tsx` | 收敛为 detail controller；summary task、audio materialize、action mutation进入 use case/repository |
-| `nativeMinutesSnapshots.ts` | 从 repository projection 构建 v2 snapshot；不再把 Markdown 作为主 Summary 输入 |
+| `nativeMinutesSnapshots.ts` | 从 repository projection 构建 v9 snapshot；不再把 Markdown 作为主 Summary 输入 |
 | `minutes.ts` / `MinutesState.kt` | schema 同步升级，增加 notes/action/marker/stage/citation |
 | `MinutesDetailPages.kt` | 新 notes page、Transcript search/highlight、结构化 summary/action/citation |
 | `MinutesRecordingSurface.kt` | 内容切换、manual note editor、Marker；录音控制 geometry 保持 |
@@ -1633,6 +1708,8 @@ openOccurrenceMeeting
 | `MeetingUploadWorker.kt` | 从 meeting audio 扩展为 recording asset upload，保留 credential generation |
 | `RecordingJournal.kt` | 保持文件安全合同；只增加可选 asset/session reconciliation metadata，禁止大改 |
 | `meetingShare.ts` | 从 kind 三选一改为 content manifest；默认 summary-only |
+| `MeetingImportSheet.tsx` / `MeetingMediaImportProvider.tsx` | 元数据确认、键盘稳定、occurrence 冲突预检；确认后才摄取 |
+| `meetingMediaImportDrafts.ts` | 持久 scope/title/time/calendarContext；ready journal 恢复时阻止跨账号落库 |
 | `guestDataMigration.ts` | v2 event ID map、逐实体阶段和 occurrence link |
 | `notifications.ts` | 增 occurrence meeting action，不破坏现有 reminder registry |
 | config plugin / native Android | share intent、Widget、Tile、相对路径构建配置 |
@@ -1773,6 +1850,8 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 - `local_meeting_db_v1`
 - `local_meeting_db_canonical_read_v1`
 - `local_meeting_db_canonical_write_v1`
+- `local_meeting_db_account_root_write_v1`
+- `local_meeting_db_account_upload_write_v1`
 - `occurrence_meeting_link`
 - `manual_notes`
 - `transcript_audio_link`
@@ -1784,7 +1863,7 @@ payload 只含随机 meeting hash、origin、stage、duration bucket、count、e
 - `series_memory`
 - `speaker_feedback_v2`
 
-`local_meeting_db_v1` 只控制 Release A 的 schema/shadow/reconciliation；`local_meeting_db_canonical_read_v1` 必须显式 opt-in，默认关闭，且基础 DB flag 关闭时强制关闭。`local_meeting_db_canonical_write_v1` 还必须依赖 canonical read，默认关闭；只有 scope 完成 preflight 且所有活动 mutation 表面都支持 ownership revision 和 legacy mirror 恢复后才可开启，不能只为单个按钮翻转写入顺序。数据 schema 不随 UI flag 回滚；关闭 canonical read 或其自动 preflight 失败时立即保留旧 Store 读取，关闭其他 flag 只隐藏/停止对应新写入路径，已有数据仍可导出和恢复。
+`local_meeting_db_v1` 只控制 Release A 的 schema/shadow/reconciliation；`local_meeting_db_canonical_read_v1` 必须显式 opt-in，默认关闭，且基础 DB flag 关闭时强制关闭。`local_meeting_db_canonical_write_v1` 还必须依赖 canonical read，默认关闭；只有 scope 完成 preflight 且所有活动 mutation 表面都支持 ownership revision 和 legacy mirror 恢复后才可在普通构建开启，不能只为单个按钮翻转写入顺序。`local_meeting_db_account_root_write_v1` 与 `local_meeting_db_account_upload_write_v1` 分别再依赖上述三项，只用于账号根 outbox、远端合并与上传状态纵切的可恢复工程验证；两者不得因为 broad write flag 开启而自动开启。根消费者还必须确认当前 scope 已是 canonical owner，不能用后台启动抢占未完成 preflight 的 legacy scope。账号 Store、云刷新和 local/remote ID 边界虽已接管，但部署 API、真实上传、离线恢复、跨设备合并与冲突处理没有闭环证据，因此两项仍不得进入普通包。可恢复模拟器上的单纵切工程验证是唯一例外，验证后必须恢复原数据并重新生成默认关闭的交付包。数据 schema 不随 UI flag 回滚；关闭 canonical read 或其自动 preflight 失败时立即保留旧 Store 读取，关闭其他 flag 只隐藏/停止对应新写入路径，已有数据仍可导出和恢复。
 
 ### 17.2 自动停线条件
 

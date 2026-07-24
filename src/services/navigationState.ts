@@ -61,9 +61,10 @@ const ROOT_ROUTE_SET = new Set<string>(ROOT_NAVIGATION_ROUTE_NAMES);
 const TAB_ROUTE_SET = new Set<string>(MAIN_TAB_ROUTE_NAMES);
 const PROFILE_FIELDS = new Set(['nickname', 'email', 'phone']);
 const ACCOUNT_SECTIONS = new Set(['deletion']);
-const TRANSCRIPTION_FOCUS = new Set(['transcript', 'summary', 'title']);
+const TRANSCRIPTION_FOCUS = new Set(['notes', 'transcript', 'summary', 'title']);
 const LEGAL_KINDS = new Set(['terms', 'privacy', 'help', 'guide', 'version', 'contact']);
 const REPEAT_VALUES = new Set(['once', 'daily', 'weekly', 'monthly', 'yearly']);
+const RECURRENCE_SCOPE_VALUES = new Set(['occurrence', 'following', 'series']);
 const EVENT_CATEGORY_SET = new Set<string>(EVENT_CATEGORIES);
 const MAX_STACK_DEPTH = 32;
 const MAX_IDENTIFIER_LENGTH = 512;
@@ -163,6 +164,7 @@ function validDraftInput(value: unknown): value is PlainRecord {
     'endTime',
     'isAllDay',
     'repeat',
+    'recurrenceUntilDate',
     'description',
     'rawText',
     'location',
@@ -178,6 +180,7 @@ function validDraftInput(value: unknown): value is PlainRecord {
     && optional(value.endTime, isTimeKey)
     && typeof value.isAllDay === 'boolean'
     && optional(value.repeat, candidate => typeof candidate === 'string' && REPEAT_VALUES.has(candidate))
+    && optional(value.recurrenceUntilDate, isDateKey)
     && optional(value.description, isBoundedString)
     && optional(value.rawText, isBoundedString)
     && optional(value.location, isBoundedString)
@@ -189,6 +192,25 @@ function validDraftInput(value: unknown): value is PlainRecord {
       || (Number.isSafeInteger(value.reminderMinutes) && (value.reminderMinutes as number) >= 0));
 }
 
+function sanitizeActionFollowup(value: unknown): NonNullable<RootStackParamList['AddEvent']['followup']> | null {
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, [
+    'meetingId',
+    'canonicalMeetingId',
+    'actionId',
+    'clientRequestId',
+  ])) return null;
+  if (!isIdentifier(value.meetingId)
+    || !isIdentifier(value.canonicalMeetingId)
+    || !isIdentifier(value.actionId)
+    || !isIdentifier(value.clientRequestId)) return null;
+  return {
+    meetingId: value.meetingId,
+    canonicalMeetingId: value.canonicalMeetingId,
+    actionId: value.actionId,
+    clientRequestId: value.clientRequestId,
+  };
+}
+
 function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] | null {
   if (value === undefined) return {};
   if (!isPlainRecord(value) || !hasOnlyKeys(value, [
@@ -197,17 +219,30 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
     'startTime',
     'endTime',
     'eventRef',
+    'recurrenceScope',
     'draft',
+    'followup',
   ])) return null;
   if (!optional(value.date, isDateKey)
     || !optional(value.endDate, isDateKey)
     || !optional(value.startTime, isTimeKey)
     || !optional(value.endTime, isTimeKey)) return null;
+  if (!optional(
+    value.recurrenceScope,
+    candidate => typeof candidate === 'string' && RECURRENCE_SCOPE_VALUES.has(candidate),
+  )) return null;
 
   const eventRef = value.eventRef === undefined ? undefined : sanitizeEventRef(value.eventRef);
   if (value.eventRef !== undefined && !eventRef) return null;
   if (value.draft !== undefined && !validDraftInput(value.draft)) return null;
-  if (eventRef) return { eventRef };
+  const followup = value.followup === undefined ? undefined : sanitizeActionFollowup(value.followup);
+  if (value.followup !== undefined && !followup) return null;
+  if (eventRef) return followup ? null : {
+    eventRef,
+    ...(value.recurrenceScope !== undefined
+      ? { recurrenceScope: value.recurrenceScope as NonNullable<RootStackParamList['AddEvent']['recurrenceScope']> }
+      : {}),
+  };
 
   const draft = value.draft as PlainRecord | undefined;
   const date = value.date ?? draft?.startDate;
@@ -219,6 +254,10 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
     ...(endDate !== undefined ? { endDate: endDate as string } : {}),
     ...(startTime !== undefined ? { startTime: startTime as string } : {}),
     ...(endTime !== undefined ? { endTime: endTime as string } : {}),
+    ...(draft !== undefined
+      ? { draft: { ...draft } as unknown as RootStackParamList['AddEvent']['draft'] }
+      : {}),
+    ...(followup ? { followup } : {}),
   };
 }
 
@@ -248,14 +287,20 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
         : null;
     case 'Transcription':
       return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['meetingId', 'focus'])
+        && hasOnlyKeys(route.params, ['meetingId', 'focus', 'actionId', 'actionFocusRequestId'])
         && isIdentifier(route.params.meetingId)
         && optional(route.params.focus, candidate => typeof candidate === 'string' && TRANSCRIPTION_FOCUS.has(candidate))
+        && optional(route.params.actionId, isIdentifier)
+        && optional(route.params.actionFocusRequestId, candidate => Number.isSafeInteger(candidate) && (candidate as number) >= 0)
         ? {
             name: 'Transcription',
             params: {
               meetingId: route.params.meetingId,
-              ...(route.params.focus !== undefined ? { focus: route.params.focus as 'transcript' | 'summary' | 'title' } : {}),
+              ...(route.params.focus !== undefined ? { focus: route.params.focus as 'notes' | 'transcript' | 'summary' | 'title' } : {}),
+              ...(route.params.actionId !== undefined ? { actionId: route.params.actionId } : {}),
+              ...(route.params.actionFocusRequestId !== undefined
+                ? { actionFocusRequestId: route.params.actionFocusRequestId as number }
+                : {}),
             },
           }
         : null;

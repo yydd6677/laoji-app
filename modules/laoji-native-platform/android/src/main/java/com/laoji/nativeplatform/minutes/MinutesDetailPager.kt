@@ -11,12 +11,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.media.MinutesPlaybackState
 
 internal class MinutesDetailPagerAdapter(
   context: Context,
   onAction: (Map<String, Any?>) -> Unit,
 ) : RecyclerView.Adapter<MinutesDetailPagerAdapter.Holder>() {
   private val pages: Map<MinutesDetailTab, MinutesDetailPage> = linkedMapOf(
+    MinutesDetailTab.NOTES to MinutesNotesPage(context, onAction),
     MinutesDetailTab.TRANSCRIPT to MinutesTranscriptPage(context, onAction),
     MinutesDetailTab.SUMMARY to MinutesSummaryPage(context, onAction),
     MinutesDetailTab.SPEAKERS to MinutesSpeakersPage(context, onAction),
@@ -39,10 +41,15 @@ internal class MinutesDetailPagerAdapter(
   }
 
   fun render(state: MinutesDetailState) {
+    (pageFor(MinutesDetailTab.NOTES) as MinutesNotesPage).render(state)
     (pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage).render(state)
     (pageFor(MinutesDetailTab.SUMMARY) as MinutesSummaryPage).render(state)
     (pageFor(MinutesDetailTab.SPEAKERS) as MinutesSpeakersPage).render(state)
     (pageFor(MinutesDetailTab.INFO) as MinutesInfoPage).render(state)
+  }
+
+  fun onPlaybackState(state: MinutesPlaybackState) {
+    (pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage).onPlaybackState(state)
   }
 
   fun pageFor(tab: MinutesDetailTab): MinutesDetailPage = requireNotNull(pages[tab])
@@ -55,10 +62,19 @@ internal class MinutesDetailPagerAdapter(
     pages.mapValues { (_, page) -> page.captureScrollPosition() }
 
   fun restoreScrollPositions(state: MinutesDetailPersistedViewState) {
+    pageFor(MinutesDetailTab.NOTES).restoreScrollPosition(state.notes)
     pageFor(MinutesDetailTab.TRANSCRIPT).restoreScrollPosition(state.transcript)
     pageFor(MinutesDetailTab.SUMMARY).restoreScrollPosition(state.summary)
     pageFor(MinutesDetailTab.SPEAKERS).restoreScrollPosition(state.speakers)
     pageFor(MinutesDetailTab.INFO).restoreScrollPosition(state.info)
+  }
+
+  fun focusSummaryAction(state: MinutesDetailState, force: Boolean = false) {
+    (pageFor(MinutesDetailTab.SUMMARY) as MinutesSummaryPage).focusAction(
+      state.focusActionId,
+      state.focusActionRequestId,
+      force,
+    )
   }
 
   internal class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(FrameLayout(parent.context)) {

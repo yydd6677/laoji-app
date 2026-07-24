@@ -10,6 +10,10 @@ import {
 import { ScreenContainer } from '../components/ScreenContainer';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import { useAppDialog } from '../components/AppDialog';
+import {
+  MeetingSeriesCarryForwardSheet,
+  type MeetingSeriesCarryForwardSelection,
+} from '../components/MeetingSeriesCarryForwardSheet';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
 import { useAuth } from '../store/AuthStore';
@@ -21,14 +25,26 @@ import {
   recurrenceDeleteDialog,
   recurrenceEditChoices,
 } from '../services/recurrenceActions';
-import { buildNativeCalendarDetailSnapshot } from '../native/nativeCalendarPages';
+import {
+  buildNativeCalendarDetailSnapshot,
+  buildNativeCalendarSeriesMemorySnapshot,
+} from '../native/nativeCalendarPages';
 import { isScopeKey, type ScopeKey } from '../domain/meeting';
 import {
-  bindLegacyMeetingToOccurrence,
-  calendarMeetingContext,
   resolveOccurrenceMeeting,
   type OccurrenceMeetingProjection,
 } from '../services/occurrenceMeeting';
+import {
+  carrySeriesMemoryToManualNote,
+  openOccurrenceMeeting as openOccurrenceMeetingUseCase,
+} from '../application/meeting';
+import {
+  isFutureMeetingSeriesOccurrence,
+  resolveMeetingSeriesMemory,
+  type MeetingSeriesMemoryProjection,
+} from '../services/meetingSeriesMemory';
+import { pullOccurrenceMeeting } from '../services/meetingOccurrencePull';
+import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -43,14 +59,19 @@ type ScopeRequest = {
 // CAL-DETAIL-001 / CAL-REPEAT-RRULE-001 / UI-OVERLAY-001: the route coordinates repository semantics only.
 export function EventDetailScreen({ navigation, route }: Props) {
   const { events, searchableEvents, deleteEvent, refreshEvents } = useEvents();
-  const { createMeeting } = useMeetings();
-  const { mode, session } = useAuth();
+  const { createMeeting, refreshMeetings } = useMeetings();
+  const { mode, session, accessToken } = useAuth();
   const { showDialog } = useAppDialog();
   const [deleting, setDeleting] = useState(false);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest | null>(null);
   const [meetingProjection, setMeetingProjection] = useState<OccurrenceMeetingProjection | null>(null);
-  const [meetingActionPhase, setMeetingActionPhase] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [meetingActionPhase, setMeetingActionPhase] = useState<'loading' | 'preparing' | 'ready' | 'error'>('loading');
+  const [seriesMemory, setSeriesMemory] = useState<MeetingSeriesMemoryProjection | null>(null);
+  const [seriesMemoryPhase, setSeriesMemoryPhase] = useState<'loading' | 'ready' | 'error'>('ready');
+  const [carrySheetVisible, setCarrySheetVisible] = useState(false);
   const meetingActionBusyRef = useRef(false);
+  const meetingProjectionRequestRef = useRef(0);
+  const seriesMemoryRequestRef = useRef(0);
   const event = useMemo(() => resolveEventReference(
     [...events, ...(searchableEvents ?? [])],
     route.params.eventRef,
@@ -65,18 +86,75 @@ export function EventDetailScreen({ navigation, route }: Props) {
   }, [mode, session?.user.id]);
 
   const refreshMeetingProjection = useCallback(async () => {
+    const request = ++meetingProjectionRequestRef.current;
     if (!event || !scopeKey) {
       setMeetingProjection(null);
       setMeetingActionPhase('ready');
       return;
     }
     setMeetingActionPhase('loading');
+    let localProjection: OccurrenceMeetingProjection | null = null;
+    let reactivated = 0;
     try {
+      reactivated = await setOccurrenceMeetingLinkState({
+        scopeKey,
+        occurrence: eventRefForEvent(event),
+        selection: 'occurrence',
+        state: 'active',
+      });
+      localProjection = await resolveOccurrenceMeeting(scopeKey, eventRefForEvent(event));
+      if (meetingProjectionRequestRef.current !== request) return;
+      setMeetingProjection(localProjection);
+      setMeetingActionPhase('ready');
+    } catch {
+      if (meetingProjectionRequestRef.current !== request) return;
+      setMeetingActionPhase('error');
+      return;
+    }
+    if (reactivated > 0) return;
+    if (mode !== 'authenticated' || !accessToken) return;
+    try {
+      const pulled = await pullOccurrenceMeeting({
+        scopeKey,
+        occurrence: eventRefForEvent(event),
+        accessToken,
+        refreshRemoteMeetings: refreshMeetings,
+      });
+      if (meetingProjectionRequestRef.current !== request) return;
+      if (pulled.outcome === 'meeting_unavailable') {
+        setMeetingProjection(localProjection);
+        setMeetingActionPhase(localProjection ? 'ready' : 'preparing');
+        return;
+      }
       const projection = await resolveOccurrenceMeeting(scopeKey, eventRefForEvent(event));
+      if (meetingProjectionRequestRef.current !== request) return;
       setMeetingProjection(projection);
       setMeetingActionPhase('ready');
     } catch {
-      setMeetingActionPhase('error');
+      // Remote lookup is additive. Offline recording remains available from the local result.
+      if (meetingProjectionRequestRef.current !== request) return;
+      setMeetingProjection(localProjection);
+      setMeetingActionPhase('ready');
+    }
+  }, [accessToken, event, mode, refreshMeetings, scopeKey]);
+
+  const refreshSeriesMemory = useCallback(async () => {
+    const request = ++seriesMemoryRequestRef.current;
+    if (!event || !scopeKey || !isFutureMeetingSeriesOccurrence(event)) {
+      setSeriesMemory(null);
+      setSeriesMemoryPhase('ready');
+      return;
+    }
+    setSeriesMemoryPhase('loading');
+    try {
+      const projection = await resolveMeetingSeriesMemory(scopeKey, event);
+      if (seriesMemoryRequestRef.current !== request) return;
+      setSeriesMemory(projection);
+      setSeriesMemoryPhase('ready');
+    } catch {
+      if (seriesMemoryRequestRef.current !== request) return;
+      setSeriesMemory(null);
+      setSeriesMemoryPhase('error');
     }
   }, [event, scopeKey]);
 
@@ -86,18 +164,39 @@ export function EventDetailScreen({ navigation, route }: Props) {
     void refreshMeetingProjection().catch(() => {
       if (active) setMeetingActionPhase('error');
     });
-    return () => { active = false; };
-  }, [refreshMeetingProjection]));
+    void refreshSeriesMemory();
+    return () => {
+      active = false;
+      meetingProjectionRequestRef.current += 1;
+      seriesMemoryRequestRef.current += 1;
+    };
+  }, [refreshMeetingProjection, refreshSeriesMemory]));
 
   const meetingAction = useMemo(() => {
     if (!event || !scopeKey) return undefined;
     if (meetingActionPhase === 'loading') {
       return { kind: 'loading' as const, label: '正在准备', statusLabel: '', enabled: false };
     }
+    if (meetingActionPhase === 'preparing') {
+      return {
+        kind: 'loading' as const,
+        label: '正在准备',
+        statusLabel: '会议记录正在同步',
+        enabled: false,
+      };
+    }
     if (meetingActionPhase === 'error') {
       return { kind: 'retry' as const, label: '重试', statusLabel: '会议状态暂时无法读取', enabled: true };
     }
     if (meetingProjection) {
+      if (meetingProjection.syncConflict) {
+        return {
+          kind: 'loading' as const,
+          label: '正在准备',
+          statusLabel: '日程关联待处理',
+          enabled: false,
+        };
+      }
       return {
         kind: meetingProjection.action,
         label: meetingProjection.label,
@@ -107,64 +206,49 @@ export function EventDetailScreen({ navigation, route }: Props) {
     }
     return { kind: 'start' as const, label: '开始记录', statusLabel: '尚未建立会议记录', enabled: true };
   }, [event, meetingActionPhase, meetingProjection, scopeKey]);
+  const seriesMemorySnapshot = useMemo(() => (
+    event && isFutureMeetingSeriesOccurrence(event)
+      ? buildNativeCalendarSeriesMemorySnapshot(seriesMemoryPhase, seriesMemory)
+      : undefined
+  ), [event, seriesMemory, seriesMemoryPhase]);
   const snapshot = useMemo(
-    () => buildNativeCalendarDetailSnapshot(event, deleting, meetingAction),
-    [deleting, event, meetingAction],
+    () => buildNativeCalendarDetailSnapshot(event, deleting, meetingAction, seriesMemorySnapshot),
+    [deleting, event, meetingAction, seriesMemorySnapshot],
   );
 
   const openOccurrenceMeeting = useCallback(async () => {
     if (!event || !scopeKey || meetingActionBusyRef.current) return;
+    if (meetingActionPhase === 'loading' || meetingActionPhase === 'preparing') return;
     if (meetingActionPhase === 'error') {
       await refreshMeetingProjection();
       return;
     }
-    const current = meetingProjection;
-    if (current?.action === 'view') {
-      meetingActionBusyRef.current = true;
-      navigation.navigate('Transcription', { meetingId: current.meetingId });
-      return;
-    }
-    if (current?.action === 'continue') {
-      meetingActionBusyRef.current = true;
-      navigation.navigate('MeetingLive', { meetingId: current.meetingId, startRequested: false });
-      return;
-    }
-    if (current?.action === 'start') {
-      meetingActionBusyRef.current = true;
-      navigation.navigate('MeetingLive', { meetingId: current.meetingId, startRequested: true });
-      return;
-    }
-
     meetingActionBusyRef.current = true;
     setMeetingActionPhase('loading');
     try {
-      const context = calendarMeetingContext(event);
-      const created = await createMeeting(event.title ?? '', {
-        description: event.description ?? event.detail ?? null,
-        location: event.location ?? null,
-        mode: 'realtime',
-        clientRequestId: `calendar:${context.occurrence.sourceEventId}:${context.occurrence.occurrenceDate}`,
-        calendarContext: context,
+      const target = await openOccurrenceMeetingUseCase({
+        scopeKey,
+        event,
+        entryPoint: 'calendar_detail',
+        createMeeting,
       });
-      const projection = await bindLegacyMeetingToOccurrence(scopeKey, created, context);
-      setMeetingProjection(projection);
+      setMeetingProjection(target.projection);
       setMeetingActionPhase('ready');
-      navigation.navigate('MeetingLive', { meetingId: projection.meetingId, startRequested: true });
+      if (target.route === 'Transcription') navigation.navigate('Transcription', target.params);
+      else navigation.navigate('MeetingLive', target.params);
     } catch {
+      meetingActionBusyRef.current = false;
       setMeetingActionPhase('error');
       showDialog({
         title: '暂时无法开始记录',
         message: '会议记录或日程关联尚未准备好，请稍后重试。',
         tone: 'error',
       });
-    } finally {
-      meetingActionBusyRef.current = false;
     }
   }, [
     createMeeting,
     event,
     meetingActionPhase,
-    meetingProjection,
     navigation,
     refreshMeetingProjection,
     scopeKey,
@@ -220,6 +304,19 @@ export function EventDetailScreen({ navigation, route }: Props) {
     }));
   }, [event, scopeRequest]);
 
+  const carrySelectionToNote = useCallback((
+    selection: MeetingSeriesCarryForwardSelection,
+  ) => {
+    if (!event || !scopeKey) return Promise.reject(new Error('series memory is unavailable'));
+    return carrySeriesMemoryToManualNote({
+      scopeKey,
+      event,
+      decisionIds: selection.decisionIds,
+      actionIds: selection.actionIds,
+      createMeeting,
+    });
+  }, [createMeeting, event, scopeKey]);
+
   const handleAction = useCallback((action: NativeCalendarDetailAction) => {
     switch (action.type) {
       case 'back':
@@ -239,10 +336,54 @@ export function EventDetailScreen({ navigation, route }: Props) {
       case 'meetingAction':
         void openOccurrenceMeeting();
         break;
+      case 'retrySeriesMemory':
+        void refreshSeriesMemory();
+        break;
+      case 'carrySeriesMemory':
+        if (seriesMemory && (seriesMemory.decisions.length > 0 || seriesMemory.pendingActions.length > 0)) {
+          setCarrySheetVisible(true);
+        }
+        break;
+      case 'openSeriesMeeting': {
+        const segmentId = action.segmentId?.trim();
+        const positionMs = typeof action.positionMs === 'number'
+          && Number.isSafeInteger(action.positionMs)
+          && action.positionMs >= 0
+          ? action.positionMs
+          : undefined;
+        navigation.navigate('Transcription', segmentId || positionMs !== undefined ? {
+          meetingId: action.meetingId,
+          focus: 'transcript',
+          segmentId,
+          positionMs,
+          transcriptFocusRequestId: Date.now(),
+        } : {
+          meetingId: action.meetingId,
+          focus: 'summary',
+        });
+        break;
+      }
+      case 'openSeriesAction':
+        navigation.navigate('Transcription', {
+          meetingId: action.meetingId,
+          focus: 'summary',
+          actionId: action.actionId,
+          actionFocusRequestId: Date.now(),
+        });
+        break;
       default:
         break;
     }
-  }, [editEvent, navigation, openOccurrenceMeeting, refreshEvents, removeEvent, route.params.eventRef.occurrenceDate]);
+  }, [
+    editEvent,
+    navigation,
+    openOccurrenceMeeting,
+    refreshEvents,
+    refreshSeriesMemory,
+    removeEvent,
+    route.params.eventRef.occurrenceDate,
+    seriesMemory,
+  ]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
@@ -264,6 +405,15 @@ export function EventDetailScreen({ navigation, route }: Props) {
         visible={scopeRequest !== null}
         items={scopeItems}
         onClose={() => setScopeRequest(null)}
+      />
+      <MeetingSeriesCarryForwardSheet
+        visible={carrySheetVisible}
+        memory={seriesMemory}
+        onClose={() => setCarrySheetVisible(false)}
+        onCarry={carrySelectionToNote}
+        onCompleted={result => {
+          navigation.navigate('Transcription', { meetingId: result.meetingId, focus: 'notes' });
+        }}
       />
     </ScreenContainer>
   );

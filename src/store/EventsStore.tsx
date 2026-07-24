@@ -73,6 +73,8 @@ import {
   touchEventMonth,
 } from '../services/eventCache';
 import { eventEffectiveEndDate, eventOverlapsDateRange } from '../utils/eventDateSemantics';
+import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
+import { isScopeKey } from '../domain/meeting';
 
 export { checkConflict } from '../utils/eventUtils';
 
@@ -118,6 +120,12 @@ function mergeMetadata(map: EventMetadataMap, id: string, patch: EventMetadata):
 
 function createGuestId(): string {
   return `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function eventWithClientRequestId(events: readonly CalEvent[], clientRequestId?: string): CalEvent | null {
+  const normalized = clientRequestId?.trim();
+  if (!normalized) return null;
+  return events.find(event => event.clientRequestId?.trim() === normalized) ?? null;
 }
 
 async function loadJson<T>(key: string, fallback: T): Promise<T> {
@@ -400,7 +408,7 @@ interface EventsContextType {
   monthStates: Record<string, EventMonthLoadState>;
   cacheRecoveryNotice: EventCacheRecoveryNotice | null;
   hydratedScope: string | null;
-  addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<EventMutationResult>;
+  addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<EventCreateResult>;
   deleteEvent: (ref: EventRef, scope?: EventRecurrenceScope) => Promise<void>;
   updateEvent: (
     ref: EventRef,
@@ -430,6 +438,10 @@ export type EventReminderDelivery = 'not-required' | 'scheduled' | 'unavailable'
 export interface EventMutationResult {
   reminderDelivery: EventReminderDelivery;
   syncStatus?: 'pending';
+}
+
+export interface EventCreateResult extends EventMutationResult {
+  eventRef: EventRef;
 }
 
 export interface EventRefreshResult {
@@ -933,7 +945,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     };
   }, [hydratedScope, mode, refreshEventCatalog, refreshEvents, scope]);
 
-  const addEvent = useCallback(async (input: Omit<CalEvent, 'id'>): Promise<EventMutationResult> => {
+  const addEvent = useCallback(async (input: Omit<CalEvent, 'id'>): Promise<EventCreateResult> => {
     const validation = validateEventDraft(input);
     if (!validation.valid || !validation.value) throw new EventDraftValidationError(validation.issues);
     const ev = validation.value;
@@ -943,6 +955,13 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
           throw new Error('event scope changed');
+        }
+        const replay = eventWithClientRequestId(guestBaseEventsRef.current, ev.clientRequestId);
+        if (replay) {
+          return {
+            eventRef: eventRefForEvent(replay),
+            reminderDelivery: reminderDeliveryForEvent(replay, replay.notificationId),
+          };
         }
         const category = normalizeEventCategory(ev.category);
         const baseId = createGuestId();
@@ -959,7 +978,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         const nextGuestEvents = [...guestBaseEventsRef.current, baseEvent];
         await persistGuestEvents(nextGuestEvents);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-          return { reminderDelivery: reminderDeliveryForEvent(baseEvent, null, true) };
+          return {
+            eventRef: eventRefForEvent(baseEvent),
+            reminderDelivery: reminderDeliveryForEvent(baseEvent, null, true),
+          };
         }
         guestBaseEventsRef.current = nextGuestEvents;
         searchableEventsRef.current = nextGuestEvents;
@@ -974,6 +996,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         }
         const persisted = eventsRef.current.find(event => sourceEventId(event) === baseId) ?? baseEvent;
         return {
+          eventRef: eventRefForEvent(persisted),
           reminderDelivery: reminderDeliveryForEvent(
             persisted,
             persisted.notificationId,
@@ -984,11 +1007,37 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     }
     if (!accessToken) throw new Error('not authenticated');
 
-    const saved = await saveEvent(calEventToApiEvent(ev), accessToken);
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-      return { reminderDelivery: 'unconfirmed' };
+    const localReplay = eventWithClientRequestId(searchableEventsRef.current, ev.clientRequestId);
+    if (localReplay) {
+      return {
+        eventRef: eventRefForEvent(localReplay),
+        reminderDelivery: reminderDeliveryForEvent(localReplay, localReplay.notificationId),
+      };
     }
-    const savedId = String((saved as ApiEvent & { id: number }).id);
+    let saved: ApiEvent;
+    try {
+      saved = await saveEvent(calEventToApiEvent(ev), accessToken);
+    } catch (reason) {
+      if (!(reason instanceof HttpResponseError) || reason.status !== 409 || !ev.clientRequestId?.trim()) {
+        throw reason;
+      }
+      await refreshEventCatalog();
+      const replay = eventWithClientRequestId(searchableEventsRef.current, ev.clientRequestId);
+      if (!replay) throw reason;
+      return {
+        eventRef: eventRefForEvent(replay),
+        reminderDelivery: reminderDeliveryForEvent(replay, replay.notificationId),
+      };
+    }
+    const savedEvent = saved as ApiEvent & { id: number };
+    const savedEventRef: EventRef = {
+      sourceEventId: String(savedEvent.id),
+      occurrenceDate: savedEvent.occurrence_date ?? savedEvent.start_date,
+    };
+    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
+      return { eventRef: savedEventRef, reminderDelivery: 'unconfirmed' };
+    }
+    const savedId = String(savedEvent.id);
     const savedRefKey = eventRefKey({
       sourceEventId: savedId,
       occurrenceDate: saved.occurrence_date ?? saved.start_date,
@@ -1005,12 +1054,18 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       reminderUnconfirmed = true;
     }
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-      return { reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true) };
+      return {
+        eventRef: savedEventRef,
+        reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true),
+      };
     }
     if (notificationId) {
       localEv = await persistNotificationId(localEv, notificationId);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-        return { reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true) };
+        return {
+          eventRef: savedEventRef,
+          reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true),
+        };
       }
     }
     for (const key of monthKeysForRange(localEv.startDate, eventEffectiveEndDate(localEv))) {
@@ -1035,9 +1090,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       reminderUnconfirmed = true;
     }
     return {
+      eventRef: eventRefForEvent(localEv),
       reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, reminderUnconfirmed),
     };
-  }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistNotificationId, refreshEvents, saveMetadataPatch, scope]);
+  }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistNotificationId, refreshEventCatalog, refreshEvents, saveMetadataPatch, scope]);
 
   const findConflicts = useCallback(async (
     draft: Omit<CalEvent, 'id'>,
@@ -1389,6 +1445,13 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       removeTransactionMetadata(nextMetadata, transaction);
       eventMetadataRef.current = nextMetadata;
       await persistMetadata(nextMetadata);
+      if (!isScopeKey(transaction.scopeKey)) throw new Error('event scope changed');
+      await setOccurrenceMeetingLinkState({
+        scopeKey: transaction.scopeKey,
+        occurrence: transaction.ref,
+        selection: transaction.recurrenceScope,
+        state: 'orphaned',
+      });
     },
     executeDelete: async transaction => {
       if (mode === 'guest') return { observedState: 'absent', revision: transaction.revision };

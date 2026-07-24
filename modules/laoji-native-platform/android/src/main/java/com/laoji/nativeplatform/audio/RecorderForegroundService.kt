@@ -15,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.laoji.nativeplatform.entry.LaojiMeetingTileService
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -216,11 +217,13 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
       RecorderServiceClient.release(activeEngine.sessionId)
     }
     engine = null
+    LaojiMeetingTileService.requestRefresh(this)
     super.onDestroy()
   }
 
   override fun onSnapshotChanged(snapshot: RecorderSnapshot) {
     RecorderServiceClient.publish(snapshot)
+    LaojiMeetingTileService.requestRefresh(this)
     if (foregroundStarted) {
       try {
         getSystemService(NotificationManager::class.java).notify(
@@ -235,6 +238,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
 
   override fun onUnexpectedStop(result: RecorderStopResult) {
     RecorderServiceClient.release(result.snapshot.sessionId)
+    LaojiMeetingTileService.requestRefresh(this)
     stoppingNormally = true
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
@@ -256,6 +260,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
           val failure = publicFailure(error)
           command.future.completeExceptionally(failure)
           RecorderServiceClient.release(command.config.sessionId)
+          LaojiMeetingTileService.requestRefresh(this)
           stoppingNormally = true
           stopForeground(STOP_FOREGROUND_REMOVE)
           stopSelf(startId)
@@ -267,6 +272,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
       val failure = publicFailure(error)
       command.future.completeExceptionally(failure)
       RecorderServiceClient.release(command.config.sessionId)
+      LaojiMeetingTileService.requestRefresh(this)
       stoppingNormally = true
       if (foregroundStarted) stopForeground(STOP_FOREGROUND_REMOVE)
       stopSelf(startId)
@@ -295,6 +301,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
       if (error != null) command.future.completeExceptionally(publicFailure(error))
       else command.future.complete(result)
       RecorderServiceClient.release(command.sessionId)
+      LaojiMeetingTileService.requestRefresh(this)
       stoppingNormally = true
       stopForeground(STOP_FOREGROUND_REMOVE)
       stopSelf()

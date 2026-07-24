@@ -10,6 +10,7 @@ import {
   getNativeMeetingUploadState,
   type NativeMeetingUploadRegistration,
 } from '../native/nativeTransferCoordinator';
+import type { NativeUploadState } from 'laoji-native-platform';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v2';
 const LEGACY_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v1';
@@ -21,6 +22,7 @@ export function normalizeRecordingUri(uri: string | undefined): string | undefin
 
 export interface FinalizeMeetingRecordingInput {
   meetingId: string;
+  remoteMeetingId?: string | null;
   storageScope: string;
   transcriptLines: TranscriptLine[];
   isGuest: boolean;
@@ -42,6 +44,7 @@ export interface FinalizeMeetingRecordingDependencies {
   ) => Promise<NativeMeetingUploadRegistration | null>;
   updateStatus: (meetingId: string, status: string, patch: Partial<Meeting>) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
+  reconcileUploads?: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
 }
 
 export interface FinalizeMeetingRecordingResult {
@@ -54,6 +57,7 @@ export interface FinalizeMeetingRecordingResult {
 
 export interface PendingMeetingAudioUpload {
   meetingId: string;
+  remoteMeetingId?: string;
   audioUri: string;
   fileName: string;
   mimeType: string;
@@ -67,6 +71,25 @@ export interface PendingMeetingAudioUpload {
   nativeWorkId?: string;
   nativeOperationId?: string;
   nativeGeneration?: number;
+}
+
+export type PendingMeetingAudioUploadPhase =
+  | 'queued'
+  | 'uploading'
+  | 'uploaded'
+  | 'failed_retryable'
+  | 'blocked';
+
+export interface PendingMeetingAudioUploadInspection {
+  pending: PendingMeetingAudioUpload;
+  phase: PendingMeetingAudioUploadPhase;
+  attemptCount: number;
+  operationId: string | null;
+  credentialGeneration: number | null;
+  errorCode: string | null;
+  retryable: boolean;
+  nextRetryAtMs: number | null;
+  nativeState: NativeUploadState | null;
 }
 
 type PendingUploadMap = Record<string, PendingMeetingAudioUpload>;
@@ -125,6 +148,110 @@ export async function listPendingMeetingAudioUploads(
     left.createdAt.localeCompare(right.createdAt)
     || left.meetingId.localeCompare(right.meetingId)
   ));
+}
+
+function nativeFailureIsBlocked(reason: string | undefined): boolean {
+  const normalized = reason?.trim().toLowerCase() ?? '';
+  return normalized === 'invalid-input'
+    || normalized === 'invalid-endpoint'
+    || normalized === 'meeting-deleted'
+    || /^http-(?:400|404|409|413|415|422)$/.test(normalized);
+}
+
+function uploadAttemptCount(
+  pending: PendingMeetingAudioUpload,
+  nativeState: NativeUploadState | null,
+): number {
+  const nativeAttempts = Number.isSafeInteger(nativeState?.runAttemptCount)
+    ? Math.max(0, Number(nativeState?.runAttemptCount))
+      + (nativeState?.state === 'running'
+        || nativeState?.state === 'succeeded'
+        || nativeState?.state === 'failed'
+        ? 1
+        : 0)
+    : 0;
+  return Math.max(0, pending.attemptCount, nativeAttempts);
+}
+
+function parsedRetryAt(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+}
+
+export function derivePendingMeetingAudioUploadInspection(
+  pending: PendingMeetingAudioUpload,
+  nativeState: NativeUploadState | null,
+): PendingMeetingAudioUploadInspection {
+  let phase: PendingMeetingAudioUploadPhase;
+  let errorCode: string | null = pending.failureCode ?? null;
+  if (pending.uploadState === 'blocked') {
+    phase = 'blocked';
+  } else if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
+    phase = 'uploaded';
+    errorCode = null;
+  } else if (nativeState?.state === 'running') {
+    phase = 'uploading';
+    errorCode = null;
+  } else if (nativeState?.state === 'enqueued' || nativeState?.state === 'blocked') {
+    const retryScheduled = Number.isSafeInteger(nativeState.runAttemptCount)
+      && Number(nativeState.runAttemptCount) > 0;
+    phase = retryScheduled ? 'failed_retryable' : 'queued';
+    errorCode = retryScheduled ? 'native_upload_retry_scheduled' : null;
+  } else if (nativeState?.state === 'failed') {
+    phase = nativeFailureIsBlocked(nativeState.reason) ? 'blocked' : 'failed_retryable';
+    errorCode = nativeState.reason?.trim() || 'native_upload_failed';
+  } else if (nativeState?.state === 'cancelled' || nativeState?.state === 'missing') {
+    phase = 'failed_retryable';
+    errorCode = `native_upload_${nativeState.state}`;
+  } else if (pending.failureCode) {
+    phase = 'failed_retryable';
+  } else {
+    phase = 'queued';
+  }
+  return {
+    pending,
+    phase,
+    attemptCount: uploadAttemptCount(pending, nativeState),
+    operationId: pending.nativeOperationId?.trim() || null,
+    credentialGeneration: Number.isSafeInteger(pending.nativeGeneration)
+      ? Number(pending.nativeGeneration)
+      : null,
+    errorCode,
+    retryable: phase === 'failed_retryable',
+    nextRetryAtMs: phase === 'failed_retryable' ? parsedRetryAt(pending.nextAttemptAt) : null,
+    nativeState,
+  };
+}
+
+export async function inspectPendingMeetingAudioUpload(
+  pending: PendingMeetingAudioUpload,
+): Promise<PendingMeetingAudioUploadInspection> {
+  const nativeState = pending.nativeWorkId
+    ? await getNativeMeetingUploadState(pending.nativeWorkId).catch(() => null)
+    : null;
+  return derivePendingMeetingAudioUploadInspection(pending, nativeState);
+}
+
+export async function inspectPendingMeetingAudioUploads(
+  pending: readonly PendingMeetingAudioUpload[],
+  concurrency = 4,
+): Promise<PendingMeetingAudioUploadInspection[]> {
+  const inspections = new Array<PendingMeetingAudioUploadInspection>(pending.length);
+  let cursor = 0;
+  const workerCount = Math.min(
+    pending.length,
+    Math.max(1, Math.min(8, Math.floor(concurrency) || 1)),
+  );
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const index = cursor;
+      cursor += 1;
+      inspections[index] = await inspectPendingMeetingAudioUpload(pending[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return inspections;
 }
 
 export async function retryPendingMeetingAudioUpload(
@@ -257,6 +384,7 @@ export async function finalizeMeetingRecording(
   if (!input.isGuest && audioUri) {
     pendingAudio = {
       meetingId: input.meetingId,
+      remoteMeetingId: input.remoteMeetingId?.trim() || undefined,
       audioUri,
       fileName: `${input.meetingId}.wav`,
       mimeType: 'audio/wav',
@@ -320,19 +448,38 @@ export async function finalizeMeetingRecording(
       input.storageScope,
       input.meetingId,
       input.accessToken,
-      (pending, token) => dependencies.uploadAudio(pending.meetingId, pending.audioUri, token),
+      (pending, token) => dependencies.uploadAudio(
+        pending.remoteMeetingId ?? pending.meetingId,
+        pending.audioUri,
+        token,
+      ),
       { automatic: true },
     ).then(uploaded => {
+      if (uploaded && dependencies.reconcileUploads) {
+        return dependencies.reconcileUploads(pendingAudio!);
+      }
       if (uploaded) return dependencies.refreshMeetings();
       return undefined;
     }).catch(() => {});
   } else if (pendingAudio && input.accessToken && !retryQueued) {
     try {
-      await dependencies.uploadAudio(input.meetingId, audioUri!, input.accessToken);
-      void dependencies.refreshMeetings().catch(() => {});
+      await dependencies.uploadAudio(
+        input.remoteMeetingId?.trim() || input.meetingId,
+        audioUri!,
+        input.accessToken,
+      );
+      if (dependencies.reconcileUploads) {
+        void dependencies.reconcileUploads(pendingAudio).catch(() => {});
+      } else {
+        void dependencies.refreshMeetings().catch(() => {});
+      }
     } catch {
       uploadFailed = true;
     }
+  }
+
+  if (pendingAudio && retryQueued && dependencies.reconcileUploads) {
+    void dependencies.reconcileUploads().catch(() => {});
   }
 
   return {
@@ -356,6 +503,7 @@ async function savePendingMeetingAudioUpload(
     const existing = records[pending.meetingId];
     records[pending.meetingId] = {
       ...pending,
+      remoteMeetingId: pending.remoteMeetingId ?? existing?.remoteMeetingId,
       createdAt: existing?.createdAt ?? pending.createdAt ?? attemptedAt,
       lastAttemptAt: attemptedAt,
       attemptCount: (existing?.attemptCount ?? pending.attemptCount) + 1,
@@ -406,6 +554,35 @@ export async function clearPendingMeetingAudioUpload(storageScope: string, meeti
   await mutatePendingUploads(storageScope, records => {
     delete records[meetingId];
   });
+}
+
+export async function attachPendingMeetingAudioUploadRemoteIdentity(
+  storageScope: string,
+  meetingId: string,
+  remoteMeetingId: string,
+): Promise<boolean> {
+  const normalizedRemoteId = remoteMeetingId.trim();
+  if (!normalizedRemoteId || /[\u0000-\u001f\u007f]/.test(normalizedRemoteId)) {
+    throw new Error('meeting remote identity is invalid');
+  }
+  let changed = false;
+  let nativeWorkId: string | undefined;
+  await mutatePendingUploads(storageScope, records => {
+    const existing = records[meetingId];
+    if (!existing || existing.remoteMeetingId === normalizedRemoteId) return;
+    if (existing.remoteMeetingId && existing.remoteMeetingId !== normalizedRemoteId) {
+      throw new Error('meeting upload remote identity changed');
+    }
+    nativeWorkId = existing.nativeWorkId;
+    const next = { ...existing, remoteMeetingId: normalizedRemoteId };
+    delete next.nativeWorkId;
+    delete next.nativeOperationId;
+    delete next.nativeGeneration;
+    records[meetingId] = next;
+    changed = true;
+  });
+  if (nativeWorkId) await cancelNativeMeetingUpload(nativeWorkId).catch(() => {});
+  return changed;
 }
 
 export async function deletePendingMeetingAudioUpload(storageScope: string, meetingId: string): Promise<void> {
@@ -487,6 +664,9 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
     if (typeof item.audioUri !== 'string' || !item.audioUri) return;
     records[meetingId] = {
       meetingId,
+      remoteMeetingId: typeof item.remoteMeetingId === 'string' && item.remoteMeetingId.trim()
+        ? item.remoteMeetingId.trim()
+        : undefined,
       audioUri: item.audioUri,
       fileName: typeof item.fileName === 'string' && item.fileName ? item.fileName : `${meetingId}.wav`,
       mimeType: typeof item.mimeType === 'string' && item.mimeType ? item.mimeType : 'audio/wav',

@@ -125,6 +125,15 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
   override fun setSource(source: MinutesPlayerSource?) {
     checkMainThread()
     if (released) return
+    if (!shouldDispatchMinutesSourceCommand(
+        desiredSource = desiredSource,
+        nextSource = source,
+        sourceWasExplicitlySet = sourceWasExplicitlySet,
+        sourceCommandInFlight = sourceCommandInFlight,
+        hasFailure = failureCode != null,
+      )) {
+      return
+    }
     desiredSource = source
     sourceWasExplicitlySet = true
     sourceGeneration += 1L
@@ -146,6 +155,10 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
       desiredSource = null
       sourceWasExplicitlySet = false
       sourceGeneration += 1L
+      // The storage-scope command now owns the transition. A result from the invalidated source
+      // command must not leave pending play/seek/rate commands blocked forever.
+      activeSourceGeneration = sourceGeneration
+      sourceCommandInFlight = false
     }
     mediaController?.let { sendStorageScopeCommand(it, normalized, storageScopeGeneration) }
   }
@@ -219,7 +232,13 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
     val resultFuture = controller.sendCustomCommand(command, source?.toSessionArguments() ?: Bundle.EMPTY)
     resultFuture.addListener(
       {
-        if (released || activeSourceGeneration != generation) return@addListener
+        if (released || !isCurrentMinutesSourceCommandResult(
+            resultGeneration = generation,
+            desiredGeneration = sourceGeneration,
+            activeGeneration = activeSourceGeneration,
+          )) {
+          return@addListener
+        }
         sourceCommandInFlight = false
         val result = runCatching { resultFuture.get() }.getOrNull()
         if (result?.resultCode == SessionResult.RESULT_SUCCESS) {

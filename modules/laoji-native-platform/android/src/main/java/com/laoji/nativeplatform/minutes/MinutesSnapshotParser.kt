@@ -24,6 +24,7 @@ object MinutesSnapshotParser {
     title = raw.string("title").orDefault("会议记录"),
     searching = raw.boolean("searching"),
     query = raw.string("query").orEmpty(),
+    mediaImporting = raw.boolean("mediaImporting"),
     phase = phase,
     message = raw.string("message")?.takeIf { it.isNotBlank() }?.let {
       NativeUserMessages.readable(it, listFallback(phase))
@@ -66,7 +67,18 @@ object MinutesSnapshotParser {
     canPause = raw.boolean("canPause"),
     canStop = raw.boolean("canStop"),
     canStart = raw.boolean("canStart", true),
+    canCreateMarker = raw.boolean("canCreateMarker"),
     followLatest = raw.boolean("followLatest", true),
+    activeContent = MinutesRecordingContent.fromWireName(raw.string("activeContent")),
+    manualNote = raw.string("manualNote").orEmpty(),
+    manualNoteLoading = raw.boolean("manualNoteLoading"),
+    manualNoteSaving = raw.boolean("manualNoteSaving"),
+    manualNoteEnabled = raw.boolean("manualNoteEnabled"),
+    manualNoteError = raw.string("manualNoteError")?.takeIf { it.isNotBlank() }?.let {
+      NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
+    }.orEmpty(),
+    manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
+    manualNoteConflict = raw.boolean("manualNoteConflict"),
     transcript = parseTranscript(raw.maps("transcript")),
     )
   }
@@ -78,18 +90,79 @@ object MinutesSnapshotParser {
       NativeUserMessages.readable(it, "会议记录暂时无法加载，请稍后重试。")
     }.orEmpty()
     val transcript = parseTranscript(raw.maps("transcript"))
+    val markers = raw.maps("markers")
+      .asSequence()
+      .mapNotNull { item ->
+        val id = item.string("id").orEmpty()
+        val positionMs = item.long("positionMs")
+        if (id.isBlank() || positionMs < 0L) null else MinutesMarker(
+          id = id,
+          positionMs = positionMs,
+          timestampLabel = item.string("timestampLabel").orDefault(formatClock(positionMs)),
+          segmentId = item.string("segmentId").orEmpty(),
+          label = item.string("label").orEmpty(),
+          deleting = item.boolean("deleting"),
+        )
+      }
+      .take(MAX_MARKERS)
+      .sortedWith(compareBy<MinutesMarker> { it.positionMs }.thenBy { it.id })
+      .toList()
     val summary = raw.maps("summary").mapIndexed { index, item ->
-      MinutesSummaryBlock(
+      MinutesSummarySection(
         id = item.string("id").orDefault("summary-$index"),
+        stableKey = item.string("stableKey").orDefault("section_$index"),
         kind = item.string("kind").orDefault("paragraph"),
+        title = item.string("title").orEmpty(),
         text = item.string("text").orEmpty(),
-        checked = item.boolean("checked"),
+        citations = item.maps("citations")
+          .asSequence()
+          .mapIndexedNotNull { citationIndex, citation ->
+            val segmentId = citation.string("segmentId").orEmpty()
+            val startMs = citation.long("startMs").coerceAtLeast(0L)
+            val endMs = citation.long("endMs", startMs).coerceAtLeast(startMs)
+            if (segmentId.isBlank()) null else MinutesSummaryCitation(
+              id = citation.string("id").orDefault("summary-$index-citation-$citationIndex"),
+              segmentId = segmentId,
+              startMs = startMs,
+              endMs = endMs,
+              label = citation.string("label").orEmpty(),
+            )
+          }
+          .take(MAX_SUMMARY_CITATIONS)
+          .toList(),
       )
     }
+    val actions = raw.maps("actions")
+      .asSequence()
+      .mapIndexedNotNull { index, item ->
+        val id = item.string("id").orDefault("action-$index")
+        val content = item.string("content").orEmpty().trim()
+        if (content.isBlank()) return@mapIndexedNotNull null
+        val status = item.string("status").orDefault("pending")
+          .takeIf { it == "pending" || it == "completed" || it == "dismissed" }
+          ?: "pending"
+        MinutesActionItem(
+          id = id,
+          content = content,
+          status = status,
+          assigneeLabel = item.string("assigneeLabel").orEmpty(),
+          dueLabel = item.string("dueLabel").orEmpty(),
+          reminderLabel = item.string("reminderLabel").orEmpty(),
+          followupEventSourceId = item.string("followupEventSourceId").orEmpty(),
+          hasSource = item.boolean("hasSource") || item.containsKey("sourceStartMs"),
+          sourceSegmentId = item.string("sourceSegmentId").orEmpty(),
+          sourceStartMs = item.long("sourceStartMs").coerceAtLeast(0L),
+          updatedAtMs = item.long("updatedAtMs").coerceAtLeast(0L),
+          updating = item.boolean("updating"),
+          syncConflict = item.boolean("syncConflict"),
+        )
+      }
+      .take(MAX_SUMMARY_ACTIONS)
+      .toList()
     val speakers = raw.maps("speakers").mapIndexed { index, item ->
       MinutesSpeaker(
         id = item.string("id").orDefault("speaker-$index"),
-        label = item.string("label").orDefault("发言人"),
+        label = item.string("label").orDefault("讲话人"),
         segmentCount = item.int("segmentCount"),
         durationLabel = item.string("durationLabel").orEmpty(),
         canManage = item.boolean("canManage"),
@@ -99,8 +172,10 @@ object MinutesSnapshotParser {
       activeTab = activeTab,
       contentPhase = contentPhase,
       contentMessage = contentMessage,
-      transcriptHasContent = transcript.any { it.id.isNotBlank() && it.text.isNotBlank() },
-      summaryHasContent = summary.any { it.id.isNotBlank() && it.text.isNotBlank() },
+      transcriptHasContent = transcript.any { it.id.isNotBlank() && it.text.isNotBlank() }
+        || markers.isNotEmpty(),
+      summaryHasContent = summary.any { it.id.isNotBlank() && (it.text.isNotBlank() || it.title.isNotBlank()) }
+        || actions.any { it.id.isNotBlank() && it.content.isNotBlank() },
       speakersHaveContent = speakers.any { it.id.isNotBlank() && it.label.isNotBlank() },
     )
     return MinutesDetailState(
@@ -117,11 +192,28 @@ object MinutesSnapshotParser {
       canShare = raw.boolean("canShare"),
       canManageSpeakers = raw.boolean("canManageSpeakers"),
       canGenerateSummary = raw.boolean("canGenerateSummary"),
+      canCreateAction = raw.boolean("canCreateAction"),
       summaryGenerating = raw.boolean("summaryGenerating"),
-      summaryActionLabel = raw.string("summaryActionLabel").orDefault("生成总结"),
+      summaryActionLabel = raw.string("summaryActionLabel").orDefault("生成整理结果"),
       titleEditRequestId = raw.int("titleEditRequestId"),
+      focusActionId = raw.string("focusActionId").orEmpty(),
+      focusActionRequestId = raw.long("focusActionRequestId").coerceAtLeast(0L),
+      focusTranscriptSegmentId = raw.string("focusTranscriptSegmentId").orEmpty(),
+      focusTranscriptPositionMs = raw.long("focusTranscriptPositionMs").coerceAtLeast(0L),
+      focusTranscriptRequestId = raw.long("focusTranscriptRequestId").coerceAtLeast(0L),
+      manualNote = raw.string("manualNote").orEmpty(),
+      manualNoteLoading = raw.boolean("manualNoteLoading"),
+      manualNoteSaving = raw.boolean("manualNoteSaving"),
+      manualNoteEnabled = raw.boolean("manualNoteEnabled"),
+      manualNoteError = raw.string("manualNoteError")?.takeIf { it.isNotBlank() }?.let {
+        NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
+      }.orEmpty(),
+      manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
+      manualNoteConflict = raw.boolean("manualNoteConflict"),
       transcript = transcript,
+      markers = markers,
       summary = summary,
+      actions = actions,
       speakers = speakers,
       playerSource = raw.mapOrNull("playerSource")?.let(::parsePlayerSource),
       audioStatusMessage = raw.string("audioStatusMessage")?.takeIf { it.isNotBlank() }?.let {
@@ -138,6 +230,7 @@ object MinutesSnapshotParser {
     raw: Map<String, Any?>?,
     fallback: MinutesDetailPageStates,
   ): MinutesDetailPageStates = MinutesDetailPageStates(
+    notes = parseDetailPageState(raw?.mapOrNull("notes"), fallback.notes),
     transcript = parseDetailPageState(raw?.mapOrNull("transcript"), fallback.transcript),
     summary = parseDetailPageState(raw?.mapOrNull("summary"), fallback.summary),
     speakers = parseDetailPageState(raw?.mapOrNull("speakers"), fallback.speakers),
@@ -171,17 +264,39 @@ object MinutesSnapshotParser {
 
   private fun parseTranscript(items: List<Map<String, Any?>>): List<MinutesTranscriptLine> =
     items.mapIndexed { index, item ->
+      val text = item.string("text").orEmpty()
+      val isFinal = item.boolean("isFinal", true)
       MinutesTranscriptLine(
         id = item.string("id").orDefault("line-$index"),
         speakerId = item.string("speakerId").orEmpty(),
-        speakerLabel = item.string("speakerLabel").orDefault("发言人"),
+        speakerClusterId = item.string("speakerClusterId").orEmpty(),
+        speakerLabel = item.string("speakerLabel").orDefault("讲话人"),
         timestampLabel = item.string("timestampLabel").orDefault("00:00"),
         startMs = item.long("startMs"),
         endMs = maxOf(item.long("startMs"), item.long("endMs")),
-        text = item.string("text").orEmpty(),
-        isFinal = item.boolean("isFinal", true),
+        text = text,
+        isFinal = isFinal,
+        active = item.boolean("active"),
+        searchRanges = item.maps("searchRanges")
+          .asSequence()
+          .mapNotNull { range ->
+            MinutesTextRange(range.int("start"), range.int("end"))
+              .takeIf { it.validFor(text) }
+          }
+          .take(MAX_TRANSCRIPT_SEARCH_RANGES)
+          .toList(),
+        selectedSearchMatch = item.boolean("selectedSearchMatch"),
+        revisionKind = MinutesTranscriptRevisionKind.fromWireName(
+          item.string("revisionKind"),
+          isFinal,
+        ),
       )
     }
+
+  private const val MAX_TRANSCRIPT_SEARCH_RANGES = 1_000
+  private const val MAX_MARKERS = 2_000
+  private const val MAX_SUMMARY_CITATIONS = 5_000
+  private const val MAX_SUMMARY_ACTIONS = 500
 
   private fun listFallback(phase: MinutesContentPhase): String = when (phase) {
     MinutesContentPhase.LOADING -> "正在加载会议记录"

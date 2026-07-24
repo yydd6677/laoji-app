@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { MeetingEntryPoint, MeetingSummaryDocument } from '../domain/meeting';
 import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
@@ -60,6 +61,8 @@ export interface EventRef {
 
 export interface Meeting {
   id: string;
+  /** Stable server identity. Explicit null means this local meeting is not created remotely yet. */
+  remoteId?: string | null;
   title: string;
   date: string;
   time?: string;
@@ -91,11 +94,16 @@ export interface TranscriptLine {
   meeting_id?: string;
   speaker_id?: string;
   speaker_label?: string;
+  /** Compatibility metadata for meeting-local diarization grouping. */
+  speakerClusterId?: string;
   text: string;
   start_time?: number;
   end_time?: number;
   confidence?: number;
   created_at?: string | null;
+  /** Compatibility metadata projected from the local transcript revision model. */
+  isFinal?: boolean;
+  revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
 }
 
 export interface MeetingSummary {
@@ -108,6 +116,8 @@ export interface MeetingSummary {
   key_decisions?: string[];
   action_items?: { id?: string; content: string; assignee?: string | null; due_date?: string | null; status?: string }[];
   generated_at?: string | null;
+  /** Schema-v2 document retained while legacy consumers are incrementally removed. */
+  structured_document?: MeetingSummaryDocument;
 }
 
 export interface EventDraftParams {
@@ -128,14 +138,35 @@ export interface EventDraftParams {
   reminderMinutes?: number | null;
 }
 
+export interface MeetingActionFollowupParams {
+  /** Legacy/native meeting route identity used when returning to the detail page. */
+  meetingId: string;
+  canonicalMeetingId: string;
+  actionId: string;
+  /** Stable across retries so one action cannot create multiple calendar events. */
+  clientRequestId: string;
+}
+
 export type EditableProfileField = 'nickname' | 'email' | 'phone';
 
 export type RootStackParamList = {
   Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
   EventDetail: { eventRef: EventRef };
-  MeetingLive: { meetingId?: string; startRequested?: boolean } | undefined;
-  Transcription: { meetingId: string; focus?: 'transcript' | 'summary' | 'title' };
+  MeetingLive: {
+    meetingId?: string;
+    startRequested?: boolean;
+    entryPoint?: Extract<MeetingEntryPoint, 'meeting_tab' | 'quick_tile'>;
+  } | undefined;
+  Transcription: {
+    meetingId: string;
+    focus?: 'notes' | 'transcript' | 'summary' | 'title';
+    actionId?: string;
+    actionFocusRequestId?: number;
+    segmentId?: string;
+    positionMs?: number;
+    transcriptFocusRequestId?: number;
+  };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
   Profile: undefined;
@@ -154,6 +185,7 @@ export type RootStackParamList = {
     eventRef?: EventRef;
     recurrenceScope?: EventRecurrenceScope;
     draft?: EventDraftParams;
+    followup?: MeetingActionFollowupParams;
   };
 };
 

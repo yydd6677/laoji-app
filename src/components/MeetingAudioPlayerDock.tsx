@@ -23,6 +23,7 @@ import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from '../service
 import { readableErrorMessage } from '../services/errors';
 import {
   formatDuration,
+  meetingRemoteIdentity,
   nextMeetingPlaybackRate,
   shouldReplayAudio,
 } from '../utils/meetingMedia';
@@ -100,7 +101,15 @@ export function MeetingAudioPlayerDock({
       return () => { alive = false; };
     }
 
-    fetchMeetingAudioInfo(meeting.id, accessToken)
+    const remoteMeetingId = meetingRemoteIdentity(meeting);
+    if (!remoteMeetingId) {
+      setAudioInfo(fallbackAudio);
+      setAudioError(fallbackAudio ? '' : '会议正在同步，请稍后重试。');
+      setAudioLoading(false);
+      return () => { alive = false; };
+    }
+
+    fetchMeetingAudioInfo(remoteMeetingId, accessToken)
       .then(info => {
         if (!alive) return;
         const next = info ?? fallbackAudio;
@@ -118,7 +127,7 @@ export function MeetingAudioPlayerDock({
       });
 
     return () => { alive = false; };
-  }, [accessToken, fallbackDurationSec, isGuest, meeting.audioDurationSec, meeting.audioLocalUri, meeting.id, reloadKey]);
+  }, [accessToken, fallbackDurationSec, isGuest, meeting.audioDurationSec, meeting.audioLocalUri, meeting.id, meeting.remoteId, meeting.source, reloadKey]);
 
   useEffect(() => () => {
     disposePlayer();

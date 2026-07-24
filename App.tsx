@@ -21,10 +21,17 @@ import {
   RestorableNavigationContainer,
 } from './src/navigation/NavigationStateCoordinator';
 import { NativePlatformCoordinator } from './src/components/NativePlatformCoordinator';
+import { MeetingActionSyncProvider } from './src/components/MeetingActionSyncProvider';
+import { MeetingRootSyncProvider } from './src/components/MeetingRootSyncProvider';
+import { MeetingSpeakerCorrectionSyncProvider } from './src/components/MeetingSpeakerCorrectionSyncProvider';
+import { MeetingManualNoteSyncProvider } from './src/components/MeetingManualNoteSyncProvider';
+import { MeetingOccurrenceSyncProvider } from './src/components/MeetingOccurrenceSyncProvider';
 import {
   AppStartupBoundary,
   AppStartupError,
 } from './src/components/AppStartupBoundary';
+import { MeetingMediaImportProvider } from './src/components/MeetingMediaImportProvider';
+import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEventsProjectionCoordinator';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -42,25 +49,38 @@ function RuntimeProviders({ onRestart }: {
           feishuEvidence="feishu:UI-BOOT-READINESS-001:readiness-gate"
           onRetry={onRestart}
         >
-          <EventsProvider>
-            <MeetingsProvider>
-              <AppLockGate>
-                <AppDialogProvider>
-                  <GuestDataMigrationProvider>
-                    <NotificationPermissionPrimer />
-                    <View style={{ flex: 1 }}>
-                      <RestorableNavigationContainer>
-                        <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                        <RootNavigator />
-                        <NotificationNavigationHandler />
-                      </RestorableNavigationContainer>
-                      <EventUndoBanner />
-                    </View>
-                  </GuestDataMigrationProvider>
-                </AppDialogProvider>
-              </AppLockGate>
-            </MeetingsProvider>
-          </EventsProvider>
+          <MeetingRootSyncProvider>
+            <MeetingOccurrenceSyncProvider>
+              <MeetingActionSyncProvider>
+                <MeetingManualNoteSyncProvider>
+                  <MeetingSpeakerCorrectionSyncProvider>
+                  <EventsProvider>
+                  <MeetingsProvider>
+                    <UpcomingEventsProjectionCoordinator />
+                    <AppLockGate>
+                      <AppDialogProvider>
+                        <MeetingMediaImportProvider>
+                          <GuestDataMigrationProvider>
+                            <NotificationPermissionPrimer />
+                            <View style={{ flex: 1 }}>
+                              <RestorableNavigationContainer>
+                                <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                                <RootNavigator />
+                                <NotificationNavigationHandler />
+                              </RestorableNavigationContainer>
+                              <EventUndoBanner />
+                            </View>
+                          </GuestDataMigrationProvider>
+                        </MeetingMediaImportProvider>
+                      </AppDialogProvider>
+                    </AppLockGate>
+                  </MeetingsProvider>
+                  </EventsProvider>
+                  </MeetingSpeakerCorrectionSyncProvider>
+                </MeetingManualNoteSyncProvider>
+              </MeetingActionSyncProvider>
+            </MeetingOccurrenceSyncProvider>
+          </MeetingRootSyncProvider>
         </AppReadinessGate>
       </NavigationStateProvider>
     </AuthProvider>

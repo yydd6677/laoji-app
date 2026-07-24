@@ -9,4 +9,13 @@
     <color name="laoji_ud_switch_on_disabled_track">#E0E9FF</color>
     <color name="laoji_ud_switch_off_disabled_track">#EFF0F1</color>
     <color name="laoji_ud_switch_off_track">#DEE0E3</color>
+    <!-- ENTRY-02 [SOURCE]: Feishu calendar widget neutrals and Calendar blue. -->
+    <color name="laoji_widget_surface">#FFFFFFFF</color>
+    <color name="laoji_widget_event_surface">#FFF8F9FA</color>
+    <color name="laoji_widget_primary_soft">#FFF0F4FF</color>
+    <color name="laoji_widget_primary">#FF3370FF</color>
+    <color name="laoji_widget_text_primary">#E6000000</color>
+    <color name="laoji_widget_text_secondary">#80000000</color>
+    <color name="laoji_widget_text_tertiary">#FF8F959E</color>
+    <color name="laoji_widget_border">#261F2329</color>
 </resources>

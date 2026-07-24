@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 1
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 9
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -17,13 +17,24 @@ enum class MinutesSurface(val wireName: String) {
 }
 
 enum class MinutesDetailTab(val wireName: String, val label: String) {
+  NOTES("notes", "我的笔记"),
   TRANSCRIPT("transcript", "文字记录"),
-  SUMMARY("summary", "纪要"),
-  SPEAKERS("speakers", "发言人"),
-  INFO("info", "录音信息");
+  SUMMARY("summary", "整理结果"),
+  SPEAKERS("speakers", "讲话人"),
+  INFO("info", "信息");
 
   companion object {
     fun fromWireName(value: String?): MinutesDetailTab =
+      entries.firstOrNull { it.wireName == value } ?: NOTES
+  }
+}
+
+enum class MinutesRecordingContent(val wireName: String) {
+  NOTES("notes"),
+  TRANSCRIPT("transcript");
+
+  companion object {
+    fun fromWireName(value: String?): MinutesRecordingContent =
       entries.firstOrNull { it.wireName == value } ?: TRANSCRIPT
   }
 }
@@ -65,12 +76,14 @@ data class MinutesDetailPageState(
 }
 
 data class MinutesDetailPageStates(
+  val notes: MinutesDetailPageState = MinutesDetailPageState(cached = true),
   val transcript: MinutesDetailPageState = MinutesDetailPageState(),
   val summary: MinutesDetailPageState = MinutesDetailPageState(),
   val speakers: MinutesDetailPageState = MinutesDetailPageState(),
   val info: MinutesDetailPageState = MinutesDetailPageState(),
 ) {
   operator fun get(tab: MinutesDetailTab): MinutesDetailPageState = when (tab) {
+    MinutesDetailTab.NOTES -> notes
     MinutesDetailTab.TRANSCRIPT -> transcript
     MinutesDetailTab.SUMMARY -> summary
     MinutesDetailTab.SPEAKERS -> speakers
@@ -78,6 +91,7 @@ data class MinutesDetailPageStates(
   }
 
   fun normalized(): MinutesDetailPageStates = copy(
+    notes = notes.normalized(),
     transcript = transcript.normalized(),
     summary = summary.normalized(),
     speakers = speakers.normalized(),
@@ -94,13 +108,15 @@ data class MinutesDetailPageStates(
       speakersHaveContent: Boolean = false,
     ): MinutesDetailPageStates {
       val inferred = MinutesDetailPageStates(
+        notes = MinutesDetailPageState(cached = true),
         transcript = contentBackedState(transcriptHasContent, "暂无文字记录"),
-        summary = contentBackedState(summaryHasContent, "该会议暂未生成纪要"),
-        speakers = contentBackedState(speakersHaveContent, "暂无发言人信息"),
+        summary = contentBackedState(summaryHasContent, "该会议暂未生成整理结果"),
+        speakers = contentBackedState(speakersHaveContent, "暂无讲话人信息"),
         info = MinutesDetailPageState(),
       )
       val activeState = MinutesDetailPageState(contentPhase, contentMessage)
       return when (activeTab) {
+        MinutesDetailTab.NOTES -> inferred.copy(notes = activeState.copy(cached = true))
         MinutesDetailTab.TRANSCRIPT -> inferred.copy(transcript = activeState)
         MinutesDetailTab.SUMMARY -> inferred.copy(summary = activeState)
         MinutesDetailTab.SPEAKERS -> inferred.copy(speakers = activeState)
@@ -144,19 +160,75 @@ enum class MinutesListCoverType(val wireName: String) {
 data class MinutesTranscriptLine(
   val id: String,
   val speakerId: String = "",
-  val speakerLabel: String = "发言人",
+  val speakerClusterId: String = "",
+  val speakerLabel: String = "讲话人",
   val timestampLabel: String = "00:00",
   val startMs: Long = 0L,
   val endMs: Long = startMs,
   val text: String,
   val isFinal: Boolean = true,
+  val active: Boolean = false,
+  val searchRanges: List<MinutesTextRange> = emptyList(),
+  val selectedSearchMatch: Boolean = false,
+  val revisionKind: MinutesTranscriptRevisionKind = if (isFinal) {
+    MinutesTranscriptRevisionKind.FINAL
+  } else {
+    MinutesTranscriptRevisionKind.REALTIME_DRAFT
+  },
 )
 
-data class MinutesSummaryBlock(
+data class MinutesMarker(
   val id: String,
+  val positionMs: Long,
+  val timestampLabel: String,
+  val segmentId: String = "",
+  val label: String = "",
+  val deleting: Boolean = false,
+)
+
+enum class MinutesTranscriptRevisionKind(val wireName: String) {
+  REALTIME_DRAFT("realtimeDraft"),
+  FINAL("final"),
+  REPROCESSED("reprocessed");
+
+  companion object {
+    fun fromWireName(value: String?, isFinal: Boolean): MinutesTranscriptRevisionKind =
+      entries.firstOrNull { it.wireName == value }
+        ?: if (isFinal) FINAL else REALTIME_DRAFT
+  }
+}
+
+data class MinutesSummaryCitation(
+  val id: String,
+  val segmentId: String,
+  val startMs: Long,
+  val endMs: Long = startMs,
+  val label: String = "",
+)
+
+data class MinutesSummarySection(
+  val id: String,
+  val stableKey: String,
   val kind: String = "paragraph",
+  val title: String = "",
   val text: String,
-  val checked: Boolean = false,
+  val citations: List<MinutesSummaryCitation> = emptyList(),
+)
+
+data class MinutesActionItem(
+  val id: String,
+  val content: String,
+  val status: String = "pending",
+  val assigneeLabel: String = "",
+  val dueLabel: String = "",
+  val reminderLabel: String = "",
+  val followupEventSourceId: String = "",
+  val hasSource: Boolean = false,
+  val sourceSegmentId: String = "",
+  val sourceStartMs: Long = 0L,
+  val updatedAtMs: Long = 0L,
+  val updating: Boolean = false,
+  val syncConflict: Boolean = false,
 )
 
 data class MinutesSpeaker(
@@ -182,6 +254,7 @@ data class MinutesListState(
   val title: String = "会议记录",
   val searching: Boolean = false,
   val query: String = "",
+  val mediaImporting: Boolean = false,
   val phase: MinutesContentPhase = MinutesContentPhase.READY,
   val message: String = "",
   val showingCachedData: Boolean = false,
@@ -202,7 +275,16 @@ data class MinutesRecordingState(
   val canPause: Boolean = false,
   val canStop: Boolean = false,
   val canStart: Boolean = true,
+  val canCreateMarker: Boolean = false,
   val followLatest: Boolean = true,
+  val activeContent: MinutesRecordingContent = MinutesRecordingContent.TRANSCRIPT,
+  val manualNote: String = "",
+  val manualNoteLoading: Boolean = false,
+  val manualNoteSaving: Boolean = false,
+  val manualNoteEnabled: Boolean = false,
+  val manualNoteError: String = "",
+  val manualNoteRetryable: Boolean = true,
+  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
 )
 
@@ -212,7 +294,7 @@ data class MinutesDetailState(
   val title: String = "会议记录",
   val dateTimeLabel: String = "",
   val location: String = "",
-  val activeTab: MinutesDetailTab = MinutesDetailTab.TRANSCRIPT,
+  val activeTab: MinutesDetailTab = MinutesDetailTab.NOTES,
   val tabGeneration: Int = 0,
   val activeTabIsExplicit: Boolean = false,
   val contentPhase: MinutesContentPhase = MinutesContentPhase.READY,
@@ -220,11 +302,26 @@ data class MinutesDetailState(
   val canShare: Boolean = false,
   val canManageSpeakers: Boolean = false,
   val canGenerateSummary: Boolean = false,
+  val canCreateAction: Boolean = false,
   val summaryGenerating: Boolean = false,
-  val summaryActionLabel: String = "生成总结",
+  val summaryActionLabel: String = "生成整理结果",
   val titleEditRequestId: Int = 0,
+  val focusActionId: String = "",
+  val focusActionRequestId: Long = 0L,
+  val focusTranscriptSegmentId: String = "",
+  val focusTranscriptPositionMs: Long = 0L,
+  val focusTranscriptRequestId: Long = 0L,
+  val manualNote: String = "",
+  val manualNoteLoading: Boolean = false,
+  val manualNoteSaving: Boolean = false,
+  val manualNoteEnabled: Boolean = false,
+  val manualNoteError: String = "",
+  val manualNoteRetryable: Boolean = true,
+  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
-  val summary: List<MinutesSummaryBlock> = emptyList(),
+  val markers: List<MinutesMarker> = emptyList(),
+  val summary: List<MinutesSummarySection> = emptyList(),
+  val actions: List<MinutesActionItem> = emptyList(),
   val speakers: List<MinutesSpeaker> = emptyList(),
   val playerSource: MinutesPlayerSource? = null,
   val audioStatusMessage: String = "",
@@ -233,8 +330,10 @@ data class MinutesDetailState(
     activeTab = activeTab,
     contentPhase = contentPhase,
     contentMessage = contentMessage,
-    transcriptHasContent = transcript.any { it.id.isNotBlank() && it.text.isNotBlank() },
-    summaryHasContent = summary.any { it.id.isNotBlank() && it.text.isNotBlank() },
+    transcriptHasContent = transcript.any { it.id.isNotBlank() && it.text.isNotBlank() }
+      || markers.any { it.id.isNotBlank() },
+    summaryHasContent = summary.any { it.id.isNotBlank() && (it.text.isNotBlank() || it.title.isNotBlank()) }
+      || actions.any { it.id.isNotBlank() && it.content.isNotBlank() },
     speakersHaveContent = speakers.any { it.id.isNotBlank() && it.label.isNotBlank() },
   ),
 ) {
@@ -304,7 +403,12 @@ object MinutesStateReducer {
         contentPhase = activePage.phase,
         contentMessage = activePage.message,
         transcript = state.detail.transcript.filter { it.id.isNotBlank() && it.text.isNotBlank() },
-        summary = state.detail.summary.filter { it.id.isNotBlank() && it.text.isNotBlank() },
+        markers = state.detail.markers
+          .filter { it.id.isNotBlank() && it.positionMs >= 0L }
+          .sortedWith(compareBy<MinutesMarker> { it.positionMs }.thenBy { it.id }),
+        summary = state.detail.summary.filter {
+          it.id.isNotBlank() && it.stableKey.isNotBlank() && (it.text.isNotBlank() || it.title.isNotBlank())
+        },
         speakers = state.detail.speakers.filter { it.id.isNotBlank() && it.label.isNotBlank() },
         playerSource = state.detail.playerSource?.takeIf {
           it.sourceId.isNotBlank() && it.uri.isNotBlank() && it.storageScope.isNotBlank()
@@ -331,12 +435,14 @@ object MinutesStateReducer {
       nextDetail.pageState(tab).generation >= currentDetail.pageState(tab).generation
 
     val transcriptFresh = fresh(MinutesDetailTab.TRANSCRIPT)
+    val notesFresh = fresh(MinutesDetailTab.NOTES)
     val summaryFresh = fresh(MinutesDetailTab.SUMMARY)
     val speakersFresh = fresh(MinutesDetailTab.SPEAKERS)
     val infoFresh = fresh(MinutesDetailTab.INFO)
     val tabFresh = nextDetail.tabGeneration > currentDetail.tabGeneration ||
       (nextDetail.tabGeneration == currentDetail.tabGeneration && nextDetail.activeTab == currentDetail.activeTab)
     val pageStates = MinutesDetailPageStates(
+      notes = if (notesFresh) nextDetail.pageStates.notes else currentDetail.pageStates.notes,
       transcript = if (transcriptFresh) nextDetail.pageStates.transcript else currentDetail.pageStates.transcript,
       summary = if (summaryFresh) nextDetail.pageStates.summary else currentDetail.pageStates.summary,
       speakers = if (speakersFresh) nextDetail.pageStates.speakers else currentDetail.pageStates.speakers,
@@ -348,7 +454,15 @@ object MinutesStateReducer {
       detail = nextDetail.copy(
         activeTab = activeTab,
         tabGeneration = if (tabFresh) nextDetail.tabGeneration else currentDetail.tabGeneration,
+        manualNote = if (notesFresh) nextDetail.manualNote else currentDetail.manualNote,
+        manualNoteLoading = if (notesFresh) nextDetail.manualNoteLoading else currentDetail.manualNoteLoading,
+        manualNoteSaving = if (notesFresh) nextDetail.manualNoteSaving else currentDetail.manualNoteSaving,
+        manualNoteEnabled = if (notesFresh) nextDetail.manualNoteEnabled else currentDetail.manualNoteEnabled,
+        manualNoteError = if (notesFresh) nextDetail.manualNoteError else currentDetail.manualNoteError,
+        manualNoteRetryable = if (notesFresh) nextDetail.manualNoteRetryable else currentDetail.manualNoteRetryable,
+        manualNoteConflict = if (notesFresh) nextDetail.manualNoteConflict else currentDetail.manualNoteConflict,
         transcript = if (transcriptFresh) nextDetail.transcript else currentDetail.transcript,
+        markers = if (transcriptFresh) nextDetail.markers else currentDetail.markers,
         summary = if (summaryFresh) nextDetail.summary else currentDetail.summary,
         speakers = if (speakersFresh) nextDetail.speakers else currentDetail.speakers,
         pageStates = pageStates,

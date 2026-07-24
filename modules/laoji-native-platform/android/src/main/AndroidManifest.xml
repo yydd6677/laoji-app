@@ -1,1 +1,34 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <receiver
+      android:name="com.laoji.nativeplatform.entry.LaojiUpcomingEventsWidgetProvider"
+      android:exported="true"
+      android:label="@string/laoji_widget_name">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/laoji_upcoming_events_widget_info" />
+    </receiver>
+
+    <service
+      android:name="com.laoji.nativeplatform.entry.UpcomingEventsRemoteViewsService"
+      android:exported="false"
+      android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+    <service
+      android:name="com.laoji.nativeplatform.entry.LaojiMeetingTileService"
+      android:exported="true"
+      android:icon="@drawable/laoji_ic_quick_tile_record"
+      android:label="@string/laoji_quick_tile_name"
+      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+      <meta-data
+        android:name="android.service.quicksettings.ACTIVE_TILE"
+        android:value="true" />
+    </service>
+  </application>
+</manifest>

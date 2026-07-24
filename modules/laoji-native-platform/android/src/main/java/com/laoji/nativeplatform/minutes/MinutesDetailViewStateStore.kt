@@ -11,9 +11,10 @@ internal data class MinutesDetailPageScrollPosition(
 )
 
 internal data class MinutesDetailPersistedViewState(
-  val activeTab: MinutesDetailTab = MinutesDetailTab.TRANSCRIPT,
+  val activeTab: MinutesDetailTab = MinutesDetailTab.NOTES,
   val tabGeneration: Int = 0,
   val headerCollapseOffsetPx: Int = 0,
+  val notes: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
   val transcript: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
   val summary: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
   val speakers: MinutesDetailPageScrollPosition = MinutesDetailPageScrollPosition(),
@@ -34,6 +35,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
       activeTab = MinutesDetailTab.fromWireName(preferences.getString("$prefix.tab", null)),
       tabGeneration = preferences.getInt("$prefix.tabGeneration", 0).coerceAtLeast(0),
       headerCollapseOffsetPx = preferences.getInt("$prefix.header", 0).coerceAtLeast(0),
+      notes = readPage(prefix, "notes"),
       transcript = readPage(prefix, "transcript"),
       summary = readPage(prefix, "summary"),
       speakers = readPage(prefix, "speakers"),
@@ -49,6 +51,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
       .putString("$prefix.tab", state.activeTab.wireName)
       .putInt("$prefix.tabGeneration", state.tabGeneration.coerceAtLeast(0))
       .putInt("$prefix.header", state.headerCollapseOffsetPx.coerceAtLeast(0))
+      .putPage(prefix, "notes", state.notes)
       .putPage(prefix, "transcript", state.transcript)
       .putPage(prefix, "summary", state.summary)
       .putPage(prefix, "speakers", state.speakers)

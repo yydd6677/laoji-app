@@ -20,7 +20,8 @@ import {
 } from '../components/EventEditorChoicePages';
 import { useAppDialog } from '../components/AppDialog';
 
-import { CalEvent, EventRecurrenceScope, RootStackParamList } from '../types';
+import { CalEvent, EventRecurrenceScope, EventRef, RootStackParamList } from '../types';
+import type { ScopeKey } from '../domain/meeting';
 import { useEvents } from '../store/EventsStore';
 import { useAuth } from '../store/AuthStore';
 import {
@@ -37,6 +38,7 @@ import {
 } from '../utils/eventColors';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { eventRefForEvent } from '../utils/eventIdentity';
+import { linkMeetingActionFollowup } from '../services/meetingActionFollowup';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { validateEventDraft } from '../utils/eventDraftValidation';
 import {
@@ -161,6 +163,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     : undefined;
   const routeDraft = editingRef ? undefined : route.params?.draft;
   const isEditing = Boolean(editingRef);
+  const followup = isEditing ? undefined : route.params?.followup;
   const selectedRecurrenceScope = editingEvent
     ? resolveRecurrenceEditScope(editingEvent, route.params?.recurrenceScope)
     : undefined;
@@ -184,7 +187,10 @@ export function AddEventScreen({ navigation, route }: Props) {
   const initStartTime = editingEvent?.startTime ?? routeDraft?.startTime ?? route.params?.startTime ?? '10:00';
   const initEndTime = editingEvent?.endTime ?? routeDraft?.endTime ?? route.params?.endTime ?? '11:00';
   const [saving, setSaving] = React.useState(false);
-  const createRequestRef = React.useRef(createClientRequestState('event'));
+  const createRequestRef = React.useRef(followup
+    ? { id: followup.clientRequestId, fingerprint: '' }
+    : createClientRequestState('event'));
+  const createdFollowupEventRef = React.useRef<EventRef | null>(null);
   const saveRunRef = React.useRef(0);
   const saveLockRef = React.useRef(false);
   const saveWriteStartedRef = React.useRef(false);
@@ -210,6 +216,9 @@ export function AddEventScreen({ navigation, route }: Props) {
       : defaultReminderForEvent(false, initStartTime),
   );
   const notificationScope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
+  const meetingScopeKey: ScopeKey | null = mode === 'authenticated' && session
+    ? `user:${session.user.id}`
+    : mode === 'guest' ? 'guest' : null;
 
   const [showTimeEditor, setShowTimeEditor] = useState(false);
   const [timeEditorTarget, setTimeEditorTarget] = useState<'start' | 'end'>('start');
@@ -409,6 +418,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   ) => {
     let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
     let syncStatus: Awaited<ReturnType<typeof addEvent>>['syncStatus'] | undefined;
+    let followupEventSaved = false;
     try {
       if (editingEvent) {
         ({ reminderDelivery, syncStatus } = await updateEvent(
@@ -417,23 +427,42 @@ export function AddEventScreen({ navigation, route }: Props) {
           recurrenceScope,
         ));
       } else {
-        createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
-        ({ reminderDelivery, syncStatus } = await addEvent({
-          ...payload,
-          clientRequestId: createRequestRef.current.id,
-        }));
+        let createdEventRef = createdFollowupEventRef.current;
+        if (!createdEventRef) {
+          if (!followup) {
+            createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
+          }
+          const created = await addEvent({
+            ...payload,
+            clientRequestId: createRequestRef.current.id,
+          });
+          ({ reminderDelivery, syncStatus } = created);
+          createdEventRef = created.eventRef;
+          if (followup) createdFollowupEventRef.current = createdEventRef;
+        }
+        if (followup) {
+          followupEventSaved = true;
+          if (!meetingScopeKey) throw new Error('当前登录状态无法关联后续日程');
+          await linkMeetingActionFollowup(followup, meetingScopeKey, createdEventRef.sourceEventId);
+        }
       }
     } catch (error) {
       if (!isSaveRunActive(runId)) return;
       releaseSaveRun(runId);
       showDialog({
-        title: error instanceof HttpResponseError && error.status === 409
-          ? '日程已发生变化'
-          : '保存失败',
-        message: error instanceof HttpResponseError && error.status === 409
-          ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
-          : readableErrorMessage(error, '请检查网络后重试'),
-        tone: error instanceof HttpResponseError && error.status === 409 ? 'warning' : 'error',
+        title: followupEventSaved
+          ? '日程已创建，关联未完成'
+          : error instanceof HttpResponseError && error.status === 409
+            ? '日程已发生变化'
+            : '保存失败',
+        message: followupEventSaved
+          ? '再次点击保存可重试关联，不会重复创建日程。'
+          : error instanceof HttpResponseError && error.status === 409
+            ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
+            : readableErrorMessage(error, '请检查网络后重试'),
+        tone: followupEventSaved || (error instanceof HttpResponseError && error.status === 409)
+          ? 'warning'
+          : 'error',
       });
       return;
     }
@@ -454,7 +483,16 @@ export function AddEventScreen({ navigation, route }: Props) {
     }
 
     allowLeaveRef.current = true;
-    navigation.goBack();
+    if (followup) {
+      navigation.popTo('Transcription', {
+        meetingId: followup.meetingId,
+        focus: 'summary',
+        actionId: followup.actionId,
+        actionFocusRequestId: Date.now(),
+      });
+    } else {
+      navigation.goBack();
+    }
     if (reminderWarning) {
       showDialog({
         title: syncStatus === 'pending' ? '日程等待同步' : '日程已保存',

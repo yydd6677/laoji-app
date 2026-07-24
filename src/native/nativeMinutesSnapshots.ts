@@ -5,17 +5,24 @@ import {
   type MinutesDetailPageStatesSnapshot,
   type MinutesDetailSnapshot,
   type MinutesDetailTab,
+  type MinutesMarkerSnapshot,
   type MinutesPlayerSourceSnapshot,
   type MinutesRecordingPhase,
-  type MinutesSummaryBlockSnapshot,
+  type MinutesRecordingContent,
+  type MinutesSummarySectionSnapshot,
   type MinutesViewSnapshot,
 } from 'laoji-native-platform';
+import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
 import type { TranscriptLine } from '../types';
 import { formatDuration } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 
 export type NativeMinutesTranscriptLine = TranscriptLine & {
   isFinal?: boolean;
+  active?: boolean;
+  searchRanges?: readonly { start: number; end: number }[];
+  selectedSearchMatch?: boolean;
+  revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
 };
 
 export interface NativeMinutesTranscriptEventLike {
@@ -47,8 +54,25 @@ export interface BuildNativeRecordingSnapshotInput {
   canPause?: boolean;
   canStop?: boolean;
   canStart?: boolean;
+  canCreateMarker?: boolean;
   followLatest?: boolean;
+  activeContent?: MinutesRecordingContent;
+  manualNote?: string;
+  manualNoteLoading?: boolean;
+  manualNoteSaving?: boolean;
+  manualNoteEnabled?: boolean;
+  manualNoteError?: string;
+  manualNoteRetryable?: boolean;
+  manualNoteConflict?: boolean;
   transcript: readonly NativeMinutesTranscriptLine[];
+}
+
+export interface NativeMinutesMarkerInput {
+  id: string;
+  positionMs: number;
+  nearestSegmentId?: string | null;
+  label?: string | null;
+  deleting?: boolean;
 }
 
 export interface BuildNativeDetailSnapshotInput {
@@ -61,8 +85,13 @@ export interface BuildNativeDetailSnapshotInput {
   tabGeneration?: number;
   activeTabIsExplicit?: boolean;
   transcript: readonly NativeMinutesTranscriptLine[];
+  markers?: readonly NativeMinutesMarkerInput[];
+  actionItemCandidates?: readonly MeetingSummaryActionCandidate[];
+  conflictedActionIds?: ReadonlySet<string>;
+  summaryDocument?: MeetingSummaryDocument | null;
   summaryText?: string;
   transcriptLoading?: boolean;
+  transcriptStatusMessage?: string;
   summaryLoading?: boolean;
   transcriptError?: string;
   summaryError?: string;
@@ -70,8 +99,22 @@ export interface BuildNativeDetailSnapshotInput {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
+  canCreateAction?: boolean;
   summaryGenerating?: boolean;
+  updatingActionId?: string | null;
+  focusActionId?: string;
+  focusActionRequestId?: number;
+  focusTranscriptSegmentId?: string;
+  focusTranscriptPositionMs?: number;
+  focusTranscriptRequestId?: number;
   titleEditRequestId?: number;
+  manualNote?: string;
+  manualNoteLoading?: boolean;
+  manualNoteSaving?: boolean;
+  manualNoteEnabled?: boolean;
+  manualNoteError?: string;
+  manualNoteRetryable?: boolean;
+  manualNoteConflict?: boolean;
   pageGenerations?: Partial<Record<MinutesDetailTab, number>>;
   pageCached?: Partial<Record<MinutesDetailTab, boolean>>;
   playerSource?: MinutesPlayerSourceSnapshot | null;
@@ -87,9 +130,10 @@ export class NativeMinutesPageGenerationClock {
 
   constructor(initial: Partial<NativeMinutesPageGenerations> = {}) {
     this.values = {
-    transcript: pageGeneration(initial.transcript),
-    summary: pageGeneration(initial.summary),
-    speakers: pageGeneration(initial.speakers),
+      notes: pageGeneration(initial.notes),
+      transcript: pageGeneration(initial.transcript),
+      summary: pageGeneration(initial.summary),
+      speakers: pageGeneration(initial.speakers),
       info: pageGeneration(initial.info),
     };
   }
@@ -154,7 +198,7 @@ export function mergeNativeMinutesTranscript(
     id,
     meeting_id: meetingId,
     speaker_id: event.speakerId ?? existing?.speaker_id ?? 'unknown',
-    speaker_label: event.speakerName ?? existing?.speaker_label ?? '发言人',
+    speaker_label: event.speakerName ?? existing?.speaker_label ?? '讲话人',
     text,
     start_time: event.startMs == null ? existing?.start_time : event.startMs / 1000,
     end_time: event.endMs == null ? existing?.end_time : event.endMs / 1000,
@@ -173,62 +217,41 @@ export function finalizedNativeMinutesTranscript(
     .map(({ isFinal: _isFinal, ...line }) => ({ ...line, text: line.text.trim() }));
 }
 
-function transcriptFingerprint(line: TranscriptLine): string {
-  const start = Number.isFinite(line.start_time) ? Math.round((line.start_time ?? 0) * 100) : -1;
-  const end = Number.isFinite(line.end_time) ? Math.round((line.end_time ?? 0) * 100) : -1;
-  return [
-    start,
-    end,
-    line.speaker_id?.trim() || line.speaker_label?.trim() || 'unknown',
-    line.text.trim(),
-  ].join('\u001f');
-}
-
-/** MIN-ASR-001: persisted server rows win while unique local final rows remain available. */
-export function mergePersistedMinutesTranscript(
-  local: readonly TranscriptLine[],
-  remote: readonly TranscriptLine[],
-): TranscriptLine[] {
-  const rows: TranscriptLine[] = [];
-  const ids = new Set<string>();
-  const fingerprints = new Set<string>();
-  const append = (line: TranscriptLine) => {
-    const text = line.text.trim();
-    if (!text) return;
-    const id = line.id?.trim();
-    const fingerprint = transcriptFingerprint({ ...line, text });
-    if ((id && ids.has(id)) || fingerprints.has(fingerprint)) return;
-    if (id) ids.add(id);
-    fingerprints.add(fingerprint);
-    rows.push({ ...line, text });
-  };
-  remote.forEach(append);
-  local.forEach(append);
-  return rows
-    .map((line, index) => ({ line, index }))
-    .sort((left, right) => (
-      (left.line.start_time ?? Number.MAX_SAFE_INTEGER)
-      - (right.line.start_time ?? Number.MAX_SAFE_INTEGER)
-      || left.index - right.index
-    ))
-    .map(item => item.line);
-}
-
 export function toNativeMinutesTranscript(
   lines: readonly NativeMinutesTranscriptLine[],
 ) {
   return lines
     .filter(line => line.text.trim())
-    .map((line, index) => ({
-      id: line.id || `line-${index}`,
-      speakerId: line.speaker_id || 'unknown',
-      speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
-      timestampLabel: formatNativeMinutesTimestamp(line.start_time),
-      startMs: Math.round(finiteSeconds(line.start_time) * 1000),
-      endMs: Math.round(Math.max(finiteSeconds(line.start_time), finiteSeconds(line.end_time)) * 1000),
-      text: line.text.trim(),
-      isFinal: line.isFinal !== false,
-    }));
+    .map((line, index) => {
+      const text = line.text.trim();
+      const leadingTrim = line.text.length - line.text.trimStart().length;
+      const searchRanges = line.searchRanges
+        ?.map(range => ({ start: range.start - leadingTrim, end: range.end - leadingTrim }))
+        .filter(range => (
+          Number.isInteger(range.start)
+          && Number.isInteger(range.end)
+          && range.start >= 0
+          && range.end > range.start
+          && range.end <= text.length
+        ))
+        .slice(0, 1_000);
+      return {
+        id: line.id || `line-${index}`,
+        speakerId: line.speaker_id || 'unknown',
+        speakerClusterId: line.speakerClusterId,
+        speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
+        timestampLabel: formatNativeMinutesTimestamp(line.start_time),
+        startMs: Math.round(finiteSeconds(line.start_time) * 1000),
+        endMs: Math.round(Math.max(finiteSeconds(line.start_time), finiteSeconds(line.end_time)) * 1000),
+        text,
+        isFinal: line.isFinal !== false,
+        active: line.active === true,
+        searchRanges,
+        selectedSearchMatch: line.selectedSearchMatch === true,
+        revisionKind: line.revisionKind
+          ?? (line.isFinal === false ? 'realtimeDraft' : 'final'),
+      };
+    });
 }
 
 function stripSummaryMarkdown(value: string): string {
@@ -239,9 +262,9 @@ function stripSummaryMarkdown(value: string): string {
     .trim();
 }
 
-type NativeSummaryKind = NonNullable<MinutesSummaryBlockSnapshot['kind']>;
+type NativeSummaryKind = NonNullable<import('laoji-native-platform').MinutesSummaryBlockSnapshot['kind']>;
 
-function summaryBlocks(markdown: string) {
+function legacySummarySections(markdown: string): MinutesSummarySectionSnapshot[] {
   const blocks: Array<{ kind: NativeSummaryKind; text: string; checked?: boolean }> = [];
   const paragraph: string[] = [];
   const code: string[] = [];
@@ -294,12 +317,72 @@ function summaryBlocks(markdown: string) {
   flushParagraph();
   return blocks.map((block, index) => ({
     id: `summary-${index}`,
+    stableKey: `legacy_${index}`,
     kind: block.kind === 'task' ? 'bullet' as const : block.kind,
+    title: null,
     text: block.kind === 'task'
       ? `${block.checked ? '已完成' : '待办'}：${block.text}`
       : block.text,
-    checked: undefined,
+    citations: [],
   }));
+}
+
+function structuredSummarySections(
+  document: MeetingSummaryDocument,
+  hasActions: boolean,
+): MinutesSummarySectionSnapshot[] {
+  return document.sections
+    .filter(section => !hasActions
+      || (section.stableKey !== 'action_items' && section.kind !== 'action_items'))
+    .map(section => ({
+    id: section.id,
+    stableKey: section.stableKey,
+    kind: section.kind,
+    title: section.title,
+    text: section.content,
+    citations: section.citations.map(citation => ({
+      id: citation.id,
+      segmentId: citation.segmentId,
+      startMs: citation.startMs,
+      endMs: citation.endMs,
+      label: formatNativeMinutesTimestamp(citation.startMs / 1000),
+    })),
+  }));
+}
+
+function structuredSummaryActions(
+  actions: readonly MeetingSummaryActionCandidate[],
+  updatingActionId?: string | null,
+  conflictedActionIds: ReadonlySet<string> = new Set<string>(),
+) {
+  return actions.map(action => {
+    const source = action.citations[0];
+    const sourceSegmentId = source?.segmentId ?? action.sourceSegmentId ?? undefined;
+    const sourceStartMs = source?.startMs ?? action.sourceStartMs ?? undefined;
+    const due = action.dueAtMs === null ? null : new Date(action.dueAtMs);
+    const reminder = action.reminderAtMs === null ? null : new Date(action.reminderAtMs);
+    return {
+      id: action.canonicalId ?? action.id,
+      content: action.content,
+      status: action.status,
+      assigneeLabel: action.assignee ?? undefined,
+      dueLabel: due && !Number.isNaN(due.getTime())
+        ? `${due.getFullYear()}年${due.getMonth() + 1}月${due.getDate()}日`
+        : undefined,
+      reminderLabel: reminder && !Number.isNaN(reminder.getTime())
+        ? reminder.getTime() <= Date.now()
+          ? '已提醒'
+          : `${reminder.getMonth() + 1}月${reminder.getDate()}日 ${String(reminder.getHours()).padStart(2, '0')}:${String(reminder.getMinutes()).padStart(2, '0')}`
+        : undefined,
+      followupEventSourceId: action.followupEventSourceId ?? undefined,
+      hasSource: sourceStartMs !== undefined,
+      sourceSegmentId,
+      sourceStartMs,
+      updatedAtMs: action.updatedAtMs ?? 0,
+      updating: (action.canonicalId ?? action.id) === updatingActionId,
+      syncConflict: conflictedActionIds.has(action.canonicalId ?? action.id),
+    } as const;
+  });
 }
 
 export function nativeMinutesSpeakers(
@@ -329,7 +412,7 @@ export function nativeMinutesSpeakers(
   }));
 }
 
-const DETAIL_TABS: readonly MinutesDetailTab[] = ['transcript', 'summary', 'speakers', 'info'];
+const DETAIL_TABS: readonly MinutesDetailTab[] = ['notes', 'transcript', 'summary', 'speakers', 'info'];
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -340,7 +423,7 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
 function minutesDetailTab(value: unknown): MinutesDetailTab {
   return DETAIL_TABS.includes(value as MinutesDetailTab)
     ? value as MinutesDetailTab
-    : 'transcript';
+    : 'notes';
 }
 
 function minutesContentPhase(value: unknown): MinutesContentPhase {
@@ -404,13 +487,15 @@ export function normalizeNativeMinutesDetailPageStates(
 ): MinutesDetailPageStatesSnapshot {
   const detail = objectRecord(snapshot) ?? {};
   const transcript = Array.isArray(detail.transcript) ? detail.transcript : [];
+  const markers = Array.isArray(detail.markers) ? detail.markers : [];
   const summary = Array.isArray(detail.summary) ? detail.summary : [];
   const speakers = Array.isArray(detail.speakers) ? detail.speakers : [];
   const activeTab = minutesDetailTab(detail.activeTab);
   const legacy: MinutesDetailPageStatesSnapshot = {
-    transcript: contentBackedPageState(hasTextRows(transcript), '暂无文字记录'),
-    summary: contentBackedPageState(hasTextRows(summary), '该会议暂未生成纪要'),
-    speakers: contentBackedPageState(hasObjectRows(speakers), '暂无发言人信息'),
+    notes: { phase: 'ready', message: '', generation: 0, cached: true },
+    transcript: contentBackedPageState(hasTextRows(transcript) || hasObjectRows(markers), '暂无文字记录'),
+    summary: contentBackedPageState(hasTextRows(summary), '该会议暂未生成整理结果'),
+    speakers: contentBackedPageState(hasObjectRows(speakers), '暂无讲话人信息'),
     info: { phase: 'ready', message: '', generation: 0, cached: false },
   };
   legacy[activeTab] = {
@@ -422,6 +507,7 @@ export function normalizeNativeMinutesDetailPageStates(
 
   const pageStates = objectRecord(detail.pageStates);
   return {
+    notes: normalizedPageState(pageStates?.notes, legacy.notes),
     transcript: normalizedPageState(pageStates?.transcript, legacy.transcript),
     summary: normalizedPageState(pageStates?.summary, legacy.summary),
     speakers: normalizedPageState(pageStates?.speakers, legacy.speakers),
@@ -431,31 +517,39 @@ export function normalizeNativeMinutesDetailPageStates(
 
 function detailContentState(
   input: BuildNativeDetailSnapshotInput,
-  detail: Pick<MinutesDetailSnapshot, 'summary' | 'speakers'>,
+  detail: Pick<MinutesDetailSnapshot, 'summary' | 'actions' | 'speakers'>,
   tab: MinutesDetailTab,
 ): { phase: MinutesContentPhase; message: string } {
+  if (tab === 'notes') {
+    if (input.manualNoteLoading) return { phase: 'loading', message: '正在读取我的笔记' };
+    if (input.manualNoteError) return { phase: 'error', message: input.manualNoteError };
+    return { phase: 'ready', message: '' };
+  }
   if (tab === 'transcript') {
-    if (input.transcriptLoading && input.transcript.length === 0) {
+    if (input.transcriptLoading && input.transcript.length === 0 && !input.markers?.length) {
       return { phase: 'loading', message: '正在同步文字记录' };
     }
     if (input.transcriptError) return { phase: 'error', message: input.transcriptError };
-    return input.transcript.length > 0
+    if (input.transcriptStatusMessage && input.transcript.length > 0) {
+      return { phase: 'loading', message: input.transcriptStatusMessage };
+    }
+    return input.transcript.length > 0 || Boolean(input.markers?.length)
       ? { phase: 'ready', message: '' }
       : { phase: 'empty', message: '暂无文字记录' };
   }
   if (tab === 'summary') {
     if (input.summaryLoading) {
-      return { phase: 'loading', message: input.summaryProgress || '正在生成会议纪要' };
+      return { phase: 'loading', message: input.summaryProgress || '正在生成整理结果' };
     }
     if (input.summaryError) return { phase: 'error', message: input.summaryError };
-    return detail.summary.length > 0
+    return detail.summary.length > 0 || (detail.actions?.length ?? 0) > 0
       ? { phase: 'ready', message: '' }
-      : { phase: 'empty', message: '该会议暂未生成纪要' };
+      : { phase: 'empty', message: '该会议暂未生成整理结果' };
   }
   if (tab === 'info') return { phase: 'ready', message: '' };
   return detail.speakers.length > 0
     ? { phase: 'ready', message: '' }
-    : { phase: 'empty', message: '暂无发言人信息' };
+    : { phase: 'empty', message: '暂无讲话人信息' };
 }
 
 /** MIN-REC-BRIDGE-001: snapshots carry low-frequency state; native Flow owns levels. */
@@ -479,7 +573,16 @@ export function buildNativeMinutesRecordingSnapshot(
       canPause: input.canPause ?? false,
       canStop: input.canStop ?? false,
       canStart: input.canStart ?? false,
+      canCreateMarker: input.canCreateMarker ?? false,
       followLatest: input.followLatest ?? true,
+      activeContent: input.activeContent ?? 'transcript',
+      manualNote: input.manualNote ?? '',
+      manualNoteLoading: input.manualNoteLoading ?? false,
+      manualNoteSaving: input.manualNoteSaving ?? false,
+      manualNoteEnabled: input.manualNoteEnabled ?? false,
+      manualNoteError: input.manualNoteError ?? '',
+      manualNoteRetryable: input.manualNoteRetryable ?? true,
+      manualNoteConflict: input.manualNoteConflict ?? false,
       transcript: toNativeMinutesTranscript(input.transcript),
     },
   };
@@ -489,8 +592,29 @@ export function buildNativeMinutesRecordingSnapshot(
 export function buildNativeMinutesDetailSnapshot(
   input: BuildNativeDetailSnapshotInput,
 ): MinutesViewSnapshot {
-  const summary = summaryBlocks(input.summaryText?.trim() ?? '');
+  const actionItemCandidates = input.actionItemCandidates
+    ?? input.summaryDocument?.actionItemCandidates
+    ?? [];
+  const summary = input.summaryDocument
+    ? structuredSummarySections(input.summaryDocument, actionItemCandidates.length > 0)
+    : legacySummarySections(input.summaryText?.trim() ?? '');
+  const actions = structuredSummaryActions(
+    actionItemCandidates,
+    input.updatingActionId,
+    input.conflictedActionIds,
+  );
   const speakers = nativeMinutesSpeakers(input.transcript, Boolean(input.canManageSpeakers));
+  const markers: MinutesMarkerSnapshot[] = (input.markers ?? [])
+    .filter(marker => marker.id.trim() && Number.isSafeInteger(marker.positionMs) && marker.positionMs >= 0)
+    .map(marker => ({
+      id: marker.id,
+      positionMs: marker.positionMs,
+      timestampLabel: formatNativeMinutesTimestamp(marker.positionMs / 1_000),
+      segmentId: marker.nearestSegmentId?.trim() || undefined,
+      label: marker.label?.trim() || undefined,
+      deleting: marker.deleting === true,
+    }))
+    .sort((left, right) => left.positionMs - right.positionMs || left.id.localeCompare(right.id));
   const detail: MinutesDetailSnapshot = {
     meetingId: input.meetingId,
     available: input.available ?? true,
@@ -503,11 +627,26 @@ export function buildNativeMinutesDetailSnapshot(
     canShare: input.canShare ?? false,
     canManageSpeakers: input.canManageSpeakers ?? false,
     canGenerateSummary: input.canGenerateSummary ?? false,
+    canCreateAction: input.canCreateAction ?? false,
     summaryGenerating: input.summaryGenerating ?? false,
-    summaryActionLabel: input.summaryText?.trim() ? '重新生成' : '生成总结',
+    summaryActionLabel: summary.length > 0 ? '重新生成' : '生成整理结果',
     titleEditRequestId: Math.max(0, input.titleEditRequestId ?? 0),
+    focusActionId: input.focusActionId,
+    focusActionRequestId: Math.max(0, input.focusActionRequestId ?? 0),
+    focusTranscriptSegmentId: input.focusTranscriptSegmentId,
+    focusTranscriptPositionMs: Math.max(0, input.focusTranscriptPositionMs ?? 0),
+    focusTranscriptRequestId: Math.max(0, input.focusTranscriptRequestId ?? 0),
+    manualNote: input.manualNote ?? '',
+    manualNoteLoading: input.manualNoteLoading ?? false,
+    manualNoteSaving: input.manualNoteSaving ?? false,
+    manualNoteEnabled: input.manualNoteEnabled ?? false,
+    manualNoteError: input.manualNoteError ?? '',
+    manualNoteRetryable: input.manualNoteRetryable ?? true,
+    manualNoteConflict: input.manualNoteConflict ?? false,
     transcript: toNativeMinutesTranscript(input.transcript),
+    markers,
     summary,
+    actions,
     speakers,
     playerSource: input.playerSource ?? null,
     audioStatusMessage: input.audioStatusMessage ?? '',
@@ -516,6 +655,11 @@ export function buildNativeMinutesDetailSnapshot(
   const pageStates = normalizeNativeMinutesDetailPageStates({
     ...detail,
     pageStates: {
+      notes: {
+        ...detailContentState(input, detail, 'notes'),
+        generation: pageGeneration(input.pageGenerations?.notes),
+        cached: true,
+      },
       transcript: {
         ...detailContentState(input, detail, 'transcript'),
         generation: pageGeneration(input.pageGenerations?.transcript),

@@ -8,7 +8,7 @@ import type { PendingMeetingSummaryTask } from '../../services/meetingSummaryTas
 import { meetingSummaryToText } from '../../services/meetingSummaryFormat';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from './openDatabase';
 
-const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v4';
+const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v5';
 const PROCESSING_STAGES = ['capture', 'upload', 'transcript', 'summary', 'speaker'] as const;
 
 export interface LegacyMeetingShadowSource {
@@ -421,13 +421,14 @@ async function insertPreparedMeeting(
       const endMs = Math.max(startMs, timeMs(line.end_time));
       await database.runAsync(
         `INSERT INTO transcript_segments (
-           id, revision_id, meeting_id, ordinal, start_ms, end_ms,
+           id, revision_id, meeting_id, source_segment_id, ordinal, start_ms, end_ms,
            speaker_cluster_id, speaker_profile_id, speaker_label, text,
            normalized_text, confidence, is_final, created_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         `${transcriptRevisionId}:segment:${ordinal}:${encodedPart(line.id || String(ordinal))}`,
         transcriptRevisionId,
         localId,
+        line.id?.trim() || null,
         ordinal,
         startMs,
         endMs,

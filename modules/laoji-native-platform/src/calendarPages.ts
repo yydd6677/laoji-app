@@ -5,7 +5,7 @@ import { requireNativeViewManager } from 'expo-modules-core';
 
 // CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001 / CAL-REPEAT-RRULE-001:
 // route snapshots are structured and repository-free.
-export const CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+export const CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION = 2 as const;
 export type CalendarPageLoadState = 'loading' | 'ready' | 'empty' | 'error';
 
 export interface CalendarPageEventRefSnapshot {
@@ -55,6 +55,34 @@ export interface NativeCalendarDetailSnapshot {
     statusLabel?: string;
     enabled: boolean;
   };
+  seriesMemory?: NativeCalendarSeriesMemorySnapshot;
+}
+
+export interface NativeCalendarSeriesMemorySnapshot {
+  state: 'loading' | 'ready' | 'error';
+  message?: string;
+  previousMeeting?: {
+    meetingId: string;
+    canonicalMeetingId: string;
+    title: string;
+    dateLabel: string;
+  };
+  decisions: readonly {
+    id: string;
+    content: string;
+    meetingId: string;
+    sourceSegmentId?: string;
+    sourceStartMs?: number;
+  }[];
+  actions: readonly {
+    id: string;
+    content: string;
+    metaLabel?: string;
+    meetingId: string;
+    canonicalMeetingId: string;
+    sourceSegmentId?: string;
+    sourceStartMs?: number;
+  }[];
 }
 
 export interface NativeCalendarEditDraftSnapshot {
@@ -91,7 +119,14 @@ export type NativeCalendarSearchAction =
   | ({ type: 'openEvent' } & CalendarPageEventRefSnapshot);
 
 export type NativeCalendarDetailAction =
-  | ({ type: 'back' | 'edit' | 'delete' | 'retry' | 'meetingAction' } & Partial<CalendarPageEventRefSnapshot>);
+  | ({ type: 'back' | 'edit' | 'delete' | 'retry' | 'meetingAction' | 'retrySeriesMemory' | 'carrySeriesMemory' } & Partial<CalendarPageEventRefSnapshot>)
+  | ({
+      type: 'openSeriesMeeting';
+      meetingId: string;
+      segmentId?: string;
+      positionMs?: number;
+    } & Partial<CalendarPageEventRefSnapshot>)
+  | ({ type: 'openSeriesAction'; meetingId: string; actionId: string } & Partial<CalendarPageEventRefSnapshot>);
 
 export type NativeCalendarEditAction =
   | { type: 'cancel' | 'delete' | 'retry' }

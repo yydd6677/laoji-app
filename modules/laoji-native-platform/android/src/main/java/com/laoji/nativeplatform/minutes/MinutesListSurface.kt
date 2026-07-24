@@ -41,7 +41,12 @@ internal class MinutesListSurface(
   private val cachedError = LinearLayout(context)
   private val cachedMessage = context.textView(textSizeSp = 14, color = MinutesPalette.danger)
   private val cachedRetry = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_refresh, "重新同步会议记录")
-  // The retained LaoJi recording action uses Feishu's bottom operation-panel geometry.
+  // [SOURCE] Feishu Minutes uses upload + record in one 64dp bottom operation host.
+  private val operationHost = LinearLayout(context)
+  private val uploadButton = LinearLayout(context)
+  private val uploadIcon = ImageView(context)
+  private val uploadProgress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall)
+  private val uploadLabel = context.textView("上传", 16, MinutesPalette.text)
   private val recordButton = LinearLayout(context)
   private val recordIcon = ImageView(context)
   private val recordLabel = context.textView("录音", 16, MinutesPalette.surface)
@@ -125,6 +130,46 @@ internal class MinutesListSurface(
       },
     )
 
+    operationHost.orientation = HORIZONTAL
+    operationHost.gravity = Gravity.CENTER
+    operationHost.setPadding(context.dp(10), 0, context.dp(10), 0)
+
+    uploadButton.orientation = HORIZONTAL
+    uploadButton.gravity = Gravity.CENTER
+    uploadButton.minimumWidth = context.dp(88)
+    uploadButton.setPadding(context.dp(10), 0, context.dp(10), 0)
+    uploadButton.background = context.roundedStateBackground(
+      defaultColor = MinutesPalette.surface,
+      pressedColor = MinutesPalette.filler,
+      disabledColor = MinutesPalette.surface,
+      radiusDp = 24,
+    )
+    uploadButton.elevation = context.dp(2).toFloat()
+    uploadButton.isClickable = true
+    uploadButton.isFocusable = true
+    uploadButton.contentDescription = "导入会议录音"
+    uploadButton.setOnClickListener { onAction(mapOf("type" to "importMedia")) }
+    uploadIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline)
+    uploadIcon.imageTintList = statefulIconTint(
+      MinutesPalette.text,
+      MinutesPalette.text,
+      MinutesPalette.disabled,
+    )
+    uploadIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    uploadProgress.indeterminateTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    uploadProgress.visibility = View.GONE
+    uploadButton.addView(uploadIcon, LayoutParams(context.dp(16), context.dp(16)))
+    uploadButton.addView(uploadProgress, LayoutParams(context.dp(16), context.dp(16)))
+    uploadLabel.setTextColor(statefulIconTint(
+      MinutesPalette.text,
+      MinutesPalette.text,
+      MinutesPalette.disabled,
+    ))
+    uploadButton.addView(uploadLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(24)).apply {
+      leftMargin = context.dp(4)
+    })
+    operationHost.addView(uploadButton, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)))
+
     recordButton.orientation = HORIZONTAL
     recordButton.gravity = Gravity.CENTER
     recordButton.minimumWidth = context.dp(88)
@@ -149,9 +194,15 @@ internal class MinutesListSurface(
     recordButton.addView(recordLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(24)).apply {
       leftMargin = context.dp(4)
     })
-    content.addView(
+    operationHost.addView(
       recordButton,
-      FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
+      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+        leftMargin = context.dp(8)
+      },
+    )
+    content.addView(
+      operationHost,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(64), Gravity.BOTTOM).apply {
         bottomMargin = context.dp(16)
       },
     )
@@ -227,7 +278,11 @@ internal class MinutesListSurface(
     applyListPadding(
       topPadding = if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
     )
-    recordButton.visibility = if (state.searching) View.GONE else View.VISIBLE
+    operationHost.visibility = if (state.searching) View.GONE else View.VISIBLE
+    uploadButton.isEnabled = !state.mediaImporting
+    uploadIcon.visibility = if (state.mediaImporting) View.GONE else View.VISIBLE
+    uploadProgress.visibility = if (state.mediaImporting) View.VISIBLE else View.GONE
+    uploadButton.contentDescription = if (state.mediaImporting) "正在导入会议录音" else "导入会议录音"
   }
 
   private fun toggleViewMode() {

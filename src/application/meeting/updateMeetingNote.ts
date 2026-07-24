@@ -113,7 +113,7 @@ function normalizeSyncOperation(
   if (scopeKey === 'guest') return null;
   const operationId = operation?.operationId.trim() ?? '';
   const operationType = operation?.operationType.trim() ?? '';
-  if (!operationId || !operationType) {
+  if (!operationId || operationType !== 'meeting.update') {
     throw new Error('account meeting update requires an atomic sync operation');
   }
   return { operationId, operationType };

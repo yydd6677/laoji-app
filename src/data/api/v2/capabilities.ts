@@ -55,6 +55,10 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     meetingNotesV2: booleanField(value, 'meeting_notes_v2'),
     structuredSummaryV2: booleanField(value, 'structured_summary_v2'),
     summaryCitations: booleanField(value, 'summary_citations'),
+    actionItemsV2: booleanField(value, 'action_items_v2'),
+    actionItemsPullV2: booleanField(value, 'action_items_pull_v2'),
+    manualNotesV2: booleanField(value, 'manual_notes_v2'),
+    occurrenceLinksV2: booleanField(value, 'occurrence_links_v2'),
     speakerCorrections: booleanField(value, 'speaker_corrections'),
     mediaImport: media && Number.isSafeInteger(maxBytes) && maxBytes > 0
       ? { mimeTypes, maxBytes }
@@ -79,6 +83,14 @@ async function readCache(): Promise<CapabilityCache | null> {
         meeting_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.meetingNotesV2 : undefined,
         structured_summary_v2: isRecord(parsed.capabilities) ? parsed.capabilities.structuredSummaryV2 : undefined,
         summary_citations: isRecord(parsed.capabilities) ? parsed.capabilities.summaryCitations : undefined,
+        action_items_v2: isRecord(parsed.capabilities) ? parsed.capabilities.actionItemsV2 : undefined,
+        action_items_pull_v2: isRecord(parsed.capabilities)
+          ? parsed.capabilities.actionItemsPullV2
+          : undefined,
+        manual_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.manualNotesV2 : undefined,
+        occurrence_links_v2: isRecord(parsed.capabilities)
+          ? parsed.capabilities.occurrenceLinksV2
+          : undefined,
         speaker_corrections: isRecord(parsed.capabilities) ? parsed.capabilities.speakerCorrections : undefined,
         media_import: isRecord(parsed.capabilities) && isRecord(parsed.capabilities.mediaImport)
           ? {
@@ -137,7 +149,7 @@ export async function loadMeetingCapabilities(
 export async function requireFreshMeetingCapability(
   capability: keyof Pick<
     MeetingCapabilities,
-    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'speakerCorrections' | 'syncCursor'
+    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'actionItemsV2' | 'actionItemsPullV2' | 'manualNotesV2' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
   >,
   accessToken?: string | null,
 ): Promise<MeetingCapabilities> {

@@ -23,7 +23,7 @@ import com.laoji.nativeplatform.media.MinutesPlayerView
 
 internal interface MinutesDetailPlayerOwner {
   val view: View
-  fun setSource(source: MinutesPlayerSource?)
+  fun bindSource(source: MinutesPlayerSource?)
   fun seekTo(positionMs: Long)
 }
 
@@ -33,14 +33,14 @@ private class ProductionMinutesDetailPlayerOwner(
 ) : MinutesDetailPlayerOwner {
   private val player = MinutesPlayerView(context, onPlaybackState)
   override val view: View = player
-  override fun setSource(source: MinutesPlayerSource?) = player.setSource(source)
+  override fun bindSource(source: MinutesPlayerSource?) = player.bindSource(source)
   override fun seekTo(positionMs: Long) = player.seekTo(positionMs)
 }
 
 internal class MinutesDetailSurface(
   context: Context,
   private val onAction: (Map<String, Any?>) -> Unit,
-  onPlaybackState: (MinutesPlaybackState) -> Unit,
+  private val onPlaybackState: (MinutesPlaybackState) -> Unit,
   playerOwnerFactory: (Context, (MinutesPlaybackState) -> Unit) -> MinutesDetailPlayerOwner =
     ::ProductionMinutesDetailPlayerOwner,
 ) : LinearLayout(context) {
@@ -48,7 +48,8 @@ internal class MinutesDetailSurface(
   internal val audioHeader = LinearLayout(context)
   internal val stickyLayout = MinutesDetailStickyLayout(context)
   internal val detailPager = ViewPager2(context)
-  private val playerOwner = playerOwnerFactory(context, onPlaybackState)
+  private val pagerAdapter = MinutesDetailPagerAdapter(context, ::handleContentAction)
+  private val playerOwner = playerOwnerFactory(context, ::handlePlaybackState)
   internal val player: View = playerOwner.view
   internal val audioNotice: TextView = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
 
@@ -58,7 +59,6 @@ internal class MinutesDetailSurface(
   private val subtitleRow = LinearLayout(context)
   private val dateTimeIcon = ImageView(context)
   private val dateTime = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-  private val pagerAdapter = MinutesDetailPagerAdapter(context, ::handleContentAction)
   private val tabBar = MinutesDetailTabBar(context, ::requestUserTab)
   private val viewStateStore = MinutesDetailViewStateStore(context)
   private var renderedState = MinutesDetailState()
@@ -67,6 +67,7 @@ internal class MinutesDetailSurface(
   private var renderedMeetingId = ""
   private var editingTitle = false
   private var consumedTitleEditRequestId = 0
+  private var consumedTranscriptFocusRequestId = 0L
   private val persistRunnable = Runnable { persistViewState(synchronous = false) }
 
   internal val titleEditorShowing: Boolean
@@ -193,7 +194,7 @@ internal class MinutesDetailSurface(
     // Feishu owns the audio toolbar outside the sticky container. WRAP_CONTENT lets the player
     // measure its real controls and system inset instead of imposing the old 100dp surface slot.
     addView(player, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    tabBar.select(MinutesDetailTab.TRANSCRIPT)
+    tabBar.select(MinutesDetailTab.NOTES)
   }
 
   fun render(state: MinutesDetailState) {
@@ -203,6 +204,7 @@ internal class MinutesDetailSurface(
       renderedMeetingId = state.meetingId
       pendingTabCommand = null
       consumedTitleEditRequestId = 0
+      consumedTranscriptFocusRequestId = 0L
     }
     val persisted = if (meetingChanged) viewStateStore.read(state.meetingId) else null
     val restoredTab = persisted?.activeTab?.takeUnless { state.activeTabIsExplicit }
@@ -230,8 +232,8 @@ internal class MinutesDetailSurface(
     title.contentDescription = if (renderedState.available) "编辑会议标题" else null
     dateTime.text = renderedState.dateTimeLabel
     subtitleRow.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
-    renderAudioState(renderedState)
     pagerAdapter.render(renderedState)
+    renderAudioState(renderedState)
     tabBar.render(renderedState)
     issueTabCommand(
       tab = acceptedTab,
@@ -243,11 +245,37 @@ internal class MinutesDetailSurface(
       post {
         stickyLayout.restoreHeaderCollapseOffset(persisted.headerCollapseOffsetPx)
         pagerAdapter.restoreScrollPositions(persisted)
+        post { pagerAdapter.focusSummaryAction(renderedState, force = true) }
       }
     }
     if (renderedState.available && renderedState.titleEditRequestId > consumedTitleEditRequestId) {
       consumedTitleEditRequestId = renderedState.titleEditRequestId
       post { beginTitleEdit() }
+    }
+    if (
+      renderedState.available
+      && renderedState.focusTranscriptRequestId > consumedTranscriptFocusRequestId
+      && (renderedState.focusTranscriptSegmentId.isNotBlank() || renderedState.focusTranscriptPositionMs > 0L)
+    ) {
+      issueTabCommand(
+        tab = MinutesDetailTab.TRANSCRIPT,
+        generation = nextTabGeneration(),
+        smoothScroll = false,
+        emit = false,
+      )
+      post {
+        val transcriptPage = pagerAdapter.pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage
+        val revealed = transcriptPage.revealMarker(
+          renderedState.focusTranscriptSegmentId.takeIf(String::isNotBlank),
+          renderedState.focusTranscriptPositionMs,
+        )
+        if (revealed) {
+          consumedTranscriptFocusRequestId = renderedState.focusTranscriptRequestId
+        }
+        if (revealed && playableSource(renderedState) != null) {
+          playerOwner.seekTo(renderedState.focusTranscriptPositionMs)
+        }
+      }
     }
   }
 
@@ -318,8 +346,11 @@ internal class MinutesDetailSurface(
   }
 
   private fun renderAudioState(state: MinutesDetailState) {
-    playerOwner.setSource(state.playerSource)
-    val message = state.audioErrorMessage.ifBlank { state.audioStatusMessage }
+    val source = playableSource(state)
+    playerOwner.bindSource(source)
+    val message = state.audioErrorMessage.ifBlank {
+      state.audioStatusMessage.ifBlank { "暂无可播放的录音".takeIf { source == null }.orEmpty() }
+    }
     audioNotice.text = message
     audioNotice.setTextColor(if (state.audioErrorMessage.isNotBlank()) MinutesPalette.danger else MinutesPalette.secondary)
     audioNotice.backgroundShape(
@@ -328,6 +359,9 @@ internal class MinutesDetailSurface(
     audioNotice.contentDescription = message.takeIf { it.isNotBlank() }
     audioNotice.visibility = if (message.isBlank()) View.GONE else View.VISIBLE
   }
+
+  private fun playableSource(state: MinutesDetailState): MinutesPlayerSource? =
+    state.playerSource?.takeIf { it.sourceId.isNotBlank() && it.uri.isNotBlank() }
 
   private fun schedulePersistViewState() {
     removeCallbacks(persistRunnable)
@@ -349,6 +383,7 @@ internal class MinutesDetailSurface(
         activeTab = renderedState.activeTab,
         tabGeneration = renderedState.tabGeneration,
         headerCollapseOffsetPx = stickyLayout.headerCollapseOffsetPx,
+        notes = requireNotNull(scroll[MinutesDetailTab.NOTES]),
         transcript = requireNotNull(scroll[MinutesDetailTab.TRANSCRIPT]),
         summary = requireNotNull(scroll[MinutesDetailTab.SUMMARY]),
         speakers = requireNotNull(scroll[MinutesDetailTab.SPEAKERS]),
@@ -359,10 +394,39 @@ internal class MinutesDetailSurface(
   }
 
   private fun handleContentAction(action: Map<String, Any?>) {
+    if (
+      action["type"] == "seekSummaryCitation"
+      || action["type"] == "openActionSource"
+      || action["type"] == "openMarker"
+    ) {
+      val segmentId = action["segmentId"] as? String
+      val positionMs = (action["positionMs"] as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
+      issueTabCommand(
+        tab = MinutesDetailTab.TRANSCRIPT,
+        generation = nextTabGeneration(),
+        smoothScroll = false,
+        emit = true,
+      )
+      val transcriptPage = pagerAdapter.pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage
+      if (action["type"] == "openMarker") {
+        transcriptPage.revealMarker(segmentId, positionMs)
+      } else if (!segmentId.isNullOrBlank()) {
+        transcriptPage.revealSegment(segmentId)
+      }
+      if (playableSource(renderedState) != null) {
+        playerOwner.seekTo(positionMs)
+      }
+    }
     if (action["type"] == "seekTranscript") {
+      if (playableSource(renderedState) == null) return
       (action["positionMs"] as? Number)?.toLong()?.let(playerOwner::seekTo)
     }
     onAction(action + mapOf("meetingId" to renderedState.meetingId))
+  }
+
+  private fun handlePlaybackState(state: MinutesPlaybackState) {
+    pagerAdapter.onPlaybackState(state)
+    onPlaybackState(state)
   }
 
   private fun configureTitleBar() {

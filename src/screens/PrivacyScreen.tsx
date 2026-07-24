@@ -86,6 +86,7 @@ function Toggle({
 export function PrivacyScreen({ navigation }: Props) {
   const [faceId, setFaceId] = useState(false);
   const [appLock, setAppLock] = useState(false);
+  const [hideWidgetTitles, setHideWidgetTitles] = useState(true);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const { mode, session, signOut } = useAuth();
   const { showDialog } = useAppDialog();
@@ -98,6 +99,7 @@ export function PrivacyScreen({ navigation }: Props) {
       if (!alive) return;
       setFaceId(saved.biometricEnabled);
       setAppLock(saved.appLockEnabled);
+      setHideWidgetTitles(saved.hideWidgetTitles);
     }).catch(() => {
       if (!alive) return;
       showDialog({ title: '读取失败', message: '隐私设置暂时无法读取，请返回后重试。', tone: 'error' });
@@ -105,11 +107,20 @@ export function PrivacyScreen({ navigation }: Props) {
     return () => { alive = false; };
   }, [scope, showDialog]);
 
-  const persistPrivacy = async (nextFaceId: boolean, nextAppLock: boolean) => {
+  const persistPrivacy = async (
+    nextFaceId: boolean,
+    nextAppLock: boolean,
+    nextHideWidgetTitles = hideWidgetTitles,
+  ) => {
     try {
-      await savePrivacyPrefs(scope, { biometricEnabled: nextFaceId, appLockEnabled: nextAppLock });
+      await savePrivacyPrefs(scope, {
+        biometricEnabled: nextFaceId,
+        appLockEnabled: nextAppLock,
+        hideWidgetTitles: nextHideWidgetTitles,
+      });
       setFaceId(nextFaceId);
       setAppLock(nextAppLock);
+      setHideWidgetTitles(nextHideWidgetTitles);
       return true;
     } catch {
       showDialog({ title: '设置未保存', message: '隐私设置写入失败，请稍后重试。', tone: 'error' });
@@ -171,6 +182,16 @@ export function PrivacyScreen({ navigation }: Props) {
     }
   };
 
+  const handleWidgetTitleToggle = async () => {
+    if (privacyBusy || !appLock) return;
+    setPrivacyBusy(true);
+    try {
+      await persistPrivacy(faceId, appLock, !hideWidgetTitles);
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
   const handleClearLocalData = () => {
     showDialog({
       title: '清除本机数据',
@@ -225,7 +246,7 @@ export function PrivacyScreen({ navigation }: Props) {
           />
           <SettingsRow
             label="文件分享说明"
-            onPress={() => showDialog({ title: '文件分享说明', message: '分享会议文档、完整资料包或录音文件时会打开系统分享面板，由你选择接收应用和对象。', tone: 'info' })}
+            onPress={() => showDialog({ title: '文件分享说明', message: '分享前可选择基本信息、整理结果、行动项、文字记录、录音或我的笔记；确认后会打开系统分享面板。', tone: 'info' })}
           />
           {mode === 'authenticated' ? (
             <SettingsRow
@@ -258,6 +279,20 @@ export function PrivacyScreen({ navigation }: Props) {
               />
             )}
           />
+          {appLock ? (
+            <SettingsRow
+              label="锁屏隐藏标题"
+              right={(
+                <Toggle
+                  label="锁屏隐藏标题"
+                  on={hideWidgetTitles}
+                  onToggle={handleWidgetTitleToggle}
+                  disabled={privacyBusy}
+                  testID="privacy-widget-title-toggle"
+                />
+              )}
+            />
+          ) : null}
           <SettingsRow label="清除本机数据" onPress={handleClearLocalData} destructive last />
         </SettingsGroup>
 

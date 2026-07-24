@@ -6,17 +6,20 @@
 
 | 证据 | 状态 | 可用于什么 |
 |---|---|---|
-| 配置中的日程服务 OpenAPI | 经本机代理返回 HTTP 502；绕过代理直连失败；手机网络直连未收到 HTTP 响应 | 只能证明当前无法读取，不能推断线上路由或模型 |
-| 配置中的会议服务 OpenAPI | 经本机代理返回 HTTP 502；绕过代理直连失败；手机网络直连未收到 HTTP 响应 | 只能证明当前无法读取，不能推断线上路由或模型 |
+| 当前 8020 运行实例 | 2026-07-24 只读检查为旧工作区进程；`/openapi.json` 可读，但只包含 `/api/meetings` 等旧路由，没有 App 的 `/api/laoji/meetings` | 证明当前可访问实例不是移动端账号会议合同，不能把它当作 18020 的替代 |
+| 配置中的 18020/18035 服务 | 2026-07-24 无监听；未启动、未重启 | 证明当前 APK 配置的会议/日程账号链路不可用，不证明已同步源码的运行行为 |
+| 目标部署工作区生成 OpenAPI | 已从实际 Python 环境只读生成；包含 `/api/laoji/meetings` 完整兼容路由 | 证明待启动源码的请求模型和路由，不等同在线端到端成功 |
+| 目标部署 SQLite schema | 已用只读连接检查实际 `local.db` | 证明 `client_request_id`、`location`、`recorded_at` 列及用户内唯一索引已经存在 |
 | 移动端当前源码 | 已读取 | 证明客户端实际发送和消费的字段 |
-| `server-work` 会议 API 副本 | 已读取并固定 SHA-256 | 证明该本机副本的行为，不等同线上 |
-| `server-staging` 总结生成副本 | 已读取并固定 SHA-256 | 证明该本机副本的输出归一化逻辑，不等同线上 |
+| `server-work` 部署补丁 | 已与目标部署工作区当前源码三方合并并固定 SHA-256 | 证明待启动源码与本机补丁一致，不等同运行态 |
 
 本机证据文件：
 
-- `/home/yydd/桌面/light_plan/server-work/summary/api/app_meetings.py`：`0e911dd85ade9f20e420088e604347b615131fa07a407efa111b88fe077b77cb`
-- `/home/yydd/桌面/light_plan/server-work/summary/summary_tasks.py`：`e16b91a85ab50906e8d789f8251df19542d1c19d677b729db632c900a928563f`
-- `/home/yydd/LaoJi/server-staging/qwen35-9b-cutover/smart-meeting-ai/backend/app/services/app_summary_generator.py`：`0052c2ef8d68b73c46e8086f272280080ebf49090d195a5d60b7df1eef13c216`
+- `/home/yydd/桌面/light_plan/server-work/summary/api/app_meetings.py`：`bd9c9a227ba4edbf6283fb927bb79e5d2f517d6c9e22bbb76d38d2759fe3283b`
+- `/home/yydd/桌面/light_plan/server-work/summary/summary_tasks.py`：`d304a0ebd5ff0cbdcfd6a19d2affe17488dbb4397a47cfc841e70ac4cbb180e1`
+- `/home/yydd/桌面/light_plan/server-work/summary/meetingsummary/main.py`：`fe63e8e3f5e1199b00f6c33ad2ddcc2ff07fe87d44382bf47b2dea1022739697`
+
+以上三个 SHA-256 与共享服务器目标部署工作区逐项一致；同步前原文件保存在服务器 `backups/20260724-meeting-contract-template-v2`。没有启动或重启服务，当前 8020 进程仍来自另一旧工作区。
 
 ## 当前客户端实际合同
 
@@ -25,24 +28,22 @@
 - 创建发送 `title`、`description`、`participants`、`mode`、`client_request_id`、`location`、`recorded_at`。
 - 列表使用 page/size，客户端最多读取 50 页；不是稳定 cursor。
 - Transcript 使用 offset/limit；没有 revision 或稳定 cursor。
-- Summary 生成仍通过 `summary_type=final&force=...`，结果仍兼容字段对象、Markdown 和 raw JSON。
+- Summary 生成通过 `summary_type=final&force=...&template_id=...&template_revision=...`；移动端优先消费 schema v2，仍保留旧字段兼容投影。
 - Meeting 仍使用单一 `status`，上传另叠加本机 pending registry。
 
-## 本机会议服务副本的已确认差异
+## 目标部署源码与数据库的已确认合同
 
-`server-work` 的 `AppMeetingCreate` 仅声明 `title`、`description`、`participants`、`mode`：
+- `AppMeetingCreate` 要求客户端发送 `title` 字段，但空字符串合法；同时声明 `client_request_id`、`location` 和 `recorded_at`。
+- 同一用户内 `(user_id, client_request_id)` 有实际 SQLite 唯一索引。首次请求、并发唯一冲突后的重读和相同 payload 重放返回同一远端 ID；同键不同 payload 返回 409。
+- `Meeting` 模型与实际 `local.db` 均已有 `client_request_id VARCHAR(96)`、`location VARCHAR(500)` 和 `recorded_at DATETIME`。schema helper 对旧 SQLite 安装执行 additive column/index 修复，不重建会议表。
+- `PATCH` 允许空标题；`description` 与 `location` 使用 Pydantic `model_fields_set` 区分未提供和显式 `null`，后者可以真正清空。
+- 四个固定模板的 `id@revision` 进入任务指纹、prompt 和 schema v2 结果。决定/行动项只能来自既有事实清洗结果，模型的 `template_sections` 不能绕过该清洗。
+- Summary action candidate 使用稳定内容身份；兼容响应不再临时生成随机 ID，也不再把 raw 模型 JSON 返回移动端。每次生成使用唯一 `final3_*` 产物名，避免同日重生成读取旧文件。
+- 已保留原服务的同会议串行、不同会议有界并发、任务归属校验、长轮询、失败不复用、删除墓碑检查、摘要事实清洗和 compact/general 路径；模板增量没有用旧副本覆盖这些保护。
+- Summary carry-forward 为 additive request body：最多八项，request ID 和项目 identity 进入去重指纹；账号端只接受当前用户拥有的来源会议并拒绝引用本场自身。结构化结果回传同一 request ID，移动端不匹配时拒绝保存；有历史授权时禁用不接收上下文的 compact 快路径。
+- 兼容 DELETE 仍是立即删除数据库行和音频文件；Transcript 仍是 offset 分页。当前仍没有 `/api/laoji/capabilities`、MeetingNote v2、独立 processing job、soft delete/restore、summary citation 或 sync cursor。
 
-- 未声明 `client_request_id`、`location`、`recorded_at`；Pydantic 默认会忽略客户端额外字段。
-- `title` 要求至少一个字符，与目标合同“允许空标题”冲突。
-- 创建使用随机服务端 UUID，没有客户端幂等键和 occurrence 唯一约束。
-- `PATCH` 不支持 `location`。
-- 删除是立即删除数据库行和音频文件，不是 soft delete/restore。
-- Transcript 只有 offset 分页，没有 revision。
-- Summary 生成路由未声明 `force`，客户端参数在该副本中没有语义。
-- 每次读取 Final Summary 都为 action item 临时生成新 UUID，不能作为稳定可编辑对象。
-- 没有 `/api/laoji/capabilities`、MeetingNote v2、独立 processing job、summary version/citation 或 sync cursor。
-
-这些差异解释了为什么当前移动端接口不能直接升级为事实合同。它们也不能证明线上一定存在同样缺口。
+模板部署后在目标 Python 环境执行 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，另行验证模板 prompt CLI 参数，均通过。carry-forward 增量又在目标源码隔离候选中通过 56 项相关合同，并按 SHA 防并发覆盖后同步至目标源码。这里只证明源码与数据库合同，未证明 18020/18035 运行态、账号鉴权或真实模型输出质量。
 
 ## Phase 0 决策
 
@@ -51,7 +52,7 @@
 3. SQLite Release A 只做影子导入和计数/hash 对账；UI、录音 journal 和上传链路仍读旧事实源。
    构建级回滚开关为 `EXPO_PUBLIC_LOCAL_MEETING_DB_V1=false`。
 4. 不向当前不可确认的线上服务发送探测性写请求。
-5. 获取线上 OpenAPI、部署 migration 版本和实际响应模型后，新增一份脱敏快照并更新本文件；在此之前 Phase 0 的“线上契约冻结”退出条件尚未满足。
+5. 目标部署源码、生成 OpenAPI 和 SQLite schema 已取得脱敏快照，但 18020/18035 尚未运行，未完成账号鉴权读写往返；因此 Phase 0 的“线上契约冻结”退出条件仍未满足。
 
 ## Android Release A 运行证据
 

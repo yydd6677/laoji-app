@@ -9,4 +9,12 @@
     <color name="laoji_ud_switch_on_disabled_track">#173166</color>
     <color name="laoji_ud_switch_off_disabled_track">#373737</color>
     <color name="laoji_ud_switch_off_track">#26EBEBEB</color>
+    <color name="laoji_widget_surface">#FF1F1F1F</color>
+    <color name="laoji_widget_event_surface">#FF292929</color>
+    <color name="laoji_widget_primary_soft">#FF152340</color>
+    <color name="laoji_widget_primary">#FF4C88FF</color>
+    <color name="laoji_widget_text_primary">#E6FFFFFF</color>
+    <color name="laoji_widget_text_secondary">#99FFFFFF</color>
+    <color name="laoji_widget_text_tertiary">#FF8F959E</color>
+    <color name="laoji_widget_border">#33FFFFFF</color>
 </resources>

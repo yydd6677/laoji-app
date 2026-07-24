@@ -132,8 +132,11 @@ internal class Media3MinutesPlayerAdapter(
     }
 
     val previous = source
-    val preserveState = previous?.sourceId == nextSource.sourceId &&
-      previous.storageScope == nextSource.storageScope && player.mediaItemCount > 0
+    val preserveState = canPreserveMinutesPlaybackState(
+      previousSource = previous,
+      nextSource = nextSource,
+      hasMediaItem = player.mediaItemCount > 0,
+    )
     val preservedPositionMs = if (preserveState) player.currentPosition.coerceAtLeast(0L) else 0L
     val preservePlaying = preserveState && player.isPlaying
     source = nextSource

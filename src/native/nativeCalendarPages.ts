@@ -1,9 +1,11 @@
 import type {
   NativeCalendarDetailSnapshot,
+  NativeCalendarSeriesMemorySnapshot,
   NativeCalendarEditDraftSnapshot,
   NativeCalendarEditSnapshot,
   NativeCalendarSearchSnapshot,
 } from 'laoji-native-platform';
+import { CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION } from 'laoji-native-platform';
 import type { CalEvent } from '../types';
 import { dateFromKey, formatMonthTitle } from '../utils/calendarDate';
 import { sortEventsForSearch } from '../utils/eventOrdering';
@@ -15,6 +17,7 @@ import { isValidEventDate } from '../utils/eventDraftValidation';
 import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { labelForReminder } from '../services/notifications';
 import { eventDetailTitle, eventListTitle } from '../utils/eventTitle';
+import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
 
 // CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: pure builders keep native pages deterministic.
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -115,7 +118,7 @@ export function buildNativeCalendarSearchSnapshot(
   const normalized = query.trim();
   if (!normalized) {
     // An untouched search field is a ready input state, not an empty-result state.
-    return { schemaVersion: 1, query, state: 'ready', message: '', results: [] };
+    return { schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION, query, state: 'ready', message: '', results: [] };
   }
   const matches = searchMatches(events, query, today);
   const previousDate = new Map<number, string>();
@@ -136,7 +139,7 @@ export function buildNativeCalendarSearchSnapshot(
     };
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION,
     query,
     state: results.length > 0 ? 'ready' : 'empty',
     message: results.length > 0 ? '' : '无相关结果',
@@ -159,13 +162,78 @@ export function nativeCalendarDetailTimeLabel(event: CalEvent): string {
   return event.endTime ? `${startWithTime} - ${event.endTime}` : startWithTime;
 }
 
+function seriesDateLabel(value: string): string {
+  if (!isValidEventDate(value)) return value;
+  const date = dateFromKey(value);
+  const year = date.getFullYear() === new Date().getFullYear() ? '' : `${date.getFullYear()}年`;
+  return `${year}${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function seriesActionMetaLabel(action: MeetingSeriesMemoryProjection['pendingActions'][number]): string {
+  const values = [seriesDateLabel(action.occurrenceDate)];
+  if (action.assigneeText?.trim()) values.push(action.assigneeText.trim());
+  if (action.dueAtMs !== null) {
+    const due = new Date(action.dueAtMs);
+    if (!Number.isNaN(due.getTime())) {
+      values.push(`截止${due.getMonth() + 1}月${due.getDate()}日`);
+    }
+  }
+  return values.filter(Boolean).join(' · ');
+}
+
+export function buildNativeCalendarSeriesMemorySnapshot(
+  phase: 'loading' | 'ready' | 'error',
+  projection: MeetingSeriesMemoryProjection | null,
+): NativeCalendarSeriesMemorySnapshot | undefined {
+  if (phase === 'loading') {
+    return { state: 'loading', message: '正在读取上次会议', decisions: [], actions: [] };
+  }
+  if (phase === 'error') {
+    return { state: 'error', message: '上次会议内容暂时无法读取', decisions: [], actions: [] };
+  }
+  if (!projection) return undefined;
+  return {
+    state: 'ready',
+    previousMeeting: {
+      meetingId: projection.previousMeeting.legacyMeetingId,
+      canonicalMeetingId: projection.previousMeeting.canonicalMeetingId,
+      title: projection.previousMeeting.title,
+      dateLabel: seriesDateLabel(projection.previousMeeting.occurrenceDate),
+    },
+    decisions: projection.decisions.map(decision => {
+      const citation = decision.citations[0];
+      return {
+        id: decision.id,
+        content: decision.content,
+        meetingId: decision.legacyMeetingId,
+        sourceSegmentId: citation?.sourceSegmentId ?? citation?.segmentId,
+        sourceStartMs: citation?.startMs,
+      };
+    }),
+    actions: projection.pendingActions.map(action => ({
+      id: action.id,
+      content: action.content,
+      metaLabel: seriesActionMetaLabel(action),
+      meetingId: action.legacyMeetingId,
+      canonicalMeetingId: action.canonicalMeetingId,
+      sourceSegmentId: action.sourceSegmentSourceId ?? action.sourceSegmentId ?? undefined,
+      sourceStartMs: action.sourceStartMs ?? undefined,
+    })),
+  };
+}
+
 export function buildNativeCalendarDetailSnapshot(
   event: CalEvent | undefined,
   deleting = false,
   meetingAction?: NativeCalendarDetailSnapshot['meetingAction'],
+  seriesMemory?: NativeCalendarSeriesMemorySnapshot,
 ): NativeCalendarDetailSnapshot {
   if (!event) {
-    return { schemaVersion: 1, state: 'error', message: '日程不存在，请返回日历后重新打开。' };
+    return {
+      schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION,
+      state: 'error',
+      message: '日程不存在，请返回日历后重新打开。',
+    };
   }
   const repeatLabels: Record<string, string> = {
     daily: '每天重复',
@@ -174,10 +242,11 @@ export function buildNativeCalendarDetailSnapshot(
     yearly: '每年重复',
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION,
     state: 'ready',
     deleting,
     meetingAction,
+    seriesMemory,
     event: {
       ...eventRefForEvent(event),
       title: eventDetailTitle(event.title),
@@ -226,7 +295,7 @@ export function buildNativeCalendarEditSnapshot(input: {
   message?: string;
 }): NativeCalendarEditSnapshot {
   return {
-    schemaVersion: 1,
+    schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION,
     state: input.state ?? 'ready',
     message: input.message,
     draft: input.draft,

@@ -11,6 +11,8 @@ import {
 } from '../utils/eventIdentity';
 import { expandEventsForMonths } from '../utils/eventRecurrence';
 import { eventListTitle } from '../utils/eventTitle';
+import { sqliteMeetingNoteRepository, type MeetingActionReminderRecord } from '../data/repositories';
+import { isScopeKey, type ScopeKey } from '../domain/meeting';
 
 export const DEFAULT_REMINDER_MINUTES = 15;
 export const SOON_REMINDER_DELAY_MS = 1_000;
@@ -44,6 +46,32 @@ const PREFS_KEY = '@laoji:notificationPrefs:v1';
 const EVENT_NOTIFICATION_REGISTRY_KEY = '@laoji:eventNotificationRegistry:v1';
 const ACTIVE_NOTIFICATION_SCOPE_KEY = '@laoji:activeNotificationScope:v1';
 const EVENT_NOTIFICATION_CHANNEL_ID = 'laoji-events';
+const MEETING_ACTION_NOTIFICATION_CHANNEL_ID = 'laoji-meeting-actions';
+export const EVENT_NOTIFICATION_CATEGORY_IDENTIFIER = 'laoji-event-reminder';
+export const EVENT_START_OR_RESUME_ACTION_IDENTIFIER = 'start-or-resume-meeting';
+
+export interface MeetingActionNotificationSnapshot {
+  actionId: string;
+  canonicalMeetingId: string;
+  meetingId: string;
+  meetingTitle: string;
+  content: string;
+  reminderAtMs: number;
+}
+
+export class MeetingActionNotificationPermissionError extends Error {
+  constructor() {
+    super('meeting action notification permission denied');
+    this.name = 'MeetingActionNotificationPermissionError';
+  }
+}
+
+export class MeetingActionReminderTimeError extends Error {
+  constructor() {
+    super('meeting action reminder time is not in the future');
+    this.name = 'MeetingActionReminderTimeError';
+  }
+}
 
 type NotificationEventSnapshot = Pick<
   CalEvent,
@@ -117,6 +145,7 @@ function notificationSnapshot(event: CalEvent): NotificationEventSnapshot {
 
 function notificationFingerprint(event: NotificationEventSnapshot): string {
   return JSON.stringify([
+    'event-notification-v3',
     event.sourceEventId,
     event.occurrenceDate,
     event.legacyEventId ?? null,
@@ -528,13 +557,16 @@ export function planEventNotificationHorizon(
   };
 }
 
-export function notificationDateTrigger(date: Date): Notifications.DateTriggerInput {
+export function notificationDateTrigger(
+  date: Date,
+  channelId = EVENT_NOTIFICATION_CHANNEL_ID,
+): Notifications.DateTriggerInput {
   const base: Notifications.DateTriggerInput = {
     type: 'date' as Notifications.SchedulableTriggerInputTypes.DATE,
     date,
   };
   if (Platform.OS !== 'android') return base;
-  return { ...base, channelId: EVENT_NOTIFICATION_CHANNEL_ID };
+  return { ...base, channelId };
 }
 
 export async function loadNotificationPrefs(scope: string): Promise<NotificationPrefs> {
@@ -569,9 +601,29 @@ export async function getNotificationPermissionState(): Promise<NotificationPerm
 }
 
 export async function prepareNotificationChannel(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(EVENT_NOTIFICATION_CHANNEL_ID, {
+      name: '日程提醒',
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: 'default',
+      vibrationPattern: [0, 250, 250, 250],
+    });
+  }
+  await Notifications.setNotificationCategoryAsync(
+    EVENT_NOTIFICATION_CATEGORY_IDENTIFIER,
+    [{
+      identifier: EVENT_START_OR_RESUME_ACTION_IDENTIFIER,
+      buttonTitle: '开始记录',
+      options: { opensAppToForeground: true },
+    }],
+  );
+}
+
+async function prepareMeetingActionNotificationChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(EVENT_NOTIFICATION_CHANNEL_ID, {
-    name: '日程提醒',
+  await Notifications.setNotificationChannelAsync(MEETING_ACTION_NOTIFICATION_CHANNEL_ID, {
+    name: '待办提醒',
     importance: Notifications.AndroidImportance.HIGH,
     sound: 'default',
     vibrationPattern: [0, 250, 250, 250],
@@ -638,12 +690,13 @@ export async function scheduleEventNotification(
 
     return await Notifications.scheduleNotificationAsync({
       content: {
-        title: '老记日程提醒',
+        title: '日程即将开始',
         body: eventListTitle(event.title),
         sound: 'default',
+        categoryIdentifier: EVENT_NOTIFICATION_CATEGORY_IDENTIFIER,
         data: {
           kind: 'event',
-          version: 2,
+          version: 3,
           ...eventRefNotificationData(eventRefForEvent(event)),
           notificationScope: scope,
           fingerprint: notificationFingerprint(notificationSnapshot(event)),
@@ -668,6 +721,240 @@ export async function cancelEventNotification(notificationId?: string | null): P
   return scheduled.status === 'fulfilled';
 }
 
+function meetingActionNotificationKey(canonicalMeetingId: string, actionId: string): string {
+  return JSON.stringify([canonicalMeetingId, actionId]);
+}
+
+function meetingActionNotificationFingerprint(snapshot: MeetingActionNotificationSnapshot): string {
+  return JSON.stringify([
+    snapshot.canonicalMeetingId,
+    snapshot.actionId,
+    snapshot.meetingId,
+    snapshot.meetingTitle,
+    snapshot.content,
+    snapshot.reminderAtMs,
+  ]);
+}
+
+function meetingActionSnapshotFromRecord(record: MeetingActionReminderRecord): MeetingActionNotificationSnapshot {
+  return {
+    actionId: record.action.id,
+    canonicalMeetingId: record.action.meetingId,
+    meetingId: record.legacyMeetingId,
+    meetingTitle: record.meetingTitle,
+    content: record.action.content,
+    reminderAtMs: record.action.reminderAtMs ?? 0,
+  };
+}
+
+function meetingActionNotificationKeyFromData(data: Record<string, unknown> | null | undefined): string | null {
+  if (data?.kind !== 'meeting-action') return null;
+  const canonicalMeetingId = typeof data.canonicalMeetingId === 'string' ? data.canonicalMeetingId : '';
+  const actionId = typeof data.actionId === 'string' ? data.actionId : '';
+  return canonicalMeetingId && actionId
+    ? meetingActionNotificationKey(canonicalMeetingId, actionId)
+    : null;
+}
+
+export function meetingActionReminderAtForDue(dueAtMs: number): number {
+  if (!Number.isSafeInteger(dueAtMs) || dueAtMs < 0) return 0;
+  const due = new Date(dueAtMs);
+  if (Number.isNaN(due.getTime())) return 0;
+  const hasExplicitTime = due.getHours() !== 0
+    || due.getMinutes() !== 0
+    || due.getSeconds() !== 0
+    || due.getMilliseconds() !== 0;
+  if (hasExplicitTime) return due.getTime();
+  due.setHours(9, 0, 0, 0);
+  return due.getTime();
+}
+
+async function scheduleMeetingActionNotificationInternal(
+  snapshot: MeetingActionNotificationSnapshot,
+  scope: ScopeKey,
+  requestPermission: boolean,
+): Promise<string | null> {
+  if (!isDesiredScope(scope)) return null;
+  const fireAt = new Date(snapshot.reminderAtMs);
+  if (!Number.isSafeInteger(snapshot.reminderAtMs) || Number.isNaN(fireAt.getTime()) || fireAt.getTime() <= Date.now()) {
+    if (requestPermission) throw new MeetingActionReminderTimeError();
+    return null;
+  }
+  await prepareMeetingActionNotificationChannel();
+  const granted = requestPermission
+    ? await ensureNotificationPermission()
+    : (await getNotificationPermissionState()).granted;
+  if (!granted) {
+    if (requestPermission) throw new MeetingActionNotificationPermissionError();
+    return null;
+  }
+  const fingerprint = meetingActionNotificationFingerprint(snapshot);
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '老记待办提醒',
+      body: `待办事项：${snapshot.content}`.slice(0, 512),
+      sound: 'default',
+      data: {
+        kind: 'meeting-action',
+        version: 1,
+        actionId: snapshot.actionId,
+        canonicalMeetingId: snapshot.canonicalMeetingId,
+        meetingId: snapshot.meetingId,
+        meetingTitle: snapshot.meetingTitle,
+        notificationScope: scope,
+        fingerprint,
+        fireAt: fireAt.toISOString(),
+      },
+    },
+    trigger: notificationDateTrigger(fireAt, MEETING_ACTION_NOTIFICATION_CHANNEL_ID),
+  });
+}
+
+export function scheduleMeetingActionNotification(
+  snapshot: MeetingActionNotificationSnapshot,
+  scope: ScopeKey,
+): Promise<string | null> {
+  return enqueueNotificationOperation(() => scheduleMeetingActionNotificationInternal(snapshot, scope, true));
+}
+
+export function cancelMeetingActionNotification(notificationId?: string | null): Promise<boolean> {
+  return enqueueNotificationOperation(() => cancelEventNotification(notificationId));
+}
+
+async function scheduledMeetingActionNotifications(scope: ScopeKey) {
+  return (await Notifications.getAllScheduledNotificationsAsync()).filter(request => (
+    request.content.data?.kind === 'meeting-action'
+    && request.content.data?.notificationScope === scope
+  ));
+}
+
+async function reconcileMeetingActionNotificationsNow(scope: ScopeKey): Promise<void> {
+  if (!isDesiredScope(scope)) return;
+  const reminders = await sqliteMeetingNoteRepository.listMeetingActionReminders(scope);
+  let scheduled: Awaited<ReturnType<typeof scheduledMeetingActionNotifications>>;
+  try {
+    scheduled = await scheduledMeetingActionNotifications(scope);
+  } catch (error) {
+    diagnosticWarn('read meeting action notifications failed', error);
+    return;
+  }
+  const requestsByKey = new Map<string, typeof scheduled>();
+  scheduled.forEach(request => {
+    const key = meetingActionNotificationKeyFromData(request.content.data as Record<string, unknown>);
+    if (key) requestsByKey.set(key, [...(requestsByKey.get(key) ?? []), request]);
+  });
+
+  for (const record of reminders) {
+    const snapshot = meetingActionSnapshotFromRecord(record);
+    const key = meetingActionNotificationKey(snapshot.canonicalMeetingId, snapshot.actionId);
+    const requests = requestsByKey.get(key) ?? [];
+    requestsByKey.delete(key);
+    const fingerprint = meetingActionNotificationFingerprint(snapshot);
+    const desired = record.action.status === 'pending' && snapshot.reminderAtMs > Date.now();
+    if (!desired) {
+      await cancelNotificationIds([
+        record.action.reminderNotificationId,
+        ...requests.map(request => request.identifier),
+      ]).catch(error => diagnosticWarn('cancel expired meeting action notification failed', error));
+      await sqliteMeetingNoteRepository.setMeetingActionReminderNotificationId(
+        snapshot.actionId,
+        snapshot.canonicalMeetingId,
+        scope,
+        record.action.reminderAtMs,
+        null,
+      );
+      continue;
+    }
+
+    let canonical = requests.find(request => (
+      request.identifier === record.action.reminderNotificationId
+      && request.content.data?.fingerprint === fingerprint
+    )) ?? requests.find(request => request.content.data?.fingerprint === fingerprint);
+    let newlyScheduledId: string | null = null;
+    if (!canonical) {
+      try {
+        newlyScheduledId = await scheduleMeetingActionNotificationInternal(snapshot, scope, false);
+      } catch (error) {
+        diagnosticWarn('reschedule meeting action notification failed', error);
+      }
+    }
+    const notificationId = canonical?.identifier ?? newlyScheduledId;
+    if (notificationId) {
+      const updated = await sqliteMeetingNoteRepository.setMeetingActionReminderNotificationId(
+        snapshot.actionId,
+        snapshot.canonicalMeetingId,
+        scope,
+        record.action.reminderAtMs,
+        notificationId,
+      );
+      if (!updated && newlyScheduledId) {
+        await cancelEventNotification(newlyScheduledId);
+        newlyScheduledId = null;
+      }
+    } else {
+      await sqliteMeetingNoteRepository.setMeetingActionReminderNotificationId(
+        snapshot.actionId,
+        snapshot.canonicalMeetingId,
+        scope,
+        record.action.reminderAtMs,
+        null,
+      );
+    }
+    await cancelNotificationIds(requests
+      .filter(request => request.identifier !== notificationId)
+      .map(request => request.identifier))
+      .catch(error => diagnosticWarn('cancel duplicate meeting action notification failed', error));
+  }
+
+  await cancelNotificationIds([...requestsByKey.values()].flat().map(request => request.identifier))
+    .catch(error => diagnosticWarn('cancel orphan meeting action notification failed', error));
+}
+
+async function deactivateMeetingActionNotificationScopeNow(scope: ScopeKey): Promise<void> {
+  const reminders = await sqliteMeetingNoteRepository.listMeetingActionReminders(scope).catch(() => []);
+  const scheduled = await scheduledMeetingActionNotifications(scope).catch(() => []);
+  await cancelNotificationIds([
+    ...reminders.map(record => record.action.reminderNotificationId),
+    ...scheduled.map(request => request.identifier),
+  ]).catch(error => diagnosticWarn('deactivate meeting action notifications failed', error));
+  await Promise.all(reminders.map(record => sqliteMeetingNoteRepository.setMeetingActionReminderNotificationId(
+    record.action.id,
+    record.action.meetingId,
+    scope,
+    record.action.reminderAtMs,
+    null,
+  )));
+}
+
+export function reconcileMeetingActionNotifications(scope: ScopeKey): Promise<void> {
+  return enqueueNotificationOperation(() => reconcileMeetingActionNotificationsNow(scope));
+}
+
+export function cancelMeetingActionNotificationsForMeeting(
+  scope: ScopeKey,
+  legacyMeetingId: string,
+): Promise<void> {
+  return enqueueNotificationOperation(async () => {
+    const reminders = await sqliteMeetingNoteRepository.listMeetingActionReminders(scope).catch(() => []);
+    const selected = reminders.filter(record => record.legacyMeetingId === legacyMeetingId);
+    const scheduled = await scheduledMeetingActionNotifications(scope).catch(() => []);
+    const scheduledIds = scheduled
+      .filter(request => request.content.data?.meetingId === legacyMeetingId)
+      .map(request => request.identifier);
+    await cancelNotificationIds([
+      ...selected.map(record => record.action.reminderNotificationId),
+      ...scheduledIds,
+    ]);
+    await Promise.all(selected.map(record => sqliteMeetingNoteRepository.setMeetingActionReminderNotificationId(
+      record.action.id,
+      record.action.meetingId,
+      scope,
+      record.action.reminderAtMs,
+      null,
+    )));
+  });
+}
+
 export function switchEventNotificationScope(
   previousScope: string | null,
   nextScope: string | null,
@@ -683,6 +970,7 @@ export function switchEventNotificationScope(
     );
     for (const scope of scopesToDeactivate) {
       await deactivateNotificationScope(scope);
+      if (isScopeKey(scope)) await deactivateMeetingActionNotificationScopeNow(scope);
     }
     if (previousScope && scopesToDeactivate.has(previousScope)) {
       await cancelNotificationIds(previousEvents.map(event => event.notificationId));
@@ -691,6 +979,7 @@ export function switchEventNotificationScope(
     if (desiredActiveScope !== nextScope) return;
     if (nextScope) await setAppStorageItem(ACTIVE_NOTIFICATION_SCOPE_KEY, nextScope);
     else await removeAppStorageItem(ACTIVE_NOTIFICATION_SCOPE_KEY);
+    if (nextScope && isScopeKey(nextScope)) await reconcileMeetingActionNotificationsNow(nextScope);
   });
 }
 

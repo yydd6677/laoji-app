@@ -13,7 +13,8 @@ import { AppToast } from '../components/AppToast';
 import { useAppDialog } from '../components/AppDialog';
 import { useEvents } from '../store/EventsStore';
 import { useAuth } from '../store/AuthStore';
-import type { CalEvent, EventRecurrenceScope, RootStackParamList } from '../types';
+import type { CalEvent, EventRecurrenceScope, EventRef, RootStackParamList } from '../types';
+import type { ScopeKey } from '../domain/meeting';
 import {
   DEFAULT_REMINDER_MINUTES,
   REMINDER_OPTIONS,
@@ -41,6 +42,7 @@ import {
   buildNativeCalendarEditSnapshot,
   nativeCalendarEditDraft,
 } from '../native/nativeCalendarPages';
+import { linkMeetingActionFollowup } from '../services/meetingActionFollowup';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -103,6 +105,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     ? resolveEventReference([...events, ...(searchableEvents ?? [])], editingRef) ?? undefined
     : undefined;
   const editing = Boolean(editingRef);
+  const followup = editing ? undefined : route.params?.followup;
   const selectedRecurrenceScope = editingEvent
     ? resolveRecurrenceEditScope(editingEvent, route.params?.recurrenceScope)
     : undefined;
@@ -127,7 +130,10 @@ export function AddEventScreen({ navigation, route }: Props) {
   const saveLockRef = useRef(false);
   const saveRunRef = useRef(0);
   const saveWriteStartedRef = useRef(false);
-  const createRequestRef = useRef(createClientRequestState('event'));
+  const createRequestRef = useRef(followup
+    ? { id: followup.clientRequestId, fingerprint: '' }
+    : createClientRequestState('event'));
+  const createdFollowupEventRef = useRef<EventRef | null>(null);
   const categoryRef = useRef<EventCategory>(normalizeEventCategory(editingEvent?.category ?? route.params?.draft?.category));
   const dirty = JSON.stringify(draft) !== baselineRef.current;
   draftRef.current = draft;
@@ -135,6 +141,9 @@ export function AddEventScreen({ navigation, route }: Props) {
   const notificationScope = mode === 'authenticated' && session
     ? `user:${session.user.id}`
     : mode === 'guest' ? 'guest' : 'signed_out';
+  const meetingScopeKey: ScopeKey | null = mode === 'authenticated' && session
+    ? `user:${session.user.id}`
+    : mode === 'guest' ? 'guest' : null;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -256,26 +265,42 @@ export function AddEventScreen({ navigation, route }: Props) {
   ) => {
     let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
     let syncStatus: Awaited<ReturnType<typeof addEvent>>['syncStatus'] | undefined;
+    let followupEventSaved = false;
     try {
       if (editingEvent) {
         ({ reminderDelivery, syncStatus } = await updateEvent(eventRefForEvent(editingEvent), payload, recurrenceScope));
       } else {
-        createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
-        ({ reminderDelivery, syncStatus } = await addEvent({
-          ...payload,
-          clientRequestId: createRequestRef.current.id,
-        }));
+        let createdEventRef = createdFollowupEventRef.current;
+        if (!createdEventRef) {
+          if (!followup) {
+            createRequestRef.current = requestStateForPayload(createRequestRef.current, 'event', payload);
+          }
+          const created = await addEvent({
+            ...payload,
+            clientRequestId: createRequestRef.current.id,
+          });
+          ({ reminderDelivery, syncStatus } = created);
+          createdEventRef = created.eventRef;
+          if (followup) createdFollowupEventRef.current = createdEventRef;
+        }
+        if (followup) {
+          followupEventSaved = true;
+          if (!meetingScopeKey) throw new Error('当前登录状态无法关联后续日程');
+          await linkMeetingActionFollowup(followup, meetingScopeKey, createdEventRef.sourceEventId);
+        }
       }
     } catch (reason) {
       if (!activeSave(runId)) return;
       releaseSave(runId);
       const stale = reason instanceof HttpResponseError && reason.status === 409;
       showDialog({
-        title: stale ? '日程已发生变化' : '保存失败',
-        message: stale
-          ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
-          : readableErrorMessage(reason, '请检查网络后重试'),
-        tone: stale ? 'warning' : 'error',
+        title: followupEventSaved ? '日程已创建，关联未完成' : stale ? '日程已发生变化' : '保存失败',
+        message: followupEventSaved
+          ? '再次点击保存可重试关联，不会重复创建日程。'
+          : stale
+            ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
+            : readableErrorMessage(reason, '请检查网络后重试'),
+        tone: followupEventSaved || stale ? 'warning' : 'error',
       });
       return;
     }
@@ -289,7 +314,16 @@ export function AddEventScreen({ navigation, route }: Props) {
     }
     if (!activeSave(runId)) return;
     allowLeaveRef.current = true;
-    navigation.goBack();
+    if (followup) {
+      navigation.popTo('Transcription', {
+        meetingId: followup.meetingId,
+        focus: 'summary',
+        actionId: followup.actionId,
+        actionFocusRequestId: Date.now(),
+      });
+    } else {
+      navigation.goBack();
+    }
     if (warning) showDialog({
       title: syncStatus === 'pending' ? '日程等待同步' : '日程已保存',
       message: warning,

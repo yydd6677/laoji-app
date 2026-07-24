@@ -1,15 +1,31 @@
+import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { BEST_SPEED, zip } from 'react-native-zip-archive';
+import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { meetingSummaryTextToPlainText } from './meetingSummaryFormat';
+import { diagnosticAudit } from './diagnostics';
+import { meetingRemoteIdentity } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 
-export type MeetingShareKind = 'bundle' | 'document' | 'audio';
+export type MeetingShareContentKey =
+  | 'info'
+  | 'summary'
+  | 'actions'
+  | 'transcript'
+  | 'audio'
+  | 'manualNote';
+
+export interface MeetingShareSelection extends Record<MeetingShareContentKey, boolean> {}
+
+export interface MeetingShareAvailability extends Record<MeetingShareContentKey, boolean> {}
+
 export type MeetingShareErrorCode = 'NO_AUDIO' | 'NO_MEETING_CONTENT' | 'SHARING_UNAVAILABLE';
 export const MEETING_SHARE_RETENTION_MS = 10 * 60 * 1000;
+export const MEETING_SHARE_MANIFEST_SCHEMA_VERSION = 1;
 
 export class MeetingShareError extends Error {
   constructor(public readonly code: MeetingShareErrorCode, message: string) {
@@ -22,9 +38,52 @@ export interface MeetingShareInput {
   meeting: Meeting;
   transcriptLines: TranscriptLine[];
   summaryText?: string | null;
+  summaryDocument?: MeetingSummaryDocument | null;
+  actionItems?: readonly MeetingSummaryActionCandidate[];
+  manualNoteText?: string | null;
+  transcriptRevisionId?: string | null;
+  summaryVersionId?: string | null;
   isGuest: boolean;
   accessToken?: string | null;
   audioInfo?: ApiMeetingAudioInfo | null;
+}
+
+export interface MeetingShareManifest {
+  schema_version: typeof MEETING_SHARE_MANIFEST_SCHEMA_VERSION;
+  meeting_ref: string;
+  exported_at: string;
+  included_contents: MeetingShareContentKey[];
+  transcript_revision_id: string | null;
+  summary_version_id: string | null;
+}
+
+const SHARE_CONTENT_ORDER: readonly MeetingShareContentKey[] = [
+  'info',
+  'summary',
+  'actions',
+  'transcript',
+  'audio',
+  'manualNote',
+];
+
+export function defaultMeetingShareSelection(
+  availability: MeetingShareAvailability,
+): MeetingShareSelection {
+  return {
+    info: availability.info,
+    summary: availability.summary,
+    actions: availability.actions,
+    transcript: false,
+    audio: false,
+    manualNote: false,
+  };
+}
+
+export function selectedMeetingShareContents(
+  selection: MeetingShareSelection,
+  availability: MeetingShareAvailability,
+): MeetingShareContentKey[] {
+  return SHARE_CONTENT_ORDER.filter(key => selection[key] && availability[key]);
 }
 
 export function safeMeetingFileName(value: string): string {
@@ -47,18 +106,13 @@ function formatTranscriptTime(seconds?: number): string {
 }
 
 export function buildMeetingInfoText(meeting: Meeting): string {
-  const participants = meeting.participants?.filter(Boolean).join('、') || '未记录';
-  const status = meeting.tags.map(tag => tag.label).filter(Boolean).join('、') || meeting.status || '未记录';
-  const location = meeting.location?.trim() || '未记录';
+  const location = meeting.location?.trim();
   return [
-    `会议标题：${meeting.title}`,
+    `会议标题：${meeting.title.trim() || '无标题会议'}`,
     `会议日期：${meeting.date}`,
-    `会议时间：${meeting.time || '未记录'}`,
-    `会议时长：${meeting.duration || '未记录'}`,
-    `会议地址：${location}`,
-    `参与人员：${participants}`,
-    `会议状态：${status}`,
-  ].join('\n');
+    meeting.time?.trim() ? `会议时间：${meeting.time.trim()}` : '',
+    location ? `会议地址：${location}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
@@ -72,19 +126,110 @@ export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
     .join('\n');
 }
 
-export function buildMeetingDocumentText(
-  meeting: Meeting,
-  transcriptLines: TranscriptLine[],
-  summaryText?: string | null,
+function structuredSummaryText(document: MeetingSummaryDocument | null | undefined): string {
+  if (!document) return '';
+  return document.sections
+    .filter(section => section.kind !== 'action_items' && section.stableKey !== 'action_items')
+    .map(section => [section.title?.trim(), section.content.trim()].filter(Boolean).join('\n'))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function withoutMarkdownActionSections(value: string): string {
+  const lines = value.replace(/\r\n?/g, '\n').split('\n');
+  const kept: string[] = [];
+  let skipping = false;
+  lines.forEach(line => {
+    const heading = /^\s*#{1,6}\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      skipping = /^(?:待办事项|行动项|任务)(?:\s|$)/.test(heading[1].trim());
+      if (!skipping) kept.push(line);
+      return;
+    }
+    if (!skipping) kept.push(line);
+  });
+  return kept.join('\n');
+}
+
+function selectedSummaryText(input: MeetingShareInput): string {
+  const structured = structuredSummaryText(input.summaryDocument);
+  if (structured) return meetingSummaryTextToPlainText(structured);
+  return meetingSummaryTextToPlainText(withoutMarkdownActionSections(input.summaryText?.trim() ?? ''));
+}
+
+function formatActionDate(value: number | null): string | null {
+  if (value === null) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+export function buildMeetingActionsText(
+  actions: readonly MeetingSummaryActionCandidate[],
 ): string {
-  const transcript = buildMeetingTranscriptText(transcriptLines);
-  const summary = meetingSummaryTextToPlainText(summaryText?.trim() ?? '');
-  return [
-    '老记会议文档',
-    buildMeetingInfoText(meeting),
-    summary ? `会议总结\n${summary}` : '',
-    transcript ? `会议转写\n${transcript}` : '',
-  ].filter(Boolean).join('\n\n--------------------\n\n');
+  return actions
+    .filter(action => action.content.trim())
+    .map(action => {
+      const status = action.status === 'completed'
+        ? '已完成'
+        : action.status === 'dismissed' ? '已忽略' : '未完成';
+      const due = formatActionDate(action.dueAtMs);
+      const details = [
+        action.assignee?.trim() ? `负责人：${action.assignee.trim()}` : '',
+        due ? `截止：${due}` : '',
+      ].filter(Boolean);
+      return `- [${status}] ${action.content.trim()}${details.length ? `（${details.join('，')}）` : ''}`;
+    })
+    .join('\n');
+}
+
+type TextShareContent = {
+  document: string;
+  included: MeetingShareContentKey[];
+};
+
+function buildSelectedMeetingDocument(
+  selection: MeetingShareSelection,
+  input: MeetingShareInput,
+): TextShareContent {
+  const sections: string[] = ['老记会议资料'];
+  const included: MeetingShareContentKey[] = [];
+  if (selection.info) {
+    sections.push(buildMeetingInfoText(input.meeting));
+    included.push('info');
+  }
+  if (selection.summary) {
+    const summary = selectedSummaryText(input);
+    if (summary) {
+      sections.push(`整理结果\n${summary}`);
+      included.push('summary');
+    }
+  }
+  if (selection.actions) {
+    const actions = buildMeetingActionsText(input.actionItems ?? input.summaryDocument?.actionItemCandidates ?? []);
+    if (actions) {
+      sections.push(`行动项\n${actions}`);
+      included.push('actions');
+    }
+  }
+  if (selection.transcript) {
+    const transcript = buildMeetingTranscriptText(input.transcriptLines);
+    if (transcript) {
+      sections.push(`文字记录\n${transcript}`);
+      included.push('transcript');
+    }
+  }
+  if (selection.manualNote) {
+    const note = input.manualNoteText?.replace(/\r\n?/g, '\n').trim() ?? '';
+    if (note) {
+      sections.push(`我的笔记\n${note}`);
+      included.push('manualNote');
+    }
+  }
+  return {
+    document: included.length > 0 ? sections.join('\n\n--------------------\n\n') : '',
+    included,
+  };
 }
 
 function requireCacheDirectory(): string {
@@ -159,6 +304,20 @@ function audioExtension(info: ApiMeetingAudioInfo): string {
   return '.wav';
 }
 
+function localAudioMimeType(uri: string): string {
+  const extension = uri.split(/[?#]/)[0].match(/\.([A-Za-z0-9]{2,6})$/)?.[1]?.toLowerCase();
+  switch (extension) {
+    case 'mp3': return 'audio/mpeg';
+    case 'm4a': return 'audio/mp4';
+    case 'aac': return 'audio/aac';
+    case 'ogg': return 'audio/ogg';
+    case 'webm': return 'audio/webm';
+    case 'flac': return 'audio/flac';
+    case 'wav':
+    default: return 'audio/wav';
+  }
+}
+
 async function createShareDirectory(meeting: Meeting): Promise<{ directoryUri: string; baseName: string }> {
   const root = meetingShareRoot();
   const baseName = safeMeetingFileName(meeting.title);
@@ -172,6 +331,29 @@ async function writeTextFile(uri: string, content: string): Promise<string> {
   return uri;
 }
 
+export async function buildMeetingShareManifest(
+  input: MeetingShareInput,
+  included: readonly MeetingShareContentKey[],
+  exportedAt = Date.now(),
+): Promise<MeetingShareManifest> {
+  const meetingHash = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    input.meeting.id,
+  );
+  return {
+    schema_version: MEETING_SHARE_MANIFEST_SCHEMA_VERSION,
+    meeting_ref: meetingHash.slice(0, 16),
+    exported_at: new Date(exportedAt).toISOString(),
+    included_contents: SHARE_CONTENT_ORDER.filter(key => included.includes(key)),
+    transcript_revision_id: input.transcriptRevisionId?.trim()
+      || input.summaryDocument?.transcriptRevisionId?.trim()
+      || null,
+    summary_version_id: input.summaryVersionId?.trim()
+      || input.summaryDocument?.remoteVersionId?.trim()
+      || null,
+  };
+}
+
 async function resolveAudioInfo(input: MeetingShareInput): Promise<ApiMeetingAudioInfo | null> {
   if (input.audioInfo) return input.audioInfo;
   const localUri = input.meeting.audioLocalUri;
@@ -181,7 +363,7 @@ async function resolveAudioInfo(input: MeetingShareInput): Promise<ApiMeetingAud
       if (info.exists) {
         return {
           url: localUri,
-          mime_type: 'audio/wav',
+          mime_type: localAudioMimeType(localUri),
           file_name: localUri.split('/').pop() ?? 'meeting.wav',
         };
       }
@@ -190,7 +372,10 @@ async function resolveAudioInfo(input: MeetingShareInput): Promise<ApiMeetingAud
     }
   }
   if (input.isGuest || !input.accessToken) return null;
-  return fetchMeetingAudioInfo(input.meeting.id, input.accessToken);
+  const remoteMeetingId = meetingRemoteIdentity(input.meeting);
+  return remoteMeetingId
+    ? fetchMeetingAudioInfo(remoteMeetingId, input.accessToken)
+    : null;
 }
 
 async function materializeAudio(
@@ -228,51 +413,53 @@ async function shareFile(uri: string, mimeType: string, dialogTitle: string, UTI
   await Sharing.shareAsync(uri, { mimeType, dialogTitle, UTI });
 }
 
-export async function shareMeetingArtifact(kind: MeetingShareKind, input: MeetingShareInput): Promise<void> {
+export async function shareMeetingContent(
+  selection: MeetingShareSelection,
+  input: MeetingShareInput,
+): Promise<void> {
   await cleanupStaleMeetingShareCache().catch(() => {});
   const { directoryUri, baseName } = await createShareDirectory(input.meeting);
-  const summary = meetingSummaryTextToPlainText(input.summaryText?.trim() ?? '');
-  const transcript = buildMeetingTranscriptText(input.transcriptLines);
   let archiveUri: string | null = null;
   let shareCompleted = false;
 
   try {
-    if (kind === 'document') {
-      const uri = await writeTextFile(
-        `${directoryUri}${baseName}_会议文档.txt`,
-        buildMeetingDocumentText(input.meeting, input.transcriptLines, summary),
-      );
-      await shareFile(uri, 'text/plain', '分享会议文档', 'public.plain-text');
-      shareCompleted = true;
-      return;
-    }
-
-    if (kind === 'audio') {
-      const audio = await materializeAudio(input, directoryUri, baseName);
+    const textContent = buildSelectedMeetingDocument(selection, input);
+    const documentUri = textContent.document
+      ? await writeTextFile(`${directoryUri}${baseName}_会议资料.txt`, textContent.document)
+      : null;
+    let audio: { uri: string; mimeType: string } | null = null;
+    if (selection.audio) {
+      audio = await materializeAudio(input, directoryUri, baseName);
       if (!audio) throw new MeetingShareError('NO_AUDIO', 'meeting audio is unavailable');
+    }
+    const included = [...textContent.included, ...(audio ? ['audio' as const] : [])];
+    if (included.length === 0) {
+      throw new MeetingShareError('NO_MEETING_CONTENT', 'selected meeting content is unavailable');
+    }
+    const manifest = await buildMeetingShareManifest(input, included);
+    const manifestUri = await writeTextFile(
+      `${directoryUri}share_manifest.json`,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+    const artifactKind = audio && documentUri ? 'archive' : audio ? 'audio' : 'document';
+    diagnosticAudit('meeting_share_prepared', {
+      included_contents: manifest.included_contents.join('.') || 'none',
+      artifact_kind: artifactKind,
+    });
+
+    if (audio && documentUri) {
+      archiveUri = `${requireCacheDirectory()}meeting-shares/${baseName}_会议资料_${Date.now()}.zip`;
+      const result = await zip(
+        [documentUri, audio.uri, manifestUri].map(fileUriToPath),
+        fileUriToPath(archiveUri),
+        BEST_SPEED,
+      );
+      await shareFile(pathToFileUri(result), 'application/zip', '分享会议资料', 'com.pkware.zip-archive');
+    } else if (audio) {
       await shareFile(audio.uri, audio.mimeType, '分享会议录音', 'public.audio');
-      shareCompleted = true;
-      return;
+    } else if (documentUri) {
+      await shareFile(documentUri, 'text/plain', '分享会议资料', 'public.plain-text');
     }
-
-    const files = [
-      await writeTextFile(`${directoryUri}${baseName}_会议信息.txt`, buildMeetingInfoText(input.meeting)),
-    ];
-    if (summary) {
-      files.push(await writeTextFile(`${directoryUri}${baseName}_会议总结.txt`, summary));
-    }
-    if (transcript) {
-      files.push(await writeTextFile(`${directoryUri}${baseName}_会议转写.txt`, transcript));
-    }
-    const audio = await materializeAudio(input, directoryUri, baseName);
-    if (audio) files.push(audio.uri);
-    if (!summary && !transcript && !audio) {
-      throw new MeetingShareError('NO_MEETING_CONTENT', 'meeting package has no transcript, summary, or audio');
-    }
-
-    archiveUri = `${requireCacheDirectory()}meeting-shares/${baseName}_完整资料_${Date.now()}.zip`;
-    const result = await zip(files.map(fileUriToPath), fileUriToPath(archiveUri), BEST_SPEED);
-    await shareFile(pathToFileUri(result), 'application/zip', '分享会议完整资料', 'com.pkware.zip-archive');
     shareCompleted = true;
   } finally {
     const artifacts = [directoryUri, archiveUri].filter((uri): uri is string => Boolean(uri));
@@ -291,7 +478,7 @@ export function meetingShareErrorMessage(error: unknown): string {
   if (audioSecurityMessage) return audioSecurityMessage;
   if (error instanceof MeetingShareError) {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
-    if (error.code === 'NO_MEETING_CONTENT') return '当前会议还没有录音、转写或总结，无法生成完整资料包。';
+    if (error.code === 'NO_MEETING_CONTENT') return '所选会议内容当前不可分享，请重新选择。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';
   }
   return '分享文件准备失败，请稍后重试。';

@@ -14,6 +14,7 @@ internal object MinutesRecordingV3Contract {
   const val WAVE_CONTAINER_HEIGHT_DP = 44
   const val WAVE_HEIGHT_DP = 32
   const val ACTION_ROW_HEIGHT_DP = 68
+  const val MARKER_SIZE_DP = 44
   const val PAUSE_WIDTH_DP = 78
   const val PAUSE_HEIGHT_DP = 56
   const val STOP_WIDTH_DP = 78

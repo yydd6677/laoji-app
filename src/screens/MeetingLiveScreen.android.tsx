@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   PermissionsAndroid,
   StyleSheet,
+  ToastAndroid,
   View,
 } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiMinutesView,
+  type MinutesRecordingContent,
   type MinutesRecordingPhase,
   type MinutesSemanticAction,
   addNativeRecorderErrorListener,
@@ -26,14 +29,18 @@ import {
   type NativeRecorderStopResult,
 } from 'laoji-native-platform';
 import { ScreenContainer } from '../components/ScreenContainer';
+import {
+  MeetingManualNoteConflictSheet,
+  type MeetingManualNoteConflictChoice,
+} from '../components/MeetingManualNoteConflictSheet';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import {
   createGuestRealtimeSession,
   deleteGuestRealtimeSession,
-  fetchGuestMeetingTranscript,
-  fetchMeetingTranscript,
+  fetchGuestMeetingTranscriptSnapshot,
+  fetchMeetingTranscriptSnapshot,
   type ApiGuestRealtimeSession,
   uploadMeetingAudio,
 } from '../services/api';
@@ -50,14 +57,37 @@ import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator'
 import {
   buildNativeMinutesRecordingSnapshot,
   finalizedNativeMinutesTranscript,
-  mergePersistedMinutesTranscript,
+  formatNativeMinutesTimestamp,
   mergeNativeMinutesTranscript,
   type NativeMinutesTranscriptLine,
 } from '../native/nativeMinutesSnapshots';
 import type { RootStackParamList } from '../types';
-import { canResumeMeetingRecording, shouldCheckpointTranscript } from '../utils/meetingMedia';
+import type { ScopeKey } from '../domain/meeting';
+import {
+  canResumeMeetingRecording,
+  meetingRemoteIdentity,
+  requireMeetingRemoteIdentity,
+  shouldCheckpointTranscript,
+} from '../utils/meetingMedia';
 import { defaultMeetingTitle } from '../utils/meetingTitle';
 import { CurrentAddressError, getCurrentAddress } from '../services/currentAddress';
+import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
+import { createMeetingMarker } from '../services/meetingMarkers';
+import {
+  evaluateTranscriptLineCandidate,
+  type TranscriptServerCompleteness,
+} from '../services/transcriptCompleteness';
+import {
+  MeetingManualNoteSyncConflictChangedError,
+  ResolveMeetingManualNoteSyncConflictUseCase,
+} from '../application/meeting';
+import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { pullMeetingManualNote } from '../services/meetingManualNotePull';
+import {
+  loadMeetingManualNoteSyncConflict,
+  type MeetingManualNoteSyncConflictView,
+} from '../services/meetingManualNoteConflicts';
+import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -70,6 +100,10 @@ interface ActiveNativeRecording {
   guestSession?: ApiGuestRealtimeSession;
   finalize: () => Promise<FinalizeMeetingRecordingResult>;
 }
+
+const resolveMeetingManualNoteSyncConflictUseCase = new ResolveMeetingManualNoteSyncConflictUseCase(
+  sqliteMeetingNoteRepository,
+);
 
 function formatMeetingStart(value: Date): string {
   return `${value.getMonth() + 1}月${value.getDate()}日 ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
@@ -114,10 +148,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     getCachedTranscript,
     saveCachedTranscript,
     refreshMeetings,
+    reconcileAudioUploads,
   } = useMeetings();
   const { showDialog } = useAppDialog();
   const requestedMeetingId = route.params?.meetingId;
   const startRequested = route.params?.startRequested === true;
+  const entryPoint = route.params?.entryPoint ?? 'meeting_tab';
   const existing = requestedMeetingId
     ? meetings.find(meeting => meeting.id === requestedMeetingId)
     : undefined;
@@ -132,7 +168,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const [transcript, setTranscript] = useState<NativeMinutesTranscriptLine[]>(
     () => existing ? getCachedTranscript(existing.id) : [],
   );
+  const [activeContent, setActiveContent] = useState<MinutesRecordingContent>('transcript');
   const [followingLatest, setFollowingLatest] = useState(true);
+  const [manualNoteConflict, setManualNoteConflict] = useState<MeetingManualNoteSyncConflictView | null>(null);
+  const [manualNoteConflictTarget, setManualNoteConflictTarget] = useState<MeetingManualNoteSyncConflictView | null>(null);
+  const [manualNoteConflictSaving, setManualNoteConflictSaving] = useState(false);
+  const [manualNoteConflictError, setManualNoteConflictError] = useState('');
   const mountedRef = useRef(true);
   const activeRef = useRef<ActiveNativeRecording | null>(null);
   const currentSessionIdRef = useRef('');
@@ -144,6 +185,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const titleRef = useRef(title);
   const locationRef = useRef(location);
   const finalizationRef = useRef<Promise<boolean> | null>(null);
+  const markerCreateQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const manualNoteConflictRequestGenerationRef = useRef(0);
   const navigateAfterFinalizeRef = useRef(false);
   const autoStartAttemptedRef = useRef(false);
   const startInFlightRef = useRef(false);
@@ -151,6 +194,13 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const checkpointRef = useRef({ lineCount: finalizedNativeMinutesTranscript(transcript).length, savedAtMs: Date.now() });
   const createRequestRef = useRef(createClientRequestState('meeting'));
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
+  const meetingScopeKey: ScopeKey | null = isGuest
+    ? 'guest'
+    : session
+      ? `user:${session.user.id}`
+      : null;
+  const existingRemoteMeetingId = existing && !isGuest ? meetingRemoteIdentity(existing) : null;
+  const manualNote = useMeetingManualNote(meetingScopeKey, meetingId || undefined);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -169,6 +219,121 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     if (existing?.location == null) return;
     setLocation(existing.location);
   }, [existing?.location]);
+
+  const refreshManualNoteConflict = useCallback(async () => {
+    const requestedId = activeMeetingIdRef.current;
+    if (!requestedId || !meetingScopeKey || meetingScopeKey === 'guest') {
+      setManualNoteConflict(null);
+      setManualNoteConflictTarget(null);
+      return null;
+    }
+    const generation = manualNoteConflictRequestGenerationRef.current + 1;
+    manualNoteConflictRequestGenerationRef.current = generation;
+    try {
+      const conflict = await loadMeetingManualNoteSyncConflict(meetingScopeKey, requestedId);
+      if (
+        !mountedRef.current
+        || manualNoteConflictRequestGenerationRef.current !== generation
+        || activeMeetingIdRef.current !== requestedId
+      ) return null;
+      setManualNoteConflict(conflict);
+      setManualNoteConflictTarget(current => current && conflict?.id === current.id ? conflict : null);
+      return conflict;
+    } catch (reason) {
+      diagnosticWarn('load live meeting manual note conflict failed', reason);
+      return null;
+    }
+  }, [meetingScopeKey]);
+
+  useEffect(() => {
+    manualNoteConflictRequestGenerationRef.current += 1;
+    setManualNoteConflict(null);
+    setManualNoteConflictTarget(null);
+    setManualNoteConflictSaving(false);
+    setManualNoteConflictError('');
+    void refreshManualNoteConflict();
+  }, [meetingId, meetingScopeKey, refreshManualNoteConflict]);
+
+  useEffect(() => {
+    if (!meetingId || !meetingScopeKey || meetingScopeKey === 'guest') return undefined;
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
+    void sqliteMeetingNoteRepository.findByNativeSessionId(meetingId, meetingScopeKey)
+      .then(aggregate => {
+        if (!active || !aggregate) return;
+        unsubscribe = sqliteMeetingNoteRepository.observeMeeting(
+          aggregate.note.id,
+          meetingScopeKey,
+          () => { void refreshManualNoteConflict(); },
+        );
+      })
+      .catch(reason => diagnosticWarn('observe live manual note conflict failed', reason));
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [meetingId, meetingScopeKey, refreshManualNoteConflict]);
+
+  useEffect(() => {
+    if (
+      !accessToken
+      || !meetingId
+      || !meetingScopeKey
+      || meetingScopeKey === 'guest'
+      || !existingRemoteMeetingId
+    ) {
+      return undefined;
+    }
+    let active = true;
+    let running = false;
+    let requested = true;
+    let controller: AbortController | null = null;
+    const requestPull = () => {
+      if (!active) return;
+      requested = true;
+      if (running) return;
+      running = true;
+      void (async () => {
+        try {
+          while (active && requested) {
+            requested = false;
+            controller = new AbortController();
+            try {
+              await manualNote.flush();
+              const result = await pullMeetingManualNote({
+                scopeKey: meetingScopeKey,
+                meetingId,
+                meetingRemoteId: existingRemoteMeetingId,
+                accessToken,
+                signal: controller.signal,
+              });
+              if (result.outcome === 'updated' || result.outcome === 'attached') {
+                await manualNote.reload();
+              }
+              await refreshManualNoteConflict();
+            } finally {
+              controller = null;
+            }
+          }
+        } catch (reason) {
+          if (active) diagnosticWarn('pull live meeting manual note failed', reason);
+        } finally {
+          running = false;
+          if (active && requested) requestPull();
+        }
+      })();
+    };
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') requestPull();
+    });
+    requestPull();
+    return () => {
+      active = false;
+      requested = false;
+      controller?.abort();
+      appStateSubscription.remove();
+    };
+  }, [accessToken, existingRemoteMeetingId, manualNote.flush, manualNote.reload, meetingId, meetingScopeKey, refreshManualNoteConflict]);
 
   const applyRecorderSnapshot = useCallback((snapshot: NativeRecorderSnapshot) => {
     if (snapshot.sessionId !== currentSessionIdRef.current) return;
@@ -245,6 +410,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
   const persistNativeRecording = useCallback(async (
     id: string,
+    remoteMeetingId: string | null,
     stopAudio: () => Promise<string | undefined>,
     guestSession?: ApiGuestRealtimeSession,
   ) => {
@@ -252,6 +418,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     try {
       return await finalizeMeetingRecording({
         meetingId: id,
+        remoteMeetingId,
         storageScope: recordingStorageScope,
         transcriptLines: finalizedNativeMinutesTranscript(transcriptRef.current),
         getTranscriptLines: () => finalizedNativeMinutesTranscript(transcriptRef.current),
@@ -276,6 +443,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           scope: recordingStorageScope,
           accessToken: token,
           meetingId: pending.meetingId,
+          remoteMeetingId: pending.remoteMeetingId,
           operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
           fileUri: pending.audioUri,
           mimeType: pending.mimeType,
@@ -283,45 +451,67 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }),
         updateStatus: updateMeetingStatus,
         refreshMeetings,
+        reconcileUploads: reconcileAudioUploads,
       });
     } finally {
       if (guestSession) {
         await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
       }
     }
-  }, [accessToken, isGuest, recordingStorageScope, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
+  }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
 
   const syncPersistedTranscript = useCallback(async (
     id: string,
+    remoteMeetingId: string | null,
     guestSession?: ApiGuestRealtimeSession,
   ) => {
     const local = finalizedNativeMinutesTranscript(transcriptRef.current);
-    let merged = local;
+    let selected = local;
+    let lastCandidate: typeof local | null = null;
+    let lastCompleteness: TranscriptServerCompleteness = 'unknown';
+    let lastRemoteRevisionId: string | null = null;
+    let preservedDraft = false;
     if (isGuest) {
       if (guestSession) {
         for (const delayMs of [0, 250, 750]) {
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
           try {
-            const remote = await fetchGuestMeetingTranscript(
+            const remote = await fetchGuestMeetingTranscriptSnapshot(
               guestSession.meeting_id,
               guestSession.guest_token,
-              { fallbackItems: local },
             );
-            merged = mergePersistedMinutesTranscript(local, remote);
-            if (remote.length > 0 && remote.length >= local.length) break;
+            const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+            const decision = evaluateTranscriptLineCandidate(selected, remote.items, {
+              candidateKind,
+              serverCompleteness: remote.completeness,
+            });
+            lastCandidate = remote.items;
+            lastCompleteness = remote.completeness;
+            preservedDraft = !decision.useCandidate || decision.completing;
+            if (decision.useCandidate) selected = remote.items;
+            if (decision.useCandidate && !decision.completing && remote.items.length > 0) break;
           } catch {
             if (mountedRef.current) setError('实时转写暂时不可用，已保留现有文字记录');
             break;
           }
         }
       }
-    } else if (accessToken) {
+    } else if (accessToken && remoteMeetingId) {
       for (const delayMs of [0, 250, 750]) {
         if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
         try {
-          const remote = await fetchMeetingTranscript(id, accessToken);
-          merged = mergePersistedMinutesTranscript(local, remote);
-          if (remote.length > 0 && remote.length >= local.length) break;
+          const remote = await fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken);
+          const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+          const decision = evaluateTranscriptLineCandidate(selected, remote.items, {
+            candidateKind,
+            serverCompleteness: remote.completeness,
+          });
+          lastCandidate = remote.items;
+          lastCompleteness = remote.completeness;
+          lastRemoteRevisionId = remote.remoteRevisionId;
+          preservedDraft = !decision.useCandidate || decision.completing;
+          if (decision.useCandidate) selected = remote.items;
+          if (decision.useCandidate && !decision.completing && remote.items.length > 0) break;
         } catch {
           if (mountedRef.current) {
             setError('录音已保存，文字记录暂未补全；详情页会继续同步');
@@ -330,15 +520,28 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
       }
     }
-    await saveCachedTranscript(id, merged).catch(() => {
+    const candidate = lastCandidate ?? local;
+    const candidateKind = lastCandidate && lastCompleteness === 'incomplete'
+      ? 'realtime_draft'
+      : 'final';
+    await saveCachedTranscript(id, candidate, {
+      candidateKind,
+      serverCompleteness: lastCandidate ? lastCompleteness : 'unknown',
+      remoteRevisionId: lastRemoteRevisionId,
+    }).catch(() => {
       if (mountedRef.current) setError('字幕已生成，但本机缓存写入失败；结束时会再次尝试');
     });
-    transcriptRef.current = merged;
-    if (mountedRef.current) setTranscript(merged);
-  }, [accessToken, isGuest, saveCachedTranscript]);
+    const effective = getCachedTranscript(id);
+    transcriptRef.current = effective;
+    if (mountedRef.current) {
+      setTranscript(effective);
+      if (preservedDraft) setError('录音已保存，文字记录仍在补全；详情页会继续同步');
+    }
+  }, [accessToken, getCachedTranscript, isGuest, saveCachedTranscript]);
 
   const createActiveRecording = useCallback((
     id: string,
+    remoteMeetingId: string | null,
     guestSession?: ApiGuestRealtimeSession,
   ): ActiveNativeRecording => {
     const stopAudio = async () => {
@@ -358,14 +561,19 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
         localUri = recovered.localUri ?? undefined;
       }
-      await syncPersistedTranscript(id, guestSession);
+      await syncPersistedTranscript(id, remoteMeetingId, guestSession);
       return localUri;
     };
     return {
       meetingId: id,
       sessionId: id,
       guestSession,
-      finalize: createMeetingRecordingFinalizer(() => persistNativeRecording(id, stopAudio, guestSession)),
+      finalize: createMeetingRecordingFinalizer(() => persistNativeRecording(
+        id,
+        remoteMeetingId,
+        stopAudio,
+        guestSession,
+      )),
     };
   }, [applyRecorderSnapshot, persistNativeRecording, syncPersistedTranscript]);
 
@@ -413,7 +621,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       setTitle(existing.title ?? '');
       setTranscript(getCachedTranscript(existing.id));
       applyRecorderSnapshot(current);
-      activeRef.current = createActiveRecording(existing.id);
+      activeRef.current = createActiveRecording(
+        existing.id,
+        isGuest ? null : meetingRemoteIdentity(existing),
+      );
       setActiveSessionId(existing.id);
       return true;
     }
@@ -440,11 +651,13 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       errorCode: null,
       errorMessage: null,
     };
-    await syncPersistedTranscript(existing.id);
-    await persistNativeRecording(existing.id, async () => recovered.localUri);
+    const remoteMeetingId = isGuest ? null : meetingRemoteIdentity(existing);
+    await syncPersistedTranscript(existing.id, remoteMeetingId);
+    await persistNativeRecording(existing.id, remoteMeetingId, async () => recovered.localUri);
+    await manualNote.flush();
     if (mountedRef.current) navigation.replace('Transcription', { meetingId: existing.id });
     return true;
-  }, [applyRecorderSnapshot, createActiveRecording, existing, getCachedTranscript, navigation, persistNativeRecording, syncPersistedTranscript]);
+  }, [applyRecorderSnapshot, createActiveRecording, existing, getCachedTranscript, isGuest, manualNote.flush, navigation, persistNativeRecording, syncPersistedTranscript]);
 
   const startRecording = useCallback(async () => {
     if (startInFlightRef.current || activeRef.current || finalizationRef.current) return;
@@ -477,7 +690,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         mode: meetingPayload.mode,
         clientRequestId: createRequestRef.current.id,
         location: locationRef.current || null,
+        entryPoint,
       });
+      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(meeting);
       startedMeetingId = meeting.id;
       navigation.setParams({ meetingId: meeting.id, startRequested: false });
       setMeetingId(meeting.id);
@@ -502,7 +717,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         config.realtimeAsrSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const websocketMeetingId = guestSession?.meeting_id ?? meeting.id;
+      const websocketMeetingId = guestSession?.meeting_id ?? remoteMeetingId!;
       const websocketUrl = buildRealtimeAsrUrl({
         meetingId: websocketMeetingId,
         provider: config.realtimeAsrProvider,
@@ -523,7 +738,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         ...credentials,
       });
       applyRecorderSnapshot(snapshot);
-      activeRef.current = createActiveRecording(meeting.id, guestSession);
+      activeRef.current = createActiveRecording(meeting.id, remoteMeetingId, guestSession);
       setActiveSessionId(meeting.id);
       setPhase('recording');
     } catch (reason) {
@@ -546,13 +761,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } finally {
       startInFlightRef.current = false;
     }
-  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, existing, getCachedTranscript, isGuest, meetingId, meetings, navigation, showDialog, updateMeetingStatus]);
+  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, entryPoint, existing, getCachedTranscript, isGuest, meetingId, meetings, navigation, showDialog, updateMeetingStatus]);
 
-  const stopRecording = useCallback((navigateAfter = true) => {
+  const stopRecording = useCallback(async (navigateAfter = true) => {
     const active = activeRef.current;
-    if (!active) return Promise.resolve(false);
+    if (!active) return false;
+    await manualNote.flush();
     return finalizeActiveRecording(active, navigateAfter);
-  }, [finalizeActiveRecording]);
+  }, [finalizeActiveRecording, manualNote.flush]);
 
   const togglePause = useCallback(async () => {
     const active = activeRef.current;
@@ -563,10 +779,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         ? await resumeNativeRecorder(active.sessionId)
         : await pauseNativeRecorder(active.sessionId);
       applyRecorderSnapshot(snapshot);
+      await updateMeetingStatus(
+        active.meetingId,
+        snapshot.state === 'paused' ? 'paused' : 'recording',
+      ).catch(() => false);
     } catch (reason) {
       setError(readableErrorMessage(reason, '录音状态切换失败，请重试。'));
     }
-  }, [applyRecorderSnapshot, phase]);
+  }, [applyRecorderSnapshot, phase, updateMeetingStatus]);
 
   useEffect(() => {
     if (autoStartAttemptedRef.current || meetingsLoading) return;
@@ -651,10 +871,90 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     }
   }, [locationLoading, showDialog, updateMeetingDetails]);
 
+  const createMarkerAt = useCallback((id: string, positionMs: number) => {
+    if (!meetingScopeKey || id !== activeMeetingIdRef.current || !Number.isSafeInteger(positionMs) || positionMs < 0) {
+      ToastAndroid.show('当前无法添加标记', ToastAndroid.SHORT);
+      return;
+    }
+    const task = markerCreateQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await createMeetingMarker(meetingScopeKey, id, positionMs);
+          if (mountedRef.current) {
+            ToastAndroid.show(
+              `已标记 ${formatNativeMinutesTimestamp(positionMs / 1_000)}`,
+              ToastAndroid.SHORT,
+            );
+          }
+        } catch (reason) {
+          if (mountedRef.current) {
+            ToastAndroid.show(
+              readableErrorMessage(reason, '标记未保存，请重试。'),
+              ToastAndroid.LONG,
+            );
+          }
+        }
+      });
+    markerCreateQueueRef.current = task;
+  }, [meetingScopeKey]);
+
+  const openManualNoteConflict = useCallback(async () => {
+    await manualNote.flush();
+    const conflict = manualNoteConflict ?? await refreshManualNoteConflict();
+    if (!conflict) {
+      ToastAndroid.show('笔记冲突已处理', ToastAndroid.SHORT);
+      return;
+    }
+    setManualNoteConflictError('');
+    setManualNoteConflictTarget(conflict);
+  }, [manualNote.flush, manualNoteConflict, refreshManualNoteConflict]);
+
+  const resolveManualNoteConflict = useCallback(async (
+    choice: MeetingManualNoteConflictChoice,
+  ) => {
+    if (!meetingScopeKey || !manualNoteConflictTarget || manualNoteConflictSaving) return;
+    setManualNoteConflictSaving(true);
+    setManualNoteConflictError('');
+    try {
+      await resolveMeetingManualNoteSyncConflictUseCase.execute({
+        conflictId: manualNoteConflictTarget.id,
+        meetingId: manualNoteConflictTarget.meetingId,
+        scopeKey: meetingScopeKey,
+        expectedLocalRevision: manualNoteConflictTarget.local.revision,
+        resolution: choice,
+      });
+      await manualNote.reload();
+      await refreshManualNoteConflict();
+      setManualNoteConflictTarget(null);
+      ToastAndroid.show(
+        choice === 'keep_local' ? '本机笔记将重新同步' : '已使用云端笔记',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      diagnosticAudit('live_manual_note_conflict_resolution_failed', {
+        operation: choice,
+        error_code: reason instanceof MeetingManualNoteSyncConflictChangedError
+          ? 'conflict_changed'
+          : 'resolution_failed',
+      });
+      setManualNoteConflictError(reason instanceof MeetingManualNoteSyncConflictChangedError
+        ? '这次冲突已发生变化，请关闭后重新打开。'
+        : choice === 'keep_local'
+          ? '本机笔记暂时无法重新同步，请稍后重试。'
+          : '云端笔记暂时无法应用，请稍后重试。');
+      if (reason instanceof MeetingManualNoteSyncConflictChangedError) {
+        await refreshManualNoteConflict().catch(() => null);
+      }
+    } finally {
+      if (mountedRef.current) setManualNoteConflictSaving(false);
+    }
+  }, [manualNote.reload, manualNoteConflictSaving, manualNoteConflictTarget, meetingScopeKey, refreshManualNoteConflict]);
+
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'back':
-        navigation.goBack();
+        void manualNote.flush().finally(() => navigation.goBack());
         break;
       case 'startRecording':
         void startRecording();
@@ -674,11 +974,31 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       case 'toggleRecordingPause':
         void togglePause();
         break;
+      case 'createMarker':
+        if (!['recording', 'paused'].includes(phase)) break;
+        createMarkerAt(action.meetingId, action.positionMs);
+        break;
       case 'requestMeetingLocation':
         void requestMeetingLocation();
         break;
       case 'setFollowLatest':
         setFollowingLatest(action.followLatest);
+        break;
+      case 'selectRecordingContent':
+        if (action.meetingId !== activeMeetingIdRef.current) break;
+        setActiveContent(action.content);
+        break;
+      case 'updateManualNote':
+        if (action.meetingId !== activeMeetingIdRef.current) break;
+        manualNote.updateContent(action.content);
+        break;
+      case 'retryManualNote':
+        if (action.meetingId !== activeMeetingIdRef.current) break;
+        void manualNote.retry();
+        break;
+      case 'openManualNoteConflict':
+        if (action.meetingId !== activeMeetingIdRef.current) break;
+        void openManualNoteConflict();
         break;
       case 'saveTitle': {
         const nextTitle = action.title.trim();
@@ -695,7 +1015,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [confirmStop, navigation, phase, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
+  }, [confirmStop, createMarkerAt, manualNote, navigation, openManualNoteConflict, phase, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
 
   // Refs protect async recorder commands, but assigning a ref does not render
   // the native snapshot. Keep a small reactive identity so pause/stop become
@@ -704,6 +1024,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const requestedMeetingMissing = Boolean(requestedMeetingId && !meetingsLoading && !existing);
   const canPause = hasActive && ['recording', 'paused'].includes(phase);
   const canStop = hasActive && ['recording', 'paused', 'failed'].includes(phase);
+  const canCreateMarker = Boolean(
+    meetingScopeKey
+    && (meetingId || requestedMeetingId)
+    && hasActive
+    && ['recording', 'paused'].includes(phase),
+  );
   const canStart = !hasActive
     && !requestedMeetingMissing
     && ['idle', 'failed'].includes(phase)
@@ -724,9 +1050,18 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     canPause,
     canStop,
     canStart,
+    canCreateMarker,
     followLatest: followingLatest,
+    activeContent,
+    manualNote: manualNote.content,
+    manualNoteLoading: manualNote.loading,
+    manualNoteSaving: manualNote.saving,
+    manualNoteEnabled: manualNote.enabled,
+    manualNoteError: manualNote.error,
+    manualNoteRetryable: manualNote.retryable,
+    manualNoteConflict: manualNoteConflict !== null,
     transcript,
-  }), [canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, meetingId, phase, requestedMeetingId, title, transcript]);
+  }), [activeContent, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, manualNoteConflict, meetingId, phase, requestedMeetingId, title, transcript]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
@@ -744,6 +1079,18 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           testID="meeting-live-native-surface"
         />
       </View>
+      <MeetingManualNoteConflictSheet
+        visible={manualNoteConflictTarget !== null}
+        conflict={manualNoteConflictTarget}
+        saving={manualNoteConflictSaving}
+        error={manualNoteConflictError}
+        onClose={() => {
+          if (manualNoteConflictSaving) return;
+          setManualNoteConflictTarget(null);
+          setManualNoteConflictError('');
+        }}
+        onResolve={choice => { void resolveManualNoteConflict(choice); }}
+      />
     </ScreenContainer>
   );
 }

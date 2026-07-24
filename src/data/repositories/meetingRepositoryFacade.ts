@@ -1,6 +1,8 @@
 import type { Meeting } from '../../types';
-import type { MeetingLifecycle, ProcessingStageName, ScopeKey } from '../../domain/meeting';
-import { PROCESSING_STAGE_NAMES, assertScopeKey } from '../../domain/meeting';
+import type { MeetingLifecycle, ScopeKey } from '../../domain/meeting/entities';
+import { assertScopeKey } from '../../domain/meeting/entities';
+import type { ProcessingStageName } from '../../domain/meeting/processing';
+import { PROCESSING_STAGE_NAMES } from '../../domain/meeting/processing';
 import type {
   MeetingListProjectionItem,
   MeetingNoteRepository,

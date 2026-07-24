@@ -41,11 +41,11 @@ class LaojiTransferModule : Module() {
       scope: String,
       generation: Long,
       meetingId: String,
+      remoteMeetingId: String,
       operationId: String,
       fileUri: String,
       mimeType: String,
-      fileName: String,
-      expectedBytes: Long? ->
+      fileName: String ->
       if (MeetingDeletionStore(requireContext()).isDeleted(scope, meetingId)) {
         throw IllegalStateException("meeting has been deleted")
       }
@@ -57,11 +57,11 @@ class LaojiTransferModule : Module() {
             MeetingUploadWorker.KEY_SCOPE to scope,
             MeetingUploadWorker.KEY_GENERATION to generation,
             MeetingUploadWorker.KEY_MEETING_ID to meetingId,
+            MeetingUploadWorker.KEY_REMOTE_MEETING_ID to remoteMeetingId,
             MeetingUploadWorker.KEY_OPERATION_ID to operationId,
             MeetingUploadWorker.KEY_FILE_URI to fileUri,
             MeetingUploadWorker.KEY_MIME_TYPE to mimeType,
-            MeetingUploadWorker.KEY_FILE_NAME to fileName,
-            MeetingUploadWorker.KEY_EXPECTED_BYTES to (expectedBytes ?: -1L)
+            MeetingUploadWorker.KEY_FILE_NAME to fileName
           )
         )
         .addTag(scopeTag(scope))

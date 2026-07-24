@@ -327,7 +327,7 @@ internal class MinutesMeetingAdapter(
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book)
           coverHeaderIcon.background = null
-          coverTitle.text = meeting.coverTitle.ifBlank { "总结" }
+          coverTitle.text = meeting.coverTitle.ifBlank { "整理结果" }
           coverTitle.setTextColor(MinutesPalette.secondary)
           coverText.maxLines = 5
           coverText.text = usableText
@@ -344,7 +344,7 @@ internal class MinutesMeetingAdapter(
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageDrawable(null)
           coverHeaderIcon.background = speakerAvatarBackground(meeting.coverTitle)
-          coverTitle.text = meeting.coverTitle.ifBlank { "发言人" }
+          coverTitle.text = meeting.coverTitle.ifBlank { "讲话人" }
           coverTitle.setTextColor(MinutesPalette.secondary)
           coverText.maxLines = 4
           coverText.text = usableText

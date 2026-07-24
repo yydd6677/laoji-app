@@ -74,6 +74,36 @@ interface MinutesPlayerController {
   fun release()
 }
 
+/**
+ * A detail snapshot can be rendered repeatedly while unrelated page state changes. Re-sending an
+ * identical source only adds a MediaSession round trip; a failed command remains retryable.
+ */
+internal fun shouldDispatchMinutesSourceCommand(
+  desiredSource: MinutesPlayerSource?,
+  nextSource: MinutesPlayerSource?,
+  sourceWasExplicitlySet: Boolean,
+  sourceCommandInFlight: Boolean,
+  hasFailure: Boolean,
+): Boolean {
+  if (!sourceWasExplicitlySet || desiredSource != nextSource) return true
+  return hasFailure && !sourceCommandInFlight
+}
+
+/** Signed URL/header refreshes for the same recording keep the user's playback position and rate. */
+internal fun canPreserveMinutesPlaybackState(
+  previousSource: MinutesPlayerSource?,
+  nextSource: MinutesPlayerSource,
+  hasMediaItem: Boolean,
+): Boolean = hasMediaItem && previousSource != null && previousSource.sourceId == nextSource.sourceId &&
+  previousSource.storageScope == nextSource.storageScope
+
+/** Only the latest desired and latest dispatched command may mutate controller command state. */
+internal fun isCurrentMinutesSourceCommandResult(
+  resultGeneration: Long,
+  desiredGeneration: Long,
+  activeGeneration: Long,
+): Boolean = resultGeneration == desiredGeneration && resultGeneration == activeGeneration
+
 interface MinutesBackgroundPlaybackHost {
   fun requestForegroundPlayback(state: MinutesPlaybackState)
   fun clearForegroundPlayback()

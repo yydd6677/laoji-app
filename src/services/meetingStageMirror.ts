@@ -1,5 +1,5 @@
 import type { Meeting } from '../types';
-import type { CaptureStatus, ScopeKey } from '../domain/meeting';
+import type { CaptureStatus, MeetingEntryPoint, ScopeKey } from '../domain/meeting';
 import {
   createInitialProcessingStages,
   secureClientIdFactory,
@@ -58,6 +58,7 @@ export async function mirrorLegacyMeetingCreated(
   scopeKey: ScopeKey,
   meeting: Meeting,
   calendarContext?: CalendarMeetingContext,
+  entryPoint?: MeetingEntryPoint,
 ): Promise<void> {
   if (!getFeatureFlags().localMeetingDbV1) return;
   try {
@@ -76,7 +77,7 @@ export async function mirrorLegacyMeetingCreated(
           remoteId: meeting.source === 'cloud' ? meeting.id : null,
           legacySourceId: meeting.id,
           origin: calendarContext ? 'calendar' : 'ad_hoc',
-          entryPoint: calendarContext ? 'calendar_detail' : 'legacy_store',
+          entryPoint: entryPoint ?? (calendarContext ? 'calendar_detail' : 'legacy_store'),
           title: meeting.title ?? '',
           description: meeting.description ?? null,
           participants: normalizedParticipants(meeting),
@@ -192,7 +193,11 @@ export async function mirrorLegacyMeetingStageState(
 
       const upload = await transaction.getStage(note.id, scopeKey, 'upload');
       if (!upload) throw new Error('meeting upload processing stage is missing');
-      const uploadStatus = scopeKey === 'guest'
+      const preserveImportedLocalUpload = primary?.origin === 'imported'
+        && primary.remoteAssetId === null;
+      const uploadStatus = preserveImportedLocalUpload
+        ? null
+        : scopeKey === 'guest'
         ? 'not_required'
         : legacyMeeting.audioSyncBlocked
           ? 'blocked'
@@ -217,12 +222,19 @@ export async function mirrorLegacyMeetingStageState(
       if (legacyMeeting.hasTranscript || legacyMeeting.status === 'processing') {
         const transcript = await transaction.getStage(note.id, scopeKey, 'transcript');
         if (!transcript) throw new Error('meeting transcript processing stage is missing');
-        const realtimeDraft = legacyMeeting.hasTranscript
+        const activeRevision = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+        const activelyRecordingDraft = legacyMeeting.hasTranscript
           && (legacyMeeting.status === 'recording' || legacyMeeting.status === 'paused');
+        const waitingForFinal = activeRevision?.kind === 'realtime_draft' && !activelyRecordingDraft;
+        const transcriptStatus = activelyRecordingDraft
+          ? 'realtime_draft'
+          : waitingForFinal || !legacyMeeting.hasTranscript
+            ? 'finalizing'
+            : 'ready';
         await transaction.upsertStage(transitionProcessingStage(transcript, {
           stage: 'transcript',
-          status: realtimeDraft ? 'realtime_draft' : legacyMeeting.hasTranscript ? 'ready' : 'finalizing',
-          progress: legacyMeeting.hasTranscript && !realtimeDraft ? 1 : null,
+          status: transcriptStatus,
+          progress: transcriptStatus === 'ready' ? 1 : null,
         }, Math.max(nowMs, transcript.updatedAtMs)), scopeKey);
       }
       if (legacyMeeting.hasSummary) {

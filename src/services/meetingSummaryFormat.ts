@@ -1,4 +1,11 @@
 import type { MeetingSummary } from '../types';
+import type { MeetingSummaryDocument } from '../domain/meeting';
+import {
+  legacyMeetingSummaryToDocument,
+  meetingSummaryDocumentForLegacy,
+  meetingSummaryDocumentToText,
+  normalizeMeetingSummaryDocument,
+} from './meetingSummaryDocument';
 
 type UnknownRecord = Record<string, unknown>;
 type SummaryActionItem = NonNullable<MeetingSummary['action_items']>[number];
@@ -165,6 +172,13 @@ function actionText(item: SummaryActionItem): string {
 
 export function meetingSummaryToText(summary: MeetingSummary | null): string {
   if (!summary) return '';
+  if (summary.structured_document) {
+    const document = meetingSummaryDocumentForLegacy(
+      summary.meeting_id ?? summary.structured_document.meetingId ?? '',
+      summary,
+    );
+    if (document) return meetingSummaryDocumentToText(document);
+  }
   const { overview, decisions, actions } = summaryContent(summary);
   const sections: string[] = [];
   if (overview) sections.push(overview);
@@ -175,6 +189,43 @@ export function meetingSummaryToText(summary: MeetingSummary | null): string {
     sections.push(`## 待办事项\n${actions.map(item => `- ${actionText(item)}`).join('\n')}`);
   }
   return sections.join('\n\n');
+}
+
+function documentLines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map(line => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '').trim())
+    .filter(Boolean);
+}
+
+export function meetingSummaryDocumentToLegacySummary(
+  document: MeetingSummaryDocument,
+): MeetingSummary {
+  const overview = document.sections.find(section => section.stableKey === 'overview')?.content
+    ?? document.sections.find(section => section.kind === 'paragraph')?.content
+    ?? document.sections.find(section => section.kind !== 'action_items')?.content
+    ?? '';
+  const decisions = document.sections
+    .filter(section => section.stableKey === 'decisions' || section.kind === 'decisions')
+    .flatMap(section => documentLines(section.content));
+  const fullText = meetingSummaryDocumentToText(document);
+  return {
+    id: document.remoteVersionId ?? undefined,
+    meeting_id: document.meetingId,
+    overview,
+    full_text: fullText || overview || undefined,
+    markdown: null,
+    key_decisions: decisions,
+    action_items: document.actionItemCandidates.map(action => ({
+      id: action.id,
+      content: action.content,
+      assignee: action.assignee,
+      due_date: action.dueAtMs === null ? null : new Date(action.dueAtMs).toISOString(),
+      status: action.status,
+    })),
+    generated_at: new Date(document.completedAtMs).toISOString(),
+    structured_document: document,
+  };
 }
 
 export function meetingSummaryTextToPlainText(value: string): string {
@@ -191,9 +242,11 @@ export function meetingSummaryTextToPlainText(value: string): string {
 }
 
 export function normalizeMeetingSummaryResult(meetingId: string, value: unknown): MeetingSummary | null {
+  const document = normalizeMeetingSummaryDocument(meetingId, value);
+  if (document) return meetingSummaryDocumentToLegacySummary(document);
   const { root, overview, decisions, actions } = summaryContent(value);
   if (!(overview || decisions.length > 0 || actions.length > 0)) return null;
-  return {
+  const summary: MeetingSummary = {
     id: meaningfulText(root.id) || undefined,
     meeting_id: meaningfulText(root.meeting_id) || meetingId,
     overview,
@@ -203,4 +256,6 @@ export function normalizeMeetingSummaryResult(meetingId: string, value: unknown)
     action_items: actions,
     generated_at: meaningfulText(root.generated_at) || new Date().toISOString(),
   };
+  const legacyDocument = legacyMeetingSummaryToDocument(meetingId, summary);
+  return legacyDocument ? { ...summary, structured_document: legacyDocument } : summary;
 }

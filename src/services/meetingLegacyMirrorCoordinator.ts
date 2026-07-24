@@ -3,8 +3,8 @@ import type {
   MeetingNoteRepository,
   MeetingScopeWriteState,
 } from '../data/repositories';
-import type { ScopeKey } from '../domain/meeting';
-import { assertScopeKey } from '../domain/meeting';
+import type { ScopeKey } from '../domain/meeting/entities';
+import { assertScopeKey } from '../domain/meeting/entities';
 import {
   buildCanonicalMeetingReadProjection,
   type MeetingReadProjection,

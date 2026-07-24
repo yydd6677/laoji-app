@@ -1,4 +1,12 @@
 import { TranscriptLine } from '../types';
+import {
+  DEFAULT_MEETING_TEMPLATE,
+  meetingTemplateById,
+  meetingTemplateKey,
+  type MeetingSummaryCarryForwardAuthorization,
+  type MeetingSummaryCarryForwardItem,
+  type MeetingTemplate,
+} from '../domain/meeting';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
 
 const PENDING_SUMMARY_TASKS_KEY = '@laoji:pendingMeetingSummaryTasks:v1';
@@ -11,7 +19,10 @@ export interface PendingMeetingSummaryTask {
   meetingId: string;
   taskId: string;
   mode: MeetingSummaryTaskMode;
+  templateId: MeetingTemplate['id'];
+  templateRevision: number;
   inputFingerprint: string;
+  carryForward: MeetingSummaryCarryForwardAuthorization | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -33,6 +44,8 @@ export function meetingSummaryInputFingerprint(
   transcriptLines: TranscriptLine[],
   title?: string,
   meetingDate?: string,
+  template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
+  carryForward: MeetingSummaryCarryForwardAuthorization | null = null,
 ): string {
   let primary = 0x811c9dc5;
   let secondary = 0x9e3779b9;
@@ -44,6 +57,7 @@ export function meetingSummaryInputFingerprint(
     secondary = updateHash(secondary, `${text.length}:${text}\u001e`);
   };
 
+  feed(meetingTemplateKey(template));
   feed(title?.trim());
   feed(meetingDate?.trim());
   feed(transcriptLines.length);
@@ -56,7 +70,23 @@ export function meetingSummaryInputFingerprint(
     feed(line.end_time);
   });
 
-  return `v1:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
+  if (carryForward) {
+    feed(carryForward.requestId);
+    feed(carryForward.items.length);
+    carryForward.items.forEach(item => {
+      feed(item.kind);
+      feed(item.sourceMeetingId);
+      feed(item.sourceItemId);
+      feed(item.sourceTitle);
+      feed(item.sourceOccurrenceDate);
+      feed(item.content);
+      feed(item.assignee);
+      feed(item.dueAt);
+    });
+  }
+
+  const version = carryForward ? 'v3' : 'v2';
+  return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 
 export async function getPendingMeetingSummaryTask(
@@ -98,7 +128,10 @@ export async function savePendingMeetingSummaryTask(
       meetingId: task.meetingId,
       taskId: task.taskId,
       mode: task.mode,
+      templateId: task.templateId,
+      templateRevision: task.templateRevision,
       inputFingerprint: task.inputFingerprint,
+      carryForward: task.carryForward,
       createdAt: existing?.taskId === task.taskId
         ? existing.createdAt
         : task.createdAt ?? now,
@@ -148,16 +181,74 @@ async function readPendingTasks(storageScope: string): Promise<PendingSummaryTas
     if (typeof item.taskId !== 'string' || !item.taskId) return;
     if (item.mode !== 'guest' && item.mode !== 'authenticated') return;
     if (typeof item.inputFingerprint !== 'string' || !item.inputFingerprint) return;
+    const template = meetingTemplateById(item.templateId, item.templateRevision)
+      ?? DEFAULT_MEETING_TEMPLATE;
+    const carryForward = parseCarryForwardAuthorization(item.carryForward);
+    if (item.carryForward != null && !carryForward) return;
     records[meetingId] = {
       meetingId,
       taskId: item.taskId,
       mode: item.mode,
+      templateId: template.id,
+      templateRevision: template.revision,
       inputFingerprint: item.inputFingerprint,
+      carryForward,
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
       updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString(),
     };
   });
   return records;
+}
+
+function pendingText(value: unknown, maximum: number, allowEmpty = false): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  if ((!allowEmpty && !normalized) || normalized.length > maximum || /\u0000/.test(normalized)) return null;
+  return normalized;
+}
+
+function parseCarryForwardItem(value: unknown): MeetingSummaryCarryForwardItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<MeetingSummaryCarryForwardItem>;
+  if (item.kind !== 'decision' && item.kind !== 'action') return null;
+  const sourceMeetingId = pendingText(item.sourceMeetingId, 160);
+  const sourceItemId = pendingText(item.sourceItemId, 512);
+  const sourceTitle = pendingText(item.sourceTitle, 255, true);
+  const content = pendingText(item.content, 2_000);
+  if (!sourceMeetingId || !sourceItemId || sourceTitle === null || !content) return null;
+  if (typeof item.sourceOccurrenceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(item.sourceOccurrenceDate)) {
+    return null;
+  }
+  const assignee = item.assignee == null ? null : pendingText(item.assignee, 200);
+  if (item.assignee != null && assignee === null) return null;
+  const dueAt = item.dueAt == null ? null : pendingText(item.dueAt, 80);
+  if (dueAt && !Number.isFinite(Date.parse(dueAt))) return null;
+  return {
+    kind: item.kind,
+    sourceMeetingId,
+    sourceItemId,
+    sourceTitle,
+    sourceOccurrenceDate: item.sourceOccurrenceDate,
+    content,
+    assignee,
+    dueAt,
+  };
+}
+
+function parseCarryForwardAuthorization(value: unknown): MeetingSummaryCarryForwardAuthorization | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const authorization = value as Partial<MeetingSummaryCarryForwardAuthorization>;
+  const requestId = pendingText(authorization.requestId, 96);
+  if (!requestId || requestId.length < 8 || !/^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(requestId)) return null;
+  if (!Array.isArray(authorization.items) || authorization.items.length < 1 || authorization.items.length > 8) {
+    return null;
+  }
+  const items = authorization.items.map(parseCarryForwardItem);
+  if (items.some(item => item === null)) return null;
+  const resolved = items as MeetingSummaryCarryForwardItem[];
+  const identities = resolved.map(item => `${item.kind}\u0000${item.sourceMeetingId}\u0000${item.sourceItemId}`);
+  if (new Set(identities).size !== identities.length) return null;
+  return { requestId, items: resolved };
 }
 
 function pendingTasksKey(storageScope: string): string {

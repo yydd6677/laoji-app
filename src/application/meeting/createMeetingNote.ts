@@ -11,6 +11,7 @@ import type {
 } from '../../domain/meeting';
 import {
   assertScopeKey,
+  calendarMeetingSeriesKey,
   createInitialProcessingStages,
   secureClientIdFactory,
 } from '../../domain/meeting';
@@ -54,6 +55,8 @@ export interface CreateMeetingNoteInput {
   endedAtMs?: number | null;
   occurrence?: OccurrenceReference | null;
   scheduleSnapshot?: ScheduleSnapshot | null;
+  recurrenceSegmentId?: string | null;
+  seriesKey?: string | null;
   recordingAsset?: InitialRecordingAssetInput | null;
   initialStageStatuses?: Partial<MeetingProcessingStatuses>;
   canonicalWrite?: boolean;
@@ -173,6 +176,9 @@ function assertSourceContract(input: CreateMeetingNoteInput): void {
   if (input.origin === 'calendar' && !hasOccurrence) {
     throw new Error('calendar meeting requires an occurrence snapshot');
   }
+  if (!hasOccurrence && (input.recurrenceSegmentId || input.seriesKey)) {
+    throw new Error('calendar series metadata requires an occurrence');
+  }
   if ((input.origin === 'file_import' || input.origin === 'share_intent') && !input.recordingAsset) {
     throw new Error('imported meeting requires an ingesting recording asset');
   }
@@ -204,6 +210,14 @@ export class CreateMeetingNoteUseCase {
     if (lifecycle === 'ended' && endedAtMs === null) throw new Error('ended meeting requires an end time');
     const occurrence = input.occurrence ? normalizeOccurrence(input.occurrence) : null;
     const snapshot = input.scheduleSnapshot ? normalizeSnapshot(input.scheduleSnapshot) : null;
+    const recurrenceSegmentId = normalizeOptionalText(
+      input.recurrenceSegmentId,
+      512,
+      'calendar recurrence segment ID',
+    );
+    const seriesKey = occurrence
+      ? calendarMeetingSeriesKey(input.scopeKey, occurrence.sourceEventId)
+      : normalizeOptionalText(input.seriesKey, 512, 'calendar series key');
     const title = input.title?.trim() ?? '';
     const description = normalizeOptionalText(input.description, 100_000, 'meeting description');
     const participants = normalizeParticipants(input.participants);
@@ -290,8 +304,8 @@ export class CreateMeetingNoteUseCase {
           scopeKey: input.scopeKey,
           ...occurrence,
           calendarRevision: snapshot.capturedEventRevision,
-          recurrenceSegmentId: null,
-          seriesKey: null,
+          recurrenceSegmentId,
+          seriesKey,
           linkedAtMs: nowMs,
         }, snapshot);
       }
@@ -346,11 +360,38 @@ export class CreateMeetingNoteUseCase {
             client_request_id: clientRequestId,
             recorded_at_ms: recordedAtMs,
             started_at_ms: startedAtMs,
-            occurrence_ref: occurrence,
+            occurrence_ref: occurrence ? {
+              ...occurrence,
+              calendarRevision: snapshot?.capturedEventRevision ?? null,
+              recurrenceSegmentId,
+              seriesKey,
+            } : null,
             schedule_snapshot: snapshot,
           }),
           createdAtMs: nowMs,
         });
+        if (occurrence && snapshot) {
+          await transaction.insertOutbox({
+            operationId: `occurrence.upsert:${requestedId}:${nowMs}`,
+            scopeKey: input.scopeKey,
+            aggregateType: 'meeting_occurrence',
+            aggregateId: requestedId,
+            operationType: 'occurrence.upsert',
+            baseRevision: null,
+            payloadJson: JSON.stringify({
+              schema_version: 2,
+              source_event_id: occurrence.sourceEventId,
+              occurrence_date: occurrence.occurrenceDate,
+              calendar_revision: snapshot.capturedEventRevision,
+              recurrence_segment_id: recurrenceSegmentId,
+              series_key: seriesKey,
+              link_state: 'active',
+              client_updated_at_ms: nowMs,
+              schedule_snapshot: snapshot,
+            }),
+            createdAtMs: nowMs,
+          });
+        }
       }
       if (input.canonicalWrite) {
         canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, nowMs);

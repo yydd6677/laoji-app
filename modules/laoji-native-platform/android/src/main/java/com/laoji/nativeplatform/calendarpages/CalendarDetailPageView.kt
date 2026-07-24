@@ -158,6 +158,14 @@ class CalendarDetailPageView(
     state.reminderLabel?.takeIf(String::isNotBlank)?.let {
       body.addView(detailRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, it, false))
     }
+    state.seriesMemory?.let { memory ->
+      body.addView(
+        buildSeriesMemory(memory),
+        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+          topMargin = context.pageDp(12)
+        },
+      )
+    }
   }
 
   private fun buildHeader(): View = LinearLayout(context).apply {
@@ -266,6 +274,225 @@ class CalendarDetailPageView(
         if (action.enabled) emit("meetingAction", mapOf("meetingActionKind" to action.kind))
       }
     }
+
+  private fun buildSeriesMemory(memory: CalendarSeriesMemory): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.VERTICAL
+      addView(context.pageDivider(0))
+      when (memory.loadState) {
+        CalendarPageLoadState.LOADING -> addView(seriesLoadingRow(memory.message))
+        CalendarPageLoadState.ERROR -> addView(seriesErrorRow(memory.message))
+        CalendarPageLoadState.READY -> {
+          val previous = memory.previousMeeting ?: return@apply
+          addView(seriesHeader(previous))
+          if (memory.decisions.isNotEmpty()) {
+            addView(seriesSectionLabel("决定"))
+            memory.decisions.forEach { decision -> addView(seriesDecisionRow(decision)) }
+          }
+          if (memory.actions.isNotEmpty()) {
+            addView(seriesSectionLabel("未完成事项"))
+            memory.actions.forEachIndexed { index, action ->
+              addView(seriesActionRow(action))
+              if (index < memory.actions.lastIndex) addView(context.pageDivider(48))
+            }
+          }
+          if (memory.decisions.isNotEmpty() || memory.actions.isNotEmpty()) {
+            addView(context.pageDivider(16))
+            addView(seriesCarryForwardAction())
+          }
+          addView(View(context), LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(12)))
+        }
+        CalendarPageLoadState.EMPTY -> Unit
+      }
+    }
+
+  private fun seriesLoadingRow(message: String?): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(context.pageDp(16), 0, context.pageDp(16), 0)
+      minimumHeight = context.pageDp(56)
+      addView(
+        ProgressBar(context).apply {
+          indeterminateTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.primary)
+        },
+        LinearLayout.LayoutParams(context.pageDp(20), context.pageDp(20)).apply {
+          rightMargin = context.pageDp(12)
+        },
+      )
+      addView(
+        context.pageText(message ?: "正在读取上次会议", 14f, CalendarPagePalette.secondary),
+        LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+      )
+    }
+
+  private fun seriesErrorRow(message: String?): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(context.pageDp(16), 0, context.pageDp(8), 0)
+      minimumHeight = context.pageDp(56)
+      isClickable = true
+      isFocusable = true
+      background = seriesRowBackground()
+      contentDescription = "${message ?: "上次会议内容暂时无法读取"}，重试"
+      addView(
+        context.pageText(message ?: "上次会议内容暂时无法读取", 14f, CalendarPagePalette.secondary),
+        LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+      )
+      addView(
+        context.pageText("重试", 14f, CalendarPagePalette.primary).apply { gravity = Gravity.CENTER },
+        LinearLayout.LayoutParams(context.pageDp(60), context.pageDp(44)),
+      )
+      setOnClickListener { emit("retrySeriesMemory") }
+    }
+
+  private fun seriesHeader(previous: CalendarSeriesMeeting): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(context.pageDp(16), context.pageDp(10), context.pageDp(4), context.pageDp(10))
+      minimumHeight = context.pageDp(64)
+      isClickable = true
+      isFocusable = true
+      background = seriesRowBackground()
+      contentDescription = listOf("上次会议", previous.title, previous.dateLabel, "查看记录")
+        .filter(String::isNotBlank)
+        .joinToString("，")
+      addView(
+        LinearLayout(context).apply {
+          orientation = LinearLayout.VERTICAL
+          addView(context.pageText("上次会议", 16f, CalendarPagePalette.text))
+          addView(
+            context.pageText(
+              listOf(previous.title, previous.dateLabel).filter(String::isNotBlank).joinToString(" · "),
+              13f,
+              CalendarPagePalette.secondary,
+            ).apply {
+              maxLines = 1
+              ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+          )
+        },
+        LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+      )
+      addView(
+        ImageView(context).apply {
+          setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
+          imageTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.placeholder)
+          contentDescription = null
+          setPadding(context.pageDp(14), context.pageDp(14), context.pageDp(14), context.pageDp(14))
+        },
+        LinearLayout.LayoutParams(context.pageDp(44), context.pageDp(44)),
+      )
+      setOnClickListener { emit("openSeriesMeeting", mapOf("meetingId" to previous.meetingId)) }
+    }
+
+  private fun seriesSectionLabel(label: String): View =
+    context.pageText(label, 13f, CalendarPagePalette.secondary).apply {
+      setPadding(context.pageDp(16), context.pageDp(10), context.pageDp(16), context.pageDp(4))
+    }
+
+  private fun seriesDecisionRow(decision: CalendarSeriesDecision): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.TOP
+      setPadding(context.pageDp(16), context.pageDp(8), context.pageDp(16), context.pageDp(8))
+      minimumHeight = context.pageDp(44)
+      isClickable = true
+      isFocusable = true
+      background = seriesRowBackground()
+      contentDescription = if (decision.sourceSegmentId != null || decision.sourceStartMs != null) {
+        "决定，${decision.content}，定位来源文字"
+      } else {
+        "决定，${decision.content}，查看来源会议"
+      }
+      addView(
+        View(context).apply { pageShape(CalendarPagePalette.primary, 2f) },
+        LinearLayout.LayoutParams(context.pageDp(4), context.pageDp(4)).apply {
+          topMargin = context.pageDp(8)
+          rightMargin = context.pageDp(10)
+        },
+      )
+      addView(
+        context.pageText(decision.content, 15f, CalendarPagePalette.text).apply { maxLines = 3 },
+        LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+      )
+      setOnClickListener {
+        val source = mutableMapOf<String, Any?>("meetingId" to decision.meetingId)
+        decision.sourceSegmentId?.takeIf(String::isNotBlank)?.let { source["segmentId"] = it }
+        decision.sourceStartMs?.takeIf { it >= 0L }?.let { source["positionMs"] = it }
+        emit("openSeriesMeeting", source)
+      }
+    }
+
+  private fun seriesActionRow(action: CalendarSeriesAction): View =
+    LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.TOP
+      setPadding(context.pageDp(16), context.pageDp(9), context.pageDp(16), context.pageDp(9))
+      minimumHeight = context.pageDp(52)
+      isClickable = true
+      isFocusable = true
+      background = seriesRowBackground()
+      contentDescription = listOf("未完成事项", action.content, action.metaLabel, "查看来源")
+        .filterNotNull()
+        .filter(String::isNotBlank)
+        .joinToString("，")
+      addView(
+        View(context).apply {
+          background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.TRANSPARENT)
+            setStroke(context.pageDp(1), CalendarPagePalette.placeholder)
+          }
+        },
+        LinearLayout.LayoutParams(context.pageDp(16), context.pageDp(16)).apply {
+          topMargin = context.pageDp(2)
+          rightMargin = context.pageDp(12)
+        },
+      )
+      addView(
+        LinearLayout(context).apply {
+          orientation = LinearLayout.VERTICAL
+          addView(context.pageText(action.content, 15f, CalendarPagePalette.text).apply { maxLines = 3 })
+          action.metaLabel?.takeIf(String::isNotBlank)?.let { meta ->
+            addView(context.pageText(meta, 12f, CalendarPagePalette.secondary).apply {
+              maxLines = 1
+              ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+              topMargin = context.pageDp(2)
+            })
+          }
+        },
+        LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+      )
+      setOnClickListener {
+        emit("openSeriesAction", mapOf("meetingId" to action.meetingId, "actionId" to action.id))
+      }
+    }
+
+  private fun seriesCarryForwardAction(): TextView =
+    context.pageText("带入我的笔记", 15f, CalendarPagePalette.primary).apply {
+      gravity = Gravity.CENTER
+      minimumHeight = context.pageDp(44)
+      isClickable = true
+      isFocusable = true
+      background = seriesRowBackground()
+      contentDescription = "选择内容带入我的笔记"
+      setOnClickListener { emit("carrySeriesMemory") }
+    }
+
+  private fun seriesRowBackground(): StateListDrawable = StateListDrawable().apply {
+    addState(
+      intArrayOf(android.R.attr.state_pressed),
+      GradientDrawable().apply { setColor(Color.rgb(245, 246, 247)) },
+    )
+    addState(
+      intArrayOf(),
+      GradientDrawable().apply { setColor(Color.TRANSPARENT) },
+    )
+  }
 
   private fun requestDelete() {
     emit("delete")

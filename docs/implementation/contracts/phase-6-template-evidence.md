@@ -1,0 +1,60 @@
+# Phase 6 内置会议模板证据：TPL-01
+
+状态：四个内置模板的移动端注册、请求身份、任务恢复、结果校验、不可变版本保护和模板选择 sheet 已形成一个本机纵向切片；服务端 additive 适配已与共享服务器目标工作区当前源码合并并同步。本文件记录合同、源码、目标 Python 环境测试和模拟器实测；目标服务尚未启动，不代表真实模型四模板输出、账号端到端或 Phase 6 退出条件已经完成。
+
+## 当前移动端范围
+
+- `templates.ts` 是唯一模板注册表。`general`、`one_on_one`、`project_sync`、`interview` 当前均为 revision 1，分别声明固定 section schema 与 `standard/follow_up_focused` 行动项抽取策略；默认模板为 `general@1`。
+- 登录态 query 与游客 JSON 请求都发送 `template_id + template_revision`。模板只影响整理 schema 和 prompt，不改变录音、上传、转写、权限或媒体处理流程。
+- pending summary task 持久化模板 ID/revision；无历史授权时使用 v2 input fingerprint，有授权时使用包含 request ID 与完整历史项目 identity 的 v3 fingerprint。两者首项均包含 `id@revision`，因此同一 Transcript 使用不同模板或不同历史授权不会错误复用旧任务。旧记录缺模板或模板失效时安全回落到 `general@1`。
+- 恢复任务前同时比较 mode、模板和 input fingerprint；任一失配都清除旧 pending 并提交新任务。任务不存在时可以稳定重提，仍复用本次明确选择的模板。
+- 成功结果必须含同一模板 ID/revision 的结构化文档，否则以中文合同错误拒绝保存。登录态轮询成功后优先解析该 task 自身 result，只有没有可用 task result 时才读取 durable detail，避免连续切换模板时误拿另一模板版本。
+- 更换模板继续走现有 immutable Summary version 流程。人工编辑、已关联行动项或其他受保护版本不会被新模板结果原地覆盖；第一阶段没有自由 prompt 编辑器。
+- Android 原生详情页与通用详情页共用 `MeetingTemplateSheet`。无整理结果时从“生成整理结果”进入，有结果时从“重新生成”进入；选择模板后 sheet 完整退出，再查询本场系列记忆并按候选情况直接生成或进入独立引用授权。
+
+## 部署补丁与目标源码
+
+本机补丁路径：`/home/yydd/桌面/light_plan/server-work/summary`。共享服务器目标工作区是独立的非运行源码；模板适配首次同步前备份在 `backups/20260724-meeting-contract-template-v2`。后续 carry-forward 增量再次执行同步前 SHA-256 并只更新会议 API 与 summary worker，直接前态备份在 `backups/20260724-summary-carry-forward-v1`。当前 8020 进程来自另一旧工作区，未受同步影响。
+
+- API 与 worker 共用四模板严格白名单；未知 ID 或 revision 返回中文 422，不把未知 prompt 透传给模型。
+- 模板 prompt suffix 明确固定 key/title/kind、空值和禁止编造规则；CLI 新增 `--summary-prompt-suffix-file`，worker 使用临时文件传递并在子进程结束后清理。
+- parser 对普通 section 优先读取模型的 `template_sections`；决定、承诺和行动项只使用既有事实清洗后的结果，模型不能通过模板字段绕过否定语义、未承诺事项、去重和来源一致性保护。缺字段时按确定性 fallback 和模板顺序产生 schema v2 sections。
+- section ID、template ID/revision 和行动项稳定 ID 都包含模板身份。同一会议、相同行动文字在不同模板下不会错误折叠为同一生成候选。
+- 当前真实 `FinalSummary` 表只有旧六列。本切片没有假定不存在的模板列，而是把 v2 envelope 合并进输出 JSON 的 `_laoji_structured_summary`，并用模板 sections 生成兼容 Markdown。
+- 新输出文件使用带时间部分的 `final3_*` 前缀，匹配现有模型产物查找顺序，避免同日连续生成读到旧文件。
+- App Summary 响应返回稳定 action candidate 和校验后的 schema v2；`full_text` 只使用兼容 Markdown/结构化 section/overview，不再因缺 Markdown 把 raw 模型 JSON 当正文，也不再向移动端返回 `raw_json`。
+- 合并以服务器当前 worker 为基线，保留同会议串行、不同会议有界并发、task scope/meeting 归属、长轮询、短期幂等复用、失败不复用、墓碑阻止写入和原有总结质量清洗。compact general 路径在无历史授权时保留；有授权时必须走支持 prompt suffix 的路径，否则历史内容不会真正送入模型。旧本机副本中会回退这些能力的 `chunker.py`、`ollama_client.py` 和启动脚本已恢复为服务器当前版本。
+
+## UI 证据分类
+
+组件：整理模板底部 sheet
+
+- Classification：LaoJi-only capability；最近容器为飞书风格底部 sheet，不声称飞书 7.71.8 存在同一四模板页面。
+- `[SOURCE]`：沿用现有 Feishu token owner 的浮层、遮罩、divider、primary、pressed、标题与图标语义；12dp 顶角、44dp 图标触控目标和约 300ms 全高度进出遵循当前 sheet 规范。
+- `[PRODUCT]`：只显示“整理模板”和四个内置选项，不出现其他产品专有术语，不增加 prompt 编辑器或解释性说明；服务错误使用中文。
+- `[DEVICE]`：`emulator-5556` 的 1080x2400 Preview 上四行均完整显示；默认“通用”有勾选，遮罩点击关闭；选择“项目同步”后 sheet 关闭，服务失败时显示中文页内错误和中文“生成失败”对话框，再次打开时“项目同步”保持选中。
+- `[INFERENCE]`：72dp 双行 option row、右侧勾选和能力缩减后的单页选择流程是老记对最近 Feishu sheet/container family 的组合，不是直接来源页面复刻。
+
+## 轻量验证
+
+- `npx tsc --noEmit --pretty false`：通过。
+- 移动端相关 `git diff --check`：通过。
+- 本机补丁与共享服务器目标文件 SHA-256 逐项一致；目标 Python 3.11 环境 `py_compile` 通过。
+- 目标部署源码生成 OpenAPI 已确认创建字段含 `title/client_request_id/location/recorded_at`，空标题没有 `minLength`，PATCH 标题同样允许空字符串。
+- 目标 `local.db` 只读 schema 检查确认 `client_request_id/location/recorded_at` 三列和 `(user_id, client_request_id)` 唯一索引存在；未读取标题、正文、账号或音频路径。
+- 部署后 API、任务生命周期、总结质量清洗、模板、空标题、幂等、显式清空和稳定 action ID 共 81 项通过；meetingsummary chunker/Ollama/阈值共 34 项通过，CLI template prompt 参数另行断言通过。
+- carry-forward 增量在再次从目标源码复制的隔离候选中执行 56 项相关合同并通过，覆盖账号来源归属、授权指纹/结构化结果往返、compact 路径隔离和短会议 durable identity 保留；目标文件与本机补丁最终 SHA-256 一致。
+- 最新 Preview 于 `2026-07-24 17:12:11 +0800` 构建，大小 `90,121,368` bytes，SHA-256 `06b4225234b6b72de1a98355d3b0f95424563c43d6805c541c652ef399fa7c91`；`emulator-5556` 覆盖安装时间为 `2026-07-24 17:12:23`，冷启动无应用崩溃。
+- `:app:assemblePreview --parallel --max-workers=$(nproc)`：通过；627 个 task，59 executed，耗时 34 秒。
+- Preview 已覆盖安装到唯一设备 `emulator-5556`，安装变体确认为 `versionName=1.0.0-source-preview`、`versionCode=101`，包 flags 不含 `DEBUGGABLE`。
+- 先验证默认选中和四项布局，再点击遮罩，UI tree 确认 sheet 完整移除。重新打开选择“项目同步”，sheet 正常关闭；当前服务不可达时页内显示“暂时无法连接老记服务，请检查网络后重试。”，对话框显示“生成失败 / 知道了”。
+- 关闭错误对话框后再次打开，UI tree 为 `项目同步 selected=true`、`通用 selected=false`。进程保持存活，清空后的 logcat 没有应用 FATAL、React Native exception、SIGSEGV 或 SIGABRT。
+- 验证使用的临时 ended meeting 和一条测试转写均已恢复：最终会议列表重新显示 `OccueneSmoke，7月22日 21:04，失败`，临时 Transcript cache 已删除，最终仍安装 Preview；本轮 `/tmp` 备份、截图和设备 XML 已清理。
+
+## 未完成边界
+
+1. 当前没有 USB 真机；不同物理设备密度、字体缩放、深色模式、手势导航 inset 和真实触觉尚未验证。
+2. 目标源码已同步但共享服务未启动或重启；配置中的 18020/18035 当前没有监听，8020 是另一旧工作区进程。因此没有真实模型运行四模板、固定 schema 质量、prompt 遵循率或账号鉴权读写证据。
+3. 没有可用测试账号完成登录态生成、快速连续切换模板、进程中断恢复和跨设备版本选择；本轮设备任务是游客失败路径与本机状态验证。
+4. 真实模型 action/section 内容质量、空 section、长 Transcript、多人会议、模板间污染及历史参考利用质量仍需服务恢复后的样本任务；当前只证明合同与 fallback，不证明生成质量。
+5. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或大样本矩阵；只执行类型检查、服务端纯函数 smoke、Preview 构建、定向模拟器交互和崩溃日志检查。

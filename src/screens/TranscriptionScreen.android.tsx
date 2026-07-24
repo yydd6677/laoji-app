@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   StyleSheet,
+  ToastAndroid,
   View,
 } from 'react-native';
 import type { RouteProp } from '@react-navigation/native';
@@ -12,17 +14,43 @@ import {
   type MinutesSemanticAction,
 } from 'laoji-native-platform';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
+import {
+  MeetingActionEditorSheet,
+  type MeetingActionEditorSaveValue,
+  type MeetingActionEditorValue,
+} from '../components/MeetingActionEditorSheet';
+import {
+  MeetingActionConflictSheet,
+  type MeetingActionConflictChoice,
+} from '../components/MeetingActionConflictSheet';
+import {
+  MeetingManualNoteConflictSheet,
+  type MeetingManualNoteConflictChoice,
+} from '../components/MeetingManualNoteConflictSheet';
+import {
+  MeetingSummaryVersionSheet,
+  type MeetingSummaryVersionChoice,
+} from '../components/MeetingSummaryVersionSheet';
+import {
+  MeetingSpeakerAssignmentSheet,
+  type MeetingSpeakerAssignmentValue,
+} from '../components/MeetingSpeakerAssignmentSheet';
+import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
+import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
+import { MeetingShareSheet } from '../components/MeetingShareSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
+import { useEvents } from '../store/EventsStore';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import {
   fetchMeetingAudioInfo,
   fetchMeetingSummaryDetail,
-  fetchMeetingTranscript,
+  fetchMeetingTranscriptSnapshot,
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
+import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
@@ -47,12 +75,14 @@ import {
 } from '../services/meetingSummaryTasks';
 import {
   meetingShareErrorMessage,
-  shareMeetingArtifact,
-  type MeetingShareKind,
+  shareMeetingContent,
+  type MeetingShareAvailability,
+  type MeetingShareSelection,
 } from '../services/meetingShare';
 import { openMeetingsTab } from '../navigation/tabTargets';
 import {
   buildNativeMinutesDetailSnapshot,
+  formatNativeMinutesTimestamp,
   nativeMinutesDetailRetryPlan,
   type NativeMinutesPageGenerations,
 } from '../native/nativeMinutesSnapshots';
@@ -61,20 +91,110 @@ import {
   NativeMinutesTabSelectionOwner,
   type NativeMinutesRequestToken,
 } from '../native/nativeMinutesRequestCoordinator';
-import type { RootStackParamList, TranscriptLine } from '../types';
-import { transcriptDurationSec } from '../utils/meetingMedia';
+import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
+import {
+  DEFAULT_MEETING_TEMPLATE,
+  meetingTemplateById,
+  secureClientIdFactory,
+  type MeetingTemplate,
+  type MeetingSummaryCarryForwardAuthorization,
+  type MeetingSummaryActionCandidate,
+  type MeetingSummaryDocument,
+  type ScopeKey,
+} from '../domain/meeting';
+import {
+  meetingRemoteIdentity,
+  requireMeetingRemoteIdentity,
+  transcriptDurationSec,
+} from '../utils/meetingMedia';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCache';
+import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
+import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
+import { deleteMeetingMarker, loadMeetingMarkers } from '../services/meetingMarkers';
+import { loadMeetingActions } from '../services/meetingActions';
+import { pullMeetingActionsForDetail } from '../services/meetingActionPull';
+import type { MeetingActionSyncConflictView } from '../services/meetingActionConflicts';
+import { pullMeetingManualNote } from '../services/meetingManualNotePull';
+import {
+  loadMeetingManualNoteSyncConflict,
+  type MeetingManualNoteSyncConflictView,
+} from '../services/meetingManualNoteConflicts';
+import { shareMeetingMarkerText } from '../services/meetingMarkerShare';
+import { evaluateTranscriptLineCandidate } from '../services/transcriptCompleteness';
+import {
+  meetingSummaryDocumentForLegacy,
+  meetingSummaryDocumentToText,
+} from '../services/meetingSummaryDocument';
+import { loadCurrentMeetingSummaryState } from '../services/meetingSummaryState';
+import {
+  loadMeetingSummaryVersions,
+  type MeetingSummaryVersionsState,
+} from '../services/meetingSummaryVersions';
+import {
+  authorizeMeetingSummaryCarryForward,
+  resolveMeetingSummaryCarryForwardMemory,
+} from '../services/meetingSummaryCarryForward';
+import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
+import {
+  CreateMeetingActionUseCase,
+  MeetingActionIdentityConflictError,
+  MeetingActionRevisionConflictError,
+  MeetingActionSyncConflictChangedError,
+  MeetingManualNoteSyncConflictChangedError,
+  MeetingSummaryVersionConflictError,
+  MeetingSummaryVersionUnavailableError,
+  SelectMeetingSummaryVersionUseCase,
+  ResolveMeetingActionSyncConflictUseCase,
+  ResolveMeetingManualNoteSyncConflictUseCase,
+  UpdateMeetingActionUseCase,
+  UpdateMeetingSpeakerAssignmentUseCase,
+  SpeakerAssignmentDraftError,
+  SpeakerAssignmentTargetUnavailableError,
+} from '../application/meeting';
+import {
+  sqliteMeetingNoteRepository,
+  type MarkerRecord,
+  type SummaryVersionRecord,
+} from '../data/repositories';
+import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
+import {
+  meetingActionFollowupClientRequestId,
+  meetingActionFollowupDraft,
+} from '../services/meetingActionFollowup';
+import { eventRefForEvent, sourceEventId as calendarSourceEventId } from '../utils/eventIdentity';
+import {
+  cancelMeetingActionNotification,
+  meetingActionReminderAtForDue,
+  MeetingActionNotificationPermissionError,
+  MeetingActionReminderTimeError,
+  reconcileMeetingActionNotifications,
+  scheduleMeetingActionNotification,
+} from '../services/notifications';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
   route: RouteProp<RootStackParamList, 'Transcription'>;
 };
 
+type EditTranscriptSpeakerAction = Extract<MinutesSemanticAction, { type: 'editTranscriptSpeaker' }>;
+
+type SpeakerAssignmentTarget = EditTranscriptSpeakerAction & {
+  clusterCount: number;
+};
+
 function compactMeetingDateTime(date: string, time?: string): string {
   const currentYearPrefix = `${new Date().getFullYear()}年`;
   const compactDate = date.startsWith(currentYearPrefix) ? date.slice(currentYearPrefix.length) : date;
   return [compactDate, time].filter(Boolean).join(' ');
+}
+
+function explicitDetailTab(focus: RootStackParamList['Transcription']['focus']): MinutesDetailTab | null {
+  return focus === 'notes' || focus === 'transcript' || focus === 'summary' ? focus : null;
+}
+
+function transcriptSpeakerClusterId(line: TranscriptLine): string {
+  return line.speakerClusterId?.trim() || line.speaker_id?.trim() || '';
 }
 
 function localPlayerSource(
@@ -94,6 +214,86 @@ function localPlayerSource(
   };
 }
 
+function summaryDocumentFor(
+  meetingId: string,
+  summary: MeetingSummary | null,
+): MeetingSummaryDocument | null {
+  return summary ? meetingSummaryDocumentForLegacy(meetingId, summary) : null;
+}
+
+const updateMeetingActionUseCase = new UpdateMeetingActionUseCase(sqliteMeetingNoteRepository);
+const createMeetingActionUseCase = new CreateMeetingActionUseCase(sqliteMeetingNoteRepository);
+const resolveMeetingActionSyncConflictUseCase = new ResolveMeetingActionSyncConflictUseCase(
+  sqliteMeetingNoteRepository,
+);
+const resolveMeetingManualNoteSyncConflictUseCase = new ResolveMeetingManualNoteSyncConflictUseCase(
+  sqliteMeetingNoteRepository,
+);
+const selectMeetingSummaryVersionUseCase = new SelectMeetingSummaryVersionUseCase(sqliteMeetingNoteRepository);
+const updateMeetingSpeakerAssignmentUseCase = new UpdateMeetingSpeakerAssignmentUseCase(
+  sqliteMeetingNoteRepository,
+);
+
+function summaryVersionTimestamp(version: SummaryVersionRecord): number {
+  return version.completedAtMs ?? version.createdAtMs;
+}
+
+function summaryVersionDateLabel(version: SummaryVersionRecord): string {
+  const date = new Date(summaryVersionTimestamp(version));
+  if (Number.isNaN(date.getTime())) return '生成时间未知';
+  const year = date.getFullYear() === new Date().getFullYear() ? '' : `${date.getFullYear()}年`;
+  return `${year}${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function summaryTemplateLabel(templateId: string): string {
+  if (templateId === 'legacy') return '旧版整理';
+  const template = meetingTemplateById(templateId);
+  if (!template) return '整理结果';
+  return template.id === 'general' ? '通用整理' : template.title;
+}
+
+function summaryVersionChoices(state: MeetingSummaryVersionsState | null): MeetingSummaryVersionChoice[] {
+  if (!state) return [];
+  const current = state.versions.find(version => version.id === state.currentVersionId);
+  const currentTimestamp = current ? summaryVersionTimestamp(current) : Number.POSITIVE_INFINITY;
+  return state.versions.map(version => {
+    const metadata = [
+      summaryVersionDateLabel(version),
+      summaryTemplateLabel(version.templateId),
+      version.userEdited ? '含人工修改' : '',
+      version.status === 'stale' ? '内容可能已过期' : '',
+    ].filter(Boolean).join(' · ');
+    const isCurrent = version.id === state.currentVersionId;
+    return {
+      id: version.id,
+      title: isCurrent
+        ? '当前版本'
+        : summaryVersionTimestamp(version) > currentTimestamp ? '新版本' : '历史版本',
+      metadata,
+      current: isCurrent,
+    };
+  });
+}
+
+function meetingAction(
+  actions: readonly MeetingSummaryActionCandidate[],
+  actionId: string,
+) {
+  return actions.find(action => (action.canonicalId ?? action.id) === actionId) ?? null;
+}
+
+function meetingActionFailureCode(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  if (message.includes('expected revision')) return 'expected_revision_invalid';
+  if (message.includes('revision changed')) return 'revision_conflict';
+  if (message.includes('does not exist')) return 'action_missing';
+  if (message.includes('database is locked')) return 'database_locked';
+  if (message.includes('transaction')) return 'transaction_failed';
+  if (message.includes('update time') || message.includes('clock')) return 'clock_invalid';
+  if (message.includes('no such')) return 'schema_missing';
+  return reason instanceof Error ? reason.name.replace(/[^a-z0-9_.-]/gi, '_').toLowerCase() : 'unknown_error';
+}
+
 /** MIN-DETAIL-001 / MIN-SUMMARY-001 / MIN-GUEST-001 / MIN-PLAYER-001. */
 export function TranscriptionScreen({ navigation, route }: Props) {
   const {
@@ -106,23 +306,42 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     refreshMeetings,
     updateMeetingTitle,
   } = useMeetings();
+  const { events, searchableEvents } = useEvents();
   const { accessToken, isGuest, session } = useAuth();
   const { showDialog } = useAppDialog();
   const meeting = meetings.find(item => item.id === route.params.meetingId);
+  const remoteMeetingId = meeting ? meetingRemoteIdentity(meeting) : null;
+  const focusedTab = explicitDetailTab(route.params.focus);
   const [activeTab, setActiveTab] = useState<MinutesDetailTab>(
-    route.params.focus === 'summary' ? 'summary' : 'transcript',
+    focusedTab ?? 'notes',
   );
   const [tabGeneration, setTabGeneration] = useState(0);
   const [transcript, setTranscript] = useState<TranscriptLine[]>(
     () => meeting ? getCachedTranscript(meeting.id) : [],
   );
   const [summary, setSummary] = useState(() => meeting ? meetingSummaryToText(getCachedSummary(meeting.id)) : '');
+  const [summaryDocument, setSummaryDocument] = useState<MeetingSummaryDocument | null>(() => (
+    meeting ? summaryDocumentFor(meeting.id, getCachedSummary(meeting.id)) : null
+  ));
+  const [summaryTemplate, setSummaryTemplate] = useState<MeetingTemplate>(() => {
+    const cached = meeting ? summaryDocumentFor(meeting.id, getCachedSummary(meeting.id)) : null;
+    return meetingTemplateById(cached?.templateId, cached?.templateRevision) ?? DEFAULT_MEETING_TEMPLATE;
+  });
+  const [templateSheetVisible, setTemplateSheetVisible] = useState(false);
+  const [summaryCarryForwardRequest, setSummaryCarryForwardRequest] = useState<{
+    meetingId: string;
+    scopeKey: ScopeKey;
+    template: MeetingTemplate;
+    forceRegenerate: boolean;
+    memory: MeetingSeriesMemoryProjection;
+  } | null>(null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [transcriptError, setTranscriptError] = useState('');
   const [summaryError, setSummaryError] = useState('');
-  const [summaryProgress, setSummaryProgress] = useState('正在提交总结任务');
+  const [summaryProgress, setSummaryProgress] = useState('正在提交整理任务');
   const [transcriptCached, setTranscriptCached] = useState(() => Boolean(meeting && getCachedTranscript(meeting.id).length));
+  const [transcriptCompleting, setTranscriptCompleting] = useState(false);
   const [summaryCached, setSummaryCached] = useState(() => Boolean(meeting && getCachedSummary(meeting.id)));
   const requestCoordinatorRef = useRef(new NativeMinutesRequestCoordinator());
   const [pageGenerations, setPageGenerations] = useState<NativeMinutesPageGenerations>(
@@ -131,12 +350,39 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [reloadKey, setReloadKey] = useState(0);
   const [playerSource, setPlayerSource] = useState<MinutesPlayerSourceSnapshot | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [playerSourceError, setPlayerSourceError] = useState('');
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
+  const [updatingActionId, setUpdatingActionId] = useState<string | null>(null);
+  const [editingAction, setEditingAction] = useState<MeetingActionEditorValue | null>(null);
+  const [actionEditorSaving, setActionEditorSaving] = useState(false);
+  const [actionEditorError, setActionEditorError] = useState('');
+  const [summaryVersionsVisible, setSummaryVersionsVisible] = useState(false);
+  const [summaryVersionsState, setSummaryVersionsState] = useState<MeetingSummaryVersionsState | null>(null);
+  const [summaryVersionsLoading, setSummaryVersionsLoading] = useState(false);
+  const [summaryVersionsError, setSummaryVersionsError] = useState('');
+  const [switchingSummaryVersionId, setSwitchingSummaryVersionId] = useState<string | null>(null);
+  const [meetingActions, setMeetingActions] = useState<readonly MeetingSummaryActionCandidate[]>([]);
+  const [meetingActionsLoaded, setMeetingActionsLoaded] = useState(false);
+  const [meetingActionsCanonicalId, setMeetingActionsCanonicalId] = useState<string | null>(null);
+  const [meetingActionConflicts, setMeetingActionConflicts] = useState<readonly MeetingActionSyncConflictView[]>([]);
+  const [actionConflictTarget, setActionConflictTarget] = useState<MeetingActionSyncConflictView | null>(null);
+  const [actionConflictSaving, setActionConflictSaving] = useState(false);
+  const [actionConflictError, setActionConflictError] = useState('');
+  const [manualNoteConflict, setManualNoteConflict] = useState<MeetingManualNoteSyncConflictView | null>(null);
+  const [manualNoteConflictTarget, setManualNoteConflictTarget] = useState<MeetingManualNoteSyncConflictView | null>(null);
+  const [manualNoteConflictSaving, setManualNoteConflictSaving] = useState(false);
+  const [manualNoteConflictError, setManualNoteConflictError] = useState('');
+  const [markers, setMarkers] = useState<readonly MarkerRecord[]>([]);
+  const [deletingMarkerId, setDeletingMarkerId] = useState<string | null>(null);
+  const [markerActionsId, setMarkerActionsId] = useState<string | null>(null);
+  const [speakerAssignmentTarget, setSpeakerAssignmentTarget] = useState<SpeakerAssignmentTarget | null>(null);
+  const [speakerAssignmentSaving, setSpeakerAssignmentSaving] = useState(false);
+  const [speakerAssignmentError, setSpeakerAssignmentError] = useState('');
   const mountedRef = useRef(true);
   const summaryAbortRef = useRef<AbortController | null>(null);
   const silentSummaryAbortRef = useRef(new WeakSet<AbortController>());
@@ -145,7 +391,52 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const uploadInFlightRef = useRef<Promise<void> | null>(null);
   const automaticAudioUploadKeyRef = useRef('');
   const autoResumeTaskRef = useRef('');
+  const summaryCarryLookupGenerationRef = useRef(0);
+  const activeMeetingIdRef = useRef(meeting?.id ?? null);
+  const activeMeetingScopeRef = useRef<ScopeKey | null>(null);
+  const openingFollowupRef = useRef(false);
+  const actionRequestGenerationRef = useRef(0);
+  const manualNoteConflictRequestGenerationRef = useRef(0);
+  const markerRequestGenerationRef = useRef(0);
+  const markerLoadErrorShownRef = useRef(false);
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
+  const meetingScopeKey: ScopeKey | null = isGuest
+    ? 'guest'
+    : session
+      ? `user:${session.user.id}`
+      : null;
+  activeMeetingIdRef.current = meeting?.id ?? null;
+  activeMeetingScopeRef.current = meetingScopeKey;
+  const speakerNameCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    transcript.forEach(line => {
+      const name = line.speaker_label?.normalize('NFKC').trim() ?? '';
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      names.push(name);
+    });
+    return names.slice(0, 100);
+  }, [transcript]);
+  const manualNote = useMeetingManualNote(meetingScopeKey, meeting?.id);
+  const manualNoteSnapshotKeyRef = useRef('');
+  const manualNoteSnapshotGenerationRef = useRef(0);
+  const manualNoteSnapshotKey = [
+    manualNote.revision,
+    manualNote.loading ? 1 : 0,
+    manualNote.saving ? 1 : 0,
+    manualNote.enabled ? 1 : 0,
+    manualNote.error,
+    manualNote.retryable ? 1 : 0,
+    manualNoteConflict?.id ?? '',
+  ].join('|');
+  if (manualNoteSnapshotKeyRef.current !== manualNoteSnapshotKey) {
+    manualNoteSnapshotKeyRef.current = manualNoteSnapshotKey;
+    manualNoteSnapshotGenerationRef.current = Math.min(
+      2_147_483_647,
+      manualNoteSnapshotGenerationRef.current + 1,
+    );
+  }
   const playbackStorageScope: 'guest' | `user:${string}` | null = isGuest
     ? 'guest'
     : session
@@ -153,7 +444,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : null;
   const routeMeetingIdRef = useRef(route.params.meetingId);
   routeMeetingIdRef.current = route.params.meetingId;
-  const initialTab = route.params.focus === 'summary' ? 'summary' : 'transcript';
+  const initialTab = focusedTab ?? 'notes';
   const tabOwnerRef = useRef(new NativeMinutesTabSelectionOwner({
     meetingId: route.params.meetingId,
     tab: initialTab,
@@ -176,6 +467,130 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     mountedRef.current && requestCoordinatorRef.current.isCurrent(token, routeMeetingIdRef.current)
   ), []);
 
+  const refreshMarkers = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey) {
+      setMarkers([]);
+      return;
+    }
+    const generation = markerRequestGenerationRef.current + 1;
+    markerRequestGenerationRef.current = generation;
+    try {
+      const state = await loadMeetingMarkers(meetingScopeKey, requestedMeetingId);
+      if (
+        !mountedRef.current
+        || markerRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return;
+      markerLoadErrorShownRef.current = false;
+      setMarkers(state.markers);
+    } catch {
+      if (
+        mountedRef.current
+        && markerRequestGenerationRef.current === generation
+        && routeMeetingIdRef.current === requestedMeetingId
+        && !markerLoadErrorShownRef.current
+      ) {
+        markerLoadErrorShownRef.current = true;
+        ToastAndroid.show('标记暂时无法加载，请稍后重试。', ToastAndroid.LONG);
+      }
+    }
+  }, [meeting?.id, meetingScopeKey]);
+
+  const refreshMeetingActions = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey) {
+      setMeetingActions([]);
+      setMeetingActionsLoaded(false);
+      setMeetingActionsCanonicalId(null);
+      setMeetingActionConflicts([]);
+      return null;
+    }
+    const generation = actionRequestGenerationRef.current + 1;
+    actionRequestGenerationRef.current = generation;
+    try {
+      const state = await loadMeetingActions(meetingScopeKey, requestedMeetingId);
+      if (
+        !mountedRef.current
+        || actionRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return null;
+      setMeetingActions(state.actions);
+      setMeetingActionsLoaded(true);
+      setMeetingActionsCanonicalId(state.canonicalMeetingId);
+      setMeetingActionConflicts(state.conflicts);
+      setActionConflictTarget(current => current
+        ? state.conflicts.find(conflict => conflict.id === current.id) ?? null
+        : null);
+      return state;
+    } catch (reason) {
+      diagnosticWarn('load meeting actions failed', reason);
+      return null;
+    }
+  }, [meeting?.id, meetingScopeKey]);
+
+  const refreshManualNoteConflict = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey || meetingScopeKey === 'guest') {
+      setManualNoteConflict(null);
+      setManualNoteConflictTarget(null);
+      return null;
+    }
+    const generation = manualNoteConflictRequestGenerationRef.current + 1;
+    manualNoteConflictRequestGenerationRef.current = generation;
+    try {
+      const conflict = await loadMeetingManualNoteSyncConflict(
+        meetingScopeKey,
+        requestedMeetingId,
+      );
+      if (
+        !mountedRef.current
+        || manualNoteConflictRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return null;
+      setManualNoteConflict(conflict);
+      setManualNoteConflictTarget(current => current && conflict?.id === current.id ? conflict : null);
+      return conflict;
+    } catch (reason) {
+      diagnosticWarn('load meeting manual note conflict failed', reason);
+      return null;
+    }
+  }, [meeting?.id, meetingScopeKey]);
+
+  const loadSummaryVersions = useCallback(async () => {
+    if (!meeting || !meetingScopeKey) {
+      setSummaryVersionsState(null);
+      setSummaryVersionsError('当前会议无法读取整理结果版本。');
+      return;
+    }
+    const requestedMeetingId = meeting.id;
+    setSummaryVersionsLoading(true);
+    setSummaryVersionsError('');
+    try {
+      const state = await loadMeetingSummaryVersions(meetingScopeKey, requestedMeetingId);
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      if (!state) {
+        setSummaryVersionsState(null);
+        setSummaryVersionsError('当前会议没有可用的整理结果版本。');
+        return;
+      }
+      setSummaryVersionsState(state);
+    } catch {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setSummaryVersionsError('整理结果版本暂时无法加载，请稍后重试。');
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setSummaryVersionsLoading(false);
+      }
+    }
+  }, [meeting, meetingScopeKey]);
+
+  const openSummaryVersions = useCallback(() => {
+    setSummaryVersionsVisible(true);
+    void loadSummaryVersions();
+  }, [loadSummaryVersions]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -183,6 +598,140 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       summaryAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    setEditingAction(null);
+    setActionEditorSaving(false);
+    setActionEditorError('');
+    setUpdatingActionId(null);
+    setSummaryVersionsVisible(false);
+    setTemplateSheetVisible(false);
+    setSummaryVersionsState(null);
+    setSummaryVersionsLoading(false);
+    setSummaryVersionsError('');
+    setSwitchingSummaryVersionId(null);
+    setMeetingActions([]);
+    setMeetingActionsLoaded(false);
+    setMeetingActionsCanonicalId(null);
+    setMeetingActionConflicts([]);
+    setActionConflictTarget(null);
+    setActionConflictSaving(false);
+    setActionConflictError('');
+    setManualNoteConflict(null);
+    setManualNoteConflictTarget(null);
+    setManualNoteConflictSaving(false);
+    setManualNoteConflictError('');
+    setShareVisible(false);
+    setMarkers([]);
+    setDeletingMarkerId(null);
+    setMarkerActionsId(null);
+    setSpeakerAssignmentTarget(null);
+    setSpeakerAssignmentSaving(false);
+    setSpeakerAssignmentError('');
+    actionRequestGenerationRef.current += 1;
+    manualNoteConflictRequestGenerationRef.current += 1;
+    markerRequestGenerationRef.current += 1;
+    markerLoadErrorShownRef.current = false;
+  }, [route.params.meetingId, meetingScopeKey]);
+
+  useEffect(() => {
+    setSummaryTemplate(
+      meetingTemplateById(summaryDocument?.templateId, summaryDocument?.templateRevision)
+        ?? DEFAULT_MEETING_TEMPLATE,
+    );
+  }, [route.params.meetingId, summaryDocument?.templateId, summaryDocument?.templateRevision]);
+
+  useEffect(() => {
+    void refreshMarkers();
+  }, [refreshMarkers, transcriptCached, transcriptCompleting]);
+
+  useEffect(() => {
+    void refreshMeetingActions();
+  }, [refreshMeetingActions, summaryCached]);
+
+  useEffect(() => {
+    void refreshManualNoteConflict();
+  }, [refreshManualNoteConflict]);
+
+  useEffect(() => {
+    if (!meetingActionsCanonicalId || !meetingScopeKey) return undefined;
+    return sqliteMeetingNoteRepository.observeMeeting(
+      meetingActionsCanonicalId,
+      meetingScopeKey,
+      () => {
+        void refreshMeetingActions();
+        void refreshManualNoteConflict();
+      },
+    );
+  }, [meetingActionsCanonicalId, meetingScopeKey, refreshManualNoteConflict, refreshMeetingActions]);
+
+  useEffect(() => {
+    if (
+      isGuest
+      || !accessToken
+      || !meetingScopeKey
+      || !meetingActionsCanonicalId
+      || !remoteMeetingId
+    ) return undefined;
+    let active = true;
+    let running = false;
+    let requested = true;
+    let controller: AbortController | null = null;
+    const requestPull = () => {
+      if (!active) return;
+      requested = true;
+      if (running) return;
+      running = true;
+      void (async () => {
+        try {
+          while (active && requested) {
+            requested = false;
+            controller = new AbortController();
+            try {
+              await manualNote.flush();
+              const [, notePull] = await Promise.all([
+                pullMeetingActionsForDetail({
+                  scopeKey: meetingScopeKey,
+                  canonicalMeetingId: meetingActionsCanonicalId,
+                  meetingRemoteId: remoteMeetingId,
+                  accessToken,
+                  signal: controller.signal,
+                }),
+                pullMeetingManualNote({
+                  scopeKey: meetingScopeKey,
+                  meetingId: meetingActionsCanonicalId,
+                  meetingRemoteId: remoteMeetingId,
+                  accessToken,
+                  signal: controller.signal,
+                }),
+              ]);
+              if (notePull.outcome === 'updated' || notePull.outcome === 'attached') {
+                await manualNote.reload();
+              }
+              await refreshManualNoteConflict();
+            } finally {
+              controller = null;
+            }
+          }
+        } catch (reason) {
+          if (active) diagnosticWarn('pull meeting actions for detail failed', reason);
+        } finally {
+          running = false;
+          if (active && requested) requestPull();
+        }
+      })();
+    };
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') requestPull();
+    });
+    requestPull();
+    return () => {
+      active = false;
+      requested = false;
+      controller?.abort();
+      appStateSubscription.remove();
+    };
+  }, [accessToken, isGuest, manualNote.flush, manualNote.reload, meetingActionsCanonicalId, meetingScopeKey, refreshManualNoteConflict, remoteMeetingId]);
 
   useEffect(() => {
     const previousScope = summaryScopeRef.current;
@@ -199,7 +748,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       advancePageGenerations('transcript', 'summary', 'speakers');
       setTranscript([]);
       setSummary('');
+      setSummaryDocument(null);
       setTranscriptCached(false);
+      setTranscriptCompleting(false);
       setSummaryCached(false);
       setLoadingTranscript(false);
       setLoadingSummary(false);
@@ -209,75 +760,148 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
     let alive = true;
     const cachedTranscript = getCachedTranscript(meeting.id);
-    const cachedSummary = meetingSummaryToText(getCachedSummary(meeting.id));
+    const cachedSummaryValue = getCachedSummary(meeting.id);
+    const cachedSummary = meetingSummaryToText(cachedSummaryValue);
+    const cachedSummaryDocument = summaryDocumentFor(meeting.id, cachedSummaryValue);
     const transcriptRequest = beginPageRequest(meeting.id, 'transcript', 'speakers');
     setTranscript(cachedTranscript);
     setTranscriptCached(cachedTranscript.length > 0);
+    setTranscriptCompleting(false);
     setSummary(cachedSummary);
+    setSummaryDocument(cachedSummaryDocument);
     setSummaryCached(Boolean(cachedSummary));
     setTranscriptError('');
     setSummaryError('');
     setLoadingSummary(false);
 
     setLoadingTranscript(true);
-    if (isGuest || !accessToken) {
-      setLoadingTranscript(false);
-    } else {
-      fetchMeetingTranscript(meeting.id, accessToken, { fallbackItems: cachedTranscript })
-        .then(items => {
-          if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
-          if (items.length > 0) {
-            setTranscript(items);
-            setTranscriptCached(false);
-            void saveCachedTranscript(meeting.id, items).catch(() => {
-              if (alive && isCurrentPageRequest(transcriptRequest)) {
-                setTranscriptError('转写已同步，但本机缓存写入失败。');
-              }
-            });
-          }
-        })
-        .catch(() => {
-          if (alive && isCurrentPageRequest(transcriptRequest)) {
-            setTranscriptCached(cachedTranscript.length > 0);
-            setTranscriptError('转写同步失败，当前显示本机缓存。');
-          }
-        })
-        .finally(() => {
-          if (alive && isCurrentPageRequest(transcriptRequest)) setLoadingTranscript(false);
+    void (async () => {
+      let baseline = cachedTranscript;
+      let activeState = null as Awaited<ReturnType<typeof loadActiveMeetingTranscriptState>>;
+      if (meetingScopeKey) {
+        activeState = await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null);
+      }
+      if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+      if (activeState?.lines.length) {
+        const activeDecision = evaluateTranscriptLineCandidate(baseline, activeState.lines, {
+          candidateKind: activeState.kind,
+          serverCompleteness: activeState.kind === 'realtime_draft' ? 'incomplete' : 'complete',
         });
-    }
+        if (activeDecision.useCandidate) baseline = activeState.lines;
+      }
+      setTranscript(baseline);
+      setTranscriptCached(baseline.length > 0);
+      setTranscriptCompleting(activeState?.completing ?? false);
+      if (isGuest || !accessToken) {
+        setLoadingTranscript(false);
+        return;
+      }
 
-    if (meeting.hasSummary && !isGuest && accessToken) {
-      const summaryRequest = beginPageRequest(meeting.id, 'summary');
-      setLoadingSummary(true);
-      setSummaryProgress('正在同步总结');
-      fetchMeetingSummaryDetail(meeting.id, accessToken)
-        .then(value => {
-          if (!alive || !isCurrentPageRequest(summaryRequest)) return;
-          const normalized = normalizeMeetingSummaryResult(meeting.id, value);
-          const text = meetingSummaryToText(normalized);
-          setSummary(text || cachedSummary);
-          setSummaryCached(!text && Boolean(cachedSummary));
-          if (normalized && text) {
-            void saveCachedSummary(meeting.id, normalized).catch(() => {
-              if (alive && isCurrentPageRequest(summaryRequest)) {
-                setSummaryError('总结已同步，但本机缓存写入失败。');
-              }
-            });
-          }
-        })
-        .catch(() => {
-          if (alive && isCurrentPageRequest(summaryRequest)) {
-            setSummaryCached(Boolean(cachedSummary));
-            setSummaryError('总结同步失败，可重试或重新生成。');
-          }
-        })
-        .finally(() => {
-          if (alive && isCurrentPageRequest(summaryRequest)) setLoadingSummary(false);
+      try {
+        if (!remoteMeetingId) throw new Error('meeting remote identity is pending');
+        const remote = await fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken);
+        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+        const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+        const decision = evaluateTranscriptLineCandidate(baseline, remote.items, {
+          candidateKind,
+          serverCompleteness: remote.completeness,
         });
-    }
+        let cacheWriteFailed = false;
+        try {
+          await saveCachedTranscript(meeting.id, remote.items, {
+            candidateKind,
+            serverCompleteness: remote.completeness,
+            remoteRevisionId: remote.remoteRevisionId,
+          });
+        } catch {
+          cacheWriteFailed = true;
+        }
+        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+        const refreshedActive = meetingScopeKey
+          ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
+          : null;
+        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+        const selected = refreshedActive?.lines.length
+          ? refreshedActive.lines
+          : decision.useCandidate ? remote.items : baseline;
+        setTranscript(selected);
+        setTranscriptCached(Boolean(refreshedActive) || !decision.useCandidate);
+        setTranscriptCompleting(refreshedActive?.completing ?? decision.completing);
+        setTranscriptError(cacheWriteFailed ? '转写已同步，但本机缓存写入失败。' : '');
+      } catch {
+        if (alive && isCurrentPageRequest(transcriptRequest)) {
+          setTranscript(baseline);
+          setTranscriptCached(baseline.length > 0);
+          setTranscriptError('转写同步失败，当前显示本机缓存。');
+        }
+      } finally {
+        if (alive && isCurrentPageRequest(transcriptRequest)) setLoadingTranscript(false);
+      }
+    })();
+
+    const summaryRequest = beginPageRequest(meeting.id, 'summary');
+    void (async () => {
+      let baselineText = cachedSummary;
+      let baselineDocument = cachedSummaryDocument;
+      if (meetingScopeKey) {
+        const current = await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null);
+        if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+        if (current) {
+          baselineDocument = current.document;
+          baselineText = meetingSummaryDocumentToText(current.document);
+          setSummary(baselineText);
+          setSummaryDocument(current.document);
+          setSummaryCached(true);
+        }
+      }
+      if (!meeting.hasSummary || isGuest || !accessToken) return;
+      setLoadingSummary(true);
+      setSummaryProgress('正在同步整理结果');
+      try {
+        if (!remoteMeetingId) throw new Error('meeting remote identity is pending');
+        const value = await fetchMeetingSummaryDetail(remoteMeetingId, accessToken);
+        if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+        const normalized = normalizeMeetingSummaryResult(meeting.id, value);
+        const text = meetingSummaryToText(normalized);
+        if (normalized && text) {
+          const generatedDocument = summaryDocumentFor(meeting.id, normalized);
+          try {
+            const cacheResult = await saveCachedSummary(meeting.id, normalized);
+            if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+            const shouldReadCanonical = Boolean(
+              meetingScopeKey
+              && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
+            );
+            const current = shouldReadCanonical && meetingScopeKey
+              ? await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null)
+              : null;
+            if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+            setSummary(current ? meetingSummaryDocumentToText(current.document) : text);
+            setSummaryDocument(current?.document ?? generatedDocument);
+            setSummaryCached(true);
+          } catch {
+            if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+            setSummary(text);
+            setSummaryDocument(generatedDocument);
+            setSummaryCached(false);
+            setSummaryError('整理结果已同步，但本机缓存写入失败。');
+          }
+        } else {
+          setSummary(baselineText);
+          setSummaryDocument(baselineDocument);
+          setSummaryCached(Boolean(baselineText));
+        }
+      } catch {
+        if (alive && isCurrentPageRequest(summaryRequest)) {
+          setSummaryCached(Boolean(baselineText));
+          setSummaryError('整理结果同步失败，可重试或重新生成。');
+        }
+      } finally {
+        if (alive && isCurrentPageRequest(summaryRequest)) setLoadingSummary(false);
+      }
+    })();
     return () => { alive = false; };
-  }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, meeting?.hasSummary, meeting?.id, reloadKey, saveCachedSummary, saveCachedTranscript]);
+  }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, meeting?.hasSummary, meeting?.id, meetingScopeKey, reloadKey, remoteMeetingId, saveCachedSummary, saveCachedTranscript]);
 
   useEffect(() => {
     if (!meeting) {
@@ -310,7 +934,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return () => { alive = false; };
     }
     setLoadingAudio(true);
-    void fetchMeetingAudioInfo(meeting.id, accessToken)
+    if (!remoteMeetingId) {
+      setLoadingAudio(false);
+      setPlayerSourceError('会议正在同步，请稍后重试。');
+      return () => { alive = false; };
+    }
+    void fetchMeetingAudioInfo(remoteMeetingId, accessToken)
       .then(async info => {
         if (!alive || !info) return;
         if (!playbackStorageScope) return;
@@ -339,7 +968,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       })
       .finally(() => { if (alive) setLoadingAudio(false); });
     return () => { alive = false; };
-  }, [accessToken, isGuest, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, playbackStorageScope, reloadKey, transcript]);
+  }, [accessToken, isGuest, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, playbackStorageScope, reloadKey, remoteMeetingId, transcript]);
 
   const performPendingAudioUpload = useCallback((
     pending: PendingMeetingAudioUpload,
@@ -357,7 +986,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           pending.meetingId,
           accessToken,
           (item, token) => uploadMeetingAudio(
-            item.meetingId,
+            item.remoteMeetingId ?? item.meetingId,
             item.audioUri,
             token,
             { fileName: item.fileName, mimeType: item.mimeType },
@@ -444,11 +1073,18 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => { autoResumeTaskRef.current = ''; }, [meeting?.id, recordingStorageScope]);
 
+  useEffect(() => {
+    summaryCarryLookupGenerationRef.current += 1;
+    setSummaryCarryForwardRequest(null);
+  }, [meeting?.id, meetingScopeKey]);
+
   function runSummaryTask(options: {
     automatic?: boolean;
     forceRegenerate?: boolean;
     resumeTask?: PendingMeetingSummaryTask | null;
     transcriptLines?: TranscriptLine[];
+    template?: MeetingTemplate;
+    carryForward?: MeetingSummaryCarryForwardAuthorization | null;
   } = {}): Promise<void> {
     if (!meeting) return Promise.resolve();
     if (summaryInFlightRef.current) return summaryInFlightRef.current;
@@ -456,20 +1092,29 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const lines = options.transcriptLines ?? transcript;
     if (lines.length === 0) {
       if (!options.automatic) {
-        showDialog({ title: '暂无转写', message: '需要先有会议转写内容，才能生成总结。', tone: 'info' });
+        showDialog({ title: '暂无转写', message: '需要先有会议转写内容，才能生成整理结果。', tone: 'info' });
       }
       return Promise.resolve();
     }
 
     const meetingDate = meetingDateForSummary(currentMeeting.date, currentMeeting.createdAt);
-    const fingerprint = meetingSummaryInputFingerprint(lines, currentMeeting.title, meetingDate);
+    const resumedTemplate = options.resumeTask
+      ? meetingTemplateById(options.resumeTask.templateId, options.resumeTask.templateRevision)
+      : null;
+    const requestedTemplate = options.template ?? resumedTemplate ?? summaryTemplate;
+    const hasExplicitCarryForward = Object.prototype.hasOwnProperty.call(options, 'carryForward');
+    const requestedCarryForward = options.resumeTask
+      ? options.resumeTask.carryForward
+      : hasExplicitCarryForward
+        ? options.carryForward ?? null
+        : null;
     const expectedMode = isGuest ? 'guest' : 'authenticated';
     let operation: Promise<void> | null = null;
     operation = (async () => {
       const summaryRequest = beginPageRequest(currentMeeting.id, 'summary');
       setLoadingSummary(true);
       setSummaryError('');
-      setSummaryProgress('正在检查上次总结任务');
+      setSummaryProgress('正在检查上次整理任务');
       const controller = new AbortController();
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = controller;
@@ -482,21 +1127,50 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             pending = await getPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id);
             if (!isCurrentPageRequest(summaryRequest)) return;
           } catch {
-            throw new Error('无法读取上次总结任务，未提交新任务。请检查本机存储后重试。');
+            throw new Error('无法读取上次整理任务，未提交新任务。请检查本机存储后重试。');
           }
         }
-        if (pending && (pending.mode !== expectedMode || pending.inputFingerprint !== fingerprint)) {
+        let carryForward = options.resumeTask
+          ? options.resumeTask.carryForward
+          : hasExplicitCarryForward
+            ? options.carryForward ?? null
+            : pending?.carryForward ?? null;
+        let fingerprint = meetingSummaryInputFingerprint(
+          lines,
+          currentMeeting.title,
+          meetingDate,
+          requestedTemplate,
+          carryForward,
+        );
+        if (pending && (
+          pending.mode !== expectedMode
+          || pending.templateId !== requestedTemplate.id
+          || pending.templateRevision !== requestedTemplate.revision
+          || pending.inputFingerprint !== fingerprint
+        )) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
           if (!isCurrentPageRequest(summaryRequest)) return;
           pending = null;
+          carryForward = requestedCarryForward;
+          fingerprint = meetingSummaryInputFingerprint(
+            lines,
+            currentMeeting.title,
+            meetingDate,
+            requestedTemplate,
+            carryForward,
+          );
         }
         if (!isCurrentPageRequest(summaryRequest)) return;
-        setSummaryProgress(pending ? '正在恢复上次总结任务' : '正在提交总结任务');
+        setSummaryProgress(pending ? '正在恢复上次整理任务' : '正在提交整理任务');
         const generated = await generateSummaryForMeeting({
-          meetingId: currentMeeting.id,
+          meetingId: isGuest
+            ? currentMeeting.id
+            : requireMeetingRemoteIdentity(currentMeeting),
           title: currentMeeting.title,
           meetingDate,
           transcriptLines: lines,
+          template: requestedTemplate,
+          carryForward,
           isGuest,
           accessToken,
           resumeTaskId: pending?.taskId,
@@ -509,7 +1183,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 meetingId: currentMeeting.id,
                 taskId,
                 mode: expectedMode,
+                templateId: requestedTemplate.id,
+                templateRevision: requestedTemplate.revision,
                 inputFingerprint: fingerprint,
+                carryForward,
               });
               if (!isCurrentPageRequest(summaryRequest)) return;
               autoResumeTaskRef.current = taskId;
@@ -527,20 +1204,44 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         });
         if (!isCurrentPageRequest(summaryRequest)) return;
         const text = meetingSummaryToText(generated);
-        setSummary(text || '暂无总结内容');
-        setSummaryCached(false);
+        const generatedDocument = text ? summaryDocumentFor(currentMeeting.id, generated) : null;
         setSummaryError('');
         let cached = false;
         try {
-          await saveCachedSummary(currentMeeting.id, generated);
+          const cacheResult = await saveCachedSummary(currentMeeting.id, generated);
           if (!isCurrentPageRequest(summaryRequest)) return;
+          const shouldReadCanonical = Boolean(
+            meetingScopeKey
+            && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
+          );
+          const current = shouldReadCanonical && meetingScopeKey
+            ? await loadCurrentMeetingSummaryState(meetingScopeKey, currentMeeting.id).catch(() => null)
+            : null;
+          if (!isCurrentPageRequest(summaryRequest)) return;
+          setSummary(current ? meetingSummaryDocumentToText(current.document) : (text || '暂无整理结果'));
+          setSummaryDocument(current?.document ?? generatedDocument);
+          setSummaryCached(true);
+          if (cacheResult.projection === 'preserved' && !options.automatic) {
+            showDialog({
+              title: '新整理结果已保存',
+              message: '当前版本包含你的修改或已处理的行动项，因此没有自动替换。',
+              tone: 'info',
+              actions: [
+                { text: '查看新版本', role: 'primary', onPress: openSummaryVersions },
+                { text: '保留当前', role: 'cancel' },
+              ],
+            });
+          }
           cached = true;
         } catch {
           if (isCurrentPageRequest(summaryRequest)) {
-            setSummaryError('总结已生成，但本机缓存写入失败。');
+            setSummary(text || '暂无整理结果');
+            setSummaryDocument(generatedDocument);
+            setSummaryCached(false);
+            setSummaryError('整理结果已生成，但本机缓存写入失败。');
             showDialog({
-              title: '总结已生成，保存失败',
-              message: '当前页面仍可查看总结，但退出后可能无法离线恢复。',
+              title: '整理结果已生成，保存失败',
+              message: '当前页面仍可查看整理结果，但退出后可能无法离线恢复。',
               tone: 'warning',
             });
           }
@@ -564,7 +1265,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         } else {
           const message = readableErrorMessage(
             reason,
-            options.automatic ? '上次会议总结暂时无法恢复，点击重试可继续获取。' : '会议总结暂时无法生成，请稍后重试。',
+            options.automatic ? '上次会议整理结果暂时无法恢复，点击重试可继续获取。' : '会议整理结果暂时无法生成，请稍后重试。',
           );
           setSummaryError(message);
           if (!options.automatic) showDialog({ title: '生成失败', message, tone: 'error' });
@@ -581,11 +1282,75 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     return operation;
   }
 
+  function isActiveSummaryCarryLookup(
+    generation: number,
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): boolean {
+    return mountedRef.current
+      && summaryCarryLookupGenerationRef.current === generation
+      && activeMeetingIdRef.current === meetingId
+      && activeMeetingScopeRef.current === scopeKey;
+  }
+
+  async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
+    if (!meeting) return;
+    const currentMeetingId = meeting.id;
+    const currentScopeKey = meetingScopeKey;
+    const forceRegenerate = Boolean(summary);
+    setSummaryTemplate(template);
+    setSummaryCarryForwardRequest(null);
+
+    if (!currentScopeKey) {
+      await runSummaryTask({ forceRegenerate, template, carryForward: null });
+      return;
+    }
+
+    const generation = summaryCarryLookupGenerationRef.current + 1;
+    summaryCarryLookupGenerationRef.current = generation;
+    try {
+      const memory = await resolveMeetingSummaryCarryForwardMemory(currentScopeKey, currentMeetingId);
+      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      if (!memory || (memory.decisions.length === 0 && memory.pendingActions.length === 0)) {
+        await runSummaryTask({ forceRegenerate, template, carryForward: null });
+        return;
+      }
+      setSummaryCarryForwardRequest({
+        meetingId: currentMeetingId,
+        scopeKey: currentScopeKey,
+        template,
+        forceRegenerate,
+        memory,
+      });
+    } catch {
+      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      showDialog({
+        title: '无法读取上次会议内容',
+        message: '暂时无法检查可引用的决定和未完成事项。',
+        tone: 'warning',
+        actions: [
+          {
+            text: '不引用，继续',
+            role: 'primary',
+            onPress: () => {
+              if (
+                activeMeetingIdRef.current === currentMeetingId
+                && activeMeetingScopeRef.current === currentScopeKey
+              ) {
+                void runSummaryTask({ forceRegenerate, template, carryForward: null });
+              }
+            },
+          },
+          { text: '取消', role: 'cancel' },
+        ],
+      });
+    }
+  }
+
   useEffect(() => {
     if (!meeting || loadingTranscript || loadingSummary || summaryInFlightRef.current || transcript.length === 0) return;
     let alive = true;
     const date = meetingDateForSummary(meeting.date, meeting.createdAt);
-    const fingerprint = meetingSummaryInputFingerprint(transcript, meeting.title, date);
     const expectedMode = isGuest ? 'guest' : 'authenticated';
     const pendingRequest = requestCoordinatorRef.current.capture(meeting.id, 'summary');
     void getPendingMeetingSummaryTask(recordingStorageScope, meeting.id).then(pending => {
@@ -595,53 +1360,94 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         !pending ||
         autoResumeTaskRef.current === pending.taskId
       ) return;
-      if (pending.mode !== expectedMode || pending.inputFingerprint !== fingerprint) {
+      const pendingTemplate = meetingTemplateById(pending.templateId, pending.templateRevision);
+      const fingerprint = pendingTemplate
+        ? meetingSummaryInputFingerprint(
+          transcript,
+          meeting.title,
+          date,
+          pendingTemplate,
+          pending.carryForward,
+        )
+        : '';
+      if (
+        !pendingTemplate
+        || pending.mode !== expectedMode
+        || pending.inputFingerprint !== fingerprint
+      ) {
         void clearPendingMeetingSummaryTask(recordingStorageScope, meeting.id).catch(() => {});
         return;
       }
+      setSummaryTemplate(pendingTemplate);
       autoResumeTaskRef.current = pending.taskId;
-      void runSummaryTask({ automatic: true, resumeTask: pending, transcriptLines: transcript });
+      void runSummaryTask({
+        automatic: true,
+        resumeTask: pending,
+        transcriptLines: transcript,
+        template: pendingTemplate,
+      });
     }).catch(() => {
       if (alive && isCurrentPageRequest(pendingRequest)) {
-        setSummaryError('无法读取上次总结任务，点击重试可重新生成。');
+        setSummaryError('无法读取上次整理任务，点击重试可重新生成。');
       }
     });
     return () => { alive = false; };
   }, [isCurrentPageRequest, isGuest, loadingSummary, loadingTranscript, meeting?.createdAt, meeting?.date, meeting?.id, meeting?.title, recordingStorageScope, transcript]);
 
   useEffect(() => {
-    if (route.params.focus === 'summary') {
-      setTabGeneration(value => {
-        const next = value + 1;
-        tabOwnerRef.current.accept({ meetingId: route.params.meetingId, tab: 'summary', generation: next });
-        return next;
-      });
-      setActiveTab('summary');
-    }
-    if (route.params.focus === 'transcript') {
-      setTabGeneration(value => {
-        const next = value + 1;
-        tabOwnerRef.current.accept({ meetingId: route.params.meetingId, tab: 'transcript', generation: next });
-        return next;
-      });
-      setActiveTab('transcript');
-    }
-  }, [route.params.focus, route.params.meetingId]);
+    const target = explicitDetailTab(route.params.focus);
+    if (!target) return;
+    setTabGeneration(value => {
+      const next = value + 1;
+      tabOwnerRef.current.accept({ meetingId: route.params.meetingId, tab: target, generation: next });
+      return next;
+    });
+    setActiveTab(target);
+  }, [route.params.actionFocusRequestId, route.params.focus, route.params.meetingId]);
 
   const briefSummary = useMemo(
     () => briefGreetingSummaryText(transcript),
     [transcript],
   );
   const displayedSummary = summary || briefSummary || '';
+  const displayedSummaryDocument = summary && summaryDocument?.meetingId === (meeting?.id ?? route.params.meetingId)
+    ? summaryDocument
+    : null;
+  const displayedActionCandidates = meetingActionsLoaded
+    ? meetingActions
+    : displayedSummaryDocument?.actionItemCandidates ?? [];
+  const conflictedActionIds = useMemo(
+    () => new Set(meetingActionConflicts.map(conflict => conflict.actionId)),
+    [meetingActionConflicts],
+  );
 
-  const runShare = useCallback(async (kind: MeetingShareKind) => {
+  const shareAvailability = useMemo<MeetingShareAvailability>(() => ({
+    info: Boolean(meeting),
+    summary: displayedSummaryDocument
+      ? displayedSummaryDocument.sections.some(section => (
+        section.kind !== 'action_items'
+        && section.stableKey !== 'action_items'
+        && Boolean(section.title?.trim() || section.content.trim())
+      ))
+      : Boolean(displayedSummary.trim()),
+    actions: displayedActionCandidates.some(action => Boolean(action.content.trim())),
+    transcript: transcript.some(line => Boolean(line.text.trim())),
+    audio: Boolean(meeting?.audioAvailable || meeting?.audioLocalUri || playerSource),
+    manualNote: Boolean(manualNote.content.trim()),
+  }), [displayedActionCandidates, displayedSummary, displayedSummaryDocument, manualNote.content, meeting, playerSource, transcript]);
+
+  const runShare = useCallback(async (selection: MeetingShareSelection) => {
     if (!meeting || sharing) return;
     setSharing(true);
     try {
-      await shareMeetingArtifact(kind, {
+      await shareMeetingContent(selection, {
         meeting,
         transcriptLines: transcript,
         summaryText: displayedSummary || meetingSummaryToText(getCachedSummary(meeting.id)),
+        summaryDocument: displayedSummaryDocument,
+        actionItems: displayedActionCandidates,
+        manualNoteText: manualNote.content,
+        summaryVersionId: displayedSummaryDocument?.remoteVersionId,
         isGuest,
         accessToken,
       });
@@ -650,20 +1456,46 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setSharing(false);
     }
-  }, [accessToken, displayedSummary, getCachedSummary, isGuest, meeting, sharing, showDialog, transcript]);
+  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, sharing, showDialog, transcript]);
+
+  const requestShare = useCallback((selection: MeetingShareSelection) => {
+    if (!selection.manualNote) {
+      void runShare(selection);
+      return;
+    }
+    showDialog({
+      title: '包含我的笔记？',
+      message: '我的笔记会原样写入分享文件。',
+      tone: 'warning',
+      actions: [
+        { text: '继续分享', role: 'primary', onPress: () => { void runShare(selection); } },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  }, [runShare, showDialog]);
 
   const confirmDelete = useCallback(() => {
     if (!meeting) return;
+    const presentation = meetingDeletionPresentation(meeting);
+    if (presentation.blocked) {
+      showDialog({
+        title: presentation.title,
+        message: presentation.message,
+        tone: 'warning',
+      });
+      return;
+    }
     showDialog({
-      title: '确认删除',
-      message: '确定要删除这条会议记录吗？',
+      title: presentation.title,
+      message: presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: '删除',
+          text: presentation.confirmText,
           role: 'destructive',
           onPress: async () => {
             try {
+              await manualNote.flush();
               await deleteMeeting(meeting.id);
               openMeetingsTab(navigation);
             } catch (reason) {
@@ -687,7 +1519,40 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         { text: '取消', role: 'cancel' },
       ],
     });
-  }, [deleteMeeting, meeting, navigation, showDialog]);
+  }, [deleteMeeting, manualNote.flush, meeting, navigation, showDialog]);
+
+  const openSpeakerAssignment = useCallback((action: EditTranscriptSpeakerAction) => {
+    if (!meeting || action.meetingId !== meeting.id) return;
+    if (action.revisionKind === 'realtimeDraft') {
+      ToastAndroid.show('文字记录还在生成，完成后才能修改讲话人。', ToastAndroid.LONG);
+      return;
+    }
+    const exact = transcript.filter(line => line.id === action.lineId);
+    const positioned = exact.length === 0
+      ? transcript.filter(line => (
+        Math.round((line.start_time ?? 0) * 1_000) === action.positionMs
+        && (!action.speakerId || line.speaker_id === action.speakerId)
+      ))
+      : [];
+    const line = exact.length === 1 ? exact[0] : positioned.length === 1 ? positioned[0] : null;
+    if (line?.revisionKind === 'realtimeDraft' || line?.isFinal === false) {
+      ToastAndroid.show('文字记录还在生成，完成后才能修改讲话人。', ToastAndroid.LONG);
+      return;
+    }
+    const clusterId = action.speakerClusterId?.trim()
+      || (line ? transcriptSpeakerClusterId(line) : '')
+      || action.speakerId.trim();
+    const clusterCount = clusterId
+      ? transcript.filter(candidate => transcriptSpeakerClusterId(candidate) === clusterId).length
+      : 1;
+    setSpeakerAssignmentError('');
+    setSpeakerAssignmentTarget({
+      ...action,
+      speakerClusterId: clusterId || undefined,
+      speakerLabel: line?.speaker_label?.trim() || action.speakerLabel || '讲话人',
+      clusterCount: Math.max(1, clusterCount),
+    });
+  }, [meeting, transcript]);
 
   const manageSpeaker = useCallback((speakerId?: string) => {
     if (isGuest || !accessToken) {
@@ -701,13 +1566,612 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [accessToken, isGuest, navigation, showDialog]);
 
+  const refreshCanonicalSummary = useCallback(async (meetingId: string) => {
+    if (!meetingScopeKey) return null;
+    const current = await loadCurrentMeetingSummaryState(meetingScopeKey, meetingId);
+    if (!current) return null;
+    setSummaryDocument(current.document);
+    setMeetingActions(current.document.actionItemCandidates);
+    setMeetingActionsLoaded(true);
+    setSummary(meetingSummaryDocumentToText(current.document));
+    setSummaryCached(true);
+    setSummaryError('');
+    return current.document;
+  }, [meetingScopeKey]);
+
+  const saveSpeakerAssignment = useCallback(async (value: MeetingSpeakerAssignmentValue) => {
+    const target = speakerAssignmentTarget;
+    if (!meeting || !meetingScopeKey || !target || speakerAssignmentSaving) return;
+    if (target.meetingId !== meeting.id) return;
+    const requestedMeetingId = meeting.id;
+    setSpeakerAssignmentSaving(true);
+    setSpeakerAssignmentError('');
+    try {
+      const result = await updateMeetingSpeakerAssignmentUseCase.execute({
+        nativeMeetingId: requestedMeetingId,
+        scopeKey: meetingScopeKey,
+        lineId: target.lineId,
+        positionMs: target.positionMs,
+        speakerId: target.speakerClusterId ?? target.speakerId,
+        scope: value.applyToCluster ? 'cluster' : 'segment',
+        displayName: value.displayName,
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      const refreshed = await loadActiveMeetingTranscriptState(
+        meetingScopeKey,
+        requestedMeetingId,
+      ).catch(reason => {
+        diagnosticWarn('reload transcript after speaker assignment failed', reason);
+        return null;
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      if (refreshed) {
+        setTranscript(refreshed.lines);
+        setTranscriptCached(refreshed.lines.length > 0);
+        setTranscriptCompleting(refreshed.completing);
+      } else {
+        setReloadKey(current => current + 1);
+      }
+      advancePageGenerations('transcript', 'speakers', 'summary');
+      await refreshCanonicalSummary(requestedMeetingId).catch(reason => {
+        diagnosticWarn('reload summary after speaker assignment failed', reason);
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      setSpeakerAssignmentTarget(null);
+      ToastAndroid.show(
+        result.applied
+          ? value.applyToCluster
+            ? `已更新本场 ${result.affectedSegmentIds.length} 处讲话人`
+            : '讲话人已更新'
+          : '讲话人名称未变化',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      if (reason instanceof SpeakerAssignmentDraftError) {
+        setSpeakerAssignmentTarget(null);
+        ToastAndroid.show('文字记录还在生成，完成后才能修改讲话人。', ToastAndroid.LONG);
+      } else if (reason instanceof SpeakerAssignmentTargetUnavailableError) {
+        setSpeakerAssignmentError('这段文字记录已发生变化，请刷新后重试。');
+      } else if (reason instanceof Error && reason.message === 'speaker display name is invalid') {
+        setSpeakerAssignmentError('请输入 1 至 120 个字符的人名。');
+      } else {
+        diagnosticWarn('update meeting speaker assignment failed', reason);
+        setSpeakerAssignmentError('讲话人暂时无法更新，请稍后重试。');
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setSpeakerAssignmentSaving(false);
+      }
+    }
+  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, speakerAssignmentSaving, speakerAssignmentTarget]);
+
+  useEffect(() => {
+    if (!route.params.actionFocusRequestId || !meeting) return;
+    void refreshCanonicalSummary(meeting.id).then(current => {
+      if (current) advancePageGenerations('summary');
+    }).catch(() => null);
+  }, [advancePageGenerations, meeting?.id, refreshCanonicalSummary, route.params.actionFocusRequestId]);
+
+  const openMeetingActionFollowup = useCallback(async (actionId: string) => {
+    if (!meeting || !meetingScopeKey || openingFollowupRef.current) return;
+    const candidate = meetingAction(displayedActionCandidates, actionId);
+    if (!candidate) {
+      showDialog({ title: '无法打开', message: '这条待办事项已发生变化，请刷新后重试。', tone: 'error' });
+      return;
+    }
+    if (candidate.followupEventSourceId) {
+      const target = [...searchableEvents, ...events].find(event => (
+        calendarSourceEventId(event) === candidate.followupEventSourceId
+        && !event.isExpandedOccurrence
+      )) ?? [...searchableEvents, ...events].find(event => (
+        calendarSourceEventId(event) === candidate.followupEventSourceId
+      ));
+      if (!target) {
+        showDialog({
+          title: '后续日程暂不可用',
+          message: '该日程可能已删除或尚未同步，请稍后重试。',
+          tone: 'warning',
+        });
+        return;
+      }
+      navigation.navigate('EventDetail', { eventRef: eventRefForEvent(target) });
+      return;
+    }
+
+    openingFollowupRef.current = true;
+    try {
+      const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
+      const canonicalAction = meetingAction(canonical.actions, actionId);
+      if (!canonicalAction?.canonicalId) {
+        throw new Error('meeting action canonical projection is unavailable');
+      }
+      navigation.navigate('AddEvent', {
+        draft: meetingActionFollowupDraft(canonicalAction),
+        followup: {
+          meetingId: meeting.id,
+          canonicalMeetingId: canonical.canonicalMeetingId,
+          actionId: canonicalAction.canonicalId,
+          clientRequestId: meetingActionFollowupClientRequestId(canonicalAction.canonicalId),
+        },
+      });
+    } catch {
+      showDialog({
+        title: '暂时无法创建后续日程',
+        message: '这条待办事项尚未完成本机保存，请稍后重试。',
+        tone: 'error',
+      });
+    } finally {
+      openingFollowupRef.current = false;
+    }
+  }, [displayedActionCandidates, events, meeting, meetingScopeKey, navigation, searchableEvents, showDialog]);
+
+  const selectSummaryVersion = useCallback(async (versionId: string) => {
+    if (!meeting || !meetingScopeKey || !summaryVersionsState || switchingSummaryVersionId) return;
+    if (versionId === summaryVersionsState.currentVersionId) return;
+    setSwitchingSummaryVersionId(versionId);
+    setSummaryVersionsError('');
+    try {
+      await selectMeetingSummaryVersionUseCase.execute({
+        meetingId: summaryVersionsState.canonicalMeetingId,
+        versionId,
+        expectedCurrentVersionId: summaryVersionsState.currentVersionId,
+        scopeKey: meetingScopeKey,
+      });
+      const current = await refreshCanonicalSummary(meeting.id);
+      if (!current) throw new MeetingSummaryVersionUnavailableError();
+      setSummaryVersionsState(previous => previous ? { ...previous, currentVersionId: versionId } : previous);
+      advancePageGenerations('summary');
+      setSummaryVersionsVisible(false);
+    } catch (reason) {
+      setSummaryVersionsError(reason instanceof MeetingSummaryVersionConflictError
+        ? '整理结果版本已发生变化，请重新加载后再选择。'
+        : '整理结果版本暂时无法切换，请稍后重试。');
+    } finally {
+      if (mountedRef.current) setSwitchingSummaryVersionId(null);
+    }
+  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, summaryVersionsState, switchingSummaryVersionId]);
+
+  const toggleMeetingAction = useCallback(async (
+    actionId: string,
+    completed: boolean,
+  ) => {
+    if (!meeting || !meetingScopeKey || updatingActionId) return;
+    const candidate = meetingAction(displayedActionCandidates, actionId);
+    if (!candidate?.updatedAtMs) {
+      showDialog({ title: '更新失败', message: '这条待办事项尚未完成本机保存，请稍后重试。', tone: 'error' });
+      return;
+    }
+    setUpdatingActionId(actionId);
+    try {
+      const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
+      await updateMeetingActionUseCase.execute({
+        meetingId: canonical.canonicalMeetingId,
+        actionId,
+        scopeKey: meetingScopeKey,
+        expectedUpdatedAtMs: candidate.updatedAtMs,
+        status: completed ? 'completed' : 'pending',
+      });
+      if (completed && candidate.reminderNotificationId) {
+        await cancelMeetingActionNotification(candidate.reminderNotificationId).catch(reason => {
+          diagnosticWarn('cancel completed meeting action notification failed', reason);
+        });
+      }
+      if (completed) {
+        await reconcileMeetingActionNotifications(meetingScopeKey).catch(reason => {
+          diagnosticWarn('reconcile meeting action notifications after completion failed', reason);
+        });
+      }
+      const current = await refreshMeetingActions();
+      await refreshCanonicalSummary(meeting.id).catch(() => null);
+      if (!current) {
+        showDialog({
+          title: '已更新',
+          message: '待办状态已保存，但页面内容暂未刷新，请重新打开会议查看。',
+          tone: 'warning',
+        });
+      }
+    } catch (reason) {
+      diagnosticAudit('meeting_action_update_failed', {
+        operation: 'toggle',
+        error_code: meetingActionFailureCode(reason),
+      });
+      showDialog({
+        title: '更新失败',
+        message: reason instanceof MeetingActionRevisionConflictError
+          ? '这条待办事项已在其他操作中更新，请重试。'
+          : '待办事项暂时无法更新，请稍后重试。',
+        tone: 'error',
+      });
+      await refreshMeetingActions().catch(() => null);
+      await refreshCanonicalSummary(meeting.id).catch(() => null);
+    } finally {
+      if (mountedRef.current) setUpdatingActionId(null);
+    }
+  }, [displayedActionCandidates, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog, updatingActionId]);
+
+  const openMeetingActionEditor = useCallback((actionId: string) => {
+    const syncConflict = meetingActionConflicts.find(conflict => conflict.actionId === actionId);
+    if (syncConflict) {
+      setActionConflictError('');
+      setActionConflictTarget(syncConflict);
+      return;
+    }
+    const candidate = meetingAction(displayedActionCandidates, actionId);
+    if (!candidate) {
+      showDialog({ title: '无法编辑', message: '这条待办事项已发生变化，请刷新后重试。', tone: 'error' });
+      return;
+    }
+    setActionEditorError('');
+    setEditingAction({
+      mode: 'edit',
+      id: actionId,
+      content: candidate.content,
+      assignee: candidate.assignee,
+      dueAtMs: candidate.dueAtMs,
+      reminderAtMs: candidate.reminderAtMs,
+      reminderNotificationId: candidate.reminderNotificationId,
+      sourceMarkerId: null,
+      status: candidate.status,
+      expectedUpdatedAtMs: candidate.updatedAtMs ?? 0,
+    });
+  }, [displayedActionCandidates, meetingActionConflicts, showDialog]);
+
+  const resolveMeetingActionConflict = useCallback(async (choice: MeetingActionConflictChoice) => {
+    if (!meeting || !meetingScopeKey || !actionConflictTarget || actionConflictSaving) return;
+    setActionConflictSaving(true);
+    setActionConflictError('');
+    try {
+      const result = await resolveMeetingActionSyncConflictUseCase.execute({
+        conflictId: actionConflictTarget.id,
+        meetingId: actionConflictTarget.meetingId,
+        actionId: actionConflictTarget.actionId,
+        scopeKey: meetingScopeKey,
+        expectedUpdatedAtMs: actionConflictTarget.local.updatedAtMs,
+        resolution: choice,
+      });
+      if (choice === 'use_remote' && result.previousNotificationId) {
+        await cancelMeetingActionNotification(result.previousNotificationId).catch(reason => {
+          diagnosticWarn('cancel replaced conflict action notification failed', reason);
+        });
+      }
+      await reconcileMeetingActionNotifications(meetingScopeKey).catch(reason => {
+        diagnosticWarn('reconcile meeting action notifications after conflict resolution failed', reason);
+      });
+      const current = await refreshMeetingActions();
+      await refreshCanonicalSummary(meeting.id).catch(() => null);
+      setActionConflictTarget(null);
+      ToastAndroid.show(
+        choice === 'keep_local' ? '本机版本将重新同步' : '已使用云端版本',
+        ToastAndroid.SHORT,
+      );
+      if (!current) {
+        showDialog({
+          title: '版本已选择',
+          message: '待办事项已保存，但页面内容暂未刷新，请重新打开会议查看。',
+          tone: 'warning',
+        });
+      }
+    } catch (reason) {
+      diagnosticAudit('meeting_action_conflict_resolution_failed', {
+        operation: choice,
+        error_code: meetingActionFailureCode(reason),
+      });
+      setActionConflictError(reason instanceof MeetingActionSyncConflictChangedError
+        ? '这条冲突已发生变化，请关闭后重新打开。'
+        : choice === 'keep_local'
+          ? '本机版本暂时无法重新同步，请稍后重试。'
+          : '云端版本暂时无法应用，请稍后重试。');
+      if (reason instanceof MeetingActionSyncConflictChangedError) {
+        await refreshMeetingActions().catch(() => null);
+      }
+    } finally {
+      if (mountedRef.current) setActionConflictSaving(false);
+    }
+  }, [actionConflictSaving, actionConflictTarget, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog]);
+
+  const openManualNoteConflict = useCallback(async () => {
+    await manualNote.flush();
+    const conflict = manualNoteConflict ?? await refreshManualNoteConflict();
+    if (!conflict) {
+      ToastAndroid.show('笔记冲突已处理', ToastAndroid.SHORT);
+      return;
+    }
+    setManualNoteConflictError('');
+    setManualNoteConflictTarget(conflict);
+  }, [manualNote.flush, manualNoteConflict, refreshManualNoteConflict]);
+
+  const resolveManualNoteConflict = useCallback(async (
+    choice: MeetingManualNoteConflictChoice,
+  ) => {
+    if (!meetingScopeKey || !manualNoteConflictTarget || manualNoteConflictSaving) return;
+    setManualNoteConflictSaving(true);
+    setManualNoteConflictError('');
+    try {
+      await resolveMeetingManualNoteSyncConflictUseCase.execute({
+        conflictId: manualNoteConflictTarget.id,
+        meetingId: manualNoteConflictTarget.meetingId,
+        scopeKey: meetingScopeKey,
+        expectedLocalRevision: manualNoteConflictTarget.local.revision,
+        resolution: choice,
+      });
+      await manualNote.reload();
+      await refreshManualNoteConflict();
+      setManualNoteConflictTarget(null);
+      advancePageGenerations('notes');
+      ToastAndroid.show(
+        choice === 'keep_local' ? '本机笔记将重新同步' : '已使用云端笔记',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      diagnosticAudit('manual_note_conflict_resolution_failed', {
+        operation: choice,
+        error_code: reason instanceof MeetingManualNoteSyncConflictChangedError
+          ? 'conflict_changed'
+          : 'resolution_failed',
+      });
+      setManualNoteConflictError(reason instanceof MeetingManualNoteSyncConflictChangedError
+        ? '这次冲突已发生变化，请关闭后重新打开。'
+        : choice === 'keep_local'
+          ? '本机笔记暂时无法重新同步，请稍后重试。'
+          : '云端笔记暂时无法应用，请稍后重试。');
+      if (reason instanceof MeetingManualNoteSyncConflictChangedError) {
+        await refreshManualNoteConflict().catch(() => null);
+      }
+    } finally {
+      if (mountedRef.current) setManualNoteConflictSaving(false);
+    }
+  }, [advancePageGenerations, manualNote.reload, manualNoteConflictSaving, manualNoteConflictTarget, meetingScopeKey, refreshManualNoteConflict]);
+
+  const openMeetingActionCreator = useCallback((sourceMarkerId: string | null = null) => {
+    if (!meeting || !meetingScopeKey) {
+      showDialog({
+        title: '暂时无法新建',
+        message: '当前会议尚未完成本机保存，请稍后重试。',
+        tone: 'warning',
+      });
+      return;
+    }
+    setActionEditorError('');
+    try {
+      setEditingAction({
+        mode: 'create',
+        id: secureClientIdFactory.create(),
+        content: '',
+        assignee: null,
+        dueAtMs: null,
+        reminderAtMs: null,
+        reminderNotificationId: null,
+        sourceMarkerId,
+        status: 'pending',
+        expectedUpdatedAtMs: 0,
+      });
+    } catch (reason) {
+      diagnosticAudit('meeting_action_create_failed', {
+        operation: 'prepare',
+        error_code: meetingActionFailureCode(reason),
+      });
+      showDialog({ title: '暂时无法新建', message: '待办事项创建准备失败，请稍后重试。', tone: 'error' });
+    }
+  }, [meeting, meetingScopeKey, showDialog]);
+
+  const saveMeetingActionEdit = useCallback(async (value: MeetingActionEditorSaveValue) => {
+    if (!meeting || !meetingScopeKey || !editingAction || actionEditorSaving) return;
+    setActionEditorSaving(true);
+    setActionEditorError('');
+    const isCreating = editingAction.mode === 'create';
+    const desiredReminderAtMs = value.reminderEnabled && value.dueAtMs !== null
+      ? meetingActionReminderAtForDue(value.dueAtMs)
+      : null;
+    const oldNotificationId = editingAction.reminderNotificationId;
+    let newNotificationId: string | null = null;
+    let nextNotificationId = desiredReminderAtMs === null ? null : oldNotificationId;
+    let committed = false;
+    let schedulingNotification = false;
+    try {
+      const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
+      const reminderAlreadyDelivered = desiredReminderAtMs !== null
+        && desiredReminderAtMs <= Date.now()
+        && editingAction.reminderAtMs === desiredReminderAtMs;
+      const notificationNeedsReplacement = desiredReminderAtMs !== null && !reminderAlreadyDelivered && (
+        !oldNotificationId
+        || editingAction.reminderAtMs !== desiredReminderAtMs
+        || editingAction.content.trim() !== value.content.trim()
+      );
+      if (notificationNeedsReplacement) {
+        schedulingNotification = true;
+        newNotificationId = await scheduleMeetingActionNotification({
+          actionId: editingAction.id,
+          canonicalMeetingId: canonical.canonicalMeetingId,
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          content: value.content,
+          reminderAtMs: desiredReminderAtMs,
+        }, meetingScopeKey);
+        if (!newNotificationId) throw new Error('meeting action notification scope changed');
+        schedulingNotification = false;
+        nextNotificationId = newNotificationId;
+      }
+      if (isCreating) {
+        await createMeetingActionUseCase.execute({
+          meetingId: canonical.canonicalMeetingId,
+          actionId: editingAction.id,
+          scopeKey: meetingScopeKey,
+          content: value.content,
+          assigneeText: value.assignee,
+          dueAtMs: value.dueAtMs,
+          reminderAtMs: desiredReminderAtMs,
+          reminderNotificationId: nextNotificationId,
+          sourceMarkerId: editingAction.sourceMarkerId,
+        });
+      } else {
+        await updateMeetingActionUseCase.execute({
+          meetingId: canonical.canonicalMeetingId,
+          actionId: editingAction.id,
+          scopeKey: meetingScopeKey,
+          expectedUpdatedAtMs: editingAction.expectedUpdatedAtMs,
+          content: value.content,
+          assigneeText: value.assignee,
+          dueAtMs: value.dueAtMs,
+          reminderAtMs: desiredReminderAtMs,
+          reminderNotificationId: nextNotificationId,
+        });
+      }
+      committed = true;
+      if (oldNotificationId && oldNotificationId !== nextNotificationId) {
+        await cancelMeetingActionNotification(oldNotificationId).catch(reason => {
+          diagnosticWarn('cancel replaced meeting action notification failed', reason);
+        });
+      }
+      await reconcileMeetingActionNotifications(meetingScopeKey).catch(reason => {
+        diagnosticWarn('reconcile meeting action notifications after edit failed', reason);
+      });
+      const current = await refreshMeetingActions();
+      await refreshCanonicalSummary(meeting.id).catch(() => null);
+      setEditingAction(null);
+      if (!current) {
+        showDialog({
+          title: isCreating ? '已创建' : '已保存',
+          message: `待办事项已${isCreating ? '创建' : '保存'}，但页面内容暂未刷新，请重新打开会议查看。`,
+          tone: 'warning',
+        });
+      }
+    } catch (reason) {
+      if (!committed && newNotificationId) {
+        await cancelMeetingActionNotification(newNotificationId).catch(cancelReason => {
+          diagnosticWarn('rollback meeting action notification failed', cancelReason);
+        });
+      }
+      diagnosticAudit('meeting_action_update_failed', {
+        operation: isCreating ? 'create' : 'edit',
+        error_code: meetingActionFailureCode(reason),
+      });
+      if (reason instanceof MeetingActionNotificationPermissionError) {
+        setActionEditorError('未获得通知权限，请在“通知与提醒”中开启后再保存。');
+      } else if (reason instanceof MeetingActionReminderTimeError) {
+        setActionEditorError('提醒时间已过，请选择之后的截止日期。');
+      } else if (
+        reason instanceof MeetingActionRevisionConflictError
+        || reason instanceof MeetingActionIdentityConflictError
+      ) {
+        setActionEditorError(isCreating
+          ? '这条待办事项已创建，请关闭后查看。'
+          : '这条待办事项已更新，请关闭后重新编辑。');
+        await refreshMeetingActions().catch(() => null);
+        await refreshCanonicalSummary(meeting.id).catch(() => null);
+      } else if (schedulingNotification) {
+        setActionEditorError('保存失败，未能创建系统提醒，请稍后重试。');
+      } else {
+        setActionEditorError(isCreating ? '创建失败，请稍后重试。' : '保存失败，请稍后重试。');
+      }
+    } finally {
+      if (mountedRef.current) setActionEditorSaving(false);
+    }
+  }, [actionEditorSaving, editingAction, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog]);
+
+  const changeMeetingActionStatus = useCallback(async (status: 'pending' | 'dismissed') => {
+    if (
+      !meeting
+      || !meetingScopeKey
+      || !editingAction
+      || editingAction.mode !== 'edit'
+      || actionEditorSaving
+    ) return;
+    setActionEditorSaving(true);
+    setActionEditorError('');
+    try {
+      const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
+      await updateMeetingActionUseCase.execute({
+        meetingId: canonical.canonicalMeetingId,
+        actionId: editingAction.id,
+        scopeKey: meetingScopeKey,
+        expectedUpdatedAtMs: editingAction.expectedUpdatedAtMs,
+        status,
+      });
+      if (status === 'dismissed' && editingAction.reminderNotificationId) {
+        await cancelMeetingActionNotification(editingAction.reminderNotificationId).catch(reason => {
+          diagnosticWarn('cancel dismissed meeting action notification failed', reason);
+        });
+      }
+      await reconcileMeetingActionNotifications(meetingScopeKey).catch(reason => {
+        diagnosticWarn('reconcile meeting action notifications after status change failed', reason);
+      });
+      const current = await refreshMeetingActions();
+      await refreshCanonicalSummary(meeting.id).catch(() => null);
+      setEditingAction(null);
+      if (!current) {
+        showDialog({
+          title: status === 'dismissed' ? '已忽略' : '已恢复',
+          message: '待办状态已保存，但页面内容暂未刷新，请重新打开会议查看。',
+          tone: 'warning',
+        });
+      }
+    } catch (reason) {
+      diagnosticAudit('meeting_action_update_failed', {
+        operation: status === 'dismissed' ? 'dismiss' : 'restore',
+        error_code: meetingActionFailureCode(reason),
+      });
+      if (reason instanceof MeetingActionRevisionConflictError) {
+        setActionEditorError('这条待办事项已更新，请关闭后重试。');
+        await refreshMeetingActions().catch(() => null);
+        await refreshCanonicalSummary(meeting.id).catch(() => null);
+      } else {
+        setActionEditorError(status === 'dismissed'
+          ? '暂时无法忽略，请稍后重试。'
+          : '暂时无法恢复，请稍后重试。');
+      }
+    } finally {
+      if (mountedRef.current) setActionEditorSaving(false);
+    }
+  }, [actionEditorSaving, editingAction, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog]);
+
+  const removeMarker = useCallback(async (markerId: string) => {
+    if (!meeting || !meetingScopeKey || deletingMarkerId) return;
+    setDeletingMarkerId(markerId);
+    try {
+      await deleteMeetingMarker(meetingScopeKey, meeting.id, markerId);
+      if (!mountedRef.current || routeMeetingIdRef.current !== meeting.id) return;
+      setMarkers(current => current.filter(marker => marker.id !== markerId));
+      setMarkerActionsId(current => current === markerId ? null : current);
+      ToastAndroid.show('已删除标记', ToastAndroid.SHORT);
+    } catch (reason) {
+      if (mountedRef.current && routeMeetingIdRef.current === meeting.id) {
+        ToastAndroid.show(
+          readableErrorMessage(reason, '标记删除失败，请稍后重试。'),
+          ToastAndroid.LONG,
+        );
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === meeting.id) {
+        setDeletingMarkerId(null);
+      }
+    }
+  }, [deletingMarkerId, meeting, meetingScopeKey]);
+
+  const shareMarker = useCallback(async (markerId: string) => {
+    const marker = markers.find(candidate => candidate.id === markerId);
+    if (!marker) {
+      ToastAndroid.show('这条标记已发生变化，请刷新后重试。', ToastAndroid.LONG);
+      return;
+    }
+    try {
+      await shareMeetingMarkerText(marker, transcript);
+    } catch (reason) {
+      showDialog({
+        title: '分享失败',
+        message: readableErrorMessage(reason, '标记文字暂时无法分享，请稍后重试。'),
+        tone: 'error',
+      });
+    }
+  }, [markers, showDialog, transcript]);
+
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'back':
-        navigation.goBack();
+        void manualNote.flush().finally(() => navigation.goBack());
         break;
       case 'share':
-        void runShare('document');
+        if (!sharing) setShareVisible(true);
         break;
       case 'more':
         if (meeting) setMoreVisible(true);
@@ -729,6 +2193,18 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         setTabGeneration(action.selectionGeneration);
         setActiveTab(action.tab);
         break;
+      case 'updateManualNote':
+        if (!meeting || action.meetingId !== meeting.id) break;
+        manualNote.updateContent(action.content);
+        break;
+      case 'retryManualNote':
+        if (!meeting || action.meetingId !== meeting.id) break;
+        void manualNote.retry();
+        break;
+      case 'openManualNoteConflict':
+        if (!meeting || action.meetingId !== meeting.id) break;
+        void openManualNoteConflict();
+        break;
       case 'retryDetailContent':
         if (action.meetingId !== route.params.meetingId) break;
         const retryPlan = nativeMinutesDetailRetryPlan(action.tab, Boolean(summary));
@@ -740,15 +2216,48 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         break;
       case 'generateSummary':
         if (action.meetingId !== route.params.meetingId) break;
-        void runSummaryTask({ forceRegenerate: Boolean(summary) });
+        setTemplateSheetVisible(true);
+        break;
+      case 'editTranscriptSpeaker':
+        openSpeakerAssignment(action);
         break;
       case 'manageSpeaker':
         manageSpeaker(action.speakerId);
         break;
+      case 'toggleAction':
+        if (action.meetingId !== route.params.meetingId) break;
+        void toggleMeetingAction(
+          action.actionId,
+          action.completed,
+        );
+        break;
+      case 'createAction':
+        if (action.meetingId !== route.params.meetingId) break;
+        openMeetingActionCreator();
+        break;
+      case 'editAction':
+        if (action.meetingId !== route.params.meetingId) break;
+        openMeetingActionEditor(action.actionId);
+        break;
+      case 'actionToEvent':
+        if (action.meetingId !== route.params.meetingId) break;
+        void openMeetingActionFollowup(action.actionId);
+        break;
+      case 'deleteMarker':
+        if (action.meetingId !== route.params.meetingId) break;
+        void removeMarker(action.markerId);
+        break;
+      case 'openMarkerActions':
+        if (action.meetingId !== route.params.meetingId) break;
+        if (markers.some(marker => marker.id === action.markerId)) setMarkerActionsId(action.markerId);
+        break;
+      case 'openMarker':
+        // Native owns tab selection, transcript positioning, and optional audio seek.
+        break;
       default:
         break;
     }
-  }, [manageSpeaker, meeting, navigation, route.params.meetingId, runShare, showDialog, summary]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, removeMarker, route.params.meetingId, sharing, showDialog, summary, toggleMeetingAction]);
 
   const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
@@ -758,10 +2267,28 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     location: meeting?.location ?? '',
     activeTab,
     tabGeneration,
-    activeTabIsExplicit: route.params.focus === 'summary' || route.params.focus === 'transcript',
+    activeTabIsExplicit: focusedTab !== null,
+    manualNote: manualNote.content,
+    manualNoteLoading: manualNote.loading,
+    manualNoteSaving: manualNote.saving,
+    manualNoteEnabled: manualNote.enabled,
+    manualNoteError: manualNote.error,
+    manualNoteRetryable: manualNote.retryable,
+    manualNoteConflict: manualNoteConflict !== null,
     transcript,
+    actionItemCandidates: displayedActionCandidates,
+    conflictedActionIds,
+    markers: markers.map(marker => ({
+      id: marker.id,
+      positionMs: marker.positionMs,
+      nearestSegmentId: marker.nearestSegmentId,
+      label: marker.label,
+      deleting: marker.id === deletingMarkerId,
+    })),
+    summaryDocument: displayedSummaryDocument,
     summaryText: displayedSummary,
     transcriptLoading: Boolean(meeting && loadingTranscript),
+    transcriptStatusMessage: transcriptCompleting ? '文字记录仍在补全' : '',
     summaryLoading: Boolean(meeting && loadingSummary && !briefSummary),
     transcriptError: meeting ? transcriptError : '请返回会议列表后重新打开。',
     summaryError: briefSummary ? '' : summaryError,
@@ -769,18 +2296,33 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     canShare: Boolean(meeting && !sharing),
     canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
+    canCreateAction: Boolean(
+      meeting
+      && meetingScopeKey
+      && (displayedSummaryDocument || displayedActionCandidates.length > 0),
+    ),
     summaryGenerating: loadingSummary,
+    updatingActionId,
+    focusActionId: route.params.actionId,
+    focusActionRequestId: route.params.actionFocusRequestId,
+    focusTranscriptSegmentId: route.params.segmentId,
+    focusTranscriptPositionMs: route.params.positionMs,
+    focusTranscriptRequestId: route.params.transcriptFocusRequestId,
     titleEditRequestId: route.params.focus === 'title' ? 1 : 0,
-    pageGenerations,
+    pageGenerations: {
+      ...pageGenerations,
+      notes: manualNoteSnapshotGenerationRef.current,
+    },
     pageCached: {
-      transcript: transcriptCached,
+      notes: true,
+      transcript: transcriptCached || transcriptCompleting,
       summary: summaryCached,
       speakers: transcriptCached,
     },
     playerSource,
     audioStatusMessage: loadingAudio ? '正在加载录音' : (!playerSource ? '仅有转写，无录音文件' : ''),
     audioErrorMessage: pendingAudioError || playerSourceError,
-  }), [accessToken, activeTab, briefSummary, displayedSummary, isGuest, loadingAudio, loadingSummary, loadingTranscript, meeting, pageGenerations, pendingAudioError, playerSource, playerSourceError, route.params.focus, route.params.meetingId, sharing, summaryCached, summaryError, summaryProgress, tabGeneration, transcript, transcriptCached, transcriptError]);
+  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
@@ -796,9 +2338,34 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             onPress: () => { void performPendingAudioUpload(pendingAudioUpload, true); },
           }]
         : []),
+      ...(summaryDocument?.remoteVersionId
+        ? [{ key: 'summary-versions', label: '整理结果版本', onPress: openSummaryVersions }]
+        : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload]);
+  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
+
+  const markerForActions = useMemo(
+    () => markers.find(marker => marker.id === markerActionsId) ?? null,
+    [markerActionsId, markers],
+  );
+  const markerItems = useMemo<AppActionSheetItem[]>(() => markerForActions ? [
+    {
+      key: 'create-action',
+      label: '创建待办事项',
+      onPress: () => openMeetingActionCreator(markerForActions.id),
+    },
+    {
+      key: 'share-text',
+      label: '分享标记文字',
+      onPress: () => { void shareMarker(markerForActions.id); },
+    },
+  ] : [], [markerForActions, openMeetingActionCreator, shareMarker]);
+
+  const versionChoices = useMemo(
+    () => summaryVersionChoices(summaryVersionsState),
+    [summaryVersionsState],
+  );
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
@@ -816,11 +2383,150 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           testID="meeting-detail-native-surface"
         />
       </View>
+      <MeetingShareSheet
+        visible={shareVisible}
+        availability={shareAvailability}
+        onClose={() => setShareVisible(false)}
+        onShare={requestShare}
+      />
       <AppActionSheet
         visible={moreVisible}
         title={meeting?.title ?? '会议记录'}
         items={moreItems}
         onClose={() => setMoreVisible(false)}
+      />
+      <AppActionSheet
+        visible={markerForActions !== null}
+        title={markerForActions
+          ? `标记 ${formatNativeMinutesTimestamp(markerForActions.positionMs / 1_000)}`
+          : '标记操作'}
+        items={markerItems}
+        onClose={() => setMarkerActionsId(null)}
+      />
+      <MeetingSummaryVersionSheet
+        visible={summaryVersionsVisible}
+        choices={versionChoices}
+        loading={summaryVersionsLoading}
+        error={summaryVersionsError}
+        switchingId={switchingSummaryVersionId}
+        onClose={() => {
+          if (switchingSummaryVersionId) return;
+          setSummaryVersionsVisible(false);
+        }}
+        onRetry={() => { void loadSummaryVersions(); }}
+        onSelect={versionId => { void selectSummaryVersion(versionId); }}
+      />
+      <MeetingTemplateSheet
+        visible={templateSheetVisible}
+        selectedTemplate={summaryTemplate}
+        busy={loadingSummary}
+        onClose={() => setTemplateSheetVisible(false)}
+        onSelect={template => {
+          void prepareSummaryGeneration(template);
+        }}
+      />
+      <MeetingSummaryCarryForwardSheet
+        visible={summaryCarryForwardRequest !== null}
+        memory={summaryCarryForwardRequest?.memory ?? null}
+        onClose={() => setSummaryCarryForwardRequest(null)}
+        onSkip={() => {
+          const request = summaryCarryForwardRequest;
+          setSummaryCarryForwardRequest(null);
+          if (
+            request
+            && activeMeetingIdRef.current === request.meetingId
+            && activeMeetingScopeRef.current === request.scopeKey
+          ) {
+            void runSummaryTask({
+              forceRegenerate: request.forceRegenerate,
+              template: request.template,
+              carryForward: null,
+            });
+          }
+        }}
+        onAuthorize={selection => {
+          const request = summaryCarryForwardRequest;
+          if (
+            !request
+            || activeMeetingIdRef.current !== request.meetingId
+            || activeMeetingScopeRef.current !== request.scopeKey
+          ) {
+            return Promise.reject(new Error('summary carry-forward request is no longer active'));
+          }
+          return authorizeMeetingSummaryCarryForward({
+            scopeKey: request.scopeKey,
+            meetingId: request.meetingId,
+            selection,
+          });
+        }}
+        onCompleted={carryForward => {
+          const request = summaryCarryForwardRequest;
+          setSummaryCarryForwardRequest(null);
+          if (
+            request
+            && activeMeetingIdRef.current === request.meetingId
+            && activeMeetingScopeRef.current === request.scopeKey
+          ) {
+            void runSummaryTask({
+              forceRegenerate: request.forceRegenerate,
+              template: request.template,
+              carryForward,
+            });
+          }
+        }}
+      />
+      <MeetingSpeakerAssignmentSheet
+        visible={speakerAssignmentTarget !== null}
+        targetKey={speakerAssignmentTarget?.lineId ?? ''}
+        speakerLabel={speakerAssignmentTarget?.speakerLabel ?? ''}
+        clusterCount={speakerAssignmentTarget?.clusterCount ?? 1}
+        candidates={speakerNameCandidates}
+        saving={speakerAssignmentSaving}
+        error={speakerAssignmentError}
+        onClearError={() => setSpeakerAssignmentError('')}
+        onClose={() => {
+          if (speakerAssignmentSaving) return;
+          setSpeakerAssignmentTarget(null);
+          setSpeakerAssignmentError('');
+        }}
+        onSave={value => { void saveSpeakerAssignment(value); }}
+      />
+      <MeetingActionEditorSheet
+        visible={editingAction !== null}
+        action={editingAction}
+        saving={actionEditorSaving}
+        error={actionEditorError}
+        onClose={() => {
+          if (actionEditorSaving) return;
+          setEditingAction(null);
+          setActionEditorError('');
+        }}
+        onSave={value => { void saveMeetingActionEdit(value); }}
+        onStatusChange={status => { void changeMeetingActionStatus(status); }}
+      />
+      <MeetingActionConflictSheet
+        visible={actionConflictTarget !== null}
+        conflict={actionConflictTarget}
+        saving={actionConflictSaving}
+        error={actionConflictError}
+        onClose={() => {
+          if (actionConflictSaving) return;
+          setActionConflictTarget(null);
+          setActionConflictError('');
+        }}
+        onResolve={choice => { void resolveMeetingActionConflict(choice); }}
+      />
+      <MeetingManualNoteConflictSheet
+        visible={manualNoteConflictTarget !== null}
+        conflict={manualNoteConflictTarget}
+        saving={manualNoteConflictSaving}
+        error={manualNoteConflictError}
+        onClose={() => {
+          if (manualNoteConflictSaving) return;
+          setManualNoteConflictTarget(null);
+          setManualNoteConflictError('');
+        }}
+        onResolve={choice => { void resolveManualNoteConflict(choice); }}
       />
     </ScreenContainer>
   );

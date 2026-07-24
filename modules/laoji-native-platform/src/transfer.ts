@@ -15,11 +15,11 @@ interface NativeTransferModule {
     scope: string,
     generation: number,
     meetingId: string,
+    remoteMeetingId: string,
     operationId: string,
     fileUri: string,
     mimeType: string,
     fileName: string,
-    expectedBytes?: number,
   ): Promise<string>;
   getUploadState(workId: string): Promise<NativeUploadState>;
   cancelUpload(workId: string): Promise<void>;

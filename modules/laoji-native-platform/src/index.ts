@@ -10,6 +10,8 @@ export * from './audio';
 export * from './scheduleVoice';
 export * from './speaker';
 export * from './location';
+export * from './mediaImport';
+export * from './systemEntries';
 export * from './ui';
 
 interface LaojiNativePlatformModule {

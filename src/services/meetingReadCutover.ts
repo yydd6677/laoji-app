@@ -8,7 +8,7 @@ import type {
 import {
   MeetingRepositoryFacade,
   legacyIdentityForRepositoryItem,
-} from '../data/repositories';
+} from '../data/repositories/meetingRepositoryFacade';
 import { Colors as C } from '../theme/colors';
 import { formatDuration } from '../utils/meetingMedia';
 import {
@@ -94,6 +94,7 @@ function compatibilityStatus(item: MeetingListProjectionItem): string {
 
 function statusTag(status: string): { label: string; color: string } {
   if (status === 'recording') return { label: '录音中', color: C.red };
+  if (status === 'paused') return { label: '录音已暂停', color: C.orange };
   if (status === 'processing') return { label: '处理中', color: C.orange };
   if (status === 'failed') return { label: '失败', color: C.red };
   if (status === 'completed') return { label: '已完成', color: C.green };
@@ -163,13 +164,14 @@ function compatibilityMeeting(
   );
   return {
     id,
+    remoteId: item.remoteId,
     title: item.title,
     ...dateTime,
     duration: formatDuration(durationSec),
     tags: compatibilityTags(item, scopeKey, status, uploadPending, uploadBlocked),
     participants: [...item.participants],
-    hasTranscript: item.activeTranscriptSegmentCount > 0,
-    hasSummary: item.currentSummaryReady,
+    hasTranscript: item.activeTranscriptSegmentCount > 0 || stageStatus(item, 'transcript') === 'ready',
+    hasSummary: item.currentSummaryReady || stageStatus(item, 'summary') === 'ready',
     status,
     statusSyncPending: item.syncState === 'pending',
     mode: item.mode ?? 'realtime',

@@ -6,11 +6,13 @@ export const PRIVACY_KEY = '@laoji_privacy';
 export interface PrivacyPrefs {
   biometricEnabled: boolean;
   appLockEnabled: boolean;
+  hideWidgetTitles: boolean;
 }
 
 export const DEFAULT_PRIVACY_PREFS: PrivacyPrefs = {
   biometricEnabled: false,
   appLockEnabled: false,
+  hideWidgetTitles: true,
 };
 
 type PrivacyPrefsListener = (prefs: PrivacyPrefs) => void;
@@ -42,6 +44,7 @@ export async function loadPrivacyPrefs(scope: string): Promise<PrivacyPrefs> {
     return {
       biometricEnabled: Boolean(saved.biometricEnabled ?? saved.faceId),
       appLockEnabled: Boolean(saved.appLockEnabled ?? saved.appLock),
+      hideWidgetTitles: saved.hideWidgetTitles !== false,
     };
   } catch {
     throw new Error('privacy preferences are corrupted');

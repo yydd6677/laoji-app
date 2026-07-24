@@ -7,6 +7,11 @@ import {
   generateMeetingSummary,
 } from './api';
 import { MeetingSummary, TranscriptLine } from '../types';
+import {
+  DEFAULT_MEETING_TEMPLATE,
+  type MeetingSummaryCarryForwardAuthorization,
+  type MeetingTemplate,
+} from '../domain/meeting';
 import { HttpResponseError } from './errors';
 import {
   meetingSummaryToText,
@@ -130,6 +135,43 @@ export function meetingDateForSummary(dateLabel?: string, createdAt?: string): s
 
 export const normalizeGuestSummaryResult = normalizeMeetingSummaryResult;
 
+function normalizeSummaryForTemplate(
+  meetingId: string,
+  value: unknown,
+  template: Pick<MeetingTemplate, 'id' | 'revision'>,
+  carryForward: MeetingSummaryCarryForwardAuthorization | null,
+): MeetingSummary | null {
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const nested = root?.structured_document && typeof root.structured_document === 'object'
+    && !Array.isArray(root.structured_document)
+    ? root.structured_document as Record<string, unknown>
+    : null;
+  const rawCarryRequestId = nested?.carryForwardRequestId
+    ?? nested?.carry_forward_request_id
+    ?? root?.carryForwardRequestId
+    ?? root?.carry_forward_request_id;
+  const responseCarryRequestId = typeof rawCarryRequestId === 'string'
+    ? rawCarryRequestId.trim() || null
+    : null;
+  const expectedCarryRequestId = carryForward?.requestId.trim() || null;
+  if (responseCarryRequestId !== expectedCarryRequestId) {
+    throw new Error('服务端返回的历史参考授权与本次请求不一致，未保存本次结果。');
+  }
+  const summary = normalizeMeetingSummaryResult(meetingId, value);
+  if (!summary) return null;
+  const document = summary.structured_document;
+  if (
+    !document
+    || document.templateId !== template.id
+    || document.templateRevision !== template.revision
+  ) {
+    throw new Error('服务端返回的整理模板与所选模板不一致，未保存本次结果。');
+  }
+  return summary;
+}
+
 async function waitForTask(
   fetchStatus: (waitMs: number) => Promise<ApiMeetingTaskStatus>,
   options: { signal?: AbortSignal; onProgress?: (progress: MeetingSummaryProgress) => void } = {},
@@ -199,6 +241,8 @@ export async function generateSummaryForMeeting(options: {
   title?: string;
   meetingDate?: string;
   transcriptLines: TranscriptLine[];
+  template?: Pick<MeetingTemplate, 'id' | 'revision'>;
+  carryForward?: MeetingSummaryCarryForwardAuthorization | null;
   isGuest: boolean;
   accessToken?: string | null;
   resumeTaskId?: string;
@@ -212,6 +256,8 @@ export async function generateSummaryForMeeting(options: {
     title,
     meetingDate,
     transcriptLines,
+    template = DEFAULT_MEETING_TEMPLATE,
+    carryForward = null,
     isGuest,
     accessToken,
     resumeTaskId,
@@ -239,6 +285,8 @@ export async function generateSummaryForMeeting(options: {
         signal,
         meetingDate,
         force,
+        template,
+        carryForward,
       );
       if (onTaskSubmitted) await onTaskSubmitted(task.task_id);
       return task.task_id;
@@ -260,21 +308,29 @@ export async function generateSummaryForMeeting(options: {
         { signal, onProgress },
       );
     }
-    const summary = normalizeMeetingSummaryResult(meetingId, status.result);
+    const summary = normalizeSummaryForTemplate(meetingId, status.result, template, carryForward);
     if (!summary) throw new Error('guest meeting summary is empty');
     return summary;
   }
 
   if (!accessToken) throw new Error('not authenticated');
   const submitTask = async (force: boolean): Promise<string> => {
-    const task = await generateMeetingSummary(meetingId, accessToken, signal, force);
+    const task = await generateMeetingSummary(
+      meetingId,
+      accessToken,
+      signal,
+      force,
+      template,
+      carryForward,
+    );
     if (onTaskSubmitted) await onTaskSubmitted(task.task_id);
     return task.task_id;
   };
   let taskId = resumeTaskId || await submitTask(forceRegenerate);
+  let completedStatus: ApiMeetingTaskStatus | null = null;
   if (taskId) {
     try {
-      await waitForTask(
+      completedStatus = await waitForTask(
         waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
         { signal, onProgress },
       );
@@ -283,12 +339,20 @@ export async function generateSummaryForMeeting(options: {
       // summary. Check the durable result once before showing a terminal error.
       throwIfAborted(signal);
       const completed = await fetchMeetingSummaryDetail(meetingId, accessToken, signal).catch(() => null);
-      const normalizedCompleted = normalizeMeetingSummaryResult(meetingId, completed);
+      let normalizedCompleted: MeetingSummary | null = null;
+      if (completed) {
+        try {
+          normalizedCompleted = normalizeSummaryForTemplate(meetingId, completed, template, carryForward);
+        } catch {
+          // The durable endpoint may still expose the previous template while a missing task is
+          // being recovered. Only a matching version can satisfy this request.
+        }
+      }
       if (normalizedCompleted) return normalizedCompleted;
       if (isMissingTaskError(error)) {
         reportResubmission();
         taskId = await submitTask(false);
-        await waitForTask(
+        completedStatus = await waitForTask(
           waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
           { signal, onProgress },
         );
@@ -298,9 +362,20 @@ export async function generateSummaryForMeeting(options: {
     }
   }
   throwIfAborted(signal);
-  const summary = normalizeMeetingSummaryResult(
+  if (completedStatus?.result) {
+    const taskSummary = normalizeSummaryForTemplate(
+      meetingId,
+      completedStatus.result,
+      template,
+      carryForward,
+    );
+    if (taskSummary) return taskSummary;
+  }
+  const summary = normalizeSummaryForTemplate(
     meetingId,
     await fetchMeetingSummaryDetail(meetingId, accessToken, signal),
+    template,
+    carryForward,
   );
   if (!summary) throw new Error('meeting summary is empty');
   return summary;

@@ -21,6 +21,7 @@ import { AppActionSheet, AppActionSheetItem } from '../components/AppActionSheet
 import { MeetingListItem } from '../components/MeetingListItem';
 import { MeetingSearchPage } from '../components/MeetingSearchPage';
 import { readableErrorMessage } from '../services/errors';
+import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { canResumeMeetingRecording } from '../utils/meetingMedia';
 
 type MeetingListNavigationProp = CompositeNavigationProp<
@@ -43,13 +44,24 @@ export function MeetingListScreen({ navigation }: Props) {
   };
 
   const confirmDelete = (id: string) => {
+    const target = meetings.find(meeting => meeting.id === id);
+    if (!target) return;
+    const presentation = meetingDeletionPresentation(target);
+    if (presentation.blocked) {
+      showDialog({
+        title: presentation.title,
+        message: presentation.message,
+        tone: 'warning',
+      });
+      return;
+    }
     showDialog({
-      title: '删除会议',
-      message: '确定删除此会议记录？',
+      title: presentation.title,
+      message: presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: '删除',
+          text: presentation.confirmText,
           role: 'destructive',
           onPress: async () => {
             try {

@@ -18,13 +18,17 @@ function countMessage(preview: {
   audioCount: number;
   transcriptCount: number;
   summaryCount: number;
+  manualNoteCount: number;
+  occurrenceCount: number;
 }): string {
   const parts = [
     preview.eventCount > 0 ? `${preview.eventCount} 条日程` : '',
     preview.meetingCount > 0 ? `${preview.meetingCount} 条会议记录` : '',
     preview.audioCount > 0 ? `${preview.audioCount} 份录音` : '',
-    preview.transcriptCount > 0 ? `${preview.transcriptCount} 份转写` : '',
-    preview.summaryCount > 0 ? `${preview.summaryCount} 份总结` : '',
+    preview.transcriptCount > 0 ? `${preview.transcriptCount} 份文字记录` : '',
+    preview.summaryCount > 0 ? `${preview.summaryCount} 份整理结果` : '',
+    preview.manualNoteCount > 0 ? `${preview.manualNoteCount} 份我的笔记` : '',
+    preview.occurrenceCount > 0 ? `${preview.occurrenceCount} 项日程关联` : '',
   ].filter(Boolean);
   return parts.join('、');
 }

@@ -1,19 +1,28 @@
 import type { MeetingSummary, TranscriptLine } from '../types';
 import type {
+  MeetingSummaryActionCandidate,
+  MeetingSummaryDocument,
+  MeetingSummarySectionKind,
+} from '../domain/meeting';
+import type {
+  ActionItemRecord,
   SummarySectionRecord,
   SummaryVersionProjection,
   TranscriptRevisionProjection,
 } from '../data/repositories';
+import { meetingSummaryDocumentToLegacySummary } from './meetingSummaryFormat';
 
 function sectionText(section: SummarySectionRecord): string {
   return (section.userText !== null ? section.userText : section.generatedText).trim();
 }
 
-function bulletLines(value: string): string[] {
-  return value
-    .split(/\r?\n/)
-    .map(line => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '').trim())
-    .filter(Boolean);
+function sectionKind(value: string): MeetingSummarySectionKind {
+  if (
+    value === 'paragraph' || value === 'bullets' || value === 'numbered'
+    || value === 'decisions' || value === 'topics' || value === 'risks'
+    || value === 'action_items'
+  ) return value;
+  return 'legacy';
 }
 
 export function transcriptProjectionToLegacyLines(
@@ -21,16 +30,22 @@ export function transcriptProjectionToLegacyLines(
   legacyMeetingId: string,
 ): TranscriptLine[] {
   if (!projection) return [];
+  const revisionKind = projection.revision.kind === 'realtime_draft'
+    ? 'realtimeDraft'
+    : projection.revision.kind;
   return projection.segments.map(segment => ({
-    id: segment.id,
+    id: segment.sourceId ?? segment.id,
     meeting_id: legacyMeetingId,
     speaker_id: segment.speakerProfileId ?? segment.speakerClusterId ?? undefined,
     speaker_label: segment.speakerLabelOverride ?? segment.speakerLabel ?? undefined,
+    speakerClusterId: segment.speakerClusterId ?? undefined,
     text: segment.text,
     start_time: segment.startMs / 1000,
     end_time: segment.endMs / 1000,
     confidence: segment.confidence ?? undefined,
     created_at: new Date(segment.createdAtMs).toISOString(),
+    isFinal: projection.revision.kind !== 'realtime_draft' && segment.isFinal,
+    revisionKind,
   }));
 }
 
@@ -39,37 +54,81 @@ export function summaryProjectionToLegacySummary(
   legacyMeetingId: string,
 ): MeetingSummary | null {
   if (!projection || !['ready', 'stale'].includes(projection.version.status)) return null;
-  const visibleSections = projection.sections
-    .map(section => ({ section, text: sectionText(section) }))
-    .filter(item => item.text);
-  const overview = visibleSections.find(item => item.section.stableKey === 'overview')?.text
-    ?? visibleSections.find(item => item.section.kind === 'paragraph')?.text
-    ?? visibleSections.find(item => item.section.kind !== 'action_items')?.text
-    ?? '';
-  const decisions = visibleSections
-    .filter(item => item.section.stableKey === 'decisions' || item.section.kind === 'decisions')
-    .flatMap(item => bulletLines(item.text));
-  const actionItems = projection.meetingActions.map(action => ({
-    id: action.id,
+  const document = summaryProjectionToDocument(projection, legacyMeetingId);
+  return document ? meetingSummaryDocumentToLegacySummary(document) : null;
+}
+
+export function summaryProjectionToDocument(
+  projection: SummaryVersionProjection | null,
+  legacyMeetingId: string,
+): MeetingSummaryDocument | null {
+  if (!projection || !['ready', 'stale'].includes(projection.version.status)) return null;
+  const citationsBySection = new Map<string, typeof projection.citations>();
+  projection.citations.forEach(citation => {
+    citationsBySection.set(citation.sectionId, [
+      ...(citationsBySection.get(citation.sectionId) ?? []),
+      citation,
+    ]);
+  });
+  const sections = projection.sections
+    .map(section => ({
+      id: section.id,
+      stableKey: section.stableKey,
+      kind: sectionKind(section.kind),
+      title: section.title,
+      content: sectionText(section),
+      citations: (citationsBySection.get(section.id) ?? []).map(citation => ({
+        id: citation.id,
+        segmentId: citation.sourceSegmentId ?? citation.segmentId,
+        startMs: citation.startMs,
+        endMs: citation.endMs,
+        quoteHash: citation.quoteHash,
+      })),
+    }))
+    .filter(section => section.content || section.title);
+  const actions = projection.meetingActions.map(meetingActionRecordToCandidate);
+  if (sections.length === 0 && actions.length === 0) return null;
+  return {
+    schemaVersion: 2,
+    remoteVersionId: projection.version.id,
+    meetingId: legacyMeetingId,
+    templateId: projection.version.templateId,
+    templateRevision: projection.version.templateRevision,
+    transcriptRevisionId: projection.version.transcriptRevisionId,
+    manualNoteRevision: projection.version.manualNoteRevision,
+    scheduleSnapshotHash: projection.version.scheduleSnapshotHash,
+    status: projection.version.status === 'stale' ? 'stale' : 'ready',
+    generatedBy: projection.version.generatedBy,
+    supersedesVersionId: projection.version.supersedesVersionId,
+    createdAtMs: projection.version.createdAtMs,
+    completedAtMs: projection.version.completedAtMs ?? projection.version.createdAtMs,
+    sections,
+    actionItemCandidates: actions,
+  };
+}
+
+export function meetingActionRecordToCandidate(
+  action: ActionItemRecord,
+): MeetingSummaryActionCandidate {
+  return {
+    id: action.remoteId ?? action.id,
+    canonicalId: action.id,
     content: action.content,
     assignee: action.assigneeText,
-    due_date: action.dueAtMs === null ? null : new Date(action.dueAtMs).toISOString(),
+    dueAtMs: action.dueAtMs,
+    reminderAtMs: action.reminderAtMs,
+    reminderNotificationId: action.reminderNotificationId,
+    followupEventSourceId: action.followupEventSourceId,
     status: action.status,
-  }));
-  const fullText = visibleSections
-    .map(({ section, text }) => section.title ? `${section.title}\n${text}` : text)
-    .join('\n\n');
-  if (!overview && decisions.length === 0 && actionItems.length === 0 && !fullText) return null;
-  return {
-    id: projection.version.id,
-    meeting_id: legacyMeetingId,
-    overview,
-    full_text: fullText || overview || undefined,
-    markdown: null,
-    key_decisions: decisions,
-    action_items: actionItems,
-    generated_at: new Date(
-      projection.version.completedAtMs ?? projection.version.createdAtMs,
-    ).toISOString(),
+    updatedAtMs: action.updatedAtMs,
+    sourceSegmentId: action.sourceSegmentSourceId ?? action.sourceSegmentId,
+    sourceStartMs: action.sourceStartMs,
+    citations: action.sourceSegmentId === null ? [] : [{
+      id: `${action.id}:source`,
+      segmentId: action.sourceSegmentSourceId ?? action.sourceSegmentId,
+      startMs: action.sourceStartMs ?? 0,
+      endMs: action.sourceStartMs ?? 0,
+      quoteHash: null,
+    }],
   };
 }

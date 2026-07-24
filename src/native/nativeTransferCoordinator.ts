@@ -14,11 +14,11 @@ export interface NativeMeetingUploadRequest {
   scope: string;
   accessToken: string;
   meetingId: string;
+  remoteMeetingId?: string;
   operationId: string;
   fileUri: string;
   mimeType: string;
   fileName: string;
-  expectedBytes?: number;
 }
 
 export interface NativeMeetingUploadRegistration extends NativeTransferLease {
@@ -112,11 +112,11 @@ export async function enqueueNativeMeetingUpload(
     lease.scope,
     lease.generation,
     request.meetingId,
+    request.remoteMeetingId?.trim() || request.meetingId,
     request.operationId,
     request.fileUri,
     request.mimeType,
     request.fileName,
-    request.expectedBytes,
   );
   return { ...lease, workId, operationId: request.operationId };
 }

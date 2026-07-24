@@ -69,3 +69,12 @@ export function isScopeKey(value: string): value is ScopeKey {
 export function assertScopeKey(value: string): asserts value is ScopeKey {
   if (!isScopeKey(value)) throw new Error('meeting scope key is invalid');
 }
+
+export function calendarMeetingSeriesKey(scopeKey: ScopeKey, sourceEventId: string): string {
+  assertScopeKey(scopeKey);
+  const normalizedSourceId = sourceEventId.trim();
+  if (!normalizedSourceId || normalizedSourceId.length > 512) {
+    throw new Error('calendar series source is invalid');
+  }
+  return `calendar:${scopeKey}:${normalizedSourceId}`;
+}

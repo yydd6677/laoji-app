@@ -8,6 +8,7 @@ const {
 const base = {
   name: '老记',
   slug: 'laoji-app',
+  scheme: 'laoji',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
@@ -189,6 +190,14 @@ module.exports = () => {
     && ['1', 'true', 'yes', 'on'].includes(
       String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_WRITE_V1 ?? 'false').trim().toLowerCase(),
     );
+  const localMeetingDbAccountRootWriteV1 = localMeetingDbCanonicalWriteV1
+    && ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_ROOT_WRITE_V1 ?? 'false').trim().toLowerCase(),
+    );
+  const localMeetingDbAccountUploadWriteV1 = localMeetingDbCanonicalWriteV1
+    && ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_UPLOAD_WRITE_V1 ?? 'false').trim().toLowerCase(),
+    );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
   );
@@ -231,6 +240,8 @@ module.exports = () => {
         localMeetingDbV1,
         localMeetingDbCanonicalReadV1,
         localMeetingDbCanonicalWriteV1,
+        localMeetingDbAccountRootWriteV1,
+        localMeetingDbAccountUploadWriteV1,
       },
     },
   };

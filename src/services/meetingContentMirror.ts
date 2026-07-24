@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import type { Meeting, MeetingSummary, TranscriptLine } from '../types';
 import type {
   ActionItemRecord,
+  SummaryCitationRecord,
   SummarySectionRecord,
   SummaryVersionRecord,
   TranscriptRevisionRecord,
@@ -9,12 +10,18 @@ import type {
 } from '../data/repositories';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
-import { transitionProcessingStage } from '../domain/meeting';
+import { transitionProcessingStage } from '../domain/meeting/processing';
 import { getFeatureFlags } from '../config/featureFlags';
 import { meetingSummaryToText, normalizeMeetingSummaryResult } from './meetingSummaryFormat';
+import { legacyMeetingSummaryToDocument } from './meetingSummaryDocument';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
+import {
+  evaluateTranscriptCandidate,
+  type TranscriptCandidateKind,
+  type TranscriptServerCompleteness,
+} from './transcriptCompleteness';
 
-const writeTailByMeeting = new Map<string, Promise<void>>();
+const writeTailByMeeting = new Map<string, Promise<unknown>>();
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -47,7 +54,7 @@ function normalizeTranscriptText(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-CN');
 }
 
-function enqueueMeetingWrite(scopeKey: ScopeKey, meetingId: string, operation: () => Promise<void>): Promise<void> {
+function enqueueMeetingWrite<T>(scopeKey: ScopeKey, meetingId: string, operation: () => Promise<T>): Promise<T> {
   const key = `${scopeKey}\u0000${meetingId}`;
   const previous = writeTailByMeeting.get(key) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(operation);
@@ -56,6 +63,19 @@ function enqueueMeetingWrite(scopeKey: ScopeKey, meetingId: string, operation: (
     if (writeTailByMeeting.get(key) === next) writeTailByMeeting.delete(key);
   }).catch(() => undefined);
   return next;
+}
+
+export interface SummaryMirrorResult {
+  /** Whether the compatibility cache may replace its currently readable projection. */
+  replaceLegacyProjection: boolean;
+  status: string;
+  canonicalRevision: number | null;
+}
+
+export interface MirrorLegacySummaryOptions {
+  expectedCanonicalMeetingId?: string;
+  canonicalWrite?: boolean;
+  throwOnFailure?: boolean;
 }
 
 function isLegacyProvider(value: string | null): boolean {
@@ -69,6 +89,10 @@ function legacyActionStatus(value: string | undefined): ActionItemRecord['status
   return 'pending';
 }
 
+function normalizedActionIdentityText(value: string | null): string {
+  return (value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ');
+}
+
 function reportFailure(kind: 'transcript' | 'summary', scopeKey: ScopeKey, error: unknown): void {
   diagnosticWarn(`[meeting-db] ${kind} shadow write failed`, error);
   diagnosticAudit(`meeting_${kind}_shadow_write`, {
@@ -78,17 +102,27 @@ function reportFailure(kind: 'transcript' | 'summary', scopeKey: ScopeKey, error
   });
 }
 
+export interface MirrorLegacyTranscriptOptions {
+  candidateKind?: TranscriptCandidateKind;
+  serverCompleteness?: TranscriptServerCompleteness;
+  remoteRevisionId?: string | null;
+}
+
 export function mirrorLegacyTranscriptContent(
   scopeKey: ScopeKey,
   legacyMeeting: Meeting,
   transcript: readonly TranscriptLine[],
+  options: MirrorLegacyTranscriptOptions = {},
 ): Promise<void> {
   if (!getFeatureFlags().localMeetingDbV1) return Promise.resolve();
   return enqueueMeetingWrite(scopeKey, legacyMeeting.id, async () => {
     try {
       const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
       if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
-      if (transcript.length === 0) {
+      const meaningfulTranscript = transcript.filter(line => (
+        typeof line.text === 'string' && line.text.trim().length > 0
+      ));
+      if (meaningfulTranscript.length === 0) {
         let status = 'unchanged_empty';
         await sqliteMeetingNoteRepository.transaction(async transaction => {
           const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
@@ -98,18 +132,24 @@ export function mirrorLegacyTranscriptContent(
             status = 'preserved_canonical';
             return;
           }
-          if (current) await transaction.setActiveTranscriptRevision(note.id, scopeKey, null);
           const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
           if (!stage) throw new Error('meeting transcript processing stage is missing');
           const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+          const stillCompleting = options.serverCompleteness === 'incomplete'
+            || legacyMeeting.status === 'processing';
+          const retainedStatus = !current
+            ? stillCompleting ? 'finalizing' : 'none'
+            : current.kind === 'realtime_draft'
+              ? stillCompleting ? 'finalizing' : 'realtime_draft'
+              : current.status === 'ready' ? 'ready' : 'finalizing';
           await transaction.upsertStage(transitionProcessingStage(stage, {
             stage: 'transcript',
-            status: legacyMeeting.status === 'processing' ? 'finalizing' : 'none',
+            status: retainedStatus,
             progress: null,
             inputFingerprint: null,
           }, nowMs), scopeKey);
           await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
-          status = current ? 'cleared_legacy_projection' : 'unchanged_empty';
+          status = current ? 'preserved_nonempty_active' : 'unchanged_empty';
         });
         diagnosticAudit('meeting_transcript_shadow_write', {
           status,
@@ -118,7 +158,7 @@ export function mirrorLegacyTranscriptContent(
         });
         return;
       }
-      const normalizedLines = transcript.map((line, ordinal) => ({
+      const normalizedLines = meaningfulTranscript.map((line, ordinal) => ({
         ordinal,
         sourceId: typeof line.id === 'string' ? line.id.trim() : '',
         speakerId: line.speaker_id?.trim() || null,
@@ -133,10 +173,21 @@ export function mirrorLegacyTranscriptContent(
         createdAtMs: timestamp(line.created_at, aggregate.note.createdAtMs),
       }));
       const fingerprint = await sha256(normalizedLines);
-      const realtimeDraft = legacyMeeting.status === 'recording' || legacyMeeting.status === 'paused';
+      const derivedKind: TranscriptCandidateKind = legacyMeeting.status === 'recording'
+        || legacyMeeting.status === 'paused'
+        ? 'realtime_draft'
+        : 'final';
+      const requestedKind = options.candidateKind ?? derivedKind;
+      const revisionKind: TranscriptCandidateKind = options.serverCompleteness === 'incomplete'
+        && requestedKind === 'final'
+        ? 'realtime_draft'
+        : requestedKind;
+      const realtimeDraft = revisionKind === 'realtime_draft';
       const revisionId = realtimeDraft
         ? `${aggregate.note.id}:transcript:legacy-live`
-        : `${aggregate.note.id}:transcript:legacy-final:${fingerprint}`;
+        : revisionKind === 'reprocessed'
+          ? `${aggregate.note.id}:transcript:legacy-reprocessed:${fingerprint}`
+          : `${aggregate.note.id}:transcript:legacy-final:${fingerprint}`;
       const createdAtMs = normalizedLines.reduce(
         (minimum, line) => Math.min(minimum, line.createdAtMs),
         normalizedLines[0]?.createdAtMs ?? aggregate.note.createdAtMs,
@@ -151,6 +202,7 @@ export function mirrorLegacyTranscriptContent(
       const segments: TranscriptSegmentRecord[] = normalizedLines.map((line, ordinal) => ({
         id: `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
         meetingId: aggregate.note.id,
+        sourceId: line.sourceId || null,
         ordinal,
         startMs: line.startMs,
         endMs: line.endMs,
@@ -164,15 +216,31 @@ export function mirrorLegacyTranscriptContent(
         isFinal: !realtimeDraft,
         createdAtMs: line.createdAtMs,
       }));
+      const auditState: {
+        writeStatus: string;
+        activationDecision?: ReturnType<typeof evaluateTranscriptCandidate>;
+      } = { writeStatus: 'completed' };
       await sqliteMeetingNoteRepository.transaction(async transaction => {
         const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
         if (!note || note.lifecycle === 'deleted') return;
-        const current = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
-        const activate = !current || current.id === revisionId || isLegacyProvider(current.sourceProvider);
+        const currentContent = await transaction.getActiveTranscriptContent(note.id, scopeKey);
+        const current = currentContent?.revision ?? null;
+        const preservedCanonical = Boolean(current && !isLegacyProvider(current.sourceProvider));
+        const activationDecision = evaluateTranscriptCandidate(
+          currentContent?.segments ?? [],
+          segments,
+          {
+            candidateKind: revisionKind,
+            serverCompleteness: options.serverCompleteness,
+          },
+        );
+        auditState.activationDecision = activationDecision;
+        const activate = !preservedCanonical && activationDecision.useCandidate;
         const revision: TranscriptRevisionRecord = {
           id: revisionId,
           meetingId: note.id,
-          kind: realtimeDraft ? 'realtime_draft' : 'final',
+          remoteId: options.remoteRevisionId?.trim() || null,
+          kind: revisionKind,
           status: realtimeDraft ? 'realtime_draft' : 'ready',
           sourceProvider: 'legacy-cache',
           sourceModel: null,
@@ -180,25 +248,55 @@ export function mirrorLegacyTranscriptContent(
           createdAtMs,
           finalizedAtMs,
         };
-        await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
-          activate,
-          replaceSegments: realtimeDraft,
-        });
+        const replacingActiveDraftWithShorterCandidate = Boolean(
+          current?.id === revisionId && realtimeDraft && !activationDecision.useCandidate,
+        );
+        if (!replacingActiveDraftWithShorterCandidate) {
+          await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
+            activate,
+            replaceSegments: realtimeDraft,
+          });
+        }
         const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
         if (!stage) throw new Error('meeting transcript processing stage is missing');
-        const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
-        await transaction.upsertStage(transitionProcessingStage(stage, {
-          stage: 'transcript',
-          status: realtimeDraft ? 'realtime_draft' : 'ready',
-          progress: realtimeDraft ? null : 1,
-          inputFingerprint: `sha256:${fingerprint}`,
-        }, nowMs), scopeKey);
+        if (!preservedCanonical) {
+          const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+          const stageStatus = activate
+            ? realtimeDraft
+              ? options.serverCompleteness === 'incomplete'
+                && legacyMeeting.status !== 'recording'
+                && legacyMeeting.status !== 'paused'
+                ? 'finalizing'
+                : 'realtime_draft'
+              : 'ready'
+            : 'finalizing';
+          await transaction.upsertStage(transitionProcessingStage(stage, {
+            stage: 'transcript',
+            status: stageStatus,
+            progress: stageStatus === 'ready' ? 1 : null,
+            inputFingerprint: `sha256:${fingerprint}`,
+          }, nowMs), scopeKey);
+        }
+        auditState.writeStatus = preservedCanonical
+          ? 'preserved_canonical'
+          : activate
+            ? 'completed'
+            : activationDecision.reason === 'candidate_clearly_shorter'
+              ? 'preserved_more_complete_active'
+              : 'saved_inactive';
       });
+      const activationDecision = auditState.activationDecision;
       diagnosticAudit('meeting_transcript_shadow_write', {
-        status: 'completed',
+        status: auditState.writeStatus,
         scope: scopeKey === 'guest' ? 'guest' : 'account',
         segments: segments.length,
-        revision_kind: realtimeDraft ? 'draft' : 'final',
+        revision_kind: revisionKind,
+        completeness: options.serverCompleteness ?? 'unknown',
+        baseline_latest_ms: activationDecision?.baseline.latestTimeMs ?? 0,
+        candidate_latest_ms: activationDecision?.candidate.latestTimeMs ?? 0,
+        baseline_text: activationDecision?.baseline.textCodePoints ?? 0,
+        candidate_text: activationDecision?.candidate.textCodePoints ?? 0,
+        regression_signals: activationDecision?.regressionSignals.join(',') ?? '',
       });
     } catch (error) {
       reportFailure('transcript', scopeKey, error);
@@ -210,13 +308,26 @@ export function mirrorLegacySummaryContent(
   scopeKey: ScopeKey,
   legacyMeeting: Meeting,
   summary: MeetingSummary | null,
-): Promise<void> {
-  if (!getFeatureFlags().localMeetingDbV1) return Promise.resolve();
+  options: MirrorLegacySummaryOptions = {},
+): Promise<SummaryMirrorResult> {
+  if (!getFeatureFlags().localMeetingDbV1) {
+    return Promise.resolve({
+      replaceLegacyProjection: true,
+      status: 'canonical_disabled',
+      canonicalRevision: null,
+    });
+  }
   return enqueueMeetingWrite(scopeKey, legacyMeeting.id, async () => {
+    let canonicalRevision: number | null = null;
     try {
       const normalized = summary ? normalizeMeetingSummaryResult(legacyMeeting.id, summary) : null;
-      if (!normalized || !meetingSummaryToText(normalized)) {
+      const document = normalized?.structured_document
+        ?? (normalized ? legacyMeetingSummaryToDocument(legacyMeeting.id, normalized) : null);
+      if (!normalized || !document || !meetingSummaryToText(normalized)) {
         const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
+        if (options.expectedCanonicalMeetingId && aggregate?.note.id !== options.expectedCanonicalMeetingId) {
+          throw new Error('summary canonical meeting identity changed');
+        }
         let status = 'unchanged_empty';
         if (aggregate && aggregate.note.lifecycle !== 'deleted') {
           await sqliteMeetingNoteRepository.transaction(async transaction => {
@@ -224,7 +335,8 @@ export function mirrorLegacySummaryContent(
             if (!note || note.lifecycle === 'deleted') return;
             const current = await transaction.getCurrentSummaryVersion(note.id, scopeKey);
             if (!current) return;
-            if (!isLegacyProvider(current.generatedBy) || current.userEdited) {
+            const currentProtected = await transaction.hasUserProtectedSummaryState(current.id, scopeKey);
+            if (!isLegacyProvider(current.generatedBy) || currentProtected) {
               status = 'preserved_canonical';
               return;
             }
@@ -241,6 +353,9 @@ export function mirrorLegacySummaryContent(
               progress: null,
               inputFingerprint: null,
             }, nowMs), scopeKey);
+            if (options.canonicalWrite) {
+              canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+            }
             status = 'cleared_legacy_projection';
           });
         }
@@ -250,85 +365,175 @@ export function mirrorLegacySummaryContent(
           sections: 0,
           actions: 0,
         });
-        return;
+        return {
+          replaceLegacyProjection: status !== 'preserved_canonical',
+          status,
+          canonicalRevision,
+        };
       }
       const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
-      if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
-      const sourceTranscript = await sqliteMeetingNoteRepository.getActiveTranscriptRevision(
+      if (options.expectedCanonicalMeetingId && aggregate?.note.id !== options.expectedCanonicalMeetingId) {
+        throw new Error('summary canonical meeting identity changed');
+      }
+      if (!aggregate || aggregate.note.lifecycle === 'deleted') {
+        return {
+          replaceLegacyProjection: true,
+          status: 'canonical_meeting_unavailable',
+          canonicalRevision: null,
+        };
+      }
+      const sourceTranscriptContent = await sqliteMeetingNoteRepository.getActiveTranscriptContent(
         aggregate.note.id,
         scopeKey,
       );
-      const generatedAtMs = timestamp(summary?.generated_at, aggregate.note.createdAtMs);
+      const sourceTranscript = sourceTranscriptContent?.revision ?? null;
+      if (options.canonicalWrite && sourceTranscript?.kind === 'realtime_draft') {
+        throw new Error('summary requires a stable canonical transcript revision');
+      }
+      const declaredTranscriptRevisionId = document.transcriptRevisionId?.trim() || null;
+      if (
+        options.canonicalWrite
+        && declaredTranscriptRevisionId
+        && declaredTranscriptRevisionId !== sourceTranscript?.id
+        && declaredTranscriptRevisionId !== sourceTranscript?.remoteId
+      ) {
+        throw new Error('summary transcript revision is not the active canonical revision');
+      }
+      const generatedAtMs = document.completedAtMs || timestamp(summary?.generated_at, aggregate.note.createdAtMs);
       const summaryPayload = {
+        remoteVersionId: document.remoteVersionId,
+        templateId: document.templateId,
+        templateRevision: document.templateRevision,
         transcriptRevisionId: sourceTranscript?.id ?? null,
-        manualNoteRevision: aggregate.manualNote.revision,
+        manualNoteRevision: document.templateId === 'legacy'
+          ? aggregate.manualNote.revision
+          : document.manualNoteRevision,
+        scheduleSnapshotHash: document.scheduleSnapshotHash,
         generatedAtMs,
-        overview: normalized.overview?.trim() || '',
-        decisions: (normalized.key_decisions ?? []).map(item => item.trim()).filter(Boolean),
-        actions: (normalized.action_items ?? []).map(item => ({
+        sections: document.sections.map(section => ({
+          stableKey: section.stableKey,
+          kind: section.kind,
+          title: section.title,
+          content: section.content,
+          citations: section.citations,
+        })),
+        actions: document.actionItemCandidates.map(item => ({
+          remoteId: item.id,
           content: item.content.trim(),
           assignee: item.assignee?.trim() || null,
-          dueDate: item.due_date?.trim() || null,
+          dueAtMs: item.dueAtMs,
           status: legacyActionStatus(item.status),
+          citations: item.citations,
         })).filter(item => item.content),
       };
-      const fingerprint = await sha256(summaryPayload);
-      const versionId = `${aggregate.note.id}:summary:legacy:${fingerprint}`;
-      const sections: SummarySectionRecord[] = [];
-      if (summaryPayload.overview) {
-        sections.push({
-          id: `${versionId}:section:overview`,
-          versionId,
-          stableKey: 'overview',
-          kind: 'paragraph',
-          title: '会议概述',
-          generatedText: summaryPayload.overview,
-          userText: null,
-          ordinal: sections.length,
-          userEditedAtMs: null,
-        });
-      }
-      if (summaryPayload.decisions.length > 0) {
-        sections.push({
-          id: `${versionId}:section:decisions`,
-          versionId,
-          stableKey: 'decisions',
-          kind: 'bullets',
-          title: '关键决定',
-          generatedText: summaryPayload.decisions.join('\n'),
-          userText: null,
-          ordinal: sections.length,
-          userEditedAtMs: null,
-        });
-      }
-      if (summaryPayload.actions.length > 0) {
-        sections.push({
-          id: `${versionId}:section:action_items`,
-          versionId,
+      if (summaryPayload.sections.length === 0 && summaryPayload.actions.length > 0) {
+        summaryPayload.sections.push({
           stableKey: 'action_items',
           kind: 'action_items',
           title: '待办事项',
-          generatedText: summaryPayload.actions.map(item => item.content).join('\n'),
-          userText: null,
-          ordinal: sections.length,
-          userEditedAtMs: null,
+          content: summaryPayload.actions.map(item => item.content).join('\n'),
+          citations: [],
         });
       }
-      const actionFingerprints = await Promise.all(summaryPayload.actions.map(action => sha256(action)));
+      const fingerprintPayload = {
+        ...summaryPayload,
+        sections: summaryPayload.sections.map(section => ({
+          ...section,
+          citations: section.citations.map(({ id: _id, ...citation }) => citation),
+        })),
+        actions: summaryPayload.actions.map(({ remoteId: _remoteId, ...action }) => ({
+          ...action,
+          citations: action.citations.map(({ id: _id, ...citation }) => citation),
+        })),
+      };
+      const fingerprint = await sha256(fingerprintPayload);
+      const versionId = `${aggregate.note.id}:summary:${document.templateId}:${fingerprint}`;
+      const sectionFingerprints = await Promise.all(fingerprintPayload.sections.map(section => sha256(section)));
+      const sections: SummarySectionRecord[] = summaryPayload.sections.map((section, ordinal) => ({
+        id: `${versionId}:section:${ordinal}:${sectionFingerprints[ordinal]}`,
+        versionId,
+        stableKey: section.stableKey,
+        kind: section.kind,
+        title: section.title,
+        generatedText: section.content,
+        userText: null,
+        ordinal,
+        userEditedAtMs: null,
+      }));
+      const segmentBySourceId = new Map<string, TranscriptSegmentRecord>();
+      sourceTranscriptContent?.segments.forEach(segment => {
+        segmentBySourceId.set(segment.id, segment);
+        if (segment.sourceId) segmentBySourceId.set(segment.sourceId, segment);
+      });
+      let rejectedCitationCount = 0;
+      const citations: SummaryCitationRecord[] = [];
+      summaryPayload.sections.forEach((section, sectionOrdinal) => {
+        const sectionRecord = sections[sectionOrdinal];
+        let citationOrdinal = 0;
+        section.citations.forEach(citation => {
+          const segment = segmentBySourceId.get(citation.segmentId);
+          const segmentEndMs = segment ? Math.max(segment.startMs, segment.endMs) : -1;
+          if (
+            !segment
+            || !sourceTranscript
+            || citation.startMs < segment.startMs
+            || citation.endMs < citation.startMs
+            || citation.endMs > segmentEndMs
+          ) {
+            rejectedCitationCount += 1;
+            return;
+          }
+          citations.push({
+            id: `${sectionRecord.id}:citation:${citationOrdinal}:${segment.id}`,
+            sectionId: sectionRecord.id,
+            segmentId: segment.id,
+            sourceSegmentId: segment.sourceId,
+            startMs: citation.startMs,
+            endMs: citation.endMs,
+            quoteHash: citation.quoteHash,
+            ordinal: citationOrdinal,
+          });
+          citationOrdinal += 1;
+        });
+      });
+      const actionFingerprints = await Promise.all(summaryPayload.actions.map(action => sha256({
+        templateKey: document.templateId,
+        content: normalizedActionIdentityText(action.content),
+        assignee: normalizedActionIdentityText(action.assignee),
+        dueAtMs: action.dueAtMs,
+        sourceSegmentIds: [...new Set(action.citations.map(citation => citation.segmentId))].sort(),
+      })));
       const actions: ActionItemRecord[] = summaryPayload.actions.map((action, ordinal) => {
-        const dueAtMs = timestamp(action.dueDate, 0) || null;
+        const sourceCitation = action.citations
+          .map(citation => {
+            const segment = segmentBySourceId.get(citation.segmentId);
+            const segmentEndMs = segment ? Math.max(segment.startMs, segment.endMs) : -1;
+            const valid = Boolean(
+              segment
+              && citation.startMs >= segment.startMs
+              && citation.endMs >= citation.startMs
+              && citation.endMs <= segmentEndMs,
+            );
+            return { citation, segment, valid };
+          })
+          .find(candidate => candidate.valid);
         return {
-          id: `${aggregate.note.id}:action:legacy:${actionFingerprints[ordinal]}`,
+          id: `${aggregate.note.id}:action:generated:${actionFingerprints[ordinal]}`,
           meetingId: aggregate.note.id,
-          remoteId: null,
+          remoteId: action.remoteId,
+          remoteRevision: null,
           content: action.content,
           status: action.status,
           assigneeText: action.assignee,
-          dueAtMs,
+          dueAtMs: action.dueAtMs,
+          reminderAtMs: null,
+          reminderNotificationId: null,
+          followupEventSourceId: null,
           sourceKind: 'generated',
+          sourceMarkerId: null,
           sourceSummaryVersionId: versionId,
-          sourceSegmentId: null,
-          sourceStartMs: null,
+          sourceSegmentId: sourceCitation?.segment?.id ?? null,
+          sourceStartMs: sourceCitation?.citation.startMs ?? null,
           generationFingerprint: `sha256:${actionFingerprints[ordinal]}`,
           userEditedAtMs: null,
           completedAtMs: action.status === 'completed' ? generatedAtMs : null,
@@ -336,49 +541,91 @@ export function mirrorLegacySummaryContent(
           updatedAtMs: generatedAtMs,
         };
       });
+      let replaceLegacyProjection = true;
+      let mirrorStatus = 'completed';
       await sqliteMeetingNoteRepository.transaction(async transaction => {
         const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
-        if (!note || note.lifecycle === 'deleted') return;
+        if (!note || note.lifecycle === 'deleted') {
+          if (options.expectedCanonicalMeetingId) {
+            throw new Error('summary canonical meeting became unavailable');
+          }
+          mirrorStatus = 'canonical_meeting_unavailable';
+          return;
+        }
         const current = await transaction.getCurrentSummaryVersion(note.id, scopeKey);
-        const activate = !current || current.id === versionId
-          || (!current.userEdited && isLegacyProvider(current.generatedBy));
-        const version: SummaryVersionRecord = {
+        const existingVersion = await transaction.getSummaryVersion(versionId, scopeKey);
+        const activeTranscript = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+        const sourceTranscriptStillActive = (sourceTranscript?.id ?? null) === (activeTranscript?.id ?? null);
+        const currentProtected = current
+          ? await transaction.hasUserProtectedSummaryState(current.id, scopeKey)
+          : false;
+        const incomingLegacyCanReplace = document.templateId !== 'legacy'
+          || !current
+          || isLegacyProvider(current.generatedBy);
+        const activate = sourceTranscriptStillActive && (
+          !current
+          || current.id === versionId
+          || (incomingLegacyCanReplace && !currentProtected)
+        );
+        replaceLegacyProjection = activate && !currentProtected;
+        mirrorStatus = !sourceTranscriptStillActive
+          ? 'saved_stale_input_candidate'
+          : activate
+            ? currentProtected ? 'preserved_user_projection' : 'activated'
+            : 'saved_candidate';
+        const newVersion: SummaryVersionRecord = {
           id: versionId,
           meetingId: note.id,
-          templateId: 'legacy',
-          templateRevision: 1,
+          templateId: document.templateId,
+          templateRevision: document.templateRevision,
           inputFingerprint: `sha256:${fingerprint}`,
           transcriptRevisionId: sourceTranscript?.id ?? null,
-          manualNoteRevision: aggregate.manualNote.revision,
-          scheduleSnapshotHash: null,
-          status: 'ready',
-          generatedBy: 'legacy-cache',
+          manualNoteRevision: summaryPayload.manualNoteRevision,
+          scheduleSnapshotHash: summaryPayload.scheduleSnapshotHash,
+          status: document.status,
+          generatedBy: document.templateId === 'legacy'
+            ? 'legacy-cache'
+            : document.generatedBy ?? 'server-v2',
           userEdited: false,
-          supersedesVersionId: current && current.id !== versionId && isLegacyProvider(current.generatedBy)
+          supersedesVersionId: current && current.id !== versionId
             ? current.id
             : null,
-          createdAtMs: generatedAtMs,
+          createdAtMs: document.createdAtMs,
           completedAtMs: generatedAtMs,
         };
-        await transaction.saveSummaryVersion(version, sections, actions, scopeKey, { activate });
+        const version = existingVersion ?? newVersion;
+        await transaction.saveSummaryVersion(version, sections, actions, scopeKey, { activate, citations });
         const stage = await transaction.getStage(note.id, scopeKey, 'summary');
         if (!stage) throw new Error('meeting summary processing stage is missing');
-        const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+        const nowMs = Math.max(Date.now(), generatedAtMs, stage.updatedAtMs, note.updatedAtMs);
+        const retainedStatus = current?.status === 'stale'
+          ? 'stale'
+          : current
+            ? 'ready'
+            : 'none';
         await transaction.upsertStage(transitionProcessingStage(stage, {
           stage: 'summary',
-          status: 'ready',
-          progress: 1,
-          inputFingerprint: `sha256:${fingerprint}`,
+          status: activate ? document.status : retainedStatus,
+          progress: activate || current ? 1 : null,
+          inputFingerprint: activate ? `sha256:${fingerprint}` : stage.inputFingerprint,
         }, nowMs), scopeKey);
+        if (options.canonicalWrite) {
+          canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+        }
       });
       diagnosticAudit('meeting_summary_shadow_write', {
-        status: 'completed',
+        status: mirrorStatus,
         scope: scopeKey === 'guest' ? 'guest' : 'account',
         sections: sections.length,
+        citations: citations.length,
+        rejected_citations: rejectedCitationCount,
         actions: actions.length,
       });
+      return { replaceLegacyProjection, status: mirrorStatus, canonicalRevision };
     } catch (error) {
       reportFailure('summary', scopeKey, error);
+      if (options.throwOnFailure) throw error;
+      return { replaceLegacyProjection: true, status: 'failed', canonicalRevision: null };
     }
   });
 }

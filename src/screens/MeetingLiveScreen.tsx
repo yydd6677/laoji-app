@@ -36,6 +36,7 @@ import {
   canResumeMeetingRecording,
   latestTranscriptWindow,
   pcmDurationSec,
+  requireMeetingRemoteIdentity,
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
@@ -117,9 +118,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     getCachedTranscript,
     saveCachedTranscript,
     refreshMeetings,
+    reconcileAudioUploads,
   } = useMeetings();
   const { showDialog } = useAppDialog();
   const existing = route.params?.meetingId ? meetings.find(item => item.id === route.params?.meetingId) : undefined;
+  const entryPoint = route.params?.entryPoint ?? 'meeting_tab';
   const [title, setTitle] = useState(existing?.title ?? defaultTitle());
   const [titleDraft, setTitleDraft] = useState(existing?.title ?? title);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -234,6 +237,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const persistStoppedSession = useCallback(async (
     session: RealtimeAsrSession,
     id: string,
+    remoteMeetingId: string | null,
     guestSession?: ApiGuestRealtimeSession,
   ) => {
     const audioDurationSec = pcmDurationSec(audioStatsRef.current?.byteCount ?? 0);
@@ -241,6 +245,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     try {
       return await finalizeMeetingRecording({
         meetingId: id,
+        remoteMeetingId,
         storageScope: recordingStorageScope,
         transcriptLines: transcriptRef.current,
         isGuest,
@@ -261,6 +266,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           scope: recordingStorageScope,
           accessToken: token,
           meetingId: pending.meetingId,
+          remoteMeetingId: pending.remoteMeetingId,
           operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
           fileUri: pending.audioUri,
           mimeType: pending.mimeType,
@@ -268,6 +274,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }),
         updateStatus: updateMeetingStatus,
         refreshMeetings,
+        reconcileUploads: reconcileAudioUploads,
       });
     } finally {
       try {
@@ -278,7 +285,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         await restorePlaybackAudioMode();
       }
     }
-  }, [accessToken, isGuest, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
+  }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
 
   const finalizeActiveRecording = useCallback((
     active: ActiveRecording,
@@ -398,7 +405,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const meeting = reusableMeeting ?? await createMeeting(meetingPayload.title, {
         mode: meetingPayload.mode,
         clientRequestId: createRequestRef.current.id,
+        entryPoint,
       });
+      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(meeting);
       startedMeetingId = meeting.id;
       ensureScreenActive();
       setMeetingId(meeting.id);
@@ -419,7 +428,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         ensureScreenActive();
       }
       const session = await startRealtimeAsr({
-        meetingId: guestSession?.meeting_id ?? meeting.id,
+        meetingId: guestSession?.meeting_id ?? remoteMeetingId!,
         storageScope: recordingStorageScope,
         accessToken: isGuest ? null : accessToken,
         guestToken: guestSession?.guest_token,
@@ -451,7 +460,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         meetingId: meeting.id,
         session,
         guestSession,
-        finalize: createMeetingRecordingFinalizer(() => persistStoppedSession(session, meeting.id, guestSession)),
+        finalize: createMeetingRecordingFinalizer(() => persistStoppedSession(
+          session,
+          meeting.id,
+          remoteMeetingId,
+          guestSession,
+        )),
       };
       if (!mountedRef.current) {
         await active.finalize().catch(() => {});
@@ -517,12 +531,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (pausedAt) accumulatedPausedMsRef.current += Math.max(0, resumedAt - pausedAt);
         pausedAtRef.current = null;
         setStatus('recording');
+        await updateMeetingStatus(active.meetingId, 'recording').catch(() => false);
       } else {
         await active.session.pause();
         const pausedAt = Date.now();
         pausedAtRef.current = pausedAt;
         setElapsedMs(recordingElapsedAt(pausedAt));
         setStatus('paused');
+        await updateMeetingStatus(active.meetingId, 'paused').catch(() => false);
       }
     } catch (reason) {
       const fallback = isPaused ? '继续录音失败，请重试。' : '暂停录音失败，请重试。';

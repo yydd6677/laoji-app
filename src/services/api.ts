@@ -9,9 +9,20 @@ import {
 } from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
 import type { EventRecurrenceScope, MeetingSummary, TranscriptLine } from '../types';
+import {
+  DEFAULT_MEETING_TEMPLATE,
+  type MeetingSummaryCarryForwardAuthorization,
+  type MeetingTemplate,
+} from '../domain/meeting';
 import { fetchWithTimeout as fetch } from './http';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
+import {
+  combineTranscriptServerCompleteness,
+  evaluateTranscriptLineCandidate,
+  transcriptServerCompletenessFromPayload,
+  type TranscriptServerCompleteness,
+} from './transcriptCompleteness';
 
 // LaoJi Backend API Client
 // Endpoints are embedded by app.config.js from EXPO_PUBLIC_* build variables.
@@ -441,6 +452,25 @@ export interface ApiMeetingTaskStatus {
   long_poll_supported?: boolean;
 }
 
+function summaryCarryForwardPayload(
+  authorization: MeetingSummaryCarryForwardAuthorization | null | undefined,
+): Record<string, unknown> | null {
+  if (!authorization) return null;
+  return {
+    request_id: authorization.requestId,
+    items: authorization.items.map(item => ({
+      kind: item.kind,
+      source_meeting_id: item.sourceMeetingId,
+      source_item_id: item.sourceItemId,
+      source_title: item.sourceTitle,
+      source_occurrence_date: item.sourceOccurrenceDate,
+      content: item.content,
+      assignee: item.assignee,
+      due_at: item.dueAt,
+    })),
+  };
+}
+
 export async function fetchMeetings(page = 1, size = 20, accessToken?: string): Promise<ApiMeeting[]> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings?page=${page}&size=${size}`),
@@ -479,10 +509,12 @@ export async function createMeeting(
     recordedAt?: string | null;
   },
   accessToken?: string,
+  signal?: AbortSignal,
 ): Promise<ApiMeeting> {
   const res = await fetch(meetingUrl('/api/laoji/meetings'), {
     method: 'POST',
     headers: jsonHeaders(accessToken),
+    signal,
     body: JSON.stringify({
       title: payload.title,
       description: payload.description ?? null,
@@ -524,14 +556,15 @@ export async function deleteGuestRealtimeSession(meetingId: string, guestToken: 
   }
 }
 
-export async function fetchGuestMeetingTranscript(
+export async function fetchGuestMeetingTranscriptSnapshot(
   meetingId: string,
   guestToken: string,
   options: FetchMeetingTranscriptOptions = {},
-): Promise<TranscriptLine[]> {
+): Promise<ApiTranscriptSnapshot> {
   const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 1000));
   const all: TranscriptLine[] = [];
   const seenIds = new Set<string>();
+  let completeness: TranscriptServerCompleteness = 'unknown';
   let offset = 0;
 
   while (true) {
@@ -541,6 +574,10 @@ export async function fetchGuestMeetingTranscript(
     );
     if (!res.ok) throw await readResponseError('fetch guest meeting transcript failed', res);
     const data = await res.json();
+    completeness = combineTranscriptServerCompleteness(
+      completeness,
+      transcriptServerCompletenessFromPayload(data),
+    );
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
       ? data.total
@@ -558,19 +595,29 @@ export async function fetchGuestMeetingTranscript(
     if (all.length === previousCount) break;
   }
 
-  const fallbackItems = options.fallbackItems ?? [];
-  return fallbackItems.length > all.length ? fallbackItems : all;
+  return { items: all, completeness, remoteRevisionId: null };
+}
+
+export async function fetchGuestMeetingTranscript(
+  meetingId: string,
+  guestToken: string,
+  options: FetchMeetingTranscriptOptions = {},
+): Promise<TranscriptLine[]> {
+  const snapshot = await fetchGuestMeetingTranscriptSnapshot(meetingId, guestToken, options);
+  return transcriptWithFallback(snapshot, options.fallbackItems ?? []);
 }
 
 export async function updateMeeting(
   meetingId: string,
   changes: Partial<Pick<ApiMeeting, 'title' | 'description' | 'status' | 'participants' | 'mode' | 'location'>>,
   accessToken?: string,
+  signal?: AbortSignal,
 ): Promise<ApiMeeting> {
-  const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}`), {
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}`), {
     method: 'PATCH',
     headers: jsonHeaders(accessToken),
     body: JSON.stringify(changes),
+    signal,
   });
   if (!res.ok) throw await apiResponseError('update meeting failed', res, accessToken);
   return res.json();
@@ -622,14 +669,50 @@ export interface FetchMeetingTranscriptOptions {
   pageSize?: number;
 }
 
-export async function fetchMeetingTranscript(
+export interface ApiTranscriptSnapshot {
+  items: TranscriptLine[];
+  completeness: TranscriptServerCompleteness;
+  remoteRevisionId: string | null;
+}
+
+function transcriptRemoteRevisionId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const revision = record.revision && typeof record.revision === 'object' && !Array.isArray(record.revision)
+    ? record.revision as Record<string, unknown>
+    : null;
+  const value = record.transcript_revision_id ?? record.revision_id ?? revision?.id;
+  if (value == null) return null;
+  if (typeof value !== 'string') throw new Error('transcript remote revision identity is invalid');
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('transcript remote revision identity is invalid');
+  }
+  return normalized;
+}
+
+function transcriptWithFallback(
+  snapshot: ApiTranscriptSnapshot,
+  fallbackItems: readonly TranscriptLine[],
+): TranscriptLine[] {
+  const candidateKind = snapshot.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+  const decision = evaluateTranscriptLineCandidate(fallbackItems, snapshot.items, {
+    candidateKind,
+    serverCompleteness: snapshot.completeness,
+  });
+  return [...(decision.useCandidate ? snapshot.items : fallbackItems)];
+}
+
+export async function fetchMeetingTranscriptSnapshot(
   meetingId: string,
   accessToken?: string,
   options: FetchMeetingTranscriptOptions = {},
-): Promise<TranscriptLine[]> {
+): Promise<ApiTranscriptSnapshot> {
   const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 1000));
   const all: TranscriptLine[] = [];
   const seenIds = new Set<string>();
+  let completeness: TranscriptServerCompleteness = 'unknown';
+  let remoteRevisionId: string | null = null;
   let offset = 0;
 
   while (true) {
@@ -639,6 +722,15 @@ export async function fetchMeetingTranscript(
     );
     if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, accessToken);
     const data = await res.json();
+    const pageRevisionId = transcriptRemoteRevisionId(data);
+    if (remoteRevisionId && pageRevisionId && remoteRevisionId !== pageRevisionId) {
+      throw new Error('transcript pagination changed remote revision');
+    }
+    remoteRevisionId = remoteRevisionId ?? pageRevisionId;
+    completeness = combineTranscriptServerCompleteness(
+      completeness,
+      transcriptServerCompletenessFromPayload(data),
+    );
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
       ? data.total
@@ -658,11 +750,19 @@ export async function fetchMeetingTranscript(
     if (all.length === previousCount) break;
   }
 
-  const fallbackItems = options.fallbackItems ?? [];
-  return fallbackItems.length > all.length ? fallbackItems : all;
+  return { items: all, completeness, remoteRevisionId };
 }
 
-export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string, signal?: AbortSignal): Promise<MeetingSummary | null> {
+export async function fetchMeetingTranscript(
+  meetingId: string,
+  accessToken?: string,
+  options: FetchMeetingTranscriptOptions = {},
+): Promise<TranscriptLine[]> {
+  const snapshot = await fetchMeetingTranscriptSnapshot(meetingId, accessToken, options);
+  return transcriptWithFallback(snapshot, options.fallbackItems ?? []);
+}
+
+export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string, signal?: AbortSignal): Promise<unknown | null> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/final`),
     { headers: authHeaders(accessToken), signal },
@@ -677,15 +777,20 @@ export async function generateMeetingSummary(
   accessToken?: string,
   signal?: AbortSignal,
   force = false,
+  template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
+  carryForward?: MeetingSummaryCarryForwardAuthorization | null,
 ): Promise<ApiMeetingSummaryTask> {
   const query = new URLSearchParams({
     summary_type: 'final',
     force: String(force),
+    template_id: template.id,
+    template_revision: String(template.revision),
   });
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/generate?${query}`), {
     method: 'POST',
-    headers: authHeaders(accessToken),
+    headers: jsonHeaders(accessToken),
     signal,
+    body: JSON.stringify({ carry_forward: summaryCarryForwardPayload(carryForward) }),
   });
   if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, accessToken);
   return res.json();
@@ -714,6 +819,8 @@ export async function generateGuestMeetingSummary(
   signal?: AbortSignal,
   meetingDate?: string,
   force = false,
+  template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
+  carryForward?: MeetingSummaryCarryForwardAuthorization | null,
 ): Promise<ApiMeetingSummaryTask> {
   const res = await fetch(meetingUrl('/api/laoji/meetings/guest-summary'), {
     method: 'POST',
@@ -724,7 +831,11 @@ export async function generateGuestMeetingSummary(
       title: title ?? null,
       meeting_date: meetingDate ?? null,
       force,
+      template_id: template.id,
+      template_revision: template.revision,
+      carry_forward: summaryCarryForwardPayload(carryForward),
       transcript_lines: transcriptLines.map(line => ({
+        id: line.id,
         speaker_label: line.speaker_label ?? null,
         speaker_id: line.speaker_id ?? null,
         text: line.text,
@@ -821,10 +932,17 @@ export async function uploadMeetingAudio(
   };
 }
 
-export async function deleteMeeting(meetingId: string, accessToken?: string): Promise<void> {
-  const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}`), {
+export async function deleteMeeting(
+  meetingId: string,
+  accessToken?: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}`), {
     method: 'DELETE',
     headers: authHeaders(accessToken),
+    signal,
   });
-  if (!res.ok) throw await apiResponseError('delete meeting failed', res, accessToken);
+  if (!res.ok && res.status !== 404) {
+    throw await apiResponseError('delete meeting failed', res, accessToken);
+  }
 }

@@ -16,10 +16,12 @@ import { useAppDialog } from '../components/AppDialog';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { readableErrorMessage } from '../services/errors';
+import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { briefGreetingSummaryText, meetingSummaryToText } from '../services/meetingSummary';
 import { canResumeMeetingRecording, formatDuration, preferredMeetingStatusLabel } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
+import { useMeetingMediaImport } from '../components/MeetingMediaImportProvider';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -34,7 +36,7 @@ function statusTone(label: string): 'neutral' | 'primary' | 'success' | 'warning
   if (label.includes('失败') || label.includes('中断') || label.includes('受阻')) return 'danger';
   if (label.includes('处理中') || label.includes('待')) return 'warning';
   if (label.includes('完成')) return 'success';
-  if (label.includes('录音')) return 'primary';
+  if (label.includes('录音') || label.includes('导入')) return 'primary';
   return 'neutral';
 }
 
@@ -145,6 +147,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     getCachedSummary,
   } = useMeetings();
   const { showDialog } = useAppDialog();
+  const { busy: mediaImporting, selectMeetingMedia } = useMeetingMediaImport();
   const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
@@ -252,6 +255,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       title: '会议记录',
       searching,
       query,
+      mediaImporting,
       phase: loading && meetings.length === 0
         ? 'loading'
         : error ? 'error' : meetings.length === 0 ? 'empty' : 'ready',
@@ -260,9 +264,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         : '',
       showingCachedData: Boolean(error && meetings.length > 0),
       meetings: meetings.map(meeting => {
+        const imported = meeting.tags.some(tag => tag.label === '已导入');
         const rawStatusLabel = staleRecordingIds.has(meeting.id)
           ? '录音中断'
-          : preferredMeetingStatusLabel(meeting.tags);
+          : imported ? '已导入' : preferredMeetingStatusLabel(meeting.tags);
         const statusLabel = rawStatusLabel === '已完成' ? '' : rawStatusLabel;
         const cover = inferredMeetingCover(
           getCachedSummary(meeting.id),
@@ -282,16 +287,27 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         };
       }),
     },
-  }), [error, getCachedSummary, getCachedTranscript, loading, meetings, query, searching, staleRecordingIds]);
+  }), [error, getCachedSummary, getCachedTranscript, loading, mediaImporting, meetings, query, searching, staleRecordingIds]);
 
   const confirmDelete = (id: string) => {
+    const target = meetings.find(meeting => meeting.id === id);
+    if (!target) return;
+    const presentation = meetingDeletionPresentation(target);
+    if (presentation.blocked) {
+      showDialog({
+        title: presentation.title,
+        message: presentation.message,
+        tone: 'warning',
+      });
+      return;
+    }
     showDialog({
-      title: '删除会议',
-      message: '确定删除此会议记录？',
+      title: presentation.title,
+      message: presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: '删除',
+          text: presentation.confirmText,
           role: 'destructive',
           onPress: async () => {
             try {
@@ -339,6 +355,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           if (resumable) navigation.navigate('MeetingLive', { meetingId: resumable.id });
           else navigation.navigate('MeetingLive');
         }
+        break;
+      case 'importMedia':
+        void selectMeetingMedia();
         break;
       case 'search':
       case 'beginSearch':
