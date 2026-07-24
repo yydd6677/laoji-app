@@ -39,8 +39,6 @@ import { useMeetings } from '../store/MeetingsStore';
 import {
   createGuestRealtimeSession,
   deleteGuestRealtimeSession,
-  fetchGuestMeetingTranscriptSnapshot,
-  fetchMeetingTranscriptSnapshot,
   type ApiGuestRealtimeSession,
   uploadMeetingAudio,
 } from '../services/api';
@@ -74,9 +72,9 @@ import { CurrentAddressError, getCurrentAddress } from '../services/currentAddre
 import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
 import { createMeetingMarker } from '../services/meetingMarkers';
 import {
-  evaluateTranscriptLineCandidate,
-  type TranscriptServerCompleteness,
-} from '../services/transcriptCompleteness';
+  completeMeetingTranscriptAfterCapture,
+  type MeetingTranscriptCompletionStatus,
+} from '../services/meetingTranscriptCompletion';
 import {
   MeetingManualNoteSyncConflictChangedError,
   RecordingSessionController,
@@ -93,7 +91,7 @@ import {
   type MeetingManualNoteSyncConflictView,
 } from '../services/meetingManualNoteConflicts';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
-import { mirrorLegacyTranscriptSaveFailure } from '../services/meetingStageMirror';
+import { mirrorLegacyTranscriptProcessingFailure } from '../services/meetingStageMirror';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -421,135 +419,84 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     id: string,
     remoteMeetingId: string | null,
     stopAudio: () => Promise<string | undefined>,
-    guestSession?: ApiGuestRealtimeSession,
   ) => {
     const recorder = recorderSnapshotRef.current;
-    try {
-      return await finalizeMeetingRecording({
-        meetingId: id,
-        remoteMeetingId,
-        storageScope: recordingStorageScope,
-        transcriptLines: finalizedNativeMinutesTranscript(transcriptRef.current),
-        getTranscriptLines: () => finalizedNativeMinutesTranscript(transcriptRef.current),
-        isGuest,
-        accessToken,
-        audioDurationSec: recorder?.durationMs ? recorder.durationMs / 1000 : undefined,
-        getAudioDurationSec: () => {
-          const durationMs = recorderSnapshotRef.current?.durationMs;
-          return durationMs ? durationMs / 1000 : undefined;
-        },
-        getAudioBars: () => nativeAudioBarsRef.current,
-        stopAudio,
-      }, {
-        saveTranscript: saveCachedTranscript,
-        onTranscriptSaveFailure: (meetingId, reason) => meetingScopeKey
-          ? mirrorLegacyTranscriptSaveFailure(meetingScopeKey, meetingId, reason)
-          : Promise.resolve(),
-        uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
-          meetingIdToUpload,
-          uri,
-          token,
-          { fileName: `${meetingIdToUpload}.wav`, mimeType: 'audio/wav' },
-        ),
-        enqueuePersistentUpload: (pending, token) => enqueueNativeMeetingUpload({
-          scope: recordingStorageScope,
-          accessToken: token,
-          meetingId: pending.meetingId,
-          remoteMeetingId: pending.remoteMeetingId,
-          operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
-          fileUri: pending.audioUri,
-          mimeType: pending.mimeType,
-          fileName: pending.fileName,
-        }),
-        updateStatus: updateMeetingStatus,
-        refreshMeetings,
-        reconcileUploads: reconcileAudioUploads,
-      });
-    } finally {
-      if (guestSession) {
-        await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
-      }
-    }
+    return finalizeMeetingRecording({
+      meetingId: id,
+      remoteMeetingId,
+      storageScope: recordingStorageScope,
+      transcriptLines: finalizedNativeMinutesTranscript(transcriptRef.current),
+      getTranscriptLines: () => finalizedNativeMinutesTranscript(transcriptRef.current),
+      isGuest,
+      accessToken,
+      audioDurationSec: recorder?.durationMs ? recorder.durationMs / 1000 : undefined,
+      getAudioDurationSec: () => {
+        const durationMs = recorderSnapshotRef.current?.durationMs;
+        return durationMs ? durationMs / 1000 : undefined;
+      },
+      getAudioBars: () => nativeAudioBarsRef.current,
+      stopAudio,
+    }, {
+      saveTranscript: saveCachedTranscript,
+      onTranscriptSaveFailure: (meetingId, reason) => meetingScopeKey
+        ? mirrorLegacyTranscriptProcessingFailure(meetingScopeKey, meetingId, 'persistence', reason)
+        : Promise.resolve(),
+      uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
+        meetingIdToUpload,
+        uri,
+        token,
+        { fileName: `${meetingIdToUpload}.wav`, mimeType: 'audio/wav' },
+      ),
+      enqueuePersistentUpload: (pending, token) => enqueueNativeMeetingUpload({
+        scope: recordingStorageScope,
+        accessToken: token,
+        meetingId: pending.meetingId,
+        remoteMeetingId: pending.remoteMeetingId,
+        operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
+        fileUri: pending.audioUri,
+        mimeType: pending.mimeType,
+        fileName: pending.fileName,
+      }),
+      updateStatus: updateMeetingStatus,
+      refreshMeetings,
+      reconcileUploads: reconcileAudioUploads,
+    });
   }, [accessToken, isGuest, meetingScopeKey, reconcileAudioUploads, recordingStorageScope, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
 
   const syncPersistedTranscript = useCallback(async (
     id: string,
     remoteMeetingId: string | null,
     guestSession?: ApiGuestRealtimeSession,
-  ) => {
+  ): Promise<MeetingTranscriptCompletionStatus> => {
     const local = finalizedNativeMinutesTranscript(transcriptRef.current);
-    let selected = local;
-    let lastCandidate: typeof local | null = null;
-    let lastCompleteness: TranscriptServerCompleteness = 'unknown';
-    let lastRemoteRevisionId: string | null = null;
-    let preservedDraft = false;
-    if (isGuest) {
-      if (guestSession) {
-        for (const delayMs of [0, 250, 750]) {
-          if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
-          try {
-            const remote = await fetchGuestMeetingTranscriptSnapshot(
-              guestSession.meeting_id,
-              guestSession.guest_token,
-            );
-            const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
-            const decision = evaluateTranscriptLineCandidate(selected, remote.items, {
-              candidateKind,
-              serverCompleteness: remote.completeness,
-            });
-            lastCandidate = remote.items;
-            lastCompleteness = remote.completeness;
-            preservedDraft = !decision.useCandidate || decision.completing;
-            if (decision.useCandidate) selected = remote.items;
-            if (decision.useCandidate && !decision.completing && remote.items.length > 0) break;
-          } catch {
-            if (mountedRef.current) setError('实时转写暂时不可用，已保留现有文字记录');
-            break;
+    const remote = isGuest
+      ? guestSession
+        ? {
+            kind: 'guest' as const,
+            meetingId: guestSession.meeting_id,
+            guestToken: guestSession.guest_token,
           }
-        }
-      }
-    } else if (accessToken && remoteMeetingId) {
-      for (const delayMs of [0, 250, 750]) {
-        if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
-        try {
-          const remote = await fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken);
-          const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
-          const decision = evaluateTranscriptLineCandidate(selected, remote.items, {
-            candidateKind,
-            serverCompleteness: remote.completeness,
-          });
-          lastCandidate = remote.items;
-          lastCompleteness = remote.completeness;
-          lastRemoteRevisionId = remote.remoteRevisionId;
-          preservedDraft = !decision.useCandidate || decision.completing;
-          if (decision.useCandidate) selected = remote.items;
-          if (decision.useCandidate && !decision.completing && remote.items.length > 0) break;
-        } catch {
-          if (mountedRef.current) {
-            setError('录音已保存，文字记录暂未补全；详情页会继续同步');
-          }
-          break;
-        }
-      }
-    }
-    const candidate = lastCandidate ?? local;
-    const candidateKind = lastCandidate && lastCompleteness === 'incomplete'
-      ? 'realtime_draft'
-      : 'final';
-    await saveCachedTranscript(id, candidate, {
-      candidateKind,
-      serverCompleteness: lastCandidate ? lastCompleteness : 'unknown',
-      remoteRevisionId: lastRemoteRevisionId,
-    }).catch(() => {
-      if (mountedRef.current) setError('字幕已生成，但本机缓存写入失败；结束时会再次尝试');
+        : null
+      : accessToken && remoteMeetingId
+        ? { kind: 'account' as const, meetingId: remoteMeetingId, accessToken }
+        : null;
+    const completion = await completeMeetingTranscriptAfterCapture({
+      meetingId: id,
+      localLines: local,
+      remote,
+    }, {
+      saveTranscript: saveCachedTranscript,
+      getCachedTranscript,
+      onFailure: (kind, reason) => meetingScopeKey
+        ? mirrorLegacyTranscriptProcessingFailure(meetingScopeKey, id, kind, reason)
+        : Promise.resolve(),
     });
-    const effective = getCachedTranscript(id);
-    transcriptRef.current = effective;
+    transcriptRef.current = completion.lines;
     if (mountedRef.current) {
-      setTranscript(effective);
-      if (preservedDraft) setError('录音已保存，文字记录仍在补全；详情页会继续同步');
+      setTranscript(completion.lines);
     }
-  }, [accessToken, getCachedTranscript, isGuest, saveCachedTranscript]);
+    return completion.status;
+  }, [accessToken, getCachedTranscript, isGuest, meetingScopeKey, saveCachedTranscript]);
 
   const createActiveRecording = useCallback((
     id: string,
@@ -573,21 +520,41 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
         localUri = recovered.localUri ?? undefined;
       }
-      await syncPersistedTranscript(id, remoteMeetingId, guestSession);
       return localUri;
     };
     return {
       meetingId: id,
       sessionId: id,
       guestSession,
-      finalize: createMeetingRecordingFinalizer(() => persistNativeRecording(
-        id,
-        remoteMeetingId,
-        stopAudio,
-        guestSession,
-      )),
+      finalize: createMeetingRecordingFinalizer(async () => {
+        try {
+          const committed = await persistNativeRecording(id, remoteMeetingId, stopAudio);
+          let transcriptCompletion: MeetingTranscriptCompletionStatus = 'failed';
+          try {
+            transcriptCompletion = await syncPersistedTranscript(id, remoteMeetingId, guestSession);
+          } catch (reason) {
+            diagnosticWarn('complete transcript after local recording commit failed', reason);
+            if (meetingScopeKey) {
+              await mirrorLegacyTranscriptProcessingFailure(
+                meetingScopeKey,
+                id,
+                'sync',
+                reason,
+              );
+            }
+          }
+          return { ...committed, transcriptCompletion };
+        } finally {
+          if (guestSession) {
+            await deleteGuestRealtimeSession(
+              guestSession.meeting_id,
+              guestSession.guest_token,
+            ).catch(() => {});
+          }
+        }
+      }),
     };
-  }, [applyRecorderSnapshot, persistNativeRecording, syncPersistedTranscript]);
+  }, [applyRecorderSnapshot, meetingScopeKey, persistNativeRecording, syncPersistedTranscript]);
 
   const finalizeActiveRecording = useCallback((navigateAfter: boolean) => {
     const controller = recordingControllerRef.current;
@@ -611,13 +578,20 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (!mountedRef.current) return true;
         setPhase('saving');
         const warnings: string[] = [];
-        if (completed.result.transcriptSaveFailed) warnings.push('文字记录保存失败，可稍后重试');
+        if (completed.result.transcriptCompletion === 'failed') {
+          warnings.push(completed.result.transcriptSaveFailed
+            ? '文字记录保存失败，可稍后重试'
+            : '文字记录补全失败，可稍后重试');
+        }
         if (completed.result.uploadFailed) {
           warnings.push(completed.result.retryQueued ? '录音将在联网后继续同步' : '录音上传状态未保存');
         }
         if (completed.result.statusSyncPending) warnings.push('会议状态稍后继续同步');
         const warning = warnings.length > 0 ? `会议录音已保存；${warnings.join('；')}` : '';
-        setError(completed.navigateAfter ? '' : warning);
+        const pending = completed.result.transcriptCompletion === 'pending'
+          ? '会议录音已保存；文字记录仍在补全'
+          : '';
+        setError(completed.navigateAfter ? '' : warning || pending);
         if (warning) ToastAndroid.show(warning, ToastAndroid.LONG);
         if (completed.navigateAfter) {
           navigation.replace('Transcription', { meetingId: completed.session.meetingId });
@@ -685,8 +659,18 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     };
     const remoteMeetingId = isGuest ? null : meetingRemoteIdentity(existing);
     await cancelMeetingPlannedEndReminder(existing.id);
-    await syncPersistedTranscript(existing.id, remoteMeetingId);
     await persistNativeRecording(existing.id, remoteMeetingId, async () => recovered.localUri);
+    await syncPersistedTranscript(existing.id, remoteMeetingId).catch(async reason => {
+      diagnosticWarn('complete recovered transcript after local recording commit failed', reason);
+      if (meetingScopeKey) {
+        await mirrorLegacyTranscriptProcessingFailure(
+          meetingScopeKey,
+          existing.id,
+          'sync',
+          reason,
+        );
+      }
+    });
     await manualNote.flush();
     if (mountedRef.current) navigation.replace('Transcription', { meetingId: existing.id });
     return true;

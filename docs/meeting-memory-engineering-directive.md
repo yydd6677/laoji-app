@@ -1088,6 +1088,8 @@ interface MinutesTranscriptLineSnapshot {
 
 录音结束第二层纵切已拆开本机音频与最终 Transcript 的成败：只有 native stop 未得到可恢复结果，或 Transcript 写失败且同时无法确认本机音频 URI 时，整次 finalize 才失败并保留 active handle；一旦本机音频已确认，Transcript 持久化失败只返回 `transcriptSaveFailed`，继续把音频、时长、波形和会议结束状态落账，并继续独立安排上传。legacy meeting status 更新必须等待自身 stage mirror 完成，再写最终 Transcript 失败，禁止异步 mirror 把 `failed_retryable` 迟到覆盖成 `finalizing`。失败回调把 canonical Transcript 标为 `failed_retryable`，但已存在稳定 final revision 时不得被第二次兼容缓存写失败降级。Android 只显示“会议录音已保存”后的中文次级警告并正常进入详情，不能再显示整场保存失败。当前会议根状态写入仍属于把 journal asset 关联到业务 meeting 的 capture commit：在 canonical journal 尚不能反向修复关闭 read flag 时的 legacy 投影前，该写入抛错仍保留 finalize 重试，不得提前释放会话并假设后台一定修复。
 
+录音结束第三层纵切固定执行顺序为 `native stop -> 本机 Transcript/audio/meeting 状态提交与上传登记 -> 远端 Transcript 补全`。`stopAudio` 不再包含网络读取；只有前两段成功后才运行 `completeMeetingTranscriptAfterCapture()`。后置补全统一返回 `ready/pending/failed`，明确 incomplete 只保存 draft，服务端失败、同步失败和二次缓存失败分别写入 Transcript 可重试状态；该步骤自身抛错也被提交边界外捕获，不能再让已经落账的会议被控制器视为 finalize 失败。首次本机 Transcript 写失败但后置补全成功时，以最终补全状态为准，不继续展示过期警告。legacy 列表或上传刷新不得把 `failed_retryable` 当成成功重试并覆盖为 `finalizing`；只有 active stable final 已经 ready 时才能清除此失败。游客临时 ASR 会话在补全尝试完成后清理；恢复出的本机音频同样先落账再拉取文字。该纵切仍未把上传网络等待移出 finalize，也没有强杀、停止超时或真机长录音证据。
+
 这一切片不改变事实源边界：Android recorder/journal 仍唯一负责采集状态、音频字节、本机文件、停止结果和进程恢复；控制器不缓存或推断 native capture state。`MeetingLiveScreen.android.tsx` 目前仍组装创建、持久化、Transcript 补全与上传依赖，尚未完成代码改造地图中“仅作为订阅者”的最终形态。当前仅有 TypeScript、无落盘窄状态合同和模拟器冒烟证据；强杀、停止超时与真机长录音仍属于后续退出条件。
 
 ## 10. P1 功能详细设计

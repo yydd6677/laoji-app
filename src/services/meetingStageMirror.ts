@@ -226,16 +226,23 @@ export async function mirrorLegacyMeetingStageState(
         const activelyRecordingDraft = legacyMeeting.hasTranscript
           && (legacyMeeting.status === 'recording' || legacyMeeting.status === 'paused');
         const waitingForFinal = activeRevision?.kind === 'realtime_draft' && !activelyRecordingDraft;
+        const stableFinalReady = Boolean(
+          activeRevision
+          && activeRevision.kind !== 'realtime_draft'
+          && activeRevision.status === 'ready',
+        );
         const transcriptStatus = activelyRecordingDraft
           ? 'realtime_draft'
           : waitingForFinal || !legacyMeeting.hasTranscript
             ? 'finalizing'
             : 'ready';
-        await transaction.upsertStage(transitionProcessingStage(transcript, {
-          stage: 'transcript',
-          status: transcriptStatus,
-          progress: transcriptStatus === 'ready' ? 1 : null,
-        }, Math.max(nowMs, transcript.updatedAtMs)), scopeKey);
+        if (transcript.status !== 'failed_retryable' || stableFinalReady || activelyRecordingDraft) {
+          await transaction.upsertStage(transitionProcessingStage(transcript, {
+            stage: 'transcript',
+            status: transcriptStatus,
+            progress: transcriptStatus === 'ready' ? 1 : null,
+          }, Math.max(nowMs, transcript.updatedAtMs)), scopeKey);
+        }
       }
       if (legacyMeeting.hasSummary) {
         const summary = await transaction.getStage(note.id, scopeKey, 'summary');

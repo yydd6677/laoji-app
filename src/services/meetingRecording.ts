@@ -51,6 +51,7 @@ export interface FinalizeMeetingRecordingDependencies {
 export interface FinalizeMeetingRecordingResult {
   audioUri?: string;
   transcriptSaveFailed: boolean;
+  transcriptCompletion?: 'ready' | 'pending' | 'failed';
   uploadFailed: boolean;
   retryQueued: boolean;
   uploadInBackground: boolean;
