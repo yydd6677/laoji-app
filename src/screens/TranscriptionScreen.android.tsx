@@ -132,7 +132,10 @@ import {
   type MeetingManualNoteSyncConflictView,
 } from '../services/meetingManualNoteConflicts';
 import { shareMeetingMarkerText } from '../services/meetingMarkerShare';
-import { evaluateTranscriptLineCandidate } from '../services/transcriptCompleteness';
+import {
+  evaluateTranscriptLineCandidate,
+  shouldRecheckTranscriptRemoteCandidate,
+} from '../services/transcriptCompleteness';
 import {
   meetingSummaryDocumentForLegacy,
   meetingSummaryDocumentToText,
@@ -1038,7 +1041,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           }
 
           setTranscriptError('');
-          if (remote.remoteState !== 'incomplete') break;
+          if (!shouldRecheckTranscriptRemoteCandidate(
+            remote.remoteState,
+            decision,
+            hasStableFinal,
+          )) break;
           setTranscriptCompleting(!hasStableFinal);
           const retryDelayMs = retryIndex < TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS.length
             ? TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS[retryIndex]

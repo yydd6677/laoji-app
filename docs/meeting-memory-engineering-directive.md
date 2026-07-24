@@ -755,7 +755,7 @@ type SpeakerStatus =
 
 Summary 生命周期纵切已把页面内 loading 提升为 canonical 阶段状态：准备提交写 `queued`；得到稳定 task ID 后写 `job_id/input_fingerprint`，且同一 task 恢复或重复轮询不增加 attempt；服务端 `PENDING/STARTED` 分别投影为 `queued/generating`。当前 API 不提供可信百分比，因此 `progress` 保持 `null`，禁止从耗时推算虚假进度。页面关闭或请求 generation 变化只停止可见 UI 更新，已提交任务的 pending registry、阶段状态和最终结果保存继续按捕获时的 meeting/scope 执行；已知后台 task 的 Abort 保持运行态，只有没有 task 身份的提交中断、明确 worker/传输失败、恢复 registry 不可读或 pending 被明确丢弃时才进入可重试失败或 `stale`。阶段写入按 meeting 串行且只记诊断，SQLite 失败不得反向伪装为服务端提交失败。现有 `saveCachedSummary()` 仍是 `ready` 和 Summary version 落盘的唯一完成路径。该纵切已有纯状态合同、TypeScript 和 Preview Kotlin 编译证据，但尚无真实远端长任务、进程重启恢复、账号切换和服务端任务过期证据。
 
-Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同步失败和本机持久化失败映射为独立路径：明确 `incomplete` 时只写可替换 draft/finalizing，并按 1/2/4 秒有限重取，随后降为 15 秒检查；页面失效或 Abort 静默退出，不写失败。每次候选保存后必须重读 canonical active revision 作为下一轮 baseline；远端失败或传输失败进入 `failed_retryable`，但已有稳定 final 时保留 `ready`。状态百分比继续为 `null`，不得把轮询次数伪装成进度。当前详情重试可重新发起 Transcript 同步，但该纵切尚无运行服务、进程重启和真实长录音收敛证据。
+Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同步失败和本机持久化失败映射为独立路径：明确 `incomplete` 时只写可替换 draft/finalizing，并按 1/2/4 秒有限重取，随后降为 15 秒检查；服务端虽然明确 `complete`、但候选覆盖范围明显短于当前可读 draft 时，同样保留 draft/finalizing 并沿该节奏复查，直到取得不退化的 final 或页面失效。已有稳定 final 时不因更短 complete 候选进入无意义轮询；旧服务的 `unknown` 兼容读取和明确 `failed` 也仍只走原有终止路径。页面失效或 Abort 静默退出，不写失败。每次候选保存后必须重读 canonical active revision 作为下一轮 baseline；远端失败或传输失败进入 `failed_retryable`，但已有稳定 final 时保留 `ready`。状态百分比继续为 `null`，不得把轮询次数伪装成进度。当前详情重试可重新发起 Transcript 同步，纯函数窄合同已覆盖 complete 截断、可接受 final、稳定 final、unknown、failed 和 incomplete 分支；该纵切尚无运行服务、进程重启和真实长录音收敛证据。
 
 ### 8.3 错误合同
 

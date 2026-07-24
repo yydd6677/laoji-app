@@ -185,6 +185,17 @@ export function evaluateTranscriptLineCandidate(
   );
 }
 
+export function shouldRecheckTranscriptRemoteCandidate(
+  remoteState: TranscriptRemoteState,
+  decision: Pick<TranscriptCandidateDecision, 'clearlyShorter'>,
+  hasStableFinal: boolean,
+): boolean {
+  if (remoteState === 'incomplete') return true;
+  return remoteState === 'complete'
+    && decision.clearlyShorter
+    && !hasStableFinal;
+}
+
 export function transcriptRemoteStateFromPayload(
   payload: unknown,
 ): TranscriptRemoteState {
