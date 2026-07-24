@@ -43,7 +43,12 @@ export interface FinalizeMeetingRecordingDependencies {
     pending: PendingMeetingAudioUpload,
     accessToken: string,
   ) => Promise<NativeMeetingUploadRegistration | null>;
-  updateStatus: (meetingId: string, status: string, patch: Partial<Meeting>) => Promise<boolean>;
+  updateStatus: (
+    meetingId: string,
+    status: string,
+    patch: Partial<Meeting>,
+    options?: { remoteSync?: 'wait' | 'background' },
+  ) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   reconcileUploads?: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
 }
@@ -56,6 +61,7 @@ export interface FinalizeMeetingRecordingResult {
   retryQueued: boolean;
   uploadInBackground: boolean;
   statusSyncPending: boolean;
+  statusSyncInBackground: boolean;
 }
 
 export interface PendingMeetingAudioUpload {
@@ -120,10 +126,10 @@ function meetingAudioOperationKey(storageScope: string, meetingId: string): stri
   return `${storageScope}\u001f${meetingId}`;
 }
 
-export function createMeetingRecordingFinalizer(
-  finalize: () => Promise<FinalizeMeetingRecordingResult>,
-): () => Promise<FinalizeMeetingRecordingResult> {
-  let inFlightOrCompleted: Promise<FinalizeMeetingRecordingResult> | null = null;
+export function createMeetingRecordingFinalizer<
+  Result extends FinalizeMeetingRecordingResult = FinalizeMeetingRecordingResult,
+>(finalize: () => Promise<Result>): () => Promise<Result> {
+  let inFlightOrCompleted: Promise<Result> | null = null;
   return () => {
     if (inFlightOrCompleted) return inFlightOrCompleted;
     const operation = Promise.resolve().then(finalize);
@@ -422,7 +428,13 @@ export async function finalizeMeetingRecording(
     meetingPatch.duration = formatDuration(audioDurationSec);
   }
   if (audioBars?.length) meetingPatch.audioBars = audioBars;
-  const statusSynced = await dependencies.updateStatus(input.meetingId, 'ended', meetingPatch);
+  const statusSyncInBackground = !input.isGuest;
+  const statusSynced = await dependencies.updateStatus(
+    input.meetingId,
+    'ended',
+    meetingPatch,
+    { remoteSync: statusSyncInBackground ? 'background' : 'wait' },
+  );
   if (transcriptResult.status === 'rejected') {
     await dependencies.onTranscriptSaveFailure?.(input.meetingId, transcriptResult.reason).catch(() => {});
   }
@@ -471,20 +483,24 @@ export async function finalizeMeetingRecording(
       return undefined;
     }).catch(() => {});
   } else if (pendingAudio && input.accessToken && !retryQueued) {
-    try {
-      await dependencies.uploadAudio(
+    // The local capture is already committed, but the durable JS registry is
+    // unavailable. Make one best-effort upload without holding the recorder
+    // controller open; a failure remains visible as an untracked local asset.
+    uploadFailed = true;
+    uploadInBackground = true;
+    const accessToken = input.accessToken;
+    void Promise.resolve().then(() => dependencies.uploadAudio(
         input.remoteMeetingId?.trim() || input.meetingId,
         audioUri!,
-        input.accessToken,
-      );
-      if (dependencies.reconcileUploads) {
-        void dependencies.reconcileUploads(pendingAudio).catch(() => {});
-      } else {
-        void dependencies.refreshMeetings().catch(() => {});
-      }
-    } catch {
-      uploadFailed = true;
-    }
+        accessToken,
+      ))
+      .then(() => {
+        if (dependencies.reconcileUploads) {
+          return dependencies.reconcileUploads(pendingAudio);
+        }
+        return dependencies.refreshMeetings();
+      })
+      .catch(() => {});
   }
 
   if (pendingAudio && retryQueued && dependencies.reconcileUploads) {
@@ -498,6 +514,7 @@ export async function finalizeMeetingRecording(
     retryQueued,
     uploadInBackground,
     statusSyncPending: !input.isGuest && !statusSynced,
+    statusSyncInBackground,
   };
 }
 

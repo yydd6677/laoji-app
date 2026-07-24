@@ -1,0 +1,189 @@
+import type { NativeMeetingUploadRegistration } from '../../native/nativeTransferCoordinator';
+import type { ScopeKey } from '../../domain/meeting';
+import type { Meeting, TranscriptLine } from '../../types';
+import { diagnosticWarn } from '../../services/diagnostics';
+import {
+  finalizeMeetingRecording,
+  type FinalizeMeetingRecordingResult,
+  type PendingMeetingAudioUpload,
+} from '../../services/meetingRecording';
+import type { MeetingTranscriptFailureKind } from '../../services/meetingStageMirror';
+import {
+  completeMeetingTranscriptAfterCapture,
+  type MeetingTranscriptCompletionStatus,
+} from '../../services/meetingTranscriptCompletion';
+import type {
+  TranscriptCandidateKind,
+  TranscriptServerCompleteness,
+} from '../../services/transcriptCompleteness';
+
+export interface GuestRealtimeSessionIdentity {
+  meetingId: string;
+  guestToken: string;
+}
+
+export interface FinalizeNativeMeetingRecordingInput {
+  meetingId: string;
+  remoteMeetingId: string | null;
+  storageScope: string;
+  scopeKey: ScopeKey | null;
+  isGuest: boolean;
+  accessToken?: string | null;
+  guestSession?: GuestRealtimeSessionIdentity;
+  getTranscriptLines: () => TranscriptLine[];
+  getAudioDurationSec: () => number | undefined;
+  getAudioBars: () => number[] | undefined;
+  stopAudio: () => Promise<string | undefined>;
+}
+
+export interface FinalizeNativeMeetingRecordingResult extends FinalizeMeetingRecordingResult {
+  transcriptCompletion: MeetingTranscriptCompletionStatus;
+  transcriptLines: TranscriptLine[];
+  transcriptCompletionTask: Promise<NativeMeetingTranscriptCompletionResult>;
+}
+
+export interface NativeMeetingTranscriptCompletionResult {
+  status: MeetingTranscriptCompletionStatus;
+  lines: TranscriptLine[];
+}
+
+export interface FinalizeNativeMeetingRecordingDependencies {
+  saveTranscript: (
+    meetingId: string,
+    lines: TranscriptLine[],
+    options?: {
+      candidateKind?: TranscriptCandidateKind;
+      serverCompleteness?: TranscriptServerCompleteness;
+      remoteRevisionId?: string | null;
+    },
+  ) => Promise<void>;
+  getCachedTranscript: (meetingId: string) => TranscriptLine[];
+  recordTranscriptFailure?: (
+    scopeKey: ScopeKey,
+    meetingId: string,
+    kind: MeetingTranscriptFailureKind,
+    reason: unknown,
+  ) => Promise<void>;
+  uploadAudio: (meetingId: string, uri: string, accessToken: string) => Promise<unknown>;
+  enqueuePersistentUpload?: (
+    pending: PendingMeetingAudioUpload,
+    accessToken: string,
+  ) => Promise<NativeMeetingUploadRegistration | null>;
+  updateStatus: (
+    meetingId: string,
+    status: string,
+    patch: Partial<Meeting>,
+    options?: { remoteSync?: 'wait' | 'background' },
+  ) => Promise<boolean>;
+  refreshMeetings: () => Promise<void>;
+  reconcileUploads?: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
+  deleteGuestSession?: (session: GuestRealtimeSessionIdentity) => Promise<void>;
+}
+
+/** ANDR-01: application orchestration starts only after Android owns capture. */
+export class FinalizeNativeMeetingRecordingUseCase {
+  constructor(private readonly dependencies: FinalizeNativeMeetingRecordingDependencies) {}
+
+  async execute(
+    input: FinalizeNativeMeetingRecordingInput,
+  ): Promise<FinalizeNativeMeetingRecordingResult> {
+    const committed = await finalizeMeetingRecording({
+      meetingId: input.meetingId,
+      remoteMeetingId: input.remoteMeetingId,
+      storageScope: input.storageScope,
+      transcriptLines: input.getTranscriptLines(),
+      getTranscriptLines: input.getTranscriptLines,
+      isGuest: input.isGuest,
+      accessToken: input.accessToken,
+      getAudioDurationSec: input.getAudioDurationSec,
+      getAudioBars: input.getAudioBars,
+      stopAudio: input.stopAudio,
+    }, {
+      saveTranscript: this.dependencies.saveTranscript,
+      onTranscriptSaveFailure: (meetingId, reason) => this.recordTranscriptFailure(
+        input.scopeKey,
+        meetingId,
+        'persistence',
+        reason,
+      ),
+      uploadAudio: this.dependencies.uploadAudio,
+      enqueuePersistentUpload: this.dependencies.enqueuePersistentUpload,
+      updateStatus: this.dependencies.updateStatus,
+      refreshMeetings: this.dependencies.refreshMeetings,
+      reconcileUploads: this.dependencies.reconcileUploads,
+    });
+    const transcriptLines = input.getTranscriptLines();
+    const transcriptCompletionTask = this.completeTranscript(input, transcriptLines);
+    return {
+      ...committed,
+      transcriptCompletion: 'pending',
+      transcriptLines,
+      transcriptCompletionTask,
+    };
+  }
+
+  private async completeTranscript(
+    input: FinalizeNativeMeetingRecordingInput,
+    localLines: TranscriptLine[],
+  ): Promise<NativeMeetingTranscriptCompletionResult> {
+    try {
+      const completion = await completeMeetingTranscriptAfterCapture({
+        meetingId: input.meetingId,
+        localLines,
+        remote: this.remoteTranscriptIdentity(input),
+      }, {
+        saveTranscript: this.dependencies.saveTranscript,
+        getCachedTranscript: this.dependencies.getCachedTranscript,
+        onFailure: (kind, reason) => this.recordTranscriptFailure(
+          input.scopeKey,
+          input.meetingId,
+          kind,
+          reason,
+        ),
+      });
+      return { status: completion.status, lines: completion.lines };
+    } catch (reason) {
+      diagnosticWarn('complete transcript after local recording commit failed', reason);
+      await this.recordTranscriptFailure(input.scopeKey, input.meetingId, 'sync', reason);
+      return { status: 'failed', lines: localLines };
+    } finally {
+      const guestSession = input.guestSession;
+      const deleteGuestSession = this.dependencies.deleteGuestSession;
+      if (guestSession && deleteGuestSession) {
+        void Promise.resolve()
+          .then(() => deleteGuestSession(guestSession))
+          .catch(() => {});
+      }
+    }
+  }
+
+  private remoteTranscriptIdentity(input: FinalizeNativeMeetingRecordingInput) {
+    if (input.isGuest) {
+      return input.guestSession
+        ? {
+            kind: 'guest' as const,
+            meetingId: input.guestSession.meetingId,
+            guestToken: input.guestSession.guestToken,
+          }
+        : null;
+    }
+    return input.accessToken && input.remoteMeetingId
+      ? {
+          kind: 'account' as const,
+          meetingId: input.remoteMeetingId,
+          accessToken: input.accessToken,
+        }
+      : null;
+  }
+
+  private recordTranscriptFailure(
+    scopeKey: ScopeKey | null,
+    meetingId: string,
+    kind: MeetingTranscriptFailureKind,
+    reason: unknown,
+  ): Promise<void> {
+    if (!scopeKey || !this.dependencies.recordTranscriptFailure) return Promise.resolve();
+    return this.dependencies.recordTranscriptFailure(scopeKey, meetingId, kind, reason)
+      .catch(() => {});
+  }
+}

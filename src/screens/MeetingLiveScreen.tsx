@@ -306,7 +306,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
             ? '录音文件待上传，可在转写页重试'
             : '待上传记录写入失败，请勿清理本机数据');
         }
-        if (result.statusSyncPending) syncWarnings.push('会议状态将在网络恢复后自动同步');
+        if (result.statusSyncPending && !result.statusSyncInBackground) {
+          syncWarnings.push('会议状态将在网络恢复后自动同步');
+        }
         if (syncWarnings.length > 0) setError(`会议已保存到本机；${syncWarnings.join('；')}`);
         setStatus('closed');
         const shouldNavigate = navigateAfterFinalizeRef.current;

@@ -499,7 +499,12 @@ interface MeetingsContextType {
     id: string,
     changes: Partial<Pick<Meeting, 'title' | 'description' | 'participants' | 'mode' | 'location'>>,
   ) => Promise<void>;
-  updateMeetingStatus: (id: string, status: string, patch?: Partial<Meeting>) => Promise<boolean>;
+  updateMeetingStatus: (
+    id: string,
+    status: string,
+    patch?: Partial<Meeting>,
+    options?: MeetingStatusUpdateOptions,
+  ) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   reconcileAudioUploads: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
   getCachedTranscript: (id: string) => TranscriptLine[];
@@ -510,6 +515,10 @@ interface MeetingsContextType {
   ) => Promise<void>;
   getCachedSummary: (id: string) => MeetingSummary | null;
   saveCachedSummary: (id: string, summary: MeetingSummary | null) => Promise<SaveCachedSummaryResult>;
+}
+
+interface MeetingStatusUpdateOptions {
+  remoteSync?: 'wait' | 'background';
 }
 
 export interface SaveCachedTranscriptOptions {
@@ -2353,7 +2362,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetingsStrict, scope, updateCanonicalAccountMeetingRoot, updateCanonicalGuestMeetingRoot]);
 
-  const updateMeetingStatus = useCallback(async (id: string, status: string, patch: Partial<Meeting> = {}) => {
+  const updateMeetingStatus = useCallback(async (
+    id: string,
+    status: string,
+    patch: Partial<Meeting> = {},
+    options: MeetingStatusUpdateOptions = {},
+  ) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return false;
     if (mode === 'guest') {
@@ -2409,33 +2423,49 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     meetingsRef.current = local;
     setMeetings(local);
     await mirrorMeetingProjection(scope, local.find(meeting => meeting.id === id));
-    try {
-      const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
-      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
-      const synced = meetingsRef.current.map(meeting => {
-        if (meeting.id !== id) return meeting;
-        const audioSyncPending = Boolean(patch.audioSyncPending ?? meeting.audioSyncPending);
-        const audioSyncBlocked = audioSyncPending
-          && Boolean(patch.audioSyncBlocked ?? meeting.audioSyncBlocked);
-        return {
-          ...meeting,
-          ...updated,
-          ...patch,
-          tags: tagsForAudioSync(updated.tags, audioSyncPending, audioSyncBlocked),
-          audioSyncPending,
-          audioSyncBlocked,
-          statusSyncPending: false,
-        };
-      });
-      await persistMeetingsStrict(synced);
-      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
-      meetingsRef.current = synced;
-      setMeetings(synced);
-      await mirrorMeetingProjection(scope, synced.find(meeting => meeting.id === id));
-      return true;
-    } catch {
+    const syncRemoteStatus = async (): Promise<boolean> => {
+      try {
+        const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
+        const current = meetingsRef.current.find(meeting => meeting.id === id);
+        if (!current || current.status !== status || !current.statusSyncPending) return true;
+        const synced = meetingsRef.current.map(meeting => {
+          if (meeting.id !== id) return meeting;
+          // The status response may arrive after WorkManager/reconciliation.
+          // Preserve the current local media projection instead of replaying
+          // the capture-time patch and resurrecting an already uploaded asset.
+          const audioSyncPending = Boolean(meeting.audioSyncPending);
+          const audioSyncBlocked = audioSyncPending && Boolean(meeting.audioSyncBlocked);
+          return {
+            ...meeting,
+            ...updated,
+            tags: tagsForAudioSync(updated.tags, audioSyncPending, audioSyncBlocked),
+            hasTranscript: meeting.hasTranscript || updated.hasTranscript,
+            audioAvailable: meeting.audioAvailable || updated.audioAvailable,
+            audioLocalUri: meeting.audioLocalUri,
+            audioDurationSec: meeting.audioDurationSec,
+            audioBars: meeting.audioBars,
+            duration: meeting.duration,
+            audioSyncPending,
+            audioSyncBlocked,
+            statusSyncPending: false,
+          };
+        });
+        await persistMeetingsStrict(synced);
+        if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
+        meetingsRef.current = synced;
+        setMeetings(synced);
+        await mirrorMeetingProjection(scope, synced.find(meeting => meeting.id === id));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (options.remoteSync === 'background') {
+      void syncRemoteStatus();
       return false;
     }
+    return syncRemoteStatus();
   }, [accessToken, deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetingsStrict, scope, updateCanonicalAccountMeetingStatus, updateCanonicalGuestMeetingStatus]);
 
   const getCachedTranscript = useCallback((id: string) => {
