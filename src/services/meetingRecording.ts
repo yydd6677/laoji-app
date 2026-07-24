@@ -37,6 +37,7 @@ export interface FinalizeMeetingRecordingInput {
 
 export interface FinalizeMeetingRecordingDependencies {
   saveTranscript: (meetingId: string, lines: TranscriptLine[]) => Promise<void>;
+  onTranscriptSaveFailure?: (meetingId: string, reason: unknown) => Promise<void>;
   uploadAudio: (meetingId: string, uri: string, accessToken: string) => Promise<unknown>;
   enqueuePersistentUpload?: (
     pending: PendingMeetingAudioUpload,
@@ -49,6 +50,7 @@ export interface FinalizeMeetingRecordingDependencies {
 
 export interface FinalizeMeetingRecordingResult {
   audioUri?: string;
+  transcriptSaveFailed: boolean;
   uploadFailed: boolean;
   retryQueued: boolean;
   uploadInBackground: boolean;
@@ -373,9 +375,12 @@ export async function finalizeMeetingRecording(
   }
   const audioUri = normalizeRecordingUri(audioResult.value);
   if (transcriptResult.status === 'rejected') {
-    const audioState = audioUri ? '录音文件已保留在本机' : '录音已安全停止';
-    throw new Error(`转写暂时无法保存，${audioState}。请检查存储空间后重试`);
+    if (!audioUri) {
+      await dependencies.onTranscriptSaveFailure?.(input.meetingId, transcriptResult.reason).catch(() => {});
+      throw new Error('转写暂时无法保存，且未能确认本机录音文件。请重试');
+    }
   }
+  const transcriptSaveFailed = transcriptResult.status === 'rejected';
 
   let uploadFailed = false;
   let retryQueued = false;
@@ -403,12 +408,12 @@ export async function finalizeMeetingRecording(
   }
 
   const meetingPatch: Partial<Meeting> = {
-    hasTranscript: transcriptLines.length > 0,
     audioAvailable: Boolean(audioUri),
     audioLocalUri: audioUri ?? null,
     audioSyncPending: retryQueued,
     audioSyncBlocked: false,
   };
+  if (!transcriptSaveFailed) meetingPatch.hasTranscript = transcriptLines.length > 0;
   const audioDurationSec = input.getAudioDurationSec?.() ?? input.audioDurationSec;
   const audioBars = input.getAudioBars?.() ?? input.audioBars;
   if (audioDurationSec) {
@@ -417,6 +422,9 @@ export async function finalizeMeetingRecording(
   }
   if (audioBars?.length) meetingPatch.audioBars = audioBars;
   const statusSynced = await dependencies.updateStatus(input.meetingId, 'ended', meetingPatch);
+  if (transcriptResult.status === 'rejected') {
+    await dependencies.onTranscriptSaveFailure?.(input.meetingId, transcriptResult.reason).catch(() => {});
+  }
 
   let persistentUploadQueued = false;
   if (
@@ -484,6 +492,7 @@ export async function finalizeMeetingRecording(
 
   return {
     audioUri,
+    transcriptSaveFailed,
     uploadFailed,
     retryQueued,
     uploadInBackground,

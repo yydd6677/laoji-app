@@ -93,6 +93,7 @@ import {
   type MeetingManualNoteSyncConflictView,
 } from '../services/meetingManualNoteConflicts';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
+import { mirrorLegacyTranscriptSaveFailure } from '../services/meetingStageMirror';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -441,6 +442,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         stopAudio,
       }, {
         saveTranscript: saveCachedTranscript,
+        onTranscriptSaveFailure: (meetingId, reason) => meetingScopeKey
+          ? mirrorLegacyTranscriptSaveFailure(meetingScopeKey, meetingId, reason)
+          : Promise.resolve(),
         uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
           meetingIdToUpload,
           uri,
@@ -466,7 +470,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
       }
     }
-  }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
+  }, [accessToken, isGuest, meetingScopeKey, reconcileAudioUploads, recordingStorageScope, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
 
   const syncPersistedTranscript = useCallback(async (
     id: string,
@@ -606,7 +610,15 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (mountedRef.current) setActiveSessionId('');
         if (!mountedRef.current) return true;
         setPhase('saving');
-        setError('');
+        const warnings: string[] = [];
+        if (completed.result.transcriptSaveFailed) warnings.push('文字记录保存失败，可稍后重试');
+        if (completed.result.uploadFailed) {
+          warnings.push(completed.result.retryQueued ? '录音将在联网后继续同步' : '录音上传状态未保存');
+        }
+        if (completed.result.statusSyncPending) warnings.push('会议状态稍后继续同步');
+        const warning = warnings.length > 0 ? `会议录音已保存；${warnings.join('；')}` : '';
+        setError(completed.navigateAfter ? '' : warning);
+        if (warning) ToastAndroid.show(warning, ToastAndroid.LONG);
         if (completed.navigateAfter) {
           navigation.replace('Transcription', { meetingId: completed.session.meetingId });
         }

@@ -300,6 +300,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (activeRecordingRef.current === active) activeRecordingRef.current = null;
         if (!mountedRef.current) return true;
         const syncWarnings: string[] = [];
+        if (result.transcriptSaveFailed) syncWarnings.push('文字记录保存失败，可稍后重试');
         if (result.uploadFailed) {
           syncWarnings.push(result.retryQueued
             ? '录音文件待上传，可在转写页重试'

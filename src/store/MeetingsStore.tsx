@@ -2370,7 +2370,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
         meetingsRef.current = next;
         setMeetings(next);
-        mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
+        await mirrorMeetingProjection(scope, next.find(meeting => meeting.id === id));
         return true;
       });
     }
@@ -2408,7 +2408,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return false;
     meetingsRef.current = local;
     setMeetings(local);
-    mirrorMeetingProjection(scope, local.find(meeting => meeting.id === id));
+    await mirrorMeetingProjection(scope, local.find(meeting => meeting.id === id));
     try {
       const updated = serverToLocal(await apiUpdateMeeting(id, { status }, accessToken));
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
@@ -2431,7 +2431,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return true;
       meetingsRef.current = synced;
       setMeetings(synced);
-      mirrorMeetingProjection(scope, synced.find(meeting => meeting.id === id));
+      await mirrorMeetingProjection(scope, synced.find(meeting => meeting.id === id));
       return true;
     } catch {
       return false;

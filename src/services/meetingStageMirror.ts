@@ -287,6 +287,65 @@ export async function mirrorLegacyMeetingStageState(
   }
 }
 
+function transcriptPersistenceFailureCode(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  if (/storage|disk|space|quota|full/.test(message)) return 'transcript_local_storage_unavailable';
+  if (/sqlite|database|transaction|locked/.test(message)) return 'transcript_database_write_failed';
+  if (/scope|account|session/.test(message)) return 'transcript_scope_changed';
+  return 'transcript_persistence_failed';
+}
+
+export async function mirrorLegacyTranscriptSaveFailure(
+  scopeKey: ScopeKey,
+  legacyMeetingId: string,
+  reason: unknown,
+): Promise<void> {
+  if (!getFeatureFlags().localMeetingDbV1) return;
+  let outcome = 'meeting_unavailable';
+  try {
+    const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
+      legacyMeetingId,
+      scopeKey,
+    );
+    if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
+    await sqliteMeetingNoteRepository.transaction(async transaction => {
+      const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
+      if (!note || note.lifecycle === 'deleted') return;
+      const active = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+      if (active && active.kind !== 'realtime_draft' && active.status === 'ready') {
+        outcome = 'preserved_ready';
+        return;
+      }
+      const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
+      if (!stage) throw new Error('meeting transcript processing stage is missing');
+      const nowMs = Math.max(Date.now(), note.updatedAtMs, stage.updatedAtMs);
+      await transaction.upsertStage(transitionProcessingStage(stage, {
+        stage: 'transcript',
+        status: 'failed_retryable',
+        attemptStarted: true,
+        progress: null,
+        errorCode: transcriptPersistenceFailureCode(reason),
+        userMessageKey: 'meeting.transcript.retryable',
+        retryable: true,
+        nextRetryAtMs: null,
+      }, nowMs), scopeKey);
+      await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+      outcome = 'failed_retryable';
+    });
+    diagnosticAudit('meeting_transcript_persistence_failure', {
+      status: outcome,
+      scope: scopeKey === 'guest' ? 'guest' : 'account',
+    });
+  } catch (error) {
+    diagnosticWarn('[meeting-db] transcript failure shadow write failed', error);
+    diagnosticAudit('meeting_transcript_persistence_failure', {
+      status: 'write_failed',
+      scope: scopeKey === 'guest' ? 'guest' : 'account',
+      error_code: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
+
 export async function mirrorLegacyMeetingDeletion(scopeKey: ScopeKey, legacyMeetingId: string): Promise<void> {
   if (!getFeatureFlags().localMeetingDbV1) return;
   try {
