@@ -175,6 +175,7 @@ class RecorderEngine(
       sessionId = config.sessionId,
       purpose = config.purpose,
       mode = config.mode,
+      storageScope = config.storageScope,
       state = state,
       startedAtMs = startedAtMs,
       updatedAtMs = updatedAtMs,

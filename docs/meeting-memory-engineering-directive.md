@@ -1094,6 +1094,8 @@ interface MinutesTranscriptLineSnapshot {
 
 录音结束第五层纵切为账号 Transcript 补全增加无凭据持久恢复：本机 capture commit 后、控制器释放前，按 `user:{id}` 写入只含本机会议 ID、远端会议 ID、创建/尝试/下次重试时间和结果状态的 registry；不得保存 access token、guest token、Transcript 正文或用户资料。当前账号的 `MeetingTranscriptCompletionProvider` 在启动、回前台和显式 trigger 时临时注入当前 token，单次最多处理四项；同 scope/meeting 的进程内任务合并，明确 incomplete 每 15 秒复查，失败从 30 秒指数退避到 15 分钟，23 小时后停止自动恢复并保留阶段手动重试。ready 后清 registry，账号删除会议时同步清理；账号切换或会议已删除时 `saveCachedTranscript()` 明确拒绝，不能静默成功、清掉原账号任务或生成孤儿缓存。registry 首次写失败只降低强杀恢复能力，不把已落账录音重新判为失败，当前进程仍继续补全。游客临时 ASR token 不安全落盘，因此本层明确只支持账号；游客仍依赖当前进程补全和再次打开详情，不能宣称强杀恢复。临时无落盘合同已覆盖 scope 隔离、过期清理、attempt/next retry、凭据不落盘、同任务合并、ready 清理、failed 保留，以及 registry 写完前控制器不释放；TypeScript 与 1869 模块 Android bundle 通过，尚无真实进程强杀或运行服务证据。
 
+录音结束第六层纵切补齐 native stop 的 scope ownership 和桥接异常兜底。`RecorderSnapshot` 现在从 `RecorderStartConfig` 原样携带 `storageScope`，start/state/event/stop 都跨桥返回；Android 页面只接纳同时满足 exact session ID 与 exact current scope 的活动 snapshot、失败 stop result 和 finalized journal。`ready_to_stop_timeout` 等带 `localSaved` 的既有结果继续直接提交；若桥接或前台服务异常只抛错误而没有 result，则立即扫描 finalized journal，只在 purpose=`meeting`、mode=`realtime`、session 与 scope 全部一致且 recovery report 提供非空 URI 时合成本机 `localSaved` snapshot 并继续 capture commit；同身份有多个候选时按 PCM 字节数、时长和 URI 确定性择优，波形结果未知时不伪造。无 scope 的旧 journal、其他账号、speaker 文件或近似时间文件不得由页面直接接管，仍交给集中 reconciler 的保守策略。纯函数合同已覆盖 session/scope/purpose/mode/无 scope 拒绝、重复候选择优和恢复 snapshot；TypeScript、1870 模块 Android bundle、`:app:compilePreviewKotlin`（232 tasks，9 executed）通过。真实 stop timeout、服务销毁竞态、恢复后可播放性和 USB 真机仍未验证，因此不能把源码兜底写成运行验收。
+
 这一切片不改变事实源边界：Android recorder/journal 仍唯一负责采集状态、音频字节、本机文件、停止结果和进程恢复；控制器不缓存或推断 native capture state。`FinalizeNativeMeetingRecordingUseCase` 现在拥有“本机提交、启动远端 Transcript 补全、补全后清理游客会话”的顺序，`useNativeMeetingRecordingFinalizer` 组装 Store/API/WorkManager 依赖，`MeetingLiveScreen.android.tsx` 不再直接组装这些结束依赖或实现补全算法；页面仍负责创建会议、启动原生录音、订阅状态、用户动作和可见反馈，因此尚未达到纯状态订阅者的最终形态。当前只有 TypeScript、Android JS bundle 和临时窄合同证据，没有模拟器冒烟、强杀、停止超时、长录音或 USB 真机证据，这些仍属于后续退出条件。
 
 ## 10. P1 功能详细设计
@@ -1732,6 +1734,7 @@ openOccurrenceMeeting
 | `MinutesDetailSurface.kt` | 版本动作、引用跨 tab 跳转、稳定 page state |
 | `MeetingUploadWorker.kt` | 从 meeting audio 扩展为 recording asset upload，保留 credential generation |
 | `RecordingJournal.kt` | 保持文件安全合同；只增加可选 asset/session reconciliation metadata，禁止大改 |
+| `RecorderSnapshot` / `nativeMeetingRecordingRecovery.ts` | 跨桥携带 scope ownership；只按 exact session + exact scope 接管 bridge 异常后的 finalized journal |
 | `meetingShare.ts` | 从 kind 三选一改为 content manifest；默认 summary-only |
 | `MeetingImportSheet.tsx` / `MeetingMediaImportProvider.tsx` | 元数据确认、键盘稳定、occurrence 冲突预检；确认后才摄取 |
 | `meetingMediaImportDrafts.ts` | 持久 scope/title/time/calendarContext；ready journal 恢复时阻止跨账号落库 |

@@ -69,6 +69,7 @@ export interface NativeRecorderSnapshot {
   sessionId: string;
   purpose: NativeRecorderPurpose;
   mode?: NativeRecorderMode;
+  storageScope: string | null;
   state: NativeRecorderState;
   startedAtMs: number;
   updatedAtMs: number;
