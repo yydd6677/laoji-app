@@ -18,9 +18,12 @@ import { fetchWithTimeout as fetch } from './http';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 import {
+  combineTranscriptRemoteState,
   combineTranscriptServerCompleteness,
   evaluateTranscriptLineCandidate,
+  transcriptRemoteStateFromPayload,
   transcriptServerCompletenessFromPayload,
+  type TranscriptRemoteState,
   type TranscriptServerCompleteness,
 } from './transcriptCompleteness';
 
@@ -565,18 +568,23 @@ export async function fetchGuestMeetingTranscriptSnapshot(
   const all: TranscriptLine[] = [];
   const seenIds = new Set<string>();
   let completeness: TranscriptServerCompleteness = 'unknown';
+  let remoteState: TranscriptRemoteState = 'unknown';
   let offset = 0;
 
   while (true) {
     const res = await fetch(
       meetingUrl(`/api/laoji/meetings/guest-sessions/${encodeURIComponent(meetingId)}/transcripts?offset=${offset}&limit=${pageSize}`),
-      { headers: { 'X-Guest-Session-Token': guestToken } },
+      { headers: { 'X-Guest-Session-Token': guestToken }, signal: options.signal },
     );
     if (!res.ok) throw await readResponseError('fetch guest meeting transcript failed', res);
     const data = await res.json();
     completeness = combineTranscriptServerCompleteness(
       completeness,
       transcriptServerCompletenessFromPayload(data),
+    );
+    remoteState = combineTranscriptRemoteState(
+      remoteState,
+      transcriptRemoteStateFromPayload(data),
     );
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
@@ -595,7 +603,7 @@ export async function fetchGuestMeetingTranscriptSnapshot(
     if (all.length === previousCount) break;
   }
 
-  return { items: all, completeness, remoteRevisionId: null };
+  return { items: all, completeness, remoteState, remoteRevisionId: null };
 }
 
 export async function fetchGuestMeetingTranscript(
@@ -667,11 +675,13 @@ export async function importGuestMeetingData(
 export interface FetchMeetingTranscriptOptions {
   fallbackItems?: TranscriptLine[];
   pageSize?: number;
+  signal?: AbortSignal;
 }
 
 export interface ApiTranscriptSnapshot {
   items: TranscriptLine[];
   completeness: TranscriptServerCompleteness;
+  remoteState: TranscriptRemoteState;
   remoteRevisionId: string | null;
 }
 
@@ -712,13 +722,14 @@ export async function fetchMeetingTranscriptSnapshot(
   const all: TranscriptLine[] = [];
   const seenIds = new Set<string>();
   let completeness: TranscriptServerCompleteness = 'unknown';
+  let remoteState: TranscriptRemoteState = 'unknown';
   let remoteRevisionId: string | null = null;
   let offset = 0;
 
   while (true) {
     const res = await fetch(
       meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}/transcripts?offset=${offset}&limit=${pageSize}`),
-      { headers: authHeaders(accessToken) },
+      { headers: authHeaders(accessToken), signal: options.signal },
     );
     if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, accessToken);
     const data = await res.json();
@@ -730,6 +741,10 @@ export async function fetchMeetingTranscriptSnapshot(
     completeness = combineTranscriptServerCompleteness(
       completeness,
       transcriptServerCompletenessFromPayload(data),
+    );
+    remoteState = combineTranscriptRemoteState(
+      remoteState,
+      transcriptRemoteStateFromPayload(data),
     );
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
@@ -750,7 +765,12 @@ export async function fetchMeetingTranscriptSnapshot(
     if (all.length === previousCount) break;
   }
 
-  return { items: all, completeness, remoteRevisionId };
+  return {
+    items: all,
+    completeness,
+    remoteState,
+    remoteRevisionId: remoteState === 'complete' ? remoteRevisionId : null,
+  };
 }
 
 export async function fetchMeetingTranscript(

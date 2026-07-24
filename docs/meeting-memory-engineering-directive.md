@@ -755,6 +755,8 @@ type SpeakerStatus =
 
 Summary 生命周期纵切已把页面内 loading 提升为 canonical 阶段状态：准备提交写 `queued`；得到稳定 task ID 后写 `job_id/input_fingerprint`，且同一 task 恢复或重复轮询不增加 attempt；服务端 `PENDING/STARTED` 分别投影为 `queued/generating`。当前 API 不提供可信百分比，因此 `progress` 保持 `null`，禁止从耗时推算虚假进度。页面关闭或请求 generation 变化只停止可见 UI 更新，已提交任务的 pending registry、阶段状态和最终结果保存继续按捕获时的 meeting/scope 执行；已知后台 task 的 Abort 保持运行态，只有没有 task 身份的提交中断、明确 worker/传输失败、恢复 registry 不可读或 pending 被明确丢弃时才进入可重试失败或 `stale`。阶段写入按 meeting 串行且只记诊断，SQLite 失败不得反向伪装为服务端提交失败。现有 `saveCachedSummary()` 仍是 `ready` 和 Summary version 落盘的唯一完成路径。该纵切已有纯状态合同、TypeScript 和 Preview Kotlin 编译证据，但尚无真实远端长任务、进程重启恢复、账号切换和服务端任务过期证据。
 
+Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同步失败和本机持久化失败映射为独立路径：明确 `incomplete` 时只写可替换 draft/finalizing，并按 1/2/4 秒有限重取，随后降为 15 秒检查；页面失效或 Abort 静默退出，不写失败。每次候选保存后必须重读 canonical active revision 作为下一轮 baseline；远端失败或传输失败进入 `failed_retryable`，但已有稳定 final 时保留 `ready`。状态百分比继续为 `null`，不得把轮询次数伪装成进度。当前详情重试可重新发起 Transcript 同步，但该纵切尚无运行服务、进程重启和真实长录音收敛证据。
+
 ### 8.3 错误合同
 
 - 底层持久化 `error_code` 和内部诊断，不持久化供应商英文错误作为用户文案。
@@ -915,6 +917,8 @@ speaker assignment revision
 当前移动端实现将“明显短于”收敛为可复用纯函数，而不是页面内按行数猜测：NFKC 后非空 Unicode code point、非空段数、最大 `start/end` 时间共同参与；分段数单独减少永不构成拒绝，因为 final 可能合并 draft 段。`[INFERENCE]` 第一版要求至少两项显著回退，或时间/文字出现极端回退才保留 active draft。阈值集中在 `transcriptCompleteness.ts`，后续真实 10/30/60 分钟样本只调整这一处。服务端明确 `incomplete/processing/finalizing` 时，候选只能更新 `realtime_draft` 并保持补全状态；明确 complete 也不能绕过本机截断检测；无声明时按本机指标 fail-safe。
 
 final 候选与当前 active revision 的读取、候选 revision 保存、active 切换和 processing stage 更新必须位于同一 SQLite transaction。被拒绝的 immutable final 仍以 inactive revision 保存，不能写入旧缓存覆盖当前可读 draft；相同内容后续仅声明从 incomplete 变 complete 时，不得通过修改 immutable revision 元数据伪造新版本。当前兼容层把 incomplete 内容写入可替换的 `legacy-live` draft，只有得到 final 候选且完整性通过时才创建并激活 immutable final。
+
+客户端只把服务端明确 `complete` 的 `transcript_revision_id` 交给 final revision；`incomplete`、`failed` 或互相矛盾的声明一律 fail closed，丢弃该远端 revision ID。无新增字段的旧服务继续按 `unknown` 兼容路径读取一次，不启动轮询。服务端所需的 `transcript_status`、nullable `is_complete` 和仅完成时返回的稳定 revision ID 目前只存在于本机 deployment overlay `server-work/summary`，尚未同步目标工作区、部署或通过 18020/18035 验证，因此不能宣称远端状态合同已经生效。
 
 #### 单场搜索
 

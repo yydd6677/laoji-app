@@ -170,6 +170,10 @@ import {
 } from '../data/repositories';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
 import {
+  mirrorLegacyTranscriptProcessingFailure,
+  mirrorLegacyTranscriptSaveFailure,
+} from '../services/meetingStageMirror';
+import {
   meetingActionFollowupClientRequestId,
   meetingActionFollowupDraft,
 } from '../services/meetingActionFollowup';
@@ -255,6 +259,32 @@ function summaryDocumentFor(
   summary: MeetingSummary | null,
 ): MeetingSummaryDocument | null {
   return summary ? meetingSummaryDocumentForLegacy(meetingId, summary) : null;
+}
+
+const TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+const TRANSCRIPT_COMPLETION_RECHECK_MS = 15_000;
+
+function waitForTranscriptCompletionRetry(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      const error = new Error('transcript completion retry cancelled');
+      error.name = 'AbortError';
+      reject(error);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      const error = new Error('transcript completion retry cancelled');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 const updateMeetingActionUseCase = new UpdateMeetingActionUseCase(sqliteMeetingNoteRepository);
@@ -877,6 +907,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return;
     }
     let alive = true;
+    const transcriptController = new AbortController();
     const cachedTranscript = getCachedTranscript(meeting.id);
     const cachedSummaryValue = getCachedSummary(meeting.id);
     const cachedSummary = meetingSummaryToText(cachedSummaryValue);
@@ -895,62 +926,144 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setLoadingTranscript(true);
     void (async () => {
       let baseline = cachedTranscript;
+      let baselineCached = cachedTranscript.length > 0;
+      let hasStableFinal = false;
       let activeState = null as Awaited<ReturnType<typeof loadActiveMeetingTranscriptState>>;
       if (meetingScopeKey) {
         activeState = await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null);
       }
       if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+      hasStableFinal = Boolean(
+        activeState
+        && activeState.kind !== 'realtime_draft'
+        && !activeState.completing,
+      );
       if (activeState?.lines.length) {
         const activeDecision = evaluateTranscriptLineCandidate(baseline, activeState.lines, {
           candidateKind: activeState.kind,
           serverCompleteness: activeState.kind === 'realtime_draft' ? 'incomplete' : 'complete',
         });
-        if (activeDecision.useCandidate) baseline = activeState.lines;
+        if (activeDecision.useCandidate) {
+          baseline = activeState.lines;
+          baselineCached = true;
+        }
       }
       setTranscript(baseline);
-      setTranscriptCached(baseline.length > 0);
+      setTranscriptCached(baselineCached);
       setTranscriptCompleting(activeState?.completing ?? false);
       if (isGuest || !accessToken) {
         setLoadingTranscript(false);
         return;
       }
+      if (!remoteMeetingId) {
+        setLoadingTranscript(false);
+        return;
+      }
 
       try {
-        if (!remoteMeetingId) throw new Error('meeting remote identity is pending');
-        const remote = await fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken);
-        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
-        const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
-        const decision = evaluateTranscriptLineCandidate(baseline, remote.items, {
-          candidateKind,
-          serverCompleteness: remote.completeness,
-        });
-        let cacheWriteFailed = false;
-        try {
-          await saveCachedTranscript(meeting.id, remote.items, {
+        let retryIndex = 0;
+        while (alive && isCurrentPageRequest(transcriptRequest)) {
+          const remote = await fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken, {
+            signal: transcriptController.signal,
+          });
+          if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+          const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+          const decision = evaluateTranscriptLineCandidate(baseline, remote.items, {
             candidateKind,
             serverCompleteness: remote.completeness,
-            remoteRevisionId: remote.remoteRevisionId,
           });
-        } catch {
-          cacheWriteFailed = true;
+          const preserveStableFinal = hasStableFinal && remote.completeness === 'incomplete';
+          let cacheWriteFailure: unknown = null;
+          if (!preserveStableFinal) {
+            try {
+              await saveCachedTranscript(meeting.id, remote.items, {
+                candidateKind,
+                serverCompleteness: remote.completeness,
+                remoteRevisionId: remote.remoteRevisionId,
+              });
+            } catch (reason) {
+              cacheWriteFailure = reason;
+            }
+          }
+          if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+          const refreshedActive = meetingScopeKey
+            ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
+            : null;
+          if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+          let selected = baseline;
+          let selectedCached = baselineCached;
+          if (refreshedActive?.lines.length) {
+            selected = refreshedActive.lines;
+            selectedCached = true;
+          } else if (!preserveStableFinal && decision.useCandidate) {
+            selected = remote.items;
+            selectedCached = cacheWriteFailure === null && remote.items.length > 0;
+          }
+          hasStableFinal = refreshedActive
+            ? refreshedActive.kind !== 'realtime_draft' && !refreshedActive.completing
+            : hasStableFinal || Boolean(
+              !preserveStableFinal
+              && cacheWriteFailure === null
+              && decision.useCandidate
+              && candidateKind !== 'realtime_draft',
+            );
+          baseline = selected;
+          baselineCached = selectedCached;
+          setTranscript(selected);
+          setTranscriptCached(selectedCached);
+          setTranscriptCompleting(refreshedActive?.completing ?? decision.completing);
+
+          if (cacheWriteFailure !== null) {
+            if (meetingScopeKey) {
+              await mirrorLegacyTranscriptSaveFailure(meetingScopeKey, meeting.id, cacheWriteFailure);
+            }
+            if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+            setTranscriptCompleting(false);
+            setTranscriptError(hasStableFinal ? '' : '文字记录已同步，但本机缓存写入失败。');
+            break;
+          }
+          if (remote.remoteState === 'failed') {
+            if (meetingScopeKey) {
+              await mirrorLegacyTranscriptProcessingFailure(
+                meetingScopeKey,
+                meeting.id,
+                'remote_processing',
+                new Error('remote transcript processing failed'),
+              );
+            }
+            if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
+            setTranscriptCompleting(false);
+            setTranscriptError(hasStableFinal ? '' : '文字处理失败，可重试。');
+            break;
+          }
+
+          setTranscriptError('');
+          if (remote.remoteState !== 'incomplete') break;
+          setTranscriptCompleting(!hasStableFinal);
+          const retryDelayMs = retryIndex < TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS.length
+            ? TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS[retryIndex]
+            : TRANSCRIPT_COMPLETION_RECHECK_MS;
+          if (retryIndex < TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS.length) retryIndex += 1;
+          await waitForTranscriptCompletionRetry(retryDelayMs, transcriptController.signal);
         }
-        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
-        const refreshedActive = meetingScopeKey
-          ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
-          : null;
-        if (!alive || !isCurrentPageRequest(transcriptRequest)) return;
-        const selected = refreshedActive?.lines.length
-          ? refreshedActive.lines
-          : decision.useCandidate ? remote.items : baseline;
-        setTranscript(selected);
-        setTranscriptCached(Boolean(refreshedActive) || !decision.useCandidate);
-        setTranscriptCompleting(refreshedActive?.completing ?? decision.completing);
-        setTranscriptError(cacheWriteFailed ? '转写已同步，但本机缓存写入失败。' : '');
-      } catch {
-        if (alive && isCurrentPageRequest(transcriptRequest)) {
+      } catch (reason) {
+        const cancelled = transcriptController.signal.aborted
+          || (reason as Error)?.name === 'AbortError';
+        if (!cancelled && alive && isCurrentPageRequest(transcriptRequest)) {
+          if (meetingScopeKey) {
+            await mirrorLegacyTranscriptProcessingFailure(
+              meetingScopeKey,
+              meeting.id,
+              'sync',
+              reason,
+            );
+          }
+        }
+        if (!cancelled && alive && isCurrentPageRequest(transcriptRequest)) {
           setTranscript(baseline);
-          setTranscriptCached(baseline.length > 0);
-          setTranscriptError('转写同步失败，当前显示本机缓存。');
+          setTranscriptCached(baselineCached);
+          setTranscriptCompleting(false);
+          setTranscriptError(hasStableFinal ? '' : '文字记录同步失败，当前显示本机缓存。');
         }
       } finally {
         if (alive && isCurrentPageRequest(transcriptRequest)) setLoadingTranscript(false);
@@ -1018,7 +1131,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (alive && isCurrentPageRequest(summaryRequest)) setLoadingSummary(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      transcriptController.abort();
+    };
   }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, meeting?.hasSummary, meeting?.id, meetingScopeKey, reloadKey, remoteMeetingId, saveCachedSummary, saveCachedTranscript]);
 
   useEffect(() => {

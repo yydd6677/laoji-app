@@ -287,17 +287,34 @@ export async function mirrorLegacyMeetingStageState(
   }
 }
 
-function transcriptPersistenceFailureCode(reason: unknown): string {
-  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
-  if (/storage|disk|space|quota|full/.test(message)) return 'transcript_local_storage_unavailable';
-  if (/sqlite|database|transaction|locked/.test(message)) return 'transcript_database_write_failed';
-  if (/scope|account|session/.test(message)) return 'transcript_scope_changed';
-  return 'transcript_persistence_failed';
+export type MeetingTranscriptFailureKind = 'persistence' | 'sync' | 'remote_processing';
+
+function transcriptProcessingFailureCode(
+  kind: MeetingTranscriptFailureKind,
+  reason: unknown,
+): string {
+  if (kind === 'remote_processing') return 'transcript_remote_processing_failed';
+  const message = reason instanceof Error
+    ? `${reason.name} ${reason.message}`.toLowerCase()
+    : '';
+  if (kind === 'persistence') {
+    if (/storage|disk|space|quota|full|存储|磁盘|空间/.test(message)) {
+      return 'transcript_local_storage_unavailable';
+    }
+    if (/sqlite|database|transaction|locked|数据库|事务|锁定/.test(message)) {
+      return 'transcript_database_write_failed';
+    }
+    if (/scope|account|session|作用域|账号|会话/.test(message)) return 'transcript_scope_changed';
+    return 'transcript_persistence_failed';
+  }
+  if (/timed out|timeout|超时/.test(message)) return 'transcript_sync_timeout';
+  return 'transcript_sync_failed';
 }
 
-export async function mirrorLegacyTranscriptSaveFailure(
+export async function mirrorLegacyTranscriptProcessingFailure(
   scopeKey: ScopeKey,
   legacyMeetingId: string,
+  kind: MeetingTranscriptFailureKind,
   reason: unknown,
 ): Promise<void> {
   if (!getFeatureFlags().localMeetingDbV1) return;
@@ -324,7 +341,7 @@ export async function mirrorLegacyTranscriptSaveFailure(
         status: 'failed_retryable',
         attemptStarted: true,
         progress: null,
-        errorCode: transcriptPersistenceFailureCode(reason),
+        errorCode: transcriptProcessingFailureCode(kind, reason),
         userMessageKey: 'meeting.transcript.retryable',
         retryable: true,
         nextRetryAtMs: null,
@@ -332,18 +349,33 @@ export async function mirrorLegacyTranscriptSaveFailure(
       await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
       outcome = 'failed_retryable';
     });
-    diagnosticAudit('meeting_transcript_persistence_failure', {
+    diagnosticAudit('meeting_transcript_processing_failure', {
       status: outcome,
+      failure_kind: kind,
       scope: scopeKey === 'guest' ? 'guest' : 'account',
     });
   } catch (error) {
     diagnosticWarn('[meeting-db] transcript failure shadow write failed', error);
-    diagnosticAudit('meeting_transcript_persistence_failure', {
+    diagnosticAudit('meeting_transcript_processing_failure', {
       status: 'write_failed',
+      failure_kind: kind,
       scope: scopeKey === 'guest' ? 'guest' : 'account',
       error_code: error instanceof Error ? error.name : 'UnknownError',
     });
   }
+}
+
+export function mirrorLegacyTranscriptSaveFailure(
+  scopeKey: ScopeKey,
+  legacyMeetingId: string,
+  reason: unknown,
+): Promise<void> {
+  return mirrorLegacyTranscriptProcessingFailure(
+    scopeKey,
+    legacyMeetingId,
+    'persistence',
+    reason,
+  );
 }
 
 export async function mirrorLegacyMeetingDeletion(scopeKey: ScopeKey, legacyMeetingId: string): Promise<void> {

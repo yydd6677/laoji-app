@@ -2,6 +2,7 @@ import type { TranscriptLine } from '../types';
 
 export type TranscriptCandidateKind = 'realtime_draft' | 'final' | 'reprocessed';
 export type TranscriptServerCompleteness = 'complete' | 'incomplete' | 'unknown';
+export type TranscriptRemoteState = TranscriptServerCompleteness | 'failed';
 
 export interface TranscriptComparableRow {
   text: string;
@@ -184,33 +185,54 @@ export function evaluateTranscriptLineCandidate(
   );
 }
 
-export function transcriptServerCompletenessFromPayload(
+export function transcriptRemoteStateFromPayload(
   payload: unknown,
-): TranscriptServerCompleteness {
+): TranscriptRemoteState {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 'unknown';
   const record = payload as Record<string, unknown>;
-  const declared = record.is_complete ?? record.complete ?? record.final;
-  if (declared === true) return 'complete';
-  if (declared === false) return 'incomplete';
   const status = typeof record.transcript_status === 'string'
     ? record.transcript_status
     : typeof record.status === 'string'
       ? record.status
       : '';
   const normalized = status.trim().toLowerCase();
-  if (['complete', 'completed', 'final', 'ready', 'success', 'succeeded'].includes(normalized)) {
-    return 'complete';
-  }
-  if (['partial', 'pending', 'processing', 'transcribing', 'finalizing', 'running'].includes(normalized)) {
-    return 'incomplete';
-  }
-  return 'unknown';
+  const declared = record.is_complete ?? record.complete ?? record.final;
+  const declaredState: TranscriptRemoteState = declared === true
+    ? 'complete'
+    : declared === false
+      ? 'incomplete'
+      : 'unknown';
+  const statusState: TranscriptRemoteState = ['failed', 'failure', 'error'].includes(normalized)
+    ? 'failed'
+    : ['complete', 'completed', 'final', 'ready', 'success', 'succeeded'].includes(normalized)
+      ? 'complete'
+      : ['partial', 'pending', 'processing', 'transcribing', 'finalizing', 'running'].includes(normalized)
+        ? 'incomplete'
+        : 'unknown';
+  return combineTranscriptRemoteState(declaredState, statusState);
+}
+
+export function transcriptServerCompletenessFromPayload(
+  payload: unknown,
+): TranscriptServerCompleteness {
+  const state = transcriptRemoteStateFromPayload(payload);
+  return state === 'failed' ? 'incomplete' : state;
 }
 
 export function combineTranscriptServerCompleteness(
   current: TranscriptServerCompleteness,
   next: TranscriptServerCompleteness,
 ): TranscriptServerCompleteness {
+  if (current === 'incomplete' || next === 'incomplete') return 'incomplete';
+  if (current === 'complete' || next === 'complete') return 'complete';
+  return 'unknown';
+}
+
+export function combineTranscriptRemoteState(
+  current: TranscriptRemoteState,
+  next: TranscriptRemoteState,
+): TranscriptRemoteState {
+  if (current === 'failed' || next === 'failed') return 'failed';
   if (current === 'incomplete' || next === 'incomplete') return 'incomplete';
   if (current === 'complete' || next === 'complete') return 'complete';
   return 'unknown';
