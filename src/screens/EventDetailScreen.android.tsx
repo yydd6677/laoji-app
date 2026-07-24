@@ -45,6 +45,15 @@ import {
 } from '../services/meetingSeriesMemory';
 import { pullOccurrenceMeeting } from '../services/meetingOccurrencePull';
 import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
+import {
+  loadMeetingOccurrenceSyncConflict,
+  type MeetingOccurrenceSyncConflictView,
+} from '../services/meetingOccurrenceConflicts';
+import {
+  MeetingOccurrenceSyncConflictChangedError,
+  resolveMeetingOccurrenceSyncConflict,
+} from '../application/meeting/resolveMeetingOccurrenceSyncConflict';
+import { MeetingOccurrenceConflictSheet } from '../components/MeetingOccurrenceConflictSheet';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -69,6 +78,10 @@ export function EventDetailScreen({ navigation, route }: Props) {
   const [seriesMemory, setSeriesMemory] = useState<MeetingSeriesMemoryProjection | null>(null);
   const [seriesMemoryPhase, setSeriesMemoryPhase] = useState<'loading' | 'ready' | 'error'>('ready');
   const [carrySheetVisible, setCarrySheetVisible] = useState(false);
+  const [occurrenceConflict, setOccurrenceConflict] = useState<MeetingOccurrenceSyncConflictView | null>(null);
+  const [occurrenceConflictVisible, setOccurrenceConflictVisible] = useState(false);
+  const [occurrenceConflictSaving, setOccurrenceConflictSaving] = useState(false);
+  const [occurrenceConflictError, setOccurrenceConflictError] = useState('');
   const meetingActionBusyRef = useRef(false);
   const meetingProjectionRequestRef = useRef(0);
   const seriesMemoryRequestRef = useRef(0);
@@ -191,10 +204,10 @@ export function EventDetailScreen({ navigation, route }: Props) {
     if (meetingProjection) {
       if (meetingProjection.syncConflict) {
         return {
-          kind: 'loading' as const,
-          label: '正在准备',
-          statusLabel: '日程关联待处理',
-          enabled: false,
+          kind: 'resolve' as const,
+          label: '处理关联',
+          statusLabel: '需要确认日程关联',
+          enabled: true,
         };
       }
       return {
@@ -223,6 +236,49 @@ export function EventDetailScreen({ navigation, route }: Props) {
       await refreshMeetingProjection();
       return;
     }
+    if (meetingProjection?.syncConflict) {
+      meetingActionBusyRef.current = true;
+      try {
+        const occurrence = eventRefForEvent(event);
+        let conflict = await loadMeetingOccurrenceSyncConflict(scopeKey, occurrence);
+        if (conflict?.kind === 'remote_meeting_unavailable' && mode === 'authenticated' && accessToken) {
+          await refreshMeetings();
+          conflict = await loadMeetingOccurrenceSyncConflict(scopeKey, occurrence);
+        }
+        if (!conflict) {
+          await refreshMeetingProjection();
+          showDialog({
+            title: '日程关联已变化',
+            message: '请重新打开日程后再试。',
+            tone: 'info',
+          });
+          return;
+        }
+        if (!conflict.canResolve) {
+          const message = conflict.kind === 'remote_meeting_unavailable'
+            ? '云端会议尚未同步到本机，请联网后重试。'
+            : conflict.kind === 'same_meeting_divergence'
+              ? '日程计划信息存在差异，当前不能自动处理。'
+              : conflict.kind === 'target_not_attachable'
+                ? '日程当前关联的会议已有其他日程信息，不能自动处理。'
+              : '日程关联信息不完整，请刷新后重试。';
+          showDialog({ title: '暂时无法处理关联', message, tone: 'error' });
+          return;
+        }
+        setOccurrenceConflict(conflict);
+        setOccurrenceConflictError('');
+        setOccurrenceConflictVisible(true);
+      } catch {
+        showDialog({
+          title: '暂时无法处理关联',
+          message: '云端会议状态暂时无法读取，请检查网络后重试。',
+          tone: 'error',
+        });
+      } finally {
+        meetingActionBusyRef.current = false;
+      }
+      return;
+    }
     meetingActionBusyRef.current = true;
     setMeetingActionPhase('loading');
     try {
@@ -249,10 +305,44 @@ export function EventDetailScreen({ navigation, route }: Props) {
     createMeeting,
     event,
     meetingActionPhase,
+    meetingProjection,
+    mode,
     navigation,
+    accessToken,
+    refreshMeetings,
     refreshMeetingProjection,
     scopeKey,
     showDialog,
+  ]);
+
+  const resolveOccurrenceConflict = useCallback(async () => {
+    if (!event || !scopeKey || !occurrenceConflict || occurrenceConflictSaving) return;
+    setOccurrenceConflictSaving(true);
+    setOccurrenceConflictError('');
+    try {
+      await resolveMeetingOccurrenceSyncConflict({
+        conflictId: occurrenceConflict.id,
+        scopeKey,
+        occurrence: eventRefForEvent(event),
+      });
+      setOccurrenceConflictVisible(false);
+      await refreshMeetingProjection();
+    } catch (error) {
+      const message = error instanceof MeetingOccurrenceSyncConflictChangedError
+        ? error.message
+        : error instanceof Error && /[\u3400-\u9fff]/.test(error.message)
+          ? error.message
+          : '日程关联处理失败，请稍后重试。';
+      setOccurrenceConflictError(message);
+    } finally {
+      setOccurrenceConflictSaving(false);
+    }
+  }, [
+    event,
+    occurrenceConflict,
+    occurrenceConflictSaving,
+    refreshMeetingProjection,
+    scopeKey,
   ]);
 
   const removeEvent = useCallback(() => {
@@ -414,6 +504,17 @@ export function EventDetailScreen({ navigation, route }: Props) {
         onCompleted={result => {
           navigation.navigate('Transcription', { meetingId: result.meetingId, focus: 'notes' });
         }}
+      />
+      <MeetingOccurrenceConflictSheet
+        visible={occurrenceConflictVisible}
+        conflict={occurrenceConflict}
+        saving={occurrenceConflictSaving}
+        error={occurrenceConflictError}
+        onClose={() => {
+          setOccurrenceConflictVisible(false);
+          setOccurrenceConflictError('');
+        }}
+        onResolve={() => { void resolveOccurrenceConflict(); }}
       />
     </ScreenContainer>
   );

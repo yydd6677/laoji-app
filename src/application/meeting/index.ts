@@ -11,6 +11,7 @@ export * from './recordingReconciler';
 export * from './reconcileMeetingAudioUpload';
 export * from './resolveMeetingActionSyncConflict';
 export * from './resolveMeetingManualNoteSyncConflict';
+export * from './resolveMeetingOccurrenceSyncConflict';
 export * from './rootSyncTrigger';
 export * from './occurrenceSyncTrigger';
 export * from './saveManualNote';

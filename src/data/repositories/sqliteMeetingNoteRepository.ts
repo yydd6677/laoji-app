@@ -41,6 +41,7 @@ import type {
   MergeOccurrenceRemoteResult,
   MeetingActionSyncConflictRecord,
   MeetingManualNoteSyncConflictRecord,
+  MeetingOccurrenceSyncConflictRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
   MeetingListQuery,
@@ -62,6 +63,7 @@ import type {
   RecordingAssetRecord,
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
+  ResolveMeetingOccurrenceSyncConflictInput,
   RemoteMeetingActionRecord,
   RemoteOccurrenceLinkRecord,
   SaveSummaryVersionOptions,
@@ -421,6 +423,16 @@ type MeetingActionSyncConflictRow = {
 };
 
 type MeetingManualNoteSyncConflictRow = {
+  id: string;
+  meeting_id: string;
+  local_revision: number | null;
+  remote_revision: number | null;
+  local_payload_json: string;
+  remote_payload_json: string;
+  created_at_ms: number;
+};
+
+type MeetingOccurrenceSyncConflictRow = {
   id: string;
   meeting_id: string;
   local_revision: number | null;
@@ -4358,6 +4370,275 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return Boolean(row);
   }
 
+  async getOccurrenceSyncConflict(
+    reference: { sourceEventId: string; occurrenceDate: string },
+    scopeKey: ScopeKey,
+  ): Promise<MeetingOccurrenceSyncConflictRecord | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(reference.sourceEventId, 'occurrence source event ID');
+    assertOccurrenceDate(reference.occurrenceDate, 'occurrence date');
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<MeetingOccurrenceSyncConflictRow>(
+      `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+         conflict.local_revision, conflict.remote_revision,
+         conflict.local_payload_json, conflict.remote_payload_json,
+         conflict.created_at_ms
+       FROM sync_conflicts conflict
+       INNER JOIN meeting_occurrence_links link
+         ON link.meeting_id = conflict.aggregate_id AND link.scope_key = conflict.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = link.meeting_id AND meeting.scope_key = link.scope_key
+       WHERE conflict.scope_key = ? AND conflict.aggregate_type = 'meeting_occurrence'
+         AND conflict.status = 'unresolved' AND meeting.lifecycle <> 'deleted'
+         AND link.calendar_source_event_id = ? AND link.occurrence_date = ?
+       ORDER BY conflict.created_at_ms DESC, conflict.id DESC LIMIT 1`,
+      scopeKey,
+      reference.sourceEventId,
+      reference.occurrenceDate,
+    );
+    return row ? {
+      id: row.id,
+      meetingId: row.meeting_id,
+      localRevision: row.local_revision,
+      remoteRevision: row.remote_revision,
+      localPayloadJson: row.local_payload_json,
+      remotePayloadJson: row.remote_payload_json,
+      createdAtMs: row.created_at_ms,
+    } : null;
+  }
+
+  async resolveMeetingOccurrenceSyncConflict(
+    input: ResolveMeetingOccurrenceSyncConflictInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') throw new Error('guest meeting cannot have an occurrence sync conflict');
+    assertRecordId(input.conflictId, 'occurrence conflict ID');
+    assertRecordId(input.meetingId, 'occurrence local meeting ID');
+    assertRecordId(input.targetMeetingId, 'occurrence target meeting ID');
+    assertRecordId(input.detachedHistoryId, 'occurrence detached history ID');
+    assertNonNegativeInteger(input.resolvedAtMs, 'occurrence conflict resolution time');
+    if (
+      !input.expectedRemotePayloadJson
+      || input.expectedRemotePayloadJson.length > 1_048_576
+    ) throw new Error('occurrence conflict payload is invalid');
+    JSON.parse(input.expectedRemotePayloadJson);
+    assertRemoteOccurrenceLink(input.remote);
+    if (input.meetingId === input.targetMeetingId) {
+      throw new Error('occurrence conflict does not contain two meetings');
+    }
+
+    let touchedMeetingIds: readonly string[] = [];
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const conflict = await database.getFirstAsync<MeetingOccurrenceSyncConflictRow>(
+        `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+           conflict.local_revision, conflict.remote_revision,
+           conflict.local_payload_json, conflict.remote_payload_json,
+           conflict.created_at_ms
+         FROM sync_conflicts conflict
+         INNER JOIN meeting_notes meeting ON meeting.id = conflict.aggregate_id
+         WHERE conflict.id = ? AND conflict.scope_key = ?
+           AND conflict.aggregate_type = 'meeting_occurrence'
+           AND conflict.aggregate_id = ? AND conflict.status = 'unresolved'
+           AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'`,
+        input.conflictId,
+        input.scopeKey,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!conflict) return false;
+      if (
+        conflict.remote_payload_json !== input.expectedRemotePayloadJson
+        || (
+          conflict.remote_revision !== null
+          && conflict.remote_revision !== input.remote.revision
+        )
+      ) throw new Error('occurrence conflict remote state changed');
+
+      const localMeeting = await database.getFirstAsync<MeetingRow>(
+        'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ? AND lifecycle <> \'deleted\'',
+        input.meetingId,
+        input.scopeKey,
+      );
+      const targetMeeting = await database.getFirstAsync<MeetingRow>(
+        'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ? AND lifecycle <> \'deleted\'',
+        input.targetMeetingId,
+        input.scopeKey,
+      );
+      if (!localMeeting || !targetMeeting) return false;
+      if (targetMeeting.remote_id !== input.remote.meetingRemoteId) {
+        throw new Error('occurrence target meeting identity changed');
+      }
+      if (localMeeting.remote_id === input.remote.meetingRemoteId) {
+        throw new Error('occurrence conflict no longer contains two meetings');
+      }
+
+      const localLink = await database.getFirstAsync<OccurrenceLinkRow>(
+        'SELECT * FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!localLink) return false;
+      if (
+        localLink.calendar_source_event_id !== input.remote.sourceEventId
+        || localLink.occurrence_date !== input.remote.occurrenceDate
+      ) throw new Error('occurrence local identity changed');
+      const targetLink = await database.getFirstAsync<OccurrenceLinkRow>(
+        'SELECT * FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+        input.targetMeetingId,
+        input.scopeKey,
+      );
+      if (targetLink) throw new Error('occurrence target meeting is already linked');
+
+      const localSnapshot = await database.getFirstAsync<ScheduleSnapshotRow>(
+        'SELECT * FROM meeting_schedule_snapshots WHERE meeting_id = ?',
+        input.meetingId,
+      );
+      if (!localSnapshot) throw new Error('occurrence local schedule snapshot is missing');
+      const targetSnapshot = await database.getFirstAsync<ScheduleSnapshotRow>(
+        'SELECT * FROM meeting_schedule_snapshots WHERE meeting_id = ?',
+        input.targetMeetingId,
+      );
+      if (
+        targetSnapshot
+        && !scheduleSnapshotsEqual(snapshotFromRow(targetSnapshot), input.remote.scheduleSnapshot)
+      ) throw new Error('occurrence target schedule snapshot changed');
+
+      const historyInserted = await database.runAsync(
+        `INSERT INTO meeting_occurrence_detached_history (
+           id, scope_key, local_meeting_id, conflict_id,
+           calendar_source_event_id, occurrence_date,
+           remote_meeting_id, remote_meeting_remote_id,
+           link_payload_json, schedule_snapshot_json,
+           resolution, detached_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           'keep_local_independent_use_remote', ?)`,
+        input.detachedHistoryId,
+        input.scopeKey,
+        input.meetingId,
+        input.conflictId,
+        localLink.calendar_source_event_id,
+        localLink.occurrence_date,
+        input.targetMeetingId,
+        input.remote.meetingRemoteId,
+        JSON.stringify({
+          schema_version: 1,
+          meeting_id: localLink.meeting_id,
+          remote_id: localLink.remote_id,
+          remote_revision: localLink.remote_revision,
+          calendar_source_event_id: localLink.calendar_source_event_id,
+          occurrence_date: localLink.occurrence_date,
+          calendar_revision: localLink.calendar_revision,
+          recurrence_segment_id: localLink.recurrence_segment_id,
+          series_key: localLink.series_key,
+          link_state: localLink.link_state,
+          linked_at_ms: localLink.linked_at_ms,
+          client_updated_at_ms: localLink.client_updated_at_ms,
+          sync_state: localLink.sync_state,
+        }),
+        JSON.stringify({
+          schema_version: 1,
+          event_title: localSnapshot.event_title,
+          planned_start_ms: localSnapshot.planned_start_ms,
+          planned_end_ms: localSnapshot.planned_end_ms,
+          all_day: localSnapshot.all_day === 1,
+          timezone_id: localSnapshot.timezone_id,
+          location: localSnapshot.location,
+          participants: participantsFromJson(localSnapshot.participants_json),
+          description: localSnapshot.description,
+          captured_event_revision: localSnapshot.captured_event_revision,
+          captured_at_ms: localSnapshot.captured_at_ms,
+        }),
+        input.resolvedAtMs,
+      );
+      if (historyInserted.changes !== 1) throw new Error('occurrence detached history was not recorded');
+
+      await database.runAsync(
+        `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
+           last_error_code = 'detached_by_conflict_resolution',
+           request_payload_json = NULL, claim_token = NULL, updated_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_occurrence'
+           AND aggregate_id = ? AND status <> 'completed'`,
+        input.resolvedAtMs,
+        input.scopeKey,
+        input.meetingId,
+      );
+      const detached = await database.runAsync(
+        'DELETE FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (detached.changes !== 1) throw new Error('occurrence local link changed concurrently');
+
+      await database.runAsync(
+        `INSERT INTO meeting_occurrence_links (
+           meeting_id, scope_key, calendar_source_event_id, occurrence_date,
+           calendar_revision, recurrence_segment_id, series_key, link_state, linked_at_ms,
+           remote_id, remote_revision, client_updated_at_ms, sync_state,
+           last_sync_error_code, synced_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', NULL, ?)`,
+        input.targetMeetingId,
+        input.scopeKey,
+        input.remote.sourceEventId,
+        input.remote.occurrenceDate,
+        input.remote.calendarRevision,
+        input.remote.recurrenceSegmentId,
+        input.remote.seriesKey,
+        input.remote.linkState,
+        input.remote.scheduleSnapshot.capturedAtMs,
+        input.remote.remoteId,
+        input.remote.revision,
+        input.remote.clientUpdatedAtMs,
+        input.resolvedAtMs,
+      );
+      if (!targetSnapshot) {
+        const snapshot = input.remote.scheduleSnapshot;
+        await database.runAsync(
+          `INSERT INTO meeting_schedule_snapshots (
+             meeting_id, event_title, planned_start_ms, planned_end_ms, all_day,
+             timezone_id, location, participants_json, description,
+             captured_event_revision, captured_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          input.targetMeetingId,
+          snapshot.eventTitle,
+          snapshot.plannedStartMs,
+          snapshot.plannedEndMs,
+          snapshot.allDay ? 1 : 0,
+          snapshot.timezoneId,
+          snapshot.location,
+          JSON.stringify(snapshot.participants),
+          snapshot.description,
+          snapshot.capturedEventRevision,
+          snapshot.capturedAtMs,
+        );
+      }
+      const resolved = await database.runAsync(
+        `UPDATE sync_conflicts SET status = 'resolved', resolved_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_occurrence'
+           AND aggregate_id = ? AND status = 'unresolved'`,
+        input.resolvedAtMs,
+        input.scopeKey,
+        input.meetingId,
+      );
+      if (resolved.changes < 1) throw new Error('occurrence conflict changed concurrently');
+      await database.runAsync(
+        `UPDATE meeting_notes SET updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE scope_key = ? AND id IN (?, ?)`,
+        input.resolvedAtMs,
+        input.scopeKey,
+        input.meetingId,
+        input.targetMeetingId,
+      );
+      await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+      await refreshMeetingSyncState(database, input.targetMeetingId, input.scopeKey);
+      const transaction = new SqliteMeetingTransaction(database);
+      await transaction.advanceCanonicalWrite(input.scopeKey, input.resolvedAtMs);
+      touchedMeetingIds = [input.meetingId, input.targetMeetingId];
+      return true;
+    });
+    if (applied) this.notify(touchedMeetingIds);
+    return applied;
+  }
+
   async mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult> {
     assertScopeKey(input.scopeKey);
     if (input.scopeKey === 'guest') throw new Error('guest meeting cannot merge remote occurrence');
@@ -4411,11 +4692,21 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       ): Promise<MergeOccurrenceRemoteResult> => {
         const conflictId = `occurrence-pull:${meetingId}`;
         await database.runAsync(
-          `INSERT OR IGNORE INTO sync_conflicts (
+          `INSERT INTO sync_conflicts (
              id, scope_key, aggregate_type, aggregate_id,
              local_revision, remote_revision, local_payload_json,
              remote_payload_json, status, created_at_ms
-           ) VALUES (?, ?, 'meeting_occurrence', ?, NULL, ?, ?, ?, 'unresolved', ?)`,
+           ) VALUES (?, ?, 'meeting_occurrence', ?, NULL, ?, ?, ?, 'unresolved', ?)
+           ON CONFLICT(id) DO UPDATE SET
+             remote_revision = excluded.remote_revision,
+             local_payload_json = excluded.local_payload_json,
+             remote_payload_json = excluded.remote_payload_json,
+             status = 'unresolved',
+             created_at_ms = excluded.created_at_ms,
+             resolved_at_ms = NULL
+           WHERE sync_conflicts.status = 'resolved'
+             OR sync_conflicts.remote_revision IS NULL
+             OR excluded.remote_revision >= sync_conflicts.remote_revision`,
           conflictId,
           input.scopeKey,
           meetingId,

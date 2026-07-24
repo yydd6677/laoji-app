@@ -211,6 +211,27 @@ export interface MergeOccurrenceRemoteResult {
   meetingId: string | null;
 }
 
+export interface MeetingOccurrenceSyncConflictRecord {
+  id: string;
+  meetingId: string;
+  localRevision: number | null;
+  remoteRevision: number | null;
+  localPayloadJson: string;
+  remotePayloadJson: string;
+  createdAtMs: number;
+}
+
+export interface ResolveMeetingOccurrenceSyncConflictInput {
+  conflictId: string;
+  meetingId: string;
+  targetMeetingId: string;
+  detachedHistoryId: string;
+  scopeKey: ScopeKey;
+  expectedRemotePayloadJson: string;
+  remote: RemoteOccurrenceLinkRecord;
+  resolvedAtMs: number;
+}
+
 export interface SetOccurrenceLinkStateInput extends OccurrenceReference {
   scopeKey: ScopeKey;
   selection: 'occurrence' | 'following' | 'series';
@@ -938,6 +959,13 @@ export interface MeetingNoteRepository {
   hasOccurrenceSyncConflict(
     reference: OccurrenceReference,
     scopeKey: ScopeKey,
+  ): Promise<boolean>;
+  getOccurrenceSyncConflict(
+    reference: OccurrenceReference,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingOccurrenceSyncConflictRecord | null>;
+  resolveMeetingOccurrenceSyncConflict(
+    input: ResolveMeetingOccurrenceSyncConflictInput,
   ): Promise<boolean>;
   mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult>;
   setOccurrenceLinkState(input: SetOccurrenceLinkStateInput): Promise<number>;

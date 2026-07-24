@@ -50,7 +50,7 @@ export interface NativeCalendarDetailSnapshot {
   event?: NativeCalendarDetailEventSnapshot;
   deleting?: boolean;
   meetingAction?: {
-    kind: 'start' | 'continue' | 'view' | 'loading' | 'retry';
+    kind: 'start' | 'continue' | 'view' | 'loading' | 'retry' | 'resolve';
     label: string;
     statusLabel?: string;
     enabled: boolean;
