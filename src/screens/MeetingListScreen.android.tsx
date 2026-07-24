@@ -14,14 +14,15 @@ import {
 } from 'laoji-native-platform';
 import { useAppDialog } from '../components/AppDialog';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
-import type { MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
+import type { Meeting, MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { readableErrorMessage } from '../services/errors';
 import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { briefGreetingSummaryText, meetingSummaryToText } from '../services/meetingSummary';
-import { canResumeMeetingRecording, formatDuration, preferredMeetingStatusLabel } from '../utils/meetingMedia';
+import { canResumeMeetingRecording, formatDuration } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 import { useMeetingMediaImport } from '../components/MeetingMediaImportProvider';
+import { deriveLegacyMeetingPresentationState } from '../services/meetingPresentation';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -32,15 +33,26 @@ type Props = {
   bottomBarSelectionCommand: number;
 };
 
-function statusTone(label: string): 'neutral' | 'primary' | 'success' | 'warning' | 'danger' {
-  if (label.includes('失败') || label.includes('中断') || label.includes('受阻')) return 'danger';
-  if (label.includes('处理中') || label.includes('待')) return 'warning';
-  if (label.includes('完成')) return 'success';
-  if (label.includes('录音') || label.includes('导入')) return 'primary';
-  return 'neutral';
-}
-
 const ACTIVE_RECORDER_STATES = new Set(['preparing', 'recording', 'paused', 'stopping']);
+
+function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) {
+  const presentation = deriveLegacyMeetingPresentationState(meeting, captureInterrupted
+    ? { captureOverride: 'failed_recoverable' }
+    : undefined);
+  const hasRootSyncPending = Boolean(meeting.statusSyncPending)
+    || meeting.tags.some(tag => tag.label === '待同步');
+  if (
+    hasRootSyncPending
+    && (presentation.key === 'ready' || presentation.key === 'not_started')
+  ) {
+    return { label: '待同步', tone: 'warning' as const };
+  }
+  const imported = meeting.tags.some(tag => tag.label === '已导入');
+  if (imported && (presentation.key === 'ready' || presentation.key === 'not_started')) {
+    return { label: '已导入', tone: 'primary' as const };
+  }
+  return presentation;
+}
 
 function cleanCoverText(value: string): string {
   return value
@@ -264,11 +276,11 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         : '',
       showingCachedData: Boolean(error && meetings.length > 0),
       meetings: meetings.map(meeting => {
-        const imported = meeting.tags.some(tag => tag.label === '已导入');
-        const rawStatusLabel = staleRecordingIds.has(meeting.id)
-          ? '录音中断'
-          : imported ? '已导入' : preferredMeetingStatusLabel(meeting.tags);
-        const statusLabel = rawStatusLabel === '已完成' ? '' : rawStatusLabel;
+        const presentation = meetingListPresentation(
+          meeting,
+          staleRecordingIds.has(meeting.id),
+        );
+        const statusLabel = presentation.label === '已完成' ? '' : presentation.label;
         const cover = inferredMeetingCover(
           getCachedSummary(meeting.id),
           getCachedTranscript(meeting.id),
@@ -281,7 +293,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
             ? formatDuration(meeting.audioDurationSec)
             : meeting.duration,
           statusLabel,
-          statusTone: statusTone(statusLabel),
+          statusTone: presentation.tone,
           canResume: canResumeMeetingRecording(meeting),
           ...cover,
         };

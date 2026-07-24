@@ -232,9 +232,12 @@ export type MeetingPresentationTone = 'neutral' | 'primary' | 'success' | 'warni
 
 export interface MeetingPresentationState {
   key:
+    | 'not_started'
+    | 'preparing'
     | 'recording'
     | 'paused'
     | 'finalizing'
+    | 'capture_failed'
     | 'uploading'
     | 'upload_failed'
     | 'transcribing'
@@ -247,60 +250,114 @@ export interface MeetingPresentationState {
   retryStage: ProcessingStageName | null;
 }
 
+const PRESENTATION_STATES_BY_LABEL: Readonly<Record<string, MeetingPresentationState>> = {
+  '未开始': { key: 'not_started', label: '未开始', tone: 'neutral', retryStage: null },
+  '正在准备录音': { key: 'preparing', label: '正在准备录音', tone: 'primary', retryStage: null },
+  '正在录音': { key: 'recording', label: '正在录音', tone: 'danger', retryStage: null },
+  '录音已暂停': { key: 'paused', label: '录音已暂停', tone: 'warning', retryStage: null },
+  '正在安全保存录音': { key: 'finalizing', label: '正在安全保存录音', tone: 'neutral', retryStage: null },
+  '录音中断': { key: 'capture_failed', label: '录音中断', tone: 'danger', retryStage: 'capture' },
+  '录音失败': { key: 'capture_failed', label: '录音失败', tone: 'danger', retryStage: null },
+  '录音已保存在本机，等待上传': { key: 'uploading', label: '录音已保存在本机，等待上传', tone: 'neutral', retryStage: null },
+  '录音已保存在本机，正在上传': { key: 'uploading', label: '录音已保存在本机，正在上传', tone: 'neutral', retryStage: null },
+  '上传受阻': { key: 'upload_failed', label: '上传受阻', tone: 'danger', retryStage: 'upload' },
+  '上传失败，可重试': { key: 'upload_failed', label: '上传失败，可重试', tone: 'danger', retryStage: 'upload' },
+  '正在生成文字记录': { key: 'transcribing', label: '正在生成文字记录', tone: 'neutral', retryStage: null },
+  '文字记录仍在补全': { key: 'transcribing', label: '文字记录仍在补全', tone: 'neutral', retryStage: null },
+  '文字处理失败，可重试': { key: 'transcript_failed', label: '文字处理失败，可重试', tone: 'danger', retryStage: 'transcript' },
+  '正在整理会议记录': { key: 'summarizing', label: '正在整理会议记录', tone: 'neutral', retryStage: null },
+  '整理失败，可重试': { key: 'summary_failed', label: '整理失败，可重试', tone: 'danger', retryStage: 'summary' },
+  '整理结果可更新': { key: 'ready', label: '整理结果可更新', tone: 'warning', retryStage: null },
+  '已完成': { key: 'ready', label: '已完成', tone: 'success', retryStage: null },
+};
+
+export const MEETING_PRESENTATION_LABELS = Object.freeze(Object.keys(PRESENTATION_STATES_BY_LABEL));
+
+export function meetingPresentationStateFromLabel(label: string): MeetingPresentationState | null {
+  const state = PRESENTATION_STATES_BY_LABEL[label];
+  return state ? { ...state } : null;
+}
+
+export function processingStatusesFromStages(
+  stages: readonly ProcessingStage[],
+): MeetingProcessingStatuses {
+  const byStage = new Map<ProcessingStageName, string>();
+  stages.forEach(stage => {
+    assertProcessingStage(stage);
+    if (byStage.has(stage.stage)) throw new Error('meeting processing stage is duplicated');
+    byStage.set(stage.stage, stage.status);
+  });
+  for (const stage of PROCESSING_STAGE_NAMES) {
+    if (!byStage.has(stage)) throw new Error('meeting processing stage is missing');
+  }
+  return {
+    capture: byStage.get('capture') as CaptureStatus,
+    upload: byStage.get('upload') as UploadStatus,
+    transcript: byStage.get('transcript') as TranscriptStatus,
+    summary: byStage.get('summary') as SummaryStatus,
+    speaker: byStage.get('speaker') as SpeakerStatus,
+  };
+}
+
 export function deriveMeetingPresentationState(
   stages: MeetingProcessingStatuses,
 ): MeetingPresentationState {
+  if (stages.capture === 'preparing') {
+    return meetingPresentationStateFromLabel('正在准备录音')!;
+  }
   if (stages.capture === 'recording') {
-    return { key: 'recording', label: '正在录音', tone: 'danger', retryStage: null };
+    return meetingPresentationStateFromLabel('正在录音')!;
   }
   if (stages.capture === 'paused') {
-    return { key: 'paused', label: '录音已暂停', tone: 'warning', retryStage: null };
+    return meetingPresentationStateFromLabel('录音已暂停')!;
   }
   if (stages.capture === 'finalizing') {
-    return { key: 'finalizing', label: '正在安全保存录音', tone: 'neutral', retryStage: null };
+    return meetingPresentationStateFromLabel('正在安全保存录音')!;
+  }
+  if (stages.capture === 'failed_recoverable') {
+    return meetingPresentationStateFromLabel('录音中断')!;
+  }
+  if (stages.capture === 'failed_terminal') {
+    return meetingPresentationStateFromLabel('录音失败')!;
   }
   if (stages.upload === 'queued' || stages.upload === 'uploading') {
-    return {
-      key: 'uploading',
-      label: stages.upload === 'queued' ? '录音已保存在本机，等待上传' : '录音已保存在本机，正在上传',
-      tone: 'neutral',
-      retryStage: null,
-    };
+    return meetingPresentationStateFromLabel(
+      stages.upload === 'queued'
+        ? '录音已保存在本机，等待上传'
+        : '录音已保存在本机，正在上传',
+    )!;
   }
   if (stages.upload === 'failed_retryable' || stages.upload === 'blocked') {
-    return {
-      key: 'upload_failed',
-      label: stages.upload === 'blocked' ? '上传受阻' : '上传失败，可重试',
-      tone: 'danger',
-      retryStage: 'upload',
-    };
+    return meetingPresentationStateFromLabel(
+      stages.upload === 'blocked' ? '上传受阻' : '上传失败，可重试',
+    )!;
   }
   if (stages.transcript === 'finalizing') {
-    return { key: 'transcribing', label: '正在生成文字记录', tone: 'neutral', retryStage: null };
+    return meetingPresentationStateFromLabel('正在生成文字记录')!;
+  }
+  if (stages.transcript === 'realtime_draft') {
+    return meetingPresentationStateFromLabel('文字记录仍在补全')!;
   }
   if (stages.transcript === 'failed_retryable') {
-    return {
-      key: 'transcript_failed',
-      label: '文字处理失败，可重试',
-      tone: 'danger',
-      retryStage: 'transcript',
-    };
+    return meetingPresentationStateFromLabel('文字处理失败，可重试')!;
   }
   if (stages.summary === 'queued' || stages.summary === 'generating') {
-    return { key: 'summarizing', label: '正在整理会议记录', tone: 'neutral', retryStage: null };
+    return meetingPresentationStateFromLabel('正在整理会议记录')!;
   }
   if (stages.summary === 'failed_retryable') {
-    return {
-      key: 'summary_failed',
-      label: '整理失败，可重试',
-      tone: 'danger',
-      retryStage: 'summary',
-    };
+    return meetingPresentationStateFromLabel('整理失败，可重试')!;
   }
-  return {
-    key: 'ready',
-    label: stages.summary === 'stale' ? '整理结果可更新' : '已完成',
-    tone: stages.summary === 'stale' ? 'warning' : 'success',
-    retryStage: null,
-  };
+  if (stages.summary === 'stale') {
+    return meetingPresentationStateFromLabel('整理结果可更新')!;
+  }
+  if (
+    stages.capture === 'not_started'
+    && stages.upload === 'not_required'
+    && stages.transcript === 'none'
+    && stages.summary === 'none'
+    && stages.speaker === 'none'
+  ) {
+    return meetingPresentationStateFromLabel('未开始')!;
+  }
+  return meetingPresentationStateFromLabel('已完成')!;
 }

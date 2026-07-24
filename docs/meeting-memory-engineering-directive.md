@@ -738,17 +738,20 @@ type SpeakerStatus =
 
 ### 8.2 用户状态推导优先级
 
-1. `capture=recording/paused`：正在录音/录音已暂停。
+1. `capture=preparing/recording/paused`：正在准备录音/正在录音/录音已暂停。
 2. `capture=finalizing`：正在安全保存录音。
-3. 本地文件存在且 `upload=queued/uploading`：录音已保存在本机，等待上传/正在上传。
-4. `upload=failed_retryable/blocked`：上传失败，可重试/上传受阻；播放器仍可使用本地文件。
-5. `transcript=finalizing`：正在生成文字记录。
-6. `transcript=failed_retryable`：文字处理失败，可单独重试；音频状态不得变成失败。
-7. `summary=queued/generating`：正在整理会议记录。
-8. `summary=failed_retryable`：整理失败，可单独重试；Transcript 和音频保持可用。
-9. 主要资产就绪：已完成；若输入变化则显示“整理结果可更新”，而不是失败。
+3. `capture=failed_recoverable/failed_terminal`：录音中断/录音失败；只有 recoverable 返回 capture 重试目标。
+4. 本地文件存在且 `upload=queued/uploading`：录音已保存在本机，等待上传/正在上传。
+5. `upload=failed_retryable/blocked`：上传失败，可重试/上传受阻；播放器仍可使用本地文件。
+6. `transcript=finalizing/realtime_draft`：正在生成文字记录/文字记录仍在补全。
+7. `transcript=failed_retryable`：文字处理失败，可单独重试；音频状态不得变成失败。
+8. `summary=queued/generating`：正在整理会议记录。
+9. `summary=failed_retryable`：整理失败，可单独重试；Transcript 和音频保持可用。
+10. 输入变化时显示“整理结果可更新”；五阶段均为初始空状态时显示“未开始”；其余主要资产就绪时显示“已完成”。
 
 列表、日程详情和会议详情必须调用同一个 `deriveMeetingPresentationState()`，不得各写一套条件。
+
+当前第一纵切已补全严格的五阶段聚合与统一 label/tone/retryStage，并接入 canonical list projection、occurrence 日程动作和旧 `Meeting` DTO 的列表兼容投影；旧 DTO 只根据粗粒度 status、显式上传/内容字段作保守重建，canonical 第一标签仍优先。详情页现有 upload/transcript/summary 分页状态尚未改成统一 stage snapshot，也尚未提供通用 `retryProcessingStage` 操作，不能把本纵切表述为 PROC-01 完整 UI。
 
 ### 8.3 错误合同
 

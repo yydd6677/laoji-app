@@ -33,6 +33,7 @@ import {
   runLegacyMeetingShadowImport,
 } from '../data/db/legacyImport';
 import {
+  MEETING_PRESENTATION_LABELS,
   isScopeKey,
   secureClientIdFactory,
   type MeetingEntryPoint,
@@ -221,7 +222,15 @@ function statusTag(status: string): { label: string; color: string } {
   return { label: '未开始', color: C.purple };
 }
 
-const STATUS_TAG_LABELS = new Set(['录音中', '录音已暂停', '处理中', '失败', '已完成', '未开始']);
+const STATUS_TAG_LABELS = new Set([
+  '录音中',
+  '录音已暂停',
+  '处理中',
+  '失败',
+  '已完成',
+  '未开始',
+  ...MEETING_PRESENTATION_LABELS,
+]);
 
 function tagsForStatus(meeting: Meeting, status: string): Meeting['tags'] {
   const retained = meeting.tags.filter(tag => !STATUS_TAG_LABELS.has(tag.label) && tag.label !== '待同步');

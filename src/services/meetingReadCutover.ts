@@ -1,5 +1,10 @@
 import type { Meeting, MeetingSummary, TranscriptLine } from '../types';
-import type { ScopeKey } from '../domain/meeting';
+import {
+  deriveMeetingPresentationState,
+  processingStatusesFromStages,
+  type MeetingPresentationState,
+  type ScopeKey,
+} from '../domain/meeting';
 import type {
   MeetingDualReadReport,
   MeetingListProjectionItem,
@@ -92,23 +97,27 @@ function compatibilityStatus(item: MeetingListProjectionItem): string {
   return 'created';
 }
 
-function statusTag(status: string): { label: string; color: string } {
-  if (status === 'recording') return { label: '录音中', color: C.red };
-  if (status === 'paused') return { label: '录音已暂停', color: C.orange };
-  if (status === 'processing') return { label: '处理中', color: C.orange };
-  if (status === 'failed') return { label: '失败', color: C.red };
-  if (status === 'completed') return { label: '已完成', color: C.green };
-  return { label: '未开始', color: C.purple };
+function presentationTag(presentation: MeetingPresentationState): { label: string; color: string } {
+  const color = presentation.tone === 'danger'
+    ? C.red
+    : presentation.tone === 'warning'
+      ? C.orange
+      : presentation.tone === 'success'
+        ? C.green
+        : presentation.tone === 'primary'
+          ? C.blue
+          : C.faint;
+  return { label: presentation.label, color };
 }
 
 function compatibilityTags(
   item: MeetingListProjectionItem,
   scopeKey: ScopeKey,
-  status: string,
+  presentation: MeetingPresentationState,
   uploadPending: boolean,
   uploadBlocked: boolean,
 ): Meeting['tags'] {
-  const tags: Meeting['tags'] = [statusTag(status)];
+  const tags: Meeting['tags'] = [presentationTag(presentation)];
   if (scopeKey === 'guest') tags.push({ label: '本机', color: C.teal });
   if (scopeKey !== 'guest' && item.mode) {
     tags.push({ label: item.mode === 'offline' ? '离线' : '实时', color: C.blue });
@@ -156,6 +165,7 @@ function compatibilityMeeting(
   const uploadPending = ['queued', 'uploading', 'failed_retryable'].includes(upload ?? '');
   const uploadBlocked = upload === 'blocked';
   const status = compatibilityStatus(item);
+  const presentation = deriveMeetingPresentationState(processingStatusesFromStages(item.stages));
   const audioAvailable = Boolean(
     recording
     && (recording.localState === 'local_ready'
@@ -168,7 +178,7 @@ function compatibilityMeeting(
     title: item.title,
     ...dateTime,
     duration: formatDuration(durationSec),
-    tags: compatibilityTags(item, scopeKey, status, uploadPending, uploadBlocked),
+    tags: compatibilityTags(item, scopeKey, presentation, uploadPending, uploadBlocked),
     participants: [...item.participants],
     hasTranscript: item.activeTranscriptSegmentCount > 0 || stageStatus(item, 'transcript') === 'ready',
     hasSummary: item.currentSummaryReady || stageStatus(item, 'summary') === 'ready',

@@ -9,7 +9,12 @@ import type {
   ScheduleSnapshot,
   ScopeKey,
 } from '../domain/meeting';
-import { assertScopeKey, calendarMeetingSeriesKey } from '../domain/meeting';
+import {
+  assertScopeKey,
+  calendarMeetingSeriesKey,
+  deriveMeetingPresentationState,
+  processingStatusesFromStages,
+} from '../domain/meeting';
 import { eventRefForEvent } from '../utils/eventIdentity';
 
 export type OccurrenceMeetingActionKind = 'start' | 'continue' | 'view';
@@ -77,6 +82,9 @@ function legacyFacingMeetingId(aggregate: MeetingNoteAggregate): string {
 
 function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingProjection {
   const capture = aggregate.processingStages.find(stage => stage.stage === 'capture');
+  const presentation = deriveMeetingPresentationState(
+    processingStatusesFromStages(aggregate.processingStages),
+  );
   const hasContent = aggregate.recordingAssets.some(asset => (
     asset.localState === 'local_ready'
     || asset.localState === 'remote_only'
@@ -96,7 +104,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       canonicalMeetingId: aggregate.note.id,
       action: 'continue',
       label: '继续记录',
-      statusLabel: capture?.status === 'paused' ? '录音已暂停' : '记录尚未结束',
+      statusLabel: presentation.label,
       syncConflict: false,
     };
   }
@@ -106,7 +114,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       canonicalMeetingId: aggregate.note.id,
       action: 'view',
       label: '查看记录',
-      statusLabel: '已有会议记录',
+      statusLabel: presentation.label,
       syncConflict: false,
     };
   }
@@ -115,7 +123,7 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
     canonicalMeetingId: aggregate.note.id,
     action: 'start',
     label: '开始记录',
-    statusLabel: '尚未开始',
+    statusLabel: presentation.label,
     syncConflict: false,
   };
 }
