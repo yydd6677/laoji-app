@@ -16,6 +16,9 @@ import type {
   TranscriptCandidateKind,
   TranscriptServerCompleteness,
 } from '../../services/transcriptCompleteness';
+import { runAccountMeetingTranscriptCompletion } from '../../services/meetingTranscriptCompletionCoordinator';
+import { savePendingMeetingTranscriptCompletion } from '../../services/meetingTranscriptCompletionTasks';
+import { requestMeetingTranscriptCompletion } from './transcriptCompletionTrigger';
 
 export interface GuestRealtimeSessionIdentity {
   meetingId: string;
@@ -113,7 +116,30 @@ export class FinalizeNativeMeetingRecordingUseCase {
       reconcileUploads: this.dependencies.reconcileUploads,
     });
     const transcriptLines = input.getTranscriptLines();
-    const transcriptCompletionTask = this.completeTranscript(input, transcriptLines);
+    let transcriptCompletionTaskRegistered = false;
+    if (
+      !input.isGuest
+      && input.scopeKey
+      && input.scopeKey !== 'guest'
+      && input.accessToken
+      && input.remoteMeetingId
+    ) {
+      try {
+        await savePendingMeetingTranscriptCompletion(
+          input.storageScope,
+          input.meetingId,
+          input.remoteMeetingId,
+        );
+        transcriptCompletionTaskRegistered = true;
+      } catch (reason) {
+        diagnosticWarn('register transcript completion after local commit failed', reason);
+      }
+    }
+    const transcriptCompletionTask = this.completeTranscript(
+      input,
+      transcriptLines,
+      transcriptCompletionTaskRegistered,
+    );
     return {
       ...committed,
       transcriptCompletion: 'pending',
@@ -125,26 +151,48 @@ export class FinalizeNativeMeetingRecordingUseCase {
   private async completeTranscript(
     input: FinalizeNativeMeetingRecordingInput,
     localLines: TranscriptLine[],
+    taskRegistered: boolean,
   ): Promise<NativeMeetingTranscriptCompletionResult> {
     try {
-      const completion = await completeMeetingTranscriptAfterCapture({
-        meetingId: input.meetingId,
-        localLines,
-        remote: this.remoteTranscriptIdentity(input),
-      }, {
+      const completionDependencies = {
         saveTranscript: this.dependencies.saveTranscript,
         getCachedTranscript: this.dependencies.getCachedTranscript,
-        onFailure: (kind, reason) => this.recordTranscriptFailure(
+        onFailure: (kind: MeetingTranscriptFailureKind, reason: unknown) => this.recordTranscriptFailure(
           input.scopeKey,
           input.meetingId,
           kind,
           reason,
         ),
-      });
+      };
+      const completion = !input.isGuest
+        && input.scopeKey
+        && input.scopeKey !== 'guest'
+        && input.accessToken
+        && input.remoteMeetingId
+        ? await runAccountMeetingTranscriptCompletion({
+            scopeKey: input.scopeKey,
+            storageScope: input.storageScope,
+            meetingId: input.meetingId,
+            remoteMeetingId: input.remoteMeetingId,
+            accessToken: input.accessToken,
+            localLines,
+            taskRegistered,
+          }, completionDependencies)
+        : await completeMeetingTranscriptAfterCapture({
+            meetingId: input.meetingId,
+            localLines,
+            remote: this.remoteTranscriptIdentity(input),
+          }, completionDependencies);
+      if (completion.status !== 'ready' && input.scopeKey && input.scopeKey !== 'guest') {
+        requestMeetingTranscriptCompletion(input.scopeKey);
+      }
       return { status: completion.status, lines: completion.lines };
     } catch (reason) {
       diagnosticWarn('complete transcript after local recording commit failed', reason);
       await this.recordTranscriptFailure(input.scopeKey, input.meetingId, 'sync', reason);
+      if (input.scopeKey && input.scopeKey !== 'guest') {
+        requestMeetingTranscriptCompletion(input.scopeKey);
+      }
       return { status: 'failed', lines: localLines };
     } finally {
       const guestSession = input.guestSession;

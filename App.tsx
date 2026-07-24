@@ -32,6 +32,7 @@ import {
 } from './src/components/AppStartupBoundary';
 import { MeetingMediaImportProvider } from './src/components/MeetingMediaImportProvider';
 import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEventsProjectionCoordinator';
+import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTranscriptCompletionProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -56,24 +57,26 @@ function RuntimeProviders({ onRestart }: {
                   <MeetingSpeakerCorrectionSyncProvider>
                   <EventsProvider>
                   <MeetingsProvider>
-                    <UpcomingEventsProjectionCoordinator />
-                    <AppLockGate>
-                      <AppDialogProvider>
-                        <MeetingMediaImportProvider>
-                          <GuestDataMigrationProvider>
-                            <NotificationPermissionPrimer />
-                            <View style={{ flex: 1 }}>
-                              <RestorableNavigationContainer>
-                                <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                                <RootNavigator />
-                                <NotificationNavigationHandler />
-                              </RestorableNavigationContainer>
-                              <EventUndoBanner />
-                            </View>
-                          </GuestDataMigrationProvider>
-                        </MeetingMediaImportProvider>
-                      </AppDialogProvider>
-                    </AppLockGate>
+                    <MeetingTranscriptCompletionProvider>
+                      <UpcomingEventsProjectionCoordinator />
+                      <AppLockGate>
+                        <AppDialogProvider>
+                          <MeetingMediaImportProvider>
+                            <GuestDataMigrationProvider>
+                              <NotificationPermissionPrimer />
+                              <View style={{ flex: 1 }}>
+                                <RestorableNavigationContainer>
+                                  <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                                  <RootNavigator />
+                                  <NotificationNavigationHandler />
+                                </RestorableNavigationContainer>
+                                <EventUndoBanner />
+                              </View>
+                            </GuestDataMigrationProvider>
+                          </MeetingMediaImportProvider>
+                        </AppDialogProvider>
+                      </AppLockGate>
+                    </MeetingTranscriptCompletionProvider>
                   </MeetingsProvider>
                   </EventsProvider>
                   </MeetingSpeakerCorrectionSyncProvider>

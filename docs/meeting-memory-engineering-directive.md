@@ -1092,6 +1092,8 @@ interface MinutesTranscriptLineSnapshot {
 
 录音结束第四层纵切把剩余网络等待移出 capture finalize：账号 legacy 状态先完成本机持久化和 stage mirror，远端 PATCH 再后台执行；pending upload registry 写失败时只启动一次不受控的 best-effort 直传并立即返回“上传状态未保存”，不再等待网络结果；远端 Transcript 补全以不会向控制器抛错的 `transcriptCompletionTask` 继续运行，控制器在本机提交后即可释放 session handle。页面留在原处时订阅 task 并更新文字/中文状态，已经进入详情时由 canonical stage 与详情轮询继续呈现。迟到的状态 PATCH 合并时以当时 Store 中的音频投影为准，不能把已经上传成功的资产重新标成待上传。正常后台状态同步不弹出伪故障，失败仍保留 `statusSyncPending` 供列表刷新重试。两份临时无落盘合同分别覆盖上传 Promise 永不结束、同步抛错、补全 Promise 永不结束、本机提交失败保留控制器重试权，以及游客会话只在补全结束后清理；TypeScript 编译与 Android JS bundle 均通过。
 
+录音结束第五层纵切为账号 Transcript 补全增加无凭据持久恢复：本机 capture commit 后、控制器释放前，按 `user:{id}` 写入只含本机会议 ID、远端会议 ID、创建/尝试/下次重试时间和结果状态的 registry；不得保存 access token、guest token、Transcript 正文或用户资料。当前账号的 `MeetingTranscriptCompletionProvider` 在启动、回前台和显式 trigger 时临时注入当前 token，单次最多处理四项；同 scope/meeting 的进程内任务合并，明确 incomplete 每 15 秒复查，失败从 30 秒指数退避到 15 分钟，23 小时后停止自动恢复并保留阶段手动重试。ready 后清 registry，账号删除会议时同步清理；账号切换或会议已删除时 `saveCachedTranscript()` 明确拒绝，不能静默成功、清掉原账号任务或生成孤儿缓存。registry 首次写失败只降低强杀恢复能力，不把已落账录音重新判为失败，当前进程仍继续补全。游客临时 ASR token 不安全落盘，因此本层明确只支持账号；游客仍依赖当前进程补全和再次打开详情，不能宣称强杀恢复。临时无落盘合同已覆盖 scope 隔离、过期清理、attempt/next retry、凭据不落盘、同任务合并、ready 清理、failed 保留，以及 registry 写完前控制器不释放；TypeScript 与 1869 模块 Android bundle 通过，尚无真实进程强杀或运行服务证据。
+
 这一切片不改变事实源边界：Android recorder/journal 仍唯一负责采集状态、音频字节、本机文件、停止结果和进程恢复；控制器不缓存或推断 native capture state。`FinalizeNativeMeetingRecordingUseCase` 现在拥有“本机提交、启动远端 Transcript 补全、补全后清理游客会话”的顺序，`useNativeMeetingRecordingFinalizer` 组装 Store/API/WorkManager 依赖，`MeetingLiveScreen.android.tsx` 不再直接组装这些结束依赖或实现补全算法；页面仍负责创建会议、启动原生录音、订阅状态、用户动作和可见反馈，因此尚未达到纯状态订阅者的最终形态。当前只有 TypeScript、Android JS bundle 和临时窄合同证据，没有模拟器冒烟、强杀、停止超时、长录音或 USB 真机证据，这些仍属于后续退出条件。
 
 ## 10. P1 功能详细设计
@@ -1720,6 +1722,8 @@ openOccurrenceMeeting
 | `MeetingsStore.tsx` | 变成 repository facade，移除 meetings/transcript/summary 整体 JSON map |
 | `EventsStore.tsx` | 保持 recurrence 事务；增加 occurrence meeting projection 查询，不把 meeting 塞回 CalEvent |
 | `MeetingLiveScreen.android.tsx` | 收敛为 `RecordingSessionController` 订阅者；移出创建/停止/上传/同步长流程 |
+| `FinalizeNativeMeetingRecordingUseCase` / `useNativeMeetingRecordingFinalizer` | 固定本机 commit 边界并组装停止、上传登记、Transcript 补全；页面只订阅结果 |
+| `meetingTranscriptCompletionTasks.ts` / coordinator / Provider | 账号补全无凭据 registry、同任务合并、退避与启动/前台恢复；不得持久化 token 或正文 |
 | `TranscriptionScreen.android.tsx` | 收敛为 detail controller；summary task、audio materialize、action mutation进入 use case/repository |
 | `nativeMinutesSnapshots.ts` | 从 repository projection 构建 v9 snapshot；不再把 Markdown 作为主 Summary 输入 |
 | `minutes.ts` / `MinutesState.kt` | schema 同步升级，增加 notes/action/marker/stage/citation |

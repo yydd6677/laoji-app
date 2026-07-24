@@ -29,6 +29,7 @@ import { meetingSummaryToText } from '../services/meetingSummary';
 import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
+import { clearPendingMeetingTranscriptCompletion } from '../services/meetingTranscriptCompletionTasks';
 import {
   runLegacyMeetingShadowImport,
 } from '../data/db/legacyImport';
@@ -1198,6 +1199,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     const cleanupResults = await Promise.allSettled([
       deletePendingMeetingAudioUpload(scope, legacyMeetingId),
+      clearPendingMeetingTranscriptCompletion(scope, legacyMeetingId),
       deleteNativeMeetingArtifacts(scope, legacyMeetingId),
       deleteMeetingPlaybackCache(legacyMeetingId),
       cancelMeetingActionNotificationsForMeeting(scope, legacyMeetingId),
@@ -2175,6 +2177,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       persistTranscripts(),
       persistSummaries(),
       deletePendingMeetingAudioUpload(scope, id),
+      clearPendingMeetingTranscriptCompletion(scope, id),
       deleteNativeMeetingArtifacts(scope, id),
       deleteMeetingPlaybackCache(id),
       ...(isScopeKey(scope) ? [cancelMeetingActionNotificationsForMeeting(scope, id)] : []),
@@ -2478,7 +2481,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     options: SaveCachedTranscriptOptions = {},
   ) => {
     const operationGeneration = generationRef.current;
-    if (activeScopeRef.current !== scope) return;
+    if (activeScopeRef.current !== scope) {
+      throw new Error('会议账号已切换，文字记录将在返回原账号后继续保存。');
+    }
+    const contentMeeting = meetingsRef.current.find(meeting => meeting.id === id);
+    if (!contentMeeting) throw new Error('会议记录已不存在，无法继续保存文字记录。');
     const transcriptFlags = getFeatureFlags();
     if (
       transcriptFlags.localMeetingDbCanonicalWriteV1
@@ -2494,7 +2501,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     deactivateCanonicalRead();
     const previous = transcriptCacheRef.current;
     const baseline = previous[id] ?? [];
-    const contentMeeting = meetingsRef.current.find(meeting => meeting.id === id);
     const derivedKind: TranscriptCandidateKind = contentMeeting?.status === 'recording'
       || contentMeeting?.status === 'paused'
       ? 'realtime_draft'
