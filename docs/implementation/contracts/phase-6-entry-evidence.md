@@ -9,6 +9,7 @@
 - `notificationNavigation.ts` 在执行业务动作前将 semantic intent、occurrence ref、scope、response key 和原通知 ID 持久化。旧 v2 pending event 缺 intent 时安全恢复为 `open-event`。
 - `AppLockGate` 继续拥有 `navigationUnlocked`；锁未解除时只保存 pending target，不查询或创建 meeting。scope 不一致的旧通知被消费但不跨账号导航。
 - `openOccurrenceMeeting.ts` 是详情页和通知共同调用的应用用例：先按 occurrence 查询，已有 ended/content 时查看详情，active/可恢复时继续，同一 occurrence 无记录时才创建并绑定。
+- 后续 CAL-01 增量把通知动作与 Widget 明确动作接入账号 occurrence 回查：先恢复本机 orphaned link 并读取本机投影；已有本机会议直接沿用，只有本机无关联时才查询云端并安全附着，避免服务离线阻断已有记录。
 - 同一 scope/occurrence 的进程内请求使用共享 Promise 合并；创建请求 ID 对正常 event ID 保持 `calendar:{sourceEventId}:{occurrenceDate}`，超长身份改用 SHA-256。游客 mutation queue 在持久化前按 `clientRequestId` 复用现有 meeting，并重新尝试影子落库/occurrence 绑定。
 - `CreateMeetingOptions.entryPoint` 传到 canonical shadow；通知首次创建保存 `notification`，日程详情首次创建保存 `calendar_detail`。已存在会议不会因后续另一个入口被改写来源。
 - 处理成功后按原 notification ID 主动移除系统通知，避免动作完成后留下可重复点击的过期卡片。默认点击仍只打开 `EventDetail`，不会创建会议。
@@ -44,6 +45,7 @@
 2. App Lock 的代码门禁和 pending 恢复顺序已保留，但本轮没有在模拟器配置生物识别锁后执行 notification -> 解锁 -> 创建的完整任务。
 3. 当前会议服务不可达，无法证明通知动作成功进入持续录音、active recording 的真实继续或 ended meeting 的真实详情分支；本轮只实测了首次创建/自动开始尝试和 failed-recoverable 继续。
 4. 账号作用域、服务端 occurrence 唯一约束、两设备同时创建及 409 后本机音频合并仍缺可用服务端和测试账号。
+   客户端已经能在 409/412 的 current 严格匹配同一会议和不可变快照时自动收敛；真正不同会议仍只保留冲突和资产，尚无用户恢复界面。
 5. 本轮按当前目标没有恢复归档测试、做通知投递压力矩阵或执行快速连点录音 session 压测；重复 response、稳定请求 ID和最终计数已做轻量验证。
 
 ## ENTRY-02 当前范围

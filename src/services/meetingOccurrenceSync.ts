@@ -1,6 +1,7 @@
 import {
   loadMeetingCapabilities,
   OccurrenceLinkConflictResponseError,
+  parseRemoteOccurrenceLinkV2,
   upsertMeetingOccurrenceLinkV2,
   type OccurrenceLinkV2Mutation,
   type OccurrenceScheduleSnapshotV2,
@@ -189,6 +190,65 @@ function transientHttpStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+async function attachMatchingConflictCurrent(
+  claim: OccurrenceSyncClaim,
+  mutation: OccurrenceLinkV2Mutation,
+  error: OccurrenceLinkConflictResponseError,
+  nowMs: number,
+): Promise<'completed' | 'conflicted' | 'unavailable'> {
+  try {
+    const remote = parseRemoteOccurrenceLinkV2(error.remotePayload, {
+      sourceEventId: mutation.source_event_id,
+      occurrenceDate: mutation.occurrence_date,
+    });
+    if (
+      !remote.exists
+      || remote.remoteId === null
+      || remote.meetingRemoteId === null
+      || remote.sourceEventId === null
+      || remote.occurrenceDate === null
+      || remote.linkState === null
+      || remote.scheduleSnapshot === null
+      || remote.serverCreatedAtMs === null
+      || remote.serverUpdatedAtMs === null
+    ) return 'unavailable';
+    const merged = await sqliteMeetingNoteRepository.mergeOccurrenceRemote({
+      scopeKey: claim.scopeKey,
+      pulledAtMs: nowMs,
+      remote: {
+        remoteId: remote.remoteId,
+        meetingRemoteId: remote.meetingRemoteId,
+        revision: remote.revision,
+        sourceEventId: remote.sourceEventId,
+        occurrenceDate: remote.occurrenceDate,
+        calendarRevision: remote.calendarRevision,
+        recurrenceSegmentId: remote.recurrenceSegmentId,
+        seriesKey: remote.seriesKey,
+        linkState: remote.linkState,
+        clientUpdatedAtMs: remote.clientUpdatedAtMs,
+        scheduleSnapshot: remote.scheduleSnapshot,
+        serverCreatedAtMs: remote.serverCreatedAtMs,
+        serverUpdatedAtMs: remote.serverUpdatedAtMs,
+      },
+    });
+    if (merged.outcome === 'conflicted') return 'conflicted';
+    if (merged.meetingId !== claim.meetingId) return 'unavailable';
+    if (merged.outcome === 'unchanged') {
+      const completed = await sqliteMeetingNoteRepository.completeOccurrenceSyncClaim(
+        claim,
+        remote.remoteId,
+        remote.revision,
+        nowMs,
+      );
+      return completed ? 'completed' : 'unavailable';
+    }
+    if (merged.outcome === 'attached' || merged.outcome === 'updated') return 'completed';
+  } catch {
+    // Preserve the original 409/412 payload below when it cannot be attached safely.
+  }
+  return 'unavailable';
+}
+
 type ClaimResult = {
   processed: boolean;
   retryAfterMs: number | null;
@@ -252,6 +312,13 @@ async function processClaim(
     }
     const nowMs = Date.now();
     if (error instanceof OccurrenceLinkConflictResponseError) {
+      const attached = await attachMatchingConflictCurrent(claim, mutation, error, nowMs);
+      if (attached === 'completed') {
+        return { processed: true, retryAfterMs: null, outcome: 'completed' };
+      }
+      if (attached === 'conflicted') {
+        return { processed: true, retryAfterMs: null, outcome: 'conflict' };
+      }
       const recorded = await sqliteMeetingNoteRepository.recordOccurrenceSyncConflict(claim, {
         remoteRevision: error.remoteRevision,
         remotePayloadJson: boundedRemotePayload({

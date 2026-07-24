@@ -92,7 +92,10 @@ async function executeOpenOccurrenceMeeting(
   context: CalendarMeetingContext,
 ): Promise<OccurrenceMeetingOpenTarget> {
   const existing = await resolveOccurrenceMeeting(input.scopeKey, context.occurrence);
-  if (existing) return occurrenceMeetingOpenTarget(existing);
+  if (existing) {
+    if (existing.syncConflict) throw new Error('日程关联正在处理，请稍后重试');
+    return occurrenceMeetingOpenTarget(existing);
+  }
 
   const created = await input.createMeeting(input.event.title ?? '', {
     description: input.event.description ?? input.event.detail ?? null,

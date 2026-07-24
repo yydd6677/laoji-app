@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Phase 2 尚未满足退出条件。NOTE-01 已从本机纵向路径扩展到账号人工笔记的窄云同步；CAL-01 也已形成第一条账号纵向闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、跨设备安全附着、冲突保留和删除后 orphan 都已接通。游客迁移 journal 仍按创建、日程关联、人工笔记、文字记录、整理版本、行动项、录音和状态分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
+Phase 2 尚未满足退出条件。NOTE-01 已从本机纵向路径扩展到账号人工笔记的窄云同步；CAL-01 也已形成第一条账号纵向闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、跨设备安全附着、冲突保留和删除后 orphan 都已接通。日历详情、通知动作和 Widget 明确动作在没有本机关联时共用 occurrence 云端回查；已有本机关联仍保持离线可打开。游客迁移 journal 仍按创建、日程关联、人工笔记、文字记录、整理版本、行动项、录音和状态分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
 
 目标服务源码现有 `manual_notes_v2` 与 `occurrence_links_v2` capability、认证 GET/PUT、持久幂等结果和 revision precondition，并已与客户端协议同步；目标 18020/18035 服务未启动，所以新表未在目标数据库实例化，也没有真实鉴权请求、跨设备收敛或真实账号迁移证据。两个设备创建不同本机会议时，当前只进入可恢复冲突和固定“正在准备”状态；待合并录音的用户决策/执行页仍未实现。
 
@@ -30,7 +30,8 @@ Phase 2 尚未满足退出条件。NOTE-01 已从本机纵向路径扩展到账�
 | Occurrence 服务端写入 | `occurrence_links_v2` 控制认证 GET/PUT；创建使用 `If-None-Match: *`，更新使用 `If-Match`，写入保存 revision、单调客户端时间和持久幂等结果 |
 | 计划快照 | 服务端首次创建时写入 `meeting_schedule_snapshots_v2`；后续更新只允许 link 元数据和 active/orphaned 状态变化，快照或 occurrence identity 分歧返回 409，绝不覆盖记录时计划 |
 | Occurrence 上行 | 创建会议事务同时写独立 `meeting_occurrence` outbox；会议根取得 remote ID 后才 claim，陈旧 claim 可回收，重试固定请求快照，ACK 必须逐字段匹配本次 occurrence 和计划快照 |
-| Occurrence 下行 | 日历详情先读本机；账号态再按 occurrence 查询云端。若本机还没有会议根，先刷新账号会议列表，再按 remote meeting ID 安全附着；缺失、陈旧、身份分歧分别处理 |
+| Occurrence 下行 | 日历详情先读本机并做增量云端查询；通知动作和 Widget 明确动作仅在没有本机关联时回查云端，避免离线时阻断已有会议。若本机还没有会议根，先刷新账号会议列表，再按 remote meeting ID 安全附着；缺失、陈旧、身份分歧分别处理 |
+| 409/412 收敛 | 若冲突响应中的 current 仍是本次 occurrence、同一云端会议和同一不可变计划快照，则复用严格 parser 与下行 merge 安全 ACK；不同会议、身份或快照分歧仍进入 unresolved conflict，不因状态码直接覆盖本机资产 |
 | 双会议保护 | 云端 occurrence 指向另一条本机会议、目标会议已有其他 occurrence、本机墓碑或计划快照分歧时写 unresolved conflict、阻塞旧 outbox并保留全部本机资产；日历动作固定为 disabled“正在准备” |
 | 删除与恢复 | 日程删除事务最终确认后，按 occurrence/following/series 把相应 link 标为 `orphaned` 并排队同步，不删除会议或快照；同 identity 日程重新出现并打开详情时，本机 link 恢复 active |
 | 笔记迁移 | 非空游客笔记复制到账号 scope 的空笔记容器并标记 dirty；账号已有不同内容时拒绝自动覆盖 |
@@ -77,10 +78,10 @@ Component: 日历详情 occurrence 同步状态
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
 - 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：90273412 bytes
-- SHA-256：`8beac580288d2ef5554524a14b1f9be5e96d16aa99ce902fb8f8fec753d11b67`
-- 构建时间：`2026-07-24 20:36:32 +0800`
-- 安装状态：已在 `emulator-5556` 保留数据覆盖安装；PackageManager `lastUpdateTime=2026-07-24 20:36:46`。冷启动、旧 occurrence 日历详情和 crash scan 均通过；当前 `adb devices` 没有 USB 真机，因此尚未安装到手机。
+- 大小：90274696 bytes
+- SHA-256：`07c6c8c719d7444f28ae779cf67b65507ee4548cf0d0e87d8c13ebab71130d15`
+- 构建时间：`2026-07-24 20:52:06 +0800`
+- 安装状态：已在 `emulator-5556` 保留数据覆盖安装；PackageManager `lastUpdateTime=2026-07-24 20:52:38`。冷启动与 crash/SQLite migration log scan 均通过；上一候选已验证旧 occurrence 日历详情，本次补丁没有改详情渲染。当前 `adb devices` 没有 USB 真机，因此尚未安装到手机。
 
 ## 未决项与停线边界
 
@@ -89,4 +90,4 @@ Component: 日历详情 occurrence 同步状态
 3. 人工笔记冲突候选选择已实现，但尚未用两个真实账号设备制造并解决一次 409/412。Occurrence 双会议冲突当前只保留双方并阻止继续创建；待合并录音的选择、移动和解除冲突 UI/事务仍未实现。
 4. USB 真机未连接，录音页键盘/inset、切页视频、停止录音前 flush 和覆盖安装仍需真机复核。
 5. Phase 1 canonical write 仍未接 Store，Phase 2 sidecar 不声明 scope-wide canonical owner；生产 read/write flags 继续关闭。
-6. 日历详情已经执行 occurrence 云端 lookup；通知和 Widget 仍只走本机统一 occurrence 用例，尚未在无本机绑定时先做云端回查。目标服务停止期间不能验证这项跨入口差异。
+6. 通知和 Widget 的无本机关联回查、同会议 409/412 安全收敛已有客户端代码路径，但目标服务停止期间不能形成真实鉴权、冲突响应或跨入口运行证据；不同会议冲突仍必须等待用户恢复路径。
