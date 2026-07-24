@@ -49,6 +49,10 @@ export interface MeetingSummaryProgress {
   stage: 'queued' | 'generating' | 'reconnecting' | 'resubmitting';
 }
 
+type MeetingSummaryProgressListener = (
+  progress: MeetingSummaryProgress,
+) => void | Promise<void>;
+
 export function summaryPollDelayMs(elapsedMs: number, lastStatus = ''): number {
   if (lastStatus === 'RECONNECTING') {
     if (elapsedMs < 5_000) return 500;
@@ -174,7 +178,7 @@ function normalizeSummaryForTemplate(
 
 async function waitForTask(
   fetchStatus: (waitMs: number) => Promise<ApiMeetingTaskStatus>,
-  options: { signal?: AbortSignal; onProgress?: (progress: MeetingSummaryProgress) => void } = {},
+  options: { signal?: AbortSignal; onProgress?: MeetingSummaryProgressListener } = {},
 ): Promise<ApiMeetingTaskStatus> {
   const startedAt = Date.now();
   let consecutiveFetchFailures = 0;
@@ -198,7 +202,7 @@ async function waitForTask(
       lastFetchError = error;
       lastStatus = 'RECONNECTING';
       supportsLongPoll = false;
-      options.onProgress?.({
+      await options.onProgress?.({
         attempt: attempt + 1,
         status: 'RECONNECTING',
         elapsedMs: Date.now() - startedAt,
@@ -209,7 +213,7 @@ async function waitForTask(
     }
     lastStatus = status.status;
     const elapsedMs = Date.now() - startedAt;
-    options.onProgress?.({
+    await options.onProgress?.({
       attempt: attempt + 1,
       status: status.status,
       elapsedMs,
@@ -248,7 +252,7 @@ export async function generateSummaryForMeeting(options: {
   resumeTaskId?: string;
   forceRegenerate?: boolean;
   signal?: AbortSignal;
-  onProgress?: (progress: MeetingSummaryProgress) => void;
+  onProgress?: MeetingSummaryProgressListener;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
   const {
@@ -301,7 +305,7 @@ export async function generateSummaryForMeeting(options: {
     } catch (error) {
       if (!isMissingTaskError(error)) throw error;
       throwIfAborted(signal);
-      reportResubmission();
+      await reportResubmission();
       taskId = await submitTask(false);
       status = await waitForTask(
         waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs),
@@ -350,7 +354,7 @@ export async function generateSummaryForMeeting(options: {
       }
       if (normalizedCompleted) return normalizedCompleted;
       if (isMissingTaskError(error)) {
-        reportResubmission();
+        await reportResubmission();
         taskId = await submitTask(false);
         completedStatus = await waitForTask(
           waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),

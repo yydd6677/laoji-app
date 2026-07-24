@@ -75,6 +75,10 @@ import {
   type PendingMeetingSummaryTask,
 } from '../services/meetingSummaryTasks';
 import {
+  meetingSummaryProcessingFailureCode,
+  recordMeetingSummaryProcessing,
+} from '../services/meetingSummaryProcessing';
+import {
   meetingShareErrorMessage,
   shareMeetingContent,
   type MeetingShareAvailability,
@@ -1223,6 +1227,18 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         ? options.carryForward ?? null
         : null;
     const expectedMode = isGuest ? 'guest' : 'authenticated';
+    const currentMeetingScopeKey = meetingScopeKey;
+    let knownTaskId = options.resumeTask?.taskId ?? null;
+    let recordedTaskStatus: 'queued' | 'generating' | null = options.resumeTask
+      ? 'generating'
+      : null;
+    let activeFingerprint = meetingSummaryInputFingerprint(
+      lines,
+      currentMeeting.title,
+      meetingDate,
+      requestedTemplate,
+      requestedCarryForward,
+    );
     let operation: Promise<void> | null = null;
     operation = (async () => {
       const summaryRequest = beginPageRequest(currentMeeting.id, 'summary');
@@ -1235,6 +1251,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       try {
         let pending = options.resumeTask ?? null;
         if (options.forceRegenerate) {
+          await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
           pending = null;
         } else if (options.resumeTask === undefined) {
           try {
@@ -1274,8 +1291,27 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             carryForward,
           );
         }
+        knownTaskId = pending?.taskId ?? null;
+        activeFingerprint = fingerprint;
         if (!isCurrentPageRequest(summaryRequest)) return;
         setSummaryProgress(pending ? '正在恢复上次整理任务' : '正在提交整理任务');
+        if (currentMeetingScopeKey) {
+          await recordMeetingSummaryProcessing({
+            scopeKey: currentMeetingScopeKey,
+            legacyMeetingId: currentMeeting.id,
+            signal: pending
+              ? {
+                type: 'task_status',
+                status: 'generating',
+                taskId: pending.taskId,
+                inputFingerprint: fingerprint,
+              }
+              : {
+                type: 'prepare',
+                inputFingerprint: fingerprint,
+              },
+          });
+        }
         const generated = await generateSummaryForMeeting({
           meetingId: isGuest
             ? currentMeeting.id
@@ -1291,7 +1327,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           forceRegenerate: Boolean(options.forceRegenerate),
           signal: controller.signal,
           onTaskSubmitted: async taskId => {
-            if (!isCurrentPageRequest(summaryRequest)) return;
+            knownTaskId = taskId;
             try {
               await savePendingMeetingSummaryTask(recordingStorageScope, {
                 meetingId: currentMeeting.id,
@@ -1302,51 +1338,89 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 inputFingerprint: fingerprint,
                 carryForward,
               });
-              if (!isCurrentPageRequest(summaryRequest)) return;
-              autoResumeTaskRef.current = taskId;
             } catch {
               if (isCurrentPageRequest(summaryRequest)) {
                 setSummaryError('任务已提交，但本机无法保存恢复状态，请保持当前页面打开。');
               }
             }
+            if (currentMeetingScopeKey) {
+              const outcome = await recordMeetingSummaryProcessing({
+                scopeKey: currentMeetingScopeKey,
+                legacyMeetingId: currentMeeting.id,
+                signal: {
+                  type: 'task_status',
+                  status: 'generating',
+                  taskId,
+                  inputFingerprint: fingerprint,
+                },
+              });
+              if (outcome !== 'failed') recordedTaskStatus = 'generating';
+            }
+            if (isCurrentPageRequest(summaryRequest)) autoResumeTaskRef.current = taskId;
           },
-          onProgress: progress => {
+          onProgress: async progress => {
             if (isCurrentPageRequest(summaryRequest)) {
               setSummaryProgress(meetingSummaryProgressLabel(progress));
             }
+            if (!currentMeetingScopeKey) return;
+            if (progress.stage === 'resubmitting') {
+              knownTaskId = null;
+              recordedTaskStatus = null;
+              await recordMeetingSummaryProcessing({
+                scopeKey: currentMeetingScopeKey,
+                legacyMeetingId: currentMeeting.id,
+                signal: { type: 'prepare', inputFingerprint: fingerprint },
+              });
+              return;
+            }
+            if (!knownTaskId || progress.stage === 'reconnecting') return;
+            const nextStatus = progress.stage === 'queued' ? 'queued' : 'generating';
+            if (recordedTaskStatus === nextStatus) return;
+            const outcome = await recordMeetingSummaryProcessing({
+              scopeKey: currentMeetingScopeKey,
+              legacyMeetingId: currentMeeting.id,
+              signal: {
+                type: 'task_status',
+                status: nextStatus,
+                taskId: knownTaskId,
+                inputFingerprint: fingerprint,
+              },
+            });
+            if (outcome !== 'failed') recordedTaskStatus = nextStatus;
           },
         });
-        if (!isCurrentPageRequest(summaryRequest)) return;
         const text = meetingSummaryToText(generated);
         const generatedDocument = text ? summaryDocumentFor(currentMeeting.id, generated) : null;
-        setSummaryError('');
+        if (isCurrentPageRequest(summaryRequest)) setSummaryError('');
         let cached = false;
         try {
           const cacheResult = await saveCachedSummary(currentMeeting.id, generated);
-          if (!isCurrentPageRequest(summaryRequest)) return;
-          const shouldReadCanonical = Boolean(
-            meetingScopeKey
-            && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
-          );
-          const current = shouldReadCanonical && meetingScopeKey
-            ? await loadCurrentMeetingSummaryState(meetingScopeKey, currentMeeting.id).catch(() => null)
-            : null;
-          if (!isCurrentPageRequest(summaryRequest)) return;
-          setSummary(current ? meetingSummaryDocumentToText(current.document) : (text || '暂无整理结果'));
-          setSummaryDocument(current?.document ?? generatedDocument);
-          setSummaryCached(true);
-          if (cacheResult.projection === 'preserved' && !options.automatic) {
-            showDialog({
-              title: '新整理结果已保存',
-              message: '当前版本包含你的修改或已处理的行动项，因此没有自动替换。',
-              tone: 'info',
-              actions: [
-                { text: '查看新版本', role: 'primary', onPress: openSummaryVersions },
-                { text: '保留当前', role: 'cancel' },
-              ],
-            });
+          cached = cacheResult.mirrorStatus !== 'stale_scope';
+          if (isCurrentPageRequest(summaryRequest)) {
+            const shouldReadCanonical = Boolean(
+              meetingScopeKey
+              && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
+            );
+            const current = shouldReadCanonical && meetingScopeKey
+              ? await loadCurrentMeetingSummaryState(meetingScopeKey, currentMeeting.id).catch(() => null)
+              : null;
+            if (isCurrentPageRequest(summaryRequest)) {
+              setSummary(current ? meetingSummaryDocumentToText(current.document) : (text || '暂无整理结果'));
+              setSummaryDocument(current?.document ?? generatedDocument);
+              setSummaryCached(cached);
+              if (cacheResult.projection === 'preserved' && !options.automatic) {
+                showDialog({
+                  title: '新整理结果已保存',
+                  message: '当前版本包含你的修改或已处理的行动项，因此没有自动替换。',
+                  tone: 'info',
+                  actions: [
+                    { text: '查看新版本', role: 'primary', onPress: openSummaryVersions },
+                    { text: '保留当前', role: 'cancel' },
+                  ],
+                });
+              }
+            }
           }
-          cached = true;
         } catch {
           if (isCurrentPageRequest(summaryRequest)) {
             setSummary(text || '暂无整理结果');
@@ -1360,12 +1434,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             });
           }
         }
-        if (isCurrentPageRequest(summaryRequest) && (cached || !isGuest)) {
+        if (cached || !isGuest) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
       } catch (reason) {
-        if (isCurrentPageRequest(summaryRequest) && shouldDiscardPendingMeetingSummaryTask(reason)) {
+        if (shouldDiscardPendingMeetingSummaryTask(reason)) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
+        }
+        if (currentMeetingScopeKey) {
+          await recordMeetingSummaryProcessing({
+            scopeKey: currentMeetingScopeKey,
+            legacyMeetingId: currentMeeting.id,
+            signal: (reason as Error)?.name === 'AbortError'
+              ? {
+                type: 'aborted',
+                taskId: knownTaskId,
+                inputFingerprint: activeFingerprint,
+              }
+              : {
+                type: 'failed',
+                taskId: knownTaskId,
+                inputFingerprint: activeFingerprint,
+                errorCode: meetingSummaryProcessingFailureCode(reason),
+              },
+          });
         }
         if (!isCurrentPageRequest(summaryRequest)) return;
         if ((reason as Error)?.name === 'AbortError') {
@@ -1467,13 +1559,22 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const date = meetingDateForSummary(meeting.date, meeting.createdAt);
     const expectedMode = isGuest ? 'guest' : 'authenticated';
     const pendingRequest = requestCoordinatorRef.current.capture(meeting.id, 'summary');
-    void getPendingMeetingSummaryTask(recordingStorageScope, meeting.id).then(pending => {
-      if (
-        !alive ||
-        !isCurrentPageRequest(pendingRequest) ||
-        !pending ||
-        autoResumeTaskRef.current === pending.taskId
-      ) return;
+    void getPendingMeetingSummaryTask(recordingStorageScope, meeting.id).then(async pending => {
+      if (!alive || !isCurrentPageRequest(pendingRequest)) return;
+      if (pending && autoResumeTaskRef.current === pending.taskId) return;
+      if (!pending) {
+        if (
+          meetingScopeKey
+          && (processingStatuses.summary === 'queued' || processingStatuses.summary === 'generating')
+        ) {
+          await recordMeetingSummaryProcessing({
+            scopeKey: meetingScopeKey,
+            legacyMeetingId: meeting.id,
+            signal: { type: 'discarded' },
+          });
+        }
+        return;
+      }
       const pendingTemplate = meetingTemplateById(pending.templateId, pending.templateRevision);
       const fingerprint = pendingTemplate
         ? meetingSummaryInputFingerprint(
@@ -1489,7 +1590,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         || pending.mode !== expectedMode
         || pending.inputFingerprint !== fingerprint
       ) {
-        void clearPendingMeetingSummaryTask(recordingStorageScope, meeting.id).catch(() => {});
+        await clearPendingMeetingSummaryTask(recordingStorageScope, meeting.id).catch(() => {});
+        if (meetingScopeKey) {
+          await recordMeetingSummaryProcessing({
+            scopeKey: meetingScopeKey,
+            legacyMeetingId: meeting.id,
+            signal: { type: 'discarded' },
+          });
+        }
         return;
       }
       setSummaryTemplate(pendingTemplate);
@@ -1503,10 +1611,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }).catch(() => {
       if (alive && isCurrentPageRequest(pendingRequest)) {
         setSummaryError('无法读取上次整理任务，点击重试可重新生成。');
+        if (
+          meetingScopeKey
+          && (processingStatuses.summary === 'queued' || processingStatuses.summary === 'generating')
+        ) {
+          void recordMeetingSummaryProcessing({
+            scopeKey: meetingScopeKey,
+            legacyMeetingId: meeting.id,
+            signal: { type: 'recovery_failed' },
+          });
+        }
       }
     });
     return () => { alive = false; };
-  }, [isCurrentPageRequest, isGuest, loadingSummary, loadingTranscript, meeting?.createdAt, meeting?.date, meeting?.id, meeting?.title, recordingStorageScope, transcript]);
+  }, [isCurrentPageRequest, isGuest, loadingSummary, loadingTranscript, meeting?.createdAt, meeting?.date, meeting?.id, meeting?.title, meetingScopeKey, processingStatuses.summary, recordingStorageScope, transcript]);
 
   useEffect(() => {
     const target = explicitDetailTab(route.params.focus);

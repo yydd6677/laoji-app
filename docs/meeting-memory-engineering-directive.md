@@ -753,6 +753,8 @@ type SpeakerStatus =
 
 当前前两层纵切已补全严格的五阶段聚合与统一 label/tone/retryStage，并接入 canonical list projection、occurrence 日程动作、详情页和旧 `Meeting` DTO 兼容投影；旧 DTO 只根据粗粒度 status、显式上传/内容字段作保守重建，canonical 阶段可读时优先。Minutes snapshot v10 在详情头部增加紧凑状态槽，Transcript/Summary 分页的 loading/error 与同一 stage snapshot 对齐；页面和状态槽的重试统一分派到录音恢复、现有上传 registry、Transcript 重新同步或 Summary pending-task 恢复，不复制后台任务实现。当前讲话人处理仍没有可验证的独立重试通道，远端运行与多阶段同时失败的真实收敛尚未验证，不能把本纵切表述为 PROC-01 完整 UI。
 
+Summary 生命周期纵切已把页面内 loading 提升为 canonical 阶段状态：准备提交写 `queued`；得到稳定 task ID 后写 `job_id/input_fingerprint`，且同一 task 恢复或重复轮询不增加 attempt；服务端 `PENDING/STARTED` 分别投影为 `queued/generating`。当前 API 不提供可信百分比，因此 `progress` 保持 `null`，禁止从耗时推算虚假进度。页面关闭或请求 generation 变化只停止可见 UI 更新，已提交任务的 pending registry、阶段状态和最终结果保存继续按捕获时的 meeting/scope 执行；已知后台 task 的 Abort 保持运行态，只有没有 task 身份的提交中断、明确 worker/传输失败、恢复 registry 不可读或 pending 被明确丢弃时才进入可重试失败或 `stale`。阶段写入按 meeting 串行且只记诊断，SQLite 失败不得反向伪装为服务端提交失败。现有 `saveCachedSummary()` 仍是 `ready` 和 Summary version 落盘的唯一完成路径。该纵切已有纯状态合同、TypeScript 和 Preview Kotlin 编译证据，但尚无真实远端长任务、进程重启恢复、账号切换和服务端任务过期证据。
+
 ### 8.3 错误合同
 
 - 底层持久化 `error_code` 和内部诊断，不持久化供应商英文错误作为用户文案。
