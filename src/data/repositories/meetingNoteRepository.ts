@@ -459,12 +459,24 @@ export interface MeetingRootSyncClaim {
   scopeKey: ScopeKey;
   meetingId: string;
   remoteId: string | null;
+  remoteRevision: number | null;
   operationId: string;
   operationType: string;
   idempotencyKey: string;
   claimToken: string;
   requestPayloadJson: string;
   attemptCount: number;
+}
+
+export interface MeetingRootSyncCompletion {
+  remoteId: string;
+  remoteRevision: number | null;
+  occurrence: {
+    remoteId: string;
+    remoteRevision: number;
+    sourceEventId: string;
+    occurrenceDate: string;
+  } | null;
 }
 
 export interface ClaimMeetingRootSyncOptions {
@@ -481,6 +493,7 @@ export interface MeetingRootSyncFailure {
 }
 
 export interface MeetingRootSyncConflict {
+  remoteRevision: number | null;
   remotePayloadJson: string;
   createdAtMs: number;
 }
@@ -936,7 +949,7 @@ export interface MeetingNoteRepository {
   ): Promise<number | null>;
   completeMeetingRootSyncClaim(
     claim: MeetingRootSyncClaim,
-    remoteId: string,
+    completion: MeetingRootSyncCompletion,
     completedAtMs: number,
   ): Promise<boolean>;
   failMeetingRootSyncClaim(

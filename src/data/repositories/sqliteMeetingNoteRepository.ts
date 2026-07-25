@@ -50,6 +50,7 @@ import type {
   MeetingNoteAggregate,
   MeetingNoteRepository,
   MeetingRootSyncClaim,
+  MeetingRootSyncCompletion,
   MeetingRootSyncConflict,
   MeetingRootSyncFailure,
   MeetingRootPatch,
@@ -241,6 +242,7 @@ type OccurrenceSyncOutboxRow = SyncOutboxRow & {
 
 type MeetingRootSyncOutboxRow = SyncOutboxRow & {
   meeting_remote_id: string | null;
+  meeting_remote_revision: number | null;
   transport_order: number;
 };
 
@@ -3866,7 +3868,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
            outbox.request_payload_json, outbox.claim_token,
            outbox.created_at_ms, outbox.updated_at_ms,
            outbox.rowid AS transport_order,
-           meeting.remote_id AS meeting_remote_id
+           meeting.remote_id AS meeting_remote_id,
+           meeting.remote_revision AS meeting_remote_revision
          FROM sync_outbox outbox
          INNER JOIN meeting_notes meeting ON meeting.id = outbox.aggregate_id
          WHERE outbox.scope_key = ? AND meeting.scope_key = ?
@@ -3940,6 +3943,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
           scopeKey,
           meetingId: first.aggregate_id,
           remoteId: first.meeting_remote_id,
+          remoteRevision: first.meeting_remote_revision,
           operationId: first.operation_id,
           operationType: first.operation_type,
           idempotencyKey: first.operation_id,
@@ -3999,14 +4003,29 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
 
   async completeMeetingRootSyncClaim(
     claim: MeetingRootSyncClaim,
-    remoteId: string,
+    completion: MeetingRootSyncCompletion,
     completedAtMs: number,
   ): Promise<boolean> {
     assertScopeKey(claim.scopeKey);
     assertRecordId(claim.meetingId, 'meeting ID');
     assertRecordId(claim.operationId, 'meeting root sync operation');
     assertRecordId(claim.claimToken, 'meeting root sync claim');
-    assertRecordId(remoteId, 'meeting remote ID');
+    assertRecordId(completion.remoteId, 'meeting remote ID');
+    assertOptionalNonNegativeInteger(completion.remoteRevision, 'meeting remote revision');
+    if (completion.remoteRevision !== null && completion.remoteRevision < 1) {
+      throw new Error('meeting remote revision is invalid');
+    }
+    if (completion.occurrence) {
+      assertRecordId(completion.occurrence.remoteId, 'occurrence remote ID');
+      assertNonNegativeInteger(completion.occurrence.remoteRevision, 'occurrence remote revision');
+      if (completion.occurrence.remoteRevision < 1) {
+        throw new Error('occurrence remote revision is invalid');
+      }
+      assertRecordId(completion.occurrence.sourceEventId, 'occurrence source event ID');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(completion.occurrence.occurrenceDate)) {
+        throw new Error('occurrence date is invalid');
+      }
+    }
     assertNonNegativeInteger(completedAtMs, 'meeting root sync completion time');
     const applied = await withMeetingDatabaseTransaction(async database => {
       const operation = await database.getFirstAsync<SyncOutboxRow>(
@@ -4029,7 +4048,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         claim.scopeKey,
       );
       if (!meeting) throw new Error('meeting root sync target no longer exists');
-      if (meeting.remote_id !== null && meeting.remote_id !== remoteId) {
+      if (meeting.remote_id !== null && meeting.remote_id !== completion.remoteId) {
         throw new Error('meeting root remote identity changed');
       }
       const remoteOwner = await database.getFirstAsync<{ id: string }>(
@@ -4037,18 +4056,68 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          WHERE scope_key = ? AND remote_id = ? AND id <> ?
          LIMIT 1`,
         claim.scopeKey,
-        remoteId,
+        completion.remoteId,
         claim.meetingId,
       );
       if (remoteOwner) {
         throw new Error('meeting root remote identity belongs to another local meeting');
       }
       await database.runAsync(
-        'UPDATE meeting_notes SET remote_id = ? WHERE id = ? AND scope_key = ?',
-        remoteId,
+        `UPDATE meeting_notes SET remote_id = ?,
+           remote_revision = CASE
+             WHEN ? IS NULL THEN remote_revision
+             WHEN remote_revision IS NULL OR remote_revision < ? THEN ?
+             ELSE remote_revision
+           END
+         WHERE id = ? AND scope_key = ?`,
+        completion.remoteId,
+        completion.remoteRevision,
+        completion.remoteRevision,
+        completion.remoteRevision,
         claim.meetingId,
         claim.scopeKey,
       );
+      if (completion.occurrence) {
+        const localOccurrence = await database.getFirstAsync<OccurrenceLinkRow>(
+          `SELECT * FROM meeting_occurrence_links
+           WHERE meeting_id = ? AND scope_key = ?`,
+          claim.meetingId,
+          claim.scopeKey,
+        );
+        if (!localOccurrence) {
+          throw new Error('meeting root response contains an unexpected occurrence');
+        }
+        if (
+          localOccurrence.calendar_source_event_id !== completion.occurrence.sourceEventId
+          || localOccurrence.occurrence_date !== completion.occurrence.occurrenceDate
+        ) throw new Error('meeting root occurrence identity changed');
+        if (
+          localOccurrence.remote_id !== null
+          && localOccurrence.remote_id !== completion.occurrence.remoteId
+        ) throw new Error('meeting root occurrence remote identity changed');
+        await database.runAsync(
+          `UPDATE meeting_occurrence_links SET
+             remote_id = ?, remote_revision = ?, sync_state = 'synced',
+             last_sync_error_code = NULL, synced_at_ms = ?
+           WHERE meeting_id = ? AND scope_key = ?`,
+          completion.occurrence.remoteId,
+          completion.occurrence.remoteRevision,
+          completedAtMs,
+          claim.meetingId,
+          claim.scopeKey,
+        );
+        await database.runAsync(
+          `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
+             last_error_code = NULL, claim_token = NULL, updated_at_ms = ?
+           WHERE scope_key = ? AND aggregate_type = 'meeting_occurrence'
+             AND aggregate_id = ? AND operation_type = 'occurrence.upsert'
+             AND base_revision IS NULL
+             AND status IN ('pending', 'retry')`,
+          completedAtMs,
+          claim.scopeKey,
+          claim.meetingId,
+        );
+      }
       const completed = await database.runAsync(
         `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
            last_error_code = NULL, claim_token = NULL, updated_at_ms = ?
@@ -4142,6 +4211,10 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     assertRecordId(claim.operationId, 'meeting root sync operation');
     assertRecordId(claim.claimToken, 'meeting root sync claim');
     assertNonNegativeInteger(conflict.createdAtMs, 'meeting root sync conflict time');
+    assertOptionalNonNegativeInteger(conflict.remoteRevision, 'meeting root conflict revision');
+    if (conflict.remoteRevision !== null && conflict.remoteRevision < 1) {
+      throw new Error('meeting root conflict revision is invalid');
+    }
     if (!conflict.remotePayloadJson || conflict.remotePayloadJson.length > 1_048_576) {
       throw new Error('meeting root sync conflict payload is invalid');
     }
@@ -4168,11 +4241,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
            id, scope_key, aggregate_type, aggregate_id,
            local_revision, remote_revision, local_payload_json,
            remote_payload_json, status, created_at_ms
-         ) VALUES (?, ?, 'meeting_note', ?, ?, NULL, ?, ?, 'unresolved', ?)`,
+         ) VALUES (?, ?, 'meeting_note', ?, ?, ?, ?, ?, 'unresolved', ?)`,
         conflictId,
         claim.scopeKey,
         claim.meetingId,
         operation.base_revision,
+        conflict.remoteRevision,
         claim.requestPayloadJson,
         conflict.remotePayloadJson,
         conflict.createdAtMs,

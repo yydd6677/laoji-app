@@ -7,7 +7,20 @@ import {
 import {
   sqliteMeetingNoteRepository,
   type MeetingRootSyncClaim,
+  type MeetingRootSyncCompletion,
 } from '../data/repositories';
+import {
+  createMeetingNoteV2,
+  deleteMeetingNoteV2,
+  getMeetingNoteV2,
+  loadMeetingCapabilities,
+  MeetingNoteConflictResponseError,
+  MeetingNoteResponseContractError,
+  updateMeetingNoteV2,
+  type CreateMeetingNoteV2Request,
+  type RemoteMeetingNoteV2,
+  type UpdateMeetingNoteV2Request,
+} from '../data/api/v2';
 import type { ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 import { HttpResponseError } from './errors';
@@ -24,15 +37,18 @@ class MeetingRootResponseContractError extends Error {}
 type CreateMutation = {
   kind: 'create';
   clientRequestId: string;
-  payload: Parameters<typeof createMeeting>[0];
+  legacyPayload: Parameters<typeof createMeeting>[0];
+  v2Request: CreateMeetingNoteV2Request;
 };
 
 type UpdateMutation = {
   kind: 'update';
-  payload: Parameters<typeof updateMeeting>[1];
+  baseRevision: number | null;
+  legacyPayload: Parameters<typeof updateMeeting>[1];
+  v2Request: UpdateMeetingNoteV2Request;
 };
 
-type DeleteMutation = { kind: 'delete' };
+type DeleteMutation = { kind: 'delete'; baseRevision: number | null };
 
 type MeetingRootMutation = CreateMutation | UpdateMutation | DeleteMutation;
 
@@ -97,6 +113,154 @@ function optionalTime(value: unknown, label: string): number | null {
   return Number(value);
 }
 
+function optionalRevision(value: unknown, label: string): number | null {
+  const revision = optionalTime(value, label);
+  if (revision !== null && revision < 1) {
+    throw new InvalidMeetingRootPayloadError(`${label} is invalid`);
+  }
+  return revision;
+}
+
+function meetingOrigin(value: unknown): CreateMeetingNoteV2Request['origin'] {
+  if (value !== 'calendar' && value !== 'ad_hoc' && value !== 'file_import' && value !== 'share_intent') {
+    throw new InvalidMeetingRootPayloadError('meeting origin is invalid');
+  }
+  return value;
+}
+
+function meetingEntryPoint(value: unknown): CreateMeetingNoteV2Request['entry_point'] {
+  if (value === null || value === undefined) return null;
+  const supported = new Set<CreateMeetingNoteV2Request['entry_point']>([
+    'calendar_detail',
+    'notification',
+    'widget',
+    'meeting_tab',
+    'quick_tile',
+    'document_picker',
+    'share_intent',
+    'legacy_store',
+    'recorder_recovery',
+  ]);
+  if (typeof value !== 'string' || !supported.has(value as CreateMeetingNoteV2Request['entry_point'])) {
+    throw new InvalidMeetingRootPayloadError('meeting entry point is invalid');
+  }
+  return value as CreateMeetingNoteV2Request['entry_point'];
+}
+
+function nullableIdentifier(value: unknown, label: string, maximum = 512): string | null {
+  if (value === null || value === undefined) return null;
+  return requiredString(value, label, { maximum });
+}
+
+function requiredBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new InvalidMeetingRootPayloadError(`${label} is invalid`);
+  return value;
+}
+
+function compatibleField(
+  source: Record<string, unknown>,
+  preferred: string,
+  fallback: string,
+): unknown {
+  return Object.prototype.hasOwnProperty.call(source, preferred)
+    ? source[preferred]
+    : source[fallback];
+}
+
+function localOccurrenceContext(
+  occurrenceValue: unknown,
+  snapshotValue: unknown,
+): Pick<CreateMeetingNoteV2Request, 'occurrence_ref' | 'schedule_snapshot'> {
+  const occurrenceMissing = occurrenceValue === null || occurrenceValue === undefined;
+  const snapshotMissing = snapshotValue === null || snapshotValue === undefined;
+  if (occurrenceMissing && snapshotMissing) return {};
+  if (!isRecord(occurrenceValue) || !isRecord(snapshotValue)) {
+    throw new InvalidMeetingRootPayloadError('meeting occurrence context is incomplete');
+  }
+  const occurrenceDate = requiredString(
+    compatibleField(occurrenceValue, 'occurrenceDate', 'occurrence_date'),
+    'meeting occurrence date',
+    { maximum: 10 },
+  );
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDate)) {
+    throw new InvalidMeetingRootPayloadError('meeting occurrence date is invalid');
+  }
+  const plannedStartMs = optionalTime(
+    compatibleField(snapshotValue, 'plannedStartMs', 'planned_start_ms'),
+    'meeting planned start',
+  );
+  const plannedEndMs = optionalTime(
+    compatibleField(snapshotValue, 'plannedEndMs', 'planned_end_ms'),
+    'meeting planned end',
+  );
+  if (plannedStartMs !== null && plannedEndMs !== null && plannedEndMs < plannedStartMs) {
+    throw new InvalidMeetingRootPayloadError('meeting planned range is invalid');
+  }
+  const capturedAtMs = optionalTime(
+    compatibleField(snapshotValue, 'capturedAtMs', 'captured_at_ms'),
+    'meeting schedule capture time',
+  );
+  if (capturedAtMs === null) {
+    throw new InvalidMeetingRootPayloadError('meeting schedule capture time is missing');
+  }
+  return {
+    occurrence_ref: {
+      source_event_id: requiredString(
+        compatibleField(occurrenceValue, 'sourceEventId', 'source_event_id'),
+        'meeting occurrence source',
+        { maximum: 512 },
+      ),
+      occurrence_date: occurrenceDate,
+      calendar_revision: optionalTime(
+        compatibleField(occurrenceValue, 'calendarRevision', 'calendar_revision'),
+        'meeting calendar revision',
+      ),
+      recurrence_segment_id: nullableIdentifier(
+        compatibleField(occurrenceValue, 'recurrenceSegmentId', 'recurrence_segment_id'),
+        'meeting recurrence segment',
+      ),
+      series_key: nullableIdentifier(
+        compatibleField(occurrenceValue, 'seriesKey', 'series_key'),
+        'meeting series key',
+      ),
+    },
+    schedule_snapshot: {
+      event_title: requiredString(
+        compatibleField(snapshotValue, 'eventTitle', 'event_title'),
+        'meeting schedule title',
+        { allowEmpty: true, maximum: 20_000 },
+      ),
+      planned_start_ms: plannedStartMs,
+      planned_end_ms: plannedEndMs,
+      all_day: requiredBoolean(
+        compatibleField(snapshotValue, 'allDay', 'all_day'),
+        'meeting schedule all-day state',
+      ),
+      timezone_id: nullableIdentifier(
+        compatibleField(snapshotValue, 'timezoneId', 'timezone_id'),
+        'meeting schedule timezone',
+        160,
+      ),
+      location: nullableString(
+        snapshotValue.location,
+        'meeting schedule location',
+        2_000,
+      ),
+      participants: participants(snapshotValue.participants),
+      description: nullableString(
+        snapshotValue.description,
+        'meeting schedule description',
+        100_000,
+      ),
+      captured_event_revision: optionalTime(
+        compatibleField(snapshotValue, 'capturedEventRevision', 'captured_event_revision'),
+        'meeting captured event revision',
+      ),
+      captured_at_ms: capturedAtMs,
+    },
+  };
+}
+
 function isoTime(value: number, label: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -124,20 +288,51 @@ function parseCreateMutation(
   const clientRequestId = requiredString(
     parsed.client_request_id,
     'meeting client request identity',
-    { maximum: 512 },
+    { maximum: 96 },
   );
   const recordedAtMs = optionalTime(parsed.recorded_at_ms, 'meeting recorded time');
+  const origin = meetingOrigin(parsed.origin);
+  const occurrenceContext = localOccurrenceContext(
+    parsed.occurrence_ref,
+    parsed.schedule_snapshot,
+  );
+  if ((origin === 'calendar') !== Boolean(occurrenceContext.occurrence_ref)) {
+    throw new InvalidMeetingRootPayloadError('meeting origin and occurrence context differ');
+  }
+  const title = requiredString(parsed.title, 'meeting title', {
+    allowEmpty: true,
+    maximum: 255,
+  });
+  const description = nullableString(parsed.description, 'meeting description', 100_000);
+  const meetingParticipants = participants(parsed.participants);
+  const mode = parsed.mode === null ? 'realtime' : meetingMode(parsed.mode, false);
+  const location = nullableString(parsed.location, 'meeting location', 500);
+  const recordedAt = recordedAtMs === null ? null : isoTime(recordedAtMs, 'meeting recorded time');
   return {
     kind: 'create',
     clientRequestId,
-    payload: {
-      title: requiredString(parsed.title, 'meeting title', { allowEmpty: true }),
-      description: nullableString(parsed.description, 'meeting description', 100_000),
-      participants: participants(parsed.participants),
-      mode: parsed.mode === null ? 'realtime' : meetingMode(parsed.mode, false),
+    legacyPayload: {
+      title,
+      description,
+      participants: meetingParticipants,
+      mode,
       clientRequestId,
-      location: nullableString(parsed.location, 'meeting location', 2_000),
-      recordedAt: recordedAtMs === null ? null : isoTime(recordedAtMs, 'meeting recorded time'),
+      location,
+      recordedAt,
+    },
+    v2Request: {
+      schema_version: 2,
+      client_note_id: claim.meetingId,
+      client_request_id: clientRequestId,
+      origin,
+      entry_point: meetingEntryPoint(parsed.entry_point),
+      title,
+      description,
+      participants: meetingParticipants,
+      location,
+      mode,
+      recorded_at: recordedAt,
+      ...occurrenceContext,
     },
   };
 }
@@ -157,30 +352,47 @@ function parseUpdateMutation(
   if (keys.some(key => !supported.has(key))) {
     throw new UnsupportedMeetingRootPayloadError('meeting update field is not supported by legacy API');
   }
-  const payload: Parameters<typeof updateMeeting>[1] = {};
+  const legacyPayload: Parameters<typeof updateMeeting>[1] = {};
+  const v2Request: UpdateMeetingNoteV2Request = { schema_version: 2 };
   if (Object.prototype.hasOwnProperty.call(source, 'title')) {
-    payload.title = requiredString(source.title, 'meeting title', { allowEmpty: true });
+    const title = requiredString(source.title, 'meeting title', { allowEmpty: true, maximum: 255 });
+    legacyPayload.title = title;
+    v2Request.title = title;
   }
   if (Object.prototype.hasOwnProperty.call(source, 'description')) {
-    payload.description = nullableString(source.description, 'meeting description', 100_000);
+    const description = nullableString(source.description, 'meeting description', 100_000);
+    legacyPayload.description = description;
+    v2Request.description = description;
   }
   if (Object.prototype.hasOwnProperty.call(source, 'participants')) {
-    payload.participants = participants(source.participants);
+    const meetingParticipants = participants(source.participants);
+    legacyPayload.participants = meetingParticipants;
+    v2Request.participants = meetingParticipants;
   }
   if (Object.prototype.hasOwnProperty.call(source, 'location')) {
-    payload.location = nullableString(source.location, 'meeting location', 2_000);
+    const location = nullableString(source.location, 'meeting location', 500);
+    legacyPayload.location = location;
+    v2Request.location = location;
   }
   if (Object.prototype.hasOwnProperty.call(source, 'mode')) {
     const mode = meetingMode(source.mode, true);
     if (mode === null) {
       throw new UnsupportedMeetingRootPayloadError('legacy meeting API cannot clear capture mode');
     }
-    payload.mode = mode;
+    legacyPayload.mode = mode;
+    v2Request.mode = mode;
   }
   if (Object.prototype.hasOwnProperty.call(source, 'status')) {
-    payload.status = requiredString(source.status, 'meeting status', { maximum: 160 });
+    const status = requiredString(source.status, 'meeting status', { maximum: 160 });
+    legacyPayload.status = status;
+    v2Request.status = status;
   }
-  return { kind: 'update', payload };
+  return {
+    kind: 'update',
+    baseRevision: optionalRevision(parsed.base_revision, 'meeting base revision'),
+    legacyPayload,
+    v2Request,
+  };
 }
 
 function parseMeetingRootMutation(claim: MeetingRootSyncClaim): MeetingRootMutation {
@@ -197,7 +409,10 @@ function parseMeetingRootMutation(claim: MeetingRootSyncClaim): MeetingRootMutat
   if (claim.operationType === 'meeting.update') return parseUpdateMutation(parsed, claim);
   if (claim.operationType === 'meeting.delete') {
     assertIdentity(parsed, claim);
-    return { kind: 'delete' };
+    return {
+      kind: 'delete',
+      baseRevision: optionalRevision(parsed.base_revision, 'meeting base revision'),
+    };
   }
   throw new UnsupportedMeetingRootPayloadError('meeting root operation is not supported');
 }
@@ -235,6 +450,125 @@ function conflictPayload(error: HttpResponseError): string {
   });
 }
 
+type RootTransport = 'v2' | 'legacy';
+
+class MeetingRootV2CapabilityUnavailableError extends Error {}
+
+async function resolveRootTransport(accessToken: string): Promise<RootTransport> {
+  try {
+    const state = await loadMeetingCapabilities({
+      accessToken,
+      forceRefresh: true,
+      allowStaleOnError: false,
+    });
+    return state.source === 'remote' && state.capabilities.meetingNotesV2 ? 'v2' : 'legacy';
+  } catch (error) {
+    diagnosticWarn('[meeting-root-sync] fresh capability unavailable; retaining legacy transport', error);
+    return 'legacy';
+  }
+}
+
+function v2Completion(
+  response: RemoteMeetingNoteV2,
+  includeOccurrence: boolean,
+): MeetingRootSyncCompletion {
+  return {
+    remoteId: response.remoteId,
+    remoteRevision: response.revision,
+    occurrence: includeOccurrence && response.occurrenceRef ? {
+      remoteId: response.occurrenceRef.id,
+      remoteRevision: response.occurrenceRef.revision,
+      sourceEventId: response.occurrenceRef.source_event_id,
+      occurrenceDate: response.occurrenceRef.occurrence_date,
+    } : null,
+  };
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function assertV2CreateResponse(
+  request: CreateMeetingNoteV2Request,
+  response: RemoteMeetingNoteV2,
+): void {
+  const recordedAtMs = request.recorded_at === null ? null : Date.parse(request.recorded_at);
+  if (
+    response.clientNoteId !== request.client_note_id
+    || response.origin !== request.origin
+    || response.entryPoint !== request.entry_point
+    || response.title !== request.title
+    || response.description !== request.description
+    || !sameStrings(response.participants, request.participants)
+    || response.location !== request.location
+    || response.mode !== request.mode
+    || response.recordedAtMs !== recordedAtMs
+  ) throw new MeetingNoteResponseContractError('会议创建响应与本机请求不一致');
+
+  const requestOccurrence = request.occurrence_ref ?? null;
+  const responseOccurrence = response.occurrenceRef;
+  const requestSnapshot = request.schedule_snapshot ?? null;
+  const responseSnapshot = response.scheduleSnapshot;
+  if ((requestOccurrence === null) !== (responseOccurrence === null)) {
+    throw new MeetingNoteResponseContractError('会议创建响应的日程关联不一致');
+  }
+  if ((requestSnapshot === null) !== (responseSnapshot === null)) {
+    throw new MeetingNoteResponseContractError('会议创建响应的日程快照不一致');
+  }
+  if (requestOccurrence && responseOccurrence && (
+    responseOccurrence.source_event_id !== requestOccurrence.source_event_id
+    || responseOccurrence.occurrence_date !== requestOccurrence.occurrence_date
+    || responseOccurrence.calendar_revision !== (requestOccurrence.calendar_revision ?? null)
+    || responseOccurrence.recurrence_segment_id !== (requestOccurrence.recurrence_segment_id ?? null)
+    || responseOccurrence.series_key !== (requestOccurrence.series_key ?? null)
+    || responseOccurrence.link_state !== 'active'
+  )) throw new MeetingNoteResponseContractError('会议创建响应的日程身份不一致');
+  if (requestSnapshot && responseSnapshot && (
+    responseSnapshot.event_title !== requestSnapshot.event_title
+    || responseSnapshot.planned_start_ms !== requestSnapshot.planned_start_ms
+    || responseSnapshot.planned_end_ms !== requestSnapshot.planned_end_ms
+    || responseSnapshot.all_day !== requestSnapshot.all_day
+    || responseSnapshot.timezone_id !== requestSnapshot.timezone_id
+    || responseSnapshot.location !== requestSnapshot.location
+    || !sameStrings(responseSnapshot.participants, requestSnapshot.participants)
+    || responseSnapshot.description !== requestSnapshot.description
+    || responseSnapshot.captured_event_revision !== requestSnapshot.captured_event_revision
+    || responseSnapshot.captured_at_ms !== requestSnapshot.captured_at_ms
+  )) throw new MeetingNoteResponseContractError('会议创建响应的日程快照不一致');
+}
+
+function assertV2UpdateResponse(
+  request: UpdateMeetingNoteV2Request,
+  expectedRevision: number,
+  response: RemoteMeetingNoteV2,
+): void {
+  if (response.revision < expectedRevision) {
+    throw new MeetingNoteResponseContractError('会议修改响应版本倒退');
+  }
+  if (
+    (request.title !== undefined && response.title !== request.title)
+    || (request.description !== undefined && response.description !== request.description)
+    || (request.participants !== undefined && !sameStrings(response.participants, request.participants))
+    || (request.location !== undefined && response.location !== request.location)
+    || (request.mode !== undefined && response.mode !== request.mode)
+    || (request.status !== undefined && response.status !== request.status)
+    || (
+      request.recorded_at !== undefined
+      && response.recordedAtMs !== (
+        request.recorded_at === null ? null : Date.parse(request.recorded_at)
+      )
+    )
+  ) throw new MeetingNoteResponseContractError('会议修改响应未应用本机字段');
+}
+
+function requiresV2Transport(
+  claim: MeetingRootSyncClaim,
+  mutation: MeetingRootMutation,
+): boolean {
+  return claim.remoteRevision !== null
+    || (mutation.kind !== 'create' && mutation.baseRevision !== null);
+}
+
 type ClaimResult = {
   processed: boolean;
   retryAfterMs: number | null;
@@ -261,6 +595,7 @@ async function processClaim(
   accessToken: string,
   signal: AbortSignal,
   isCurrent: () => boolean,
+  transport: RootTransport,
 ): Promise<ClaimResult> {
   let mutation: MeetingRootMutation;
   try {
@@ -274,36 +609,111 @@ async function processClaim(
   }
 
   try {
-    let remoteId = claim.remoteId;
-    if (mutation.kind === 'create') {
-      if (!remoteId) {
-        const response = await createMeeting(mutation.payload, accessToken, signal);
-        remoteId = remoteMeetingId(response);
-        if (response.client_request_id != null
-          && response.client_request_id.trim() !== mutation.clientRequestId) {
-          throw new MeetingRootResponseContractError('meeting create identity changed');
+    if (transport === 'legacy' && requiresV2Transport(claim, mutation)) {
+      throw new MeetingRootV2CapabilityUnavailableError('meeting root v2 capability is unavailable');
+    }
+    let completion: MeetingRootSyncCompletion;
+    if (transport === 'v2') {
+      let response: RemoteMeetingNoteV2;
+      if (mutation.kind === 'create') {
+        const alreadyRemote = Boolean(claim.remoteId);
+        if (claim.remoteId) {
+          response = await getMeetingNoteV2({
+            accessToken,
+            meetingRemoteId: claim.remoteId,
+            signal,
+          });
+          if (response.clientNoteId !== claim.meetingId) {
+            throw new MeetingNoteResponseContractError('会议本机标识发生变化');
+          }
+        } else {
+          response = await createMeetingNoteV2({
+            accessToken,
+            idempotencyKey: claim.idempotencyKey,
+            request: mutation.v2Request,
+            signal,
+          });
         }
+        if (!alreadyRemote) assertV2CreateResponse(mutation.v2Request, response);
+        if (response.lifecycle !== 'active') {
+          throw new MeetingNoteResponseContractError('新建会议记录返回了删除状态');
+        }
+        completion = v2Completion(response, true);
+      } else {
+        if (!claim.remoteId) {
+          throw new UnsupportedMeetingRootPayloadError('meeting remote identity is missing');
+        }
+        let expectedRevision = claim.remoteRevision ?? mutation.baseRevision;
+        if (expectedRevision === null) {
+          const current = await getMeetingNoteV2({
+            accessToken,
+            meetingRemoteId: claim.remoteId,
+            signal,
+          });
+          expectedRevision = current.revision;
+        }
+        response = mutation.kind === 'update'
+          ? await updateMeetingNoteV2({
+            accessToken,
+            meetingRemoteId: claim.remoteId,
+            expectedRevision,
+            idempotencyKey: claim.idempotencyKey,
+            request: mutation.v2Request,
+            signal,
+          })
+          : await deleteMeetingNoteV2({
+            accessToken,
+            meetingRemoteId: claim.remoteId,
+            expectedRevision,
+            idempotencyKey: claim.idempotencyKey,
+            signal,
+          });
+        if (mutation.kind === 'update') {
+          assertV2UpdateResponse(mutation.v2Request, expectedRevision, response);
+        } else if (response.revision < expectedRevision) {
+          throw new MeetingNoteResponseContractError('会议删除响应版本倒退');
+        }
+        if (mutation.kind === 'update' && response.lifecycle !== 'active') {
+          throw new MeetingNoteResponseContractError('会议修改返回了删除状态');
+        }
+        if (mutation.kind === 'delete' && response.lifecycle !== 'deleted') {
+          throw new MeetingNoteResponseContractError('会议删除未返回删除状态');
+        }
+        completion = v2Completion(response, false);
       }
     } else {
-      if (!remoteId) {
-        throw new UnsupportedMeetingRootPayloadError('meeting remote identity is missing');
-      }
-      if (mutation.kind === 'update') {
-        const response = await updateMeeting(remoteId, mutation.payload, accessToken, signal);
-        if (remoteMeetingId(response) !== remoteId) {
-          throw new MeetingRootResponseContractError('meeting update identity changed');
+      let remoteId = claim.remoteId;
+      if (mutation.kind === 'create') {
+        if (!remoteId) {
+          const response = await createMeeting(mutation.legacyPayload, accessToken, signal);
+          remoteId = remoteMeetingId(response);
+          if (response.client_request_id != null
+            && response.client_request_id.trim() !== mutation.clientRequestId) {
+            throw new MeetingRootResponseContractError('meeting create identity changed');
+          }
         }
       } else {
-        await deleteMeeting(remoteId, accessToken, signal);
+        if (!remoteId) {
+          throw new UnsupportedMeetingRootPayloadError('meeting remote identity is missing');
+        }
+        if (mutation.kind === 'update') {
+          const response = await updateMeeting(remoteId, mutation.legacyPayload, accessToken, signal);
+          if (remoteMeetingId(response) !== remoteId) {
+            throw new MeetingRootResponseContractError('meeting update identity changed');
+          }
+        } else {
+          await deleteMeeting(remoteId, accessToken, signal);
+        }
       }
+      if (!remoteId) throw new MeetingRootResponseContractError('meeting remote identity is missing');
+      completion = { remoteId, remoteRevision: null, occurrence: null };
     }
     if (!isCurrent() || signal.aborted) {
       return { processed: false, retryAfterMs: STALE_CLAIM_MS, outcome: 'stale' };
     }
-    if (!remoteId) throw new MeetingRootResponseContractError('meeting remote identity is missing');
     const completed = await sqliteMeetingNoteRepository.completeMeetingRootSyncClaim(
       claim,
-      remoteId,
+      completion,
       Date.now(),
     );
     return { processed: completed, retryAfterMs: null, outcome: completed ? 'completed' : 'stale' };
@@ -316,8 +726,21 @@ async function processClaim(
       return rejectLocalClaim(claim, error);
     }
     const nowMs = Date.now();
-    if (error instanceof HttpResponseError && error.status === 409) {
+    if (error instanceof MeetingNoteConflictResponseError) {
       const recorded = await sqliteMeetingNoteRepository.recordMeetingRootSyncConflict(claim, {
+        remoteRevision: error.remoteRevision,
+        remotePayloadJson: JSON.stringify({
+          status: error.status,
+          code: error.contractCode,
+          current: error.remotePayload,
+        }),
+        createdAtMs: nowMs,
+      });
+      return { processed: recorded, retryAfterMs: null, outcome: recorded ? 'conflict' : 'stale' };
+    }
+    if (error instanceof HttpResponseError && (error.status === 409 || error.status === 412)) {
+      const recorded = await sqliteMeetingNoteRepository.recordMeetingRootSyncConflict(claim, {
+        remoteRevision: null,
         remotePayloadJson: conflictPayload(error),
         createdAtMs: nowMs,
       });
@@ -334,6 +757,7 @@ async function processClaim(
       return { processed: retried, retryAfterMs: delayMs, outcome: retried ? 'retry' : 'stale' };
     }
     if (error instanceof MeetingRootResponseContractError
+      || error instanceof MeetingNoteResponseContractError
       || (error instanceof Error && /remote identity|remote ID/i.test(error.message))) {
       const blocked = await sqliteMeetingNoteRepository.failMeetingRootSyncClaim(claim, {
         disposition: 'blocked',
@@ -342,6 +766,16 @@ async function processClaim(
         updatedAtMs: nowMs,
       });
       return { processed: blocked, retryAfterMs: null, outcome: blocked ? 'blocked' : 'stale' };
+    }
+    if (error instanceof MeetingRootV2CapabilityUnavailableError) {
+      const delayMs = 60_000;
+      const retried = await sqliteMeetingNoteRepository.failMeetingRootSyncClaim(claim, {
+        disposition: 'retry',
+        errorCode: 'root_v2_capability_unavailable',
+        nextAttemptAtMs: nowMs + delayMs,
+        updatedAtMs: nowMs,
+      });
+      return { processed: retried, retryAfterMs: delayMs, outcome: retried ? 'retry' : 'stale' };
     }
     if (error instanceof HttpResponseError && !transientHttpStatus(error.status)) {
       const contractUnavailable = error.status === 403 || error.status === 404
@@ -390,6 +824,7 @@ async function drainMeetingRootSyncOnce(
   }
   let processedCount = 0;
   let earliestRetryMs: number | null = null;
+  let transport: RootTransport | null = null;
   for (let batch = 0; batch < MAX_BATCHES_PER_DRAIN; batch += 1) {
     if (!input.isCurrent() || input.signal.aborted) {
       return { outcome: 'stale', processedCount, retryAfterMs: earliestRetryMs };
@@ -420,11 +855,16 @@ async function drainMeetingRootSyncOnce(
       });
       return { outcome: 'drained', processedCount, retryAfterMs };
     }
+    if (transport === null) {
+      transport = await resolveRootTransport(input.accessToken);
+    }
+    const selectedTransport = transport;
     const results = await Promise.all(claims.map(claim => processClaim(
       claim,
       input.accessToken,
       input.signal,
       input.isCurrent,
+      selectedTransport,
     )));
     processedCount += results.filter(result => result.processed).length;
     results.forEach(result => {

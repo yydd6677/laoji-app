@@ -6,6 +6,7 @@
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
 > 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已由媒体导入、游客会议创建、游客会议标题/详情、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 及游客 Summary version/section/action 七个受控 canonical-first 纵切接入 Store，并完成游客模拟器 clean mirror、写入期稳定投影、删除后 occurrence 动作恢复、录音启动失败的可恢复资产保留与冷启动 owner 恢复。游客 Transcript 纵切已把 draft 原位替换、immutable final/reprocessed、stable final 防迟到 draft 降级、较短 final 保留、Summary stale、Marker 对账和 canonical revision 收入同一事务语义。游客 Summary 纵切复用 schema v2 归一化与 immutable version 管线，保护用户编辑/已处理 action，拒绝 realtime draft、主键错配和显式 Transcript revision 错配；事务内发现输入 revision 已过期时只保存历史候选，不替换当前版本或阶段 fingerprint。账号录音上传保留 AsyncStorage registry/WorkManager 的唯一调度权，SQLite 只记录 RecordingAsset、upload phase、attempt、operation ID 和 credential generation；同 operation 的 uploaded 不被迟到失败或延迟远端列表降级。账号 MeetingNote 根 outbox 已补齐逐会议真实插入顺序、陈旧 claim 回收、complete/retry/blocked/permanent/conflict 终态和旧 API 消费器；同 scope drain 进程内串行，本机主键保持不变，远端 UUID 只写 `remote_id`，create 复用稳定 `client_request_id`，PATCH 只发送设值字段，DELETE 404 视为幂等完成。独立账号根写开关下，普通 Store 创建/编辑/删除、录音根状态、Transcript/Summary、远端刷新合并和 ASR/上传/读取/播放/分享的 local/remote ID 边界均已接入 canonical 路径；远端 merge 保护未完成 mutation、墓碑和本机内容，列表缺项不解释为删除。目标部署源码与实际 SQLite 已确认空标题、`client_request_id/location/recorded_at`、用户内幂等和 PATCH 显式清空合同并完成源码同步，但配置中的 18020/18035 服务仍未运行，账号鉴权读写、真实 WorkManager、跨设备恢复和冲突闭环尚未验证，因此普通构建的 canonical write、账号根写和账号上传写开关继续关闭。Phase 2 已形成 occurrence 与“我的笔记”的本机纵向闭环、游客迁移 journal v2、账号日程 ID 映射及账号作用域 sidecar 迁移；人工笔记和 occurrence 的服务端窄 v2 源码合同也已同步，occurrence 现有独立 outbox、按 occurrence 回查、安全附着、冲突保留和 orphan 状态。但目标服务未启动，真实账号迁移、鉴权运行、双设备收敛、待合并录音处理和真机验证仍未完成，因此 Phase 2 尚未满足退出条件。按“先框架和功能、后严格门禁”的目标执行顺序，Phase 3 已完成第二个本机纵向切片：单场 Unicode 搜索、循环匹配导航、范围/播放段落高亮、无音频 seek 保护、选择复制/分享、snapshot v3，以及 Draft/Final 完整性判定、inactive final 持久化和条件式 active revision 切换已实现；详情暂态不再清除后台 MediaSession、相同 source 命令幂等、同录音 URL 更新保位及 stale callback 防护也已落地。服务端明确 completeness 字段、60 分钟真机精度与带有效录音的后台返回录像仍待完成。
+> MeetingNote v2 根增量状态：目标部署源码已以既有 `Meeting` 为唯一主对象，实现 root metadata/operation、单调 revision、幂等 create/patch/delete/restore、tombstone 和会议级 cursor；旧 App API 同步维护同一根元数据。移动端严格 v2 transport 仅由本次 fresh capability 开启，ACK 会持久化远端 root revision，并在日程创建时原子收敛 occurrence outbox。目标源码的内存 SQLite 窄合同已通过且文件哈希一致，但运行数据库、鉴权 endpoint、双设备 cursor、APK/模拟器/USB 真机均未验证，18020/18035 仍未启动，`sync_cursor` 与普通构建账号根写开关继续关闭。
 > Phase 4 已进入连续纵向切片：schema v2 sections/citations、immutable version、受保护版本不自动覆盖、本机候选/历史版本选择、snapshot v5、可定位引用、本机行动项手动创建/编辑/完成/忽略恢复/来源/提醒/后续日程，以及 capability 默认关闭的 action outbox 消费骨架已接通。SUM-02 的服务端 segment-ID prompt、compact/Map-Reduce 来源保留、canonical 时间/quote 校验、唯一 quote 回填、漂移哈希与来源感知 action identity 已同步到目标源码。服务端 `action_items_v2` 已完成稳定 ID、幂等重放、entity revision、If-Match/If-None-Match、409/412 当前版本返回和可靠 upsert；客户端已完成冲突可见、版本选择、旧 operation 取代、云端字段应用和本机版本新 operation 的原子闭环。新增会议级 action collection 使用不透明 `(updated_at, id)` cursor，并以独立 `action_items_pull_v2` capability 控制详情页 pull；客户端已接通完整 provenance 解析、cursor CAS、新建/单调更新/精确附着/冲突保留、active Transcript segment 唯一映射和提醒对账。上行来源也已改用 provider/server 稳定 segment identity，不再发送本机主键。目标服务未启动，新表尚未实例化，因此真实模型引用质量、运行合同、账号 ACK/重试、真实冲突选择和跨设备收敛仍未验证。全账号 change feed、全局 `sync_cursor`、batch、action tombstone 和跨会议同步仍未完成。验证遵循“轻测试、轻校验”，严格样本与归档门禁后置。
 > Phase 5 已完成四个本机纵向切片。Marker 已接通录音中/暂停态固定入口、canonical SQLite 事务、active Transcript 覆盖段对账、详情定位/删除、显式转待办和最小披露文字分享。文件选择与 Android 系统分享已接通持久 Intent inbox、原生流式摄取、可恢复 journal、`MeetingNote + RecordingAsset(imported)`、统一详情/播放器和 snapshot v8；专用确认页已接通标题、录制时间、可选 occurrence、作用域持久 draft 与已有会议拒绝，模拟器已验证系统“文件”的冷/热启动分享、短窗口 URI 去重、多选中文拒绝、日期/时间 picker、键盘稳定、日程冲突、播放器与重启对账。分层分享已接通内容级勾选、安全默认、私人笔记二次确认、文档/音频/ZIP 产物和最小审计；模拟器已验证默认文档、显式音频 ZIP、默认状态复位和全不选禁用。删除语义首个纵切已统一四个入口：本机/未同步会议明确永久删除，当前没有服务端回收站证据时不虚构可恢复；录音中、暂停和 finalize 状态在 UI 与 Store 双层阻止。当前线上 capability 与会议端口不可达且没有 USB 真机；服务端上传/转写、处理语言合同、视频、已有会议显式合并、强杀/大文件/格式矩阵、真实录音 Marker、Marker/附件分享、分享链接、远端删除 tombstone 重试及真实 soft-delete/回收站仍未完成，因此 Phase 5 尚未满足退出条件。
 > Phase 6 已完成 ENTRY-01、ENTRY-02、TPL-01 与 SERIES-01 会前记忆的本机纵向切片。ENTRY-01 已接通日程通知中文 action、默认查看/明确记录语义、pending intent、App Lock 后置执行、统一 occurrence 用例和去重；ENTRY-02 已接通固定 scheme、严格语义链接、最小未来日程投影、近期日程 Widget、隐私标题和临时会议 Quick Settings Tile；TPL-01 已接通四个版本化内置模板、模板感知的任务身份/恢复/结果校验、不可变 Summary version 保护，以及详情页模板选择 sheet；SERIES-01 已接通规范系列身份、最近 ended 会议、最多三条决定、最多五条同系列 pending action、来源跳转、可靠决定 citation 定位、用户明确选择后带入新会议人工笔记，以及与笔记授权分离的新 Summary 历史参考选择。授权 request ID、完整项目 identity、模板和 Transcript 进入同一任务 fingerprint/pending 恢复链，服务端校验账号来源归属并回传同一 identity；有授权时不走无法接收上下文的 compact 快路径。migration v13 的逐来源实体 ledger 已实测覆盖部分重叠选择，完成原 action 后会前投影同步消失。模板与 carry-forward additive 适配已同步到共享服务器目标工作区；模板批次通过 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，carry-forward 隔离候选另通过 56 项相关合同。目标 18020/18035 服务没有启动或重启。App Lock 生物识别实测、真机/不同 ROM、成功持续录音、Tile active、ended 详情、过期投影跨时钟、账号并发冲突、真实模型四模板/历史参考输出、远端运行和新授权 sheet 的恢复数据设备交互仍未完成，因此 Phase 6 尚未满足退出条件。证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)、[`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md) 与 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
@@ -1465,23 +1466,35 @@ Content-Type: application/json
 
 ```json
 {
+  "schema_version": 2,
   "client_note_id": "local-uuid",
+  "client_request_id": "local-uuid",
   "origin": "calendar",
+  "entry_point": "calendar_detail",
   "title": "",
+  "description": null,
+  "participants": [],
+  "location": "会议室 A",
+  "mode": "realtime",
   "recorded_at": "<RFC3339 timestamp with timezone>",
   "occurrence_ref": {
-    "calendar_source_event_id": "1234",
+    "source_event_id": "1234",
     "occurrence_date": "<local YYYY-MM-DD>",
     "calendar_revision": 8,
-    "recurrence_segment_id": "2"
+    "recurrence_segment_id": "2",
+    "series_key": "calendar:user:7:1234"
   },
   "schedule_snapshot": {
-    "title": "项目同步",
-    "planned_start": "<RFC3339 timestamp with timezone>",
-    "planned_end": "<RFC3339 timestamp with timezone>",
-    "timezone": "Asia/Shanghai",
+    "event_title": "项目同步",
+    "planned_start_ms": 1785000100000,
+    "planned_end_ms": 1785003700000,
+    "all_day": false,
+    "timezone_id": "Asia/Shanghai",
     "location": "会议室 A",
-    "participants": []
+    "participants": [],
+    "description": null,
+    "captured_event_revision": 8,
+    "captured_at_ms": 1785000000000
   }
 }
 ```
@@ -1489,9 +1502,12 @@ Content-Type: application/json
 响应必须包含 `id`、`client_note_id`、`revision`、规范化 occurrence ref、所有 processing stages 和 `created_at/updated_at`。语义：
 
 - 同 Idempotency-Key 重放返回相同 ID，不重复创建。
-- occurrence 唯一冲突返回 409，并在结构化 error 中给 `existing_meeting_id`。
+- occurrence 唯一冲突返回 409，并在结构化 `current.id` 中给出已关联会议 ID。
 - title 空字符串合法。
 - occurrence_ref 缺失时 origin 不能是 calendar。
+- `Meeting` 仍是唯一主对象；root metadata 只保存客户端身份、来源、单调 revision、生命周期和游标时间。
+- 旧 App API 创建/修改/删除必须维护同一 root metadata；已有 root 的旧 API 删除转为软删除并从旧列表隐藏，禁止绕过 tombstone/revision。
+- `meeting_notes_v2` 只在 root 与 operation 两张表都可查询时开启；全账号多资产 change feed 未完成前 `sync_cursor` 继续为 false。
 
 其他 endpoint：
 
@@ -1505,6 +1521,8 @@ POST   /api/laoji/v2/meeting-notes/{id}/restore
 ```
 
 列表返回稳定 cursor，不再让移动端固定拉最多 50 页完整历史。cursor 必须按 `(updated_at,id)` 排序并包含 tombstone，避免同毫秒更新丢失。
+
+当前纵切已在目标部署源码中实现复用既有 `Meeting` 的 root metadata、持久幂等 operation、create/get/list/patch/delete/restore、`If-Match`、409/412 current payload、日程创建原子关联、软删除和 `(updated_at, meeting_id)` cursor；SQLite 启动 helper 会幂等回填既有 App meeting。移动端已有严格 v2 parser/transport，仅在本次实时 capability 明确开启时走 v2，并把远端 root revision 与原子返回的 occurrence identity 写回本机；已经持有 v2 revision 的会议不会因 capability 探测失败退回无版本旧写。服务端通过 Python 编译、临时 schema 幂等合同、隔离候选及目标源码的内存 SQLite create/replay/conflict/cursor/tombstone/legacy-bridge 合同，最终连同 occurrence 与旧 API 空标题合同共 `4 passed`，7 份目标文件与预期候选哈希一致；移动端 TypeScript 与 Android Metro bundle 通过。18020/18035 未启动，真实鉴权、运行数据库、断线响应丢失、双设备 cursor 收敛、APK/模拟器/USB 真机均未验证，因此只算目标源码纵切，不能表述为线上 v2 可用。
 
 ### 12.4 Recording 与处理作业
 

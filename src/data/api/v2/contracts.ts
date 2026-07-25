@@ -19,33 +19,83 @@ export interface MeetingCapabilities {
 }
 
 export interface CreateMeetingNoteV2Request {
+  schema_version: 2;
   client_note_id: string;
+  client_request_id: string | null;
   origin: MeetingOrigin;
+  entry_point:
+    | 'calendar_detail'
+    | 'notification'
+    | 'widget'
+    | 'meeting_tab'
+    | 'quick_tile'
+    | 'document_picker'
+    | 'share_intent'
+    | 'legacy_store'
+    | 'recorder_recovery'
+    | null;
   title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: 'realtime' | 'offline' | 'whisper' | 'qwen';
   recorded_at: string | null;
   occurrence_ref?: {
-    calendar_source_event_id: string;
+    source_event_id: string;
     occurrence_date: string;
     calendar_revision?: number | null;
     recurrence_segment_id?: string | null;
+    series_key?: string | null;
   };
   schedule_snapshot?: {
-    title: string;
-    planned_start: string | null;
-    planned_end: string | null;
-    timezone: string | null;
+    event_title: string;
+    planned_start_ms: number | null;
+    planned_end_ms: number | null;
+    all_day: boolean;
+    timezone_id: string | null;
     location: string | null;
     participants: readonly string[];
+    description: string | null;
+    captured_event_revision: number | null;
+    captured_at_ms: number;
   };
 }
 
+export interface UpdateMeetingNoteV2Request {
+  schema_version: 2;
+  title?: string;
+  description?: string | null;
+  participants?: readonly string[];
+  location?: string | null;
+  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
+  status?: string;
+  recorded_at?: string | null;
+}
+
 export interface MeetingNoteV2Response {
+  schema_version: 2;
   id: string;
   client_note_id: string;
   revision: number;
+  origin: MeetingOrigin;
+  entry_point: CreateMeetingNoteV2Request['entry_point'];
+  title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: CreateMeetingNoteV2Request['mode'];
+  status: string;
+  recorded_at: string | null;
+  lifecycle: 'active' | 'deleted';
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
-  occurrence_ref?: CreateMeetingNoteV2Request['occurrence_ref'];
+  occurrence_ref: (NonNullable<CreateMeetingNoteV2Request['occurrence_ref']> & {
+    id: string;
+    revision: number;
+    link_state: 'active' | 'orphaned';
+  }) | null;
+  schedule_snapshot: NonNullable<CreateMeetingNoteV2Request['schedule_snapshot']> | null;
   processing_stages: readonly {
     stage: 'capture' | 'upload' | 'transcript' | 'summary' | 'speaker';
     status: string;
@@ -54,6 +104,28 @@ export interface MeetingNoteV2Response {
     error_code?: string | null;
     retryable?: boolean;
   }[];
+}
+
+export interface RemoteMeetingNoteV2 {
+  remoteId: string;
+  clientNoteId: string;
+  revision: number;
+  origin: MeetingOrigin;
+  entryPoint: CreateMeetingNoteV2Request['entry_point'];
+  title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: CreateMeetingNoteV2Request['mode'];
+  status: string;
+  recordedAtMs: number | null;
+  lifecycle: 'active' | 'deleted';
+  deletedAtMs: number | null;
+  occurrenceRef: MeetingNoteV2Response['occurrence_ref'];
+  scheduleSnapshot: MeetingNoteV2Response['schedule_snapshot'];
+  processingStages: MeetingNoteV2Response['processing_stages'];
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
 }
 
 export interface ProcessingJobV2Response {
