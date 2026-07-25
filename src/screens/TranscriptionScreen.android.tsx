@@ -55,7 +55,7 @@ import {
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
-import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
+import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
@@ -200,6 +200,7 @@ import {
   reconcileMeetingActionNotifications,
   scheduleMeetingActionNotification,
 } from '../services/notifications';
+import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -396,6 +397,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   } = useMeetings();
   const { events, searchableEvents } = useEvents();
   const { accessToken, isGuest, session } = useAuth();
+  const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
   const { showDialog } = useAppDialog();
   const meeting = meetings.find(item => item.id === route.params.meetingId);
   const remoteMeetingId = meeting ? meetingRemoteIdentity(meeting) : null;
@@ -1893,9 +1895,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   }, [runShare, showDialog]);
 
-  const confirmDelete = useCallback(() => {
+  const confirmDelete = useCallback(async () => {
     if (!meeting) return;
-    const presentation = meetingDeletionPresentation(meeting);
+    let presentation;
+    try {
+      presentation = await resolveMeetingDeletionPresentation(meeting, refreshRecycleCapability);
+    } catch (reason) {
+      showDialog({
+        title: '无法确认删除方式',
+        message: readableErrorMessage(reason, '暂时无法确认此会议是否可以恢复，请稍后重试。'),
+        tone: 'error',
+      });
+      return;
+    }
     if (presentation.blocked) {
       showDialog({
         title: presentation.title,
@@ -1915,7 +1927,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           onPress: async () => {
             try {
               await manualNote.flush();
-              await deleteMeeting(meeting.id);
+              await deleteMeeting(meeting.id, {
+                recoverable: presentation.recoverable,
+                expectedRetentionDays: presentation.retentionDays,
+              });
               openMeetingsTab(navigation);
             } catch (reason) {
               if (reason instanceof MeetingDeletionCleanupError) {
@@ -1938,7 +1953,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         { text: '取消', role: 'cancel' },
       ],
     });
-  }, [deleteMeeting, manualNote.flush, meeting, navigation, showDialog]);
+  }, [deleteMeeting, manualNote.flush, meeting, navigation, refreshRecycleCapability, showDialog]);
 
   const openSpeakerAssignment = useCallback((action: EditTranscriptSpeakerAction) => {
     if (!meeting || action.meetingId !== meeting.id) return;

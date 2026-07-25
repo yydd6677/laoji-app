@@ -36,8 +36,9 @@ function identifier(value: unknown, maximum = 160): string | null {
     : null;
 }
 
-export function localLifecycleFromRemote(remote: RemoteMeetingNoteV2): MeetingLifecycle {
-  if (remote.lifecycle === 'deleted') return 'deleted';
+export function restorableLifecycleFromRemote(
+  remote: RemoteMeetingNoteV2,
+): Exclude<MeetingLifecycle, 'deleted'> {
   if (remote.status === 'recording' || remote.status === 'paused' || remote.status === 'processing') {
     return 'active';
   }
@@ -45,6 +46,10 @@ export function localLifecycleFromRemote(remote: RemoteMeetingNoteV2): MeetingLi
     return 'ended';
   }
   return 'draft';
+}
+
+export function localLifecycleFromRemote(remote: RemoteMeetingNoteV2): MeetingLifecycle {
+  return remote.lifecycle === 'deleted' ? 'deleted' : restorableLifecycleFromRemote(remote);
 }
 
 function parseStrictRemote(

@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 11 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 12 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -52,6 +52,8 @@ export interface MinutesMeetingSnapshot {
   coverType?: 'default' | 'summary' | 'speakerSummary';
   coverTitle?: string;
   coverText?: string;
+  action?: 'open' | 'restore';
+  actionEnabled?: boolean;
 }
 
 export interface MinutesTranscriptLineSnapshot {
@@ -161,6 +163,8 @@ export interface MinutesListSnapshot {
   phase?: MinutesContentPhase;
   message?: string;
   showingCachedData?: boolean;
+  mode?: 'meetings' | 'recycleBin';
+  canOpenRecycleBin?: boolean;
   meetings: readonly MinutesMeetingSnapshot[];
 }
 
@@ -247,13 +251,14 @@ export interface MinutesViewSnapshot {
 
 export type MinutesSemanticAction =
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
-  | { type: 'openSpeakers' | 'openProfile'; surface: 'list' }
+  | { type: 'openSpeakers' | 'openProfile' | 'openRecycleBin' | 'closeRecycleBin'; surface: 'list' }
   | { type: 'importMedia'; surface: 'list' }
   | { type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording'; surface: MinutesSurface; meetingId: string }
   | { type: 'startRecording'; surface: MinutesSurface; meetingId?: string }
   | { type: 'saveTitle'; surface: 'detail' | 'recording'; meetingId: string; title: string }
   | { type: 'openMeetingMenu'; surface: MinutesSurface; meetingId: string; canResume: boolean }
   | { type: 'renameMeeting' | 'deleteMeeting'; surface: 'list'; meetingId: string }
+  | { type: 'restoreMeeting'; surface: 'list'; meetingId: string }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
   | { type: 'createMarker'; surface: 'recording'; meetingId: string; positionMs: number }
   | { type: 'requestMeetingLocation'; surface: 'recording'; meetingId?: string }

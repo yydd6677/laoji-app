@@ -93,13 +93,17 @@ internal class MinutesItemContextMenu(
       clipToOutline = true
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    val actions = listOf(
-      MenuAction(
-        label = if (meeting.canResume) "继续录音" else "查看会议记录",
-        type = if (meeting.canResume) "openRecording" else "openMeeting",
-      ),
-      MenuAction(label = "删除", type = "deleteMeeting"),
-    )
+    val actions = if (meeting.action == MinutesMeetingAction.RESTORE) {
+      listOf(MenuAction(label = "恢复", type = "restoreMeeting"))
+    } else {
+      listOf(
+        MenuAction(
+          label = if (meeting.canResume) "继续录音" else "查看会议记录",
+          type = if (meeting.canResume) "openRecording" else "openMeeting",
+        ),
+        MenuAction(label = "删除", type = "deleteMeeting"),
+      )
+    }
     val menu = createMenu(nextActivity, actions, meeting.id)
     val horizontalPadding = nextActivity.dp(2)
     val verticalPadding = nextActivity.dp(3)

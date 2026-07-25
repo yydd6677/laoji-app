@@ -30,6 +30,8 @@ object MinutesSnapshotParser {
       NativeUserMessages.readable(it, listFallback(phase))
     }.orEmpty(),
     showingCachedData = raw.boolean("showingCachedData"),
+    mode = MinutesListMode.fromWireName(raw.string("mode")),
+    canOpenRecycleBin = raw.boolean("canOpenRecycleBin"),
     meetings = raw.maps("meetings").mapIndexed { index, item ->
       MinutesMeeting(
         id = item.string("id").orDefault("meeting-$index"),
@@ -42,6 +44,8 @@ object MinutesSnapshotParser {
         coverType = MinutesListCoverType.fromWireName(item.string("coverType")),
         coverTitle = item.string("coverTitle").orEmpty(),
         coverText = item.string("coverText").orEmpty(),
+        action = MinutesMeetingAction.fromWireName(item.string("action")),
+        actionEnabled = item.boolean("actionEnabled", true),
       )
     },
     )

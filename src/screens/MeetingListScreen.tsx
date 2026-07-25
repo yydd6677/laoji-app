@@ -21,8 +21,9 @@ import { AppActionSheet, AppActionSheetItem } from '../components/AppActionSheet
 import { MeetingListItem } from '../components/MeetingListItem';
 import { MeetingSearchPage } from '../components/MeetingSearchPage';
 import { readableErrorMessage } from '../services/errors';
-import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
+import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { canResumeMeetingRecording } from '../utils/meetingMedia';
+import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 
 type MeetingListNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabsParamList, 'Meetings'>,
@@ -33,6 +34,7 @@ type Props = { navigation: MeetingListNavigationProp };
 export function MeetingListScreen({ navigation }: Props) {
   const { meetings, loading, error, deleteMeeting, refreshMeetings } = useMeetings();
   const { showDialog } = useAppDialog();
+  const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
   const [searchVisible, setSearchVisible] = useState(false);
   const [appMenuVisible, setAppMenuVisible] = useState(false);
   const [meetingMenuId, setMeetingMenuId] = useState<string | null>(null);
@@ -43,10 +45,20 @@ export function MeetingListScreen({ navigation }: Props) {
     navigation.navigate('Transcription', { meetingId });
   };
 
-  const confirmDelete = (id: string) => {
+  const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
     if (!target) return;
-    const presentation = meetingDeletionPresentation(target);
+    let presentation;
+    try {
+      presentation = await resolveMeetingDeletionPresentation(target, refreshRecycleCapability);
+    } catch (reason) {
+      showDialog({
+        title: '无法确认删除方式',
+        message: readableErrorMessage(reason, '暂时无法确认此会议是否可以恢复，请稍后重试。'),
+        tone: 'error',
+      });
+      return;
+    }
     if (presentation.blocked) {
       showDialog({
         title: presentation.title,
@@ -65,7 +77,10 @@ export function MeetingListScreen({ navigation }: Props) {
           role: 'destructive',
           onPress: async () => {
             try {
-              await deleteMeeting(id);
+              await deleteMeeting(id, {
+                recoverable: presentation.recoverable,
+                expectedRetentionDays: presentation.retentionDays,
+              });
             } catch (deleteError) {
               if (deleteError instanceof MeetingDeletionCleanupError) {
                 showDialog({
@@ -116,7 +131,7 @@ export function MeetingListScreen({ navigation }: Props) {
       key: 'delete',
       label: '删除',
       destructive: true,
-      onPress: () => confirmDelete(menuMeeting.id),
+      onPress: () => { void confirmDelete(menuMeeting.id); },
     }] : []),
   ] : [];
 

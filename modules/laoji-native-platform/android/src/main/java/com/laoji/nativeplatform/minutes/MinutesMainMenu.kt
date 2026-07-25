@@ -33,7 +33,7 @@ internal class MinutesMainMenu(
   private var contentRoot: View? = null
   private var previousContentAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
 
-  fun show(anchor: View) {
+  fun show(anchor: View, canOpenRecycleBin: Boolean) {
     dismiss()
     val activity = sourceContext.findMenuActivity() ?: return
     val host = activity.window.decorView as? ViewGroup ?: return
@@ -56,7 +56,7 @@ internal class MinutesMainMenu(
       contentDescription = "会议记录更多操作"
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     }
-    val menu = createMenu(activity)
+    val menu = createMenu(activity, canOpenRecycleBin)
     menu.measure(
       View.MeasureSpec.makeMeasureSpec(hostWidth, View.MeasureSpec.AT_MOST),
       View.MeasureSpec.makeMeasureSpec(hostHeight, View.MeasureSpec.AT_MOST),
@@ -116,13 +116,13 @@ internal class MinutesMainMenu(
     contentRoot = null
   }
 
-  private fun createMenu(context: Context): LinearLayout = LinearLayout(context).apply {
+  private fun createMenu(context: Context, canOpenRecycleBin: Boolean): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     minimumWidth = context.dp(140)
     backgroundShape(MinutesPalette.surface, radiusDp = 8)
     clipToOutline = true
     elevation = context.dp(8).toFloat()
-    listOf(
+    val actions = mutableListOf(
       MenuAction(
         label = "管理讲话人",
         type = "openSpeakers",
@@ -133,7 +133,15 @@ internal class MinutesMainMenu(
         type = "openProfile",
         icon = com.laoji.nativeplatform.R.drawable.laoji_ic_personal_info_outline,
       ),
-    ).forEach { action ->
+    )
+    if (canOpenRecycleBin) {
+      actions += MenuAction(
+        label = "回收站",
+        type = "openRecycleBin",
+        icon = com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
+      )
+    }
+    actions.forEach { action ->
       val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL

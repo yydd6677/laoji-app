@@ -38,11 +38,13 @@ export interface MeetingListQuery {
     id: string;
   } | null;
   includeDeleted?: boolean;
+  onlyDeleted?: boolean;
 }
 
 export interface MeetingListProjectionItem {
   id: string;
   remoteId: string | null;
+  remoteRevision: number | null;
   legacySourceId: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint | null;
@@ -60,6 +62,7 @@ export interface MeetingListProjectionItem {
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs: number | null;
+  deletedFromLifecycle: Exclude<MeetingLifecycle, 'deleted'> | null;
   currentSummaryVersionId: string | null;
   activeTranscriptSegmentCount: number;
   currentSummaryReady: boolean;
@@ -92,6 +95,7 @@ export interface NewMeetingNote {
   endedAtMs: number | null;
   syncState?: MeetingNote['syncState'];
   deletedAtMs?: number | null;
+  deletedFromLifecycle?: Exclude<MeetingLifecycle, 'deleted'> | null;
   createdAtMs: number;
 }
 
@@ -142,6 +146,7 @@ export interface MeetingRootPatch {
   remoteRevision?: number | null;
   syncState?: MeetingNote['syncState'];
   deletedAtMs?: number | null;
+  deletedFromLifecycle?: Exclude<MeetingLifecycle, 'deleted'> | null;
   updatedAtMs: number;
 }
 
@@ -523,6 +528,7 @@ export interface MeetingRootRemoteConflictFields {
   mode: MeetingCaptureMode;
   recordedAtMs: number | null;
   lifecycle: MeetingLifecycle;
+  deletedFromLifecycle: Exclude<MeetingLifecycle, 'deleted'> | null;
   deletedAtMs: number | null;
   serverCreatedAtMs: number;
   serverUpdatedAtMs: number;

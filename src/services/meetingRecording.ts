@@ -623,6 +623,11 @@ export async function deletePendingMeetingAudioUpload(storageScope: string, meet
   if (nativeWorkId) await cancelNativeMeetingUpload(nativeWorkId);
 }
 
+/** Re-enables future local audio work after a recoverable root tombstone is restored. */
+export function restoreDeletedMeetingAudio(storageScope: string, meetingId: string): void {
+  deletedMeetingAudio.delete(meetingAudioOperationKey(storageScope, meetingId));
+}
+
 async function attachNativeUploadRegistration(
   storageScope: string,
   meetingId: string,

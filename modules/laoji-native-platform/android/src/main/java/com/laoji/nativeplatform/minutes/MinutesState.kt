@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 11
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 12
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -156,7 +156,20 @@ data class MinutesMeeting(
   val coverType: MinutesListCoverType = MinutesListCoverType.DEFAULT,
   val coverTitle: String = "",
   val coverText: String = "",
+  val action: MinutesMeetingAction = MinutesMeetingAction.OPEN,
+  val actionEnabled: Boolean = true,
 )
+
+enum class MinutesMeetingAction(val wireName: String) {
+  OPEN("open"),
+  RESTORE("restore");
+
+  companion object {
+    fun fromWireName(value: String?): MinutesMeetingAction = entries.firstOrNull {
+      it.wireName == value
+    } ?: OPEN
+  }
+}
 
 enum class MinutesListCoverType(val wireName: String) {
   DEFAULT("default"),
@@ -271,8 +284,21 @@ data class MinutesListState(
   val phase: MinutesContentPhase = MinutesContentPhase.READY,
   val message: String = "",
   val showingCachedData: Boolean = false,
+  val mode: MinutesListMode = MinutesListMode.MEETINGS,
+  val canOpenRecycleBin: Boolean = false,
   val meetings: List<MinutesMeeting> = emptyList(),
 )
+
+enum class MinutesListMode(val wireName: String) {
+  MEETINGS("meetings"),
+  RECYCLE_BIN("recycleBin");
+
+  companion object {
+    fun fromWireName(value: String?): MinutesListMode = entries.firstOrNull {
+      it.wireName == value
+    } ?: MEETINGS
+  }
+}
 
 data class MinutesRecordingState(
   val meetingId: String = "",

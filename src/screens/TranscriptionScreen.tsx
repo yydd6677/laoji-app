@@ -50,7 +50,7 @@ import {
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { readableErrorMessage } from '../services/errors';
-import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
+import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
 import { AppActionSheet } from '../components/AppActionSheet';
 import { MeetingAudioPlayerDock } from '../components/MeetingAudioPlayerDock';
@@ -80,6 +80,7 @@ import {
   resolveMeetingSummaryCarryForwardMemory,
 } from '../services/meetingSummaryCarryForward';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
+import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -133,6 +134,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     refreshMeetings,
   } = useMeetings();
   const { accessToken, isGuest, session } = useAuth();
+  const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
   const { showDialog } = useAppDialog();
   const m = meetings.find(x => x.id === route.params.meetingId);
   const remoteMeetingId = m ? meetingRemoteIdentity(m) : null;
@@ -867,8 +869,18 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setShareVisible(true);
   };
 
-  const confirmDelete = () => {
-    const presentation = meetingDeletionPresentation(m);
+  const confirmDelete = async () => {
+    let presentation;
+    try {
+      presentation = await resolveMeetingDeletionPresentation(m, refreshRecycleCapability);
+    } catch (reason) {
+      showDialog({
+        title: '无法确认删除方式',
+        message: readableErrorMessage(reason, '暂时无法确认此会议是否可以恢复，请稍后重试。'),
+        tone: 'error',
+      });
+      return;
+    }
     if (presentation.blocked) {
       showDialog({
         title: presentation.title,
@@ -887,7 +899,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           role: 'destructive',
           onPress: async () => {
             try {
-              await deleteMeeting(m.id);
+              await deleteMeeting(m.id, {
+                recoverable: presentation.recoverable,
+                expectedRetentionDays: presentation.retentionDays,
+              });
               openMeetingsTab(navigation);
             } catch (deleteError) {
               if (deleteError instanceof MeetingDeletionCleanupError) {

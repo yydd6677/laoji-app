@@ -8,6 +8,7 @@ export interface DeleteMeetingNoteInput {
   scopeKey: ScopeKey;
   syncOperation?: MeetingRootSyncOperation | null;
   canonicalWrite?: boolean;
+  preserveForRestore?: boolean;
 }
 
 export interface DeleteMeetingNoteResult {
@@ -108,6 +109,7 @@ export class DeleteMeetingNoteUseCase {
       }
       await transaction.updateMeeting(meetingId, input.scopeKey, {
         lifecycle: 'deleted',
+        deletedFromLifecycle: input.preserveForRestore ? meeting.lifecycle : null,
         syncState: input.scopeKey === 'guest' ? 'deleted' : 'pending',
         deletedAtMs,
         updatedAtMs: deletedAtMs,

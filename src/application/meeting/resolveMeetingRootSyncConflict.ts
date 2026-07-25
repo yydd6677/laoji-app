@@ -8,6 +8,7 @@ import type { ClientIdFactory, MeetingLifecycle, ScopeKey } from '../../domain/m
 import { assertScopeKey, secureClientIdFactory } from '../../domain/meeting';
 import {
   meetingRootSyncConflictView,
+  restorableLifecycleFromRemote,
   type MeetingRootSyncConflictView,
 } from '../../services/meetingRootConflicts';
 import { requestMeetingRootSync } from './rootSyncTrigger';
@@ -158,6 +159,9 @@ function remoteFields(
     mode: remote.mode,
     recordedAtMs: remote.recordedAtMs,
     lifecycle: view.remoteLifecycle as MeetingLifecycle,
+    deletedFromLifecycle: remote.lifecycle === 'deleted'
+      ? restorableLifecycleFromRemote(remote)
+      : null,
     deletedAtMs: remote.deletedAtMs,
     serverCreatedAtMs: remote.serverCreatedAtMs,
     serverUpdatedAtMs: remote.serverUpdatedAtMs,

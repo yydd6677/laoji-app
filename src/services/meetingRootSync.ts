@@ -693,9 +693,9 @@ async function processClaim(
               idempotencyKey: claim.idempotencyKey,
               signal,
             });
-        if (response.clientNoteId !== claim.meetingId) {
-          throw new MeetingNoteResponseContractError('会议本机标识发生变化');
-        }
+        // A pulled or legacy-imported remote root keeps this device's local ID.
+        // The server's client_note_id belongs to the creating device, so existing
+        // roots are identified by the already-validated remote ID and revision.
         if (mutation.kind === 'update') {
           assertV2UpdateResponse(mutation.v2Request, expectedRevision, response);
         } else if (response.revision < expectedRevision) {

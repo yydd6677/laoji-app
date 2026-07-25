@@ -40,6 +40,8 @@ export interface MeetingNote {
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs: number | null;
+  /** Exact lifecycle captured by the deletion transaction; null for legacy tombstones. */
+  deletedFromLifecycle: Exclude<MeetingLifecycle, 'deleted'> | null;
 }
 
 export interface OccurrenceReference {

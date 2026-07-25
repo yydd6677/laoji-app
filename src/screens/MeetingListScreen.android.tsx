@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { BackHandler, StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
@@ -16,13 +16,18 @@ import { useAppDialog } from '../components/AppDialog';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
 import type { Meeting, MeetingSummary, RootStackParamList, TranscriptLine } from '../types';
 import { readableErrorMessage } from '../services/errors';
-import { meetingDeletionPresentation } from '../services/meetingDeletionPresentation';
+import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { briefGreetingSummaryText, meetingSummaryToText } from '../services/meetingSummary';
 import { canResumeMeetingRecording, formatDuration } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 import { useMeetingMediaImport } from '../components/MeetingMediaImportProvider';
 import { deriveLegacyMeetingPresentationState } from '../services/meetingPresentation';
+import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
+import { useAuth } from '../store/AuthStore';
+import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/meetingRecycleBin';
+import type { ScopeKey } from '../domain/meeting';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -156,17 +161,68 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     loading,
     error,
     deleteMeeting,
+    restoreDeletedMeeting,
     refreshMeetings,
     updateMeetingStatus,
     getCachedTranscript,
     getCachedSummary,
   } = useMeetings();
+  const { isGuest, session } = useAuth();
+  const {
+    retentionDays,
+    refresh: refreshRecycleCapability,
+  } = useMeetingRecycleCapability();
   const { showDialog } = useAppDialog();
   const { busy: mediaImporting, selectMeetingMedia } = useMeetingMediaImport();
   const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
   const [staleRecordingIds, setStaleRecordingIds] = useState<ReadonlySet<string>>(new Set());
+  const [recycleBinVisible, setRecycleBinVisible] = useState(false);
+  const [recycleBinEntries, setRecycleBinEntries] = useState<readonly MeetingRecycleBinEntry[]>([]);
+  const [recycleBinLoading, setRecycleBinLoading] = useState(false);
+  const [recycleBinError, setRecycleBinError] = useState('');
+  const [restoringMeetingId, setRestoringMeetingId] = useState<string | null>(null);
+  const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
+
+  const refreshRecycleBin = useCallback(async (syncRemote = false) => {
+    if (!accountScope || retentionDays === null) {
+      setRecycleBinEntries([]);
+      return;
+    }
+    setRecycleBinLoading(true);
+    setRecycleBinError('');
+    try {
+      if (syncRemote) await refreshMeetings();
+      setRecycleBinEntries(await listMeetingRecycleBin(
+        sqliteMeetingNoteRepository,
+        accountScope,
+        retentionDays,
+      ));
+    } catch (reason) {
+      setRecycleBinError(readableErrorMessage(reason, '回收站暂时无法加载，请稍后重试。'));
+    } finally {
+      setRecycleBinLoading(false);
+    }
+  }, [accountScope, refreshMeetings, retentionDays]);
+
+  useEffect(() => {
+    if (!recycleBinVisible) return;
+    if (retentionDays === null) {
+      setRecycleBinVisible(false);
+      return;
+    }
+    void refreshRecycleBin(true);
+  }, [recycleBinVisible, refreshRecycleBin, retentionDays]);
+
+  useEffect(() => {
+    if (!recycleBinVisible) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setRecycleBinVisible(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [recycleBinVisible]);
 
   // A cached/local resumable row is not enough to describe the native session.
   // Reconcile active, finalized-local, and interrupted states on the visible
@@ -267,18 +323,42 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
     surface: 'list',
     list: {
-      title: '会议记录',
-      searching,
-      query,
-      mediaImporting,
-      phase: loading && meetings.length === 0
-        ? 'loading'
-        : error ? 'error' : meetings.length === 0 ? 'empty' : 'ready',
-      message: error
-        ? readableErrorMessage(error, '会议记录暂时无法加载，请稍后重试。')
-        : '',
-      showingCachedData: Boolean(error && meetings.length > 0),
-      meetings: meetings.map(meeting => {
+      title: recycleBinVisible ? '回收站' : '会议记录',
+      mode: recycleBinVisible ? 'recycleBin' : 'meetings',
+      canOpenRecycleBin: retentionDays !== null,
+      searching: recycleBinVisible ? false : searching,
+      query: recycleBinVisible ? '' : query,
+      mediaImporting: recycleBinVisible ? false : mediaImporting,
+      phase: recycleBinVisible
+        ? recycleBinLoading && recycleBinEntries.length === 0
+          ? 'loading'
+          : recycleBinError ? 'error' : recycleBinEntries.length === 0 ? 'empty' : 'ready'
+        : loading && meetings.length === 0
+          ? 'loading'
+          : error ? 'error' : meetings.length === 0 ? 'empty' : 'ready',
+      message: recycleBinVisible
+        ? recycleBinError
+        : error ? readableErrorMessage(error, '会议记录暂时无法加载，请稍后重试。') : '',
+      showingCachedData: recycleBinVisible
+        ? false
+        : Boolean(error && meetings.length > 0),
+      meetings: recycleBinVisible ? recycleBinEntries.map(entry => {
+        const recordedAt = new Date(entry.recordedAtMs);
+        const date = `${recordedAt.getFullYear()}年${recordedAt.getMonth() + 1}月${recordedAt.getDate()}日`;
+        const time = `${String(recordedAt.getHours()).padStart(2, '0')}:${String(recordedAt.getMinutes()).padStart(2, '0')}`;
+        return {
+          id: entry.meetingId,
+          title: displayMeetingTitle(entry.title),
+          dateTimeLabel: compactMeetingDateTime(date, time),
+          statusLabel: restoringMeetingId === entry.meetingId
+            ? '正在恢复'
+            : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '同步冲突',
+          statusTone: entry.canRestore ? 'warning' as const : 'danger' as const,
+          action: 'restore' as const,
+          actionEnabled: entry.canRestore && restoringMeetingId === null,
+          coverType: 'default' as const,
+        };
+      }) : meetings.map(meeting => {
         const presentation = meetingListPresentation(
           meeting,
           staleRecordingIds.has(meeting.id),
@@ -302,12 +382,22 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         };
       }),
     },
-  }), [error, getCachedSummary, getCachedTranscript, loading, mediaImporting, meetings, query, searching, staleRecordingIds]);
+  }), [error, getCachedSummary, getCachedTranscript, loading, mediaImporting, meetings, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, restoringMeetingId, retentionDays, searching, staleRecordingIds]);
 
-  const confirmDelete = (id: string) => {
+  const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
     if (!target) return;
-    const presentation = meetingDeletionPresentation(target);
+    let presentation;
+    try {
+      presentation = await resolveMeetingDeletionPresentation(target, refreshRecycleCapability);
+    } catch (reason) {
+      showDialog({
+        title: '无法确认删除方式',
+        message: readableErrorMessage(reason, '暂时无法确认此会议是否可以恢复，请稍后重试。'),
+        tone: 'error',
+      });
+      return;
+    }
     if (presentation.blocked) {
       showDialog({
         title: presentation.title,
@@ -326,7 +416,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           role: 'destructive',
           onPress: async () => {
             try {
-              await deleteMeeting(id);
+              await deleteMeeting(id, {
+                recoverable: presentation.recoverable,
+                expectedRetentionDays: presentation.retentionDays,
+              });
             } catch (deleteError) {
               showDialog({
                 title: deleteError instanceof MeetingDeletionCleanupError
@@ -348,6 +441,37 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     });
   };
 
+  const confirmRestore = (meetingId: string) => {
+    const entry = recycleBinEntries.find(item => item.meetingId === meetingId);
+    if (!entry || !entry.canRestore || retentionDays === null || restoringMeetingId) return;
+    showDialog({
+      title: '恢复会议记录？',
+      message: '恢复后，此会议会重新显示在会议记录中。',
+      actions: [
+        {
+          text: '恢复',
+          role: 'primary',
+          onPress: async () => {
+            setRestoringMeetingId(meetingId);
+            try {
+              await restoreDeletedMeeting(meetingId, retentionDays);
+              await refreshRecycleBin(false);
+            } catch (reason) {
+              showDialog({
+                title: '恢复失败',
+                message: readableErrorMessage(reason, '会议记录暂时无法恢复，请稍后重试。'),
+                tone: 'error',
+              });
+            } finally {
+              setRestoringMeetingId(null);
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
   const handleAction = (action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'openMeeting':
@@ -358,11 +482,38 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
       case 'openMeetingMenu':
         break;
+      case 'openRecycleBin':
+        void refreshRecycleCapability()
+          .then(days => {
+            if (days !== null) {
+              setRecycleBinVisible(true);
+              return;
+            }
+            showDialog({
+              title: '回收站暂时不可用',
+              message: '当前会议服务未提供可恢复删除，请稍后重试。',
+              tone: 'warning',
+            });
+          })
+          .catch(reason => {
+            showDialog({
+              title: '回收站暂时无法打开',
+              message: readableErrorMessage(reason, '暂时无法连接会议服务，请稍后重试。'),
+              tone: 'error',
+            });
+          });
+        break;
+      case 'closeRecycleBin':
+        setRecycleBinVisible(false);
+        break;
+      case 'restoreMeeting':
+        confirmRestore(action.meetingId);
+        break;
       case 'renameMeeting':
         navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'title' });
         break;
       case 'deleteMeeting':
-        confirmDelete(action.meetingId);
+        void confirmDelete(action.meetingId);
         break;
       case 'startRecording':
         {
@@ -386,7 +537,8 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         setQuery(action.query);
         break;
       case 'refreshMeetings':
-        void refreshMeetings();
+        if (recycleBinVisible) void refreshRecycleBin(true);
+        else void refreshMeetings();
         break;
       case 'more':
         // The native title bar owns its source-matched anchored menu.

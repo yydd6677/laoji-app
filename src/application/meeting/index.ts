@@ -16,6 +16,7 @@ export * from './resolveMeetingManualNoteSyncConflict';
 export * from './resolveMeetingOccurrenceSyncConflict';
 export * from './resolveMeetingRootSyncConflict';
 export * from './retryMeetingSpeakerCorrectionSync';
+export * from './restoreMeetingNote';
 export * from './rootSyncTrigger';
 export * from './occurrenceSyncTrigger';
 export * from './saveManualNote';

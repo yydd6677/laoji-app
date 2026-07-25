@@ -146,7 +146,7 @@ function normalizeSnapshot(value: AccountMeetingRemoteSnapshot): AccountMeetingR
   };
 }
 
-function lifecycle(status: string): MeetingLifecycle {
+function lifecycle(status: string): Exclude<MeetingLifecycle, 'deleted'> {
   if (status === 'recording' || status === 'paused' || status === 'processing') return 'active';
   if (['completed', 'ended', 'done', 'processed', 'failed'].includes(status)) return 'ended';
   return 'draft';
@@ -229,6 +229,11 @@ function fieldPatch(
   if (current.mode !== snapshot.mode) set('mode', snapshot.mode);
   if (current.recordedAtMs !== snapshot.recordedAtMs) set('recordedAtMs', snapshot.recordedAtMs);
   if (current.lifecycle !== nextLifecycle) set('lifecycle', nextLifecycle);
+  if (nextLifecycle === 'deleted' && current.lifecycle !== 'deleted') {
+    set('deletedFromLifecycle', lifecycle(snapshot.status));
+  } else if (nextLifecycle !== 'deleted' && current.deletedFromLifecycle !== null) {
+    set('deletedFromLifecycle', null);
+  }
   if (current.deletedAtMs !== snapshot.deletedAtMs) set('deletedAtMs', snapshot.deletedAtMs);
   const nextSyncState = nextLifecycle === 'deleted' ? 'deleted' : 'synced';
   if (current.syncState !== nextSyncState) set('syncState', nextSyncState);
@@ -261,6 +266,18 @@ function remoteRootFieldsMatch(
     && current.recordedAtMs === snapshot.recordedAtMs
     && current.lifecycle === snapshotLifecycle(snapshot)
     && (current.deletedAtMs === null) === (snapshot.deletedAtMs === null);
+}
+
+function legacySourceNormalizationOnly(
+  current: Awaited<ReturnType<MeetingTransaction['getMeeting']>> & {},
+  snapshot: AccountMeetingRemoteSnapshot,
+): boolean {
+  if (current.entryPoint !== 'legacy_store') return false;
+  return remoteRootFieldsMatch(current, {
+    ...snapshot,
+    origin: null,
+    entryPoint: null,
+  });
 }
 
 async function updateRemoteStages(
@@ -362,6 +379,9 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
             remoteRevision: snapshot.remoteRevision,
             syncState: meetingLifecycle === 'deleted' ? 'deleted' : 'synced',
             deletedAtMs: snapshot.deletedAtMs,
+            deletedFromLifecycle: meetingLifecycle === 'deleted'
+              ? lifecycle(snapshot.status)
+              : null,
             createdAtMs: snapshot.createdAtMs,
           });
           await transaction.saveManualNote({
@@ -448,10 +468,13 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
           tombstonesPreserved += 1;
           continue;
         }
+        // The legacy collection omitted origin/entry-point metadata. Its shadow
+        // may therefore be normalized by the first authoritative v2 snapshot.
         if (
           snapshot.remoteRevision !== null
           && current.remoteRevision === snapshot.remoteRevision
           && !remoteRootFieldsMatch(current, snapshot)
+          && !legacySourceNormalizationOnly(current, snapshot)
         ) throw new Error('meeting remote payload changed without revision');
         const updatedAtMs = Math.max(current.updatedAtMs, snapshot.updatedAtMs);
         const patch = fieldPatch(current, snapshot, updatedAtMs);

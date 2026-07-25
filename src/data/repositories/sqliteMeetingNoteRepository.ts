@@ -114,6 +114,7 @@ type MeetingRow = {
   created_at_ms: number;
   updated_at_ms: number;
   deleted_at_ms: number | null;
+  deleted_from_lifecycle: Exclude<MeetingNote['lifecycle'], 'deleted'> | null;
   active_transcript_segment_count?: number;
   current_summary_ready?: number;
 };
@@ -594,6 +595,7 @@ function noteFromRow(row: MeetingRow): MeetingNote {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     deletedAtMs: row.deleted_at_ms,
+    deletedFromLifecycle: row.deleted_from_lifecycle,
   };
 }
 
@@ -2341,6 +2343,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     const recordedAtMs = note.recordedAtMs ?? null;
     const remoteRevision = note.remoteRevision ?? null;
     const deletedAtMs = note.deletedAtMs ?? null;
+    const deletedFromLifecycle = note.deletedFromLifecycle ?? null;
     assertNullableBoundedText(description, 100_000, 'meeting description');
     assertMeetingParticipants(participants);
     assertNullableBoundedText(location, 2_000, 'meeting location');
@@ -2349,6 +2352,10 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     assertOptionalNonNegativeInteger(recordedAtMs, 'meeting recorded time');
     assertOptionalNonNegativeInteger(remoteRevision, 'meeting remote revision');
     assertOptionalNonNegativeInteger(deletedAtMs, 'meeting deletion time');
+    if (
+      deletedFromLifecycle !== null
+      && !['draft', 'active', 'ended'].includes(deletedFromLifecycle)
+    ) throw new Error('meeting deletion source lifecycle is invalid');
     if (remoteRevision !== null && remoteRevision < 1) {
       throw new Error('meeting remote revision is invalid');
     }
@@ -2357,8 +2364,8 @@ class SqliteMeetingTransaction implements MeetingTransaction {
          id, scope_key, remote_id, legacy_source_id, origin, entry_point, title,
          description, participants_json, location, mode, client_request_id, recorded_at_ms, lifecycle,
          started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
-         sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+         sync_state, created_at_ms, updated_at_ms, deleted_at_ms, deleted_from_lifecycle
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
       note.id,
       note.scopeKey,
       note.remoteId ?? null,
@@ -2380,6 +2387,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       note.createdAtMs,
       note.createdAtMs,
       deletedAtMs,
+      deletedFromLifecycle,
     );
     this.touchedMeetingIds.add(note.id);
   }
@@ -2440,6 +2448,13 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'syncState')) add('sync_state', patch.syncState!);
     if (Object.prototype.hasOwnProperty.call(patch, 'deletedAtMs')) add('deleted_at_ms', patch.deletedAtMs ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, 'deletedFromLifecycle')) {
+      const value = patch.deletedFromLifecycle ?? null;
+      if (value !== null && !['draft', 'active', 'ended'].includes(value)) {
+        throw new Error('meeting deletion source lifecycle is invalid');
+      }
+      add('deleted_from_lifecycle', value);
+    }
     add('updated_at_ms', patch.updatedAtMs);
     const result = await this.database.runAsync(
       `UPDATE meeting_notes SET ${assignments.join(', ')} WHERE id = ? AND scope_key = ?`,
@@ -4490,6 +4505,11 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if ((remote.lifecycle === 'deleted') !== (remote.deletedAtMs !== null)) {
         throw new Error('remote meeting root deletion state is invalid');
       }
+      if (
+        (remote.lifecycle === 'deleted') !== (remote.deletedFromLifecycle !== null)
+        || (remote.deletedFromLifecycle !== null
+          && !['draft', 'active', 'ended'].includes(remote.deletedFromLifecycle))
+      ) throw new Error('remote meeting root deletion history is invalid');
       if (remote.title.length > 100_000 || remote.title.includes('\u0000')) {
         throw new Error('remote meeting root title is invalid');
       }
@@ -4587,7 +4607,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
              origin = ?, entry_point = ?, title = ?, description = ?,
              participants_json = ?, location = ?, mode = ?, recorded_at_ms = ?,
              lifecycle = ?, started_at_ms = ?, ended_at_ms = ?,
-             sync_state = ?, deleted_at_ms = ?, updated_at_ms = ?
+             sync_state = ?, deleted_at_ms = ?, deleted_from_lifecycle = ?, updated_at_ms = ?
            WHERE id = ? AND scope_key = ? AND updated_at_ms = ?`,
           remote.remoteId,
           remote.remoteRevision,
@@ -4604,6 +4624,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
           endedAtMs,
           nextSyncState,
           remote.deletedAtMs,
+          remote.deletedFromLifecycle,
           input.resolvedAtMs,
           input.meetingId,
           input.scopeKey,
@@ -8579,7 +8600,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       : 50;
     const conditions = ['meeting.scope_key = ?'];
     const params: Array<string | number> = [scopeKey];
-    if (!query.includeDeleted) {
+    if (query.onlyDeleted) {
+      conditions.push("meeting.lifecycle = 'deleted'");
+    } else if (!query.includeDeleted) {
       conditions.push("(meeting.lifecycle != 'deleted' OR meeting.sync_state = 'conflicted')");
     }
     if (query.before) {
@@ -8640,6 +8663,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     const items: MeetingListProjectionItem[] = visibleRows.map(row => ({
       id: row.id,
       remoteId: row.remote_id,
+      remoteRevision: row.remote_revision,
       legacySourceId: row.legacy_source_id,
       origin: row.origin,
       entryPoint: row.entry_point,
@@ -8657,6 +8681,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       createdAtMs: row.created_at_ms,
       updatedAtMs: row.updated_at_ms,
       deletedAtMs: row.deleted_at_ms,
+      deletedFromLifecycle: row.deleted_from_lifecycle,
       currentSummaryVersionId: row.current_summary_version_id,
       activeTranscriptSegmentCount: Number(row.active_transcript_segment_count ?? 0),
       currentSummaryReady: row.current_summary_ready === 1,

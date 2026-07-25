@@ -56,6 +56,10 @@ internal class MinutesListSurface(
   // Feishu's home V2 opens in the two-column cover grid; the list is an
   // explicit secondary mode exposed by the trailing switch icon.
   private var viewMode = MinutesHomeViewMode.GRID
+  private var recycleBin = false
+  private var canOpenRecycleBin = false
+  private var mainListFirstVisible = 0
+  private var pendingMainListScrollRestore: Int? = null
 
   init {
     orientation = VERTICAL
@@ -209,14 +213,31 @@ internal class MinutesListSurface(
   }
 
   fun render(state: MinutesListState) {
+    val nextRecycleBin = state.mode == MinutesListMode.RECYCLE_BIN
+    canOpenRecycleBin = state.canOpenRecycleBin
+    if (nextRecycleBin != recycleBin) {
+      if (nextRecycleBin) mainListFirstVisible = firstVisiblePosition()
+      recycleBin = nextRecycleBin
+      if (recycleBin) {
+        pendingMainListScrollRestore = null
+        applyViewMode(MinutesHomeViewMode.LIST, 0)
+      } else {
+        pendingMainListScrollRestore = mainListFirstVisible
+        applyViewMode(viewMode)
+      }
+    }
     renderedTitle = state.title
-    titleBar.configure(state.title, viewMode) { action ->
+    titleBar.configure(
+      state.title,
+      if (recycleBin) MinutesHomeViewMode.LIST else viewMode,
+      recycleBin,
+    ) { action ->
       if (action == "toggleViewMode") toggleViewMode()
-      else if (action == "more") mainMenu.show(titleBar.moreAnchor())
+      else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
       else onAction(mapOf("type" to action))
     }
     titleBar.visibility = if (state.searching) View.GONE else View.VISIBLE
-    if (state.searching) mainMenu.dismiss()
+    if (state.searching || recycleBin) mainMenu.dismiss()
     searchBar.visibility = if (state.searching) View.VISIBLE else View.GONE
     renderingSearch = true
     if (searchInput.text.toString() != state.query) {
@@ -245,7 +266,12 @@ internal class MinutesListSurface(
         || it.dateTimeLabel.contains(normalizedQuery, ignoreCase = true)
         || it.statusLabel.contains(normalizedQuery, ignoreCase = true)
     }
-    adapter.submitList(visibleMeetings)
+    adapter.submitList(visibleMeetings) {
+      pendingMainListScrollRestore?.let { position ->
+        pendingMainListScrollRestore = null
+        list.scrollToPosition(position.coerceAtLeast(0))
+      }
+    }
 
     val showBlockingState = state.meetings.isEmpty() && state.phase != MinutesContentPhase.READY
     val showNoSearchResults = state.searching && normalizedQuery.isNotBlank() &&
@@ -264,7 +290,7 @@ internal class MinutesListSurface(
       when (state.phase) {
         MinutesContentPhase.LOADING -> "正在加载会议记录"
         MinutesContentPhase.ERROR -> "会议记录服务暂时不可用"
-        else -> "暂无会议记录"
+        else -> if (recycleBin) "回收站为空" else "暂无会议记录"
       }
     }
     cachedError.visibility = if (
@@ -278,7 +304,7 @@ internal class MinutesListSurface(
     applyListPadding(
       topPadding = if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
     )
-    operationHost.visibility = if (state.searching) View.GONE else View.VISIBLE
+    operationHost.visibility = if (state.searching || recycleBin) View.GONE else View.VISIBLE
     uploadButton.isEnabled = !state.mediaImporting
     uploadIcon.visibility = if (state.mediaImporting) View.GONE else View.VISIBLE
     uploadProgress.visibility = if (state.mediaImporting) View.VISIBLE else View.GONE
@@ -286,27 +312,34 @@ internal class MinutesListSurface(
   }
 
   private fun toggleViewMode() {
+    if (recycleBin) return
     itemContextMenu.dismiss()
     mainMenu.dismiss()
-    val firstVisible = when (val layoutManager = list.layoutManager) {
-      is StaggeredGridLayoutManager -> layoutManager.findFirstVisibleItemPositions(null).minOrNull() ?: 0
-      is LinearLayoutManager -> layoutManager.findFirstVisibleItemPosition()
-      else -> 0
-    }
+    val firstVisible = firstVisiblePosition()
     viewMode = if (viewMode == MinutesHomeViewMode.LIST) MinutesHomeViewMode.GRID else MinutesHomeViewMode.LIST
-    adapter.setViewMode(viewMode)
-    list.layoutManager = if (viewMode == MinutesHomeViewMode.GRID) {
+    applyViewMode(viewMode, firstVisible)
+    titleBar.configure(renderedTitle, viewMode, recycleBin = false) { action ->
+      if (action == "toggleViewMode") toggleViewMode()
+      else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
+      else onAction(mapOf("type" to action))
+    }
+  }
+
+  private fun firstVisiblePosition(): Int = when (val layoutManager = list.layoutManager) {
+    is StaggeredGridLayoutManager -> layoutManager.findFirstVisibleItemPositions(null).minOrNull() ?: 0
+    is LinearLayoutManager -> layoutManager.findFirstVisibleItemPosition().coerceAtLeast(0)
+    else -> 0
+  }
+
+  private fun applyViewMode(mode: MinutesHomeViewMode, firstVisible: Int? = null) {
+    adapter.setViewMode(mode)
+    list.layoutManager = if (mode == MinutesHomeViewMode.GRID) {
       createGridLayoutManager()
     } else {
       LinearLayoutManager(context)
     }
     applyListPadding(topPadding = list.paddingTop)
-    titleBar.configure(renderedTitle, viewMode) { action ->
-      if (action == "toggleViewMode") toggleViewMode()
-      else if (action == "more") mainMenu.show(titleBar.moreAnchor())
-      else onAction(mapOf("type" to action))
-    }
-    list.scrollToPosition(firstVisible.coerceAtLeast(0))
+    firstVisible?.let { list.scrollToPosition(it.coerceAtLeast(0)) }
   }
 
   private fun createGridLayoutManager(): StaggeredGridLayoutManager =
@@ -317,7 +350,7 @@ internal class MinutesListSurface(
     }
 
   private fun applyListPadding(topPadding: Int = 0) {
-    val sidePadding = if (viewMode == MinutesHomeViewMode.GRID) context.dp(7) else 0
+    val sidePadding = if (!recycleBin && viewMode == MinutesHomeViewMode.GRID) context.dp(7) else 0
     list.setPadding(sidePadding, topPadding, sidePadding, context.dp(84))
   }
 

@@ -290,7 +290,12 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
     orientation = LinearLayout.HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
   }
+  private val leading = LinearLayout(context).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+  }
   private var actionHandler: ((String) -> Unit)? = null
+  private var actionConfiguration = ""
   private val viewModeButton = context.iconButton(
     com.laoji.nativeplatform.R.drawable.laoji_ic_list_outline,
     "切换到列表视图",
@@ -316,6 +321,13 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
       },
     )
     addView(
+      leading,
+      LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT).apply {
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        leftMargin = context.dp(6)
+      },
+    )
+    addView(
       actions,
       LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT).apply {
         gravity = Gravity.END or Gravity.CENTER_VERTICAL
@@ -324,7 +336,12 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
     )
   }
 
-  fun configure(title: String, viewMode: MinutesHomeViewMode, onAction: (String) -> Unit) {
+  fun configure(
+    title: String,
+    viewMode: MinutesHomeViewMode,
+    recycleBin: Boolean,
+    onAction: (String) -> Unit,
+  ) {
     titleView.text = title
     actionHandler = onAction
     viewModeButton.setImageResource(
@@ -339,7 +356,25 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
     } else {
       "切换到网格视图"
     }
-    if (actions.childCount != 0) return
+    val nextConfiguration = if (recycleBin) "recycle" else "meetings"
+    if (actionConfiguration == nextConfiguration) return
+    actionConfiguration = nextConfiguration
+    leading.removeAllViews()
+    actions.removeAllViews()
+    (titleView.layoutParams as LayoutParams).apply {
+      leftMargin = context.dp(if (recycleBin) 54 else 98)
+      rightMargin = context.dp(if (recycleBin) 54 else 98)
+    }.also(titleView::setLayoutParams)
+    if (recycleBin) {
+      leading.addView(
+        context.iconButton(
+          com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back,
+          "返回会议记录",
+        ).apply { setOnClickListener { actionHandler?.invoke("closeRecycleBin") } },
+        LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+      )
+      return
+    }
     actions.addView(
       context.iconButton(
         com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,

@@ -292,15 +292,22 @@ internal class MinutesMeetingAdapter(
       )
         .filter { it.isNotBlank() }
         .joinToString("，")
+      root.isEnabled = meeting.actionEnabled
+      root.alpha = if (meeting.actionEnabled) 1f else 0.52f
       root.setOnClickListener {
+        if (!meeting.actionEnabled) return@setOnClickListener
         onAction(
           mapOf(
-            "type" to if (meeting.canResume) "openRecording" else "openMeeting",
+            "type" to when (meeting.action) {
+              MinutesMeetingAction.RESTORE -> "restoreMeeting"
+              MinutesMeetingAction.OPEN -> if (meeting.canResume) "openRecording" else "openMeeting"
+            },
             "meetingId" to meeting.id,
           ),
         )
       }
       root.setOnLongClickListener {
+        if (!meeting.actionEnabled) return@setOnLongClickListener false
         onLongPress(root, meeting)
         true
       }

@@ -20,6 +20,8 @@ export type MeetingDeletionPresentation =
       title: string;
       message: string;
       confirmText: string;
+      recoverable: boolean;
+      retentionDays: number | null;
     };
 
 export function isMeetingDeletionBlocked(meeting: Meeting): boolean {
@@ -32,7 +34,19 @@ function isLocalOnlyMeeting(meeting: Meeting): boolean {
   return Boolean(meeting.statusSyncPending && clientRequestId && clientRequestId === meeting.id);
 }
 
-export function meetingDeletionPresentation(meeting: Meeting): MeetingDeletionPresentation {
+export function isMeetingEligibleForRecycleBin(meeting: Meeting): boolean {
+  return !isMeetingDeletionBlocked(meeting)
+    && !isLocalOnlyMeeting(meeting)
+    && Boolean(meeting.remoteId?.trim())
+    && !meeting.statusSyncPending
+    && !meeting.audioSyncPending
+    && !meeting.audioSyncBlocked;
+}
+
+export function meetingDeletionPresentation(
+  meeting: Meeting,
+  options: { softDeleteDays?: number | null } = {},
+): MeetingDeletionPresentation {
   if (isMeetingDeletionBlocked(meeting)) {
     return {
       blocked: true,
@@ -50,6 +64,24 @@ export function meetingDeletionPresentation(meeting: Meeting): MeetingDeletionPr
         ? '此会议记录和本机录音将被永久删除，无法恢复。'
         : '此会议记录将从本机永久删除，无法恢复。',
       confirmText: '永久删除',
+      recoverable: false,
+      retentionDays: null,
+    };
+  }
+
+  const softDeleteDays = options.softDeleteDays ?? null;
+  if (
+    Number.isSafeInteger(softDeleteDays)
+    && Number(softDeleteDays) > 0
+    && isMeetingEligibleForRecycleBin(meeting)
+  ) {
+    return {
+      blocked: false,
+      title: '移到回收站？',
+      message: `此会议记录将在回收站保留${softDeleteDays}天，期间可以恢复。`,
+      confirmText: '移到回收站',
+      recoverable: true,
+      retentionDays: Number(softDeleteDays),
     };
   }
 
@@ -58,5 +90,19 @@ export function meetingDeletionPresentation(meeting: Meeting): MeetingDeletionPr
     title: '永久删除会议？',
     message: '此会议记录及相关录音、文字记录和整理结果将被永久删除，无法恢复。',
     confirmText: '永久删除',
+    recoverable: false,
+    retentionDays: null,
   };
+}
+
+export async function resolveMeetingDeletionPresentation(
+  meeting: Meeting,
+  loadSoftDeleteDays: () => Promise<number | null>,
+): Promise<MeetingDeletionPresentation> {
+  if (!isMeetingEligibleForRecycleBin(meeting)) {
+    return meetingDeletionPresentation(meeting);
+  }
+  return meetingDeletionPresentation(meeting, {
+    softDeleteDays: await loadSoftDeleteDays(),
+  });
 }

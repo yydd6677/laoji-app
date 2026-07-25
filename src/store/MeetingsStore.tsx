@@ -20,6 +20,7 @@ import {
   derivePendingMeetingAudioUploadInspection,
   listPendingMeetingAudioUploads,
   PendingMeetingAudioUpload,
+  restoreDeletedMeetingAudio,
   type PendingMeetingAudioUploadInspection,
   retryPendingMeetingAudioUploads,
 } from '../services/meetingRecording';
@@ -42,7 +43,11 @@ import {
   type ScopeKey,
 } from '../domain/meeting';
 import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
-import { isMeetingDeletionBlocked } from '../services/meetingDeletionPresentation';
+import {
+  isMeetingDeletionBlocked,
+  isMeetingEligibleForRecycleBin,
+} from '../services/meetingDeletionPresentation';
+import { requireFreshMeetingRecycleCapability } from '../services/meetingRecycleCapability';
 import { getFeatureFlags } from '../config/featureFlags';
 import {
   MeetingRepositoryFacade,
@@ -80,6 +85,7 @@ import { requestMeetingRootSync } from '../application/meeting/rootSyncTrigger';
 import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
 import { CreateMeetingNoteUseCase } from '../application/meeting/createMeetingNote';
 import { DeleteMeetingNoteUseCase } from '../application/meeting/deleteMeetingNote';
+import { RestoreMeetingNoteUseCase } from '../application/meeting/restoreMeetingNote';
 import {
   MergeAccountMeetingRemoteSnapshotUseCase,
   type AccountMeetingRemoteSnapshot,
@@ -114,6 +120,9 @@ const updateCanonicalMeetingNote = new UpdateMeetingNoteUseCase({
   repository: sqliteMeetingNoteRepository,
 });
 const deleteCanonicalMeetingNote = new DeleteMeetingNoteUseCase({
+  repository: sqliteMeetingNoteRepository,
+});
+const restoreCanonicalMeetingNote = new RestoreMeetingNoteUseCase({
   repository: sqliteMeetingNoteRepository,
 });
 const mergeCanonicalAccountMeetingSnapshot = new MergeAccountMeetingRemoteSnapshotUseCase({
@@ -501,7 +510,8 @@ interface MeetingsContextType {
   error: string | null;
   createMeeting: (title: string, options?: CreateMeetingOptions) => Promise<Meeting>;
   importMeetingMedia: (media: IngestedMeetingMedia, options: ImportMeetingMediaOptions) => Promise<Meeting>;
-  deleteMeeting: (id: string) => Promise<void>;
+  deleteMeeting: (id: string, options?: DeleteMeetingOptions) => Promise<void>;
+  restoreDeletedMeeting: (canonicalMeetingId: string, expectedRetentionDays: number) => Promise<void>;
   updateMeetingTitle: (id: string, title: string) => Promise<void>;
   updateMeetingDetails: (
     id: string,
@@ -527,6 +537,11 @@ interface MeetingsContextType {
 
 interface MeetingStatusUpdateOptions {
   remoteSync?: 'wait' | 'background';
+}
+
+export interface DeleteMeetingOptions {
+  recoverable?: boolean;
+  expectedRetentionDays?: number | null;
 }
 
 export interface SaveCachedTranscriptOptions {
@@ -1176,12 +1191,28 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     legacyMeetingId: string,
     target: Meeting,
     operationGeneration: number,
+    options: DeleteMeetingOptions,
   ): Promise<void> => {
     if (scope === 'guest' || !isScopeKey(scope) || activeScopeRef.current !== scope) return;
+    if (options.recoverable) {
+      if (!accessToken || !isMeetingEligibleForRecycleBin(target)) {
+        throw new Error('此会议当前不能移到回收站');
+      }
+      const currentRetentionDays = await requireFreshMeetingRecycleCapability(accessToken);
+      if (currentRetentionDays !== options.expectedRetentionDays) {
+        throw new Error('回收站保留期限已更新，请重试');
+      }
+    }
     const canonicalMeetingId = canonicalReadProjectionRef.current
       ?.canonicalIdByLegacyId[legacyMeetingId]
       ?.trim();
     if (!canonicalMeetingId) throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
+    if (options.recoverable) {
+      const canonicalTarget = await sqliteMeetingNoteRepository.get(canonicalMeetingId, scope);
+      if (!canonicalTarget?.note.remoteId || canonicalTarget.note.remoteRevision === null) {
+        throw new Error('会议云端状态尚未同步完成，请刷新后重试。');
+      }
+    }
     canonicalStoreMutationDepthRef.current += 1;
     try {
       const result = await deleteCanonicalMeetingNote.execute({
@@ -1192,6 +1223,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           operationType: 'meeting.delete',
         },
         canonicalWrite: true,
+        preserveForRestore: options.recoverable === true,
       });
       if (!result.deleted || result.canonicalRevision === null) {
         throw new Error('会议记录未能删除，请重试。');
@@ -1207,16 +1239,62 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const cleanupResults = await Promise.allSettled([
       deletePendingMeetingAudioUpload(scope, legacyMeetingId),
       clearPendingMeetingTranscriptCompletion(scope, legacyMeetingId),
-      deleteNativeMeetingArtifacts(scope, legacyMeetingId),
       deleteMeetingPlaybackCache(legacyMeetingId),
       cancelMeetingActionNotificationsForMeeting(scope, legacyMeetingId),
-      ...(target.audioLocalUri
+      ...(!options.recoverable ? [deleteNativeMeetingArtifacts(scope, legacyMeetingId)] : []),
+      ...(!options.recoverable && target.audioLocalUri
         ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
         : []),
     ]);
     const failures = cleanupResults.filter(result => result.status === 'rejected').length;
     if (failures > 0) throw new MeetingDeletionCleanupError(failures);
   }, [accessToken, adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, scope]);
+
+  const restoreDeletedMeeting = useCallback(async (
+    canonicalMeetingId: string,
+    expectedRetentionDays: number,
+  ): Promise<void> => enqueueGuestMutation(async () => {
+    const operationGeneration = generationRef.current;
+    if (
+      scope === 'guest'
+      || !isScopeKey(scope)
+      || !accessToken
+      || activeScopeRef.current !== scope
+      || !getFeatureFlags().localMeetingDbAccountRootWriteV1
+    ) throw new Error('当前账号不能恢复此会议');
+    const retentionDays = await requireFreshMeetingRecycleCapability(accessToken);
+    if (retentionDays !== expectedRetentionDays) {
+      throw new Error('回收站保留期限已更新，请重试');
+    }
+    canonicalStoreMutationDepthRef.current += 1;
+    try {
+      const result = await restoreCanonicalMeetingNote.execute({
+        meetingId: canonicalMeetingId,
+        scopeKey: scope,
+        retentionDays,
+        syncOperation: {
+          operationId: `meeting.restore:${secureClientIdFactory.create()}`,
+          operationType: 'meeting.restore',
+        },
+        canonicalWrite: true,
+      });
+      if (!result.restored || result.canonicalRevision === null) {
+        throw new Error('会议记录未能恢复，请重试');
+      }
+      const owned = await loadCanonicalOwnedScope();
+      const restoredLegacyId = owned
+        ? Object.entries(owned.projection.canonicalIdByLegacyId)
+          .find(([, id]) => id === canonicalMeetingId)?.[0]
+        : null;
+      if (!owned || !restoredLegacyId || !adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+        throw new Error('会议恢复后的数据不完整，请刷新后重试');
+      }
+      restoreDeletedMeetingAudio(scope, restoredLegacyId);
+      requestMeetingRootSync(scope);
+    } finally {
+      canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
+    }
+  }), [accessToken, adoptCanonicalOwnedProjection, enqueueGuestMutation, loadCanonicalOwnedScope, scope]);
 
   const applyMeetingReadCutover = useCallback(async (
     legacyMeetings: readonly Meeting[],
@@ -1293,7 +1371,28 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
       timer = null;
       if (canonicalReadProjectionRef.current) return;
-      void applyMeetingReadCutover(meetingsRef.current);
+      const readRequest = canonicalReadRequestRef.current;
+      const operationGeneration = generationRef.current;
+      void loadCanonicalOwnedScope()
+        .then(owned => {
+          if (
+            canonicalReadRequestRef.current !== readRequest
+            || generationRef.current !== operationGeneration
+            || activeScopeRef.current !== scope
+          ) return;
+          if (owned) {
+            adoptCanonicalOwnedProjection(owned, operationGeneration);
+            return;
+          }
+          void applyMeetingReadCutover(meetingsRef.current);
+        })
+        .catch(() => {
+          if (
+            canonicalReadRequestRef.current === readRequest
+            && generationRef.current === operationGeneration
+            && activeScopeRef.current === scope
+          ) void applyMeetingReadCutover(meetingsRef.current);
+        });
     };
     const unsubscribe = sqliteMeetingNoteRepository.observeList(scope, () => {
       deactivateCanonicalRead();
@@ -1304,7 +1403,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
       unsubscribe();
     };
-  }, [applyMeetingReadCutover, deactivateCanonicalRead, scope]);
+  }, [
+    adoptCanonicalOwnedProjection,
+    applyMeetingReadCutover,
+    deactivateCanonicalRead,
+    loadCanonicalOwnedScope,
+    scope,
+  ]);
 
   const refreshMeetingsFromCloud = useCallback(async () => {
     const requestGeneration = generationRef.current;
@@ -2113,12 +2218,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     scope,
   ]);
 
-  const deleteMeeting = useCallback(async (id: string) => {
+  const deleteMeeting = useCallback(async (id: string, options: DeleteMeetingOptions = {}) => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
     if (mode !== 'guest' && !accessToken) throw new Error('not authenticated');
 
     if (mode === 'guest') {
+      if (options.recoverable) throw new Error('本机会议删除后无法恢复');
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
         const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
@@ -2162,13 +2268,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const previousSummaries = summaryCacheRef.current;
     const target = previousMeetings.find(m => m.id === id) ?? null;
     if (target) assertMeetingDeletionAllowed(target);
+    if (options.recoverable && !getFeatureFlags().localMeetingDbAccountRootWriteV1) {
+      throw new Error('当前会议服务暂不支持回收站');
+    }
     if (target && getFeatureFlags().localMeetingDbAccountRootWriteV1) {
       return enqueueGuestMutation(() => deleteCanonicalAccountMeeting(
         id,
         target,
         operationGeneration,
+        options,
       ));
     }
+    if (options.recoverable) throw new Error('此会议当前不能移到回收站');
     deactivateCanonicalRead();
     const targetIndex = previousMeetings.findIndex(m => m.id === id);
     const hadTranscript = Object.prototype.hasOwnProperty.call(previousTranscripts, id);
@@ -2667,6 +2778,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         createMeeting,
         importMeetingMedia,
         deleteMeeting,
+        restoreDeletedMeeting,
         updateMeetingTitle,
         updateMeetingDetails,
         updateMeetingStatus,
