@@ -1,6 +1,6 @@
 # Phase 5 默认私有与删除：永久删除与账号回收站纵向切片
 
-状态：`PRIV-01` 已把永久删除和已同步会议的可恢复删除拆成两条诚实路径。Android 在实时、非陈旧 capability 明确返回 `meeting_notes_v2=true` 与正数 `soft_delete_days` 时，才为具备稳定远端身份的会议显示“移到回收站”和恢复入口；本机、未同步或仍有音频上传风险的会议继续明确永久删除。普通 Preview 的 canonical read/write、账号根写和账号上传写仍全部关闭，所以默认包不显示尚未在线验收的回收站。
+状态：`PRIV-01` 已把永久删除和已同步会议的可恢复删除拆成两条诚实路径。Android 在实时、非陈旧 capability 明确返回 `meeting_notes_v2=true` 与正数 `soft_delete_days` 时，才为具备稳定远端身份的会议显示“移到回收站”和恢复入口；本机、未同步或仍有音频上传风险的会议继续明确永久删除。普通 Preview 已开启 canonical read/write 与账号根写，账号上传写仍关闭；运行服务 API 已验证软删除/恢复和子实体保留，页面继续由实时 capability fail closed。
 
 ## 当前范围
 
@@ -49,8 +49,8 @@
 ## 服务端源码合同
 
 - 共享服务器目标工作区 `/home/zhong/laoji-service-platform/smart-meeting-ai` 已在本轮早段同步 `meeting_note_root_service.py`、`app_meeting_v2.py` 和 `test_meeting_notes_v2.py`；同步前备份位于 `/home/zhong/laoji-service-platform/backups/20260725-priv-01-soft-delete-v1`。
-- 目标 `.venv` 的 soft-delete/restore 窄合同为 `1 passed in 1.42s`。这只证明目标源码与隔离测试，不等于运行服务已经迁移或在线可用。
-- 18020/18035 没有启动或重启；8020 属于旧工作区，未被当作本切片证据。
+- 目标 `.venv` 的 soft-delete/restore 窄合同为 `1 passed in 1.42s`；随后目标 18020/18035 已从该工作区启动，运行 capability 返回 `meeting_notes_v2=true`、`soft_delete_days=30`。
+- 同一测试账号的两个独立登录会话在实际数据库上完成 root revision 2→delete 3→restore 4→final delete 5；删除态 occurrence/manual-note 均为 404，恢复后 occurrence revision 3、manual-note revision 2 和原内容保持。测试根最终软删除。8020 仍属于旧工作区，未被当作本切片证据。
 
 ## 轻量验证
 
@@ -67,7 +67,7 @@
 
 ## 未完成边界
 
-1. 目标 18020/18035 仍未运行，真实 capability、鉴权、运行数据库迁移、远端 tombstone/restore、断线重放和跨设备收敛尚未验证；普通构建开关因此保持关闭。
+1. 目标 18020/18035 的 capability、鉴权、运行数据库、远端 tombstone/restore 和双会话收敛已验证；App outbox 断网/强杀恢复及第二台物理设备仍未验证。
 2. 30 天到期后的服务端物理清理、canonical Transcript/Summary/人工笔记/行动项/录音资产级联清理，以及本机过期 tombstone/文件自动清理尚未完整实现或证明。当前客户端只隐藏已过期条目，不能把这写成已完成的数据销毁。
 3. USB 真机、不同 ROM、TalkBack、触觉和真实弱网切换未验证；当前设备证据仅为 Android 模拟器。
 4. Android 原生回收站页面已完成；非 Android React Native fallback 目前只复用删除确认，没有独立回收站列表，不属于当前 Android 交付证明。

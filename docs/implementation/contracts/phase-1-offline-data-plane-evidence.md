@@ -99,6 +99,7 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 - 修复了 7 个会议域 v2 客户端错误使用 18035 `laojiApiBase` 的边界；它们现统一使用 18020 `meetingApiBase`。账号根开关默认改为 true，账号上传开关继续为 false。
 - 测试账号保留数据覆盖安装后，启动先报告 account preflight mismatch（旧 Store 1 / repository 0），完成一次 shadow import 后 repository 1/1 一致并切换 `canonical_projection_ready`；没有第二套账号 Store 或主键替换。
 - 真实服务会议进入详情时 action pull `inserted=1`；匿名 editor 把远端 revision 2 更新为 3 后再次进入详情为 `updated=1`，本机负责人变为“第二客户端”。这同时证明账号根 remote identity、canonical action identity 和详情 pull 已接通。
+- 同一测试账号的两个独立登录会话完成 root 与 occurrence 原子创建、相同请求幂等重放、第二会话列表拉取、root/occurrence/manual-note 三类陈旧 revision 412、计划快照不可变 409、occurrence active→orphaned→active、笔记跨会话修改，以及 root 删除→子实体隐藏→恢复后子实体保留。共 20 个运行断言通过，测试记录最终保持软删除；这证明服务端双会话收敛，不冒充第二台物理设备或 App 离线队列验收。
 - 账号录音上传写仍未开启：8030 ASR 未启动，共享服务器 NVIDIA 用户态/内核驱动版本不一致；不以根/action 成功推导资产上传或转写已完成。
 
 ## 当前安装包
@@ -114,7 +115,7 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 ## 未决项与停线边界
 
 1. 游客和账号根普通包已完成 canonical cutover；账号上传写仍独立关闭，不能因根/action 往返成功而抢占 WorkManager/registry 的资产调度权。
-2. 账号根 owner 已由真实 capability 和测试账号启动路径取得。仍需 occurrence、manual note、delete/restore 和非协作 action 的双设备冲突收敛，不能把单待办协作替代全部实体。
+2. 账号根、occurrence、manual note 和 delete/restore 已完成两个独立登录会话的运行往返；仍需非协作 action 的 App 冲突选择、RecordingAsset 多资产和第二台物理设备抽查，不能把双 token 会话写成跨设备验收。
 3. 账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复和服务端多 RecordingAsset；账号 Transcript/Summary 的长任务恢复、大数据量性能、真实 mirror I/O 故障和授权 USB 真机 cutover 仍未完成。
 4. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
-5. 线上 MeetingNote v2 schema/capability、账号 root GET/pull 和 action 协作已验证并进入普通 Preview；任何尚未验证的 occurrence/note/upload/correction 写入仍使用各自 capability/outbox，不得由 broad flag 绕过。
+5. 线上 MeetingNote v2 schema/capability、账号 root GET/pull、occurrence、manual note、soft-delete/restore 和 action 协作均已有运行证据；upload/correction 仍使用各自 capability/outbox 且保持关闭，不得由 broad flag 绕过。

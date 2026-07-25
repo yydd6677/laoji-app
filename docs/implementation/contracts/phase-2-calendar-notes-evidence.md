@@ -4,9 +4,9 @@
 
 ## 当前结论
 
-Phase 2 尚未满足退出条件。NOTE-01 已从本机纵向路径扩展到账号人工笔记的窄云同步；CAL-01 也已形成第一条账号纵向闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、跨设备安全附着、冲突保留和删除后 orphan 都已接通。日历详情、通知动作和 Widget 明确动作在没有本机关联时共用 occurrence 云端回查；已有本机关联仍保持离线可打开。游客迁移 journal 仍按创建、日程关联、人工笔记、文字记录、整理版本、行动项、录音和状态分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
+NOTE-01 与 CAL-01 已从本机纵向路径扩展到运行服务的账号双会话闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、安全附着、冲突保留和删除后 orphan 均已接通；服务端真实完成 root 与 occurrence 原子创建、幂等重放、计划快照不可变、active/orphaned revision、人工笔记跨会话修改、陈旧写拒绝和删除/恢复保留。日历详情、通知动作和 Widget 明确动作在没有本机关联时共用 occurrence 云端回查；已有本机关联仍保持离线可打开。游客迁移 journal 继续按实体分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
 
-目标服务源码现有 `manual_notes_v2` 与 `occurrence_links_v2` capability、认证 GET/PUT、持久幂等结果和 revision precondition，并已与客户端协议同步；目标 18020/18035 服务未启动，所以新表未在目标数据库实例化，也没有真实鉴权请求、跨设备收敛或真实账号迁移证据。两个设备创建不同本机会议时，客户端现会保留本机会议和全部内容为独立记录，把原 occurrence 身份写入不可变 detached history，并为可读取或仍在录制的本机录音持久化恢复任务。已结束的录音通过原生流式复制加入日程当前关联的目标会议；来源 MeetingNote、来源 RecordingAsset 和原文件不移动、不删除。该闭环只有合成数据模拟器证据；多 RecordingAsset 的服务端上传、转写、跨设备下载仍未实现。
+目标 18020/18035 已由目标工作区运行，`manual_notes_v2` 与 `occurrence_links_v2` capability、认证 GET/PUT、持久幂等结果和 revision precondition 均在实际数据库上生效。运行检查使用同一账号的两个独立登录会话，不等于第二台物理设备，也不替代 App outbox 的断网/强杀恢复或真实游客迁移。两个设备创建不同本机会议时，客户端仍按既有合同保留本机会议和全部内容为独立记录，把原 occurrence 身份写入不可变 detached history，并为可读取或仍在录制的本机录音持久化恢复任务。已结束录音的本机复制只有合成模拟器证据；多 RecordingAsset 的服务端上传、转写和跨设备下载仍未实现。
 
 ## 已实现合同
 
@@ -86,6 +86,7 @@ Component: 会议详情多录音选择
 - 服务端目标源码同步后复跑同一组窄合同：`5 passed`；部署前旧文件已备份到 `backups/20260724-manual-notes-v2-v1`，18020/18035 未启动。
 - 服务端 occurrence 隔离候选：`tests/test_occurrence_links_v2.py` 为 `2 passed`；覆盖 create/replay/lookup/orphan、用户内唯一冲突、快照不可变和账号隔离。
 - 服务端目标源码同步后复跑 occurrence 窄合同：`2 passed`；6 份部署文件与 overlay SHA-256 逐项一致，旧文件备份位于 `backups/20260724-occurrence-links-v2-v1`，18020/18035 未启动。
+- 运行服务账号双会话：20 个断言通过，覆盖 root+occurrence 原子创建、响应丢失等价的相同请求重放、occurrence lookup 与 active/orphaned/active revision、不可变计划快照 409、root/occurrence/manual-note 陈旧版本 412、第二会话笔记更新、root pull、soft-delete、子实体隐藏、restore 后 occurrence/note 原版本保留；测试根最终软删除。该证据不冒充第二台物理设备。
 - 模拟器保留数据覆盖安装：PackageManager 返回 `Success`，随后冷启动无应用进程 FATAL。
 - 详情页五个 pager 页面真实渲染；输入临时笔记后切换到文字记录再返回，内容保持。
 - 输入后强制停止 App 并冷启动，已落盘内容恢复；随后清除临时内容并再次冷启动，确认测试正文未遗留。
@@ -103,17 +104,16 @@ Component: 会议详情多录音选择
 
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
-- 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：90447420 bytes
-- SHA-256：`fd810cfd5115a5a69d79729afa79d48d9493669edc0fe4b2760aaff8fd6dca7d`
-- 构建时间：`2026-07-25 21:51:27 +0800`
-- 安装状态：已在 `emulator-5556` 恢复测试前快照后保留数据覆盖安装；PackageManager `lastUpdateTime=2026-07-25 21:52:02`。默认能力冷启动、原数据列表和 crash/SQLite migration log scan 均通过。当前 `adb devices` 没有 USB 真机，因此尚未安装到手机。
+- 版本：`1.0.0-source-preview`（versionCode 103）
+- 大小：90,702,684 bytes
+- SHA-256：`1fd6ee81c27a5957d6ab68e38c0fa0dfbe294c7757fd84fe9609203b17b550d0`
+- 安装状态：已在 `emulator-5556` 保留测试账号和数据库覆盖安装；账号根 canonical read/write 与真实 action pull 已接通，没有应用 FATAL、React Native 致命错误或 SQLite 损坏/缺表日志。当前没有 USB 真机。
 
 ## 未决项与停线边界
 
-1. 人工笔记与 occurrence v2 已进入目标源码但运行服务未启动；当前只能声明源码合同和客户端闭环，不能声明线上 capability、鉴权读写或跨设备同步成功。结构化 Summary version 和 marker 的线上 v2 capability 仍未确认。
-2. 游客迁移 v2 已有恢复 journal 和本机账号作用域实现，但没有可用测试账号的真实服务端任务证据；在完成 event/meeting 幂等响应、单音频失败重试、退出重进和 link 回查前，不得宣布迁移验收通过。
-3. 人工笔记冲突候选选择已实现，但尚未用两个真实账号设备制造并解决一次 409/412。Occurrence 双会议的本机独立保留、detached history、可恢复录音复制、多录音播放与当前录音分享已用合成模拟器闭环；真实双设备制造、线上 occurrence 响应和目标服务多 RecordingAsset 上下行仍未完成。
+1. 人工笔记与 occurrence v2 已有运行 capability、真实鉴权读写和双会话收敛；第二台物理设备、App 冲突选择页面及断网 outbox 恢复仍待候选抽查，不能由 API 双会话替代。
+2. 游客迁移 v2 已有恢复 journal 和本机账号作用域实现，但尚未执行完整真实迁移任务；仍需 event/meeting 幂等响应后的退出重进、单音频失败不阻塞和 link 回查。
+3. Occurrence 双会议的本机独立保留、detached history、可恢复录音复制、多录音播放与当前录音分享已用合成模拟器闭环；真实跨设备双会议制造和目标服务多 RecordingAsset 上下行仍未完成。
 4. USB 真机未连接，录音页键盘/inset、切页视频、停止录音前 flush 和覆盖安装仍需真机复核。
-5. 普通包仍未完成 scope-wide canonical cutover；本次最终 Preview 已确认 canonical read/write、账号根写和账号上传写继续关闭。
-6. 通知和 Widget 的无本机关联回查、同会议 409/412 安全收敛及不同会议恢复已有客户端代码路径，但目标服务停止期间不能形成真实鉴权、冲突响应、跨入口或跨设备运行证据。
+5. 普通包已完成游客和账号根 canonical cutover；账号上传写继续关闭。
+6. 通知和 Widget 的无本机关联回查、同会议 409/412 安全收敛及不同会议恢复已有客户端代码路径；跨入口与第二台物理设备仍留到候选抽查。
