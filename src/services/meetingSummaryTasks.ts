@@ -3,6 +3,8 @@ import {
   DEFAULT_MEETING_TEMPLATE,
   meetingTemplateById,
   meetingTemplateKey,
+  type MeetingSummaryAttachmentAuthorization,
+  type MeetingSummaryAttachmentItem,
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingSummaryCarryForwardItem,
   type MeetingTemplate,
@@ -23,6 +25,7 @@ export interface PendingMeetingSummaryTask {
   templateRevision: number;
   inputFingerprint: string;
   carryForward: MeetingSummaryCarryForwardAuthorization | null;
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,6 +49,7 @@ export function meetingSummaryInputFingerprint(
   meetingDate?: string,
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward: MeetingSummaryCarryForwardAuthorization | null = null,
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null,
 ): string {
   let primary = 0x811c9dc5;
   let secondary = 0x9e3779b9;
@@ -85,7 +89,20 @@ export function meetingSummaryInputFingerprint(
     });
   }
 
-  const version = carryForward ? 'v3' : 'v2';
+  if (attachmentAuthorization) {
+    feed(attachmentAuthorization.requestId);
+    feed(attachmentAuthorization.items.length);
+    attachmentAuthorization.items.forEach(item => {
+      feed(item.attachmentId);
+      feed(item.kind);
+      feed(item.positionMs);
+      feed(item.content);
+      feed(item.contentSha256);
+      feed(item.updatedAtMs);
+    });
+  }
+
+  const version = attachmentAuthorization ? 'v4' : carryForward ? 'v3' : 'v2';
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 
@@ -132,6 +149,7 @@ export async function savePendingMeetingSummaryTask(
       templateRevision: task.templateRevision,
       inputFingerprint: task.inputFingerprint,
       carryForward: task.carryForward,
+      attachmentAuthorization: task.attachmentAuthorization,
       createdAt: existing?.taskId === task.taskId
         ? existing.createdAt
         : task.createdAt ?? now,
@@ -185,6 +203,8 @@ async function readPendingTasks(storageScope: string): Promise<PendingSummaryTas
       ?? DEFAULT_MEETING_TEMPLATE;
     const carryForward = parseCarryForwardAuthorization(item.carryForward);
     if (item.carryForward != null && !carryForward) return;
+    const attachmentAuthorization = parseAttachmentAuthorization(item.attachmentAuthorization);
+    if (item.attachmentAuthorization != null && !attachmentAuthorization) return;
     records[meetingId] = {
       meetingId,
       taskId: item.taskId,
@@ -193,6 +213,7 @@ async function readPendingTasks(storageScope: string): Promise<PendingSummaryTas
       templateRevision: template.revision,
       inputFingerprint: item.inputFingerprint,
       carryForward,
+      attachmentAuthorization,
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
       updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString(),
     };
@@ -248,6 +269,51 @@ function parseCarryForwardAuthorization(value: unknown): MeetingSummaryCarryForw
   const resolved = items as MeetingSummaryCarryForwardItem[];
   const identities = resolved.map(item => `${item.kind}\u0000${item.sourceMeetingId}\u0000${item.sourceItemId}`);
   if (new Set(identities).size !== identities.length) return null;
+  return { requestId, items: resolved };
+}
+
+function parseAttachmentItem(value: unknown): MeetingSummaryAttachmentItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<MeetingSummaryAttachmentItem>;
+  const attachmentId = pendingText(item.attachmentId, 512);
+  const content = pendingText(item.content, 2_000);
+  const contentSha256 = pendingText(item.contentSha256, 71);
+  if (
+    !attachmentId
+    || item.kind !== 'text'
+    || !Number.isSafeInteger(item.positionMs)
+    || Number(item.positionMs) < 0
+    || !content
+    || !contentSha256
+    || !/^sha256:[0-9a-f]{64}$/.test(contentSha256)
+    || !Number.isSafeInteger(item.updatedAtMs)
+    || Number(item.updatedAtMs) < 0
+  ) return null;
+  return {
+    attachmentId,
+    kind: 'text',
+    positionMs: Number(item.positionMs),
+    content,
+    contentSha256,
+    updatedAtMs: Number(item.updatedAtMs),
+  };
+}
+
+function parseAttachmentAuthorization(value: unknown): MeetingSummaryAttachmentAuthorization | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const authorization = value as Partial<MeetingSummaryAttachmentAuthorization>;
+  const requestId = pendingText(authorization.requestId, 96);
+  if (!requestId || requestId.length < 8 || !/^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(requestId)) return null;
+  if (!Array.isArray(authorization.items) || authorization.items.length < 1 || authorization.items.length > 12) {
+    return null;
+  }
+  const items = authorization.items.map(parseAttachmentItem);
+  if (items.some(item => item === null)) return null;
+  const resolved = items as MeetingSummaryAttachmentItem[];
+  if (
+    new Set(resolved.map(item => item.attachmentId)).size !== resolved.length
+    || resolved.reduce((total, item) => total + item.content.length, 0) > 12_000
+  ) return null;
   return { requestId, items: resolved };
 }
 

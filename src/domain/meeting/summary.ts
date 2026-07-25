@@ -61,6 +61,21 @@ export interface MeetingSummaryCarryForwardAuthorization {
   items: readonly MeetingSummaryCarryForwardItem[];
 }
 
+export interface MeetingSummaryAttachmentItem {
+  attachmentId: string;
+  kind: 'text';
+  positionMs: number;
+  content: string;
+  contentSha256: string;
+  updatedAtMs: number;
+}
+
+/** A fresh, generation-scoped opt-in. It is deliberately unrelated to sharing consent. */
+export interface MeetingSummaryAttachmentAuthorization {
+  requestId: string;
+  items: readonly MeetingSummaryAttachmentItem[];
+}
+
 /**
  * Client-normalized v2 document. It is safe to serialize in the legacy cache while SQLite becomes
  * the canonical source; generated content remains immutable after it is mirrored as a version.

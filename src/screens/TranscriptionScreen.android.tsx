@@ -41,6 +41,7 @@ import {
   type MeetingSpeakerAssignmentValue,
 } from '../components/MeetingSpeakerAssignmentSheet';
 import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
+import { MeetingSummaryAttachmentSheet } from '../components/MeetingSummaryAttachmentSheet';
 import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
 import { MeetingShareSheet } from '../components/MeetingShareSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -108,6 +109,7 @@ import {
   processingStatusesFromStages,
   secureClientIdFactory,
   type MeetingProcessingStatuses,
+  type MeetingSummaryAttachmentAuthorization,
   type MeetingTemplate,
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingSummaryActionCandidate,
@@ -159,6 +161,11 @@ import {
   resolveMeetingSummaryCarryForwardMemory,
 } from '../services/meetingSummaryCarryForward';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
+import {
+  authorizeMeetingSummaryAttachments,
+  meetingSummaryAttachmentAuthorizationIsCurrent,
+  MeetingSummaryAttachmentSelectionStaleError,
+} from '../services/meetingSummaryAttachments';
 import {
   CreateMeetingActionUseCase,
   MeetingActionIdentityConflictError,
@@ -433,12 +440,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     return meetingTemplateById(cached?.templateId, cached?.templateRevision) ?? DEFAULT_MEETING_TEMPLATE;
   });
   const [templateSheetVisible, setTemplateSheetVisible] = useState(false);
+  const [summaryAttachmentRequest, setSummaryAttachmentRequest] = useState<{
+    meetingId: string;
+    scopeKey: ScopeKey;
+    template: MeetingTemplate;
+    forceRegenerate: boolean;
+    attachments: readonly MeetingAttachmentRecord[];
+  } | null>(null);
   const [summaryCarryForwardRequest, setSummaryCarryForwardRequest] = useState<{
     meetingId: string;
     scopeKey: ScopeKey;
     template: MeetingTemplate;
     forceRegenerate: boolean;
     memory: MeetingSeriesMemoryProjection;
+    attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
   } | null>(null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -1508,6 +1523,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     summaryCarryLookupGenerationRef.current += 1;
+    setSummaryAttachmentRequest(null);
     setSummaryCarryForwardRequest(null);
   }, [meeting?.id, meetingScopeKey]);
 
@@ -1518,6 +1534,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     transcriptLines?: TranscriptLine[];
     template?: MeetingTemplate;
     carryForward?: MeetingSummaryCarryForwardAuthorization | null;
+    attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
   } = {}): Promise<void> {
     if (!meeting) return Promise.resolve();
     if (summaryInFlightRef.current) return summaryInFlightRef.current;
@@ -1541,6 +1558,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : hasExplicitCarryForward
         ? options.carryForward ?? null
         : null;
+    const hasExplicitAttachmentAuthorization = Object.prototype.hasOwnProperty.call(
+      options,
+      'attachmentAuthorization',
+    );
+    const requestedAttachmentAuthorization = options.resumeTask
+      ? options.resumeTask.attachmentAuthorization
+      : hasExplicitAttachmentAuthorization
+        ? options.attachmentAuthorization ?? null
+        : null;
     const expectedMode = isGuest ? 'guest' : 'authenticated';
     const currentMeetingScopeKey = meetingScopeKey;
     let knownTaskId = options.resumeTask?.taskId ?? null;
@@ -1553,6 +1579,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       meetingDate,
       requestedTemplate,
       requestedCarryForward,
+      requestedAttachmentAuthorization,
     );
     let operation: Promise<void> | null = null;
     operation = (async () => {
@@ -1581,12 +1608,34 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           : hasExplicitCarryForward
             ? options.carryForward ?? null
             : pending?.carryForward ?? null;
+        let attachmentAuthorization = options.resumeTask
+          ? options.resumeTask.attachmentAuthorization
+          : hasExplicitAttachmentAuthorization
+            ? options.attachmentAuthorization ?? null
+            : pending?.attachmentAuthorization ?? null;
+        if (attachmentAuthorization) {
+          const authorizationIsCurrent = Boolean(
+            currentMeetingScopeKey
+            && await meetingSummaryAttachmentAuthorizationIsCurrent({
+              scopeKey: currentMeetingScopeKey,
+              meetingId: currentMeeting.id,
+              authorization: attachmentAuthorization,
+            }),
+          );
+          if (!authorizationIsCurrent) {
+            if (pending) {
+              await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
+            }
+            throw new MeetingSummaryAttachmentSelectionStaleError();
+          }
+        }
         let fingerprint = meetingSummaryInputFingerprint(
           lines,
           currentMeeting.title,
           meetingDate,
           requestedTemplate,
           carryForward,
+          attachmentAuthorization,
         );
         if (pending && (
           pending.mode !== expectedMode
@@ -1594,16 +1643,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           || pending.templateRevision !== requestedTemplate.revision
           || pending.inputFingerprint !== fingerprint
         )) {
+          const pendingUsedAttachments = pending.attachmentAuthorization !== null;
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
           if (!isCurrentPageRequest(summaryRequest)) return;
           pending = null;
+          if (pendingUsedAttachments) throw new MeetingSummaryAttachmentSelectionStaleError();
           carryForward = requestedCarryForward;
+          attachmentAuthorization = requestedAttachmentAuthorization;
           fingerprint = meetingSummaryInputFingerprint(
             lines,
             currentMeeting.title,
             meetingDate,
             requestedTemplate,
             carryForward,
+            attachmentAuthorization,
           );
         }
         knownTaskId = pending?.taskId ?? null;
@@ -1636,6 +1689,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           transcriptLines: lines,
           template: requestedTemplate,
           carryForward,
+          attachmentAuthorization,
           isGuest,
           accessToken,
           resumeTaskId: pending?.taskId,
@@ -1652,6 +1706,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 templateRevision: requestedTemplate.revision,
                 inputFingerprint: fingerprint,
                 carryForward,
+                attachmentAuthorization,
               });
             } catch {
               if (isCurrentPageRequest(summaryRequest)) {
@@ -1814,37 +1869,33 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       && activeMeetingScopeRef.current === scopeKey;
   }
 
-  async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
-    if (!meeting) return;
-    const currentMeetingId = meeting.id;
-    const currentScopeKey = meetingScopeKey;
-    const forceRegenerate = Boolean(summary);
-    setSummaryTemplate(template);
-    setSummaryCarryForwardRequest(null);
-
-    if (!currentScopeKey) {
-      await runSummaryTask({ forceRegenerate, template, carryForward: null });
-      return;
-    }
-
+  async function continueSummaryAfterAttachmentSelection(input: {
+    meetingId: string;
+    scopeKey: ScopeKey;
+    template: MeetingTemplate;
+    forceRegenerate: boolean;
+  }, attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null): Promise<void> {
     const generation = summaryCarryLookupGenerationRef.current + 1;
     summaryCarryLookupGenerationRef.current = generation;
     try {
-      const memory = await resolveMeetingSummaryCarryForwardMemory(currentScopeKey, currentMeetingId);
-      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      const memory = await resolveMeetingSummaryCarryForwardMemory(input.scopeKey, input.meetingId);
+      if (!isActiveSummaryCarryLookup(generation, input.meetingId, input.scopeKey)) return;
       if (!memory || (memory.decisions.length === 0 && memory.pendingActions.length === 0)) {
-        await runSummaryTask({ forceRegenerate, template, carryForward: null });
+        await runSummaryTask({
+          forceRegenerate: input.forceRegenerate,
+          template: input.template,
+          carryForward: null,
+          attachmentAuthorization,
+        });
         return;
       }
       setSummaryCarryForwardRequest({
-        meetingId: currentMeetingId,
-        scopeKey: currentScopeKey,
-        template,
-        forceRegenerate,
+        ...input,
         memory,
+        attachmentAuthorization,
       });
     } catch {
-      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      if (!isActiveSummaryCarryLookup(generation, input.meetingId, input.scopeKey)) return;
       showDialog({
         title: '无法读取上次会议内容',
         message: '暂时无法检查可引用的决定和未完成事项。',
@@ -1855,11 +1906,74 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             role: 'primary',
             onPress: () => {
               if (
+                activeMeetingIdRef.current === input.meetingId
+                && activeMeetingScopeRef.current === input.scopeKey
+              ) {
+                void runSummaryTask({
+                  forceRegenerate: input.forceRegenerate,
+                  template: input.template,
+                  carryForward: null,
+                  attachmentAuthorization,
+                });
+              }
+            },
+          },
+          { text: '取消', role: 'cancel' },
+        ],
+      });
+    }
+  }
+
+  async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
+    if (!meeting) return;
+    const currentMeetingId = meeting.id;
+    const currentScopeKey = meetingScopeKey;
+    const forceRegenerate = Boolean(summary);
+    setSummaryTemplate(template);
+    setSummaryAttachmentRequest(null);
+    setSummaryCarryForwardRequest(null);
+
+    if (!currentScopeKey) {
+      await runSummaryTask({
+        forceRegenerate,
+        template,
+        carryForward: null,
+        attachmentAuthorization: null,
+      });
+      return;
+    }
+
+    const input = {
+      meetingId: currentMeetingId,
+      scopeKey: currentScopeKey,
+      template,
+      forceRegenerate,
+    };
+    const generation = summaryCarryLookupGenerationRef.current + 1;
+    summaryCarryLookupGenerationRef.current = generation;
+    try {
+      const attachments = await loadMeetingAttachments(currentScopeKey, currentMeetingId);
+      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      if (attachments.length > 0) {
+        setSummaryAttachmentRequest({ ...input, attachments });
+        return;
+      }
+      await continueSummaryAfterAttachmentSelection(input, null);
+    } catch {
+      if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      showDialog({
+        title: '无法读取附件',
+        message: '暂时无法确认本次会议的附件。',
+        tone: 'warning',
+        actions: [
+          {
+            text: '不使用，继续',
+            role: 'primary',
+            onPress: () => {
+              if (
                 activeMeetingIdRef.current === currentMeetingId
                 && activeMeetingScopeRef.current === currentScopeKey
-              ) {
-                void runSummaryTask({ forceRegenerate, template, carryForward: null });
-              }
+              ) void continueSummaryAfterAttachmentSelection(input, null);
             },
           },
           { text: '取消', role: 'cancel' },
@@ -1898,6 +2012,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           date,
           pendingTemplate,
           pending.carryForward,
+          pending.attachmentAuthorization,
         )
         : '';
       if (
@@ -3312,6 +3427,43 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           void prepareSummaryGeneration(template);
         }}
       />
+      <MeetingSummaryAttachmentSheet
+        visible={summaryAttachmentRequest !== null}
+        attachments={summaryAttachmentRequest?.attachments ?? []}
+        onClose={() => setSummaryAttachmentRequest(null)}
+        onSkip={() => {
+          const request = summaryAttachmentRequest;
+          setSummaryAttachmentRequest(null);
+          if (
+            request
+            && activeMeetingIdRef.current === request.meetingId
+            && activeMeetingScopeRef.current === request.scopeKey
+          ) void continueSummaryAfterAttachmentSelection(request, null);
+        }}
+        onAuthorize={attachmentIds => {
+          const request = summaryAttachmentRequest;
+          if (
+            !request
+            || activeMeetingIdRef.current !== request.meetingId
+            || activeMeetingScopeRef.current !== request.scopeKey
+          ) return Promise.reject(new MeetingSummaryAttachmentSelectionStaleError());
+          return authorizeMeetingSummaryAttachments({
+            scopeKey: request.scopeKey,
+            meetingId: request.meetingId,
+            attachmentIds,
+            accessToken,
+          });
+        }}
+        onCompleted={authorization => {
+          const request = summaryAttachmentRequest;
+          setSummaryAttachmentRequest(null);
+          if (
+            request
+            && activeMeetingIdRef.current === request.meetingId
+            && activeMeetingScopeRef.current === request.scopeKey
+          ) void continueSummaryAfterAttachmentSelection(request, authorization);
+        }}
+      />
       <MeetingSummaryCarryForwardSheet
         visible={summaryCarryForwardRequest !== null}
         memory={summaryCarryForwardRequest?.memory ?? null}
@@ -3328,6 +3480,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               forceRegenerate: request.forceRegenerate,
               template: request.template,
               carryForward: null,
+              attachmentAuthorization: request.attachmentAuthorization,
             });
           }
         }}
@@ -3358,6 +3511,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               forceRegenerate: request.forceRegenerate,
               template: request.template,
               carryForward,
+              attachmentAuthorization: request.attachmentAuthorization,
             });
           }
         }}

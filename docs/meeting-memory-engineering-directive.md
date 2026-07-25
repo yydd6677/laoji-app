@@ -30,7 +30,7 @@
 | 文件导入、Marker、分层分享、删除/回收站 | 音频和附件分层分享本机闭环；删除远端源码合同完成 | 模拟器；普通包对在线能力保持 fail closed | 补视频/多资产服务端、到期清理、Marker 分享和 P2 片段 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成 | 模拟器和服务端模板源码；App Lock/真机/真实模型待集中验收 | 不重做页面；只补真实运行与发现的缺陷 |
 | 讲话人 | 本场 segment/cluster 修正闭环，账号 correction 客户端框架完成 | 模拟器；远端不可达 | 实现 profile 同意、未来改善和旧会议重匹配 |
-| QA、跨会议组织、轻协作、媒体片段、时间点附件 | ORG-01 标签/分源搜索/人物与用户主题本机聚合及 ATT-01 本机附件/显式分享已闭环；其余未开始 | ORG 有 v20 和聚合夹具、ATT 有 v21 保留数据模拟器证据 | ORG 只续账号标签同步/实验 topic；推进其余独立纵切，Folder 保留需求门槛 |
+| QA、跨会议组织、轻协作、媒体片段、时间点附件 | ORG-01 标签/分源搜索/人物与用户主题本机聚合；ATT-01 本机附件、显式分享及文字附件显式整理输入已闭环 | ORG 有 v20 和聚合夹具；ATT 有 v21、选择页和 fail-closed 模拟器证据 | ATT 只续照片多模态/账号同步；ORG 只续账号标签同步/实验 topic；推进其余纵切 |
 
 ### 0.3 已完成并锁定的基础
 
@@ -86,7 +86,7 @@
 > Phase 6 已完成 ENTRY-01、ENTRY-02、TPL-01 与 SERIES-01 会前记忆的本机纵向切片。ENTRY-01 已接通日程通知中文 action、默认查看/明确记录语义、pending intent、App Lock 后置执行、统一 occurrence 用例和去重；ENTRY-02 已接通固定 scheme、严格语义链接、最小未来日程投影、近期日程 Widget、隐私标题和临时会议 Quick Settings Tile；TPL-01 已接通四个版本化内置模板、模板感知的任务身份/恢复/结果校验、不可变 Summary version 保护，以及详情页模板选择 sheet；SERIES-01 已接通规范系列身份、最近 ended 会议、最多三条决定、最多五条同系列 pending action、来源跳转、可靠决定 citation 定位、用户明确选择后带入新会议人工笔记，以及与笔记授权分离的新 Summary 历史参考选择。授权 request ID、完整项目 identity、模板和 Transcript 进入同一任务 fingerprint/pending 恢复链，服务端校验账号来源归属并回传同一 identity；有授权时不走无法接收上下文的 compact 快路径。migration v13 的逐来源实体 ledger 已实测覆盖部分重叠选择，完成原 action 后会前投影同步消失。模板与 carry-forward additive 适配已同步到共享服务器目标工作区；模板批次通过 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，carry-forward 隔离候选另通过 56 项相关合同。目标 18020/18035 服务没有启动或重启。App Lock 生物识别实测、真机/不同 ROM、成功持续录音、Tile active、ended 详情、过期投影跨时钟、账号并发冲突、真实模型四模板/历史参考输出、远端运行和新授权 sheet 的恢复数据设备交互仍未完成，因此 Phase 6 尚未满足退出条件。证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)、[`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md) 与 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
 > Phase 7 已完成 SPK-01 的本场修正纵向切片，并建立 capability-gated 账号 correction outbox 客户端框架。migration v11/v12、匿名 speaker cluster、不可变 correction/assignment、段落与本场同簇更名、游客本机名称、Summary stale 保护、realtime draft 阻止、飞书来源的修改讲话人 sheet、独立远端 Transcript revision 映射、幂等提交/退避/冲突记录均已接通；本场更名不会建立声纹资料，缺少服务端 segment 身份时也不会上传本机 hash。讲话人 correction 现已接入独立 `speaker` 阶段：本机成功、远端排队、可重试失败、明确禁用和完成分别投影为 `ready/partial`、`processing`、`failed_retryable`、`partial` 与 `ready`，详情页重试只重新唤醒该会议的 correction outbox。模拟器已完成本场修改、持久化、v10→v11→v12 迁移和最终 v13 无夹具恢复验证。远端当前不可达（先前返回 502，最终直连无 HTTP 响应），因此 capability 开启、真实账号 correction、跨设备同步、`future_profile`、旧会议重新匹配、真实中文多人准确率改善和 USB 真机仍未完成，Phase 7 尚未满足退出条件。证据见 [`implementation/contracts/phase-7-speaker-assignment-evidence.md`](implementation/contracts/phase-7-speaker-assignment-evidence.md)。
 > Phase 8 已完成 ORG-01 的两组本机纵向切片。第一组以 migration v20 接通作用域隔离的用户标签、创建/分配/改名/同名合并/删除，以及标题、标签、我的笔记、active Transcript、current Summary 和 Action 的本机分源索引；Android 以 FTS5 trigram/短词 LIKE 保留命中来源、source ID 和 Transcript 时间。第二组不新增 migration，直接从 active Transcript 派生人物、从用户标签派生主题：稳定 `speaker_profile_id` 优先；无 profile 只按 scope 内精确姓名临时聚合并标“未确认”；`Speaker 1`、本地化编号和泛化标签不会成为人物。会议列表更多菜单以单一“分类查看”入口进入人物/主题页，会议行可回到详情。模拟器夹具已验证稳定 profile 跨匿名段计数、三个有效人物、匿名编号过滤、用户主题和详情跳转；原数据库三文件随后按 SHA-256 精确恢复。Folder 仍保留需求门槛，实验模型 topic、账号标签同步和 USB 真机尚未完成，因此 ORG-01 仍记为部分完成。证据见 [`implementation/contracts/phase-8-organization-search-evidence.md`](implementation/contracts/phase-8-organization-search-evidence.md)。
-> Phase 8 也完成 ATT-01 的两组本机纵向切片：migration v21、绑定 Marker 与时间点的短文字/相册照片、应用私有文件复制、附件总览、单项删除，以及默认关闭的分层分享已接通。Marker 删除只把附件来源置空并保留时间点；可恢复删除保留附件，永久删除清理记录和私有文件。显式分享会把附件索引、原图和不含本机路径的 manifest 写入 ZIP。模拟器已完成 v20→v21、文字/照片添加、冷启动、Marker 删除保留、照片删除清理、附件分享和无夹具恢复。附件尚未作为显式 Summary 输入，且没有账号同步/USB 真机证据，因此 ATT-01 记为部分完成。证据见 [`implementation/contracts/phase-8-timepoint-attachments-evidence.md`](implementation/contracts/phase-8-timepoint-attachments-evidence.md)。
+> Phase 8 也完成 ATT-01 的三组本机纵向切片：migration v21、绑定 Marker 与时间点的短文字/相册照片、应用私有文件复制、附件总览、单项删除、默认关闭的分层分享，以及文字附件逐次授权进入整理结果。Marker 删除只把附件来源置空并保留时间点；可恢复删除保留附件，永久删除清理记录和私有文件。整理授权与分享授权分离且默认关闭，保存 request ID、附件 ID/时间点/内容/hash/更新时间并进入 v4 task fingerprint；恢复前重新核对当前附件，变化后不静默重提。服务端 overlay 把文字附件纳入 dedupe/prompt/结果 identity，并禁用不接收附件上下文的短问候与 compact 快路径；照片能力明确为 false，不以文件名冒充视觉输入。模拟器已验证零选择、照片禁用、取消后复位、当前服务未声明能力时中文 fail closed、“不使用”继续和原数据精确恢复。目标服务源码未同步或运行，真实模型、账号附件同步、照片多模态和 USB 真机仍未完成，因此 ATT-01 记为部分完成。证据见 [`implementation/contracts/phase-8-timepoint-attachments-evidence.md`](implementation/contracts/phase-8-timepoint-attachments-evidence.md) 与 [`implementation/contracts/phase-8-summary-attachments-evidence.md`](implementation/contracts/phase-8-summary-attachments-evidence.md)。
 
 > NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。真正双会议冲突已有 detached history 和“本机独立保留、日程使用云端关联”的原子恢复路径；v19 进一步把可读取的来源录音安全复制为目标 RecordingAsset，并支持 journal 恢复、多录音播放和当前录音分享。文字记录、整理结果、我的笔记和行动项仍不跨会议自动合并，服务端多资产也未实现。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同或恢复路径写成线上、跨设备或真机已验收。
 > 账号同步调度增量状态：MeetingNote 根、occurrence、人工笔记、行动项和讲话人 correction 五类 outbox 均从 SQLite 的绝对 `next_attempt_at_ms` 与 `in_flight.updated_at_ms + stale interval` 恢复 provider 定时；App 进程重启不再依赖上一次内存中的 `setTimeout`。各队列仍保持原有分组、顺序、远端身份和 blocked/permanent/conflict 门禁，持久唤醒只决定何时再次进入 claim，不绕过是否允许发送。当前仅有 TypeScript、纯时间合并合同和查询/claim 同域源码审计，尚未做真实进程强杀、系统时钟跳变、账号切换或远端恢复验证。
@@ -216,7 +216,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | ORG-01 | 标签/Folder、多场检索与聚合 | 部分完成；标签、分源搜索、人物与用户主题本机闭环 | 账号标签同步、实验模型 topic；Folder 仅在需求成立时添加 |
 | COLLAB-01 | 共享行动项与轻协作 | 未开始 | 完整纵切 |
 | CLIP-01 | Marker/Transcript 媒体片段 | 未开始 | 完整纵切 |
-| ATT-01 | 时间点照片/人工附件 | 部分完成；本机附件及默认关闭的显式分享闭环 | 显式整理输入、账号同步与真机 |
+| ATT-01 | 时间点照片/人工附件 | 部分完成；本机附件、显式分享及文字附件逐次授权整理闭环 | 照片多模态、账号同步与真机 |
 | ANDR-01 | Android 创建、录制、恢复、核对、执行闭环 | 核心主链本机闭环 | 合并剩余功能、线上能力与一次候选版收口 |
 
 上述登记表仍是完整范围。P2 改为“先实现、后由真实指标决定默认开放”，不再因缺少尚未产生的使用数据而延迟开发；明确不进入本路线的项目见第 18 节。
@@ -1532,7 +1532,9 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 - Summary 是否读取附件文字/图片必须由用户显式选择，并记录在 input fingerprint。
 - 附件分享默认关闭；删除附件不改变 Transcript 或 Summary 历史版本。
 
-当前已用 migration v21 和既有 Marker 完成本机短文字/相册照片闭环。照片在落库前复制到应用私有 `documentDirectory/meeting-attachments`，Marker 删除只断开来源而不丢失时间点；可恢复删除保留、永久删除清理。分层分享已增加默认关闭的“附件”项；只有用户显式勾选后，短文字/照片索引、原图和不含本机路径的 manifest 才进入 ZIP。Summary 仍不读取附件；下一纵切必须以独立显式开关和 input fingerprint 接入，不能直接把附件拼进既有正文。
+当前已用 migration v21 和既有 Marker 完成本机短文字/相册照片闭环。照片在落库前复制到应用私有 `documentDirectory/meeting-attachments`，Marker 删除只断开来源而不丢失时间点；可恢复删除保留、永久删除清理。分层分享已增加默认关闭的“附件”项；只有用户显式勾选后，短文字/照片索引、原图和不含本机路径的 manifest 才进入 ZIP。
+
+文字附件现以独立“选择附件”sheet 接入 Summary：每次生成默认零选择，“取消”终止，“不使用”以空附件授权继续；授权不复用分享选择。pending task 保存 request ID、附件 ID、kind、时间点、正文、SHA-256 与更新时间，全部进入 v4 fingerprint；任务恢复和提交前重新读取 SQLite，附件删除或变化后丢弃旧任务。服务端只有在 fresh capability 明确 `summary_attachments_text=true` 时才接收内容，并回传相同 `attachment_request_id`；授权请求禁用不接收额外上下文的 compact/短问候路径。当前模型链没有可靠视觉输入，因此 `summary_attachments_image=false`，照片行可见但不可选，不得以文件名或时间点冒充已读取图片。账号附件同步、真实模型文字附件质量、照片多模态和真机仍待后续。
 
 ## 12. 服务端与同步契约
 
@@ -1937,7 +1939,7 @@ openOccurrenceMeeting
 - `QA-01`：仅对锁定 Transcript/Summary revision 的单场问答，每条回答必须带可定位 citation；无证据时明确拒答。
 - `ORG-01`：标签、跨会议本机分源检索、人物和用户标签主题聚合已完成；继续账号标签同步与实验 topic，且不得把模型 topic 写回用户标签。Folder 只在大量会议需求成立时添加。
 - `COLLAB-01`：先共享单个行动项及 revision/conflict，不建设 Workspace/Channel 权限树。
-- `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片和显式分享已完成；继续把附件以独立选择接入 Summary fingerprint，并实现 CLIP。片段/附件都是派生资产，不修改原录音。
+- `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；继续照片多模态与账号同步，并实现 CLIP。片段/附件都是派生资产，不修改原录音。
 
 这些纵切各自使用独立 flag。实现完成后即可计入路线完成；真实使用数据只决定默认开放和后续深化，不决定是否允许开工。
 

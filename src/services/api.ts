@@ -11,6 +11,7 @@ import type { EventCategory } from '../utils/eventColors';
 import type { EventRecurrenceScope, MeetingSummary, TranscriptLine } from '../types';
 import {
   DEFAULT_MEETING_TEMPLATE,
+  type MeetingSummaryAttachmentAuthorization,
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingTemplate,
 } from '../domain/meeting';
@@ -474,6 +475,23 @@ function summaryCarryForwardPayload(
   };
 }
 
+function summaryAttachmentAuthorizationPayload(
+  authorization: MeetingSummaryAttachmentAuthorization | null | undefined,
+): Record<string, unknown> | null {
+  if (!authorization) return null;
+  return {
+    request_id: authorization.requestId,
+    items: authorization.items.map(item => ({
+      attachment_id: item.attachmentId,
+      kind: item.kind,
+      position_ms: item.positionMs,
+      content: item.content,
+      content_sha256: item.contentSha256,
+      updated_at_ms: item.updatedAtMs,
+    })),
+  };
+}
+
 export async function fetchMeetings(page = 1, size = 20, accessToken?: string): Promise<ApiMeeting[]> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings?page=${page}&size=${size}`),
@@ -799,6 +817,7 @@ export async function generateMeetingSummary(
   force = false,
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward?: MeetingSummaryCarryForwardAuthorization | null,
+  attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
 ): Promise<ApiMeetingSummaryTask> {
   const query = new URLSearchParams({
     summary_type: 'final',
@@ -810,7 +829,10 @@ export async function generateMeetingSummary(
     method: 'POST',
     headers: jsonHeaders(accessToken),
     signal,
-    body: JSON.stringify({ carry_forward: summaryCarryForwardPayload(carryForward) }),
+    body: JSON.stringify({
+      carry_forward: summaryCarryForwardPayload(carryForward),
+      attachment_authorization: summaryAttachmentAuthorizationPayload(attachmentAuthorization),
+    }),
   });
   if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, accessToken);
   return res.json();
@@ -841,6 +863,7 @@ export async function generateGuestMeetingSummary(
   force = false,
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward?: MeetingSummaryCarryForwardAuthorization | null,
+  attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
 ): Promise<ApiMeetingSummaryTask> {
   const res = await fetch(meetingUrl('/api/laoji/meetings/guest-summary'), {
     method: 'POST',
@@ -854,6 +877,7 @@ export async function generateGuestMeetingSummary(
       template_id: template.id,
       template_revision: template.revision,
       carry_forward: summaryCarryForwardPayload(carryForward),
+      attachment_authorization: summaryAttachmentAuthorizationPayload(attachmentAuthorization),
       transcript_lines: transcriptLines.map(line => ({
         id: line.id,
         speaker_label: line.speaker_label ?? null,
