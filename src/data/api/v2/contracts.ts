@@ -11,6 +11,7 @@ export interface MeetingCapabilities {
   actionItemsV2: boolean;
   actionItemsPullV2: boolean;
   actionCollaborationV1: boolean;
+  recordingAssetsV2: boolean;
   manualNotesV2: boolean;
   occurrenceLinksV2: boolean;
   speakerCorrections: boolean;
@@ -142,6 +143,52 @@ export interface ProcessingJobV2Response {
   error_code: string | null;
   retryable: boolean;
   result_revision_id: string | null;
+}
+
+export interface RecordingAssetV2Registration {
+  schema_version: 2;
+  client_asset_id: string;
+  role: 'primary' | 'secondary';
+  origin: 'captured' | 'imported' | 'recovered';
+  mime_type: string;
+  file_name: string;
+  byte_size: number | null;
+  duration_ms: number | null;
+  checksum_sha256: string | null;
+}
+
+export interface RemoteRecordingAssetV2 {
+  remoteId: string;
+  meetingRemoteId: string;
+  clientAssetId: string;
+  revision: number;
+  role: 'primary' | 'secondary';
+  origin: 'captured' | 'imported' | 'recovered';
+  uploadState: 'registered' | 'uploaded';
+  mimeType: string;
+  fileName: string;
+  byteSize: number | null;
+  durationMs: number | null;
+  checksumSha256: string | null;
+  contentUrl: string | null;
+  requiresAuth: boolean;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+}
+
+export interface RecordingAssetTranscriptionJobV2 {
+  jobId: string;
+  meetingRemoteId: string;
+  recordingAssetRemoteId: string;
+  stage: 'transcript';
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  attempt: number;
+  progress: number | null;
+  errorCode: string | null;
+  retryable: boolean;
+  resultRevisionId: string | null;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
 }
 
 export interface ActionItemV2Mutation {
@@ -300,6 +347,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   actionItemsV2: false,
   actionItemsPullV2: false,
   actionCollaborationV1: false,
+  recordingAssetsV2: false,
   manualNotesV2: false,
   occurrenceLinksV2: false,
   speakerCorrections: false,

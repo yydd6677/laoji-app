@@ -2087,6 +2087,26 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     return row ? recordingAssetFromRow(row) : null;
   }
 
+  async getRecordingAsset(
+    meetingId: string,
+    recordingAssetId: string,
+    scopeKey: ScopeKey,
+  ): Promise<RecordingAssetRecord | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    assertRecordId(recordingAssetId, 'recording asset ID');
+    const row = await this.database.getFirstAsync<RecordingAssetRow>(
+      `SELECT asset.* FROM recording_assets asset
+       INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+       WHERE asset.meeting_id = ? AND asset.id = ? AND meeting.scope_key = ?
+       LIMIT 1`,
+      meetingId,
+      recordingAssetId,
+      scopeKey,
+    );
+    return row ? recordingAssetFromRow(row) : null;
+  }
+
   async getTranscriptRevision(
     id: string,
     scopeKey: ScopeKey,

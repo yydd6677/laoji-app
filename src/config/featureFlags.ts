@@ -34,8 +34,8 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     localMeetingDbAccountRootWriteV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.localMeetingDbAccountRootWriteV1 === true,
-    // Account upload remains isolated from the broad write flag until the
-    // deployed root and audio contracts are verified together.
+    // Account upload remains independently reversible. Runtime writes still
+    // require a fresh recording_assets_v2 capability response.
     localMeetingDbAccountUploadWriteV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.localMeetingDbAccountUploadWriteV1 === true,

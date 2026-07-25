@@ -47,6 +47,13 @@ export function classifyMeetingAudioUploadFailure(error: unknown): MeetingAudioU
         message: '录音格式或文件内容无法上传，文件仍保存在本机。',
       };
     }
+    if (error.status === 409 || error.status === 412) {
+      return {
+        retryable: false,
+        code: 'audio_rejected',
+        message: '云端已有不同的录音资产状态，请刷新会议后再处理。本机文件不会被删除。',
+      };
+    }
     if (error.status === 403) {
       return {
         retryable: false,

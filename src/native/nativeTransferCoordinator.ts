@@ -19,6 +19,13 @@ export interface NativeMeetingUploadRequest {
   fileUri: string;
   mimeType: string;
   fileName: string;
+  protocol?: 'legacy' | 'recording-assets-v2';
+  recordingAssetId?: string;
+  recordingRole?: 'primary' | 'secondary';
+  recordingOrigin?: 'captured' | 'imported' | 'recovered';
+  expectedBytes?: number | null;
+  durationMs?: number | null;
+  checksumSha256?: string | null;
 }
 
 export interface NativeMeetingUploadRegistration extends NativeTransferLease {
@@ -108,16 +115,23 @@ export async function enqueueNativeMeetingUpload(
 ): Promise<NativeMeetingUploadRegistration | null> {
   const lease = await ensureNativeTransferLease(request.scope, request.accessToken);
   if (!lease || !nativeTransfer) return null;
-  const workId = await nativeTransfer.enqueueMeetingUpload(
-    lease.scope,
-    lease.generation,
-    request.meetingId,
-    request.remoteMeetingId?.trim() || request.meetingId,
-    request.operationId,
-    request.fileUri,
-    request.mimeType,
-    request.fileName,
-  );
+  const workId = await nativeTransfer.enqueueMeetingUpload({
+    scope: lease.scope,
+    generation: lease.generation,
+    meetingId: request.meetingId,
+    remoteMeetingId: request.remoteMeetingId?.trim() || request.meetingId,
+    operationId: request.operationId,
+    fileUri: request.fileUri,
+    mimeType: request.mimeType,
+    fileName: request.fileName,
+    protocol: request.protocol ?? 'legacy',
+    recordingAssetId: request.recordingAssetId?.trim() ?? '',
+    recordingRole: request.recordingRole ?? 'primary',
+    recordingOrigin: request.recordingOrigin ?? 'captured',
+    expectedBytes: request.expectedBytes ?? -1,
+    durationMs: request.durationMs ?? -1,
+    checksumSha256: request.checksumSha256?.trim() ?? '',
+  });
   return { ...lease, workId, operationId: request.operationId };
 }
 

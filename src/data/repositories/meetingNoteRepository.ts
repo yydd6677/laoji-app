@@ -963,6 +963,11 @@ export interface MeetingTransaction {
     stage: ProcessingStage['stage'],
   ): Promise<ProcessingStage | null>;
   getPrimaryRecording(meetingId: string, scopeKey: ScopeKey): Promise<RecordingAssetRecord | null>;
+  getRecordingAsset(
+    meetingId: string,
+    recordingAssetId: string,
+    scopeKey: ScopeKey,
+  ): Promise<RecordingAssetRecord | null>;
   getTranscriptRevision(id: string, scopeKey: ScopeKey): Promise<TranscriptRevisionRecord | null>;
   getActiveTranscriptRevision(
     meetingId: string,

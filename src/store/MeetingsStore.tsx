@@ -15,6 +15,7 @@ import { Colors as C } from '../theme/colors';
 import { formatDuration } from '../utils/meetingMedia';
 import {
   attachPendingMeetingAudioUploadRemoteIdentity,
+  attachNativeUploadRegistration,
   deletePendingMeetingAudioUpload,
   inspectPendingMeetingAudioUploads,
   derivePendingMeetingAudioUploadInspection,
@@ -23,11 +24,16 @@ import {
   restoreDeletedMeetingAudio,
   type PendingMeetingAudioUploadInspection,
   retryPendingMeetingAudioUploads,
+  upsertPendingMeetingAudioUpload,
 } from '../services/meetingRecording';
 import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
 import { HttpResponseError } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
-import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
+import {
+  cancelNativeMeetingUpload,
+  deleteNativeMeetingArtifacts,
+  enqueueNativeMeetingUpload,
+} from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 import { deleteMeetingAttachmentFiles } from '../services/meetingAttachmentStorage';
 import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
@@ -107,6 +113,10 @@ import {
 } from '../application/meeting/reconcileMeetingAudioUpload';
 import { drainMeetingRootSync } from '../services/meetingRootSync';
 import { pullMeetingRootsV2 } from '../services/meetingRootPull';
+import {
+  loadMeetingCapabilities,
+  uploadRecordingAssetV2,
+} from '../data/api/v2';
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
@@ -276,10 +286,18 @@ function audioUploadEvidence(
   const pending = inspection.pending;
   return {
     status,
-    nativeSessionId: pending.meetingId,
+    recordingAssetId: pending.recordingAssetId,
+    role: pending.role,
+    origin: pending.origin,
+    nativeSessionId: pending.nativeSessionId ?? null,
     localUri: pending.audioUri,
     mimeType: pending.mimeType,
     fileName: pending.fileName,
+    byteSize: pending.byteSize ?? null,
+    durationMs: pending.durationMs ?? null,
+    checksumSha256: pending.checksumSha256 ?? null,
+    remoteAssetId: pending.remoteAssetId ?? null,
+    remoteAssetRevision: pending.remoteAssetRevision ?? null,
     attemptCount: inspection.attemptCount,
     operationId: inspection.operationId
       ?? `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
@@ -288,6 +306,23 @@ function audioUploadEvidence(
     retryable: inspection.retryable,
     nextRetryAtMs: inspection.nextRetryAtMs,
   };
+}
+
+function recordingUploadFileName(assetId: string, uri: string, mimeType: string | null): string {
+  const raw = uri.split(/[?#]/)[0].split('/').pop() ?? '';
+  const decoded = (() => {
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  })();
+  if (/\.(wav|mp3|m4a|aac|ogg|webm|flac)$/i.test(decoded)) return decoded;
+  const mime = mimeType?.trim().toLowerCase() ?? '';
+  const extension = mime.includes('mpeg') ? 'mp3'
+    : mime.includes('mp4') || mime.includes('m4a') ? 'm4a'
+      : mime.includes('aac') ? 'aac'
+        : mime.includes('ogg') ? 'ogg'
+          : mime.includes('webm') ? 'webm'
+            : mime.includes('flac') ? 'flac'
+              : 'wav';
+  return `${assetId}.${extension}`;
 }
 
 type CaptureTransition = Extract<ProcessingStageTransition, { stage: 'capture' }>;
@@ -588,6 +623,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const canonicalStoreMutationDepthRef = useRef(0);
   const audioResumeOperationsRef = useRef(new Map<string, Promise<void>>());
   const lastAudioResumeAtRef = useRef(new Map<string, number>());
+  const audioResumePollTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const audioResumePollCountsRef = useRef(new Map<string, number>());
+  const recordingAssetCapabilityScopesRef = useRef(new Set<string>());
 
   const scope = useMemo(() => {
     if (mode === 'authenticated' && session) return `user:${session.user.id}`;
@@ -610,6 +648,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     setMeetings([]);
     setError(null);
     setLoading(false);
+    audioResumePollTimersRef.current.forEach(timer => clearTimeout(timer));
+    audioResumePollTimersRef.current.clear();
+    audioResumePollCountsRef.current.clear();
+    recordingAssetCapabilityScopesRef.current.clear();
   }, [scope]);
 
   const persistMeetings = useCallback((next: Meeting[]) => persistJson(meetingsKey, next), [meetingsKey]);
@@ -1618,15 +1660,45 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     uploadedInspections: readonly PendingMeetingAudioUploadInspection[] = [],
   ) => {
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
-    const inspectionById = new Map(inspections.map(item => [item.pending.meetingId, item]));
-    const evidenceById = new Map<string, MeetingAudioUploadEvidence>();
+    const inspectionById = new Map(inspections.map(item => [item.pending.recordingAssetId, item]));
+    const evidenceById = new Map<string, {
+      pending: PendingMeetingAudioUpload;
+      evidence: MeetingAudioUploadEvidence;
+    }>();
     uploadedInspections.forEach(item => {
-      if (!inspectionById.has(item.pending.meetingId)) {
-        evidenceById.set(item.pending.meetingId, audioUploadEvidence(item, 'uploaded'));
+      if (!inspectionById.has(item.pending.recordingAssetId)) {
+        evidenceById.set(item.pending.recordingAssetId, {
+          pending: item.pending,
+          evidence: audioUploadEvidence(item, 'uploaded'),
+        });
       }
     });
     inspections.forEach(item => {
-      evidenceById.set(item.pending.meetingId, audioUploadEvidence(item));
+      evidenceById.set(item.pending.recordingAssetId, {
+        pending: item.pending,
+        evidence: audioUploadEvidence(item),
+      });
+    });
+    const statusPriority: Record<MeetingAudioUploadEvidence['status'], number> = {
+      not_required: 0,
+      blocked: 5,
+      failed_retryable: 4,
+      uploading: 3,
+      queued: 2,
+      uploaded: 1,
+    };
+    const statusByMeeting = new Map<string, MeetingAudioUploadEvidence['status']>();
+    evidenceById.forEach(({ pending, evidence }) => {
+      const current = statusByMeeting.get(pending.meetingId);
+      if (!current || statusPriority[evidence.status] > statusPriority[current]) {
+        statusByMeeting.set(pending.meetingId, evidence.status);
+      }
+    });
+    evidenceById.forEach(entry => {
+      entry.evidence = {
+        ...entry.evidence,
+        status: statusByMeeting.get(entry.pending.meetingId) ?? entry.evidence.status,
+      };
     });
 
     const flags = getFeatureFlags();
@@ -1642,9 +1714,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       canonicalStoreMutationDepthRef.current += 1;
       try {
         let changedCount = 0;
-        for (const [legacyMeetingId, evidence] of evidenceById) {
+        for (const { pending, evidence } of evidenceById.values()) {
           if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
-          const canonicalMeetingId = projection.canonicalIdByLegacyId[legacyMeetingId]?.trim();
+          const canonicalMeetingId = pending.canonicalMeetingId?.trim()
+            || projection.canonicalIdByLegacyId[pending.meetingId]?.trim();
           if (!canonicalMeetingId) {
             throw new Error('会议上传状态缺少本机数据映射，请刷新后重试。');
           }
@@ -1676,16 +1749,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const pendingById = new Map(
-      inspections
-        .filter(item => item.phase !== 'uploaded')
-        .map(item => [item.pending.meetingId, item]),
-    );
+    const pendingById = new Map<string, readonly PendingMeetingAudioUploadInspection[]>();
+    inspections.filter(item => item.phase !== 'uploaded').forEach(item => {
+      pendingById.set(item.pending.meetingId, [
+        ...(pendingById.get(item.pending.meetingId) ?? []),
+        item,
+      ]);
+    });
     let changed = false;
     const next = meetingsRef.current.map(meeting => {
-      const inspection = pendingById.get(meeting.id);
-      const audioSyncPending = Boolean(inspection);
-      const audioSyncBlocked = inspection?.phase === 'blocked';
+      const meetingInspections = pendingById.get(meeting.id) ?? [];
+      const audioSyncPending = meetingInspections.length > 0;
+      const audioSyncBlocked = meetingInspections.some(item => item.phase === 'blocked');
       const tags = tagsForAudioSync(meeting.tags, audioSyncPending, audioSyncBlocked);
       const hasMatchingTag = meeting.tags.some(tag => tag.label === '待上传') === audioSyncPending;
       const hasMatchingBlockedTag = meeting.tags.some(tag => tag.label === '上传受阻') === audioSyncBlocked;
@@ -1711,8 +1786,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
     if (isScopeKey(scope) && (changed || evidenceById.size > 0)) {
       await mirrorMeetingProjections(scope, next);
-      for (const [legacyMeetingId, evidence] of evidenceById) {
-        const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeetingId, scope);
+      for (const { pending, evidence } of evidenceById.values()) {
+        const aggregate = pending.canonicalMeetingId
+          ? await sqliteMeetingNoteRepository.get(pending.canonicalMeetingId, scope)
+          : await sqliteMeetingNoteRepository.findByNativeSessionId(pending.meetingId, scope);
         if (!aggregate || aggregate.note.lifecycle === 'deleted') continue;
         await reconcileCanonicalMeetingAudioUpload.execute({
           meetingId: aggregate.note.id,
@@ -1754,7 +1831,47 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const operationGeneration = generationRef.current;
 
     let operation: Promise<void>;
+    let shouldPollNativeUploads = false;
     operation = (async () => {
+      const flags = getFeatureFlags();
+      if (flags.localMeetingDbAccountUploadWriteV1 && isScopeKey(scope)) {
+        const projection = canonicalReadProjectionRef.current;
+        if (!projection) return;
+        for (const meeting of projection.meetings) {
+          const canonicalMeetingId = projection.canonicalIdByLegacyId[meeting.id]?.trim();
+          if (!canonicalMeetingId) continue;
+          const aggregate = await sqliteMeetingNoteRepository.get(canonicalMeetingId, scope);
+          if (!aggregate || aggregate.note.lifecycle === 'deleted') continue;
+          for (const asset of aggregate.recordingAssets) {
+            if (
+              asset.localState !== 'local_ready'
+              || !asset.localUri
+              || asset.remoteAssetId
+            ) continue;
+            await upsertPendingMeetingAudioUpload(scope, {
+              meetingId: meeting.id,
+              canonicalMeetingId,
+              remoteMeetingId: aggregate.note.remoteId?.trim() || undefined,
+              recordingAssetId: asset.id,
+              role: asset.role,
+              origin: asset.origin,
+              nativeSessionId: asset.nativeSessionId ?? undefined,
+              audioUri: asset.localUri,
+              fileName: asset.fileName
+                ?? recordingUploadFileName(asset.id, asset.localUri, asset.mimeType),
+              mimeType: asset.mimeType?.trim() || 'audio/wav',
+              byteSize: asset.byteSize ?? undefined,
+              durationMs: asset.durationMs ?? undefined,
+              checksumSha256: asset.checksumSha256 ?? undefined,
+              createdAt: new Date(asset.createdAtMs).toISOString(),
+              lastAttemptAt: new Date(0).toISOString(),
+              attemptCount: 0,
+              uploadState: 'pending',
+            });
+          }
+        }
+      }
+
       let before = await listPendingMeetingAudioUploads(scope);
       let remoteIdentityChanged = false;
       if (getFeatureFlags().localMeetingDbV1 && isScopeKey(scope)) {
@@ -1774,23 +1891,102 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (remoteIdentityChanged) before = await listPendingMeetingAudioUploads(scope);
+
+      if (flags.localMeetingDbAccountUploadWriteV1) {
+        let recordingAssetsV2Ready = recordingAssetCapabilityScopesRef.current.has(scope);
+        if (!recordingAssetsV2Ready) {
+          const capability = await loadMeetingCapabilities({
+            accessToken,
+            forceRefresh: true,
+            allowStaleOnError: false,
+          }).catch(() => null);
+          recordingAssetsV2Ready = capability?.source === 'remote'
+            && capability.capabilities.recordingAssetsV2;
+          if (recordingAssetsV2Ready) recordingAssetCapabilityScopesRef.current.add(scope);
+        }
+        if (!recordingAssetsV2Ready) {
+          const unavailableInspections = await inspectPendingMeetingAudioUploads(before);
+          if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+          await reconcilePendingAudioUploads(unavailableInspections, operationGeneration);
+          return;
+        }
+
+        for (const pending of before) {
+          if (pending.nativeWorkId || !pending.remoteMeetingId) continue;
+          try {
+            const registration = await enqueueNativeMeetingUpload({
+              scope,
+              accessToken,
+              meetingId: pending.meetingId,
+              remoteMeetingId: pending.remoteMeetingId,
+              operationId: `recording-asset:${pending.recordingAssetId}:${pending.createdAt}`,
+              fileUri: pending.audioUri,
+              mimeType: pending.mimeType,
+              fileName: pending.fileName,
+              protocol: 'recording-assets-v2',
+              recordingAssetId: pending.recordingAssetId,
+              recordingRole: pending.role,
+              recordingOrigin: pending.origin,
+              expectedBytes: pending.byteSize ?? null,
+              durationMs: pending.durationMs ?? null,
+              checksumSha256: pending.checksumSha256 ?? null,
+            });
+            if (registration) {
+              const attached = await attachNativeUploadRegistration(
+                scope,
+                pending.recordingAssetId,
+                registration,
+              );
+              if (!attached) await cancelNativeMeetingUpload(registration.workId).catch(() => {});
+            }
+          } catch (reason) {
+            diagnosticWarn('[recording-assets-v2] native upload enqueue failed', reason);
+          }
+        }
+        before = await listPendingMeetingAudioUploads(scope);
+      }
+
       const beforeInspections = await inspectPendingMeetingAudioUploads(before);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       await reconcilePendingAudioUploads(beforeInspections, operationGeneration);
-      if (before.length === 0) return;
+      if (before.length === 0) {
+        audioResumePollCountsRef.current.delete(operationKey);
+        return;
+      }
 
       const result = await retryPendingMeetingAudioUploads(
         scope,
         accessToken,
-        (pending, token) => uploadMeetingAudio(
-          pending.remoteMeetingId ?? pending.meetingId,
-          pending.audioUri,
-          token,
-          { fileName: pending.fileName, mimeType: pending.mimeType },
-        ),
+        (pending, token) => flags.localMeetingDbAccountUploadWriteV1
+          ? uploadRecordingAssetV2({
+              accessToken: token,
+              meetingRemoteId: pending.remoteMeetingId!,
+              registerIdempotencyKey: `recording-asset-register:${pending.recordingAssetId}`,
+              contentIdempotencyKey: `recording-asset-content:${pending.recordingAssetId}`,
+              registration: {
+                schema_version: 2,
+                client_asset_id: pending.recordingAssetId,
+                role: pending.role,
+                origin: pending.origin,
+                mime_type: pending.mimeType,
+                file_name: pending.fileName,
+                byte_size: pending.byteSize ?? null,
+                duration_ms: pending.durationMs ?? null,
+                checksum_sha256: pending.checksumSha256 ?? null,
+              },
+              audioUri: pending.audioUri,
+            })
+          : uploadMeetingAudio(
+              pending.remoteMeetingId ?? pending.meetingId,
+              pending.audioUri,
+              token,
+              { fileName: pending.fileName, mimeType: pending.mimeType },
+            ),
         2,
       );
       const after = await listPendingMeetingAudioUploads(scope);
+      shouldPollNativeUploads = after.some(item => Boolean(item.nativeWorkId));
+      if (!shouldPollNativeUploads) audioResumePollCountsRef.current.delete(operationKey);
       const afterInspections = await inspectPendingMeetingAudioUploads(after);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       if (
@@ -1800,12 +1996,28 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         await refreshMeetingsFromCloud();
       }
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
-      const uploadedIds = new Set(result.uploadedIds);
-      const uploadedInspections = beforeInspections.filter(item => uploadedIds.has(item.pending.meetingId));
+      const uploadedInspections = result.uploaded.map(item => (
+        derivePendingMeetingAudioUploadInspection(item, null)
+      ));
       await reconcilePendingAudioUploads(afterInspections, operationGeneration, uploadedInspections);
     })().finally(() => {
       if (audioResumeOperationsRef.current.get(operationKey) === operation) {
         audioResumeOperationsRef.current.delete(operationKey);
+      }
+      if (
+        shouldPollNativeUploads
+        && generationRef.current === operationGeneration
+        && activeScopeRef.current === scope
+      ) {
+        const count = audioResumePollCountsRef.current.get(operationKey) ?? 0;
+        if (count < 24 && !audioResumePollTimersRef.current.has(operationKey)) {
+          audioResumePollCountsRef.current.set(operationKey, count + 1);
+          const timer = setTimeout(() => {
+            audioResumePollTimersRef.current.delete(operationKey);
+            void resumePendingAudioUploads(true).catch(() => {});
+          }, 5_000);
+          audioResumePollTimersRef.current.set(operationKey, timer);
+        }
       }
     });
     audioResumeOperationsRef.current.set(operationKey, operation);
@@ -1814,17 +2026,16 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   const reconcileAudioUploads = useCallback(async (uploaded?: PendingMeetingAudioUpload) => {
     const operationGeneration = generationRef.current;
+    if (uploaded) {
+      if (activeScopeRef.current !== scope) return;
+      await reconcilePendingAudioUploads(
+        [],
+        operationGeneration,
+        [derivePendingMeetingAudioUploadInspection(uploaded, null)],
+      );
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+    }
     await resumePendingAudioUploads(true);
-    if (
-      !uploaded
-      || generationRef.current !== operationGeneration
-      || activeScopeRef.current !== scope
-    ) return;
-    await reconcilePendingAudioUploads(
-      [],
-      operationGeneration,
-      [derivePendingMeetingAudioUploadInspection(uploaded, null)],
-    );
   }, [reconcilePendingAudioUploads, resumePendingAudioUploads, scope]);
 
   const refreshMeetings = useCallback(async () => {

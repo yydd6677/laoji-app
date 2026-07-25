@@ -139,6 +139,10 @@ import {
 import { legacyMeetingProcessingStatuses } from '../services/meetingPresentation';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCache';
+import {
+  listRecordingAssetsV2,
+  loadMeetingCapabilities,
+} from '../data/api/v2';
 import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
 import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
 import { deleteMeetingMarker, loadMeetingMarkers } from '../services/meetingMarkers';
@@ -447,6 +451,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     getCachedSummary,
     saveCachedSummary,
     refreshMeetings,
+    reconcileAudioUploads,
     updateMeetingTitle,
   } = useMeetings();
   const { events, searchableEvents } = useEvents();
@@ -1440,6 +1445,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ? canonicalProcessingSnapshot.recordingAssets
       : [];
     const localSources: MinutesPlayerSourceSnapshot[] = [];
+    const localSourceIdByAsset = new Map<string, string>();
     const seenUris = new Set<string>();
     if (meeting.audioLocalUri) {
       seenUris.add(meeting.audioLocalUri);
@@ -1456,9 +1462,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       .filter(asset => asset.localState === 'local_ready' && Boolean(asset.localUri))
       .forEach(asset => {
         const uri = asset.localUri!;
-        if (seenUris.has(uri)) return;
+        if (seenUris.has(uri)) {
+          const existing = localSources.find(source => source.uri === uri);
+          if (existing) localSourceIdByAsset.set(asset.id, existing.sourceId);
+          return;
+        }
         seenUris.add(uri);
-        localSources.push(localPlayerSource(
+        const source = localPlayerSource(
           meeting.id,
           displayMeetingTitle(meeting.title),
           uri,
@@ -1468,7 +1478,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             sourceId: asset.role === 'primary' ? `local:${meeting.id}` : `asset:${asset.id}`,
             localOnly: asset.remoteAssetId === null,
           },
-        ));
+        );
+        localSources.push(source);
+        localSourceIdByAsset.set(asset.id, source.sourceId);
       });
     const labelSources = (sources: readonly MinutesPlayerSourceSnapshot[]) => sources.map((source, index) => ({
       ...source,
@@ -1485,10 +1497,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ));
     };
     commitSources(localSources);
-    const hasPrimaryLocal = Boolean(meeting.audioLocalUri) || canonicalAssets.some(asset => (
-      asset.role === 'primary' && asset.localState === 'local_ready' && Boolean(asset.localUri)
-    ));
-    if (hasPrimaryLocal || isGuest || !accessToken) {
+    if (isGuest || !accessToken) {
       setLoadingAudio(false);
       return () => { alive = false; };
     }
@@ -1498,33 +1507,99 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       if (localSources.length === 0) setPlayerSourceError('会议正在同步，请稍后重试。');
       return () => { alive = false; };
     }
-    void fetchMeetingAudioInfo(remoteMeetingId, accessToken)
-      .then(async info => {
-        if (!alive || !info) return;
-        if (!playbackStorageScope) return;
-        const localUri = await materializeMeetingPlaybackAudio({
-          meetingId: meeting.id,
-          meetingUpdatedAt: meeting.updatedAt,
-          audio: info,
+    void (async () => {
+      const capability = await loadMeetingCapabilities({
+        accessToken,
+        forceRefresh: true,
+        allowStaleOnError: false,
+      }).catch(() => null);
+      if (capability?.source === 'remote' && capability.capabilities.recordingAssetsV2) {
+        const remoteAssets = await listRecordingAssetsV2({
           accessToken,
+          meetingRemoteId: remoteMeetingId,
         });
+        const matchedLocalSourceIds = new Set<string>();
+        const remoteSources: MinutesPlayerSourceSnapshot[] = [];
+        let remoteDownloadFailed = false;
+        for (const asset of remoteAssets) {
+          if (asset.uploadState !== 'uploaded' || !asset.contentUrl) continue;
+          const localSourceId = localSourceIdByAsset.get(asset.clientAssetId);
+          if (localSourceId) {
+            matchedLocalSourceIds.add(localSourceId);
+            const local = localSources.find(source => source.sourceId === localSourceId);
+            if (local && !remoteSources.some(source => source.sourceId === local.sourceId)) {
+              remoteSources.push({ ...local, localOnly: false });
+            }
+            continue;
+          }
+          try {
+            const localUri = await materializeMeetingPlaybackAudio({
+              meetingId: `${meeting.id}-${asset.remoteId}`,
+              meetingUpdatedAt: new Date(asset.serverUpdatedAtMs).toISOString(),
+              audio: {
+                url: asset.contentUrl,
+                mime_type: asset.mimeType,
+                duration_sec: asset.durationMs === null ? null : asset.durationMs / 1_000,
+                file_name: asset.fileName,
+                expires_at: null,
+                requires_auth: true,
+              },
+              accessToken,
+            });
+            if (!alive) return;
+            remoteSources.push({
+              sourceId: `remote-asset:${asset.remoteId}`,
+              uri: localUri,
+              localOnly: false,
+              title: displayMeetingTitle(meeting.title),
+              durationMsHint: asset.durationMs ?? undefined,
+              retainForBackground: true,
+              storageScope: playbackStorageScope,
+            });
+          } catch {
+            remoteDownloadFailed = true;
+          }
+        }
         if (!alive) return;
-        const cloudSource: MinutesPlayerSourceSnapshot = {
-          sourceId: `cloud:${meeting.id}`,
-          uri: localUri,
-          label: '录音 1',
-          localOnly: false,
-          title: displayMeetingTitle(meeting.title),
-          durationMsHint: info.duration_sec ? Math.round(info.duration_sec * 1000) : undefined,
-          retainForBackground: true,
-          storageScope: playbackStorageScope,
-        };
-        commitSources([
-          cloudSource,
-          ...localSources.filter(source => source.uri !== cloudSource.uri),
-        ]);
-        setPlayerSourceError('');
-      })
+        const unmatchedLocal = localSources
+          .filter(source => !matchedLocalSourceIds.has(source.sourceId))
+          .map(source => ({ ...source, localOnly: true }));
+        const merged = [...remoteSources, ...unmatchedLocal];
+        commitSources(merged);
+        setPlayerSourceError(remoteDownloadFailed
+          ? merged.length > 0
+            ? '部分云端录音加载失败，本机录音仍可播放。'
+            : '录音文件加载失败，请稍后重试。'
+          : '');
+        return;
+      }
+
+      const hasPrimaryLocal = Boolean(meeting.audioLocalUri) || canonicalAssets.some(asset => (
+        asset.role === 'primary' && asset.localState === 'local_ready' && Boolean(asset.localUri)
+      ));
+      if (hasPrimaryLocal) return;
+      const info = await fetchMeetingAudioInfo(remoteMeetingId, accessToken);
+      if (!alive || !info) return;
+      const localUri = await materializeMeetingPlaybackAudio({
+        meetingId: meeting.id,
+        meetingUpdatedAt: meeting.updatedAt,
+        audio: info,
+        accessToken,
+      });
+      if (!alive) return;
+      const cloudSource: MinutesPlayerSourceSnapshot = {
+        sourceId: `cloud:${meeting.id}`,
+        uri: localUri,
+        label: '录音 1',
+        localOnly: false,
+        title: displayMeetingTitle(meeting.title),
+        durationMsHint: info.duration_sec ? Math.round(info.duration_sec * 1000) : undefined,
+        retainForBackground: true,
+        storageScope: playbackStorageScope,
+      };
+      commitSources([cloudSource, ...localSources.filter(source => source.uri !== cloudSource.uri)]);
+      setPlayerSourceError('');
+    })()
       .catch(() => {
         if (alive) {
           commitSources(localSources);
@@ -1548,9 +1623,29 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     let operation: Promise<void> | null = null;
     operation = (async () => {
       try {
+        if (getFeatureFlags().localMeetingDbAccountUploadWriteV1) {
+          await reconcileAudioUploads();
+          const latest = await getPendingMeetingAudioUpload(
+            recordingStorageScope,
+            pending.meetingId,
+            pending.recordingAssetId,
+          );
+          if (mountedRef.current) {
+            setPendingAudioUpload(latest);
+            setPendingAudioError(latest?.failureMessage
+              ? readableErrorMessage(latest.failureMessage, '自动同步未完成，录音仍保存在本机')
+              : '');
+          }
+          if (notifyUser && mountedRef.current) {
+            showDialog(latest
+              ? { title: '正在后台同步', message: '录音将在后台继续上传。', tone: 'info' }
+              : { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
+          }
+          return;
+        }
         const uploaded = await retryPendingMeetingAudioUpload(
           recordingStorageScope,
-          pending.meetingId,
+          pending.recordingAssetId,
           accessToken,
           (item, token) => uploadMeetingAudio(
             item.remoteMeetingId ?? item.meetingId,
@@ -1569,7 +1664,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             ? readableErrorMessage(stillPending.failureMessage, '自动同步未完成，录音仍保存在本机')
             : '');
         }
-        if (uploaded) await refreshMeetings();
+        if (uploaded) await reconcileAudioUploads(uploaded);
         if (notifyUser && mountedRef.current) {
           showDialog(uploaded
             ? { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' }
@@ -1601,7 +1696,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })();
     uploadInFlightRef.current = operation;
     return operation;
-  }, [accessToken, recordingStorageScope, refreshMeetings, showDialog]);
+  }, [accessToken, reconcileAudioUploads, recordingStorageScope, showDialog]);
 
   useEffect(() => {
     let alive = true;
@@ -1636,7 +1731,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       alive = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [accessToken, isGuest, meeting?.id, performPendingAudioUpload, recordingStorageScope, reloadKey]);
+  }, [accessToken, isGuest, meeting?.id, meeting?.updatedAt, performPendingAudioUpload, recordingStorageScope, reloadKey]);
 
   useEffect(() => { autoResumeTaskRef.current = ''; }, [meeting?.id, recordingStorageScope]);
 

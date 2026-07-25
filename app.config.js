@@ -37,7 +37,7 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 103,
+    versionCode: 104,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
@@ -196,7 +196,7 @@ module.exports = () => {
     );
   const localMeetingDbAccountUploadWriteV1 = localMeetingDbCanonicalWriteV1
     && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_UPLOAD_WRITE_V1 ?? 'false').trim().toLowerCase(),
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_UPLOAD_WRITE_V1 ?? 'true').trim().toLowerCase(),
     );
   const meetingQuestionsV1 = localMeetingDbCanonicalReadV1 && !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_MEETING_QUESTIONS_V1 ?? 'true').trim().toLowerCase(),

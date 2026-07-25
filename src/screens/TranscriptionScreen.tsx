@@ -146,6 +146,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     getCachedSummary,
     saveCachedSummary,
     refreshMeetings,
+    reconcileAudioUploads,
   } = useMeetings();
   const { accessToken, isGuest, session } = useAuth();
   const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
@@ -270,9 +271,29 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     let operation: Promise<void> | null = null;
     operation = (async () => {
       try {
+        if (getFeatureFlags().localMeetingDbAccountUploadWriteV1) {
+          await reconcileAudioUploads();
+          const latest = await getPendingMeetingAudioUpload(
+            recordingStorageScope,
+            pending.meetingId,
+            pending.recordingAssetId,
+          );
+          if (mountedRef.current) {
+            setPendingAudioUpload(latest);
+            setPendingAudioError(latest?.failureMessage
+              ? readableErrorMessage(latest.failureMessage, '自动同步未完成，录音仍保存在本机')
+              : '');
+          }
+          if (notifyUser && mountedRef.current) {
+            showDialog(latest
+              ? { title: '正在后台同步', message: '录音将在后台继续上传。', tone: 'info' }
+              : { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
+          }
+          return;
+        }
         const uploaded = await retryPendingMeetingAudioUpload(
           recordingStorageScope,
-          pending.meetingId,
+          pending.recordingAssetId,
           accessToken,
           (item, token) => uploadMeetingAudio(
             item.remoteMeetingId ?? item.meetingId,
@@ -291,7 +312,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             ? readableErrorMessage(stillPending.failureMessage, '自动同步未完成，录音仍保存在本机')
             : '');
         }
-        if (uploaded) await refreshMeetings();
+        if (uploaded) await reconcileAudioUploads(uploaded);
         if (uploaded && notifyUser && mountedRef.current) {
           showDialog({ title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
         }
@@ -329,7 +350,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })();
     audioUploadUiPromiseRef.current = operation;
     return operation;
-  }, [accessToken, recordingStorageScope, refreshMeetings, showDialog]);
+  }, [accessToken, reconcileAudioUploads, recordingStorageScope, showDialog]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -476,7 +497,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       alive = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [accessToken, isGuest, m?.id, performPendingAudioUpload, recordingStorageScope, reloadKey]);
+  }, [accessToken, isGuest, m?.id, m?.updatedAt, performPendingAudioUpload, recordingStorageScope, reloadKey]);
 
   useEffect(() => {
     autoResumeTaskRef.current = '';

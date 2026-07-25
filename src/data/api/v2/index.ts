@@ -1,4 +1,5 @@
 export * from './capabilities';
+export * from './recordingAssets';
 export * from './occurrenceLinks';
 export * from './actionItems';
 export * from './actionCollaboration';

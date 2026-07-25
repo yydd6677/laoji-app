@@ -12,13 +12,16 @@ import {
   importGuestMeetingData,
   saveEvent,
   updateMeeting,
-  uploadMeetingAudio,
 } from './api';
 import { getAppStorageItem, writeAppStorageJson } from './appStorage';
 import { calEventToApiEvent, eventSeriesDraft } from './eventMapper';
 import { mirrorLegacyMeetingCreated } from './meetingStageMirror';
 import type { CalendarMeetingContext } from './occurrenceMeeting';
 import { requestMeetingOccurrenceSync } from '../application/meeting/occurrenceSyncTrigger';
+import {
+  loadMeetingCapabilities,
+  uploadRecordingAssetV2,
+} from '../data/api/v2';
 
 const GUEST_EVENTS_KEY = '@laoji:guestEvents:v1';
 const GUEST_MEETINGS_KEY = '@laoji:meetings:v2:guest';
@@ -597,6 +600,13 @@ export async function migrateGuestData(
   let migratedEvents = 0;
   let migratedMeetings = 0;
   let failedItems = 0;
+  const recordingAssetCapability = await loadMeetingCapabilities({
+    accessToken,
+    forceRefresh: true,
+    allowStaleOnError: false,
+  }).catch(() => null);
+  const canUploadRecordingAssets = recordingAssetCapability?.source === 'remote'
+    && recordingAssetCapability.capabilities.recordingAssetsV2;
 
   // Events are completed first so every meeting occurrence can be rebuilt with
   // a durable guest-source -> cloud-source mapping.
@@ -793,11 +803,32 @@ export async function migrateGuestData(
 
     if (!state.audioUploaded && meeting.audioLocalUri) {
       try {
+        if (!canUploadRecordingAssets) throw new Error('当前会议服务暂不支持录音迁移。');
         const info = await FileSystem.getInfoAsync(meeting.audioLocalUri);
         if (!info.exists) throw new Error('访客录音文件已不存在，无法迁移该录音。');
-        await uploadMeetingAudio(cloudMeetingId, meeting.audioLocalUri, accessToken, {
-          fileName: `${cloudMeetingId}.wav`,
-          mimeType: 'audio/wav',
+        const clientAssetId = `guest-migration:${meeting.id}:primary`;
+        await uploadRecordingAssetV2({
+          accessToken,
+          meetingRemoteId: cloudMeetingId,
+          registerIdempotencyKey: `guest-recording-register:${meeting.id}`,
+          contentIdempotencyKey: `guest-recording-content:${meeting.id}`,
+          registration: {
+            schema_version: 2,
+            client_asset_id: clientAssetId,
+            role: 'primary',
+            origin: 'captured',
+            mime_type: 'audio/wav',
+            file_name: `${meeting.id}.wav`,
+            byte_size: typeof info.size === 'number' && Number.isSafeInteger(info.size)
+              ? info.size
+              : null,
+            duration_ms: typeof meeting.audioDurationSec === 'number'
+              && Number.isFinite(meeting.audioDurationSec)
+              ? Math.max(0, Math.round(meeting.audioDurationSec * 1_000))
+              : null,
+            checksum_sha256: null,
+          },
+          audioUri: meeting.audioLocalUri,
         });
         state.audioUploaded = true;
         clearPhaseError(state, 'audio');

@@ -6,9 +6,7 @@ import type {
 import {
   assertProcessingStage,
   assertScopeKey,
-  secureClientIdFactory,
   transitionProcessingStage,
-  type ClientIdFactory,
 } from '../../domain/meeting';
 import type {
   MeetingNoteAggregate,
@@ -18,10 +16,18 @@ import type {
 
 export interface MeetingAudioUploadEvidence {
   status: UploadStatus;
+  recordingAssetId: string;
+  role?: RecordingAssetRecord['role'];
+  origin?: RecordingAssetRecord['origin'];
   nativeSessionId?: string | null;
   localUri?: string | null;
   mimeType?: string | null;
   fileName?: string | null;
+  byteSize?: number | null;
+  durationMs?: number | null;
+  checksumSha256?: string | null;
+  remoteAssetId?: string | null;
+  remoteAssetRevision?: number | null;
   attemptCount: number;
   operationId?: string | null;
   credentialGeneration?: number | null;
@@ -45,7 +51,6 @@ export interface ReconcileMeetingAudioUploadResult {
 
 export interface ReconcileMeetingAudioUploadDependencies {
   repository: MeetingNoteRepository;
-  idFactory?: ClientIdFactory;
   now?: () => number;
 }
 
@@ -120,12 +125,10 @@ function uploadMessageKey(status: UploadStatus): string | null {
 
 export class ReconcileMeetingAudioUploadUseCase {
   private readonly repository: MeetingNoteRepository;
-  private readonly idFactory: ClientIdFactory;
   private readonly now: () => number;
 
   constructor(dependencies: ReconcileMeetingAudioUploadDependencies) {
     this.repository = dependencies.repository;
-    this.idFactory = dependencies.idFactory ?? secureClientIdFactory;
     this.now = dependencies.now ?? Date.now;
   }
 
@@ -136,6 +139,12 @@ export class ReconcileMeetingAudioUploadUseCase {
     }
     const meetingId = input.meetingId.trim();
     if (!meetingId) throw new Error('meeting ID is invalid');
+    const recordingAssetId = optionalText(
+      input.evidence.recordingAssetId,
+      512,
+      'recording asset ID',
+    );
+    if (!recordingAssetId) throw new Error('recording asset ID is invalid');
     assertAttemptCount(input.evidence.attemptCount);
 
     const operationId = optionalText(input.evidence.operationId, 2_000, 'meeting upload operation ID');
@@ -147,6 +156,22 @@ export class ReconcileMeetingAudioUploadUseCase {
     const localUri = optionalText(input.evidence.localUri, 16_384, 'recording local URI');
     const mimeType = optionalText(input.evidence.mimeType, 512, 'recording MIME type');
     const fileName = optionalText(input.evidence.fileName, 2_000, 'recording file name');
+    const byteSize = optionalTimestamp(input.evidence.byteSize, 'recording byte size');
+    const durationMs = optionalTimestamp(input.evidence.durationMs, 'recording duration');
+    const checksumSha256 = optionalText(
+      input.evidence.checksumSha256,
+      128,
+      'recording checksum',
+    );
+    if (checksumSha256 && !/^sha256:[0-9a-f]{64}$/i.test(checksumSha256)) {
+      throw new Error('recording checksum is invalid');
+    }
+    const remoteAssetId = optionalText(
+      input.evidence.remoteAssetId,
+      512,
+      'recording remote asset ID',
+    );
+    optionalTimestamp(input.evidence.remoteAssetRevision, 'recording remote asset revision');
     const errorCode = optionalText(input.evidence.errorCode, 512, 'meeting upload error code');
     const nextRetryAtMs = optionalTimestamp(
       input.evidence.nextRetryAtMs,
@@ -162,9 +187,25 @@ export class ReconcileMeetingAudioUploadUseCase {
       if (meeting.lifecycle === 'deleted') throw new Error('deleted meeting cannot accept upload work');
       const currentUpload = await transaction.getStage(meetingId, input.scopeKey, 'upload');
       if (!currentUpload) throw new Error('meeting upload processing stage is missing');
-      const existingAsset = await transaction.getPrimaryRecording(meetingId, input.scopeKey);
+      const existingAsset = recordingAssetId.startsWith('legacy-primary:')
+        ? await transaction.getPrimaryRecording(meetingId, input.scopeKey)
+        : await transaction.getRecordingAsset(meetingId, recordingAssetId, input.scopeKey);
       if (!existingAsset && !localUri && input.evidence.status !== 'uploaded') {
         throw new Error('meeting upload requires a local recording asset');
+      }
+      if (
+        existingAsset
+        && input.evidence.role
+        && existingAsset.role !== input.evidence.role
+      ) {
+        throw new Error('meeting upload recording role is inconsistent');
+      }
+      if (
+        existingAsset
+        && input.evidence.origin
+        && existingAsset.origin !== input.evidence.origin
+      ) {
+        throw new Error('meeting upload recording origin is inconsistent');
       }
       if (
         existingAsset?.nativeSessionId
@@ -180,6 +221,13 @@ export class ReconcileMeetingAudioUploadUseCase {
         && currentUpload.jobId === operationId
       ) {
         throw new Error('meeting upload local asset changed within one operation');
+      }
+      if (
+        existingAsset?.remoteAssetId
+        && remoteAssetId
+        && existingAsset.remoteAssetId !== remoteAssetId
+      ) {
+        throw new Error('meeting upload remote asset identity changed');
       }
 
       const clockMs = this.now();
@@ -225,24 +273,26 @@ export class ReconcileMeetingAudioUploadUseCase {
       const effectiveLocalUri = localUri ?? existingAsset?.localUri ?? null;
       const localFileMissing = effectiveStatus === 'blocked' && errorCode === 'file_missing';
       const nextAsset: RecordingAssetRecord = {
-        id: existingAsset?.id ?? this.idFactory.create(),
+        id: existingAsset?.id ?? recordingAssetId,
         meetingId,
-        role: 'primary',
-        origin: existingAsset?.origin ?? 'captured',
+        role: existingAsset?.role ?? input.evidence.role ?? 'primary',
+        origin: existingAsset?.origin ?? input.evidence.origin ?? 'captured',
         nativeSessionId: nativeSessionId ?? existingAsset?.nativeSessionId ?? null,
         localUri: effectiveLocalUri,
-        remoteAssetId: existingAsset?.remoteAssetId ?? null,
+        remoteAssetId: remoteAssetId ?? existingAsset?.remoteAssetId ?? null,
         mimeType: mimeType ?? existingAsset?.mimeType ?? null,
         fileName: fileName ?? existingAsset?.fileName ?? null,
-        byteSize: existingAsset?.byteSize ?? null,
-        durationMs: existingAsset?.durationMs ?? null,
-        checksumSha256: existingAsset?.checksumSha256 ?? null,
+        byteSize: byteSize ?? existingAsset?.byteSize ?? null,
+        durationMs: durationMs ?? existingAsset?.durationMs ?? null,
+        checksumSha256: checksumSha256?.toLowerCase() ?? existingAsset?.checksumSha256 ?? null,
         waveformJson: existingAsset?.waveformJson ?? null,
         localState: localFileMissing
           ? 'missing'
           : effectiveLocalUri
             ? 'local_ready'
-            : 'remote_only',
+            : remoteAssetId || existingAsset?.remoteAssetId
+              ? 'remote_only'
+              : existingAsset?.localState ?? 'missing',
         createdAtMs: existingAsset?.createdAtMs ?? updatedAtMs,
         updatedAtMs,
         lastVerifiedAtMs: localFileMissing
