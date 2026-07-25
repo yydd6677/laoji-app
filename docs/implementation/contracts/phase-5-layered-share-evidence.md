@@ -4,12 +4,13 @@
 
 ## 当前范围
 
-- Android 原生详情和通用详情复用同一个 `MeetingShareSheet`，按“基本会议信息 / 整理结果 / 行动项 / 文字记录 / 录音 / 我的笔记”六类内容逐项表达可用、选中和禁用状态。
-- 每次打开重新计算安全默认：当前可用的基本信息、整理结果和行动项默认开启；文字记录、录音和我的笔记始终默认关闭。全部关闭时保留 48dp 提交槽位，但禁用“分享”。
+- Android 原生详情和通用详情复用同一个 `MeetingShareSheet`，按“基本会议信息 / 整理结果 / 行动项 / 文字记录 / 附件 / 录音 / 我的笔记”七类内容逐项表达可用、选中和禁用状态。
+- 每次打开重新计算安全默认：当前可用的基本信息、整理结果和行动项默认开启；文字记录、附件、录音和我的笔记始终默认关闭。全部关闭时保留 48dp 提交槽位，但禁用“分享”。
 - 基本信息只写标题、日期/时间和可选地点，不默认写参与人、内部处理状态、时长、token 或本机路径。
 - 整理结果导出当前 active version；结构化结果排除 `action_items` section，旧 Markdown 回退会移除中文行动项 heading，避免与独立行动项重复。行动项只导出任务正文、状态、可选负责人和截止日期。
 - 文字记录按时间、讲话人和正文生成纯文本；我的笔记按原文导出，提交前必须再次确认。确认框关闭后不保留勾选状态，下次打开恢复安全默认。
 - 有文字内容且无录音时直接分享 UTF-8 `.txt`；只选录音时直接分享音频；文字内容与录音同时存在时生成 ZIP，并把文档、录音和 `share_manifest.json` 放入压缩包。
+- 显式选择附件时，短文字/照片索引进入文档；只要包含照片就生成 ZIP，并复制应用私有原图。原图缺失会终止准备，不能让 manifest 声称已包含但产物实际漏图。
 - 每次成功准备产物都生成 schema v1 manifest：会议 ID 的 SHA-256 前 16 位、导出时间、实际包含内容、Transcript revision 和 Summary version。manifest 不包含正文、access token、speaker embedding 或本机绝对路径。
 - 直接文档或直接音频的 manifest 只作为 app-private sidecar 留在同一临时目录，不额外扩大系统分享内容；ZIP 中显式包含 manifest。
 - 审计事件 `meeting_share_prepared` 只记录 `included_contents` 和 `artifact_kind`，不记录标题、正文、路径、会议 ID 或身份信息。
@@ -22,8 +23,8 @@
 
 - Classification：LaoJi-only component，最近容器为 Feishu bottom sheet 与 Universe Design checklist/UDButton。
 - `[SOURCE]`：沿用共享 surface/mask/divider/text/disabled/primary token；提交按钮使用 48dp Big Column、6dp radius、17sp regular，sheet 从完整测量高度以约 300ms 进出。
-- `[PRODUCT]`：六类内容必须逐项授权；原始文字、录音和私人笔记默认关闭；我的笔记需二次强调；用户未选择任何内容时不得提交。
-- `[INFERENCE]`：六行 checkbox、标题栏关闭动作以及文字/音频/ZIP 的组合规则是老记分享合同，不声称飞书 7.71.8 存在完全相同的会议分享页面。
+- `[PRODUCT]`：七类内容必须逐项授权；原始文字、附件、录音和私人笔记默认关闭；我的笔记需二次强调；用户未选择任何内容时不得提交。
+- `[INFERENCE]`：七行 checkbox、标题栏关闭动作以及文字/音频/图片/ZIP 的组合规则是老记分享合同，不声称飞书 7.71.8 存在完全相同的会议分享页面。
 
 组件：私人笔记确认
 
@@ -43,13 +44,14 @@
 - 取消确认后重新打开 sheet：基本信息恢复开启，录音和我的笔记都恢复关闭，证明授权状态不跨打开保留。
 - 关闭唯一默认项后，UIAutomator 显示“分享所选会议资料” `enabled=false`，按钮尺寸和底部布局不移动。
 - sheet 静态截图无文字、复选框、提交按钮或导航栏重叠；本轮交互日志未发现应用 FATAL、`SQLiteException` 或 `no such column`。
-- 验证后加载整机快照 `codex-laoji-import-pretest-20260724`，再覆盖安装最终 Preview。冷启动 repository audit 为 `status=consistent`、`legacy_meetings=1`、`projected_meetings=1`、`context_mismatches=0`，测试会议和私人笔记未残留。
-- 最终 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 03:19:15 +0800`，大小 `89,892,467` bytes，SHA-256 `07e43cea82c8f92e842811460180729be902f755ee038bfa6904bb166da6a6f1`。已覆盖安装到唯一设备 `emulator-5556`，包版本为 `1.0.0-source-preview`。
+- 附件分享夹具中“附件”可用但默认关闭；显式勾选后 chooser 打开 ZIP，审计为 `included_contents=info.attachments`。ZIP 中资料索引保留时间点/文件名，原图哈希与私有源文件一致，manifest 不含本机路径。
+- 原六类分享验证后曾加载 `codex-laoji-import-pretest-20260724`；附件增量验证后再次以匹配的 SwiftShader renderer 加载 `codex-laoji-att01-pretest-20260725`，再覆盖安装最终 Preview。最终只读数据库为 `user_version=21`、`quick_check=ok`、0 条 Marker、0 条附件，分享夹具未残留。
+- 当前最终 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，大小 `90,527,844` bytes，SHA-256 `3954445001ea8a97429a129d46846f59a586f49032438d1161b7eb2eea84e923`。已覆盖安装到唯一设备 `emulator-5556`，包版本为 `1.0.0-source-preview`。
 
 ## 未完成边界
 
 1. 当前只有 `emulator-5556`，没有 USB 真机；不同 ROM chooser、字体/密度、TalkBack、App Lock 和物理返回手势仍未验证。
 2. 当前导入夹具没有整理结果、行动项或文字记录；这三项的默认分支和内容格式已做实现审计，但尚未在同一真实会议上逐项打开 chooser。
 3. WAV 的默认文档与文字+录音 ZIP 已实测；MP3/M4A/AAC/OGG/WEBM/FLAC 的 MIME 修复只完成静态合同与 TypeScript 验证，尚未逐格式分享给真实接收应用。
-4. 未执行六类内容的完整组合矩阵、10 分钟真实等待清理、分享中强杀或超大录音打包；这些按当前“轻测试、轻校验”目标后置。
-5. Marker/附件仍未并入分层 sheet；可撤销分享链接属于 P2；同步感知删除仍是 Phase 5 后续纵切。
+4. 未执行七类内容的完整组合矩阵、10 分钟真实等待清理、分享中强杀或超大录音打包；这些按当前“轻测试、轻校验”目标后置。
+5. Marker 仍未并入分层 sheet；可撤销分享链接属于 P2；同步感知删除仍是 Phase 5 后续纵切。

@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { BEST_SPEED, zip } from 'react-native-zip-archive';
 import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
+import type { MeetingAttachmentRecord } from '../data/repositories';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
@@ -10,12 +11,14 @@ import { meetingSummaryTextToPlainText } from './meetingSummaryFormat';
 import { diagnosticAudit } from './diagnostics';
 import { meetingRemoteIdentity } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
+import { isStoredMeetingAttachmentUri } from './meetingAttachmentStorage';
 
 export type MeetingShareContentKey =
   | 'info'
   | 'summary'
   | 'actions'
   | 'transcript'
+  | 'attachments'
   | 'audio'
   | 'manualNote';
 
@@ -23,7 +26,11 @@ export interface MeetingShareSelection extends Record<MeetingShareContentKey, bo
 
 export interface MeetingShareAvailability extends Record<MeetingShareContentKey, boolean> {}
 
-export type MeetingShareErrorCode = 'NO_AUDIO' | 'NO_MEETING_CONTENT' | 'SHARING_UNAVAILABLE';
+export type MeetingShareErrorCode =
+  | 'NO_AUDIO'
+  | 'NO_ATTACHMENTS'
+  | 'NO_MEETING_CONTENT'
+  | 'SHARING_UNAVAILABLE';
 export const MEETING_SHARE_RETENTION_MS = 10 * 60 * 1000;
 export const MEETING_SHARE_MANIFEST_SCHEMA_VERSION = 1;
 
@@ -41,6 +48,7 @@ export interface MeetingShareInput {
   summaryDocument?: MeetingSummaryDocument | null;
   actionItems?: readonly MeetingSummaryActionCandidate[];
   manualNoteText?: string | null;
+  attachments?: readonly MeetingAttachmentRecord[];
   transcriptRevisionId?: string | null;
   summaryVersionId?: string | null;
   isGuest: boolean;
@@ -62,6 +70,7 @@ const SHARE_CONTENT_ORDER: readonly MeetingShareContentKey[] = [
   'summary',
   'actions',
   'transcript',
+  'attachments',
   'audio',
   'manualNote',
 ];
@@ -74,6 +83,7 @@ export function defaultMeetingShareSelection(
     summary: availability.summary,
     actions: availability.actions,
     transcript: false,
+    attachments: false,
     audio: false,
     manualNote: false,
   };
@@ -124,6 +134,19 @@ export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
       return `${time ? `[${time}] ` : ''}${speaker}：${line.text.trim()}`;
     })
     .join('\n');
+}
+
+export function buildMeetingAttachmentsText(
+  attachments: readonly MeetingAttachmentRecord[],
+): string {
+  return attachments.map((attachment, index) => {
+    const time = formatTranscriptTime(attachment.positionMs / 1_000);
+    const prefix = `${index + 1}. ${time ? `[${time}] ` : ''}`;
+    if (attachment.kind === 'text') {
+      return `${prefix}文字\n${attachment.textContent?.trim() ?? ''}`.trimEnd();
+    }
+    return `${prefix}照片：${attachment.fileName?.trim() || '照片'}`;
+  }).filter(Boolean).join('\n\n');
 }
 
 function structuredSummaryText(document: MeetingSummaryDocument | null | undefined): string {
@@ -217,6 +240,13 @@ function buildSelectedMeetingDocument(
     if (transcript) {
       sections.push(`文字记录\n${transcript}`);
       included.push('transcript');
+    }
+  }
+  if (selection.attachments) {
+    const attachments = buildMeetingAttachmentsText(input.attachments ?? []);
+    if (attachments) {
+      sections.push(`附件\n${attachments}`);
+      included.push('attachments');
     }
   }
   if (selection.manualNote) {
@@ -406,6 +436,45 @@ async function materializeAudio(
   return { uri: targetUri, mimeType: audio.mime_type || 'audio/wav' };
 }
 
+async function materializeAttachmentImages(
+  input: MeetingShareInput,
+  directoryUri: string,
+  baseName: string,
+): Promise<readonly string[]> {
+  const images = (input.attachments ?? []).filter(attachment => attachment.kind === 'image');
+  const copied: string[] = [];
+  for (let index = 0; index < images.length; index += 1) {
+    const attachment = images[index];
+    if (!isStoredMeetingAttachmentUri(attachment.localUri)) {
+      throw new MeetingShareError('NO_ATTACHMENTS', 'meeting attachment file is unavailable');
+    }
+    const originalName = attachment.fileName?.trim() ?? '';
+    const originalExtension = originalName.match(/\.([A-Za-z0-9]{2,5})$/)?.[1]?.toLowerCase();
+    const mimeExtension = attachment.mimeType === 'image/jpeg'
+      ? 'jpg'
+      : attachment.mimeType === 'image/png'
+        ? 'png'
+        : attachment.mimeType === 'image/webp'
+          ? 'webp'
+          : attachment.mimeType === 'image/heif' ? 'heif' : 'heic';
+    const extension = originalExtension ?? mimeExtension;
+    const stem = originalExtension ? originalName.slice(0, -(originalExtension.length + 1)) : originalName;
+    const sourceName = `${safeMeetingFileName(stem || `照片_${index + 1}`).slice(0, 40)}.${extension}`;
+    const targetUri = `${directoryUri}${baseName}_附件_${String(index + 1).padStart(2, '0')}_${sourceName}`;
+    try {
+      await FileSystem.copyAsync({ from: attachment.localUri, to: targetUri });
+      const info = await FileSystem.getInfoAsync(targetUri);
+      if (!info.exists || typeof info.size !== 'number' || info.size < 1) {
+        throw new Error('copied meeting attachment is empty');
+      }
+      copied.push(targetUri);
+    } catch {
+      throw new MeetingShareError('NO_ATTACHMENTS', 'meeting attachment file is unavailable');
+    }
+  }
+  return copied;
+}
+
 async function shareFile(uri: string, mimeType: string, dialogTitle: string, UTI?: string): Promise<void> {
   if (!(await Sharing.isAvailableAsync())) {
     throw new MeetingShareError('SHARING_UNAVAILABLE', 'system sharing is unavailable');
@@ -423,6 +492,9 @@ export async function shareMeetingContent(
   let shareCompleted = false;
 
   try {
+    if (selection.attachments && !(input.attachments?.length)) {
+      throw new MeetingShareError('NO_ATTACHMENTS', 'meeting attachments are unavailable');
+    }
     const textContent = buildSelectedMeetingDocument(selection, input);
     const documentUri = textContent.document
       ? await writeTextFile(`${directoryUri}${baseName}_会议资料.txt`, textContent.document)
@@ -432,6 +504,9 @@ export async function shareMeetingContent(
       audio = await materializeAudio(input, directoryUri, baseName);
       if (!audio) throw new MeetingShareError('NO_AUDIO', 'meeting audio is unavailable');
     }
+    const attachmentFiles = selection.attachments
+      ? await materializeAttachmentImages(input, directoryUri, baseName)
+      : [];
     const included = [...textContent.included, ...(audio ? ['audio' as const] : [])];
     if (included.length === 0) {
       throw new MeetingShareError('NO_MEETING_CONTENT', 'selected meeting content is unavailable');
@@ -441,16 +516,19 @@ export async function shareMeetingContent(
       `${directoryUri}share_manifest.json`,
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
-    const artifactKind = audio && documentUri ? 'archive' : audio ? 'audio' : 'document';
+    const archiveRequired = attachmentFiles.length > 0 || Boolean(audio && documentUri);
+    const artifactKind = archiveRequired ? 'archive' : audio ? 'audio' : 'document';
     diagnosticAudit('meeting_share_prepared', {
       included_contents: manifest.included_contents.join('.') || 'none',
       artifact_kind: artifactKind,
     });
 
-    if (audio && documentUri) {
+    if (archiveRequired) {
       archiveUri = `${requireCacheDirectory()}meeting-shares/${baseName}_会议资料_${Date.now()}.zip`;
       const result = await zip(
-        [documentUri, audio.uri, manifestUri].map(fileUriToPath),
+        [documentUri, audio?.uri, ...attachmentFiles, manifestUri]
+          .filter((uri): uri is string => Boolean(uri))
+          .map(fileUriToPath),
         fileUriToPath(archiveUri),
         BEST_SPEED,
       );
@@ -478,6 +556,7 @@ export function meetingShareErrorMessage(error: unknown): string {
   if (audioSecurityMessage) return audioSecurityMessage;
   if (error instanceof MeetingShareError) {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
+    if (error.code === 'NO_ATTACHMENTS') return '所选附件暂时无法读取，请稍后重试。';
     if (error.code === 'NO_MEETING_CONTENT') return '所选会议内容当前不可分享，请重新选择。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';
   }

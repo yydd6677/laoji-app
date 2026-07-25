@@ -25,6 +25,7 @@ const CONTENT_ROWS: readonly { key: MeetingShareContentKey; label: string }[] = 
   { key: 'summary', label: '整理结果' },
   { key: 'actions', label: '行动项' },
   { key: 'transcript', label: '文字记录' },
+  { key: 'attachments', label: '附件' },
   { key: 'audio', label: '录音' },
   { key: 'manualNote', label: '我的笔记' },
 ];
@@ -38,6 +39,7 @@ function availableSelection(
     summary: selection.summary && availability.summary,
     actions: selection.actions && availability.actions,
     transcript: selection.transcript && availability.transcript,
+    attachments: selection.attachments && availability.attachments,
     audio: selection.audio && availability.audio,
     manualNote: selection.manualNote && availability.manualNote,
   };

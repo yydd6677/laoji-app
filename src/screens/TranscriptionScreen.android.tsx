@@ -1979,9 +1979,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : Boolean(displayedSummary.trim()),
     actions: displayedActionCandidates.some(action => Boolean(action.content.trim())),
     transcript: transcript.some(line => Boolean(line.text.trim())),
+    attachments: meetingAttachments.length > 0,
     audio: Boolean(meeting?.audioAvailable || meeting?.audioLocalUri || playerSource),
     manualNote: Boolean(manualNote.content.trim()),
-  }), [displayedActionCandidates, displayedSummary, displayedSummaryDocument, manualNote.content, meeting, playerSource, transcript]);
+  }), [displayedActionCandidates, displayedSummary, displayedSummaryDocument, manualNote.content, meeting, meetingAttachments.length, playerSource, transcript]);
 
   const runShare = useCallback(async (selection: MeetingShareSelection) => {
     if (!meeting || sharing) return;
@@ -1994,6 +1995,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         summaryDocument: displayedSummaryDocument,
         actionItems: displayedActionCandidates,
         manualNoteText: manualNote.content,
+        attachments: meetingAttachments,
         summaryVersionId: displayedSummaryDocument?.remoteVersionId,
         isGuest,
         accessToken,
@@ -2011,7 +2013,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setSharing(false);
     }
-  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, playerSource, sharing, showDialog, transcript]);
+  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, meetingAttachments, playerSource, sharing, showDialog, transcript]);
 
   const requestShare = useCallback((selection: MeetingShareSelection) => {
     if (!selection.manualNote) {

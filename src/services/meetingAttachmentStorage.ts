@@ -8,6 +8,15 @@ function requireDocumentDirectory(): string {
   return `${FileSystem.documentDirectory}${ROOT_NAME}`;
 }
 
+export function isStoredMeetingAttachmentUri(uri: string | null | undefined): uri is string {
+  if (!uri || uri.includes('..')) return false;
+  try {
+    return uri.startsWith(requireDocumentDirectory());
+  } catch {
+    return false;
+  }
+}
+
 function stableHash(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {

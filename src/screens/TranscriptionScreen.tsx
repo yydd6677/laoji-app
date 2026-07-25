@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { useFocusEffect, type RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -81,6 +81,8 @@ import {
 } from '../services/meetingSummaryCarryForward';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
+import { loadMeetingAttachments } from '../services/meetingAttachments';
+import type { MeetingAttachmentRecord } from '../data/repositories';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -167,6 +169,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [sharing, setSharing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
+  const [meetingAttachments, setMeetingAttachments] = useState<readonly MeetingAttachmentRecord[]>([]);
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
@@ -769,6 +772,22 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setShareVisible(false);
   }, [route.params.meetingId]);
 
+  useFocusEffect(useCallback(() => {
+    if (!m?.id || !meetingScopeKey) {
+      setMeetingAttachments([]);
+      return undefined;
+    }
+    let active = true;
+    void loadMeetingAttachments(meetingScopeKey, m.id)
+      .then(attachments => {
+        if (active) setMeetingAttachments(attachments);
+      })
+      .catch(() => {
+        if (active) setMeetingAttachments([]);
+      });
+    return () => { active = false; };
+  }, [m?.id, meetingScopeKey]));
+
   const shareSummaryDocument = useMemo(() => {
     if (!m) return null;
     const cached = getCachedSummary(m.id);
@@ -792,9 +811,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : Boolean(shareSummaryText.trim()),
     actions: shareActions.some(action => Boolean(action.content.trim())),
     transcript: transcriptItems.some(line => Boolean(line.text.trim())),
+    attachments: meetingAttachments.length > 0,
     audio: Boolean(m?.audioAvailable || m?.audioLocalUri),
     manualNote: false,
-  }), [m?.audioAvailable, m?.audioLocalUri, m?.id, shareActions, shareSummaryDocument, shareSummaryText, transcriptItems]);
+  }), [m?.audioAvailable, m?.audioLocalUri, m?.id, meetingAttachments.length, shareActions, shareSummaryDocument, shareSummaryText, transcriptItems]);
 
   if (!m) {
     return (
@@ -853,6 +873,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         summaryText: shareSummaryText,
         summaryDocument: shareSummaryDocument,
         actionItems: shareActions,
+        attachments: meetingAttachments,
         summaryVersionId: shareSummaryDocument?.remoteVersionId,
         isGuest,
         accessToken,
