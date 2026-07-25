@@ -673,6 +673,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           setTagSheetMode('manage');
         });
         break;
+      case 'openMeetingOrganization':
+        navigation.navigate('MeetingOrganization');
+        break;
       case 'closeRecycleBin':
         setRecycleBinVisible(false);
         break;

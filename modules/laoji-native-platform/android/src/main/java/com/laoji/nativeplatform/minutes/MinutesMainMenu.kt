@@ -124,6 +124,11 @@ internal class MinutesMainMenu(
     elevation = context.dp(8).toFloat()
     val actions = mutableListOf(
       MenuAction(
+        label = "分类查看",
+        type = "openMeetingOrganization",
+        icon = com.laoji.nativeplatform.R.drawable.laoji_ic_grid_outline,
+      ),
+      MenuAction(
         label = "管理标签",
         type = "openMeetingTags",
         icon = com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline,

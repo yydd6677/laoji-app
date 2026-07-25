@@ -1,6 +1,6 @@
-# Phase 8 会议组织与多场检索证据：ORG-01 标签和本机分源搜索
+# Phase 8 会议组织与多场检索证据：ORG-01 标签、分源搜索与人物/主题聚合
 
-状态：用户标签与本机跨会议分源检索已形成游客/账号作用域隔离的本机纵向闭环；Folder、按人物聚合、模型主题聚合、账号跨设备标签同步仍未实现，因此 `ORG-01` 记为部分完成。本文件记录 migration v20、repository 事务、原生 Minutes 入口、模拟器实测和恢复边界，不把标题/标签样本外推成真实长 Transcript、Summary 或 Action 设备验收。
+状态：用户标签、本机跨会议分源检索、按人物聚合和按用户标签聚合主题，已形成游客/账号作用域隔离的本机纵向闭环。Folder 仍保留需求门槛；实验模型 topic 和账号跨设备标签同步尚未实现，因此 `ORG-01` 仍记为部分完成。本文件记录 migration v20、只读派生查询、原生 Minutes 入口、模拟器夹具和恢复边界，不把短 Transcript/单会议样本外推成真实长记录性能或跨设备证据。
 
 ## 数据和检索合同
 
@@ -12,12 +12,21 @@
 - Android 的 Expo SQLite 16.0.10 自带 SQLite 3.50.3，并以 `SQLITE_ENABLE_FTS5=1` 编译。三字符及以上查询使用 FTS5 trigram 子串 MATCH；一到两个 Unicode codepoint 的中文短词使用转义后的逐来源 `LIKE`，避免 trigram 对“验收”一类两字词静默无结果。LIKE 结果在 SQL 内截取有界上下文，不把整段长正文复制过 bridge。
 - 索引在每个 scope 首次查询时事务性重建；repository mutation 通知会失效内存索引标记。查询本身不写用户正文，scope、deleted lifecycle 和 active/current revision 仍在每次检索 SQL 中复核。
 
+## 人物和主题聚合合同
+
+- 聚合是现有 v20/v21 数据的只读派生，不新增表或 migration。每次查询都从 `meeting_notes.scope_key` 和 `lifecycle <> deleted` 重新限定作用域；人物只读取 `transcript_revisions.is_active = 1` 的段落，不读取 inactive 历史版本，也不把 `speaker_cluster_id` 当跨会议身份。
+- 人物优先按稳定 `speaker_profile_id` 聚合。一个 profile 内允许部分段落仍带匿名显示名：只要同一 profile 至少存在一个真实姓名，匿名段仍计入该稳定人物的发言段数；若整个 profile 没有可显示姓名，则不暴露 opaque profile ID，也不虚构人物标题。
+- 没有 profile 时，只对 NFKC 后精确姓名做 scope 内临时聚合，不做大小写折叠、模糊相似或同音合并，并明确投影为“未确认”。`Speaker 1`、`说话人 1`、`讲话人 1`、`发言人 1`、泛化“讲话人/发言人/说话人”和 unknown 值统一由领域分类器过滤。
+- 每个人物返回 profile/临时 key、会议数、发言段总数，以及每场会议的 canonical ID、可导航 ID、标题、录制时间和段数。repository 复用既有 legacy/remote 导航映射，页面不会拿 canonical 内部前缀错误打开其他 scope。
+- 主题第一版只从用户明确创建并分配的 `meeting_tags` 派生，且只包含未删除会议。实验模型 topic 尚未接入；未来即使接入也必须作为独立来源，不能自动创建、改名或覆盖用户标签。
+
 ## 页面和导航合同
 
 - 原生 Minutes 搜索栏继续作为唯一跨会议搜索入口；React 只接收 query 并返回分源结果。输入框有焦点时不再用落后一轮的 React snapshot 覆盖 native EditText，快速连续输入不会丢字；清除动作先本地清空再同步状态。
 - 搜索结果卡显示来源标签和摘要。Transcript 命中携带稳定 segment/source ID 与时间进入“文字记录”并定位；Summary、我的笔记和 Action 分别进入对应详情页，Action 保留独立 focus request identity；标题/标签进入会议详情。
 - 会议卡长按增加“设置标签”，会议页更多菜单增加“管理标签”。设置面板支持创建和整组勾选保存；管理面板支持改名、同名合并和删除。
 - 标签面板保存后先完成约 300ms 全高度退出，再关闭 Modal；父层刷新不再重启入场动画。危险删除先退出 React Native Modal，再显示 Activity 原生确认框，避免确认框不可见地落在 Modal 下方。
+- 会议列表更多菜单新增且只新增一个“分类查看”入口，不增加底栏、Agent 或团队权限入口。页面以“人物/主题”双标签展示派生组；人物行显示会议数和明确的“段发言”计数，临时姓名显示“未确认”；组内会议行可直接进入原会议详情。
 
 ## UI 证据分类
 
@@ -37,6 +46,14 @@
 - `[DEVICE]`：一次性输入 `Acceptance` 完整保留并只返回“标签”来源；输入 `Occ` 只返回一条“标题”来源，不再同时伪造标签结果。trigram 中间子串 `uene` 和两字符 LIKE 子串 `ne` 都命中 `OccueneSmoke`，来源仍各只有一条“标题”。
 - `[INFERENCE]`：在封面卡中用克制的来源标题与 snippet 表达搜索结果；未用临时数据实测 Transcript/Summary/Action 目标页，因此这些来源的点击只记源码和编译合同。
 
+组件：分类查看人物/主题页
+
+- Classification：LaoJi-only；最近容器是既有 Minutes 标题栏、双标签和中性列表层级，不声称飞书 7.71.8 存在同名聚合能力。
+- `[PRODUCT]`：人物身份边界由稳定 profile/精确临时姓名决定；匿名簇不得伪装成真实人物；主题先用用户标签；不增加底栏或说明书式文案。
+- `[SOURCE]`：复用既有 44dp 标题栏、16sp 常规标签、蓝色选中指示、neutral page/surface/divider、44dp 以上触控目标和中性会议列表，不使用 Minutes AI 渐变或新的页面局部色板。
+- `[DEVICE]`：API 35、1080x2400、420 dpi 的 `emulator-5556` 上，菜单入口、空人物/空主题、三个有效人物、一个用户主题、标签切换和会议详情跳转均实际显示；匿名编号没有出现在人物组。静态空页截图已检查标题栏、标签指示和空状态没有首帧位移。
+- `[INFERENCE]`：圆形首字头像、主题标签图标、组内会议折叠层级和“段发言”措辞是老记对既有列表/标签家族的组合；没有声称是飞书直接页面复刻。
+
 ## 轻量验证与恢复
 
 - `npx tsc --noEmit --pretty false` 与 `git diff --check` 通过。
@@ -44,13 +61,15 @@
 - 从 `codex-laoji-org01-pretest-20260725` 的 v19 保留数据覆盖安装，冷启动无应用 FATAL、SQLiteException、缺表、FTS 或 malformed query 日志。Debug 变体只用于停进程导出数据库；Python 3 的 SQLite 3.46.1 读取结果为 `user_version=20`、`quick_check=ok`、trigram schema 存在、FTS MATCH 可返回标题行。
 - 原始未删除会议 `OccueneSmoke` 计数为 1。验收中创建并分配 ASCII 标签，冷启动仍显示；另建 `Beta`、改名为 `Gamma`、合并到已有标签后只剩一个标签；删除后 `meeting_tags/meeting_tag_links=0/0`，会议卡仍存在。
 - 实测中发现并修复四个直接缺陷：快速输入丢字、标题命中伪造多个来源、保存后 sheet 被刷新打断而卡住、删除确认被 Modal 遮挡。修复后逐项重复相同动作，最终日志无应用崩溃或 SQLite 错误。
-- 结束时再次恢复预试快照并覆盖安装最终 Preview。最终数据库仍为 `user_version=20`、`quick_check=ok`，原会议存在，标签和关联均为 0；模拟器页面没有验收标签残留。
-- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-25 23:12:10 +0800`，大小 `90,501,044` bytes，SHA-256 `053e17677c5f0c56dd844f9a1b01d6deb023ccb3fd4949eb4e7dc208006da941`。已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-25 23:13:52`。
+- 人物/主题切片再次通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和 `:laoji-native-platform:compileReleaseKotlin`。最终增量 `:app:assemblePreview --parallel --max-workers=$(nproc)` 通过：627 tasks，59 executed、568 up-to-date，耗时 36 秒；没有恢复归档测试/门禁。
+- 人物夹具使用一个 active final Transcript：稳定 profile“林晓”有 2 段，其中一段仍显示 `Speaker 1`；无 profile 的“王敏”和 override“陈静”各 1 段并显示“未确认”；profile-less `Speaker 2` 与“说话人 3”均未形成组。用户标签“研发周会”形成 1 个主题；四类可见会议行均打开 `OccueneSmoke` 详情。
+- 夹具前数据库为 v21、`quick_check=ok`。测试后没有用模糊删除回滚，而是把原始 DB/WAL/SHM 三文件原位恢复；设备与本机备份 SHA-256 分别一致为 `42ff97c9…f5f93`、`63b56aa4…3a0f`、`9fbd53a9…e5c1bd`。最终页面回到原会议列表，夹具 Transcript/标签不在常用模拟器数据中。
+- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-26 00:44:12 +0800`，大小 `90,540,848` bytes，SHA-256 `eb476d84b165d6a4c854e5d1c681dad80de7060319f3bfd34a6e096e91cba480`。已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-26 00:44:31`。
 
 ## 未完成边界
 
 1. Folder 仍只保留需求门槛；当前没有真实大量会议证据支持加入文件夹，更没有树形权限模型。
-2. 按稳定 speaker profile 的人物聚合和按用户标签/实验 topic 的主题聚合尚未实现；模型 topic 不得自动写成用户标签。
-3. 标签当前是本机 scope 数据，没有账号 outbox、服务端 schema、跨设备合并或冲突处理，不能宣称账号同步完成。
-4. 本轮没有向恢复后的常用模拟器注入 Transcript/Summary/Action 夹具；三类正文建索引和目标导航只到源码、TypeScript/Kotlin/Preview 合同，不记为设备点击实证。
-5. 没有 USB 真机、深色模式、字体缩放、超大标签库或长 Transcript 性能证据；这些按轻量目标留到功能批次或候选版，而不是反向抹掉已完成的标签/标题纵切。
+2. 实验模型 topic 尚未实现；模型 topic 必须保持独立来源，不得自动写成用户标签。当前“主题”只代表用户标签，不应被外推为自动主题发现。
+3. 标签当前是本机 scope 数据，没有账号 outbox、服务端 schema、跨设备合并或冲突处理，不能宣称账号同步完成；人物也是本机 active Transcript 的派生视图，不是跨设备 profile 仓库。
+4. 搜索中的 Transcript/Summary/Action 目标页仍只有既有源码/编译边界；本轮夹具只为人物聚合和普通会议详情跳转，不补写成三类搜索来源的设备点击证据。
+5. 没有 USB 真机、深色模式、字体缩放、超大人物/标签库或长 Transcript 性能证据；这些按轻量目标留到功能批次或候选版，而不是反向抹掉已完成的本机聚合纵切。

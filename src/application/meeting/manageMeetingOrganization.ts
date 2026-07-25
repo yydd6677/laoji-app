@@ -2,6 +2,7 @@ import type { ScopeKey } from '../../domain/meeting';
 import { secureClientIdFactory, type ClientIdFactory } from '../../domain/meeting';
 import type {
   MeetingNoteRepository,
+  MeetingOrganizationProjection,
   MeetingSearchResult,
   MeetingTagAssignment,
   MeetingTagRecord,
@@ -33,6 +34,10 @@ export class ManageMeetingOrganizationUseCase {
 
   listAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]> {
     return this.repository.listMeetingTagAssignments(scopeKey);
+  }
+
+  listAggregates(scopeKey: ScopeKey): Promise<MeetingOrganizationProjection> {
+    return this.repository.listMeetingOrganization(scopeKey);
   }
 
   async listMeetingTags(

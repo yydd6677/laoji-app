@@ -14,6 +14,7 @@ export const ROOT_NAVIGATION_ROUTE_NAMES = [
   'EventDetail',
   'MeetingLive',
   'Transcription',
+  'MeetingOrganization',
   'SpeakerManager',
   'SpeakerEnrollment',
   'Profile',
@@ -265,6 +266,7 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
   if (!isPlainRecord(route) || typeof route.name !== 'string' || !ROOT_ROUTE_SET.has(route.name)) return null;
   switch (route.name as keyof RootStackParamList) {
     case 'Login':
+    case 'MeetingOrganization':
     case 'SpeakerManager':
     case 'Profile':
     case 'ChangePassword':

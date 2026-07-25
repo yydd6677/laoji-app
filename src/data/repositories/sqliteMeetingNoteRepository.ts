@@ -10,6 +10,7 @@ import {
   assertProcessingStage,
   assertScopeKey,
   calendarMeetingSeriesKey,
+  namedSpeakerIdentityLabel,
   secureClientIdFactory,
   transitionProcessingStage,
 } from '../../domain/meeting';
@@ -48,6 +49,9 @@ import type {
   MeetingActionSyncConflictRecord,
   MeetingManualNoteSyncConflictRecord,
   MeetingOccurrenceSyncConflictRecord,
+  MeetingOrganizationMeeting,
+  MeetingOrganizationProjection,
+  MeetingPersonAggregate,
   MeetingRecordingMergeTaskRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
@@ -68,6 +72,7 @@ import type {
   MeetingSeriesCarryImportRecord,
   MeetingTagAssignment,
   MeetingTagRecord,
+  MeetingTopicAggregate,
   MeetingTransaction,
   NewMeetingNote,
   OccurrenceLinkRecord,
@@ -417,6 +422,28 @@ type MeetingTagAssignmentRow = {
   entry_point: string | null;
   tag_id: string;
   tag_name: string;
+};
+
+type MeetingOrganizationBaseRow = {
+  meeting_id: string;
+  legacy_source_id: string | null;
+  remote_id: string | null;
+  entry_point: string | null;
+  meeting_title: string;
+  recorded_at_ms: number;
+};
+
+type MeetingPersonAggregationRow = MeetingOrganizationBaseRow & {
+  speaker_profile_id: string | null;
+  speaker_label_override: string | null;
+  speaker_label: string | null;
+  occurrence_count: number;
+};
+
+type MeetingTopicAggregationRow = MeetingOrganizationBaseRow & {
+  tag_id: string;
+  tag_name: string;
+  normalized_name: string;
 };
 
 type MeetingSearchRow = {
@@ -8268,6 +8295,146 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       scopeKey,
     );
     return rows.map(meetingTagFromRow);
+  }
+
+  async listMeetingOrganization(scopeKey: ScopeKey): Promise<MeetingOrganizationProjection> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const personRows = await database.getAllAsync<MeetingPersonAggregationRow>(
+      `SELECT meeting.id AS meeting_id, meeting.legacy_source_id, meeting.remote_id,
+         meeting.entry_point, meeting.title AS meeting_title,
+         COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)
+           AS recorded_at_ms,
+         segment.speaker_profile_id, segment.speaker_label_override, segment.speaker_label,
+         COUNT(segment.id) AS occurrence_count
+       FROM transcript_segments segment
+       INNER JOIN transcript_revisions revision
+         ON revision.id = segment.revision_id
+           AND revision.meeting_id = segment.meeting_id
+           AND revision.is_active = 1
+       INNER JOIN meeting_notes meeting ON meeting.id = segment.meeting_id
+       WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         AND (
+           NULLIF(TRIM(segment.speaker_profile_id), '') IS NOT NULL
+           OR NULLIF(TRIM(segment.speaker_label_override), '') IS NOT NULL
+           OR NULLIF(TRIM(segment.speaker_label), '') IS NOT NULL
+         )
+       GROUP BY meeting.id, meeting.legacy_source_id, meeting.remote_id,
+         meeting.entry_point, meeting.title, recorded_at_ms,
+         segment.speaker_profile_id, segment.speaker_label_override, segment.speaker_label
+       ORDER BY recorded_at_ms DESC, meeting.id, segment.speaker_profile_id,
+         segment.speaker_label_override, segment.speaker_label`,
+      scopeKey,
+    );
+    const topicRows = await database.getAllAsync<MeetingTopicAggregationRow>(
+      `SELECT meeting.id AS meeting_id, meeting.legacy_source_id, meeting.remote_id,
+         meeting.entry_point, meeting.title AS meeting_title,
+         COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)
+           AS recorded_at_ms,
+         tag.id AS tag_id, tag.name AS tag_name, tag.normalized_name
+       FROM meeting_tag_links link
+       INNER JOIN meeting_tags tag
+         ON tag.id = link.tag_id AND tag.scope_key = link.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = link.meeting_id AND meeting.scope_key = link.scope_key
+       WHERE link.scope_key = ? AND meeting.lifecycle <> 'deleted'
+       ORDER BY tag.normalized_name, tag.id, recorded_at_ms DESC, meeting.id`,
+      scopeKey,
+    );
+
+    type MutableMeeting = MeetingOrganizationMeeting;
+    type MutablePerson = {
+      key: string;
+      profileId: string | null;
+      labels: Map<string, number>;
+      meetings: Map<string, MutableMeeting>;
+    };
+    const peopleByKey = new Map<string, MutablePerson>();
+    for (const row of personRows) {
+      const profileId = row.speaker_profile_id?.trim() || null;
+      const name = namedSpeakerIdentityLabel(row.speaker_label_override)
+        ?? namedSpeakerIdentityLabel(row.speaker_label);
+      if (!profileId && !name) continue;
+      if (!Number.isSafeInteger(row.occurrence_count) || row.occurrence_count < 1) {
+        throw new Error('stored meeting person occurrence count is invalid');
+      }
+      const key = profileId ? `profile:${profileId}` : `name:${name}`;
+      const aggregate = peopleByKey.get(key) ?? {
+        key,
+        profileId,
+        labels: new Map<string, number>(),
+        meetings: new Map<string, MutableMeeting>(),
+      };
+      if (name) aggregate.labels.set(name, (aggregate.labels.get(name) ?? 0) + row.occurrence_count);
+      const currentMeeting = aggregate.meetings.get(row.meeting_id);
+      aggregate.meetings.set(row.meeting_id, {
+        meetingId: row.meeting_id,
+        navigationMeetingId: meetingNavigationIdentity(row, scopeKey),
+        title: row.meeting_title,
+        recordedAtMs: row.recorded_at_ms,
+        occurrenceCount: (currentMeeting?.occurrenceCount ?? 0) + row.occurrence_count,
+      });
+      peopleByKey.set(key, aggregate);
+    }
+
+    const people = [...peopleByKey.values()].flatMap<MeetingPersonAggregate>(aggregate => {
+      const selectedName = [...aggregate.labels.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
+      // A stable profile may still arrive with only an anonymous cluster label.
+      // It remains hidden until a human-readable name exists instead of exposing
+      // an opaque profile ID or inventing a person title.
+      if (!selectedName) return [];
+      const meetings = [...aggregate.meetings.values()]
+        .sort((left, right) => right.recordedAtMs - left.recordedAtMs
+          || left.meetingId.localeCompare(right.meetingId));
+      return [{
+        key: aggregate.key,
+        profileId: aggregate.profileId,
+        name: selectedName,
+        confirmed: aggregate.profileId !== null,
+        meetingCount: meetings.length,
+        occurrenceCount: meetings.reduce((total, meeting) => total + meeting.occurrenceCount, 0),
+        meetings,
+      }];
+    }).sort((left, right) => right.meetingCount - left.meetingCount
+      || right.occurrenceCount - left.occurrenceCount
+      || left.name.localeCompare(right.name));
+
+    type MutableTopic = {
+      tagId: string;
+      name: string;
+      meetings: Map<string, MeetingOrganizationMeeting>;
+    };
+    const topicsById = new Map<string, MutableTopic>();
+    for (const row of topicRows) {
+      const aggregate = topicsById.get(row.tag_id) ?? {
+        tagId: row.tag_id,
+        name: row.tag_name,
+        meetings: new Map<string, MeetingOrganizationMeeting>(),
+      };
+      aggregate.meetings.set(row.meeting_id, {
+        meetingId: row.meeting_id,
+        navigationMeetingId: meetingNavigationIdentity(row, scopeKey),
+        title: row.meeting_title,
+        recordedAtMs: row.recorded_at_ms,
+        occurrenceCount: 1,
+      });
+      topicsById.set(row.tag_id, aggregate);
+    }
+    const topics = [...topicsById.values()].map<MeetingTopicAggregate>(aggregate => {
+      const meetings = [...aggregate.meetings.values()]
+        .sort((left, right) => right.recordedAtMs - left.recordedAtMs
+          || left.meetingId.localeCompare(right.meetingId));
+      return {
+        tagId: aggregate.tagId,
+        name: aggregate.name,
+        meetingCount: meetings.length,
+        meetings,
+      };
+    }).sort((left, right) => right.meetingCount - left.meetingCount
+      || left.name.localeCompare(right.name));
+
+    return { people, topics };
   }
 
   async createMeetingTag(

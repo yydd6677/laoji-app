@@ -105,6 +105,11 @@ export function MeetingListScreen({ navigation }: Props) {
 
   const appMenuItems: AppActionSheetItem[] = [
     {
+      key: 'organization',
+      label: '分类查看',
+      onPress: () => navigation.navigate('MeetingOrganization'),
+    },
+    {
       key: 'speakers',
       label: '管理讲话人',
       onPress: () => navigation.navigate('SpeakerManager'),
