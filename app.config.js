@@ -184,11 +184,11 @@ module.exports = () => {
     String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
   );
   const localMeetingDbCanonicalReadV1 = localMeetingDbV1 && ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_READ_V1 ?? 'false').trim().toLowerCase(),
+    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_READ_V1 ?? 'true').trim().toLowerCase(),
   );
   const localMeetingDbCanonicalWriteV1 = localMeetingDbCanonicalReadV1
     && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_WRITE_V1 ?? 'false').trim().toLowerCase(),
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_WRITE_V1 ?? 'true').trim().toLowerCase(),
     );
   const localMeetingDbAccountRootWriteV1 = localMeetingDbCanonicalWriteV1
     && ['1', 'true', 'yes', 'on'].includes(

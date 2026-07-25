@@ -279,7 +279,12 @@ function normalizedMeetingCompatibility(meeting: Meeting, scopeKey: ScopeKey): u
     date: meeting.date,
     time: meeting.time ?? null,
     duration: meeting.duration,
-    tags: meeting.tags.map(tag => ({ label: tag.label, color: tag.color })),
+    // The first tag is a derived presentation state. Canonical stages use the
+    // more precise Chinese label (for example, legacy “失败” becomes
+    // “录音中断”), while `status` below already verifies the same lifecycle.
+    // Compare only durable secondary tags so a wording improvement does not
+    // block an otherwise lossless read cutover.
+    tags: meeting.tags.slice(1).map(tag => ({ label: tag.label, color: tag.color })),
     participants: (meeting.participants ?? []).map(value => value.trim()).filter(Boolean),
     hasTranscript: Boolean(meeting.hasTranscript),
     hasSummary: Boolean(meeting.hasSummary),

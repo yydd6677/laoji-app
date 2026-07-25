@@ -112,6 +112,14 @@ const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
 const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
 
+function canonicalWritesEnabledForScope(
+  flags: ReturnType<typeof getFeatureFlags>,
+  scope: string,
+): boolean {
+  return flags.localMeetingDbCanonicalWriteV1
+    && (scope === 'guest' || flags.localMeetingDbAccountRootWriteV1);
+}
+
 const meetingRepositoryFacade = new MeetingRepositoryFacade(sqliteMeetingNoteRepository);
 const createCanonicalMeetingNote = new CreateMeetingNoteUseCase({
   repository: sqliteMeetingNoteRepository,
@@ -1883,7 +1891,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         meetingsRef.current = hydratedMeetings;
         setMeetings(hydratedMeetings);
         const flags = getFeatureFlags();
-        if (flags.localMeetingDbCanonicalWriteV1 && isScopeKey(scope)) {
+        if (canonicalWritesEnabledForScope(flags, scope) && isScopeKey(scope)) {
           const canonicalScope = scope;
           const owned = await loadCanonicalOwnedScope();
           if (!isCurrent()) return;
@@ -2112,6 +2120,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const cleanTitle = options.title.trim();
     const calendarContext = options.calendarContext ?? null;
     const flags = getFeatureFlags();
+    const canonicalImportWrite = canonicalWritesEnabledForScope(flags, scope);
     const created = await createCanonicalMeetingNote.execute({
       id: media.meetingId,
       scopeKey: scope,
@@ -2145,7 +2154,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         localState: 'local_ready',
         lastVerifiedAtMs: nowMs,
       },
-      canonicalWrite: flags.localMeetingDbCanonicalWriteV1,
+      canonicalWrite: canonicalImportWrite,
     });
     const primary = created.aggregate.recordingAssets.find(asset => asset.role === 'primary') ?? null;
     if (
@@ -2156,7 +2165,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     ) {
       throw new Error('meeting import identity is inconsistent');
     }
-    if (flags.localMeetingDbCanonicalWriteV1) {
+    if (canonicalImportWrite) {
       const owned = await loadCanonicalOwnedScope();
       if (!owned) throw new Error('meeting canonical ownership was not established');
       const projected = owned.projection.meetings.find(meeting => meeting.id === media.meetingId);

@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Phase 1 仍在进行中，不满足退出条件。当前批次完成了 SQLite v2 基础不变量、additive v3 会议上下文、additive v4 scope 写所有权、创建与独立阶段用例、旧 Store 双读/增量影子写、按原生 session 和作用域执行的录音 journal 对账、Transcript/Summary repository 读写契约、默认关闭且可自动回退的 Store canonical read 接线，以及媒体导入、游客会议创建、游客会议根字段编辑、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 和游客 Summary version/section/action 七个受控 canonical-first 写纵切。媒体导入与游客创建在显式写开关下把 `MeetingNote`、可选 `RecordingAsset` 和 owner/revision 同事务提交；游客标题/详情、删除、录音与内容更新先从已通过 preflight 的 canonical 投影解析主键，映射缺失时 fail-closed，再把对应领域数据与 owner/revision 同事务提交。游客录音开始创建 `capturing` 主资产并绑定原生 session ID；服务启动失败转为 `failed_recoverable + missing`，保留同一资产供 journal 对账；游客 upload 恒为 `not_required`。游客 Transcript 以完整 snapshot 写 mutable draft 或 immutable final/reprocessed revision，稳定 final 不会被迟到 draft 降级，明显较短 final 只保存为 inactive 并保持旧内容可读；active 内容变化同时 stale 当前 Summary 并触发 repository Marker 对账。游客 Summary 使用 schema v2 归一化与 immutable version，用户保护版本不被自动替换，稳定 Transcript revision 才可作为引用输入；输入在事务前后漂移时只保存 inactive 候选并保留当前阶段 fingerprint。七类 mutation 均以全 scope 投影写回三份旧缓存并用 revision CAS 标记 clean；冷启动会先按 owner/revision 修复 pending/failed mirror，不再让旧快照反向导入。本批另接入账号录音上传状态对账：既有 AsyncStorage registry/WorkManager 仍是唯一调度源，SQLite 只投影 recording asset 与 queued/uploading/uploaded/failed_retryable/blocked stage、attempt、operation ID 和 credential generation，不创建第二份 outbox。账号普通创建、标题/详情编辑、软删除、录音根状态、Transcript/Summary 内容和远端列表刷新均已在独立根写开关下切到 canonical owner；远端快照按 `remote_id` 或待创建记录的 `client_request_id` 合并，保护未完成 mutation、删除墓碑和本机内容资产，远端列表缺项不解释为本机删除。账号 MeetingNote 根 outbox 逐会议串行消费真实插入顺序，支持陈旧 in-flight 回收、retry、blocked、permanent error 和 conflict；同一 scope 的多个 drain 也在进程内串行，避免 Provider 与创建后立即同步竞争。create 复用 `client_request_id`，PATCH 只发送设值字段，DELETE 404 视为完成，本机 ID 永不替换，远端 ID 独立写 `remote_id` 并贯穿 ASR、上传、Transcript、Summary、播放和分享。上述路径仍由 `localMeetingDbAccountRootWriteV1` 控制且默认关闭；由于部署中的账号 API、真实 WorkManager 上传和跨设备恢复尚未闭环验证，普通构建仍不取得账号 canonical 写所有权。
+Phase 1 的游客本机 cutover 已闭环；账号线上部分仍在进行中，因此整体仍不满足线上退出条件。当前普通 Preview 默认开启可自动回退的 canonical read/write：尚未取得 owner 的 scope 先完成 shadow import、内容级 preflight 和最终投影对账，游客首次 mutation 才原子取得 canonical owner/revision；三份旧缓存只作为 revision 管理的兼容镜像。媒体导入、游客会议创建、游客会议根字段编辑、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 和游客 Summary version/section/action 七类写纵切都从已通过 preflight 的 canonical 投影解析主键，映射缺失时 fail closed。冷启动先按 owner/revision 修复 pending/failed mirror，不让旧快照反向导入。账号普通创建、标题/详情编辑、软删除、录音根状态、Transcript/Summary 内容、远端列表刷新和上传对账虽已接通独立 canonical 路径，但 `localMeetingDbAccountRootWriteV1` 与 `localMeetingDbAccountUploadWriteV1` 仍默认关闭；broad canonical write 不授权账号媒体导入取得 owner，启动时也不恢复被账号开关禁止的 canonical owner。部署中的账号 API、真实 WorkManager 上传和跨设备恢复尚未闭环，普通构建仍不取得账号 canonical 写所有权。
 
 Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只读快照，并同步旧 `/api/laoji/meetings` 兼容合同；但配置中的 18020/18035 未运行，尚无账号鉴权读写往返或 MeetingNote v2 capability。因此 MeetingNote v2 与账号 canonical 写入继续保持关闭。详见 [`phase-0-meeting-contract-snapshot.md`](phase-0-meeting-contract-snapshot.md)。
 
@@ -48,7 +48,8 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 | 内容读取 | 可按 scope 读取指定或 active Transcript revision 的有序 segments，以及指定或 current Summary version 的有序 sections 和 meeting-level actions；不存在或跨 scope 时返回空 |
 | 用户覆盖层 | Transcript 同时保留原说话人标签和覆盖标签；Summary 同时返回 generated/user text。读取 current version 时从 section/action 实际编辑字段推导用户所有权，不只信根标记 |
 | 空内容语义 | 旧缓存变空时只取消 legacy active/current 指针并重置对应阶段；历史 revision、version、action 不删除。server revision 或任何用户接管的 Summary 保持当前状态 |
-| 读切换接线 | 默认关闭的 `localMeetingDbCanonicalReadV1` 已接入 `MeetingsStore` 的列表及同步 Transcript/Summary getter；基础 DB flag 关闭时强制关闭。SQLite 投影和旧 Store refs 分离，不把兼容投影写回旧缓存或旧写模型 |
+| 读切换接线 | `localMeetingDbCanonicalReadV1` 已默认开启并接入列表及同步 Transcript/Summary getter；基础 DB flag 关闭或 preflight/最终投影不一致时仍自动回退。SQLite 投影和旧 Store refs 分离，兼容缓存只由 revision mirror 协调器更新 |
+| 开关作用域隔离 | broad canonical read 可在账号 shadow/preflight 一致后采用只读投影，但 broad write 只授权游客取得 owner；账号媒体导入、owner 启动恢复、根 outbox 与上传状态必须再满足各自账号开关 |
 | 写后再验证 | 旧路径写入前立即撤销 canonical getter；repository 提交通知会同步使所有在途读取失效，30 ms 合并后用最新旧 Store 快照重新 preflight。上传待处理状态也先镜像独立阶段，再尝试恢复 SQLite 读取 |
 | 自动回退 | 只有双读和最终兼容投影全部一致且仍是同 scope 的最新请求才返回 SQLite 投影；非法/重复身份、missing/extra、顺序、阶段、上下文、可见字段、同数量正文漂移、分页变化或读取异常均恢复原旧 Store 快照 |
 
@@ -59,7 +60,7 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 - `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、4 个 outbox；覆盖账号根字段 mutation 必须携带同事务 outbox、空标题与其他上下文归一化、相同 operation 重试不重复、不同 payload 复用 ID 被拒绝、active capture 拒绝删除、软删除保留 recording asset 及 tombstone 重试幂等。录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
 - `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3→v4 原行保留与安全默认值、scope 默认 legacy owner、canonical revision 递增、镜像 clean/failed CAS、clean 后晚到 failure 拒绝、投影期间 revision 漂移重试、三份旧缓存完整修复和失败后恢复；同时覆盖 canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影、删除墓碑隔离、重复旧身份拒绝、可见字段漂移拒绝、同数量 Transcript 正文漂移拒绝和 mismatch 自动回退，以及内容版本不变量。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
 - 临时 canonical mirror 契约：通过。首次 revision 2 将三份缓存各写一次并 clean；重复调用零写入；Summary writer 失败时 mirror revision 保持 2、状态为 failed 且只保存 `TypeError`；恢复后 clean 到 revision 3；写入期间 revision 3→4 漂移会把三份缓存完整重写第二轮并最终 clean。脚本执行后删除，未恢复测试目录。
-- Expo public config：默认输出 DB=true、canonical read=false、canonical write=false；write 单独请求时因 read=false 被强制关闭，只有 read/write 同时显式 opt-in 才可均为 true，基础 DB=false 时两者均强制关闭。
+- 当前 Expo public config：默认输出 DB/read/write/account-root/account-upload=`true/true/true/false/false`；显式关闭 read 会强制关闭 write 和两项账号写，基础 DB=false 时其余四项也均强制关闭。
 - `git diff --check`：通过。
 - SQLite v1→v2→v3→v4 迁移：既有 MeetingNote 原行保留，六个新字段取得安全默认值，v4 ownership 表可用且外键检查为 0；第二个 primary recording 和 canonical 重复请求 ID 被唯一索引拒绝，legacy 重复请求 ID 可导入。
 - Kotlin release 编译和 Android Preview 构建：通过。最终默认配置使用 `--rerun-tasks` 完整执行 627 个 task，耗时 2 分 29 秒，避免复用此前 opt-in bundle。
@@ -90,22 +91,23 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 - `emulator-5556` 保留数据覆盖安装本批 Preview 后冷启动：应用进程存活，guest shadow unchanged，legacy/repository 为 1/1、tombstone 1、全部 mismatch 为 0，`OccueneSmoke` 与日程/会议入口仍可见；没有应用 FATAL、React Native exception、SQLite exception 或 bundle load error。模拟器没有账号 pending upload 且会议服务不可用，因此本条只证明默认关闭包和旧数据安全，不宣称真实上传闭环。
 - 账号 Store/根同步批次的最终默认 Preview：显式设置 DB=true、canonical read/write=false、account root/upload=false 后执行 `assemblePreview --parallel --max-workers=16`，627 个 task 中 79 个执行、548 个 up-to-date，1 分 34 秒通过。直接读取 APK `assets/app.config` 再次确认五项开关为 true/false/false/false/false。
 - 同一 `emulator-5556` 保留数据覆盖安装并冷启动：PackageManager `lastUpdateTime` 更新，启动状态为 COLD 且进程持续存活；日历页仍有 `OccueneSmoke`，会议页仍有同名失败态记录，repository 为 consistent、legacy/repository 1/1、tombstone 1、全部 mismatch 为 0；没有应用 FATAL、React Native exception、SQLite exception 或 bundle load error。当前无 USB 真机，因此不宣称真实账号同步或上传闭环。
+- 游客普通包 cutover：默认 flags=`true/true/true/false/false` 的 Preview 对保留数据覆盖安装后，预检为 `canonical_projection_ready`，legacy/repository 1/1、tombstone 2，身份、顺序、标题、lifecycle、阶段、上下文、Transcript 与 Summary mismatch 全为 0。详情页把原标题临时改为验证值时首次 canonical mutation 得到 owner=`canonical`、revision/mirror=`1/1 clean`；强停冷启动以 `canonical_owner_recovered` 恢复。改回原标题后为 `2/2 clean`，第二次冷启动仍一致。停止进程后用同签名 Debug 变体只读导出，SQLite `quick_check=ok`，canonical 根与 RKStorage fallback 副本标题一致。随后恢复 `codex-laoji-cutover-pretest-20260725` 快照并重新覆盖当前 Preview；常用模拟器回到无 owner 的原始数据，启动理由恢复为 `canonical_projection_ready`，未残留验证标题。
 
 ## 当前安装包
 
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
 - 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：90,110,844 bytes
-- SHA-256：`252275698fa9ad4766c3f7e5757c939660b535777a98fb8a32eb5044abf0f756`
-- 构建时间：`2026-07-24 14:08:30 +0800`
-- 内嵌开关：`localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=false`、`localMeetingDbCanonicalWriteV1=false`、`localMeetingDbAccountRootWriteV1=false`、`localMeetingDbAccountUploadWriteV1=false`
-- 安装状态：本包已在 `emulator-5556` 对恢复后的预试数据保留覆盖安装，`lastUpdateTime=2026-07-24 14:09:13`；冷启动 repository 为 consistent、legacy/repository 为 1/1、tombstone 1 且 mismatch 全零，原始 `OccueneSmoke` 日程与会议记录仍可见，没有应用 FATAL。当前没有 USB 真机，真机 4/7/1/4 基线复核留待重连
+- 大小：90,447,528 bytes
+- SHA-256：`16d55464447eb07ed2ad2ce0b25a695242aa2633d8ebd97ffdeb0c33b67fed15`
+- 构建时间：`2026-07-25 22:05:30 +0800`
+- 内嵌开关：`localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=true`、`localMeetingDbCanonicalWriteV1=true`、`localMeetingDbAccountRootWriteV1=false`、`localMeetingDbAccountUploadWriteV1=false`
+- 安装状态：本包已在 `emulator-5556` 对恢复后的预试数据保留覆盖安装，`lastUpdateTime=2026-07-25 22:13:07`；冷启动 repository 为 consistent、legacy/repository 为 1/1、tombstone 2 且 mismatch 全零，原始 `OccueneSmoke` 会议记录可见，没有应用 FATAL。当前没有 USB 真机，真机 4/7/1/4 基线复核留待重连。
 
 ## 未决项与停线边界
 
-1. 游客全部既有纵切和账号创建/根字段/删除/录音根状态/Transcript/Summary/远端刷新/上传状态已经具备 canonical-first 实验路径，但这只证明本机框架和临时事务合同成立，不等价于部署服务已支持完整字段、幂等、冲突和空值语义；账号根写及上传开关继续默认关闭。
-2. Store 已在上述受控纵切和 owner 冷启动恢复中调用 scope revision、legacy mirror CAS 与全投影协调器；普通构建只有在真实账号 create/update/delete/upload、离线重试、冷启动恢复和回滚均完成后才可声明 canonical owner。
-3. canonical read 已在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退；canonical write 已完成游客路径的设备验证及账号路径的临时实际函数契约。账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复、服务端成功/失败、跨设备刷新或冲突闭环；服务不可达，账号 Transcript/Summary 也没有真实 Expo SQLite/UI 内容闭环。生产 flag 继续关闭，大数据量性能、真实 mirror I/O 故障和授权真机账号 opt-in 均未完成。
+1. 游客普通包已完成 canonical cutover；这只证明本机游客事实源和回退镜像成立，不等价于部署服务已支持账号字段、幂等、冲突和空值语义。账号根写及上传开关继续默认关闭。
+2. broad canonical flag 不授权账号取得 owner。只有真实账号 create/update/delete/upload、离线重试、冷启动恢复和回滚闭环后，账号根写/上传开关才可进入普通包。
+3. 账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复、服务端成功/失败、跨设备刷新或冲突闭环；服务不可达，账号 Transcript/Summary 也没有真实 Expo SQLite/UI 内容闭环。大数据量性能、真实 mirror I/O 故障和授权 USB 真机 cutover 均未完成。
 4. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
 5. 线上 MeetingNote v2 契约仍未验证，不得发送探测性 v2 写请求或开启 v2 capability；本批根 outbox 已接旧 API 消费器，但只能在独立实验开关、已通过 preflight 的 canonical owner 和真实授权账号下验证，不得进入普通包。
