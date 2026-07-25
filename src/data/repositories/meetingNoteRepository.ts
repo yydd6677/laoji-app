@@ -500,6 +500,48 @@ export interface MeetingRootSyncConflict {
   createdAtMs: number;
 }
 
+export interface MeetingRootSyncConflictRecord {
+  id: string;
+  meetingId: string;
+  localRevision: number | null;
+  remoteRevision: number | null;
+  localPayloadJson: string;
+  remotePayloadJson: string;
+  createdAtMs: number;
+}
+
+export interface MeetingRootRemoteConflictFields {
+  remoteId: string;
+  clientNoteId: string;
+  remoteRevision: number;
+  origin: MeetingOrigin;
+  entryPoint: MeetingEntryPoint | null;
+  title: string;
+  description: string | null;
+  participants: readonly string[];
+  location: string | null;
+  mode: MeetingCaptureMode;
+  recordedAtMs: number | null;
+  lifecycle: MeetingLifecycle;
+  deletedAtMs: number | null;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+}
+
+export interface ResolveMeetingRootSyncConflictInput {
+  conflictId: string;
+  meetingId: string;
+  scopeKey: ScopeKey;
+  expectedLocalUpdatedAtMs: number;
+  resolution: 'keep_local' | 'use_remote';
+  remoteId: string;
+  remoteClientNoteId: string;
+  remoteRevision: number;
+  remoteFields: MeetingRootRemoteConflictFields | null;
+  nextOperations: readonly SyncOperationRecord[];
+  resolvedAtMs: number;
+}
+
 export interface MeetingRootPullState {
   scopeKey: ScopeKey;
   cursor: string | null;
@@ -978,6 +1020,11 @@ export interface MeetingNoteRepository {
     claim: MeetingRootSyncClaim,
     conflict: MeetingRootSyncConflict,
   ): Promise<boolean>;
+  getMeetingRootSyncConflict(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingRootSyncConflictRecord | null>;
+  resolveMeetingRootSyncConflict(input: ResolveMeetingRootSyncConflictInput): Promise<boolean>;
   ensureOccurrenceSyncOperations(scopeKey: ScopeKey, createdAtMs: number): Promise<number>;
   claimOccurrenceSyncOperations(
     scopeKey: ScopeKey,

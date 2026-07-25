@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 10 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 11 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -232,6 +232,7 @@ export interface MinutesDetailSnapshot {
   audioErrorMessage?: string;
   processingStatusLabel?: string;
   processingStatusTone?: MinutesStatusTone;
+  rootSyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
 }
@@ -261,6 +262,7 @@ export type MinutesSemanticAction =
   | { type: 'updateManualNote'; surface: 'detail' | 'recording'; meetingId: string; content: string }
   | { type: 'retryManualNote'; surface: 'detail' | 'recording'; meetingId: string }
   | { type: 'openManualNoteConflict'; surface: 'detail' | 'recording'; meetingId: string }
+  | { type: 'openMeetingRootConflict'; surface: 'detail'; meetingId: string }
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
   | { type: 'retryProcessingStage'; surface: 'detail'; meetingId: string; stage: MinutesProcessingStage }

@@ -228,6 +228,7 @@ object MinutesSnapshotParser {
       processingStatusTone = raw.string("processingStatusTone")
         ?.takeIf { it == "neutral" || it == "primary" || it == "success" || it == "warning" || it == "danger" }
         ?: "neutral",
+      rootSyncConflict = raw.boolean("rootSyncConflict"),
       processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
       processingRetrying = raw.boolean("processingRetrying"),
       pageStates = parseDetailPageStates(raw.mapOrNull("pageStates"), legacyPageStates),

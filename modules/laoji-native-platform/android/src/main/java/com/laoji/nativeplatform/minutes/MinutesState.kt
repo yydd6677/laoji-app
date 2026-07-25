@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 10
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 11
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -341,6 +341,7 @@ data class MinutesDetailState(
   val audioErrorMessage: String = "",
   val processingStatusLabel: String = "",
   val processingStatusTone: String = "neutral",
+  val rootSyncConflict: Boolean = false,
   val processingRetryStage: MinutesProcessingStage? = null,
   val processingRetrying: Boolean = false,
   val pageStates: MinutesDetailPageStates = MinutesDetailPageStates.fromLegacy(

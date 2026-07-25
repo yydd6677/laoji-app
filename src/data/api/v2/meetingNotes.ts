@@ -507,3 +507,29 @@ export async function deleteMeetingNoteV2(input: {
   );
   return readMeetingResponse(response, input.accessToken, { remoteId });
 }
+
+export async function restoreMeetingNoteV2(input: {
+  accessToken: string;
+  meetingRemoteId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}): Promise<RemoteMeetingNoteV2> {
+  const remoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
+  const expectedRevision = safeInteger(input.expectedRevision, '会议云端版本', 1);
+  const base = getApiConfig().laojiApiBase.replace(/\/+$/, '');
+  const response = await fetchWithTimeout(
+    `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(remoteId)}/restore`,
+    {
+      method: 'POST',
+      signal: input.signal,
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${input.accessToken}`,
+        'Idempotency-Key': identifier(input.idempotencyKey, '请求标识'),
+        'If-Match': `"${expectedRevision}"`,
+      },
+    },
+  );
+  return readMeetingResponse(response, input.accessToken, { remoteId });
+}

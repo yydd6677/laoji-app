@@ -124,6 +124,7 @@ export interface BuildNativeDetailSnapshotInput {
   audioErrorMessage?: string;
   processingStatusLabel?: string;
   processingStatusTone?: MinutesStatusTone;
+  rootSyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
 }
@@ -659,6 +660,7 @@ export function buildNativeMinutesDetailSnapshot(
     audioErrorMessage: input.audioErrorMessage ?? '',
     processingStatusLabel: input.processingStatusLabel ?? '',
     processingStatusTone: input.processingStatusTone ?? 'neutral',
+    rootSyncConflict: input.rootSyncConflict ?? false,
     processingRetryStage: input.processingRetryStage,
     processingRetrying: input.processingRetrying ?? false,
   };

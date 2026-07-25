@@ -16,6 +16,7 @@ import {
   loadMeetingCapabilities,
   MeetingNoteConflictResponseError,
   MeetingNoteResponseContractError,
+  restoreMeetingNoteV2,
   updateMeetingNoteV2,
   type CreateMeetingNoteV2Request,
   type RemoteMeetingNoteV2,
@@ -49,8 +50,9 @@ type UpdateMutation = {
 };
 
 type DeleteMutation = { kind: 'delete'; baseRevision: number | null };
+type RestoreMutation = { kind: 'restore'; baseRevision: number | null };
 
-type MeetingRootMutation = CreateMutation | UpdateMutation | DeleteMutation;
+type MeetingRootMutation = CreateMutation | UpdateMutation | DeleteMutation | RestoreMutation;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -348,7 +350,9 @@ function parseUpdateMutation(
   const source = parsed.changes;
   const keys = Object.keys(source);
   if (keys.length === 0) throw new InvalidMeetingRootPayloadError('meeting update is empty');
-  const supported = new Set(['title', 'description', 'participants', 'location', 'mode', 'status']);
+  const supported = new Set([
+    'title', 'description', 'participants', 'location', 'mode', 'status', 'recordedAtMs',
+  ]);
   if (keys.some(key => !supported.has(key))) {
     throw new UnsupportedMeetingRootPayloadError('meeting update field is not supported by legacy API');
   }
@@ -387,6 +391,12 @@ function parseUpdateMutation(
     legacyPayload.status = status;
     v2Request.status = status;
   }
+  if (Object.prototype.hasOwnProperty.call(source, 'recordedAtMs')) {
+    const recordedAtMs = optionalTime(source.recordedAtMs, 'meeting recorded time');
+    v2Request.recorded_at = recordedAtMs === null
+      ? null
+      : isoTime(recordedAtMs, 'meeting recorded time');
+  }
   return {
     kind: 'update',
     baseRevision: optionalRevision(parsed.base_revision, 'meeting base revision'),
@@ -411,6 +421,13 @@ function parseMeetingRootMutation(claim: MeetingRootSyncClaim): MeetingRootMutat
     assertIdentity(parsed, claim);
     return {
       kind: 'delete',
+      baseRevision: optionalRevision(parsed.base_revision, 'meeting base revision'),
+    };
+  }
+  if (claim.operationType === 'meeting.restore') {
+    assertIdentity(parsed, claim);
+    return {
+      kind: 'restore',
       baseRevision: optionalRevision(parsed.base_revision, 'meeting base revision'),
     };
   }
@@ -661,13 +678,24 @@ async function processClaim(
             request: mutation.v2Request,
             signal,
           })
-          : await deleteMeetingNoteV2({
-            accessToken,
-            meetingRemoteId: claim.remoteId,
-            expectedRevision,
-            idempotencyKey: claim.idempotencyKey,
-            signal,
-          });
+          : mutation.kind === 'delete'
+            ? await deleteMeetingNoteV2({
+              accessToken,
+              meetingRemoteId: claim.remoteId,
+              expectedRevision,
+              idempotencyKey: claim.idempotencyKey,
+              signal,
+            })
+            : await restoreMeetingNoteV2({
+              accessToken,
+              meetingRemoteId: claim.remoteId,
+              expectedRevision,
+              idempotencyKey: claim.idempotencyKey,
+              signal,
+            });
+        if (response.clientNoteId !== claim.meetingId) {
+          throw new MeetingNoteResponseContractError('会议本机标识发生变化');
+        }
         if (mutation.kind === 'update') {
           assertV2UpdateResponse(mutation.v2Request, expectedRevision, response);
         } else if (response.revision < expectedRevision) {
@@ -678,6 +706,9 @@ async function processClaim(
         }
         if (mutation.kind === 'delete' && response.lifecycle !== 'deleted') {
           throw new MeetingNoteResponseContractError('会议删除未返回删除状态');
+        }
+        if (mutation.kind === 'restore' && response.lifecycle !== 'active') {
+          throw new MeetingNoteResponseContractError('会议恢复未返回可用状态');
         }
         completion = v2Completion(response, false);
       }
@@ -701,8 +732,10 @@ async function processClaim(
           if (remoteMeetingId(response) !== remoteId) {
             throw new MeetingRootResponseContractError('meeting update identity changed');
           }
-        } else {
+        } else if (mutation.kind === 'delete') {
           await deleteMeeting(remoteId, accessToken, signal);
+        } else {
+          throw new UnsupportedMeetingRootPayloadError('legacy meeting API cannot restore a meeting');
         }
       }
       if (!remoteId) throw new MeetingRootResponseContractError('meeting remote identity is missing');

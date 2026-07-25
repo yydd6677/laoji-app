@@ -123,6 +123,7 @@ function compatibilityTags(
     tags.push({ label: item.mode === 'offline' ? '离线' : '实时', color: C.blue });
   }
   if (item.syncState === 'pending') tags.push({ label: '待同步', color: C.orange });
+  if (item.syncState === 'conflicted') tags.push({ label: '同步冲突', color: C.red });
   if (uploadBlocked) tags.push({ label: '上传受阻', color: C.red });
   else if (uploadPending) tags.push({ label: '待上传', color: C.orange });
   return tags;

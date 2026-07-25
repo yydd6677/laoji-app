@@ -41,6 +41,9 @@ function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) 
     : undefined);
   const hasRootSyncPending = Boolean(meeting.statusSyncPending)
     || meeting.tags.some(tag => tag.label === '待同步');
+  if (meeting.tags.some(tag => tag.label === '同步冲突')) {
+    return { label: '同步冲突', tone: 'danger' as const };
+  }
   if (
     hasRootSyncPending
     && (presentation.key === 'ready' || presentation.key === 'not_started')

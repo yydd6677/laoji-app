@@ -53,6 +53,7 @@ import type {
   MeetingRootSyncClaim,
   MeetingRootSyncCompletion,
   MeetingRootSyncConflict,
+  MeetingRootSyncConflictRecord,
   MeetingRootSyncFailure,
   MeetingRootPullState,
   MeetingRootPatch,
@@ -69,6 +70,7 @@ import type {
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
   ResolveMeetingOccurrenceSyncConflictInput,
+  ResolveMeetingRootSyncConflictInput,
   RemoteMeetingActionRecord,
   RemoteOccurrenceLinkRecord,
   SaveSummaryVersionOptions,
@@ -460,6 +462,16 @@ type MeetingActionSyncConflictRow = {
 };
 
 type MeetingManualNoteSyncConflictRow = {
+  id: string;
+  meeting_id: string;
+  local_revision: number | null;
+  remote_revision: number | null;
+  local_payload_json: string;
+  remote_payload_json: string;
+  created_at_ms: number;
+};
+
+type MeetingRootSyncConflictRow = {
   id: string;
   meeting_id: string;
   local_revision: number | null;
@@ -1133,9 +1145,10 @@ function normalizedSyncErrorCode(value: string): string {
 
 function meetingRootOperationRank(value: string): number {
   if (value === 'meeting.create') return 0;
-  if (value === 'meeting.update') return 1;
-  if (value === 'meeting.delete') return 2;
-  return 3;
+  if (value === 'meeting.restore') return 1;
+  if (value === 'meeting.update') return 2;
+  if (value === 'meeting.delete') return 3;
+  return 4;
 }
 
 function compareMeetingRootOperations(
@@ -4371,6 +4384,270 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       return true;
     });
     if (applied) this.notify([claim.meetingId]);
+    return applied;
+  }
+
+  async getMeetingRootSyncConflict(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingRootSyncConflictRecord | null> {
+    assertScopeKey(scopeKey);
+    if (scopeKey === 'guest') return null;
+    assertRecordId(meetingId, 'meeting ID');
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<MeetingRootSyncConflictRow>(
+      `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+         conflict.local_revision, conflict.remote_revision,
+         conflict.local_payload_json, conflict.remote_payload_json,
+         conflict.created_at_ms
+       FROM sync_conflicts conflict
+       INNER JOIN meeting_notes meeting ON meeting.id = conflict.aggregate_id
+       WHERE conflict.scope_key = ? AND conflict.aggregate_type = 'meeting_note'
+         AND conflict.aggregate_id = ? AND conflict.status = 'unresolved'
+         AND meeting.scope_key = ?
+       ORDER BY conflict.created_at_ms DESC, conflict.id DESC
+       LIMIT 1`,
+      scopeKey,
+      meetingId,
+      scopeKey,
+    );
+    return row ? {
+      id: row.id,
+      meetingId: row.meeting_id,
+      localRevision: row.local_revision,
+      remoteRevision: row.remote_revision,
+      localPayloadJson: row.local_payload_json,
+      remotePayloadJson: row.remote_payload_json,
+      createdAtMs: row.created_at_ms,
+    } : null;
+  }
+
+  async resolveMeetingRootSyncConflict(
+    input: ResolveMeetingRootSyncConflictInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') throw new Error('guest meeting cannot resolve a root sync conflict');
+    assertRecordId(input.conflictId, 'meeting root conflict ID');
+    assertRecordId(input.meetingId, 'meeting ID');
+    assertRecordId(input.remoteId, 'meeting remote ID');
+    assertRecordId(input.remoteClientNoteId, 'meeting remote client note ID');
+    assertNonNegativeInteger(input.remoteRevision, 'meeting remote revision');
+    if (input.remoteRevision < 1) throw new Error('meeting remote revision is invalid');
+    assertNonNegativeInteger(input.expectedLocalUpdatedAtMs, 'meeting root conflict revision');
+    assertNonNegativeInteger(input.resolvedAtMs, 'meeting root conflict resolution time');
+    if (input.resolvedAtMs <= input.expectedLocalUpdatedAtMs) {
+      throw new Error('meeting root conflict resolution time did not advance');
+    }
+    if (input.resolution === 'use_remote') {
+      if (!input.remoteFields || input.nextOperations.length !== 0) {
+        throw new Error('remote meeting root resolution payload is invalid');
+      }
+    } else if (input.remoteFields || input.nextOperations.length > 2) {
+      throw new Error('local meeting root resolution payload is invalid');
+    }
+    if (
+      new Set(input.nextOperations.map(operation => operation.operationId)).size
+      !== input.nextOperations.length
+    ) throw new Error('meeting root resolution operations are duplicated');
+    const nextOperationTypes = input.nextOperations.map(operation => operation.operationType);
+    if (
+      (nextOperationTypes.length === 2
+        && (nextOperationTypes[0] !== 'meeting.restore' || nextOperationTypes[1] !== 'meeting.update'))
+      || (nextOperationTypes.length === 1
+        && !['meeting.update', 'meeting.delete'].includes(nextOperationTypes[0]))
+    ) throw new Error('meeting root resolution operation sequence is invalid');
+    input.nextOperations.forEach(operation => {
+      if (
+        operation.scopeKey !== input.scopeKey
+        || operation.aggregateType !== 'meeting_note'
+        || operation.aggregateId !== input.meetingId
+        || !['meeting.restore', 'meeting.update', 'meeting.delete'].includes(operation.operationType)
+        || operation.baseRevision !== input.remoteRevision
+        || operation.createdAtMs !== input.resolvedAtMs
+      ) throw new Error('meeting root resolution operation is invalid');
+    });
+
+    const remote = input.remoteFields;
+    if (remote) {
+      if (
+        remote.remoteId !== input.remoteId
+        || remote.clientNoteId !== input.remoteClientNoteId
+        || remote.remoteRevision !== input.remoteRevision
+      ) throw new Error('remote meeting root resolution identity changed');
+      if (!['calendar', 'ad_hoc', 'file_import', 'share_intent'].includes(remote.origin)) {
+        throw new Error('remote meeting root origin is invalid');
+      }
+      if (
+        remote.entryPoint !== null
+        && ![
+          'calendar_detail', 'notification', 'widget', 'meeting_tab', 'quick_tile',
+          'document_picker', 'share_intent', 'legacy_store', 'recorder_recovery',
+        ].includes(remote.entryPoint)
+      ) throw new Error('remote meeting root entry point is invalid');
+      if (!['draft', 'active', 'ended', 'deleted'].includes(remote.lifecycle)) {
+        throw new Error('remote meeting root lifecycle is invalid');
+      }
+      if ((remote.lifecycle === 'deleted') !== (remote.deletedAtMs !== null)) {
+        throw new Error('remote meeting root deletion state is invalid');
+      }
+      if (remote.title.length > 100_000 || remote.title.includes('\u0000')) {
+        throw new Error('remote meeting root title is invalid');
+      }
+      assertNullableBoundedText(remote.description, 100_000, 'remote meeting root description');
+      assertMeetingParticipants(remote.participants);
+      assertNullableBoundedText(remote.location, 2_000, 'remote meeting root location');
+      assertMeetingMode(remote.mode);
+      if (remote.mode === null) throw new Error('remote meeting root mode is missing');
+      assertOptionalNonNegativeInteger(remote.recordedAtMs, 'remote meeting root recorded time');
+      assertOptionalNonNegativeInteger(remote.deletedAtMs, 'remote meeting root deletion time');
+      assertNonNegativeInteger(remote.serverCreatedAtMs, 'remote meeting root creation time');
+      assertNonNegativeInteger(remote.serverUpdatedAtMs, 'remote meeting root update time');
+      if (
+        remote.serverCreatedAtMs > remote.serverUpdatedAtMs
+        || input.resolvedAtMs < remote.serverUpdatedAtMs
+      ) throw new Error('remote meeting root clock is invalid');
+    }
+
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const conflict = await database.getFirstAsync<MeetingRootSyncConflictRow>(
+        `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+           conflict.local_revision, conflict.remote_revision,
+           conflict.local_payload_json, conflict.remote_payload_json,
+           conflict.created_at_ms
+         FROM sync_conflicts conflict
+         WHERE conflict.id = ? AND conflict.scope_key = ?
+           AND conflict.aggregate_type = 'meeting_note'
+           AND conflict.aggregate_id = ? AND conflict.status = 'unresolved'`,
+        input.conflictId,
+        input.scopeKey,
+        input.meetingId,
+      );
+      if (!conflict) return false;
+      if (conflict.remote_revision !== input.remoteRevision) {
+        throw new Error('meeting root conflict remote revision changed');
+      }
+      const meeting = await database.getFirstAsync<MeetingRow>(
+        'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ? AND updated_at_ms = ?',
+        input.meetingId,
+        input.scopeKey,
+        input.expectedLocalUpdatedAtMs,
+      );
+      if (!meeting) return false;
+      if (meeting.remote_revision !== null && meeting.remote_revision > input.remoteRevision) {
+        throw new Error('meeting root conflict is older than local remote state');
+      }
+      if (meeting.remote_id !== null && meeting.remote_id !== input.remoteId) {
+        throw new Error('meeting root conflict remote identity changed');
+      }
+      if (meeting.remote_id === null && input.remoteClientNoteId !== meeting.id) {
+        throw new Error('meeting root conflict belongs to another local meeting');
+      }
+      const remoteOwner = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE scope_key = ? AND remote_id = ? AND id <> ? LIMIT 1`,
+        input.scopeKey,
+        input.remoteId,
+        input.meetingId,
+      );
+      if (remoteOwner) throw new Error('meeting root remote identity belongs to another local meeting');
+      if (remote?.origin === 'calendar') {
+        const occurrence = await database.getFirstAsync<{ meeting_id: string }>(
+          'SELECT meeting_id FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+          input.meetingId,
+          input.scopeKey,
+        );
+        if (!occurrence) throw new Error('calendar meeting root is missing its occurrence');
+      }
+
+      await database.runAsync(
+        `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
+           last_error_code = 'superseded_by_root_conflict_resolution',
+           request_payload_json = NULL, claim_token = NULL, updated_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_note'
+           AND aggregate_id = ? AND status <> 'completed'`,
+        input.resolvedAtMs,
+        input.scopeKey,
+        input.meetingId,
+      );
+
+      const nextLifecycle = remote?.lifecycle ?? meeting.lifecycle;
+      const nextSyncState: MeetingNote['syncState'] = input.nextOperations.length > 0
+        ? 'pending'
+        : nextLifecycle === 'deleted' ? 'deleted' : 'synced';
+      let updated;
+      if (remote) {
+        const startedAtMs = remote.lifecycle === 'draft'
+          ? null
+          : meeting.started_at_ms ?? remote.serverCreatedAtMs;
+        const endedAtMs = remote.lifecycle === 'ended'
+          ? meeting.ended_at_ms ?? remote.serverUpdatedAtMs
+          : remote.lifecycle === 'deleted' ? meeting.ended_at_ms : null;
+        updated = await database.runAsync(
+          `UPDATE meeting_notes SET remote_id = ?, remote_revision = ?,
+             origin = ?, entry_point = ?, title = ?, description = ?,
+             participants_json = ?, location = ?, mode = ?, recorded_at_ms = ?,
+             lifecycle = ?, started_at_ms = ?, ended_at_ms = ?,
+             sync_state = ?, deleted_at_ms = ?, updated_at_ms = ?
+           WHERE id = ? AND scope_key = ? AND updated_at_ms = ?`,
+          remote.remoteId,
+          remote.remoteRevision,
+          remote.origin,
+          remote.entryPoint,
+          remote.title,
+          remote.description,
+          JSON.stringify(remote.participants),
+          remote.location,
+          remote.mode,
+          remote.recordedAtMs,
+          remote.lifecycle,
+          startedAtMs,
+          endedAtMs,
+          nextSyncState,
+          remote.deletedAtMs,
+          input.resolvedAtMs,
+          input.meetingId,
+          input.scopeKey,
+          input.expectedLocalUpdatedAtMs,
+        );
+      } else {
+        updated = await database.runAsync(
+          `UPDATE meeting_notes SET remote_id = ?, remote_revision = ?,
+             sync_state = ?, updated_at_ms = ?
+           WHERE id = ? AND scope_key = ? AND updated_at_ms = ?`,
+          input.remoteId,
+          input.remoteRevision,
+          nextSyncState,
+          input.resolvedAtMs,
+          input.meetingId,
+          input.scopeKey,
+          input.expectedLocalUpdatedAtMs,
+        );
+      }
+      if (updated.changes !== 1) {
+        throw new Error('meeting root conflict local revision changed during resolution');
+      }
+
+      const resolved = await database.runAsync(
+        `UPDATE sync_conflicts SET status = 'resolved', resolved_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_note'
+           AND aggregate_id = ? AND status = 'unresolved'`,
+        input.resolvedAtMs,
+        input.scopeKey,
+        input.meetingId,
+      );
+      if (resolved.changes < 1) {
+        throw new Error('meeting root conflict disappeared during resolution');
+      }
+      const transaction = new SqliteMeetingTransaction(database);
+      for (const operation of input.nextOperations) {
+        const inserted = await transaction.insertOutbox(operation);
+        if (!inserted) throw new Error('meeting root conflict operation already exists');
+      }
+      await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+      await transaction.advanceCanonicalWrite(input.scopeKey, input.resolvedAtMs);
+      return true;
+    });
+    if (applied) this.notify([input.meetingId]);
     return applied;
   }
 
@@ -8302,7 +8579,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       : 50;
     const conditions = ['meeting.scope_key = ?'];
     const params: Array<string | number> = [scopeKey];
-    if (!query.includeDeleted) conditions.push("meeting.lifecycle != 'deleted'");
+    if (!query.includeDeleted) {
+      conditions.push("(meeting.lifecycle != 'deleted' OR meeting.sync_state = 'conflicted')");
+    }
     if (query.before) {
       conditions.push('(meeting.updated_at_ms < ? OR (meeting.updated_at_ms = ? AND meeting.id < ?))');
       params.push(query.before.updatedAtMs, query.before.updatedAtMs, query.before.id);

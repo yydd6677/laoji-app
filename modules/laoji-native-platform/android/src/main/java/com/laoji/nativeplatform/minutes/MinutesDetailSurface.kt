@@ -210,8 +210,17 @@ internal class MinutesDetailSurface(
     processingRetry.isClickable = true
     processingRetry.isFocusable = true
     processingRetry.setOnClickListener {
-      val stage = renderedState.processingRetryStage ?: return@setOnClickListener
       if (!processingRetry.isEnabled) return@setOnClickListener
+      if (renderedState.rootSyncConflict) {
+        onAction(
+          mapOf(
+            "type" to "openMeetingRootConflict",
+            "meetingId" to renderedState.meetingId,
+          ),
+        )
+        return@setOnClickListener
+      }
+      val stage = renderedState.processingRetryStage ?: return@setOnClickListener
       onAction(
         mapOf(
           "type" to "retryProcessingStage",
@@ -399,27 +408,30 @@ internal class MinutesDetailSurface(
   }
 
   private fun renderProcessingState(state: MinutesDetailState) {
-    val label = state.processingStatusLabel.trim()
+    val label = if (state.rootSyncConflict) "会议同步冲突" else state.processingStatusLabel.trim()
     val retryStage = state.processingRetryStage
-    val actionColor = if (state.processingStatusTone == "danger") MinutesPalette.danger else MinutesPalette.primary
+    val tone = if (state.rootSyncConflict) "danger" else state.processingStatusTone
+    val actionColor = if (tone == "danger") MinutesPalette.danger else MinutesPalette.primary
     processingNoticeText.text = label
-    processingNoticeText.setTextColor(statusToneColor(state.processingStatusTone))
+    processingNoticeText.setTextColor(statusToneColor(tone))
     processingNotice.backgroundShape(
-      when (state.processingStatusTone) {
+      when (tone) {
         "danger" -> MinutesPalette.dangerSoft
         "primary" -> MinutesPalette.primarySoft
         else -> MinutesPalette.page
       },
       radiusDp = 6,
     )
-    processingRetry.visibility = if (retryStage == null) View.GONE else View.VISIBLE
-    processingRetry.isEnabled = retryStage != null && !state.processingRetrying
-    processingRetry.text = if (state.processingRetrying) "重试中" else "重试"
+    val hasAction = state.rootSyncConflict || retryStage != null
+    processingRetry.visibility = if (hasAction) View.VISIBLE else View.GONE
+    processingRetry.isEnabled = state.rootSyncConflict || (retryStage != null && !state.processingRetrying)
+    processingRetry.text = if (state.rootSyncConflict) "处理" else if (state.processingRetrying) "重试中" else "重试"
     processingRetry.setTextColor(
       statefulIconTint(actionColor, actionColor, MinutesPalette.disabled),
     )
-    processingRetry.contentDescription = if (retryStage == null) null else {
-      if (state.processingRetrying) "$label，正在重试" else "$label，重试"
+    processingRetry.contentDescription = if (!hasAction) null else {
+      if (state.rootSyncConflict) "$label，处理"
+      else if (state.processingRetrying) "$label，正在重试" else "$label，重试"
     }
     processingNotice.contentDescription = label.takeIf { it.isNotBlank() }
     processingNotice.visibility = if (label.isBlank()) View.GONE else View.VISIBLE
