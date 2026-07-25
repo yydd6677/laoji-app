@@ -10,6 +10,7 @@ import {
 } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
 import { HttpResponseError } from './errors';
+import { mergeSyncRetryAfterMs } from './syncRetryWake';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 
 const STALE_CLAIM_MS = 90_000;
@@ -326,12 +327,21 @@ export async function drainMeetingActionSync(
       maxMeetings: 3,
     });
     if (claims.length === 0) {
+      const nextAttemptAtMs = await sqliteMeetingNoteRepository.getNextActionSyncAttemptAt(
+        input.scopeKey,
+        STALE_CLAIM_MS,
+      );
+      const retryAfterMs = mergeSyncRetryAfterMs(
+        nowMs,
+        nextAttemptAtMs,
+        earliestRetryMs,
+      );
       diagnosticAudit('meeting_action_sync_drain', {
         status: 'drained',
         processed: processedCount,
-        retry_scheduled: earliestRetryMs !== null,
+        retry_scheduled: retryAfterMs !== null,
       });
-      return { outcome: 'drained', processedCount, retryAfterMs: earliestRetryMs };
+      return { outcome: 'drained', processedCount, retryAfterMs };
     }
     const results = await Promise.all(claims.map(claim => processClaim(
       claim,

@@ -12,6 +12,7 @@
 > Phase 7 已完成 SPK-01 的本场修正纵向切片，并建立 capability-gated 账号 correction outbox 客户端框架。migration v11/v12、匿名 speaker cluster、不可变 correction/assignment、段落与本场同簇更名、游客本机名称、Summary stale 保护、realtime draft 阻止、飞书来源的修改讲话人 sheet、独立远端 Transcript revision 映射、幂等提交/退避/冲突记录均已接通；本场更名不会建立声纹资料，缺少服务端 segment 身份时也不会上传本机 hash。讲话人 correction 现已接入独立 `speaker` 阶段：本机成功、远端排队、可重试失败、明确禁用和完成分别投影为 `ready/partial`、`processing`、`failed_retryable`、`partial` 与 `ready`，详情页重试只重新唤醒该会议的 correction outbox。模拟器已完成本场修改、持久化、v10→v11→v12 迁移和最终 v13 无夹具恢复验证。远端当前不可达（先前返回 502，最终直连无 HTTP 响应），因此 capability 开启、真实账号 correction、跨设备同步、`future_profile`、旧会议重新匹配、真实中文多人准确率改善和 USB 真机仍未完成，Phase 7 尚未满足退出条件。证据见 [`implementation/contracts/phase-7-speaker-assignment-evidence.md`](implementation/contracts/phase-7-speaker-assignment-evidence.md)。
 
 > NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。真正双会议冲突已增加 detached history 和“本机独立保留、日程使用云端关联”的原子恢复路径，但跨会议移动录音/内容仍未实现。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同或恢复路径写成线上、跨设备或真机已验收。
+> 账号同步调度增量状态：MeetingNote 根、occurrence、人工笔记、行动项和讲话人 correction 五类 outbox 均从 SQLite 的绝对 `next_attempt_at_ms` 与 `in_flight.updated_at_ms + stale interval` 恢复 provider 定时；App 进程重启不再依赖上一次内存中的 `setTimeout`。各队列仍保持原有分组、顺序、远端身份和 blocked/permanent/conflict 门禁，持久唤醒只决定何时再次进入 claim，不绕过是否允许发送。当前仅有 TypeScript、纯时间合并合同和查询/claim 同域源码审计，尚未做真实进程强杀、系统时钟跳变、账号切换或远端恢复验证。
 > 适用范围：老记 Android、React Native 领域层、本机持久化、会议服务、日程服务对接。
 > 规范词：`必须`、`不得`、`应`、`可以`分别对应 MUST、MUST NOT、SHOULD、MAY。
 
@@ -1585,6 +1586,7 @@ Outbox 调度：
 - `claim_token` 保护迟到响应：只有仍持有同一 token 的 `in_flight` cohort 可以 ACK、转 retry 或写 conflict；过期 claim 由新 token 回收。
 - 网络恢复、App foreground、用户手动刷新触发。
 - 自动重试遵守 next_attempt；手动重试可以绕过时间但不绕过 blocked。
+- provider 每次启动或 drain 后必须从持久 outbox 重建下一次绝对唤醒时间；`retry` 使用 `next_attempt_at_ms`，未完成的 `in_flight` 使用最后更新时间加 stale claim 间隔。进程内刚产生的相对退避与持久绝对时间取更早者，时钟已越过目标时按立即可唤醒处理，但实际 timer 至少延迟 1 秒，避免热循环。
 - scope/token generation 改变时旧请求停止，不能把用户 A 的操作发送到用户 B。
 - 客户端只有在本次实时 `GET /api/laoji/capabilities` 明确返回 `action_items_v2=true` 时才 claim/send；404、断网、旧缓存或缺字段均不发写请求，本机 mutation 不回滚。
 - 409/412 不自动覆盖：冲突记录必须保留本机发送快照、云端 current payload/revision 和错误码。用户选择本机版本后用新 operation/Idempotency-Key 对云端 current revision 重试；选择云端版本后取消该 action 所有旧未完成 operation。损坏 payload、身份错配或 revision 漂移时保持 unresolved，不允许推测字段。

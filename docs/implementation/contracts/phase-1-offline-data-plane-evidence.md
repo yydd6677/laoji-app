@@ -27,6 +27,7 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 | 游客录音 capture/asset | capture stage、会议 lifecycle、主录音资产、guest upload stage、可选 Transcript stage 与 canonical revision 在一个事务中更新。开始录音创建或复用 `capturing` 主资产并绑定 native session；暂停/恢复不重复增加 attempt；有效本机 URI 才允许 `local_ready`；启动失败保留 `failed_recoverable + missing` 资产供 journal 恢复；guest upload 固定 `not_required` |
 | 账号录音上传对账 | pending registry 与 WorkManager 保持唯一上传调度权；前台、录音结束和 JS/native 重试前后读取当前 worker state，归一化 queued/uploading/uploaded/failed_retryable/blocked。事务只更新主 RecordingAsset、upload stage、attempt、稳定 operation ID 与 credential generation；同 operation 的 uploaded 不被迟到失败降级，相同证据不增加 revision，新 operation 才可替换本机资产 URI。账号专用写开关独立且默认关闭，普通构建只 shadow write |
 | 账号根 outbox 消费 | 本机 MeetingNote ID 永不替换，远端 UUID 独立写 `remote_id`。每场只 claim 最早未完成 operation，create/update/delete 不乱序；90 秒陈旧 in-flight 可回收，指数退避保留同一 request snapshot。create 使用稳定 `client_request_id`，PATCH 只发送显式设值字段，DELETE 404 为幂等成功；409 保存冲突副本，401/网络重试，合同缺失或非法 payload 终止并阻止同场后续操作。成功/终态与 canonical revision 同事务推进 |
+| 账号 outbox 持久唤醒 | MeetingNote 根、occurrence、人工笔记、行动项与讲话人 correction 的 provider 不再只依赖当前进程创建的 timer。claim 返回空时从 SQLite 读取仍可发送 cohort 的 `next_attempt_at_ms`，并把 fresh `in_flight` 的最后更新时间加 90 秒作为 stale 回收时间；根队列只看每场最早 operation，行动项/笔记等待整个在途 cohort，occurrence 按 operation，blocked/permanent 继续排除。持久绝对时间与本轮相对退避取更早者 |
 | 账号 Store 与远端合并 | 独立根写开关下，创建、根字段、删除、capture、Transcript、Summary 和上传状态都从 canonical 投影解析本机 ID；根 outbox、领域 mutation 与 revision 同事务。远端列表按 `remote_id`/`client_request_id` 绑定，未完成根操作保护本机字段，墓碑不复活，列表缺项不删除，远端内容可用性不覆盖本机正文或录音资产，已上传证据不被延迟列表降级 |
 | 游客 Transcript | Store 复用游客 mutation 队列并从 canonical 投影解析主键；用例过滤空行、规范时间/说话人/置信度，使用内容指纹生成稳定 revision/segment ID。realtime draft 只显式全量替换自身；final/reprocessed immutable；稳定 final 阻止迟到 draft 激活；明显较短 final 保存为 inactive 且阶段保持 finalizing；active 内容变化才 stale Summary。Transcript/stage/Summary stale/Marker 对账与 canonical revision 同事务，提交后只采用全 scope canonical 投影 |
 | 游客 Summary | Store 复用游客 mutation 队列并校验 canonical 主键；严格模式沿用 schema v2/legacy adapter、内容指纹、immutable version/section/citation 和生成 action 复用。realtime draft、显式 Transcript revision 错配与主键错配 fail-closed；事务内二次确认 active Transcript，输入已过期或当前版本有用户编辑/已处理 action 时只保存 inactive 候选，当前 Summary、阶段状态和 fingerprint 不被覆盖；候选与 canonical revision 同事务 |
@@ -54,6 +55,7 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 ## 已执行验证
 
 - `npx tsc --noEmit --pretty false`：通过。
+- outbox 持久唤醒增量：`npx tsc --noEmit`、`git diff --check` 与临时纯时间合并合同通过；静态复核四个新增查询与原 claim 使用相同 scope、远端身份、生命周期、aggregate、operation type 和 blocker 条件。没有恢复归档测试/门禁，没有生成 APK；Expo SQLite、真实进程强杀、系统时钟跳变和远端恢复仍未实测。
 - `node /tmp/laoji-phase1-contract.cjs`：通过。结果为 3 个 MeetingNote、4 个 outbox；覆盖账号根字段 mutation 必须携带同事务 outbox、空标题与其他上下文归一化、相同 operation 重试不重复、不同 payload 复用 ID 被拒绝、active capture 拒绝删除、软删除保留 recording asset 及 tombstone 重试幂等。录音对账 matched 2、创建恢复 MeetingNote 1、更新 recording asset 2、跨 scope 忽略 2、冲突和未决失败均为 0。该脚本是当期临时验证材料，不纳入轻量工作树。
 - `node /tmp/laoji-phase1-content-contract.cjs`：通过。覆盖 v2→v3→v4 原行保留与安全默认值、scope 默认 legacy owner、canonical revision 递增、镜像 clean/failed CAS、clean 后晚到 failure 拒绝、投影期间 revision 漂移重试、三份旧缓存完整修复和失败后恢复；同时覆盖 canonical 请求 ID 唯一、legacy 重复请求 ID 豁免、六项上下文对账、默认关闭/一致时生成完整兼容投影、删除墓碑隔离、重复旧身份拒绝、可见字段漂移拒绝、同数量 Transcript 正文漂移拒绝和 mismatch 自动回退，以及内容版本不变量。空投影后仍保留 2 个 revision、1 个 version、1 个 action。该脚本和临时数据库不纳入轻量工作树。
 - 临时 canonical mirror 契约：通过。首次 revision 2 将三份缓存各写一次并 clean；重复调用零写入；Summary writer 失败时 mirror revision 保持 2、状态为 failed 且只保存 `TypeError`；恢复后 clean 到 revision 3；写入期间 revision 3→4 漂移会把三份缓存完整重写第二轮并最终 clean。脚本执行后删除，未恢复测试目录。
@@ -104,6 +106,6 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 
 1. 游客全部既有纵切和账号创建/根字段/删除/录音根状态/Transcript/Summary/远端刷新/上传状态已经具备 canonical-first 实验路径，但这只证明本机框架和临时事务合同成立，不等价于部署服务已支持完整字段、幂等、冲突和空值语义；账号根写及上传开关继续默认关闭。
 2. Store 已在上述受控纵切和 owner 冷启动恢复中调用 scope revision、legacy mirror CAS 与全投影协调器；普通构建只有在真实账号 create/update/delete/upload、离线重试、冷启动恢复和回滚均完成后才可声明 canonical owner。
-3. canonical read 已在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退；canonical write 已完成游客路径的设备验证及账号路径的临时实际函数契约。账号尚无真实 pending registry/WorkManager 网络请求、服务端成功/失败、跨设备刷新或冲突闭环；服务不可达，账号 Transcript/Summary 也没有真实 Expo SQLite/UI 内容闭环。生产 flag 继续关闭，大数据量性能、真实 mirror I/O 故障和授权真机账号 opt-in 均未完成。
+3. canonical read 已在显式 opt-in 模拟器完成创建、失败态、删除、冷启动和自动回退；canonical write 已完成游客路径的设备验证及账号路径的临时实际函数契约。账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复、服务端成功/失败、跨设备刷新或冲突闭环；服务不可达，账号 Transcript/Summary 也没有真实 Expo SQLite/UI 内容闭环。生产 flag 继续关闭，大数据量性能、真实 mirror I/O 故障和授权真机账号 opt-in 均未完成。
 4. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
 5. 线上 MeetingNote v2 契约仍未验证，不得发送探测性 v2 写请求或开启 v2 capability；本批根 outbox 已接旧 API 消费器，但只能在独立实验开关、已通过 preflight 的 canonical owner 和真实授权账号下验证，不得进入普通包。

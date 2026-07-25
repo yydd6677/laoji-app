@@ -11,6 +11,7 @@ import {
 import type { ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 import { HttpResponseError } from './errors';
+import { mergeSyncRetryAfterMs } from './syncRetryWake';
 
 const STALE_CLAIM_MS = 90_000;
 const MAX_BATCHES_PER_DRAIN = 20;
@@ -332,14 +333,11 @@ export async function drainMeetingSpeakerCorrectionSync(
         input.scopeKey,
         STALE_CLAIM_MS,
       );
-      const persistedRetryAfterMs = nextAttemptAtMs === null
-        ? null
-        : Math.max(0, nextAttemptAtMs - nowMs);
-      const retryAfterMs = earliestRetryMs === null
-        ? persistedRetryAfterMs
-        : persistedRetryAfterMs === null
-          ? earliestRetryMs
-          : Math.min(earliestRetryMs, persistedRetryAfterMs);
+      const retryAfterMs = mergeSyncRetryAfterMs(
+        nowMs,
+        nextAttemptAtMs,
+        earliestRetryMs,
+      );
       diagnosticAudit('speaker_correction_sync_drain', {
         status: 'drained',
         processed: processedCount,

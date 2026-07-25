@@ -176,6 +176,11 @@ type SyncOutboxRow = {
   updated_at_ms: number;
 };
 
+type SyncAttemptProjectionRow = Pick<
+  SyncOutboxRow,
+  'aggregate_id' | 'status' | 'next_attempt_at_ms' | 'updated_at_ms'
+>;
+
 type ActionSyncOutboxRow = SyncOutboxRow & {
   meeting_id: string;
   meeting_remote_id: string;
@@ -238,6 +243,17 @@ type MeetingRootSyncOutboxRow = SyncOutboxRow & {
   meeting_remote_id: string | null;
   transport_order: number;
 };
+
+type MeetingRootOperationOrderRow = Pick<
+  SyncOutboxRow,
+  | 'operation_id'
+  | 'aggregate_id'
+  | 'operation_type'
+  | 'status'
+  | 'next_attempt_at_ms'
+  | 'created_at_ms'
+  | 'updated_at_ms'
+> & { transport_order: number };
 
 type SpeakerCorrectionSyncOutboxRow = SyncOutboxRow & {
   meeting_id: string;
@@ -1113,13 +1129,76 @@ function meetingRootOperationRank(value: string): number {
 }
 
 function compareMeetingRootOperations(
-  left: MeetingRootSyncOutboxRow,
-  right: MeetingRootSyncOutboxRow,
+  left: MeetingRootOperationOrderRow,
+  right: MeetingRootOperationOrderRow,
 ): number {
   return left.created_at_ms - right.created_at_ms
     || left.transport_order - right.transport_order
     || meetingRootOperationRank(left.operation_type) - meetingRootOperationRank(right.operation_type)
     || left.operation_id.localeCompare(right.operation_id);
+}
+
+function staleSyncAttemptAt(updatedAtMs: number, staleClaimAfterMs: number): number {
+  assertNonNegativeInteger(updatedAtMs, 'sync attempt update time');
+  assertNonNegativeInteger(staleClaimAfterMs, 'sync stale claim interval');
+  return Math.min(Number.MAX_SAFE_INTEGER, updatedAtMs + staleClaimAfterMs);
+}
+
+function retrySyncAttemptAt(row: SyncAttemptProjectionRow): number {
+  if (row.next_attempt_at_ms === null) return 0;
+  assertNonNegativeInteger(row.next_attempt_at_ms, 'sync next attempt time');
+  return row.next_attempt_at_ms;
+}
+
+function nextGroupedSyncAttemptAt(
+  rows: readonly SyncAttemptProjectionRow[],
+  staleClaimAfterMs: number,
+): number | null {
+  const byAggregate = new Map<string, SyncAttemptProjectionRow[]>();
+  rows.forEach(row => {
+    const group = byAggregate.get(row.aggregate_id);
+    if (group) group.push(row);
+    else byAggregate.set(row.aggregate_id, [row]);
+  });
+  const attempts: number[] = [];
+  byAggregate.forEach(group => {
+    const inFlight = group.filter(row => row.status === 'in_flight');
+    if (inFlight.length > 0) {
+      attempts.push(inFlight.reduce((latest, row) => Math.max(
+        latest,
+        staleSyncAttemptAt(row.updated_at_ms, staleClaimAfterMs),
+      ), 0));
+      return;
+    }
+    const retries = group.filter(row => row.status === 'retry');
+    if (retries.length > 0) {
+      attempts.push(retries.reduce((earliest, row) => Math.min(
+        earliest,
+        retrySyncAttemptAt(row),
+      ), Number.MAX_SAFE_INTEGER));
+      return;
+    }
+    if (group.some(row => row.status === 'pending')) attempts.push(0);
+  });
+  return attempts.reduce<number | null>((earliest, attempt) => (
+    earliest === null ? attempt : Math.min(earliest, attempt)
+  ), null);
+}
+
+function nextFlatSyncAttemptAt(
+  rows: readonly SyncAttemptProjectionRow[],
+  staleClaimAfterMs: number,
+): number | null {
+  return rows.reduce<number | null>((earliest, row) => {
+    let attempt: number | null = null;
+    if (row.status === 'pending') attempt = 0;
+    else if (row.status === 'retry') attempt = retrySyncAttemptAt(row);
+    else if (row.status === 'in_flight') {
+      attempt = staleSyncAttemptAt(row.updated_at_ms, staleClaimAfterMs);
+    }
+    if (attempt === null) return earliest;
+    return earliest === null ? attempt : Math.min(earliest, attempt);
+  }, null);
 }
 
 function actionSyncRequestPayload(row: ActionSyncOutboxRow): string {
@@ -3874,6 +3953,50 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     });
   }
 
+  async getNextMeetingRootSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'meeting root stale claim interval');
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingRootOperationOrderRow>(
+      `SELECT
+         outbox.operation_id, outbox.aggregate_id, outbox.operation_type,
+         outbox.status, outbox.next_attempt_at_ms,
+         outbox.created_at_ms, outbox.updated_at_ms,
+         outbox.rowid AS transport_order
+       FROM sync_outbox outbox
+       INNER JOIN meeting_notes meeting ON meeting.id = outbox.aggregate_id
+       WHERE outbox.scope_key = ? AND meeting.scope_key = ?
+         AND outbox.aggregate_type = 'meeting_note'
+         AND outbox.status IN ('pending', 'retry', 'in_flight', 'blocked', 'permanent_error')
+       ORDER BY outbox.created_at_ms, outbox.operation_id`,
+      scopeKey,
+      scopeKey,
+    );
+    const byMeeting = new Map<string, MeetingRootOperationOrderRow[]>();
+    rows.forEach(row => {
+      const group = byMeeting.get(row.aggregate_id);
+      if (group) group.push(row);
+      else byMeeting.set(row.aggregate_id, [row]);
+    });
+    const attempts: number[] = [];
+    byMeeting.forEach(group => {
+      const first = [...group].sort(compareMeetingRootOperations)[0];
+      if (!first || first.status === 'blocked' || first.status === 'permanent_error') return;
+      if (first.status === 'pending') attempts.push(0);
+      else if (first.status === 'retry') attempts.push(retrySyncAttemptAt(first));
+      else if (first.status === 'in_flight') {
+        attempts.push(staleSyncAttemptAt(first.updated_at_ms, staleClaimAfterMs));
+      }
+    });
+    return attempts.reduce<number | null>((earliest, attempt) => (
+      earliest === null ? attempt : Math.min(earliest, attempt)
+    ), null);
+  }
+
   async completeMeetingRootSyncClaim(
     claim: MeetingRootSyncClaim,
     remoteId: string,
@@ -4281,6 +4404,36 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       }
       return claims;
     });
+  }
+
+  async getNextOccurrenceSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'occurrence stale claim interval');
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<SyncAttemptProjectionRow & { operation_type: string }>(
+      `SELECT outbox.aggregate_id, outbox.operation_type, outbox.status,
+         outbox.next_attempt_at_ms, outbox.updated_at_ms
+       FROM sync_outbox outbox
+       INNER JOIN meeting_occurrence_links link
+         ON link.meeting_id = outbox.aggregate_id AND link.scope_key = outbox.scope_key
+       INNER JOIN meeting_notes meeting ON meeting.id = link.meeting_id
+       INNER JOIN meeting_schedule_snapshots snapshot ON snapshot.meeting_id = link.meeting_id
+       WHERE outbox.scope_key = ? AND meeting.scope_key = ?
+         AND outbox.aggregate_type = 'meeting_occurrence'
+         AND outbox.status IN ('pending', 'retry', 'in_flight', 'blocked', 'permanent_error')
+         AND meeting.lifecycle <> 'deleted' AND meeting.remote_id IS NOT NULL
+       ORDER BY outbox.created_at_ms, outbox.operation_id`,
+      scopeKey,
+      scopeKey,
+    );
+    if (rows.some(row => row.operation_type !== 'occurrence.upsert')) {
+      throw new Error('occurrence sync operation type is invalid');
+    }
+    return nextFlatSyncAttemptAt(rows, staleClaimAfterMs);
   }
 
   async completeOccurrenceSyncClaim(
@@ -5358,6 +5511,40 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     });
   }
 
+  async getNextActionSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'meeting action stale claim interval');
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<SyncAttemptProjectionRow>(
+      `SELECT outbox.aggregate_id, outbox.status,
+         outbox.next_attempt_at_ms, outbox.updated_at_ms
+       FROM sync_outbox outbox
+       INNER JOIN action_items action ON action.id = outbox.aggregate_id
+       INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
+       WHERE outbox.scope_key = ? AND meeting.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+         AND meeting.remote_id IS NOT NULL AND LENGTH(TRIM(meeting.remote_id)) > 0
+         AND outbox.aggregate_type = 'action_item'
+         AND outbox.operation_type = 'action_item.upsert'
+         AND outbox.status IN ('pending', 'retry', 'in_flight')
+         AND NOT EXISTS (
+           SELECT 1 FROM sync_outbox blocker
+           WHERE blocker.scope_key = outbox.scope_key
+             AND blocker.aggregate_type = outbox.aggregate_type
+             AND blocker.aggregate_id = outbox.aggregate_id
+             AND blocker.status IN ('blocked', 'permanent_error')
+         )
+       ORDER BY outbox.created_at_ms, outbox.operation_id`,
+      scopeKey,
+      scopeKey,
+    );
+    return nextGroupedSyncAttemptAt(rows, staleClaimAfterMs);
+  }
+
   async completeActionSyncClaim(
     claim: ActionSyncClaim,
     remoteId: string,
@@ -5811,6 +5998,40 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       }
       return claims;
     });
+  }
+
+  async getNextManualNoteSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'manual note stale claim interval');
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<SyncAttemptProjectionRow>(
+      `SELECT outbox.aggregate_id, outbox.status,
+         outbox.next_attempt_at_ms, outbox.updated_at_ms
+       FROM sync_outbox outbox
+       INNER JOIN manual_notes note ON note.meeting_id = outbox.aggregate_id
+       INNER JOIN meeting_notes meeting ON meeting.id = note.meeting_id
+       WHERE outbox.scope_key = ? AND meeting.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+         AND meeting.remote_id IS NOT NULL AND LENGTH(TRIM(meeting.remote_id)) > 0
+         AND outbox.aggregate_type = 'manual_note'
+         AND outbox.operation_type = 'manual_note.upsert'
+         AND outbox.status IN ('pending', 'retry', 'in_flight')
+         AND NOT EXISTS (
+           SELECT 1 FROM sync_outbox blocker
+           WHERE blocker.scope_key = outbox.scope_key
+             AND blocker.aggregate_type = 'manual_note'
+             AND blocker.aggregate_id = outbox.aggregate_id
+             AND blocker.status IN ('blocked', 'permanent_error')
+         )
+       ORDER BY outbox.created_at_ms, outbox.operation_id`,
+      scopeKey,
+      scopeKey,
+    );
+    return nextGroupedSyncAttemptAt(rows, staleClaimAfterMs);
   }
 
   async completeManualNoteSyncClaim(

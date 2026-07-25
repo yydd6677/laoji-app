@@ -930,6 +930,10 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     options: ClaimMeetingRootSyncOptions,
   ): Promise<readonly MeetingRootSyncClaim[]>;
+  getNextMeetingRootSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
   completeMeetingRootSyncClaim(
     claim: MeetingRootSyncClaim,
     remoteId: string,
@@ -948,6 +952,10 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     options: ClaimOccurrenceSyncOptions,
   ): Promise<readonly OccurrenceSyncClaim[]>;
+  getNextOccurrenceSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
   completeOccurrenceSyncClaim(
     claim: OccurrenceSyncClaim,
     remoteId: string,
@@ -979,6 +987,10 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     options: ClaimActionSyncOptions,
   ): Promise<readonly ActionSyncClaim[]>;
+  getNextActionSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
   completeActionSyncClaim(
     claim: ActionSyncClaim,
     remoteId: string,
@@ -995,6 +1007,10 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     options: ClaimManualNoteSyncOptions,
   ): Promise<readonly ManualNoteSyncClaim[]>;
+  getNextManualNoteSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
   completeManualNoteSyncClaim(
     claim: ManualNoteSyncClaim,
     remoteRevision: number,
