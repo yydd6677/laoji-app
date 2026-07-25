@@ -439,6 +439,23 @@ export interface MarkerRecord {
   updatedAtMs: number;
 }
 
+export type MeetingAttachmentKind = 'text' | 'image';
+
+export interface MeetingAttachmentRecord {
+  id: string;
+  meetingId: string;
+  markerId: string | null;
+  positionMs: number;
+  kind: MeetingAttachmentKind;
+  textContent: string | null;
+  localUri: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  byteSize: number | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
 export interface MeetingTagRecord {
   id: string;
   scopeKey: ScopeKey;
@@ -1089,6 +1106,16 @@ export interface MeetingNoteRepository {
     input: ResolveMeetingActionSyncConflictInput,
   ): Promise<boolean>;
   listMeetingMarkers(meetingId: string, scopeKey: ScopeKey): Promise<readonly MarkerRecord[]>;
+  listMeetingAttachments(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingAttachmentRecord[]>;
+  createMeetingAttachment(
+    attachment: MeetingAttachmentRecord,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingAttachmentRecord>;
+  deleteMeetingAttachment(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingAttachmentRecord | null>;
   listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
   resolveCanonicalMeetingId(navigationMeetingId: string, scopeKey: ScopeKey): Promise<string | null>;
   listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]>;

@@ -167,6 +167,12 @@ export type RootStackParamList = {
     positionMs?: number;
     transcriptFocusRequestId?: number;
   };
+  MeetingAttachments: {
+    meetingId: string;
+    meetingTitle?: string;
+    markerId?: string;
+    positionMs?: number;
+  };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
   Profile: undefined;

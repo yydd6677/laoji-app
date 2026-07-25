@@ -18,6 +18,7 @@ import { meetingRootPullCursorV17 } from './0017MeetingRootPullCursor';
 import { meetingDeletionLifecycleV18 } from './0018MeetingDeletionLifecycle';
 import { recordingMergeRecoveryV19 } from './0019RecordingMergeRecovery';
 import { meetingOrganizationSearchV20 } from './0020MeetingOrganizationSearch';
+import { meetingAttachmentsV21 } from './0021MeetingAttachments';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -41,6 +42,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingDeletionLifecycleV18,
   recordingMergeRecoveryV19,
   meetingOrganizationSearchV20,
+  meetingAttachmentsV21,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -63,4 +65,5 @@ export { MEETING_ROOT_PULL_CURSOR_V17_SQL } from './0017MeetingRootPullCursor';
 export { MEETING_DELETION_LIFECYCLE_V18_SQL } from './0018MeetingDeletionLifecycle';
 export { RECORDING_MERGE_RECOVERY_V19_SQL } from './0019RecordingMergeRecovery';
 export { MEETING_ORGANIZATION_SEARCH_V20_SQL } from './0020MeetingOrganizationSearch';
+export { MEETING_ATTACHMENTS_V21_SQL } from './0021MeetingAttachments';
 export type { MeetingDatabaseMigration } from './types';

@@ -29,6 +29,7 @@ import { HttpResponseError } from '../services/errors';
 import { meetingSummaryToText } from '../services/meetingSummary';
 import { deleteNativeMeetingArtifacts } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
+import { deleteMeetingAttachmentFiles } from '../services/meetingAttachmentStorage';
 import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
 import { clearPendingMeetingTranscriptCompletion } from '../services/meetingTranscriptCompletionTasks';
 import {
@@ -917,6 +918,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         deletePendingMeetingAudioUpload(scope, legacyMeetingId),
         deleteNativeMeetingArtifacts(scope, legacyMeetingId),
         deleteMeetingPlaybackCache(legacyMeetingId),
+        deleteMeetingAttachmentFiles(legacyMeetingId),
         cancelMeetingActionNotificationsForMeeting('guest', legacyMeetingId),
         ...(target.audioLocalUri
           ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
@@ -1249,6 +1251,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       clearPendingMeetingTranscriptCompletion(scope, legacyMeetingId),
       deleteMeetingPlaybackCache(legacyMeetingId),
       cancelMeetingActionNotificationsForMeeting(scope, legacyMeetingId),
+      ...(!options.recoverable ? [deleteMeetingAttachmentFiles(legacyMeetingId)] : []),
       ...(!options.recoverable ? [deleteNativeMeetingArtifacts(scope, legacyMeetingId)] : []),
       ...(!options.recoverable && target.audioLocalUri
         ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
@@ -2262,6 +2265,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           deletePendingMeetingAudioUpload(scope, id),
           deleteNativeMeetingArtifacts(scope, id),
           deleteMeetingPlaybackCache(id),
+          deleteMeetingAttachmentFiles(id),
           ...(isScopeKey(scope) ? [cancelMeetingActionNotificationsForMeeting(scope, id)] : []),
           ...(target.audioLocalUri
             ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
@@ -2356,6 +2360,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       clearPendingMeetingTranscriptCompletion(scope, id),
       deleteNativeMeetingArtifacts(scope, id),
       deleteMeetingPlaybackCache(id),
+      deleteMeetingAttachmentFiles(id),
       ...(isScopeKey(scope) ? [cancelMeetingActionNotificationsForMeeting(scope, id)] : []),
       ...(target?.audioLocalUri
         ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]

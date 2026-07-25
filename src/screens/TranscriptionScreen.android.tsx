@@ -5,7 +5,7 @@ import {
   ToastAndroid,
   View,
 } from 'react-native';
-import type { RouteProp } from '@react-navigation/native';
+import { useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiMinutesView,
@@ -127,6 +127,7 @@ import { materializeMeetingPlaybackAudio } from '../services/meetingPlaybackCach
 import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
 import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
 import { deleteMeetingMarker, loadMeetingMarkers } from '../services/meetingMarkers';
+import { loadMeetingAttachments } from '../services/meetingAttachments';
 import { loadMeetingActions } from '../services/meetingActions';
 import { pullMeetingActionsForDetail } from '../services/meetingActionPull';
 import type { MeetingActionSyncConflictView } from '../services/meetingActionConflicts';
@@ -182,6 +183,7 @@ import {
 } from '../application/meeting';
 import {
   sqliteMeetingNoteRepository,
+  type MeetingAttachmentRecord,
   type MarkerRecord,
   type RecordingAssetRecord,
   type SummaryVersionRecord,
@@ -489,6 +491,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [rootConflictSaving, setRootConflictSaving] = useState(false);
   const [rootConflictError, setRootConflictError] = useState('');
   const [markers, setMarkers] = useState<readonly MarkerRecord[]>([]);
+  const [meetingAttachments, setMeetingAttachments] = useState<readonly MeetingAttachmentRecord[]>([]);
   const [deletingMarkerId, setDeletingMarkerId] = useState<string | null>(null);
   const [markerActionsId, setMarkerActionsId] = useState<string | null>(null);
   const [speakerAssignmentTarget, setSpeakerAssignmentTarget] = useState<SpeakerAssignmentTarget | null>(null);
@@ -516,6 +519,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const rootConflictRequestGenerationRef = useRef(0);
   const markerRequestGenerationRef = useRef(0);
   const markerLoadErrorShownRef = useRef(false);
+  const attachmentRequestGenerationRef = useRef(0);
+  const attachmentLoadErrorShownRef = useRef(false);
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
   const meetingScopeKey: ScopeKey | null = isGuest
     ? 'guest'
@@ -635,6 +640,36 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ) {
         markerLoadErrorShownRef.current = true;
         ToastAndroid.show('标记暂时无法加载，请稍后重试。', ToastAndroid.LONG);
+      }
+    }
+  }, [meeting?.id, meetingScopeKey]);
+
+  const refreshMeetingAttachments = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey) {
+      setMeetingAttachments([]);
+      return;
+    }
+    const generation = attachmentRequestGenerationRef.current + 1;
+    attachmentRequestGenerationRef.current = generation;
+    try {
+      const attachments = await loadMeetingAttachments(meetingScopeKey, requestedMeetingId);
+      if (
+        !mountedRef.current
+        || attachmentRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return;
+      attachmentLoadErrorShownRef.current = false;
+      setMeetingAttachments(attachments);
+    } catch {
+      if (
+        mountedRef.current
+        && attachmentRequestGenerationRef.current === generation
+        && routeMeetingIdRef.current === requestedMeetingId
+        && !attachmentLoadErrorShownRef.current
+      ) {
+        attachmentLoadErrorShownRef.current = true;
+        ToastAndroid.show('附件暂时无法加载，请稍后重试。', ToastAndroid.LONG);
       }
     }
   }, [meeting?.id, meetingScopeKey]);
@@ -866,6 +901,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setRootConflictError('');
     setShareVisible(false);
     setMarkers([]);
+    setMeetingAttachments([]);
     setDeletingMarkerId(null);
     setMarkerActionsId(null);
     setSpeakerAssignmentTarget(null);
@@ -877,6 +913,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     rootConflictRequestGenerationRef.current += 1;
     markerRequestGenerationRef.current += 1;
     markerLoadErrorShownRef.current = false;
+    attachmentRequestGenerationRef.current += 1;
+    attachmentLoadErrorShownRef.current = false;
   }, [route.params.meetingId, meetingScopeKey]);
 
   useEffect(() => {
@@ -889,6 +927,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   useEffect(() => {
     void refreshMarkers();
   }, [refreshMarkers, transcriptCached, transcriptCompleting]);
+
+  useFocusEffect(useCallback(() => {
+    void refreshMeetingAttachments();
+  }, [refreshMeetingAttachments]));
 
   useEffect(() => {
     void refreshMeetingActions();
@@ -2741,6 +2783,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [markers, showDialog, transcript]);
 
+  const openMeetingAttachments = useCallback((marker: MarkerRecord | null = null) => {
+    if (!meeting) return;
+    setMoreVisible(false);
+    setMarkerActionsId(null);
+    navigation.navigate('MeetingAttachments', {
+      meetingId: meeting.id,
+      meetingTitle: displayMeetingTitle(meeting.title),
+      ...(marker ? { markerId: marker.id, positionMs: marker.positionMs } : {}),
+    });
+  }, [meeting, navigation]);
+
   function retryProcessingStage(stage: MinutesProcessingStage): void {
     if (!meeting || !processingStageCanRetry(processingStatuses, stage)) {
       setReloadKey(value => value + 1);
@@ -3158,15 +3211,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ...(summaryDocument?.remoteVersionId
         ? [{ key: 'summary-versions', label: '整理结果版本', onPress: openSummaryVersions }]
         : []),
+      ...(meetingAttachments.length > 0
+        ? [{
+            key: 'attachments',
+            label: `附件（${meetingAttachments.length}）`,
+            onPress: () => openMeetingAttachments(),
+          }]
+        : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
+  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, meetingAttachments.length, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
 
   const markerForActions = useMemo(
     () => markers.find(marker => marker.id === markerActionsId) ?? null,
     [markerActionsId, markers],
   );
+  const markerAttachmentCount = useMemo(() => markerForActions
+    ? meetingAttachments.filter(attachment => attachment.markerId === markerForActions.id).length
+    : 0, [markerForActions, meetingAttachments]);
   const markerItems = useMemo<AppActionSheetItem[]>(() => markerForActions ? [
+    {
+      key: 'attachments',
+      label: `附件（${markerAttachmentCount}）`,
+      onPress: () => openMeetingAttachments(markerForActions),
+    },
     {
       key: 'create-action',
       label: '创建待办事项',
@@ -3177,7 +3245,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       label: '分享标记文字',
       onPress: () => { void shareMarker(markerForActions.id); },
     },
-  ] : [], [markerForActions, openMeetingActionCreator, shareMarker]);
+  ] : [], [markerAttachmentCount, markerForActions, openMeetingActionCreator, openMeetingAttachments, shareMarker]);
 
   const versionChoices = useMemo(
     () => summaryVersionChoices(summaryVersionsState),

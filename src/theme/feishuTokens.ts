@@ -75,6 +75,7 @@ export type FeishuSemanticColors = Readonly<{
   divider: string;
   pressedFill: string;
   primary: string;
+  primarySoft: string;
   primaryHover: string;
   primaryPressed: string;
   primaryLoading: string;
@@ -106,6 +107,7 @@ export const FEISHU_LIGHT_COLORS: FeishuSemanticColors = Object.freeze({
   divider: 'rgba(31,35,41,0.15)',
   pressedFill: 'rgba(31,35,41,0.12)',
   primary: '#1456F0',
+  primarySoft: '#F0F4FF',
   primaryHover: '#336DF4',
   primaryPressed: '#0442D2',
   primaryLoading: '#94B4FF',
@@ -136,6 +138,7 @@ export const FEISHU_DARK_COLORS: FeishuSemanticColors = Object.freeze({
   divider: 'rgba(207,207,207,0.15)',
   pressedFill: 'rgba(235,235,235,0.12)',
   primary: '#3370EB',
+  primarySoft: '#152340',
   primaryHover: '#275FCE',
   primaryPressed: '#4C88FF',
   primaryLoading: '#2655B6',

@@ -37,6 +37,7 @@ import type {
   MeetingActionMutableFields,
   MeetingActionFollowupLinkFields,
   MeetingActionReminderRecord,
+  MeetingAttachmentRecord,
   MeetingActionPullState,
   MergeMeetingActionPullPageInput,
   MergeMeetingActionPullPageResult,
@@ -380,6 +381,21 @@ type MarkerRow = {
   nearest_segment_id: string | null;
   label: string | null;
   kind: MarkerRecord['kind'];
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+type MeetingAttachmentRow = {
+  id: string;
+  meeting_id: string;
+  marker_id: string | null;
+  position_ms: number;
+  kind: string;
+  text_content: string | null;
+  local_uri: string | null;
+  mime_type: string | null;
+  file_name: string | null;
+  byte_size: number | null;
   created_at_ms: number;
   updated_at_ms: number;
 };
@@ -966,6 +982,42 @@ function markerFromRow(row: MarkerRow): MarkerRecord {
   };
 }
 
+function meetingAttachmentFromRow(row: MeetingAttachmentRow): MeetingAttachmentRecord {
+  if (row.kind !== 'text' && row.kind !== 'image') {
+    throw new Error('stored meeting attachment kind is invalid');
+  }
+  const textShape = row.kind === 'text'
+    && Boolean(row.text_content?.trim())
+    && row.local_uri === null
+    && row.mime_type === null
+    && row.file_name === null
+    && row.byte_size === null;
+  const imageShape = row.kind === 'image'
+    && row.text_content === null
+    && Boolean(row.local_uri?.trim())
+    && Boolean(row.mime_type?.trim())
+    && Boolean(row.file_name?.trim())
+    && Number.isSafeInteger(row.byte_size)
+    && (row.byte_size ?? 0) > 0;
+  if ((!textShape && !imageShape) || !Number.isSafeInteger(row.position_ms) || row.position_ms < 0) {
+    throw new Error('stored meeting attachment is invalid');
+  }
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    markerId: row.marker_id,
+    positionMs: row.position_ms,
+    kind: row.kind,
+    textContent: row.text_content,
+    localUri: row.local_uri,
+    mimeType: row.mime_type,
+    fileName: row.file_name,
+    byteSize: row.byte_size,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+  };
+}
+
 function meetingTagFromRow(row: MeetingTagRow): MeetingTagRecord {
   const scopeKey = row.scope_key as ScopeKey;
   assertScopeKey(scopeKey);
@@ -1316,6 +1368,46 @@ function assertMeetingTagValue(name: string, normalizedName: string): void {
     || /[\u0000-\u001f\u007f]/.test(name)
     || /[\u0000-\u001f\u007f]/.test(normalizedName)
   ) throw new Error('meeting tag name is invalid');
+}
+
+function assertMeetingAttachmentValue(attachment: MeetingAttachmentRecord): void {
+  assertRecordId(attachment.id, 'meeting attachment ID');
+  assertRecordId(attachment.meetingId, 'meeting attachment meeting ID');
+  if (attachment.markerId !== null) assertRecordId(attachment.markerId, 'meeting attachment marker ID');
+  assertNonNegativeInteger(attachment.positionMs, 'meeting attachment position');
+  assertNonNegativeInteger(attachment.createdAtMs, 'meeting attachment creation time');
+  assertNonNegativeInteger(attachment.updatedAtMs, 'meeting attachment update time');
+  if (attachment.updatedAtMs < attachment.createdAtMs) {
+    throw new Error('meeting attachment update time is invalid');
+  }
+  if (attachment.kind === 'text') {
+    const content = attachment.textContent?.trim() ?? '';
+    if (
+      !content
+      || [...content].length > 500
+      || /[\u0000]/.test(content)
+      || attachment.localUri !== null
+      || attachment.mimeType !== null
+      || attachment.fileName !== null
+      || attachment.byteSize !== null
+    ) throw new Error('meeting text attachment is invalid');
+    return;
+  }
+  if (attachment.kind === 'image') {
+    if (
+      attachment.textContent !== null
+      || !attachment.localUri?.startsWith('file://')
+      || !attachment.mimeType?.toLocaleLowerCase().startsWith('image/')
+      || !attachment.fileName?.trim()
+      || attachment.fileName.length > 240
+      || !Number.isSafeInteger(attachment.byteSize)
+      || (attachment.byteSize ?? 0) < 1
+      || (attachment.byteSize ?? 0) > 25 * 1024 * 1024
+      || /[\u0000-\u001f\u007f]/.test(attachment.fileName)
+    ) throw new Error('meeting image attachment is invalid');
+    return;
+  }
+  throw new Error('meeting attachment kind is invalid');
 }
 
 function assertMeetingParticipants(value: readonly string[]): void {
@@ -7957,6 +8049,123 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       scopeKey,
     );
     return rows.map(markerFromRow);
+  }
+
+  async listMeetingAttachments(
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<readonly MeetingAttachmentRecord[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingAttachmentRow>(
+      `SELECT attachment.*
+       FROM meeting_attachments attachment
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+       WHERE attachment.meeting_id = ? AND attachment.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+       ORDER BY attachment.position_ms, attachment.created_at_ms, attachment.id`,
+      meetingId,
+      scopeKey,
+    );
+    return rows.map(meetingAttachmentFromRow);
+  }
+
+  async createMeetingAttachment(
+    attachment: MeetingAttachmentRecord,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingAttachmentRecord> {
+    assertScopeKey(scopeKey);
+    assertMeetingAttachmentValue(attachment);
+    const created = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        attachment.meetingId,
+        scopeKey,
+      );
+      if (!meeting) throw new Error('meeting attachment target is unavailable');
+      if (attachment.markerId !== null) {
+        const marker = await database.getFirstAsync<{ position_ms: number }>(
+          `SELECT marker.position_ms
+           FROM markers marker
+           INNER JOIN meeting_notes meeting ON meeting.id = marker.meeting_id
+           WHERE marker.id = ? AND marker.meeting_id = ? AND meeting.scope_key = ?
+             AND meeting.lifecycle <> 'deleted'`,
+          attachment.markerId,
+          attachment.meetingId,
+          scopeKey,
+        );
+        if (!marker || marker.position_ms !== attachment.positionMs) {
+          throw new Error('meeting attachment marker changed');
+        }
+      }
+      await database.runAsync(
+        `INSERT INTO meeting_attachments (
+           id, meeting_id, scope_key, marker_id, position_ms, kind,
+           text_content, local_uri, mime_type, file_name, byte_size,
+           created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        attachment.id,
+        attachment.meetingId,
+        scopeKey,
+        attachment.markerId,
+        attachment.positionMs,
+        attachment.kind,
+        attachment.textContent,
+        attachment.localUri,
+        attachment.mimeType,
+        attachment.fileName,
+        attachment.byteSize,
+        attachment.createdAtMs,
+        attachment.updatedAtMs,
+      );
+      const row = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        attachment.id,
+        attachment.meetingId,
+        scopeKey,
+      );
+      if (!row) throw new Error('meeting attachment was not created');
+      return meetingAttachmentFromRow(row);
+    });
+    this.notify([attachment.meetingId]);
+    return created;
+  }
+
+  async deleteMeetingAttachment(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<MeetingAttachmentRecord | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(attachmentId, 'meeting attachment ID');
+    assertRecordId(meetingId, 'meeting ID');
+    const deleted = await withMeetingDatabaseTransaction(async database => {
+      const row = await database.getFirstAsync<MeetingAttachmentRow>(
+        `SELECT attachment.*
+         FROM meeting_attachments attachment
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE attachment.id = ? AND attachment.meeting_id = ? AND attachment.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'`,
+        attachmentId,
+        meetingId,
+        scopeKey,
+      );
+      if (!row) return null;
+      const result = await database.runAsync(
+        'DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        attachmentId,
+        meetingId,
+        scopeKey,
+      );
+      if (result.changes !== 1) throw new Error('meeting attachment changed during deletion');
+      return meetingAttachmentFromRow(row);
+    });
+    if (deleted) this.notify([meetingId]);
+    return deleted;
   }
 
   async listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]> {

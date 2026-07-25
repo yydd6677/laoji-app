@@ -9,6 +9,7 @@ export * from './linkMeetingActionFollowupEvent';
 export * from './mergeAccountMeetingRemoteSnapshot';
 export * from './mergeDetachedMeetingRecordings';
 export * from './manageMeetingOrganization';
+export * from './manageMeetingAttachments';
 export * from './openOccurrenceMeeting';
 export * from './recordingReconciler';
 export * from './recordingSessionController';
