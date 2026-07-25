@@ -13,6 +13,7 @@ import { MeetingLiveScreen } from '../screens/MeetingLiveScreen';
 import { TranscriptionScreen } from '../screens/TranscriptionScreen';
 import { MeetingAttachmentsScreen } from '../screens/MeetingAttachmentsScreen';
 import { MeetingOrganizationScreen } from '../screens/MeetingOrganizationScreen';
+import { SharedActionScreen } from '../screens/SharedActionScreen';
 import { ProfileScreen }     from '../screens/ProfileScreen';
 import { ProfileFieldScreen, PROFILE_FIELD_SCREEN_OPTIONS } from '../screens/ProfileFieldScreen';
 import { AccountScreen }     from '../screens/AccountScreen';
@@ -55,6 +56,7 @@ export function RootNavigator() {
       <Stack.Screen name="Transcription" component={TranscriptionScreen} />
       <Stack.Screen name="MeetingAttachments" component={MeetingAttachmentsScreen} />
       <Stack.Screen name="MeetingOrganization" component={MeetingOrganizationScreen} />
+      <Stack.Screen name="SharedAction" component={SharedActionScreen} />
       <Stack.Screen name="SpeakerManager" component={SpeakerManagerScreen} />
       <Stack.Screen name="SpeakerEnrollment" component={SpeakerEnrollmentScreen} />
       <Stack.Screen name="Profile"       component={ProfileScreen} />

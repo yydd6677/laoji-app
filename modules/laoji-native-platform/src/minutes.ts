@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 14 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 15 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -124,6 +124,7 @@ export interface MinutesActionItemSnapshot {
   updatedAtMs?: number;
   updating?: boolean;
   syncConflict?: boolean;
+  canShare?: boolean;
 }
 
 export interface MinutesSpeakerSnapshot {
@@ -309,6 +310,7 @@ export type MinutesSemanticAction =
   | { type: 'toggleAction'; surface: 'detail'; meetingId: string; actionId: string; completed: boolean }
   | { type: 'createAction'; surface: 'detail'; meetingId: string }
   | { type: 'editAction'; surface: 'detail'; meetingId: string; actionId: string }
+  | { type: 'shareAction'; surface: 'detail'; meetingId: string; actionId: string }
   | { type: 'actionToEvent'; surface: 'detail'; meetingId: string; actionId: string }
   | { type: 'openActionSource'; surface: 'detail'; meetingId: string; actionId: string; segmentId?: string; positionMs: number }
   | {

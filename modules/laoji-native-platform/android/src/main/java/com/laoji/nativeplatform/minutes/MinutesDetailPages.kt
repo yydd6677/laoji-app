@@ -1064,6 +1064,26 @@ internal class MinutesSummaryPage(
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)),
     )
     row.addView(body, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    if (action.canShare) {
+      row.addView(
+        context.iconButton(
+          com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline,
+          "共享待办事项",
+        ).apply {
+          isEnabled = !action.updating
+          imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+          setOnClickListener {
+            emitAction(
+              mapOf(
+                "type" to "shareAction",
+                "actionId" to action.id,
+              ),
+            )
+          }
+        },
+        LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+      )
+    }
     row.addView(
       context.iconButton(
         com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,

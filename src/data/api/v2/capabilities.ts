@@ -60,6 +60,7 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     meetingQuestionsV1: booleanField(value, 'meeting_questions_v1'),
     actionItemsV2: booleanField(value, 'action_items_v2'),
     actionItemsPullV2: booleanField(value, 'action_items_pull_v2'),
+    actionCollaborationV1: booleanField(value, 'action_collaboration_v1'),
     manualNotesV2: booleanField(value, 'manual_notes_v2'),
     occurrenceLinksV2: booleanField(value, 'occurrence_links_v2'),
     speakerCorrections: booleanField(value, 'speaker_corrections'),
@@ -98,6 +99,9 @@ async function readCache(): Promise<CapabilityCache | null> {
         action_items_v2: isRecord(parsed.capabilities) ? parsed.capabilities.actionItemsV2 : undefined,
         action_items_pull_v2: isRecord(parsed.capabilities)
           ? parsed.capabilities.actionItemsPullV2
+          : undefined,
+        action_collaboration_v1: isRecord(parsed.capabilities)
+          ? parsed.capabilities.actionCollaborationV1
           : undefined,
         manual_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.manualNotesV2 : undefined,
         occurrence_links_v2: isRecord(parsed.capabilities)

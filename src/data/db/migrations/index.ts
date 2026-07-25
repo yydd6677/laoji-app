@@ -21,6 +21,7 @@ import { meetingOrganizationSearchV20 } from './0020MeetingOrganizationSearch';
 import { meetingAttachmentsV21 } from './0021MeetingAttachments';
 import { meetingQuestionsV22 } from './0022MeetingQuestions';
 import { meetingMediaClipsV23 } from './0023MeetingMediaClips';
+import { meetingActionCollaborationV24 } from './0024MeetingActionCollaboration';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -47,6 +48,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingAttachmentsV21,
   meetingQuestionsV22,
   meetingMediaClipsV23,
+  meetingActionCollaborationV24,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -72,4 +74,5 @@ export { MEETING_ORGANIZATION_SEARCH_V20_SQL } from './0020MeetingOrganizationSe
 export { MEETING_ATTACHMENTS_V21_SQL } from './0021MeetingAttachments';
 export { MEETING_QUESTIONS_V22_SQL } from './0022MeetingQuestions';
 export { MEETING_MEDIA_CLIPS_V23_SQL } from './0023MeetingMediaClips';
+export { MEETING_ACTION_COLLABORATION_V24_SQL } from './0024MeetingActionCollaboration';
 export type { MeetingDatabaseMigration } from './types';

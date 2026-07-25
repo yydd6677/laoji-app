@@ -6,7 +6,7 @@
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
 > v19 基线：`600c274`（稳定回溯点后的第 37 个实现/证据提交）；其上由本轮独立切片完成游客普通包 canonical cutover。
-> 规划估算：核心 P0/P1 框架约完成 90%，完整优化登记表（含线上闭环和 P2）约完成 80%–84%。这是功能工作量估算，不是发布通过率。
+> 规划估算：核心 P0/P1 框架约完成 90%，完整优化登记表（含线上闭环和 P2）约完成 82%–86%。这是功能工作量估算，不是发布通过率。
 
 ## 0. 执行总览（先看这里）
 
@@ -30,7 +30,7 @@
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音频/附件分层分享与本机 WAV 片段纵切完成；删除远端源码合同完成 | 模拟器；片段 v23、native 流式导出和真实 WAV；普通包对在线能力保持 fail closed | 补视频/多资产服务端、到期清理、Marker 分享和非 WAV 异步片段 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成 | 模拟器和服务端模板源码；App Lock/真机/真实模型待集中验收 | 不重做页面；只补真实运行与发现的缺陷 |
 | 讲话人 | 本场 segment/cluster 修正闭环，账号 correction 客户端框架完成 | 模拟器；远端不可达 | 实现 profile 同意、未来改善和旧会议重匹配 |
-| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01 本机与服务端源码；ORG-01 本机聚合；ATT-01 本机附件；CLIP-01 本机 WAV 纵切 | QA v22；ORG v20；ATT v21；CLIP v23 与模拟器真实 WAV | QA/ORG/ATT/CLIP 只续线上或非 WAV 边界；推进 COLLAB |
+| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01 本机与服务端源码；ORG-01 本机聚合；COLLAB-01 单待办移动端与服务端 overlay；ATT-01 本机附件；CLIP-01 本机 WAV 纵切 | QA v22；ORG v20；COLLAB v24/共享深链；ATT v21；CLIP v23 与模拟器真实 WAV | QA/ORG/ATT/CLIP 只续线上或非 WAV 边界；COLLAB 续真实 capability、账号与双设备往返 |
 
 ### 0.3 已完成并锁定的基础
 
@@ -182,7 +182,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 2. 配置对应的 18020/18035 没有运行证据；目标源码、内存 SQLite 或隔离合同不能替代运行数据库、鉴权和跨设备闭环。
 3. 服务端仍以单一主录音 API 为主；同一 MeetingNote 的多 RecordingAsset 上传、转写身份和跨设备下载合同尚未完成。当前 v19 只解决本机安全复制与播放。
 4. 讲话人只完成本场人工修正；profile 同意、资料撤销、未来会议改善、旧会议重匹配和跨 revision 锁定规则仍缺实现。
-5. video ingest、删除到期物理清理、reprocessed Transcript 生产入口、ORG-01 的账号同步/实验 topic 尾项，以及其余三个 P2 功能仍有真实功能量未完成。
+5. video ingest、删除到期物理清理、reprocessed Transcript 生产入口、ORG-01 的账号同步/实验 topic 尾项，以及 COLLAB-01 的运行服务与双设备闭环仍有真实功能量未完成。
 6. `MeetingLiveScreen.android.tsx` 和 `TranscriptionScreen.android.tsx` 已抽出关键用例但仍是较重 controller；只在继续增加功能会产生重复事务时再拆，不为纯洁架构单独延长路线。
 7. USB 真机、真实模型、长录音和双设备证据尚未集中取得；它们归入候选版收口，不再分散阻塞每个切片。
 
@@ -214,7 +214,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | PRIV-01 | 默认私有、永久删除与回收站 | 本机闭环；服务端源码完成 | 运行中软删除/恢复、到期物理清理 |
 | QA-01 | 单场有来源问答 | 本机闭环；服务端源码完成 | 运行服务、真实模型来源质量与账号持久化往返 |
 | ORG-01 | 标签/Folder、多场检索与聚合 | 部分完成；标签、分源搜索、人物与用户主题本机闭环 | 账号标签同步、实验模型 topic；Folder 仅在需求成立时添加 |
-| COLLAB-01 | 共享行动项与轻协作 | 未开始 | 完整纵切 |
+| COLLAB-01 | 共享行动项与轻协作 | 部分完成；单待办移动端、深链、冲突 UI 与服务端 overlay 已完成 | 目标源码同步/运行 capability、真实账号创建/撤销及双设备协作者往返 |
 | CLIP-01 | Marker/Transcript 媒体片段 | 部分完成；本机 WAV 生成、持久化、分享、定位与删除纵切 | MP3/M4A/视频服务端异步导出、账号同步与 USB 真机 |
 | ATT-01 | 时间点照片/人工附件 | 部分完成；本机附件、显式分享及文字附件逐次授权整理闭环 | 照片多模态、账号同步与真机 |
 | ANDR-01 | Android 创建、录制、恢复、核对、执行闭环 | 核心主链本机闭环 | 合并剩余功能、线上能力与一次候选版收口 |
@@ -1515,11 +1515,15 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 
 只在个人闭环稳定后添加：
 
-- 分享单个 MeetingNote 或单个 ActionItem。
+- 当前协作对象只允许单个 ActionItem；整场 MeetingNote 继续使用 SHARE-01 的显式内容导出，不创建整场公开协作链接。
 - 权限仅 `viewer` / `action_editor`；不做 Workspace 角色树。
 - action_editor 可以改状态、负责人和截止时间，不能访问未分享的 Transcript、音频或我的笔记。
 - 每次修改有 actor、revision、updated_at；冲突按 ACT-01 规则。
 - 无复杂自动分享、Channel、用户组或组织默认录制规则。
+
+当前已用 migration v24 和独立 `meetingActionCollaborationV1` flag 完成受控纵切的移动端部分。每条共享回执绑定 canonical MeetingNote/Action 和 scope，创建、失败重试、撤销各有稳定 operation ID；详情中的共享入口不替换原待办编辑入口。所有者 sheet 只提供 `viewer` / `action_editor`，登录后才能创建或撤销，系统发送内容只有待办正文与 capability 链接。严格深链 `laoji://collaboration/action?token=...` 可持久排队并恢复到独立共享待办页；匿名 viewer 只读，editor 只能改状态、负责人和截止日期，revision 冲突提供“使用最新版本 / 保留我的修改”。本机稳定随机 actor ID 只用于协作事件，不映射用户身份。
+
+服务端 overlay 新增 owner create/revoke、匿名单待办投影、editor revision 更新、幂等 operation 与 actor event。token 由至少 32 字节的 `LAOJI_ACTION_SHARE_SECRET` 派生 HMAC，数据库只保存 SHA-256 查询哈希；secret、表或 capability 任一缺失时能力保持关闭。公开投影不含会议标题、Transcript、录音、Summary、我的笔记或来源身份，协作者修改直接推进既有 ActionItem revision，所有者原 action pull/conflict 链可观察。实现与证据边界见 [`implementation/contracts/phase-8-action-collaboration-evidence.md`](implementation/contracts/phase-8-action-collaboration-evidence.md)。overlay 尚未同步或部署，18020/18035 未运行；真实创建/撤销、账号所有者和双设备往返仍未完成，因此 COLLAB-01 保持部分完成。
 
 ### 11.4 CLIP-01：重要媒体片段
 
@@ -1944,7 +1948,7 @@ openOccurrenceMeeting
 - `IMP-01/PRIV-01`：视频 ingest、远端多资产处理、已有会议显式合并、删除到期后的服务端及本机物理清理。
 - `QA-01`：锁定 Transcript/Summary/可选 note revision 的单场问答、逐条可定位 citation、本机持久化与服务端源码已完成；继续运行服务、真实模型来源质量和账号持久化往返。
 - `ORG-01`：标签、跨会议本机分源检索、人物和用户标签主题聚合已完成；继续账号标签同步与实验 topic，且不得把模型 topic 写回用户标签。Folder 只在大量会议需求成立时添加。
-- `COLLAB-01`：先共享单个行动项及 revision/conflict，不建设 Workspace/Channel 权限树。
+- `COLLAB-01`：单个行动项的本机回执、入口、深链、revision/conflict UI 与服务端 overlay 已完成；继续目标源码同步/部署、真实 capability、账号所有者和双设备往返，不建设 Workspace/Channel 权限树。
 - `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；CLIP 的本机 WAV 生成、片段列表、分享、定位与删除已完成。继续 ATT 照片多模态/账号同步，以及 CLIP 非 WAV 异步导出/账号同步。片段与附件都是派生资产，不修改原录音。
 
 这些纵切各自使用独立 flag。实现完成后即可计入路线完成；真实使用数据只决定默认开放和后续深化，不决定是否允许开工。
@@ -1968,7 +1972,7 @@ v19 recording merge（已完成） ── guest canonical cutover（已完成）
 
 已锁定的 TRN + SUM citation ── QA-01（本机与服务端源码已完成）
 已锁定的 ARC + speaker projection ── ORG-01
-已锁定的 ACT + SHARE ── COLLAB-01
+已锁定的 ACT + SHARE ── COLLAB-01 移动端/overlay（已完成）── 运行 capability / 双设备
 已锁定的 MRK + RecordingAsset ── CLIP-01 本机 WAV（已完成）/ ATT-01
 
 以上功能完成 ── 单次候选版收口
@@ -2050,7 +2054,7 @@ v19 recording merge（已完成） ── guest canonical cutover（已完成）
 - `video_import_v1`
 - `meeting_qa_v1`
 - `meeting_organization_v1`
-- `meeting_collaboration_v1`
+- `meetingActionCollaborationV1`（服务端 capability：`action_collaboration_v1`）
 - `meeting_clips_v1`
 - `meeting_attachments_v1`
 

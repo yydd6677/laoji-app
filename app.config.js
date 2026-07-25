@@ -37,7 +37,7 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 102,
+    versionCode: 103,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
@@ -204,6 +204,10 @@ module.exports = () => {
   const meetingMediaClipsV1 = localMeetingDbCanonicalReadV1 && !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_MEETING_MEDIA_CLIPS_V1 ?? 'true').trim().toLowerCase(),
   );
+  const meetingActionCollaborationV1 = localMeetingDbCanonicalReadV1
+    && !['0', 'false', 'no', 'off'].includes(
+      String(process.env.EXPO_PUBLIC_MEETING_ACTION_COLLABORATION_V1 ?? 'true').trim().toLowerCase(),
+    );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
   );
@@ -250,6 +254,7 @@ module.exports = () => {
         localMeetingDbAccountUploadWriteV1,
         meetingQuestionsV1,
         meetingMediaClipsV1,
+        meetingActionCollaborationV1,
       },
     },
   };

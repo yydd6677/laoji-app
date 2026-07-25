@@ -1,4 +1,5 @@
 export * from './clientId';
+export * from './collaboration';
 export * from './entities';
 export * from './mediaClips';
 export * from './processing';

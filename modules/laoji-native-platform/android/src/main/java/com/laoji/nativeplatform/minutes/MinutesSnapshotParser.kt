@@ -164,6 +164,7 @@ object MinutesSnapshotParser {
           updatedAtMs = item.long("updatedAtMs").coerceAtLeast(0L),
           updating = item.boolean("updating"),
           syncConflict = item.boolean("syncConflict"),
+          canShare = item.boolean("canShare"),
         )
       }
       .take(MAX_SUMMARY_ACTIONS)

@@ -102,6 +102,7 @@ export interface BuildNativeDetailSnapshotInput {
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
   canCreateAction?: boolean;
+  canShareActions?: boolean;
   canCreateClip?: boolean;
   summaryGenerating?: boolean;
   updatingActionId?: string | null;
@@ -366,15 +367,17 @@ function structuredSummaryActions(
   actions: readonly MeetingSummaryActionCandidate[],
   updatingActionId?: string | null,
   conflictedActionIds: ReadonlySet<string> = new Set<string>(),
+  canShare = false,
 ) {
   return actions.map(action => {
+    const actionId = action.canonicalId ?? action.id;
     const source = action.citations[0];
     const sourceSegmentId = source?.segmentId ?? action.sourceSegmentId ?? undefined;
     const sourceStartMs = source?.startMs ?? action.sourceStartMs ?? undefined;
     const due = action.dueAtMs === null ? null : new Date(action.dueAtMs);
     const reminder = action.reminderAtMs === null ? null : new Date(action.reminderAtMs);
     return {
-      id: action.canonicalId ?? action.id,
+      id: actionId,
       content: action.content,
       status: action.status,
       assigneeLabel: action.assignee ?? undefined,
@@ -391,8 +394,9 @@ function structuredSummaryActions(
       sourceSegmentId,
       sourceStartMs,
       updatedAtMs: action.updatedAtMs ?? 0,
-      updating: (action.canonicalId ?? action.id) === updatingActionId,
-      syncConflict: conflictedActionIds.has(action.canonicalId ?? action.id),
+      updating: actionId === updatingActionId,
+      syncConflict: conflictedActionIds.has(actionId),
+      canShare: canShare && !conflictedActionIds.has(actionId),
     } as const;
   });
 }
@@ -614,6 +618,7 @@ export function buildNativeMinutesDetailSnapshot(
     actionItemCandidates,
     input.updatingActionId,
     input.conflictedActionIds,
+    input.canShareActions ?? false,
   );
   const speakers = nativeMinutesSpeakers(input.transcript, Boolean(input.canManageSpeakers));
   const markers: MinutesMarkerSnapshot[] = (input.markers ?? [])

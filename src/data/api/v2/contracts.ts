@@ -10,6 +10,7 @@ export interface MeetingCapabilities {
   meetingQuestionsV1: boolean;
   actionItemsV2: boolean;
   actionItemsPullV2: boolean;
+  actionCollaborationV1: boolean;
   manualNotesV2: boolean;
   occurrenceLinksV2: boolean;
   speakerCorrections: boolean;
@@ -298,6 +299,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   meetingQuestionsV1: false,
   actionItemsV2: false,
   actionItemsPullV2: false,
+  actionCollaborationV1: false,
   manualNotesV2: false,
   occurrenceLinksV2: false,
   speakerCorrections: false,

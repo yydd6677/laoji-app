@@ -8,6 +8,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
   meetingMediaClipsV1: boolean;
+  meetingActionCollaborationV1: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -46,5 +47,9 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // source RecordingAsset.
     meetingMediaClipsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaClipsV1 === true,
+    // Collaboration links expose one action projection only and remain
+    // independently reversible from meeting-level sharing.
+    meetingActionCollaborationV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingActionCollaborationV1 === true,
   };
 }
