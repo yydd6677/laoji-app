@@ -61,8 +61,12 @@ import type {
   MeetingRootPullState,
   MeetingRootPatch,
   MeetingScopeWriteState,
+  MeetingSearchResult,
+  MeetingSearchSourceKind,
   MeetingSeriesActionRecord,
   MeetingSeriesCarryImportRecord,
+  MeetingTagAssignment,
+  MeetingTagRecord,
   MeetingTransaction,
   NewMeetingNote,
   OccurrenceLinkRecord,
@@ -70,6 +74,7 @@ import type {
   OccurrenceSyncConflict,
   OccurrenceSyncFailure,
   RecordingAssetRecord,
+  RenameMeetingTagResult,
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
   ResolveMeetingOccurrenceSyncConflictInput,
@@ -377,6 +382,39 @@ type MarkerRow = {
   kind: MarkerRecord['kind'];
   created_at_ms: number;
   updated_at_ms: number;
+};
+
+type MeetingTagRow = {
+  id: string;
+  scope_key: string;
+  name: string;
+  normalized_name: string;
+  meeting_count: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+type MeetingTagAssignmentRow = {
+  meeting_id: string;
+  legacy_source_id: string | null;
+  remote_id: string | null;
+  entry_point: string | null;
+  tag_id: string;
+  tag_name: string;
+};
+
+type MeetingSearchRow = {
+  meeting_id: string;
+  legacy_source_id: string | null;
+  remote_id: string | null;
+  entry_point: string | null;
+  source_kind: string;
+  source_id: string;
+  start_ms: string | number;
+  meeting_title: string;
+  recorded_at_ms: number;
+  snippet: string;
+  rank: number;
 };
 
 type SummaryVersionRow = {
@@ -928,6 +966,109 @@ function markerFromRow(row: MarkerRow): MarkerRecord {
   };
 }
 
+function meetingTagFromRow(row: MeetingTagRow): MeetingTagRecord {
+  const scopeKey = row.scope_key as ScopeKey;
+  assertScopeKey(scopeKey);
+  if (!Number.isSafeInteger(row.meeting_count) || row.meeting_count < 0) {
+    throw new Error('stored meeting tag count is invalid');
+  }
+  return {
+    id: row.id,
+    scopeKey,
+    name: row.name,
+    normalizedName: row.normalized_name,
+    meetingCount: row.meeting_count,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+  };
+}
+
+const MEETING_SEARCH_SOURCE_KINDS = new Set<MeetingSearchSourceKind>([
+  'title',
+  'tag',
+  'manual_note',
+  'transcript',
+  'summary',
+  'action',
+]);
+
+function meetingSearchSourceKind(value: string): MeetingSearchSourceKind {
+  if (!MEETING_SEARCH_SOURCE_KINDS.has(value as MeetingSearchSourceKind)) {
+    throw new Error('stored meeting search source is invalid');
+  }
+  return value as MeetingSearchSourceKind;
+}
+
+function meetingNavigationIdentity(
+  row: Pick<MeetingSearchRow, 'meeting_id' | 'legacy_source_id' | 'remote_id' | 'entry_point'>,
+  scopeKey: ScopeKey,
+): string {
+  const legacySourceId = row.legacy_source_id?.trim();
+  if (legacySourceId) return legacySourceId;
+  const remoteId = row.remote_id?.trim();
+  if (row.entry_point === 'legacy_store' && remoteId) return remoteId;
+  const prefix = `legacy:${encodeURIComponent(scopeKey)}:`;
+  if (!row.meeting_id.startsWith(prefix)) return row.meeting_id;
+  try {
+    return decodeURIComponent(row.meeting_id.slice(prefix.length));
+  } catch {
+    return row.meeting_id;
+  }
+}
+
+type MeetingSearchPredicate =
+  | { kind: 'match'; query: string; terms: readonly string[] }
+  | { kind: 'like'; patterns: readonly string[]; terms: readonly string[] };
+
+function escapeMeetingSearchLike(value: string): string {
+  return value.replace(/[\\%_]/g, character => `\\${character}`);
+}
+
+function meetingSearchPredicate(value: string): MeetingSearchPredicate | null {
+  const normalized = value.normalize('NFKC').trim().toLocaleLowerCase();
+  if (!normalized || normalized.length > 200 || /[\u0000-\u001f\u007f]/.test(normalized)) return null;
+  const terms = normalized
+    .replace(/[^\p{L}\p{N}_]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 12);
+  if (terms.length === 0) return null;
+  if (terms.every(term => [...term].length >= 3)) {
+    const expression = terms.map(term => `"${term.replace(/"/g, '""')}"`).join(' AND ');
+    // Every FTS row carries the meeting title for display, but only the row's
+    // own content determines its source label. Without the column filter, a
+    // title match incorrectly returns one result for every tag/note/section
+    // in the same meeting.
+    return { kind: 'match', query: `content : (${expression})`, terms };
+  }
+  // Every FTS row carries the meeting title for display, but only the row's
+  // own content is searched. FTS5 trigram cannot match a one- or two-codepoint
+  // Chinese term, so short queries use an escaped, bounded full-table LIKE
+  // path instead of silently returning no result.
+  return {
+    kind: 'like',
+    patterns: terms.map(term => `%${escapeMeetingSearchLike(term)}%`),
+    terms,
+  };
+}
+
+function meetingSearchResultFromRow(row: MeetingSearchRow, scopeKey: ScopeKey): MeetingSearchResult {
+  const startMs = Number(row.start_ms);
+  const rank = Number(row.rank);
+  return {
+    resultId: `${row.meeting_id}:${row.source_kind}:${row.source_id}`,
+    meetingId: row.meeting_id,
+    navigationMeetingId: meetingNavigationIdentity(row, scopeKey),
+    sourceKind: meetingSearchSourceKind(row.source_kind),
+    sourceId: row.source_id,
+    startMs: Number.isSafeInteger(startMs) && startMs >= 0 ? startMs : null,
+    meetingTitle: row.meeting_title,
+    recordedAtMs: row.recorded_at_ms,
+    snippet: row.snippet.replace(/\s+/g, ' ').trim().slice(0, 240),
+    rank: Number.isFinite(rank) ? rank : 0,
+  };
+}
+
 function seriesCarryImportFromRow(row: MeetingSeriesCarryImportRow): MeetingSeriesCarryImportRecord {
   if (row.source_kind !== 'decision' && row.source_kind !== 'action') {
     throw new Error('stored series carry import kind is invalid');
@@ -1164,6 +1305,17 @@ function assertNullableBoundedText(value: string | null, maximum: number, field:
   if (value !== null && (value.length > maximum || /[\u0000]/.test(value))) {
     throw new Error(`${field} is invalid`);
   }
+}
+
+function assertMeetingTagValue(name: string, normalizedName: string): void {
+  if (
+    !name.trim()
+    || !normalizedName.trim()
+    || [...name].length > 30
+    || [...normalizedName].length > 30
+    || /[\u0000-\u001f\u007f]/.test(name)
+    || /[\u0000-\u001f\u007f]/.test(normalizedName)
+  ) throw new Error('meeting tag name is invalid');
 }
 
 function assertMeetingParticipants(value: readonly string[]): void {
@@ -3653,6 +3805,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   private readonly meetingListeners = new Map<ScopeKey, Map<string, Set<() => void>>>();
   private readonly listListeners = new Map<ScopeKey, Set<() => void>>();
+  private readonly indexedSearchScopes = new Set<ScopeKey>();
 
   async transaction<T>(work: (transaction: MeetingTransaction) => Promise<T>): Promise<T> {
     let touchedMeetingIds: readonly string[] = [];
@@ -7806,6 +7959,457 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return rows.map(markerFromRow);
   }
 
+  async listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingTagRow>(
+      `SELECT tag.*, COUNT(active_meeting.id) AS meeting_count
+       FROM meeting_tag_links selected
+       INNER JOIN meeting_tags tag
+         ON tag.id = selected.tag_id AND tag.scope_key = selected.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = selected.meeting_id AND meeting.scope_key = selected.scope_key
+       LEFT JOIN meeting_tag_links all_links
+         ON all_links.tag_id = tag.id AND all_links.scope_key = tag.scope_key
+       LEFT JOIN meeting_notes active_meeting
+         ON active_meeting.id = all_links.meeting_id
+           AND active_meeting.scope_key = all_links.scope_key
+           AND active_meeting.lifecycle <> 'deleted'
+       WHERE selected.meeting_id = ? AND selected.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+       GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+         tag.created_at_ms, tag.updated_at_ms
+       ORDER BY tag.normalized_name, tag.id`,
+      meetingId,
+      scopeKey,
+    );
+    return rows.map(meetingTagFromRow);
+  }
+
+  async resolveCanonicalMeetingId(
+    navigationMeetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<string | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(navigationMeetingId, 'meeting navigation ID');
+    const database = await openMeetingDatabase();
+    const legacyCanonicalId = `legacy:${encodeURIComponent(scopeKey)}:${encodeURIComponent(navigationMeetingId)}`;
+    const row = await database.getFirstAsync<{ id: string }>(
+      `SELECT id FROM meeting_notes
+       WHERE scope_key = ? AND lifecycle <> 'deleted'
+         AND (
+           id = ? OR id = ? OR legacy_source_id = ?
+           OR (entry_point = 'legacy_store' AND remote_id = ?)
+         )
+       ORDER BY CASE
+         WHEN id = ? THEN 0 WHEN legacy_source_id = ? THEN 1
+         WHEN id = ? THEN 2 ELSE 3 END
+       LIMIT 1`,
+      scopeKey,
+      navigationMeetingId,
+      legacyCanonicalId,
+      navigationMeetingId,
+      navigationMeetingId,
+      navigationMeetingId,
+      navigationMeetingId,
+      legacyCanonicalId,
+    );
+    return row?.id ?? null;
+  }
+
+  async listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingTagAssignmentRow>(
+      `SELECT link.meeting_id, meeting.legacy_source_id, meeting.remote_id,
+         meeting.entry_point, tag.id AS tag_id, tag.name AS tag_name
+       FROM meeting_tag_links link
+       INNER JOIN meeting_tags tag
+         ON tag.id = link.tag_id AND tag.scope_key = link.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = link.meeting_id AND meeting.scope_key = link.scope_key
+       WHERE link.scope_key = ? AND meeting.lifecycle <> 'deleted'
+       ORDER BY link.meeting_id, tag.normalized_name, tag.id`,
+      scopeKey,
+    );
+    return rows.map(row => ({
+      meetingId: meetingNavigationIdentity(row, scopeKey),
+      tagId: row.tag_id,
+      tagName: row.tag_name,
+    }));
+  }
+
+  async listMeetingTagsForScope(scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingTagRow>(
+      `SELECT tag.*, COUNT(active_meeting.id) AS meeting_count
+       FROM meeting_tags tag
+       LEFT JOIN meeting_tag_links link
+         ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+       LEFT JOIN meeting_notes active_meeting
+         ON active_meeting.id = link.meeting_id
+           AND active_meeting.scope_key = link.scope_key
+           AND active_meeting.lifecycle <> 'deleted'
+       WHERE tag.scope_key = ?
+       GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+         tag.created_at_ms, tag.updated_at_ms
+       ORDER BY tag.normalized_name, tag.id`,
+      scopeKey,
+    );
+    return rows.map(meetingTagFromRow);
+  }
+
+  async createMeetingTag(
+    tag: Omit<MeetingTagRecord, 'meetingCount'>,
+  ): Promise<MeetingTagRecord> {
+    assertScopeKey(tag.scopeKey);
+    assertRecordId(tag.id, 'meeting tag ID');
+    assertMeetingTagValue(tag.name, tag.normalizedName);
+    assertNonNegativeInteger(tag.createdAtMs, 'meeting tag creation time');
+    assertNonNegativeInteger(tag.updatedAtMs, 'meeting tag update time');
+    if (tag.updatedAtMs < tag.createdAtMs) throw new Error('meeting tag update time is invalid');
+    return withMeetingDatabaseTransaction(async database => {
+      await database.runAsync(
+        `INSERT OR IGNORE INTO meeting_tags (
+           id, scope_key, name, normalized_name, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        tag.id,
+        tag.scopeKey,
+        tag.name,
+        tag.normalizedName,
+        tag.createdAtMs,
+        tag.updatedAtMs,
+      );
+      const row = await database.getFirstAsync<MeetingTagRow>(
+        `SELECT tag.*, COUNT(link.meeting_id) AS meeting_count
+         FROM meeting_tags tag
+         LEFT JOIN meeting_tag_links link
+           ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+         WHERE tag.scope_key = ? AND tag.normalized_name = ?
+         GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+           tag.created_at_ms, tag.updated_at_ms`,
+        tag.scopeKey,
+        tag.normalizedName,
+      );
+      if (!row) throw new Error('meeting tag was not created');
+      return meetingTagFromRow(row);
+    });
+  }
+
+  async renameOrMergeMeetingTag(
+    tagId: string,
+    scopeKey: ScopeKey,
+    name: string,
+    normalizedName: string,
+    updatedAtMs: number,
+  ): Promise<RenameMeetingTagResult> {
+    assertScopeKey(scopeKey);
+    assertRecordId(tagId, 'meeting tag ID');
+    assertMeetingTagValue(name, normalizedName);
+    assertNonNegativeInteger(updatedAtMs, 'meeting tag update time');
+    let affectedMeetingIds: readonly string[] = [];
+    const result = await withMeetingDatabaseTransaction(async database => {
+      const source = await database.getFirstAsync<MeetingTagRow>(
+        `SELECT tag.*, COUNT(link.meeting_id) AS meeting_count
+         FROM meeting_tags tag
+         LEFT JOIN meeting_tag_links link
+           ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+         WHERE tag.id = ? AND tag.scope_key = ?
+         GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+           tag.created_at_ms, tag.updated_at_ms`,
+        tagId,
+        scopeKey,
+      );
+      if (!source) throw new Error('meeting tag does not exist');
+      const linked = await database.getAllAsync<{ meeting_id: string }>(
+        `SELECT meeting_id FROM meeting_tag_links
+         WHERE tag_id = ? AND scope_key = ? ORDER BY meeting_id`,
+        tagId,
+        scopeKey,
+      );
+      affectedMeetingIds = linked.map(row => row.meeting_id);
+      const target = await database.getFirstAsync<MeetingTagRow>(
+        `SELECT tag.*, COUNT(link.meeting_id) AS meeting_count
+         FROM meeting_tags tag
+         LEFT JOIN meeting_tag_links link
+           ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+         WHERE tag.scope_key = ? AND tag.normalized_name = ?
+         GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+           tag.created_at_ms, tag.updated_at_ms`,
+        scopeKey,
+        normalizedName,
+      );
+      const merged = Boolean(target && target.id !== tagId);
+      const targetId = merged ? target!.id : tagId;
+      if (merged) {
+        await database.runAsync(
+          `INSERT OR IGNORE INTO meeting_tag_links (meeting_id, tag_id, scope_key, created_at_ms)
+           SELECT meeting_id, ?, scope_key, MIN(created_at_ms, ?)
+           FROM meeting_tag_links WHERE tag_id = ? AND scope_key = ?`,
+          targetId,
+          updatedAtMs,
+          tagId,
+          scopeKey,
+        );
+        await database.runAsync(
+          'DELETE FROM meeting_tags WHERE id = ? AND scope_key = ?',
+          tagId,
+          scopeKey,
+        );
+      } else {
+        await database.runAsync(
+          `UPDATE meeting_tags SET name = ?, normalized_name = ?, updated_at_ms = ?
+           WHERE id = ? AND scope_key = ?`,
+          name,
+          normalizedName,
+          Math.max(updatedAtMs, source.updated_at_ms),
+          tagId,
+          scopeKey,
+        );
+      }
+      const row = await database.getFirstAsync<MeetingTagRow>(
+        `SELECT tag.*, COUNT(link.meeting_id) AS meeting_count
+         FROM meeting_tags tag
+         LEFT JOIN meeting_tag_links link
+           ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+         WHERE tag.id = ? AND tag.scope_key = ?
+         GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+           tag.created_at_ms, tag.updated_at_ms`,
+        targetId,
+        scopeKey,
+      );
+      if (!row) throw new Error('meeting tag rename did not persist');
+      return { tag: meetingTagFromRow(row), merged, affectedMeetingIds };
+    });
+    if (affectedMeetingIds.length > 0) this.notify(affectedMeetingIds);
+    return result;
+  }
+
+  async deleteMeetingTag(tagId: string, scopeKey: ScopeKey): Promise<readonly string[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(tagId, 'meeting tag ID');
+    const affected = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<{ meeting_id: string }>(
+        `SELECT meeting_id FROM meeting_tag_links
+         WHERE tag_id = ? AND scope_key = ? ORDER BY meeting_id`,
+        tagId,
+        scopeKey,
+      );
+      const deleted = await database.runAsync(
+        'DELETE FROM meeting_tags WHERE id = ? AND scope_key = ?',
+        tagId,
+        scopeKey,
+      );
+      if (deleted.changes !== 1) throw new Error('meeting tag does not exist');
+      return rows.map(row => row.meeting_id);
+    });
+    if (affected.length > 0) this.notify(affected);
+    return affected;
+  }
+
+  async replaceMeetingTags(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    tagIds: readonly string[],
+    updatedAtMs: number,
+  ): Promise<readonly MeetingTagRecord[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    assertNonNegativeInteger(updatedAtMs, 'meeting tag assignment time');
+    const uniqueTagIds = [...new Set(tagIds.map(value => value.trim()).filter(Boolean))];
+    if (uniqueTagIds.length > 20) throw new Error('meeting tag assignment limit was exceeded');
+    uniqueTagIds.forEach(id => assertRecordId(id, 'meeting tag ID'));
+    const tags = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        meetingId,
+        scopeKey,
+      );
+      if (!meeting) throw new Error('meeting does not exist');
+      let selected: MeetingTagRow[] = [];
+      if (uniqueTagIds.length > 0) {
+        const placeholders = uniqueTagIds.map(() => '?').join(',');
+        selected = await database.getAllAsync<MeetingTagRow>(
+          `SELECT tag.*, COUNT(link.meeting_id) AS meeting_count
+           FROM meeting_tags tag
+           LEFT JOIN meeting_tag_links link
+             ON link.tag_id = tag.id AND link.scope_key = tag.scope_key
+           WHERE tag.scope_key = ? AND tag.id IN (${placeholders})
+           GROUP BY tag.id, tag.scope_key, tag.name, tag.normalized_name,
+             tag.created_at_ms, tag.updated_at_ms`,
+          scopeKey,
+          ...uniqueTagIds,
+        );
+        if (selected.length !== uniqueTagIds.length) throw new Error('meeting tag selection is invalid');
+      }
+      await database.runAsync(
+        'DELETE FROM meeting_tag_links WHERE meeting_id = ? AND scope_key = ?',
+        meetingId,
+        scopeKey,
+      );
+      for (const tagId of uniqueTagIds) {
+        await database.runAsync(
+          `INSERT INTO meeting_tag_links (meeting_id, tag_id, scope_key, created_at_ms)
+           VALUES (?, ?, ?, ?)`,
+          meetingId,
+          tagId,
+          scopeKey,
+          updatedAtMs,
+        );
+      }
+      return selected
+        .map(meetingTagFromRow)
+        .sort((left, right) => left.normalizedName.localeCompare(right.normalizedName));
+    });
+    this.notify([meetingId]);
+    return tags;
+  }
+
+  async searchMeetingContent(
+    scopeKey: ScopeKey,
+    query: string,
+    limit = 60,
+  ): Promise<readonly MeetingSearchResult[]> {
+    assertScopeKey(scopeKey);
+    const predicate = meetingSearchPredicate(query);
+    if (!predicate) return [];
+    const safeLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 60;
+    if (!this.indexedSearchScopes.has(scopeKey)) {
+      await withMeetingDatabaseTransaction(async database => {
+        await database.runAsync('DELETE FROM meeting_search_fts WHERE scope_key = ?', scopeKey);
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'title', meeting.id, '-1',
+           meeting.title, meeting.title
+         FROM meeting_notes meeting
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted' AND TRIM(meeting.title) <> ''`,
+        scopeKey,
+      );
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'manual_note', note.meeting_id, '-1',
+           meeting.title, note.content
+         FROM manual_notes note
+         INNER JOIN meeting_notes meeting ON meeting.id = note.meeting_id
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND TRIM(note.content) <> ''`,
+        scopeKey,
+      );
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'transcript',
+           COALESCE(NULLIF(segment.source_segment_id, ''), segment.id),
+           CAST(segment.start_ms AS TEXT), meeting.title, segment.text
+         FROM transcript_segments segment
+         INNER JOIN transcript_revisions revision ON revision.id = segment.revision_id
+         INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND revision.is_active = 1 AND TRIM(segment.text) <> ''`,
+        scopeKey,
+      );
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'summary', section.id, '-1',
+           meeting.title,
+           TRIM(COALESCE(section.title, '') || ' ' ||
+             COALESCE(NULLIF(section.user_text, ''), section.generated_text))
+         FROM summary_sections section
+         INNER JOIN summary_versions version ON version.id = section.version_id
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = version.meeting_id
+             AND meeting.current_summary_version_id = version.id
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND TRIM(COALESCE(NULLIF(section.user_text, ''), section.generated_text)) <> ''`,
+        scopeKey,
+      );
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'action', action.id,
+           CAST(COALESCE(action.source_start_ms, -1) AS TEXT), meeting.title, action.content
+         FROM action_items action
+         INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND TRIM(action.content) <> ''`,
+        scopeKey,
+      );
+      await database.runAsync(
+        `INSERT INTO meeting_search_fts (
+           scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+         )
+         SELECT meeting.scope_key, meeting.id, 'tag', tag.id, '-1', meeting.title, tag.name
+         FROM meeting_tag_links link
+         INNER JOIN meeting_tags tag
+           ON tag.id = link.tag_id AND tag.scope_key = link.scope_key
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = link.meeting_id AND meeting.scope_key = link.scope_key
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'`,
+        scopeKey,
+      );
+      });
+      this.indexedSearchScopes.add(scopeKey);
+    }
+    const database = await openMeetingDatabase();
+    const predicateSql = predicate.kind === 'match'
+      ? 'meeting_search_fts MATCH ?'
+      : predicate.patterns.map(() => "search.content LIKE ? ESCAPE '\\'").join(' AND ');
+    const predicateArguments = predicate.kind === 'match'
+      ? [predicate.query]
+      : [...predicate.patterns];
+    const firstTerm = predicate.terms[0];
+    const snippetSql = predicate.kind === 'match'
+      ? "snippet(meeting_search_fts, 6, '', '', '…', 24)"
+      : `CASE
+           WHEN instr(lower(search.content), lower(?)) > 81 THEN
+             '…' || substr(
+               search.content,
+               instr(lower(search.content), lower(?)) - 80,
+               240
+             )
+           ELSE substr(search.content, 1, 240)
+         END`;
+    const rankSql = predicate.kind === 'match'
+      ? 'bm25(meeting_search_fts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)'
+      : '0.0';
+    const snippetArguments = predicate.kind === 'like' ? [firstTerm, firstTerm] : [];
+    const rows = await database.getAllAsync<MeetingSearchRow>(
+      `SELECT search.meeting_id, meeting.legacy_source_id, meeting.remote_id,
+           meeting.entry_point, search.source_kind, search.source_id, search.start_ms,
+           meeting.title AS meeting_title,
+           COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)
+             AS recorded_at_ms,
+           ${snippetSql} AS snippet,
+           ${rankSql} AS rank
+         FROM meeting_search_fts search
+         INNER JOIN meeting_notes meeting ON meeting.id = search.meeting_id
+         WHERE ${predicateSql} AND search.scope_key = ?
+           AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         ORDER BY CASE search.source_kind
+           WHEN 'title' THEN 0 WHEN 'tag' THEN 1 WHEN 'manual_note' THEN 2
+           WHEN 'transcript' THEN 3 WHEN 'summary' THEN 4 ELSE 5 END,
+           rank, meeting.updated_at_ms DESC, search.meeting_id, search.source_id
+         LIMIT ?`,
+        ...snippetArguments,
+        ...predicateArguments,
+        scopeKey,
+        scopeKey,
+      safeLimit,
+    );
+    return rows.map(row => meetingSearchResultFromRow(row, scopeKey));
+  }
+
   async listSeriesCarryImports(
     meetingId: string,
     scopeKey: ScopeKey,
@@ -9171,6 +9775,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   private notify(touchedMeetingIds: readonly string[]): void {
     const touched = new Set(touchedMeetingIds);
     if (touched.size === 0) return;
+    this.indexedSearchScopes.clear();
     const invoke = (listener: () => void) => {
       try {
         listener();

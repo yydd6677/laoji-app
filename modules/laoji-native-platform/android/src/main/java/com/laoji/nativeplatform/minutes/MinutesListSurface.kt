@@ -240,7 +240,12 @@ internal class MinutesListSurface(
     if (state.searching || recycleBin) mainMenu.dismiss()
     searchBar.visibility = if (state.searching) View.VISIBLE else View.GONE
     renderingSearch = true
-    if (searchInput.text.toString() != state.query) {
+    // While the native EditText owns focus, React snapshots trail the latest
+    // keystroke by one bridge round-trip. Reapplying that stale query here
+    // drops characters during normal typing. Synchronize on entry/exit and
+    // when the field is not actively owned by the user instead.
+    val shouldSynchronizeQuery = !state.searching || !wasSearching || !searchInput.hasFocus()
+    if (shouldSynchronizeQuery && searchInput.text.toString() != state.query) {
       searchInput.setText(state.query)
       searchInput.setSelection(searchInput.text.length)
     }
@@ -262,9 +267,11 @@ internal class MinutesListSurface(
     searchClear.visibility = if (state.query.isBlank()) View.INVISIBLE else View.VISIBLE
     val normalizedQuery = state.query.trim()
     val visibleMeetings = if (normalizedQuery.isBlank()) state.meetings else state.meetings.filter {
-      it.title.contains(normalizedQuery, ignoreCase = true)
+      it.searchSource.isNotBlank()
+        || it.title.contains(normalizedQuery, ignoreCase = true)
         || it.dateTimeLabel.contains(normalizedQuery, ignoreCase = true)
         || it.statusLabel.contains(normalizedQuery, ignoreCase = true)
+        || it.supportText.contains(normalizedQuery, ignoreCase = true)
     }
     adapter.submitList(visibleMeetings) {
       pendingMainListScrollRestore?.let { position ->
@@ -380,7 +387,13 @@ internal class MinutesListSurface(
       })
     }
     searchBar.addView(searchInput, LayoutParams(0, context.dp(44), 1f))
-    searchClear.setOnClickListener { onAction(mapOf("type" to "updateSearchQuery", "query" to "")) }
+    searchClear.setOnClickListener {
+      renderingSearch = true
+      searchInput.text.clear()
+      renderingSearch = false
+      searchClear.visibility = View.INVISIBLE
+      onAction(mapOf("type" to "updateSearchQuery", "query" to ""))
+    }
     searchBar.addView(searchClear, LayoutParams(context.dp(44), context.dp(44)))
   }
 

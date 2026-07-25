@@ -101,10 +101,11 @@ internal class MinutesItemContextMenu(
           label = if (meeting.canResume) "继续录音" else "查看会议记录",
           type = if (meeting.canResume) "openRecording" else "openMeeting",
         ),
+        MenuAction(label = "设置标签", type = "setMeetingTags"),
         MenuAction(label = "删除", type = "deleteMeeting"),
       )
     }
-    val menu = createMenu(nextActivity, actions, meeting.id)
+    val menu = createMenu(nextActivity, actions, meeting.targetMeetingId)
     val horizontalPadding = nextActivity.dp(2)
     val verticalPadding = nextActivity.dp(3)
     val cardLeft = anchorLeft - horizontalPadding

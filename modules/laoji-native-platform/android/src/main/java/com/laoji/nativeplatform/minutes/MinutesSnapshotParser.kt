@@ -35,6 +35,7 @@ object MinutesSnapshotParser {
     meetings = raw.maps("meetings").mapIndexed { index, item ->
       MinutesMeeting(
         id = item.string("id").orDefault("meeting-$index"),
+        targetMeetingId = item.string("targetMeetingId").orDefault(item.string("id").orDefault("meeting-$index")),
         title = item.string("title").orDefault("未命名会议"),
         dateTimeLabel = item.string("dateTimeLabel").orEmpty(),
         durationLabel = item.string("durationLabel").orEmpty(),
@@ -44,6 +45,10 @@ object MinutesSnapshotParser {
         coverType = MinutesListCoverType.fromWireName(item.string("coverType")),
         coverTitle = item.string("coverTitle").orEmpty(),
         coverText = item.string("coverText").orEmpty(),
+        supportText = item.string("supportText").orEmpty(),
+        searchSource = item.string("searchSource").orEmpty(),
+        searchSourceId = item.string("searchSourceId").orEmpty(),
+        searchPositionMs = item.long("searchPositionMs", -1L),
         action = MinutesMeetingAction.fromWireName(item.string("action")),
         actionEnabled = item.boolean("actionEnabled", true),
       )

@@ -439,6 +439,49 @@ export interface MarkerRecord {
   updatedAtMs: number;
 }
 
+export interface MeetingTagRecord {
+  id: string;
+  scopeKey: ScopeKey;
+  name: string;
+  normalizedName: string;
+  meetingCount: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface MeetingTagAssignment {
+  meetingId: string;
+  tagId: string;
+  tagName: string;
+}
+
+export type MeetingSearchSourceKind =
+  | 'title'
+  | 'tag'
+  | 'manual_note'
+  | 'transcript'
+  | 'summary'
+  | 'action';
+
+export interface MeetingSearchResult {
+  resultId: string;
+  meetingId: string;
+  navigationMeetingId: string;
+  sourceKind: MeetingSearchSourceKind;
+  sourceId: string;
+  startMs: number | null;
+  meetingTitle: string;
+  recordedAtMs: number;
+  snippet: string;
+  rank: number;
+}
+
+export interface RenameMeetingTagResult {
+  tag: MeetingTagRecord;
+  merged: boolean;
+  affectedMeetingIds: readonly string[];
+}
+
 export interface MeetingActionMutableFields {
   content: string;
   status: ActionItemRecord['status'];
@@ -1046,6 +1089,30 @@ export interface MeetingNoteRepository {
     input: ResolveMeetingActionSyncConflictInput,
   ): Promise<boolean>;
   listMeetingMarkers(meetingId: string, scopeKey: ScopeKey): Promise<readonly MarkerRecord[]>;
+  listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
+  resolveCanonicalMeetingId(navigationMeetingId: string, scopeKey: ScopeKey): Promise<string | null>;
+  listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]>;
+  listMeetingTagsForScope(scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
+  createMeetingTag(tag: Omit<MeetingTagRecord, 'meetingCount'>): Promise<MeetingTagRecord>;
+  renameOrMergeMeetingTag(
+    tagId: string,
+    scopeKey: ScopeKey,
+    name: string,
+    normalizedName: string,
+    updatedAtMs: number,
+  ): Promise<RenameMeetingTagResult>;
+  deleteMeetingTag(tagId: string, scopeKey: ScopeKey): Promise<readonly string[]>;
+  replaceMeetingTags(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    tagIds: readonly string[],
+    updatedAtMs: number,
+  ): Promise<readonly MeetingTagRecord[]>;
+  searchMeetingContent(
+    scopeKey: ScopeKey,
+    query: string,
+    limit?: number,
+  ): Promise<readonly MeetingSearchResult[]>;
   listSeriesCarryImports(
     meetingId: string,
     scopeKey: ScopeKey,

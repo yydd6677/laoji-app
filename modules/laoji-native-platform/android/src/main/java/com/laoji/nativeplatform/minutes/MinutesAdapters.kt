@@ -73,6 +73,7 @@ internal class MinutesMeetingAdapter(
     private val coverQuote = ImageView(parent.context)
     private val textColumn = LinearLayout(parent.context)
     private val title = parent.context.textView()
+    private val support = parent.context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
     private val metaRow = LinearLayout(parent.context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
@@ -151,6 +152,10 @@ internal class MinutesMeetingAdapter(
       title.maxLines = 2
       title.ellipsize = TextUtils.TruncateAt.END
       textColumn.addView(title)
+      support.maxLines = 2
+      support.ellipsize = TextUtils.TruncateAt.END
+      support.setLineSpacing(parent.context.dp(2).toFloat(), 1f)
+      textColumn.addView(support)
 
       typeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
       typeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.faint)
@@ -190,6 +195,11 @@ internal class MinutesMeetingAdapter(
         textColumn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
         title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+        support.layoutParams = LinearLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = context.dp(2) }
         metaRow.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
           context.dp(22),
@@ -239,6 +249,11 @@ internal class MinutesMeetingAdapter(
         }
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
         title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+        support.layoutParams = LinearLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = context.dp(4) }
         metaRow.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
           context.dp(20),
@@ -265,6 +280,11 @@ internal class MinutesMeetingAdapter(
       onLongPress: (View, MinutesMeeting) -> Unit,
     ) {
       title.text = meeting.title
+      support.text = meeting.supportText
+      support.visibility = if (
+        meeting.supportText.isBlank()
+        || (mode == MinutesHomeViewMode.GRID && meeting.searchSource.isNotBlank())
+      ) View.GONE else View.VISIBLE
       bindCover(meeting)
       meta.text = if (mode == MinutesHomeViewMode.GRID) {
         // Feishu's cover card keeps one compact itemTime lane beside itemStatus.
@@ -287,6 +307,7 @@ internal class MinutesMeetingAdapter(
         meeting.title,
         meeting.coverTitle,
         meeting.coverText,
+        meeting.supportText,
         meta.text,
         visibleStatus,
       )
@@ -302,7 +323,10 @@ internal class MinutesMeetingAdapter(
               MinutesMeetingAction.RESTORE -> "restoreMeeting"
               MinutesMeetingAction.OPEN -> if (meeting.canResume) "openRecording" else "openMeeting"
             },
-            "meetingId" to meeting.id,
+            "meetingId" to meeting.targetMeetingId,
+            "searchSource" to meeting.searchSource,
+            "searchSourceId" to meeting.searchSourceId,
+            "searchPositionMs" to meeting.searchPositionMs,
           ),
         )
       }

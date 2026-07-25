@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -26,8 +26,11 @@ import { deriveLegacyMeetingPresentationState } from '../services/meetingPresent
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { useAuth } from '../store/AuthStore';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { MeetingSearchResult, MeetingTagRecord } from '../data/repositories';
+import { ManageMeetingOrganizationUseCase } from '../application/meeting';
 import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/meetingRecycleBin';
 import type { ScopeKey } from '../domain/meeting';
+import { MeetingTagSheet } from '../components/MeetingTagSheet';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -39,6 +42,16 @@ type Props = {
 };
 
 const ACTIVE_RECORDER_STATES = new Set(['preparing', 'recording', 'paused', 'stopping']);
+const meetingOrganization = new ManageMeetingOrganizationUseCase(sqliteMeetingNoteRepository);
+
+const SEARCH_SOURCE_LABELS: Record<MeetingSearchResult['sourceKind'], string> = {
+  title: '标题',
+  tag: '标签',
+  manual_note: '我的笔记',
+  transcript: '文字记录',
+  summary: '整理结果',
+  action: '事项',
+};
 
 function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) {
   const presentation = deriveLegacyMeetingPresentationState(meeting, captureInterrupted
@@ -183,7 +196,17 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const [recycleBinLoading, setRecycleBinLoading] = useState(false);
   const [recycleBinError, setRecycleBinError] = useState('');
   const [restoringMeetingId, setRestoringMeetingId] = useState<string | null>(null);
+  const [meetingTags, setMeetingTags] = useState<readonly MeetingTagRecord[]>([]);
+  const [tagAssignments, setTagAssignments] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
+  const [tagSheetMode, setTagSheetMode] = useState<'assign' | 'manage' | null>(null);
+  const [tagMeetingId, setTagMeetingId] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<readonly MeetingSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const searchRequestRef = useRef(0);
+  const focusRequestRef = useRef(0);
   const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
+  const meetingScope = isGuest ? 'guest' as ScopeKey : accountScope;
 
   const refreshRecycleBin = useCallback(async (syncRemote = false) => {
     if (!accountScope || retentionDays === null) {
@@ -223,6 +246,65 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     });
     return () => subscription.remove();
   }, [recycleBinVisible]);
+
+  const refreshOrganization = useCallback(async () => {
+    if (!meetingScope) {
+      setMeetingTags([]);
+      setTagAssignments(new Map());
+      return '当前无法使用会议标签。';
+    }
+    try {
+      const [tags, assignments] = await Promise.all([
+        meetingOrganization.listTags(meetingScope),
+        meetingOrganization.listAssignments(meetingScope),
+      ]);
+      const byMeeting = new Map<string, string[]>();
+      assignments.forEach(assignment => {
+        byMeeting.set(assignment.meetingId, [
+          ...(byMeeting.get(assignment.meetingId) ?? []),
+          assignment.tagId,
+        ]);
+      });
+      setMeetingTags(tags);
+      setTagAssignments(byMeeting);
+      return null;
+    } catch (reason) {
+      const message = readableErrorMessage(reason, '标签暂时无法加载，请稍后重试。');
+      return message;
+    }
+  }, [meetingScope]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    void refreshOrganization();
+  }, [isFocused, meetings, refreshOrganization]);
+
+  useEffect(() => {
+    const request = ++searchRequestRef.current;
+    const normalized = query.normalize('NFKC').trim();
+    if (!searching || !meetingScope || !normalized) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError('');
+      return undefined;
+    }
+    setSearchLoading(true);
+    setSearchResults([]);
+    setSearchError('');
+    const timer = setTimeout(() => {
+      void meetingOrganization.search(meetingScope, normalized).then(results => {
+        if (searchRequestRef.current !== request) return;
+        setSearchResults(results);
+        setSearchLoading(false);
+      }).catch(reason => {
+        if (searchRequestRef.current !== request) return;
+        setSearchResults([]);
+        setSearchLoading(false);
+        setSearchError(readableErrorMessage(reason, '会议记录暂时无法搜索，请稍后重试。'));
+      });
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [meetingScope, query, searching]);
 
   // A cached/local resumable row is not enough to describe the native session.
   // Reconcile active, finalized-local, and interrupted states on the visible
@@ -319,70 +401,121 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     return () => { cancelled = true; };
   }, [isFocused, meetings, updateMeetingStatus]);
 
-  const snapshot = useMemo<MinutesViewSnapshot>(() => ({
-    schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
-    surface: 'list',
-    list: {
-      title: recycleBinVisible ? '回收站' : '会议记录',
-      mode: recycleBinVisible ? 'recycleBin' : 'meetings',
-      canOpenRecycleBin: retentionDays !== null,
-      searching: recycleBinVisible ? false : searching,
-      query: recycleBinVisible ? '' : query,
-      mediaImporting: recycleBinVisible ? false : mediaImporting,
-      phase: recycleBinVisible
-        ? recycleBinLoading && recycleBinEntries.length === 0
-          ? 'loading'
-          : recycleBinError ? 'error' : recycleBinEntries.length === 0 ? 'empty' : 'ready'
-        : loading && meetings.length === 0
-          ? 'loading'
-          : error ? 'error' : meetings.length === 0 ? 'empty' : 'ready',
-      message: recycleBinVisible
-        ? recycleBinError
-        : error ? readableErrorMessage(error, '会议记录暂时无法加载，请稍后重试。') : '',
-      showingCachedData: recycleBinVisible
-        ? false
-        : Boolean(error && meetings.length > 0),
-      meetings: recycleBinVisible ? recycleBinEntries.map(entry => {
-        const recordedAt = new Date(entry.recordedAtMs);
-        const date = `${recordedAt.getFullYear()}年${recordedAt.getMonth() + 1}月${recordedAt.getDate()}日`;
-        const time = `${String(recordedAt.getHours()).padStart(2, '0')}:${String(recordedAt.getMinutes()).padStart(2, '0')}`;
-        return {
-          id: entry.meetingId,
-          title: displayMeetingTitle(entry.title),
-          dateTimeLabel: compactMeetingDateTime(date, time),
-          statusLabel: restoringMeetingId === entry.meetingId
-            ? '正在恢复'
-            : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '同步冲突',
-          statusTone: entry.canRestore ? 'warning' as const : 'danger' as const,
-          action: 'restore' as const,
-          actionEnabled: entry.canRestore && restoringMeetingId === null,
-          coverType: 'default' as const,
-        };
-      }) : meetings.map(meeting => {
-        const presentation = meetingListPresentation(
-          meeting,
-          staleRecordingIds.has(meeting.id),
-        );
-        const statusLabel = presentation.label === '已完成' ? '' : presentation.label;
-        const cover = inferredMeetingCover(
-          getCachedSummary(meeting.id),
-          getCachedTranscript(meeting.id),
-        );
-        return {
-          id: meeting.id,
-          title: displayMeetingTitle(meeting.title),
-          dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
-          durationLabel: meeting.audioDurationSec
-            ? formatDuration(meeting.audioDurationSec)
-            : meeting.duration,
-          statusLabel,
-          statusTone: presentation.tone,
-          canResume: canResumeMeetingRecording(meeting),
-          ...cover,
-        };
-      }),
-    },
-  }), [error, getCachedSummary, getCachedTranscript, loading, mediaImporting, meetings, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, restoringMeetingId, retentionDays, searching, staleRecordingIds]);
+  const tagNameById = useMemo(
+    () => new Map(meetingTags.map(tag => [tag.id, tag.name])),
+    [meetingTags],
+  );
+  const meetingById = useMemo(() => new Map(meetings.map(meeting => [meeting.id, meeting])), [meetings]);
+  const activeSearch = searching && query.normalize('NFKC').trim().length > 0;
+  const normalMeetingSnapshots = useMemo(() => meetings.map(meeting => {
+    const presentation = meetingListPresentation(meeting, staleRecordingIds.has(meeting.id));
+    const assignedNames = (tagAssignments.get(meeting.id) ?? [])
+      .map(tagId => tagNameById.get(tagId))
+      .filter((name): name is string => Boolean(name));
+    const visibleNames = assignedNames.slice(0, 3);
+    const supportText = visibleNames.length > 0
+      ? `标签 · ${visibleNames.join('、')}${assignedNames.length > visibleNames.length ? ` 等${assignedNames.length}个` : ''}`
+      : '';
+    return {
+      id: meeting.id,
+      targetMeetingId: meeting.id,
+      title: displayMeetingTitle(meeting.title),
+      dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
+      durationLabel: meeting.audioDurationSec
+        ? formatDuration(meeting.audioDurationSec)
+        : meeting.duration,
+      statusLabel: presentation.label === '已完成' ? '' : presentation.label,
+      statusTone: presentation.tone,
+      canResume: canResumeMeetingRecording(meeting),
+      supportText,
+      ...inferredMeetingCover(getCachedSummary(meeting.id), getCachedTranscript(meeting.id)),
+    };
+  }), [getCachedSummary, getCachedTranscript, meetings, staleRecordingIds, tagAssignments, tagNameById]);
+  const searchMeetingSnapshots = useMemo(() => searchResults.flatMap(result => {
+    const meeting = meetingById.get(result.navigationMeetingId);
+    if (!meeting) return [];
+    const presentation = meetingListPresentation(meeting, staleRecordingIds.has(meeting.id));
+    const sourceLabel = SEARCH_SOURCE_LABELS[result.sourceKind];
+    const snippet = result.snippet || displayMeetingTitle(meeting.title);
+    return [{
+      id: result.resultId,
+      targetMeetingId: meeting.id,
+      title: displayMeetingTitle(meeting.title),
+      dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
+      durationLabel: meeting.audioDurationSec
+        ? formatDuration(meeting.audioDurationSec)
+        : meeting.duration,
+      statusLabel: presentation.label === '已完成' ? '' : presentation.label,
+      statusTone: presentation.tone,
+      canResume: false,
+      coverType: 'summary' as const,
+      coverTitle: sourceLabel,
+      coverText: snippet,
+      supportText: `${sourceLabel} · ${snippet}`,
+      searchSource: result.sourceKind,
+      searchSourceId: result.sourceId,
+      ...(result.startMs !== null ? { searchPositionMs: result.startMs } : {}),
+    }];
+  }), [meetingById, searchResults, staleRecordingIds]);
+
+  const snapshot = useMemo<MinutesViewSnapshot>(() => {
+    const recycleMeetings = recycleBinEntries.map(entry => {
+      const recordedAt = new Date(entry.recordedAtMs);
+      const date = `${recordedAt.getFullYear()}年${recordedAt.getMonth() + 1}月${recordedAt.getDate()}日`;
+      const time = `${String(recordedAt.getHours()).padStart(2, '0')}:${String(recordedAt.getMinutes()).padStart(2, '0')}`;
+      return {
+        id: entry.meetingId,
+        targetMeetingId: entry.meetingId,
+        title: displayMeetingTitle(entry.title),
+        dateTimeLabel: compactMeetingDateTime(date, time),
+        statusLabel: restoringMeetingId === entry.meetingId
+          ? '正在恢复'
+          : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '同步冲突',
+        statusTone: entry.canRestore ? 'warning' as const : 'danger' as const,
+        action: 'restore' as const,
+        actionEnabled: entry.canRestore && restoringMeetingId === null,
+        coverType: 'default' as const,
+      };
+    });
+    const searchPhase = searchLoading
+      ? 'loading' as const
+      : searchError ? 'error' as const : searchMeetingSnapshots.length === 0 ? 'empty' as const : 'ready' as const;
+    const searchMessage = searchLoading
+      ? '正在搜索会议记录'
+      : searchError || (searchMeetingSnapshots.length === 0 ? '未找到相关会议记录' : '');
+    return {
+      schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
+      surface: 'list',
+      list: {
+        title: recycleBinVisible ? '回收站' : '会议记录',
+        mode: recycleBinVisible ? 'recycleBin' : 'meetings',
+        canOpenRecycleBin: retentionDays !== null,
+        searching: recycleBinVisible ? false : searching,
+        query: recycleBinVisible ? '' : query,
+        mediaImporting: recycleBinVisible ? false : mediaImporting,
+        phase: recycleBinVisible
+          ? recycleBinLoading && recycleBinEntries.length === 0
+            ? 'loading'
+            : recycleBinError ? 'error' : recycleBinEntries.length === 0 ? 'empty' : 'ready'
+          : activeSearch
+            ? searchPhase
+            : loading && meetings.length === 0
+              ? 'loading'
+              : error ? 'error' : meetings.length === 0 ? 'empty' : 'ready',
+        message: recycleBinVisible
+          ? recycleBinError
+          : activeSearch
+            ? searchMessage
+            : error ? readableErrorMessage(error, '会议记录暂时无法加载，请稍后重试。') : '',
+        showingCachedData: recycleBinVisible || activeSearch
+          ? false
+          : Boolean(error && meetings.length > 0),
+        meetings: recycleBinVisible
+          ? recycleMeetings
+          : activeSearch ? searchMeetingSnapshots : normalMeetingSnapshots,
+      },
+    };
+  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
 
   const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
@@ -474,9 +607,32 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
 
   const handleAction = (action: MinutesSemanticAction) => {
     switch (action.type) {
-      case 'openMeeting':
-        navigation.navigate('Transcription', { meetingId: action.meetingId });
+      case 'openMeeting': {
+        const requestId = ++focusRequestRef.current;
+        if (action.searchSource === 'transcript') {
+          navigation.navigate('Transcription', {
+            meetingId: action.meetingId,
+            focus: 'transcript',
+            segmentId: action.searchSourceId,
+            positionMs: action.searchPositionMs,
+            transcriptFocusRequestId: requestId,
+          });
+        } else if (action.searchSource === 'summary') {
+          navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'summary' });
+        } else if (action.searchSource === 'action') {
+          navigation.navigate('Transcription', {
+            meetingId: action.meetingId,
+            focus: 'summary',
+            actionId: action.searchSourceId,
+            actionFocusRequestId: requestId,
+          });
+        } else if (action.searchSource === 'manual_note') {
+          navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'notes' });
+        } else {
+          navigation.navigate('Transcription', { meetingId: action.meetingId });
+        }
         break;
+      }
       case 'openRecording':
         navigation.navigate('MeetingLive', { meetingId: action.meetingId });
         break;
@@ -503,6 +659,20 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
             });
           });
         break;
+      case 'openMeetingTags':
+        void refreshOrganization().then(loadError => {
+          if (loadError) {
+            showDialog({
+              title: '标签暂时不可用',
+              message: loadError,
+              tone: 'error',
+            });
+            return;
+          }
+          setTagMeetingId(null);
+          setTagSheetMode('manage');
+        });
+        break;
       case 'closeRecycleBin':
         setRecycleBinVisible(false);
         break;
@@ -511,6 +681,20 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
       case 'renameMeeting':
         navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'title' });
+        break;
+      case 'setMeetingTags':
+        void refreshOrganization().then(loadError => {
+          if (loadError) {
+            showDialog({
+              title: '标签暂时不可用',
+              message: loadError,
+              tone: 'error',
+            });
+            return;
+          }
+          setTagMeetingId(action.meetingId);
+          setTagSheetMode('assign');
+        });
         break;
       case 'deleteMeeting':
         void confirmDelete(action.meetingId);
@@ -554,16 +738,87 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     }
   };
 
+  const createTag = async (name: string): Promise<MeetingTagRecord> => {
+    if (!meetingScope) throw new Error('当前无法使用会议标签。');
+    const tag = await meetingOrganization.createTag(meetingScope, name);
+    await refreshOrganization();
+    return tag;
+  };
+
+  const renameTag = async (tagId: string, name: string) => {
+    if (!meetingScope) throw new Error('当前无法使用会议标签。');
+    const result = await meetingOrganization.renameOrMergeTag(tagId, meetingScope, name);
+    await refreshOrganization();
+    return result;
+  };
+
+  const requestDeleteTag = (tag: MeetingTagRecord) => {
+    if (!meetingScope) return;
+    showDialog({
+      title: `删除标签“${tag.name}”？`,
+      message: tag.meetingCount > 0
+        ? `会从 ${tag.meetingCount} 场会议中移除此标签，会议内容不会被删除。`
+        : '会议内容不会被删除。',
+      tone: 'danger',
+      actions: [
+        {
+          text: '删除',
+          role: 'destructive',
+          onPress: async () => {
+            try {
+              await meetingOrganization.deleteTag(tag.id, meetingScope);
+              await refreshOrganization();
+            } catch (reason) {
+              showDialog({
+                title: '删除失败',
+                message: readableErrorMessage(reason, '标签暂时未能删除，请稍后重试。'),
+                tone: 'error',
+              });
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
+  const saveMeetingTags = async (tagIds: readonly string[]) => {
+    if (!meetingScope || !tagMeetingId) throw new Error('当前无法保存会议标签。');
+    await meetingOrganization.replaceMeetingTags(tagMeetingId, meetingScope, tagIds);
+    await refreshOrganization();
+  };
+
+  const tagMeeting = tagMeetingId ? meetings.find(meeting => meeting.id === tagMeetingId) ?? null : null;
+
   return (
-    <LaojiMinutesView
-      style={styles.surface}
-      surface="list"
-      snapshot={snapshot}
-      bottomBarSelectionCommand={bottomBarSelectionCommand}
-      onMinutesAction={event => handleAction(event.nativeEvent)}
-      onTabPress={onTabPress}
-      testID="meeting-native-list"
-    />
+    <>
+      <LaojiMinutesView
+        style={styles.surface}
+        surface="list"
+        snapshot={snapshot}
+        bottomBarSelectionCommand={bottomBarSelectionCommand}
+        onMinutesAction={event => handleAction(event.nativeEvent)}
+        onTabPress={onTabPress}
+        testID="meeting-native-list"
+      />
+      {tagSheetMode && meetingScope && (tagSheetMode === 'manage' || tagMeeting) ? (
+        <MeetingTagSheet
+          visible
+          mode={tagSheetMode}
+          meetingTitle={tagMeeting ? displayMeetingTitle(tagMeeting.title) : undefined}
+          tags={meetingTags}
+          selectedTagIds={tagMeetingId ? tagAssignments.get(tagMeetingId) ?? [] : []}
+          onClose={() => {
+            setTagSheetMode(null);
+            setTagMeetingId(null);
+          }}
+          onCreate={createTag}
+          onRename={renameTag}
+          onDelete={requestDeleteTag}
+          onSave={tagSheetMode === 'assign' ? saveMeetingTags : undefined}
+        />
+      ) : null}
+    </>
   );
 }
 
