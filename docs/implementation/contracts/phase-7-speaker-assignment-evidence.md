@@ -1,6 +1,6 @@
 # Phase 7 说话人反馈证据：SPK-01 本场修正
 
-状态：段落级与本场同一匿名簇的讲话人更名，已形成游客本机纵向闭环；账号 correction 已具备 capability-gated outbox 客户端框架，但远端服务与账号端到端尚不可验证。当前实现刻意不创建账号级声纹资料，也不把本场临时名称伪装成未来识别能力。本文件记录 migration v11/v12、事务不变量、飞书来源映射、同步边界和模拟器实测；它不代表 `future_profile`、远端 correction endpoint、账号/跨设备同步、旧会议重新匹配、真实中文多人识别改善或 Phase 7 退出条件已经完成。
+状态：段落级与本场同一匿名簇的讲话人更名，已形成游客本机纵向闭环；账号 correction 已具备 capability-gated outbox、独立处理阶段和单会议重试客户端框架，但远端服务与账号端到端尚不可验证。当前实现刻意不创建账号级声纹资料，也不把本场临时名称伪装成未来识别能力。本文件记录 migration v11/v12、事务不变量、飞书来源映射、同步边界和模拟器实测；它不代表 `future_profile`、远端 correction endpoint、账号/跨设备同步、旧会议重新匹配、真实中文多人识别改善或 Phase 7 退出条件已经完成。
 
 ## 当前数据与事务合同
 
@@ -18,6 +18,9 @@
 - 旧 Transcript API 仅在响应明确给出 `transcript_revision_id`、`revision_id` 或 `revision.id` 时保存服务端 revision 映射；分页中 revision 身份变化会拒绝镜像。映射落库后会触发 pending correction drain。
 - 每次 drain 都强制刷新 capability，只有来源为真实远端且 `speaker_corrections=true` 才发送；缓存值和 legacy fallback 不能开启写操作。请求/响应执行结构化校验，成功响应必须回显同一 `client_request_id` 并提供非负 assignment revision。
 - 网络、超时、408/425/429/5xx 使用有界指数退避；401 等待凭据刷新；其他 4xx 进入阻断/永久错误。409/412 保存有界远端 payload 与 revision 到 `sync_conflicts`，不做静默覆盖；90 秒陈旧 claim 可恢复，每场按 assignment revision 串行、最多三场并发。
+- `speaker` processing stage 不再固定为 `none`。本机 correction 落库后从 correction/outbox 聚合状态；真正 claim 才增加 attempt。远端排队/claim、可重试失败、全部同步、永久阻断或冲突分别投影为 `processing`、`failed_retryable`、`ready`、`partial`，不改写 capture/upload/transcript/summary。
+- fresh capability 明确返回 `speaker_corrections=false` 时，只把仍待同步的讲话人修改展示为“已保存在本机”，outbox 和 correction 身份保持不变，未来能力开启后仍可 claim。能力端点本身传输失败时，只有已经具备远端 Meeting/Transcript 身份的可发送行进入持久 retry；provider 重启后会从 `next_attempt_at_ms` 或 stale claim 时间恢复定时。
+- 详情状态槽的 speaker 重试只把当前 canonical meeting 下可重试 outbox 行恢复为 `pending` 并触发 correction drain；blocked/permanent 行、讲话人本机名称、Transcript、Summary 和录音均不重跑。
 
 ## 原生桥接与页面合同
 
@@ -25,6 +28,7 @@
 - Transcript 每段的头像加姓名构成独立 44dp “修改讲话人”触控区；正文和时间区域继续执行原有回听。native action `editTranscriptSpeaker` 携带 meeting、line、position、speaker、cluster、label 和 revision kind，不在 Kotlin 层写业务数据。
 - React controller 对 realtime draft 先显示中文阻止提示；稳定 revision 才打开编辑 sheet。保存后重新读取 active Transcript，并刷新文字记录、讲话人统计和当前 Summary，而不是只乐观修改一个 React state。
 - 游客可以使用本场临时名字；账号级“管理讲话人”仍保持登录边界。用户可见成功、失败、目标变化和 draft 提示全部为中文。
+- 讲话人状态复用详情头部既有固定状态/重试槽，不增加新布局、颜色或说明书式提示；`processing/partial/failed_retryable` 分别使用“正在同步讲话人修改”“讲话人修改已保存在本机”“讲话人修改同步失败，可重试”。
 
 ## UI 证据分类
 
@@ -46,6 +50,7 @@
 
 ## 轻量验证
 
+- 独立处理阶段增量：`npx tsc --noEmit` 与 `git diff --check` 通过；没有恢复归档测试/门禁，也没有为本增量生成 APK。纯状态窄检查覆盖 speaker processing、failed retry target、summary stale 与 speaker priority；SQLite/outbox 行为仍以源码事务审计为证据，不记为设备或远端实测。
 - `npx tsc --noEmit`：v12 与服务端 segment 身份门禁通过。
 - `:app:compilePreviewKotlin --parallel --max-workers=$(nproc)`：通过；232 个 task，8 executed、224 up-to-date，耗时 24 秒。
 - 最终 `:app:assemblePreview --parallel --max-workers=$(nproc)`：通过；627 个 task，75 executed、552 up-to-date，耗时 2 分 8 秒。
@@ -63,7 +68,7 @@
 ## 未完成边界
 
 1. `future_profile`、关联现有讲话人资料、显式声纹同意、样本质量阈值和资料撤销尚未实现；当前 UI 不提供这些未完成能力。
-2. 客户端 outbox、幂等请求、重试和 409/412 冲突记录已实现，但远端当前不可达，尚未证明 capability 开启、endpoint 请求/响应、真实账号 correction 或跨设备同步；远端链路仍是硬阻塞。
+2. 客户端 outbox、独立 speaker 状态、单会议重试、幂等请求和 409/412 冲突记录已实现，但远端当前不可达，尚未证明 capability 开启、endpoint 请求/响应、真实账号 correction、进程重启定时或跨设备同步；远端链路仍是硬阻塞。
 3. 旧会议重新匹配 job、模型/profile revision 元数据、手工 assignment 不被 reprocess 覆盖的跨 revision 合并尚未实现。
 4. 当前没有可用的真实中文多人识别样本和服务端声纹链路，无法证明人工反馈会提高未来会议识别率；本轮只证明本场人工修正不会损坏原内容。
 5. 当前只有模拟器，没有 USB 真机；物理设备键盘、TalkBack、字体缩放、长会议性能和真实录音中的说话人统计仍未验证。

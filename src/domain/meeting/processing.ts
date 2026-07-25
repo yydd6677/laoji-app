@@ -244,6 +244,9 @@ export interface MeetingPresentationState {
     | 'transcript_failed'
     | 'summarizing'
     | 'summary_failed'
+    | 'speaker_processing'
+    | 'speaker_partial'
+    | 'speaker_failed'
     | 'ready';
   label: string;
   tone: MeetingPresentationTone;
@@ -268,6 +271,9 @@ const PRESENTATION_STATES_BY_LABEL: Readonly<Record<string, MeetingPresentationS
   '正在整理会议记录': { key: 'summarizing', label: '正在整理会议记录', tone: 'neutral', retryStage: null },
   '整理失败，可重试': { key: 'summary_failed', label: '整理失败，可重试', tone: 'danger', retryStage: 'summary' },
   '整理结果可更新': { key: 'ready', label: '整理结果可更新', tone: 'warning', retryStage: null },
+  '正在同步讲话人修改': { key: 'speaker_processing', label: '正在同步讲话人修改', tone: 'neutral', retryStage: null },
+  '讲话人修改已保存在本机': { key: 'speaker_partial', label: '讲话人修改已保存在本机', tone: 'warning', retryStage: null },
+  '讲话人修改同步失败，可重试': { key: 'speaker_failed', label: '讲话人修改同步失败，可重试', tone: 'danger', retryStage: 'speaker' },
   '已完成': { key: 'ready', label: '已完成', tone: 'success', retryStage: null },
 };
 
@@ -347,8 +353,17 @@ export function deriveMeetingPresentationState(
   if (stages.summary === 'failed_retryable') {
     return meetingPresentationStateFromLabel('整理失败，可重试')!;
   }
+  if (stages.speaker === 'processing') {
+    return meetingPresentationStateFromLabel('正在同步讲话人修改')!;
+  }
+  if (stages.speaker === 'failed_retryable') {
+    return meetingPresentationStateFromLabel('讲话人修改同步失败，可重试')!;
+  }
   if (stages.summary === 'stale') {
     return meetingPresentationStateFromLabel('整理结果可更新')!;
+  }
+  if (stages.speaker === 'partial') {
+    return meetingPresentationStateFromLabel('讲话人修改已保存在本机')!;
   }
   if (
     stages.capture === 'not_started'

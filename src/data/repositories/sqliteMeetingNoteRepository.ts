@@ -4,12 +4,14 @@ import type {
   ProcessingStage,
   ScheduleSnapshot,
   ScopeKey,
+  SpeakerStatus,
 } from '../../domain/meeting';
 import {
   assertProcessingStage,
   assertScopeKey,
   calendarMeetingSeriesKey,
   secureClientIdFactory,
+  transitionProcessingStage,
 } from '../../domain/meeting';
 import { withMeetingDatabaseTransaction, openMeetingDatabase } from '../db/openDatabase';
 import type {
@@ -72,6 +74,7 @@ import type {
   SpeakerCorrectionSyncClaim,
   SpeakerCorrectionSyncConflict,
   SpeakerCorrectionSyncFailure,
+  SpeakerCorrectionSyncState,
   SummaryCitationRecord,
   SummarySectionRecord,
   SummaryVersionRecord,
@@ -304,6 +307,14 @@ type SpeakerCorrectionRow = {
   remote_assignment_revision: number | null;
   last_sync_error_code: string | null;
   synced_at_ms: number | null;
+};
+
+type SpeakerProcessingProjectionRow = {
+  sync_state: SpeakerCorrectionSyncState;
+  correction_error_code: string | null;
+  outbox_status: string | null;
+  outbox_error_code: string | null;
+  next_attempt_at_ms: number | null;
 };
 
 type MarkerRow = {
@@ -612,6 +623,121 @@ function stageFromRow(row: StageRow): ProcessingStage {
   };
   assertProcessingStage(stage);
   return stage;
+}
+
+type SpeakerProcessingProjectionMode = 'normal' | 'capability_disabled';
+
+async function reconcileSpeakerProcessingStageInDatabase(
+  database: SQLiteDatabase,
+  meetingId: string,
+  scopeKey: ScopeKey,
+  updatedAtMs: number,
+  options: {
+    mode?: SpeakerProcessingProjectionMode;
+    attemptStarted?: boolean;
+  } = {},
+): Promise<boolean> {
+  assertScopeKey(scopeKey);
+  assertRecordId(meetingId, 'speaker processing meeting ID');
+  assertNonNegativeInteger(updatedAtMs, 'speaker processing update time');
+  const stageRow = await database.getFirstAsync<StageRow>(
+    `SELECT stage.* FROM processing_stages stage
+     INNER JOIN meeting_notes meeting ON meeting.id = stage.meeting_id
+     WHERE stage.meeting_id = ? AND meeting.scope_key = ? AND stage.stage = 'speaker'`,
+    meetingId,
+    scopeKey,
+  );
+  if (!stageRow) throw new Error('speaker processing stage is missing');
+
+  const rows = await database.getAllAsync<SpeakerProcessingProjectionRow>(
+    `SELECT correction.sync_state,
+       correction.last_sync_error_code AS correction_error_code,
+       outbox.status AS outbox_status,
+       outbox.last_error_code AS outbox_error_code,
+       outbox.next_attempt_at_ms
+     FROM speaker_corrections correction
+     LEFT JOIN sync_outbox outbox
+       ON outbox.scope_key = correction.scope_key
+      AND outbox.aggregate_type = 'speaker_correction'
+      AND outbox.aggregate_id = correction.id
+      AND outbox.operation_type = 'speaker_correction.submit'
+     WHERE correction.meeting_id = ? AND correction.scope_key = ?
+     ORDER BY correction.assignment_revision, correction.id`,
+    meetingId,
+    scopeKey,
+  );
+  const retryable = rows.filter(row => (
+    row.sync_state === 'failed' || row.outbox_status === 'retry'
+  ));
+  const inFlight = rows.some(row => row.outbox_status === 'in_flight');
+  const pending = rows.some(row => (
+    row.sync_state === 'pending'
+    || row.outbox_status === 'pending'
+  ));
+  const blocked = rows.some(row => (
+    row.sync_state === 'blocked'
+    || row.outbox_status === 'blocked'
+    || row.outbox_status === 'permanent_error'
+  ));
+  const accountLocalOnly = scopeKey !== 'guest'
+    && rows.some(row => row.sync_state === 'local_only');
+  const capabilityDisabled = options.mode === 'capability_disabled'
+    && (retryable.length > 0 || inFlight || pending);
+  let status: SpeakerStatus;
+  if (rows.length === 0) status = 'none';
+  else if (capabilityDisabled) status = 'partial';
+  else if (blocked) status = 'partial';
+  else if (inFlight) status = 'processing';
+  else if (retryable.length > 0) status = 'failed_retryable';
+  else if (pending) status = 'processing';
+  else if (accountLocalOnly) status = 'partial';
+  else status = 'ready';
+
+  const retryTimes = retryable
+    .map(row => row.next_attempt_at_ms)
+    .filter((value): value is number => value !== null && Number.isSafeInteger(value) && value >= 0);
+  const retryError = retryable
+    .map(row => row.outbox_error_code ?? row.correction_error_code)
+    .find((value): value is string => Boolean(value)) ?? null;
+  const current = stageFromRow(stageRow);
+  const next = transitionProcessingStage(current, {
+    stage: 'speaker',
+    status,
+    attemptStarted: options.attemptStarted === true,
+    errorCode: status === 'failed_retryable' ? retryError ?? 'speaker_sync_retryable' : null,
+    userMessageKey: status === 'failed_retryable' ? 'speaker_sync_retryable' : null,
+    retryable: status === 'failed_retryable',
+    nextRetryAtMs: status === 'failed_retryable' && retryTimes.length > 0
+      ? Math.min(...retryTimes)
+      : null,
+  }, Math.max(updatedAtMs, current.updatedAtMs));
+  const changed = next.status !== current.status
+    || next.attemptCount !== current.attemptCount
+    || next.errorCode !== current.errorCode
+    || next.userMessageKey !== current.userMessageKey
+    || next.retryable !== current.retryable
+    || next.nextRetryAtMs !== current.nextRetryAtMs;
+  if (!changed) return false;
+  const result = await database.runAsync(
+    `UPDATE processing_stages SET
+       status = ?, attempt_count = ?, progress = ?, job_id = ?,
+       input_fingerprint = ?, error_code = ?, user_message_key = ?,
+       retryable = ?, next_retry_at_ms = ?, updated_at_ms = ?
+     WHERE meeting_id = ? AND stage = 'speaker'`,
+    next.status,
+    next.attemptCount,
+    next.progress,
+    next.jobId,
+    next.inputFingerprint,
+    next.errorCode,
+    next.userMessageKey,
+    next.retryable ? 1 : 0,
+    next.nextRetryAtMs,
+    next.updatedAtMs,
+    meetingId,
+  );
+  if (result.changes !== 1) throw new Error('speaker processing stage changed concurrently');
+  return true;
 }
 
 function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
@@ -2317,6 +2443,21 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       stage.updatedAtMs,
     );
     this.touchedMeetingIds.add(stage.meetingId);
+  }
+
+  async reconcileSpeakerProcessingStage(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    updatedAtMs: number,
+  ): Promise<void> {
+    await this.assertMeetingInScope(meetingId, scopeKey);
+    await reconcileSpeakerProcessingStageInDatabase(
+      this.database,
+      meetingId,
+      scopeKey,
+      updatedAtMs,
+    );
+    this.touchedMeetingIds.add(meetingId);
   }
 
   async saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void> {
@@ -5892,7 +6033,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     }
     const maxMeetings = Math.min(3, options.maxMeetings);
 
-    return withMeetingDatabaseTransaction(async database => {
+    const claimed = await withMeetingDatabaseTransaction(async database => {
       const rows = await database.getAllAsync<SpeakerCorrectionSyncOutboxRow>(
         `SELECT
            outbox.operation_id, outbox.scope_key, outbox.aggregate_type,
@@ -6040,6 +6181,13 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         if (markedPending.changes !== 1) {
           throw new Error('speaker correction sync target changed concurrently');
         }
+        await reconcileSpeakerProcessingStageInDatabase(
+          database,
+          row.meeting_id,
+          scopeKey,
+          options.nowMs,
+          { attemptStarted: true },
+        );
         const baseRevision = Number(row.base_revision ?? 0);
         assertNonNegativeInteger(baseRevision, 'speaker correction sync base revision');
         claims.push({
@@ -6057,6 +6205,57 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       }
       return claims;
     });
+    if (claimed.length > 0) this.notify([...new Set(claimed.map(claim => claim.meetingId))]);
+    return claimed;
+  }
+
+  async getNextSpeakerCorrectionSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'speaker correction stale claim interval');
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<{ next_at_ms: number | null }>(
+      `SELECT MIN(
+         CASE outbox.status
+           WHEN 'retry' THEN COALESCE(outbox.next_attempt_at_ms, 0)
+           WHEN 'in_flight' THEN outbox.updated_at_ms + ?
+           ELSE NULL
+         END
+       ) AS next_at_ms
+       FROM sync_outbox outbox
+       INNER JOIN speaker_corrections correction ON correction.id = outbox.aggregate_id
+       INNER JOIN meeting_notes meeting ON meeting.id = correction.meeting_id
+       INNER JOIN transcript_revisions revision
+         ON revision.id = correction.transcript_revision_id
+       WHERE outbox.scope_key = ? AND correction.scope_key = ? AND meeting.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+         AND meeting.remote_id IS NOT NULL AND LENGTH(TRIM(meeting.remote_id)) > 0
+         AND revision.remote_id IS NOT NULL AND LENGTH(TRIM(revision.remote_id)) > 0
+         AND correction.sync_state IN ('pending', 'failed')
+         AND outbox.aggregate_type = 'speaker_correction'
+         AND outbox.operation_type = 'speaker_correction.submit'
+         AND outbox.status IN ('retry', 'in_flight')
+         AND NOT EXISTS (
+           SELECT 1 FROM sync_outbox blocker
+           INNER JOIN speaker_corrections blocked_correction
+             ON blocked_correction.id = blocker.aggregate_id
+           WHERE blocker.scope_key = outbox.scope_key
+             AND blocker.aggregate_type = 'speaker_correction'
+             AND blocked_correction.meeting_id = correction.meeting_id
+             AND blocker.status IN ('blocked', 'permanent_error')
+         )`,
+      staleClaimAfterMs,
+      scopeKey,
+      scopeKey,
+      scopeKey,
+    );
+    if (row?.next_at_ms === null || row?.next_at_ms === undefined) return null;
+    const nextAtMs = Number(row.next_at_ms);
+    assertNonNegativeInteger(nextAtMs, 'speaker correction next attempt time');
+    return nextAtMs;
   }
 
   async completeSpeakerCorrectionSyncClaim(
@@ -6132,6 +6331,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if (completed.changes !== 1) {
         throw new Error('speaker correction sync completion changed concurrently');
       }
+      await reconcileSpeakerProcessingStageInDatabase(
+        database,
+        claim.meetingId,
+        claim.scopeKey,
+        completedAtMs,
+      );
       await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
       return true;
     });
@@ -6193,6 +6398,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if (updatedCorrection.changes !== 1) {
         throw new Error('speaker correction sync failure target changed concurrently');
       }
+      await reconcileSpeakerProcessingStageInDatabase(
+        database,
+        claim.meetingId,
+        claim.scopeKey,
+        failure.updatedAtMs,
+      );
       await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
       return true;
     });
@@ -6287,11 +6498,244 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if (updatedCorrection.changes !== 1) {
         throw new Error('speaker correction conflict target changed concurrently');
       }
+      await reconcileSpeakerProcessingStageInDatabase(
+        database,
+        claim.meetingId,
+        claim.scopeKey,
+        conflict.createdAtMs,
+      );
       await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
       return true;
     });
     if (applied) this.notify([claim.meetingId]);
     return applied;
+  }
+
+  async retrySpeakerCorrectionSyncOperations(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    requestedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'speaker correction meeting ID');
+    assertNonNegativeInteger(requestedAtMs, 'speaker correction retry time');
+    if (scopeKey === 'guest') return false;
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        meetingId,
+        scopeKey,
+      );
+      if (!meeting) return false;
+      const rows = await database.getAllAsync<{ correction_id: string }>(
+        `SELECT correction.id AS correction_id
+         FROM speaker_corrections correction
+         INNER JOIN sync_outbox outbox
+           ON outbox.scope_key = correction.scope_key
+          AND outbox.aggregate_type = 'speaker_correction'
+          AND outbox.aggregate_id = correction.id
+          AND outbox.operation_type = 'speaker_correction.submit'
+         WHERE correction.meeting_id = ? AND correction.scope_key = ?
+           AND outbox.status = 'retry'
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_outbox blocker
+             INNER JOIN speaker_corrections blocked_correction
+               ON blocked_correction.id = blocker.aggregate_id
+             WHERE blocker.scope_key = correction.scope_key
+               AND blocker.aggregate_type = 'speaker_correction'
+               AND blocked_correction.meeting_id = correction.meeting_id
+               AND blocker.status IN ('blocked', 'permanent_error')
+           )
+         ORDER BY correction.assignment_revision, correction.id`,
+        meetingId,
+        scopeKey,
+      );
+      if (rows.length === 0) {
+        await reconcileSpeakerProcessingStageInDatabase(
+          database,
+          meetingId,
+          scopeKey,
+          requestedAtMs,
+        );
+        return false;
+      }
+      for (const row of rows) {
+        const outbox = await database.runAsync(
+          `UPDATE sync_outbox SET
+             status = 'pending', next_attempt_at_ms = NULL,
+             last_error_code = NULL, claim_token = NULL,
+             updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE scope_key = ? AND aggregate_type = 'speaker_correction'
+             AND aggregate_id = ? AND operation_type = 'speaker_correction.submit'
+             AND status = 'retry'`,
+          requestedAtMs,
+          scopeKey,
+          row.correction_id,
+        );
+        if (outbox.changes !== 1) {
+          throw new Error('speaker correction retry changed concurrently');
+        }
+        const correction = await database.runAsync(
+          `UPDATE speaker_corrections SET
+             sync_state = 'pending', last_sync_error_code = NULL,
+             updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+          requestedAtMs,
+          row.correction_id,
+          meetingId,
+          scopeKey,
+        );
+        if (correction.changes !== 1) {
+          throw new Error('speaker correction retry target changed concurrently');
+        }
+      }
+      await reconcileSpeakerProcessingStageInDatabase(
+        database,
+        meetingId,
+        scopeKey,
+        requestedAtMs,
+      );
+      await refreshMeetingSyncState(database, meetingId, scopeKey);
+      return true;
+    });
+    this.notify([meetingId]);
+    return applied;
+  }
+
+  async deferSpeakerCorrectionSyncForCapabilityFailure(
+    scopeKey: ScopeKey,
+    nextAttemptAtMs: number,
+    updatedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(nextAttemptAtMs, 'speaker correction capability retry time');
+    assertNonNegativeInteger(updatedAtMs, 'speaker correction capability failure time');
+    if (nextAttemptAtMs < updatedAtMs) {
+      throw new Error('speaker correction capability retry precedes failure');
+    }
+    if (scopeKey === 'guest') return 0;
+    const meetingIds = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<{
+        correction_id: string;
+        meeting_id: string;
+      }>(
+        `SELECT correction.id AS correction_id, correction.meeting_id
+         FROM speaker_corrections correction
+         INNER JOIN meeting_notes meeting ON meeting.id = correction.meeting_id
+         INNER JOIN transcript_revisions revision
+           ON revision.id = correction.transcript_revision_id
+         INNER JOIN sync_outbox outbox
+           ON outbox.scope_key = correction.scope_key
+          AND outbox.aggregate_type = 'speaker_correction'
+          AND outbox.aggregate_id = correction.id
+          AND outbox.operation_type = 'speaker_correction.submit'
+         WHERE correction.scope_key = ? AND meeting.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'
+           AND meeting.remote_id IS NOT NULL AND LENGTH(TRIM(meeting.remote_id)) > 0
+           AND revision.remote_id IS NOT NULL AND LENGTH(TRIM(revision.remote_id)) > 0
+           AND correction.sync_state IN ('pending', 'failed')
+           AND outbox.status IN ('pending', 'retry')
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_outbox blocker
+             INNER JOIN speaker_corrections blocked_correction
+               ON blocked_correction.id = blocker.aggregate_id
+             WHERE blocker.scope_key = correction.scope_key
+               AND blocker.aggregate_type = 'speaker_correction'
+               AND blocked_correction.meeting_id = correction.meeting_id
+               AND blocker.status IN ('blocked', 'permanent_error')
+           )
+         ORDER BY correction.meeting_id, correction.assignment_revision, correction.id`,
+        scopeKey,
+        scopeKey,
+      );
+      for (const row of rows) {
+        const outbox = await database.runAsync(
+          `UPDATE sync_outbox SET
+             status = 'retry',
+             next_attempt_at_ms = MAX(COALESCE(next_attempt_at_ms, 0), ?),
+             last_error_code = 'capability_unavailable', claim_token = NULL,
+             updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE scope_key = ? AND aggregate_type = 'speaker_correction'
+             AND aggregate_id = ? AND operation_type = 'speaker_correction.submit'
+             AND status IN ('pending', 'retry')`,
+          nextAttemptAtMs,
+          updatedAtMs,
+          scopeKey,
+          row.correction_id,
+        );
+        if (outbox.changes !== 1) {
+          throw new Error('speaker correction capability failure changed concurrently');
+        }
+        const correction = await database.runAsync(
+          `UPDATE speaker_corrections SET
+             sync_state = 'failed', last_sync_error_code = 'capability_unavailable',
+             updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+          updatedAtMs,
+          row.correction_id,
+          row.meeting_id,
+          scopeKey,
+        );
+        if (correction.changes !== 1) {
+          throw new Error('speaker correction capability failure target changed concurrently');
+        }
+      }
+      const uniqueMeetingIds = [...new Set(rows.map(row => row.meeting_id))];
+      for (const meetingId of uniqueMeetingIds) {
+        await reconcileSpeakerProcessingStageInDatabase(
+          database,
+          meetingId,
+          scopeKey,
+          updatedAtMs,
+        );
+        await refreshMeetingSyncState(database, meetingId, scopeKey);
+      }
+      return uniqueMeetingIds;
+    });
+    if (meetingIds.length > 0) this.notify(meetingIds);
+    return meetingIds.length;
+  }
+
+  async projectSpeakerCorrectionSyncDisabled(
+    scopeKey: ScopeKey,
+    updatedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(updatedAtMs, 'speaker correction capability time');
+    if (scopeKey === 'guest') return 0;
+    const changedMeetingIds = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<{ meeting_id: string }>(
+        `SELECT DISTINCT correction.meeting_id
+         FROM speaker_corrections correction
+         INNER JOIN meeting_notes meeting ON meeting.id = correction.meeting_id
+         INNER JOIN sync_outbox outbox
+           ON outbox.scope_key = correction.scope_key
+          AND outbox.aggregate_type = 'speaker_correction'
+          AND outbox.aggregate_id = correction.id
+          AND outbox.operation_type = 'speaker_correction.submit'
+         WHERE correction.scope_key = ? AND meeting.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'
+           AND correction.sync_state IN ('pending', 'failed')
+           AND outbox.status IN ('pending', 'retry', 'in_flight')
+         ORDER BY correction.meeting_id`,
+        scopeKey,
+        scopeKey,
+      );
+      const changed: string[] = [];
+      for (const row of rows) {
+        if (await reconcileSpeakerProcessingStageInDatabase(
+          database,
+          row.meeting_id,
+          scopeKey,
+          updatedAtMs,
+          { mode: 'capability_disabled' },
+        )) changed.push(row.meeting_id);
+      }
+      return changed;
+    });
+    if (changedMeetingIds.length > 0) this.notify(changedMeetingIds);
+    return changedMeetingIds.length;
   }
 
   async getTranscriptRevisionContent(

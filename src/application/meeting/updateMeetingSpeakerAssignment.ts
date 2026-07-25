@@ -182,6 +182,11 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
             updatedAtMs: Math.max(createdAtMs, meeting.updatedAtMs + 1),
           });
         }
+        await transaction.reconcileSpeakerProcessingStage(
+          meeting.id,
+          input.scopeKey,
+          createdAtMs,
+        );
       }
       result = { ...applied, canonicalMeetingId: meeting.id };
     });

@@ -269,19 +269,46 @@ export async function drainMeetingSpeakerCorrectionSync(
       allowStaleOnError: false,
     });
   } catch (error) {
-    if (input.isCurrent() && !input.signal.aborted) {
+    const current = input.isCurrent() && !input.signal.aborted;
+    if (current) {
       diagnosticWarn('[speaker-correction-sync] capability refresh failed', error);
+      const nowMs = Date.now();
+      try {
+        await sqliteMeetingNoteRepository.deferSpeakerCorrectionSyncForCapabilityFailure(
+          input.scopeKey,
+          nowMs + CAPABILITY_RETRY_MS,
+          nowMs,
+        );
+      } catch (projectionError) {
+        diagnosticWarn('[speaker-correction-sync] capability failure projection failed', projectionError);
+      }
     }
     return {
-      outcome: input.isCurrent() && !input.signal.aborted ? 'capability_unavailable' : 'stale',
+      outcome: current ? 'capability_unavailable' : 'stale',
       processedCount: 0,
-      retryAfterMs: input.isCurrent() && !input.signal.aborted ? CAPABILITY_RETRY_MS : null,
+      retryAfterMs: current ? CAPABILITY_RETRY_MS : null,
     };
   }
   if (!input.isCurrent() || input.signal.aborted) {
     return { outcome: 'stale', processedCount: 0, retryAfterMs: null };
   }
-  if (capability.source !== 'remote' || !capability.capabilities.speakerCorrections) {
+  if (capability.source !== 'remote') {
+    return { outcome: 'disabled', processedCount: 0, retryAfterMs: null };
+  }
+  if (!capability.capabilities.speakerCorrections) {
+    try {
+      await sqliteMeetingNoteRepository.projectSpeakerCorrectionSyncDisabled(
+        input.scopeKey,
+        Date.now(),
+      );
+    } catch (error) {
+      diagnosticWarn('[speaker-correction-sync] disabled capability projection failed', error);
+      return {
+        outcome: 'disabled',
+        processedCount: 0,
+        retryAfterMs: CAPABILITY_RETRY_MS,
+      };
+    }
     return { outcome: 'disabled', processedCount: 0, retryAfterMs: null };
   }
 
@@ -301,12 +328,24 @@ export async function drainMeetingSpeakerCorrectionSync(
       },
     );
     if (claims.length === 0) {
+      const nextAttemptAtMs = await sqliteMeetingNoteRepository.getNextSpeakerCorrectionSyncAttemptAt(
+        input.scopeKey,
+        STALE_CLAIM_MS,
+      );
+      const persistedRetryAfterMs = nextAttemptAtMs === null
+        ? null
+        : Math.max(0, nextAttemptAtMs - nowMs);
+      const retryAfterMs = earliestRetryMs === null
+        ? persistedRetryAfterMs
+        : persistedRetryAfterMs === null
+          ? earliestRetryMs
+          : Math.min(earliestRetryMs, persistedRetryAfterMs);
       diagnosticAudit('speaker_correction_sync_drain', {
         status: 'drained',
         processed: processedCount,
-        retry_scheduled: earliestRetryMs !== null,
+        retry_scheduled: retryAfterMs !== null,
       });
-      return { outcome: 'drained', processedCount, retryAfterMs: earliestRetryMs };
+      return { outcome: 'drained', processedCount, retryAfterMs };
     }
     const results = await Promise.all(claims.map(claim => processClaim(
       claim,

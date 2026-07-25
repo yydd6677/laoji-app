@@ -826,6 +826,12 @@ export interface MeetingTransaction {
     input: ApplySpeakerCorrectionInput,
     scopeKey: ScopeKey,
   ): Promise<ApplySpeakerCorrectionResult>;
+  /** Reprojects the speaker stage from durable corrections and their outbox rows. */
+  reconcileSpeakerProcessingStage(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    updatedAtMs: number,
+  ): Promise<void>;
   saveSummaryVersion(
     version: SummaryVersionRecord,
     sections: readonly SummarySectionRecord[],
@@ -1016,6 +1022,11 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     options: ClaimSpeakerCorrectionSyncOptions,
   ): Promise<readonly SpeakerCorrectionSyncClaim[]>;
+  /** Restores retry/stale-claim wakeups after the provider process restarts. */
+  getNextSpeakerCorrectionSyncAttemptAt(
+    scopeKey: ScopeKey,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
   completeSpeakerCorrectionSyncClaim(
     claim: SpeakerCorrectionSyncClaim,
     remoteAssignmentRevision: number,
@@ -1029,6 +1040,20 @@ export interface MeetingNoteRepository {
     claim: SpeakerCorrectionSyncClaim,
     conflict: SpeakerCorrectionSyncConflict,
   ): Promise<boolean>;
+  /** Makes only retryable speaker corrections for one meeting immediately claimable. */
+  retrySpeakerCorrectionSyncOperations(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    requestedAtMs: number,
+  ): Promise<boolean>;
+  /** Converts claimable queued corrections into durable retry state after capability transport fails. */
+  deferSpeakerCorrectionSyncForCapabilityFailure(
+    scopeKey: ScopeKey,
+    nextAttemptAtMs: number,
+    updatedAtMs: number,
+  ): Promise<number>;
+  /** Keeps local corrections readable when a fresh server contract explicitly disables sync. */
+  projectSpeakerCorrectionSyncDisabled(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;
