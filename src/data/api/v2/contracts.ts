@@ -7,6 +7,7 @@ export interface MeetingCapabilities {
   summaryCitations: boolean;
   summaryAttachmentsText: boolean;
   summaryAttachmentsImage: boolean;
+  meetingQuestionsV1: boolean;
   actionItemsV2: boolean;
   actionItemsPullV2: boolean;
   manualNotesV2: boolean;
@@ -294,6 +295,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   summaryCitations: false,
   summaryAttachmentsText: false,
   summaryAttachmentsImage: false,
+  meetingQuestionsV1: false,
   actionItemsV2: false,
   actionItemsPullV2: false,
   manualNotesV2: false,

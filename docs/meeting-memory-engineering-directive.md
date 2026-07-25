@@ -182,7 +182,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 2. 配置对应的 18020/18035 没有运行证据；目标源码、内存 SQLite 或隔离合同不能替代运行数据库、鉴权和跨设备闭环。
 3. 服务端仍以单一主录音 API 为主；同一 MeetingNote 的多 RecordingAsset 上传、转写身份和跨设备下载合同尚未完成。当前 v19 只解决本机安全复制与播放。
 4. 讲话人只完成本场人工修正；profile 同意、资料撤销、未来会议改善、旧会议重匹配和跨 revision 锁定规则仍缺实现。
-5. video ingest、删除到期物理清理、reprocessed Transcript 生产入口、ORG-01 的账号同步/实验 topic 尾项，以及其余四个 P2 功能仍有真实功能量未完成。
+5. video ingest、删除到期物理清理、reprocessed Transcript 生产入口、ORG-01 的账号同步/实验 topic 尾项，以及其余三个 P2 功能仍有真实功能量未完成。
 6. `MeetingLiveScreen.android.tsx` 和 `TranscriptionScreen.android.tsx` 已抽出关键用例但仍是较重 controller；只在继续增加功能会产生重复事务时再拆，不为纯洁架构单独延长路线。
 7. USB 真机、真实模型、长录音和双设备证据尚未集中取得；它们归入候选版收口，不再分散阻塞每个切片。
 
@@ -212,7 +212,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | REC-01 | 日程结束只提醒、不自动停止 | 已锁定 | 候选版确认通知和录音状态不互相改写 |
 | SPK-01 | 本场修正→资料反馈→未来改善→旧会重匹配 | 部分完成 | profile/同意/撤销、服务端 correction、未来改善、旧会重匹配 |
 | PRIV-01 | 默认私有、永久删除与回收站 | 本机闭环；服务端源码完成 | 运行中软删除/恢复、到期物理清理 |
-| QA-01 | 单场有来源问答 | 未开始 | 完整纵切 |
+| QA-01 | 单场有来源问答 | 本机闭环；服务端源码完成 | 运行服务、真实模型来源质量与账号持久化往返 |
 | ORG-01 | 标签/Folder、多场检索与聚合 | 部分完成；标签、分源搜索、人物与用户主题本机闭环 | 账号标签同步、实验模型 topic；Folder 仅在需求成立时添加 |
 | COLLAB-01 | 共享行动项与轻协作 | 未开始 | 完整纵切 |
 | CLIP-01 | Marker/Transcript 媒体片段 | 未开始 | 完整纵切 |
@@ -1484,14 +1484,18 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 
 ### 11.1 QA-01：单场带来源问答
 
-上线门槛：引用有效率、Transcript 时间跳转成功率和 Summary 独立重试率均已达到第 16 节阈值。
+默认开放门槛：引用有效率、Transcript 时间跳转成功率和 Summary 独立重试率均已达到第 16 节阈值；实现本身不等待这些后验指标。
 
 - 检索范围默认仅当前 meeting 的 active Transcript、active Summary 和用户选择包含的我的笔记。
-- 每个答案必须返回一到多个 `segment_id`/section citation；无足够来源时回答“当前会议记录中没有足够信息”，不得补常识。
+- 每个普通答案必须返回一到多个 `segment_id`/section citation；用户显式纳入“我的笔记”时允许使用锁定的 note revision citation。无足够来源时回答“当前会议记录中没有足够信息”，不得补常识。
 - 后续问题保留单场 thread context，但每轮重新校验引用仍属于当前 meeting/revision。
 - 默认不把“我的笔记”发往问答服务；首次使用时由用户选择是否纳入，选择按 thread 保存。
 - 服务端保存问题、答案和 citation，不保存模型隐藏推理。
 - UI 放在会议更多动作或详情次级入口，不增加底栏 Agent。
+
+当前已用 migration v22 完成受独立 flag 保护的本机纵切。每个线程锁定 active final/reprocessed Transcript、当前可读 Summary 和可选 manual-note revision 的完整 SHA-256 证据指纹；来源变化会切换新线程，不把旧回答续接到新内容。问题、最终回答和规范化引用保存在 canonical SQLite，引用可跳回文字记录时间点、整理结果或我的笔记；普通回答无有效引用时客户端拒绝落库。会议详情“更多”中的独立问答页复用老记会议页的标题栏、UD 输入/按钮与中性色阶，没有新增底栏入口或说明书式文案。
+
+服务端 overlay 新增游客临时问答与账号问答合同：账号线程按 owner/meeting/client thread 持久化 question、final answer、citation、revision 与 idempotency hash，不保存隐藏推理；游客远端响应为 transient，本机仍持久化。服务端重算完整输入指纹，模型返回的未知、重复或伪造引用会被丢弃，普通回答失去全部有效引用时降级为固定拒答。客户端在保存前再次校验 meeting/thread/request/ordinal/fingerprint/revision 全部回显身份。实现与模拟器边界见 `implementation/contracts/phase-8-meeting-question-evidence.md`；overlay 尚未同步或部署，真实模型和账号远端往返继续作为剩余闭环。
 
 ### 11.2 ORG-01：组织与多场找回
 
@@ -1936,7 +1940,7 @@ openOccurrenceMeeting
 
 - `SPK-01`：显式 profile 同意/撤销、样本质量状态、future profile correction、模型/profile revision 和旧会议 reprocess；人工锁定 assignment 优先。
 - `IMP-01/PRIV-01`：视频 ingest、远端多资产处理、已有会议显式合并、删除到期后的服务端及本机物理清理。
-- `QA-01`：仅对锁定 Transcript/Summary revision 的单场问答，每条回答必须带可定位 citation；无证据时明确拒答。
+- `QA-01`：锁定 Transcript/Summary/可选 note revision 的单场问答、逐条可定位 citation、本机持久化与服务端源码已完成；继续运行服务、真实模型来源质量和账号持久化往返。
 - `ORG-01`：标签、跨会议本机分源检索、人物和用户标签主题聚合已完成；继续账号标签同步与实验 topic，且不得把模型 topic 写回用户标签。Folder 只在大量会议需求成立时添加。
 - `COLLAB-01`：先共享单个行动项及 revision/conflict，不建设 Workspace/Channel 权限树。
 - `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；继续照片多模态与账号同步，并实现 CLIP。片段/附件都是派生资产，不修改原录音。
@@ -1960,7 +1964,7 @@ v19 recording merge（已完成） ── guest canonical cutover（已完成）
   ├─ recording-assets v2 ── 多录音上传/转写 ── video / clip / attachment
   └─ speaker-correction v2 ── profile consent ── future improvement / old-meeting reprocess
 
-已锁定的 TRN + SUM citation ── QA-01
+已锁定的 TRN + SUM citation ── QA-01（本机与服务端源码已完成）
 已锁定的 ARC + speaker projection ── ORG-01
 已锁定的 ACT + SHARE ── COLLAB-01
 已锁定的 MRK + RecordingAsset ── CLIP-01 / ATT-01

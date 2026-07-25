@@ -5,3 +5,4 @@ export * from './contracts';
 export * from './manualNotes';
 export * from './speakerCorrections';
 export * from './meetingNotes';
+export * from './meetingQuestions';

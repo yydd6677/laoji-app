@@ -59,6 +59,10 @@ import { MeetingShareSheet } from '../components/MeetingShareSheet';
 import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
 import { MeetingSummaryAttachmentSheet } from '../components/MeetingSummaryAttachmentSheet';
 import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
+import {
+  MeetingQuestionSheet,
+  type MeetingQuestionCitationTarget,
+} from '../components/MeetingQuestionSheet';
 import { openMeetingsTab } from '../navigation/tabTargets';
 import {
   meetingRemoteIdentity,
@@ -90,6 +94,7 @@ import {
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { loadMeetingAttachments } from '../services/meetingAttachments';
 import type { MeetingAttachmentRecord } from '../data/repositories';
+import { getFeatureFlags } from '../config/featureFlags';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -184,6 +189,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [sharing, setSharing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
+  const [questionVisible, setQuestionVisible] = useState(false);
   const [meetingAttachments, setMeetingAttachments] = useState<readonly MeetingAttachmentRecord[]>([]);
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
@@ -211,6 +217,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     : session
       ? `user:${session.user.id}`
       : null;
+  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
   activeMeetingIdRef.current = m?.id ?? null;
   activeMeetingScopeRef.current = meetingScopeKey;
   const focusTitleInput = useCallback(() => {
@@ -1004,6 +1011,29 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setShareVisible(true);
   };
 
+  const openQuestionCitation = (target: MeetingQuestionCitationTarget) => {
+    if (target.kind === 'transcript') {
+      selectDetailTab('transcript');
+      navigation.setParams({
+        focus: 'transcript',
+        segmentId: target.segmentId,
+        positionMs: target.positionMs,
+        transcriptFocusRequestId: Date.now(),
+      });
+      return;
+    }
+    if (target.kind === 'summary') {
+      selectDetailTab('summary');
+      navigation.setParams({ focus: 'summary', actionFocusRequestId: Date.now() });
+      return;
+    }
+    showDialog({
+      title: '来源：我的笔记',
+      message: '当前平台的会议详情尚未提供笔记定位入口。',
+      tone: 'info',
+    });
+  };
+
   const confirmDelete = async () => {
     let presentation;
     try {
@@ -1437,12 +1467,28 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         }}
       />
 
+      <MeetingQuestionSheet
+        visible={questionVisible}
+        meetingTitle={displayMeetingTitle(m.title)}
+        meetingId={m.id}
+        scopeKey={meetingScopeKey}
+        accessToken={accessToken}
+        onClose={() => setQuestionVisible(false)}
+        onOpenCitation={openQuestionCitation}
+      />
+
       {moreVisible ? (
         <AppActionSheet
           visible
           title={displayMeetingTitle(m.title)}
           onClose={() => setMoreVisible(false)}
           items={[
+            ...(meetingQuestionsEnabled ? [{
+              key: 'questions',
+              label: '会议问答',
+              disabled: !meetingScopeKey,
+              onPress: () => setQuestionVisible(true),
+            }] : []),
             {
               key: 'delete',
               label: '删除会议',

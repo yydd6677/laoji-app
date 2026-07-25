@@ -6,6 +6,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbCanonicalWriteV1: boolean;
   localMeetingDbAccountRootWriteV1: boolean;
   localMeetingDbAccountUploadWriteV1: boolean;
+  meetingQuestionsV1: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -36,5 +37,9 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     localMeetingDbAccountUploadWriteV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.localMeetingDbAccountUploadWriteV1 === true,
+    // QA remains independently reversible even though its source revisions are
+    // stored in the canonical meeting database.
+    meetingQuestionsV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingQuestionsV1 === true,
   };
 }

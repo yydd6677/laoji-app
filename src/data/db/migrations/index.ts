@@ -19,6 +19,7 @@ import { meetingDeletionLifecycleV18 } from './0018MeetingDeletionLifecycle';
 import { recordingMergeRecoveryV19 } from './0019RecordingMergeRecovery';
 import { meetingOrganizationSearchV20 } from './0020MeetingOrganizationSearch';
 import { meetingAttachmentsV21 } from './0021MeetingAttachments';
+import { meetingQuestionsV22 } from './0022MeetingQuestions';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -43,6 +44,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   recordingMergeRecoveryV19,
   meetingOrganizationSearchV20,
   meetingAttachmentsV21,
+  meetingQuestionsV22,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -66,4 +68,5 @@ export { MEETING_DELETION_LIFECYCLE_V18_SQL } from './0018MeetingDeletionLifecyc
 export { RECORDING_MERGE_RECOVERY_V19_SQL } from './0019RecordingMergeRecovery';
 export { MEETING_ORGANIZATION_SEARCH_V20_SQL } from './0020MeetingOrganizationSearch';
 export { MEETING_ATTACHMENTS_V21_SQL } from './0021MeetingAttachments';
+export { MEETING_QUESTIONS_V22_SQL } from './0022MeetingQuestions';
 export type { MeetingDatabaseMigration } from './types';

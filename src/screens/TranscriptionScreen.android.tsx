@@ -16,6 +16,10 @@ import {
 } from 'laoji-native-platform';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import {
+  MeetingQuestionSheet,
+  type MeetingQuestionCitationTarget,
+} from '../components/MeetingQuestionSheet';
+import {
   MeetingActionEditorSheet,
   type MeetingActionEditorSaveValue,
   type MeetingActionEditorValue,
@@ -214,6 +218,7 @@ import {
   scheduleMeetingActionNotification,
 } from '../services/notifications';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
+import { getFeatureFlags } from '../config/featureFlags';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -473,6 +478,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [sharing, setSharing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
+  const [questionVisible, setQuestionVisible] = useState(false);
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [playerSourceError, setPlayerSourceError] = useState('');
@@ -542,6 +548,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     : session
       ? `user:${session.user.id}`
       : null;
+  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
   const processingStatuses = useMemo<MeetingProcessingStatuses>(() => {
     if (
       canonicalProcessingSnapshot
@@ -2911,6 +2918,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   }, [meeting, navigation]);
 
+  const openQuestionCitation = useCallback((target: MeetingQuestionCitationTarget) => {
+    const requestId = Date.now();
+    if (target.kind === 'transcript') {
+      navigation.setParams({
+        focus: 'transcript',
+        segmentId: target.segmentId,
+        positionMs: target.positionMs,
+        transcriptFocusRequestId: requestId,
+      });
+      return;
+    }
+    if (target.kind === 'summary') {
+      navigation.setParams({
+        focus: 'summary',
+        actionFocusRequestId: requestId,
+      });
+      return;
+    }
+    navigation.setParams({
+      focus: 'notes',
+      actionFocusRequestId: requestId,
+    });
+  }, [navigation]);
+
   function retryProcessingStage(stage: MinutesProcessingStage): void {
     if (!meeting || !processingStageCanRetry(processingStatuses, stage)) {
       setReloadKey(value => value + 1);
@@ -3314,6 +3345,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
     return [
+      ...(meetingQuestionsEnabled
+        ? [{
+            key: 'questions',
+            label: '会议问答',
+            disabled: !meetingScopeKey,
+            onPress: () => setQuestionVisible(true),
+          }]
+        : []),
       ...(!isGuest && accessToken
         ? [{ key: 'speakers', label: '管理讲话人', onPress: () => manageSpeaker() }]
         : []),
@@ -3337,7 +3376,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, meetingAttachments.length, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
+  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, meetingAttachments.length, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
 
   const markerForActions = useMemo(
     () => markers.find(marker => marker.id === markerActionsId) ?? null,
@@ -3390,6 +3429,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         availability={shareAvailability}
         onClose={() => setShareVisible(false)}
         onShare={requestShare}
+      />
+      <MeetingQuestionSheet
+        visible={questionVisible}
+        meetingTitle={displayMeetingTitle(meeting?.title ?? '')}
+        meetingId={meeting?.id ?? route.params.meetingId}
+        scopeKey={meetingScopeKey}
+        accessToken={accessToken}
+        onClose={() => setQuestionVisible(false)}
+        onOpenCitation={openQuestionCitation}
       />
       <AppActionSheet
         visible={moreVisible}
