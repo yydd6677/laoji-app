@@ -24,6 +24,7 @@ export interface ResolveMeetingOccurrenceSyncConflictUseCaseInput {
 export interface ResolveMeetingOccurrenceSyncConflictUseCaseResult {
   localMeetingId: string;
   targetMeetingId: string;
+  recordingMergeTaskIds: readonly string[];
 }
 
 export class ResolveMeetingOccurrenceSyncConflictUseCase {
@@ -62,11 +63,27 @@ export class ResolveMeetingOccurrenceSyncConflictUseCase {
       current.remoteLink.clientUpdatedAtMs + 1,
     );
     if (!Number.isSafeInteger(resolvedAtMs)) throw new Error('日程关联处理时间溢出');
+    const localAggregate = await this.repository.get(current.local.id, input.scopeKey);
+    if (!localAggregate || localAggregate.note.lifecycle === 'deleted') {
+      throw new MeetingOccurrenceSyncConflictChangedError();
+    }
+    const recordingMergePlans = localAggregate.recordingAssets
+      .filter(asset => Boolean(
+        asset.localUri
+        || asset.localState === 'capturing'
+        || asset.localState === 'ingesting'
+      ))
+      .map(asset => ({
+        taskId: this.idFactory.create(),
+        sourceRecordingAssetId: asset.id,
+        targetRecordingAssetId: this.idFactory.create(),
+      }));
     const applied = await this.repository.resolveMeetingOccurrenceSyncConflict({
       conflictId,
       meetingId: current.local.id,
       targetMeetingId: current.remote.id,
       detachedHistoryId: this.idFactory.create(),
+      recordingMergePlans,
       scopeKey: input.scopeKey,
       expectedRemotePayloadJson: current.expectedRemotePayloadJson,
       remote: current.remoteLink,
@@ -76,6 +93,7 @@ export class ResolveMeetingOccurrenceSyncConflictUseCase {
     return {
       localMeetingId: current.local.id,
       targetMeetingId: current.remote.id,
+      recordingMergeTaskIds: applied.recordingMergeTaskIds,
     };
   }
 }

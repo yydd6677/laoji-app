@@ -220,6 +220,7 @@ object MinutesSnapshotParser {
       actions = actions,
       speakers = speakers,
       playerSource = raw.mapOrNull("playerSource")?.let(::parsePlayerSource),
+      playerSources = raw.maps("playerSources").take(20).map(::parsePlayerSource),
       audioStatusMessage = raw.string("audioStatusMessage")?.takeIf { it.isNotBlank() }?.let {
         NativeUserMessages.readable(it, "录音状态暂时无法获取，请稍后重试。")
       }.orEmpty(),
@@ -235,6 +236,11 @@ object MinutesSnapshotParser {
       rootSyncConflict = raw.boolean("rootSyncConflict"),
       processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
       processingRetrying = raw.boolean("processingRetrying"),
+      recordingMergeStatusLabel = raw.string("recordingMergeStatusLabel")?.takeIf { it.isNotBlank() }?.let {
+        NativeUserMessages.readable(it, "本机录音暂时无法加入，请稍后重试。")
+      }.orEmpty(),
+      recordingMergeActionLabel = raw.string("recordingMergeActionLabel").orEmpty(),
+      recordingMergeActionEnabled = raw.boolean("recordingMergeActionEnabled"),
       pageStates = parseDetailPageStates(raw.mapOrNull("pageStates"), legacyPageStates),
     )
   }
@@ -330,6 +336,8 @@ object MinutesSnapshotParser {
   private fun parsePlayerSource(raw: Map<String, Any?>): MinutesPlayerSource = MinutesPlayerSource(
     sourceId = raw.string("sourceId").orEmpty(),
     uri = raw.string("uri").orEmpty(),
+    label = raw.string("label").orEmpty(),
+    localOnly = raw.boolean("localOnly"),
     headers = raw.map("headers").mapNotNull { (key, value) ->
       (value as? String)?.let { key to it }
     }.toMap(),

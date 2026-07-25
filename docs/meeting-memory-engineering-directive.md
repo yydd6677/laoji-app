@@ -5,7 +5,7 @@
 > 移动端基线：`752fa8a388e6f1e533267118b2c79dfdd8654a61`
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
-> 本次对账基准：`stable-before-meeting-memory-roadmap` → `c69f568`，共 35 个本路线提交（实现与证据）；另有 migration v19“冲突录音加入目标会议”工作树切片正在实现，未计入完成项。
+> 本次对账基准：`stable-before-meeting-memory-roadmap` → `27888cd`，共 36 个已提交的本路线实现/证据提交；当前 migration v19“冲突录音加入目标会议”切片已完成本机闭环，待作为下一独立提交纳入。
 > 规划估算：核心 P0/P1 框架约完成 85%，完整优化登记表（含线上闭环和 P2）约完成 75%–80%。这是功能工作量估算，不是发布通过率。
 
 ## 0. 执行总览（先看这里）
@@ -24,7 +24,7 @@
 | 能力面 | 实现判断 | 当前证据边界 | 后续只做什么 |
 |---|---|---|---|
 | 本机数据平面、作用域、迁移、独立处理阶段 | 框架完成，游客主路径已形成 canonical-first 闭环 | 源码、TypeScript/Kotlin、迁移窄合同、模拟器 | 完成普通包 cutover；不重建第二套数据库或状态机 |
-| 日程 occurrence、人工笔记、游客迁移 | 本机闭环；账号同步与冲突客户端/目标源码已接通 | 模拟器与目标源码，尚无运行中的 18020/18035 | 完成当前录音恢复任务、真实账号/双设备闭环 |
+| 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通 | 合成数据模拟器与目标源码，尚无运行中的 18020/18035 | 只补真实账号/双设备和服务端多录音资产闭环 |
 | 录音结束、Transcript 搜索回听、后台播放 | 本机主链闭环 | 编译、窄合同和局部模拟器；长录音与真实远端未集中验收 | 接通服务端 completeness、多录音资产上传；候选版一次验收 |
 | 结构化整理、版本、引用、行动项 | 本机闭环；服务端 additive 源码和同步框架完成 | 模拟器、目标源码窄合同；无真实模型/鉴权运行证据 | 启动真实服务，完成模型引用与账号冲突往返 |
 | 文件导入、Marker、分层分享、删除/回收站 | 音频本机闭环；删除远端源码合同完成 | 模拟器；普通包对在线能力保持 fail closed | 补视频/多资产服务端、到期清理和 P2 附件/片段 |
@@ -38,7 +38,7 @@
 
 1. SQLite MeetingNote 聚合、repository/facade、scope ownership/revision、legacy mirror CAS、迁移 runner 与独立 outbox 基础。
 2. capture/upload/transcript/summary/speaker 五阶段状态、录音本机提交边界、停止与笔记/网络解耦、账号 Transcript 补全恢复和持久队列唤醒。
-3. occurrence 唯一绑定、计划快照、日程开始/继续/查看、orphan 恢复、409/412 冲突保留和 detached history。
+3. occurrence 唯一绑定、计划快照、日程开始/继续/查看、orphan 恢复、409/412 冲突保留、detached history，以及冲突录音的 journal 恢复复制与多录音详情。
 4. “我的笔记”本机自动保存、版本冲突选择、游客迁移 journal v2 与日程 ID 映射。
 5. Transcript revision、截断 final 保护、本机 Unicode 搜索、循环导航、段落高亮、选择复制/分享和后台播放器生命周期。
 6. schema v2 整理结果、不可变版本、citation、行动项编辑/完成/忽略/提醒/后续日程、action 上下行与冲突选择框架。
@@ -55,7 +55,7 @@
 
 | 批次 | 目标产物 | 纳入内容 | 不纳入内容 |
 |---|---|---|---|
-| A：关闭本机架构尾项 | 普通 Preview 可稳定使用 canonical 主路径 | 完成 v19 冲突录音恢复、多录音选择与分享；清理最后的 Store 双事实源入口；默认包 upgrade smoke | 不做全格式、长录音、全故障矩阵 |
+| A：关闭本机架构尾项 | 普通 Preview 可稳定使用 canonical 主路径 | v19 冲突录音恢复、多录音选择与分享已完成；剩余只清理最后的 Store 双事实源入口并完成默认包 upgrade smoke | 不做全格式、长录音、全故障矩阵 |
 | B：启用账号线上闭环 | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 启动目标 18020/18035、运行 additive migration/capability、录音资产 v2、多设备冲突收敛 | 不重复已经通过的本机 UI 冒烟 |
 | C：补齐尚缺功能量 | P0/P1 尾项和五个 P2 纵切均有真实入口、持久化与失败状态 | speaker profile/旧会议重匹配、视频导入、到期清理、QA、组织、多场检索、轻协作、片段、时间点附件 | 不先建设复杂 Agent、团队权限树或完整编辑器 |
 | D：一次候选版收口 | 一个默认能力配置的可安装候选包 | 数据升级、录制→保存→播放、日程绑定、账号同步、默认隐私和核心恢复任务 | 不把穷举 ROM/格式/时长组合当作目标完成前置条件 |
@@ -78,7 +78,7 @@
 <details>
 <summary>展开历史增量状态</summary>
 
-> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已由媒体导入、游客会议创建、游客会议标题/详情、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 及游客 Summary version/section/action 七个受控 canonical-first 纵切接入 Store，并完成游客模拟器 clean mirror、写入期稳定投影、删除后 occurrence 动作恢复、录音启动失败的可恢复资产保留与冷启动 owner 恢复。游客 Transcript 纵切已把 draft 原位替换、immutable final/reprocessed、stable final 防迟到 draft 降级、较短 final 保留、Summary stale、Marker 对账和 canonical revision 收入同一事务语义。游客 Summary 纵切复用 schema v2 归一化与 immutable version 管线，保护用户编辑/已处理 action，拒绝 realtime draft、主键错配和显式 Transcript revision 错配；事务内发现输入 revision 已过期时只保存历史候选，不替换当前版本或阶段 fingerprint。账号录音上传保留 AsyncStorage registry/WorkManager 的唯一调度权，SQLite 只记录 RecordingAsset、upload phase、attempt、operation ID 和 credential generation；同 operation 的 uploaded 不被迟到失败或延迟远端列表降级。账号 MeetingNote 根 outbox 已补齐逐会议真实插入顺序、陈旧 claim 回收、complete/retry/blocked/permanent/conflict 终态和旧 API 消费器；同 scope drain 进程内串行，本机主键保持不变，远端 UUID 只写 `remote_id`，create 复用稳定 `client_request_id`，PATCH 只发送设值字段，DELETE 404 视为幂等完成。独立账号根写开关下，普通 Store 创建/编辑/删除、录音根状态、Transcript/Summary、远端刷新合并和 ASR/上传/读取/播放/分享的 local/remote ID 边界均已接入 canonical 路径；远端 merge 保护未完成 mutation、墓碑和本机内容，列表缺项不解释为删除。目标部署源码与实际 SQLite 已确认空标题、`client_request_id/location/recorded_at`、用户内幂等和 PATCH 显式清空合同并完成源码同步，但配置中的 18020/18035 服务仍未运行，账号鉴权读写、真实 WorkManager、跨设备恢复和冲突闭环尚未验证，因此普通构建的 canonical write、账号根写和账号上传写开关继续关闭。Phase 2 已形成 occurrence 与“我的笔记”的本机纵向闭环、游客迁移 journal v2、账号日程 ID 映射及账号作用域 sidecar 迁移；人工笔记和 occurrence 的服务端窄 v2 源码合同也已同步，occurrence 现有独立 outbox、按 occurrence 回查、安全附着、冲突保留和 orphan 状态。但目标服务未启动，真实账号迁移、鉴权运行、双设备收敛、待合并录音处理和真机验证仍未完成，因此 Phase 2 尚未满足退出条件。按“先框架和功能、后严格门禁”的目标执行顺序，Phase 3 已完成第二个本机纵向切片：单场 Unicode 搜索、循环匹配导航、范围/播放段落高亮、无音频 seek 保护、选择复制/分享、snapshot v3，以及 Draft/Final 完整性判定、inactive final 持久化和条件式 active revision 切换已实现；详情暂态不再清除后台 MediaSession、相同 source 命令幂等、同录音 URL 更新保位及 stale callback 防护也已落地。服务端明确 completeness 字段、60 分钟真机精度与带有效录音的后台返回录像仍待完成。
+> 实施状态：Phase 0 线上契约仍待验证；Phase 1 离线数据平面进行中。默认关闭的 SQLite canonical read 已完成 Store 接线和模拟器 fail-closed 验证；canonical mutation 原语、scope ownership/revision 和 legacy mirror CAS 已由媒体导入、游客会议创建、游客会议标题/详情、游客软删除、游客录音 capture/asset、游客 Transcript 内容/revision 及游客 Summary version/section/action 七个受控 canonical-first 纵切接入 Store，并完成游客模拟器 clean mirror、写入期稳定投影、删除后 occurrence 动作恢复、录音启动失败的可恢复资产保留与冷启动 owner 恢复。游客 Transcript 纵切已把 draft 原位替换、immutable final/reprocessed、stable final 防迟到 draft 降级、较短 final 保留、Summary stale、Marker 对账和 canonical revision 收入同一事务语义。游客 Summary 纵切复用 schema v2 归一化与 immutable version 管线，保护用户编辑/已处理 action，拒绝 realtime draft、主键错配和显式 Transcript revision 错配；事务内发现输入 revision 已过期时只保存历史候选，不替换当前版本或阶段 fingerprint。账号录音上传保留 AsyncStorage registry/WorkManager 的唯一调度权，SQLite 只记录 RecordingAsset、upload phase、attempt、operation ID 和 credential generation；同 operation 的 uploaded 不被迟到失败或延迟远端列表降级。账号 MeetingNote 根 outbox 已补齐逐会议真实插入顺序、陈旧 claim 回收、complete/retry/blocked/permanent/conflict 终态和旧 API 消费器；同 scope drain 进程内串行，本机主键保持不变，远端 UUID 只写 `remote_id`，create 复用稳定 `client_request_id`，PATCH 只发送设值字段，DELETE 404 视为幂等完成。独立账号根写开关下，普通 Store 创建/编辑/删除、录音根状态、Transcript/Summary、远端刷新合并和 ASR/上传/读取/播放/分享的 local/remote ID 边界均已接入 canonical 路径；远端 merge 保护未完成 mutation、墓碑和本机内容，列表缺项不解释为删除。目标部署源码与实际 SQLite 已确认空标题、`client_request_id/location/recorded_at`、用户内幂等和 PATCH 显式清空合同并完成源码同步，但配置中的 18020/18035 服务仍未运行，账号鉴权读写、真实 WorkManager、跨设备恢复和冲突闭环尚未验证，因此普通构建的 canonical write、账号根写和账号上传写开关继续关闭。Phase 2 已形成 occurrence 与“我的笔记”的本机纵向闭环、游客迁移 journal v2、账号日程 ID 映射及账号作用域 sidecar 迁移；人工笔记和 occurrence 的服务端窄 v2 源码合同也已同步，occurrence 现有独立 outbox、按 occurrence 回查、安全附着、冲突保留和 orphan 状态，冲突录音恢复也已完成合成数据模拟器闭环。但目标服务未启动，真实账号迁移、鉴权运行、双设备收敛、服务端多录音资产和真机验证仍未完成，因此 Phase 2 尚未满足退出条件。按“先框架和功能、后严格门禁”的目标执行顺序，Phase 3 已完成第二个本机纵向切片：单场 Unicode 搜索、循环匹配导航、范围/播放段落高亮、无音频 seek 保护、选择复制/分享、snapshot v3，以及 Draft/Final 完整性判定、inactive final 持久化和条件式 active revision 切换已实现；详情暂态不再清除后台 MediaSession、相同 source 命令幂等、同录音 URL 更新保位及 stale callback 防护也已落地。服务端明确 completeness 字段、60 分钟真机精度与带有效录音的后台返回录像仍待完成。
 > MeetingNote v2 根增量状态：目标部署源码已以既有 `Meeting` 为唯一主对象，实现 root metadata/operation、单调 revision、幂等 create/patch/delete/restore、tombstone 和会议级 cursor；旧 App API 同步维护同一根元数据。移动端严格 v2 上行和根专用下行 cursor 仅由本次 fresh capability 开启；上行 ACK 持久化远端 root revision，并在日程创建时原子收敛 occurrence outbox；下行按页合并 revision、tombstone/restore 和 occurrence 后才 CAS 推进独立 cursor，保护未完成本机根 mutation，已建立 v2 下行状态后 capability 降级或探测失败不再回退旧列表。`client_note_id` 与旧 `client_request_id` 保持独立语义，不用来源设备 ID 覆盖本机请求身份。目标源码的内存 SQLite 窄合同已通过且文件哈希一致；移动端 v17 schema/绑定参数/cursor CAS、TypeScript 与 Android bundle 已做轻量验证。但运行数据库、鉴权 endpoint、双设备 cursor、APK/模拟器/USB 真机均未验证，18020/18035 仍未启动，全局 `sync_cursor` 与普通构建账号根写开关继续关闭。
 > MeetingNote v2 根冲突闭环状态：移动端已严格解析 409/412 包装中的完整 `current`，只有远端 ID/`client_note_id`、revision、origin、entry point 和 calendar occurrence 身份均可证明兼容时才允许选择版本。选择云端只替换根元数据；选择本机会作废旧根 outbox，并按远端/本机删除状态生成 update、delete 或 `restore -> update` 新幂等操作，录音、文字记录、整理结果、人工笔记和待办均不随根版本替换。删除态冲突仍保留在会议列表，Minutes snapshot v11 以独立“会议同步冲突 / 处理”固定状态入口打开老记自有版本选择 sheet，不复用 processing retry stage。当前只有 TypeScript、Debug/Kotlin 构建、1878 modules Android bundle 和内存 SQLite 回滚/排序/可见性窄合同；18020/18035、真实 409/412、鉴权、跨设备和 USB 真机仍未验证，普通构建开关继续关闭。
 > Phase 4 已进入连续纵向切片：schema v2 sections/citations、immutable version、受保护版本不自动覆盖、本机候选/历史版本选择、snapshot v5、可定位引用、本机行动项手动创建/编辑/完成/忽略恢复/来源/提醒/后续日程，以及 capability 默认关闭的 action outbox 消费骨架已接通。SUM-02 的服务端 segment-ID prompt、compact/Map-Reduce 来源保留、canonical 时间/quote 校验、唯一 quote 回填、漂移哈希与来源感知 action identity 已同步到目标源码。服务端 `action_items_v2` 已完成稳定 ID、幂等重放、entity revision、If-Match/If-None-Match、409/412 当前版本返回和可靠 upsert；客户端已完成冲突可见、版本选择、旧 operation 取代、云端字段应用和本机版本新 operation 的原子闭环。新增会议级 action collection 使用不透明 `(updated_at, id)` cursor，并以独立 `action_items_pull_v2` capability 控制详情页 pull；客户端已接通完整 provenance 解析、cursor CAS、新建/单调更新/精确附着/冲突保留、active Transcript segment 唯一映射和提醒对账。上行来源也已改用 provider/server 稳定 segment identity，不再发送本机主键。目标服务未启动，新表尚未实例化，因此真实模型引用质量、运行合同、账号 ACK/重试、真实冲突选择和跨设备收敛仍未验证。全账号 change feed、全局 `sync_cursor`、batch、action tombstone 和跨会议同步仍未完成。验证遵循“轻测试、轻校验”，严格样本与归档门禁后置。
@@ -86,7 +86,7 @@
 > Phase 6 已完成 ENTRY-01、ENTRY-02、TPL-01 与 SERIES-01 会前记忆的本机纵向切片。ENTRY-01 已接通日程通知中文 action、默认查看/明确记录语义、pending intent、App Lock 后置执行、统一 occurrence 用例和去重；ENTRY-02 已接通固定 scheme、严格语义链接、最小未来日程投影、近期日程 Widget、隐私标题和临时会议 Quick Settings Tile；TPL-01 已接通四个版本化内置模板、模板感知的任务身份/恢复/结果校验、不可变 Summary version 保护，以及详情页模板选择 sheet；SERIES-01 已接通规范系列身份、最近 ended 会议、最多三条决定、最多五条同系列 pending action、来源跳转、可靠决定 citation 定位、用户明确选择后带入新会议人工笔记，以及与笔记授权分离的新 Summary 历史参考选择。授权 request ID、完整项目 identity、模板和 Transcript 进入同一任务 fingerprint/pending 恢复链，服务端校验账号来源归属并回传同一 identity；有授权时不走无法接收上下文的 compact 快路径。migration v13 的逐来源实体 ledger 已实测覆盖部分重叠选择，完成原 action 后会前投影同步消失。模板与 carry-forward additive 适配已同步到共享服务器目标工作区；模板批次通过 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，carry-forward 隔离候选另通过 56 项相关合同。目标 18020/18035 服务没有启动或重启。App Lock 生物识别实测、真机/不同 ROM、成功持续录音、Tile active、ended 详情、过期投影跨时钟、账号并发冲突、真实模型四模板/历史参考输出、远端运行和新授权 sheet 的恢复数据设备交互仍未完成，因此 Phase 6 尚未满足退出条件。证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)、[`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md) 与 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
 > Phase 7 已完成 SPK-01 的本场修正纵向切片，并建立 capability-gated 账号 correction outbox 客户端框架。migration v11/v12、匿名 speaker cluster、不可变 correction/assignment、段落与本场同簇更名、游客本机名称、Summary stale 保护、realtime draft 阻止、飞书来源的修改讲话人 sheet、独立远端 Transcript revision 映射、幂等提交/退避/冲突记录均已接通；本场更名不会建立声纹资料，缺少服务端 segment 身份时也不会上传本机 hash。讲话人 correction 现已接入独立 `speaker` 阶段：本机成功、远端排队、可重试失败、明确禁用和完成分别投影为 `ready/partial`、`processing`、`failed_retryable`、`partial` 与 `ready`，详情页重试只重新唤醒该会议的 correction outbox。模拟器已完成本场修改、持久化、v10→v11→v12 迁移和最终 v13 无夹具恢复验证。远端当前不可达（先前返回 502，最终直连无 HTTP 响应），因此 capability 开启、真实账号 correction、跨设备同步、`future_profile`、旧会议重新匹配、真实中文多人准确率改善和 USB 真机仍未完成，Phase 7 尚未满足退出条件。证据见 [`implementation/contracts/phase-7-speaker-assignment-evidence.md`](implementation/contracts/phase-7-speaker-assignment-evidence.md)。
 
-> NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。真正双会议冲突已增加 detached history 和“本机独立保留、日程使用云端关联”的原子恢复路径，但跨会议移动录音/内容仍未实现。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同或恢复路径写成线上、跨设备或真机已验收。
+> NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。真正双会议冲突已有 detached history 和“本机独立保留、日程使用云端关联”的原子恢复路径；v19 进一步把可读取的来源录音安全复制为目标 RecordingAsset，并支持 journal 恢复、多录音播放和当前录音分享。文字记录、整理结果、我的笔记和行动项仍不跨会议自动合并，服务端多资产也未实现。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同或恢复路径写成线上、跨设备或真机已验收。
 > 账号同步调度增量状态：MeetingNote 根、occurrence、人工笔记、行动项和讲话人 correction 五类 outbox 均从 SQLite 的绝对 `next_attempt_at_ms` 与 `in_flight.updated_at_ms + stale interval` 恢复 provider 定时；App 进程重启不再依赖上一次内存中的 `setTimeout`。各队列仍保持原有分组、顺序、远端身份和 blocked/permanent/conflict 门禁，持久唤醒只决定何时再次进入 claim，不绕过是否允许发送。当前仅有 TypeScript、纯时间合并合同和查询/claim 同域源码审计，尚未做真实进程强杀、系统时钟跳变、账号切换或远端恢复验证。
 </details>
 
@@ -153,8 +153,8 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 ### 3.1 对账事实源
 
 - 稳定回溯点为 `stable-before-meeting-memory-roadmap`；本次只统计该标签之后的提交和当前工作树，不把标签前已有功能重复计入升级量。
-- 本路线提交从 SQLite foundation 延伸到 versioned meeting root、root conflict 和 capability-gated recycle bin，共 35 个实现/证据提交。
-- 当前工作树的 migration v19、录音恢复任务、原生流式复制、多录音播放器选择和当前录音分享仍在进行中；它们只有 TypeScript/Kotlin/Preview 构建证据，尚未完成定向模拟器任务，因此不得写成完成。
+- 截至 `27888cd`，本路线提交从 SQLite foundation 延伸到 versioned meeting root、root conflict 和 capability-gated recycle bin，共 36 个实现/证据提交。
+- 当前 migration v19 已完成本机纵向闭环：双会议冲突原子生成恢复任务，原生流式复制具备进程重启 journal 恢复，目标详情支持多录音选择并分享当前录音，来源会议和原文件保持。证据只到合成数据模拟器和默认 Preview；它不证明服务端多资产、真实账号、双设备或 USB 真机完成。
 - `docs/implementation/contracts/` 是证据边界索引，不是待办清单。历史文档中的“Phase 未退出”通常表示缺少线上或真机证据，不等于对应代码仍未实现。
 
 ### 3.2 原“结构缺口”的处理结果
@@ -190,9 +190,9 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | ID | 优化项 | 当前实现状态 | 剩余功能闭环 |
 |---|---|---|---|
 | ARC-01 | 事务型本地会议数据层与可恢复迁移 | 框架完成 | 普通包全面 canonical cutover、最后兼容写入口清理 |
-| SRC-01 | 日程、临时录音、文件导入统一为 `MeetingNote` | 本机闭环 | 多录音服务端资产合同；v19 本机录音合并正在收口 |
+| SRC-01 | 日程、临时录音、文件导入统一为 `MeetingNote` | 本机闭环 | 多录音服务端上传/转写/下载合同；v19 本机恢复已完成 |
 | PROC-01 | 五类处理独立状态与独立重试 | 本机闭环 | 运行服务下的真实 job 恢复和账号长期重试收敛 |
-| CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机闭环；线上源码完成 | 完成 v19、运行 capability、真实双设备冲突 |
+| CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机闭环；线上源码完成 | 运行 capability、真实双设备冲突与多录音资产收敛 |
 | NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机闭环；同步框架完成 | 真实账号冲突往返与服务端运行 |
 | TRN-01 | 搜索、跳转、回听、高亮、复制/分享 | 本机闭环 | 服务端 completeness/reprocessed 入口；候选版长录音抽查 |
 | ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机闭环；双向同步源码完成 | 运行中 ACK、冲突和跨设备收敛 |
@@ -896,7 +896,7 @@ Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同�
 
 - 同一作用域同一 occurrence 最多绑定一个未删除 MeetingNote。
 - 用户重复点击“开始记录”时，repository 先查唯一索引；存在 `active` 则继续，存在 `ended` 则查看。
-- 两个设备同时创建时由服务端唯一约束裁决；收到 409 时拉取已存在对象并把本机临时对象合并到它。若本机临时对象已有音频，不得直接丢弃，进入“待合并录音”恢复路径。
+- 两个设备同时创建时由服务端唯一约束裁决；收到 409 时拉取已存在对象并保留本机临时 MeetingNote。若本机记录已有音频，不得直接丢弃：为每段可恢复录音写持久任务，再把独立副本加入日程当前关联；来源记录和原文件继续保留。
 
 ### 9.2 CAL-01：occurrence 绑定与日程动作
 
@@ -931,6 +931,38 @@ resolveOccurrenceMeeting(scopeKey, {
 - recurrence 的 `following` 分段仍以原 `sourceEventId` 形成系列；具体 occurrence 继续用原 anchor date。
 - 删除日程不级联删除会议；link 变为 `orphaned`，会议保留快照和系列来源。
 - 删除会议不删除日程；日程动作恢复为“开始记录”。
+
+#### 双会议冲突录音恢复（migration v19）
+
+当 occurrence 冲突已经严格证明“本机临时会议”和“日程当前关联的云端会议”是两条不同 MeetingNote 时，处理事务必须同时完成以下工作：
+
+1. 在 `meeting_occurrence_detached_history` 保存本机旧 link、计划快照和选择结果；本机 MeetingNote 不删除、不改成目标 MeetingNote。
+2. 读取本机会议当时全部具有 `local_uri` 或仍处于 `capturing/ingesting` 的 RecordingAsset；集合若在事务内变化则整次冲突处理回滚。
+3. 为每段录音写 `meeting_recording_merge_tasks`，持久化 source/target asset identity、来源快照、attempt、error、retryable 和完成时间。任务 ID 与目标 asset ID 一旦写入就不能在重试时更换。
+4. 完成旧 occurrence outbox、解除本机 link、把严格匹配的远端 link 附着到目标会议并解决 conflict；上述变更与恢复任务位于同一 SQLite transaction。
+
+任务执行复用 MediaIngest 原生流式复制，不通过 JS 读取整段音频：
+
+```text
+source RecordingAsset.local_uri
+  -> .media-ingest-v1.json: copying
+  -> fsync temporary copy
+  -> prepared
+  -> atomic rename + directory fsync
+  -> ready
+  -> SQLite verifies source scope/state/checksum/size
+  -> insert target RecordingAsset + complete task
+  -> acknowledge journal
+```
+
+- 目标已有主录音或远端根时，恢复副本必须是 `secondary`；只有没有主录音且没有远端根的目标才可把首段恢复副本设为 `primary`。
+- 复制结果必须是目标会议目录中的独立 URI。不得把来源 URI 直接挂到两个 MeetingNote，也不得在成功后删除来源 RecordingAsset、来源文件或来源上传任务。
+- 进程在 prepared、rename、SQLite commit 或 acknowledge 前退出时，启动恢复读取同一 journal 和目标 asset ID；校验失败进入可重试任务，不能降低 checksum/size 约束来“修好”测试。
+- 来源仍在录制时先显示等待；录音结束后由详情明确“加入”。永久不可读只阻止该任务，不回滚已经完成的 occurrence 选择，也不把目标会议的文字/整理状态改成失败。
+- 目标详情只在存在两段及以上可播放录音时显示固定 44 dp 选择槽；36 dp 可见 chip 使用 regular 字重、6 dp 半径和 normal/pressed 状态。当前选择是播放器和显式音频分享的唯一来源；未上传副本标记“仅本机”。
+- 永久删除目标会议时删除其 MediaIngest 目录；来源会议的 recorder 文件不在该清理范围。普通软删除/回收站不提前物理删除录音。
+
+当前证据为合成双会议模拟器：覆盖 stale checksum 拒绝、重装后 journal 恢复、目标 primary+secondary、来源保留、两段播放、当前第二段分享、Preview 冷启动持久化和测试前快照恢复。服务端 RecordingAsset 多资产上行/下行、真实 409/412 和双设备仍属于批次 B，不能从本机 v19 推断完成。
 
 #### 文件改动入口
 
@@ -1745,11 +1777,11 @@ Outbox 调度：
 
 实施每个 surface 前必须补短 evidence note，包含 `[PRODUCT]/[SOURCE]/[DEVICE]/[INFERENCE]`。没有直对应组件时不得声称“飞书就是这样”。
 
-### 13.3 Minutes snapshot v12 与进行中的 v13
+### 13.3 Minutes snapshot v13
 
-HEAD `c69f568` 的已提交运行合同为 v12：列表已包含 `mediaImporting/importMedia`、普通列表/回收站 mode、回收站入口和 restore action；录音页包含人工笔记与 Marker；详情包含 page states、结构化 sections/citations、actions、markers、播放器、action focus、处理状态 label/tone/retry stage、独立 `rootSyncConflict` 及处理动作，以及 `focusTranscriptSegmentId`、`focusTranscriptPositionMs`、`focusTranscriptRequestId` 初始来源定位。
+v12 基线包含 `mediaImporting/importMedia`、普通列表/回收站 mode、回收站入口和 restore action；录音页包含人工笔记与 Marker；详情包含 page states、结构化 sections/citations、actions、markers、播放器、action focus、处理状态 label/tone/retry stage、独立 `rootSyncConflict` 及处理动作，以及 `focusTranscriptSegmentId`、`focusTranscriptPositionMs`、`focusTranscriptRequestId` 初始来源定位。
 
-当前未提交 v13 只为 v19 录音恢复增加 `playerSources`、录音 label/本机标记、`recordingMergeStatus/Action` 和 `mergeRecordingAssets/selectPlayerSource`。在定向模拟器任务与提交前，它属于进行中合同，不能作为已完成客户端兼容基线。TypeScript 和 Kotlin 必须同步使用版本常量，未知 retry stage 必须 fail closed；根同步冲突不得伪装成 processing retry stage；focus request 只有实际找到目标或可靠时间回退后才能消费。
+v13 已为 v19 录音恢复增加 `playerSources`、录音 label/本机标记、`recordingMergeStatus/Action` 和 `mergeRecordingAssets/selectPlayerSource`，TypeScript/Kotlin 版本常量与 parser 默认值同步。合成模拟器已验证多录音切换、播放、分享和冷启动，因此它是当前客户端兼容基线；旧 snapshot 缺失新字段时仍安全退化为单录音。未知 retry stage 必须 fail closed；根同步冲突不得伪装成 processing retry stage；focus request 只有实际找到目标或可靠时间回退后才能消费。
 
 后续 processing stage、版本选择和同步字段仍按当期纵切逐次增加；目标补充形状如下：
 
@@ -1846,7 +1878,7 @@ openOccurrenceMeeting
 | `FinalizeNativeMeetingRecordingUseCase` / `useNativeMeetingRecordingFinalizer` | 固定本机 commit 边界并组装停止、上传登记、Transcript 补全；页面只订阅结果 |
 | `meetingTranscriptCompletionTasks.ts` / coordinator / Provider | 账号补全无凭据 registry、同任务合并、退避与启动/前台恢复；不得持久化 token 或正文 |
 | `TranscriptionScreen.android.tsx` | 收敛为 detail controller；summary task、audio materialize、action mutation进入 use case/repository |
-| `nativeMinutesSnapshots.ts` | 已从 repository projection 构建已提交 v12 snapshot；当前 v13 多录音字段进行中；不再把 Markdown 作为主 Summary 输入 |
+| `nativeMinutesSnapshots.ts` | 已从 repository projection 构建 v13 snapshot并接入多录音字段；不再把 Markdown 作为主 Summary 输入 |
 | `minutes.ts` / `MinutesState.kt` | schema 同步升级，增加 notes/action/marker/stage/citation |
 | `MinutesDetailPages.kt` | 新 notes page、Transcript search/highlight、结构化 summary/action/citation |
 | `MinutesRecordingSurface.kt` | 内容切换、manual note editor、Marker；录音控制 geometry 保持 |
@@ -1875,11 +1907,11 @@ openOccurrenceMeeting
 
 ### 15.2 批次 A：关闭本机架构尾项
 
-1. 完成 migration v19 的 recording merge task：detached source 保留、原生流式复制、进程恢复、secondary 资产、多录音选择与当前录音分享。
-2. 用当前窄夹具完成一次目标会议已有主录音的加入任务；通过后单独提交，不扩大为多格式或强杀矩阵。
-3. 审计仍从 AsyncStorage 直接写会议/Transcript/Summary 的活动入口；有 canonical 用例的入口改为 facade，纯历史兼容读取保留。
-4. 在默认 Preview 做一次覆盖升级和冷启动后，启用已满足 preflight 的游客 canonical read/write；账号写开关仍等待批次 B 的真实服务。
-5. `MeetingLiveScreen`/`TranscriptionScreen` 只抽离本批新增会重复实现事务的部分，不做全文件重写。
+v19 recording merge 与目标已有主录音的窄夹具已完成并恢复测试前快照；该纵切不再占用剩余工期。批次 A 只剩：
+
+1. 审计仍从 AsyncStorage 直接写会议/Transcript/Summary 的活动入口；有 canonical 用例的入口改为 facade，纯历史兼容读取保留。
+2. 在默认 Preview 做一次覆盖升级和冷启动后，启用已满足 preflight 的游客 canonical read/write；账号写开关仍等待批次 B 的真实服务。
+3. `MeetingLiveScreen`/`TranscriptionScreen` 只抽离本批新增会重复实现事务的部分，不做全文件重写。
 
 ### 15.3 批次 B：账号和服务端真实闭环
 
@@ -1910,7 +1942,7 @@ openOccurrenceMeeting
 ### 15.6 剩余依赖图
 
 ```text
-v19 recording merge ── guest canonical cutover
+v19 recording merge（已完成） ── guest canonical cutover
 
 目标服务运行/migration
   ├─ root + occurrence + note + action capability ── 真实账号/双设备 ── account cutover

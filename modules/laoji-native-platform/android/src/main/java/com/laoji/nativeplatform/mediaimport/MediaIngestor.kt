@@ -141,7 +141,7 @@ internal class MediaIngestor(context: Context) {
   ): IngestedMeetingMedia = synchronized(mediaImportIoLock) {
     val normalizedMeetingId = validateIdentity(meetingId, "meeting")
     val normalizedAssetId = validateIdentity(assetId, "asset")
-    if (origin !in setOf("file_import", "share_intent")) {
+    if (origin !in setOf("file_import", "share_intent", "recording_merge")) {
       throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "invalid media import origin")
     }
     if (maximumBytes <= 0L || maximumBytes > MAXIMUM_SUPPORTED_BYTES) {
@@ -318,6 +318,20 @@ internal class MediaIngestor(context: Context) {
     syncDirectory(directory)
     directory.delete()
     changed
+  }
+
+  fun deleteMeetingAssets(meetingId: String): Int = synchronized(mediaImportIoLock) {
+    val directory = File(root, validateIdentity(meetingId, "meeting"))
+    if (!directory.exists()) return@synchronized 0
+    if (!directory.isDirectory) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "media import path is not a directory")
+    }
+    val files = directory.walkBottomUp().count { it.isFile }
+    if (!directory.deleteRecursively()) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "unable to delete meeting media")
+    }
+    syncDirectory(root)
+    files
   }
 
   private fun ensureRoot() {

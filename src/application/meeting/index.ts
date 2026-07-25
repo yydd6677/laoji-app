@@ -7,6 +7,7 @@ export * from './deleteMeetingMarker';
 export * from './finalizeNativeMeetingRecording';
 export * from './linkMeetingActionFollowupEvent';
 export * from './mergeAccountMeetingRemoteSnapshot';
+export * from './mergeDetachedMeetingRecordings';
 export * from './openOccurrenceMeeting';
 export * from './recordingReconciler';
 export * from './recordingSessionController';

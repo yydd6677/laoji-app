@@ -13,6 +13,7 @@ export interface MeetingOccurrenceConflictMeetingView {
   id: string;
   title: string;
   statusLabel: string;
+  mergeableRecordingCount: number;
 }
 
 export interface MeetingOccurrenceSyncConflictView {
@@ -190,6 +191,11 @@ export async function loadMeetingOccurrenceSyncConflict(
         id: local.note.id,
         title: displayTitle(local.note.title),
         statusLabel: aggregateHasContent(local) ? '本机内容将完整保留' : '本机记录将独立保留',
+        mergeableRecordingCount: local.recordingAssets.filter(asset => Boolean(
+          asset.localUri
+          || asset.localState === 'capturing'
+          || asset.localState === 'ingesting'
+        )).length,
       },
       remote: null,
       remoteLink: null,
@@ -227,11 +233,17 @@ export async function loadMeetingOccurrenceSyncConflict(
       id: local.note.id,
       title: displayTitle(local.note.title),
       statusLabel: aggregateHasContent(local) ? '本机内容将完整保留' : '本机记录将独立保留',
+      mergeableRecordingCount: local.recordingAssets.filter(asset => Boolean(
+        asset.localUri
+        || asset.localState === 'capturing'
+        || asset.localState === 'ingesting'
+      )).length,
     },
     remote: targetAggregate && targetAggregate.note.lifecycle !== 'deleted' ? {
       id: targetAggregate.note.id,
       title: displayTitle(targetAggregate.note.title || parsed.remote.scheduleSnapshot.eventTitle),
       statusLabel: '日程将使用此关联',
+      mergeableRecordingCount: 0,
     } : null,
     remoteLink: parsed.remote,
     expectedRemotePayloadJson: conflict.remotePayloadJson,

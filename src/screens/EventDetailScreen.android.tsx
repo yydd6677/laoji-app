@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, ToastAndroid, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -53,6 +53,7 @@ import {
   MeetingOccurrenceSyncConflictChangedError,
   resolveMeetingOccurrenceSyncConflict,
 } from '../application/meeting/resolveMeetingOccurrenceSyncConflict';
+import { mergeDetachedMeetingRecordings } from '../application/meeting';
 import { MeetingOccurrenceConflictSheet } from '../components/MeetingOccurrenceConflictSheet';
 
 type Props = {
@@ -320,12 +321,23 @@ export function EventDetailScreen({ navigation, route }: Props) {
     setOccurrenceConflictSaving(true);
     setOccurrenceConflictError('');
     try {
-      await resolveMeetingOccurrenceSyncConflict({
+      const result = await resolveMeetingOccurrenceSyncConflict({
         conflictId: occurrenceConflict.id,
         scopeKey,
         occurrence: eventRefForEvent(event),
       });
+      if (result.recordingMergeTaskIds.length > 0) {
+        const merged = await mergeDetachedMeetingRecordings(scopeKey, result.targetMeetingId);
+        if (merged.blockedCount > 0) {
+          ToastAndroid.show('日程关联已处理，部分本机录音无法读取。', ToastAndroid.LONG);
+        } else if (merged.failedCount > 0) {
+          ToastAndroid.show('日程关联已处理，本机录音可在会议详情重试加入。', ToastAndroid.LONG);
+        } else if (merged.waitingCount > 0) {
+          ToastAndroid.show('日程关联已处理，录音结束后可在会议详情加入。', ToastAndroid.LONG);
+        }
+      }
       setOccurrenceConflictVisible(false);
+      await refreshMeetings().catch(() => {});
       await refreshMeetingProjection();
     } catch (error) {
       const message = error instanceof MeetingOccurrenceSyncConflictChangedError
@@ -342,6 +354,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
     occurrenceConflict,
     occurrenceConflictSaving,
     refreshMeetingProjection,
+    refreshMeetings,
     scopeKey,
   ]);
 

@@ -233,10 +233,58 @@ export interface ResolveMeetingOccurrenceSyncConflictInput {
   meetingId: string;
   targetMeetingId: string;
   detachedHistoryId: string;
+  recordingMergePlans: readonly MeetingRecordingMergePlan[];
   scopeKey: ScopeKey;
   expectedRemotePayloadJson: string;
   remote: RemoteOccurrenceLinkRecord;
   resolvedAtMs: number;
+}
+
+export interface MeetingRecordingMergePlan {
+  taskId: string;
+  sourceRecordingAssetId: string;
+  targetRecordingAssetId: string;
+}
+
+export type MeetingRecordingMergeTaskStatus = 'pending' | 'failed' | 'completed';
+
+export interface MeetingRecordingMergeTaskRecord {
+  id: string;
+  scopeKey: ScopeKey;
+  detachedHistoryId: string;
+  sourceMeetingId: string;
+  sourceRecordingAssetId: string;
+  targetMeetingId: string;
+  targetRecordingAssetId: string;
+  sourceAssetSnapshotJson: string;
+  status: MeetingRecordingMergeTaskStatus;
+  attemptCount: number;
+  lastErrorCode: string | null;
+  retryable: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs: number | null;
+}
+
+export interface ResolveMeetingOccurrenceSyncConflictResult {
+  recordingMergeTaskIds: readonly string[];
+}
+
+export interface CompleteMeetingRecordingMergeTaskInput {
+  taskId: string;
+  targetMeetingId: string;
+  scopeKey: ScopeKey;
+  recordingAsset: RecordingAssetRecord;
+  completedAtMs: number;
+}
+
+export interface FailMeetingRecordingMergeTaskInput {
+  taskId: string;
+  targetMeetingId: string;
+  scopeKey: ScopeKey;
+  errorCode: string;
+  retryable: boolean;
+  failedAtMs: number;
 }
 
 export interface SetOccurrenceLinkStateInput extends OccurrenceReference {
@@ -1064,7 +1112,15 @@ export interface MeetingNoteRepository {
   ): Promise<MeetingOccurrenceSyncConflictRecord | null>;
   resolveMeetingOccurrenceSyncConflict(
     input: ResolveMeetingOccurrenceSyncConflictInput,
+  ): Promise<ResolveMeetingOccurrenceSyncConflictResult | null>;
+  listMeetingRecordingMergeTasks(
+    targetMeetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<readonly MeetingRecordingMergeTaskRecord[]>;
+  completeMeetingRecordingMergeTask(
+    input: CompleteMeetingRecordingMergeTaskInput,
   ): Promise<boolean>;
+  failMeetingRecordingMergeTask(input: FailMeetingRecordingMergeTaskInput): Promise<boolean>;
   mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult>;
   setOccurrenceLinkState(input: SetOccurrenceLinkStateInput): Promise<number>;
   claimActionSyncOperations(

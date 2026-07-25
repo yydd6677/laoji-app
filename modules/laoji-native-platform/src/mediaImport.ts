@@ -2,6 +2,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
 export type MeetingMediaImportOrigin = 'file_import' | 'share_intent';
+export type MeetingMediaIngestOrigin = MeetingMediaImportOrigin | 'recording_merge';
 
 export interface PendingMeetingMediaImportIntent {
   token: string;
@@ -18,7 +19,7 @@ export interface PendingMeetingMediaImportIntent {
 export interface IngestedMeetingMedia {
   meetingId: string;
   assetId: string;
-  origin: MeetingMediaImportOrigin;
+  origin: MeetingMediaIngestOrigin;
   localUri: string;
   fileName: string;
   mimeType: string;
@@ -49,7 +50,7 @@ interface NativeMediaImportModule extends NativeModule<NativeMediaImportEvents> 
     sourceUri: string,
     meetingId: string,
     assetId: string,
-    origin: MeetingMediaImportOrigin,
+    origin: MeetingMediaIngestOrigin,
     maximumBytes: number,
   ): Promise<unknown>;
   recoverPendingMediaImports(): Promise<unknown>;
@@ -119,7 +120,7 @@ function normalizeIngestedMedia(value: unknown): IngestedMeetingMedia {
   const source = record(value);
   if (!source) throw new Error('native ingested media result is invalid');
   const origin = requireString(source.origin, 'origin');
-  if (origin !== 'file_import' && origin !== 'share_intent') {
+  if (origin !== 'file_import' && origin !== 'share_intent' && origin !== 'recording_merge') {
     throw new Error('native ingested media origin is invalid');
   }
   const checksumSha256 = requireString(source.checksumSha256, 'checksum').toLowerCase();
@@ -181,7 +182,7 @@ export async function ingestMeetingMedia(input: {
   sourceUri: string;
   meetingId: string;
   assetId: string;
-  origin: MeetingMediaImportOrigin;
+  origin: MeetingMediaIngestOrigin;
   maximumBytes: number;
 }): Promise<IngestedMeetingMedia> {
   if (!Number.isSafeInteger(input.maximumBytes) || input.maximumBytes <= 0) {

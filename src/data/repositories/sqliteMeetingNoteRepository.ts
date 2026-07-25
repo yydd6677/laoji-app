@@ -27,6 +27,8 @@ import type {
   ClaimMeetingRootSyncOptions,
   ClaimOccurrenceSyncOptions,
   ClaimSpeakerCorrectionSyncOptions,
+  CompleteMeetingRecordingMergeTaskInput,
+  FailMeetingRecordingMergeTaskInput,
   ManualNoteRecord,
   ManualNoteSyncClaim,
   ManualNoteSyncConflict,
@@ -45,6 +47,7 @@ import type {
   MeetingActionSyncConflictRecord,
   MeetingManualNoteSyncConflictRecord,
   MeetingOccurrenceSyncConflictRecord,
+  MeetingRecordingMergeTaskRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
   MeetingListQuery,
@@ -70,6 +73,7 @@ import type {
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
   ResolveMeetingOccurrenceSyncConflictInput,
+  ResolveMeetingOccurrenceSyncConflictResult,
   ResolveMeetingRootSyncConflictInput,
   RemoteMeetingActionRecord,
   RemoteOccurrenceLinkRecord,
@@ -137,6 +141,24 @@ type RecordingAssetRow = {
   created_at_ms: number;
   updated_at_ms: number;
   last_verified_at_ms: number | null;
+};
+
+type MeetingRecordingMergeTaskRow = {
+  id: string;
+  scope_key: string;
+  detached_history_id: string;
+  source_meeting_id: string;
+  source_recording_asset_id: string;
+  target_meeting_id: string;
+  target_recording_asset_id: string;
+  source_asset_snapshot_json: string;
+  status: MeetingRecordingMergeTaskRecord['status'];
+  attempt_count: number;
+  last_error_code: string | null;
+  retryable: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+  completed_at_ms: number | null;
 };
 
 type ManualNoteRow = {
@@ -805,6 +827,32 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     lastVerifiedAtMs: row.last_verified_at_ms,
+  };
+}
+
+function recordingMergeTaskFromRow(row: MeetingRecordingMergeTaskRow): MeetingRecordingMergeTaskRecord {
+  if (
+    (row.status !== 'pending' && row.status !== 'failed' && row.status !== 'completed')
+    || !Number.isSafeInteger(row.attempt_count)
+    || row.attempt_count < 0
+    || (row.retryable !== 0 && row.retryable !== 1)
+  ) throw new Error('recording merge task is invalid');
+  return {
+    id: row.id,
+    scopeKey: row.scope_key as ScopeKey,
+    detachedHistoryId: row.detached_history_id,
+    sourceMeetingId: row.source_meeting_id,
+    sourceRecordingAssetId: row.source_recording_asset_id,
+    targetMeetingId: row.target_meeting_id,
+    targetRecordingAssetId: row.target_recording_asset_id,
+    sourceAssetSnapshotJson: row.source_asset_snapshot_json,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    lastErrorCode: row.last_error_code,
+    retryable: row.retryable === 1,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+    completedAtMs: row.completed_at_ms,
   };
 }
 
@@ -5158,7 +5206,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
 
   async resolveMeetingOccurrenceSyncConflict(
     input: ResolveMeetingOccurrenceSyncConflictInput,
-  ): Promise<boolean> {
+  ): Promise<ResolveMeetingOccurrenceSyncConflictResult | null> {
     assertScopeKey(input.scopeKey);
     if (input.scopeKey === 'guest') throw new Error('guest meeting cannot have an occurrence sync conflict');
     assertRecordId(input.conflictId, 'occurrence conflict ID');
@@ -5175,9 +5223,25 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     if (input.meetingId === input.targetMeetingId) {
       throw new Error('occurrence conflict does not contain two meetings');
     }
+    if (input.recordingMergePlans.length > 64) {
+      throw new Error('occurrence recording merge plan is too large');
+    }
+    const mergePlanBySourceAssetId = new Map<string, ResolveMeetingOccurrenceSyncConflictInput['recordingMergePlans'][number]>();
+    const targetAssetIds = new Set<string>();
+    input.recordingMergePlans.forEach(plan => {
+      assertRecordId(plan.taskId, 'recording merge task ID');
+      assertRecordId(plan.sourceRecordingAssetId, 'recording merge source asset ID');
+      assertRecordId(plan.targetRecordingAssetId, 'recording merge target asset ID');
+      if (
+        mergePlanBySourceAssetId.has(plan.sourceRecordingAssetId)
+        || targetAssetIds.has(plan.targetRecordingAssetId)
+      ) throw new Error('occurrence recording merge plan is duplicated');
+      mergePlanBySourceAssetId.set(plan.sourceRecordingAssetId, plan);
+      targetAssetIds.add(plan.targetRecordingAssetId);
+    });
 
     let touchedMeetingIds: readonly string[] = [];
-    const applied = await withMeetingDatabaseTransaction(async database => {
+    const applied = await withMeetingDatabaseTransaction<ResolveMeetingOccurrenceSyncConflictResult | null>(async database => {
       const conflict = await database.getFirstAsync<MeetingOccurrenceSyncConflictRow>(
         `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
            conflict.local_revision, conflict.remote_revision,
@@ -5194,7 +5258,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.meetingId,
         input.scopeKey,
       );
-      if (!conflict) return false;
+      if (!conflict) return null;
       if (
         conflict.remote_payload_json !== input.expectedRemotePayloadJson
         || (
@@ -5213,7 +5277,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.targetMeetingId,
         input.scopeKey,
       );
-      if (!localMeeting || !targetMeeting) return false;
+      if (!localMeeting || !targetMeeting) return null;
       if (targetMeeting.remote_id !== input.remote.meetingRemoteId) {
         throw new Error('occurrence target meeting identity changed');
       }
@@ -5226,7 +5290,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.meetingId,
         input.scopeKey,
       );
-      if (!localLink) return false;
+      if (!localLink) return null;
       if (
         localLink.calendar_source_event_id !== input.remote.sourceEventId
         || localLink.occurrence_date !== input.remote.occurrenceDate
@@ -5300,6 +5364,68 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.resolvedAtMs,
       );
       if (historyInserted.changes !== 1) throw new Error('occurrence detached history was not recorded');
+
+      const localRecordingRows = await database.getAllAsync<RecordingAssetRow>(
+        `SELECT * FROM recording_assets
+         WHERE meeting_id = ?
+         ORDER BY CASE WHEN role = 'primary' THEN 0 ELSE 1 END, created_at_ms, id`,
+        input.meetingId,
+      );
+      const mergeableRecordingRows = localRecordingRows.filter(row => Boolean(
+        row.local_uri
+        || row.local_state === 'capturing'
+        || row.local_state === 'ingesting'
+      ));
+      const mergeableIds = new Set(mergeableRecordingRows.map(row => row.id));
+      if (
+        mergeableIds.size !== mergePlanBySourceAssetId.size
+        || [...mergePlanBySourceAssetId.keys()].some(id => !mergeableIds.has(id))
+      ) throw new Error('occurrence recording assets changed concurrently');
+      const recordingMergeTaskIds: string[] = [];
+      for (const source of mergeableRecordingRows) {
+        const plan = mergePlanBySourceAssetId.get(source.id);
+        if (!plan) throw new Error('occurrence recording merge plan is incomplete');
+        const inserted = await database.runAsync(
+          `INSERT INTO meeting_recording_merge_tasks (
+             id, scope_key, detached_history_id,
+             source_meeting_id, source_recording_asset_id,
+             target_meeting_id, target_recording_asset_id,
+             source_asset_snapshot_json, status, attempt_count,
+             last_error_code, retryable, created_at_ms, updated_at_ms, completed_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, 1, ?, ?, NULL)`,
+          plan.taskId,
+          input.scopeKey,
+          input.detachedHistoryId,
+          input.meetingId,
+          source.id,
+          input.targetMeetingId,
+          plan.targetRecordingAssetId,
+          JSON.stringify({
+            schema_version: 1,
+            id: source.id,
+            meeting_id: source.meeting_id,
+            role: source.role,
+            origin: source.origin,
+            native_session_id: source.native_session_id,
+            local_uri: source.local_uri,
+            remote_asset_id: source.remote_asset_id,
+            mime_type: source.mime_type,
+            file_name: source.file_name,
+            byte_size: source.byte_size,
+            duration_ms: source.duration_ms,
+            checksum_sha256: source.checksum_sha256,
+            waveform_json: source.waveform_json,
+            local_state: source.local_state,
+            created_at_ms: source.created_at_ms,
+            updated_at_ms: source.updated_at_ms,
+            last_verified_at_ms: source.last_verified_at_ms,
+          }),
+          input.resolvedAtMs,
+          input.resolvedAtMs,
+        );
+        if (inserted.changes !== 1) throw new Error('recording merge recovery was not recorded');
+        recordingMergeTaskIds.push(plan.taskId);
+      }
 
       await database.runAsync(
         `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
@@ -5382,10 +5508,195 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       const transaction = new SqliteMeetingTransaction(database);
       await transaction.advanceCanonicalWrite(input.scopeKey, input.resolvedAtMs);
       touchedMeetingIds = [input.meetingId, input.targetMeetingId];
-      return true;
+      return { recordingMergeTaskIds };
     });
     if (applied) this.notify(touchedMeetingIds);
     return applied;
+  }
+
+  async listMeetingRecordingMergeTasks(
+    targetMeetingId: string,
+    scopeKey: ScopeKey,
+  ): Promise<readonly MeetingRecordingMergeTaskRecord[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(targetMeetingId, 'recording merge target meeting ID');
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingRecordingMergeTaskRow>(
+      `SELECT task.* FROM meeting_recording_merge_tasks task
+       INNER JOIN meeting_notes target
+         ON target.id = task.target_meeting_id AND target.scope_key = task.scope_key
+       WHERE task.scope_key = ? AND task.target_meeting_id = ?
+       ORDER BY task.created_at_ms, task.id`,
+      scopeKey,
+      targetMeetingId,
+    );
+    return rows.map(recordingMergeTaskFromRow);
+  }
+
+  async completeMeetingRecordingMergeTask(
+    input: CompleteMeetingRecordingMergeTaskInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.taskId, 'recording merge task ID');
+    assertRecordId(input.targetMeetingId, 'recording merge target meeting ID');
+    assertRecordId(input.recordingAsset.id, 'recording merge target asset ID');
+    assertNonNegativeInteger(input.completedAtMs, 'recording merge completion time');
+    if (
+      input.recordingAsset.meetingId !== input.targetMeetingId
+      || input.recordingAsset.localState !== 'local_ready'
+      || !input.recordingAsset.localUri?.trim()
+    ) throw new Error('recording merge result is invalid');
+    assertNullableBoundedText(input.recordingAsset.localUri, 16_384, 'recording merge local URI');
+    assertNullableBoundedText(input.recordingAsset.mimeType, 512, 'recording merge MIME type');
+    assertNullableBoundedText(input.recordingAsset.fileName, 2_000, 'recording merge file name');
+    assertNullableBoundedText(input.recordingAsset.checksumSha256, 128, 'recording merge checksum');
+    assertOptionalNonNegativeInteger(input.recordingAsset.byteSize, 'recording merge byte size');
+    assertOptionalNonNegativeInteger(input.recordingAsset.durationMs, 'recording merge duration');
+
+    let touched = false;
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const task = await database.getFirstAsync<MeetingRecordingMergeTaskRow>(
+        `SELECT * FROM meeting_recording_merge_tasks
+         WHERE id = ? AND scope_key = ? AND target_meeting_id = ?`,
+        input.taskId,
+        input.scopeKey,
+        input.targetMeetingId,
+      );
+      if (!task) return false;
+      if (task.target_recording_asset_id !== input.recordingAsset.id) {
+        throw new Error('recording merge target asset changed');
+      }
+      if (task.status === 'completed') {
+        const existing = await database.getFirstAsync<RecordingAssetRow>(
+          'SELECT * FROM recording_assets WHERE id = ? AND meeting_id = ?',
+          task.target_recording_asset_id,
+          task.target_meeting_id,
+        );
+        if (!existing || existing.local_uri !== input.recordingAsset.localUri) {
+          throw new Error('completed recording merge asset is inconsistent');
+        }
+        return true;
+      }
+      const target = await database.getFirstAsync<MeetingRow>(
+        `SELECT * FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        task.target_meeting_id,
+        input.scopeKey,
+      );
+      if (!target) throw new Error('recording merge target meeting is unavailable');
+      const source = await database.getFirstAsync<RecordingAssetRow>(
+        `SELECT asset.* FROM recording_assets asset
+         INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+         WHERE asset.id = ? AND asset.meeting_id = ? AND meeting.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'`,
+        task.source_recording_asset_id,
+        task.source_meeting_id,
+        input.scopeKey,
+      );
+      if (!source || source.local_state !== 'local_ready' || !source.local_uri) {
+        throw new Error('recording merge source is not ready');
+      }
+      if (
+        source.checksum_sha256
+        && input.recordingAsset.checksumSha256
+        && source.checksum_sha256.toLowerCase() !== input.recordingAsset.checksumSha256.toLowerCase()
+      ) throw new Error('recording merge source checksum changed');
+      if (
+        source.byte_size !== null
+        && input.recordingAsset.byteSize !== null
+        && source.byte_size !== input.recordingAsset.byteSize
+      ) throw new Error('recording merge source size changed');
+      const existingTargetAsset = await database.getFirstAsync<RecordingAssetRow>(
+        'SELECT * FROM recording_assets WHERE id = ?',
+        task.target_recording_asset_id,
+      );
+      if (existingTargetAsset) {
+        throw new Error('recording merge target asset already exists');
+      }
+      const primary = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM recording_assets
+         WHERE meeting_id = ? AND role = 'primary' LIMIT 1`,
+        task.target_meeting_id,
+      );
+      // A remotely rooted conflict target may already own server audio that the
+      // root feed cannot identify as a RecordingAsset. Keep the recovered copy
+      // secondary in that case so it never hides the cloud recording.
+      const role: RecordingAssetRecord['role'] = primary || target.remote_id
+        ? 'secondary'
+        : 'primary';
+      await database.runAsync(
+        `INSERT INTO recording_assets (
+           id, meeting_id, role, origin, native_session_id, local_uri, remote_asset_id,
+           mime_type, file_name, byte_size, duration_ms, checksum_sha256, waveform_json,
+           local_state, created_at_ms, updated_at_ms, last_verified_at_ms
+         ) VALUES (?, ?, ?, 'recovered', NULL, ?, NULL, ?, ?, ?, ?, ?, ?,
+           'local_ready', ?, ?, ?)`,
+        task.target_recording_asset_id,
+        task.target_meeting_id,
+        role,
+        input.recordingAsset.localUri,
+        input.recordingAsset.mimeType,
+        input.recordingAsset.fileName,
+        input.recordingAsset.byteSize,
+        input.recordingAsset.durationMs,
+        input.recordingAsset.checksumSha256,
+        input.recordingAsset.waveformJson,
+        input.completedAtMs,
+        input.completedAtMs,
+        input.completedAtMs,
+      );
+      const completed = await database.runAsync(
+        `UPDATE meeting_recording_merge_tasks
+         SET status = 'completed', attempt_count = attempt_count + 1,
+           last_error_code = NULL, retryable = 0,
+           updated_at_ms = ?, completed_at_ms = ?
+         WHERE id = ? AND scope_key = ? AND target_meeting_id = ?
+           AND status <> 'completed'`,
+        input.completedAtMs,
+        input.completedAtMs,
+        task.id,
+        input.scopeKey,
+        task.target_meeting_id,
+      );
+      if (completed.changes !== 1) throw new Error('recording merge task changed concurrently');
+      await database.runAsync(
+        `UPDATE meeting_notes SET updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE id = ? AND scope_key = ?`,
+        input.completedAtMs,
+        task.target_meeting_id,
+        input.scopeKey,
+      );
+      const transaction = new SqliteMeetingTransaction(database);
+      await transaction.advanceCanonicalWrite(input.scopeKey, input.completedAtMs);
+      touched = true;
+      return true;
+    });
+    if (applied && touched) this.notify([input.targetMeetingId]);
+    return applied;
+  }
+
+  async failMeetingRecordingMergeTask(input: FailMeetingRecordingMergeTaskInput): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.taskId, 'recording merge task ID');
+    assertRecordId(input.targetMeetingId, 'recording merge target meeting ID');
+    assertNullableBoundedText(input.errorCode, 160, 'recording merge error code');
+    assertNonNegativeInteger(input.failedAtMs, 'recording merge failure time');
+    const database = await openMeetingDatabase();
+    const result = await database.runAsync(
+      `UPDATE meeting_recording_merge_tasks
+       SET status = 'failed', attempt_count = attempt_count + 1,
+         last_error_code = ?, retryable = ?, updated_at_ms = ?, completed_at_ms = NULL
+       WHERE id = ? AND scope_key = ? AND target_meeting_id = ?
+         AND status <> 'completed'`,
+      input.errorCode,
+      input.retryable ? 1 : 0,
+      input.failedAtMs,
+      input.taskId,
+      input.scopeKey,
+      input.targetMeetingId,
+    );
+    if (result.changes > 0) this.notify([input.targetMeetingId]);
+    return result.changes > 0;
   }
 
   async mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult> {

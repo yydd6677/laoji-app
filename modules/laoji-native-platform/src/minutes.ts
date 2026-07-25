@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 12 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 13 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -147,6 +147,8 @@ export interface MinutesDetailPageStatesSnapshot {
 export interface MinutesPlayerSourceSnapshot {
   sourceId: string;
   uri: string;
+  label?: string;
+  localOnly?: boolean;
   headers?: Readonly<Record<string, string>>;
   title?: string;
   durationMsHint?: number;
@@ -232,6 +234,7 @@ export interface MinutesDetailSnapshot {
   actions?: readonly MinutesActionItemSnapshot[];
   speakers: readonly MinutesSpeakerSnapshot[];
   playerSource?: MinutesPlayerSourceSnapshot | null;
+  playerSources?: readonly MinutesPlayerSourceSnapshot[];
   audioStatusMessage?: string;
   audioErrorMessage?: string;
   processingStatusLabel?: string;
@@ -239,6 +242,9 @@ export interface MinutesDetailSnapshot {
   rootSyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
+  recordingMergeStatusLabel?: string;
+  recordingMergeActionLabel?: string;
+  recordingMergeActionEnabled?: boolean;
 }
 
 export interface MinutesViewSnapshot {
@@ -271,6 +277,8 @@ export type MinutesSemanticAction =
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
   | { type: 'retryProcessingStage'; surface: 'detail'; meetingId: string; stage: MinutesProcessingStage }
+  | { type: 'mergeRecordingAssets'; surface: 'detail'; meetingId: string }
+  | { type: 'selectPlayerSource'; surface: 'detail'; meetingId: string; sourceId: string }
   | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
   | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
   | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }

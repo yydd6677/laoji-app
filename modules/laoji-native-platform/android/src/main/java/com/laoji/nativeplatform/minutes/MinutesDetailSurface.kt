@@ -14,6 +14,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -52,6 +53,7 @@ internal class MinutesDetailSurface(
   private val playerOwner = playerOwnerFactory(context, ::handlePlaybackState)
   internal val player: View = playerOwner.view
   internal val audioNotice: TextView = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  internal val recordingSelector = HorizontalScrollView(context)
   internal val processingNotice = LinearLayout(context)
 
   private val titleContainer = FrameLayout(context)
@@ -62,6 +64,7 @@ internal class MinutesDetailSurface(
   private val dateTime = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val processingNoticeText = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
   private val processingRetry = context.textView("重试", textSizeSp = 14, color = MinutesPalette.primary, weight = Typeface.BOLD)
+  private val recordingSelectorItems = LinearLayout(context)
   private val tabBar = MinutesDetailTabBar(context, ::requestUserTab)
   private val viewStateStore = MinutesDetailViewStateStore(context)
   private var renderedState = MinutesDetailState()
@@ -194,6 +197,18 @@ internal class MinutesDetailSurface(
     audioNotice.visibility = View.GONE
     addView(audioNotice, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+    recordingSelector.isHorizontalScrollBarEnabled = false
+    recordingSelector.overScrollMode = View.OVER_SCROLL_NEVER
+    recordingSelector.setPadding(context.dp(16), context.dp(4), context.dp(8), context.dp(4))
+    recordingSelectorItems.orientation = HORIZONTAL
+    recordingSelectorItems.gravity = Gravity.CENTER_VERTICAL
+    recordingSelector.addView(
+      recordingSelectorItems,
+      ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT),
+    )
+    recordingSelector.visibility = View.GONE
+    addView(recordingSelector, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
+
     // [INFERENCE] LaoJi's independent processing stages use the existing
     // Minutes cached/error banner family. The 44dp slot and text action keep
     // retry visible without turning a background task into a blocking dialog.
@@ -215,6 +230,16 @@ internal class MinutesDetailSurface(
         onAction(
           mapOf(
             "type" to "openMeetingRootConflict",
+            "meetingId" to renderedState.meetingId,
+          ),
+        )
+        return@setOnClickListener
+      }
+      if (renderedState.recordingMergeStatusLabel.isNotBlank()) {
+        if (!renderedState.recordingMergeActionEnabled) return@setOnClickListener
+        onAction(
+          mapOf(
+            "type" to "mergeRecordingAssets",
             "meetingId" to renderedState.meetingId,
           ),
         )
@@ -394,6 +419,7 @@ internal class MinutesDetailSurface(
 
   private fun renderAudioState(state: MinutesDetailState) {
     val source = playableSource(state)
+    renderRecordingSelector(state)
     playerOwner.bindSource(source)
     val message = state.audioErrorMessage.ifBlank {
       state.audioStatusMessage.ifBlank { "暂无可播放的录音".takeIf { source == null }.orEmpty() }
@@ -407,10 +433,84 @@ internal class MinutesDetailSurface(
     audioNotice.visibility = if (message.isBlank()) View.GONE else View.VISIBLE
   }
 
+  private fun renderRecordingSelector(state: MinutesDetailState) {
+    val sources = state.playerSources
+      .filter { it.sourceId.isNotBlank() && it.uri.isNotBlank() }
+      .distinctBy { it.sourceId }
+    recordingSelectorItems.removeAllViews()
+    if (sources.size <= 1) {
+      recordingSelector.visibility = View.GONE
+      return
+    }
+    val selectedId = state.playerSource?.sourceId
+    sources.forEachIndexed { index, source ->
+      val selected = source.sourceId == selectedId
+      val fallback = "录音 ${index + 1}"
+      val visibleLabel = source.label.ifBlank { fallback }
+      val label = if (source.localOnly && !visibleLabel.contains("仅本机")) {
+        "$visibleLabel · 仅本机"
+      } else visibleLabel
+      val chipLabel = context.textView(
+        label,
+        14,
+        if (selected) MinutesPalette.primary else MinutesPalette.secondary,
+        Typeface.NORMAL,
+      ).apply {
+        gravity = Gravity.CENTER
+        setPadding(context.dp(12), 0, context.dp(12), 0)
+        background = context.roundedStateBackground(
+          defaultColor = if (selected) MinutesPalette.primarySoft else MinutesPalette.page,
+          pressedColor = if (selected) MinutesPalette.primaryTransparent else MinutesPalette.filler,
+          disabledColor = MinutesPalette.page,
+          radiusDp = 6,
+        )
+      }
+      val target = FrameLayout(context).apply {
+        isClickable = true
+        isFocusable = true
+        contentDescription = if (selected) "$label，当前播放" else "播放$label"
+        setOnClickListener {
+          if (source.sourceId == renderedState.playerSource?.sourceId) return@setOnClickListener
+          onAction(
+            mapOf(
+              "type" to "selectPlayerSource",
+              "meetingId" to renderedState.meetingId,
+              "sourceId" to source.sourceId,
+            ),
+          )
+        }
+        addView(
+          chipLabel,
+          FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            context.dp(36),
+            Gravity.CENTER,
+          ),
+        )
+      }
+      recordingSelectorItems.addView(
+        target,
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+          rightMargin = context.dp(8)
+        },
+      )
+    }
+    recordingSelector.visibility = View.VISIBLE
+  }
+
   private fun renderProcessingState(state: MinutesDetailState) {
-    val label = if (state.rootSyncConflict) "会议同步冲突" else state.processingStatusLabel.trim()
+    val mergeLabel = state.recordingMergeStatusLabel.trim()
+    val label = when {
+      state.rootSyncConflict -> "会议同步冲突"
+      mergeLabel.isNotBlank() -> mergeLabel
+      else -> state.processingStatusLabel.trim()
+    }
     val retryStage = state.processingRetryStage
-    val tone = if (state.rootSyncConflict) "danger" else state.processingStatusTone
+    val tone = when {
+      state.rootSyncConflict -> "danger"
+      mergeLabel.isNotBlank() -> "warning"
+      else -> state.processingStatusTone
+    }
     val actionColor = if (tone == "danger") MinutesPalette.danger else MinutesPalette.primary
     processingNoticeText.text = label
     processingNoticeText.setTextColor(statusToneColor(tone))
@@ -422,15 +522,26 @@ internal class MinutesDetailSurface(
       },
       radiusDp = 6,
     )
-    val hasAction = state.rootSyncConflict || retryStage != null
+    val hasMergeAction = mergeLabel.isNotBlank() && state.recordingMergeActionLabel.isNotBlank()
+    val hasAction = state.rootSyncConflict || hasMergeAction || retryStage != null
     processingRetry.visibility = if (hasAction) View.VISIBLE else View.GONE
-    processingRetry.isEnabled = state.rootSyncConflict || (retryStage != null && !state.processingRetrying)
-    processingRetry.text = if (state.rootSyncConflict) "处理" else if (state.processingRetrying) "重试中" else "重试"
+    processingRetry.isEnabled = when {
+      state.rootSyncConflict -> true
+      hasMergeAction -> state.recordingMergeActionEnabled
+      else -> retryStage != null && !state.processingRetrying
+    }
+    processingRetry.text = when {
+      state.rootSyncConflict -> "处理"
+      hasMergeAction -> state.recordingMergeActionLabel
+      state.processingRetrying -> "重试中"
+      else -> "重试"
+    }
     processingRetry.setTextColor(
       statefulIconTint(actionColor, actionColor, MinutesPalette.disabled),
     )
     processingRetry.contentDescription = if (!hasAction) null else {
       if (state.rootSyncConflict) "$label，处理"
+      else if (hasMergeAction) "$label，${state.recordingMergeActionLabel}"
       else if (state.processingRetrying) "$label，正在重试" else "$label，重试"
     }
     processingNotice.contentDescription = label.takeIf { it.isNotBlank() }

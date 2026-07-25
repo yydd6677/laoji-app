@@ -167,6 +167,9 @@ import {
   MeetingRootSyncConflictChangedError,
   MeetingSummaryVersionConflictError,
   MeetingSummaryVersionUnavailableError,
+  loadMeetingRecordingMergeRecovery,
+  mergeDetachedMeetingRecordings,
+  type MeetingRecordingMergeRecoveryState,
   SelectMeetingSummaryVersionUseCase,
   RetryMeetingSpeakerCorrectionSyncUseCase,
   ResolveMeetingActionSyncConflictUseCase,
@@ -180,6 +183,7 @@ import {
 import {
   sqliteMeetingNoteRepository,
   type MarkerRecord,
+  type RecordingAssetRecord,
   type SummaryVersionRecord,
 } from '../data/repositories';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
@@ -218,6 +222,8 @@ type CanonicalProcessingSnapshot = {
   canonicalMeetingId: string;
   scopeKey: ScopeKey;
   stages: readonly ProcessingStage[];
+  recordingAssets: readonly RecordingAssetRecord[];
+  recordingMergeRecovery: MeetingRecordingMergeRecoveryState;
 };
 
 const EMPTY_PROCESSING_STATUSES: MeetingProcessingStatuses = {
@@ -260,10 +266,17 @@ function localPlayerSource(
   uri: string,
   storageScope: 'guest' | `user:${string}`,
   durationSec?: number,
+  options: {
+    sourceId?: string;
+    label?: string;
+    localOnly?: boolean;
+  } = {},
 ): MinutesPlayerSourceSnapshot {
   return {
-    sourceId: `local:${meetingId}`,
+    sourceId: options.sourceId ?? `local:${meetingId}`,
     uri,
+    label: options.label,
+    localOnly: options.localOnly,
     title,
     durationMsHint: durationSec ? Math.round(durationSec * 1000) : undefined,
     retainForBackground: true,
@@ -438,7 +451,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     () => requestCoordinatorRef.current.snapshot(),
   );
   const [reloadKey, setReloadKey] = useState(0);
-  const [playerSource, setPlayerSource] = useState<MinutesPlayerSourceSnapshot | null>(null);
+  const [playerSources, setPlayerSources] = useState<readonly MinutesPlayerSourceSnapshot[]>([]);
+  const [selectedPlayerSourceId, setSelectedPlayerSourceId] = useState('');
   const [sharing, setSharing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
@@ -446,6 +460,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [playerSourceError, setPlayerSourceError] = useState('');
   const [loadingAudio, setLoadingAudio] = useState(false);
+  const [recordingMergeBusy, setRecordingMergeBusy] = useState(false);
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
   const [retryingSpeakerCorrection, setRetryingSpeakerCorrection] = useState(false);
   const [canonicalProcessingSnapshot, setCanonicalProcessingSnapshot] = useState<CanonicalProcessingSnapshot | null>(null);
@@ -479,6 +494,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [speakerAssignmentTarget, setSpeakerAssignmentTarget] = useState<SpeakerAssignmentTarget | null>(null);
   const [speakerAssignmentSaving, setSpeakerAssignmentSaving] = useState(false);
   const [speakerAssignmentError, setSpeakerAssignmentError] = useState('');
+  const playerSource = useMemo(() => (
+    playerSources.find(source => source.sourceId === selectedPlayerSourceId)
+    ?? playerSources[0]
+    ?? null
+  ), [playerSources, selectedPlayerSourceId]);
   const mountedRef = useRef(true);
   const summaryAbortRef = useRef<AbortController | null>(null);
   const silentSummaryAbortRef = useRef(new WeakSet<AbortController>());
@@ -775,11 +795,23 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           setCanonicalProcessingSnapshot(null);
           return;
         }
+        const recordingMergeRecovery = await loadMeetingRecordingMergeRecovery(
+          requestedScopeKey,
+          aggregate.note.id,
+        );
+        if (
+          !active
+          || generation !== loadGeneration
+          || routeMeetingIdRef.current !== requestedMeetingId
+          || activeMeetingScopeRef.current !== requestedScopeKey
+        ) return;
         setCanonicalProcessingSnapshot({
           meetingId: requestedMeetingId,
           canonicalMeetingId: aggregate.note.id,
           scopeKey: requestedScopeKey,
           stages: aggregate.processingStages,
+          recordingAssets: aggregate.recordingAssets,
+          recordingMergeRecovery,
         });
         if (observedCanonicalId !== aggregate.note.id) {
           unsubscribe?.();
@@ -1212,38 +1244,82 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!meeting) {
-      setPlayerSource(null);
+      setPlayerSources([]);
+      setSelectedPlayerSourceId('');
       setPlayerSourceError('');
       setLoadingAudio(false);
       return;
     }
     let alive = true;
     setPlayerSourceError('');
-    if (meeting.audioLocalUri) {
-      if (!playbackStorageScope) {
-        setPlayerSource(null);
-        setLoadingAudio(false);
-        return () => { alive = false; };
-      }
+    if (!playbackStorageScope) {
+      setPlayerSources([]);
+      setSelectedPlayerSourceId('');
       setLoadingAudio(false);
-      setPlayerSource(localPlayerSource(
+      return () => { alive = false; };
+    }
+    const canonicalAssets = canonicalProcessingSnapshot
+      && canonicalProcessingSnapshot.meetingId === meeting.id
+      && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+      ? canonicalProcessingSnapshot.recordingAssets
+      : [];
+    const localSources: MinutesPlayerSourceSnapshot[] = [];
+    const seenUris = new Set<string>();
+    if (meeting.audioLocalUri) {
+      seenUris.add(meeting.audioLocalUri);
+      localSources.push(localPlayerSource(
         meeting.id,
         displayMeetingTitle(meeting.title),
         meeting.audioLocalUri,
         playbackStorageScope,
         meeting.audioDurationSec ?? transcriptDurationSec(transcript),
+        { localOnly: !meeting.audioAvailable },
       ));
-      return () => { alive = false; };
     }
-    setPlayerSource(null);
-    if (isGuest || !accessToken) {
+    canonicalAssets
+      .filter(asset => asset.localState === 'local_ready' && Boolean(asset.localUri))
+      .forEach(asset => {
+        const uri = asset.localUri!;
+        if (seenUris.has(uri)) return;
+        seenUris.add(uri);
+        localSources.push(localPlayerSource(
+          meeting.id,
+          displayMeetingTitle(meeting.title),
+          uri,
+          playbackStorageScope,
+          asset.durationMs === null ? undefined : asset.durationMs / 1000,
+          {
+            sourceId: asset.role === 'primary' ? `local:${meeting.id}` : `asset:${asset.id}`,
+            localOnly: asset.remoteAssetId === null,
+          },
+        ));
+      });
+    const labelSources = (sources: readonly MinutesPlayerSourceSnapshot[]) => sources.map((source, index) => ({
+      ...source,
+      label: source.label ?? `录音 ${index + 1}`,
+    }));
+    const commitSources = (sources: readonly MinutesPlayerSourceSnapshot[]) => {
+      if (!alive) return;
+      const next = labelSources(sources);
+      setPlayerSources(next);
+      setSelectedPlayerSourceId(previous => (
+        next.some(source => source.sourceId === previous)
+          ? previous
+          : next[0]?.sourceId ?? ''
+      ));
+    };
+    commitSources(localSources);
+    const hasPrimaryLocal = Boolean(meeting.audioLocalUri) || canonicalAssets.some(asset => (
+      asset.role === 'primary' && asset.localState === 'local_ready' && Boolean(asset.localUri)
+    ));
+    if (hasPrimaryLocal || isGuest || !accessToken) {
       setLoadingAudio(false);
       return () => { alive = false; };
     }
     setLoadingAudio(true);
     if (!remoteMeetingId) {
       setLoadingAudio(false);
-      setPlayerSourceError('会议正在同步，请稍后重试。');
+      if (localSources.length === 0) setPlayerSourceError('会议正在同步，请稍后重试。');
       return () => { alive = false; };
     }
     void fetchMeetingAudioInfo(remoteMeetingId, accessToken)
@@ -1257,25 +1333,33 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           accessToken,
         });
         if (!alive) return;
-        setPlayerSource({
+        const cloudSource: MinutesPlayerSourceSnapshot = {
           sourceId: `cloud:${meeting.id}`,
           uri: localUri,
+          label: '录音 1',
+          localOnly: false,
           title: displayMeetingTitle(meeting.title),
           durationMsHint: info.duration_sec ? Math.round(info.duration_sec * 1000) : undefined,
           retainForBackground: true,
           storageScope: playbackStorageScope,
-        });
+        };
+        commitSources([
+          cloudSource,
+          ...localSources.filter(source => source.uri !== cloudSource.uri),
+        ]);
         setPlayerSourceError('');
       })
       .catch(() => {
         if (alive) {
-          setPlayerSource(null);
-          setPlayerSourceError('录音文件加载失败，请稍后重试。');
+          commitSources(localSources);
+          setPlayerSourceError(localSources.length > 0
+            ? '云端录音加载失败，本机录音仍可播放。'
+            : '录音文件加载失败，请稍后重试。');
         }
       })
       .finally(() => { if (alive) setLoadingAudio(false); });
     return () => { alive = false; };
-  }, [accessToken, isGuest, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, playbackStorageScope, reloadKey, remoteMeetingId, transcript]);
+  }, [accessToken, canonicalProcessingSnapshot, isGuest, meeting?.audioAvailable, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, meetingScopeKey, playbackStorageScope, reloadKey, remoteMeetingId, transcript]);
 
   const performPendingAudioUpload = useCallback((
     pending: PendingMeetingAudioUpload,
@@ -1871,13 +1955,21 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         summaryVersionId: displayedSummaryDocument?.remoteVersionId,
         isGuest,
         accessToken,
+        audioInfo: playerSource ? {
+          url: playerSource.uri,
+          duration_sec: playerSource.durationMsHint
+            ? playerSource.durationMsHint / 1000
+            : null,
+          file_name: playerSource.uri.split('/').pop() ?? 'meeting.wav',
+          requires_auth: false,
+        } : null,
       });
     } catch (reason) {
       showDialog({ title: '分享失败', message: meetingShareErrorMessage(reason), tone: 'error' });
     } finally {
       if (mountedRef.current) setSharing(false);
     }
-  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, sharing, showDialog, transcript]);
+  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, playerSource, sharing, showDialog, transcript]);
 
   const requestShare = useCallback((selection: MeetingShareSelection) => {
     if (!selection.manualNote) {
@@ -2765,6 +2857,45 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }
 
+  const runRecordingMerge = useCallback(async () => {
+    if (!meeting || !meetingScopeKey || recordingMergeBusy) return;
+    const canonicalMeetingId = canonicalProcessingSnapshot
+      && canonicalProcessingSnapshot.meetingId === meeting.id
+      && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+      ? canonicalProcessingSnapshot.canonicalMeetingId
+      : null;
+    if (!canonicalMeetingId) {
+      ToastAndroid.show('会议本机数据尚未准备好，请稍后重试。', ToastAndroid.LONG);
+      return;
+    }
+    const requestedMeetingId = meeting.id;
+    setRecordingMergeBusy(true);
+    try {
+      const result = await mergeDetachedMeetingRecordings(meetingScopeKey, canonicalMeetingId);
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      if (result.completedCount > 0) {
+        ToastAndroid.show(`已加入${result.completedCount}段本机录音`, ToastAndroid.SHORT);
+      } else if (result.waitingCount > 0) {
+        ToastAndroid.show('录音结束后即可加入当前会议。', ToastAndroid.LONG);
+      } else if (result.blockedCount > 0) {
+        ToastAndroid.show('本机录音文件无法读取。', ToastAndroid.LONG);
+      } else if (result.failedCount > 0) {
+        ToastAndroid.show('本机录音暂时无法加入，请稍后重试。', ToastAndroid.LONG);
+      }
+    } catch (reason) {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        ToastAndroid.show(
+          readableErrorMessage(reason, '本机录音暂时无法加入，请稍后重试。'),
+          ToastAndroid.LONG,
+        );
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setRecordingMergeBusy(false);
+      }
+    }
+  }, [canonicalProcessingSnapshot, meeting, meetingScopeKey, recordingMergeBusy]);
+
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'back':
@@ -2830,6 +2961,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (action.meetingId !== route.params.meetingId) break;
         retryProcessingStage(action.stage);
         break;
+      case 'mergeRecordingAssets':
+        if (action.meetingId !== route.params.meetingId) break;
+        void runRecordingMerge();
+        break;
+      case 'selectPlayerSource':
+        if (action.meetingId !== route.params.meetingId) break;
+        if (playerSources.some(source => source.sourceId === action.sourceId)) {
+          setSelectedPlayerSourceId(action.sourceId);
+        }
+        break;
       case 'generateSummary':
         if (action.meetingId !== route.params.meetingId) break;
         setTemplateSheetVisible(true);
@@ -2873,7 +3014,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, sharing, showDialog, summary, toggleMeetingAction]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
 
   const transcriptStageLoading = processingStatuses.transcript === 'realtime_draft'
     || processingStatuses.transcript === 'finalizing';
@@ -2899,6 +3040,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         : processingPresentation.retryStage === 'speaker'
           ? retryingSpeakerCorrection
           : false;
+  const recordingMergeRecovery = canonicalProcessingSnapshot
+    && meeting
+    && canonicalProcessingSnapshot.meetingId === meeting.id
+    && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+    ? canonicalProcessingSnapshot.recordingMergeRecovery
+    : null;
+  const recordingMergeStatusLabel = recordingMergeBusy
+    ? '正在加入本机录音'
+    : (recordingMergeRecovery?.failedCount ?? 0) > 0
+      ? '本机录音尚未加入'
+      : (recordingMergeRecovery?.readyCount ?? 0) > 0
+        ? '有本机录音可加入'
+        : (recordingMergeRecovery?.waitingCount ?? 0) > 0
+          ? '本机录音结束后可加入'
+          : (recordingMergeRecovery?.blockedCount ?? 0) > 0
+            ? '本机录音无法读取'
+            : '';
+  const recordingMergeActionLabel = recordingMergeBusy
+    ? '加入中'
+    : (recordingMergeRecovery?.failedCount ?? 0) > 0
+      ? '重试'
+      : (recordingMergeRecovery?.readyCount ?? 0) > 0
+        ? '加入'
+        : '';
 
   const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
@@ -2963,6 +3128,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       speakers: transcriptCached,
     },
     playerSource,
+    playerSources,
     audioStatusMessage: loadingAudio ? '正在加载录音' : (!playerSource ? '仅有转写，无录音文件' : ''),
     audioErrorMessage: pendingAudioError || playerSourceError,
     processingStatusLabel,
@@ -2970,7 +3136,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     rootSyncConflict: rootConflict !== null,
     processingRetryStage: processingPresentation.retryStage ?? undefined,
     processingRetrying,
-  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+    recordingMergeStatusLabel,
+    recordingMergeActionLabel,
+    recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
+  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];

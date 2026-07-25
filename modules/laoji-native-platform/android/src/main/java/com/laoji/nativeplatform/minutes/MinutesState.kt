@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 12
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 13
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -268,6 +268,8 @@ data class MinutesSpeaker(
 data class MinutesPlayerSource(
   val sourceId: String,
   val uri: String,
+  val label: String = "",
+  val localOnly: Boolean = false,
   val headers: Map<String, String> = emptyMap(),
   val title: String = "",
   val durationMsHint: Long = 0L,
@@ -363,6 +365,7 @@ data class MinutesDetailState(
   val actions: List<MinutesActionItem> = emptyList(),
   val speakers: List<MinutesSpeaker> = emptyList(),
   val playerSource: MinutesPlayerSource? = null,
+  val playerSources: List<MinutesPlayerSource> = emptyList(),
   val audioStatusMessage: String = "",
   val audioErrorMessage: String = "",
   val processingStatusLabel: String = "",
@@ -370,6 +373,9 @@ data class MinutesDetailState(
   val rootSyncConflict: Boolean = false,
   val processingRetryStage: MinutesProcessingStage? = null,
   val processingRetrying: Boolean = false,
+  val recordingMergeStatusLabel: String = "",
+  val recordingMergeActionLabel: String = "",
+  val recordingMergeActionEnabled: Boolean = false,
   val pageStates: MinutesDetailPageStates = MinutesDetailPageStates.fromLegacy(
     activeTab = activeTab,
     contentPhase = contentPhase,
@@ -432,6 +438,13 @@ object MinutesStateReducer {
   fun normalize(state: MinutesUiState): MinutesUiState {
     val pageStates = state.detail.pageStates.normalized()
     val activePage = pageStates[state.detail.activeTab]
+    val selectedPlayerSource = state.detail.playerSource?.takeIf {
+      it.sourceId.isNotBlank() && it.uri.isNotBlank() && it.storageScope.isNotBlank()
+    }
+    val playerSources = (state.detail.playerSources + listOfNotNull(selectedPlayerSource))
+      .filter { it.sourceId.isNotBlank() && it.uri.isNotBlank() && it.storageScope.isNotBlank() }
+      .distinctBy { it.sourceId }
+      .take(20)
     return state.copy(
       schemaVersion = MINUTES_SNAPSHOT_SCHEMA_VERSION,
       list = state.list.copy(
@@ -454,9 +467,8 @@ object MinutesStateReducer {
           it.id.isNotBlank() && it.stableKey.isNotBlank() && (it.text.isNotBlank() || it.title.isNotBlank())
         },
         speakers = state.detail.speakers.filter { it.id.isNotBlank() && it.label.isNotBlank() },
-        playerSource = state.detail.playerSource?.takeIf {
-          it.sourceId.isNotBlank() && it.uri.isNotBlank() && it.storageScope.isNotBlank()
-        },
+        playerSource = selectedPlayerSource,
+        playerSources = playerSources,
         pageStates = pageStates,
       ),
     )

@@ -22,6 +22,7 @@ import {
   type PendingMeetingMediaImportIntent,
 } from 'laoji-native-platform';
 import { secureClientIdFactory, type ScopeKey } from '../domain/meeting';
+import { recoverPreparedMeetingRecordingMerge } from '../application/meeting';
 import { navigationRef } from '../navigation/notificationNavigation';
 import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
@@ -348,6 +349,13 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       for (const media of pending) {
         if (cancelled) return;
         try {
+          if (media.origin === 'recording_merge') {
+            const recovered = await recoverPreparedMeetingRecordingMerge(scopeKey, media);
+            if (recovered) {
+              await acknowledgeIngestedMeetingMedia(media.meetingId, media.assetId).catch(() => false);
+            }
+            continue;
+          }
           const savedDraft = await loadMeetingMediaImportDraft(media.meetingId);
           if (savedDraft && savedDraft.scopeKey !== scopeKey) {
             promptActiveRef.current = true;

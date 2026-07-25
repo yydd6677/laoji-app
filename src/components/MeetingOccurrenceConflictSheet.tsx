@@ -110,6 +110,7 @@ export function MeetingOccurrenceConflictSheet({
   useEffect(() => () => progress.stopAnimation(), [progress]);
 
   if (!mounted || !conflict?.remote) return null;
+  const hasRecordingsToMerge = conflict.local.mergeableRecordingCount > 0;
   const requestClose = () => {
     if (!saving) finishClose(true);
   };
@@ -159,7 +160,11 @@ export function MeetingOccurrenceConflictSheet({
             <MeetingCard label="本机会议记录" meeting={conflict.local} />
             <MeetingCard label="日程当前关联" meeting={conflict.remote} />
             <View style={[styles.notice, { backgroundColor: colors.pressedFill }]}>
-              <Text style={[styles.noticeText, { color: colors.textCaption }]}>处理后，本机录音、文字记录、整理结果和笔记都会独立保留；日程将使用云端关联。</Text>
+              <Text style={[styles.noticeText, { color: colors.textCaption }]}>
+                {hasRecordingsToMerge
+                  ? '处理后，本机会议仍完整保留；录音会复制到日程当前关联，原文件不会移除。'
+                  : '处理后，本机会议记录会独立保留；日程将使用云端关联。'}
+              </Text>
             </View>
             <View style={styles.errorSlot}>
               <Text style={[styles.errorText, { color: colors.danger }]} accessibilityLiveRegion="polite">
@@ -178,12 +183,14 @@ export function MeetingOccurrenceConflictSheet({
               disabled={disabled}
               onPress={onResolve}
               accessibilityRole="button"
-              accessibilityLabel="保留本机记录，使用云端关联"
+              accessibilityLabel={hasRecordingsToMerge ? '保留本机记录并加入本机录音' : '保留本机记录，使用云端关联'}
               accessibilityState={{ disabled, busy: saving }}
             >
               {saving
                 ? <ActivityIndicator color={colors.onPrimary} />
-                : <Text style={[styles.commitText, { color: colors.onPrimary }]}>保留本机记录，使用云端关联</Text>}
+                : <Text style={[styles.commitText, { color: colors.onPrimary }]}>
+                  {hasRecordingsToMerge ? '保留并加入本机录音' : '保留本机记录，使用云端关联'}
+                </Text>}
             </Pressable>
           </ScrollView>
         </Animated.View>

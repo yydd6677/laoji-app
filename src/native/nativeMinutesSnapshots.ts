@@ -120,6 +120,7 @@ export interface BuildNativeDetailSnapshotInput {
   pageGenerations?: Partial<Record<MinutesDetailTab, number>>;
   pageCached?: Partial<Record<MinutesDetailTab, boolean>>;
   playerSource?: MinutesPlayerSourceSnapshot | null;
+  playerSources?: readonly MinutesPlayerSourceSnapshot[];
   audioStatusMessage?: string;
   audioErrorMessage?: string;
   processingStatusLabel?: string;
@@ -127,6 +128,9 @@ export interface BuildNativeDetailSnapshotInput {
   rootSyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
+  recordingMergeStatusLabel?: string;
+  recordingMergeActionLabel?: string;
+  recordingMergeActionEnabled?: boolean;
 }
 
 export type NativeMinutesPageGenerations = Record<MinutesDetailTab, number>;
@@ -656,6 +660,7 @@ export function buildNativeMinutesDetailSnapshot(
     actions,
     speakers,
     playerSource: input.playerSource ?? null,
+    playerSources: input.playerSources ?? (input.playerSource ? [input.playerSource] : []),
     audioStatusMessage: input.audioStatusMessage ?? '',
     audioErrorMessage: input.audioErrorMessage ?? '',
     processingStatusLabel: input.processingStatusLabel ?? '',
@@ -663,6 +668,9 @@ export function buildNativeMinutesDetailSnapshot(
     rootSyncConflict: input.rootSyncConflict ?? false,
     processingRetryStage: input.processingRetryStage,
     processingRetrying: input.processingRetrying ?? false,
+    recordingMergeStatusLabel: input.recordingMergeStatusLabel ?? '',
+    recordingMergeActionLabel: input.recordingMergeActionLabel ?? '',
+    recordingMergeActionEnabled: input.recordingMergeActionEnabled ?? false,
   };
   const pageStates = normalizeNativeMinutesDetailPageStates({
     ...detail,
