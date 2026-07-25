@@ -218,6 +218,7 @@ export interface MinutesDetailSnapshot {
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
   canCreateAction?: boolean;
+  canCreateClip?: boolean;
   summaryGenerating?: boolean;
   summaryActionLabel?: string;
   titleEditRequestId?: number;
@@ -294,6 +295,15 @@ export type MinutesSemanticAction =
   | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
   | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
   | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }
+  | {
+      type: 'createClipFromTranscript';
+      surface: 'detail';
+      meetingId: string;
+      lineId: string;
+      positionMs: number;
+      endMs: number;
+      selectedText: string;
+    }
   | { type: 'deleteMarker'; surface: 'detail'; meetingId: string; markerId: string }
   | { type: 'seekSummaryCitation'; surface: 'detail'; meetingId: string; segmentId: string; positionMs: number }
   | { type: 'toggleAction'; surface: 'detail'; meetingId: string; actionId: string; completed: boolean }

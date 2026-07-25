@@ -460,6 +460,7 @@ internal class MinutesTranscriptPage(
       ?.sourceId
     searchController.updateLines(renderedLines)
     rows.setCanSeek(expectedPlaybackSourceId != null)
+    rows.setCanCreateClip(state.canCreateClip)
     renderSearch(scrollToSelected = false)
     renderPageChrome(
       pageState = state.pageState(tab),
@@ -1346,6 +1347,7 @@ private class MinutesTranscriptPageAdapter(
 ) : ListAdapter<MinutesTranscriptRenderRow, MinutesTranscriptPageAdapter.Holder>(DIFF) {
   private var activeLineIndex: Int? = null
   private var canSeek = false
+  private var canCreateClip = false
 
   init {
     setHasStableIds(true)
@@ -1376,11 +1378,17 @@ private class MinutesTranscriptPageAdapter(
     if (itemCount > 0) notifyItemRangeChanged(0, itemCount, PAYLOAD_SEEK)
   }
 
+  fun setCanCreateClip(next: Boolean) {
+    if (canCreateClip == next) return
+    canCreateClip = next
+    if (itemCount > 0) notifyItemRangeChanged(0, itemCount, PAYLOAD_CLIP)
+  }
+
   override fun getItemId(position: Int): Long = getItem(position).line.id.hashCode().toLong()
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(parent)
 
   override fun onBindViewHolder(holder: Holder, position: Int) {
-    holder.bind(getItem(position), position == activeLineIndex, canSeek, onAction)
+    holder.bind(getItem(position), position == activeLineIndex, canSeek, canCreateClip, onAction)
   }
 
   override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
@@ -1393,6 +1401,7 @@ private class MinutesTranscriptPageAdapter(
       getItem(position),
       position == activeLineIndex,
       canSeek,
+      canCreateClip,
       onAction,
       payload,
     )
@@ -1417,6 +1426,8 @@ private class MinutesTranscriptPageAdapter(
     private val body = parent.context.textView(textSizeSp = 16)
     private var boundLine: MinutesTranscriptLine? = null
     private var boundActive = false
+    private var boundCanCreateClip = false
+    private var boundAction: (Map<String, Any?>) -> Unit = {}
 
     init {
       root.layoutParams = RecyclerView.LayoutParams(
@@ -1453,15 +1464,32 @@ private class MinutesTranscriptPageAdapter(
           menu.removeItem(android.R.id.shareText)
           menu.add(Menu.NONE, MENU_SHARE_SELECTION, Menu.NONE, "分享")
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+          val line = boundLine
+          if (
+            boundCanCreateClip
+            && line?.isFinal == true
+            && line.revisionKind != MinutesTranscriptRevisionKind.REALTIME_DRAFT
+          ) {
+            menu.add(Menu.NONE, MENU_CREATE_CLIP, Menu.NONE, "生成音频片段")
+              .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+          }
           return true
         }
 
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-          if (item.itemId != MENU_SHARE_SELECTION) return false
-          shareSelection(mode)
-          return true
+          return when (item.itemId) {
+            MENU_SHARE_SELECTION -> {
+              shareSelection(mode)
+              true
+            }
+            MENU_CREATE_CLIP -> {
+              createClipSelection(mode)
+              true
+            }
+            else -> false
+          }
         }
 
         override fun onDestroyActionMode(mode: ActionMode) = Unit
@@ -1475,8 +1503,11 @@ private class MinutesTranscriptPageAdapter(
       row: MinutesTranscriptRenderRow,
       active: Boolean,
       canSeek: Boolean,
+      canCreateClip: Boolean,
       onAction: (Map<String, Any?>) -> Unit,
     ) {
+      boundCanCreateClip = canCreateClip
+      boundAction = onAction
       bindMetadata(row.line)
       bindBody(row)
       bindActive(active)
@@ -1487,12 +1518,15 @@ private class MinutesTranscriptPageAdapter(
       row: MinutesTranscriptRenderRow,
       active: Boolean,
       canSeek: Boolean,
+      canCreateClip: Boolean,
       onAction: (Map<String, Any?>) -> Unit,
       payload: Int,
     ) {
       if (payload == 0 || payload and PAYLOAD_METADATA != 0) bindMetadata(row.line)
       if (payload == 0 || payload and PAYLOAD_BODY != 0) bindBody(row)
       if (payload == 0 || payload and PAYLOAD_ACTIVE != 0) bindActive(active)
+      if (payload == 0 || payload and PAYLOAD_CLIP != 0) boundCanCreateClip = canCreateClip
+      boundAction = onAction
       if (
         payload == 0
         || payload and (PAYLOAD_SEEK or PAYLOAD_METADATA or PAYLOAD_BODY) != 0
@@ -1603,6 +1637,25 @@ private class MinutesTranscriptPageAdapter(
         Toast.makeText(body.context, "暂时无法分享，请稍后重试。", Toast.LENGTH_SHORT).show()
       }
     }
+
+    private fun createClipSelection(mode: ActionMode) {
+      val line = boundLine ?: return
+      val start = minOf(body.selectionStart, body.selectionEnd).coerceAtLeast(0)
+      val end = maxOf(body.selectionStart, body.selectionEnd).coerceAtMost(body.text.length)
+      if (end <= start) return
+      val selected = body.text.subSequence(start, end).toString().trim()
+      if (selected.isBlank()) return
+      boundAction(
+        mapOf(
+          "type" to "createClipFromTranscript",
+          "lineId" to line.id,
+          "positionMs" to line.startMs,
+          "endMs" to line.endMs,
+          "selectedText" to selected,
+        ),
+      )
+      mode.finish()
+    }
   }
 
   companion object {
@@ -1610,7 +1663,9 @@ private class MinutesTranscriptPageAdapter(
     private const val PAYLOAD_BODY = 1 shl 1
     private const val PAYLOAD_ACTIVE = 1 shl 2
     private const val PAYLOAD_SEEK = 1 shl 3
+    private const val PAYLOAD_CLIP = 1 shl 4
     private const val MENU_SHARE_SELECTION = 0x4C4A5301
+    private const val MENU_CREATE_CLIP = 0x4C4A5302
 
     private val DIFF = object : DiffUtil.ItemCallback<MinutesTranscriptRenderRow>() {
       override fun areItemsTheSame(

@@ -18,6 +18,7 @@ import com.laoji.nativeplatform.transfer.meetingUploadTag
 import com.laoji.nativeplatform.audio.RecorderServiceClient
 import com.laoji.nativeplatform.audio.RecordingRepository
 import com.laoji.nativeplatform.mediaimport.MediaIngestor
+import com.laoji.nativeplatform.mediaclip.MediaClipExporter
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.UUID
@@ -97,7 +98,8 @@ class LaojiTransferModule : Module() {
         RecorderServiceClient.currentSessionId(),
       )
       val deletedImportedFiles = MediaIngestor(context).deleteMeetingAssets(meetingId)
-      mapOf("deletedFiles" to deletedFiles + deletedImportedFiles)
+      val deletedClipFiles = MediaClipExporter(context).deleteMeeting(meetingId)
+      mapOf("deletedFiles" to deletedFiles + deletedImportedFiles + deletedClipFiles)
     }
   }
 

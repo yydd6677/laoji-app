@@ -9,6 +9,7 @@ import { useFocusEffect, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiMinutesView,
+  hasNativeMediaClip,
   type MinutesDetailTab,
   type MinutesPlayerSourceSnapshot,
   type MinutesProcessingStage,
@@ -19,6 +20,8 @@ import {
   MeetingQuestionSheet,
   type MeetingQuestionCitationTarget,
 } from '../components/MeetingQuestionSheet';
+import { MeetingMediaClipEditorSheet } from '../components/MeetingMediaClipEditorSheet';
+import { MeetingMediaClipsSheet } from '../components/MeetingMediaClipsSheet';
 import {
   MeetingActionEditorSheet,
   type MeetingActionEditorSaveValue,
@@ -116,6 +119,8 @@ import {
   type MeetingSummaryAttachmentAuthorization,
   type MeetingTemplate,
   type MeetingSummaryCarryForwardAuthorization,
+  type MeetingMediaClip,
+  type MeetingMediaClipDraft,
   type MeetingSummaryActionCandidate,
   type MeetingSummaryDocument,
   type ProcessingStage,
@@ -219,6 +224,17 @@ import {
 } from '../services/notifications';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { getFeatureFlags } from '../config/featureFlags';
+import {
+  createMeetingMediaClip,
+  deleteMeetingMediaClip,
+  loadMeetingMediaClipState,
+  mediaClipPreferredAssetId,
+  meetingMediaClipErrorMessage,
+  prepareMeetingMediaClipDraft,
+  retryMeetingMediaClip,
+  shareMeetingMediaClip,
+  type MeetingMediaClipDraftSource,
+} from '../services/meetingMediaClips';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -479,6 +495,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [shareVisible, setShareVisible] = useState(false);
   const [moreVisible, setMoreVisible] = useState(false);
   const [questionVisible, setQuestionVisible] = useState(false);
+  const [mediaClipsVisible, setMediaClipsVisible] = useState(false);
+  const [mediaClipEditorVisible, setMediaClipEditorVisible] = useState(false);
+  const [mediaClips, setMediaClips] = useState<readonly MeetingMediaClip[]>([]);
+  const [mediaClipsLoading, setMediaClipsLoading] = useState(false);
+  const [mediaClipDraft, setMediaClipDraft] = useState<MeetingMediaClipDraft | null>(null);
+  const [mediaClipPreparing, setMediaClipPreparing] = useState(false);
+  const [mediaClipBusyId, setMediaClipBusyId] = useState<string | null>(null);
+  const [mediaClipError, setMediaClipError] = useState('');
   const [pendingAudioUpload, setPendingAudioUpload] = useState<PendingMeetingAudioUpload | null>(null);
   const [pendingAudioError, setPendingAudioError] = useState('');
   const [playerSourceError, setPlayerSourceError] = useState('');
@@ -542,6 +566,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const markerLoadErrorShownRef = useRef(false);
   const attachmentRequestGenerationRef = useRef(0);
   const attachmentLoadErrorShownRef = useRef(false);
+  const mediaClipRequestGenerationRef = useRef(0);
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
   const meetingScopeKey: ScopeKey | null = isGuest
     ? 'guest'
@@ -549,6 +574,23 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ? `user:${session.user.id}`
       : null;
   const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
+  const meetingMediaClipsEnabled = getFeatureFlags().meetingMediaClipsV1 && hasNativeMediaClip();
+  const canCreateMediaClip = Boolean(
+    meetingMediaClipsEnabled
+    && meeting
+    && meetingScopeKey
+    && canonicalProcessingSnapshot
+    && canonicalProcessingSnapshot.meetingId === meeting.id
+    && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+    && canonicalProcessingSnapshot.recordingAssets.some(asset => {
+      const mime = asset.mimeType?.trim().toLowerCase() ?? '';
+      const name = asset.fileName?.trim().toLowerCase() ?? '';
+      const uri = asset.localUri?.trim().toLowerCase() ?? '';
+      return asset.localState === 'local_ready'
+        && Boolean(asset.localUri)
+        && (mime.includes('wav') || name.endsWith('.wav') || uri.endsWith('.wav'));
+    })
+  );
   const processingStatuses = useMemo<MeetingProcessingStatuses>(() => {
     if (
       canonicalProcessingSnapshot
@@ -695,6 +737,40 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       }
     }
   }, [meeting?.id, meetingScopeKey]);
+
+  const refreshMeetingMediaClips = useCallback(async (showLoading = false) => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey || !meetingMediaClipsEnabled) {
+      setMediaClips([]);
+      setMediaClipsLoading(false);
+      return;
+    }
+    const generation = mediaClipRequestGenerationRef.current + 1;
+    mediaClipRequestGenerationRef.current = generation;
+    if (showLoading) setMediaClipsLoading(true);
+    try {
+      const state = await loadMeetingMediaClipState(meetingScopeKey, requestedMeetingId);
+      if (
+        !mountedRef.current
+        || mediaClipRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return;
+      setMediaClips(state.clips);
+      setMediaClipError('');
+    } catch (reason) {
+      if (
+        mountedRef.current
+        && mediaClipRequestGenerationRef.current === generation
+        && routeMeetingIdRef.current === requestedMeetingId
+      ) setMediaClipError(meetingMediaClipErrorMessage(reason, '音频片段暂时无法加载，请稍后重试。'));
+    } finally {
+      if (
+        mountedRef.current
+        && mediaClipRequestGenerationRef.current === generation
+        && routeMeetingIdRef.current === requestedMeetingId
+      ) setMediaClipsLoading(false);
+    }
+  }, [meeting?.id, meetingMediaClipsEnabled, meetingScopeKey]);
 
   const refreshMeetingActions = useCallback(async () => {
     const requestedMeetingId = meeting?.id;
@@ -922,6 +998,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setRootConflictSaving(false);
     setRootConflictError('');
     setShareVisible(false);
+    setMediaClipsVisible(false);
+    setMediaClipEditorVisible(false);
+    setMediaClips([]);
+    setMediaClipsLoading(false);
+    setMediaClipDraft(null);
+    setMediaClipPreparing(false);
+    setMediaClipBusyId(null);
+    setMediaClipError('');
     setMarkers([]);
     setMeetingAttachments([]);
     setDeletingMarkerId(null);
@@ -937,6 +1021,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     markerLoadErrorShownRef.current = false;
     attachmentRequestGenerationRef.current += 1;
     attachmentLoadErrorShownRef.current = false;
+    mediaClipRequestGenerationRef.current += 1;
   }, [route.params.meetingId, meetingScopeKey]);
 
   useEffect(() => {
@@ -953,6 +1038,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   useFocusEffect(useCallback(() => {
     void refreshMeetingAttachments();
   }, [refreshMeetingAttachments]));
+
+  useFocusEffect(useCallback(() => {
+    void refreshMeetingMediaClips();
+  }, [refreshMeetingMediaClips]));
 
   useEffect(() => {
     void refreshMeetingActions();
@@ -2176,7 +2265,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
     showDialog({
       title: presentation.title,
-      message: presentation.message,
+      message: !presentation.recoverable && mediaClips.length > 0
+        ? `${presentation.message}\n\n其中包含 ${mediaClips.length} 个音频片段，片段也会一并永久删除。`
+        : presentation.message,
       tone: 'danger',
       actions: [
         {
@@ -2211,7 +2302,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         { text: '取消', role: 'cancel' },
       ],
     });
-  }, [deleteMeeting, manualNote.flush, meeting, navigation, refreshRecycleCapability, showDialog]);
+  }, [deleteMeeting, manualNote.flush, mediaClips.length, meeting, navigation, refreshRecycleCapability, showDialog]);
 
   const openSpeakerAssignment = useCallback((action: EditTranscriptSpeakerAction) => {
     if (!meeting || action.meetingId !== meeting.id) return;
@@ -2918,6 +3009,174 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   }, [meeting, navigation]);
 
+  const openMediaClipEditor = useCallback(async (source: MeetingMediaClipDraftSource) => {
+    if (!meeting || !meetingScopeKey || !canCreateMediaClip || mediaClipPreparing) {
+      if (!mediaClipPreparing) {
+        showDialog({
+          title: '无法生成音频片段',
+          message: '当前会议没有可用的本机 WAV 录音。',
+          tone: 'warning',
+        });
+      }
+      return;
+    }
+    const requestedMeetingId = meeting.id;
+    setMoreVisible(false);
+    setMarkerActionsId(null);
+    setMediaClipPreparing(true);
+    setMediaClipError('');
+    try {
+      const draft = await prepareMeetingMediaClipDraft({
+        scopeKey: meetingScopeKey,
+        meetingId: requestedMeetingId,
+        source,
+        preferredRecordingAssetId: mediaClipPreferredAssetId(selectedPlayerSourceId),
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      setMediaClipDraft(draft);
+      setMediaClipEditorVisible(true);
+    } catch (reason) {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      showDialog({
+        title: '无法生成音频片段',
+        message: meetingMediaClipErrorMessage(reason),
+        tone: 'warning',
+      });
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setMediaClipPreparing(false);
+      }
+    }
+  }, [canCreateMediaClip, mediaClipPreparing, meeting, meetingScopeKey, selectedPlayerSourceId, showDialog]);
+
+  const saveMediaClip = useCallback(async (draft: MeetingMediaClipDraft) => {
+    if (!meeting || !meetingScopeKey || mediaClipBusyId) return;
+    const requestedMeetingId = meeting.id;
+    setMediaClipBusyId('creating');
+    setMediaClipError('');
+    try {
+      const clip = await createMeetingMediaClip({ scopeKey: meetingScopeKey, draft });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      setMediaClips(current => [clip, ...current.filter(candidate => candidate.id !== clip.id)]);
+      setMediaClipEditorVisible(false);
+      setMediaClipDraft(null);
+      ToastAndroid.show('音频片段已生成', ToastAndroid.SHORT);
+      setTimeout(() => {
+        if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+          setMediaClipsVisible(true);
+        }
+      }, 320);
+    } catch (reason) {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setMediaClipError(meetingMediaClipErrorMessage(reason));
+        await refreshMeetingMediaClips().catch(() => undefined);
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setMediaClipBusyId(null);
+      }
+    }
+  }, [mediaClipBusyId, meeting, meetingScopeKey, refreshMeetingMediaClips]);
+
+  const retryMediaClip = useCallback(async (clip: MeetingMediaClip) => {
+    if (!meetingScopeKey || mediaClipBusyId) return;
+    setMediaClipBusyId(clip.id);
+    setMediaClipError('');
+    try {
+      const ready = await retryMeetingMediaClip(meetingScopeKey, clip);
+      if (!mountedRef.current) return;
+      setMediaClips(current => current.map(candidate => candidate.id === ready.id ? ready : candidate));
+    } catch (reason) {
+      if (mountedRef.current) setMediaClipError(meetingMediaClipErrorMessage(reason));
+    } finally {
+      if (mountedRef.current) setMediaClipBusyId(null);
+    }
+  }, [mediaClipBusyId, meetingScopeKey]);
+
+  const shareMediaClip = useCallback(async (clip: MeetingMediaClip) => {
+    if (mediaClipBusyId) return;
+    setMediaClipBusyId(clip.id);
+    setMediaClipError('');
+    try {
+      await shareMeetingMediaClip(clip);
+    } catch (reason) {
+      if (mountedRef.current) {
+        setMediaClipError(meetingMediaClipErrorMessage(reason, '音频片段暂时无法分享，请稍后重试。'));
+      }
+    } finally {
+      if (mountedRef.current) setMediaClipBusyId(null);
+    }
+  }, [mediaClipBusyId]);
+
+  const confirmDeleteMediaClip = useCallback((clip: MeetingMediaClip) => {
+    if (!meetingScopeKey || mediaClipBusyId) return;
+    setMediaClipsVisible(false);
+    setTimeout(() => {
+      if (!mountedRef.current) return;
+      showDialog({
+        title: '删除音频片段',
+        message: '只删除此片段，原会议录音不会改变。',
+        tone: 'warning',
+        actions: [
+          {
+            text: '取消',
+            role: 'cancel',
+            onPress: () => { if (mountedRef.current) setMediaClipsVisible(true); },
+          },
+          {
+            text: '删除',
+            role: 'destructive',
+            onPress: () => {
+              setMediaClipBusyId(clip.id);
+              setMediaClipError('');
+              void deleteMeetingMediaClip(meetingScopeKey, clip)
+                .then(() => {
+                  if (mountedRef.current) {
+                    setMediaClips(current => current.filter(candidate => candidate.id !== clip.id));
+                    ToastAndroid.show('已删除音频片段', ToastAndroid.SHORT);
+                  }
+                })
+                .catch(reason => {
+                  if (mountedRef.current) {
+                    setMediaClipError(meetingMediaClipErrorMessage(reason, '音频片段删除失败，请稍后重试。'));
+                    setMediaClipsVisible(true);
+                  }
+                })
+                .finally(() => { if (mountedRef.current) setMediaClipBusyId(null); });
+            },
+          },
+        ],
+      });
+    }, 320);
+  }, [mediaClipBusyId, meetingScopeKey, showDialog]);
+
+  const openMediaClipSource = useCallback((clip: MeetingMediaClip) => {
+    const sourceMarker = clip.sourceKind === 'marker'
+      ? markers.find(marker => marker.id === clip.sourceMarkerId) ?? null
+      : null;
+    const sourceLine = clip.sourceKind === 'transcript' && clip.transcriptText
+      ? transcript.find(line => line.text.includes(clip.transcriptText!)) ?? null
+      : null;
+    const fallbackPositionMs = clip.sourceKind === 'marker'
+      ? Math.round((clip.startMs + clip.endMs) / 2)
+      : Math.min(clip.endMs, clip.startMs + 1_500);
+    const targetPositionMs = sourceMarker?.positionMs
+      ?? (sourceLine?.start_time == null ? fallbackPositionMs : Math.round(sourceLine.start_time * 1_000));
+    const nearest = sourceLine ?? transcript.reduce<TranscriptLine | null>((current, line) => {
+      const distance = Math.abs((line.start_time ?? 0) * 1_000 - targetPositionMs);
+      if (!current) return line;
+      const currentDistance = Math.abs((current.start_time ?? 0) * 1_000 - targetPositionMs);
+      return distance < currentDistance ? line : current;
+    }, null);
+    setMediaClipsVisible(false);
+    navigation.setParams({
+      focus: 'transcript',
+      segmentId: nearest?.id,
+      positionMs: targetPositionMs,
+      transcriptFocusRequestId: Date.now(),
+    });
+  }, [markers, navigation, transcript]);
+
   const openQuestionCitation = useCallback((target: MeetingQuestionCitationTarget) => {
     const requestId = Date.now();
     if (target.kind === 'transcript') {
@@ -3201,6 +3460,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (action.meetingId !== route.params.meetingId) break;
         void openMeetingActionFollowup(action.actionId);
         break;
+      case 'createClipFromTranscript':
+        if (action.meetingId !== route.params.meetingId) break;
+        void openMediaClipEditor({
+          kind: 'transcript',
+          segmentId: action.lineId,
+          selectedText: action.selectedText,
+        });
+        break;
       case 'deleteMarker':
         if (action.meetingId !== route.params.meetingId) break;
         void removeMarker(action.markerId);
@@ -3215,7 +3482,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
 
   const transcriptStageLoading = processingStatuses.transcript === 'realtime_draft'
     || processingStatuses.transcript === 'finalizing';
@@ -3310,6 +3577,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       && meetingScopeKey
       && (displayedSummaryDocument || displayedActionCandidates.length > 0),
     ),
+    canCreateClip: canCreateMediaClip,
     summaryGenerating: loadingSummary || summaryStageLoading,
     updatingActionId,
     focusActionId: route.params.actionId,
@@ -3340,7 +3608,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeStatusLabel,
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
-  }), [accessToken, activeTab, briefSummary, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
@@ -3374,9 +3642,21 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             onPress: () => openMeetingAttachments(),
           }]
         : []),
+      ...(meetingMediaClipsEnabled
+        ? [{
+            key: 'media-clips',
+            label: mediaClips.length > 0 ? `音频片段（${mediaClips.length}）` : '音频片段',
+            disabled: mediaClipsLoading,
+            onPress: () => {
+              setMediaClipError('');
+              setMediaClipsVisible(true);
+              void refreshMeetingMediaClips(true);
+            },
+          }]
+        : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, meeting, meetingAttachments.length, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, retryingAudioUpload, summaryDocument?.remoteVersionId]);
+  }, [accessToken, confirmDelete, isGuest, manageSpeaker, mediaClips.length, mediaClipsLoading, meeting, meetingAttachments.length, meetingMediaClipsEnabled, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, refreshMeetingMediaClips, retryingAudioUpload, summaryDocument?.remoteVersionId]);
 
   const markerForActions = useMemo(
     () => markers.find(marker => marker.id === markerActionsId) ?? null,
@@ -3386,6 +3666,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     ? meetingAttachments.filter(attachment => attachment.markerId === markerForActions.id).length
     : 0, [markerForActions, meetingAttachments]);
   const markerItems = useMemo<AppActionSheetItem[]>(() => markerForActions ? [
+    ...(meetingMediaClipsEnabled ? [{
+      key: 'create-media-clip',
+      label: mediaClipPreparing ? '正在读取录音' : '生成音频片段',
+      disabled: !canCreateMediaClip || mediaClipPreparing,
+      onPress: () => { void openMediaClipEditor({ kind: 'marker', markerId: markerForActions.id }); },
+    }] : []),
     {
       key: 'attachments',
       label: `附件（${markerAttachmentCount}）`,
@@ -3401,7 +3687,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       label: '分享标记文字',
       onPress: () => { void shareMarker(markerForActions.id); },
     },
-  ] : [], [markerAttachmentCount, markerForActions, openMeetingActionCreator, openMeetingAttachments, shareMarker]);
+  ] : [], [canCreateMediaClip, markerAttachmentCount, markerForActions, mediaClipPreparing, meetingMediaClipsEnabled, openMediaClipEditor, openMeetingActionCreator, openMeetingAttachments, shareMarker]);
 
   const versionChoices = useMemo(
     () => summaryVersionChoices(summaryVersionsState),
@@ -3438,6 +3724,35 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         accessToken={accessToken}
         onClose={() => setQuestionVisible(false)}
         onOpenCitation={openQuestionCitation}
+      />
+      <MeetingMediaClipEditorSheet
+        visible={mediaClipEditorVisible}
+        draft={mediaClipDraft}
+        saving={mediaClipBusyId === 'creating'}
+        error={mediaClipEditorVisible ? mediaClipError : ''}
+        onClose={() => {
+          if (mediaClipBusyId === 'creating') return;
+          setMediaClipEditorVisible(false);
+          setMediaClipDraft(null);
+          setMediaClipError('');
+        }}
+        onSubmit={draft => { void saveMediaClip(draft); }}
+      />
+      <MeetingMediaClipsSheet
+        visible={mediaClipsVisible}
+        clips={mediaClips}
+        loading={mediaClipsLoading}
+        busyClipId={mediaClipBusyId}
+        error={mediaClipsVisible ? mediaClipError : ''}
+        onClose={() => {
+          if (mediaClipBusyId) return;
+          setMediaClipsVisible(false);
+          setMediaClipError('');
+        }}
+        onOpenSource={openMediaClipSource}
+        onRetry={clip => { void retryMediaClip(clip); }}
+        onShare={clip => { void shareMediaClip(clip); }}
+        onDelete={confirmDeleteMediaClip}
       />
       <AppActionSheet
         visible={moreVisible}

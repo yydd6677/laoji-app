@@ -27,10 +27,10 @@
 | 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通 | 合成数据模拟器与目标源码，尚无运行中的 18020/18035 | 只补真实账号/双设备和服务端多录音资产闭环 |
 | 录音结束、Transcript 搜索回听、后台播放 | 本机主链闭环 | 编译、窄合同和局部模拟器；长录音与真实远端未集中验收 | 接通服务端 completeness、多录音资产上传；候选版一次验收 |
 | 结构化整理、版本、引用、行动项 | 本机闭环；服务端 additive 源码和同步框架完成 | 模拟器、目标源码窄合同；无真实模型/鉴权运行证据 | 启动真实服务，完成模型引用与账号冲突往返 |
-| 文件导入、Marker、分层分享、删除/回收站 | 音频和附件分层分享本机闭环；删除远端源码合同完成 | 模拟器；普通包对在线能力保持 fail closed | 补视频/多资产服务端、到期清理、Marker 分享和 P2 片段 |
+| 文件导入、Marker、片段、分层分享、删除/回收站 | 音频/附件分层分享与本机 WAV 片段纵切完成；删除远端源码合同完成 | 模拟器；片段 v23、native 流式导出和真实 WAV；普通包对在线能力保持 fail closed | 补视频/多资产服务端、到期清理、Marker 分享和非 WAV 异步片段 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成 | 模拟器和服务端模板源码；App Lock/真机/真实模型待集中验收 | 不重做页面；只补真实运行与发现的缺陷 |
 | 讲话人 | 本场 segment/cluster 修正闭环，账号 correction 客户端框架完成 | 模拟器；远端不可达 | 实现 profile 同意、未来改善和旧会议重匹配 |
-| QA、跨会议组织、轻协作、媒体片段、时间点附件 | ORG-01 标签/分源搜索/人物与用户主题本机聚合；ATT-01 本机附件、显式分享及文字附件显式整理输入已闭环 | ORG 有 v20 和聚合夹具；ATT 有 v21、选择页和 fail-closed 模拟器证据 | ATT 只续照片多模态/账号同步；ORG 只续账号标签同步/实验 topic；推进其余纵切 |
+| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01 本机与服务端源码；ORG-01 本机聚合；ATT-01 本机附件；CLIP-01 本机 WAV 纵切 | QA v22；ORG v20；ATT v21；CLIP v23 与模拟器真实 WAV | QA/ORG/ATT/CLIP 只续线上或非 WAV 边界；推进 COLLAB |
 
 ### 0.3 已完成并锁定的基础
 
@@ -215,7 +215,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | QA-01 | 单场有来源问答 | 本机闭环；服务端源码完成 | 运行服务、真实模型来源质量与账号持久化往返 |
 | ORG-01 | 标签/Folder、多场检索与聚合 | 部分完成；标签、分源搜索、人物与用户主题本机闭环 | 账号标签同步、实验模型 topic；Folder 仅在需求成立时添加 |
 | COLLAB-01 | 共享行动项与轻协作 | 未开始 | 完整纵切 |
-| CLIP-01 | Marker/Transcript 媒体片段 | 未开始 | 完整纵切 |
+| CLIP-01 | Marker/Transcript 媒体片段 | 部分完成；本机 WAV 生成、持久化、分享、定位与删除纵切 | MP3/M4A/视频服务端异步导出、账号同步与 USB 真机 |
 | ATT-01 | 时间点照片/人工附件 | 部分完成；本机附件、显式分享及文字附件逐次授权整理闭环 | 照片多模态、账号同步与真机 |
 | ANDR-01 | Android 创建、录制、恢复、核对、执行闭环 | 核心主链本机闭环 | 合并剩余功能、线上能力与一次候选版收口 |
 
@@ -1529,6 +1529,8 @@ POST /api/laoji/v2/meetings/{id}/speaker-corrections
 - 片段最短/最长限制由 capability 返回；导出前明确显示范围和是否包含说话人/文字。
 - 片段是派生资产，删除片段不删除原录音；删除原录音前提示现有片段依赖。
 
+当前已用 migration v23 和独立 `meetingMediaClipsV1` flag 完成本机 WAV 纵切。Marker 更多操作与 final Transcript 文字选择都能进入编辑 sheet；范围默认带小缓冲，并按 native capability 的最短/最长/步长调整。每条 pending 记录锁定 RecordingAsset checksum/更新时间、来源、范围和讲话人/文字快照；中断后以稳定 clip ID 重试，ready 文件必须具备完整 SHA-256。Android native 解析 RIFF chunk，只接受应用私有目录内的 16kHz/单声道/16-bit PCM，以 64KiB 缓冲按 sample frame 流式复制、重写 WAV header，并通过 `.part` 后同步再改名。片段列表支持来源定位、失败重试、系统分享和独立删除；含讲话人或文字时输出 WAV + `片段信息.txt` 的 ZIP，不含时直接分享 WAV。模拟器 Marker 路径已实际生成 10 秒、320044 字节且 header/数据库 hash 一致的 WAV；原夹具随后恢复。详细边界见 [`implementation/contracts/phase-8-media-clips-evidence.md`](implementation/contracts/phase-8-media-clips-evidence.md)。非 WAV 异步导出、账号同步与 USB 真机仍未完成，故 CLIP-01 保持部分完成。
+
 ### 11.5 ATT-01：时间点附件
 
 - 照片和简短文本作为 `attachment`，绑定 marker/time，不嵌入 Transcript 文本。
@@ -1943,7 +1945,7 @@ openOccurrenceMeeting
 - `QA-01`：锁定 Transcript/Summary/可选 note revision 的单场问答、逐条可定位 citation、本机持久化与服务端源码已完成；继续运行服务、真实模型来源质量和账号持久化往返。
 - `ORG-01`：标签、跨会议本机分源检索、人物和用户标签主题聚合已完成；继续账号标签同步与实验 topic，且不得把模型 topic 写回用户标签。Folder 只在大量会议需求成立时添加。
 - `COLLAB-01`：先共享单个行动项及 revision/conflict，不建设 Workspace/Channel 权限树。
-- `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；继续照片多模态与账号同步，并实现 CLIP。片段/附件都是派生资产，不修改原录音。
+- `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；CLIP 的本机 WAV 生成、片段列表、分享、定位与删除已完成。继续 ATT 照片多模态/账号同步，以及 CLIP 非 WAV 异步导出/账号同步。片段与附件都是派生资产，不修改原录音。
 
 这些纵切各自使用独立 flag。实现完成后即可计入路线完成；真实使用数据只决定默认开放和后续深化，不决定是否允许开工。
 
@@ -1967,7 +1969,7 @@ v19 recording merge（已完成） ── guest canonical cutover（已完成）
 已锁定的 TRN + SUM citation ── QA-01（本机与服务端源码已完成）
 已锁定的 ARC + speaker projection ── ORG-01
 已锁定的 ACT + SHARE ── COLLAB-01
-已锁定的 MRK + RecordingAsset ── CLIP-01 / ATT-01
+已锁定的 MRK + RecordingAsset ── CLIP-01 本机 WAV（已完成）/ ATT-01
 
 以上功能完成 ── 单次候选版收口
 ```

@@ -7,6 +7,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbAccountRootWriteV1: boolean;
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
+  meetingMediaClipsV1: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -41,5 +42,9 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // stored in the canonical meeting database.
     meetingQuestionsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingQuestionsV1 === true,
+    // Derived WAV clips remain independently reversible and never replace the
+    // source RecordingAsset.
+    meetingMediaClipsV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingMediaClipsV1 === true,
   };
 }

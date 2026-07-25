@@ -102,6 +102,7 @@ export interface BuildNativeDetailSnapshotInput {
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
   canCreateAction?: boolean;
+  canCreateClip?: boolean;
   summaryGenerating?: boolean;
   updatingActionId?: string | null;
   focusActionId?: string;
@@ -639,6 +640,7 @@ export function buildNativeMinutesDetailSnapshot(
     canManageSpeakers: input.canManageSpeakers ?? false,
     canGenerateSummary: input.canGenerateSummary ?? false,
     canCreateAction: input.canCreateAction ?? false,
+    canCreateClip: input.canCreateClip ?? false,
     summaryGenerating: input.summaryGenerating ?? false,
     summaryActionLabel: summary.length > 0 ? '重新生成' : '生成整理结果',
     titleEditRequestId: Math.max(0, input.titleEditRequestId ?? 0),

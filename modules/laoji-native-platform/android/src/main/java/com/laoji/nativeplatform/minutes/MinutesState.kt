@@ -349,6 +349,7 @@ data class MinutesDetailState(
   val canManageSpeakers: Boolean = false,
   val canGenerateSummary: Boolean = false,
   val canCreateAction: Boolean = false,
+  val canCreateClip: Boolean = false,
   val summaryGenerating: Boolean = false,
   val summaryActionLabel: String = "生成整理结果",
   val titleEditRequestId: Int = 0,

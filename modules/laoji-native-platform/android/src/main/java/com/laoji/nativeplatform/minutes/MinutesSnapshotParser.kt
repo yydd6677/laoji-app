@@ -202,6 +202,7 @@ object MinutesSnapshotParser {
       canManageSpeakers = raw.boolean("canManageSpeakers"),
       canGenerateSummary = raw.boolean("canGenerateSummary"),
       canCreateAction = raw.boolean("canCreateAction"),
+      canCreateClip = raw.boolean("canCreateClip"),
       summaryGenerating = raw.boolean("summaryGenerating"),
       summaryActionLabel = raw.string("summaryActionLabel").orDefault("生成整理结果"),
       titleEditRequestId = raw.int("titleEditRequestId"),

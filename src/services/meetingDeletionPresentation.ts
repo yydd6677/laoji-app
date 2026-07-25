@@ -61,8 +61,8 @@ export function meetingDeletionPresentation(
       blocked: false,
       title: '永久删除本机会议？',
       message: ownsLocalRecording
-        ? '此会议记录和本机录音将被永久删除，无法恢复。'
-        : '此会议记录将从本机永久删除，无法恢复。',
+        ? '此会议记录、本机录音和已生成的音频片段将被永久删除，无法恢复。'
+        : '此会议记录及相关本机文件将被永久删除，无法恢复。',
       confirmText: '永久删除',
       recoverable: false,
       retentionDays: null,
@@ -88,7 +88,7 @@ export function meetingDeletionPresentation(
   return {
     blocked: false,
     title: '永久删除会议？',
-    message: '此会议记录及相关录音、文字记录和整理结果将被永久删除，无法恢复。',
+    message: '此会议记录及相关录音、音频片段、文字记录和整理结果将被永久删除，无法恢复。',
     confirmText: '永久删除',
     recoverable: false,
     retentionDays: null,
