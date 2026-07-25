@@ -93,21 +93,28 @@ Phase 0 已取得目标部署源码生成 OpenAPI 和实际 SQLite schema 的只
 - 同一 `emulator-5556` 保留数据覆盖安装并冷启动：PackageManager `lastUpdateTime` 更新，启动状态为 COLD 且进程持续存活；日历页仍有 `OccueneSmoke`，会议页仍有同名失败态记录，repository 为 consistent、legacy/repository 1/1、tombstone 1、全部 mismatch 为 0；没有应用 FATAL、React Native exception、SQLite exception 或 bundle load error。当前无 USB 真机，因此不宣称真实账号同步或上传闭环。
 - 游客普通包 cutover：默认 flags=`true/true/true/false/false` 的 Preview 对保留数据覆盖安装后，预检为 `canonical_projection_ready`，legacy/repository 1/1、tombstone 2，身份、顺序、标题、lifecycle、阶段、上下文、Transcript 与 Summary mismatch 全为 0。详情页把原标题临时改为验证值时首次 canonical mutation 得到 owner=`canonical`、revision/mirror=`1/1 clean`；强停冷启动以 `canonical_owner_recovered` 恢复。改回原标题后为 `2/2 clean`，第二次冷启动仍一致。停止进程后用同签名 Debug 变体只读导出，SQLite `quick_check=ok`，canonical 根与 RKStorage fallback 副本标题一致。随后恢复 `codex-laoji-cutover-pretest-20260725` 快照并重新覆盖当前 Preview；常用模拟器回到无 owner 的原始数据，启动理由恢复为 `canonical_projection_ready`，未残留验证标题。
 
+## 账号根线上 cutover 增量
+
+- 目标 18020/18035 已从 `/home/zhong/laoji-service-platform/smart-meeting-ai` 运行，MeetingNote root、occurrence、manual-note、action、question 和 collaboration additive 表均已实例化；`meeting_notes_v2`、`action_items_v2`、`action_items_pull_v2` 等 capability 从外网真实返回 true。
+- 修复了 7 个会议域 v2 客户端错误使用 18035 `laojiApiBase` 的边界；它们现统一使用 18020 `meetingApiBase`。账号根开关默认改为 true，账号上传开关继续为 false。
+- 测试账号保留数据覆盖安装后，启动先报告 account preflight mismatch（旧 Store 1 / repository 0），完成一次 shadow import 后 repository 1/1 一致并切换 `canonical_projection_ready`；没有第二套账号 Store 或主键替换。
+- 真实服务会议进入详情时 action pull `inserted=1`；匿名 editor 把远端 revision 2 更新为 3 后再次进入详情为 `updated=1`，本机负责人变为“第二客户端”。这同时证明账号根 remote identity、canonical action identity 和详情 pull 已接通。
+- 账号录音上传写仍未开启：8030 ASR 未启动，共享服务器 NVIDIA 用户态/内核驱动版本不一致；不以根/action 成功推导资产上传或转写已完成。
+
 ## 当前安装包
 
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
-- 版本：`1.0.0-source-preview`（versionCode 101）
-- 大小：90,447,528 bytes
-- SHA-256：`16d55464447eb07ed2ad2ce0b25a695242aa2633d8ebd97ffdeb0c33b67fed15`
-- 构建时间：`2026-07-25 22:05:30 +0800`
-- 内嵌开关：`localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=true`、`localMeetingDbCanonicalWriteV1=true`、`localMeetingDbAccountRootWriteV1=false`、`localMeetingDbAccountUploadWriteV1=false`
-- 安装状态：本包已在 `emulator-5556` 对恢复后的预试数据保留覆盖安装，`lastUpdateTime=2026-07-25 22:13:07`；冷启动 repository 为 consistent、legacy/repository 为 1/1、tombstone 2 且 mismatch 全零，原始 `OccueneSmoke` 会议记录可见，没有应用 FATAL。当前没有 USB 真机，真机 4/7/1/4 基线复核留待重连。
+- 版本：`1.0.0-source-preview`（versionCode 103）
+- 大小：90,702,684 bytes
+- SHA-256：`1fd6ee81c27a5957d6ab68e38c0fa0dfbe294c7757fd84fe9609203b17b550d0`
+- 内嵌开关：`localMeetingDbV1=true`、`localMeetingDbCanonicalReadV1=true`、`localMeetingDbCanonicalWriteV1=true`、`localMeetingDbAccountRootWriteV1=true`、`localMeetingDbAccountUploadWriteV1=false`
+- 安装状态：本包已在 `emulator-5556` 保留测试账号和数据库覆盖安装；账号根 canonical read、真实 action pull、viewer/editor 创建/撤销和协作者更新回流均完成，没有应用 FATAL、React Native 致命错误或 SQLite 损坏/缺表日志。当前没有 USB 真机。
 
 ## 未决项与停线边界
 
-1. 游客普通包已完成 canonical cutover；这只证明本机游客事实源和回退镜像成立，不等价于部署服务已支持账号字段、幂等、冲突和空值语义。账号根写及上传开关继续默认关闭。
-2. broad canonical flag 不授权账号取得 owner。只有真实账号 create/update/delete/upload、离线重试、冷启动恢复和回滚闭环后，账号根写/上传开关才可进入普通包。
-3. 账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复、服务端成功/失败、跨设备刷新或冲突闭环；服务不可达，账号 Transcript/Summary 也没有真实 Expo SQLite/UI 内容闭环。大数据量性能、真实 mirror I/O 故障和授权 USB 真机 cutover 均未完成。
+1. 游客和账号根普通包已完成 canonical cutover；账号上传写仍独立关闭，不能因根/action 往返成功而抢占 WorkManager/registry 的资产调度权。
+2. 账号根 owner 已由真实 capability 和测试账号启动路径取得。仍需 occurrence、manual note、delete/restore 和非协作 action 的双设备冲突收敛，不能把单待办协作替代全部实体。
+3. 账号 outbox 已能从持久时间重建唤醒，但尚无真实 pending registry/WorkManager 网络请求、进程强杀后的定时恢复和服务端多 RecordingAsset；账号 Transcript/Summary 的长任务恢复、大数据量性能、真实 mirror I/O 故障和授权 USB 真机 cutover 仍未完成。
 4. 本批已通过一台授权真机的无损升级计数，但后续任何 canonical cutover 仍须保持 4 个 MeetingNote、7 个 Transcript segment、1 个 Summary version、4 个 Recording asset 的计数下限且不得清除真机数据。
-5. 线上 MeetingNote v2 契约仍未验证，不得发送探测性 v2 写请求或开启 v2 capability；本批根 outbox 已接旧 API 消费器，但只能在独立实验开关、已通过 preflight 的 canonical owner 和真实授权账号下验证，不得进入普通包。
+5. 线上 MeetingNote v2 schema/capability、账号 root GET/pull 和 action 协作已验证并进入普通 Preview；任何尚未验证的 occurrence/note/upload/correction 写入仍使用各自 capability/outbox，不得由 broad flag 绕过。

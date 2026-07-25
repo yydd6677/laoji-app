@@ -39,11 +39,12 @@
 - 撤销后 capability GET/PUT 返回 410；operation 回放不在持久响应中保存原始 token。
 - overlay 位于 `/home/yydd/桌面/light_plan/server-work/summary`，不属于移动端 Git 提交。同步到目标源码前必须按 README 映射复制，并在完整目标依赖环境执行聚焦合同。
 
-## 当前证据与明确未完成
+## 当前运行证据与明确未完成
 
-- 已通过 `npx tsc --noEmit --pretty false`、`:laoji-native-platform:compileReleaseKotlin`、`git diff --check` 和 overlay 五个 Python 模块的 `python3 -m py_compile`。
-- 最终 Preview v103（`versionName=1.0.0-source-preview`）于 2026-07-26 04:10:31 +08:00 生成，大小 90,702,684 字节，SHA-256 为 `7b5516b51f8387ede3854f24103ba9669c8cd3e0d4b3d6f6dc26e0f3db4f40f3`。
-- `[DEVICE]` 最终 APK 已覆盖安装 `emulator-5556` 并完成冷启动。此前 v24 升级后的 `OccueneSmoke · 录音中断` 仍在会议列表；Android 能把严格共享 URI 解析到 `com.laoji.app/.MainActivity`，伪 token 进入“共享待办”并只显示中文连接错误，不产生假数据。冷启动、返回列表和深链过程未出现 FATAL、React Native 致命错误或 SQLite 损坏/异常日志。
-- overlay 聚焦 pytest 文件已准备，但 sparse overlay 缺完整基线 `app.database`，当前收集失败不是断言失败；不要把它记为合同通过。
-- 18020/18035 未运行，overlay 未同步/部署；没有真实 capability、测试账号所有者、真实链接创建/撤销、第二设备 viewer/editor 往返或 USB 真机证据。
-- 因此本证据只支持“COLLAB-01 移动端与服务端 overlay 纵切已完成、整体部分完成”，不支持“线上协作已可用”或“跨设备已验收”。
+- overlay 先在目标源码隔离候选补齐基线，46 项 action/root/occurrence/manual-note/summary 聚焦合同通过；随后只备份并同步实时哈希为 DIFF/MISSING 的 12 个文件。热修复后的 38 个受控 overlay/测试文件与目标工作区逐文件 SHA-256 一致，备份位于目标工作区外的专用 backups 目录。
+- 目标 18020/18035 已由专用 ownership-check 脚本启动；旧 8020 仍属于另一工作区且未被触碰。`meeting_action_shares`、operation、event 三表已落入目标 `local.db`，64 字符 secret 只进入受限 `.env`，运行 capability 返回 `action_collaboration_v1=true`。
+- 真实测试账号的服务级合同完成 owner create/revoke、匿名 viewer/editor、revision 2 更新、陈旧 revision 412、owner pull 和撤销后 410；公开投影扫描未出现会议标题、Transcript、录音、Summary、我的笔记、来源或 owner identity，目标库只保存 64 位 token hash。
+- 修复了所有会议域 v2 客户端误用 18035 `laojiApiBase` 的服务边界；capability、MeetingNote、occurrence、manual note、action、collaboration 和 speaker correction 现统一使用 18020 `meetingApiBase`。普通 Preview 默认开启账号根 canonical write，账号上传写仍关闭。
+- 最终 Preview v103（`versionName=1.0.0-source-preview`）大小 90,702,684 字节，SHA-256 为 `1fd6ee81c27a5957d6ab68e38c0fa0dfbe294c7757fd84fe9609203b17b550d0`；APK 内配置直接确认 18035/18020 分离和 `localMeetingDbAccountRootWriteV1=true`。
+- `[DEVICE]` APK 已保留数据覆盖安装到 `emulator-5556`。冷启动完成账号 compatibility 投影导入后切到 canonical read；详情真实 action pull 先 `inserted=1`，匿名 editor 把 revision 2 更新为 3 后再次进入详情为 `updated=1`，界面显示“负责人：第二客户端”。App 创建的 viewer 修改返回 403；viewer/editor 均由 App 撤销并由匿名 HTTP 复查为 410。一次撤销遇到网络失败时保留“撤销失败”并在重试后收敛，没有假成功。
+- 当前证据支持“线上单待办协作已可用”和“模拟器所有者 + 匿名第二客户端往返”。它仍不等于两台移动设备、USB 真机或生产 HTTPS 验收；这些边界继续保留，但不再把 COLLAB-01 的主体功能记为未部署。

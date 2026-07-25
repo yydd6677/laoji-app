@@ -54,7 +54,7 @@ function validToken(value: string): string {
 }
 
 function apiBase(): string {
-  return getApiConfig().laojiApiBase.replace(/\/+$/, '');
+  return getApiConfig().meetingApiBase.replace(/\/+$/, '');
 }
 
 export interface MeetingActionShareRemoteReceipt {

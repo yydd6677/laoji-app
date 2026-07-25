@@ -49,8 +49,10 @@ Migration v22 新增三张 canonical 表：
 - Preview：`assemblePreview` 成功，627 tasks；覆盖安装后冷启动无 fatal/React Native/SQLite 异常，数据库升级到 user_version 22 且三张表存在。
 - 模拟器夹具：更多菜单出现“会议问答”；已保存问答与来源摘录可见；点击来源关闭页面并定位到对应 Transcript segment；夹具后恢复原 canonical DB/WAL/SHM 与 RKStorage，再覆盖安装 Preview。
 
-## 未宣称完成
+## 运行证据与剩余边界
 
-- overlay 没有同步或部署到共享服务，18020/18035 没有本轮运行证据。
-- 没有真实模型、账号远端持久化、跨设备或 USB 真机证据。
-- 当前 evidence retrieval 是有界词项召回加邻段扩展；真实模型窗口出现后仍需观察来源质量，再决定默认 flag。
+- QA overlay 已随 38 个受控文件同步到目标工作区，目标 `local.db` 的 thread/turn/citation 三表存在且 `meeting_questions_v1=true`。18020/18035 从目标工作区运行，旧 8020 未参与本次证据。
+- 使用测试账号和两条明确的合成 Transcript evidence 走真实 `qwen3.5:9b`：预算问题在 32.22 秒返回“五十万元 / 王芳”并只引用唯一允许片段；同 request ID 幂等回放到同一 turn；无来源的上海办公室问题在 18.73 秒返回固定拒答且零引用；更换同一 request ID 的问题返回 409。
+- 首次 follow-up 发现服务端会保存模型的全角逗号，却要求下一轮历史回答已为 NFKC，导致服务端拒绝自身上一轮输出。修复后模型回答在持久化前规范化，历史上下文兼容已有未规范化回答；隔离候选聚焦文件 8 项合同通过，热修复后真实两轮问答成功。
+- 本轮模型运行在 CPU，因为共享服务器 NVIDIA 595.84 用户态库与 595.71.05 内核驱动不一致；这解释当前延迟，不把它误判为 QA 逻辑超时。未获授权前不重启共享服务器。
+- 当前证据支持真实模型、账号持久化、引用约束、拒答和 follow-up。仍缺一场真实 final Transcript 从移动端问答页面进入、来源点击回跳、第二台移动设备和 USB 真机；evidence retrieval 的有界词项召回也仍需在真实长会议上观察质量。

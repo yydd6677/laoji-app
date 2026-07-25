@@ -192,7 +192,7 @@ module.exports = () => {
     );
   const localMeetingDbAccountRootWriteV1 = localMeetingDbCanonicalWriteV1
     && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_ROOT_WRITE_V1 ?? 'false').trim().toLowerCase(),
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_ROOT_WRITE_V1 ?? 'true').trim().toLowerCase(),
     );
   const localMeetingDbAccountUploadWriteV1 = localMeetingDbCanonicalWriteV1
     && ['1', 'true', 'yes', 'on'].includes(
