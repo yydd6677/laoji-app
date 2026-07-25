@@ -200,7 +200,12 @@ export async function loadMeetingOccurrenceSyncConflict(
     };
   }
   const target = await repository.transaction(transaction => (
-    transaction.findMeetingByRemoteIdentity(parsed.remote!.meetingRemoteId, null, scopeKey)
+    transaction.findMeetingByRemoteIdentity(
+      parsed.remote!.meetingRemoteId,
+      null,
+      null,
+      scopeKey,
+    )
   ));
   const sameMeeting = target?.id === local.note.id;
   const targetAggregate = target && !sameMeeting ? await repository.get(target.id, scopeKey) : null;

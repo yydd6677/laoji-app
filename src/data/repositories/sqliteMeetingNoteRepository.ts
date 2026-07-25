@@ -19,6 +19,7 @@ import type {
   ActionSyncClaim,
   ActionSyncConflict,
   ActionSyncFailure,
+  AdvanceMeetingRootPullCursorInput,
   ApplySpeakerCorrectionInput,
   ApplySpeakerCorrectionResult,
   ClaimActionSyncOptions,
@@ -53,6 +54,7 @@ import type {
   MeetingRootSyncCompletion,
   MeetingRootSyncConflict,
   MeetingRootSyncFailure,
+  MeetingRootPullState,
   MeetingRootPatch,
   MeetingScopeWriteState,
   MeetingSeriesActionRecord,
@@ -244,6 +246,12 @@ type MeetingRootSyncOutboxRow = SyncOutboxRow & {
   meeting_remote_id: string | null;
   meeting_remote_revision: number | null;
   transport_order: number;
+};
+
+type MeetingRootPullStateRow = {
+  scope_key: string;
+  cursor: string | null;
+  updated_at_ms: number;
 };
 
 type MeetingRootOperationOrderRow = Pick<
@@ -1658,27 +1666,39 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 
   async findMeetingByRemoteIdentity(
     remoteId: string,
+    clientNoteId: string | null,
     clientRequestId: string | null,
     scopeKey: ScopeKey,
   ): Promise<MeetingNote | null> {
     assertScopeKey(scopeKey);
     assertRecordId(remoteId, 'meeting remote ID');
+    if (clientNoteId) assertRecordId(clientNoteId, 'meeting client note ID');
     if (clientRequestId) assertRecordId(clientRequestId, 'meeting client request ID');
     const rows = await this.database.getAllAsync<MeetingRow>(
       `SELECT * FROM meeting_notes
        WHERE scope_key = ? AND (
          remote_id = ? OR (
+           ? IS NOT NULL AND id = ?
+         ) OR (
            ? IS NOT NULL AND client_request_id = ?
            AND entry_point <> 'legacy_store'
          )
        )
-       ORDER BY CASE WHEN remote_id = ? THEN 0 ELSE 1 END, created_at_ms, id
+       ORDER BY CASE
+         WHEN remote_id = ? THEN 0
+         WHEN ? IS NOT NULL AND id = ? THEN 1
+         ELSE 2
+       END, created_at_ms, id
        LIMIT 2`,
       scopeKey,
       remoteId,
+      clientNoteId,
+      clientNoteId,
       clientRequestId,
       clientRequestId,
       remoteId,
+      clientNoteId,
+      clientNoteId,
     );
     if (rows.length > 1 && rows[0].id !== rows[1].id) {
       throw new Error('meeting remote snapshot identity is ambiguous');
@@ -2306,19 +2326,26 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     const mode = note.mode ?? null;
     const clientRequestId = note.clientRequestId?.trim() || null;
     const recordedAtMs = note.recordedAtMs ?? null;
+    const remoteRevision = note.remoteRevision ?? null;
+    const deletedAtMs = note.deletedAtMs ?? null;
     assertNullableBoundedText(description, 100_000, 'meeting description');
     assertMeetingParticipants(participants);
     assertNullableBoundedText(location, 2_000, 'meeting location');
     assertMeetingMode(mode);
     if (clientRequestId) assertRecordId(clientRequestId, 'meeting client request ID');
     assertOptionalNonNegativeInteger(recordedAtMs, 'meeting recorded time');
+    assertOptionalNonNegativeInteger(remoteRevision, 'meeting remote revision');
+    assertOptionalNonNegativeInteger(deletedAtMs, 'meeting deletion time');
+    if (remoteRevision !== null && remoteRevision < 1) {
+      throw new Error('meeting remote revision is invalid');
+    }
     await this.database.runAsync(
       `INSERT INTO meeting_notes (
          id, scope_key, remote_id, legacy_source_id, origin, entry_point, title,
          description, participants_json, location, mode, client_request_id, recorded_at_ms, lifecycle,
          started_at_ms, ended_at_ms, current_summary_version_id, remote_revision,
          sync_state, created_at_ms, updated_at_ms, deleted_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
       note.id,
       note.scopeKey,
       note.remoteId ?? null,
@@ -2335,9 +2362,11 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       note.lifecycle,
       note.startedAtMs,
       note.endedAtMs,
+      remoteRevision,
       note.syncState ?? (note.scopeKey === 'guest' ? 'local' : 'pending'),
       note.createdAtMs,
       note.createdAtMs,
+      deletedAtMs,
     );
     this.touchedMeetingIds.add(note.id);
   }
@@ -3843,6 +3872,60 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       lastErrorCode: null,
       updatedAtMs: 0,
     };
+  }
+
+  async getMeetingRootPullState(scopeKey: ScopeKey): Promise<MeetingRootPullState | null> {
+    assertScopeKey(scopeKey);
+    if (scopeKey === 'guest') return null;
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<MeetingRootPullStateRow>(
+      'SELECT * FROM meeting_root_pull_state WHERE scope_key = ?',
+      scopeKey,
+    );
+    return row ? {
+      scopeKey: row.scope_key as ScopeKey,
+      cursor: row.cursor,
+      updatedAtMs: row.updated_at_ms,
+    } : null;
+  }
+
+  async advanceMeetingRootPullCursor(
+    input: AdvanceMeetingRootPullCursorInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') throw new Error('guest meeting cannot pull remote roots');
+    assertActionPullCursor(input.expectedCursor, 'meeting root expected cursor');
+    assertActionPullCursor(input.nextCursor, 'meeting root next cursor');
+    assertNonNegativeInteger(input.pulledAtMs, 'meeting root pull time');
+    return withMeetingDatabaseTransaction(async database => {
+      const state = await database.getFirstAsync<MeetingRootPullStateRow>(
+        'SELECT * FROM meeting_root_pull_state WHERE scope_key = ?',
+        input.scopeKey,
+      );
+      if (state) {
+        if (state.cursor !== input.expectedCursor) return false;
+        const advanced = await database.runAsync(
+          `UPDATE meeting_root_pull_state SET cursor = ?, updated_at_ms = ?
+           WHERE scope_key = ? AND cursor IS ?`,
+          input.nextCursor,
+          input.pulledAtMs,
+          input.scopeKey,
+          input.expectedCursor,
+        );
+        if (advanced.changes !== 1) throw new Error('meeting root pull cursor changed concurrently');
+        return true;
+      }
+      if (input.expectedCursor !== null) return false;
+      const created = await database.runAsync(
+        `INSERT OR IGNORE INTO meeting_root_pull_state (
+           scope_key, cursor, updated_at_ms
+         ) VALUES (?, ?, ?)`,
+        input.scopeKey,
+        input.nextCursor,
+        input.pulledAtMs,
+      );
+      return created.changes === 1;
+    });
   }
 
   async claimMeetingRootSyncOperations(

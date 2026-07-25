@@ -76,6 +76,7 @@ export interface NewMeetingNote {
   id: string;
   scopeKey: ScopeKey;
   remoteId?: string | null;
+  remoteRevision?: number | null;
   legacySourceId?: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint;
@@ -90,6 +91,7 @@ export interface NewMeetingNote {
   startedAtMs: number | null;
   endedAtMs: number | null;
   syncState?: MeetingNote['syncState'];
+  deletedAtMs?: number | null;
   createdAtMs: number;
 }
 
@@ -498,6 +500,19 @@ export interface MeetingRootSyncConflict {
   createdAtMs: number;
 }
 
+export interface MeetingRootPullState {
+  scopeKey: ScopeKey;
+  cursor: string | null;
+  updatedAtMs: number;
+}
+
+export interface AdvanceMeetingRootPullCursorInput {
+  scopeKey: ScopeKey;
+  expectedCursor: string | null;
+  nextCursor: string | null;
+  pulledAtMs: number;
+}
+
 export interface ActionSyncClaim {
   scopeKey: ScopeKey;
   meetingId: string;
@@ -751,6 +766,7 @@ export interface MeetingTransaction {
   findMeetingByNativeSessionId(sessionId: string, scopeKey: ScopeKey): Promise<MeetingNote | null>;
   findMeetingByRemoteIdentity(
     remoteId: string,
+    clientNoteId: string | null,
     clientRequestId: string | null,
     scopeKey: ScopeKey,
   ): Promise<MeetingNote | null>;
@@ -939,6 +955,8 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
   ): Promise<readonly MeetingSeriesCarryImportRecord[]>;
   getScopeWriteState(scopeKey: ScopeKey): Promise<MeetingScopeWriteState>;
+  getMeetingRootPullState(scopeKey: ScopeKey): Promise<MeetingRootPullState | null>;
+  advanceMeetingRootPullCursor(input: AdvanceMeetingRootPullCursorInput): Promise<boolean>;
   claimMeetingRootSyncOperations(
     scopeKey: ScopeKey,
     options: ClaimMeetingRootSyncOptions,

@@ -1,7 +1,9 @@
 import type {
   ClientIdFactory,
   MeetingCaptureMode,
+  MeetingEntryPoint,
   MeetingLifecycle,
+  MeetingOrigin,
   MeetingProcessingStatuses,
   ProcessingStage,
   ScopeKey,
@@ -20,7 +22,13 @@ import type {
 
 export interface AccountMeetingRemoteSnapshot {
   remoteId: string;
+  clientNoteId: string | null;
   clientRequestId: string | null;
+  remoteRevision: number | null;
+  origin: MeetingOrigin | null;
+  entryPoint: MeetingEntryPoint | null;
+  remoteLifecycle: 'active' | 'deleted' | null;
+  deletedAtMs: number | null;
   title: string;
   description: string | null;
   participants: readonly string[];
@@ -47,6 +55,9 @@ export interface MergeAccountMeetingRemoteSnapshotResult {
   protectedLocal: number;
   tombstonesPreserved: number;
   attachedRemoteIdentities: number;
+  remoteTombstonesApplied: number;
+  remoteRestoresApplied: number;
+  ignoredStale: number;
   canonicalRevision: number | null;
 }
 
@@ -84,6 +95,7 @@ function nonNegativeTime(value: number | null, field: string): number | null {
 function normalizeSnapshot(value: AccountMeetingRemoteSnapshot): AccountMeetingRemoteSnapshot {
   const remoteId = recordId(value.remoteId, 'meeting remote ID');
   if (!remoteId) throw new Error('meeting remote ID is missing');
+  const clientNoteId = recordId(value.clientNoteId, 'meeting client note ID');
   const clientRequestId = recordId(value.clientRequestId, 'meeting client request ID');
   const title = value.title.trim();
   if (title.length > 100_000 || title.includes('\u0000')) throw new Error('meeting title is invalid');
@@ -97,16 +109,34 @@ function normalizeSnapshot(value: AccountMeetingRemoteSnapshot): AccountMeetingR
   }
   const createdAtMs = nonNegativeTime(value.createdAtMs, 'meeting creation time');
   const updatedAtMs = nonNegativeTime(value.updatedAtMs, 'meeting update time');
+  const remoteRevision = nonNegativeTime(value.remoteRevision, 'meeting remote revision');
+  if (remoteRevision !== null && remoteRevision < 1) {
+    throw new Error('meeting remote revision is invalid');
+  }
+  const deletedAtMs = nonNegativeTime(value.deletedAtMs, 'meeting deletion time');
+  if ((value.remoteLifecycle === 'deleted') !== (deletedAtMs !== null)) {
+    throw new Error('meeting remote deletion state is invalid');
+  }
   if (createdAtMs === null || updatedAtMs === null) throw new Error('meeting remote clock is missing');
+  const status = value.status.trim().toLowerCase();
+  if (!status || status.length > 160 || /[\u0000-\u001f\u007f]/.test(status)) {
+    throw new Error('meeting remote status is invalid');
+  }
   return {
     remoteId,
+    clientNoteId,
     clientRequestId,
+    remoteRevision,
+    origin: value.origin,
+    entryPoint: value.entryPoint,
+    remoteLifecycle: value.remoteLifecycle,
+    deletedAtMs,
     title,
     description: nullableText(value.description, 100_000, 'meeting description'),
     participants: [...new Set(participants)],
     location: nullableText(value.location, 2_000, 'meeting location'),
     mode,
-    status: value.status.trim().toLowerCase(),
+    status,
     recordedAtMs: nonNegativeTime(value.recordedAtMs, 'meeting recorded time'),
     createdAtMs,
     updatedAtMs,
@@ -120,6 +150,10 @@ function lifecycle(status: string): MeetingLifecycle {
   if (status === 'recording' || status === 'paused' || status === 'processing') return 'active';
   if (['completed', 'ended', 'done', 'processed', 'failed'].includes(status)) return 'ended';
   return 'draft';
+}
+
+function snapshotLifecycle(snapshot: AccountMeetingRemoteSnapshot): MeetingLifecycle {
+  return snapshot.remoteLifecycle === 'deleted' ? 'deleted' : lifecycle(snapshot.status);
 }
 
 function captureStatus(snapshot: AccountMeetingRemoteSnapshot): MeetingProcessingStatuses['capture'] {
@@ -154,7 +188,14 @@ function pendingCreateMatches(
   return current.title === snapshot.title
     && current.description === snapshot.description
     && arraysEqual(current.participants, snapshot.participants)
-    && (current.mode ?? 'realtime') === (snapshot.mode ?? 'realtime');
+    && current.location === snapshot.location
+    && (current.mode ?? 'realtime') === (snapshot.mode ?? 'realtime')
+    && current.recordedAtMs === snapshot.recordedAtMs
+    && (snapshot.origin === null || current.origin === snapshot.origin)
+    && (
+      snapshot.clientRequestId === null
+      || current.clientRequestId === snapshot.clientRequestId
+    );
 }
 
 function fieldPatch(
@@ -162,7 +203,7 @@ function fieldPatch(
   snapshot: AccountMeetingRemoteSnapshot,
   updatedAtMs: number,
 ): MeetingRootPatch | null {
-  const nextLifecycle = lifecycle(snapshot.status);
+  const nextLifecycle = snapshotLifecycle(snapshot);
   const patch: MeetingRootPatch = { updatedAtMs };
   let changed = false;
   const set = <Key extends keyof MeetingRootPatch>(key: Key, value: MeetingRootPatch[Key]) => {
@@ -170,6 +211,17 @@ function fieldPatch(
     changed = true;
   };
   if (current.remoteId !== snapshot.remoteId) set('remoteId', snapshot.remoteId);
+  if (snapshot.remoteRevision !== null && current.remoteRevision !== snapshot.remoteRevision) {
+    set('remoteRevision', snapshot.remoteRevision);
+  }
+  if (snapshot.origin !== null && current.origin !== snapshot.origin) set('origin', snapshot.origin);
+  if (snapshot.entryPoint !== null && current.entryPoint !== snapshot.entryPoint) {
+    set('entryPoint', snapshot.entryPoint);
+  }
+  if (
+    snapshot.clientRequestId !== null
+    && current.clientRequestId !== snapshot.clientRequestId
+  ) set('clientRequestId', snapshot.clientRequestId);
   if (current.title !== snapshot.title) set('title', snapshot.title);
   if (current.description !== snapshot.description) set('description', snapshot.description);
   if (!arraysEqual(current.participants, snapshot.participants)) set('participants', snapshot.participants);
@@ -177,6 +229,9 @@ function fieldPatch(
   if (current.mode !== snapshot.mode) set('mode', snapshot.mode);
   if (current.recordedAtMs !== snapshot.recordedAtMs) set('recordedAtMs', snapshot.recordedAtMs);
   if (current.lifecycle !== nextLifecycle) set('lifecycle', nextLifecycle);
+  if (current.deletedAtMs !== snapshot.deletedAtMs) set('deletedAtMs', snapshot.deletedAtMs);
+  const nextSyncState = nextLifecycle === 'deleted' ? 'deleted' : 'synced';
+  if (current.syncState !== nextSyncState) set('syncState', nextSyncState);
   if (nextLifecycle === 'active' && current.startedAtMs === null) {
     set('startedAtMs', snapshot.createdAtMs);
   }
@@ -184,6 +239,28 @@ function fieldPatch(
     set('endedAtMs', snapshot.updatedAtMs);
   }
   return changed ? patch : null;
+}
+
+function remoteRootFieldsMatch(
+  current: Awaited<ReturnType<MeetingTransaction['getMeeting']>> & {},
+  snapshot: AccountMeetingRemoteSnapshot,
+): boolean {
+  return current.remoteId === snapshot.remoteId
+    && (snapshot.remoteRevision === null || current.remoteRevision === snapshot.remoteRevision)
+    && (snapshot.origin === null || current.origin === snapshot.origin)
+    && (snapshot.entryPoint === null || current.entryPoint === snapshot.entryPoint)
+    && (
+      snapshot.clientRequestId === null
+      || current.clientRequestId === snapshot.clientRequestId
+    )
+    && current.title === snapshot.title
+    && current.description === snapshot.description
+    && arraysEqual(current.participants, snapshot.participants)
+    && current.location === snapshot.location
+    && (current.mode ?? 'realtime') === (snapshot.mode ?? 'realtime')
+    && current.recordedAtMs === snapshot.recordedAtMs
+    && current.lifecycle === snapshotLifecycle(snapshot)
+    && (current.deletedAtMs === null) === (snapshot.deletedAtMs === null);
 }
 
 async function updateRemoteStages(
@@ -247,6 +324,9 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
     let protectedLocal = 0;
     let tombstonesPreserved = 0;
     let attachedRemoteIdentities = 0;
+    let remoteTombstonesApplied = 0;
+    let remoteRestoresApplied = 0;
+    let ignoredStale = 0;
     let canonicalRevision: number | null = null;
 
     await this.repository.transaction(async transaction => {
@@ -254,18 +334,19 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
       for (const snapshot of snapshots) {
         let current = await transaction.findMeetingByRemoteIdentity(
           snapshot.remoteId,
+          snapshot.clientNoteId,
           snapshot.clientRequestId,
           input.scopeKey,
         );
         if (!current) {
           const meetingId = this.idFactory.create();
-          const meetingLifecycle = lifecycle(snapshot.status);
+          const meetingLifecycle = snapshotLifecycle(snapshot);
           await transaction.insertMeeting({
             id: meetingId,
             scopeKey: input.scopeKey,
             remoteId: snapshot.remoteId,
-            origin: 'ad_hoc',
-            entryPoint: 'meeting_tab',
+            origin: snapshot.origin ?? 'ad_hoc',
+            entryPoint: snapshot.entryPoint ?? 'meeting_tab',
             title: snapshot.title,
             description: snapshot.description,
             participants: snapshot.participants,
@@ -274,9 +355,13 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
             clientRequestId: snapshot.clientRequestId,
             recordedAtMs: snapshot.recordedAtMs,
             lifecycle: meetingLifecycle,
-            startedAtMs: meetingLifecycle === 'draft' ? null : snapshot.createdAtMs,
+            startedAtMs: meetingLifecycle === 'draft' || meetingLifecycle === 'deleted'
+              ? null
+              : snapshot.createdAtMs,
             endedAtMs: meetingLifecycle === 'ended' ? snapshot.updatedAtMs : null,
-            syncState: 'synced',
+            remoteRevision: snapshot.remoteRevision,
+            syncState: meetingLifecycle === 'deleted' ? 'deleted' : 'synced',
+            deletedAtMs: snapshot.deletedAtMs,
             createdAtMs: snapshot.createdAtMs,
           });
           await transaction.saveManualNote({
@@ -321,11 +406,20 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
             });
           }
           created += 1;
+          if (meetingLifecycle === 'deleted') remoteTombstonesApplied += 1;
           changed = true;
           continue;
         }
-        if (current.lifecycle === 'deleted') {
-          tombstonesPreserved += 1;
+        if (
+          snapshot.remoteRevision !== null
+          && current.remoteRevision !== null
+          && snapshot.remoteRevision < current.remoteRevision
+        ) {
+          ignoredStale += 1;
+          continue;
+        }
+        if (current.remoteRevision !== null && snapshot.remoteRevision === null) {
+          protectedLocal += 1;
           continue;
         }
         const outstanding = await transaction.hasOutstandingMeetingRootSync(
@@ -336,27 +430,49 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
           if (current.remoteId === null && pendingCreateMatches(current, snapshot)) {
             await transaction.updateMeeting(current.id, input.scopeKey, {
               remoteId: snapshot.remoteId,
+              remoteRevision: snapshot.remoteRevision,
               updatedAtMs: Math.max(current.updatedAtMs, snapshot.updatedAtMs),
             });
-            current = { ...current, remoteId: snapshot.remoteId };
+            current = {
+              ...current,
+              remoteId: snapshot.remoteId,
+              remoteRevision: snapshot.remoteRevision,
+            };
             attachedRemoteIdentities += 1;
             changed = true;
           }
           protectedLocal += 1;
           continue;
         }
+        if (current.lifecycle === 'deleted' && snapshot.remoteLifecycle === null) {
+          tombstonesPreserved += 1;
+          continue;
+        }
+        if (
+          snapshot.remoteRevision !== null
+          && current.remoteRevision === snapshot.remoteRevision
+          && !remoteRootFieldsMatch(current, snapshot)
+        ) throw new Error('meeting remote payload changed without revision');
         const updatedAtMs = Math.max(current.updatedAtMs, snapshot.updatedAtMs);
         const patch = fieldPatch(current, snapshot, updatedAtMs);
-        const stagesChanged = await updateRemoteStages(
-          transaction,
-          current.id,
-          input.scopeKey,
-          snapshot,
-          updatedAtMs,
-        );
+        const nextLifecycle = snapshotLifecycle(snapshot);
+        if (current.lifecycle !== 'deleted' && nextLifecycle === 'deleted') {
+          remoteTombstonesApplied += 1;
+        } else if (current.lifecycle === 'deleted' && nextLifecycle !== 'deleted') {
+          remoteRestoresApplied += 1;
+        }
+        const stagesChanged = nextLifecycle === 'deleted'
+          ? false
+          : await updateRemoteStages(
+            transaction,
+            current.id,
+            input.scopeKey,
+            snapshot,
+            updatedAtMs,
+          );
         const primary = await transaction.getPrimaryRecording(current.id, input.scopeKey);
         let recordingChanged = false;
-        if (!primary && snapshot.audioAvailable) {
+        if (nextLifecycle !== 'deleted' && !primary && snapshot.audioAvailable) {
           await transaction.saveRecordingAsset({
             id: this.idFactory.create(),
             meetingId: current.id,
@@ -395,6 +511,9 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
       protectedLocal,
       tombstonesPreserved,
       attachedRemoteIdentities,
+      remoteTombstonesApplied,
+      remoteRestoresApplied,
+      ignoredStale,
       canonicalRevision,
     };
   }

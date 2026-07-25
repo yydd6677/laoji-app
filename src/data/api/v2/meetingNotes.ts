@@ -48,14 +48,19 @@ function nullableInteger(value: unknown, label: string): number | null {
   return value === null ? null : safeInteger(value, label);
 }
 
-function serverTime(value: unknown, label: string): number {
-  if (
-    typeof value !== 'string'
-    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(value)
-  ) throw new Error(`${label}无效`);
-  const parsed = Date.parse(value);
+function serverTimeMicros(value: unknown, label: string): number {
+  if (typeof value !== 'string') throw new Error(`${label}无效`);
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/.exec(value);
+  if (!match) throw new Error(`${label}无效`);
+  const secondsMs = Date.parse(`${match[1]}Z`);
+  const fractionalMicros = Number((match[2] ?? '').padEnd(6, '0') || '0');
+  const parsed = secondsMs * 1_000 + fractionalMicros;
   if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`${label}无效`);
   return parsed;
+}
+
+function serverTime(value: unknown, label: string): number {
+  return Math.floor(serverTimeMicros(value, label) / 1_000);
 }
 
 function nullableServerTime(value: unknown, label: string): number | null {
@@ -343,6 +348,109 @@ export async function getMeetingNoteV2(input: {
     },
   );
   return readMeetingResponse(response, input.accessToken, { remoteId });
+}
+
+function strictCursor(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error('会议记录同步游标无效');
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    throw new Error('会议记录同步游标无效');
+  }
+  return normalized;
+}
+
+export interface MeetingNoteV2Page {
+  items: readonly RemoteMeetingNoteV2[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export async function listMeetingNotesV2(input: {
+  accessToken: string;
+  cursor: string | null;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<MeetingNoteV2Page> {
+  const cursor = strictCursor(input.cursor);
+  const limit = input.limit ?? 100;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error('会议记录拉取数量无效');
+  }
+  const base = getApiConfig().laojiApiBase.replace(/\/+$/, '');
+  const query = [
+    `limit=${limit}`,
+    ...(cursor ? [`cursor=${encodeURIComponent(cursor)}`] : []),
+  ].join('&');
+  const response = await fetchWithTimeout(`${base}/api/laoji/v2/meeting-notes?${query}`, {
+    signal: input.signal,
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${input.accessToken}`,
+    },
+  });
+  if (!response.ok) {
+    throw await readResponseError('会议记录拉取失败', response, {
+      unauthorizedToken: input.accessToken,
+    });
+  }
+  const data = await readResponseData(response);
+  if (!isRecord(data) || data.schema_version !== 2 || !Array.isArray(data.items)) {
+    throw new MeetingNoteResponseContractError('会议记录拉取响应格式无效');
+  }
+  if (data.items.length > limit) {
+    throw new MeetingNoteResponseContractError('会议记录拉取响应超出数量限制');
+  }
+  let items: readonly RemoteMeetingNoteV2[];
+  let orderKeys: readonly { updatedAtMicros: number; remoteId: string }[];
+  try {
+    items = data.items.map(item => parseMeetingNoteV2(item));
+    orderKeys = data.items.map((item, index) => {
+      if (!isRecord(item)) throw new Error('会议记录拉取响应包含无效条目');
+      return {
+        updatedAtMicros: serverTimeMicros(item.updated_at, '会议云端更新时间'),
+        remoteId: items[index].remoteId,
+      };
+    });
+  } catch (error) {
+    throw new MeetingNoteResponseContractError(
+      error instanceof Error ? error.message : '会议记录拉取响应包含无效条目',
+    );
+  }
+  if (
+    new Set(items.map(item => item.remoteId)).size !== items.length
+    || new Set(items.map(item => item.clientNoteId)).size !== items.length
+  ) throw new MeetingNoteResponseContractError('会议记录拉取响应包含重复标识');
+  for (let index = 1; index < orderKeys.length; index += 1) {
+    const previous = orderKeys[index - 1];
+    const current = orderKeys[index];
+    if (
+      previous.updatedAtMicros > current.updatedAtMicros
+      || (
+        previous.updatedAtMicros === current.updatedAtMicros
+        && previous.remoteId >= current.remoteId
+      )
+    ) throw new MeetingNoteResponseContractError('会议记录拉取响应顺序无效');
+  }
+  if (typeof data.has_more !== 'boolean') {
+    throw new MeetingNoteResponseContractError('会议记录拉取分页状态无效');
+  }
+  let nextCursor: string | null;
+  try {
+    nextCursor = strictCursor(data.next_cursor);
+  } catch {
+    throw new MeetingNoteResponseContractError('会议记录拉取游标无效');
+  }
+  if (items.length > 0 && (nextCursor === null || nextCursor === cursor)) {
+    throw new MeetingNoteResponseContractError('会议记录拉取游标未向前推进');
+  }
+  if (items.length === 0 && nextCursor !== cursor) {
+    throw new MeetingNoteResponseContractError('会议记录拉取空页游标发生变化');
+  }
+  if (data.has_more && items.length === 0) {
+    throw new MeetingNoteResponseContractError('会议记录拉取分页缺少条目');
+  }
+  return { items, nextCursor, hasMore: data.has_more };
 }
 
 export async function updateMeetingNoteV2(input: {

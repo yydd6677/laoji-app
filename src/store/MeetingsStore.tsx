@@ -99,6 +99,7 @@ import {
   type MeetingAudioUploadEvidence,
 } from '../application/meeting/reconcileMeetingAudioUpload';
 import { drainMeetingRootSync } from '../services/meetingRootSync';
+import { pullMeetingRootsV2 } from '../services/meetingRootPull';
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
 
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
@@ -406,7 +407,13 @@ function serverToCanonicalSnapshot(m: ApiMeeting): AccountMeetingRemoteSnapshot 
   }
   return {
     remoteId: m.id,
+    clientNoteId: null,
     clientRequestId: m.client_request_id?.trim() || null,
+    remoteRevision: null,
+    origin: null,
+    entryPoint: null,
+    remoteLifecycle: null,
+    deletedAtMs: null,
     title: m.title,
     description: m.description ?? null,
     participants: m.participants ?? [],
@@ -1320,6 +1327,55 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         && isScopeKey(scope)
         && (await sqliteMeetingNoteRepository.getScopeWriteState(scope)).writeOwner === 'canonical';
       if (!canonicalAccountRefresh) deactivateCanonicalRead();
+      if (canonicalAccountRefresh && isScopeKey(scope)) {
+        canonicalStoreMutationDepthRef.current += 1;
+        try {
+          const pulled = await pullMeetingRootsV2({
+            scopeKey: scope,
+            accessToken,
+            isCurrent: () => (
+              generationRef.current === requestGeneration
+              && activeScopeRef.current === scope
+            ),
+          });
+          if (pulled.outcome === 'stale') return;
+          if (pulled.outcome === 'pulled' || pulled.outcome === 'page_limit') {
+            const owned = await loadCanonicalOwnedScope();
+            if (!owned) throw new Error('会议下行同步后的本机数据所有权异常，请刷新后重试。');
+            if (!adoptCanonicalOwnedProjection(owned, requestGeneration)) return;
+            if (pulled.protectedLocal > 0) requestMeetingRootSync(scope);
+            diagnosticAudit('meeting_account_remote_refresh', {
+              status: `v2_${pulled.outcome}`,
+              pages: pulled.pages,
+              remote: pulled.items,
+              created: pulled.created,
+              updated: pulled.updated,
+              protected_local: pulled.protectedLocal,
+              identities_attached: pulled.attachedRemoteIdentities,
+              tombstones: pulled.remoteTombstonesApplied,
+              restores: pulled.remoteRestoresApplied,
+              ignored_stale: pulled.ignoredStale,
+              occurrence_conflicts: pulled.occurrenceConflicts,
+              occurrence_deferred: pulled.occurrenceDeferred,
+              canonical_revision: owned.canonicalRevision,
+            });
+            setError(null);
+            return;
+          }
+          if (pulled.hadState) {
+            throw new Error(
+              pulled.outcome === 'disabled'
+                ? '当前会议服务已暂停新版同步，请稍后重试。'
+                : '会议同步服务暂时不可用，请稍后重试。',
+            );
+          }
+        } finally {
+          canonicalStoreMutationDepthRef.current = Math.max(
+            0,
+            canonicalStoreMutationDepthRef.current - 1,
+          );
+        }
+      }
       const data = await fetchAllMeetings(accessToken);
       if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
       if (canonicalAccountRefresh && isScopeKey(scope)) {

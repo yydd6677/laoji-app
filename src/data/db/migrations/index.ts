@@ -14,6 +14,7 @@ import { seriesCarryImportsV13 } from './0013SeriesCarryImports';
 import { actionPullCursorV14 } from './0014ActionPullCursor';
 import { occurrenceLinkSyncV15 } from './0015OccurrenceLinkSync';
 import { occurrenceDetachedHistoryV16 } from './0016OccurrenceDetachedHistory';
+import { meetingRootPullCursorV17 } from './0017MeetingRootPullCursor';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -33,6 +34,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   actionPullCursorV14,
   occurrenceLinkSyncV15,
   occurrenceDetachedHistoryV16,
+  meetingRootPullCursorV17,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -51,4 +53,5 @@ export { SERIES_CARRY_IMPORTS_V13_SQL } from './0013SeriesCarryImports';
 export { ACTION_PULL_CURSOR_V14_SQL } from './0014ActionPullCursor';
 export { OCCURRENCE_LINK_SYNC_V15_SQL } from './0015OccurrenceLinkSync';
 export { OCCURRENCE_DETACHED_HISTORY_V16_SQL } from './0016OccurrenceDetachedHistory';
+export { MEETING_ROOT_PULL_CURSOR_V17_SQL } from './0017MeetingRootPullCursor';
 export type { MeetingDatabaseMigration } from './types';
