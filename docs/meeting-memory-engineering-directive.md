@@ -23,8 +23,8 @@
 
 | 能力面 | 实现判断 | 当前证据边界 | 后续只做什么 |
 |---|---|---|---|
-| 本机数据平面、作用域、迁移、独立处理阶段 | 本机闭环；游客、账号根、RecordingAsset 上传、逐资产转写及独立 Summary 均已形成普通包/运行纵切 | 源码、TypeScript/Kotlin、v26 迁移窄合同、保留数据模拟器、线上账号根/action pull、真实 upload/transcript/Summary job | 批次 B 只续 GPU 恢复和第二设备；不重建第二套数据库或状态机 |
-| 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通 | 合成数据模拟器；运行目标服务上两个独立账号会话已完成 occurrence/note/root delete/restore 与双 RecordingAsset 往返 | 只补恢复 secondary 的 App 上传/下载、真实迁移恢复和第二台移动设备抽查 |
+| 本机数据平面、作用域、迁移、独立处理阶段 | 本机闭环；游客、账号根、RecordingAsset 上传、逐资产转写及独立 Summary 均已形成普通包/运行纵切 | 源码、TypeScript/Kotlin、v26 迁移窄合同、保留数据模拟器、线上账号根/action pull、真实 upload/transcript/Summary job；当前健康接口模型就绪 | 批次 B 只续自动任务候选复核和第二设备；不重建第二套数据库或状态机 |
+| 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通 | 合成数据模拟器；运行目标服务上两个独立账号会话已完成 occurrence/note/root delete/restore 与双 RecordingAsset 往返；通用上传链已覆盖 `secondary + recovered` | 只补恢复 secondary 的特定 App 运行样本、真实迁移恢复和第二台移动设备抽查 |
 | 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；v31 保留数据模拟器升级与 Preview 冷启动；reprocess 服务端仅持久 overlay，当前端口未监听 | GPU/服务恢复后补 reprocessed 真实任务和自动转写；候选版一次验收 |
 | 结构化整理、版本、引用、行动项 | 本机闭环；服务端独立 Summary task 和 additive 同步框架运行 | 独立 Summary 27.1 秒成功、schema v2、模块入口及重启后 durable result；账号 action pull/协作已验证 | 只续非平凡 Summary 引用品质、线上版本列表和非协作 action 冲突 |
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音视频导入、已有会议多资产加入、Marker/附件分享、可撤销文字链接、本机 WAV 与非 WAV 异步片段、软删除/恢复及双端到期物理清理纵切完成 | 视频/双录音模拟器、真实 MP4 上传/抽取/逐资产转写、v29/v30 保留数据模拟器、18020 共享/清理/片段任务；M4A/MP4 异步抽取及原生 WAV 校验 | 导入只续格式矩阵/第二设备/USB；片段只续跨设备目录与真机；分享/删除只续跨设备与真机抽查 |
@@ -56,7 +56,7 @@
 | 批次 | 目标产物 | 纳入内容 | 不纳入内容 |
 |---|---|---|---|
 | A：关闭本机架构尾项（已完成） | 普通 Preview 对游客 scope 稳定使用 canonical 主路径 | v19 冲突录音恢复、多录音选择与分享；活动写入口审计；默认包 cutover、覆盖升级、首次 mutation、镜像与冷启动恢复 | 不做全格式、长录音、全故障矩阵 |
-| B：启用账号线上闭环（功能纵切完成，证据收口中） | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 18020/18035、账号根、实体双会话、action 协作、RecordingAsset、per-asset provenance/job、独立 Summary 与 speaker correction 已完成；续 GPU 恢复和实体跨物理设备抽查 | 不重复已经通过的本机 UI 冒烟 |
+| B：启用账号线上闭环（功能纵切完成，证据收口中） | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 18020/18035、账号根、实体双会话、action 协作、RecordingAsset、per-asset provenance/job、独立 Summary 与 speaker correction 已完成；续自动任务候选复核和实体跨物理设备抽查 | 不重复已经通过的本机 UI 冒烟 |
 | C：补齐尚缺功能量（接近收口） | P0/P1 尾项和五个 P2 纵切均有真实入口、持久化与失败状态 | 视频导入/已有会议加入、Marker/附件分层分享、可撤销分享链接、QA/轻协作/账号标签目录、账号附件同步与照片多模态源码、非 WAV 异步片段、整理主题聚合与 reprocessed Transcript 移动端/持久 overlay 纵切已完成；继续 attachment/reprocess 线上运行 | 不先建设复杂 Agent、团队权限树或完整编辑器 |
 | D：一次候选版收口 | 一个默认能力配置的可安装候选包 | 数据升级、录制→保存→播放、日程绑定、账号同步、默认隐私和核心恢复任务 | 不把穷举 ROM/格式/时长组合当作目标完成前置条件 |
 
@@ -71,7 +71,19 @@
 5. 严格故障注入只保留在会丢录音、丢人工内容、串账号、错误删除或越权分享的路径；其余矩阵移到候选版后或真实缺陷触发时执行。
 6. 外部服务或 USB 暂不可用时，继续完成不依赖它的功能；将线上/真机任务合并到一次可用窗口，不用等待替代开发。
 
-### 0.6 旧增量状态记录
+### 0.6 当前完成审计
+
+| 完成条件 | 当前证据 | 判断 |
+|---|---|---|
+| 第 4 节无 `进行中/部分完成/未开始` | 除 ATT-01 外均已达到本机、源码或线上纵切；ATT-01 的移动端、账号同步和多模态 overlay 已实现，但运行服务没有 `meeting_attachments_v1` 且图片能力为 false | **未满足**；这是当前唯一仍带实现状态阻塞的优化项 |
+| 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
+| 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 18020 当前健康、模型就绪，root/action/note/occurrence/RecordingAsset/QA/协作/片段/讲话人 capability 在线；既有账号与双资产证据仍有效；附件 schema 未部署 | **部分满足**；不能由其他 capability 推导附件完成 |
+| V3 七条关键任务 | 第 1–6 条有分散的稳定版升级、录制、日程冲突、人工保护、来源和隐私证据；第 7 条及整包同版本集中复核仍缺附件运行、第二设备和当前候选闭环 | **未满足候选版完成口径** |
+| 默认候选 APK、回溯提交与稳定标签 | 当前默认 Preview 可安装且保留数据冷启动正常，对应照片多模态基线 `0594d42`；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足** |
+
+源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
+
+### 0.7 旧增量状态记录
 
 下面的长记录保留用于查找已经作出的事务和协议决策，但不再作为进度入口；与本节或第 4 节状态表冲突时，以较新的对账结论为准。
 
@@ -195,8 +207,8 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 |---|---|---|---|
 | ARC-01 | 事务型本地会议数据层与可恢复迁移 | 本机/账号根/录音资产线上闭环 | 账号离线长期重试与第二设备；保留兼容镜像用于旧包回滚 |
 | SRC-01 | 日程、临时录音、文件导入统一为 `MeetingNote` | 本机与账号音视频、多录音、per-asset Transcript、账号附件源码、非 WAV 派生片段纵切闭环 | 账号附件线上/第二设备抽查 |
-| PROC-01 | 五类处理独立状态与独立重试 | 本机闭环；RecordingAsset transcript 与独立 Summary 均有运行/恢复纵切 | 共享 GPU 恢复和账号长期重试收敛 |
-| CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机/线上账号双会话闭环；多录音运行合同已接通 | 恢复 secondary 的 App 往返；第二台移动设备抽查 |
+| PROC-01 | 五类处理独立状态与独立重试 | 本机闭环；RecordingAsset transcript 与独立 Summary 均有运行/恢复纵切 | 自动任务候选复核和账号长期重试收敛 |
+| CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机/线上账号双会话闭环；多录音运行合同与 `secondary + recovered` 通用上传源码已接通 | 恢复 secondary 的特定 App 运行样本；第二台移动设备抽查 |
 | NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机/线上账号双会话闭环 | 第二台移动设备冲突选择抽查 |
 | TRN-01 | 搜索、跳转、按录音来源回听、高亮、复制/分享、重新生成 | 本机闭环；per-asset provenance 已运行；reprocessed 移动端/v31/overlay 纵切完成 | 运行服务的真实 reprocess job；候选版长录音抽查 |
 | ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机闭环；运行 action pull 与协作者 revision 收敛完成 | 非协作 action 的真实冲突选择、提醒跨设备收敛 |
@@ -204,7 +216,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | SUM-02 | 结论/行动项引用 Transcript | 本机闭环；服务端源码完成 | 真实模型引用质量与运行 revision identity |
 | SUM-03 | 结果版本与用户修改保护 | 已锁定 | 只随真实模型/冲突路径做候选抽查 |
 | IMP-01 | 文件选择与系统分享导入音视频 | 本机/线上纵切闭环；视频、远端多资产处理和已有会议显式加入已完成 | 格式兼容矩阵、第二台移动设备与 USB 真机 |
-| MRK-01 | Marker、会后跳转、转行动项/分享 | 本机闭环 | 与 P2 附件/片段、线上录音资产打通 |
+| MRK-01 | Marker、会后跳转、转行动项/分享 | 本机闭环；已与附件、WAV/非 WAV 片段和具体 RecordingAsset 来源打通 | 第二设备与 USB 候选抽查 |
 | ENTRY-01 | 会前通知开始/继续/查看 | 本机闭环 | App Lock 和成功录音分支集中验收 |
 | ENTRY-02 | Widget 与 Quick Settings Tile | 本机闭环 | 真机 Launcher/Tile、active 状态集中验收 |
 | TPL-01 | 四个内置模板 | 本机闭环；服务端源码完成 | 真实模型四模板输出 |
