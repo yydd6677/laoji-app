@@ -426,10 +426,10 @@ export interface ApplySpeakerCorrectionInput {
   transcriptRevisionId: string;
   targetSegmentId: string;
   sourceClusterId: string | null;
-  scope: Exclude<SpeakerCorrectionScope, 'future_profile'>;
+  scope: SpeakerCorrectionScope;
   displayName: string;
   speakerProfileId: string | null;
-  consentToProfileUpdate: false;
+  consentToProfileUpdate: boolean;
   syncState: Extract<SpeakerCorrectionSyncState, 'local_only' | 'pending'>;
   createdAtMs: number;
 }

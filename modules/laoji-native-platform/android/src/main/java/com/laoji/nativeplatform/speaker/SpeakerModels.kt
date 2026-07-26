@@ -35,6 +35,9 @@ data class SpeakerEnrollmentState(
   val canSubmit: Boolean,
   val voiceprintText: String,
   val voiceprintConsentAccepted: Boolean = false,
+  val reprocessPhase: String = "idle",
+  val reprocessMessage: String = "",
+  val canReprocess: Boolean = false,
 )
 
 internal object SpeakerSnapshotParser {
@@ -77,6 +80,9 @@ internal object SpeakerSnapshotParser {
       "今天的会议将围绕项目进展展开，请大家依次说明完成情况和下一步安排。"
     },
     voiceprintConsentAccepted = raw.bool("voiceprintConsentAccepted"),
+    reprocessPhase = raw.string("reprocessPhase").ifBlank { "idle" },
+    reprocessMessage = raw.string("reprocessMessage"),
+    canReprocess = raw.bool("canReprocess"),
   )
 
   private fun Map<*, *>.string(key: String): String = this[key] as? String ?: ""

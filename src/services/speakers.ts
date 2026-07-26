@@ -10,6 +10,10 @@ export interface SpeakerProfile {
   registered_at?: string | null;
   updated_at?: string | null;
   available_in_realtime?: boolean;
+  profile_revision?: number;
+  consent_state?: 'granted' | 'revoked';
+  consent_version?: string | null;
+  model_version?: string;
 }
 
 interface SpeakerListResponse {
@@ -51,8 +55,77 @@ function voiceForm(audioUri: string, fileName: string, name?: string): FormData 
   const form = new FormData();
   if (name != null) form.append('name', name);
   form.append('capture_profile', SPEAKER_CAPTURE_PROFILE);
+  form.append('voiceprint_consent_accepted', 'true');
+  form.append('voiceprint_consent_version', 'voiceprint-v1');
   form.append('audio', { uri: audioUri, name: fileName, type: 'audio/wav' } as any);
   return form;
+}
+
+export interface SpeakerReprocessJob {
+  schema_version: 1;
+  job_id: string;
+  speaker_profile_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  attempt: number;
+  progress: number | null;
+  total_meetings: number;
+  processed_meetings: number;
+  matched_segments: number;
+  skipped_locked_segments: number;
+  error_code: string | null;
+  retryable: boolean;
+  profile_revision: number;
+  model_version: string;
+  result_speaker_revision_id: string | null;
+}
+
+export async function startSpeakerReprocess(
+  speakerId: string,
+  idempotencyKey: string,
+  accessToken: string,
+): Promise<SpeakerReprocessJob> {
+  const response = await fetch(endpoint(`/${encodeURIComponent(speakerId)}/reprocess`), {
+    method: 'POST',
+    headers: { ...authHeaders(accessToken), 'Idempotency-Key': idempotencyKey },
+  });
+  if (!response.ok) throw await speakerError('重新匹配旧会议失败', response, accessToken);
+  return response.json();
+}
+
+export async function fetchSpeakerReprocess(
+  speakerId: string,
+  jobId: string,
+  accessToken: string,
+): Promise<SpeakerReprocessJob> {
+  const response = await fetch(endpoint(
+    `/${encodeURIComponent(speakerId)}/reprocess/${encodeURIComponent(jobId)}`,
+  ), { headers: authHeaders(accessToken) });
+  if (!response.ok) throw await speakerError('读取重新匹配进度失败', response, accessToken);
+  return response.json();
+}
+
+export async function fetchLatestSpeakerReprocess(
+  speakerId: string,
+  accessToken: string,
+): Promise<SpeakerReprocessJob | null> {
+  const response = await fetch(endpoint(`/${encodeURIComponent(speakerId)}/reprocess`), {
+    headers: authHeaders(accessToken),
+  });
+  if (!response.ok) throw await speakerError('读取重新匹配进度失败', response, accessToken);
+  const data = await response.json() as { job?: SpeakerReprocessJob | null };
+  return data.job ?? null;
+}
+
+export async function retrySpeakerReprocess(
+  speakerId: string,
+  jobId: string,
+  accessToken: string,
+): Promise<SpeakerReprocessJob> {
+  const response = await fetch(endpoint(
+    `/${encodeURIComponent(speakerId)}/reprocess/${encodeURIComponent(jobId)}/retry`,
+  ), { method: 'POST', headers: authHeaders(accessToken) });
+  if (!response.ok) throw await speakerError('重试旧会议匹配失败', response, accessToken);
+  return response.json();
 }
 
 export async function registerSpeaker(

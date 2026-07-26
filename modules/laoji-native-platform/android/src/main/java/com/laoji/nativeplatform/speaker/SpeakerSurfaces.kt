@@ -173,6 +173,7 @@ internal class SpeakerEnrollmentSurface(
   private val waveform = SpeakerWaveformView(context)
   private val error = context.speakerText(sizeSp = 13, color = SpeakerPalette.danger)
   private val consent = context.speakerText(sizeSp = 13, color = SpeakerPalette.secondary)
+  private val reprocess = context.speakerText(sizeSp = 15, color = SpeakerPalette.primary)
   private val statePanel = LinearLayout(context)
   private val stateProgress = ProgressBar(context)
   private val stateMessage = context.speakerText(sizeSp = 14, color = SpeakerPalette.secondary)
@@ -277,6 +278,20 @@ internal class SpeakerEnrollmentSurface(
       onAction(mapOf("type" to "toggleVoiceprintConsent", "speakerId" to rendered.speakerId))
     }
     content.addView(consent, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(48)))
+    reprocess.gravity = Gravity.CENTER_VERTICAL
+    reprocess.minHeight = context.speakerDp(48)
+    reprocess.setPadding(context.speakerDp(12), 0, context.speakerDp(12), 0)
+    reprocess.speakerBackground(SpeakerPalette.surface, 6)
+    reprocess.isClickable = true
+    reprocess.isFocusable = true
+    reprocess.setOnClickListener {
+      if (rendered.canReprocess && rendered.speakerId.isNotBlank()) {
+        onAction(mapOf("type" to "reprocess", "speakerId" to rendered.speakerId))
+      }
+    }
+    content.addView(reprocess, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(48)).apply {
+      topMargin = context.speakerDp(8)
+    })
   }
 
   fun render(value: SpeakerEnrollmentState) {
@@ -306,6 +321,22 @@ internal class SpeakerEnrollmentSurface(
     } else {
       "未同意上传录音用于建立或补充讲话人声纹"
     }
+    val reprocessBusy = value.reprocessPhase == "queued" || value.reprocessPhase == "running"
+    reprocess.visibility = if (value.speakerId.isNotBlank()) View.VISIBLE else View.GONE
+    reprocess.text = value.reprocessMessage.ifBlank {
+      when (value.reprocessPhase) {
+        "queued" -> "等待重新匹配"
+        "running" -> "正在重新匹配"
+        "completed" -> "重新匹配旧会议"
+        "failed" -> "重试旧会议匹配"
+        else -> "重新匹配旧会议"
+      }
+    }
+    reprocess.setTextColor(if (reprocessBusy) SpeakerPalette.secondary else SpeakerPalette.primary)
+    reprocess.isEnabled = value.canReprocess && !reprocessBusy
+    reprocess.isClickable = value.canReprocess && !reprocessBusy
+    reprocess.alpha = if (value.canReprocess) 1f else 0.35f
+    reprocess.contentDescription = reprocess.text
     renderActions(value)
     val ready = !value.guest && value.phase == "ready"
     scroll.visibility = if (ready) View.VISIBLE else View.GONE

@@ -3642,14 +3642,20 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     assertNullableBoundedText(input.sourceClusterId, 512, 'speaker source cluster ID');
     assertNullableBoundedText(input.speakerProfileId, 512, 'speaker profile ID');
     assertNonNegativeInteger(input.createdAtMs, 'speaker correction time');
-    if (input.scope !== 'segment' && input.scope !== 'cluster') {
+    if (input.scope !== 'segment' && input.scope !== 'cluster' && input.scope !== 'future_profile') {
       throw new Error('speaker correction scope is invalid');
     }
-    if (input.scope === 'cluster' && input.sourceClusterId === null) {
+    if (input.scope !== 'segment' && input.sourceClusterId === null) {
       throw new Error('speaker cluster correction has no source cluster');
     }
-    if (input.consentToProfileUpdate) {
-      throw new Error('local speaker correction cannot update a voice profile');
+    if (
+      input.scope === 'future_profile'
+      && (!input.speakerProfileId || !input.consentToProfileUpdate || scopeKey === 'guest')
+    ) {
+      throw new Error('future speaker correction has no authorized profile');
+    }
+    if (input.scope !== 'future_profile' && (input.speakerProfileId || input.consentToProfileUpdate)) {
+      throw new Error('meeting-local speaker correction cannot update a voice profile');
     }
     if (input.syncState !== 'local_only' && input.syncState !== 'pending') {
       throw new Error('speaker correction sync state is invalid');
@@ -3694,7 +3700,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
         && existing.source_cluster_id === input.sourceClusterId
         && existing.speaker_profile_id === input.speakerProfileId
         && existing.display_name === displayName
-        && existing.consent_to_profile_update === 0;
+        && existing.consent_to_profile_update === (input.consentToProfileUpdate ? 1 : 0);
       if (!same) throw new Error('speaker correction identity was reused');
       const assigned = await this.database.getAllAsync<{ segment_id: string }>(
         `SELECT segment_id FROM speaker_assignments
@@ -3710,7 +3716,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       };
     }
 
-    const affected = input.scope === 'cluster'
+    const affected = input.scope !== 'segment'
       ? await this.database.getAllAsync<TranscriptSegmentRow>(
         `SELECT * FROM transcript_segments
          WHERE meeting_id = ? AND revision_id = ? AND speaker_cluster_id = ?
@@ -3772,7 +3778,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
          target_segment_id, source_cluster_id, speaker_profile_id,
          display_name, consent_to_profile_update, base_revision,
          assignment_revision, sync_state, created_at_ms, updated_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       input.correctionId,
       scopeKey,
       input.meetingId,
@@ -3782,6 +3788,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       input.sourceClusterId,
       input.speakerProfileId,
       displayName,
+      input.consentToProfileUpdate ? 1 : 0,
       baseRevision,
       assignmentRevision,
       input.syncState,
@@ -3809,9 +3816,12 @@ class SqliteMeetingTransaction implements MeetingTransaction {
         input.createdAtMs,
       );
       const updated = await this.database.runAsync(
-        `UPDATE transcript_segments SET speaker_label_override = ?
+        `UPDATE transcript_segments SET speaker_label_override = ?,
+           speaker_profile_id = CASE WHEN ? = 1 THEN ? ELSE speaker_profile_id END
          WHERE id = ? AND meeting_id = ? AND revision_id = ?`,
         displayName,
+        input.scope === 'future_profile' ? 1 : 0,
+        input.speakerProfileId,
         segment.id,
         input.meetingId,
         input.transcriptRevisionId,

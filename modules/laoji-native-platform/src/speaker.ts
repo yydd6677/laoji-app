@@ -17,6 +17,7 @@ export type SpeakerEnrollmentPhase =
   | 'ready'
   | 'saving'
   | 'error';
+export type SpeakerReprocessPhase = 'idle' | 'queued' | 'running' | 'completed' | 'failed';
 
 export interface NativeSpeakerProfileSnapshot {
   id: string;
@@ -55,6 +56,9 @@ export interface NativeSpeakerEnrollmentSnapshot {
   canSubmit: boolean;
   voiceprintText: string;
   voiceprintConsentAccepted: boolean;
+  reprocessPhase: SpeakerReprocessPhase;
+  reprocessMessage: string;
+  canReprocess: boolean;
 }
 
 export type NativeSpeakerSnapshot =
@@ -76,6 +80,7 @@ export type NativeSpeakerAction =
   | { type: 'stopRecording'; surface: 'enrollment'; speakerId: string | null }
   | { type: 'retake'; surface: 'enrollment'; speakerId: string | null }
   | { type: 'toggleVoiceprintConsent'; surface: 'enrollment'; speakerId: string | null }
+  | { type: 'reprocess'; surface: 'enrollment'; speakerId: string }
   | { type: 'submitRecording'; surface: 'enrollment'; speakerId: string | null };
 
 type NativeSpeakerEvent<T> = (event: NativeSyntheticEvent<T>) => void;

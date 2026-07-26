@@ -24,6 +24,13 @@ const MAX_NAME_LENGTH = 120;
 export interface MeetingSpeakerAssignmentValue {
   displayName: string;
   applyToCluster: boolean;
+  speakerProfileId: string | null;
+  consentToProfileUpdate: boolean;
+}
+
+export interface MeetingSpeakerAssignmentProfile {
+  id: string;
+  name: string;
 }
 
 interface PresentedSpeakerAssignment {
@@ -31,6 +38,7 @@ interface PresentedSpeakerAssignment {
   speakerLabel: string;
   clusterCount: number;
   candidates: readonly string[];
+  profiles: readonly MeetingSpeakerAssignmentProfile[];
 }
 
 export function MeetingSpeakerAssignmentSheet({
@@ -39,6 +47,9 @@ export function MeetingSpeakerAssignmentSheet({
   speakerLabel,
   clusterCount,
   candidates,
+  profiles,
+  profilesLoading,
+  profilesError,
   saving,
   error,
   onClearError,
@@ -50,6 +61,9 @@ export function MeetingSpeakerAssignmentSheet({
   speakerLabel: string;
   clusterCount: number;
   candidates: readonly string[];
+  profiles: readonly MeetingSpeakerAssignmentProfile[];
+  profilesLoading: boolean;
+  profilesError: string;
   saving: boolean;
   error: string;
   onClearError: () => void;
@@ -68,16 +82,19 @@ export function MeetingSpeakerAssignmentSheet({
     speakerLabel,
     clusterCount,
     candidates,
+    profiles,
   });
   closeRef.current = onClose;
   if (visible && !closingRef.current) {
-    presentedRef.current = { targetKey, speakerLabel, clusterCount, candidates };
+    presentedRef.current = { targetKey, speakerLabel, clusterCount, candidates, profiles };
   }
 
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [displayName, setDisplayName] = useState(speakerLabel);
   const [applyToCluster, setApplyToCluster] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [profileConsent, setProfileConsent] = useState(false);
   const [localError, setLocalError] = useState('');
   const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
 
@@ -105,6 +122,8 @@ export function MeetingSpeakerAssignmentSheet({
     if (visible) {
       setDisplayName(speakerLabel.slice(0, MAX_NAME_LENGTH));
       setApplyToCluster(false);
+      setSelectedProfileId(null);
+      setProfileConsent(false);
       setLocalError('');
       setAndroidKeyboardInset(0);
       mountedRef.current = true;
@@ -145,7 +164,10 @@ export function MeetingSpeakerAssignmentSheet({
   const normalizedName = displayName.normalize('NFKC').replace(/[\t ]+/g, ' ').trim();
   const initialName = presented.speakerLabel.normalize('NFKC').replace(/[\t ]+/g, ' ').trim();
   const candidateQuery = normalizedName === initialName ? '' : normalizedName;
-  const canSave = normalizedName.length > 0 && !saving && !closing;
+  const canSave = normalizedName.length > 0
+    && (!selectedProfileId || profileConsent)
+    && !saving
+    && !closing;
   const canBatch = presented.clusterCount > 1;
   const sheetHeight = Math.max(
     0,
@@ -163,6 +185,8 @@ export function MeetingSpeakerAssignmentSheet({
 
   const updateName = (value: string) => {
     setDisplayName(value);
+    setSelectedProfileId(null);
+    setProfileConsent(false);
     setLocalError('');
     onClearError();
   };
@@ -173,7 +197,12 @@ export function MeetingSpeakerAssignmentSheet({
       return;
     }
     Keyboard.dismiss();
-    onSave({ displayName: normalizedName, applyToCluster: canBatch && applyToCluster });
+    onSave({
+      displayName: normalizedName,
+      applyToCluster: !selectedProfileId && canBatch && applyToCluster,
+      speakerProfileId: selectedProfileId,
+      consentToProfileUpdate: Boolean(selectedProfileId && profileConsent),
+    });
   };
 
   return (
@@ -270,6 +299,57 @@ export function MeetingSpeakerAssignmentSheet({
               showsVerticalScrollIndicator={false}
               bounces={false}
             >
+              {presented.profiles.length > 0 || profilesLoading || profilesError ? (
+                <Text style={[styles.sectionLabel, { color: colors.textCaption }]}>讲话人资料</Text>
+              ) : null}
+              {profilesLoading ? (
+                <View style={styles.profileState}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : null}
+              {!profilesLoading && profilesError ? (
+                <Text style={[styles.profileError, { color: colors.textCaption }]} numberOfLines={2}>
+                  {profilesError}
+                </Text>
+              ) : null}
+              {presented.profiles.map(profile => {
+                const selected = profile.id === selectedProfileId;
+                return (
+                  <Pressable
+                    key={profile.id}
+                    style={({ pressed }) => [
+                      styles.candidate,
+                      pressed && { backgroundColor: colors.pressedFill },
+                    ]}
+                    onPress={() => {
+                      setDisplayName(profile.name.slice(0, MAX_NAME_LENGTH));
+                      setSelectedProfileId(profile.id);
+                      setProfileConsent(false);
+                      setLocalError('');
+                      onClearError();
+                    }}
+                    disabled={saving}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`关联讲话人资料${profile.name}`}
+                    accessibilityState={{ selected, disabled: saving }}
+                  >
+                    <View style={[styles.candidateAvatar, { backgroundColor: colors.backgroundBase }]}>
+                      <Ionicons name="person" size={16} color={selected ? colors.primary : colors.iconSecondary} />
+                    </View>
+                    <Text style={[styles.candidateText, { color: colors.textTitle }]} numberOfLines={1}>
+                      {profile.name}
+                    </Text>
+                    <Ionicons
+                      name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={20}
+                      color={selected ? colors.primary : colors.iconTertiary}
+                    />
+                  </Pressable>
+                );
+              })}
+              {visibleCandidates.length > 0 ? (
+                <Text style={[styles.sectionLabel, { color: colors.textCaption }]}>本场名称</Text>
+              ) : null}
               {visibleCandidates.map(candidate => (
                 <Pressable
                   key={candidate}
@@ -293,7 +373,34 @@ export function MeetingSpeakerAssignmentSheet({
             </ScrollView>
 
             <View style={[styles.bottomBar, { borderTopColor: colors.divider }]}>
-              {canBatch ? (
+              {selectedProfileId ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.batchAction,
+                    pressed && !saving && { backgroundColor: colors.pressedFill },
+                  ]}
+                  onPress={() => setProfileConsent(value => !value)}
+                  disabled={saving}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="同意将本场讲话人关联用于以后会议识别"
+                  accessibilityState={{ checked: profileConsent, disabled: saving }}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      {
+                        borderColor: profileConsent ? colors.primary : colors.iconTertiary,
+                        backgroundColor: profileConsent ? colors.primary : colors.backgroundFloat,
+                      },
+                    ]}
+                  >
+                    {profileConsent ? <Ionicons name="checkmark" size={14} color={colors.onPrimary} /> : null}
+                  </View>
+                  <Text style={[styles.batchText, { color: colors.textTitle }]} numberOfLines={2}>
+                    用于以后会议识别
+                  </Text>
+                </Pressable>
+              ) : canBatch ? (
                 <Pressable
                   style={({ pressed }) => [
                     styles.batchAction,
@@ -373,6 +480,9 @@ const styles = StyleSheet.create({
   errorSlot: { height: 30, paddingHorizontal: 16, justifyContent: 'center' },
   errorText: { fontSize: 12, lineHeight: 18 },
   candidateList: { flex: 1 },
+  sectionLabel: { height: 32, paddingHorizontal: 16, paddingTop: 10, fontSize: 12, lineHeight: 18 },
+  profileState: { height: 44, alignItems: 'center', justifyContent: 'center' },
+  profileError: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 10, fontSize: 13, lineHeight: 20 },
   candidate: { height: 52, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
   candidateAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   candidateText: { flex: 1, marginLeft: 12, fontSize: 16, lineHeight: 24, fontWeight: '400' },

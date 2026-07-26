@@ -6,6 +6,7 @@ import {
   type NativeSpeakerProfileSnapshot,
   type SpeakerContentPhase,
   type SpeakerEnrollmentPhase,
+  type SpeakerReprocessPhase,
 } from 'laoji-native-platform';
 
 // MIN-SPEAKER-001: snapshots deliberately contain display data only. Bearer
@@ -54,6 +55,9 @@ export function buildNativeSpeakerEnrollmentSnapshot(input: {
   canSubmit?: boolean;
   voiceprintText?: string;
   voiceprintConsentAccepted?: boolean;
+  reprocessPhase?: SpeakerReprocessPhase;
+  reprocessMessage?: string;
+  canReprocess?: boolean;
 }): NativeSpeakerEnrollmentSnapshot {
   return {
     schemaVersion: SPEAKER_SNAPSHOT_SCHEMA_VERSION,
@@ -77,5 +81,8 @@ export function buildNativeSpeakerEnrollmentSnapshot(input: {
     voiceprintText: input.voiceprintText
       ?? '今天的会议将围绕项目进展展开，请大家依次说明完成情况和下一步安排。',
     voiceprintConsentAccepted: input.voiceprintConsentAccepted ?? false,
+    reprocessPhase: input.reprocessPhase ?? 'idle',
+    reprocessMessage: input.reprocessMessage ?? '',
+    canReprocess: input.canReprocess ?? Boolean(input.speakerId),
   };
 }

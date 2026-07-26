@@ -65,6 +65,7 @@ import {
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
+import { fetchSpeakers, type SpeakerProfile } from '../services/speakers';
 import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
@@ -568,6 +569,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [speakerAssignmentTarget, setSpeakerAssignmentTarget] = useState<SpeakerAssignmentTarget | null>(null);
   const [speakerAssignmentSaving, setSpeakerAssignmentSaving] = useState(false);
   const [speakerAssignmentError, setSpeakerAssignmentError] = useState('');
+  const [speakerProfiles, setSpeakerProfiles] = useState<readonly SpeakerProfile[]>([]);
+  const [speakerProfilesLoading, setSpeakerProfilesLoading] = useState(false);
+  const [speakerProfilesError, setSpeakerProfilesError] = useState('');
+  const speakerProfileRequestGenerationRef = useRef(0);
   const playerSource = useMemo(() => (
     playerSources.find(source => source.sourceId === selectedPlayerSourceId)
     ?? playerSources[0]
@@ -2471,6 +2476,33 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   }, [meeting, transcript]);
 
+  useEffect(() => {
+    const generation = ++speakerProfileRequestGenerationRef.current;
+    if (!speakerAssignmentTarget || !accessToken || isGuest) {
+      setSpeakerProfiles([]);
+      setSpeakerProfilesLoading(false);
+      setSpeakerProfilesError('');
+      return;
+    }
+    setSpeakerProfiles([]);
+    setSpeakerProfilesLoading(true);
+    setSpeakerProfilesError('');
+    void fetchSpeakers(accessToken).then(profiles => {
+      if (speakerProfileRequestGenerationRef.current !== generation) return;
+      setSpeakerProfiles(profiles.filter(profile => profile.available_in_realtime !== false));
+    }).catch(reason => {
+      if (speakerProfileRequestGenerationRef.current !== generation) return;
+      diagnosticWarn('load speaker profiles for assignment failed', reason);
+      setSpeakerProfiles([]);
+      setSpeakerProfilesError('讲话人资料暂时无法加载');
+    }).finally(() => {
+      if (speakerProfileRequestGenerationRef.current === generation) {
+        setSpeakerProfilesLoading(false);
+      }
+    });
+    return () => { speakerProfileRequestGenerationRef.current += 1; };
+  }, [accessToken, isGuest, speakerAssignmentTarget?.lineId]);
+
   const manageSpeaker = useCallback((speakerId?: string) => {
     if (isGuest || !accessToken) {
       showDialog({ title: '登录后管理讲话人', message: '游客会议保留转写中的讲话人标签，但不上传声纹资料。', tone: 'info' });
@@ -2510,8 +2542,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         lineId: target.lineId,
         positionMs: target.positionMs,
         speakerId: target.speakerClusterId ?? target.speakerId,
-        scope: value.applyToCluster ? 'cluster' : 'segment',
+        scope: value.speakerProfileId
+          ? 'future_profile'
+          : value.applyToCluster ? 'cluster' : 'segment',
         displayName: value.displayName,
+        speakerProfileId: value.speakerProfileId,
+        consentToProfileUpdate: value.consentToProfileUpdate,
       });
       if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
       const refreshed = await loadActiveMeetingTranscriptState(
@@ -2537,7 +2573,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setSpeakerAssignmentTarget(null);
       ToastAndroid.show(
         result.applied
-          ? value.applyToCluster
+          ? value.speakerProfileId
+            ? '已关联讲话人资料'
+            : value.applyToCluster
             ? `已更新本场 ${result.affectedSegmentIds.length} 处讲话人`
             : '讲话人已更新'
           : '讲话人名称未变化',
@@ -4246,6 +4284,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         speakerLabel={speakerAssignmentTarget?.speakerLabel ?? ''}
         clusterCount={speakerAssignmentTarget?.clusterCount ?? 1}
         candidates={speakerNameCandidates}
+        profiles={speakerProfiles.map(profile => ({ id: profile.speaker_id, name: profile.name }))}
+        profilesLoading={speakerProfilesLoading}
+        profilesError={speakerProfilesError}
         saving={speakerAssignmentSaving}
         error={speakerAssignmentError}
         onClearError={() => setSpeakerAssignmentError('')}

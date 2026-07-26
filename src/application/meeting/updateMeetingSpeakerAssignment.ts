@@ -32,8 +32,10 @@ export interface UpdateMeetingSpeakerAssignmentInput {
   lineId: string;
   positionMs: number;
   speakerId: string | null;
-  scope: 'segment' | 'cluster';
+  scope: 'segment' | 'cluster' | 'future_profile';
   displayName: string;
+  speakerProfileId?: string | null;
+  consentToProfileUpdate?: boolean;
 }
 
 export interface UpdateMeetingSpeakerAssignmentResult extends ApplySpeakerCorrectionResult {
@@ -62,9 +64,20 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
     const nativeMeetingId = input.nativeMeetingId.trim();
     const lineId = input.lineId.trim();
     const speakerId = input.speakerId?.trim() || null;
+    const speakerProfileId = input.speakerProfileId?.trim() || null;
+    const consentToProfileUpdate = input.consentToProfileUpdate === true;
     const displayName = normalizedDisplayName(input.displayName);
-    if (!nativeMeetingId || !lineId || !['segment', 'cluster'].includes(input.scope)) {
+    if (!nativeMeetingId || !lineId || !['segment', 'cluster', 'future_profile'].includes(input.scope)) {
       throw new Error('speaker assignment identity is invalid');
+    }
+    if (
+      input.scope === 'future_profile'
+      && (input.scopeKey === 'guest' || !speakerProfileId || !consentToProfileUpdate)
+    ) {
+      throw new Error('future speaker profile assignment is not authorized');
+    }
+    if (input.scope !== 'future_profile' && (speakerProfileId || consentToProfileUpdate)) {
+      throw new Error('meeting-local speaker assignment cannot update a profile');
     }
     if (!Number.isSafeInteger(input.positionMs) || input.positionMs < 0) {
       throw new Error('speaker assignment position is invalid');
@@ -93,10 +106,10 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
       if (!target) throw new SpeakerAssignmentTargetUnavailableError();
 
       const sourceClusterId = target.speakerClusterId?.trim() || null;
-      if (input.scope === 'cluster' && !sourceClusterId) {
+      if (input.scope !== 'segment' && !sourceClusterId) {
         throw new SpeakerAssignmentTargetUnavailableError();
       }
-      const affected = input.scope === 'cluster'
+      const affected = input.scope !== 'segment'
         ? transcript.segments.filter(segment => segment.speakerClusterId === sourceClusterId)
         : [target];
       if (affected.length === 0) throw new SpeakerAssignmentTargetUnavailableError();
@@ -121,6 +134,10 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
         && hasCompleteRemoteSegmentIdentity;
       if (affected.every(segment => (
         (segment.speakerLabelOverride ?? segment.speakerLabel ?? '').trim() === displayName
+        && (
+          input.scope !== 'future_profile'
+          || segment.speakerProfileId === speakerProfileId
+        )
       ))) {
         result = {
           canonicalMeetingId: meeting.id,
@@ -146,8 +163,8 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
         sourceClusterId,
         scope: input.scope,
         displayName,
-        speakerProfileId: null,
-        consentToProfileUpdate: false,
+        speakerProfileId,
+        consentToProfileUpdate,
         syncState: shouldQueueRemoteCorrection ? 'pending' : 'local_only',
         createdAtMs,
       }, input.scopeKey);
@@ -169,9 +186,9 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
               scope: input.scope,
               segment_ids: remoteSegmentIds,
               cluster_id: sourceClusterId,
-              speaker_profile_id: null,
+              speaker_profile_id: speakerProfileId,
               display_name: displayName,
-              consent_to_profile_update: false,
+              consent_to_profile_update: consentToProfileUpdate,
               base_revision: applied.assignmentRevision - 1,
             }),
             createdAtMs,

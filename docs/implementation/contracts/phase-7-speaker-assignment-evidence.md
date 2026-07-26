@@ -1,5 +1,7 @@
 # Phase 7 说话人反馈证据：SPK-01 本场修正
 
+> 后续扩展：账号 correction v2、显式 profile 同意/撤销、future profile、账号离线识别和旧会议重匹配已在后续纵切完成；当前证据见 [`phase-7-speaker-profile-evidence.md`](phase-7-speaker-profile-evidence.md)。本文件以下内容保留当时“仅本场修正”切片的历史边界，不再代表当前能力状态。
+
 状态：段落级与本场同一匿名簇的讲话人更名，已形成游客本机纵向闭环；账号 correction 已具备 capability-gated outbox、独立处理阶段和单会议重试客户端框架，但远端服务与账号端到端尚不可验证。当前实现刻意不创建账号级声纹资料，也不把本场临时名称伪装成未来识别能力。本文件记录 migration v11/v12、事务不变量、飞书来源映射、同步边界和模拟器实测；它不代表 `future_profile`、远端 correction endpoint、账号/跨设备同步、旧会议重新匹配、真实中文多人识别改善或 Phase 7 退出条件已经完成。
 
 ## 当前数据与事务合同
@@ -65,11 +67,11 @@
 - 后续 SERIES-01 验证把同一原始数据真实迁移到 v13。最终恢复库 `integrity_check=ok`、`user_version=13`，v12 的 correction 同步列、远端 Transcript revision 列及两个索引仍存在；speaker correction/assignment/cluster 均为 0，说明系列夹具恢复没有留下说话人测试数据。
 - 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 10:09:36 +0800`，大小 `90,033,124` bytes，SHA-256 `00724c12c3d7b3d46ca224d84c09546dd20f26a75885114c7716ed4f968392c0`。已覆盖安装到唯一设备 `emulator-5556`，版本 `1.0.0-source-preview`，`lastUpdateTime=2026-07-24 10:12:28`。
 
-## 未完成边界
+## 当时未完成边界及后续状态
 
-1. `future_profile`、关联现有讲话人资料、显式声纹同意、样本质量阈值和资料撤销尚未实现；当前 UI 不提供这些未完成能力。
-2. 客户端 outbox、独立 speaker 状态、单会议重试、幂等请求和 409/412 冲突记录已实现，但远端当前不可达，尚未证明 capability 开启、endpoint 请求/响应、真实账号 correction、进程重启定时或跨设备同步；远端链路仍是硬阻塞。
-3. 旧会议重新匹配 job、模型/profile revision 元数据、手工 assignment 不被 reprocess 覆盖的跨 revision 合并尚未实现。
+1. 本切片结束时缺少的 `future_profile`、关联现有讲话人资料、显式声纹同意、样本质量阈值和资料撤销，已由后续 SPK-01 功能纵切补齐；当前合同见 [`phase-7-speaker-profile-evidence.md`](phase-7-speaker-profile-evidence.md)。
+2. 本切片结束时远端不可达；后续已取得 capability、endpoint、真实账号 correction、幂等重放和 409/412 运行证据。跨设备同步仍未验证。
+3. 旧会议重新匹配 job、模型/profile revision 元数据及人工 assignment 锁定规则已由后续 SPK-01 补齐；真实多人改善质量仍未验证。
 4. 当前没有可用的真实中文多人识别样本和服务端声纹链路，无法证明人工反馈会提高未来会议识别率；本轮只证明本场人工修正不会损坏原内容。
 5. 当前只有模拟器，没有 USB 真机；物理设备键盘、TalkBack、字体缩放、长会议性能和真实录音中的说话人统计仍未验证。
 6. 本轮遵循轻量目标，没有恢复归档测试/门禁，也没有执行并发 correction、故障注入、进程中断或大 Transcript 压力矩阵。

@@ -49,8 +49,8 @@
 ## 尚未闭环
 
 1. 尚未用 occurrence 冲突恢复出的 secondary 在移动端走完整上传/下载/转写恢复，也没有第二台移动设备的多资产 pull、断网/强杀长期重试或 409/412 用户选择证据。
-2. speaker correction/profile 仍未形成运行纵切；当前 capability 明确为 false。
+2. 本批结束时 speaker correction/profile 尚无运行纵切、capability 为 false；后续 SPK-01 已补齐并在目标 18020 实测为 `speaker_corrections=true`、`speaker_profiles_v2=true`、`speaker_reprocess_v1=true`，见 [`phase-7-speaker-profile-evidence.md`](phase-7-speaker-profile-evidence.md)。
 3. 共享服务器 GPU 驱动/NVML 版本失配需由主机维护窗口处理；修复后再补一次 App 自动 job → completed → combined Transcript 落盘的真实成功证据。
 4. 当前仅有模拟器设备；USB 真机、长录音和候选版七条关键任务仍后置到批次 D。
 
-这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset、逐录音回听，以及 PROC-01 的每资产 job 与独立 Summary 已形成纵切；批次 B 的 speaker correction、共享 GPU 恢复及跨设备/真机仍是实际工作，不能把本批写成整个目标完成。
+这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset、逐录音回听，以及 PROC-01 的每资产 job 与独立 Summary 已形成纵切；speaker correction/profile 已由后续 SPK-01 关闭功能缺口，共享 GPU 恢复及跨设备/真机仍是实际工作，不能把本批写成整个目标完成。
