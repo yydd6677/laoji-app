@@ -1,6 +1,6 @@
 # 批次 B 证据：RecordingAsset v2 账号上传、独立转写与来源追踪
 
-状态：目标 18020、移动端账号 canonical 数据层和 Android WorkManager 已形成一条真实 RecordingAsset v2 纵向闭环。它覆盖同一会议多资产登记、内容上传、资产列表/下载、具体资产转写任务、账号录音后台上传、本机/远端来源合并，以及 Transcript segment 到 RecordingAsset/job 的持久来源追踪。该结论不等于 App 已自动调度并恢复每一段资产的转写任务、第二台移动设备已收敛或 USB 真机已验收。
+状态：目标 18020、移动端账号 canonical 数据层和 Android WorkManager 已形成一条真实 RecordingAsset v2 纵向闭环。它覆盖同一会议多资产登记、内容上传、资产列表/下载、逐资产转写任务的自动发现/持久恢复/重试、账号录音后台上传、本机/远端来源合并，以及 Transcript segment 到 RecordingAsset/job 的持久来源追踪。该结论不等于独立 Summary job、第二台移动设备或 USB 真机已经闭环。
 
 ## 运行服务合同
 
@@ -19,6 +19,9 @@
 - Store 是 v2 唯一调度者：扫描全部 `local_ready && remoteAssetId == null` 的 captured/imported/recovered 资产，取得本次 fresh capability 后才登记 WorkManager。详情页只读取/合并远端列表，不再与 WorkManager 并发成为第二上传者。
 - 上传成功按具体 RecordingAsset 对账并保存 `remoteAssetId`；远端列表按 `client_asset_id` 与本机来源合并，避免同一录音重复显示。游客迁移的音频阶段也使用 RecordingAsset v2，不再落回单主录音端点。
 - 普通 Preview 默认打开独立账号上传开关；capability 不可达、陈旧或明确为 false 时不发送，已有本机录音和 pending 状态保持可恢复。
+- migration v26 新增 `recording_asset_transcription_tasks`，每段远端资产独立保存稳定 request/idempotency ID、远端 job ID、服务端 attempt/progress/result revision、连续传输失败次数、退避时间和 combined Transcript 是否已拉取。会议级 transcript stage 只聚合展示，不承载多 job 身份。
+- `MeetingTranscriptCompletionProvider` 每个认证会话先取得一次 fresh `recording_assets_v2=true`，启动、App 回前台和上传对账成功时发现资产；普通内部轮询最多每五分钟重拉资产列表。pending/queued/running/failed-retryable 会从 SQLite 恢复，409 的 `transcription_already_running` 和 `job_not_retryable` 只在身份完整时收敛，其他冲突 fail closed。
+- job 完成后复用既有 combined Transcript completion/cache 管线；只有服务端声明 complete 且 canonical Transcript 已落盘，才将该会议已完成资产标记为 content synced。完成但未拉取的任务由 completion 退避管理，不形成一秒空转。详情页“重试文字处理”会真正唤醒逐资产任务，不再只刷新页面。
 
 ## 逐录音 Transcript 来源
 
@@ -38,13 +41,16 @@
 - provenance 轻量收口通过 TypeScript、Kotlin、`git diff --check` 与 Preview 整包构建。保留数据 Preview 冷启动将真实库升级到 `user_version=25`，`integrity_check=ok`，未出现 SQLite/React Native/Kotlin 崩溃。
 - 双录音临时夹具验证：主录音文字定位到 `00:10 / 02:22`；补充录音文字先自动切换“录音 2”再定位到 `00:05 / 00:12`；第三条无 provenance 文字保持录音 2 和 `00:05`，没有误 seek。夹具、派生 journal 和 transcript cache 随后清除，原 Meeting SQLite 三文件恢复，最终 Preview 页面重新显示“暂无文字记录”。
 - 当前 Preview APK 大小 `90734500` 字节，SHA-256 为 `9c1caf467b5bf4a413d08fce262be73d91b720108d9873a15c4d75c9b4f83caf`，已覆盖安装到唯一设备 `emulator-5556`；版本仍为 v104 / `1.0.0-source-preview`。
+- v26 窄 SQLite 合同验证了 scope 内远端资产唯一、删除本机资产只清空 nullable local identity、删除 MeetingNote 级联任务以及 `foreign_key_check/integrity_check=ok`。TypeScript、Kotlin/Preview 整包和 diff whitespace 通过。
+- 保留数据覆盖安装后，`emulator-5556` 冷启动从真实账号发现 1 段已上传资产并写入任务，目标 18020 创建稳定 job `fe396cde-ea67-4a24-b42d-418ec2004144`；App 在进程内从 attempt 1 恢复到 attempt 3，失败 stage 与中文重试入口同步可见，证明 create/poll/retry 与 v26 恢复链实际运行。当前 APK 大小 `90764220` 字节，SHA-256 为 `a94b0a7ee8c62310d96251833ef9df46e7b242e82a6f99ce3fe7b97184dc0229`，版本仍为 v104 / `1.0.0-source-preview`。
+- 该真实 job 未能完成的根因在共享服务器：内核 NVIDIA 模块为 `595.71.05`，用户态 NVML 为 `595.84`，`nvidia-smi` 和 PyTorch 均报 driver/library mismatch。App 正确保留 `failed_retryable`；为避免持续占用服务，验证后已 force-stop 模拟器 App。未获得共享主机重启授权，因此这不是 combined Transcript 成功证据。
 
 ## 尚未闭环
 
-1. App 还没有为上传完成后的每个 RecordingAsset 自动创建、持久恢复和重试 transcription job。当前服务端 job 与 combined transcript 已可用，但移动端仍需把每资产调度/恢复接入既有 processing stage 和持久队列。
-2. Summary 已从 transcript job 中解耦，但独立 Summary 运行入口仍需修复模块启动与任务恢复；不得把它重新塞回 Transcript job。
-3. 尚未用 occurrence 冲突恢复出的 secondary 在移动端走完整上传/下载/转写恢复，也没有第二台移动设备的多资产 pull、断网/强杀长期重试或 409/412 用户选择证据。
-4. speaker correction/profile 仍未形成运行纵切；当前 capability 明确为 false。
+1. Summary 已从 transcript job 中解耦，但独立 Summary 运行入口仍需修复模块启动与任务恢复；不得把它重新塞回 Transcript job。
+2. 尚未用 occurrence 冲突恢复出的 secondary 在移动端走完整上传/下载/转写恢复，也没有第二台移动设备的多资产 pull、断网/强杀长期重试或 409/412 用户选择证据。
+3. speaker correction/profile 仍未形成运行纵切；当前 capability 明确为 false。
+4. 共享服务器 GPU 驱动/NVML 版本失配需由主机维护窗口处理；修复后再补一次 App 自动 job → completed → combined Transcript 落盘的真实成功证据。
 5. 当前仅有模拟器设备；USB 真机、长录音和候选版七条关键任务仍后置到批次 D。
 
-这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset 与逐录音回听合同已经前进，但 PROC-01 的每资产 job 调度/恢复、独立 Summary job 和批次 B 的 speaker correction 仍是实际功能工作，不能把本批写成整个目标完成。
+这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset、逐录音回听和 PROC-01 的每资产 job 调度/恢复已经形成 App 纵切；独立 Summary job、批次 B 的 speaker correction、共享 GPU 恢复及跨设备/真机仍是实际工作，不能把本批写成整个目标完成。

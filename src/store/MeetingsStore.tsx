@@ -90,6 +90,7 @@ import { cancelMeetingActionNotificationsForMeeting } from '../services/notifica
 import { requestMeetingActionSync } from '../application/meeting/actionSyncTrigger';
 import { requestMeetingRootSync } from '../application/meeting/rootSyncTrigger';
 import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
+import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
 import { CreateMeetingNoteUseCase } from '../application/meeting/createMeetingNote';
 import { DeleteMeetingNoteUseCase } from '../application/meeting/deleteMeetingNote';
 import { RestoreMeetingNoteUseCase } from '../application/meeting/restoreMeetingNote';
@@ -1700,6 +1701,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         status: statusByMeeting.get(entry.pending.meetingId) ?? entry.evidence.status,
       };
     });
+    const uploadedRecordingAvailable = [...evidenceById.values()]
+      .some(entry => entry.evidence.status === 'uploaded');
 
     const flags = getFeatureFlags();
     if (
@@ -1743,6 +1746,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           changed: changedCount,
           canonical_revision: owned.canonicalRevision,
         });
+        if (uploadedRecordingAvailable) {
+          requestMeetingTranscriptCompletion(scope, { discoverRecordingAssets: true });
+        }
       } finally {
         canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
       }
@@ -1807,6 +1813,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       observed: evidenceById.size,
       changed: changed ? 1 : 0,
     });
+    if (uploadedRecordingAvailable && isScopeKey(scope) && scope !== 'guest') {
+      requestMeetingTranscriptCompletion(scope, { discoverRecordingAssets: true });
+    }
   }, [
     adoptCanonicalOwnedProjection,
     applyMeetingReadCutover,

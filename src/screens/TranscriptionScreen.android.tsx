@@ -205,6 +205,7 @@ import {
   SpeakerAssignmentDraftError,
   SpeakerAssignmentTargetUnavailableError,
 } from '../application/meeting';
+import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
 import {
   sqliteMeetingNoteRepository,
   type MeetingAttachmentRecord,
@@ -3561,7 +3562,31 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (stage === 'transcript') {
       if (loadingTranscript) return;
       setTranscriptError('');
-      setReloadKey(value => value + 1);
+      const canonicalMeetingId = canonicalProcessingSnapshot
+        && canonicalProcessingSnapshot.meetingId === meeting.id
+        && canonicalProcessingSnapshot.scopeKey === meetingScopeKey
+        ? canonicalProcessingSnapshot.canonicalMeetingId
+        : null;
+      if (!canonicalMeetingId || !meetingScopeKey || meetingScopeKey === 'guest') {
+        setReloadKey(value => value + 1);
+        return;
+      }
+      const requestedMeetingId = meeting.id;
+      void sqliteMeetingNoteRepository.retryRecordingAssetTranscriptionTasks(
+        canonicalMeetingId,
+        meetingScopeKey,
+        Date.now(),
+      ).then(scheduled => {
+        if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+        if (scheduled > 0) {
+          requestMeetingTranscriptCompletion(meetingScopeKey, { discoverRecordingAssets: true });
+        }
+        setReloadKey(value => value + 1);
+      }).catch(reason => {
+        if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+        diagnosticWarn('retry recording asset transcription failed', reason);
+        setTranscriptError('文字处理暂时无法重试，请稍后再试。');
+      });
       return;
     }
     if (stage === 'summary') {

@@ -5,6 +5,7 @@ import type {
   ScheduleSnapshot,
   ScopeKey,
   SpeakerStatus,
+  TranscriptStatus,
 } from '../../domain/meeting';
 import {
   assertProcessingStage,
@@ -23,12 +24,14 @@ import type {
   AdvanceMeetingRootPullCursorInput,
   ApplySpeakerCorrectionInput,
   ApplySpeakerCorrectionResult,
+  ApplyRecordingAssetTranscriptionJobInput,
   ClaimActionSyncOptions,
   ClaimManualNoteSyncOptions,
   ClaimMeetingRootSyncOptions,
   ClaimOccurrenceSyncOptions,
   ClaimSpeakerCorrectionSyncOptions,
   CompleteMeetingRecordingMergeTaskInput,
+  DiscoverRecordingAssetTranscriptionTasksInput,
   FailMeetingRecordingMergeTaskInput,
   ManualNoteRecord,
   ManualNoteSyncClaim,
@@ -80,6 +83,8 @@ import type {
   OccurrenceSyncConflict,
   OccurrenceSyncFailure,
   RecordingAssetRecord,
+  RecordingAssetTranscriptionTaskRecord,
+  RecordRecordingAssetTranscriptionTransportFailureInput,
   RenameMeetingTagResult,
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
@@ -167,6 +172,33 @@ type MeetingRecordingMergeTaskRow = {
   attempt_count: number;
   last_error_code: string | null;
   retryable: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+  completed_at_ms: number | null;
+};
+
+type RecordingAssetTranscriptionTaskRow = {
+  id: string;
+  scope_key: string;
+  meeting_id: string;
+  local_recording_asset_id: string | null;
+  client_recording_asset_id: string;
+  remote_meeting_id: string;
+  remote_recording_asset_id: string;
+  client_request_id: string;
+  idempotency_key: string;
+  language: RecordingAssetTranscriptionTaskRecord['language'];
+  status: RecordingAssetTranscriptionTaskRecord['status'];
+  remote_job_id: string | null;
+  request_attempt_count: number;
+  remote_attempt: number;
+  progress: number | null;
+  result_revision_id: string | null;
+  error_code: string | null;
+  retryable: number;
+  next_attempt_at_ms: number | null;
+  remote_updated_at_ms: number | null;
+  content_synced_at_ms: number | null;
   created_at_ms: number;
   updated_at_ms: number;
   completed_at_ms: number | null;
@@ -938,6 +970,189 @@ function recordingMergeTaskFromRow(row: MeetingRecordingMergeTaskRow): MeetingRe
     updatedAtMs: row.updated_at_ms,
     completedAtMs: row.completed_at_ms,
   };
+}
+
+function recordingAssetTranscriptionTaskFromRow(
+  row: RecordingAssetTranscriptionTaskRow,
+): RecordingAssetTranscriptionTaskRecord {
+  if (
+    !['pending', 'queued', 'running', 'completed', 'failed_retryable', 'blocked'].includes(row.status)
+    || !['zh', 'en', 'auto'].includes(row.language)
+    || !Number.isSafeInteger(row.request_attempt_count)
+    || row.request_attempt_count < 0
+    || !Number.isSafeInteger(row.remote_attempt)
+    || row.remote_attempt < 0
+    || (row.retryable !== 0 && row.retryable !== 1)
+    || (row.progress !== null && (!Number.isFinite(row.progress) || row.progress < 0 || row.progress > 1))
+  ) throw new Error('recording asset transcription task is invalid');
+  if (row.status === 'completed' && (!row.remote_job_id || !row.result_revision_id)) {
+    throw new Error('completed recording asset transcription task is incomplete');
+  }
+  return {
+    id: row.id,
+    scopeKey: row.scope_key as ScopeKey,
+    meetingId: row.meeting_id,
+    localRecordingAssetId: row.local_recording_asset_id,
+    clientRecordingAssetId: row.client_recording_asset_id,
+    remoteMeetingId: row.remote_meeting_id,
+    remoteRecordingAssetId: row.remote_recording_asset_id,
+    clientRequestId: row.client_request_id,
+    idempotencyKey: row.idempotency_key,
+    language: row.language,
+    status: row.status,
+    remoteJobId: row.remote_job_id,
+    requestAttemptCount: row.request_attempt_count,
+    remoteAttempt: row.remote_attempt,
+    progress: row.progress,
+    resultRevisionId: row.result_revision_id,
+    errorCode: row.error_code,
+    retryable: row.retryable === 1,
+    nextAttemptAtMs: row.next_attempt_at_ms,
+    remoteUpdatedAtMs: row.remote_updated_at_ms,
+    contentSyncedAtMs: row.content_synced_at_ms,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+    completedAtMs: row.completed_at_ms,
+  };
+}
+
+function recordingAssetTranscriptionFingerprint(
+  rows: readonly RecordingAssetTranscriptionTaskRow[],
+): string {
+  let hash = 0x811c9dc5;
+  const feed = (value: string | null) => {
+    const text = `${value ?? ''}\u001f`;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+  };
+  rows.forEach(row => {
+    feed(row.remote_recording_asset_id);
+    feed(row.remote_job_id);
+    feed(row.status);
+    feed(row.result_revision_id);
+  });
+  return `recording-assets-v2:${rows.length}:${hash.toString(16).padStart(8, '0')}`;
+}
+
+async function reconcileRecordingAssetTranscriptionStage(
+  database: SQLiteDatabase,
+  meetingId: string,
+  scopeKey: ScopeKey,
+  nowMs: number,
+): Promise<boolean> {
+  const currentRow = await database.getFirstAsync<StageRow>(
+    `SELECT stage.* FROM processing_stages stage
+     INNER JOIN meeting_notes meeting ON meeting.id = stage.meeting_id
+     WHERE stage.meeting_id = ? AND meeting.scope_key = ? AND stage.stage = 'transcript'`,
+    meetingId,
+    scopeKey,
+  );
+  if (!currentRow) throw new Error('meeting transcript processing stage is missing');
+  const rows = await database.getAllAsync<RecordingAssetTranscriptionTaskRow>(
+    `SELECT task.* FROM recording_asset_transcription_tasks task
+     INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+     WHERE task.scope_key = ? AND task.meeting_id = ? AND meeting.lifecycle <> 'deleted'
+     ORDER BY task.created_at_ms, task.id`,
+    scopeKey,
+    meetingId,
+  );
+  if (rows.length === 0) return false;
+
+  const retryableFailure = rows.find(row => row.status === 'failed_retryable');
+  const blocked = rows.find(row => row.status === 'blocked');
+  const unfinished = rows.filter(row => (
+    row.status !== 'completed' || row.content_synced_at_ms === null
+  ));
+  const activeReady = await database.getFirstAsync<{ id: string }>(
+    `SELECT id FROM transcript_revisions
+     WHERE meeting_id = ? AND is_active = 1 AND status = 'ready' LIMIT 1`,
+    meetingId,
+  );
+  const status: TranscriptStatus = retryableFailure
+    ? 'failed_retryable'
+    : blocked
+      ? 'unavailable'
+      : unfinished.length > 0
+        ? 'finalizing'
+        : activeReady
+          ? 'ready'
+          : 'none';
+  const progressValues = rows.map(row => (
+    row.status === 'completed' ? 1 : row.progress ?? 0
+  ));
+  const progress = status === 'ready'
+    ? 1
+    : status === 'finalizing'
+      ? progressValues.reduce((sum, value) => sum + value, 0) / progressValues.length
+      : null;
+  const activeJobIds = [...new Set(unfinished
+    .map(row => row.remote_job_id)
+    .filter((value): value is string => Boolean(value)))];
+  const nextAttemptAtMs = rows
+    .map(row => row.next_attempt_at_ms)
+    .filter((value): value is number => value !== null)
+    .reduce<number | null>((earliest, value) => Math.min(earliest ?? value, value), null);
+  const current = stageFromRow(currentRow);
+  const updatedAtMs = Math.max(nowMs, current.updatedAtMs);
+  const transitioned = transitionProcessingStage(current, {
+    stage: 'transcript',
+    status,
+    progress,
+    jobId: activeJobIds.length === 1 ? activeJobIds[0] : null,
+    inputFingerprint: recordingAssetTranscriptionFingerprint(rows),
+    errorCode: retryableFailure?.error_code ?? blocked?.error_code ?? null,
+    userMessageKey: retryableFailure
+      ? 'meeting.transcript.retryable'
+      : blocked
+        ? 'meeting.transcript.unavailable'
+        : null,
+    retryable: Boolean(retryableFailure),
+    nextRetryAtMs: retryableFailure ? nextAttemptAtMs : null,
+  }, updatedAtMs);
+  const next: ProcessingStage = {
+    ...transitioned,
+    attemptCount: Math.max(
+      current.attemptCount,
+      ...rows.map(row => Math.max(row.request_attempt_count, row.remote_attempt)),
+    ),
+  };
+  const unchanged = current.status === next.status
+    && current.attemptCount === next.attemptCount
+    && current.progress === next.progress
+    && current.jobId === next.jobId
+    && current.inputFingerprint === next.inputFingerprint
+    && current.errorCode === next.errorCode
+    && current.userMessageKey === next.userMessageKey
+    && current.retryable === next.retryable
+    && current.nextRetryAtMs === next.nextRetryAtMs;
+  if (unchanged) return false;
+  await database.runAsync(
+    `UPDATE processing_stages SET
+       status = ?, attempt_count = ?, progress = ?, job_id = ?, input_fingerprint = ?,
+       error_code = ?, user_message_key = ?, retryable = ?, next_retry_at_ms = ?, updated_at_ms = ?
+     WHERE meeting_id = ? AND stage = 'transcript'`,
+    next.status,
+    next.attemptCount,
+    next.progress,
+    next.jobId,
+    next.inputFingerprint,
+    next.errorCode,
+    next.userMessageKey,
+    next.retryable ? 1 : 0,
+    next.nextRetryAtMs,
+    next.updatedAtMs,
+    meetingId,
+  );
+  await database.runAsync(
+    `UPDATE meeting_notes SET updated_at_ms = MAX(updated_at_ms, ?)
+     WHERE id = ? AND scope_key = ?`,
+    updatedAtMs,
+    meetingId,
+    scopeKey,
+  );
+  return true;
 }
 
 function transcriptRevisionFromRow(row: TranscriptRevisionRow): TranscriptRevisionRecord {
@@ -6128,6 +6343,454 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     );
     if (result.changes > 0) this.notify([input.targetMeetingId]);
     return result.changes > 0;
+  }
+
+  async discoverRecordingAssetTranscriptionTasks(
+    input: DiscoverRecordingAssetTranscriptionTasksInput,
+  ): Promise<number> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') throw new Error('guest meeting cannot schedule account transcription');
+    assertRecordId(input.meetingId, 'recording transcription meeting ID');
+    assertRecordId(input.remoteMeetingId, 'recording transcription remote meeting ID');
+    assertNonNegativeInteger(input.discoveredAtMs, 'recording transcription discovery time');
+    if (input.assets.length > 1_000) throw new Error('recording transcription discovery is too large');
+    const remoteAssetIds = new Set<string>();
+    const taskIds = new Set<string>();
+    input.assets.forEach(asset => {
+      assertRecordId(asset.taskId, 'recording transcription task ID');
+      assertRecordId(asset.clientRecordingAssetId, 'recording transcription client asset ID');
+      assertRecordId(asset.remoteRecordingAssetId, 'recording transcription remote asset ID');
+      assertRecordId(asset.clientRequestId, 'recording transcription client request ID');
+      assertRecordId(asset.idempotencyKey, 'recording transcription idempotency key');
+      if (!['zh', 'en', 'auto'].includes(asset.language)) {
+        throw new Error('recording transcription language is invalid');
+      }
+      if (remoteAssetIds.has(asset.remoteRecordingAssetId) || taskIds.has(asset.taskId)) {
+        throw new Error('recording transcription discovery contains duplicate assets');
+      }
+      remoteAssetIds.add(asset.remoteRecordingAssetId);
+      taskIds.add(asset.taskId);
+    });
+
+    const touchedMeetingIds: string[] = [];
+    const changed = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<MeetingRow>(
+        `SELECT * FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!meeting) return 0;
+      if (meeting.remote_id !== input.remoteMeetingId) {
+        throw new Error('recording transcription remote meeting identity changed');
+      }
+      let mutationCount = 0;
+      for (const asset of input.assets) {
+        const localCandidates = await database.getAllAsync<RecordingAssetRow>(
+          `SELECT * FROM recording_assets
+           WHERE meeting_id = ? AND (id = ? OR remote_asset_id = ?)
+           ORDER BY CASE WHEN remote_asset_id = ? THEN 0 ELSE 1 END, id`,
+          input.meetingId,
+          asset.clientRecordingAssetId,
+          asset.remoteRecordingAssetId,
+          asset.remoteRecordingAssetId,
+        );
+        if (new Set(localCandidates.map(candidate => candidate.id)).size > 1) {
+          throw new Error('recording transcription local asset identity is ambiguous');
+        }
+        const local = localCandidates[0] ?? null;
+        if (
+          local?.remote_asset_id
+          && local.remote_asset_id !== asset.remoteRecordingAssetId
+        ) throw new Error('recording transcription remote asset identity changed');
+
+        const byRemote = await database.getFirstAsync<RecordingAssetTranscriptionTaskRow>(
+          `SELECT * FROM recording_asset_transcription_tasks
+           WHERE scope_key = ? AND remote_recording_asset_id = ?`,
+          input.scopeKey,
+          asset.remoteRecordingAssetId,
+        );
+        const byId = await database.getFirstAsync<RecordingAssetTranscriptionTaskRow>(
+          'SELECT * FROM recording_asset_transcription_tasks WHERE id = ?',
+          asset.taskId,
+        );
+        if (byRemote && byId && byRemote.id !== byId.id) {
+          throw new Error('recording transcription task identity is ambiguous');
+        }
+        const existing = byRemote ?? byId;
+        if (existing) {
+          if (
+            existing.scope_key !== input.scopeKey
+            || existing.meeting_id !== input.meetingId
+            || existing.remote_meeting_id !== input.remoteMeetingId
+            || existing.client_recording_asset_id !== asset.clientRecordingAssetId
+            || existing.remote_recording_asset_id !== asset.remoteRecordingAssetId
+            || existing.client_request_id !== asset.clientRequestId
+            || existing.idempotency_key !== asset.idempotencyKey
+            || existing.language !== asset.language
+          ) throw new Error('recording transcription task identity changed');
+          if (
+            existing.local_recording_asset_id
+            && local
+            && existing.local_recording_asset_id !== local.id
+          ) throw new Error('recording transcription local asset identity changed');
+          if (!existing.local_recording_asset_id && local) {
+            const updated = await database.runAsync(
+              `UPDATE recording_asset_transcription_tasks
+               SET local_recording_asset_id = ?, updated_at_ms = MAX(updated_at_ms, ?)
+               WHERE id = ? AND local_recording_asset_id IS NULL`,
+              local.id,
+              input.discoveredAtMs,
+              existing.id,
+            );
+            mutationCount += updated.changes;
+          }
+          continue;
+        }
+        const inserted = await database.runAsync(
+          `INSERT INTO recording_asset_transcription_tasks (
+             id, scope_key, meeting_id, local_recording_asset_id,
+             client_recording_asset_id, remote_meeting_id, remote_recording_asset_id,
+             client_request_id, idempotency_key, language, status, remote_job_id,
+             request_attempt_count, remote_attempt, progress, result_revision_id,
+             error_code, retryable, next_attempt_at_ms, remote_updated_at_ms,
+             content_synced_at_ms, created_at_ms, updated_at_ms, completed_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL,
+             0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?, ?, NULL)`,
+          asset.taskId,
+          input.scopeKey,
+          input.meetingId,
+          local?.id ?? null,
+          asset.clientRecordingAssetId,
+          input.remoteMeetingId,
+          asset.remoteRecordingAssetId,
+          asset.clientRequestId,
+          asset.idempotencyKey,
+          asset.language,
+          input.discoveredAtMs,
+          input.discoveredAtMs,
+        );
+        mutationCount += inserted.changes;
+      }
+      if (mutationCount > 0) {
+        await reconcileRecordingAssetTranscriptionStage(
+          database,
+          input.meetingId,
+          input.scopeKey,
+          input.discoveredAtMs,
+        );
+        touchedMeetingIds.push(input.meetingId);
+      }
+      return mutationCount;
+    });
+    if (touchedMeetingIds.length > 0) this.notify(touchedMeetingIds);
+    return changed;
+  }
+
+  async listRunnableRecordingAssetTranscriptionTasks(
+    scopeKey: ScopeKey,
+    nowMs: number,
+    limit: number,
+  ): Promise<readonly RecordingAssetTranscriptionTaskRecord[]> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(nowMs, 'recording transcription query time');
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('recording transcription query limit is invalid');
+    }
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<RecordingAssetTranscriptionTaskRow>(
+      `SELECT task.* FROM recording_asset_transcription_tasks task
+       INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+       WHERE task.scope_key = ? AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         AND task.status <> 'blocked'
+         AND (
+           (task.status = 'completed' AND task.content_synced_at_ms IS NULL)
+           OR (
+             task.status <> 'completed'
+             AND (task.next_attempt_at_ms IS NULL OR task.next_attempt_at_ms <= ?)
+           )
+         )
+       ORDER BY
+         CASE
+           WHEN task.status = 'completed' AND task.content_synced_at_ms IS NULL THEN 0
+           WHEN task.status = 'failed_retryable' THEN 1
+           WHEN task.status = 'pending' THEN 2
+           ELSE 3
+         END,
+         COALESCE(task.next_attempt_at_ms, 0), task.updated_at_ms, task.id
+       LIMIT ?`,
+      scopeKey,
+      scopeKey,
+      nowMs,
+      limit,
+    );
+    return rows.map(recordingAssetTranscriptionTaskFromRow);
+  }
+
+  async applyRecordingAssetTranscriptionJob(
+    input: ApplyRecordingAssetTranscriptionJobInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.taskId, 'recording transcription task ID');
+    assertRecordId(input.remoteMeetingId, 'recording transcription remote meeting ID');
+    assertRecordId(input.remoteRecordingAssetId, 'recording transcription remote asset ID');
+    assertRecordId(input.remoteJobId, 'recording transcription remote job ID');
+    assertNonNegativeInteger(input.remoteAttempt, 'recording transcription remote attempt');
+    assertOptionalNonNegativeInteger(input.nextAttemptAtMs, 'recording transcription retry time');
+    assertNonNegativeInteger(input.remoteUpdatedAtMs, 'recording transcription remote update time');
+    assertNonNegativeInteger(input.receivedAtMs, 'recording transcription response time');
+    assertNullableBoundedText(input.errorCode, 512, 'recording transcription error code');
+    assertNullableBoundedText(input.resultRevisionId, 512, 'recording transcription result revision');
+    if (!['queued', 'running', 'completed', 'failed'].includes(input.status)) {
+      throw new Error('recording transcription remote status is invalid');
+    }
+    if (input.progress !== null && (
+      !Number.isFinite(input.progress) || input.progress < 0 || input.progress > 1
+    )) throw new Error('recording transcription progress is invalid');
+    if (input.status === 'completed' && !input.resultRevisionId) {
+      throw new Error('completed recording transcription has no result revision');
+    }
+    if (input.status !== 'completed' && input.resultRevisionId) {
+      throw new Error('unfinished recording transcription has a result revision');
+    }
+    if (input.status !== 'failed' && input.retryable) {
+      throw new Error('unfinished recording transcription cannot be retryable');
+    }
+
+    let touchedMeetingId: string | null = null;
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const row = await database.getFirstAsync<RecordingAssetTranscriptionTaskRow>(
+        `SELECT task.* FROM recording_asset_transcription_tasks task
+         INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+         WHERE task.id = ? AND task.scope_key = ? AND meeting.lifecycle <> 'deleted'`,
+        input.taskId,
+        input.scopeKey,
+      );
+      if (!row) return false;
+      if (
+        row.remote_meeting_id !== input.remoteMeetingId
+        || row.remote_recording_asset_id !== input.remoteRecordingAssetId
+      ) throw new Error('recording transcription response identity changed');
+      if (row.remote_job_id && row.remote_job_id !== input.remoteJobId) {
+        throw new Error('recording transcription remote job identity changed');
+      }
+      if (row.result_revision_id && input.resultRevisionId && row.result_revision_id !== input.resultRevisionId) {
+        throw new Error('recording transcription result revision changed');
+      }
+      if (row.remote_updated_at_ms !== null && input.remoteUpdatedAtMs < row.remote_updated_at_ms) {
+        return false;
+      }
+      if (row.status === 'completed' && input.status !== 'completed') return false;
+      const status: RecordingAssetTranscriptionTaskRecord['status'] = input.status === 'failed'
+        ? input.retryable ? 'failed_retryable' : 'blocked'
+        : input.status;
+      const preserveSynced = status === 'completed'
+        && row.status === 'completed'
+        && row.result_revision_id === input.resultRevisionId;
+      const result = await database.runAsync(
+        `UPDATE recording_asset_transcription_tasks SET
+           status = ?, remote_job_id = COALESCE(remote_job_id, ?),
+           request_attempt_count = 0,
+           remote_attempt = MAX(remote_attempt, ?), progress = ?,
+           result_revision_id = COALESCE(result_revision_id, ?), error_code = ?,
+           retryable = ?, next_attempt_at_ms = ?, remote_updated_at_ms = ?,
+           content_synced_at_ms = CASE WHEN ? THEN content_synced_at_ms ELSE NULL END,
+           updated_at_ms = MAX(updated_at_ms, ?),
+           completed_at_ms = CASE WHEN ? = 'completed'
+             THEN COALESCE(completed_at_ms, ?) ELSE NULL END
+         WHERE id = ? AND scope_key = ?`,
+        status,
+        input.remoteJobId,
+        input.remoteAttempt,
+        input.progress,
+        input.resultRevisionId,
+        input.status === 'failed' ? input.errorCode ?? 'transcription_failed' : null,
+        status === 'failed_retryable' ? 1 : 0,
+        status === 'completed' || status === 'blocked' ? null : input.nextAttemptAtMs,
+        input.remoteUpdatedAtMs,
+        preserveSynced ? 1 : 0,
+        input.receivedAtMs,
+        status,
+        input.receivedAtMs,
+        row.id,
+        input.scopeKey,
+      );
+      if (result.changes !== 1) return false;
+      await reconcileRecordingAssetTranscriptionStage(
+        database,
+        row.meeting_id,
+        input.scopeKey,
+        input.receivedAtMs,
+      );
+      touchedMeetingId = row.meeting_id;
+      return true;
+    });
+    if (touchedMeetingId) this.notify([touchedMeetingId]);
+    return applied;
+  }
+
+  async recordRecordingAssetTranscriptionTransportFailure(
+    input: RecordRecordingAssetTranscriptionTransportFailureInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.taskId, 'recording transcription task ID');
+    assertRecordId(input.errorCode, 'recording transcription transport error');
+    assertOptionalNonNegativeInteger(input.nextAttemptAtMs, 'recording transcription retry time');
+    assertNonNegativeInteger(input.failedAtMs, 'recording transcription failure time');
+    if (input.disposition === 'retry' && input.nextAttemptAtMs === null) {
+      throw new Error('retryable recording transcription failure has no retry time');
+    }
+    let touchedMeetingId: string | null = null;
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const row = await database.getFirstAsync<RecordingAssetTranscriptionTaskRow>(
+        `SELECT task.* FROM recording_asset_transcription_tasks task
+         INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+         WHERE task.id = ? AND task.scope_key = ? AND meeting.lifecycle <> 'deleted'`,
+        input.taskId,
+        input.scopeKey,
+      );
+      if (!row || row.status === 'completed') return false;
+      const status = input.disposition === 'blocked' ? 'blocked' : row.status;
+      const result = await database.runAsync(
+        `UPDATE recording_asset_transcription_tasks SET
+           status = ?, request_attempt_count = request_attempt_count + 1,
+           error_code = ?, retryable = ?, next_attempt_at_ms = ?,
+           updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE id = ? AND scope_key = ? AND status <> 'completed'`,
+        status,
+        input.errorCode,
+        input.disposition === 'retry' ? 1 : 0,
+        input.disposition === 'retry' ? input.nextAttemptAtMs : null,
+        input.failedAtMs,
+        row.id,
+        input.scopeKey,
+      );
+      if (result.changes !== 1) return false;
+      await reconcileRecordingAssetTranscriptionStage(
+        database,
+        row.meeting_id,
+        input.scopeKey,
+        input.failedAtMs,
+      );
+      touchedMeetingId = row.meeting_id;
+      return true;
+    });
+    if (touchedMeetingId) this.notify([touchedMeetingId]);
+    return applied;
+  }
+
+  async markRecordingAssetTranscriptionContentSynced(
+    scopeKey: ScopeKey,
+    remoteMeetingId: string,
+    syncedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertRecordId(remoteMeetingId, 'recording transcription remote meeting ID');
+    assertNonNegativeInteger(syncedAtMs, 'recording transcription content sync time');
+    const touchedMeetingIds: string[] = [];
+    const changes = await withMeetingDatabaseTransaction(async database => {
+      const meetingRows = await database.getAllAsync<{ meeting_id: string }>(
+        `SELECT DISTINCT meeting_id FROM recording_asset_transcription_tasks
+         WHERE scope_key = ? AND remote_meeting_id = ?
+           AND status = 'completed' AND content_synced_at_ms IS NULL`,
+        scopeKey,
+        remoteMeetingId,
+      );
+      if (meetingRows.length === 0) return 0;
+      const result = await database.runAsync(
+        `UPDATE recording_asset_transcription_tasks
+         SET content_synced_at_ms = ?, updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE scope_key = ? AND remote_meeting_id = ?
+           AND status = 'completed' AND content_synced_at_ms IS NULL`,
+        syncedAtMs,
+        syncedAtMs,
+        scopeKey,
+        remoteMeetingId,
+      );
+      for (const row of meetingRows) {
+        await reconcileRecordingAssetTranscriptionStage(
+          database,
+          row.meeting_id,
+          scopeKey,
+          syncedAtMs,
+        );
+        touchedMeetingIds.push(row.meeting_id);
+      }
+      return result.changes;
+    });
+    if (touchedMeetingIds.length > 0) this.notify(touchedMeetingIds);
+    return changes;
+  }
+
+  async retryRecordingAssetTranscriptionTasks(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    requestedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'recording transcription meeting ID');
+    assertNonNegativeInteger(requestedAtMs, 'recording transcription retry time');
+    let canonicalMeetingId: string | null = null;
+    const changes = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE scope_key = ? AND lifecycle <> 'deleted'
+           AND (id = ? OR legacy_source_id = ?)
+         ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1`,
+        scopeKey,
+        meetingId,
+        meetingId,
+        meetingId,
+      );
+      if (!meeting) return 0;
+      canonicalMeetingId = meeting.id;
+      const result = await database.runAsync(
+        `UPDATE recording_asset_transcription_tasks SET
+           next_attempt_at_ms = ?, error_code = NULL,
+           retryable = CASE WHEN status = 'failed_retryable' THEN 1 ELSE retryable END,
+           updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE scope_key = ? AND meeting_id = ?
+           AND status IN ('pending','queued','running','failed_retryable')`,
+        requestedAtMs,
+        requestedAtMs,
+        scopeKey,
+        meeting.id,
+      );
+      if (result.changes > 0) {
+        await reconcileRecordingAssetTranscriptionStage(
+          database,
+          meeting.id,
+          scopeKey,
+          requestedAtMs,
+        );
+      }
+      return result.changes;
+    });
+    if (canonicalMeetingId && changes > 0) this.notify([canonicalMeetingId]);
+    return changes;
+  }
+
+  async getNextRecordingAssetTranscriptionAttemptAt(
+    scopeKey: ScopeKey,
+    nowMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(nowMs, 'recording transcription query time');
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<{ next_at_ms: number | null }>(
+      `SELECT MIN(CASE
+         WHEN task.next_attempt_at_ms IS NULL THEN ?
+         ELSE task.next_attempt_at_ms
+       END) AS next_at_ms
+       FROM recording_asset_transcription_tasks task
+       INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+       WHERE task.scope_key = ? AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         AND task.status NOT IN ('blocked', 'completed')`,
+      nowMs,
+      scopeKey,
+      scopeKey,
+    );
+    return row?.next_at_ms ?? null;
   }
 
   async mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult> {

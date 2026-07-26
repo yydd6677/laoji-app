@@ -329,6 +329,11 @@ export function parseRecordingAssetTranscriptionJobV2(
     throw new Error('录音转写任务进度无效');
   }
   if (typeof value.retryable !== 'boolean') throw new Error('录音转写任务重试状态无效');
+  const resultRevisionId = nullableIdentifier(value.result_revision_id, '录音转写结果版本', 512);
+  if ((status === 'completed') !== (resultRevisionId !== null)) {
+    throw new Error('录音转写任务结果版本不完整');
+  }
+  if (status !== 'failed' && value.retryable) throw new Error('录音转写任务重试状态无效');
   return {
     jobId,
     meetingRemoteId: identifier(value.meeting_id, '录音转写会议标识', 160),
@@ -339,7 +344,7 @@ export function parseRecordingAssetTranscriptionJobV2(
     progress,
     errorCode: nullableIdentifier(value.error_code, '录音转写错误', 160),
     retryable: value.retryable,
-    resultRevisionId: nullableIdentifier(value.result_revision_id, '录音转写结果版本', 512),
+    resultRevisionId,
     serverCreatedAtMs: serverTime(value.created_at, '录音转写任务创建时间'),
     serverUpdatedAtMs: serverTime(value.updated_at, '录音转写任务更新时间'),
   };

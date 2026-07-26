@@ -128,6 +128,84 @@ export interface RecordingAssetRecord {
   lastVerifiedAtMs: number | null;
 }
 
+export type RecordingAssetTranscriptionTaskStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed_retryable'
+  | 'blocked';
+
+export interface RecordingAssetTranscriptionTaskRecord {
+  id: string;
+  scopeKey: ScopeKey;
+  meetingId: string;
+  localRecordingAssetId: string | null;
+  clientRecordingAssetId: string;
+  remoteMeetingId: string;
+  remoteRecordingAssetId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  language: 'zh' | 'en' | 'auto';
+  status: RecordingAssetTranscriptionTaskStatus;
+  remoteJobId: string | null;
+  requestAttemptCount: number;
+  remoteAttempt: number;
+  progress: number | null;
+  resultRevisionId: string | null;
+  errorCode: string | null;
+  retryable: boolean;
+  nextAttemptAtMs: number | null;
+  remoteUpdatedAtMs: number | null;
+  contentSyncedAtMs: number | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+  completedAtMs: number | null;
+}
+
+export interface RecordingAssetTranscriptionDiscovery {
+  taskId: string;
+  clientRecordingAssetId: string;
+  remoteRecordingAssetId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  language: RecordingAssetTranscriptionTaskRecord['language'];
+}
+
+export interface DiscoverRecordingAssetTranscriptionTasksInput {
+  meetingId: string;
+  remoteMeetingId: string;
+  scopeKey: ScopeKey;
+  assets: readonly RecordingAssetTranscriptionDiscovery[];
+  discoveredAtMs: number;
+}
+
+export interface ApplyRecordingAssetTranscriptionJobInput {
+  taskId: string;
+  scopeKey: ScopeKey;
+  remoteMeetingId: string;
+  remoteRecordingAssetId: string;
+  remoteJobId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  remoteAttempt: number;
+  progress: number | null;
+  errorCode: string | null;
+  retryable: boolean;
+  resultRevisionId: string | null;
+  nextAttemptAtMs: number | null;
+  remoteUpdatedAtMs: number;
+  receivedAtMs: number;
+}
+
+export interface RecordRecordingAssetTranscriptionTransportFailureInput {
+  taskId: string;
+  scopeKey: ScopeKey;
+  disposition: 'retry' | 'blocked';
+  errorCode: string;
+  nextAttemptAtMs: number | null;
+  failedAtMs: number;
+}
+
 export interface MeetingRootPatch {
   origin?: MeetingOrigin;
   entryPoint?: MeetingEntryPoint | null;
@@ -1263,6 +1341,34 @@ export interface MeetingNoteRepository {
     input: CompleteMeetingRecordingMergeTaskInput,
   ): Promise<boolean>;
   failMeetingRecordingMergeTask(input: FailMeetingRecordingMergeTaskInput): Promise<boolean>;
+  discoverRecordingAssetTranscriptionTasks(
+    input: DiscoverRecordingAssetTranscriptionTasksInput,
+  ): Promise<number>;
+  listRunnableRecordingAssetTranscriptionTasks(
+    scopeKey: ScopeKey,
+    nowMs: number,
+    limit: number,
+  ): Promise<readonly RecordingAssetTranscriptionTaskRecord[]>;
+  applyRecordingAssetTranscriptionJob(
+    input: ApplyRecordingAssetTranscriptionJobInput,
+  ): Promise<boolean>;
+  recordRecordingAssetTranscriptionTransportFailure(
+    input: RecordRecordingAssetTranscriptionTransportFailureInput,
+  ): Promise<boolean>;
+  markRecordingAssetTranscriptionContentSynced(
+    scopeKey: ScopeKey,
+    remoteMeetingId: string,
+    syncedAtMs: number,
+  ): Promise<number>;
+  retryRecordingAssetTranscriptionTasks(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    requestedAtMs: number,
+  ): Promise<number>;
+  getNextRecordingAssetTranscriptionAttemptAt(
+    scopeKey: ScopeKey,
+    nowMs: number,
+  ): Promise<number | null>;
   mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult>;
   setOccurrenceLinkState(input: SetOccurrenceLinkStateInput): Promise<number>;
   claimActionSyncOperations(

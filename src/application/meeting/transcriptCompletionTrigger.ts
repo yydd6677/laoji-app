@@ -1,14 +1,24 @@
 import type { ScopeKey } from '../../domain/meeting';
 
-type TranscriptCompletionListener = (scopeKey: ScopeKey) => void;
+export interface MeetingTranscriptCompletionRequestOptions {
+  discoverRecordingAssets?: boolean;
+}
+
+type TranscriptCompletionListener = (
+  scopeKey: ScopeKey,
+  options: MeetingTranscriptCompletionRequestOptions,
+) => void;
 
 const listeners = new Set<TranscriptCompletionListener>();
 
-export function requestMeetingTranscriptCompletion(scopeKey: ScopeKey): void {
+export function requestMeetingTranscriptCompletion(
+  scopeKey: ScopeKey,
+  options: MeetingTranscriptCompletionRequestOptions = {},
+): void {
   if (scopeKey === 'guest') return;
   listeners.forEach(listener => {
     try {
-      listener(scopeKey);
+      listener(scopeKey, options);
     } catch {
       // A committed local capture must not fail because a scheduler listener failed.
     }
