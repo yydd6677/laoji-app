@@ -135,6 +135,11 @@ private class MonthWeekRowView(context: Context) : View(context) {
     palette.textDisabled,
     MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
   )
+  private val weekendDayPaint = CalendarUi.textPaint(
+    context,
+    palette.accent,
+    MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
+  )
   private val selectedDayPaint = CalendarUi.textPaint(
     context,
     palette.textPrimary,
@@ -152,9 +157,13 @@ private class MonthWeekRowView(context: Context) : View(context) {
     // the 14sp title used by the expanded event list and day timeline.
     textSize = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_TEXT_SIZE_DP)
   }
-  // [INFERENCE] LaoJi currently has one calendar color, so the source
-  // EventChipView calendar-color strip maps to the Calendar accent token.
-  private val eventStripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
+  // [PRODUCT] LaoJi replaces Feishu's one-sided calendar strip with one
+  // continuous border around the full event entry.
+  private val eventBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.eventBorder
+    style = Paint.Style.STROKE
+    strokeWidth = CalendarUi.dp(context, CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP)
+  }
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.divider
     strokeWidth = maxOf(1f, 0.5f * density)
@@ -268,7 +277,8 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val epochDay = rowStartEpochDay + column
       val parts = CalendarDateMath.fromEpochDay(epochDay)
       val centerX = gridStart + column * cellWidth + cellWidth / 2f
-      when (MonthExpandedLayoutContract.dateMarker(epochDay, selectedEpochDay, todayEpochDay)) {
+      val marker = MonthExpandedLayoutContract.dateMarker(epochDay, selectedEpochDay, todayEpochDay)
+      when (marker) {
         MonthDateMarker.SELECTED -> {
           canvas.drawCircle(
             centerX,
@@ -288,10 +298,13 @@ private class MonthWeekRowView(context: Context) : View(context) {
         MonthDateMarker.NONE -> Unit
       }
       val dayText = parts.day.toString()
-      val paint = when (MonthExpandedLayoutContract.dateMarker(epochDay, selectedEpochDay, todayEpochDay)) {
-        MonthDateMarker.TODAY -> todayDayPaint
-        MonthDateMarker.SELECTED -> selectedDayPaint
-        MonthDateMarker.NONE -> if (parts.month != monthParts.month) mutedDayPaint else dayPaint
+      val outsideDisplayedMonth = parts.year != monthParts.year || parts.month != monthParts.month
+      val paint = when {
+        marker == MonthDateMarker.TODAY -> todayDayPaint
+        outsideDisplayedMonth -> mutedDayPaint
+        CalendarProductVisualContract.isWeekendColumn(column) -> weekendDayPaint
+        marker == MonthDateMarker.SELECTED -> selectedDayPaint
+        else -> dayPaint
       }
       canvas.drawText(
         dayText,
@@ -325,19 +338,14 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val rect = RectF(horizontal.left, top, horizontal.right, top + chipHeight)
       val radius = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_RADIUS_DP)
       canvas.drawRoundRect(rect, radius, radius, eventPaint)
-      val stripInset = CalendarUi.dp(context, 0.5f)
-      val stripLeft = rect.left + stripInset
-      canvas.drawRect(
-        stripLeft,
-        rect.top + stripInset,
-        stripLeft + CalendarUi.dp(context, 2f),
-        rect.bottom - stripInset,
-        eventStripPaint,
-      )
+      val borderInset = eventBorderPaint.strokeWidth / 2f
+      val borderRect = RectF(rect).apply { inset(borderInset, borderInset) }
+      val borderRadius = (radius - borderInset).coerceAtLeast(0f)
+      canvas.drawRoundRect(borderRect, borderRadius, borderRadius, eventBorderPaint)
       val title = CalendarUi.ellipsize(
         CalendarUi.listEventTitle(segment.event.title),
         eventTextPaint,
-        rect.width() - CalendarUi.dp(context, 10f),
+        rect.width() - CalendarUi.dp(context, 12f),
       )
       val titleBaseline = rect.centerY() - (eventTextPaint.ascent() + eventTextPaint.descent()) / 2f
       canvas.drawText(title, rect.left + CalendarUi.dp(context, 6f), titleBaseline, eventTextPaint)
@@ -759,7 +767,11 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     events.forEach { event ->
       eventList.addView(
         createEventRow(epochDay, event, listener),
-        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+        LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+          marginStart = CalendarUi.dp(context, 16f).roundToInt()
+          marginEnd = CalendarUi.dp(context, 12f).roundToInt()
+          bottomMargin = CalendarUi.dp(context, 6f).roundToInt()
+        },
       )
     }
     scrollView.post {
@@ -780,43 +792,42 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
       "selected-event-row",
       "calendar-selected-event-${event.identity}",
     )
-    orientation = LinearLayout.HORIZONTAL
+    orientation = LinearLayout.VERTICAL
     gravity = Gravity.TOP
     minimumHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP).roundToInt()
     setPadding(
-      0,
-      0,
-      0,
-      CalendarUi.dp(context, 6f).roundToInt(),
+      CalendarUi.dp(context, 12f).roundToInt(),
+      CalendarUi.dp(context, 7f).roundToInt(),
+      CalendarUi.dp(context, 12f).roundToInt(),
+      CalendarUi.dp(context, 7f).roundToInt(),
     )
     isClickable = true
     isFocusable = true
     background = StateListDrawable().apply {
       addState(
         intArrayOf(android.R.attr.state_pressed),
-        CalendarUi.background(palette.fillPressed, 0f, context),
+        CalendarUi.background(
+          palette.eventFill,
+          CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP,
+          context,
+          palette.eventBorder,
+          CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP,
+        ),
       )
-      addState(intArrayOf(), CalendarUi.background(palette.surfaceMuted, 0f, context))
+      addState(
+        intArrayOf(),
+        CalendarUi.background(
+          palette.surfaceMuted,
+          CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP,
+          context,
+          palette.eventBorder,
+          CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP,
+        ),
+      )
     }
     contentDescription = "${CalendarUi.listEventTitle(event.title)}，${eventTimeLabel(epochDay, event)}"
     setOnClickListener { listener?.onEventOpened(event) }
 
-    addView(
-      // [SOURCE] EventChipView draws a 2dp calendar strip from almost the
-      // full chip top to bottom. [INFERENCE] LaoJi maps its sole calendar
-      // color to the Calendar accent token.
-      View(context).apply { setBackgroundColor(palette.accent) },
-      LinearLayout.LayoutParams(
-        CalendarUi.dp(context, 2f).roundToInt(),
-        CalendarUi.dp(
-          context,
-          MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP - 14f,
-        ).roundToInt(),
-      ).apply {
-        marginStart = CalendarUi.dp(context, 20f).roundToInt()
-        topMargin = CalendarUi.dp(context, 7f).roundToInt()
-      },
-    )
     addView(
       LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -825,7 +836,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
             text = CalendarUi.listEventTitle(event.title)
             setTextColor(palette.textPrimary)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            maxLines = 1
+            maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
           },
           LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
@@ -838,14 +849,12 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
           },
-          LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+          LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+            topMargin = CalendarUi.dp(context, 2f).roundToInt()
+          },
         )
       },
-      LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
-        marginStart = CalendarUi.dp(context, 14f).roundToInt()
-        marginEnd = CalendarUi.dp(context, 14f).roundToInt()
-        topMargin = CalendarUi.dp(context, 7f).roundToInt()
-      },
+      LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
     )
   }
 

@@ -193,9 +193,10 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
   private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surface }
   private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
-  private val eventStripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.accent
-    alpha = (255f * DayEventVisualContract.CALENDAR_STRIPE_ALPHA).toInt()
+  private val eventBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = palette.eventBorder
+    style = Paint.Style.STROKE
+    strokeWidth = CalendarUi.dp(context, DayEventVisualContract.EVENT_BORDER_WIDTH_DP)
   }
   private val eventPressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.argb(
@@ -395,14 +396,13 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     if (geometry.segment.continuesAfterDay) {
       canvas.drawRect(rect.left, rect.bottom - CalendarUi.dp(context, 4f), rect.right, rect.bottom, eventPaint)
     }
-    val stripeWidth = CalendarUi.dp(context, DayEventVisualContract.CALENDAR_STRIPE_WIDTH_DP)
-    val stripeSave = canvas.save()
-    canvas.clipPath(android.graphics.Path().apply { addRoundRect(androidRect, radius, radius, android.graphics.Path.Direction.CW) })
-    canvas.drawRect(rect.left, rect.top, rect.left + stripeWidth, rect.bottom, eventStripePaint)
-    canvas.restoreToCount(stripeSave)
     if (selectedEventIdentity == geometry.segment.event.identity) {
       canvas.drawRoundRect(androidRect, radius, radius, eventPressedPaint)
     }
+    val borderInset = eventBorderPaint.strokeWidth / 2f
+    val borderRect = RectF(androidRect).apply { inset(borderInset, borderInset) }
+    val borderRadius = (radius - borderInset).coerceAtLeast(0f)
+    canvas.drawRoundRect(borderRect, borderRadius, borderRadius, eventBorderPaint)
 
     val textRect = CalendarRect(
       left = rect.left + CalendarUi.dp(context, DayEventVisualContract.TEXT_MARGIN_LEFT_DP),

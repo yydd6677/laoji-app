@@ -8,12 +8,13 @@ import kotlin.math.floor
 
 object DayEventVisualContract {
   const val EVENT_RADIUS_DP = 4f
-  const val CALENDAR_STRIPE_WIDTH_DP = 2.5f
-  const val CALENDAR_STRIPE_ALPHA = 0.4f
+  // [PRODUCT] LaoJi uses a continuous event outline instead of Feishu's
+  // one-sided calendar-color strip.
+  const val EVENT_BORDER_WIDTH_DP = CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP
   const val TEXT_MARGIN_LEFT_DP = 9f
   const val TEXT_MARGIN_TOP_DP = 3f
-  const val TEXT_MARGIN_RIGHT_DP = 1.5f
-  const val TEXT_MARGIN_BOTTOM_DP = 1.5f
+  const val TEXT_MARGIN_RIGHT_DP = 4f
+  const val TEXT_MARGIN_BOTTOM_DP = 3f
   const val TITLE_TEXT_SIZE_SP = 14f
   const val DESCRIPTION_TEXT_SIZE_SP = 12f
   const val TEXT_VERTICAL_SPACE_DP = 1f

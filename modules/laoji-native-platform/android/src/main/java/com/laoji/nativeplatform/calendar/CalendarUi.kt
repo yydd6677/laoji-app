@@ -27,6 +27,7 @@ data class CalendarPalette(
   val accentSoft: Int,
   val selectionMarker: Int,
   val accentText: Int,
+  val eventBorder: Int,
   val eventFill: Int,
   val eventText: Int,
   // CAL-DAY-COMPOSE-001: event fill/text/pressed tokens are kept together so the
@@ -34,6 +35,20 @@ data class CalendarPalette(
   val eventPressedOverlay: Int,
   val destructive: Int
 )
+
+// [PRODUCT] Intentional LaoJi calendar overrides. Feishu remains the geometry
+// baseline, while date emphasis and bounded event entries follow the user's
+// explicit personalization contract.
+internal object CalendarProductVisualContract {
+  const val DATE_NUMBER_SCALE = 1.2f
+  const val EVENT_BORDER_WIDTH_DP = 2f
+  const val EVENT_BORDER_RADIUS_DP = 4f
+
+  fun dateNumberSizeSp(sourceSizeSp: Float): Float = sourceSizeSp * DATE_NUMBER_SCALE
+
+  fun isWeekendColumn(sundayFirstColumn: Int): Boolean =
+    sundayFirstColumn == 0 || sundayFirstColumn == 6
+}
 
 object CalendarUi {
   // Feishu keeps an empty summary in storage and supplies copy only at render
@@ -67,6 +82,9 @@ object CalendarUi {
         accentSoft = Color.rgb(21, 35, 64),
         selectionMarker = Color.rgb(67, 67, 67),
         accentText = Color.WHITE,
+        // [PRODUCT] The bounded LaoJi event entry uses a quieter B400 blue;
+        // weekend dates continue to use the normal Calendar accent.
+        eventBorder = Color.rgb(76, 136, 255),
         // Feishu calendar light/dark event tokens: bg_blue and text_blue.
         eventFill = Color.rgb(23, 49, 102),
         eventText = Color.rgb(143, 180, 255),
@@ -88,6 +106,9 @@ object CalendarUi {
         accentSoft = Color.rgb(240, 244, 255),
         selectionMarker = Color.rgb(222, 224, 227),
         accentText = Color.WHITE,
+        // [PRODUCT] One step lighter than primary B600, while retaining enough
+        // contrast against the pale event fill and neutral list surface.
+        eventBorder = Color.rgb(51, 112, 255),
         eventFill = Color.rgb(224, 233, 255),
         eventText = Color.rgb(4, 66, 210),
         eventPressedOverlay = Color.rgb(143, 149, 158),
@@ -103,12 +124,20 @@ object CalendarUi {
       typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
     }
 
-  fun background(color: Int, radiusDp: Float, context: Context, strokeColor: Int? = null): GradientDrawable =
+  fun background(
+    color: Int,
+    radiusDp: Float,
+    context: Context,
+    strokeColor: Int? = null,
+    strokeWidthDp: Float = 0.5f,
+  ): GradientDrawable =
     GradientDrawable().apply {
       shape = GradientDrawable.RECTANGLE
       setColor(color)
       cornerRadius = dp(context, radiusDp)
-      if (strokeColor != null) setStroke(dp(context, 0.5f).toInt().coerceAtLeast(1), strokeColor)
+      if (strokeColor != null) {
+        setStroke(dp(context, strokeWidthDp).toInt().coerceAtLeast(1), strokeColor)
+      }
     }
 
   fun monthTitle(epochDay: Int): String {

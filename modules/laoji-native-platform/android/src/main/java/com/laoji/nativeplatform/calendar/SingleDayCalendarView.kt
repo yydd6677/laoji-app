@@ -119,29 +119,53 @@ internal class AssociatedDayPagerTouchRouter(context: Context) {
 
 class DayWeekHeaderView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
-  private val touchRouter = AssociatedDayPagerTouchRouter(context)
-  private val track = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-  private val trackViewport = FrameLayout(context).apply {
-    clipChildren = true
-    clipToPadding = true
-    addView(track)
-  }
-  private val pages = Array(DayPagerContract.PAGE_COUNT) { DayWeekHeaderPage(context) }
+  private val anchorWeekStartEpochDay = CalendarDateMath.startOfWeekSunday(currentEpochDay())
+  private val adapter = DayWeekHeaderAdapter()
+  private val pager = ViewPager2(context)
   private var selectedEpochDay = currentEpochDay()
   private var todayEpochDay: Int? = null
-  private var positionProgress = 0f
   private var dateSelectedListener: ((Int) -> Unit)? = null
-  private var associatedPagerDispatcher: ((MotionEvent) -> Boolean)? = null
+  private var hasBinding = false
+  private var suppressedPageSelection: Int? = null
+
+  private val pageCallback = object : ViewPager2.OnPageChangeCallback() {
+    override fun onPageSelected(position: Int) {
+      if (!hasBinding) return
+      val previousWeekStart = CalendarDateMath.startOfWeekSunday(selectedEpochDay)
+      val nextWeekStart = weekStartForPosition(position)
+      if (previousWeekStart == nextWeekStart) {
+        suppressedPageSelection = null
+        return
+      }
+      val weekdayOffset = selectedEpochDay - previousWeekStart
+      selectedEpochDay = nextWeekStart + weekdayOffset.coerceIn(0, 6)
+      refreshBoundPages()
+      if (suppressedPageSelection == position) {
+        suppressedPageSelection = null
+      } else {
+        dateSelectedListener?.invoke(selectedEpochDay)
+      }
+    }
+  }
 
   init {
     setBackgroundColor(palette.surface)
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     clipChildren = true
-    pages.forEach { page ->
-      page.setOnDateSelectedListener { dateSelectedListener?.invoke(it) }
-      track.addView(page)
+    pager.apply {
+      orientation = ViewPager2.ORIENTATION_HORIZONTAL
+      offscreenPageLimit = 1
+      adapter = this@DayWeekHeaderView.adapter
+      isSaveEnabled = false
+      setCurrentItem(HEADER_ANCHOR_POSITION, false)
+      registerOnPageChangeCallback(pageCallback)
     }
-    addView(trackViewport, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    (pager.getChildAt(0) as? RecyclerView)?.apply {
+      setItemViewCacheSize(3)
+      overScrollMode = OVER_SCROLL_NEVER
+      itemAnimator = null
+    }
+    addView(pager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     bind(selectedEpochDay, null)
   }
 
@@ -149,64 +173,96 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
     dateSelectedListener = listener
   }
 
-  fun setAssociatedPagerDispatcher(dispatcher: ((MotionEvent) -> Boolean)?) {
-    associatedPagerDispatcher = dispatcher
-  }
-
   fun bind(selectedEpochDay: Int, todayEpochDay: Int?, initialProgress: Float = 0f) {
     this.selectedEpochDay = selectedEpochDay
     this.todayEpochDay = todayEpochDay
-    pages.forEachIndexed { position, page ->
+    val targetPosition = positionForEpochDay(selectedEpochDay)
+    val previousPosition = pager.currentItem
+    refreshBoundPages()
+    if (previousPosition != targetPosition) {
+      suppressedPageSelection = targetPosition
+      val smooth = hasBinding && isLaidOut && abs(previousPosition - targetPosition) == 1
+      pager.setCurrentItem(targetPosition, smooth)
+    }
+    hasBinding = true
+    suppressedPageSelection = null
+  }
+
+  fun previewTimelineSelection(epochDay: Int) {
+    if (!hasBinding || epochDay == selectedEpochDay) return
+    selectedEpochDay = epochDay
+    val targetPosition = positionForEpochDay(epochDay)
+    refreshBoundPages()
+    if (pager.currentItem != targetPosition) {
+      suppressedPageSelection = targetPosition
+      pager.setCurrentItem(targetPosition, isLaidOut && abs(pager.currentItem - targetPosition) == 1)
+    }
+  }
+
+  private fun positionForEpochDay(epochDay: Int): Int {
+    val weekStart = CalendarDateMath.startOfWeekSunday(epochDay)
+    val weekDelta = (weekStart.toLong() - anchorWeekStartEpochDay.toLong()) / 7L
+    return (HEADER_ANCHOR_POSITION.toLong() + weekDelta)
+      .coerceIn(0L, (HEADER_PAGE_COUNT - 1).toLong())
+      .toInt()
+  }
+
+  private fun weekStartForPosition(position: Int): Int {
+    val weekDelta = position.toLong() - HEADER_ANCHOR_POSITION.toLong()
+    return (anchorWeekStartEpochDay.toLong() + weekDelta * 7L)
+      .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+      .toInt()
+  }
+
+  private fun refreshBoundPages() {
+    adapter.refresh()
+  }
+
+  private inner class DayWeekHeaderAdapter : RecyclerView.Adapter<DayWeekHeaderHolder>() {
+    private val boundPages = mutableMapOf<Int, DayWeekHeaderPage>()
+
+    init {
+      setHasStableIds(true)
+    }
+
+    override fun getItemCount(): Int = HEADER_PAGE_COUNT
+
+    override fun getItemId(position: Int): Long = weekStartForPosition(position).toLong()
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DayWeekHeaderHolder {
+      val page = DayWeekHeaderPage(parent.context).apply {
+        layoutParams = RecyclerView.LayoutParams(
+          RecyclerView.LayoutParams.MATCH_PARENT,
+          RecyclerView.LayoutParams.MATCH_PARENT,
+        )
+        setOnDateSelectedListener { dateSelectedListener?.invoke(it) }
+      }
+      return DayWeekHeaderHolder(page)
+    }
+
+    override fun onBindViewHolder(holder: DayWeekHeaderHolder, position: Int) {
+      boundPages[position] = holder.page
+      bindPage(holder.page, position)
+    }
+
+    override fun onViewRecycled(holder: DayWeekHeaderHolder) {
+      boundPages.entries.removeAll { it.value === holder.page }
+    }
+
+    fun refresh() {
+      boundPages.toMap().forEach { (position, page) -> bindPage(page, position) }
+    }
+
+    private fun bindPage(page: DayWeekHeaderPage, position: Int) {
       page.bind(
-        selectedEpochDay = DayPagerContract.epochDayForPosition(selectedEpochDay, position),
+        weekStartEpochDay = weekStartForPosition(position),
+        selectedEpochDay = selectedEpochDay,
         todayEpochDay = todayEpochDay,
       )
     }
-    setPositionProgress(initialProgress)
   }
 
-  fun setPositionProgress(value: Float) {
-    positionProgress = value.coerceIn(-1f, 1f)
-    updateTrackPosition()
-  }
-
-  internal fun currentPositionProgress(): Float = positionProgress
-
-  override fun dispatchTouchEvent(event: MotionEvent): Boolean =
-    touchRouter.route(event, associatedPagerDispatcher) { super.dispatchTouchEvent(it) }
-
-  override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
-    super.onSizeChanged(width, height, oldWidth, oldHeight)
-    if (width <= 0) return
-    track.layoutParams = LayoutParams(width * DayPagerContract.PAGE_COUNT, LayoutParams.MATCH_PARENT)
-    pages.forEach { page ->
-      page.layoutParams = LinearLayout.LayoutParams(width, LinearLayout.LayoutParams.MATCH_PARENT)
-    }
-    updateTrackPosition()
-  }
-
-  override fun onDetachedFromWindow() {
-    touchRouter.cancel(associatedPagerDispatcher)
-    super.onDetachedFromWindow()
-  }
-
-  private fun updateTrackPosition() {
-    if (width <= 0) return
-    track.translationX = 0f
-    trackViewport.scrollTo(
-      ((DayPagerContract.CENTER_PAGE + positionProgress) * width).roundToInt(),
-      0,
-    )
-    val accessiblePage = (DayPagerContract.CENTER_PAGE + positionProgress).roundToInt()
-      .coerceIn(0, DayPagerContract.PAGE_COUNT - 1)
-    pages.forEachIndexed { index, page ->
-      page.importantForAccessibility = if (index == accessiblePage) {
-        IMPORTANT_FOR_ACCESSIBILITY_YES
-      } else {
-        IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-      }
-    }
-  }
+  private class DayWeekHeaderHolder(val page: DayWeekHeaderPage) : RecyclerView.ViewHolder(page)
 
   private class DayWeekHeaderPage(context: Context) : LinearLayout(context) {
     private val cells = List(7) { DayWeekHeaderCell(context) }
@@ -226,20 +282,31 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       dateSelectedListener = listener
     }
 
-    fun bind(selectedEpochDay: Int, todayEpochDay: Int?) {
-      val weekStart = CalendarDateMath.startOfWeekSunday(selectedEpochDay)
+    fun bind(weekStartEpochDay: Int, selectedEpochDay: Int, todayEpochDay: Int?) {
       val weekdayLabels = CalendarUi.weekdayLabels()
+      val selectedMonth = CalendarDateMath.fromEpochDay(selectedEpochDay)
       cells.forEachIndexed { index, cell ->
-        val epochDay = weekStart + index
+        val epochDay = weekStartEpochDay + index
+        val date = CalendarDateMath.fromEpochDay(epochDay)
         cell.bind(
           epochDay = epochDay,
           weekdayLabel = weekdayLabels[index],
           selected = epochDay == selectedEpochDay,
           today = epochDay == todayEpochDay,
           todayEpochDay = todayEpochDay,
+          inSelectedMonth = date.year == selectedMonth.year && date.month == selectedMonth.month,
+          weekend = CalendarProductVisualContract.isWeekendColumn(index),
         )
       }
     }
+  }
+
+  private companion object {
+    // [SOURCE] Feishu DayWeekIndicator owns its own effectively-infinite
+    // ViewPager2, with one seven-day DayHeaderPage per position. The timeline
+    // pager is a separate owner and therefore never receives header drag input.
+    const val HEADER_PAGE_COUNT = 200_001
+    const val HEADER_ANCHOR_POSITION = HEADER_PAGE_COUNT / 2
   }
 
   private class DayWeekHeaderCell(context: Context) : LinearLayout(context) {
@@ -254,7 +321,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
     private val dayView = TextView(context).apply {
       gravity = Gravity.CENTER
       includeFontPadding = false
-      textSize = 16f
+      textSize = CalendarProductVisualContract.dateNumberSizeSp(16f)
       setTypeface(Typeface.DEFAULT, Typeface.BOLD)
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
@@ -284,6 +351,8 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       selected: Boolean,
       today: Boolean,
       todayEpochDay: Int?,
+      inSelectedMonth: Boolean,
+      weekend: Boolean,
     ) {
       this.epochDay = epochDay
       val date = CalendarDateMath.fromEpochDay(epochDay)
@@ -303,13 +372,12 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
         else -> palette.textPrimary
       }
       weekdayView.setTextColor(temporalTextColor)
-      dayView.setTextColor(
-        when (marker) {
-          MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
-          MonthDateMarker.SELECTED -> temporalTextColor
-          MonthDateMarker.NONE -> temporalTextColor
-        },
-      )
+      dayView.setTextColor(when {
+        marker == MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
+        !inSelectedMonth -> palette.textDisabled
+        weekend -> palette.accent
+        else -> temporalTextColor
+      })
       dayView.background = when (marker) {
         MonthDateMarker.TODAY -> if (selected) {
           CalendarUi.background(palette.accent, 16f, context)
@@ -330,7 +398,11 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
 }
 
 interface ThreePageDayPagerListener {
-  fun onPagerPositionProgress(binding: DayPageBinding, positionProgress: Float)
+  fun onPagerPositionProgress(
+    binding: DayPageBinding,
+    positionProgress: Float,
+    userDriven: Boolean,
+  )
   fun onPagerDaySettled(binding: DayPageBinding, nextEpochDay: Int)
   fun onPagerEventOpened(binding: DayPageBinding, event: CalendarEvent)
   fun onPagerCreateRequested(binding: DayPageBinding, draft: CalendarDraft)
@@ -361,6 +433,7 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
   private var associatedDragLastX = 0f
   private var verticalScrollAnimator: ValueAnimator? = null
   private var programmaticDayMotionActive = false
+  private var userPagingActive = false
 
   private val pageCallback = object : ViewPager2.OnPageChangeCallback() {
     override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
@@ -368,11 +441,16 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
       val progress = DayPagerContract.positionProgress(position, positionOffset)
       positionProgress = progress
       progressDispatchCount += 1
-      externalListener?.onPagerPositionProgress(centerBinding(), progress)
+      externalListener?.onPagerPositionProgress(centerBinding(), progress, userPagingActive)
     }
 
     override fun onPageScrollStateChanged(state: Int) {
+      if (state == ViewPager2.SCROLL_STATE_DRAGGING) {
+        userPagingActive = true
+        return
+      }
       if (state != ViewPager2.SCROLL_STATE_IDLE || !hasBinding) return
+      userPagingActive = false
       if (recentering) {
         if (!pager.isUserInputEnabled && pager.currentItem == DayPagerContract.CENTER_PAGE) {
           finishProgrammaticAnimation(motionToken)
@@ -385,10 +463,10 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
       val callbackBinding = centerBinding()
       externalListener?.onPagerDaySettled(callbackBinding, settlement.nextCenterEpochDay)
       if (centerEpochDay != settlement.nextCenterEpochDay) {
+        val motion = prepareForPagerMutation()
         centerEpochDay = settlement.nextCenterEpochDay
+        recenterWithoutAnimation(motion)
         bindAllPages()
-        pageAdapter.notifyDataSetChanged()
-        recenterWithoutAnimation()
       }
     }
   }
@@ -462,7 +540,13 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
       this.snapshot = snapshot
       this.sessionId = sessionId
       bindAllPages()
-      pageAdapter.notifyDataSetChanged()
+      return
+    }
+    if (hasBinding && centerEpochDay == this.centerEpochDay && !animateFromPreviousDay) {
+      this.snapshot = snapshot
+      this.sessionId = sessionId
+      pager.isUserInputEnabled = snapshot != null
+      bindAllPages()
       return
     }
     val previousCenter = this.centerEpochDay
@@ -475,12 +559,12 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
     this.centerEpochDay = centerEpochDay
     this.sessionId = sessionId
     hasBinding = true
-    bindAllPages()
-    pageAdapter.notifyDataSetChanged()
     if (canAnimate) {
+      bindAllPages()
       animateFromPreviousCenter(previousCenter, centerEpochDay, motion)
     } else {
       recenterWithoutAnimation(motion)
+      bindAllPages()
     }
   }
 
@@ -653,6 +737,7 @@ class ThreePageDayPager(context: Context) : FrameLayout(context), DayTimelinePag
 
   private fun prepareForPagerMutation(): Long {
     programmaticDayMotionActive = false
+    userPagingActive = false
     verticalScrollAnimator?.cancel()
     verticalScrollAnimator = null
     val token = ++motionToken
@@ -747,7 +832,6 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
     dayAllDaySectionView.setListener(this)
     threePageDayPager.setListener(this)
     val associatedPagerDispatcher: (MotionEvent) -> Boolean = threePageDayPager::dispatchAssociatedTouchEvent
-    dayWeekHeaderView.setAssociatedPagerDispatcher(associatedPagerDispatcher)
     dayAllDaySectionView.setAssociatedPagerDispatcher(associatedPagerDispatcher)
     addView(
       dayWeekHeaderView,
@@ -848,9 +932,17 @@ class SingleDayCalendarView(context: Context) : LinearLayout(context),
 
   override fun onAllDayExpandedChanged(expanded: Boolean, overflow: Boolean) = Unit
 
-  override fun onPagerPositionProgress(binding: DayPageBinding, positionProgress: Float) {
+  override fun onPagerPositionProgress(
+    binding: DayPageBinding,
+    positionProgress: Float,
+    userDriven: Boolean,
+  ) {
     if (!accepts(binding)) return
-    dayWeekHeaderView.setPositionProgress(positionProgress)
+    if (userDriven) {
+      dayWeekHeaderView.previewTimelineSelection(
+        selectedEpochDay + positionProgress.roundToInt(),
+      )
+    }
     dayAllDaySectionView.setPositionProgress(positionProgress)
   }
 
