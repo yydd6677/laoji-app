@@ -1,6 +1,16 @@
 # Phase 4 整理结果与行动：首个纵向切片
 
-状态：结构化整理结果、服务端引用生成与规范化、不可变版本、本机行动项、手动创建、忽略/恢复、本机提醒、后续日程、action outbox 可靠上行、冲突选择，以及服务端 `action_items_v2` upsert 和会议级 action cursor/pull 源码纵切已实现；本文件只记录轻量合同与冒烟，不代表真实模型引用质量、运行中服务、Phase 4 退出或全账号跨设备同步已可用。
+状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得真实独立任务、结构化结果和重启后 durable result 证据；这仍不代表非平凡会议的真实模型引用质量、线上版本列表或全账号跨设备同步已完成。
+
+## 独立 Summary 运行增量
+
+- RecordingAsset transcript job 继续固定关闭 Summary；整理任务只由独立 `/summaries/generate` 提交，转写或整理任一失败不回滚另一阶段。
+- 旧兼容 `SummaryService` 原先以文件路径直接执行 `meetingsummary/main.py`，运行日志真实报错 `attempted relative import with no known parent package`。目标源码现改为当前解释器执行 `-u -m meetingsummary.main`，保持既有 cwd、PYTHONPATH、Ollama endpoint 和输出目录；修改前备份为 `/home/zhong/laoji-service-platform/backups/20260726-summary-module-entry-v1`。
+- 修复后的目标文件 SHA-256 为 `cd0d588be2260b0895234f791a7130db8fe340e78347a850a62e7c13d6369487`；18020 只重启自身为 PID `4142718`，cwd 仍是目标 backend，`CUDA_VISIBLE_DEVICES=0`，18035 与旧 8020 未动。
+- 真实账号测试临时恢复一条已删除测试会议，独立 Summary 新任务未复用旧 ID，经过 `PENDING/STARTED` 后 27.1 秒 `SUCCESS`。最终 API 返回 `schema_version=2`、`template=general@1`、有序 section、字符串 `full_text` 且 `raw_json=null`，随后会议重新软删除。
+- 服务重启后，旧内存 task ID 正确返回 404，但同一 durable final version `d587b3ee-d65a-4921-b5dd-f155c48ad1e6` 仍从最终结果 endpoint 返回。移动端既有恢复顺序先检查 durable 结果，只有无匹配结果时才以同一 fingerprint 重提，因此进程重启不要求把 Summary 重新塞回 Transcript job。
+- 兼容 `SummaryService` 又以最短输入实际执行模块入口，subprocess `returncode=0` 并生成 JSON/Markdown；私有模型字典只在服务内解析，App API 仍只返回规范化结构，不把原始 JSON 展示给用户。
+- 共享服务器 NVIDIA kernel `595.71.05` 与 NVML `595.84` 的版本失配影响 VibeVoice 转写，但本次 Summary 使用 CPU Ollama 完成；两者证据必须分开记录。
 
 ## 当前范围
 

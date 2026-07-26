@@ -1,6 +1,6 @@
 # 批次 B 证据：RecordingAsset v2 账号上传、独立转写与来源追踪
 
-状态：目标 18020、移动端账号 canonical 数据层和 Android WorkManager 已形成一条真实 RecordingAsset v2 纵向闭环。它覆盖同一会议多资产登记、内容上传、资产列表/下载、逐资产转写任务的自动发现/持久恢复/重试、账号录音后台上传、本机/远端来源合并，以及 Transcript segment 到 RecordingAsset/job 的持久来源追踪。该结论不等于独立 Summary job、第二台移动设备或 USB 真机已经闭环。
+状态：目标 18020、移动端账号 canonical 数据层和 Android WorkManager 已形成一条真实 RecordingAsset v2 纵向闭环。它覆盖同一会议多资产登记、内容上传、资产列表/下载、逐资产转写任务的自动发现/持久恢复/重试、账号录音后台上传、本机/远端来源合并，以及 Transcript segment 到 RecordingAsset/job 的持久来源追踪。独立 Summary task 也已另行取得运行/重启恢复证据；第二台移动设备和 USB 真机仍未闭环。
 
 ## 运行服务合同
 
@@ -10,6 +10,7 @@
 - additive schema 新增 `meeting_recording_assets_v2`、`meeting_recording_asset_operations_v2` 与 `meeting_recording_transcription_jobs_v2`。运行 capability 明确返回 `recording_assets_v2=true`；客户端不得由 broad feature flag 推导该能力。
 - `POST meeting-notes/{id}/recording-assets` 使用稳定 `client_asset_id`、role、origin 和幂等键登记资产；`PUT recording-assets/{assetId}/content` 校验 revision、文件大小与 SHA-256；列表和认证下载保持具体 asset identity。旧主录音接口只投影兼容，不再限制 MeetingNote 只有一段云端录音。
 - 转写创建、查询和重试均绑定 `recording_asset_id`。`OfflinePipeline.process_audio()` 新增 `generate_summary`：旧上传路径保持默认生成 Summary，RecordingAsset transcript job 固定传 `false`，因此 Transcript 成败不再被 Summary subprocess 回滚。运行日志已出现“摘要生成：已跳过（独立阶段）”。
+- 独立 Summary endpoint 已在目标 18020 真实完成结构化结果；旧兼容 `SummaryService` 的直接脚本启动错误也已改为 `python -m meetingsummary.main` 并实际出件。任务进程内状态丢失后，durable final version 仍可独立读取；详见 [`phase-4-structured-summary-evidence.md`](phase-4-structured-summary-evidence.md)。
 
 ## 移动端实现
 
@@ -47,10 +48,9 @@
 
 ## 尚未闭环
 
-1. Summary 已从 transcript job 中解耦，但独立 Summary 运行入口仍需修复模块启动与任务恢复；不得把它重新塞回 Transcript job。
-2. 尚未用 occurrence 冲突恢复出的 secondary 在移动端走完整上传/下载/转写恢复，也没有第二台移动设备的多资产 pull、断网/强杀长期重试或 409/412 用户选择证据。
-3. speaker correction/profile 仍未形成运行纵切；当前 capability 明确为 false。
-4. 共享服务器 GPU 驱动/NVML 版本失配需由主机维护窗口处理；修复后再补一次 App 自动 job → completed → combined Transcript 落盘的真实成功证据。
-5. 当前仅有模拟器设备；USB 真机、长录音和候选版七条关键任务仍后置到批次 D。
+1. 尚未用 occurrence 冲突恢复出的 secondary 在移动端走完整上传/下载/转写恢复，也没有第二台移动设备的多资产 pull、断网/强杀长期重试或 409/412 用户选择证据。
+2. speaker correction/profile 仍未形成运行纵切；当前 capability 明确为 false。
+3. 共享服务器 GPU 驱动/NVML 版本失配需由主机维护窗口处理；修复后再补一次 App 自动 job → completed → combined Transcript 落盘的真实成功证据。
+4. 当前仅有模拟器设备；USB 真机、长录音和候选版七条关键任务仍后置到批次 D。
 
-这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset、逐录音回听和 PROC-01 的每资产 job 调度/恢复已经形成 App 纵切；独立 Summary job、批次 B 的 speaker correction、共享 GPU 恢复及跨设备/真机仍是实际工作，不能把本批写成整个目标完成。
+这些边界意味着 ARC-01/SRC-01/TRN-01 的 RecordingAsset、逐录音回听，以及 PROC-01 的每资产 job 与独立 Summary 已形成纵切；批次 B 的 speaker correction、共享 GPU 恢复及跨设备/真机仍是实际工作，不能把本批写成整个目标完成。
