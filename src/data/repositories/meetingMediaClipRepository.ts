@@ -10,6 +10,7 @@ type MediaClipRow = {
   id: string;
   meeting_id: string;
   source_recording_asset_id: string | null;
+  source_recording_remote_asset_id: string | null;
   source_recording_checksum_sha256: string | null;
   source_recording_updated_at_ms: number;
   source_kind: MeetingMediaClip['sourceKind'];
@@ -22,6 +23,10 @@ type MediaClipRow = {
   speaker_text: string | null;
   transcript_text: string | null;
   status: MeetingMediaClipStatus;
+  export_mode: MeetingMediaClip['exportMode'];
+  remote_job_id: string | null;
+  remote_job_attempt: number;
+  remote_job_updated_at_ms: number | null;
   local_uri: string | null;
   mime_type: string | null;
   file_name: string | null;
@@ -34,7 +39,16 @@ type MediaClipRow = {
 
 export type PendingMeetingMediaClip = Omit<
   MeetingMediaClip,
-  'status' | 'localUri' | 'mimeType' | 'fileName' | 'byteSize' | 'checksumSha256' | 'errorCode'
+  | 'status'
+  | 'localUri'
+  | 'mimeType'
+  | 'fileName'
+  | 'byteSize'
+  | 'checksumSha256'
+  | 'errorCode'
+  | 'remoteJobId'
+  | 'remoteJobAttempt'
+  | 'remoteJobUpdatedAtMs'
 >;
 
 export interface ReadyMeetingMediaClipFile {
@@ -67,12 +81,27 @@ function assertTime(value: number, label: string): number {
   return value;
 }
 
+function canonicalRecordingChecksum(value: string | null): string | null {
+  if (value === null) return null;
+  let normalized = value.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(normalized)) normalized = `sha256:${normalized}`;
+  if (!/^sha256:[0-9a-f]{64}$/.test(normalized)) throw new Error('录音校验值无效');
+  return normalized;
+}
+
 function fromRow(row: MediaClipRow): MeetingMediaClip {
   if (
     !['marker', 'transcript'].includes(row.source_kind)
     || !['pending', 'ready', 'failed', 'deleting'].includes(row.status)
+    || !['local_wav', 'remote_async'].includes(row.export_mode)
     || ![0, 1].includes(row.include_speaker)
     || ![0, 1].includes(row.include_text)
+    || !Number.isSafeInteger(row.remote_job_attempt)
+    || row.remote_job_attempt < 0
+    || (row.export_mode === 'local_wav' && (
+      row.source_recording_remote_asset_id !== null || row.remote_job_id !== null
+    ))
+    || (row.export_mode === 'remote_async' && row.source_recording_remote_asset_id === null)
   ) throw new Error('音频片段记录已损坏');
   if (row.status === 'ready' && row.mime_type !== 'audio/wav') {
     throw new Error('音频片段格式无效');
@@ -81,7 +110,8 @@ function fromRow(row: MediaClipRow): MeetingMediaClip {
     id: row.id,
     meetingId: row.meeting_id,
     sourceRecordingAssetId: row.source_recording_asset_id,
-    sourceRecordingChecksumSha256: row.source_recording_checksum_sha256,
+    sourceRecordingRemoteAssetId: row.source_recording_remote_asset_id,
+    sourceRecordingChecksumSha256: canonicalRecordingChecksum(row.source_recording_checksum_sha256),
     sourceRecordingUpdatedAtMs: row.source_recording_updated_at_ms,
     sourceKind: row.source_kind,
     sourceMarkerId: row.source_marker_id,
@@ -93,6 +123,10 @@ function fromRow(row: MediaClipRow): MeetingMediaClip {
     speakerText: row.speaker_text,
     transcriptText: row.transcript_text,
     status: row.status,
+    exportMode: row.export_mode,
+    remoteJobId: row.remote_job_id,
+    remoteJobAttempt: row.remote_job_attempt,
+    remoteJobUpdatedAtMs: row.remote_job_updated_at_ms,
     localUri: row.local_uri,
     mimeType: row.mime_type as 'audio/wav' | null,
     fileName: row.file_name,
@@ -152,10 +186,18 @@ export async function insertPendingMeetingMediaClip(
     ? assertId(input.sourceRecordingAssetId, '录音标识')
     : null;
   if (!recordingAssetId) throw new Error('生成片段需要本机录音');
-  const sourceRecordingChecksumSha256 = input.sourceRecordingChecksumSha256?.trim().toLowerCase() || null;
-  if (sourceRecordingChecksumSha256 && !/^sha256:[0-9a-f]{64}$/.test(sourceRecordingChecksumSha256)) {
-    throw new Error('录音校验值无效');
+  const recordingRemoteAssetId = input.sourceRecordingRemoteAssetId
+    ? assertId(input.sourceRecordingRemoteAssetId, '录音云端标识')
+    : null;
+  if (input.exportMode === 'remote_async' && !recordingRemoteAssetId) {
+    throw new Error('生成远端片段需要已同步录音');
   }
+  if (input.exportMode === 'local_wav' && recordingRemoteAssetId) {
+    throw new Error('本机片段不应绑定远端任务');
+  }
+  const sourceRecordingChecksumSha256 = canonicalRecordingChecksum(
+    input.sourceRecordingChecksumSha256,
+  );
   const sourceRecordingUpdatedAtMs = assertTime(input.sourceRecordingUpdatedAtMs, '录音更新时间');
   const sourceMarkerId = input.sourceMarkerId ? assertId(input.sourceMarkerId, '标记标识') : null;
   const sourceSegmentId = input.sourceSegmentId ? assertId(input.sourceSegmentId, '文字片段标识') : null;
@@ -183,9 +225,10 @@ export async function insertPendingMeetingMediaClip(
       local_uri: string | null;
       local_state: string;
       checksum_sha256: string | null;
+      remote_asset_id: string | null;
       updated_at_ms: number;
     }>(
-      `SELECT local_uri, local_state, checksum_sha256, updated_at_ms FROM recording_assets
+      `SELECT local_uri, local_state, checksum_sha256, remote_asset_id, updated_at_ms FROM recording_assets
        WHERE id = ? AND meeting_id = ?`,
       recordingAssetId,
       meetingId,
@@ -195,8 +238,11 @@ export async function insertPendingMeetingMediaClip(
     }
     if (
       recording.updated_at_ms !== sourceRecordingUpdatedAtMs
-      || recording.checksum_sha256 !== sourceRecordingChecksumSha256
+      || canonicalRecordingChecksum(recording.checksum_sha256) !== sourceRecordingChecksumSha256
     ) throw new Error('本机录音已发生变化');
+    if (recordingRemoteAssetId && recording.remote_asset_id !== recordingRemoteAssetId) {
+      throw new Error('录音云端身份已发生变化');
+    }
     if (sourceMarkerId) {
       const marker = await database.getFirstAsync<{ id: string }>(
         'SELECT id FROM markers WHERE id = ? AND meeting_id = ?',
@@ -219,17 +265,20 @@ export async function insertPendingMeetingMediaClip(
     await database.runAsync(
       `INSERT INTO meeting_media_clips (
          id, meeting_id, scope_key, source_recording_asset_id,
-         source_recording_checksum_sha256, source_recording_updated_at_ms, source_kind,
+         source_recording_remote_asset_id, source_recording_checksum_sha256,
+         source_recording_updated_at_ms, source_kind,
          source_marker_id, source_segment_id, start_ms, end_ms,
          include_speaker, include_text, speaker_text, transcript_text,
          status, local_uri, mime_type, file_name, byte_size, checksum_sha256,
-         error_code, created_at_ms, updated_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
-         NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+         error_code, created_at_ms, updated_at_ms, export_mode,
+         remote_job_id, remote_job_attempt, remote_job_updated_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending',
+         NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, 0, NULL)`,
       id,
       meetingId,
       input.scopeKey,
       recordingAssetId,
+      recordingRemoteAssetId,
       sourceRecordingChecksumSha256,
       sourceRecordingUpdatedAtMs,
       input.sourceKind,
@@ -243,10 +292,67 @@ export async function insertPendingMeetingMediaClip(
       transcriptText,
       createdAtMs,
       updatedAtMs,
+      input.exportMode,
     );
     return rowForClip(database, id, meetingId, input.scopeKey);
   });
   if (!row) throw new Error('音频片段未能保存');
+  return fromRow(row);
+}
+
+export async function applyRemoteMeetingMediaClipJob(input: {
+  clipId: string;
+  meetingId: string;
+  scopeKey: ScopeKey;
+  remoteJobId: string;
+  remoteAttempt: number;
+  remoteUpdatedAtMs: number;
+  state: 'pending' | 'failed';
+  errorCode: string | null;
+  updatedAtMs: number;
+}): Promise<MeetingMediaClip> {
+  assertScopeKey(input.scopeKey);
+  const clipId = assertId(input.clipId, '片段标识');
+  const meetingId = assertId(input.meetingId, '会议标识');
+  const remoteJobId = assertId(input.remoteJobId, '片段任务标识');
+  const remoteAttempt = assertTime(input.remoteAttempt, '片段任务次数');
+  const remoteUpdatedAtMs = assertTime(input.remoteUpdatedAtMs, '片段任务更新时间');
+  const updatedAtMs = assertTime(input.updatedAtMs, '片段更新时间');
+  const errorCode = input.errorCode ? assertId(input.errorCode, '片段错误') : null;
+  if (input.state === 'failed' && !errorCode) throw new Error('片段失败状态缺少错误');
+  const row = await withMeetingDatabaseTransaction(async database => {
+    const existing = await rowForClip(database, clipId, meetingId, input.scopeKey);
+    if (!existing || existing.status === 'deleting' || existing.export_mode !== 'remote_async') {
+      throw new Error('音频片段已不可用');
+    }
+    // A concurrent refresh may finish the native import before an older poll
+    // applies its server snapshot. Ready is terminal for this immutable clip.
+    if (existing.status === 'ready') return existing;
+    if (existing.remote_job_id && existing.remote_job_id !== remoteJobId) {
+      throw new Error('音频片段云端身份已发生变化');
+    }
+    if (
+      existing.remote_job_updated_at_ms !== null
+      && remoteUpdatedAtMs < existing.remote_job_updated_at_ms
+    ) return existing;
+    await database.runAsync(
+      `UPDATE meeting_media_clips
+       SET status = ?, remote_job_id = ?, remote_job_attempt = ?,
+         remote_job_updated_at_ms = ?, error_code = ?, updated_at_ms = ?
+       WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+      input.state,
+      remoteJobId,
+      Math.max(existing.remote_job_attempt, remoteAttempt),
+      remoteUpdatedAtMs,
+      input.state === 'failed' ? errorCode : null,
+      Math.max(existing.created_at_ms, updatedAtMs),
+      clipId,
+      meetingId,
+      input.scopeKey,
+    );
+    return rowForClip(database, clipId, meetingId, input.scopeKey);
+  });
+  if (!row) throw new Error('音频片段未能更新');
   return fromRow(row);
 }
 

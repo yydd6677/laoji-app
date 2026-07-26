@@ -7,6 +7,7 @@ export * from './contracts';
 export * from './manualNotes';
 export * from './meetingTags';
 export * from './meetingContentShares';
+export * from './mediaClips';
 export * from './speakerCorrections';
 export * from './meetingNotes';
 export * from './meetingQuestions';

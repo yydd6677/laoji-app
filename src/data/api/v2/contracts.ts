@@ -21,6 +21,12 @@ export interface MeetingCapabilities {
     mimeTypes: readonly string[];
     maxBytes: number;
   } | null;
+  mediaClips: {
+    minimumDurationMs: number;
+    maximumDurationMs: number;
+    adjustmentStepMs: number;
+    outputMimeType: 'audio/wav';
+  } | null;
   syncCursor: boolean;
   softDeleteDays: number | null;
 }
@@ -230,6 +236,30 @@ export interface RecordingAssetTranscriptionJobV2 {
   serverUpdatedAtMs: number;
 }
 
+export interface RemoteMediaClipJobV1 {
+  jobId: string;
+  meetingRemoteId: string;
+  recordingAssetRemoteId: string;
+  clientClipId: string;
+  revision: number;
+  stage: 'media_clip';
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  attempt: number;
+  progress: number | null;
+  startMs: number;
+  endMs: number;
+  errorCode: string | null;
+  retryable: boolean;
+  mimeType: 'audio/wav' | null;
+  fileName: string | null;
+  byteSize: number | null;
+  checksumSha256: string | null;
+  contentUrl: string | null;
+  requiresAuth: true;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+}
+
 export interface ActionItemV2Mutation {
   schema_version: 2;
   meeting_remote_id: string;
@@ -393,6 +423,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   occurrenceLinksV2: false,
   speakerCorrections: false,
   mediaImport: null,
+  mediaClips: null,
   syncCursor: false,
   softDeleteDays: null,
 };

@@ -149,12 +149,13 @@ export function MeetingMediaClipsSheet({
                 <Text style={[styles.emptyText, { color: colors.textCaption }]}>暂无音频片段</Text>
               </View>
             ) : clips.filter(clip => clip.status !== 'deleting').map(clip => {
-              const busy = busyClipId === clip.id || clip.status === 'pending';
+              const busy = Boolean(busyClipId);
+              const showingProgress = busyClipId === clip.id || clip.status === 'pending';
               const ready = clip.status === 'ready';
               return (
                 <View key={clip.id} style={[styles.row, { borderBottomColor: colors.divider }]}>
                   <View style={[styles.iconSlot, { backgroundColor: ready ? colors.primarySoft : colors.backgroundBase }]}>
-                    {busy ? <ActivityIndicator size="small" color={colors.primary} /> : (
+                    {showingProgress ? <ActivityIndicator size="small" color={colors.primary} /> : (
                       <Ionicons name="musical-notes-outline" size={20} color={ready ? colors.primary : colors.iconDisabled} />
                     )}
                   </View>
@@ -163,7 +164,7 @@ export function MeetingMediaClipsSheet({
                       {timeLabel(clip.startMs)}–{timeLabel(clip.endMs)}
                     </Text>
                     <Text style={[styles.rowMeta, { color: clip.status === 'failed' ? colors.danger : colors.textCaption }]} numberOfLines={2}>
-                      {clip.status === 'failed' ? '生成失败' : clipMeta(clip)}
+                      {clip.status === 'failed' ? '生成失败' : clip.status === 'pending' ? '正在生成' : clipMeta(clip)}
                     </Text>
                   </View>
                   {clip.status === 'failed' ? (
@@ -195,7 +196,7 @@ export function MeetingMediaClipsSheet({
                   <IconAction
                     name="trash-outline"
                     label="删除音频片段"
-                    disabled={busy}
+                    disabled={Boolean(busyClipId)}
                     colors={colors}
                     destructive
                     onPress={() => onDelete(clip)}

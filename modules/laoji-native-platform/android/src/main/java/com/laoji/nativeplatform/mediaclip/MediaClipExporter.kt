@@ -5,6 +5,8 @@ import android.net.Uri
 import com.laoji.nativeplatform.audio.AudioRuntimeContract
 import com.laoji.nativeplatform.audio.WavHeader
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -169,6 +171,87 @@ internal class MediaClipExporter(context: Context) {
     )
   }
 
+  fun importRemote(
+    sourceUri: String,
+    meetingId: String,
+    clipId: String,
+    expectedByteSize: Long,
+    expectedChecksumSha256: String,
+    expectedDurationMs: Long,
+  ): ExportedWavClip = synchronized(mediaClipIoLock) {
+    val normalizedMeetingId = validateIdentity(meetingId, "meeting")
+    val normalizedClipId = validateIdentity(clipId, "clip")
+    val source = requireDownloadedSource(sourceUri)
+    val checksum = expectedChecksumSha256.trim().lowercase()
+    if (!SHA256.matches(checksum)) {
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "remote media clip checksum is invalid")
+    }
+    if (expectedByteSize <= AudioRuntimeContract.WAV_HEADER_BYTES || source.length() != expectedByteSize) {
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip size changed")
+    }
+    val directory = File(root, normalizedMeetingId)
+    if (!directory.exists() && !directory.mkdirs()) {
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip directory is unavailable")
+    }
+    val finalFile = File(directory, "$normalizedClipId.wav")
+    val temporaryFile = File(directory, "$normalizedClipId.wav.part")
+    temporaryFile.delete()
+    val digest = MessageDigest.getInstance("SHA-256")
+    try {
+      FileInputStream(source).use { input ->
+        FileOutputStream(temporaryFile).use { output ->
+          val buffer = ByteArray(COPY_BUFFER_BYTES)
+          var total = 0L
+          while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (count == 0) continue
+            total += count
+            if (total > expectedByteSize) {
+              throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip grew during import")
+            }
+            output.write(buffer, 0, count)
+            digest.update(buffer, 0, count)
+          }
+          output.flush()
+          output.fd.sync()
+          if (total != expectedByteSize) {
+            throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip ended early")
+          }
+        }
+      }
+      val actualChecksum = "sha256:${digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }}"
+      if (actualChecksum != checksum) {
+        throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip checksum changed")
+      }
+      val inspected = parsePcmWav(Uri.fromFile(temporaryFile).toString())
+      if (kotlin.math.abs(inspected.durationMs - expectedDurationMs) > 250L) {
+        throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "remote media clip duration is inconsistent")
+      }
+      if (finalFile.exists() && !finalFile.delete()) {
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "existing media clip could not be replaced")
+      }
+      if (!temporaryFile.renameTo(finalFile)) {
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip could not be finalized")
+      }
+      return@synchronized ExportedWavClip(
+        meetingId = normalizedMeetingId,
+        clipId = normalizedClipId,
+        localUri = Uri.fromFile(finalFile).toString(),
+        fileName = finalFile.name,
+        byteSize = finalFile.length(),
+        durationMs = inspected.durationMs,
+        checksumSha256 = actualChecksum,
+      )
+    } catch (error: MediaClipException) {
+      temporaryFile.delete()
+      throw error
+    } catch (error: Exception) {
+      temporaryFile.delete()
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "remote media clip import failed")
+    }
+  }
+
   fun delete(meetingId: String, clipId: String): Boolean = synchronized(mediaClipIoLock) {
     val directory = File(root, validateIdentity(meetingId, "meeting"))
     val normalizedClipId = validateIdentity(clipId, "clip")
@@ -279,6 +362,24 @@ internal class MediaClipExporter(context: Context) {
     }
   }
 
+  private fun requireDownloadedSource(sourceUri: String): File {
+    val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "invalid downloaded media clip URI")
+    if (uri.scheme != "file") {
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip must be a local file")
+    }
+    val source = runCatching { File(uri.path.orEmpty()).canonicalFile }.getOrNull()
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip path is invalid")
+    val cacheRoot = applicationContext.cacheDir.canonicalFile
+    val filesRoot = applicationContext.filesDir.canonicalFile
+    val allowed = source.path.startsWith("${cacheRoot.path}${File.separator}")
+      || source.path.startsWith("${filesRoot.path}${File.separator}")
+    if (!allowed || !source.isFile || !source.canRead()) {
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip is unavailable")
+    }
+    return source
+  }
+
   private fun validateRange(startMs: Long, endMs: Long, durationMs: Long) {
     if (startMs < 0L || endMs <= startMs || endMs > durationMs) {
       throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "media clip range is invalid")
@@ -304,6 +405,7 @@ internal class MediaClipExporter(context: Context) {
     private const val COPY_BUFFER_BYTES = 64 * 1_024
     private const val MAX_HEADER_SCAN_BYTES = 1_048_576L
     private val SAFE_ID = Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,159}")
+    private val SHA256 = Regex("sha256:[0-9a-f]{64}")
     private val mediaClipIoLock = Any()
   }
 }

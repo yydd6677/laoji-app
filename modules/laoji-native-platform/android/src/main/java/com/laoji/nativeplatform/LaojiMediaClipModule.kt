@@ -43,6 +43,28 @@ class LaojiMediaClipModule : Module() {
       }
     }
 
+    AsyncFunction("importRemoteWavClip") Coroutine {
+        sourceUri: String,
+        meetingId: String,
+        clipId: String,
+        expectedByteSize: Double,
+        expectedChecksumSha256: String,
+        expectedDurationMs: Double,
+      ->
+      withContext(Dispatchers.IO) {
+        runNative {
+          MediaClipExporter(requireContext()).importRemote(
+            sourceUri,
+            meetingId,
+            clipId,
+            expectedByteSize.toLong(),
+            expectedChecksumSha256,
+            expectedDurationMs.toLong(),
+          ).toMap()
+        }
+      }
+    }
+
     AsyncFunction("deleteClip") Coroutine { meetingId: String, clipId: String ->
       withContext(Dispatchers.IO) {
         runNative { MediaClipExporter(requireContext()).delete(meetingId, clipId) }

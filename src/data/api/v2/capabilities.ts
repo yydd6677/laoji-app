@@ -47,6 +47,10 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     ? media.mime_types.filter((item): item is string => typeof item === 'string' && item.length > 0)
     : [];
   const maxBytes = Number(media?.max_bytes ?? 0);
+  const mediaClips = isRecord(value.media_clips_v1) ? value.media_clips_v1 : null;
+  const clipMinimum = Number(mediaClips?.minimum_duration_ms ?? 0);
+  const clipMaximum = Number(mediaClips?.maximum_duration_ms ?? 0);
+  const clipStep = Number(mediaClips?.adjustment_step_ms ?? 0);
   const softDeleteDays = typeof value.soft_delete_days === 'number'
     ? value.soft_delete_days
     : Number.NaN;
@@ -69,6 +73,18 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     speakerCorrections: booleanField(value, 'speaker_corrections'),
     mediaImport: media && Number.isSafeInteger(maxBytes) && maxBytes > 0
       ? { mimeTypes, maxBytes }
+      : null,
+    mediaClips: mediaClips
+      && mediaClips.output_mime_type === 'audio/wav'
+      && Number.isSafeInteger(clipMinimum) && clipMinimum > 0
+      && Number.isSafeInteger(clipMaximum) && clipMaximum >= clipMinimum
+      && Number.isSafeInteger(clipStep) && clipStep > 0
+      ? {
+        minimumDurationMs: clipMinimum,
+        maximumDurationMs: clipMaximum,
+        adjustmentStepMs: clipStep,
+        outputMimeType: 'audio/wav',
+      }
       : null,
     syncCursor: booleanField(value, 'sync_cursor'),
     softDeleteDays: Number.isSafeInteger(softDeleteDays) && softDeleteDays >= 0
@@ -122,6 +138,14 @@ async function readCache(): Promise<CapabilityCache | null> {
           ? {
             mime_types: parsed.capabilities.mediaImport.mimeTypes,
             max_bytes: parsed.capabilities.mediaImport.maxBytes,
+          }
+          : null,
+        media_clips_v1: isRecord(parsed.capabilities) && isRecord(parsed.capabilities.mediaClips)
+          ? {
+            minimum_duration_ms: parsed.capabilities.mediaClips.minimumDurationMs,
+            maximum_duration_ms: parsed.capabilities.mediaClips.maximumDurationMs,
+            adjustment_step_ms: parsed.capabilities.mediaClips.adjustmentStepMs,
+            output_mime_type: parsed.capabilities.mediaClips.outputMimeType,
           }
           : null,
         sync_cursor: isRecord(parsed.capabilities) ? parsed.capabilities.syncCursor : undefined,

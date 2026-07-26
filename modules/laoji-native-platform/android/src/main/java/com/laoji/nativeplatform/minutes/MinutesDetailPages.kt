@@ -418,6 +418,12 @@ internal class MinutesTranscriptPage(
 
     list.layoutManager = LinearLayoutManager(context)
     list.adapter = rows
+    // [INFERENCE] The transcript page remains mounted while meeting deletion
+    // clears its rows and navigates back to the list. A delayed default removal
+    // animation can outlive that surface hand-off and recycle an attached row.
+    // Keep transcript replacement immediate; seeking and scrolling behavior is
+    // unchanged.
+    list.itemAnimator = null
     list.clipToPadding = false
     list.setPadding(0, context.dp(12), 0, defaultListBottomPadding)
     list.overScrollMode = View.OVER_SCROLL_NEVER
@@ -1229,6 +1235,12 @@ internal class MinutesSpeakersPage(
   init {
     list.layoutManager = LinearLayoutManager(context)
     list.adapter = rows
+    // [INFERENCE] Every detail tab stays mounted in the pager. Deleting the
+    // meeting clears the speaker rows while the detail surface is navigating
+    // away; RecyclerView's default change animator can then finish after the
+    // hand-off and recycle a holder that is still attached. Speaker row motion
+    // is not a product interaction, so keep this state replacement immediate.
+    list.itemAnimator = null
     list.clipToPadding = false
     list.setPadding(0, context.dp(16), 0, context.dp(16))
     list.overScrollMode = View.OVER_SCROLL_NEVER
