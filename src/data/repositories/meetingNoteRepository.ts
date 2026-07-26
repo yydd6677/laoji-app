@@ -166,6 +166,10 @@ export interface RecordingAssetTranscriptionTaskRecord {
   clientRequestId: string;
   idempotencyKey: string;
   language: 'zh' | 'en' | 'auto';
+  requestKind: 'initial' | 'reprocessed';
+  requestGeneration: number;
+  requestBatchId: string | null;
+  sourceTranscriptRevisionId: string | null;
   status: RecordingAssetTranscriptionTaskStatus;
   remoteJobId: string | null;
   requestAttemptCount: number;
@@ -180,6 +184,30 @@ export interface RecordingAssetTranscriptionTaskRecord {
   createdAtMs: number;
   updatedAtMs: number;
   completedAtMs: number | null;
+}
+
+export interface RecordingAssetTranscriptReprocessAsset {
+  clientRecordingAssetId: string;
+  remoteRecordingAssetId: string;
+  clientRequestId: string;
+  idempotencyKey: string;
+  language: RecordingAssetTranscriptionTaskRecord['language'];
+}
+
+export interface RequestRecordingAssetTranscriptReprocessInput {
+  meetingId: string;
+  remoteMeetingId: string;
+  scopeKey: Exclude<ScopeKey, 'guest'>;
+  requestBatchId: string;
+  assets: readonly RecordingAssetTranscriptReprocessAsset[];
+  requestedAtMs: number;
+}
+
+export interface ReadyRecordingAssetTranscriptContent {
+  remoteMeetingId: string;
+  candidateKind: 'final' | 'reprocessed';
+  requestBatchId: string | null;
+  sourceTranscriptRevisionId: string | null;
 }
 
 export interface RecordingAssetTranscriptionDiscovery {
@@ -1386,6 +1414,7 @@ export interface MeetingNoteRepository {
   markRecordingAssetTranscriptionContentSynced(
     scopeKey: ScopeKey,
     remoteMeetingId: string,
+    requestBatchId: string | null,
     syncedAtMs: number,
   ): Promise<number>;
   retryRecordingAssetTranscriptionTasks(
@@ -1393,6 +1422,13 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
     requestedAtMs: number,
   ): Promise<number>;
+  requestRecordingAssetTranscriptReprocess(
+    input: RequestRecordingAssetTranscriptReprocessInput,
+  ): Promise<number>;
+  listReadyRecordingAssetTranscriptContent(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    limit?: number,
+  ): Promise<readonly ReadyRecordingAssetTranscriptContent[]>;
   getNextRecordingAssetTranscriptionAttemptAt(
     scopeKey: ScopeKey,
     nowMs: number,

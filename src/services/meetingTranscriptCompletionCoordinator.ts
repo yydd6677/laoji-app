@@ -26,6 +26,7 @@ export interface RunAccountMeetingTranscriptCompletionInput {
   localLines: readonly TranscriptLine[];
   retryDelaysMs?: readonly number[];
   taskRegistered?: boolean;
+  completedCandidateKind?: Extract<TranscriptCandidateKind, 'final' | 'reprocessed'>;
 }
 
 export interface RunAccountMeetingTranscriptCompletionDependencies {
@@ -90,6 +91,7 @@ export function runAccountMeetingTranscriptCompletion(
           accessToken: input.accessToken,
         },
         retryDelaysMs: input.retryDelaysMs,
+        completedCandidateKind: input.completedCandidateKind,
       }, dependencies);
       if (registryAvailable) {
         if (result.status === 'ready') {

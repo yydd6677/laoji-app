@@ -220,6 +220,10 @@ module.exports = () => {
   const meetingMediaClipsV1 = localMeetingDbCanonicalReadV1 && !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_MEETING_MEDIA_CLIPS_V1 ?? 'true').trim().toLowerCase(),
   );
+  const meetingTranscriptReprocessV1 = localMeetingDbCanonicalReadV1
+    && !['0', 'false', 'no', 'off'].includes(
+      String(process.env.EXPO_PUBLIC_MEETING_TRANSCRIPT_REPROCESS_V1 ?? 'true').trim().toLowerCase(),
+    );
   const meetingActionCollaborationV1 = localMeetingDbCanonicalReadV1
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_ACTION_COLLABORATION_V1 ?? 'true').trim().toLowerCase(),
@@ -274,6 +278,7 @@ module.exports = () => {
         meetingContentShareLinksV1,
         meetingMediaImportExistingV1,
         meetingMediaClipsV1,
+        meetingTranscriptReprocessV1,
         meetingActionCollaborationV1,
       },
     },

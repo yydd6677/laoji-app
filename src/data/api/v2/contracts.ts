@@ -13,6 +13,7 @@ export interface MeetingCapabilities {
   actionCollaborationV1: boolean;
   meetingContentSharesV1: boolean;
   recordingAssetsV2: boolean;
+  transcriptReprocessV1: boolean;
   manualNotesV2: boolean;
   meetingTagsV1: boolean;
   occurrenceLinksV2: boolean;
@@ -418,6 +419,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   actionCollaborationV1: false,
   meetingContentSharesV1: false,
   recordingAssetsV2: false,
+  transcriptReprocessV1: false,
   manualNotesV2: false,
   meetingTagsV1: false,
   occurrenceLinksV2: false,

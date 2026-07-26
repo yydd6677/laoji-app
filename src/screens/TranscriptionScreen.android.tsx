@@ -149,6 +149,7 @@ import {
 } from '../data/api/v2';
 import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
 import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
+import { requestMeetingTranscriptReprocess } from '../services/meetingTranscriptReprocess';
 import { deleteMeetingMarker, loadMeetingMarkers } from '../services/meetingMarkers';
 import { loadMeetingAttachments } from '../services/meetingAttachments';
 import { loadMeetingActions } from '../services/meetingActions';
@@ -547,6 +548,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [recordingMergeBusy, setRecordingMergeBusy] = useState(false);
   const [retryingAudioUpload, setRetryingAudioUpload] = useState(false);
   const [retryingSpeakerCorrection, setRetryingSpeakerCorrection] = useState(false);
+  const [requestingTranscriptReprocess, setRequestingTranscriptReprocess] = useState(false);
+  const [transcriptReprocessAvailable, setTranscriptReprocessAvailable] = useState(false);
   const [canonicalProcessingSnapshot, setCanonicalProcessingSnapshot] = useState<CanonicalProcessingSnapshot | null>(null);
   const [updatingActionId, setUpdatingActionId] = useState<string | null>(null);
   const [editingAction, setEditingAction] = useState<MeetingActionEditorValue | null>(null);
@@ -623,6 +626,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : null;
   const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
   const meetingMediaClipsEnabled = getFeatureFlags().meetingMediaClipsV1 && hasNativeMediaClip();
+  const meetingTranscriptReprocessEnabled = getFeatureFlags().meetingTranscriptReprocessV1;
   const meetingActionCollaborationEnabled = getFeatureFlags().meetingActionCollaborationV1;
   const meetingContentShareLinksEnabled = getFeatureFlags().meetingContentShareLinksV1;
   const canCreateMediaClip = Boolean(
@@ -1213,6 +1217,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!meeting) {
+      setTranscriptReprocessAvailable(false);
       advancePageGenerations('transcript', 'summary', 'speakers');
       setTranscript([]);
       setSummary('');
@@ -1470,8 +1475,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return;
     }
     let alive = true;
+    setTranscriptReprocessAvailable(false);
     setPlayerSourceError('');
     if (!playbackStorageScope) {
+      setTranscriptReprocessAvailable(false);
       setPlayerSources([]);
       setSelectedPlayerSourceId('');
       setLoadingAudio(false);
@@ -1542,6 +1549,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     };
     commitSources(localSources);
     if (isGuest || !accessToken) {
+      setTranscriptReprocessAvailable(false);
       setLoadingAudio(false);
       return () => { alive = false; };
     }
@@ -1557,6 +1565,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         forceRefresh: true,
         allowStaleOnError: false,
       }).catch(() => null);
+      if (alive) {
+        setTranscriptReprocessAvailable(Boolean(
+          meetingTranscriptReprocessEnabled
+          && capability?.source === 'remote'
+          && capability.capabilities.recordingAssetsV2
+          && capability.capabilities.transcriptReprocessV1,
+        ));
+      }
       if (capability?.source === 'remote' && capability.capabilities.recordingAssetsV2) {
         const remoteAssets = await listRecordingAssetsV2({
           accessToken,
@@ -1651,6 +1667,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })()
       .catch(() => {
         if (alive) {
+          setTranscriptReprocessAvailable(false);
           commitSources(localSources);
           setPlayerSourceError(localSources.length > 0
             ? '云端录音加载失败，本机录音仍可播放。'
@@ -1659,7 +1676,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       })
       .finally(() => { if (alive) setLoadingAudio(false); });
     return () => { alive = false; };
-  }, [accessToken, canonicalProcessingSnapshot, isGuest, meeting?.audioAvailable, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, meetingScopeKey, playbackStorageScope, reloadKey, remoteMeetingId, transcript]);
+  }, [accessToken, canonicalProcessingSnapshot, isGuest, meeting?.audioAvailable, meeting?.audioDurationSec, meeting?.audioLocalUri, meeting?.id, meeting?.title, meeting?.updatedAt, meetingScopeKey, meetingTranscriptReprocessEnabled, playbackStorageScope, reloadKey, remoteMeetingId, transcript]);
 
   const performPendingAudioUpload = useCallback((
     pending: PendingMeetingAudioUpload,
@@ -3913,6 +3930,59 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }
 
+  const runTranscriptReprocess = useCallback(async () => {
+    if (
+      !meeting
+      || !meetingScopeKey
+      || meetingScopeKey === 'guest'
+      || !accessToken
+      || requestingTranscriptReprocess
+    ) return;
+    const requestedMeetingId = meeting.id;
+    setRequestingTranscriptReprocess(true);
+    try {
+      const result = await requestMeetingTranscriptReprocess({
+        scopeKey: meetingScopeKey,
+        meetingId: requestedMeetingId,
+        accessToken,
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      setTranscriptCompleting(true);
+      setTranscriptError('');
+      setReloadKey(value => value + 1);
+      ToastAndroid.show(
+        result.recordingCount > 1
+          ? `正在重新处理${result.recordingCount}段录音`
+          : '正在重新处理录音',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      showDialog({
+        title: '暂时无法重新生成',
+        message: readableErrorMessage(reason, '文字记录暂时无法重新生成，请稍后再试。'),
+        tone: 'error',
+      });
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setRequestingTranscriptReprocess(false);
+      }
+    }
+  }, [accessToken, meeting, meetingScopeKey, requestingTranscriptReprocess, showDialog]);
+
+  const confirmTranscriptReprocess = useCallback(() => {
+    if (requestingTranscriptReprocess) return;
+    showDialog({
+      title: '重新生成文字记录',
+      message: '将基于现有录音创建新版本，当前文字记录会保留。',
+      tone: 'info',
+      actions: [
+        { text: '重新生成', role: 'primary', onPress: () => { void runTranscriptReprocess(); } },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  }, [requestingTranscriptReprocess, runTranscriptReprocess, showDialog]);
+
   const runRecordingMerge = useCallback(async () => {
     if (!meeting || !meetingScopeKey || recordingMergeBusy) return;
     const canonicalMeetingId = canonicalProcessingSnapshot
@@ -4240,6 +4310,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             onPress: () => { void performPendingAudioUpload(pendingAudioUpload, true); },
           }]
         : []),
+      ...(transcriptReprocessAvailable && !isGuest && accessToken
+        ? [{
+            key: 'reprocess-transcript',
+            label: requestingTranscriptReprocess ? '正在重新生成文字记录' : '重新生成文字记录',
+            disabled: requestingTranscriptReprocess
+              || loadingTranscript
+              || transcriptStageLoading
+              || transcript.length === 0,
+            onPress: confirmTranscriptReprocess,
+          }]
+        : []),
       ...(summaryDocument?.remoteVersionId
         ? [{ key: 'summary-versions', label: '整理结果版本', onPress: openSummaryVersions }]
         : []),
@@ -4264,7 +4345,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, isGuest, manageSpeaker, mediaClips.length, mediaClipsLoading, meeting, meetingAttachments.length, meetingMediaClipsEnabled, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, refreshMeetingMediaClips, retryingAudioUpload, summaryDocument?.remoteVersionId]);
+  }, [accessToken, confirmDelete, confirmTranscriptReprocess, isGuest, loadingTranscript, manageSpeaker, mediaClips.length, mediaClipsLoading, meeting, meetingAttachments.length, meetingMediaClipsEnabled, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, refreshMeetingMediaClips, requestingTranscriptReprocess, retryingAudioUpload, summaryDocument?.remoteVersionId, transcript.length, transcriptReprocessAvailable, transcriptStageLoading]);
 
   const markerForActions = useMemo(
     () => markers.find(marker => marker.id === markerActionsId) ?? null,

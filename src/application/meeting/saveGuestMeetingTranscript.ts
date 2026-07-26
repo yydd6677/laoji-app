@@ -267,11 +267,14 @@ export class SaveGuestMeetingTranscriptUseCase {
       };
     });
     const fingerprint = await this.digest(stableJson(lines));
+    const reprocessedIdentity = input.candidateKind === 'reprocessed' && remoteRevisionId
+      ? await this.digest(stableJson({ fingerprint, remoteRevisionId }))
+      : fingerprint;
     const realtimeDraft = input.candidateKind === 'realtime_draft';
     const revisionId = realtimeDraft
       ? `${meetingId}:transcript:canonical-live`
       : input.candidateKind === 'reprocessed'
-        ? `${meetingId}:transcript:canonical-reprocessed:${fingerprint}`
+        ? `${meetingId}:transcript:canonical-reprocessed:${reprocessedIdentity}`
         : `${meetingId}:transcript:canonical-final:${fingerprint}`;
     const segmentFingerprints = await Promise.all(lines.map(line => this.digest(stableJson(line))));
     const segments: TranscriptSegmentRecord[] = lines.map((line, ordinal) => ({

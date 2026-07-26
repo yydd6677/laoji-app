@@ -88,7 +88,9 @@ import type {
   QueueExpiredMeetingRetentionCleanupInput,
   RecordingAssetRecord,
   RecordingAssetTranscriptionTaskRecord,
+  ReadyRecordingAssetTranscriptContent,
   RecordRecordingAssetTranscriptionTransportFailureInput,
+  RequestRecordingAssetTranscriptReprocessInput,
   RenameMeetingTagResult,
   ResolveMeetingActionSyncConflictInput,
   ResolveMeetingManualNoteSyncConflictInput,
@@ -204,6 +206,10 @@ type RecordingAssetTranscriptionTaskRow = {
   client_request_id: string;
   idempotency_key: string;
   language: RecordingAssetTranscriptionTaskRecord['language'];
+  request_kind: RecordingAssetTranscriptionTaskRecord['requestKind'];
+  request_generation: number;
+  request_batch_id: string | null;
+  source_transcript_revision_id: string | null;
   status: RecordingAssetTranscriptionTaskRecord['status'];
   remote_job_id: string | null;
   request_attempt_count: number;
@@ -1037,6 +1043,18 @@ function recordingAssetTranscriptionTaskFromRow(
   if (
     !['pending', 'queued', 'running', 'completed', 'failed_retryable', 'blocked'].includes(row.status)
     || !['zh', 'en', 'auto'].includes(row.language)
+    || !['initial', 'reprocessed'].includes(row.request_kind)
+    || !Number.isSafeInteger(row.request_generation)
+    || row.request_generation < 0
+    || (row.request_kind === 'initial' && row.request_generation !== 0)
+    || (row.request_kind === 'initial' && (
+      row.request_batch_id !== null || row.source_transcript_revision_id !== null
+    ))
+    || (row.request_kind === 'reprocessed' && (
+      row.request_generation < 1
+      || row.request_batch_id === null
+      || row.source_transcript_revision_id === null
+    ))
     || !Number.isSafeInteger(row.request_attempt_count)
     || row.request_attempt_count < 0
     || !Number.isSafeInteger(row.remote_attempt)
@@ -1058,6 +1076,10 @@ function recordingAssetTranscriptionTaskFromRow(
     clientRequestId: row.client_request_id,
     idempotencyKey: row.idempotency_key,
     language: row.language,
+    requestKind: row.request_kind,
+    requestGeneration: row.request_generation,
+    requestBatchId: row.request_batch_id,
+    sourceTranscriptRevisionId: row.source_transcript_revision_id,
     status: row.status,
     remoteJobId: row.remote_job_id,
     requestAttemptCount: row.request_attempt_count,
@@ -1088,6 +1110,9 @@ function recordingAssetTranscriptionFingerprint(
   };
   rows.forEach(row => {
     feed(row.remote_recording_asset_id);
+    feed(row.request_kind);
+    feed(String(row.request_generation));
+    feed(row.request_batch_id);
     feed(row.remote_job_id);
     feed(row.status);
     feed(row.result_revision_id);
@@ -6494,10 +6519,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
             || existing.remote_meeting_id !== input.remoteMeetingId
             || existing.client_recording_asset_id !== asset.clientRecordingAssetId
             || existing.remote_recording_asset_id !== asset.remoteRecordingAssetId
-            || existing.client_request_id !== asset.clientRequestId
-            || existing.idempotency_key !== asset.idempotencyKey
             || existing.language !== asset.language
           ) throw new Error('recording transcription task identity changed');
+          if (existing.request_kind === 'initial' && (
+            existing.client_request_id !== asset.clientRequestId
+            || existing.idempotency_key !== asset.idempotencyKey
+          )) throw new Error('recording transcription initial request identity changed');
           if (
             existing.local_recording_asset_id
             && local
@@ -6751,13 +6778,37 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   async markRecordingAssetTranscriptionContentSynced(
     scopeKey: ScopeKey,
     remoteMeetingId: string,
+    requestBatchId: string | null,
     syncedAtMs: number,
   ): Promise<number> {
     assertScopeKey(scopeKey);
     assertRecordId(remoteMeetingId, 'recording transcription remote meeting ID');
+    if (requestBatchId !== null) {
+      assertRecordId(requestBatchId, 'recording transcription request batch ID');
+    }
     assertNonNegativeInteger(syncedAtMs, 'recording transcription content sync time');
     const touchedMeetingIds: string[] = [];
     const changes = await withMeetingDatabaseTransaction(async database => {
+      const eligible = await database.getFirstAsync<{ meeting_id: string }>(
+        `SELECT task.meeting_id
+         FROM recording_asset_transcription_tasks task
+         INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+         WHERE task.scope_key = ? AND task.remote_meeting_id = ?
+           AND task.status = 'completed' AND task.content_synced_at_ms IS NULL
+           AND ((? IS NULL AND task.request_kind = 'initial') OR task.request_batch_id = ?)
+           AND NOT EXISTS (
+             SELECT 1 FROM recording_asset_transcription_tasks pending
+             WHERE pending.scope_key = task.scope_key
+               AND pending.meeting_id = task.meeting_id
+               AND pending.status <> 'completed'
+           )
+         LIMIT 1`,
+        scopeKey,
+        remoteMeetingId,
+        requestBatchId,
+        requestBatchId,
+      );
+      if (!eligible) return 0;
       const meetingRows = await database.getAllAsync<{ meeting_id: string }>(
         `SELECT DISTINCT meeting_id FROM recording_asset_transcription_tasks
          WHERE scope_key = ? AND remote_meeting_id = ?
@@ -6789,6 +6840,192 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     });
     if (touchedMeetingIds.length > 0) this.notify(touchedMeetingIds);
     return changes;
+  }
+
+  async requestRecordingAssetTranscriptReprocess(
+    input: RequestRecordingAssetTranscriptReprocessInput,
+  ): Promise<number> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.meetingId, 'recording transcript reprocess meeting ID');
+    assertRecordId(input.remoteMeetingId, 'recording transcript reprocess remote meeting ID');
+    assertRecordId(input.requestBatchId, 'recording transcript reprocess batch ID');
+    assertNonNegativeInteger(input.requestedAtMs, 'recording transcript reprocess request time');
+    if (input.assets.length < 1 || input.assets.length > 1_000) {
+      throw new Error('当前会议没有可重新生成文字的录音');
+    }
+    const remoteAssetIds = new Set<string>();
+    for (const asset of input.assets) {
+      assertRecordId(asset.clientRecordingAssetId, 'recording transcript reprocess client asset ID');
+      assertRecordId(asset.remoteRecordingAssetId, 'recording transcript reprocess remote asset ID');
+      assertRecordId(asset.clientRequestId, 'recording transcript reprocess client request ID');
+      assertRecordId(asset.idempotencyKey, 'recording transcript reprocess idempotency key');
+      if (!['zh', 'en', 'auto'].includes(asset.language)) {
+        throw new Error('recording transcript reprocess language is invalid');
+      }
+      if (remoteAssetIds.has(asset.remoteRecordingAssetId)) {
+        throw new Error('录音列表包含重复内容');
+      }
+      remoteAssetIds.add(asset.remoteRecordingAssetId);
+    }
+
+    let canonicalMeetingId: string | null = null;
+    const changed = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ id: string; remote_id: string | null }>(
+        `SELECT id, remote_id FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!meeting) throw new Error('会议记录已不可用');
+      if (meeting.remote_id !== input.remoteMeetingId) {
+        throw new Error('会议云端身份已发生变化');
+      }
+      canonicalMeetingId = meeting.id;
+      const activeRevision = await database.getFirstAsync<{
+        id: string;
+        kind: string;
+        status: string;
+      }>(
+        `SELECT id, kind, status FROM transcript_revisions
+         WHERE meeting_id = ? AND is_active = 1 LIMIT 1`,
+        meeting.id,
+      );
+      if (
+        !activeRevision
+        || activeRevision.status !== 'ready'
+        || (activeRevision.kind !== 'final' && activeRevision.kind !== 'reprocessed')
+      ) throw new Error('文字记录尚未完成，暂时不能重新生成');
+
+      const rows = await database.getAllAsync<RecordingAssetTranscriptionTaskRow>(
+        `SELECT * FROM recording_asset_transcription_tasks
+         WHERE scope_key = ? AND meeting_id = ?
+         ORDER BY remote_recording_asset_id`,
+        input.scopeKey,
+        meeting.id,
+      );
+      if (rows.length !== input.assets.length) {
+        throw new Error('录音文字仍在同步，请稍后再试');
+      }
+      const rowsByRemote = new Map(rows.map(row => [row.remote_recording_asset_id, row]));
+      for (const asset of input.assets) {
+        const row = rowsByRemote.get(asset.remoteRecordingAssetId);
+        if (
+          !row
+          || row.remote_meeting_id !== input.remoteMeetingId
+          || row.client_recording_asset_id !== asset.clientRecordingAssetId
+          || row.status !== 'completed'
+          || row.content_synced_at_ms === null
+        ) throw new Error('录音文字仍在处理，请完成后再试');
+      }
+
+      for (const asset of input.assets) {
+        const row = rowsByRemote.get(asset.remoteRecordingAssetId)!;
+        const archived = await database.runAsync(
+          `INSERT INTO recording_asset_transcription_task_history_v31 (
+             task_id, scope_key, meeting_id, local_recording_asset_id,
+             client_recording_asset_id, remote_meeting_id, remote_recording_asset_id,
+             client_request_id, idempotency_key, language, request_kind,
+             request_generation, request_batch_id, source_transcript_revision_id,
+             status, remote_job_id, remote_attempt, result_revision_id, error_code,
+             content_synced_at_ms, created_at_ms, completed_at_ms, archived_at_ms
+           ) SELECT id, scope_key, meeting_id, local_recording_asset_id,
+             client_recording_asset_id, remote_meeting_id, remote_recording_asset_id,
+             client_request_id, idempotency_key, language, request_kind,
+             request_generation, request_batch_id, source_transcript_revision_id,
+             status, remote_job_id, remote_attempt, result_revision_id, error_code,
+             content_synced_at_ms, created_at_ms, completed_at_ms, ?
+           FROM recording_asset_transcription_tasks
+           WHERE id = ? AND scope_key = ?`,
+          input.requestedAtMs,
+          row.id,
+          input.scopeKey,
+        );
+        if (archived.changes !== 1) throw new Error('旧文字处理状态未能归档');
+        const updated = await database.runAsync(
+          `UPDATE recording_asset_transcription_tasks SET
+             client_request_id = ?, idempotency_key = ?, language = ?,
+             request_kind = 'reprocessed', request_generation = ?,
+             request_batch_id = ?, source_transcript_revision_id = ?,
+             status = 'pending', remote_job_id = NULL, request_attempt_count = 0,
+             remote_attempt = 0, progress = 0, result_revision_id = NULL,
+             error_code = NULL, retryable = 0, next_attempt_at_ms = NULL,
+             remote_updated_at_ms = NULL, content_synced_at_ms = NULL,
+             created_at_ms = ?, updated_at_ms = ?, completed_at_ms = NULL
+           WHERE id = ? AND scope_key = ? AND request_generation = ?`,
+          asset.clientRequestId,
+          asset.idempotencyKey,
+          asset.language,
+          row.request_generation + 1,
+          input.requestBatchId,
+          activeRevision.id,
+          input.requestedAtMs,
+          input.requestedAtMs,
+          row.id,
+          input.scopeKey,
+          row.request_generation,
+        );
+        if (updated.changes !== 1) throw new Error('文字重新生成请求发生冲突');
+      }
+      await reconcileRecordingAssetTranscriptionStage(
+        database,
+        meeting.id,
+        input.scopeKey,
+        input.requestedAtMs,
+      );
+      return input.assets.length;
+    });
+    if (canonicalMeetingId && changed > 0) this.notify([canonicalMeetingId]);
+    return changed;
+  }
+
+  async listReadyRecordingAssetTranscriptContent(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    limit = 100,
+  ): Promise<readonly ReadyRecordingAssetTranscriptContent[]> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('recording transcript ready query limit is invalid');
+    }
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<{
+      remote_meeting_id: string;
+      request_kind: 'initial' | 'reprocessed';
+      request_batch_id: string | null;
+      source_transcript_revision_id: string | null;
+      request_generation: number;
+      updated_at_ms: number;
+    }>(
+      `SELECT task.remote_meeting_id, task.request_kind, task.request_batch_id,
+         task.source_transcript_revision_id, task.request_generation, task.updated_at_ms
+       FROM recording_asset_transcription_tasks task
+       INNER JOIN meeting_notes meeting ON meeting.id = task.meeting_id
+       WHERE task.scope_key = ? AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         AND task.status = 'completed' AND task.content_synced_at_ms IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM recording_asset_transcription_tasks pending
+           WHERE pending.scope_key = task.scope_key
+             AND pending.meeting_id = task.meeting_id
+             AND pending.status <> 'completed'
+         )
+       ORDER BY task.remote_meeting_id,
+         CASE WHEN task.request_kind = 'reprocessed' THEN 0 ELSE 1 END,
+         task.request_generation DESC, task.updated_at_ms DESC
+       LIMIT ?`,
+      scopeKey,
+      scopeKey,
+      limit,
+    );
+    const meetings = new Map<string, ReadyRecordingAssetTranscriptContent>();
+    for (const row of rows) {
+      if (meetings.has(row.remote_meeting_id)) continue;
+      meetings.set(row.remote_meeting_id, {
+        remoteMeetingId: row.remote_meeting_id,
+        candidateKind: row.request_kind === 'reprocessed' ? 'reprocessed' : 'final',
+        requestBatchId: row.request_batch_id,
+        sourceTranscriptRevisionId: row.source_transcript_revision_id,
+      });
+    }
+    return [...meetings.values()];
   }
 
   async retryRecordingAssetTranscriptionTasks(

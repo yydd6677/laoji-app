@@ -67,6 +67,7 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     actionCollaborationV1: booleanField(value, 'action_collaboration_v1'),
     meetingContentSharesV1: booleanField(value, 'meeting_content_shares_v1'),
     recordingAssetsV2: booleanField(value, 'recording_assets_v2'),
+    transcriptReprocessV1: booleanField(value, 'transcript_reprocess_v1'),
     manualNotesV2: booleanField(value, 'manual_notes_v2'),
     meetingTagsV1: booleanField(value, 'meeting_tags_v1'),
     occurrenceLinksV2: booleanField(value, 'occurrence_links_v2'),
@@ -127,6 +128,9 @@ async function readCache(): Promise<CapabilityCache | null> {
           : undefined,
         recording_assets_v2: isRecord(parsed.capabilities)
           ? parsed.capabilities.recordingAssetsV2
+          : undefined,
+        transcript_reprocess_v1: isRecord(parsed.capabilities)
+          ? parsed.capabilities.transcriptReprocessV1
           : undefined,
         manual_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.manualNotesV2 : undefined,
         meeting_tags_v1: isRecord(parsed.capabilities) ? parsed.capabilities.meetingTagsV1 : undefined,
@@ -199,7 +203,7 @@ export async function loadMeetingCapabilities(
 export async function requireFreshMeetingCapability(
   capability: keyof Pick<
     MeetingCapabilities,
-    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'meetingContentSharesV1' | 'recordingAssetsV2' | 'manualNotesV2' | 'meetingTagsV1' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
+    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'meetingContentSharesV1' | 'recordingAssetsV2' | 'transcriptReprocessV1' | 'manualNotesV2' | 'meetingTagsV1' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
   >,
   accessToken?: string | null,
 ): Promise<MeetingCapabilities> {

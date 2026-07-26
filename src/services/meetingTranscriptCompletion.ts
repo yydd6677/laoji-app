@@ -26,6 +26,7 @@ export interface CompleteMeetingTranscriptInput {
   localLines: readonly TranscriptLine[];
   remote: MeetingTranscriptCompletionRemote;
   retryDelaysMs?: readonly number[];
+  completedCandidateKind?: Extract<TranscriptCandidateKind, 'final' | 'reprocessed'>;
 }
 
 interface SaveMeetingTranscriptOptions {
@@ -89,6 +90,7 @@ export async function completeMeetingTranscriptAfterCapture(
   let lastRemoteState: TranscriptRemoteState = 'unknown';
   let lastRemoteRevisionId: string | null = null;
   let preservedReadableDraft = false;
+  let lastCandidateAccepted = false;
   let failureKind: MeetingTranscriptFailureKind | null = null;
   let failureReason: unknown = null;
 
@@ -103,7 +105,9 @@ export async function completeMeetingTranscriptAfterCapture(
         failureReason = reason;
         break;
       }
-      const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
+      const candidateKind = remote.completeness === 'incomplete'
+        ? 'realtime_draft'
+        : input.completedCandidateKind ?? 'final';
       const decision = evaluateTranscriptLineCandidate(selected, remote.items, {
         candidateKind,
         serverCompleteness: remote.completeness,
@@ -113,6 +117,7 @@ export async function completeMeetingTranscriptAfterCapture(
       lastRemoteState = remote.remoteState;
       lastRemoteRevisionId = remote.remoteRevisionId;
       preservedReadableDraft = !decision.useCandidate || decision.completing;
+      lastCandidateAccepted = decision.useCandidate;
       if (decision.useCandidate) selected = [...remote.items];
       if (remote.remoteState === 'failed') {
         failureKind = 'remote_processing';
@@ -128,7 +133,7 @@ export async function completeMeetingTranscriptAfterCapture(
   const candidateKind: TranscriptCandidateKind = syncFailed
     || (lastCandidate !== null && lastCompleteness === 'incomplete')
     ? 'realtime_draft'
-    : 'final';
+    : input.completedCandidateKind ?? 'final';
   const serverCompleteness: TranscriptServerCompleteness = syncFailed
     ? 'incomplete'
     : lastCandidate ? lastCompleteness : 'unknown';
@@ -162,9 +167,14 @@ export async function completeMeetingTranscriptAfterCapture(
   const effective = cached.length > 0 || selected.length === 0
     ? [...cached]
     : persistenceFailure === null ? [...selected] : localLines;
+  const terminalRejectedReprocess = input.completedCandidateKind === 'reprocessed'
+    && lastCandidate !== null
+    && lastCompleteness === 'complete'
+    && lastRemoteState === 'complete'
+    && !lastCandidateAccepted;
   const status: MeetingTranscriptCompletionStatus = failureKind
     ? 'failed'
-    : preservedReadableDraft ? 'pending' : 'ready';
+    : preservedReadableDraft && !terminalRejectedReprocess ? 'pending' : 'ready';
   return {
     status,
     lines: effective,

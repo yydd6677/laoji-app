@@ -28,6 +28,7 @@ import { meetingRetentionCleanupV27 } from './0027MeetingRetentionCleanup';
 import { meetingTagCatalogSyncV28 } from './0028MeetingTagCatalogSync';
 import { meetingContentSharesV29 } from './0029MeetingContentShares';
 import { remoteMediaClipsV30 } from './0030RemoteMediaClips';
+import { transcriptReprocessTasksV31 } from './0031TranscriptReprocessTasks';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -61,6 +62,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingTagCatalogSyncV28,
   meetingContentSharesV29,
   remoteMediaClipsV30,
+  transcriptReprocessTasksV31,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -93,4 +95,5 @@ export { MEETING_RETENTION_CLEANUP_V27_SQL } from './0027MeetingRetentionCleanup
 export { MEETING_TAG_CATALOG_SYNC_V28_SQL } from './0028MeetingTagCatalogSync';
 export { MEETING_CONTENT_SHARES_V29_SQL } from './0029MeetingContentShares';
 export { REMOTE_MEDIA_CLIPS_V30_SQL } from './0030RemoteMediaClips';
+export { TRANSCRIPT_REPROCESS_TASKS_V31_SQL } from './0031TranscriptReprocessTasks';
 export type { MeetingDatabaseMigration } from './types';

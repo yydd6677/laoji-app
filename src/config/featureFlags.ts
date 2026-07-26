@@ -11,6 +11,7 @@ export interface LaoJiFeatureFlags {
   meetingTagSyncV1: boolean;
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
+  meetingTranscriptReprocessV1: boolean;
   meetingActionCollaborationV1: boolean;
   meetingContentShareLinksV1: boolean;
 }
@@ -63,6 +64,10 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // source RecordingAsset.
     meetingMediaClipsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaClipsV1 === true,
+    // A user-requested reprocess creates a new immutable transcript revision;
+    // runtime submission still requires a fresh transcript_reprocess_v1 capability.
+    meetingTranscriptReprocessV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingTranscriptReprocessV1 === true,
     // Collaboration links expose one action projection only and remain
     // independently reversible from meeting-level sharing.
     meetingActionCollaborationV1: localMeetingDbCanonicalReadV1

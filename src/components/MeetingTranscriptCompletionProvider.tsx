@@ -124,6 +124,8 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
           meeting: Meeting,
           remoteMeetingId: string,
           taskRegistered: boolean,
+          completedCandidateKind: 'final' | 'reprocessed' = 'final',
+          requestBatchId: string | null = null,
         ) => {
           const completion = await runAccountMeetingTranscriptCompletion({
             scopeKey,
@@ -134,6 +136,7 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
             localLines: getCachedTranscript(meeting.id),
             retryDelaysMs: [0],
             taskRegistered,
+            completedCandidateKind,
           }, {
             saveTranscript: saveCachedTranscript,
             getCachedTranscript,
@@ -148,6 +151,7 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
             await sqliteMeetingNoteRepository.markRecordingAssetTranscriptionContentSynced(
               scopeKey,
               remoteMeetingId,
+              requestBatchId,
               Date.now(),
             );
           }
@@ -175,10 +179,10 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
               if (!isCurrent()) return;
               if (shouldDiscover) lastRecordingDiscoveryAtMs = Date.now();
               if (recordingResult.retryAfterMs !== null) noteRetry(recordingResult.retryAfterMs);
-              for (const remoteMeetingId of recordingResult.completedRemoteMeetingIds) {
+              for (const readyContent of recordingResult.readyContents) {
                 if (!isCurrent()) return;
                 const meeting = meetingsRef.current.find(item => (
-                  meetingRemoteIdentity(item) === remoteMeetingId
+                  meetingRemoteIdentity(item) === readyContent.remoteMeetingId
                 ));
                 if (!meeting) {
                   noteRetry(FAILED_RECHECK_MS);
@@ -186,7 +190,13 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
                 }
                 handledMeetingIds.add(meeting.id);
                 try {
-                  const status = await completeRemoteMeeting(meeting, remoteMeetingId, false);
+                  const status = await completeRemoteMeeting(
+                    meeting,
+                    readyContent.remoteMeetingId,
+                    true,
+                    readyContent.candidateKind,
+                    readyContent.requestBatchId,
+                  );
                   if (status === 'pending') noteRetry(CONTENT_RECHECK_MS);
                   else if (status === 'failed') noteRetry(FAILED_RECHECK_MS);
                 } catch (reason) {
@@ -197,7 +207,7 @@ export function MeetingTranscriptCompletionProvider({ children }: { children: Re
               if (
                 recordingResult.processedCount > 0
                 && recordingResult.retryAfterMs === null
-                && recordingResult.completedRemoteMeetingIds.length === 0
+                && recordingResult.readyContents.length === 0
               ) noteRetry(CONTENT_RECHECK_MS);
             }
 

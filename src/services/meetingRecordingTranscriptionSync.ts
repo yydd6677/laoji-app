@@ -5,6 +5,7 @@ import {
   parseRecordingAssetTranscriptionJobV2,
   RecordingAssetConflictResponseError,
   retryRecordingProcessingJobV2,
+  type RemoteRecordingAssetV2,
   type RecordingAssetTranscriptionJobV2,
 } from '../data/api/v2';
 import {
@@ -35,8 +36,13 @@ export interface DrainMeetingRecordingTranscriptionInput {
 export interface DrainMeetingRecordingTranscriptionResult {
   processedCount: number;
   discoveredCount: number;
-  completedRemoteMeetingIds: readonly string[];
+  readyContents: readonly import('../data/repositories').ReadyRecordingAssetTranscriptContent[];
   retryAfterMs: number | null;
+}
+
+export interface DiscoverMeetingRecordingTranscriptionResult {
+  changedCount: number;
+  uploadedAssets: readonly RemoteRecordingAssetV2[];
 }
 
 function taskId(scopeKey: ScopeKey, remoteAssetId: string): string {
@@ -235,21 +241,36 @@ async function discoverMeeting(
   meeting: RecordingTranscriptionDiscoveryMeeting,
   input: DrainMeetingRecordingTranscriptionInput,
 ): Promise<number> {
-  const canonicalMeetingId = await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(
-    meeting.meetingId,
-    input.scopeKey,
-  );
-  if (!canonicalMeetingId) return 0;
-  const remoteAssets = await listRecordingAssetsV2({
+  const result = await discoverMeetingRecordingTranscriptionTasks({
+    scopeKey: input.scopeKey,
     accessToken: input.accessToken,
-    meetingRemoteId: meeting.remoteMeetingId,
+    meeting,
     signal: input.signal,
   });
-  if (!input.isCurrent() || input.signal.aborted) return 0;
+  return result.changedCount;
+}
+
+export async function discoverMeetingRecordingTranscriptionTasks(input: {
+  scopeKey: Exclude<ScopeKey, 'guest'>;
+  accessToken: string;
+  meeting: RecordingTranscriptionDiscoveryMeeting;
+  signal?: AbortSignal;
+}): Promise<DiscoverMeetingRecordingTranscriptionResult> {
+  const canonicalMeetingId = await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(
+    input.meeting.meetingId,
+    input.scopeKey,
+  );
+  if (!canonicalMeetingId) return { changedCount: 0, uploadedAssets: [] };
+  const remoteAssets = await listRecordingAssetsV2({
+    accessToken: input.accessToken,
+    meetingRemoteId: input.meeting.remoteMeetingId,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted) return { changedCount: 0, uploadedAssets: [] };
   const uploaded = remoteAssets.filter(asset => asset.uploadState === 'uploaded');
   const changed = await sqliteMeetingNoteRepository.discoverRecordingAssetTranscriptionTasks({
     meetingId: canonicalMeetingId,
-    remoteMeetingId: meeting.remoteMeetingId,
+    remoteMeetingId: input.meeting.remoteMeetingId,
     scopeKey: input.scopeKey,
     assets: uploaded.map(asset => ({
       taskId: taskId(input.scopeKey, asset.remoteId),
@@ -266,7 +287,7 @@ async function discoverMeeting(
     assets: uploaded.length,
     changed,
   });
-  return changed;
+  return { changedCount: changed, uploadedAssets: uploaded };
 }
 
 export async function drainMeetingRecordingTranscription(
@@ -290,9 +311,9 @@ export async function drainMeetingRecordingTranscription(
     MAX_TASKS_PER_DRAIN,
   );
   const results = await Promise.all(tasks.map(task => processTask(task, input)));
-  const completedRemoteMeetingIds = [...new Set(results
-    .map(result => result.completedRemoteMeetingId)
-    .filter((value): value is string => Boolean(value)))];
+  const readyContents = await sqliteMeetingNoteRepository.listReadyRecordingAssetTranscriptContent(
+    input.scopeKey,
+  );
   const nextAttemptAtMs = await sqliteMeetingNoteRepository.getNextRecordingAssetTranscriptionAttemptAt(
     input.scopeKey,
     Date.now(),
@@ -300,7 +321,7 @@ export async function drainMeetingRecordingTranscription(
   return {
     processedCount: results.filter(result => result.processed).length,
     discoveredCount,
-    completedRemoteMeetingIds,
+    readyContents,
     retryAfterMs: nextAttemptAtMs === null
       ? null
       : Math.max(1_000, nextAttemptAtMs - Date.now()),
