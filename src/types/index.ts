@@ -184,6 +184,7 @@ export type RootStackParamList = {
   };
   MeetingOrganization: undefined;
   SharedAction: { token: string };
+  SharedMeetingContent: { token: string };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
   Profile: undefined;

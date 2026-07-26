@@ -53,6 +53,7 @@ import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
 import { MeetingSummaryAttachmentSheet } from '../components/MeetingSummaryAttachmentSheet';
 import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
 import { MeetingShareSheet } from '../components/MeetingShareSheet';
+import { MeetingContentShareManagerSheet } from '../components/MeetingContentShareManagerSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
@@ -94,6 +95,7 @@ import {
   recordMeetingSummaryProcessing,
 } from '../services/meetingSummaryProcessing';
 import {
+  buildMeetingContentShareSnapshot,
   meetingShareErrorMessage,
   shareMeetingContent,
   type MeetingShareAvailability,
@@ -126,6 +128,7 @@ import {
   type MeetingMediaClipDraft,
   type MeetingActionShare,
   type MeetingActionSharePermission,
+  type MeetingContentShare,
   type MeetingSummaryActionCandidate,
   type MeetingSummaryDocument,
   type ProcessingStage,
@@ -241,6 +244,13 @@ import {
   retryMeetingActionShare,
   revokeMeetingActionShare,
 } from '../services/meetingActionCollaboration';
+import {
+  createMeetingContentShare,
+  loadMeetingContentShares,
+  meetingContentShareErrorMessage,
+  retryMeetingContentShare,
+  revokeMeetingContentShare,
+} from '../services/meetingContentShare';
 import {
   createMeetingMediaClip,
   deleteMeetingMediaClip,
@@ -515,6 +525,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [selectedPlayerSourceId, setSelectedPlayerSourceId] = useState('');
   const [sharing, setSharing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
+  const [contentShareManagerVisible, setContentShareManagerVisible] = useState(false);
+  const [contentShares, setContentShares] = useState<readonly MeetingContentShare[]>([]);
+  const [contentSharesLoading, setContentSharesLoading] = useState(false);
+  const [contentShareBusyId, setContentShareBusyId] = useState<string | null>(null);
+  const [contentShareError, setContentShareError] = useState('');
   const [moreVisible, setMoreVisible] = useState(false);
   const [questionVisible, setQuestionVisible] = useState(false);
   const [mediaClipsVisible, setMediaClipsVisible] = useState(false);
@@ -599,6 +614,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const attachmentLoadErrorShownRef = useRef(false);
   const mediaClipRequestGenerationRef = useRef(0);
   const actionShareRequestGenerationRef = useRef(0);
+  const contentShareRequestGenerationRef = useRef(0);
   const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
   const meetingScopeKey: ScopeKey | null = isGuest
     ? 'guest'
@@ -608,6 +624,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
   const meetingMediaClipsEnabled = getFeatureFlags().meetingMediaClipsV1 && hasNativeMediaClip();
   const meetingActionCollaborationEnabled = getFeatureFlags().meetingActionCollaborationV1;
+  const meetingContentShareLinksEnabled = getFeatureFlags().meetingContentShareLinksV1;
   const canCreateMediaClip = Boolean(
     meetingMediaClipsEnabled
     && meeting
@@ -2383,6 +2400,197 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   }, [runShare, showDialog]);
 
+  const refreshContentShares = useCallback(async (showLoading = true) => {
+    if (!meeting || !meetingScopeKey) return;
+    const requestedMeetingId = meeting.id;
+    const requestGeneration = ++contentShareRequestGenerationRef.current;
+    if (showLoading) setContentSharesLoading(true);
+    setContentShareError('');
+    try {
+      const result = await loadMeetingContentShares({
+        scopeKey: meetingScopeKey,
+        meetingId: requestedMeetingId,
+        accessToken,
+      });
+      if (
+        !mountedRef.current
+        || routeMeetingIdRef.current !== requestedMeetingId
+        || contentShareRequestGenerationRef.current !== requestGeneration
+      ) return;
+      setContentShares(result.shares);
+      setContentShareError(result.remoteError);
+    } catch (reason) {
+      if (
+        mountedRef.current
+        && routeMeetingIdRef.current === requestedMeetingId
+        && contentShareRequestGenerationRef.current === requestGeneration
+      ) {
+        setContentShareError(readableErrorMessage(reason, '共享链接暂时无法读取，请稍后重试。'));
+      }
+    } finally {
+      if (
+        mountedRef.current
+        && routeMeetingIdRef.current === requestedMeetingId
+        && contentShareRequestGenerationRef.current === requestGeneration
+      ) setContentSharesLoading(false);
+    }
+  }, [accessToken, meeting, meetingScopeKey]);
+
+  const openContentShareManager = useCallback(() => {
+    if (!meetingContentShareLinksEnabled || !meeting || !meetingScopeKey || !accessToken) return;
+    setContentShareManagerVisible(true);
+    setContentShareError('');
+    void refreshContentShares(true);
+  }, [accessToken, meeting, meetingContentShareLinksEnabled, meetingScopeKey, refreshContentShares]);
+
+  const sendContentShare = useCallback(async (share: MeetingContentShare) => {
+    if (!share.inviteUrl) return;
+    try {
+      await Share.share({ title: '共享会议资料', message: share.inviteUrl });
+    } catch (reason) {
+      if (mountedRef.current) {
+        setContentShareError(readableErrorMessage(reason, '共享面板暂时无法打开，请稍后重试。'));
+      }
+    }
+  }, []);
+
+  const runCreateContentShare = useCallback(async (
+    selection: MeetingShareSelection,
+    followLatestSummary: boolean,
+  ) => {
+    if (!meeting || !meetingScopeKey || !accessToken || contentShareBusyId) return;
+    setContentShareBusyId('creating');
+    setContentShareError('');
+    try {
+      const snapshot = buildMeetingContentShareSnapshot(selection, {
+        meeting,
+        transcriptLines: transcript,
+        summaryText: displayedSummary || meetingSummaryToText(getCachedSummary(meeting.id)),
+        summaryDocument: displayedSummaryDocument,
+        actionItems: displayedActionCandidates,
+        manualNoteText: manualNote.content,
+        markers,
+        attachments: meetingAttachments,
+        summaryVersionId: displayedSummaryDocument?.remoteVersionId,
+        isGuest,
+        accessToken,
+      });
+      const created = await createMeetingContentShare({
+        scopeKey: meetingScopeKey,
+        meetingId: meeting.id,
+        snapshot,
+        followLatestSummary,
+        accessToken,
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== meeting.id) return;
+      setContentShares(current => [created, ...current.filter(item => item.id !== created.id)]);
+      await sendContentShare(created);
+    } catch (reason) {
+      if (mountedRef.current) {
+        setContentShareManagerVisible(true);
+        setContentShareError(readableErrorMessage(reason, '共享链接暂时无法创建，请稍后重试。'));
+        await refreshContentShares(false).catch(() => undefined);
+      }
+    } finally {
+      if (mountedRef.current) setContentShareBusyId(null);
+    }
+  }, [accessToken, contentShareBusyId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, markers, meeting, meetingAttachments, meetingScopeKey, refreshContentShares, sendContentShare, transcript]);
+
+  const requestContentShare = useCallback((
+    selection: MeetingShareSelection,
+    followLatestSummary: boolean,
+  ) => {
+    if (!selection.manualNote) {
+      void runCreateContentShare(selection, followLatestSummary);
+      return;
+    }
+    showDialog({
+      title: '包含我的笔记？',
+      message: '我的笔记会原样显示在共享链接中。',
+      tone: 'warning',
+      actions: [
+        {
+          text: '继续创建',
+          role: 'primary',
+          onPress: () => { void runCreateContentShare(selection, followLatestSummary); },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  }, [runCreateContentShare, showDialog]);
+
+  const retryContentShare = useCallback(async (share: MeetingContentShare) => {
+    if (!meeting || !meetingScopeKey || !accessToken || contentShareBusyId) return;
+    setContentShareBusyId(share.id);
+    setContentShareError('');
+    try {
+      const updated = await retryMeetingContentShare({
+        scopeKey: meetingScopeKey,
+        meetingId: meeting.id,
+        share,
+        accessToken,
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== meeting.id) return;
+      setContentShares(current => current.map(item => item.id === updated.id ? updated : item));
+      if (updated.status === 'active') await sendContentShare(updated);
+    } catch (reason) {
+      if (mountedRef.current) {
+        setContentShareError(readableErrorMessage(reason, meetingContentShareErrorMessage(share)));
+        await refreshContentShares(false).catch(() => undefined);
+      }
+    } finally {
+      if (mountedRef.current) setContentShareBusyId(null);
+    }
+  }, [accessToken, contentShareBusyId, meeting, meetingScopeKey, refreshContentShares, sendContentShare]);
+
+  const confirmRevokeContentShare = useCallback((share: MeetingContentShare) => {
+    if (!meeting || !meetingScopeKey || !accessToken || contentShareBusyId) return;
+    setContentShareManagerVisible(false);
+    setTimeout(() => {
+      if (!mountedRef.current) return;
+      showDialog({
+        title: '撤销共享链接',
+        message: '撤销后，收到链接的人将无法再打开这些会议资料。',
+        tone: 'warning',
+        actions: [
+          {
+            text: '取消',
+            role: 'cancel',
+            onPress: () => { if (mountedRef.current) setContentShareManagerVisible(true); },
+          },
+          {
+            text: '撤销',
+            role: 'destructive',
+            onPress: () => {
+              setContentShareBusyId(share.id);
+              setContentShareError('');
+              void revokeMeetingContentShare({
+                scopeKey: meetingScopeKey,
+                meetingId: meeting.id,
+                share,
+                accessToken,
+              }).then(updated => {
+                if (!mountedRef.current) return;
+                setContentShares(current => current.map(item => item.id === updated.id ? updated : item));
+                ToastAndroid.show('共享链接已撤销', ToastAndroid.SHORT);
+              }).catch(reason => {
+                if (mountedRef.current) {
+                  setContentShareError(readableErrorMessage(reason, '共享链接暂时无法撤销，请稍后重试。'));
+                  void refreshContentShares(false);
+                }
+              }).finally(() => {
+                if (mountedRef.current) {
+                  setContentShareBusyId(null);
+                  setContentShareManagerVisible(true);
+                }
+              });
+            },
+          },
+        ],
+      });
+    }, 320);
+  }, [accessToken, contentShareBusyId, meeting, meetingScopeKey, refreshContentShares, showDialog]);
+
   const confirmDelete = useCallback(async () => {
     if (!meeting) return;
     let presentation;
@@ -4093,8 +4301,28 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingShareSheet
         visible={shareVisible}
         availability={shareAvailability}
+        linkEnabled={meetingContentShareLinksEnabled && !isGuest && Boolean(accessToken)}
         onClose={() => setShareVisible(false)}
         onShare={requestShare}
+        onCreateLink={requestContentShare}
+        onManageLinks={openContentShareManager}
+      />
+      <MeetingContentShareManagerSheet
+        visible={contentShareManagerVisible}
+        shares={contentShares}
+        loading={contentSharesLoading}
+        busyShareId={contentShareBusyId}
+        error={contentShareError}
+        onClose={() => {
+          if (contentShareBusyId) return;
+          contentShareRequestGenerationRef.current += 1;
+          setContentShareManagerVisible(false);
+          setContentSharesLoading(false);
+          setContentShareError('');
+        }}
+        onSend={share => { void sendContentShare(share); }}
+        onRetry={share => { void retryContentShare(share); }}
+        onRevoke={confirmRevokeContentShare}
       />
       <MeetingQuestionSheet
         visible={questionVisible}

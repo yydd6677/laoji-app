@@ -2,7 +2,12 @@ import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { BEST_SPEED, zip } from 'react-native-zip-archive';
-import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
+import type {
+  MeetingContentShareSection,
+  MeetingContentShareSnapshot,
+  MeetingSummaryActionCandidate,
+  MeetingSummaryDocument,
+} from '../domain/meeting';
 import type { MarkerRecord, MeetingAttachmentRecord } from '../data/repositories';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
@@ -31,6 +36,7 @@ export type MeetingShareErrorCode =
   | 'NO_AUDIO'
   | 'NO_MARKERS'
   | 'NO_ATTACHMENTS'
+  | 'LINK_AUDIO_UNSUPPORTED'
   | 'NO_MEETING_CONTENT'
   | 'SHARING_UNAVAILABLE';
 export const MEETING_SHARE_RETENTION_MS = 10 * 60 * 1000;
@@ -232,61 +238,84 @@ type TextShareContent = {
   included: MeetingShareContentKey[];
 };
 
-function buildSelectedMeetingDocument(
+function buildSelectedMeetingSections(
   selection: MeetingShareSelection,
   input: MeetingShareInput,
-): TextShareContent {
-  const sections: string[] = ['老记会议资料'];
-  const included: MeetingShareContentKey[] = [];
+): MeetingContentShareSection[] {
+  const sections: MeetingContentShareSection[] = [];
   if (selection.info) {
-    sections.push(buildMeetingInfoText(input.meeting));
-    included.push('info');
+    sections.push({ key: 'info', title: '基本会议信息', content: buildMeetingInfoText(input.meeting) });
   }
   if (selection.summary) {
     const summary = selectedSummaryText(input);
     if (summary) {
-      sections.push(`整理结果\n${summary}`);
-      included.push('summary');
+      sections.push({ key: 'summary', title: '整理结果', content: summary });
     }
   }
   if (selection.actions) {
     const actions = buildMeetingActionsText(input.actionItems ?? input.summaryDocument?.actionItemCandidates ?? []);
     if (actions) {
-      sections.push(`行动项\n${actions}`);
-      included.push('actions');
+      sections.push({ key: 'actions', title: '行动项', content: actions });
     }
   }
   if (selection.transcript) {
     const transcript = buildMeetingTranscriptText(input.transcriptLines);
     if (transcript) {
-      sections.push(`文字记录\n${transcript}`);
-      included.push('transcript');
+      sections.push({ key: 'transcript', title: '文字记录', content: transcript });
     }
   }
   if (selection.markers) {
     const markers = buildMeetingMarkersText(input.markers ?? []);
     if (markers) {
-      sections.push(`标记\n${markers}`);
-      included.push('markers');
+      sections.push({ key: 'markers', title: '标记', content: markers });
     }
   }
   if (selection.attachments) {
     const attachments = buildMeetingAttachmentsText(input.attachments ?? []);
     if (attachments) {
-      sections.push(`附件\n${attachments}`);
-      included.push('attachments');
+      sections.push({ key: 'attachments', title: '附件', content: attachments });
     }
   }
   if (selection.manualNote) {
     const note = input.manualNoteText?.replace(/\r\n?/g, '\n').trim() ?? '';
     if (note) {
-      sections.push(`我的笔记\n${note}`);
-      included.push('manualNote');
+      sections.push({ key: 'manualNote', title: '我的笔记', content: note });
     }
   }
+  return sections;
+}
+
+function buildSelectedMeetingDocument(
+  selection: MeetingShareSelection,
+  input: MeetingShareInput,
+): TextShareContent {
+  const sections = buildSelectedMeetingSections(selection, input);
   return {
-    document: included.length > 0 ? sections.join('\n\n--------------------\n\n') : '',
-    included,
+    document: sections.length > 0
+      ? ['老记会议资料', ...sections.map(section => `${section.title}\n${section.content}`)]
+        .join('\n\n--------------------\n\n')
+      : '',
+    included: sections.map(section => section.key),
+  };
+}
+
+export function buildMeetingContentShareSnapshot(
+  selection: MeetingShareSelection,
+  input: MeetingShareInput,
+): MeetingContentShareSnapshot {
+  if (selection.audio) {
+    throw new MeetingShareError('LINK_AUDIO_UNSUPPORTED', 'meeting content links do not include audio');
+  }
+  const sections = buildSelectedMeetingSections(selection, input);
+  if (sections.length === 0) {
+    throw new MeetingShareError('NO_MEETING_CONTENT', 'selected meeting content is unavailable');
+  }
+  return {
+    schema_version: 1,
+    sections,
+    source_summary_version_id: input.summaryVersionId?.trim()
+      || input.summaryDocument?.remoteVersionId?.trim()
+      || null,
   };
 }
 
@@ -589,6 +618,7 @@ export function meetingShareErrorMessage(error: unknown): string {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
     if (error.code === 'NO_MARKERS') return '所选标记已不存在，请重新选择。';
     if (error.code === 'NO_ATTACHMENTS') return '所选附件暂时无法读取，请稍后重试。';
+    if (error.code === 'LINK_AUDIO_UNSUPPORTED') return '录音请使用文件分享。';
     if (error.code === 'NO_MEETING_CONTENT') return '所选会议内容当前不可分享，请重新选择。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';
   }

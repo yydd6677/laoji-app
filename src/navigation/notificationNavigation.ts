@@ -67,11 +67,17 @@ type PendingSharedActionTarget = PendingNotificationTargetBase & {
   token: string;
 };
 
+type PendingSharedMeetingTarget = PendingNotificationTargetBase & {
+  kind: 'shared-meeting';
+  token: string;
+};
+
 type PendingNotificationTarget =
   | PendingEventNotificationTarget
   | PendingMeetingActionNotificationTarget
   | PendingQuickTileTarget
-  | PendingSharedActionTarget;
+  | PendingSharedActionTarget
+  | PendingSharedMeetingTarget;
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
@@ -209,6 +215,18 @@ async function flushPendingNotificationNavigationNow(): Promise<boolean> {
       : undefined;
     if (current?.name !== 'SharedAction' || params?.token !== target.token) {
       navigationRef.navigate('SharedAction', { token: target.token });
+    }
+    await markHandled(target);
+    return true;
+  }
+  if (target.kind === 'shared-meeting') {
+    if (!canNavigateTo('SharedMeetingContent')) return false;
+    const current = navigationRef.getCurrentRoute();
+    const params = current?.name === 'SharedMeetingContent'
+      ? current.params as RootStackParamList['SharedMeetingContent'] | undefined
+      : undefined;
+    if (current?.name !== 'SharedMeetingContent' || params?.token !== target.token) {
+      navigationRef.navigate('SharedMeetingContent', { token: target.token });
     }
     await markHandled(target);
     return true;
@@ -367,6 +385,8 @@ export async function queueSemanticLink(rawUrl: string): Promise<void> {
     ? { ...base, kind: 'quick-tile', origin: 'quick_tile' }
     : intent.kind === 'shared-action'
       ? { ...base, kind: 'shared-action', token: intent.token }
+      : intent.kind === 'shared-meeting'
+        ? { ...base, kind: 'shared-meeting', token: intent.token }
       : {
         ...base,
         kind: 'event',
@@ -420,6 +440,11 @@ function restoredPendingTarget(value: unknown): PendingNotificationTarget | null
     const token = typeof saved.token === 'string' ? saved.token.trim() : '';
     if (base.source !== 'semantic-link' || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) return null;
     return { ...base, kind: 'shared-action', token };
+  }
+  if (saved.kind === 'shared-meeting') {
+    const token = typeof saved.token === 'string' ? saved.token.trim() : '';
+    if (base.source !== 'semantic-link' || !/^[A-Za-z0-9_-]{32,256}$/.test(token)) return null;
+    return { ...base, kind: 'shared-meeting', token };
   }
   const rawRef = saved.ref;
   const ref = rawRef && typeof rawRef === 'object' && !Array.isArray(rawRef)

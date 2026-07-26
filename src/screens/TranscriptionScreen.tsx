@@ -1384,8 +1384,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingShareSheet
         visible={shareVisible}
         availability={shareAvailability}
+        linkEnabled={false}
         onClose={() => setShareVisible(false)}
         onShare={selection => { void runMeetingShare(selection); }}
+        onCreateLink={() => undefined}
+        onManageLinks={() => undefined}
       />
 
       <MeetingTemplateSheet

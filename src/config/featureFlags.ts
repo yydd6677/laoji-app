@@ -12,6 +12,7 @@ export interface LaoJiFeatureFlags {
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
   meetingActionCollaborationV1: boolean;
+  meetingContentShareLinksV1: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -66,5 +67,9 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // independently reversible from meeting-level sharing.
     meetingActionCollaborationV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingActionCollaborationV1 === true,
+    // Account meeting links are explicit, frozen by default, and capability-gated.
+    meetingContentShareLinksV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
+      && extra.featureFlags?.meetingContentShareLinksV1 === true,
   };
 }

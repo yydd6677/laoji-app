@@ -16,6 +16,7 @@ export const ROOT_NAVIGATION_ROUTE_NAMES = [
   'Transcription',
   'MeetingOrganization',
   'SharedAction',
+  'SharedMeetingContent',
   'SpeakerManager',
   'SpeakerEnrollment',
   'Profile',
@@ -313,6 +314,13 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
         && typeof route.params.token === 'string'
         && /^[A-Za-z0-9_-]{32,256}$/.test(route.params.token)
         ? { name: 'SharedAction', params: { token: route.params.token } }
+        : null;
+    case 'SharedMeetingContent':
+      return isPlainRecord(route.params)
+        && hasOnlyKeys(route.params, ['token'])
+        && typeof route.params.token === 'string'
+        && /^[A-Za-z0-9_-]{32,256}$/.test(route.params.token)
+        ? { name: 'SharedMeetingContent', params: { token: route.params.token } }
         : null;
     case 'SpeakerEnrollment':
       if (route.params === undefined) return { name: 'SpeakerEnrollment' };

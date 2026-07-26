@@ -1,5 +1,6 @@
 export * from './clientId';
 export * from './collaboration';
+export * from './contentShare';
 export * from './entities';
 export * from './mediaClips';
 export * from './organization';

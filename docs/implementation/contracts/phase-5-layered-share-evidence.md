@@ -1,6 +1,6 @@
 # Phase 5 导入、Marker 与分享：分层分享本机纵向切片
 
-状态：会议详情已从 `bundle/document/audio` 三选一改为内容级选择，形成安全默认、私人笔记二次确认、Marker/附件显式选择、文档/音频/ZIP 导出和最小审计的本机闭环。本文件记录轻量合同与模拟器实测，不代表可撤销分享链接、所有内容组合、物理真机或 Phase 5 退出条件已经完成。
+状态：会议详情已从 `bundle/document/audio` 三选一改为内容级选择，并完成可撤销文字链接纵切；安全默认、私人笔记二次确认、Marker/附件显式选择、文档/音频/ZIP 导出、默认冻结、可选最新整理、管理与撤销均有真实入口。本文件记录轻量合同、运行服务和模拟器实测，不代表所有内容组合、第二移动设备、物理真机或候选版退出条件已经完成。
 
 ## 当前范围
 
@@ -17,6 +17,10 @@
 - 审计事件 `meeting_share_prepared` 只记录 `included_contents` 和 `artifact_kind`，不记录标题、正文、路径、会议 ID 或身份信息。
 - 临时目录和 ZIP 使用既有 10 分钟清理合同：分享失败立即删除，分享完成后延迟删除，进程中断后由下次分享清理过期目录。
 - 本机录音分享按 WAV、MP3、M4A、AAC、OGG、WEBM、FLAC 扩展名恢复对应 MIME，避免导入的非 WAV 文件被错误声明为 `audio/wav`。
+- 登录账号且 fresh capability 声明 `meeting_content_shares_v1=true` 时，分享 sheet 显示管理入口、默认关闭的“链接使用最新整理结果”、次级“创建文字链接”和主级“发送文件”。游客、未登录和 capability 缺失时不展示链接入口。
+- 文字链接复用八类内容 scope，但不接受 `audio`。默认冻结创建时全部 section；只有用户显式勾选最新整理时，服务端公开读取才以当前结构化 Summary 替换 `summary` section，其他 section 保持冻结。
+- migration v29 的 `meeting_content_shares` 保存冻结 payload、scope、远端 revision、operation、重试/阻塞/撤销状态。服务端只保存 token SHA-256；owner list 恢复链接，撤销后公开读取返回 410。
+- 当前邀请地址是 `laoji://share/meeting?token=...`。Android manifest、语义链接、导航恢复和 `SharedMeetingContent` 页面已接通；接收端需要安装老记，当前没有通用网页落地页。非 Android 详情暂不开放创建入口。
 
 ## UI 证据分类
 
@@ -33,11 +37,18 @@
 - `[PRODUCT]`：只说明“我的笔记会原样写入分享文件”，不增加使用说明；取消不得打开系统 chooser，继续才开始准备产物。
 - `[INFERENCE]`：确认发生在 sheet 完整退出后，避免 dialog 与 sheet 叠层；取消后需重新打开并重新选择，确保旧授权不被隐式保留。
 
+组件：文字链接与管理 sheet
+
+- Classification：LaoJi-only component，复用 Feishu bottom sheet、checkbox、UDButton 和详情标题栏语义；不声称飞书存在相同公开链接合同。
+- `[PRODUCT]`：链接与文件分享必须是两个明确动作；录音只能走文件分享；默认冻结，最新整理必须显式授权；用户可发送、重试和撤销。
+- `[SOURCE]`：标题栏、12dp sheet 顶角、48dp Big Column、6dp radius、文字/危险动作层级和约 300ms 完整高度进出沿用现有 source-backed token。
+- `[INFERENCE]`：链接入口用 22dp link icon；最新整理使用 22dp checkbox；创建文字链接为 bounded secondary，发送文件为 primary。状态/error 使用固定槽位，管理列表在小屏滚动，底部操作不随加载和错误跳动。
+
 ## 轻量验证
 
 - `npx tsc --noEmit --pretty false`：通过；包括本机非 WAV MIME 修复。
 - `:app:compilePreviewKotlin`：通过，232 个 task，5 executed、227 up-to-date。
-- `:app:assemblePreview`：通过，627 个 task，58 executed、569 up-to-date。
+- `:app:assemblePreview`：通过，627 个 task，68 executed、559 up-to-date。
 - 实际导入会议 `文件选择测试-01` 打开 sheet：只有“基本会议信息”默认勾选；录音可用但默认关闭，整理结果、行动项和文字记录因无内容而禁用。
 - 默认提交实际打开 Android 系统 chooser，文件名为 `文件选择测试-01_会议资料.txt`；审计为 `included_contents=info`、`artifact_kind=document`。
 - 显式勾选录音后实际打开 chooser，文件名为 `文件选择测试-01_会议资料_<timestamp>.zip`；审计为 `included_contents=info.audio`、`artifact_kind=archive`。
@@ -47,8 +58,12 @@
 - sheet 静态截图无文字、复选框、提交按钮或导航栏重叠；本轮交互日志未发现应用 FATAL、`SQLiteException` 或 `no such column`。
 - 附件分享夹具中“附件”可用但默认关闭；显式勾选后 chooser 打开 ZIP，审计为 `included_contents=info.attachments`。ZIP 中资料索引保留时间点/文件名，原图哈希与私有源文件一致，manifest 不含本机路径。
 - Marker 增量通过 `git diff --check` 与 `npx tsc --noEmit --pretty false`；普通 Android 页面已接入真实 canonical Marker 数组，manifest 新增独立 `markers` scope。该增量尚未重新构建或制造设备夹具，不能把静态合同写成 chooser 实测。
-- 原六类分享验证后曾加载 `codex-laoji-import-pretest-20260724`；附件增量验证后再次以匹配的 SwiftShader renderer 加载 `codex-laoji-att01-pretest-20260725`，再覆盖安装最终 Preview。最终只读数据库为 `user_version=21`、`quick_check=ok`、0 条 Marker、0 条附件，分享夹具未残留。
-- 当前最终 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，大小 `90,527,844` bytes，SHA-256 `3954445001ea8a97429a129d46846f59a586f49032438d1161b7eb2eea84e923`。已覆盖安装到唯一设备 `emulator-5556`，包版本为 `1.0.0-source-preview`。
+- 保留数据模拟器从已备份 v27 原位升级到 v29；升级前后均为 15 条 MeetingNote、4 条未删除会议，`quick_check=ok`。`meeting_content_shares` 表存在，验证夹具清理后本机记录为 0。
+- 1080×2400 页面确认八类内容无重叠、管理 icon、最新整理 checkbox、bounded“创建文字链接”和 primary“发送文件”层级；1080×1920 临时小屏确认内容区为可滚动 ScrollView，固定 footer 不遮挡八行内容或系统导航区。
+- 通过应用为账号会议创建一条只含基本信息的真实链接：服务端返回 active revision 1，Android 系统文字分享器展示严格应用深链；显式深链进入 `SharedMeetingContent` 并只显示所选 section。管理页撤销后 revision 变为 2，公开读取返回 410，页面显示中文“共享链接已撤销”。
+- 实测发现首个 APK 未声明 `share/meeting` intent filter；修复构建插件和当前 manifest 后，系统级隐式 `VIEW+BROWSABLE` 可直接解析到老记，并对无效 token 显示中文失效状态。不是用显式组件启动替代系统解析结论。
+- 运行 18020 的 create/幂等重放/public read/owner list/revoke 窄合同分别返回 201/201/200/200/200；撤销后 public read 为 410。数据库只保存 64 位 token hash，operation 响应不持久化 `laoji://` URL；本轮本机和服务端 share/operation 夹具均精确清理为 0。
+- 当前最终 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，大小 `90,866,300` bytes，SHA-256 `9d9ce456b4c1840b7781359e301ff46eee8bd2bf5ab12f57bd45c6330d735770`。已保留数据覆盖安装到唯一设备 `emulator-5556`，包版本为 `1.0.0-source-preview`，启动日志未发现应用 FATAL、SQLite 缺表或缺列。
 
 ## 未完成边界
 
@@ -56,4 +71,4 @@
 2. 当前导入夹具没有整理结果、行动项或文字记录；这三项的默认分支和内容格式已做实现审计，但尚未在同一真实会议上逐项打开 chooser。
 3. WAV 的默认文档与文字+录音 ZIP 已实测；MP3/M4A/AAC/OGG/WEBM/FLAC 的 MIME 修复只完成静态合同与 TypeScript 验证，尚未逐格式分享给真实接收应用。
 4. 未执行八类内容的完整组合矩阵、10 分钟真实等待清理、分享中强杀或超大录音打包；这些按当前“轻测试、轻校验”目标后置。
-5. Marker 已并入分层 sheet；可撤销分享链接仍属于 P2，尚未实现。同步感知删除仍是 Phase 5 后续纵切。
+5. 可撤销文字链接当前只在 Android 主详情开放，邀请地址要求接收端安装老记；非 Android 创建、通用网页落地页、第二移动设备和 USB 真机仍未验证。录音按产品合同继续走文件分享，不属于文字链接缺项。

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors as C } from '../theme/colors';
 
@@ -10,6 +10,7 @@ export function MinutesDetailTitleBar({
   sharing,
   shareTestID,
   backgroundColor,
+  title,
 }: {
   onBack: () => void;
   onShare?: () => void;
@@ -17,6 +18,7 @@ export function MinutesDetailTitleBar({
   sharing?: boolean;
   shareTestID?: string;
   backgroundColor?: string;
+  title?: string;
 }) {
   return (
     <View style={[s.bar, backgroundColor ? { backgroundColor } : null]}>
@@ -28,6 +30,7 @@ export function MinutesDetailTitleBar({
       >
         <Ionicons name="chevron-back" size={22} color={C.text} />
       </TouchableOpacity>
+      {title ? <Text pointerEvents="none" style={s.title} numberOfLines={1}>{title}</Text> : null}
       <View style={s.rightActions}>
         {onShare ? (
           <TouchableOpacity
@@ -63,5 +66,6 @@ const s = StyleSheet.create({
   action: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   backAction: { marginLeft: 6 },
   rightActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center' },
+  title: { position: 'absolute', left: 60, right: 60, textAlign: 'center', fontSize: 17, lineHeight: 24, color: C.text, fontWeight: '500' },
   moreAction: { marginRight: 6 },
 });

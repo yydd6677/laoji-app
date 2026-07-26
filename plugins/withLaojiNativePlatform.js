@@ -148,6 +148,7 @@ module.exports = function withLaojiNativePlatform(config) {
     ensureSemanticLinkIntentFilter(mainActivity, 'meeting', '/new');
     ensureSemanticLinkIntentFilter(mainActivity, 'calendar', '/occurrence');
     ensureSemanticLinkIntentFilter(mainActivity, 'collaboration', '/action');
+    ensureSemanticLinkIntentFilter(mainActivity, 'share', '/meeting');
     return androidConfig;
   });
 
