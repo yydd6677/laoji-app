@@ -7,7 +7,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { File } from 'expo-file-system';
 import {
   acknowledgeIngestedMeetingMedia,
   acknowledgeMeetingMediaImportIntent,
@@ -16,6 +15,7 @@ import {
   hasNativeMeetingMediaImport,
   ingestMeetingMedia,
   inspectMeetingMediaSource,
+  pickMeetingMedia,
   recoverPendingMeetingMediaImports,
   type IngestedMeetingMedia,
   type MeetingMediaImportOrigin,
@@ -23,6 +23,8 @@ import {
 } from 'laoji-native-platform';
 import { secureClientIdFactory, type ScopeKey } from '../domain/meeting';
 import { recoverPreparedMeetingRecordingMerge } from '../application/meeting';
+import { getFeatureFlags } from '../config/featureFlags';
+import { loadMeetingCapabilities } from '../data/api/v2';
 import { navigationRef } from '../navigation/notificationNavigation';
 import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
@@ -62,9 +64,12 @@ type ImportSource = {
   lastModifiedMs: number | null;
   receivedAtMs: number | null;
   origin: MeetingMediaImportOrigin;
+  mimeType?: string | null;
+  maximumBytes?: number;
   intentToken?: string;
   meetingId?: string;
   assetId?: string;
+  readyMedia?: IngestedMeetingMedia;
 };
 
 type ImportRequest = ImportSource & {
@@ -89,9 +94,9 @@ function navigateToMeeting(meetingId: string): void {
 }
 
 export function MeetingMediaImportProvider({ children }: { children: React.ReactNode }) {
-  const { initializing, mode, session } = useAuth();
+  const { accessToken, initializing, mode, session } = useAuth();
   const { searchableEvents } = useEvents();
-  const { importMeetingMedia } = useMeetings();
+  const { importMeetingMedia, meetings } = useMeetings();
   const { showDialog } = useAppDialog();
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<ImportConfirmation | null>(null);
@@ -148,6 +153,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       title: draft.title,
       recordedAtMs: draft.recordedAtMs,
       calendarContext: draft.calendarContext,
+      targetMeetingId: draft.targetMeetingId,
     });
     const acknowledged = await acknowledgeIngestedMeetingMedia(media.meetingId, media.assetId);
     if (acknowledged) await deleteMeetingMediaImportDraft(media.meetingId);
@@ -165,16 +171,21 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     };
     promptActiveRef.current = false;
     setImportBusy(true);
-    let copied = false;
+    let copied = Boolean(source.readyMedia);
+    let ingestedMedia = source.readyMedia ?? null;
     try {
       await saveMeetingMediaImportDraft(request.meetingId, request.draft);
-      const media = await ingestMeetingMedia({
+      const media = source.readyMedia ?? await ingestMeetingMedia({
         sourceUri: request.uri,
         meetingId: request.meetingId,
         assetId: request.assetId,
         origin: request.origin,
-        maximumBytes: LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        maximumBytes: Math.min(
+          LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+          request.maximumBytes ?? LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        ),
       });
+      ingestedMedia = media;
       copied = true;
       const meeting = await persistIngestedMedia(media, request.draft);
       if (request.intentToken) await finishIntent(request.intentToken);
@@ -182,6 +193,9 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       navigateToMeeting(meeting.id);
     } catch (reason) {
       promptActiveRef.current = true;
+      const code = reason && typeof reason === 'object'
+        ? (reason as { code?: unknown }).code
+        : null;
       const closeFailure = () => {
         void (async () => {
           if (!copied) await deleteMeetingMediaImportDraft(request.meetingId).catch(() => {});
@@ -189,18 +203,43 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
           else releasePrompt();
         })();
       };
+      const chooseAnotherTarget = () => {
+        if (!ingestedMedia) {
+          closeFailure();
+          return;
+        }
+        promptActiveRef.current = true;
+        setConfirmation({
+          source: {
+            uri: ingestedMedia.localUri,
+            fileName: ingestedMedia.fileName,
+            byteSize: ingestedMedia.byteSize,
+            lastModifiedMs: ingestedMedia.sourceLastModifiedMs,
+            receivedAtMs: null,
+            origin: request.origin,
+            mimeType: ingestedMedia.mimeType,
+            maximumBytes: request.maximumBytes,
+            intentToken: request.intentToken,
+            meetingId: ingestedMedia.meetingId,
+            assetId: ingestedMedia.assetId,
+            readyMedia: ingestedMedia,
+          },
+          initialTitle: request.draft.title,
+          initialRecordedAtMs: request.draft.recordedAtMs,
+        });
+      };
       showDialog({
         title: '导入失败',
         message: copied
-          ? '录音已保存在本机，可立即重试或稍后继续处理。'
+          ? `录音已保存在本机。${meetingMediaImportErrorMessage(reason)}`
           : meetingMediaImportErrorMessage(reason),
         tone: 'error',
         onDismiss: closeFailure,
         actions: [
           {
-            text: '重试',
+            text: code === 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE' ? '重新选择' : '重试',
             role: 'primary',
-            onPress: () => {
+            onPress: code === 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE' ? chooseAnotherTarget : () => {
               promptActiveRef.current = false;
               void runImportRef.current(request);
             },
@@ -241,6 +280,14 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
 
   const validateImportDraft = useCallback(async (draft: MeetingImportDraft): Promise<string | null> => {
     if (!scopeKey) return '当前账号状态已变化，请取消后重试。';
+    if (draft.targetMeetingId) {
+      const target = meetings.find(meeting => meeting.id === draft.targetMeetingId);
+      if (!target) return '所选会议已不可用，请重新选择。';
+      if (target.status === 'recording' || target.status === 'paused') {
+        return '该会议正在录音，请结束录音后再加入。';
+      }
+      return null;
+    }
     if (!Number.isSafeInteger(draft.recordedAtMs) || draft.recordedAtMs < 0) {
       return '录制时间无效，请重新选择。';
     }
@@ -251,7 +298,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       eventRefForEvent(draft.calendarEvent),
     );
     return existing ? '该日程已有会议记录，请选择其他日程或不关联。' : null;
-  }, [scopeKey]);
+  }, [meetings, scopeKey]);
 
   const startConfirmedImport = useCallback((draft: MeetingImportDraft) => {
     const current = confirmation;
@@ -265,11 +312,20 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       scopeKey,
       title: draft.title,
       recordedAtMs: draft.recordedAtMs,
-      calendarContext: draft.calendarEvent ? calendarMeetingContext(draft.calendarEvent, scopeKey) : null,
+      calendarContext: !draft.targetMeetingId && draft.calendarEvent
+        ? calendarMeetingContext(draft.calendarEvent, scopeKey)
+        : null,
+      targetMeetingId: draft.targetMeetingId,
     };
     setConfirmation(null);
     promptActiveRef.current = false;
-    void runImportRef.current({ ...current.source, draft: persistentDraft });
+    void runImportRef.current({
+      ...current.source,
+      meetingId: current.source.readyMedia?.meetingId
+        ?? draft.targetMeetingId
+        ?? current.source.meetingId,
+      draft: persistentDraft,
+    });
   }, [confirmation, finishIntent, releasePrompt, scopeKey]);
 
   const handleIntent = useCallback((intent: PendingMeetingMediaImportIntent) => {
@@ -301,16 +357,58 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       });
       return;
     }
-    presentImportConfirmation({
-      uri: intent.uri,
-      fileName: intent.fileName,
-      byteSize: intent.byteSize,
-      lastModifiedMs: intent.lastModifiedMs,
-      receivedAtMs: intent.receivedAtMs,
-      origin: 'share_intent',
-      intentToken: intent.token,
+    const present = (maximumBytes = LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES) => {
+      presentImportConfirmation({
+        uri: intent.uri!,
+        fileName: intent.fileName,
+        byteSize: intent.byteSize,
+        lastModifiedMs: intent.lastModifiedMs,
+        receivedAtMs: intent.receivedAtMs,
+        origin: 'share_intent',
+        mimeType: intent.mimeType,
+        maximumBytes,
+        intentToken: intent.token,
+      });
+    };
+    if (!intent.mimeType?.toLowerCase().startsWith('video/')) {
+      present();
+      return;
+    }
+    promptActiveRef.current = true;
+    void loadMeetingCapabilities({
+      accessToken,
+      forceRefresh: true,
+      allowStaleOnError: false,
+    }).then(state => {
+      if (activeIntentTokenRef.current !== intent.token) return;
+      const mediaImport = state.source === 'remote' ? state.capabilities.mediaImport : null;
+      const supported = mediaImport?.mimeTypes.some(
+        mimeType => mimeType.toLowerCase() === intent.mimeType?.toLowerCase(),
+      );
+      if (supported && mediaImport) {
+        present(Math.min(LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES, mediaImport.maxBytes));
+        return;
+      }
+      const closeUnsupportedVideo = () => { void finishIntent(intent.token); };
+      showDialog({
+        title: '无法导入',
+        message: '当前服务暂不支持导入这个视频。',
+        tone: 'warning',
+        onDismiss: closeUnsupportedVideo,
+        actions: [{ text: '知道了', role: 'primary', onPress: closeUnsupportedVideo }],
+      });
+    }).catch(() => {
+      if (activeIntentTokenRef.current !== intent.token) return;
+      const closeUnavailableVideo = () => { void finishIntent(intent.token); };
+      showDialog({
+        title: '无法导入',
+        message: '暂时无法确认视频处理能力，请联网后重试。',
+        tone: 'warning',
+        onDismiss: closeUnavailableVideo,
+        actions: [{ text: '知道了', role: 'primary', onPress: closeUnavailableVideo }],
+      });
     });
-  }, [finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
+  }, [accessToken, finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
   handleIntentRef.current = handleIntent;
 
   const drainIntentInbox = useCallback(() => {
@@ -377,9 +475,37 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
               receivedAtMs: null,
             }),
             calendarContext: null,
+            targetMeetingId: null,
           };
           await persistIngestedMedia(media, draft);
         } catch (reason) {
+          const code = reason && typeof reason === 'object'
+            ? (reason as { code?: unknown }).code
+            : null;
+          if (code === 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE' && !cancelled) {
+            const savedDraft = await loadMeetingMediaImportDraft(media.meetingId).catch(() => null);
+            promptActiveRef.current = true;
+            setConfirmation({
+              source: {
+                uri: media.localUri,
+                fileName: media.fileName,
+                byteSize: media.byteSize,
+                lastModifiedMs: media.sourceLastModifiedMs,
+                receivedAtMs: null,
+                origin: media.origin as MeetingMediaImportOrigin,
+                mimeType: media.mimeType,
+                meetingId: media.meetingId,
+                assetId: media.assetId,
+                readyMedia: media,
+              },
+              initialTitle: savedDraft?.title ?? suggestedMeetingTitleFromFileName(media.fileName),
+              initialRecordedAtMs: savedDraft?.recordedAtMs ?? defaultRecordedAtMs({
+                lastModifiedMs: media.sourceLastModifiedMs,
+                receivedAtMs: null,
+              }),
+            });
+            return;
+          }
           if (!cancelled) {
             promptActiveRef.current = true;
             const closeRecoveryFailure = () => releasePrompt();
@@ -422,20 +548,30 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     }
     promptActiveRef.current = true;
     try {
-      const selected = await File.pickFileAsync(undefined, 'audio/*');
-      const file = Array.isArray(selected) ? selected[0] : selected;
-      if (!file) {
-        releasePrompt();
-        return;
-      }
-      const sourceInfo = await inspectMeetingMediaSource(file.uri);
+      const capability = await loadMeetingCapabilities({
+        accessToken,
+        forceRefresh: true,
+        allowStaleOnError: false,
+      }).catch(() => null);
+      const mediaImport = capability?.source === 'remote'
+        ? capability.capabilities.mediaImport
+        : null;
+      const includeVideo = mediaImport?.mimeTypes.some(
+        mimeType => mimeType.toLowerCase().startsWith('video/'),
+      ) === true;
+      const selectedUri = await pickMeetingMedia(includeVideo);
+      const sourceInfo = await inspectMeetingMediaSource(selectedUri);
       presentImportConfirmation({
-        uri: file.uri,
+        uri: selectedUri,
         fileName: sourceInfo.fileName,
         byteSize: sourceInfo.byteSize,
         lastModifiedMs: sourceInfo.lastModifiedMs,
         receivedAtMs: Date.now(),
         origin: 'file_import',
+        mimeType: sourceInfo.mimeType,
+        maximumBytes: mediaImport
+          ? Math.min(LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES, mediaImport.maxBytes)
+          : LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
       });
     } catch (reason) {
       if (isMeetingMediaPickerCancellation(reason)) {
@@ -451,7 +587,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         actions: [{ text: '知道了', role: 'primary', onPress: closePickerFailure }],
       });
     }
-  }, [presentImportConfirmation, releasePrompt, showDialog]);
+  }, [accessToken, presentImportConfirmation, releasePrompt, showDialog]);
 
   const value = useMemo<MeetingMediaImportContextValue>(() => ({
     busy,
@@ -465,10 +601,13 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         visible={confirmation !== null}
         requestKey={confirmation?.source.intentToken ?? confirmation?.source.uri ?? ''}
         fileName={confirmation?.source.fileName?.trim().slice(0, 240) || '会议录音'}
+        mimeType={confirmation?.source.mimeType ?? null}
         byteSize={confirmation?.source.byteSize ?? null}
         initialTitle={confirmation?.initialTitle ?? ''}
         initialRecordedAtMs={confirmation?.initialRecordedAtMs ?? Date.now()}
         events={searchableEvents}
+        meetings={meetings}
+        allowExistingMeeting={getFeatureFlags().meetingMediaImportExistingV1}
         onClose={closeImportConfirmation}
         onValidate={validateImportDraft}
         onImport={startConfirmedImport}

@@ -8,7 +8,7 @@ export function suggestedMeetingTitleFromFileName(fileName: string | null | unde
   const normalized = fileName
     ?.replace(/[\\/\u0000-\u001f\u007f]/g, ' ')
     .trim()
-    .replace(/\.(?:wav|mp3|m4a|aac|ogg|webm|flac)$/i, '')
+    .replace(/\.(?:wav|mp3|m4a|aac|ogg|webm|flac|mp4|mov|mkv)$/i, '')
     .trim()
     .slice(0, 500)
     ?? '';
@@ -44,6 +44,12 @@ export function meetingMediaImportErrorMessage(reason: unknown): string {
       return '这次导入已存在，请返回会议列表查看。';
     case 'ERR_MEDIA_IMPORT_STORAGE':
       return '文件暂时无法保存到本机，请检查存储空间后重试。';
+    case 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE':
+      return '所选会议已不可用，请重新选择保存位置。';
+    case 'ERR_MEDIA_IMPORT_TARGET_BUSY':
+      return '该会议正在录音，请结束录音后再加入。';
+    case 'ERR_MEDIA_IMPORT_TARGET_CONFLICT':
+      return '该录音与会议中的已有内容冲突，请重新选择。';
     default:
       return '会议录音导入失败，请稍后重试。';
   }

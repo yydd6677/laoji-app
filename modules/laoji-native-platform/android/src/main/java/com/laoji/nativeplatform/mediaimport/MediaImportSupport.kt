@@ -48,6 +48,10 @@ private val supportedMimeTypes = setOf(
   "audio/webm",
   "audio/flac",
   "audio/x-flac",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
 )
 
 private val supportedExtensions = mapOf(
@@ -58,6 +62,9 @@ private val supportedExtensions = mapOf(
   "ogg" to "audio/ogg",
   "webm" to "audio/webm",
   "flac" to "audio/flac",
+  "mp4" to "video/mp4",
+  "mov" to "video/quicktime",
+  "mkv" to "video/x-matroska",
 )
 
 internal fun normalizeMediaMimeType(value: String?): String? = value
@@ -88,6 +95,10 @@ internal fun preferredMediaExtension(fileName: String, mimeType: String): String
     "audio/ogg", "application/ogg" -> "ogg"
     "audio/webm" -> "webm"
     "audio/flac", "audio/x-flac" -> "flac"
+    "video/mp4" -> "mp4"
+    "video/webm" -> "webm"
+    "video/quicktime" -> "mov"
+    "video/x-matroska" -> "mkv"
     else -> "audio"
   }
 }

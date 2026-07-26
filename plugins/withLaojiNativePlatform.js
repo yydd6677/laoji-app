@@ -24,17 +24,17 @@ function findMainActivity(application) {
   ));
 }
 
-function ensureMediaIntentFilter(activity, action) {
+function ensureMediaIntentFilter(activity, action, mimeType) {
   activity['intent-filter'] = activity['intent-filter'] || [];
   const exists = activity['intent-filter'].some(filter => (
     (filter.action || []).some(item => item.$?.['android:name'] === action)
-    && (filter.data || []).some(item => item.$?.['android:mimeType'] === 'audio/*')
+    && (filter.data || []).some(item => item.$?.['android:mimeType'] === mimeType)
   ));
   if (exists) return;
   activity['intent-filter'].push({
     action: [{ $: { 'android:name': action } }],
     category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-    data: [{ $: { 'android:mimeType': 'audio/*' } }],
+    data: [{ $: { 'android:mimeType': mimeType } }],
   });
 }
 
@@ -137,9 +137,14 @@ module.exports = function withLaojiNativePlatform(config) {
     if (!mainActivity) {
       throw new Error('LaoJi native platform requires an Android MainActivity manifest node.');
     }
-    ensureMediaIntentFilter(mainActivity, 'android.intent.action.SEND');
-    ensureMediaIntentFilter(mainActivity, 'android.intent.action.SEND_MULTIPLE');
-    ensureMediaIntentFilter(mainActivity, 'android.intent.action.VIEW');
+    for (const action of [
+      'android.intent.action.SEND',
+      'android.intent.action.SEND_MULTIPLE',
+      'android.intent.action.VIEW',
+    ]) {
+      ensureMediaIntentFilter(mainActivity, action, 'audio/*');
+      ensureMediaIntentFilter(mainActivity, action, 'video/*');
+    }
     ensureSemanticLinkIntentFilter(mainActivity, 'meeting', '/new');
     ensureSemanticLinkIntentFilter(mainActivity, 'calendar', '/occurrence');
     ensureSemanticLinkIntentFilter(mainActivity, 'collaboration', '/action');

@@ -1,4 +1,5 @@
 export * from './createMeetingNote';
+export * from './attachImportedMeetingMedia';
 export * from './createMeetingAction';
 export * from './createMeetingMarker';
 export * from './carrySeriesMemoryToManualNote';

@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { CalEvent } from '../types';
+import type { CalEvent, Meeting } from '../types';
 import { getFeishuTokens } from '../theme/feishuTokens';
 import { eventRefKey, eventRefForEvent } from '../utils/eventIdentity';
 
@@ -29,6 +29,7 @@ export interface MeetingImportDraft {
   title: string;
   recordedAtMs: number;
   calendarEvent: CalEvent | null;
+  targetMeetingId: string | null;
 }
 
 function formatDate(value: number): string {
@@ -83,14 +84,27 @@ function candidateEvents(events: readonly CalEvent[], recordedAtMs: number): Cal
     .slice(0, 20);
 }
 
+function candidateMeetings(meetings: readonly Meeting[]): Meeting[] {
+  return meetings
+    .filter(meeting => !['recording', 'paused'].includes(meeting.status ?? ''))
+    .slice(0, 50);
+}
+
+function meetingMetadata(meeting: Meeting): string {
+  return [meeting.date, meeting.time].filter(Boolean).join(' ');
+}
+
 export function MeetingImportSheet({
   visible,
   requestKey,
   fileName,
+  mimeType,
   byteSize,
   initialTitle,
   initialRecordedAtMs,
   events,
+  meetings,
+  allowExistingMeeting,
   onClose,
   onValidate,
   onImport,
@@ -98,10 +112,13 @@ export function MeetingImportSheet({
   visible: boolean;
   requestKey: string;
   fileName: string;
+  mimeType: string | null;
   byteSize: number | null;
   initialTitle: string;
   initialRecordedAtMs: number;
   events: readonly CalEvent[];
+  meetings: readonly Meeting[];
+  allowExistingMeeting: boolean;
   onClose: () => void;
   onValidate: (draft: MeetingImportDraft) => Promise<string | null>;
   onImport: (draft: MeetingImportDraft) => void;
@@ -122,10 +139,11 @@ export function MeetingImportSheet({
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [page, setPage] = useState<'form' | 'events'>('form');
+  const [page, setPage] = useState<'form' | 'events' | 'meetings'>('form');
   const [title, setTitle] = useState(initialTitle);
   const [recordedAtMs, setRecordedAtMs] = useState(initialRecordedAtMs);
   const [calendarEvent, setCalendarEvent] = useState<CalEvent | null>(null);
+  const [targetMeetingId, setTargetMeetingId] = useState<string | null>(null);
   const [pickerMode, setPickerMode] = useState<'date' | 'time' | null>(null);
   const [error, setError] = useState('');
   const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
@@ -156,6 +174,7 @@ export function MeetingImportSheet({
       setTitle(initialTitle.slice(0, MAX_TITLE_LENGTH));
       setRecordedAtMs(initialRecordedAtMs);
       setCalendarEvent(null);
+      setTargetMeetingId(null);
       setPage('form');
       setPickerMode(null);
       setError('');
@@ -198,11 +217,15 @@ export function MeetingImportSheet({
     () => candidateEvents(events, recordedAtMs),
     [events, recordedAtMs],
   );
+  const meetingCandidates = useMemo(
+    () => candidateMeetings(meetings),
+    [meetings],
+  );
 
   if (!mounted) return null;
   const requestClose = () => {
     if (submitting) return;
-    if (page === 'events') {
+    if (page !== 'form') {
       setPage('form');
       return;
     }
@@ -214,7 +237,8 @@ export function MeetingImportSheet({
     const draft: MeetingImportDraft = {
       title: title.slice(0, MAX_TITLE_LENGTH),
       recordedAtMs,
-      calendarEvent,
+      calendarEvent: targetMeetingId ? null : calendarEvent,
+      targetMeetingId,
     };
     Keyboard.dismiss();
     setError('');
@@ -252,9 +276,17 @@ export function MeetingImportSheet({
 
   const sheetHeight = Math.max(
     0,
-    Math.min(620, height - androidKeyboardInset - Math.max(insets.top, 12)),
+    Math.min(
+      page === 'form' && targetMeetingId ? 348 : 620,
+      height - androidKeyboardInset - Math.max(insets.top, 12),
+    ),
   );
   const selectedEventLabel = calendarEvent?.title.trim() || (calendarEvent ? '无标题日程' : '不关联');
+  const selectedTarget = targetMeetingId
+    ? meetings.find(meeting => meeting.id === targetMeetingId) ?? null
+    : null;
+  const selectedTargetLabel = selectedTarget?.title.trim()
+    || (selectedTarget ? '无标题会议' : '新建会议记录');
 
   return (
     <Modal
@@ -297,93 +329,152 @@ export function MeetingImportSheet({
             accessibilityViewIsModal
           >
             <View style={[styles.titleBar, { borderBottomColor: colors.divider }]}>
-            <Pressable
-              style={({ pressed }) => [styles.titleAction, pressed && { backgroundColor: colors.pressedFill }]}
-              onPress={requestClose}
-              disabled={submitting}
-              accessibilityRole="button"
-              accessibilityLabel={page === 'events' ? '返回导入设置' : '取消导入会议录音'}
-            >
-              <Ionicons
-                name={page === 'events' ? 'chevron-back' : 'close'}
-                size={24}
-                color={submitting ? colors.iconDisabled : colors.iconPrimary}
-              />
-            </Pressable>
-            <Text style={[styles.title, { color: colors.textTitle }]}>
-              {page === 'events' ? '关联日程' : '导入会议录音'}
-            </Text>
-            <View style={styles.titleAction} />
+              <Pressable
+                style={({ pressed }) => [styles.titleAction, pressed && { backgroundColor: colors.pressedFill }]}
+                onPress={requestClose}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel={page !== 'form' ? '返回导入设置' : '取消导入会议录音'}
+              >
+                <Ionicons
+                  name={page !== 'form' ? 'chevron-back' : 'close'}
+                  size={24}
+                  color={submitting ? colors.iconDisabled : colors.iconPrimary}
+                />
+              </Pressable>
+              <Text style={[styles.title, { color: colors.textTitle }]}>
+                {page === 'events' ? '关联日程' : page === 'meetings' ? '保存到' : '导入会议录音'}
+              </Text>
+              <View style={styles.titleAction} />
             </View>
 
-            {page === 'events' ? (
-            <ScrollView style={styles.content} bounces={false} showsVerticalScrollIndicator={false}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.eventRow,
-                  { borderTopColor: colors.divider },
-                  pressed && { backgroundColor: colors.pressedFill },
-                ]}
-                onPress={() => {
-                  setCalendarEvent(null);
-                  setPage('form');
-                  setError('');
-                }}
-                accessibilityRole="radio"
-                accessibilityLabel="不关联日程"
-                accessibilityState={{ checked: calendarEvent === null }}
-              >
-                <View style={styles.eventBody}>
-                  <Text style={[styles.eventTitle, { color: colors.textTitle }]}>不关联</Text>
-                </View>
-                {calendarEvent === null ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
-              </Pressable>
-              {candidates.map(event => {
-                const key = eventRefKey(eventRefForEvent(event));
-                const selected = calendarEvent
-                  ? key === eventRefKey(eventRefForEvent(calendarEvent))
-                  : false;
-                return (
-                  <Pressable
-                    key={key}
-                    style={({ pressed }) => [
-                      styles.eventRow,
-                      { borderTopColor: colors.divider },
-                      pressed && { backgroundColor: colors.pressedFill },
-                    ]}
-                    onPress={() => {
-                      setCalendarEvent(event);
-                      setPage('form');
-                      setError('');
-                    }}
-                    accessibilityRole="radio"
-                    accessibilityLabel={`${event.title.trim() || '无标题日程'}，${eventMetadata(event)}`}
-                    accessibilityState={{ checked: selected }}
-                  >
-                    <View style={styles.eventBody}>
-                      <Text style={[styles.eventTitle, { color: colors.textTitle }]} numberOfLines={1}>
-                        {event.title.trim() || '无标题日程'}
-                      </Text>
-                      <Text style={[styles.eventMeta, { color: colors.textCaption }]} numberOfLines={1}>
-                        {eventMetadata(event)}
-                      </Text>
-                    </View>
-                    {selected ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : (
-            <>
-              <ScrollView
-                style={styles.content}
-                contentContainerStyle={styles.form}
-                keyboardShouldPersistTaps="handled"
-                bounces={false}
-                showsVerticalScrollIndicator={false}
-              >
+            {page === 'meetings' ? (
+              <ScrollView style={styles.content} bounces={false} showsVerticalScrollIndicator={false}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.eventRow,
+                    { borderTopColor: colors.divider },
+                    pressed && { backgroundColor: colors.pressedFill },
+                  ]}
+                  onPress={() => {
+                    setTargetMeetingId(null);
+                    setPage('form');
+                    setError('');
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityLabel="新建会议记录"
+                  accessibilityState={{ checked: targetMeetingId === null }}
+                >
+                  <View style={styles.eventBody}>
+                    <Text style={[styles.eventTitle, { color: colors.textTitle }]}>新建会议记录</Text>
+                  </View>
+                  {targetMeetingId === null ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
+                </Pressable>
+                {meetingCandidates.map(meeting => {
+                  const selected = meeting.id === targetMeetingId;
+                  return (
+                    <Pressable
+                      key={meeting.id}
+                      style={({ pressed }) => [
+                        styles.eventRow,
+                        { borderTopColor: colors.divider },
+                        pressed && { backgroundColor: colors.pressedFill },
+                      ]}
+                      onPress={() => {
+                        setTargetMeetingId(meeting.id);
+                        setCalendarEvent(null);
+                        setPage('form');
+                        setError('');
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`${meeting.title.trim() || '无标题会议'}，${meetingMetadata(meeting)}`}
+                      accessibilityState={{ checked: selected }}
+                    >
+                      <View style={styles.eventBody}>
+                        <Text style={[styles.eventTitle, { color: colors.textTitle }]} numberOfLines={1}>
+                          {meeting.title.trim() || '无标题会议'}
+                        </Text>
+                        <Text style={[styles.eventMeta, { color: colors.textCaption }]} numberOfLines={1}>
+                          {meetingMetadata(meeting)}
+                        </Text>
+                      </View>
+                      {selected ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : page === 'events' ? (
+              <ScrollView style={styles.content} bounces={false} showsVerticalScrollIndicator={false}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.eventRow,
+                    { borderTopColor: colors.divider },
+                    pressed && { backgroundColor: colors.pressedFill },
+                  ]}
+                  onPress={() => {
+                    setCalendarEvent(null);
+                    setPage('form');
+                    setError('');
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityLabel="不关联日程"
+                  accessibilityState={{ checked: calendarEvent === null }}
+                >
+                  <View style={styles.eventBody}>
+                    <Text style={[styles.eventTitle, { color: colors.textTitle }]}>不关联</Text>
+                  </View>
+                  {calendarEvent === null ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
+                </Pressable>
+                {candidates.map(event => {
+                  const key = eventRefKey(eventRefForEvent(event));
+                  const selected = calendarEvent
+                    ? key === eventRefKey(eventRefForEvent(calendarEvent))
+                    : false;
+                  return (
+                    <Pressable
+                      key={key}
+                      style={({ pressed }) => [
+                        styles.eventRow,
+                        { borderTopColor: colors.divider },
+                        pressed && { backgroundColor: colors.pressedFill },
+                      ]}
+                      onPress={() => {
+                        setCalendarEvent(event);
+                        setPage('form');
+                        setError('');
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`${event.title.trim() || '无标题日程'}，${eventMetadata(event)}`}
+                      accessibilityState={{ checked: selected }}
+                    >
+                      <View style={styles.eventBody}>
+                        <Text style={[styles.eventTitle, { color: colors.textTitle }]} numberOfLines={1}>
+                          {event.title.trim() || '无标题日程'}
+                        </Text>
+                        <Text style={[styles.eventMeta, { color: colors.textCaption }]} numberOfLines={1}>
+                          {eventMetadata(event)}
+                        </Text>
+                      </View>
+                      {selected ? <Ionicons name="checkmark" size={22} color={colors.primary} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <>
+                <ScrollView
+                  style={styles.content}
+                  contentContainerStyle={styles.form}
+                  keyboardShouldPersistTaps="handled"
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                >
                 <View style={styles.fileRow}>
-                  <Ionicons name="musical-notes-outline" size={20} color={colors.iconSecondary} />
+                  <Ionicons
+                    name={mimeType?.toLowerCase().startsWith('video/') ? 'videocam-outline' : 'musical-notes-outline'}
+                    size={20}
+                    color={colors.iconSecondary}
+                  />
                   <View style={styles.fileBody}>
                     <Text style={[styles.fileName, { color: colors.textTitle }]} numberOfLines={1}>{fileName}</Text>
                     {readableFileSize(byteSize) ? (
@@ -392,114 +483,146 @@ export function MeetingImportSheet({
                   </View>
                 </View>
 
-                <Text style={[styles.label, { color: colors.textCaption }]}>标题</Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    {
-                      color: colors.textTitle,
-                      backgroundColor: colors.backgroundBase,
-                      borderColor: colors.divider,
-                    },
-                  ]}
-                  value={title}
-                  onChangeText={value => {
-                    setTitle(value.slice(0, MAX_TITLE_LENGTH));
-                    setError('');
-                  }}
-                  placeholder="无标题会议"
-                  placeholderTextColor={colors.textPlaceholder}
-                  maxLength={MAX_TITLE_LENGTH}
-                  returnKeyType="done"
-                  onSubmitEditing={Keyboard.dismiss}
-                  accessibilityLabel="会议标题"
-                />
+                {allowExistingMeeting && meetingCandidates.length > 0 ? (
+                  <>
+                    <Text style={[styles.label, { color: colors.textCaption }]}>保存到</Text>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.linkRow,
+                        { borderColor: colors.divider },
+                        pressed && { backgroundColor: colors.pressedFill },
+                      ]}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setAndroidKeyboardInset(0);
+                        setPage('meetings');
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`保存到，${selectedTargetLabel}`}
+                    >
+                      <Text style={[styles.valueLabel, { color: colors.textTitle }]}>保存到</Text>
+                      <Text style={[styles.value, { color: colors.textCaption }]} numberOfLines={1}>
+                        {selectedTargetLabel}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
+                    </Pressable>
+                  </>
+                ) : null}
 
-                <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>录制时间</Text>
-                <View style={[styles.rows, { borderColor: colors.divider }]}>
+                {targetMeetingId === null ? (
+                  <>
+                    <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>标题</Text>
+                    <TextInput
+                      style={[
+                        styles.input,
+                        {
+                          color: colors.textTitle,
+                          backgroundColor: colors.backgroundBase,
+                          borderColor: colors.divider,
+                        },
+                      ]}
+                      value={title}
+                      onChangeText={value => {
+                        setTitle(value.slice(0, MAX_TITLE_LENGTH));
+                        setError('');
+                      }}
+                      placeholder="无标题会议"
+                      placeholderTextColor={colors.textPlaceholder}
+                      maxLength={MAX_TITLE_LENGTH}
+                      returnKeyType="done"
+                      onSubmitEditing={Keyboard.dismiss}
+                      accessibilityLabel="会议标题"
+                    />
+
+                    <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>录制时间</Text>
+                    <View style={[styles.rows, { borderColor: colors.divider }]}>
+                      <Pressable
+                        style={({ pressed }) => [styles.valueRow, pressed && { backgroundColor: colors.pressedFill }]}
+                        onPress={() => openPicker('date')}
+                        accessibilityRole="button"
+                        accessibilityLabel={`录制日期，${formatDate(recordedAtMs)}`}
+                      >
+                        <Text style={[styles.valueLabel, { color: colors.textTitle }]}>日期</Text>
+                        <Text style={[styles.value, { color: colors.textCaption }]}>{formatDate(recordedAtMs)}</Text>
+                        <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
+                      </Pressable>
+                      <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+                      <Pressable
+                        style={({ pressed }) => [styles.valueRow, pressed && { backgroundColor: colors.pressedFill }]}
+                        onPress={() => openPicker('time')}
+                        accessibilityRole="button"
+                        accessibilityLabel={`录制时间，${formatTime(recordedAtMs)}`}
+                      >
+                        <Text style={[styles.valueLabel, { color: colors.textTitle }]}>时间</Text>
+                        <Text style={[styles.value, { color: colors.textCaption }]}>{formatTime(recordedAtMs)}</Text>
+                        <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
+                      </Pressable>
+                    </View>
+
+                    <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>日程</Text>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.linkRow,
+                        { borderColor: colors.divider },
+                        pressed && { backgroundColor: colors.pressedFill },
+                      ]}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setAndroidKeyboardInset(0);
+                        setPage('events');
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`关联日程，${selectedEventLabel}`}
+                    >
+                      <Text style={[styles.valueLabel, { color: colors.textTitle }]}>关联日程</Text>
+                      <Text style={[styles.value, { color: colors.textCaption }]} numberOfLines={1}>
+                        {selectedEventLabel}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
+                    </Pressable>
+                  </>
+                ) : null}
+                </ScrollView>
+
+                <View style={styles.footer}>
+                  <View style={styles.errorSlot}>
+                    <Text style={[styles.error, { color: colors.danger }]} numberOfLines={2}>{error}</Text>
+                  </View>
                   <Pressable
-                    style={({ pressed }) => [styles.valueRow, pressed && { backgroundColor: colors.pressedFill }]}
-                    onPress={() => openPicker('date')}
+                    style={({ pressed }) => [
+                      styles.submit,
+                      { backgroundColor: pressed && !submitting ? colors.primaryPressed : colors.primary },
+                    ]}
+                    onPress={() => { void submit(); }}
+                    disabled={submitting || closing}
                     accessibilityRole="button"
-                    accessibilityLabel={`录制日期，${formatDate(recordedAtMs)}`}
+                    accessibilityLabel={targetMeetingId ? '加入会议录音' : '导入会议录音'}
+                    accessibilityState={{ busy: submitting, disabled: submitting || closing }}
                   >
-                    <Text style={[styles.valueLabel, { color: colors.textTitle }]}>日期</Text>
-                    <Text style={[styles.value, { color: colors.textCaption }]}>{formatDate(recordedAtMs)}</Text>
-                    <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
-                  </Pressable>
-                  <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-                  <Pressable
-                    style={({ pressed }) => [styles.valueRow, pressed && { backgroundColor: colors.pressedFill }]}
-                    onPress={() => openPicker('time')}
-                    accessibilityRole="button"
-                    accessibilityLabel={`录制时间，${formatTime(recordedAtMs)}`}
-                  >
-                    <Text style={[styles.valueLabel, { color: colors.textTitle }]}>时间</Text>
-                    <Text style={[styles.value, { color: colors.textCaption }]}>{formatTime(recordedAtMs)}</Text>
-                    <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
+                    {submitting ? (
+                      <ActivityIndicator color={colors.onPrimary} />
+                    ) : (
+                      <Text style={[styles.submitText, { color: colors.onPrimary }]}>
+                        {targetMeetingId ? '加入' : '导入'}
+                      </Text>
+                    )}
                   </Pressable>
                 </View>
+              </>
+            )}
 
-                <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>日程</Text>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.linkRow,
-                    { borderColor: colors.divider },
-                    pressed && { backgroundColor: colors.pressedFill },
-                  ]}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setAndroidKeyboardInset(0);
-                      setPage('events');
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`关联日程，${selectedEventLabel}`}
-                >
-                  <Text style={[styles.valueLabel, { color: colors.textTitle }]}>关联日程</Text>
-                  <Text style={[styles.value, { color: colors.textCaption }]} numberOfLines={1}>
-                    {selectedEventLabel}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
-                </Pressable>
-              </ScrollView>
-
-              <View style={styles.footer}>
-                <View style={styles.errorSlot}>
-                  <Text style={[styles.error, { color: colors.danger }]} numberOfLines={2}>{error}</Text>
-                </View>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.submit,
-                    { backgroundColor: pressed && !submitting ? colors.primaryPressed : colors.primary },
-                  ]}
-                  onPress={() => { void submit(); }}
-                  disabled={submitting || closing}
-                  accessibilityRole="button"
-                  accessibilityLabel="导入会议录音"
-                  accessibilityState={{ busy: submitting, disabled: submitting || closing }}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color={colors.onPrimary} />
-                  ) : (
-                    <Text style={[styles.submitText, { color: colors.onPrimary }]}>导入</Text>
-                  )}
-                </Pressable>
-              </View>
-            </>
-          )}
-
-          {pickerMode ? (
-            <DateTimePicker
-              value={new Date(recordedAtMs)}
-              mode={pickerMode}
-              display="default"
-              maximumDate={new Date()}
-              onChange={(event, value) => {
-                if (Platform.OS === 'android') setPickerMode(null);
-                if (event.type !== 'set' || !value) return;
-                updateDateTime(pickerMode, value);
-              }}
-            />
+            {pickerMode ? (
+              <DateTimePicker
+                value={new Date(recordedAtMs)}
+                mode={pickerMode}
+                display="default"
+                maximumDate={new Date()}
+                onChange={(event, value) => {
+                  if (Platform.OS === 'android') setPickerMode(null);
+                  if (event.type !== 'set' || !value) return;
+                  updateDateTime(pickerMode, value);
+                }}
+              />
             ) : null}
           </Animated.View>
         </KeyboardAvoidingView>

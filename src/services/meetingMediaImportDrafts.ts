@@ -10,6 +10,7 @@ export interface MeetingMediaImportDraft {
   title: string;
   recordedAtMs: number;
   calendarContext: CalendarMeetingContext | null;
+  targetMeetingId: string | null;
 }
 
 type StoredDrafts = Record<string, MeetingMediaImportDraft>;
@@ -81,6 +82,7 @@ function parseDraft(value: unknown): MeetingMediaImportDraft | null {
     title,
     recordedAtMs,
     calendarContext: parseCalendarContext(value.calendarContext),
+    targetMeetingId: optionalString(value.targetMeetingId),
   };
 }
 

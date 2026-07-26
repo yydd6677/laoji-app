@@ -1,8 +1,13 @@
 package com.laoji.nativeplatform
 
 import com.laoji.nativeplatform.mediaimport.MediaImportIntentInbox
+import com.laoji.nativeplatform.mediaimport.MediaImportException
 import com.laoji.nativeplatform.mediaimport.MediaIngestor
+import com.laoji.nativeplatform.mediaimport.MeetingMediaPickerContract
+import com.laoji.nativeplatform.mediaimport.MeetingMediaPickerOptions
+import com.laoji.nativeplatform.mediaimport.MeetingMediaPickerResult
 import com.laoji.nativeplatform.mediaimport.inspectMeetingMediaSource
+import expo.modules.kotlin.activityresult.AppContextActivityResultLauncher
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -10,6 +15,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class LaojiMediaImportModule : Module() {
+  private lateinit var mediaPickerLauncher:
+    AppContextActivityResultLauncher<MeetingMediaPickerOptions, MeetingMediaPickerResult>
+
   private val intentListener: (Map<String, Any?>) -> Unit = { value ->
     sendEvent("onMediaImportIntent", value)
   }
@@ -17,6 +25,12 @@ class LaojiMediaImportModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LaojiMediaImport")
     Events("onMediaImportIntent")
+
+    RegisterActivityContracts {
+      mediaPickerLauncher = registerForActivityResult(
+        MeetingMediaPickerContract(this@LaojiMediaImportModule),
+      )
+    }
 
     OnCreate {
       MediaImportIntentInbox.addListener(intentListener)
@@ -37,6 +51,16 @@ class LaojiMediaImportModule : Module() {
     AsyncFunction("inspectMeetingMediaSource") Coroutine { sourceUri: String ->
       withContext(Dispatchers.IO) {
         inspectMeetingMediaSource(requireContext(), sourceUri).toMap()
+      }
+    }
+
+    AsyncFunction("pickMeetingMedia") Coroutine { includeVideo: Boolean ->
+      when (val result = mediaPickerLauncher.launch(MeetingMediaPickerOptions(includeVideo))) {
+        is MeetingMediaPickerResult.Success -> result.uri
+        MeetingMediaPickerResult.Cancelled -> throw MediaImportException(
+          "ERR_PICKER_CANCELLED",
+          "meeting media selection was cancelled",
+        )
       }
     }
 

@@ -46,6 +46,7 @@ interface NativeMediaImportModule extends NativeModule<NativeMediaImportEvents> 
   getPendingMediaImportIntent(): Promise<unknown>;
   acknowledgeMediaImportIntent(token: string): Promise<boolean>;
   inspectMeetingMediaSource(sourceUri: string): Promise<unknown>;
+  pickMeetingMedia(includeVideo: boolean): Promise<string>;
   ingestMeetingMedia(
     sourceUri: string,
     meetingId: string,
@@ -176,6 +177,13 @@ export async function acknowledgeMeetingMediaImportIntent(token: string): Promis
 
 export async function inspectMeetingMediaSource(sourceUri: string): Promise<MeetingMediaSourceInfo> {
   return normalizeMediaSourceInfo(await requireNativeModule().inspectMeetingMediaSource(sourceUri));
+}
+
+export async function pickMeetingMedia(includeVideo: boolean): Promise<string> {
+  return requireString(
+    await requireNativeModule().pickMeetingMedia(includeVideo),
+    'selected media URI',
+  );
 }
 
 export async function ingestMeetingMedia(input: {

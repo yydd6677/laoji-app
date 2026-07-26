@@ -36,7 +36,10 @@ import {
 } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
 import { deleteMeetingAttachmentFiles } from '../services/meetingAttachmentStorage';
-import { listPendingMeetingSummaryTasks } from '../services/meetingSummaryTasks';
+import {
+  clearPendingMeetingSummaryTask,
+  listPendingMeetingSummaryTasks,
+} from '../services/meetingSummaryTasks';
 import { clearPendingMeetingTranscriptCompletion } from '../services/meetingTranscriptCompletionTasks';
 import {
   runLegacyMeetingShadowImport,
@@ -92,6 +95,10 @@ import { requestMeetingRootSync } from '../application/meeting/rootSyncTrigger';
 import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
 import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
 import { CreateMeetingNoteUseCase } from '../application/meeting/createMeetingNote';
+import {
+  AttachImportedMeetingMediaError,
+  AttachImportedMeetingMediaUseCase,
+} from '../application/meeting/attachImportedMeetingMedia';
 import { DeleteMeetingNoteUseCase } from '../application/meeting/deleteMeetingNote';
 import { RestoreMeetingNoteUseCase } from '../application/meeting/restoreMeetingNote';
 import {
@@ -134,6 +141,9 @@ function canonicalWritesEnabledForScope(
 
 const meetingRepositoryFacade = new MeetingRepositoryFacade(sqliteMeetingNoteRepository);
 const createCanonicalMeetingNote = new CreateMeetingNoteUseCase({
+  repository: sqliteMeetingNoteRepository,
+});
+const attachCanonicalImportedMeetingMedia = new AttachImportedMeetingMediaUseCase({
   repository: sqliteMeetingNoteRepository,
 });
 const updateCanonicalMeetingNote = new UpdateMeetingNoteUseCase({
@@ -498,6 +508,7 @@ export interface ImportMeetingMediaOptions {
   title: string;
   recordedAtMs: number;
   calendarContext?: CalendarMeetingContext | null;
+  targetMeetingId?: string | null;
 }
 
 function createGuestMeeting(
@@ -2344,6 +2355,60 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const calendarContext = options.calendarContext ?? null;
     const flags = getFeatureFlags();
     const canonicalImportWrite = canonicalWritesEnabledForScope(flags, scope);
+    const targetLegacyMeetingId = options.targetMeetingId?.trim() || null;
+    if (targetLegacyMeetingId) {
+      if (!flags.meetingMediaImportExistingV1 || !canonicalImportWrite) {
+        throw new AttachImportedMeetingMediaError(
+          'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE',
+          'existing meeting import is unavailable',
+        );
+      }
+      const projection = canonicalReadProjectionRef.current;
+      const canonicalTargetMeetingId = projection
+        ?.canonicalIdByLegacyId[targetLegacyMeetingId]
+        ?.trim();
+      const target = projection?.meetings.find(item => item.id === targetLegacyMeetingId) ?? null;
+      if (!canonicalTargetMeetingId || !target) {
+        throw new AttachImportedMeetingMediaError(
+          'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE',
+          'existing meeting import target is missing',
+        );
+      }
+      canonicalStoreMutationDepthRef.current += 1;
+      try {
+        const result = await attachCanonicalImportedMeetingMedia.execute({
+          targetMeetingId: canonicalTargetMeetingId,
+          scopeKey: scope,
+          media,
+          canonicalWrite: true,
+        });
+        if (result.attached && result.canonicalRevision === null) {
+          throw new Error('会议录音未能写入本机数据版本，请重试。');
+        }
+        const owned = await loadCanonicalOwnedScope();
+        if (!owned) throw new Error('会议本机数据状态异常，请刷新后重试。');
+        const projectedCanonicalId = owned.projection.canonicalIdByLegacyId[targetLegacyMeetingId];
+        const projected = owned.projection.meetings.find(item => item.id === targetLegacyMeetingId);
+        if (projectedCanonicalId !== canonicalTargetMeetingId || !projected) {
+          throw new Error('会议录音加入后的数据不完整，请刷新后重试。');
+        }
+        if (!adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+          throw new Error('会议数据作用域已变化，请重试。');
+        }
+        await clearPendingMeetingSummaryTask(scope, targetLegacyMeetingId).catch(error => {
+          diagnosticWarn('[meeting-import] stale summary task cleanup failed', error);
+        });
+        if (scope !== 'guest') {
+          requestMeetingTranscriptCompletion(scope, { discoverRecordingAssets: true });
+          void resumePendingAudioUploads(true).catch(error => {
+            diagnosticWarn('[meeting-import] upload resume failed', error);
+          });
+        }
+        return projected;
+      } finally {
+        canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
+      }
+    }
     const created = await createCanonicalMeetingNote.execute({
       id: media.meetingId,
       scopeKey: scope,
@@ -2396,6 +2461,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       adoptCanonicalOwnedProjection(owned, operationGeneration);
       if (scope !== 'guest' && flags.localMeetingDbAccountRootWriteV1) {
         requestMeetingRootSync(scope);
+        void resumePendingAudioUploads(true).catch(error => {
+          diagnosticWarn('[meeting-import] upload resume failed', error);
+        });
       }
       return projected;
     }
@@ -2447,6 +2515,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     loadCanonicalOwnedScope,
     mode,
     persistMeetingsStrict,
+    resumePendingAudioUploads,
     scope,
   ]);
 
