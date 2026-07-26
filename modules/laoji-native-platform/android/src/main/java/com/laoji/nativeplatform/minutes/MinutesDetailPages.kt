@@ -1612,7 +1612,14 @@ private class MinutesTranscriptPageAdapter(
       onAction: (Map<String, Any?>) -> Unit,
     ) {
       val listener = if (canSeek) View.OnClickListener {
-        onAction(mapOf("type" to "seekTranscript", "lineId" to line.id, "positionMs" to line.startMs))
+        onAction(
+          mapOf(
+            "type" to "seekTranscript",
+            "lineId" to line.id,
+            "positionMs" to line.startMs,
+            "playerSourceId" to line.playerSourceId,
+          ),
+        )
       } else null
       root.setOnClickListener(listener)
       metaRow.setOnClickListener(listener)
@@ -1707,6 +1714,7 @@ private class MinutesTranscriptPageAdapter(
           oldItem.line.speakerId != newItem.line.speakerId ||
           oldItem.line.speakerClusterId != newItem.line.speakerClusterId ||
           oldItem.line.speakerLabel != newItem.line.speakerLabel ||
+          oldItem.line.playerSourceId != newItem.line.playerSourceId ||
           oldItem.line.timestampLabel != newItem.line.timestampLabel
         ) payload = payload or PAYLOAD_METADATA
         if (

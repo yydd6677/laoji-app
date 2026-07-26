@@ -307,6 +307,9 @@ function normalizedMeetingCompatibility(meeting: Meeting, scopeKey: ScopeKey): u
 
 function normalizedTranscriptCompatibility(lines: readonly TranscriptLine[]): unknown {
   return lines.map(line => ({
+    recordingAssetId: line.recordingAssetId ?? null,
+    recordingAssetRemoteId: line.recording_asset_id ?? line.recordingAssetRemoteId ?? null,
+    transcriptionJobId: line.transcription_job_id ?? line.transcriptionJobId ?? null,
     speakerId: line.speaker_id ?? null,
     speakerLabel: line.speaker_label ?? null,
     text: line.text,

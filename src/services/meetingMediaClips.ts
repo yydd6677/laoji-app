@@ -148,16 +148,14 @@ export async function prepareMeetingMediaClipDraft(input: {
   if (!hasNativeMediaClip()) throw new Error('当前版本暂不支持生成音频片段。');
   const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(input.meetingId, input.scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') throw new Error('会议记录已不可用。');
-  const asset = chooseLocalWavRecording(aggregate.recordingAssets, input.preferredRecordingAssetId);
-  const [nativeCapabilities, sourceInfo, transcript] = await Promise.all([
-    getNativeMediaClipCapabilities(),
-    inspectNativeWavClipSource(requireLocalUri(asset)),
-    sqliteMeetingNoteRepository.getActiveTranscriptContent(aggregate.note.id, input.scopeKey),
-  ]);
-  const limits = normalizeLimits(nativeCapabilities);
+  const transcript = await sqliteMeetingNoteRepository.getActiveTranscriptContent(
+    aggregate.note.id,
+    input.scopeKey,
+  );
   const segments = transcript?.segments ?? [];
   let sourceMarkerId: string | null = null;
   let sourceSegmentId: string | null = null;
+  let sourceSegment: (typeof segments)[number] | null = null;
   let requestedStartMs: number;
   let requestedEndMs: number;
   let selectedText: string | null = null;
@@ -168,18 +166,46 @@ export async function prepareMeetingMediaClipDraft(input: {
       .find(candidate => candidate.id === source.markerId);
     if (!marker) throw new Error('标记已发生变化，请刷新后重试。');
     sourceMarkerId = marker.id;
+    sourceSegment = marker.nearestSegmentId
+      ? segments.find(candidate => candidate.id === marker.nearestSegmentId) ?? null
+      : null;
     requestedStartMs = marker.positionMs - MARKER_CONTEXT_MS;
     requestedEndMs = marker.positionMs + MARKER_CONTEXT_MS;
   } else {
-    const segment = segments.find(candidate => (
+    sourceSegment = segments.find(candidate => (
       candidate.id === source.segmentId || candidate.sourceId === source.segmentId
-    ));
-    if (!segment) throw new Error('文字记录已发生变化，请刷新后重试。');
-    sourceSegmentId = segment.id;
-    requestedStartMs = segment.startMs - TRANSCRIPT_CONTEXT_MS;
-    requestedEndMs = Math.max(segment.endMs, segment.startMs + 1_000) + TRANSCRIPT_CONTEXT_MS;
-    selectedText = normalizedSelectedText(source.selectedText) ?? (segment.text.trim() || null);
+    )) ?? null;
+    if (!sourceSegment) throw new Error('文字记录已发生变化，请刷新后重试。');
+    sourceSegmentId = sourceSegment.id;
+    requestedStartMs = sourceSegment.startMs - TRANSCRIPT_CONTEXT_MS;
+    requestedEndMs = Math.max(sourceSegment.endMs, sourceSegment.startMs + 1_000)
+      + TRANSCRIPT_CONTEXT_MS;
+    selectedText = normalizedSelectedText(source.selectedText) ?? (sourceSegment.text.trim() || null);
   }
+
+  const provenanceAssetId = sourceSegment?.sourceRecordingAssetId ?? null;
+  if (aggregate.recordingAssets.length > 1 && !provenanceAssetId) {
+    throw new Error(source.kind === 'marker'
+      ? '这个标记未关联到具体录音，暂时无法生成片段。'
+      : '这段文字未关联到具体录音，暂时无法生成片段。');
+  }
+  const asset = chooseLocalWavRecording(
+    aggregate.recordingAssets,
+    provenanceAssetId ?? input.preferredRecordingAssetId,
+  );
+  if (provenanceAssetId && asset.id !== provenanceAssetId) {
+    throw new Error(source.kind === 'marker'
+      ? '这个标记对应的本机录音无法读取。'
+      : '这段文字对应的本机录音无法读取。');
+  }
+  const [nativeCapabilities, sourceInfo] = await Promise.all([
+    getNativeMediaClipCapabilities(),
+    inspectNativeWavClipSource(requireLocalUri(asset)),
+  ]);
+  const limits = normalizeLimits(nativeCapabilities);
+  const transcriptSegmentsForAsset = aggregate.recordingAssets.length <= 1
+    ? segments
+    : segments.filter(segment => segment.sourceRecordingAssetId === asset.id);
 
   const range = boundedDefaultRange({
     startMs: requestedStartMs,
@@ -187,7 +213,7 @@ export async function prepareMeetingMediaClipDraft(input: {
     sourceDurationMs: sourceInfo.durationMs,
     limits,
   });
-  const overlapping = segments.filter(segment => (
+  const overlapping = transcriptSegmentsForAsset.filter(segment => (
     segment.endMs >= range.startMs && segment.startMs <= range.endMs
   ));
   const transcriptText = selectedText ?? normalizedSelectedText(

@@ -232,7 +232,14 @@ export function finalizedNativeMinutesTranscript(
 
 export function toNativeMinutesTranscript(
   lines: readonly NativeMinutesTranscriptLine[],
+  playerSources: readonly MinutesPlayerSourceSnapshot[] = [],
 ) {
+  const sourceByLocalAssetId = new Map(playerSources
+    .filter(source => Boolean(source.recordingAssetId))
+    .map(source => [source.recordingAssetId!, source.sourceId]));
+  const sourceByRemoteAssetId = new Map(playerSources
+    .filter(source => Boolean(source.recordingAssetRemoteId))
+    .map(source => [source.recordingAssetRemoteId!, source.sourceId]));
   return lines
     .filter(line => line.text.trim())
     .map((line, index) => {
@@ -250,6 +257,12 @@ export function toNativeMinutesTranscript(
         .slice(0, 1_000);
       return {
         id: line.id || `line-${index}`,
+        playerSourceId: (
+          (line.recordingAssetId ? sourceByLocalAssetId.get(line.recordingAssetId) : undefined)
+          ?? ((line.recording_asset_id ?? line.recordingAssetRemoteId)
+            ? sourceByRemoteAssetId.get(line.recording_asset_id ?? line.recordingAssetRemoteId!)
+            : undefined)
+        ),
         speakerId: line.speaker_id || 'unknown',
         speakerClusterId: line.speakerClusterId,
         speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
@@ -661,7 +674,10 @@ export function buildNativeMinutesDetailSnapshot(
     manualNoteError: input.manualNoteError ?? '',
     manualNoteRetryable: input.manualNoteRetryable ?? true,
     manualNoteConflict: input.manualNoteConflict ?? false,
-    transcript: toNativeMinutesTranscript(input.transcript),
+    transcript: toNativeMinutesTranscript(
+      input.transcript,
+      input.playerSources ?? (input.playerSource ? [input.playerSource] : []),
+    ),
     markers,
     summary,
     actions,

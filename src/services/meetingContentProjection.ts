@@ -36,6 +36,11 @@ export function transcriptProjectionToLegacyLines(
   return projection.segments.map(segment => ({
     id: segment.sourceId ?? segment.id,
     meeting_id: legacyMeetingId,
+    recording_asset_id: segment.sourceRecordingAssetRemoteId,
+    transcription_job_id: segment.sourceTranscriptionJobId,
+    recordingAssetId: segment.sourceRecordingAssetId ?? undefined,
+    recordingAssetRemoteId: segment.sourceRecordingAssetRemoteId ?? undefined,
+    transcriptionJobId: segment.sourceTranscriptionJobId ?? undefined,
     speaker_id: segment.speakerProfileId ?? segment.speakerClusterId ?? undefined,
     speaker_label: segment.speakerLabelOverride ?? segment.speakerLabel ?? undefined,
     speakerClusterId: segment.speakerClusterId ?? undefined,

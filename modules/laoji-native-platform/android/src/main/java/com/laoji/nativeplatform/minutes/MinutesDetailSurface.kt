@@ -344,7 +344,10 @@ internal class MinutesDetailSurface(
         if (revealed) {
           consumedTranscriptFocusRequestId = renderedState.focusTranscriptRequestId
         }
-        if (revealed && playableSource(renderedState) != null) {
+        val focusSourceId = renderedState.transcript.firstOrNull {
+          it.id == renderedState.focusTranscriptSegmentId
+        }?.playerSourceId
+        if (revealed && ensureTranscriptPlayerSource(focusSourceId)) {
           playerOwner.seekTo(renderedState.focusTranscriptPositionMs)
         }
       }
@@ -498,6 +501,21 @@ internal class MinutesDetailSurface(
     recordingSelector.visibility = View.VISIBLE
   }
 
+  private fun ensureTranscriptPlayerSource(sourceId: String?): Boolean {
+    val playableSources = renderedState.playerSources
+      .filter { it.sourceId.isNotBlank() && it.uri.isNotBlank() }
+      .distinctBy { it.sourceId }
+    if (sourceId.isNullOrBlank()) {
+      return playableSources.size <= 1 && playableSource(renderedState) != null
+    }
+    val source = playableSources.firstOrNull { it.sourceId == sourceId } ?: return false
+    if (renderedState.playerSource?.sourceId != source.sourceId) {
+      renderedState = renderedState.copy(playerSource = source)
+      renderAudioState(renderedState)
+    }
+    return true
+  }
+
   private fun renderProcessingState(state: MinutesDetailState) {
     val mergeLabel = state.recordingMergeStatusLabel.trim()
     val label = when {
@@ -589,6 +607,7 @@ internal class MinutesDetailSurface(
     ) {
       val segmentId = action["segmentId"] as? String
       val positionMs = (action["positionMs"] as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
+      val playerSourceId = renderedState.transcript.firstOrNull { it.id == segmentId }?.playerSourceId
       issueTabCommand(
         tab = MinutesDetailTab.TRANSCRIPT,
         generation = nextTabGeneration(),
@@ -601,12 +620,13 @@ internal class MinutesDetailSurface(
       } else if (!segmentId.isNullOrBlank()) {
         transcriptPage.revealSegment(segmentId)
       }
-      if (playableSource(renderedState) != null) {
+      if (ensureTranscriptPlayerSource(playerSourceId)) {
         playerOwner.seekTo(positionMs)
       }
     }
     if (action["type"] == "seekTranscript") {
-      if (playableSource(renderedState) == null) return
+      val playerSourceId = action["playerSourceId"] as? String
+      if (!ensureTranscriptPlayerSource(playerSourceId)) return
       (action["positionMs"] as? Number)?.toLong()?.let(playerOwner::seekTo)
     }
     onAction(action + mapOf("meetingId" to renderedState.meetingId))

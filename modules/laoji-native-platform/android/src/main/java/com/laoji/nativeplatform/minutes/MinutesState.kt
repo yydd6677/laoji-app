@@ -190,6 +190,7 @@ enum class MinutesListCoverType(val wireName: String) {
 
 data class MinutesTranscriptLine(
   val id: String,
+  val playerSourceId: String = "",
   val speakerId: String = "",
   val speakerClusterId: String = "",
   val speakerLabel: String = "讲话人",
@@ -274,6 +275,8 @@ data class MinutesSpeaker(
 data class MinutesPlayerSource(
   val sourceId: String,
   val uri: String,
+  val recordingAssetId: String = "",
+  val recordingAssetRemoteId: String = "",
   val label: String = "",
   val localOnly: Boolean = false,
   val headers: Map<String, String> = emptyMap(),

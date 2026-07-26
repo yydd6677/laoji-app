@@ -294,6 +294,7 @@ object MinutesSnapshotParser {
       val isFinal = item.boolean("isFinal", true)
       MinutesTranscriptLine(
         id = item.string("id").orDefault("line-$index"),
+        playerSourceId = item.string("playerSourceId").orEmpty(),
         speakerId = item.string("speakerId").orEmpty(),
         speakerClusterId = item.string("speakerClusterId").orEmpty(),
         speakerLabel = item.string("speakerLabel").orDefault("讲话人"),
@@ -343,6 +344,8 @@ object MinutesSnapshotParser {
   private fun parsePlayerSource(raw: Map<String, Any?>): MinutesPlayerSource = MinutesPlayerSource(
     sourceId = raw.string("sourceId").orEmpty(),
     uri = raw.string("uri").orEmpty(),
+    recordingAssetId = raw.string("recordingAssetId").orEmpty(),
+    recordingAssetRemoteId = raw.string("recordingAssetRemoteId").orEmpty(),
     label = raw.string("label").orEmpty(),
     localOnly = raw.boolean("localOnly"),
     headers = raw.map("headers").mapNotNull { (key, value) ->

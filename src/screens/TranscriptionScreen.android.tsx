@@ -315,6 +315,8 @@ function localPlayerSource(
     sourceId?: string;
     label?: string;
     localOnly?: boolean;
+    recordingAssetId?: string;
+    recordingAssetRemoteId?: string;
   } = {},
 ): MinutesPlayerSourceSnapshot {
   return {
@@ -322,6 +324,8 @@ function localPlayerSource(
     uri,
     label: options.label,
     localOnly: options.localOnly,
+    recordingAssetId: options.recordingAssetId,
+    recordingAssetRemoteId: options.recordingAssetRemoteId,
     title,
     durationMsHint: durationSec ? Math.round(durationSec * 1000) : undefined,
     retainForBackground: true,
@@ -1464,7 +1468,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         const uri = asset.localUri!;
         if (seenUris.has(uri)) {
           const existing = localSources.find(source => source.uri === uri);
-          if (existing) localSourceIdByAsset.set(asset.id, existing.sourceId);
+          if (existing) {
+            existing.recordingAssetId = asset.id;
+            existing.recordingAssetRemoteId = asset.remoteAssetId ?? undefined;
+            localSourceIdByAsset.set(asset.id, existing.sourceId);
+          }
           return;
         }
         seenUris.add(uri);
@@ -1477,6 +1485,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           {
             sourceId: asset.role === 'primary' ? `local:${meeting.id}` : `asset:${asset.id}`,
             localOnly: asset.remoteAssetId === null,
+            recordingAssetId: asset.id,
+            recordingAssetRemoteId: asset.remoteAssetId ?? undefined,
           },
         );
         localSources.push(source);
@@ -1528,7 +1538,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             matchedLocalSourceIds.add(localSourceId);
             const local = localSources.find(source => source.sourceId === localSourceId);
             if (local && !remoteSources.some(source => source.sourceId === local.sourceId)) {
-              remoteSources.push({ ...local, localOnly: false });
+              remoteSources.push({
+                ...local,
+                localOnly: false,
+                recordingAssetRemoteId: asset.remoteId,
+              });
             }
             continue;
           }
@@ -1550,6 +1564,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             remoteSources.push({
               sourceId: `remote-asset:${asset.remoteId}`,
               uri: localUri,
+              recordingAssetRemoteId: asset.remoteId,
               localOnly: false,
               title: displayMeetingTitle(meeting.title),
               durationMsHint: asset.durationMs ?? undefined,
@@ -3718,6 +3733,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (playerSources.some(source => source.sourceId === action.sourceId)) {
           setSelectedPlayerSourceId(action.sourceId);
         }
+        break;
+      case 'seekTranscript':
+        if (action.meetingId !== route.params.meetingId) break;
+        if (
+          action.playerSourceId
+          && playerSources.some(source => source.sourceId === action.playerSourceId)
+        ) setSelectedPlayerSourceId(action.playerSourceId);
         break;
       case 'generateSummary':
         if (action.meetingId !== route.params.meetingId) break;

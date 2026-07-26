@@ -336,6 +336,9 @@ type TranscriptSegmentRow = {
   revision_id: string;
   meeting_id: string;
   source_segment_id: string | null;
+  source_recording_asset_id: string | null;
+  source_recording_asset_remote_id: string | null;
+  source_transcription_job_id: string | null;
   ordinal: number;
   start_ms: number;
   end_ms: number;
@@ -980,6 +983,9 @@ function transcriptSegmentFromRow(row: TranscriptSegmentRow): TranscriptSegmentR
     id: row.id,
     meetingId: row.meeting_id,
     sourceId: row.source_segment_id,
+    sourceRecordingAssetId: row.source_recording_asset_id,
+    sourceRecordingAssetRemoteId: row.source_recording_asset_remote_id,
+    sourceTranscriptionJobId: row.source_transcription_job_id,
     ordinal: row.ordinal,
     startMs: row.start_ms,
     endMs: row.end_ms,
@@ -3048,6 +3054,68 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(asset.meetingId);
   }
 
+  async enrichTranscriptRecordingProvenance(
+    meetingId: string,
+    recordingAssetId: string,
+    scopeKey: ScopeKey,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    assertRecordId(recordingAssetId, 'recording asset ID');
+    const meeting = await this.getMeeting(meetingId, scopeKey);
+    if (!meeting || meeting.lifecycle === 'deleted') {
+      throw new Error('meeting does not accept transcript provenance in active scope');
+    }
+    const asset = await this.getRecordingAsset(meetingId, recordingAssetId, scopeKey);
+    if (!asset) throw new Error('transcript recording asset does not belong to the meeting');
+    if (asset.remoteAssetId) {
+      const mismatch = Number((await this.database.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) AS count
+         FROM transcript_segments
+         WHERE meeting_id = ? AND source_recording_asset_id = ?
+           AND source_recording_asset_remote_id IS NOT NULL
+           AND source_recording_asset_remote_id != ?`,
+        meetingId,
+        recordingAssetId,
+        asset.remoteAssetId,
+      ))?.count ?? 0);
+      if (mismatch > 0) throw new Error('transcript recording asset remote identity changed');
+    }
+    let changed = 0;
+    if (asset.remoteAssetId) {
+      const remoteResult = await this.database.runAsync(
+        `UPDATE transcript_segments
+         SET source_recording_asset_remote_id = ?
+         WHERE meeting_id = ? AND source_recording_asset_id = ?
+           AND source_recording_asset_remote_id IS NULL`,
+        asset.remoteAssetId,
+        meetingId,
+        recordingAssetId,
+      );
+      changed += remoteResult.changes;
+    }
+    const assetCount = Number((await this.database.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM recording_assets WHERE meeting_id = ?',
+      meetingId,
+    ))?.count ?? 0);
+    if (assetCount === 1) {
+      const unassignedResult = await this.database.runAsync(
+        `UPDATE transcript_segments SET
+           source_recording_asset_id = ?,
+           source_recording_asset_remote_id = COALESCE(source_recording_asset_remote_id, ?)
+         WHERE meeting_id = ?
+           AND source_recording_asset_id IS NULL
+           AND source_recording_asset_remote_id IS NULL`,
+        recordingAssetId,
+        asset.remoteAssetId,
+        meetingId,
+      );
+      changed += unassignedResult.changes;
+    }
+    if (changed > 0) this.touchedMeetingIds.add(meetingId);
+    return changed;
+  }
+
   async saveTranscriptRevision(
     revision: TranscriptRevisionRecord,
     segments: readonly TranscriptSegmentRecord[],
@@ -3082,6 +3150,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     const segmentIds = new Set<string>();
     const sourceSegmentIds = new Set<string>();
     const ordinals = new Set<number>();
+    const sourceRecordingAssets = new Map<string, RecordingAssetRecord | null>();
     for (const segment of segments) {
       assertRecordId(segment.id, 'transcript segment ID');
       if (segment.meetingId !== revision.meetingId) {
@@ -3102,6 +3171,38 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       }
       if (segment.sourceId && sourceSegmentIds.has(segment.sourceId)) {
         throw new Error('transcript revision contains duplicate source segment identity');
+      }
+      assertNullableBoundedText(
+        segment.sourceRecordingAssetId,
+        512,
+        'transcript recording asset ID',
+      );
+      assertNullableBoundedText(
+        segment.sourceRecordingAssetRemoteId,
+        512,
+        'transcript recording asset remote ID',
+      );
+      assertNullableBoundedText(
+        segment.sourceTranscriptionJobId,
+        512,
+        'transcript source job ID',
+      );
+      if (segment.sourceRecordingAssetId) {
+        let sourceAsset = sourceRecordingAssets.get(segment.sourceRecordingAssetId);
+        if (sourceAsset === undefined) {
+          sourceAsset = await this.getRecordingAsset(
+            revision.meetingId,
+            segment.sourceRecordingAssetId,
+            scopeKey,
+          );
+          sourceRecordingAssets.set(segment.sourceRecordingAssetId, sourceAsset);
+        }
+        if (!sourceAsset) throw new Error('transcript recording asset does not belong to the meeting');
+        if (
+          sourceAsset.remoteAssetId
+          && segment.sourceRecordingAssetRemoteId
+          && sourceAsset.remoteAssetId !== segment.sourceRecordingAssetRemoteId
+        ) throw new Error('transcript recording asset remote identity is inconsistent');
       }
       segmentIds.add(segment.id);
       if (segment.sourceId) sourceSegmentIds.add(segment.sourceId);
@@ -3160,6 +3261,39 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           await this.database.runAsync(
             'UPDATE transcript_segments SET source_segment_id = ? WHERE id = ?',
             sourceId,
+            row.id,
+          );
+        }
+        const provenance = segments[index];
+        if (
+          row.source_recording_asset_id
+          && provenance.sourceRecordingAssetId
+          && row.source_recording_asset_id !== provenance.sourceRecordingAssetId
+        ) throw new Error('immutable transcript recording asset identity cannot be replaced');
+        if (
+          row.source_recording_asset_remote_id
+          && provenance.sourceRecordingAssetRemoteId
+          && row.source_recording_asset_remote_id !== provenance.sourceRecordingAssetRemoteId
+        ) throw new Error('immutable transcript remote recording asset identity cannot be replaced');
+        if (
+          row.source_transcription_job_id
+          && provenance.sourceTranscriptionJobId
+          && row.source_transcription_job_id !== provenance.sourceTranscriptionJobId
+        ) throw new Error('immutable transcript source job identity cannot be replaced');
+        if (
+          (!row.source_recording_asset_id && provenance.sourceRecordingAssetId)
+          || (!row.source_recording_asset_remote_id && provenance.sourceRecordingAssetRemoteId)
+          || (!row.source_transcription_job_id && provenance.sourceTranscriptionJobId)
+        ) {
+          await this.database.runAsync(
+            `UPDATE transcript_segments SET
+               source_recording_asset_id = COALESCE(source_recording_asset_id, ?),
+               source_recording_asset_remote_id = COALESCE(source_recording_asset_remote_id, ?),
+               source_transcription_job_id = COALESCE(source_transcription_job_id, ?)
+             WHERE id = ?`,
+            provenance.sourceRecordingAssetId,
+            provenance.sourceRecordingAssetRemoteId,
+            provenance.sourceTranscriptionJobId,
             row.id,
           );
         }
@@ -3240,15 +3374,20 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       for (const segment of segments) {
         await this.database.runAsync(
           `INSERT INTO transcript_segments (
-             id, revision_id, meeting_id, source_segment_id, ordinal, start_ms, end_ms,
+             id, revision_id, meeting_id, source_segment_id,
+             source_recording_asset_id, source_recording_asset_remote_id,
+             source_transcription_job_id, ordinal, start_ms, end_ms,
              speaker_cluster_id, speaker_profile_id, speaker_label,
              speaker_label_override, text, normalized_text, confidence,
              is_final, created_at_ms
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           segment.id,
           revision.id,
           segment.meetingId,
           segment.sourceId,
+          segment.sourceRecordingAssetId,
+          segment.sourceRecordingAssetRemoteId,
+          segment.sourceTranscriptionJobId,
           segment.ordinal,
           segment.startMs,
           segment.endMs,

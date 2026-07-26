@@ -14,6 +14,7 @@ import type {
   MeetingNoteAggregate,
   MeetingNoteRepository,
   RecordingAssetLocalState,
+  RecordingAssetRecord,
 } from '../../data/repositories';
 import type { MeetingRootSyncOperation } from './updateMeetingNote';
 
@@ -278,7 +279,7 @@ export class UpdateGuestMeetingCaptureUseCase {
         if (patch.localState === 'local_ready' && !localUri) {
           throw new Error('local recording asset requires a URI');
         }
-        await transaction.saveRecordingAsset({
+        const recordingAsset: RecordingAssetRecord = {
           id: existing?.id ?? this.idFactory.create(),
           meetingId,
           role: 'primary',
@@ -304,7 +305,13 @@ export class UpdateGuestMeetingCaptureUseCase {
           createdAtMs: existing?.createdAtMs ?? updatedAtMs,
           updatedAtMs,
           lastVerifiedAtMs,
-        }, scopeKey);
+        };
+        await transaction.saveRecordingAsset(recordingAsset, scopeKey);
+        await transaction.enrichTranscriptRecordingProvenance(
+          meetingId,
+          recordingAsset.id,
+          scopeKey,
+        );
       }
 
       if (input.canonicalWrite) {

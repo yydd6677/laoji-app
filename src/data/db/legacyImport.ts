@@ -379,6 +379,9 @@ async function insertPreparedMeeting(
   }
 
   const localUri = pendingAudio?.audioUri ?? meeting.audioLocalUri ?? null;
+  const legacyRecordingAssetId = localUri || meeting.audioAvailable
+    ? `${localId}:recording:primary`
+    : null;
   if (localUri || meeting.audioAvailable) {
     const assetCreatedAtMs = timestamp(pendingAudio?.createdAt, createdAtMs);
     await database.runAsync(
@@ -387,7 +390,7 @@ async function insertPreparedMeeting(
          file_name, duration_ms, waveform_json, local_state, created_at_ms, updated_at_ms,
          last_verified_at_ms
        ) VALUES (?, ?, 'primary', 'captured', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      `${localId}:recording:primary`,
+      legacyRecordingAssetId,
       localId,
       item.legacyId,
       localUri,
@@ -421,14 +424,19 @@ async function insertPreparedMeeting(
       const endMs = Math.max(startMs, timeMs(line.end_time));
       await database.runAsync(
         `INSERT INTO transcript_segments (
-           id, revision_id, meeting_id, source_segment_id, ordinal, start_ms, end_ms,
+           id, revision_id, meeting_id, source_segment_id,
+           source_recording_asset_id, source_recording_asset_remote_id,
+           source_transcription_job_id, ordinal, start_ms, end_ms,
            speaker_cluster_id, speaker_profile_id, speaker_label, text,
            normalized_text, confidence, is_final, created_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         `${transcriptRevisionId}:segment:${ordinal}:${encodedPart(line.id || String(ordinal))}`,
         transcriptRevisionId,
         localId,
         line.id?.trim() || null,
+        legacyRecordingAssetId,
+        line.recording_asset_id?.trim() || line.recordingAssetRemoteId?.trim() || null,
+        line.transcription_job_id?.trim() || line.transcriptionJobId?.trim() || null,
         ordinal,
         startMs,
         endMs,

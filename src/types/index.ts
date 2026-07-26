@@ -92,6 +92,15 @@ export interface Meeting {
 export interface TranscriptLine {
   id: string;
   meeting_id?: string;
+  /** Server RecordingAsset v2 identity returned by the transcript endpoint. */
+  recording_asset_id?: string | null;
+  /** Server transcription job that produced this line. */
+  transcription_job_id?: string | null;
+  /** Local canonical RecordingAsset identity used by playback and clip creation. */
+  recordingAssetId?: string;
+  /** Explicit remote identity retained when the source asset is not local. */
+  recordingAssetRemoteId?: string;
+  transcriptionJobId?: string;
   speaker_id?: string;
   speaker_label?: string;
   /** Compatibility metadata for meeting-local diarization grouping. */

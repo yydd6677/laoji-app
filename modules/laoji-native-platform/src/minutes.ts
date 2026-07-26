@@ -63,6 +63,7 @@ export interface MinutesMeetingSnapshot {
 
 export interface MinutesTranscriptLineSnapshot {
   id: string;
+  playerSourceId?: string;
   speakerId?: string;
   speakerClusterId?: string;
   speakerLabel?: string;
@@ -153,6 +154,8 @@ export interface MinutesDetailPageStatesSnapshot {
 export interface MinutesPlayerSourceSnapshot {
   sourceId: string;
   uri: string;
+  recordingAssetId?: string;
+  recordingAssetRemoteId?: string;
   label?: string;
   localOnly?: boolean;
   headers?: Readonly<Record<string, string>>;
@@ -293,7 +296,14 @@ export type MinutesSemanticAction =
   | { type: 'retryProcessingStage'; surface: 'detail'; meetingId: string; stage: MinutesProcessingStage }
   | { type: 'mergeRecordingAssets'; surface: 'detail'; meetingId: string }
   | { type: 'selectPlayerSource'; surface: 'detail'; meetingId: string; sourceId: string }
-  | { type: 'seekTranscript'; surface: MinutesSurface; meetingId: string; lineId: string; positionMs: number }
+  | {
+      type: 'seekTranscript';
+      surface: MinutesSurface;
+      meetingId: string;
+      lineId: string;
+      positionMs: number;
+      playerSourceId?: string;
+    }
   | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
   | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }
   | {

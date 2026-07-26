@@ -67,6 +67,9 @@ export function meetingSummaryInputFingerprint(
   feed(transcriptLines.length);
   transcriptLines.forEach(line => {
     feed(line.id);
+    feed(line.recordingAssetId);
+    feed(line.recording_asset_id ?? line.recordingAssetRemoteId);
+    feed(line.transcription_job_id ?? line.transcriptionJobId);
     feed(line.speaker_id);
     feed(line.speaker_label);
     feed(line.text.trim());
@@ -102,7 +105,7 @@ export function meetingSummaryInputFingerprint(
     });
   }
 
-  const version = attachmentAuthorization ? 'v4' : carryForward ? 'v3' : 'v2';
+  const version = 'v5';
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 

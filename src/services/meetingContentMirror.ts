@@ -54,6 +54,16 @@ function normalizeTranscriptText(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('zh-CN');
 }
 
+function optionalTranscriptIdentity(value: string | null | undefined, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return normalized;
+}
+
 function enqueueMeetingWrite<T>(scopeKey: ScopeKey, meetingId: string, operation: () => Promise<T>): Promise<T> {
   const key = `${scopeKey}\u0000${meetingId}`;
   const previous = writeTailByMeeting.get(key) ?? Promise.resolve();
@@ -158,20 +168,60 @@ export function mirrorLegacyTranscriptContent(
         });
         return;
       }
-      const normalizedLines = meaningfulTranscript.map((line, ordinal) => ({
-        ordinal,
-        sourceId: typeof line.id === 'string' ? line.id.trim() : '',
-        speakerId: line.speaker_id?.trim() || null,
-        speakerLabel: line.speaker_label?.trim() || null,
-        text: typeof line.text === 'string' ? line.text : '',
-        startMs: secondsToMs(line.start_time),
-        endMs: Math.max(secondsToMs(line.start_time), secondsToMs(line.end_time)),
-        confidence: Number.isFinite(line.confidence)
-          && Number(line.confidence) >= 0 && Number(line.confidence) <= 1
-          ? Number(line.confidence)
-          : null,
-        createdAtMs: timestamp(line.created_at, aggregate.note.createdAtMs),
-      }));
+      const assetById = new Map(aggregate.recordingAssets.map(asset => [asset.id, asset]));
+      const assetByRemoteId = new Map(aggregate.recordingAssets
+        .filter(asset => Boolean(asset.remoteAssetId))
+        .map(asset => [asset.remoteAssetId!, asset]));
+      const soleAsset = aggregate.recordingAssets.length === 1 ? aggregate.recordingAssets[0] : null;
+      const normalizedLines = meaningfulTranscript.map((line, ordinal) => {
+        const localAssetId = optionalTranscriptIdentity(
+          line.recordingAssetId,
+          'transcript recording asset ID',
+        );
+        const wireRemoteAssetId = optionalTranscriptIdentity(
+          line.recording_asset_id,
+          'transcript recording asset remote ID',
+        );
+        const compatibilityRemoteAssetId = optionalTranscriptIdentity(
+          line.recordingAssetRemoteId,
+          'transcript recording asset remote ID',
+        );
+        if (
+          wireRemoteAssetId
+          && compatibilityRemoteAssetId
+          && wireRemoteAssetId !== compatibilityRemoteAssetId
+        ) throw new Error('transcript recording asset remote identity is inconsistent');
+        const remoteAssetId = wireRemoteAssetId ?? compatibilityRemoteAssetId;
+        const localAsset = localAssetId ? assetById.get(localAssetId) : null;
+        if (localAssetId && !localAsset) {
+          throw new Error('transcript recording asset does not belong to the meeting');
+        }
+        const remoteAsset = remoteAssetId ? assetByRemoteId.get(remoteAssetId) : null;
+        if (localAsset && remoteAsset && localAsset.id !== remoteAsset.id) {
+          throw new Error('transcript recording asset identity is inconsistent');
+        }
+        const resolvedAsset = localAsset ?? remoteAsset ?? (!localAssetId && !remoteAssetId ? soleAsset : null);
+        return {
+          ordinal,
+          sourceId: typeof line.id === 'string' ? line.id.trim() : '',
+          sourceRecordingAssetId: resolvedAsset?.id ?? localAssetId,
+          sourceRecordingAssetRemoteId: remoteAssetId ?? resolvedAsset?.remoteAssetId ?? null,
+          sourceTranscriptionJobId: optionalTranscriptIdentity(
+            line.transcription_job_id ?? line.transcriptionJobId,
+            'transcript source job ID',
+          ),
+          speakerId: line.speaker_id?.trim() || null,
+          speakerLabel: line.speaker_label?.trim() || null,
+          text: typeof line.text === 'string' ? line.text : '',
+          startMs: secondsToMs(line.start_time),
+          endMs: Math.max(secondsToMs(line.start_time), secondsToMs(line.end_time)),
+          confidence: Number.isFinite(line.confidence)
+            && Number(line.confidence) >= 0 && Number(line.confidence) <= 1
+            ? Number(line.confidence)
+            : null,
+          createdAtMs: timestamp(line.created_at, aggregate.note.createdAtMs),
+        };
+      });
       const fingerprint = await sha256(normalizedLines);
       const derivedKind: TranscriptCandidateKind = legacyMeeting.status === 'recording'
         || legacyMeeting.status === 'paused'
@@ -203,6 +253,9 @@ export function mirrorLegacyTranscriptContent(
         id: `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
         meetingId: aggregate.note.id,
         sourceId: line.sourceId || null,
+        sourceRecordingAssetId: line.sourceRecordingAssetId,
+        sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
+        sourceTranscriptionJobId: line.sourceTranscriptionJobId,
         ordinal,
         startMs: line.startMs,
         endMs: line.endMs,

@@ -18,6 +18,9 @@ import {
 interface NormalizedTranscriptLine {
   ordinal: number;
   sourceId: string;
+  sourceRecordingAssetId: string | null;
+  sourceRecordingAssetRemoteId: string | null;
+  sourceTranscriptionJobId: string | null;
   speakerId: string | null;
   speakerLabel: string | null;
   text: string;
@@ -102,9 +105,31 @@ function normalizeLines(
     .filter(line => typeof line.text === 'string' && line.text.trim().length > 0)
     .map((line, ordinal) => {
       const startMs = secondsToMs(line.start_time);
+      const wireRecordingAssetId = normalizedId(
+        line.recording_asset_id,
+        'transcript recording asset remote ID',
+      );
+      const compatibilityRemoteId = normalizedId(
+        line.recordingAssetRemoteId,
+        'transcript recording asset remote ID',
+      );
+      if (
+        wireRecordingAssetId
+        && compatibilityRemoteId
+        && wireRecordingAssetId !== compatibilityRemoteId
+      ) throw new Error('transcript recording asset remote identity is inconsistent');
       return {
         ordinal,
         sourceId: typeof line.id === 'string' ? line.id.trim() : '',
+        sourceRecordingAssetId: normalizedId(
+          line.recordingAssetId,
+          'transcript recording asset ID',
+        ),
+        sourceRecordingAssetRemoteId: wireRecordingAssetId ?? compatibilityRemoteId,
+        sourceTranscriptionJobId: normalizedId(
+          line.transcription_job_id ?? line.transcriptionJobId,
+          'transcript source job ID',
+        ),
         speakerId: line.speaker_id?.trim() || null,
         speakerLabel: line.speaker_label?.trim() || null,
         text: line.text,
@@ -132,6 +157,9 @@ function sameActiveContent(
     const line = lines[index];
     return segment.ordinal === line.ordinal
       && (segment.sourceId ?? '') === line.sourceId
+      && segment.sourceRecordingAssetId === line.sourceRecordingAssetId
+      && segment.sourceRecordingAssetRemoteId === line.sourceRecordingAssetRemoteId
+      && segment.sourceTranscriptionJobId === line.sourceTranscriptionJobId
       && segment.speakerClusterId === line.speakerId
       && segment.speakerLabel === line.speakerLabel
       && segment.text === line.text
@@ -200,7 +228,44 @@ export class SaveGuestMeetingTranscriptUseCase {
     if (!aggregate || aggregate.note.lifecycle === 'deleted') {
       throw new Error('meeting does not accept transcript content in active scope');
     }
-    const lines = normalizeLines(input.transcript, aggregate.note.createdAtMs);
+    const recordingAssetById = new Map(aggregate.recordingAssets.map(asset => [asset.id, asset]));
+    const recordingAssetByRemoteId = new Map(aggregate.recordingAssets
+      .filter(asset => Boolean(asset.remoteAssetId))
+      .map(asset => [asset.remoteAssetId!, asset]));
+    const soleRecordingAsset = aggregate.recordingAssets.length === 1
+      ? aggregate.recordingAssets[0]
+      : null;
+    const lines = normalizeLines(input.transcript, aggregate.note.createdAtMs).map(line => {
+      const explicitLocalAsset = line.sourceRecordingAssetId
+        ? recordingAssetById.get(line.sourceRecordingAssetId)
+        : null;
+      if (line.sourceRecordingAssetId && !explicitLocalAsset) {
+        throw new Error('transcript recording asset does not belong to the meeting');
+      }
+      const remoteAsset = line.sourceRecordingAssetRemoteId
+        ? recordingAssetByRemoteId.get(line.sourceRecordingAssetRemoteId)
+        : null;
+      if (explicitLocalAsset && remoteAsset && explicitLocalAsset.id !== remoteAsset.id) {
+        throw new Error('transcript recording asset identity is inconsistent');
+      }
+      if (
+        explicitLocalAsset?.remoteAssetId
+        && line.sourceRecordingAssetRemoteId
+        && explicitLocalAsset.remoteAssetId !== line.sourceRecordingAssetRemoteId
+      ) throw new Error('transcript recording asset remote identity changed');
+      const resolvedAsset = explicitLocalAsset ?? remoteAsset ?? (
+        !line.sourceRecordingAssetId && !line.sourceRecordingAssetRemoteId
+          ? soleRecordingAsset
+          : null
+      );
+      return {
+        ...line,
+        sourceRecordingAssetId: resolvedAsset?.id ?? line.sourceRecordingAssetId,
+        sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId
+          ?? resolvedAsset?.remoteAssetId
+          ?? null,
+      };
+    });
     const fingerprint = await this.digest(stableJson(lines));
     const realtimeDraft = input.candidateKind === 'realtime_draft';
     const revisionId = realtimeDraft
@@ -213,6 +278,9 @@ export class SaveGuestMeetingTranscriptUseCase {
       id: `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
       meetingId,
       sourceId: line.sourceId || null,
+      sourceRecordingAssetId: line.sourceRecordingAssetId,
+      sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
+      sourceTranscriptionJobId: line.sourceTranscriptionJobId,
       ordinal,
       startMs: line.startMs,
       endMs: line.endMs,

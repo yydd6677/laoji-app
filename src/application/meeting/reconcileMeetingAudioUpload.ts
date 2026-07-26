@@ -304,7 +304,14 @@ export class ReconcileMeetingAudioUploadUseCase {
       const recordingChanged = !assetMatches(existingAsset, nextAsset);
       changed = uploadChanged || recordingChanged;
       if (!changed) return;
-      if (recordingChanged) await transaction.saveRecordingAsset(nextAsset, input.scopeKey);
+      if (recordingChanged) {
+        await transaction.saveRecordingAsset(nextAsset, input.scopeKey);
+        await transaction.enrichTranscriptRecordingProvenance(
+          meetingId,
+          nextAsset.id,
+          input.scopeKey,
+        );
+      }
       if (uploadChanged) await transaction.upsertStage(nextUpload, input.scopeKey);
       await transaction.updateMeeting(meetingId, input.scopeKey, { updatedAtMs });
       if (input.canonicalWrite) {

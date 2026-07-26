@@ -299,6 +299,12 @@ export interface TranscriptSegmentRecord {
   meetingId: string;
   /** Provider/server segment identity used to resolve structured-summary citations. */
   sourceId: string | null;
+  /** Local RecordingAsset identity when this device can resolve the source. */
+  sourceRecordingAssetId: string | null;
+  /** Stable server RecordingAsset identity retained even before the asset exists locally. */
+  sourceRecordingAssetRemoteId: string | null;
+  /** Server job that produced this segment; immutable once known. */
+  sourceTranscriptionJobId: string | null;
   ordinal: number;
   startMs: number;
   endMs: number;
@@ -1035,6 +1041,12 @@ export interface MeetingTransaction {
   /** Keeps the readable version active while marking its inputs outdated. */
   markCurrentSummaryStale(meetingId: string, scopeKey: ScopeKey): Promise<boolean>;
   saveRecordingAsset(asset: RecordingAssetRecord, scopeKey: ScopeKey): Promise<void>;
+  /** Enriches immutable Transcript segments without guessing when several assets are possible. */
+  enrichTranscriptRecordingProvenance(
+    meetingId: string,
+    recordingAssetId: string,
+    scopeKey: ScopeKey,
+  ): Promise<number>;
   saveTranscriptRevision(
     revision: TranscriptRevisionRecord,
     segments: readonly TranscriptSegmentRecord[],

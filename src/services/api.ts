@@ -674,6 +674,8 @@ export async function importGuestMeetingData(
         source_meeting_id: payload.sourceMeetingId,
         transcripts: payload.transcripts.map(line => ({
           id: line.id,
+          recording_asset_id: line.recording_asset_id ?? line.recordingAssetRemoteId ?? null,
+          transcription_job_id: line.transcription_job_id ?? line.transcriptionJobId ?? null,
           speaker_id: line.speaker_id ?? null,
           speaker_label: line.speaker_label ?? null,
           text: line.text,
@@ -880,6 +882,8 @@ export async function generateGuestMeetingSummary(
       attachment_authorization: summaryAttachmentAuthorizationPayload(attachmentAuthorization),
       transcript_lines: transcriptLines.map(line => ({
         id: line.id,
+        recording_asset_id: line.recording_asset_id ?? line.recordingAssetRemoteId ?? null,
+        transcription_job_id: line.transcription_job_id ?? line.transcriptionJobId ?? null,
         speaker_label: line.speaker_label ?? null,
         speaker_id: line.speaker_id ?? null,
         text: line.text,
