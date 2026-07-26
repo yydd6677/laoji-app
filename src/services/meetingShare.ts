@@ -3,7 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { BEST_SPEED, zip } from 'react-native-zip-archive';
 import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
-import type { MeetingAttachmentRecord } from '../data/repositories';
+import type { MarkerRecord, MeetingAttachmentRecord } from '../data/repositories';
 import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
@@ -18,6 +18,7 @@ export type MeetingShareContentKey =
   | 'summary'
   | 'actions'
   | 'transcript'
+  | 'markers'
   | 'attachments'
   | 'audio'
   | 'manualNote';
@@ -28,6 +29,7 @@ export interface MeetingShareAvailability extends Record<MeetingShareContentKey,
 
 export type MeetingShareErrorCode =
   | 'NO_AUDIO'
+  | 'NO_MARKERS'
   | 'NO_ATTACHMENTS'
   | 'NO_MEETING_CONTENT'
   | 'SHARING_UNAVAILABLE';
@@ -48,6 +50,7 @@ export interface MeetingShareInput {
   summaryDocument?: MeetingSummaryDocument | null;
   actionItems?: readonly MeetingSummaryActionCandidate[];
   manualNoteText?: string | null;
+  markers?: readonly MarkerRecord[];
   attachments?: readonly MeetingAttachmentRecord[];
   transcriptRevisionId?: string | null;
   summaryVersionId?: string | null;
@@ -70,6 +73,7 @@ const SHARE_CONTENT_ORDER: readonly MeetingShareContentKey[] = [
   'summary',
   'actions',
   'transcript',
+  'markers',
   'attachments',
   'audio',
   'manualNote',
@@ -83,6 +87,7 @@ export function defaultMeetingShareSelection(
     summary: availability.summary,
     actions: availability.actions,
     transcript: false,
+    markers: false,
     attachments: false,
     audio: false,
     manualNote: false,
@@ -147,6 +152,22 @@ export function buildMeetingAttachmentsText(
     }
     return `${prefix}照片：${attachment.fileName?.trim() || '照片'}`;
   }).filter(Boolean).join('\n\n');
+}
+
+export function buildMeetingMarkersText(markers: readonly MarkerRecord[]): string {
+  return markers
+    .slice()
+    .sort((left, right) => (
+      left.positionMs - right.positionMs
+      || left.createdAtMs - right.createdAtMs
+      || left.id.localeCompare(right.id)
+    ))
+    .map((marker, index) => {
+      const time = formatTranscriptTime(marker.positionMs / 1_000);
+      const label = marker.label?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+      return `${index + 1}. ${time || '00:00'}${label ? ` · ${label}` : ''}`;
+    })
+    .join('\n');
 }
 
 function structuredSummaryText(document: MeetingSummaryDocument | null | undefined): string {
@@ -240,6 +261,13 @@ function buildSelectedMeetingDocument(
     if (transcript) {
       sections.push(`文字记录\n${transcript}`);
       included.push('transcript');
+    }
+  }
+  if (selection.markers) {
+    const markers = buildMeetingMarkersText(input.markers ?? []);
+    if (markers) {
+      sections.push(`标记\n${markers}`);
+      included.push('markers');
     }
   }
   if (selection.attachments) {
@@ -495,6 +523,9 @@ export async function shareMeetingContent(
     if (selection.attachments && !(input.attachments?.length)) {
       throw new MeetingShareError('NO_ATTACHMENTS', 'meeting attachments are unavailable');
     }
+    if (selection.markers && !(input.markers?.length)) {
+      throw new MeetingShareError('NO_MARKERS', 'meeting markers are unavailable');
+    }
     const textContent = buildSelectedMeetingDocument(selection, input);
     const documentUri = textContent.document
       ? await writeTextFile(`${directoryUri}${baseName}_会议资料.txt`, textContent.document)
@@ -556,6 +587,7 @@ export function meetingShareErrorMessage(error: unknown): string {
   if (audioSecurityMessage) return audioSecurityMessage;
   if (error instanceof MeetingShareError) {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
+    if (error.code === 'NO_MARKERS') return '所选标记已不存在，请重新选择。';
     if (error.code === 'NO_ATTACHMENTS') return '所选附件暂时无法读取，请稍后重试。';
     if (error.code === 'NO_MEETING_CONTENT') return '所选会议内容当前不可分享，请重新选择。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';

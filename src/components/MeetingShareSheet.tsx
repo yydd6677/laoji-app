@@ -4,6 +4,7 @@ import {
   Animated,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -25,6 +26,7 @@ const CONTENT_ROWS: readonly { key: MeetingShareContentKey; label: string }[] = 
   { key: 'summary', label: '整理结果' },
   { key: 'actions', label: '行动项' },
   { key: 'transcript', label: '文字记录' },
+  { key: 'markers', label: '标记' },
   { key: 'attachments', label: '附件' },
   { key: 'audio', label: '录音' },
   { key: 'manualNote', label: '我的笔记' },
@@ -39,6 +41,7 @@ function availableSelection(
     summary: selection.summary && availability.summary,
     actions: selection.actions && availability.actions,
     transcript: selection.transcript && availability.transcript,
+    markers: selection.markers && availability.markers,
     attachments: selection.attachments && availability.attachments,
     audio: selection.audio && availability.audio,
     manualNote: selection.manualNote && availability.manualNote,
@@ -174,7 +177,7 @@ export function MeetingShareSheet({
             <View style={styles.titleAction} />
           </View>
 
-          <View>
+          <ScrollView style={styles.rows} bounces={false} showsVerticalScrollIndicator={false}>
             {CONTENT_ROWS.map((row, index) => {
               const enabled = availability[row.key];
               const checked = activeSelection[row.key];
@@ -214,7 +217,7 @@ export function MeetingShareSheet({
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           <View style={styles.footer}>
             <Pressable
@@ -248,6 +251,7 @@ const styles = StyleSheet.create({
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 60, height: 44, alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  rows: { flexShrink: 1 },
   row: { height: 56, paddingLeft: 16, paddingRight: 12, flexDirection: 'row', alignItems: 'center' },
   rowLabel: { flex: 1, fontSize: 16, lineHeight: 24, fontWeight: '400' },
   checkbox: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },

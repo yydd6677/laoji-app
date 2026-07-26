@@ -246,7 +246,7 @@ export function PrivacyScreen({ navigation }: Props) {
           />
           <SettingsRow
             label="文件分享说明"
-            onPress={() => showDialog({ title: '文件分享说明', message: '分享前可选择基本信息、整理结果、行动项、文字记录、录音或我的笔记；确认后会打开系统分享面板。', tone: 'info' })}
+            onPress={() => showDialog({ title: '文件分享说明', message: '分享前可选择基本信息、整理结果、行动项、文字记录、标记、附件、录音或我的笔记；确认后会打开系统分享面板。', tone: 'info' })}
           />
           {mode === 'authenticated' ? (
             <SettingsRow

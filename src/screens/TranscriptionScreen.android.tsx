@@ -2329,10 +2329,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : Boolean(displayedSummary.trim()),
     actions: displayedActionCandidates.some(action => Boolean(action.content.trim())),
     transcript: transcript.some(line => Boolean(line.text.trim())),
+    markers: markers.length > 0,
     attachments: meetingAttachments.length > 0,
     audio: Boolean(meeting?.audioAvailable || meeting?.audioLocalUri || playerSource),
     manualNote: Boolean(manualNote.content.trim()),
-  }), [displayedActionCandidates, displayedSummary, displayedSummaryDocument, manualNote.content, meeting, meetingAttachments.length, playerSource, transcript]);
+  }), [displayedActionCandidates, displayedSummary, displayedSummaryDocument, manualNote.content, markers.length, meeting, meetingAttachments.length, playerSource, transcript]);
 
   const runShare = useCallback(async (selection: MeetingShareSelection) => {
     if (!meeting || sharing) return;
@@ -2345,6 +2346,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         summaryDocument: displayedSummaryDocument,
         actionItems: displayedActionCandidates,
         manualNoteText: manualNote.content,
+        markers,
         attachments: meetingAttachments,
         summaryVersionId: displayedSummaryDocument?.remoteVersionId,
         isGuest,
@@ -2363,7 +2365,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setSharing(false);
     }
-  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, meeting, meetingAttachments, playerSource, sharing, showDialog, transcript]);
+  }, [accessToken, displayedActionCandidates, displayedSummary, displayedSummaryDocument, getCachedSummary, isGuest, manualNote.content, markers, meeting, meetingAttachments, playerSource, sharing, showDialog, transcript]);
 
   const requestShare = useCallback((selection: MeetingShareSelection) => {
     if (!selection.manualNote) {

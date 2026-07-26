@@ -953,6 +953,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : Boolean(shareSummaryText.trim()),
     actions: shareActions.some(action => Boolean(action.content.trim())),
     transcript: transcriptItems.some(line => Boolean(line.text.trim())),
+    markers: false,
     attachments: meetingAttachments.length > 0,
     audio: Boolean(m?.audioAvailable || m?.audioLocalUri),
     manualNote: false,
