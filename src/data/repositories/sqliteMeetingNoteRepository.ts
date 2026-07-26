@@ -55,6 +55,7 @@ import type {
   MeetingOrganizationMeeting,
   MeetingOrganizationProjection,
   MeetingPersonAggregate,
+  MeetingRetentionCleanupJob,
   MeetingRecordingMergeTaskRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
@@ -82,6 +83,7 @@ import type {
   OccurrenceSyncClaim,
   OccurrenceSyncConflict,
   OccurrenceSyncFailure,
+  QueueExpiredMeetingRetentionCleanupInput,
   RecordingAssetRecord,
   RecordingAssetTranscriptionTaskRecord,
   RecordRecordingAssetTranscriptionTransportFailureInput,
@@ -157,6 +159,18 @@ type RecordingAssetRow = {
   created_at_ms: number;
   updated_at_ms: number;
   last_verified_at_ms: number | null;
+};
+
+type MeetingRetentionCleanupJobRow = {
+  id: string;
+  scope_key: string;
+  canonical_meeting_id: string;
+  navigation_meeting_id: string;
+  local_uris_json: string;
+  attempt_count: number;
+  last_error_code: string | null;
+  created_at_ms: number;
+  updated_at_ms: number;
 };
 
 type MeetingRecordingMergeTaskRow = {
@@ -943,6 +957,46 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     lastVerifiedAtMs: row.last_verified_at_ms,
+  };
+}
+
+function retentionCleanupJobFromRow(row: MeetingRetentionCleanupJobRow): MeetingRetentionCleanupJob {
+  assertScopeKey(row.scope_key);
+  assertRecordId(row.id, 'meeting retention cleanup job ID');
+  assertRecordId(row.canonical_meeting_id, 'meeting retention cleanup meeting ID');
+  assertRecordId(row.navigation_meeting_id, 'meeting retention cleanup navigation ID');
+  assertNonNegativeInteger(row.attempt_count, 'meeting retention cleanup attempt count');
+  assertNonNegativeInteger(row.created_at_ms, 'meeting retention cleanup creation time');
+  assertNonNegativeInteger(row.updated_at_ms, 'meeting retention cleanup update time');
+  if (row.updated_at_ms < row.created_at_ms) {
+    throw new Error('stored meeting retention cleanup time is invalid');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.local_uris_json);
+  } catch {
+    throw new Error('stored meeting retention cleanup paths are invalid');
+  }
+  if (
+    !Array.isArray(parsed)
+    || parsed.length > 10_000
+    || parsed.some(value => (
+      typeof value !== 'string'
+      || !value.trim()
+      || value.length > 8_192
+      || /[\u0000-\u001f\u007f]/.test(value)
+    ))
+  ) throw new Error('stored meeting retention cleanup paths are invalid');
+  return {
+    id: row.id,
+    scopeKey: row.scope_key,
+    canonicalMeetingId: row.canonical_meeting_id,
+    navigationMeetingId: row.navigation_meeting_id,
+    localUris: [...new Set(parsed as string[])],
+    attemptCount: row.attempt_count,
+    lastErrorCode: row.last_error_code,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
   };
 }
 
@@ -10712,6 +10766,251 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     });
     if (applied) this.notify([input.meetingId]);
     return applied;
+  }
+
+  async queueExpiredMeetingRetentionCleanup(
+    input: QueueExpiredMeetingRetentionCleanupInput,
+  ): Promise<readonly MeetingRetentionCleanupJob[]> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') return [];
+    assertNonNegativeInteger(input.expiresBeforeMs, 'meeting retention expiry time');
+    assertNonNegativeInteger(input.queuedAtMs, 'meeting retention cleanup time');
+    if (input.expiresBeforeMs > input.queuedAtMs) {
+      throw new Error('meeting retention expiry time is invalid');
+    }
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 50) {
+      throw new Error('meeting retention cleanup limit is invalid');
+    }
+
+    const purgedMeetingIds: string[] = [];
+    const jobs = await withMeetingDatabaseTransaction(async database => {
+      const writeState = await database.getFirstAsync<MeetingScopeWriteStateRow>(
+        'SELECT * FROM meeting_scope_write_state WHERE scope_key = ?',
+        input.scopeKey,
+      );
+      if (!writeState || writeState.write_owner !== 'canonical') return [];
+      const candidates = await database.getAllAsync<MeetingRow>(
+        `SELECT meeting.* FROM meeting_notes meeting
+         WHERE meeting.scope_key = ?
+           AND meeting.lifecycle = 'deleted'
+           AND meeting.sync_state = 'deleted'
+           AND meeting.deleted_from_lifecycle IS NOT NULL
+           AND meeting.deleted_at_ms IS NOT NULL
+           AND meeting.deleted_at_ms <= ?
+           AND meeting.remote_id IS NOT NULL
+           AND meeting.remote_revision IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_outbox outbox
+             WHERE outbox.scope_key = meeting.scope_key
+               AND outbox.aggregate_type = 'meeting_note'
+               AND outbox.aggregate_id = meeting.id
+               AND outbox.status != 'completed'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_conflicts conflict
+             WHERE conflict.scope_key = meeting.scope_key
+               AND conflict.aggregate_type = 'meeting_note'
+               AND conflict.aggregate_id = meeting.id
+               AND conflict.status = 'unresolved'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM meeting_recording_merge_tasks task
+             WHERE task.scope_key = meeting.scope_key
+               AND (task.source_meeting_id = meeting.id OR task.target_meeting_id = meeting.id)
+               AND task.status != 'completed'
+           )
+         ORDER BY meeting.deleted_at_ms, meeting.id
+         LIMIT ?`,
+        input.scopeKey,
+        input.expiresBeforeMs,
+        input.limit,
+      );
+      const queued: MeetingRetentionCleanupJob[] = [];
+      for (const candidate of candidates) {
+        const navigationMeetingId = meetingNavigationIdentity({
+          meeting_id: candidate.id,
+          legacy_source_id: candidate.legacy_source_id,
+          remote_id: candidate.remote_id,
+          entry_point: candidate.entry_point,
+        }, input.scopeKey);
+        const uriRows = await database.getAllAsync<{ local_uri: string }>(
+          `SELECT local_uri FROM recording_assets
+           WHERE meeting_id = ? AND local_uri IS NOT NULL AND trim(local_uri) != ''
+           UNION
+           SELECT local_uri FROM meeting_attachments
+           WHERE meeting_id = ? AND scope_key = ? AND local_uri IS NOT NULL AND trim(local_uri) != ''
+           UNION
+           SELECT local_uri FROM meeting_media_clips
+           WHERE meeting_id = ? AND scope_key = ? AND local_uri IS NOT NULL AND trim(local_uri) != ''
+           ORDER BY local_uri`,
+          candidate.id,
+          candidate.id,
+          input.scopeKey,
+          candidate.id,
+          input.scopeKey,
+        );
+        if (uriRows.length > 10_000) {
+          throw new Error('meeting retention cleanup has too many local files');
+        }
+        const localUris = uriRows.map(row => row.local_uri.trim());
+        const jobId = secureClientIdFactory.create();
+        await database.runAsync(
+          `INSERT INTO meeting_retention_cleanup_jobs (
+             id, scope_key, canonical_meeting_id, navigation_meeting_id,
+             local_uris_json, attempt_count, last_error_code, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+          jobId,
+          input.scopeKey,
+          candidate.id,
+          navigationMeetingId,
+          JSON.stringify(localUris),
+          input.queuedAtMs,
+          input.queuedAtMs,
+        );
+
+        const detached = await database.getAllAsync<{ conflict_id: string }>(
+          `SELECT conflict_id FROM meeting_occurrence_detached_history
+           WHERE scope_key = ? AND (local_meeting_id = ? OR remote_meeting_id = ?)`,
+          input.scopeKey,
+          candidate.id,
+          candidate.id,
+        );
+        await database.runAsync(
+          `DELETE FROM meeting_recording_merge_tasks
+           WHERE scope_key = ? AND source_meeting_id = ?`,
+          input.scopeKey,
+          candidate.id,
+        );
+        await database.runAsync(
+          `DELETE FROM meeting_occurrence_detached_history
+           WHERE scope_key = ? AND (local_meeting_id = ? OR remote_meeting_id = ?)`,
+          input.scopeKey,
+          candidate.id,
+          candidate.id,
+        );
+        for (const history of detached) {
+          await database.runAsync(
+            'DELETE FROM sync_conflicts WHERE id = ? AND scope_key = ?',
+            history.conflict_id,
+            input.scopeKey,
+          );
+        }
+        await database.runAsync(
+          `DELETE FROM sync_outbox
+           WHERE scope_key = ? AND (
+             aggregate_id = ?
+             OR aggregate_id IN (SELECT id FROM action_items WHERE meeting_id = ?)
+             OR aggregate_id IN (SELECT id FROM speaker_corrections WHERE meeting_id = ?)
+           )`,
+          input.scopeKey,
+          candidate.id,
+          candidate.id,
+          candidate.id,
+        );
+        await database.runAsync(
+          `DELETE FROM sync_conflicts
+           WHERE scope_key = ? AND (
+             aggregate_id = ?
+             OR aggregate_id IN (SELECT id FROM action_items WHERE meeting_id = ?)
+             OR aggregate_id IN (SELECT id FROM speaker_corrections WHERE meeting_id = ?)
+           )`,
+          input.scopeKey,
+          candidate.id,
+          candidate.id,
+          candidate.id,
+        );
+        const deleted = await database.runAsync(
+          `DELETE FROM meeting_notes
+           WHERE id = ? AND scope_key = ?
+             AND lifecycle = 'deleted' AND sync_state = 'deleted'
+             AND deleted_from_lifecycle IS NOT NULL
+             AND deleted_at_ms IS NOT NULL AND deleted_at_ms <= ?`,
+          candidate.id,
+          input.scopeKey,
+          input.expiresBeforeMs,
+        );
+        if (deleted.changes !== 1) {
+          throw new Error('meeting retention cleanup target changed concurrently');
+        }
+        queued.push({
+          id: jobId,
+          scopeKey: input.scopeKey,
+          canonicalMeetingId: candidate.id,
+          navigationMeetingId,
+          localUris,
+          attemptCount: 0,
+          lastErrorCode: null,
+          createdAtMs: input.queuedAtMs,
+          updatedAtMs: input.queuedAtMs,
+        });
+        purgedMeetingIds.push(candidate.id);
+      }
+      if (queued.length > 0) {
+        const transaction = new SqliteMeetingTransaction(database);
+        await transaction.advanceCanonicalWrite(input.scopeKey, input.queuedAtMs);
+      }
+      return queued;
+    });
+    if (purgedMeetingIds.length > 0) this.notify(purgedMeetingIds);
+    return jobs;
+  }
+
+  async listMeetingRetentionCleanupJobs(
+    scopeKey: ScopeKey,
+    limit: number,
+  ): Promise<readonly MeetingRetentionCleanupJob[]> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('meeting retention cleanup job limit is invalid');
+    }
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingRetentionCleanupJobRow>(
+      `SELECT * FROM meeting_retention_cleanup_jobs
+       WHERE scope_key = ?
+       ORDER BY updated_at_ms, id
+       LIMIT ?`,
+      scopeKey,
+      limit,
+    );
+    return rows.map(retentionCleanupJobFromRow);
+  }
+
+  async completeMeetingRetentionCleanupJob(jobId: string, scopeKey: ScopeKey): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertRecordId(jobId, 'meeting retention cleanup job ID');
+    const result = await withMeetingDatabaseTransaction(database => database.runAsync(
+      'DELETE FROM meeting_retention_cleanup_jobs WHERE id = ? AND scope_key = ?',
+      jobId,
+      scopeKey,
+    ));
+    return result.changes === 1;
+  }
+
+  async failMeetingRetentionCleanupJob(
+    jobId: string,
+    scopeKey: ScopeKey,
+    errorCode: string,
+    updatedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertRecordId(jobId, 'meeting retention cleanup job ID');
+    assertNonNegativeInteger(updatedAtMs, 'meeting retention cleanup failure time');
+    const normalized = normalizedSyncErrorCode(errorCode);
+    const result = await withMeetingDatabaseTransaction(database => database.runAsync(
+      `UPDATE meeting_retention_cleanup_jobs
+       SET attempt_count = CASE
+             WHEN attempt_count < 9007199254740991 THEN attempt_count + 1
+             ELSE attempt_count
+           END,
+           last_error_code = ?, updated_at_ms = ?
+       WHERE id = ? AND scope_key = ? AND updated_at_ms <= ?`,
+      normalized,
+      updatedAtMs,
+      jobId,
+      scopeKey,
+      updatedAtMs,
+    ));
+    return result.changes === 1;
   }
 
   async listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection> {

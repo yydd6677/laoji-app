@@ -33,6 +33,7 @@ import {
 import { MeetingMediaImportProvider } from './src/components/MeetingMediaImportProvider';
 import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEventsProjectionCoordinator';
 import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTranscriptCompletionProvider';
+import { MeetingRetentionCleanupProvider } from './src/components/MeetingRetentionCleanupProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -51,38 +52,40 @@ function RuntimeProviders({ onRestart }: {
           onRetry={onRestart}
         >
           <MeetingRootSyncProvider>
-            <MeetingOccurrenceSyncProvider>
-              <MeetingActionSyncProvider>
-                <MeetingManualNoteSyncProvider>
-                  <MeetingSpeakerCorrectionSyncProvider>
-                  <EventsProvider>
-                  <MeetingsProvider>
-                    <MeetingTranscriptCompletionProvider>
-                      <UpcomingEventsProjectionCoordinator />
-                      <AppLockGate>
-                        <AppDialogProvider>
-                          <MeetingMediaImportProvider>
-                            <GuestDataMigrationProvider>
-                              <NotificationPermissionPrimer />
-                              <View style={{ flex: 1 }}>
-                                <RestorableNavigationContainer>
-                                  <StatusBar style="dark" backgroundColor="#FFFFFF" />
-                                  <RootNavigator />
-                                  <NotificationNavigationHandler />
-                                </RestorableNavigationContainer>
-                                <EventUndoBanner />
-                              </View>
-                            </GuestDataMigrationProvider>
-                          </MeetingMediaImportProvider>
-                        </AppDialogProvider>
-                      </AppLockGate>
-                    </MeetingTranscriptCompletionProvider>
-                  </MeetingsProvider>
-                  </EventsProvider>
-                  </MeetingSpeakerCorrectionSyncProvider>
-                </MeetingManualNoteSyncProvider>
-              </MeetingActionSyncProvider>
-            </MeetingOccurrenceSyncProvider>
+            <MeetingRetentionCleanupProvider>
+              <MeetingOccurrenceSyncProvider>
+                <MeetingActionSyncProvider>
+                  <MeetingManualNoteSyncProvider>
+                    <MeetingSpeakerCorrectionSyncProvider>
+                    <EventsProvider>
+                    <MeetingsProvider>
+                      <MeetingTranscriptCompletionProvider>
+                        <UpcomingEventsProjectionCoordinator />
+                        <AppLockGate>
+                          <AppDialogProvider>
+                            <MeetingMediaImportProvider>
+                              <GuestDataMigrationProvider>
+                                <NotificationPermissionPrimer />
+                                <View style={{ flex: 1 }}>
+                                  <RestorableNavigationContainer>
+                                    <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                                    <RootNavigator />
+                                    <NotificationNavigationHandler />
+                                  </RestorableNavigationContainer>
+                                  <EventUndoBanner />
+                                </View>
+                              </GuestDataMigrationProvider>
+                            </MeetingMediaImportProvider>
+                          </AppDialogProvider>
+                        </AppLockGate>
+                      </MeetingTranscriptCompletionProvider>
+                    </MeetingsProvider>
+                    </EventsProvider>
+                    </MeetingSpeakerCorrectionSyncProvider>
+                  </MeetingManualNoteSyncProvider>
+                </MeetingActionSyncProvider>
+              </MeetingOccurrenceSyncProvider>
+            </MeetingRetentionCleanupProvider>
           </MeetingRootSyncProvider>
         </AppReadinessGate>
       </NavigationStateProvider>

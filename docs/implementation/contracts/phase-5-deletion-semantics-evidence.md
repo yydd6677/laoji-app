@@ -1,6 +1,6 @@
 # Phase 5 默认私有与删除：永久删除与账号回收站纵向切片
 
-状态：`PRIV-01` 已把永久删除和已同步会议的可恢复删除拆成两条诚实路径。Android 在实时、非陈旧 capability 明确返回 `meeting_notes_v2=true` 与正数 `soft_delete_days` 时，才为具备稳定远端身份的会议显示“移到回收站”和恢复入口；本机、未同步或仍有音频上传风险的会议继续明确永久删除。普通 Preview 已开启 canonical read/write 与账号根写，账号上传写仍关闭；运行服务 API 已验证软删除/恢复和子实体保留，页面继续由实时 capability fail closed。
+状态：`PRIV-01` 已把永久删除和已同步会议的可恢复删除拆成两条诚实路径。Android 只在 fresh capability 明确返回 `meeting_notes_v2=true` 与正数 `soft_delete_days` 时承诺回收站；本机、未同步或仍有音频上传风险的会议继续明确永久删除。后续 migration v27 与目标 18020 已补齐到期后的本机/服务端物理清理，详见 [`phase-5-retention-cleanup-evidence.md`](phase-5-retention-cleanup-evidence.md)。
 
 ## 当前范围
 
@@ -68,7 +68,7 @@
 ## 未完成边界
 
 1. 目标 18020/18035 的 capability、鉴权、运行数据库、远端 tombstone/restore 和双会话收敛已验证；App outbox 断网/强杀恢复及第二台物理设备仍未验证。
-2. 30 天到期后的服务端物理清理、canonical Transcript/Summary/人工笔记/行动项/录音资产级联清理，以及本机过期 tombstone/文件自动清理尚未完整实现或证明。当前客户端只隐藏已过期条目，不能把这写成已完成的数据销毁。
+2. 30 天到期后的服务端/本机物理清理、canonical 子内容级联和可恢复文件清理任务已形成纵切；仍缺真实等满期限的用户记录及带 WorkManager/通知/多资产组合的候选抽查。
 3. USB 真机、不同 ROM、TalkBack、触觉和真实弱网切换未验证；当前设备证据仅为 Android 模拟器。
 4. Android 原生回收站页面已完成；非 Android React Native fallback 目前只复用删除确认，没有独立回收站列表，不属于当前 Android 交付证明。
 5. 真实活动录音、待上传音频、非空 WorkManager/通知/播放器缓存和子内容组合的删除/恢复矩阵仍未做高成本验证，留到 Phase 5 候选包门禁阶段。

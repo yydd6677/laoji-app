@@ -75,6 +75,25 @@ export interface MeetingListProjection {
   hasMore: boolean;
 }
 
+export interface MeetingRetentionCleanupJob {
+  id: string;
+  scopeKey: ScopeKey;
+  canonicalMeetingId: string;
+  navigationMeetingId: string;
+  localUris: readonly string[];
+  attemptCount: number;
+  lastErrorCode: string | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface QueueExpiredMeetingRetentionCleanupInput {
+  scopeKey: ScopeKey;
+  expiresBeforeMs: number;
+  queuedAtMs: number;
+  limit: number;
+}
+
 export interface NewMeetingNote {
   id: string;
   scopeKey: ScopeKey;
@@ -1458,6 +1477,24 @@ export interface MeetingNoteRepository {
   ): Promise<number>;
   /** Keeps local corrections readable when a fresh server contract explicitly disables sync. */
   projectSpeakerCorrectionSyncDisabled(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
+  /** Physically removes only remotely-confirmed tombstones and leaves durable file-cleanup jobs. */
+  queueExpiredMeetingRetentionCleanup(
+    input: QueueExpiredMeetingRetentionCleanupInput,
+  ): Promise<readonly MeetingRetentionCleanupJob[]>;
+  listMeetingRetentionCleanupJobs(
+    scopeKey: ScopeKey,
+    limit: number,
+  ): Promise<readonly MeetingRetentionCleanupJob[]>;
+  completeMeetingRetentionCleanupJob(
+    jobId: string,
+    scopeKey: ScopeKey,
+  ): Promise<boolean>;
+  failMeetingRetentionCleanupJob(
+    jobId: string,
+    scopeKey: ScopeKey,
+    errorCode: string,
+    updatedAtMs: number,
+  ): Promise<boolean>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;
