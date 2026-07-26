@@ -11,6 +11,7 @@ export * from './mergeAccountMeetingRemoteSnapshot';
 export * from './mergeDetachedMeetingRecordings';
 export * from './manageMeetingOrganization';
 export * from './manageMeetingAttachments';
+export * from './attachmentSyncTrigger';
 export * from './openOccurrenceMeeting';
 export * from './recordingReconciler';
 export * from './recordingSessionController';

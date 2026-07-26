@@ -571,6 +571,8 @@ export interface MarkerRecord {
 }
 
 export type MeetingAttachmentKind = 'text' | 'image';
+export type MeetingAttachmentSyncState = 'local' | 'pending' | 'synced' | 'failed_retryable' | 'blocked';
+export type MeetingAttachmentPendingOperation = 'create' | 'delete';
 
 export interface MeetingAttachmentRecord {
   id: string;
@@ -583,8 +585,81 @@ export interface MeetingAttachmentRecord {
   mimeType: string | null;
   fileName: string | null;
   byteSize: number | null;
+  checksumSha256: string | null;
+  remoteId: string | null;
+  remoteRevision: number | null;
+  syncState: MeetingAttachmentSyncState;
+  pendingOperation: MeetingAttachmentPendingOperation | null;
+  lastErrorCode: string | null;
+  remoteUpdatedAtMs: number | null;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+export interface MeetingAttachmentSyncClaim {
+  scopeKey: Exclude<ScopeKey, 'guest'>;
+  meetingId: string;
+  meetingRemoteId: string;
+  attachmentId: string;
+  operationId: string;
+  operationType: 'meeting_attachment.create' | 'meeting_attachment.delete';
+  claimToken: string;
+  requestPayloadJson: string;
+  attemptCount: number;
+  localUri: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  byteSize: number | null;
+  checksumSha256: string | null;
+}
+
+export interface ClaimMeetingAttachmentSyncOptions {
+  nowMs: number;
+  staleBeforeMs: number;
+  limit: number;
+}
+
+export interface MeetingAttachmentSyncFailure {
+  disposition: 'retry' | 'blocked' | 'permanent_error';
+  errorCode: string;
+  nextAttemptAtMs: number | null;
+  updatedAtMs: number;
+}
+
+export interface RemoteMeetingAttachmentRecord {
+  remoteId: string;
+  meetingRemoteId: string;
+  clientAttachmentId: string;
+  revision: number;
+  lifecycle: 'registered' | 'ready' | 'deleted';
+  positionMs: number;
+  kind: MeetingAttachmentKind;
+  textContent: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  byteSize: number | null;
+  checksumSha256: string | null;
+  contentUrl: string | null;
+  requiresAuth: true;
+  clientCreatedAtMs: number;
+  clientUpdatedAtMs: number;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+  serverDeletedAtMs: number | null;
+}
+
+export interface MergeRemoteMeetingAttachmentInput {
+  scopeKey: Exclude<ScopeKey, 'guest'>;
+  meetingId: string;
+  meetingRemoteId: string;
+  remote: RemoteMeetingAttachmentRecord;
+  localUri: string | null;
+  mergedAtMs: number;
+}
+
+export interface MergeRemoteMeetingAttachmentResult {
+  outcome: 'inserted' | 'attached' | 'unchanged' | 'deleted' | 'pending_local';
+  cleanupUri: string | null;
 }
 
 export interface MeetingTagRecord {
@@ -1285,6 +1360,23 @@ export interface MeetingNoteRepository {
   ): Promise<boolean>;
   listMeetingMarkers(meetingId: string, scopeKey: ScopeKey): Promise<readonly MarkerRecord[]>;
   listMeetingAttachments(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingAttachmentRecord[]>;
+  getMeetingAttachmentForSync(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+  ): Promise<MeetingAttachmentRecord | null>;
+  listMeetingAttachmentImagesMissingChecksum(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    limit: number,
+  ): Promise<readonly MeetingAttachmentRecord[]>;
+  repairMeetingAttachmentImageChecksum(input: {
+    attachmentId: string;
+    meetingId: string;
+    scopeKey: Exclude<ScopeKey, 'guest'>;
+    localUri: string;
+    byteSize: number;
+    checksumSha256: string;
+  }): Promise<boolean>;
   createMeetingAttachment(
     attachment: MeetingAttachmentRecord,
     scopeKey: ScopeKey,
@@ -1294,6 +1386,44 @@ export interface MeetingNoteRepository {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<MeetingAttachmentRecord | null>;
+  ensureMeetingAttachmentSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    createdAtMs: number,
+  ): Promise<number>;
+  claimMeetingAttachmentSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    options: ClaimMeetingAttachmentSyncOptions,
+  ): Promise<readonly MeetingAttachmentSyncClaim[]>;
+  getNextMeetingAttachmentSyncAttemptAt(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    staleClaimAfterMs: number,
+  ): Promise<number | null>;
+  hasMeetingAttachmentSyncOperationsWaitingForRoot(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+  ): Promise<boolean>;
+  completeMeetingAttachmentCreateClaim(
+    claim: MeetingAttachmentSyncClaim,
+    remote: RemoteMeetingAttachmentRecord,
+    completedAtMs: number,
+  ): Promise<boolean>;
+  completeMeetingAttachmentDeleteClaim(
+    claim: MeetingAttachmentSyncClaim,
+    remote: RemoteMeetingAttachmentRecord,
+    completedAtMs: number,
+  ): Promise<MeetingAttachmentRecord | null>;
+  failMeetingAttachmentSyncClaim(
+    claim: MeetingAttachmentSyncClaim,
+    failure: MeetingAttachmentSyncFailure,
+  ): Promise<boolean>;
+  retryMeetingAttachmentSync(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    retriedAtMs: number,
+  ): Promise<boolean>;
+  mergeRemoteMeetingAttachment(
+    input: MergeRemoteMeetingAttachmentInput,
+  ): Promise<MergeRemoteMeetingAttachmentResult>;
   listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
   resolveCanonicalMeetingId(navigationMeetingId: string, scopeKey: ScopeKey): Promise<string | null>;
   listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]>;

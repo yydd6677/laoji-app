@@ -19,6 +19,7 @@ interface LaojiNativePlatformModule {
   evidenceSchemaVersion: number;
   implementation: string;
   createRandomUuid(): string;
+  sha256File(fileUri: string): Promise<{ checksumSha256: string; byteSize: number }>;
   getCapabilities(): Promise<NativePlatformCapabilities>;
 }
 
@@ -32,6 +33,20 @@ export function hasLaojiNativePlatform(): boolean {
 
 export function createNativeRandomUuid(): string | null {
   return nativeModule?.createRandomUuid() ?? null;
+}
+
+export async function sha256NativeFile(fileUri: string): Promise<{
+  checksumSha256: string;
+  byteSize: number;
+}> {
+  if (!nativeModule) throw new Error('当前设备无法校验附件文件。');
+  const result = await nativeModule.sha256File(fileUri);
+  const checksumSha256 = result?.checksumSha256?.trim().toLocaleLowerCase();
+  const byteSize = Number(result?.byteSize);
+  if (!/^sha256:[0-9a-f]{64}$/.test(checksumSha256) || !Number.isSafeInteger(byteSize) || byteSize < 0) {
+    throw new Error('附件文件校验失败。');
+  }
+  return { checksumSha256, byteSize };
 }
 
 export async function getNativePlatformCapabilities(): Promise<NativePlatformCapabilities> {

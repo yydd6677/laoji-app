@@ -11,3 +11,4 @@ export * from './mediaClips';
 export * from './speakerCorrections';
 export * from './meetingNotes';
 export * from './meetingQuestions';
+export * from './meetingAttachments';

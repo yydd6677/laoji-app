@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { sha256NativeFile } from 'laoji-native-platform';
 
 const ROOT_NAME = 'meeting-attachments/';
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -50,6 +51,7 @@ export interface StoredMeetingAttachmentImage {
   mimeType: string;
   fileName: string;
   byteSize: number;
+  checksumSha256: string;
 }
 
 export async function storeMeetingAttachmentImage(input: {
@@ -76,17 +78,43 @@ export async function storeMeetingAttachmentImage(input: {
     if (byteSize < 1 || byteSize > MAX_IMAGE_BYTES) {
       throw new Error(byteSize > MAX_IMAGE_BYTES ? '图片不能超过 25 MB。' : '所选图片为空或无法读取。');
     }
+    const verified = await sha256NativeFile(destination);
+    if (verified.byteSize !== byteSize) throw new Error('图片在保存时发生变化，请重新选择。');
     const sourceName = input.fileName?.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 240);
     return {
       localUri: destination,
       mimeType: type.mimeType,
       fileName: sourceName || `照片.${type.extension}`,
       byteSize,
+      checksumSha256: verified.checksumSha256,
     };
   } catch (reason) {
     await FileSystem.deleteAsync(destination, { idempotent: true }).catch(() => {});
     throw reason;
   }
+}
+
+export async function verifyMeetingAttachmentImage(input: {
+  uri: string;
+  expectedByteSize: number;
+  expectedChecksumSha256: string;
+}): Promise<boolean> {
+  if (!isStoredMeetingAttachmentUri(input.uri)) return false;
+  try {
+    const result = await sha256NativeFile(input.uri);
+    return result.byteSize === input.expectedByteSize
+      && result.checksumSha256 === input.expectedChecksumSha256.toLocaleLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export async function inspectMeetingAttachmentImage(uri: string): Promise<{
+  byteSize: number;
+  checksumSha256: string;
+}> {
+  if (!isStoredMeetingAttachmentUri(uri)) throw new Error('附件文件路径无效。');
+  return sha256NativeFile(uri);
 }
 
 export async function deleteMeetingAttachmentFile(uri: string | null): Promise<void> {

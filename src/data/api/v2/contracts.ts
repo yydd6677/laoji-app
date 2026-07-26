@@ -7,6 +7,7 @@ export interface MeetingCapabilities {
   summaryCitations: boolean;
   summaryAttachmentsText: boolean;
   summaryAttachmentsImage: boolean;
+  meetingAttachmentsV1: boolean;
   meetingQuestionsV1: boolean;
   actionItemsV2: boolean;
   actionItemsPullV2: boolean;
@@ -222,6 +223,42 @@ export interface RemoteRecordingAssetV2 {
   serverUpdatedAtMs: number;
 }
 
+export interface MeetingAttachmentV1Registration {
+  schema_version: 1;
+  client_attachment_id: string;
+  position_ms: number;
+  kind: 'text' | 'image';
+  text_content: string | null;
+  mime_type: string | null;
+  file_name: string | null;
+  byte_size: number | null;
+  checksum_sha256: string | null;
+  client_created_at_ms: number;
+  client_updated_at_ms: number;
+}
+
+export interface RemoteMeetingAttachmentV1 {
+  remoteId: string;
+  meetingRemoteId: string;
+  clientAttachmentId: string;
+  revision: number;
+  lifecycle: 'registered' | 'ready' | 'deleted';
+  positionMs: number;
+  kind: 'text' | 'image';
+  textContent: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  byteSize: number | null;
+  checksumSha256: string | null;
+  contentUrl: string | null;
+  requiresAuth: true;
+  clientCreatedAtMs: number;
+  clientUpdatedAtMs: number;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+  serverDeletedAtMs: number | null;
+}
+
 export interface RecordingAssetTranscriptionJobV2 {
   jobId: string;
   meetingRemoteId: string;
@@ -413,6 +450,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   summaryCitations: false,
   summaryAttachmentsText: false,
   summaryAttachmentsImage: false,
+  meetingAttachmentsV1: false,
   meetingQuestionsV1: false,
   actionItemsV2: false,
   actionItemsPullV2: false,

@@ -28,6 +28,7 @@ import type {
   ApplyRecordingAssetTranscriptionJobInput,
   ClaimActionSyncOptions,
   ClaimManualNoteSyncOptions,
+  ClaimMeetingAttachmentSyncOptions,
   ClaimMeetingRootSyncOptions,
   ClaimOccurrenceSyncOptions,
   ClaimSpeakerCorrectionSyncOptions,
@@ -43,11 +44,15 @@ import type {
   MeetingActionFollowupLinkFields,
   MeetingActionReminderRecord,
   MeetingAttachmentRecord,
+  MeetingAttachmentSyncClaim,
+  MeetingAttachmentSyncFailure,
   MeetingActionPullState,
   MergeMeetingActionPullPageInput,
   MergeMeetingActionPullPageResult,
   MergeMeetingManualNoteRemoteInput,
   MergeMeetingManualNoteRemoteResult,
+  MergeRemoteMeetingAttachmentInput,
+  MergeRemoteMeetingAttachmentResult,
   MergeOccurrenceRemoteInput,
   MergeOccurrenceRemoteResult,
   MeetingActionSyncConflictRecord,
@@ -98,6 +103,7 @@ import type {
   ResolveMeetingOccurrenceSyncConflictResult,
   ResolveMeetingRootSyncConflictInput,
   RemoteMeetingActionRecord,
+  RemoteMeetingAttachmentRecord,
   RemoteOccurrenceLinkRecord,
   SaveSummaryVersionOptions,
   SetOccurrenceLinkStateInput,
@@ -458,8 +464,26 @@ type MeetingAttachmentRow = {
   mime_type: string | null;
   file_name: string | null;
   byte_size: number | null;
+  checksum_sha256: string | null;
+  remote_id: string | null;
+  remote_revision: number | null;
+  sync_state: MeetingAttachmentRecord['syncState'];
+  pending_operation: MeetingAttachmentRecord['pendingOperation'];
+  last_error_code: string | null;
+  remote_updated_at_ms: number | null;
   created_at_ms: number;
   updated_at_ms: number;
+};
+
+type MeetingAttachmentSyncOutboxRow = SyncOutboxRow & {
+  meeting_id: string;
+  meeting_remote_id: string;
+  attachment_pending_operation: MeetingAttachmentRecord['pendingOperation'];
+  attachment_local_uri: string | null;
+  attachment_mime_type: string | null;
+  attachment_file_name: string | null;
+  attachment_byte_size: number | null;
+  attachment_checksum_sha256: string | null;
 };
 
 type MeetingTagRow = {
@@ -1331,7 +1355,33 @@ function meetingAttachmentFromRow(row: MeetingAttachmentRow): MeetingAttachmentR
     && Boolean(row.file_name?.trim())
     && Number.isSafeInteger(row.byte_size)
     && (row.byte_size ?? 0) > 0;
-  if ((!textShape && !imageShape) || !Number.isSafeInteger(row.position_ms) || row.position_ms < 0) {
+  const syncStateValid = ['local', 'pending', 'synced', 'failed_retryable', 'blocked']
+    .includes(row.sync_state);
+  const pendingOperationValid = row.pending_operation === null
+    || row.pending_operation === 'create'
+    || row.pending_operation === 'delete';
+  const remoteIdentityValid = (row.remote_id === null) === (row.remote_revision === null)
+    && (row.remote_revision === null || (Number.isSafeInteger(row.remote_revision) && row.remote_revision >= 1));
+  const syncShapeValid = row.sync_state === 'synced'
+    ? row.remote_id !== null && row.remote_revision !== null && row.pending_operation === null
+    : row.sync_state === 'local'
+      ? row.remote_id === null && row.remote_revision === null && row.pending_operation === null
+      : row.pending_operation !== null;
+  const checksumValid = row.checksum_sha256 === null
+    || (row.kind === 'image' && /^sha256:[0-9a-f]{64}$/.test(row.checksum_sha256));
+  if (
+    (!textShape && !imageShape)
+    || !Number.isSafeInteger(row.position_ms)
+    || row.position_ms < 0
+    || !syncStateValid
+    || !pendingOperationValid
+    || !remoteIdentityValid
+    || !syncShapeValid
+    || !checksumValid
+    || (row.remote_updated_at_ms !== null && (
+      !Number.isSafeInteger(row.remote_updated_at_ms) || row.remote_updated_at_ms < 0
+    ))
+  ) {
     throw new Error('stored meeting attachment is invalid');
   }
   return {
@@ -1345,9 +1395,67 @@ function meetingAttachmentFromRow(row: MeetingAttachmentRow): MeetingAttachmentR
     mimeType: row.mime_type,
     fileName: row.file_name,
     byteSize: row.byte_size,
+    checksumSha256: row.checksum_sha256,
+    remoteId: row.remote_id,
+    remoteRevision: row.remote_revision,
+    syncState: row.sync_state,
+    pendingOperation: row.pending_operation,
+    lastErrorCode: row.last_error_code,
+    remoteUpdatedAtMs: row.remote_updated_at_ms,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
   };
+}
+
+function meetingAttachmentCreatePayload(attachment: MeetingAttachmentRecord): string {
+  return JSON.stringify({
+    schema_version: 1,
+    client_attachment_id: attachment.id,
+    position_ms: attachment.positionMs,
+    kind: attachment.kind,
+    text_content: attachment.textContent,
+    mime_type: attachment.mimeType,
+    file_name: attachment.fileName,
+    byte_size: attachment.byteSize,
+    checksum_sha256: attachment.checksumSha256,
+    client_created_at_ms: attachment.createdAtMs,
+    client_updated_at_ms: attachment.updatedAtMs,
+  });
+}
+
+type MeetingAttachmentCreateSnapshot = {
+  client_attachment_id: string;
+  position_ms: number;
+  kind: MeetingAttachmentRecord['kind'];
+  text_content: string | null;
+  mime_type: string | null;
+  file_name: string | null;
+  byte_size: number | null;
+  checksum_sha256: string | null;
+  client_created_at_ms: number;
+  client_updated_at_ms: number;
+};
+
+function meetingAttachmentCreateSnapshot(value: string): MeetingAttachmentCreateSnapshot {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('meeting attachment request snapshot is invalid');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('meeting attachment request snapshot is invalid');
+  }
+  const candidate = parsed as Partial<MeetingAttachmentCreateSnapshot> & { schema_version?: unknown };
+  if (
+    candidate.schema_version !== 1
+    || typeof candidate.client_attachment_id !== 'string'
+    || !Number.isSafeInteger(candidate.position_ms)
+    || (candidate.kind !== 'text' && candidate.kind !== 'image')
+    || !Number.isSafeInteger(candidate.client_created_at_ms)
+    || !Number.isSafeInteger(candidate.client_updated_at_ms)
+  ) throw new Error('meeting attachment request snapshot is invalid');
+  return candidate as MeetingAttachmentCreateSnapshot;
 }
 
 function meetingTagFromRow(row: MeetingTagRow): MeetingTagRecord {
@@ -1712,6 +1820,32 @@ function assertMeetingAttachmentValue(attachment: MeetingAttachmentRecord): void
   if (attachment.updatedAtMs < attachment.createdAtMs) {
     throw new Error('meeting attachment update time is invalid');
   }
+  if (
+    !['local', 'pending', 'synced', 'failed_retryable', 'blocked'].includes(attachment.syncState)
+    || (attachment.pendingOperation !== null
+      && attachment.pendingOperation !== 'create'
+      && attachment.pendingOperation !== 'delete')
+    || ((attachment.remoteId === null) !== (attachment.remoteRevision === null))
+    || (attachment.remoteRevision !== null && (
+      !Number.isSafeInteger(attachment.remoteRevision) || attachment.remoteRevision < 1
+    ))
+    || (attachment.remoteUpdatedAtMs !== null && (
+      !Number.isSafeInteger(attachment.remoteUpdatedAtMs) || attachment.remoteUpdatedAtMs < 0
+    ))
+    || (attachment.syncState === 'synced' && (
+      attachment.remoteId === null || attachment.pendingOperation !== null
+    ))
+    || (attachment.syncState === 'local' && (
+      attachment.remoteId !== null || attachment.pendingOperation !== null
+    ))
+    || (!['local', 'synced'].includes(attachment.syncState) && attachment.pendingOperation === null)
+  ) throw new Error('meeting attachment sync state is invalid');
+  if (attachment.remoteId !== null) assertRecordId(attachment.remoteId, 'meeting attachment remote ID');
+  assertNullableBoundedText(attachment.lastErrorCode, 160, 'meeting attachment sync error');
+  if (
+    attachment.checksumSha256 !== null
+    && (attachment.kind !== 'image' || !/^sha256:[0-9a-f]{64}$/.test(attachment.checksumSha256))
+  ) throw new Error('meeting attachment checksum is invalid');
   if (attachment.kind === 'text') {
     const content = attachment.textContent?.trim() ?? '';
     if (
@@ -1740,6 +1874,52 @@ function assertMeetingAttachmentValue(attachment: MeetingAttachmentRecord): void
     return;
   }
   throw new Error('meeting attachment kind is invalid');
+}
+
+function assertRemoteMeetingAttachmentValue(remote: RemoteMeetingAttachmentRecord): void {
+  assertRecordId(remote.remoteId, 'remote meeting attachment ID');
+  assertRecordId(remote.meetingRemoteId, 'remote meeting attachment meeting ID');
+  assertRecordId(remote.clientAttachmentId, 'remote meeting attachment client ID');
+  assertNonNegativeInteger(remote.revision, 'remote meeting attachment revision');
+  if (remote.revision < 1 || !['registered', 'ready', 'deleted'].includes(remote.lifecycle)) {
+    throw new Error('remote meeting attachment state is invalid');
+  }
+  assertNonNegativeInteger(remote.positionMs, 'remote meeting attachment position');
+  assertNonNegativeInteger(remote.clientCreatedAtMs, 'remote meeting attachment creation time');
+  assertNonNegativeInteger(remote.clientUpdatedAtMs, 'remote meeting attachment update time');
+  assertNonNegativeInteger(remote.serverCreatedAtMs, 'remote meeting attachment server creation time');
+  assertNonNegativeInteger(remote.serverUpdatedAtMs, 'remote meeting attachment server update time');
+  if (remote.serverDeletedAtMs !== null) {
+    assertNonNegativeInteger(remote.serverDeletedAtMs, 'remote meeting attachment deletion time');
+  }
+  if (remote.kind === 'text') {
+    if (
+      !remote.textContent?.trim()
+      || [...remote.textContent].length > 500
+      || remote.mimeType !== null
+      || remote.fileName !== null
+      || remote.byteSize !== null
+      || remote.checksumSha256 !== null
+      || remote.contentUrl !== null
+    ) throw new Error('remote text attachment is invalid');
+  } else if (remote.kind === 'image') {
+    if (
+      remote.textContent !== null
+      || !remote.mimeType?.startsWith('image/')
+      || !remote.fileName?.trim()
+      || !Number.isSafeInteger(remote.byteSize)
+      || (remote.byteSize ?? 0) < 1
+      || (remote.lifecycle === 'ready') !== Boolean(remote.contentUrl)
+      || (remote.checksumSha256 !== null
+        && !/^sha256:[0-9a-f]{64}$/.test(remote.checksumSha256))
+      || (remote.lifecycle === 'ready' && remote.checksumSha256 === null)
+    ) throw new Error('remote image attachment is invalid');
+  } else {
+    throw new Error('remote meeting attachment kind is invalid');
+  }
+  if ((remote.lifecycle === 'deleted') !== (remote.serverDeletedAtMs !== null)) {
+    throw new Error('remote meeting attachment deletion state is invalid');
+  }
 }
 
 function assertMeetingParticipants(value: readonly string[]): void {
@@ -2179,6 +2359,13 @@ async function refreshMeetingSyncState(
              WHERE correction.meeting_id = ?
            )
          )
+         OR (
+           outbox.aggregate_type = 'meeting_attachment'
+           AND outbox.aggregate_id IN (
+             SELECT attachment.id FROM meeting_attachments attachment
+             WHERE attachment.meeting_id = ? AND attachment.scope_key = ?
+           )
+         )
        )`,
     scopeKey,
     meetingId,
@@ -2186,6 +2373,8 @@ async function refreshMeetingSyncState(
     meetingId,
     meetingId,
     meetingId,
+    meetingId,
+    scopeKey,
   );
   const conflicted = Boolean(unresolvedConflict)
     || outstanding.some(item => item.status === 'blocked' || item.status === 'permanent_error');
@@ -9220,11 +9409,135 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
        WHERE attachment.meeting_id = ? AND attachment.scope_key = ?
          AND meeting.lifecycle <> 'deleted'
+         AND attachment.pending_operation IS NOT 'delete'
        ORDER BY attachment.position_ms, attachment.created_at_ms, attachment.id`,
       meetingId,
       scopeKey,
     );
     return rows.map(meetingAttachmentFromRow);
+  }
+
+  async getMeetingAttachmentForSync(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+  ): Promise<MeetingAttachmentRecord | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(attachmentId, 'meeting attachment ID');
+    assertRecordId(meetingId, 'meeting ID');
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<MeetingAttachmentRow>(
+      `SELECT attachment.*
+       FROM meeting_attachments attachment
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+       WHERE attachment.id = ? AND attachment.meeting_id = ? AND attachment.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'`,
+      attachmentId,
+      meetingId,
+      scopeKey,
+    );
+    return row ? meetingAttachmentFromRow(row) : null;
+  }
+
+  async listMeetingAttachmentImagesMissingChecksum(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    limit: number,
+  ): Promise<readonly MeetingAttachmentRecord[]> {
+    assertScopeKey(scopeKey);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+      throw new Error('meeting attachment checksum repair limit is invalid');
+    }
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingAttachmentRow>(
+      `SELECT attachment.* FROM meeting_attachments attachment
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+       WHERE attachment.scope_key = ? AND attachment.kind = 'image'
+         AND attachment.checksum_sha256 IS NULL AND meeting.lifecycle <> 'deleted'
+       ORDER BY attachment.created_at_ms, attachment.id
+       LIMIT ?`,
+      scopeKey,
+      limit,
+    );
+    return rows.map(meetingAttachmentFromRow);
+  }
+
+  async repairMeetingAttachmentImageChecksum(input: {
+    attachmentId: string;
+    meetingId: string;
+    scopeKey: Exclude<ScopeKey, 'guest'>;
+    localUri: string;
+    byteSize: number;
+    checksumSha256: string;
+  }): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.attachmentId, 'meeting attachment ID');
+    assertRecordId(input.meetingId, 'meeting ID');
+    assertNonNegativeInteger(input.byteSize, 'meeting attachment byte size');
+    if (input.byteSize < 1 || !/^sha256:[0-9a-f]{64}$/.test(input.checksumSha256)) {
+      throw new Error('meeting attachment checksum repair value is invalid');
+    }
+    const repaired = await withMeetingDatabaseTransaction(async database => {
+      const row = await database.getFirstAsync<MeetingAttachmentRow>(
+        `SELECT attachment.* FROM meeting_attachments attachment
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE attachment.id = ? AND attachment.meeting_id = ? AND attachment.scope_key = ?
+           AND attachment.kind = 'image' AND attachment.checksum_sha256 IS NULL
+           AND meeting.lifecycle <> 'deleted'`,
+        input.attachmentId,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!row) return false;
+      if (row.local_uri !== input.localUri || row.byte_size !== input.byteSize) {
+        throw new Error('meeting attachment changed during checksum repair');
+      }
+      const inFlight = await database.getFirstAsync<{ operation_id: string }>(
+        `SELECT operation_id FROM sync_outbox
+         WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+           AND aggregate_id = ? AND operation_type = 'meeting_attachment.create'
+           AND status = 'in_flight' LIMIT 1`,
+        input.scopeKey,
+        input.attachmentId,
+      );
+      if (inFlight) return false;
+      const updated = await database.runAsync(
+        `UPDATE meeting_attachments SET checksum_sha256 = ?,
+           sync_state = CASE WHEN sync_state IN ('failed_retryable','blocked') THEN 'pending' ELSE sync_state END,
+           last_error_code = CASE WHEN sync_state IN ('failed_retryable','blocked') THEN NULL ELSE last_error_code END
+         WHERE id = ? AND meeting_id = ? AND scope_key = ? AND checksum_sha256 IS NULL`,
+        input.checksumSha256,
+        input.attachmentId,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (updated.changes !== 1) return false;
+      const next = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        input.attachmentId,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!next) throw new Error('meeting attachment checksum repair was not saved');
+      const payloadJson = meetingAttachmentCreatePayload(meetingAttachmentFromRow(next));
+      await database.runAsync(
+        `UPDATE sync_outbox SET payload_json = ?, request_payload_json = NULL,
+           status = 'pending', next_attempt_at_ms = NULL, last_error_code = NULL,
+           claim_token = NULL
+         WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+           AND aggregate_id = ? AND operation_type = 'meeting_attachment.create'
+           AND status IN ('pending','retry','blocked','permanent_error')`,
+        payloadJson,
+        input.scopeKey,
+        input.attachmentId,
+      );
+      await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+      return true;
+    });
+    if (repaired) this.notify([input.meetingId]);
+    return repaired;
   }
 
   async createMeetingAttachment(
@@ -9233,6 +9546,17 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   ): Promise<MeetingAttachmentRecord> {
     assertScopeKey(scopeKey);
     assertMeetingAttachmentValue(attachment);
+    if (scopeKey === 'guest') {
+      if (attachment.syncState !== 'local' || attachment.pendingOperation !== null) {
+        throw new Error('guest meeting attachment sync state is invalid');
+      }
+    } else if (
+      attachment.syncState !== 'pending'
+      || attachment.pendingOperation !== 'create'
+      || attachment.remoteId !== null
+      || attachment.remoteRevision !== null
+    ) throw new Error('account meeting attachment sync state is invalid');
+    const operationId = scopeKey === 'guest' ? null : secureClientIdFactory.create();
     const created = await withMeetingDatabaseTransaction(async database => {
       const meeting = await database.getFirstAsync<{ id: string }>(
         `SELECT id FROM meeting_notes
@@ -9260,8 +9584,10 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         `INSERT INTO meeting_attachments (
            id, meeting_id, scope_key, marker_id, position_ms, kind,
            text_content, local_uri, mime_type, file_name, byte_size,
+           checksum_sha256, remote_id, remote_revision, sync_state,
+           pending_operation, last_error_code, remote_updated_at_ms,
            created_at_ms, updated_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         attachment.id,
         attachment.meetingId,
         scopeKey,
@@ -9273,6 +9599,13 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         attachment.mimeType,
         attachment.fileName,
         attachment.byteSize,
+        attachment.checksumSha256,
+        attachment.remoteId,
+        attachment.remoteRevision,
+        attachment.syncState,
+        attachment.pendingOperation,
+        attachment.lastErrorCode,
+        attachment.remoteUpdatedAtMs,
         attachment.createdAtMs,
         attachment.updatedAtMs,
       );
@@ -9283,7 +9616,27 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       if (!row) throw new Error('meeting attachment was not created');
-      return meetingAttachmentFromRow(row);
+      const record = meetingAttachmentFromRow(row);
+      if (operationId) {
+        const payloadJson = meetingAttachmentCreatePayload(record);
+        await database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_attachment', ?, 'meeting_attachment.create',
+             NULL, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          attachment.id,
+          payloadJson,
+          attachment.createdAtMs,
+          attachment.updatedAtMs,
+        );
+        await refreshMeetingSyncState(database, attachment.meetingId, scopeKey);
+      }
+      return record;
     });
     this.notify([attachment.meetingId]);
     return created;
@@ -9310,17 +9663,787 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       if (!row) return null;
-      const result = await database.runAsync(
-        'DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+      const record = meetingAttachmentFromRow(row);
+      if (scopeKey === 'guest') {
+        const result = await database.runAsync(
+          'DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+          attachmentId,
+          meetingId,
+          scopeKey,
+        );
+        if (result.changes !== 1) throw new Error('meeting attachment changed during deletion');
+        return record;
+      }
+      if (record.pendingOperation === 'delete') return record;
+      const updatedAtMs = Math.max(Date.now(), record.updatedAtMs);
+      const updated = await database.runAsync(
+        `UPDATE meeting_attachments SET sync_state = 'pending',
+           pending_operation = 'delete', last_error_code = NULL, updated_at_ms = ?
+         WHERE id = ? AND meeting_id = ? AND scope_key = ?
+           AND pending_operation IS NOT 'delete'`,
+        updatedAtMs,
         attachmentId,
         meetingId,
         scopeKey,
       );
-      if (result.changes !== 1) throw new Error('meeting attachment changed during deletion');
-      return meetingAttachmentFromRow(row);
+      if (updated.changes !== 1) throw new Error('meeting attachment changed during deletion');
+      if (record.remoteId !== null && record.remoteRevision !== null) {
+        const operationId = secureClientIdFactory.create();
+        await database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_attachment', ?, 'meeting_attachment.delete',
+             ?, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          attachmentId,
+          record.remoteRevision,
+          JSON.stringify({
+            schema_version: 1,
+            client_attachment_id: attachmentId,
+            remote_id: record.remoteId,
+            expected_remote_revision: record.remoteRevision,
+          }),
+          updatedAtMs,
+          updatedAtMs,
+        );
+      }
+      await refreshMeetingSyncState(database, meetingId, scopeKey);
+      const next = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        attachmentId,
+        meetingId,
+        scopeKey,
+      );
+      if (!next) throw new Error('meeting attachment delete state was not saved');
+      return meetingAttachmentFromRow(next);
     });
     if (deleted) this.notify([meetingId]);
     return deleted;
+  }
+
+  async ensureMeetingAttachmentSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    createdAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(createdAtMs, 'meeting attachment sync repair time');
+    const touched = new Set<string>();
+    const inserted = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<MeetingAttachmentRow>(
+        `SELECT attachment.* FROM meeting_attachments attachment
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE attachment.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND attachment.sync_state <> 'blocked'
+           AND (attachment.kind = 'text' OR attachment.checksum_sha256 IS NOT NULL)
+           AND (attachment.pending_operation IS NOT NULL OR attachment.sync_state = 'local')
+         ORDER BY attachment.updated_at_ms, attachment.id`,
+        scopeKey,
+      );
+      let count = 0;
+      for (const sourceRow of rows) {
+        let row = sourceRow;
+        if (row.sync_state === 'local' && row.pending_operation === null) {
+          const repaired = await database.runAsync(
+            `UPDATE meeting_attachments SET sync_state = 'pending',
+               pending_operation = 'create', last_error_code = NULL,
+               updated_at_ms = MAX(updated_at_ms, ?)
+             WHERE id = ? AND scope_key = ? AND sync_state = 'local'
+               AND pending_operation IS NULL`,
+            createdAtMs,
+            row.id,
+            scopeKey,
+          );
+          if (repaired.changes !== 1) continue;
+          const refreshed = await database.getFirstAsync<MeetingAttachmentRow>(
+            'SELECT * FROM meeting_attachments WHERE id = ? AND scope_key = ?',
+            row.id,
+            scopeKey,
+          );
+          if (!refreshed) continue;
+          row = refreshed;
+        }
+        const operationType = row.pending_operation === 'delete' && row.remote_id !== null
+          ? 'meeting_attachment.delete'
+          : 'meeting_attachment.create';
+        const existing = await database.getFirstAsync<{ operation_id: string }>(
+          `SELECT operation_id FROM sync_outbox
+           WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+             AND aggregate_id = ? AND operation_type = ? AND status <> 'completed'
+           LIMIT 1`,
+          scopeKey,
+          row.id,
+          operationType,
+        );
+        if (existing) continue;
+        const attachment = meetingAttachmentFromRow(row);
+        const operationId = secureClientIdFactory.create();
+        const payloadJson = operationType === 'meeting_attachment.create'
+          ? meetingAttachmentCreatePayload(attachment)
+          : JSON.stringify({
+              schema_version: 1,
+              client_attachment_id: attachment.id,
+              remote_id: attachment.remoteId,
+              expected_remote_revision: attachment.remoteRevision,
+            });
+        await database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_attachment', ?, ?, ?, ?, 'pending',
+             0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          attachment.id,
+          operationType,
+          operationType === 'meeting_attachment.delete' ? attachment.remoteRevision : null,
+          payloadJson,
+          createdAtMs,
+          createdAtMs,
+        );
+        touched.add(attachment.meetingId);
+        count += 1;
+      }
+      for (const meetingId of touched) {
+        await refreshMeetingSyncState(database, meetingId, scopeKey);
+      }
+      return count;
+    });
+    if (touched.size > 0) this.notify([...touched]);
+    return inserted;
+  }
+
+  async claimMeetingAttachmentSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    options: ClaimMeetingAttachmentSyncOptions,
+  ): Promise<readonly MeetingAttachmentSyncClaim[]> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(options.nowMs, 'meeting attachment sync claim time');
+    assertNonNegativeInteger(options.staleBeforeMs, 'meeting attachment sync stale time');
+    if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 20) {
+      throw new Error('meeting attachment sync claim limit is invalid');
+    }
+    return withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<MeetingAttachmentSyncOutboxRow>(
+        `SELECT outbox.*, attachment.meeting_id AS meeting_id,
+           meeting.remote_id AS meeting_remote_id,
+           attachment.pending_operation AS attachment_pending_operation,
+           attachment.local_uri AS attachment_local_uri,
+           attachment.mime_type AS attachment_mime_type,
+           attachment.file_name AS attachment_file_name,
+           attachment.byte_size AS attachment_byte_size,
+           attachment.checksum_sha256 AS attachment_checksum_sha256
+         FROM sync_outbox outbox
+         INNER JOIN meeting_attachments attachment
+           ON attachment.id = outbox.aggregate_id AND attachment.scope_key = outbox.scope_key
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE outbox.scope_key = ? AND outbox.aggregate_type = 'meeting_attachment'
+           AND outbox.operation_type IN ('meeting_attachment.create','meeting_attachment.delete')
+           AND outbox.status IN ('pending','retry','in_flight')
+           AND meeting.lifecycle <> 'deleted'
+           AND meeting.remote_id IS NOT NULL AND LENGTH(TRIM(meeting.remote_id)) > 0
+         ORDER BY outbox.created_at_ms, outbox.operation_id`,
+        scopeKey,
+      );
+      const candidates: MeetingAttachmentSyncOutboxRow[] = [];
+      const byAttachment = new Map<string, MeetingAttachmentSyncOutboxRow[]>();
+      for (const row of rows) {
+        const values = byAttachment.get(row.aggregate_id);
+        if (values) values.push(row);
+        else byAttachment.set(row.aggregate_id, [row]);
+      }
+      for (const attachmentRows of byAttachment.values()) {
+        const active = attachmentRows.find(row => (
+          row.status === 'in_flight' && row.updated_at_ms <= options.staleBeforeMs
+        )) ?? attachmentRows.find(row => (
+          row.status === 'retry'
+          && (row.next_attempt_at_ms === null || row.next_attempt_at_ms <= options.nowMs)
+        )) ?? attachmentRows.find(row => row.status === 'pending');
+        if (active) candidates.push(active);
+      }
+      candidates.sort((left, right) => (
+        left.created_at_ms - right.created_at_ms
+        || left.operation_id.localeCompare(right.operation_id)
+      ));
+      const claims: MeetingAttachmentSyncClaim[] = [];
+      for (const row of candidates.slice(0, options.limit)) {
+        const requestPayloadJson = row.status === 'pending'
+          ? row.payload_json
+          : row.request_payload_json ?? row.payload_json;
+        const claimToken = secureClientIdFactory.create();
+        let condition = "status = 'pending'";
+        const conditionParams: Array<string | number | null> = [];
+        if (row.status === 'retry') {
+          condition = "status = 'retry' AND next_attempt_at_ms IS ? AND updated_at_ms = ?";
+          conditionParams.push(row.next_attempt_at_ms, row.updated_at_ms);
+        } else if (row.status === 'in_flight') {
+          condition = "status = 'in_flight' AND updated_at_ms <= ?";
+          conditionParams.push(options.staleBeforeMs);
+        }
+        const updated = await database.runAsync(
+          `UPDATE sync_outbox SET status = 'in_flight',
+             attempt_count = attempt_count + 1, next_attempt_at_ms = NULL,
+             last_error_code = NULL, request_payload_json = ?,
+             claim_token = ?, updated_at_ms = ?
+           WHERE operation_id = ? AND scope_key = ?
+             AND aggregate_type = 'meeting_attachment' AND ${condition}`,
+          requestPayloadJson,
+          claimToken,
+          options.nowMs,
+          row.operation_id,
+          scopeKey,
+          ...conditionParams,
+        );
+        if (updated.changes !== 1) continue;
+        claims.push({
+          scopeKey,
+          meetingId: row.meeting_id,
+          meetingRemoteId: row.meeting_remote_id,
+          attachmentId: row.aggregate_id,
+          operationId: row.operation_id,
+          operationType: row.operation_type as MeetingAttachmentSyncClaim['operationType'],
+          claimToken,
+          requestPayloadJson,
+          attemptCount: row.attempt_count + 1,
+          localUri: row.attachment_local_uri,
+          mimeType: row.attachment_mime_type,
+          fileName: row.attachment_file_name,
+          byteSize: row.attachment_byte_size,
+          checksumSha256: row.attachment_checksum_sha256,
+        });
+      }
+      return claims;
+    });
+  }
+
+  async getNextMeetingAttachmentSyncAttemptAt(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    staleClaimAfterMs: number,
+  ): Promise<number | null> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(staleClaimAfterMs, 'meeting attachment sync stale interval');
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<SyncAttemptProjectionRow>(
+      `SELECT outbox.aggregate_id, outbox.status,
+         outbox.next_attempt_at_ms, outbox.updated_at_ms
+       FROM sync_outbox outbox
+       INNER JOIN meeting_attachments attachment
+         ON attachment.id = outbox.aggregate_id AND attachment.scope_key = outbox.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+       WHERE outbox.scope_key = ? AND outbox.aggregate_type = 'meeting_attachment'
+         AND outbox.status IN ('pending','retry','in_flight')
+         AND meeting.lifecycle <> 'deleted' AND meeting.remote_id IS NOT NULL`,
+      scopeKey,
+    );
+    return nextGroupedSyncAttemptAt(rows, staleClaimAfterMs);
+  }
+
+  async hasMeetingAttachmentSyncOperationsWaitingForRoot(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const row = await database.getFirstAsync<{ found: number }>(
+      `SELECT 1 AS found
+       FROM sync_outbox outbox
+       INNER JOIN meeting_attachments attachment
+         ON attachment.id = outbox.aggregate_id AND attachment.scope_key = outbox.scope_key
+       INNER JOIN meeting_notes meeting
+         ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+       WHERE outbox.scope_key = ? AND outbox.aggregate_type = 'meeting_attachment'
+         AND outbox.status IN ('pending','retry','in_flight')
+         AND meeting.lifecycle <> 'deleted'
+         AND (meeting.remote_id IS NULL OR LENGTH(TRIM(meeting.remote_id)) = 0)
+       LIMIT 1`,
+      scopeKey,
+    );
+    return Boolean(row);
+  }
+
+  async completeMeetingAttachmentCreateClaim(
+    claim: MeetingAttachmentSyncClaim,
+    remote: RemoteMeetingAttachmentRecord,
+    completedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(claim.scopeKey);
+    assertRemoteMeetingAttachmentValue(remote);
+    assertNonNegativeInteger(completedAtMs, 'meeting attachment sync completion time');
+    if (claim.operationType !== 'meeting_attachment.create' || remote.lifecycle !== 'ready') {
+      throw new Error('meeting attachment create acknowledgement is invalid');
+    }
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const claimed = await database.getFirstAsync<{ operation_id: string }>(
+        `SELECT operation_id FROM sync_outbox
+         WHERE operation_id = ? AND scope_key = ?
+           AND aggregate_type = 'meeting_attachment' AND aggregate_id = ?
+           AND status = 'in_flight' AND claim_token = ?`,
+        claim.operationId,
+        claim.scopeKey,
+        claim.attachmentId,
+        claim.claimToken,
+      );
+      if (!claimed) return false;
+      const row = await database.getFirstAsync<MeetingAttachmentRow>(
+        `SELECT attachment.* FROM meeting_attachments attachment
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE attachment.id = ? AND attachment.scope_key = ?
+           AND attachment.meeting_id = ? AND meeting.remote_id = ?`,
+        claim.attachmentId,
+        claim.scopeKey,
+        claim.meetingId,
+        claim.meetingRemoteId,
+      );
+      if (!row) return false;
+      const attachment = meetingAttachmentFromRow(row);
+      const request = meetingAttachmentCreateSnapshot(claim.requestPayloadJson);
+      if (
+        remote.meetingRemoteId !== claim.meetingRemoteId
+        || request.client_attachment_id !== attachment.id
+        || request.position_ms !== attachment.positionMs
+        || request.kind !== attachment.kind
+        || request.text_content !== attachment.textContent
+        || request.mime_type !== attachment.mimeType
+        || request.file_name !== attachment.fileName
+        || request.byte_size !== attachment.byteSize
+        || request.checksum_sha256 !== attachment.checksumSha256
+        || request.client_created_at_ms !== attachment.createdAtMs
+        || remote.clientAttachmentId !== request.client_attachment_id
+        || remote.positionMs !== request.position_ms
+        || remote.kind !== request.kind
+        || remote.textContent !== request.text_content
+        || remote.mimeType !== request.mime_type
+        || remote.fileName !== request.file_name
+        || remote.byteSize !== request.byte_size
+        || remote.checksumSha256 !== request.checksum_sha256
+        || remote.clientCreatedAtMs !== request.client_created_at_ms
+        || remote.clientUpdatedAtMs !== request.client_updated_at_ms
+      ) throw new Error('meeting attachment create acknowledgement changed identity');
+      if (attachment.remoteId !== null && attachment.remoteId !== remote.remoteId) {
+        throw new Error('meeting attachment remote identity changed');
+      }
+      const deleting = attachment.pendingOperation === 'delete';
+      const updated = await database.runAsync(
+        `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
+           checksum_sha256 = ?, sync_state = ?, pending_operation = ?,
+           last_error_code = NULL, remote_updated_at_ms = ?,
+           updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE id = ? AND scope_key = ?`,
+        remote.remoteId,
+        remote.revision,
+        remote.checksumSha256,
+        deleting ? 'pending' : 'synced',
+        deleting ? 'delete' : null,
+        remote.serverUpdatedAtMs,
+        completedAtMs,
+        attachment.id,
+        claim.scopeKey,
+      );
+      if (updated.changes !== 1) throw new Error('meeting attachment create acknowledgement was not saved');
+      await database.runAsync(
+        `UPDATE sync_outbox SET status = 'completed', claim_token = NULL,
+           next_attempt_at_ms = NULL, last_error_code = NULL, updated_at_ms = ?
+         WHERE operation_id = ? AND status = 'in_flight' AND claim_token = ?`,
+        completedAtMs,
+        claim.operationId,
+        claim.claimToken,
+      );
+      if (deleting) {
+        const existingDelete = await database.getFirstAsync<{ operation_id: string }>(
+          `SELECT operation_id FROM sync_outbox
+           WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+             AND aggregate_id = ? AND operation_type = 'meeting_attachment.delete'
+             AND status <> 'completed' LIMIT 1`,
+          claim.scopeKey,
+          attachment.id,
+        );
+        if (!existingDelete) {
+          const operationId = secureClientIdFactory.create();
+          await database.runAsync(
+            `INSERT INTO sync_outbox (
+               operation_id, scope_key, aggregate_type, aggregate_id,
+               operation_type, base_revision, payload_json, status,
+               attempt_count, created_at_ms, updated_at_ms
+             ) VALUES (?, ?, 'meeting_attachment', ?, 'meeting_attachment.delete',
+               ?, ?, 'pending', 0, ?, ?)`,
+            operationId,
+            claim.scopeKey,
+            attachment.id,
+            remote.revision,
+            JSON.stringify({
+              schema_version: 1,
+              client_attachment_id: attachment.id,
+              remote_id: remote.remoteId,
+              expected_remote_revision: remote.revision,
+            }),
+            completedAtMs,
+            completedAtMs,
+          );
+        }
+      }
+      await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
+      return true;
+    });
+    if (applied) this.notify([claim.meetingId]);
+    return applied;
+  }
+
+  async completeMeetingAttachmentDeleteClaim(
+    claim: MeetingAttachmentSyncClaim,
+    remote: RemoteMeetingAttachmentRecord,
+    completedAtMs: number,
+  ): Promise<MeetingAttachmentRecord | null> {
+    assertScopeKey(claim.scopeKey);
+    assertRemoteMeetingAttachmentValue(remote);
+    assertNonNegativeInteger(completedAtMs, 'meeting attachment deletion completion time');
+    if (claim.operationType !== 'meeting_attachment.delete' || remote.lifecycle !== 'deleted') {
+      throw new Error('meeting attachment delete acknowledgement is invalid');
+    }
+    let removed: MeetingAttachmentRecord | null = null;
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const claimed = await database.getFirstAsync<{ operation_id: string }>(
+        `SELECT operation_id FROM sync_outbox
+         WHERE operation_id = ? AND scope_key = ?
+           AND aggregate_type = 'meeting_attachment' AND aggregate_id = ?
+           AND status = 'in_flight' AND claim_token = ?`,
+        claim.operationId,
+        claim.scopeKey,
+        claim.attachmentId,
+        claim.claimToken,
+      );
+      if (!claimed) return false;
+      const row = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        claim.attachmentId,
+        claim.meetingId,
+        claim.scopeKey,
+      );
+      if (!row) return false;
+      const attachment = meetingAttachmentFromRow(row);
+      if (
+        remote.meetingRemoteId !== claim.meetingRemoteId
+        || remote.clientAttachmentId !== attachment.id
+        || attachment.remoteId !== remote.remoteId
+        || attachment.pendingOperation !== 'delete'
+      ) throw new Error('meeting attachment delete acknowledgement changed identity');
+      removed = attachment;
+      await database.runAsync(
+        `DELETE FROM sync_outbox WHERE scope_key = ?
+           AND aggregate_type = 'meeting_attachment' AND aggregate_id = ?`,
+        claim.scopeKey,
+        attachment.id,
+      );
+      const deleted = await database.runAsync(
+        'DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        attachment.id,
+        claim.meetingId,
+        claim.scopeKey,
+      );
+      if (deleted.changes !== 1) throw new Error('meeting attachment deletion acknowledgement was not applied');
+      await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
+      return true;
+    });
+    if (applied) this.notify([claim.meetingId]);
+    return applied ? removed : null;
+  }
+
+  async failMeetingAttachmentSyncClaim(
+    claim: MeetingAttachmentSyncClaim,
+    failure: MeetingAttachmentSyncFailure,
+  ): Promise<boolean> {
+    assertScopeKey(claim.scopeKey);
+    assertRecordId(claim.claimToken, 'meeting attachment sync claim');
+    assertNonNegativeInteger(failure.updatedAtMs, 'meeting attachment sync failure time');
+    assertOptionalNonNegativeInteger(failure.nextAttemptAtMs, 'meeting attachment sync retry time');
+    const errorCode = normalizedSyncErrorCode(failure.errorCode);
+    if ((failure.disposition === 'retry') !== (failure.nextAttemptAtMs !== null)) {
+      throw new Error('meeting attachment sync retry state is invalid');
+    }
+    const outboxState = failure.disposition === 'retry' ? 'retry' : failure.disposition;
+    const attachmentState = failure.disposition === 'retry' ? 'failed_retryable' : 'blocked';
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const failed = await database.runAsync(
+        `UPDATE sync_outbox SET status = ?, next_attempt_at_ms = ?,
+           last_error_code = ?, claim_token = NULL, updated_at_ms = ?
+         WHERE operation_id = ? AND scope_key = ?
+           AND aggregate_type = 'meeting_attachment' AND aggregate_id = ?
+           AND status = 'in_flight' AND claim_token = ?`,
+        outboxState,
+        failure.nextAttemptAtMs,
+        errorCode,
+        failure.updatedAtMs,
+        claim.operationId,
+        claim.scopeKey,
+        claim.attachmentId,
+        claim.claimToken,
+      );
+      if (failed.changes !== 1) return false;
+      await database.runAsync(
+        `UPDATE meeting_attachments SET sync_state = ?, last_error_code = ?,
+           updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+        attachmentState,
+        errorCode,
+        failure.updatedAtMs,
+        claim.attachmentId,
+        claim.meetingId,
+        claim.scopeKey,
+      );
+      await refreshMeetingSyncState(database, claim.meetingId, claim.scopeKey);
+      return true;
+    });
+    if (applied) this.notify([claim.meetingId]);
+    return applied;
+  }
+
+  async retryMeetingAttachmentSync(
+    attachmentId: string,
+    meetingId: string,
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    retriedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertRecordId(attachmentId, 'meeting attachment ID');
+    assertRecordId(meetingId, 'meeting ID');
+    assertNonNegativeInteger(retriedAtMs, 'meeting attachment retry time');
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const attachment = await database.getFirstAsync<MeetingAttachmentRow>(
+        `SELECT attachment.* FROM meeting_attachments attachment
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = attachment.meeting_id AND meeting.scope_key = attachment.scope_key
+         WHERE attachment.id = ? AND attachment.meeting_id = ? AND attachment.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'`,
+        attachmentId,
+        meetingId,
+        scopeKey,
+      );
+      if (!attachment || attachment.pending_operation === null) return false;
+      const operationType = attachment.pending_operation === 'delete' && attachment.remote_id !== null
+        ? 'meeting_attachment.delete'
+        : 'meeting_attachment.create';
+      const reset = await database.runAsync(
+        `UPDATE sync_outbox SET status = 'pending', next_attempt_at_ms = NULL,
+           last_error_code = NULL, claim_token = NULL, updated_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+           AND aggregate_id = ? AND operation_type = ?
+           AND status IN ('retry','blocked','permanent_error')`,
+        retriedAtMs,
+        scopeKey,
+        attachmentId,
+        operationType,
+      );
+      if (reset.changes < 1) return false;
+      await database.runAsync(
+        `UPDATE meeting_attachments SET sync_state = 'pending',
+           last_error_code = NULL, updated_at_ms = MAX(updated_at_ms, ?)
+         WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+        retriedAtMs,
+        attachmentId,
+        meetingId,
+        scopeKey,
+      );
+      await refreshMeetingSyncState(database, meetingId, scopeKey);
+      return true;
+    });
+    if (applied) this.notify([meetingId]);
+    return applied;
+  }
+
+  async mergeRemoteMeetingAttachment(
+    input: MergeRemoteMeetingAttachmentInput,
+  ): Promise<MergeRemoteMeetingAttachmentResult> {
+    assertScopeKey(input.scopeKey);
+    assertRecordId(input.meetingId, 'meeting attachment merge meeting ID');
+    assertRecordId(input.meetingRemoteId, 'meeting attachment merge remote meeting ID');
+    assertRemoteMeetingAttachmentValue(input.remote);
+    assertNonNegativeInteger(input.mergedAtMs, 'meeting attachment merge time');
+    if (input.remote.meetingRemoteId !== input.meetingRemoteId) {
+      throw new Error('remote meeting attachment belongs to another meeting');
+    }
+    let cleanupUri: string | null = input.localUri;
+    const result = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<{ remote_id: string | null }>(
+        `SELECT remote_id FROM meeting_notes
+         WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!meeting || meeting.remote_id !== input.meetingRemoteId) {
+        throw new Error('meeting attachment merge target changed');
+      }
+      const byClient = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+        input.remote.clientAttachmentId,
+        input.meetingId,
+        input.scopeKey,
+      );
+      const byRemote = await database.getFirstAsync<MeetingAttachmentRow>(
+        'SELECT * FROM meeting_attachments WHERE remote_id = ? AND scope_key = ?',
+        input.remote.remoteId,
+        input.scopeKey,
+      );
+      if (byClient && byRemote && byClient.id !== byRemote.id) {
+        throw new Error('meeting attachment remote identity is ambiguous');
+      }
+      const existingRow = byClient ?? byRemote;
+      if (input.remote.lifecycle === 'deleted') {
+        if (!existingRow) return { outcome: 'unchanged' as const, cleanupUri };
+        const existing = meetingAttachmentFromRow(existingRow);
+        await database.runAsync(
+          `DELETE FROM sync_outbox WHERE scope_key = ?
+             AND aggregate_type = 'meeting_attachment' AND aggregate_id = ?`,
+          input.scopeKey,
+          existing.id,
+        );
+        await database.runAsync(
+          'DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
+          existing.id,
+          input.meetingId,
+          input.scopeKey,
+        );
+        cleanupUri = existing.localUri ?? cleanupUri;
+        await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+        return { outcome: 'deleted' as const, cleanupUri };
+      }
+      if (input.remote.lifecycle === 'registered') {
+        if (!existingRow) return { outcome: 'pending_local' as const, cleanupUri };
+        const existing = meetingAttachmentFromRow(existingRow);
+        if (existing.remoteId !== null && existing.remoteId !== input.remote.remoteId) {
+          throw new Error('meeting attachment remote identity changed');
+        }
+        await database.runAsync(
+          `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
+             remote_updated_at_ms = ?, updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE id = ? AND scope_key = ?`,
+          input.remote.remoteId,
+          input.remote.revision,
+          input.remote.serverUpdatedAtMs,
+          input.mergedAtMs,
+          existing.id,
+          input.scopeKey,
+        );
+        return { outcome: 'attached' as const, cleanupUri };
+      }
+      if (existingRow) {
+        const existing = meetingAttachmentFromRow(existingRow);
+        if (
+          existing.meetingId !== input.meetingId
+          || existing.positionMs !== input.remote.positionMs
+          || existing.kind !== input.remote.kind
+          || existing.textContent !== input.remote.textContent
+          || existing.mimeType !== input.remote.mimeType
+          || existing.fileName !== input.remote.fileName
+          || existing.byteSize !== input.remote.byteSize
+          || existing.createdAtMs !== input.remote.clientCreatedAtMs
+        ) throw new Error('meeting attachment remote payload changed immutable content');
+        if (existing.remoteRevision !== null && input.remote.revision < existing.remoteRevision) {
+          return { outcome: 'unchanged' as const, cleanupUri };
+        }
+        const deleting = existing.pendingOperation === 'delete';
+        const nextLocalUri = existing.kind === 'image'
+          ? input.localUri ?? existing.localUri
+          : null;
+        await database.runAsync(
+          `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
+             local_uri = ?, checksum_sha256 = ?, sync_state = ?, pending_operation = ?,
+             last_error_code = NULL, remote_updated_at_ms = ?,
+             updated_at_ms = MAX(updated_at_ms, ?)
+           WHERE id = ? AND scope_key = ?`,
+          input.remote.remoteId,
+          input.remote.revision,
+          nextLocalUri,
+          input.remote.checksumSha256,
+          deleting ? 'pending' : 'synced',
+          deleting ? 'delete' : null,
+          input.remote.serverUpdatedAtMs,
+          input.mergedAtMs,
+          existing.id,
+          input.scopeKey,
+        );
+        if (!deleting) {
+          await database.runAsync(
+            `UPDATE sync_outbox SET status = 'completed', claim_token = NULL,
+               next_attempt_at_ms = NULL, last_error_code = NULL, updated_at_ms = ?
+             WHERE scope_key = ? AND aggregate_type = 'meeting_attachment'
+               AND aggregate_id = ? AND operation_type = 'meeting_attachment.create'
+               AND status <> 'completed'`,
+            input.mergedAtMs,
+            input.scopeKey,
+            existing.id,
+          );
+        }
+        cleanupUri = existing.localUri && existing.localUri !== nextLocalUri
+          ? existing.localUri
+          : input.localUri && input.localUri !== nextLocalUri
+            ? input.localUri
+            : null;
+        await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+        return { outcome: deleting ? 'pending_local' as const : 'attached' as const, cleanupUri };
+      }
+      if (input.remote.kind === 'image' && !input.localUri?.startsWith('file://')) {
+        throw new Error('remote image attachment has no verified local file');
+      }
+      const inserted: MeetingAttachmentRecord = {
+        id: input.remote.clientAttachmentId,
+        meetingId: input.meetingId,
+        markerId: null,
+        positionMs: input.remote.positionMs,
+        kind: input.remote.kind,
+        textContent: input.remote.textContent,
+        localUri: input.remote.kind === 'image' ? input.localUri : null,
+        mimeType: input.remote.mimeType,
+        fileName: input.remote.fileName,
+        byteSize: input.remote.byteSize,
+        checksumSha256: input.remote.checksumSha256,
+        remoteId: input.remote.remoteId,
+        remoteRevision: input.remote.revision,
+        syncState: 'synced',
+        pendingOperation: null,
+        lastErrorCode: null,
+        remoteUpdatedAtMs: input.remote.serverUpdatedAtMs,
+        createdAtMs: input.remote.clientCreatedAtMs,
+        updatedAtMs: Math.max(input.remote.clientUpdatedAtMs, input.mergedAtMs),
+      };
+      assertMeetingAttachmentValue(inserted);
+      await database.runAsync(
+        `INSERT INTO meeting_attachments (
+           id, meeting_id, scope_key, marker_id, position_ms, kind,
+           text_content, local_uri, mime_type, file_name, byte_size,
+           checksum_sha256, remote_id, remote_revision, sync_state,
+           pending_operation, last_error_code, remote_updated_at_ms,
+           created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced',
+           NULL, NULL, ?, ?, ?)`,
+        inserted.id,
+        inserted.meetingId,
+        input.scopeKey,
+        inserted.positionMs,
+        inserted.kind,
+        inserted.textContent,
+        inserted.localUri,
+        inserted.mimeType,
+        inserted.fileName,
+        inserted.byteSize,
+        inserted.checksumSha256,
+        inserted.remoteId,
+        inserted.remoteRevision,
+        inserted.remoteUpdatedAtMs,
+        inserted.createdAtMs,
+        inserted.updatedAtMs,
+      );
+      cleanupUri = null;
+      return { outcome: 'inserted' as const, cleanupUri: null };
+    });
+    if (result.outcome !== 'unchanged') this.notify([input.meetingId]);
+    return { ...result, cleanupUri };
   }
 
   async listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]> {

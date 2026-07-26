@@ -18,6 +18,7 @@ import { AppActionSheet, type AppActionSheetItem } from '../components/AppAction
 import { useAppDialog } from '../components/AppDialog';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SettingsTitleBar } from '../components/SettingsGroup';
+import { subscribeMeetingAttachmentsChanged } from '../application/meeting/attachmentSyncTrigger';
 import type { MeetingAttachmentRecord } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
 import { readableErrorMessage } from '../services/errors';
@@ -26,6 +27,7 @@ import {
   addMeetingTextAttachment,
   deleteMeetingAttachment,
   loadMeetingAttachments,
+  retryMeetingAttachment,
 } from '../services/meetingAttachments';
 import { useAuth } from '../store/AuthStore';
 import { getFeishuTokens } from '../theme/feishuTokens';
@@ -58,6 +60,7 @@ export function MeetingAttachmentsScreen({ navigation, route }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [addMenuVisible, setAddMenuVisible] = useState(false);
   const [textEditorVisible, setTextEditorVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -89,7 +92,33 @@ export function MeetingAttachmentsScreen({ navigation, route }: Props) {
 
   useFocusEffect(useCallback(() => {
     void refresh();
-  }, [refresh]));
+    if (!scopeKey) return undefined;
+    return subscribeMeetingAttachmentsChanged(changedScope => {
+      if (changedScope === scopeKey) void refresh();
+    });
+  }, [refresh, scopeKey]));
+
+  const retrySync = async (attachment: MeetingAttachmentRecord) => {
+    if (!scopeKey || scopeKey === 'guest' || retryingId) return;
+    setRetryingId(attachment.id);
+    try {
+      const retried = await retryMeetingAttachment({
+        scopeKey,
+        navigationMeetingId: route.params.meetingId,
+        attachmentId: attachment.id,
+      });
+      if (!retried) throw new Error('附件同步状态已变化，请刷新后重试。');
+      await refresh();
+    } catch (reason) {
+      showDialog({
+        title: '重试失败',
+        message: readableErrorMessage(reason, '附件同步暂时无法重试，请稍后再试。'),
+        tone: 'error',
+      });
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   const addText = async () => {
     if (!scopeKey || !markerAvailable || !route.params.markerId || busy || !draft.trim()) return;
@@ -161,7 +190,9 @@ export function MeetingAttachmentsScreen({ navigation, route }: Props) {
     if (!scopeKey || deletingId) return;
     showDialog({
       title: '删除附件？',
-      message: '附件会从本机删除，会议文字和整理结果不会改变。',
+      message: scopeKey === 'guest'
+        ? '附件会从本机删除，会议文字和整理结果不会改变。'
+        : '附件会从当前账号的会议记录中删除，会议文字和整理结果不会改变。',
       tone: 'danger',
       actions: [
         {
@@ -308,9 +339,30 @@ export function MeetingAttachmentsScreen({ navigation, route }: Props) {
                   <Text style={[styles.rowTitle, { color: F.textTitle }]} numberOfLines={2}>
                     {item.kind === 'text' ? item.textContent : item.fileName}
                   </Text>
-                  <Text style={[styles.rowMeta, { color: F.textCaption }]} numberOfLines={1}>
-                    {attachmentTime(item.positionMs)}{item.kind === 'image' ? `  ·  ${imageSizeLabel(item.byteSize)}` : ''}
-                  </Text>
+                  <View style={styles.rowMetaLine}>
+                    <Text style={[styles.rowMeta, { color: F.textCaption }]} numberOfLines={1}>
+                      {attachmentTime(item.positionMs)}{item.kind === 'image' ? `  ·  ${imageSizeLabel(item.byteSize)}` : ''}
+                      {item.syncState === 'pending' ? '  ·  同步中' : ''}
+                      {item.syncState === 'failed_retryable' || item.syncState === 'blocked' ? '  ·  同步失败' : ''}
+                    </Text>
+                    {scopeKey !== 'guest' && (
+                      item.syncState === 'failed_retryable' || item.syncState === 'blocked'
+                    ) ? (
+                      <Pressable
+                        style={({ pressed }) => [styles.syncRetry, pressed && { backgroundColor: F.pressedFill }]}
+                        onPress={() => { void retrySync(item); }}
+                        disabled={retryingId !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel="重试同步附件"
+                      >
+                        {retryingId === item.id ? (
+                          <ActivityIndicator size="small" color={F.primary} />
+                        ) : (
+                          <Text style={[styles.syncRetryText, { color: F.primary }]}>重试</Text>
+                        )}
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
                 <Pressable
                   style={({ pressed }) => [styles.deleteAction, pressed && { backgroundColor: F.pressedFill }]}
@@ -360,6 +412,9 @@ const styles = StyleSheet.create({
   textIcon: { width: 48, height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1, minWidth: 0, paddingHorizontal: 12, paddingVertical: 10 },
   rowTitle: { fontSize: 16, lineHeight: 22, fontWeight: '400' },
-  rowMeta: { marginTop: 4, fontSize: 13, lineHeight: 18 },
+  rowMetaLine: { minHeight: 28, marginTop: 4, flexDirection: 'row', alignItems: 'center' },
+  rowMeta: { flexShrink: 1, fontSize: 13, lineHeight: 18 },
+  syncRetry: { minWidth: 48, minHeight: 44, marginLeft: 4, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  syncRetryText: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
   deleteAction: { width: 48, height: 48, marginRight: 4, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
 });

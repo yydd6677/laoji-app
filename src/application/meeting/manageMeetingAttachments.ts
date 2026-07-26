@@ -4,6 +4,8 @@ import type {
   MeetingAttachmentRecord,
   MeetingNoteRepository,
 } from '../../data/repositories/meetingNoteRepository';
+import { requestMeetingAttachmentSync } from './attachmentSyncTrigger';
+import { requestMeetingRootSync } from './rootSyncTrigger';
 
 const SAFE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -34,7 +36,7 @@ export class ManageMeetingAttachmentsUseCase {
     }
     const meetingId = await this.requireCanonicalMeetingId(input.navigationMeetingId, input.scopeKey);
     const nowMs = Date.now();
-    return this.repository.createMeetingAttachment({
+    const attachment = await this.repository.createMeetingAttachment({
       id: this.idFactory.create(),
       meetingId,
       markerId: input.markerId,
@@ -45,9 +47,21 @@ export class ManageMeetingAttachmentsUseCase {
       mimeType: null,
       fileName: null,
       byteSize: null,
+      checksumSha256: null,
+      remoteId: null,
+      remoteRevision: null,
+      syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
+      pendingOperation: input.scopeKey === 'guest' ? null : 'create',
+      lastErrorCode: null,
+      remoteUpdatedAtMs: null,
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
     }, input.scopeKey);
+    if (input.scopeKey !== 'guest') {
+      requestMeetingRootSync(input.scopeKey);
+      requestMeetingAttachmentSync(input.scopeKey);
+    }
+    return attachment;
   }
 
   async addImage(input: {
@@ -60,12 +74,13 @@ export class ManageMeetingAttachmentsUseCase {
     mimeType: string;
     fileName: string;
     byteSize: number;
+    checksumSha256: string;
   }): Promise<MeetingAttachmentRecord> {
     const attachmentId = input.attachmentId.trim().toLowerCase();
     if (!SAFE_UUID.test(attachmentId)) throw new Error('图片附件标识无效。');
     const meetingId = await this.requireCanonicalMeetingId(input.navigationMeetingId, input.scopeKey);
     const nowMs = Date.now();
-    return this.repository.createMeetingAttachment({
+    const attachment = await this.repository.createMeetingAttachment({
       id: attachmentId,
       meetingId,
       markerId: input.markerId,
@@ -76,9 +91,21 @@ export class ManageMeetingAttachmentsUseCase {
       mimeType: input.mimeType,
       fileName: input.fileName,
       byteSize: input.byteSize,
+      checksumSha256: input.checksumSha256,
+      remoteId: null,
+      remoteRevision: null,
+      syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
+      pendingOperation: input.scopeKey === 'guest' ? null : 'create',
+      lastErrorCode: null,
+      remoteUpdatedAtMs: null,
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
     }, input.scopeKey);
+    if (input.scopeKey !== 'guest') {
+      requestMeetingRootSync(input.scopeKey);
+      requestMeetingAttachmentSync(input.scopeKey);
+    }
+    return attachment;
   }
 
   async delete(input: {
@@ -87,7 +114,13 @@ export class ManageMeetingAttachmentsUseCase {
     scopeKey: ScopeKey;
   }): Promise<MeetingAttachmentRecord | null> {
     const meetingId = await this.requireCanonicalMeetingId(input.navigationMeetingId, input.scopeKey);
-    return this.repository.deleteMeetingAttachment(input.attachmentId, meetingId, input.scopeKey);
+    const attachment = await this.repository.deleteMeetingAttachment(
+      input.attachmentId,
+      meetingId,
+      input.scopeKey,
+    );
+    if (attachment && input.scopeKey !== 'guest') requestMeetingAttachmentSync(input.scopeKey);
+    return attachment;
   }
 
   private async requireCanonicalMeetingId(

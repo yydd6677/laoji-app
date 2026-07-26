@@ -35,6 +35,7 @@ import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEv
 import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTranscriptCompletionProvider';
 import { MeetingRetentionCleanupProvider } from './src/components/MeetingRetentionCleanupProvider';
 import { MeetingTagCatalogSyncProvider } from './src/components/MeetingTagCatalogSyncProvider';
+import { MeetingAttachmentSyncProvider } from './src/components/MeetingAttachmentSyncProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -58,6 +59,7 @@ function RuntimeProviders({ onRestart }: {
                 <MeetingActionSyncProvider>
                   <MeetingManualNoteSyncProvider>
                     <MeetingTagCatalogSyncProvider>
+                    <MeetingAttachmentSyncProvider>
                     <MeetingSpeakerCorrectionSyncProvider>
                     <EventsProvider>
                     <MeetingsProvider>
@@ -84,6 +86,7 @@ function RuntimeProviders({ onRestart }: {
                     </MeetingsProvider>
                     </EventsProvider>
                     </MeetingSpeakerCorrectionSyncProvider>
+                    </MeetingAttachmentSyncProvider>
                     </MeetingTagCatalogSyncProvider>
                   </MeetingManualNoteSyncProvider>
                 </MeetingActionSyncProvider>

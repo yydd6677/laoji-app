@@ -1,6 +1,7 @@
 import { secureClientIdFactory } from '../domain/meeting';
 import type { ScopeKey } from '../domain/meeting';
 import { ManageMeetingAttachmentsUseCase } from '../application/meeting';
+import { requestMeetingAttachmentSync } from '../application/meeting/attachmentSyncTrigger';
 import { sqliteMeetingNoteRepository, type MeetingAttachmentRecord } from '../data/repositories';
 import {
   deleteMeetingAttachmentFile,
@@ -66,11 +67,36 @@ export async function deleteMeetingAttachment(input: {
   attachmentId: string;
 }): Promise<{ attachment: MeetingAttachmentRecord | null; cleanupFailed: boolean }> {
   const attachment = await attachments.delete(input);
-  if (!attachment?.localUri) return { attachment, cleanupFailed: false };
+  // Account files stay available until the server acknowledges deletion. This
+  // also preserves the create-then-delete path while the meeting root is still
+  // waiting for its remote identity.
+  if (input.scopeKey !== 'guest' || !attachment?.localUri) {
+    return { attachment, cleanupFailed: false };
+  }
   try {
     await deleteMeetingAttachmentFile(attachment.localUri);
     return { attachment, cleanupFailed: false };
   } catch {
     return { attachment, cleanupFailed: true };
   }
+}
+
+export async function retryMeetingAttachment(input: {
+  scopeKey: Exclude<ScopeKey, 'guest'>;
+  navigationMeetingId: string;
+  attachmentId: string;
+}): Promise<boolean> {
+  const meetingId = await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(
+    input.navigationMeetingId,
+    input.scopeKey,
+  );
+  if (!meetingId) throw new Error('会议记录尚未完成本机索引，请刷新后重试。');
+  const retried = await sqliteMeetingNoteRepository.retryMeetingAttachmentSync(
+    input.attachmentId,
+    meetingId,
+    input.scopeKey,
+    Date.now(),
+  );
+  if (retried) requestMeetingAttachmentSync(input.scopeKey);
+  return retried;
 }
