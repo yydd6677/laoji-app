@@ -20,6 +20,7 @@ import type {
   MeetingTopicAggregate,
 } from '../data/repositories';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { getFeatureFlags } from '../config/featureFlags';
 import type { ScopeKey } from '../domain/meeting';
 import { readableErrorMessage } from '../services/errors';
 import { useAuth } from '../store/AuthStore';
@@ -33,6 +34,7 @@ import { displayMeetingTitle } from '../utils/meetingTitle';
 
 const { colors: F } = getFeishuTokens();
 const meetingOrganization = new ManageMeetingOrganizationUseCase(sqliteMeetingNoteRepository);
+const AUTOMATIC_TOPICS_ENABLED = getFeatureFlags().meetingAutomaticTopicsV1;
 const EMPTY_PROJECTION: MeetingOrganizationProjection = { people: [], topics: [] };
 
 type Props = {
@@ -104,7 +106,9 @@ function OrganizationGroupCard({
   onOpenMeeting: (meetingId: string) => void;
 }) {
   const person = group.kind === 'person' ? group.aggregate : null;
+  const topic = group.kind === 'topic' ? group.aggregate : null;
   const isPerson = person !== null;
+  const isSummaryTopic = topic?.source === 'summary';
   const aggregate = group.aggregate;
   const name = aggregate.name;
   const meetingCount = aggregate.meetingCount;
@@ -114,13 +118,20 @@ function OrganizationGroupCard({
   return (
     <View style={[styles.group, { backgroundColor: F.backgroundFloat }]}>
       <View style={styles.groupHeader}>
-        <View style={[styles.groupIcon, { backgroundColor: F.primarySoft }]}>
+        <View style={[
+          styles.groupIcon,
+          { backgroundColor: isSummaryTopic ? F.backgroundBodyOverlay : F.primarySoft },
+        ]}>
           {isPerson ? (
             <Text style={[styles.groupInitial, { color: F.primary }]} numberOfLines={1}>
               {name.slice(0, 1)}
             </Text>
           ) : (
-            <Ionicons name="pricetag-outline" size={20} color={F.primary} />
+            <Ionicons
+              name={isSummaryTopic ? 'document-text-outline' : 'pricetag-outline'}
+              size={20}
+              color={isSummaryTopic ? F.iconSecondary : F.primary}
+            />
           )}
         </View>
         <View style={styles.groupCopy}>
@@ -129,8 +140,21 @@ function OrganizationGroupCard({
               {name}
             </Text>
             {person && !person.confirmed ? (
-              <View style={[styles.unconfirmed, { backgroundColor: F.backgroundBodyOverlay }]}>
-                <Text style={[styles.unconfirmedText, { color: F.textCaption }]}>未确认</Text>
+              <View style={[styles.badge, { backgroundColor: F.backgroundBodyOverlay }]}>
+                <Text style={[styles.badgeText, { color: F.textCaption }]}>未确认</Text>
+              </View>
+            ) : null}
+            {topic ? (
+              <View style={[
+                styles.badge,
+                { backgroundColor: isSummaryTopic ? F.backgroundBodyOverlay : F.primarySoft },
+              ]}>
+                <Text style={[
+                  styles.badgeText,
+                  { color: isSummaryTopic ? F.textCaption : F.primary },
+                ]}>
+                  {isSummaryTopic ? '整理主题' : '用户标签'}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -176,7 +200,9 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
     setLoading(true);
     setError('');
     try {
-      const result = await meetingOrganization.listAggregates(scopeKey);
+      const result = await meetingOrganization.listAggregates(scopeKey, {
+        includeSummaryTopics: AUTOMATIC_TOPICS_ENABLED,
+      });
       if (generationRef.current === generation) setProjection(result);
     } catch (reason) {
       if (generationRef.current === generation) {
@@ -266,7 +292,7 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
         data={groups}
         keyExtractor={group => group.kind === 'person'
           ? `person:${group.aggregate.key}`
-          : `topic:${group.aggregate.tagId}`}
+          : `topic:${group.aggregate.key}`}
         renderItem={({ item }) => (
           <OrganizationGroupCard
             group={item}
@@ -347,14 +373,14 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: '500',
   },
-  unconfirmed: {
+  badge: {
     height: 20,
     marginLeft: 8,
     paddingHorizontal: 6,
     borderRadius: FEISHU_RADII.s,
     justifyContent: 'center',
   },
-  unconfirmedText: { fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
+  badgeText: { fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
   groupMeta: { marginTop: 2, fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
   groupDivider: { height: StyleSheet.hairlineWidth, marginLeft: 68 },
   meetingRow: {

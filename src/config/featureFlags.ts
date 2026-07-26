@@ -7,6 +7,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbAccountRootWriteV1: boolean;
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
+  meetingAutomaticTopicsV1: boolean;
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
   meetingActionCollaborationV1: boolean;
@@ -44,6 +45,10 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // stored in the canonical meeting database.
     meetingQuestionsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingQuestionsV1 === true,
+    // Current structured Summary topics remain a read-only source and never
+    // create or mutate user-owned meeting tags.
+    meetingAutomaticTopicsV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingAutomaticTopicsV1 === true,
     // Explicitly attaching imported media requires canonical multi-asset writes.
     meetingMediaImportExistingV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaImportExistingV1 === true,

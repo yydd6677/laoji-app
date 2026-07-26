@@ -1,6 +1,6 @@
 # Phase 8 会议组织与多场检索证据：ORG-01 标签、分源搜索与人物/主题聚合
 
-状态：用户标签、本机跨会议分源检索、按人物聚合和按用户标签聚合主题，已形成游客/账号作用域隔离的本机纵向闭环。Folder 仍保留需求门槛；实验模型 topic 和账号跨设备标签同步尚未实现，因此 `ORG-01` 仍记为部分完成。本文件记录 migration v20、只读派生查询、原生 Minutes 入口、模拟器夹具和恢复边界，不把短 Transcript/单会议样本外推成真实长记录性能或跨设备证据。
+状态：用户标签、本机跨会议分源检索、人物聚合、用户标签主题和 current structured Summary 的整理主题，已形成游客/账号作用域隔离的本机纵向闭环。Folder 仍保留需求门槛；账号跨设备标签同步尚未实现，因此 `ORG-01` 仍记为部分完成。本文件记录 migration v20、只读派生查询、原生 Minutes 入口、模拟器夹具和恢复边界，不把短 Transcript/单会议样本外推成真实长记录性能或跨设备证据。
 
 ## 数据和检索合同
 
@@ -14,11 +14,13 @@
 
 ## 人物和主题聚合合同
 
-- 聚合是现有 v20/v21 数据的只读派生，不新增表或 migration。每次查询都从 `meeting_notes.scope_key` 和 `lifecycle <> deleted` 重新限定作用域；人物只读取 `transcript_revisions.is_active = 1` 的段落，不读取 inactive 历史版本，也不把 `speaker_cluster_id` 当跨会议身份。
+- 聚合是现有 MeetingNote/Transcript/Summary/标签数据的只读派生，不新增表或 migration。每次查询都从 `meeting_notes.scope_key` 和 `lifecycle <> deleted` 重新限定作用域；人物只读取 `transcript_revisions.is_active = 1` 的段落，不读取 inactive 历史版本，也不把 `speaker_cluster_id` 当跨会议身份。
 - 人物优先按稳定 `speaker_profile_id` 聚合。一个 profile 内允许部分段落仍带匿名显示名：只要同一 profile 至少存在一个真实姓名，匿名段仍计入该稳定人物的发言段数；若整个 profile 没有可显示姓名，则不暴露 opaque profile ID，也不虚构人物标题。
 - 没有 profile 时，只对 NFKC 后精确姓名做 scope 内临时聚合，不做大小写折叠、模糊相似或同音合并，并明确投影为“未确认”。`Speaker 1`、`说话人 1`、`讲话人 1`、`发言人 1`、泛化“讲话人/发言人/说话人”和 unknown 值统一由领域分类器过滤。
 - 每个人物返回 profile/临时 key、会议数、发言段总数，以及每场会议的 canonical ID、可导航 ID、标题、录制时间和段数。repository 复用既有 legacy/remote 导航映射，页面不会拿 canonical 内部前缀错误打开其他 scope。
-- 主题第一版只从用户明确创建并分配的 `meeting_tags` 派生，且只包含未删除会议。实验模型 topic 尚未接入；未来即使接入也必须作为独立来源，不能自动创建、改名或覆盖用户标签。
+- 用户主题继续只从用户明确创建并分配的 `meeting_tags` 派生，且只包含未删除会议。
+- 独立 `meetingAutomaticTopicsV1` flag 开启时，整理主题只读取 MeetingNote 当前指向、状态为 ready/stale 的 Summary version，并只接受 `kind='topics'` 的 section；`user_text` 非空/显式空白都优先于生成文本，保持既有用户编辑保护。SQL 只跨 bridge 读取每 section 前 8000 字符，单场最多接受 12 个主题。
+- 整理主题逐行 NFKC、折叠空白和小写后形成稳定 identity；拒绝空白、40 字以上、控制字符、首尾结构括号、泛化“主题/讨论主题”等标题和同场重复项。它使用 `source='summary'`，与 `source='user_tag'` 的标签主题保持独立，即使显示名相同也不创建、改名、合并或覆盖 `meeting_tags`。
 
 ## 页面和导航合同
 
@@ -26,7 +28,7 @@
 - 搜索结果卡显示来源标签和摘要。Transcript 命中携带稳定 segment/source ID 与时间进入“文字记录”并定位；Summary、我的笔记和 Action 分别进入对应详情页，Action 保留独立 focus request identity；标题/标签进入会议详情。
 - 会议卡长按增加“设置标签”，会议页更多菜单增加“管理标签”。设置面板支持创建和整组勾选保存；管理面板支持改名、同名合并和删除。
 - 标签面板保存后先完成约 300ms 全高度退出，再关闭 Modal；父层刷新不再重启入场动画。危险删除先退出 React Native Modal，再显示 Activity 原生确认框，避免确认框不可见地落在 Modal 下方。
-- 会议列表更多菜单新增且只新增一个“分类查看”入口，不增加底栏、Agent 或团队权限入口。页面以“人物/主题”双标签展示派生组；人物行显示会议数和明确的“段发言”计数，临时姓名显示“未确认”；组内会议行可直接进入原会议详情。
+- 会议列表更多菜单新增且只新增一个“分类查看”入口，不增加底栏、Agent 或团队权限入口。页面以“人物/主题”双标签展示派生组；人物行显示会议数和明确的“段发言”计数，临时姓名显示“未确认”；主题标题旁用安静的“用户标签/整理主题”徽标说明来源，组内会议行可直接进入原会议详情。
 
 ## UI 证据分类
 
@@ -49,10 +51,10 @@
 组件：分类查看人物/主题页
 
 - Classification：LaoJi-only；最近容器是既有 Minutes 标题栏、双标签和中性列表层级，不声称飞书 7.71.8 存在同名聚合能力。
-- `[PRODUCT]`：人物身份边界由稳定 profile/精确临时姓名决定；匿名簇不得伪装成真实人物；主题先用用户标签；不增加底栏或说明书式文案。
+- `[PRODUCT]`：人物身份边界由稳定 profile/精确临时姓名决定；匿名簇不得伪装成真实人物；用户标签与整理主题来源必须可见且互不改写；不增加底栏或说明书式文案。
 - `[SOURCE]`：复用既有 44dp 标题栏、16sp 常规标签、蓝色选中指示、neutral page/surface/divider、44dp 以上触控目标和中性会议列表，不使用 Minutes AI 渐变或新的页面局部色板。
-- `[DEVICE]`：API 35、1080x2400、420 dpi 的 `emulator-5556` 上，菜单入口、空人物/空主题、三个有效人物、一个用户主题、标签切换和会议详情跳转均实际显示；匿名编号没有出现在人物组。静态空页截图已检查标题栏、标签指示和空状态没有首帧位移。
-- `[INFERENCE]`：圆形首字头像、主题标签图标、组内会议折叠层级和“段发言”措辞是老记对既有列表/标签家族的组合；没有声称是飞书直接页面复刻。
+- `[DEVICE]`：API 35、1080x2400、420 dpi 的 `emulator-5556` 上，菜单入口、空人物/空主题、三个有效人物、一个用户主题、两个整理主题、标签切换和会议详情跳转均实际显示；匿名编号、重复整理主题、泛化标题和损坏结构行没有形成组。静态截图检查标题栏、标签指示、来源徽标和列表没有首帧位移。
+- `[INFERENCE]`：圆形首字头像、标签/文档图标、来源徽标、组内会议层级和“段发言”措辞是老记对既有列表/标签家族的组合；没有声称是飞书直接页面复刻。
 
 ## 轻量验证与恢复
 
@@ -64,12 +66,15 @@
 - 人物/主题切片再次通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和 `:laoji-native-platform:compileReleaseKotlin`。最终增量 `:app:assemblePreview --parallel --max-workers=$(nproc)` 通过：627 tasks，59 executed、568 up-to-date，耗时 36 秒；没有恢复归档测试/门禁。
 - 人物夹具使用一个 active final Transcript：稳定 profile“林晓”有 2 段，其中一段仍显示 `Speaker 1`；无 profile 的“王敏”和 override“陈静”各 1 段并显示“未确认”；profile-less `Speaker 2` 与“说话人 3”均未形成组。用户标签“研发周会”形成 1 个主题；四类可见会议行均打开 `OccueneSmoke` 详情。
 - 夹具前数据库为 v21、`quick_check=ok`。测试后没有用模糊删除回滚，而是把原始 DB/WAL/SHM 三文件原位恢复；设备与本机备份 SHA-256 分别一致为 `42ff97c9…f5f93`、`63b56aa4…3a0f`、`9fbd53a9…e5c1bd`。最终页面回到原会议列表，夹具 Transcript/标签不在常用模拟器数据中。
-- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-26 00:44:12 +0800`，大小 `90,540,848` bytes，SHA-256 `eb476d84b165d6a4c854e5d1c681dad80de7060319f3bfd34a6e096e91cba480`。已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-26 00:44:31`。
+- 整理主题增量不新增 migration。纯归一化合同覆盖 Markdown bullet/编号/任务、NFKC 去重、泛化标题、JSON/孤立结构括号、链接/行内样式和 12 项上限；最小 SQLite 夹具确认只读取 current ready/stale、同 scope、未删除会议的 `topics` section。
+- 保留数据上临时安装 Debug 变体后，canonical 审计仍为 `consistent`、账号 revision/mirror=`51/51`。夹具为“新录音”添加 current `topics` section 和一个用户标签：页面显示“研发周会 / 用户标签”、“AI 助手 / 整理主题”和“客户反馈 / 整理主题”；重复“客户反馈”只保留一组，`## 主题` 与损坏 JSON 行被拒绝，整理主题会议行实际返回“新录音”详情。
+- 验证后按 DB/WAL/SHM 三文件恢复，设备读取 SHA-256 与未打开的备份逐一一致：DB `8891db34699c046466b7b3bdbb876496ed2f2b0e6c7a3a17482e71c0e571158e`、WAL `4643aec0f99d1ce554ed7c26effdca8952acabaf64d34e3f7bd47a1c88a3bf7e`、SHM `deac3b694f15d59ad18a6a1db1805d1d6ad699aa3a13ed588412b5360f27517a`；恢复后 repository audit 再次为 `consistent`，活动账号会议仍为 3 条。
+- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-26 12:02:38 +0800`，大小 `90,785,312` bytes，SHA-256 `edbcd5e4de02b6be82c96e1fe9d0939d3668adb4d8ba4f65bf2d2a0e28cb1d8a`。已覆盖安装到 `emulator-5556`，`versionCode=104`、`lastUpdateTime=2026-07-26 12:02:57`。
 
 ## 未完成边界
 
 1. Folder 仍只保留需求门槛；当前没有真实大量会议证据支持加入文件夹，更没有树形权限模型。
-2. 实验模型 topic 尚未实现；模型 topic 必须保持独立来源，不得自动写成用户标签。当前“主题”只代表用户标签，不应被外推为自动主题发现。
-3. 标签当前是本机 scope 数据，没有账号 outbox、服务端 schema、跨设备合并或冲突处理，不能宣称账号同步完成；人物也是本机 active Transcript 的派生视图，不是跨设备 profile 仓库。
-4. 搜索中的 Transcript/Summary/Action 目标页仍只有既有源码/编译边界；本轮夹具只为人物聚合和普通会议详情跳转，不补写成三类搜索来源的设备点击证据。
-5. 没有 USB 真机、深色模式、字体缩放、超大人物/标签库或长 Transcript 性能证据；这些按轻量目标留到功能批次或候选版，而不是反向抹掉已完成的本机聚合纵切。
+2. 标签当前是本机 scope 数据，没有账号 outbox、服务端 schema、跨设备合并或冲突处理，不能宣称账号同步完成；人物也是本机 active Transcript 的派生视图，不是跨设备 profile 仓库。
+3. 整理主题复用已经存在的结构化 Summary，不是独立的全库 topic 模型或聚类任务；没有 `topics` section 的会议不会被猜测分类。真实模型主题质量仍随 SUM 候选抽查，不阻止只读聚合功能完成。
+4. 搜索中的 Transcript/Summary/Action 目标页仍只有既有源码/编译边界；本轮夹具只为主题聚合和普通会议详情跳转，不补写成三类搜索来源的设备点击证据。
+5. 没有 USB 真机、深色模式、字体缩放、超大人物/主题库或长 Transcript 性能证据；这些按轻量目标留到功能批次或候选版，而不是反向抹掉已完成的本机聚合纵切。

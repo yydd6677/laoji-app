@@ -594,7 +594,9 @@ export interface MeetingPersonAggregate {
 }
 
 export interface MeetingTopicAggregate {
-  tagId: string;
+  key: string;
+  source: 'user_tag' | 'summary';
+  tagId: string | null;
   name: string;
   meetingCount: number;
   meetings: readonly MeetingOrganizationMeeting[];
@@ -603,6 +605,10 @@ export interface MeetingTopicAggregate {
 export interface MeetingOrganizationProjection {
   people: readonly MeetingPersonAggregate[];
   topics: readonly MeetingTopicAggregate[];
+}
+
+export interface MeetingOrganizationOptions {
+  includeSummaryTopics?: boolean;
 }
 
 export type MeetingSearchSourceKind =
@@ -1264,7 +1270,10 @@ export interface MeetingNoteRepository {
   resolveCanonicalMeetingId(navigationMeetingId: string, scopeKey: ScopeKey): Promise<string | null>;
   listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]>;
   listMeetingTagsForScope(scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
-  listMeetingOrganization(scopeKey: ScopeKey): Promise<MeetingOrganizationProjection>;
+  listMeetingOrganization(
+    scopeKey: ScopeKey,
+    options?: MeetingOrganizationOptions,
+  ): Promise<MeetingOrganizationProjection>;
   createMeetingTag(tag: Omit<MeetingTagRecord, 'meetingCount'>): Promise<MeetingTagRecord>;
   renameOrMergeMeetingTag(
     tagId: string,

@@ -2,6 +2,7 @@ export * from './clientId';
 export * from './collaboration';
 export * from './entities';
 export * from './mediaClips';
+export * from './organization';
 export * from './processing';
 export * from './questions';
 export * from './speakerIdentity';

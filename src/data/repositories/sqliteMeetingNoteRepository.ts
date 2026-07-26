@@ -10,6 +10,7 @@ import type {
 import {
   assertProcessingStage,
   assertScopeKey,
+  automaticMeetingTopicsFromSummaryText,
   calendarMeetingSeriesKey,
   namedSpeakerIdentityLabel,
   secureClientIdFactory,
@@ -53,6 +54,7 @@ import type {
   MeetingManualNoteSyncConflictRecord,
   MeetingOccurrenceSyncConflictRecord,
   MeetingOrganizationMeeting,
+  MeetingOrganizationOptions,
   MeetingOrganizationProjection,
   MeetingPersonAggregate,
   MeetingRetentionCleanupJob,
@@ -492,7 +494,10 @@ type MeetingPersonAggregationRow = MeetingOrganizationBaseRow & {
 type MeetingTopicAggregationRow = MeetingOrganizationBaseRow & {
   tag_id: string;
   tag_name: string;
-  normalized_name: string;
+};
+
+type MeetingSummaryTopicAggregationRow = MeetingOrganizationBaseRow & {
+  content: string;
 };
 
 type MeetingSearchRow = {
@@ -9183,7 +9188,10 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return rows.map(meetingTagFromRow);
   }
 
-  async listMeetingOrganization(scopeKey: ScopeKey): Promise<MeetingOrganizationProjection> {
+  async listMeetingOrganization(
+    scopeKey: ScopeKey,
+    options: MeetingOrganizationOptions = {},
+  ): Promise<MeetingOrganizationProjection> {
     assertScopeKey(scopeKey);
     const database = await openMeetingDatabase();
     const personRows = await database.getAllAsync<MeetingPersonAggregationRow>(
@@ -9217,7 +9225,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          meeting.entry_point, meeting.title AS meeting_title,
          COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)
            AS recorded_at_ms,
-         tag.id AS tag_id, tag.name AS tag_name, tag.normalized_name
+         tag.id AS tag_id, tag.name AS tag_name
        FROM meeting_tag_links link
        INNER JOIN meeting_tags tag
          ON tag.id = link.tag_id AND tag.scope_key = link.scope_key
@@ -9227,6 +9235,26 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
        ORDER BY tag.normalized_name, tag.id, recorded_at_ms DESC, meeting.id`,
       scopeKey,
     );
+    const summaryTopicRows = options.includeSummaryTopics === true
+      ? await database.getAllAsync<MeetingSummaryTopicAggregationRow>(
+        `SELECT meeting.id AS meeting_id, meeting.legacy_source_id, meeting.remote_id,
+           meeting.entry_point, meeting.title AS meeting_title,
+           COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)
+             AS recorded_at_ms,
+           SUBSTR(COALESCE(section.user_text, section.generated_text), 1, 8000) AS content
+         FROM summary_sections section
+         INNER JOIN summary_versions version ON version.id = section.version_id
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = version.meeting_id
+             AND meeting.current_summary_version_id = version.id
+         WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND version.status IN ('ready', 'stale')
+           AND LOWER(REPLACE(section.kind, '-', '_')) = 'topics'
+           AND TRIM(COALESCE(section.user_text, section.generated_text)) <> ''
+         ORDER BY recorded_at_ms DESC, meeting.id, section.ordinal, section.id`,
+        scopeKey,
+      )
+      : [];
 
     type MutableMeeting = MeetingOrganizationMeeting;
     type MutablePerson = {
@@ -9287,13 +9315,18 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       || left.name.localeCompare(right.name));
 
     type MutableTopic = {
-      tagId: string;
+      key: string;
+      source: MeetingTopicAggregate['source'];
+      tagId: string | null;
       name: string;
       meetings: Map<string, MeetingOrganizationMeeting>;
     };
     const topicsById = new Map<string, MutableTopic>();
     for (const row of topicRows) {
-      const aggregate = topicsById.get(row.tag_id) ?? {
+      const key = `user-tag:${row.tag_id}`;
+      const aggregate = topicsById.get(key) ?? {
+        key,
+        source: 'user_tag' as const,
         tagId: row.tag_id,
         name: row.tag_name,
         meetings: new Map<string, MeetingOrganizationMeeting>(),
@@ -9305,19 +9338,58 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         recordedAtMs: row.recorded_at_ms,
         occurrenceCount: 1,
       });
-      topicsById.set(row.tag_id, aggregate);
+      topicsById.set(key, aggregate);
+    }
+
+    type MutableSummaryTopic = MutableTopic & { labels: Map<string, number> };
+    const summaryTopicsByName = new Map<string, MutableSummaryTopic>();
+    const automaticCountByMeeting = new Map<string, number>();
+    for (const row of summaryTopicRows) {
+      for (const topic of automaticMeetingTopicsFromSummaryText(row.content)) {
+        const meetingTopicCount = automaticCountByMeeting.get(row.meeting_id) ?? 0;
+        if (meetingTopicCount >= 12) break;
+        const key = `summary:${topic.normalizedName}`;
+        const aggregate = summaryTopicsByName.get(key) ?? {
+          key,
+          source: 'summary' as const,
+          tagId: null,
+          name: topic.name,
+          labels: new Map<string, number>(),
+          meetings: new Map<string, MeetingOrganizationMeeting>(),
+        };
+        if (aggregate.meetings.has(row.meeting_id)) continue;
+        aggregate.labels.set(topic.name, (aggregate.labels.get(topic.name) ?? 0) + 1);
+        aggregate.meetings.set(row.meeting_id, {
+          meetingId: row.meeting_id,
+          navigationMeetingId: meetingNavigationIdentity(row, scopeKey),
+          title: row.meeting_title,
+          recordedAtMs: row.recorded_at_ms,
+          occurrenceCount: 1,
+        });
+        summaryTopicsByName.set(key, aggregate);
+        automaticCountByMeeting.set(row.meeting_id, meetingTopicCount + 1);
+      }
+    }
+    for (const aggregate of summaryTopicsByName.values()) {
+      aggregate.name = [...aggregate.labels.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0]
+        ?? aggregate.name;
+      topicsById.set(aggregate.key, aggregate);
     }
     const topics = [...topicsById.values()].map<MeetingTopicAggregate>(aggregate => {
       const meetings = [...aggregate.meetings.values()]
         .sort((left, right) => right.recordedAtMs - left.recordedAtMs
           || left.meetingId.localeCompare(right.meetingId));
       return {
+        key: aggregate.key,
+        source: aggregate.source,
         tagId: aggregate.tagId,
         name: aggregate.name,
         meetingCount: meetings.length,
         meetings,
       };
     }).sort((left, right) => right.meetingCount - left.meetingCount
+      || (left.source === right.source ? 0 : left.source === 'user_tag' ? -1 : 1)
       || left.name.localeCompare(right.name));
 
     return { people, topics };
