@@ -8,6 +8,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
   meetingAutomaticTopicsV1: boolean;
+  meetingTagSyncV1: boolean;
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
   meetingActionCollaborationV1: boolean;
@@ -49,6 +50,11 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // create or mutate user-owned meeting tags.
     meetingAutomaticTopicsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingAutomaticTopicsV1 === true,
+    // User tags stay local-first; account transport additionally requires a
+    // fresh meeting_tags_v1 service capability before any remote write.
+    meetingTagSyncV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
+      && extra.featureFlags?.meetingTagSyncV1 === true,
     // Explicitly attaching imported media requires canonical multi-asset writes.
     meetingMediaImportExistingV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaImportExistingV1 === true,

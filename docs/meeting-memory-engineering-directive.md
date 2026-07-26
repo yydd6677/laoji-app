@@ -30,7 +30,7 @@
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音视频导入、已有会议多资产加入、附件分享、本机 WAV 片段、软删除/恢复及双端到期物理清理纵切完成 | 视频/双录音模拟器、真实 MP4 上传/抽取/逐资产转写、v27 本机窄合同、18020 后台任务；片段 v23/真实 WAV | 导入只续格式矩阵/第二设备/USB；功能量续 Marker 链接和非 WAV 异步片段；删除只续组合/真机抽查 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成 | 模拟器和服务端模板源码；App Lock/真机/真实模型待集中验收 | 不重做页面；只补真实运行与发现的缺陷 |
 | 讲话人 | segment/cluster/future profile 修正、显式资料同意/撤销、账号离线识别和旧会议重匹配纵切完成 | 运行 correction 201/重放/412/overlay；模拟器资料详情与 reprocess；无真实人声改善证据 | 只补真实多人录音质量、第二设备与 USB；不重做 profile/correction/job 框架 |
-| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01 与 COLLAB-01 已形成线上纵切；ORG-01 已聚合人物、用户标签和当前整理主题；ATT-01 本机附件；CLIP-01 本机 WAV 纵切 | QA 真实模型/账号持久化；COLLAB 模拟器所有者 + 匿名第二客户端；ORG v20 + current Summary 只读派生；ATT v21；CLIP v23 | QA 只续完整移动端 Transcript 路径；COLLAB 只续第二台移动设备/USB；ORG 只续账号标签同步；ATT/CLIP 续线上或非 WAV 边界 |
+| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01、COLLAB-01 与 ORG-01 已形成线上纵切；ATT-01 本机附件；CLIP-01 本机 WAV 纵切 | QA 真实模型/账号持久化；COLLAB 模拟器所有者 + 匿名第二客户端；ORG v20/v28 + 18020 标签目录；ATT v21；CLIP v23 | QA 只续完整移动端 Transcript 路径；COLLAB/ORG 只续第二台移动设备/USB；ATT/CLIP 续线上或非 WAV 边界 |
 
 ### 0.3 已完成并锁定的基础
 
@@ -57,7 +57,7 @@
 |---|---|---|---|
 | A：关闭本机架构尾项（已完成） | 普通 Preview 对游客 scope 稳定使用 canonical 主路径 | v19 冲突录音恢复、多录音选择与分享；活动写入口审计；默认包 cutover、覆盖升级、首次 mutation、镜像与冷启动恢复 | 不做全格式、长录音、全故障矩阵 |
 | B：启用账号线上闭环（功能纵切完成，证据收口中） | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 18020/18035、账号根、实体双会话、action 协作、RecordingAsset、per-asset provenance/job、独立 Summary 与 speaker correction 已完成；续 GPU 恢复和实体跨物理设备抽查 | 不重复已经通过的本机 UI 冒烟 |
-| C：补齐尚缺功能量 | P0/P1 尾项和五个 P2 纵切均有真实入口、持久化与失败状态 | 视频导入/已有会议加入、QA/轻协作线上纵切和整理主题聚合已完成；继续账号标签同步、Marker 链接、非 WAV 片段和照片多模态/账号附件 | 不先建设复杂 Agent、团队权限树或完整编辑器 |
+| C：补齐尚缺功能量 | P0/P1 尾项和五个 P2 纵切均有真实入口、持久化与失败状态 | 视频导入/已有会议加入、QA/轻协作/账号标签目录线上纵切和整理主题聚合已完成；继续 Marker 链接、非 WAV 片段和照片多模态/账号附件 | 不先建设复杂 Agent、团队权限树或完整编辑器 |
 | D：一次候选版收口 | 一个默认能力配置的可安装候选包 | 数据升级、录制→保存→播放、日程绑定、账号同步、默认隐私和核心恢复任务 | 不把穷举 ROM/格式/时长组合当作目标完成前置条件 |
 
 批次 B 的服务端工作与批次 C 中不依赖线上服务的移动端/领域工作可以并行；只有 schema、API envelope 和 snapshot 需要先冻结。P2 的真实使用指标只决定是否默认开放，不再阻止代码实现，因此不损失升级量，也避免为了收集尚不存在的使用数据而空等。
@@ -85,7 +85,7 @@
 > Phase 5 已完成五个本机纵向切片，并把 IMP-01 延伸为移动端/线上纵切。Marker 已接通录音中/暂停态固定入口、canonical SQLite 事务、active Transcript 覆盖段对账、详情定位/删除、显式转待办和最小披露文字分享。文件选择与 Android 系统分享已接通持久 Intent inbox、原生流式摄取、可恢复 journal、`MeetingNote + RecordingAsset(imported)`、统一详情/播放器和 snapshot v8；专用确认页已接通标题、录制时间、可选 occurrence、作用域持久 draft、视频图标和已有会议显式“保存到/加入”。选择已有会议后在一个 canonical transaction 内加入 primary/secondary asset、推进阶段、使旧整理结果 stale 并保留旧正文/Transcript；目标失效时保留 ready journal 供重新选择。视频入口只由 fresh remote capability 开放，目标 18020 已完成 MP4/WebM/MOV/MKV 音轨抽取；模拟器覆盖 MP4 新建、WAV 追加、双录音播放，真实中文 MP4 又完成流式上传、下载对账和逐资产转写。分层分享已接通内容级勾选、安全默认、私人笔记二次确认、附件默认关闭、文档/音频/图片 ZIP 产物和最小审计。`PRIV-01` 已把本机/未同步会议的永久删除与已同步会议的可恢复删除拆开：移动端 migration v18 保存删除前 lifecycle，账号根 outbox 支持 delete/restore 顺序重放，Android 原生会议页具备 capability 门控的 30 天回收站、恢复确认、长按动作和物理返回。后续批次已启用普通包 canonical/account 写入，目标 18020/18035 已运行并验证真实 tombstone/restore；migration v27 与服务端后台任务又补齐到期 DB/文件物理清理。Phase 5 当前剩余功能量是 Marker 链接与非 WAV 异步片段；导入只剩格式矩阵、第二设备和 USB，删除只剩跨设备/真实到期组合/USB。证据见 [`implementation/contracts/phase-5-media-import-evidence.md`](implementation/contracts/phase-5-media-import-evidence.md)、[`implementation/contracts/phase-5-deletion-semantics-evidence.md`](implementation/contracts/phase-5-deletion-semantics-evidence.md) 与 [`implementation/contracts/phase-5-retention-cleanup-evidence.md`](implementation/contracts/phase-5-retention-cleanup-evidence.md)。
 > Phase 6 已完成 ENTRY-01、ENTRY-02、TPL-01 与 SERIES-01 会前记忆的本机纵向切片。ENTRY-01 已接通日程通知中文 action、默认查看/明确记录语义、pending intent、App Lock 后置执行、统一 occurrence 用例和去重；ENTRY-02 已接通固定 scheme、严格语义链接、最小未来日程投影、近期日程 Widget、隐私标题和临时会议 Quick Settings Tile；TPL-01 已接通四个版本化内置模板、模板感知的任务身份/恢复/结果校验、不可变 Summary version 保护，以及详情页模板选择 sheet；SERIES-01 已接通规范系列身份、最近 ended 会议、最多三条决定、最多五条同系列 pending action、来源跳转、可靠决定 citation 定位、用户明确选择后带入新会议人工笔记，以及与笔记授权分离的新 Summary 历史参考选择。授权 request ID、完整项目 identity、模板和 Transcript 进入同一任务 fingerprint/pending 恢复链，服务端校验账号来源归属并回传同一 identity；有授权时不走无法接收上下文的 compact 快路径。migration v13 的逐来源实体 ledger 已实测覆盖部分重叠选择，完成原 action 后会前投影同步消失。模板与 carry-forward additive 适配已同步到共享服务器目标工作区；模板批次通过 81 项 API/任务/解析合同与 34 项 meetingsummary 底层测试，carry-forward 隔离候选另通过 56 项相关合同。目标 18020/18035 服务没有启动或重启。App Lock 生物识别实测、真机/不同 ROM、成功持续录音、Tile active、ended 详情、过期投影跨时钟、账号并发冲突、真实模型四模板/历史参考输出、远端运行和新授权 sheet 的恢复数据设备交互仍未完成，因此 Phase 6 尚未满足退出条件。证据见 [`implementation/contracts/phase-6-entry-evidence.md`](implementation/contracts/phase-6-entry-evidence.md)、[`implementation/contracts/phase-6-template-evidence.md`](implementation/contracts/phase-6-template-evidence.md) 与 [`implementation/contracts/phase-6-series-memory-evidence.md`](implementation/contracts/phase-6-series-memory-evidence.md)。
 > Phase 7 的 SPK-01 功能纵切现已补全。除原有 migration v11/v12、本场 segment/cluster 修正与 capability-gated outbox 外，目标 18020 已运行账号隔离的 correction v2、逐会议 assignment revision、幂等重放、409/412 冲突、future profile 样本状态和旧会议 reprocess job；账号 profile 持久化 revision/consent/model version，撤销会移除未来识别向量但保留历史显示快照。移动端修改讲话人 sheet 可显式选择既有资料并再次勾选“用于以后会议识别”，资料详情可启动/恢复旧会议重匹配；reprocess 跳过 `user_locked=1` 人工 assignment。离线转写也已从错误的全局原型声纹切换为当前账号资料，并修复空资料库崩溃。运行证据覆盖 correction 201、同请求 200、陈旧 revision 412、Transcript overlay、合成 profile 的零片段 reprocess durable completion 和模拟器页面；真实多人录音准确率、有效片段样本更新、跨设备与 USB 仍是证据尾项。详见 [`implementation/contracts/phase-7-speaker-profile-evidence.md`](implementation/contracts/phase-7-speaker-profile-evidence.md)。
-> Phase 8 已完成 ORG-01 的三组本机纵向切片。第一组以 migration v20 接通作用域隔离的用户标签、创建/分配/改名/同名合并/删除，以及标题、标签、我的笔记、active Transcript、current Summary 和 Action 的本机分源索引；Android 以 FTS5 trigram/短词 LIKE 保留命中来源、source ID 和 Transcript 时间。第二组直接从 active Transcript 派生人物、从用户标签派生主题：稳定 `speaker_profile_id` 优先；无 profile 只按 scope 内精确姓名临时聚合并标“未确认”；匿名编号和泛化标签不会成为人物。第三组由独立 `meetingAutomaticTopicsV1` flag 只读提取 current ready/stale Summary 的 `topics` section，用户编辑文本优先；按 NFKC/折叠空白/小写稳定聚合，每场最多 12 个，拒绝泛化标题、控制字符、结构外壳、超长行和重复项，且从不写入 `meeting_tags`。分类页用“用户标签 / 整理主题”安静徽标保持来源可见。模拟器夹具验证 1 个用户标签、2 个整理主题、重复收敛、损坏格式拒绝和详情跳转；原数据库三文件随后按 SHA-256 精确恢复。Folder 仍保留需求门槛，账号标签同步和 USB 真机尚未完成，因此 ORG-01 仍记为部分完成。证据见 [`implementation/contracts/phase-8-organization-search-evidence.md`](implementation/contracts/phase-8-organization-search-evidence.md)。
+> Phase 8 的 ORG-01 功能量已完成并锁定。前三组切片分别以 migration v20 接通作用域隔离的用户标签与本机分源索引、从 active Transcript/用户标签派生人物与主题、从 current ready/stale Summary 只读派生整理主题；整理主题始终不写入 `meeting_tags`。第四组以 migration v28 复用 durable outbox/conflict，按稳定 client tag ID 和远端 meeting ID 同步账号级标签目录；18020 的 `meeting_tags_v1` 使用持久幂等结果与 optimistic revision，陈旧写返回完整 412 候选。本机保留未知远端会议分配，根身份未就绪时先同步会议；冲突明确选择“保留本机 / 使用云端”，不做 last-write-wins。真实测试账号覆盖 create/replay/update/stale-412，普通 Preview 覆盖 App push/pull 和匿名第二写入方冲突落库；测试夹具已恢复。Folder 仍只在大量会议需求成立时添加，后续只补第二台移动设备与 USB，不重做标签/索引/聚合/冲突框架。证据见 [`implementation/contracts/phase-8-organization-search-evidence.md`](implementation/contracts/phase-8-organization-search-evidence.md)。
 > Phase 8 也完成 ATT-01 的三组本机纵向切片：migration v21、绑定 Marker 与时间点的短文字/相册照片、应用私有文件复制、附件总览、单项删除、默认关闭的分层分享，以及文字附件逐次授权进入整理结果。Marker 删除只把附件来源置空并保留时间点；可恢复删除保留附件，永久删除清理记录和私有文件。整理授权与分享授权分离且默认关闭，保存 request ID、附件 ID/时间点/内容/hash/更新时间并进入 v4 task fingerprint；恢复前重新核对当前附件，变化后不静默重提。服务端 overlay 把文字附件纳入 dedupe/prompt/结果 identity，并禁用不接收附件上下文的短问候与 compact 快路径；照片能力明确为 false，不以文件名冒充视觉输入。模拟器已验证零选择、照片禁用、取消后复位、当前服务未声明能力时中文 fail closed、“不使用”继续和原数据精确恢复。目标服务源码未同步或运行，真实模型、账号附件同步、照片多模态和 USB 真机仍未完成，因此 ATT-01 记为部分完成。证据见 [`implementation/contracts/phase-8-timepoint-attachments-evidence.md`](implementation/contracts/phase-8-timepoint-attachments-evidence.md) 与 [`implementation/contracts/phase-8-summary-attachments-evidence.md`](implementation/contracts/phase-8-summary-attachments-evidence.md)。
 
 > NOTE-01 / CAL-01 增量状态：人工笔记已具备账号级窄云同步闭环；occurrence 已具备用户内唯一服务端合同、会议级 GET/PUT、按 occurrence 查询、不可变计划快照、独立客户端 outbox、跨设备安全附着、冲突保留及 active/orphaned 生命周期。真正双会议冲突已有 detached history 和“本机独立保留、日程使用云端关联”的原子恢复路径；v19 进一步把可读取的来源录音安全复制为目标 RecordingAsset，并支持 journal 恢复、多录音播放和当前录音分享。文字记录、整理结果、我的笔记和行动项仍不跨会议自动合并，服务端多资产也未实现。目标 18020/18035 服务仍未启动，新表和鉴权路由没有运行证据，因此不能把源码合同或恢复路径写成线上、跨设备或真机已验收。
@@ -182,7 +182,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 2. 配置对应的 18020/18035 已由目标工作区专用脚本启动，既有 additive 表、RecordingAsset 三表及 speaker correction/profile/reprocess 表已在运行数据库实例化；同账号独立会话已覆盖 root、occurrence、manual note、delete/restore、action、双 RecordingAsset 与 correction 合同。跨物理设备仍不能由双会话证据代替。
 3. 服务端和移动端已经接通同一 MeetingNote 的多 RecordingAsset 登记、内容上传、认证下载列表、具体 asset 转写 job、v26 自动调度/恢复、Transcript provenance，以及独立 Summary task/结构化 durable result；旧单主录音 API 仅保留兼容投影。真实结构缺口已收敛为共享 GPU 恢复，以及 secondary 的 App/第二设备恢复尚未验证。
 4. 讲话人 profile 同意/撤销、future correction、账号离线识别、旧会议重匹配和跨 revision 人工锁定已实现；真实结构缺口只剩带有效人声/录音资产的改善质量、跨设备收敛和物理设备证据。
-5. video ingest、远端视频音轨处理和已有会议显式加入已经完成移动端/18020 纵切；reprocessed Transcript 生产入口、ORG-01 的账号同步/实验 topic、Marker 链接、非 WAV 片段和照片多模态/账号附件仍有真实功能量未完成。COLLAB-01 只剩第二台移动设备/USB 证据；删除到期物理清理只剩真实组合与真机抽查。
+5. video ingest、远端视频音轨处理、已有会议显式加入和 ORG-01 账号标签目录/整理主题已经完成移动端/18020 纵切；reprocessed Transcript 生产入口、Marker 链接、非 WAV 片段和照片多模态/账号附件仍有真实功能量未完成。COLLAB-01/ORG-01 只剩第二台移动设备/USB 证据；删除到期物理清理只剩真实组合与真机抽查。
 6. `MeetingLiveScreen.android.tsx` 和 `TranscriptionScreen.android.tsx` 已抽出关键用例但仍是较重 controller；只在继续增加功能会产生重复事务时再拆，不为纯洁架构单独延长路线。
 7. USB 真机、真实模型、长录音和双设备证据尚未集中取得；它们归入候选版收口，不再分散阻塞每个切片。
 
@@ -213,7 +213,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | SPK-01 | 本场修正→资料反馈→未来改善→旧会重匹配 | 框架/线上纵切闭环 | 真实多人录音改善质量、跨设备和 USB；人工锁定与撤销合同不再重做 |
 | PRIV-01 | 默认私有、永久删除与回收站 | 软删除/恢复与双端到期物理清理纵切闭环 | 真实到期记录、多录音/WorkManager 组合和 USB 抽查 |
 | QA-01 | 单场有来源问答 | 本机/服务端线上闭环；真实模型、引用、拒答、幂等与账号持久化完成 | 用真实 final Transcript 走完整移动端页面；USB 真机 |
-| ORG-01 | 标签/Folder、多场检索与聚合 | 部分完成；标签、分源搜索、人物、用户标签主题与当前整理主题本机闭环 | 账号标签同步；Folder 仅在需求成立时添加 |
+| ORG-01 | 标签/Folder、多场检索与聚合 | 功能纵切完成；标签目录线上同步、分源搜索、人物、用户标签主题与当前整理主题闭环 | 第二台移动设备与 USB；Folder 仅在需求成立时添加 |
 | COLLAB-01 | 共享行动项与轻协作 | 本机/线上闭环；App 所有者、viewer/editor、revision、撤销及匿名第二客户端完成 | 第二台移动设备往返与 USB 真机；不扩建团队权限树 |
 | CLIP-01 | Marker/Transcript 媒体片段 | 部分完成；本机 WAV 生成、持久化、分享、定位与删除纵切 | MP3/M4A/视频服务端异步导出、账号同步与 USB 真机 |
 | ATT-01 | 时间点照片/人工附件 | 部分完成；本机附件、显式分享及文字附件逐次授权整理闭环 | 照片多模态、账号同步与真机 |
@@ -1524,7 +1524,7 @@ POST /api/laoji/v2/meeting-notes/{id}/speaker-corrections
 
 搜索结果必须展示命中来源和时间；点击 Transcript 命中直接进入 meeting 并 seek。全库问答仍不因此自动开放。
 
-当前落地：第 1、3、4、5 项本机纵切已完成。整理主题由独立 flag 从当前可读 Summary 版本派生，复用既有模型产物和用户编辑保护，不新建并行模型任务、表或标签写入；页面明确区分“用户标签/整理主题”。第 2 项仍等待大量会议的真实需求证据，账号标签同步是 ORG-01 剩余功能量。实现与模拟器边界见 `implementation/contracts/phase-8-organization-search-evidence.md`。
+当前落地：第 1、3、4、5 项及第 1 项的账号目录同步纵切均已完成。整理主题由独立 flag 从当前可读 Summary 版本派生，复用既有模型产物和用户编辑保护，不新建并行模型任务、表或标签写入；页面明确区分“用户标签/整理主题”。migration v28 与 18020 `meeting_tags_v1` 以账号目录 revision、持久 outbox/idempotency 和显式本机/云端冲突选择覆盖创建、重命名/合并、删除与会议分配。第 2 项仍等待大量会议的真实需求证据，不属于当前剩余功能量。实现与模拟器边界见 `implementation/contracts/phase-8-organization-search-evidence.md`。
 
 ### 11.3 COLLAB-01：轻协作
 
@@ -1967,7 +1967,7 @@ openOccurrenceMeeting
 - `IMP-01`：功能纵切已完成并锁定。视频 ingest、实时 capability 门控、远端音轨抽取/多资产处理与已有会议显式加入均已闭环；后续只补格式矩阵、第二台移动设备和 USB，不再新建媒体导入状态机。
 - `PRIV-01`：到期物理清理纵切已锁定；只续真实到期组合、第二设备和 USB，不再扩建第二套删除系统。
 - `QA-01`：本机/线上纵切已完成并锁定；后续只用真实 final Transcript 抽查完整移动端页面和 USB，不重做问答线程/引用/拒答/幂等框架。
-- `ORG-01`：标签、跨会议本机分源检索、人物、用户标签主题和 current Summary 整理主题聚合已完成；整理主题不写回用户标签。继续账号标签同步；Folder 只在大量会议需求成立时添加。
+- `ORG-01`：功能纵切已完成并锁定。标签目录账号同步、跨会议本机分源检索、人物、用户标签主题和 current Summary 整理主题聚合均已闭环；整理主题不写回用户标签，冲突不做 last-write-wins。后续只补第二台移动设备/USB；Folder 只在大量会议需求成立时添加。
 - `COLLAB-01`：本机/线上纵切已完成并锁定；后续只补第二台移动设备往返与 USB，不建设 Workspace/Channel 权限树。
 - `CLIP-01/ATT-01`：ATT 的本机 Marker/时间点短文字、相册照片、显式分享和文字附件逐次授权整理已完成；CLIP 的本机 WAV 生成、片段列表、分享、定位与删除已完成。继续 ATT 照片多模态/账号同步，以及 CLIP 非 WAV 异步导出/账号同步。片段与附件都是派生资产，不修改原录音。
 

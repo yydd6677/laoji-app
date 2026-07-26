@@ -25,9 +25,18 @@ import { useMeetingMediaImport } from '../components/MeetingMediaImportProvider'
 import { deriveLegacyMeetingPresentationState } from '../services/meetingPresentation';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { useAuth } from '../store/AuthStore';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import {
+  getMeetingTagCatalogSyncConflict,
+  resolveMeetingTagCatalogSyncConflict,
+  sqliteMeetingNoteRepository,
+} from '../data/repositories';
 import type { MeetingSearchResult, MeetingTagRecord } from '../data/repositories';
-import { ManageMeetingOrganizationUseCase } from '../application/meeting';
+import {
+  ManageMeetingOrganizationUseCase,
+  notifyMeetingTagCatalogChanged,
+  requestMeetingTagCatalogSync,
+  subscribeMeetingTagCatalogChanged,
+} from '../application/meeting';
 import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/meetingRecycleBin';
 import type { ScopeKey } from '../domain/meeting';
 import { MeetingTagSheet } from '../components/MeetingTagSheet';
@@ -278,6 +287,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     if (!isFocused) return;
     void refreshOrganization();
   }, [isFocused, meetings, refreshOrganization]);
+
+  useEffect(() => subscribeMeetingTagCatalogChanged(changedScope => {
+    if (changedScope === meetingScope) void refreshOrganization();
+  }), [meetingScope, refreshOrganization]);
 
   useEffect(() => {
     const request = ++searchRequestRef.current;
@@ -660,18 +673,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           });
         break;
       case 'openMeetingTags':
-        void refreshOrganization().then(loadError => {
-          if (loadError) {
-            showDialog({
-              title: '标签暂时不可用',
-              message: loadError,
-              tone: 'error',
-            });
-            return;
-          }
-          setTagMeetingId(null);
-          setTagSheetMode('manage');
-        });
+        void openTagSheet('manage', null);
         break;
       case 'openMeetingOrganization':
         navigation.navigate('MeetingOrganization');
@@ -686,18 +688,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'title' });
         break;
       case 'setMeetingTags':
-        void refreshOrganization().then(loadError => {
-          if (loadError) {
-            showDialog({
-              title: '标签暂时不可用',
-              message: loadError,
-              tone: 'error',
-            });
-            return;
-          }
-          setTagMeetingId(action.meetingId);
-          setTagSheetMode('assign');
-        });
+        void openTagSheet('assign', action.meetingId);
         break;
       case 'deleteMeeting':
         void confirmDelete(action.meetingId);
@@ -740,6 +731,62 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
     }
   };
+
+  async function openTagSheet(mode: 'assign' | 'manage', meetingId: string | null) {
+    const loadError = await refreshOrganization();
+    if (loadError) {
+      showDialog({ title: '标签暂时不可用', message: loadError, tone: 'error' });
+      return;
+    }
+    if (accountScope) {
+      try {
+        const conflict = await getMeetingTagCatalogSyncConflict(accountScope);
+        if (conflict) {
+          const resolve = async (resolution: 'keep_local' | 'use_cloud') => {
+            try {
+              const result = await resolveMeetingTagCatalogSyncConflict(
+                accountScope,
+                resolution,
+                Date.now(),
+              );
+              if (!result.resolved) throw new Error('标签同步冲突已经变化');
+              notifyMeetingTagCatalogChanged(accountScope);
+              requestMeetingTagCatalogSync(accountScope);
+              await refreshOrganization();
+              setTagMeetingId(meetingId);
+              setTagSheetMode(mode);
+            } catch (reason) {
+              showDialog({
+                title: '标签同步冲突未解决',
+                message: readableErrorMessage(reason, '标签暂时无法合并，请稍后重试。'),
+                tone: 'error',
+              });
+            }
+          };
+          showDialog({
+            title: '标签已在其他设备更新',
+            message: '请选择保留本机标签，或使用云端标签。',
+            tone: 'warning',
+            actions: [
+              { text: '保留本机', role: 'primary', onPress: () => resolve('keep_local') },
+              { text: '使用云端', onPress: () => resolve('use_cloud') },
+              { text: '取消', role: 'cancel' },
+            ],
+          });
+          return;
+        }
+      } catch (reason) {
+        showDialog({
+          title: '标签暂时不可用',
+          message: readableErrorMessage(reason, '标签同步状态暂时无法读取，请稍后重试。'),
+          tone: 'error',
+        });
+        return;
+      }
+    }
+    setTagMeetingId(meetingId);
+    setTagSheetMode(mode);
+  }
 
   const createTag = async (name: string): Promise<MeetingTagRecord> => {
     if (!meetingScope) throw new Error('当前无法使用会议标签。');

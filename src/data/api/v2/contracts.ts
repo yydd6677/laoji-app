@@ -13,6 +13,7 @@ export interface MeetingCapabilities {
   actionCollaborationV1: boolean;
   recordingAssetsV2: boolean;
   manualNotesV2: boolean;
+  meetingTagsV1: boolean;
   occurrenceLinksV2: boolean;
   speakerCorrections: boolean;
   mediaImport: {
@@ -131,6 +132,43 @@ export interface RemoteMeetingNoteV2 {
   processingStages: MeetingNoteV2Response['processing_stages'];
   serverCreatedAtMs: number;
   serverUpdatedAtMs: number;
+}
+
+export interface MeetingTagCatalogV1Tag {
+  clientTagId: string;
+  name: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface MeetingTagCatalogV1Assignment {
+  meetingRemoteId: string;
+  clientTagIds: readonly string[];
+}
+
+export interface MeetingTagCatalogV1Mutation {
+  schema_version: 1;
+  expected_remote_revision: number | null;
+  client_updated_at_ms: number;
+  tags: readonly {
+    client_tag_id: string;
+    name: string;
+    created_at_ms: number;
+    updated_at_ms: number;
+  }[];
+  assignments: readonly {
+    meeting_remote_id: string;
+    client_tag_ids: readonly string[];
+  }[];
+}
+
+export interface RemoteMeetingTagCatalogV1 {
+  exists: boolean;
+  revision: number;
+  clientUpdatedAtMs: number;
+  tags: readonly MeetingTagCatalogV1Tag[];
+  assignments: readonly MeetingTagCatalogV1Assignment[];
+  serverUpdatedAtMs: number | null;
 }
 
 export interface ProcessingJobV2Response {
@@ -349,6 +387,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   actionCollaborationV1: false,
   recordingAssetsV2: false,
   manualNotesV2: false,
+  meetingTagsV1: false,
   occurrenceLinksV2: false,
   speakerCorrections: false,
   mediaImport: null,

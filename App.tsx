@@ -34,6 +34,7 @@ import { MeetingMediaImportProvider } from './src/components/MeetingMediaImportP
 import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEventsProjectionCoordinator';
 import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTranscriptCompletionProvider';
 import { MeetingRetentionCleanupProvider } from './src/components/MeetingRetentionCleanupProvider';
+import { MeetingTagCatalogSyncProvider } from './src/components/MeetingTagCatalogSyncProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -56,6 +57,7 @@ function RuntimeProviders({ onRestart }: {
               <MeetingOccurrenceSyncProvider>
                 <MeetingActionSyncProvider>
                   <MeetingManualNoteSyncProvider>
+                    <MeetingTagCatalogSyncProvider>
                     <MeetingSpeakerCorrectionSyncProvider>
                     <EventsProvider>
                     <MeetingsProvider>
@@ -82,6 +84,7 @@ function RuntimeProviders({ onRestart }: {
                     </MeetingsProvider>
                     </EventsProvider>
                     </MeetingSpeakerCorrectionSyncProvider>
+                    </MeetingTagCatalogSyncProvider>
                   </MeetingManualNoteSyncProvider>
                 </MeetingActionSyncProvider>
               </MeetingOccurrenceSyncProvider>

@@ -27,6 +27,7 @@ export * from './saveManualNote';
 export * from './saveGuestMeetingTranscript';
 export * from './selectMeetingSummaryVersion';
 export * from './speakerCorrectionSyncTrigger';
+export * from './tagCatalogSyncTrigger';
 export * from './transcriptCompletionTrigger';
 export * from './updateMeetingNote';
 export * from './updateMeetingAction';

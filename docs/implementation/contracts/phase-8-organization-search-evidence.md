@@ -1,6 +1,6 @@
 # Phase 8 会议组织与多场检索证据：ORG-01 标签、分源搜索与人物/主题聚合
 
-状态：用户标签、本机跨会议分源检索、人物聚合、用户标签主题和 current structured Summary 的整理主题，已形成游客/账号作用域隔离的本机纵向闭环。Folder 仍保留需求门槛；账号跨设备标签同步尚未实现，因此 `ORG-01` 仍记为部分完成。本文件记录 migration v20、只读派生查询、原生 Minutes 入口、模拟器夹具和恢复边界，不把短 Transcript/单会议样本外推成真实长记录性能或跨设备证据。
+状态：用户标签、本机跨会议分源检索、人物聚合、用户标签主题、current structured Summary 整理主题和账号标签目录同步均已形成纵向闭环，`ORG-01` 功能量完成并锁定。Folder 仍保留真实需求门槛，不因路线表存在而预建。本文件记录 migration v20/v28、只读派生查询、原生 Minutes 入口、账号 revision/outbox/冲突边界、模拟器夹具和恢复边界；不把单个模拟器加匿名 HTTP 第二写入方外推成双物理设备或 USB 验收。
 
 ## 数据和检索合同
 
@@ -11,6 +11,15 @@
 - 多场索引只包含未删除会议的标题、标签、我的笔记、active Transcript、current Summary section 和 Action。每条命中保留 `source_kind/source_id/start_ms`，标题只用于结果展示；MATCH 明确限定 `content` 列，标题命中不会伪造一条“标签”或“事项”来源。
 - Android 的 Expo SQLite 16.0.10 自带 SQLite 3.50.3，并以 `SQLITE_ENABLE_FTS5=1` 编译。三字符及以上查询使用 FTS5 trigram 子串 MATCH；一到两个 Unicode codepoint 的中文短词使用转义后的逐来源 `LIKE`，避免 trigram 对“验收”一类两字词静默无结果。LIKE 结果在 SQL 内截取有界上下文，不把整段长正文复制过 bridge。
 - 索引在每个 scope 首次查询时事务性重建；repository mutation 通知会失效内存索引标记。查询本身不写用户正文，scope、deleted lifecycle 和 active/current revision 仍在每次检索 SQL 中复核。
+
+## 账号标签目录同步合同
+
+- migration v28 新增 `meeting_tag_catalog_sync_state`，复用既有 `sync_outbox/sync_conflicts`，不改写 v20 标签表。账号 scope 的本机标签仍立即提交；创建、重命名/合并、删除和整组分配只触发后台目录同步，调度失败不能回滚用户已完成的本机操作。游客 scope 永不上传。
+- 同步聚合是一个受 optimistic revision 保护的账号目录快照：标签保留本机生成的稳定 `client_tag_id`；分配在传输前把 canonical meeting ID 解析为已归属当前账号的远端 meeting ID。存在标签的会议尚无远端身份时任务保持 durable pending 并先请求根同步，禁止上传悬空关联。
+- 客户端保存最后确认的本机快照和完整云端快照。生成新请求时，已知本机会议采用当前分配；尚未拉到本机的远端会议继续保留上次云端分配，避免一台只持有部分会议的设备用全量替换误删未知关联。每次 claim 冻结 request payload 与 idempotency key；进程中断重放同一 payload，不用新时钟伪装成另一项修改。
+- 18020 新增 `meeting_tag_catalogs_v1`、持久 operation ledger 和 `GET/PUT /api/laoji/v1/meeting-tags`；capability 为 `meeting_tags_v1`。首次创建要求 `If-None-Match: *`，后续替换要求 `If-Match`；同一 idempotency key 只重放原结果，陈旧 revision 返回 412 与完整当前候选。服务端限制最多 100 个标签、每场 20 个标签和 5000 条非空会议分配，并重新验证 NFKC 名称唯一、标签引用和会议归属。
+- 无本机目录状态且本机无标签时先拉云端，不能用空目录抢先覆盖另一设备；已有本机标签的旧安装先尝试创建，若云端已存在则进入冲突。推送完成后再拉取对账；拉取只在没有 pending/in-flight/blocked/conflict 时覆盖本机 v20 表。
+- revision 冲突不做 last-write-wins。`sync_conflicts` 保存本机快照和远端完整候选；用户再次打开标签入口时只显示中文选择“保留本机 / 使用云端”。保留本机先接受最新远端 revision 为新基线，再由 outbox 重提当前完整本机目录；使用云端则原子替换当前 scope 的标签和可映射分配。两条路径均不触碰会议正文、录音、文字记录、整理结果或人物资料。
 
 ## 人物和主题聚合合同
 
@@ -28,6 +37,7 @@
 - 搜索结果卡显示来源标签和摘要。Transcript 命中携带稳定 segment/source ID 与时间进入“文字记录”并定位；Summary、我的笔记和 Action 分别进入对应详情页，Action 保留独立 focus request identity；标题/标签进入会议详情。
 - 会议卡长按增加“设置标签”，会议页更多菜单增加“管理标签”。设置面板支持创建和整组勾选保存；管理面板支持改名、同名合并和删除。
 - 标签面板保存后先完成约 300ms 全高度退出，再关闭 Modal；父层刷新不再重启入场动画。危险删除先退出 React Native Modal，再显示 Activity 原生确认框，避免确认框不可见地落在 Modal 下方。
+- 账号目录发生 revision 冲突时，不在已打开的 sheet 下叠第二个窗口；入口先使用现有 Activity 对话框给出“保留本机 / 使用云端 / 取消”，解决后再打开原标签 sheet。没有新增同步说明页、英文错误或常驻状态徽标。
 - 会议列表更多菜单新增且只新增一个“分类查看”入口，不增加底栏、Agent 或团队权限入口。页面以“人物/主题”双标签展示派生组；人物行显示会议数和明确的“段发言”计数，临时姓名显示“未确认”；主题标题旁用安静的“用户标签/整理主题”徽标说明来源，组内会议行可直接进入原会议详情。
 
 ## UI 证据分类
@@ -69,12 +79,16 @@
 - 整理主题增量不新增 migration。纯归一化合同覆盖 Markdown bullet/编号/任务、NFKC 去重、泛化标题、JSON/孤立结构括号、链接/行内样式和 12 项上限；最小 SQLite 夹具确认只读取 current ready/stale、同 scope、未删除会议的 `topics` section。
 - 保留数据上临时安装 Debug 变体后，canonical 审计仍为 `consistent`、账号 revision/mirror=`51/51`。夹具为“新录音”添加 current `topics` section 和一个用户标签：页面显示“研发周会 / 用户标签”、“AI 助手 / 整理主题”和“客户反馈 / 整理主题”；重复“客户反馈”只保留一组，`## 主题` 与损坏 JSON 行被拒绝，整理主题会议行实际返回“新录音”详情。
 - 验证后按 DB/WAL/SHM 三文件恢复，设备读取 SHA-256 与未打开的备份逐一一致：DB `8891db34699c046466b7b3bdbb876496ed2f2b0e6c7a3a17482e71c0e571158e`、WAL `4643aec0f99d1ce554ed7c26effdca8952acabaf64d34e3f7bd47a1c88a3bf7e`、SHM `deac3b694f15d59ad18a6a1db1805d1d6ad699aa3a13ed588412b5360f27517a`；恢复后 repository audit 再次为 `consistent`，活动账号会议仍为 3 条。
-- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-26 12:02:38 +0800`，大小 `90,785,312` bytes，SHA-256 `edbcd5e4de02b6be82c96e1fe9d0939d3668adb4d8ba4f65bf2d2a0e28cb1d8a`。已覆盖安装到 `emulator-5556`，`versionCode=104`、`lastUpdateTime=2026-07-26 12:02:57`。
+- 账号目录服务候选基于运行中 18020 的精确源哈希而非较旧 overlay。一个聚焦 async SQLite 合同覆盖 missing/create/replay/update/stale-412/跨账号拒绝，另一次临时 schema helper 安装确认两张 additive 表和 foreign-key check；候选路径为 `/home/zhong/laoji-service-platform/candidates/20260726-meeting-tags-v1`，部署前备份为 `backups/20260726-meeting-tags-v1`。
+- 部署后 capability 实际返回 `meeting_tags_v1=true`。真实测试账号通过 HTTP 完成 revision `0→1→2`、同请求幂等重放和陈旧 `If-Match: 1` 返回 412；用于验收的服务端 catalog/operation 行随后删除，最终 GET 回到 `exists=false/revision=0`。
+- 普通 Preview 在 `emulator-5556` 把账号“移动端同步验收”分配到“新录音”，后台日志为 `pushed=1/pulled=true`，远端 revision 1 的标签名和 meeting remote ID 对账一致。随后匿名第二写入方把云端推进到 revision 2，本机另改名称后没有覆盖云端：v28 中形成 `meeting_tag_catalog/catalog local=1 remote=2 unresolved`，对应 outbox 为 `blocked/revision_conflict`。
+- 验收前 DB/WAL/SHM 哈希已记录；但对本机备份执行 `sqlite3 quick_check` 时，SQLite 在备份目录把 WAL checkpoint 进主文件并移除了旁文件，因此最终不是三文件字节级恢复。恢复的是逻辑等价的 v27 checkpoint：`quick_check=ok`、标签/标签冲突均为 0；随后最终 Preview 正常迁移到 v28。冷启动审计为 `consistent`，活动账号会议仍为 3、canonical/mirror=`53/53`，无 FATAL、SQLiteException、缺表或 malformed 日志。服务端夹具也恢复为 `exists=false/revision=0`。
+- 当前统一交付 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-26 12:39:10 +0800`，大小 `90,821,408` bytes，SHA-256 `1d9c596bbda41077ecfc9e65f06adb104a24d1187b389161c6273144bc4817dd`。构建为 627 tasks、63 executed、564 up-to-date，耗时 49 秒；已覆盖安装到 `emulator-5556`，`versionCode=104`、`lastUpdateTime=2026-07-26 12:45:49`。
 
 ## 未完成边界
 
 1. Folder 仍只保留需求门槛；当前没有真实大量会议证据支持加入文件夹，更没有树形权限模型。
-2. 标签当前是本机 scope 数据，没有账号 outbox、服务端 schema、跨设备合并或冲突处理，不能宣称账号同步完成；人物也是本机 active Transcript 的派生视图，不是跨设备 profile 仓库。
+2. 账号标签目录同步的功能纵切已经完成；证据覆盖同一模拟器和匿名 HTTP 第二写入方，不等于第二台移动设备持续离线后往返。冲突选择对话框有源码/编译合同和底层 durable conflict 证据，本轮没有再次制造夹具去点击两种按钮。人物仍是当前账号本机 active Transcript 的派生视图，不是另一套跨设备 profile 仓库。
 3. 整理主题复用已经存在的结构化 Summary，不是独立的全库 topic 模型或聚类任务；没有 `topics` section 的会议不会被猜测分类。真实模型主题质量仍随 SUM 候选抽查，不阻止只读聚合功能完成。
 4. 搜索中的 Transcript/Summary/Action 目标页仍只有既有源码/编译边界；本轮夹具只为主题聚合和普通会议详情跳转，不补写成三类搜索来源的设备点击证据。
 5. 没有 USB 真机、深色模式、字体缩放、超大人物/主题库或长 Transcript 性能证据；这些按轻量目标留到功能批次或候选版，而不是反向抹掉已完成的本机聚合纵切。

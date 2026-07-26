@@ -5,6 +5,7 @@ export * from './actionItems';
 export * from './actionCollaboration';
 export * from './contracts';
 export * from './manualNotes';
+export * from './meetingTags';
 export * from './speakerCorrections';
 export * from './meetingNotes';
 export * from './meetingQuestions';

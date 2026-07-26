@@ -205,6 +205,10 @@ module.exports = () => {
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_AUTOMATIC_TOPICS_V1 ?? 'true').trim().toLowerCase(),
     );
+  const meetingTagSyncV1 = localMeetingDbCanonicalWriteV1
+    && !['0', 'false', 'no', 'off'].includes(
+      String(process.env.EXPO_PUBLIC_MEETING_TAG_SYNC_V1 ?? 'true').trim().toLowerCase(),
+    );
   const meetingMediaImportExistingV1 = localMeetingDbCanonicalReadV1
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_MEDIA_IMPORT_EXISTING_V1 ?? 'true').trim().toLowerCase(),
@@ -262,6 +266,7 @@ module.exports = () => {
         localMeetingDbAccountUploadWriteV1,
         meetingQuestionsV1,
         meetingAutomaticTopicsV1,
+        meetingTagSyncV1,
         meetingMediaImportExistingV1,
         meetingMediaClipsV1,
         meetingActionCollaborationV1,

@@ -1,23 +1,19 @@
 import React, { useEffect } from 'react';
 import { AppState } from 'react-native';
-import { subscribeMeetingRootSync } from '../application/meeting/rootSyncTrigger';
-import { requestMeetingActionSync } from '../application/meeting/actionSyncTrigger';
-import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
-import { requestMeetingOccurrenceSync } from '../application/meeting/occurrenceSyncTrigger';
-import { requestMeetingTagCatalogSync } from '../application/meeting/tagCatalogSyncTrigger';
+import { subscribeMeetingTagCatalogSync } from '../application/meeting/tagCatalogSyncTrigger';
 import { getFeatureFlags } from '../config/featureFlags';
 import type { ScopeKey } from '../domain/meeting';
 import { diagnosticWarn } from '../services/diagnostics';
-import { drainMeetingRootSync } from '../services/meetingRootSync';
+import { synchronizeMeetingTagCatalog } from '../services/meetingTagCatalogSync';
 import { useAuth } from '../store/AuthStore';
 
-export function MeetingRootSyncProvider({ children }: { children: React.ReactNode }) {
+export function MeetingTagCatalogSyncProvider({ children }: { children: React.ReactNode }) {
   const { mode, session, accessToken } = useAuth();
   const userId = session?.user.id ?? null;
 
   useEffect(() => {
     if (
-      !getFeatureFlags().localMeetingDbAccountRootWriteV1
+      !getFeatureFlags().meetingTagSyncV1
       || mode !== 'authenticated'
       || !accessToken
       || userId === null
@@ -29,7 +25,7 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const controllers = new Set<AbortController>();
 
-    const clearRetryTimer = () => {
+    const clearRetry = () => {
       if (!retryTimer) return;
       clearTimeout(retryTimer);
       retryTimer = null;
@@ -37,7 +33,7 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
     const requestRun = () => {
       if (!active) return;
       requested = true;
-      clearRetryTimer();
+      clearRetry();
       if (running) return;
       running = true;
       void (async () => {
@@ -47,18 +43,12 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
             const controller = new AbortController();
             controllers.add(controller);
             try {
-              const result = await drainMeetingRootSync({
+              const result = await synchronizeMeetingTagCatalog({
                 scopeKey,
                 accessToken,
                 signal: controller.signal,
                 isCurrent: () => active,
               });
-              if (active && result.processedCount > 0) {
-                requestMeetingOccurrenceSync(scopeKey);
-                requestMeetingActionSync(scopeKey);
-                requestMeetingSpeakerCorrectionSync(scopeKey);
-                requestMeetingTagCatalogSync(scopeKey);
-              }
               if (active && result.retryAfterMs !== null && !requested) {
                 retryTimer = setTimeout(requestRun, Math.max(1_000, result.retryAfterMs));
               }
@@ -67,7 +57,12 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
             }
           }
         } catch (error) {
-          if (active) diagnosticWarn('[meeting-root-sync] drain failed', error);
+          if (active) {
+            diagnosticWarn('[meeting-tag-sync] synchronization failed', error);
+            if (!retryTimer && !requested) {
+              retryTimer = setTimeout(requestRun, 60_000);
+            }
+          }
         } finally {
           running = false;
           if (active && requested) requestRun();
@@ -75,19 +70,19 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
       })();
     };
 
-    const unsubscribe = subscribeMeetingRootSync(requestedScope => {
+    const unsubscribe = subscribeMeetingTagCatalogSync(requestedScope => {
       if (requestedScope === scopeKey) requestRun();
     });
-    const appStateSubscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') requestRun();
+    const appState = AppState.addEventListener('change', next => {
+      if (next === 'active') requestRun();
     });
     requestRun();
     return () => {
       active = false;
       requested = false;
-      clearRetryTimer();
+      clearRetry();
       unsubscribe();
-      appStateSubscription.remove();
+      appState.remove();
       controllers.forEach(controller => controller.abort());
       controllers.clear();
     };

@@ -9,6 +9,7 @@ import type {
   MeetingTagRecord,
   RenameMeetingTagResult,
 } from '../../data/repositories/meetingNoteRepository';
+import { requestMeetingTagCatalogSync } from './tagCatalogSyncTrigger';
 
 export interface NormalizedMeetingTagName {
   name: string;
@@ -55,13 +56,15 @@ export class ManageMeetingOrganizationUseCase {
   async createTag(scopeKey: ScopeKey, value: string): Promise<MeetingTagRecord> {
     const normalized = normalizeMeetingTagName(value);
     const nowMs = Date.now();
-    return this.repository.createMeetingTag({
+    const tag = await this.repository.createMeetingTag({
       id: this.idFactory.create(),
       scopeKey,
       ...normalized,
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
     });
+    requestMeetingTagCatalogSync(scopeKey);
+    return tag;
   }
 
   async renameOrMergeTag(
@@ -70,17 +73,21 @@ export class ManageMeetingOrganizationUseCase {
     value: string,
   ): Promise<RenameMeetingTagResult> {
     const normalized = normalizeMeetingTagName(value);
-    return this.repository.renameOrMergeMeetingTag(
+    const result = await this.repository.renameOrMergeMeetingTag(
       tagId,
       scopeKey,
       normalized.name,
       normalized.normalizedName,
       Date.now(),
     );
+    requestMeetingTagCatalogSync(scopeKey);
+    return result;
   }
 
-  deleteTag(tagId: string, scopeKey: ScopeKey): Promise<readonly string[]> {
-    return this.repository.deleteMeetingTag(tagId, scopeKey);
+  async deleteTag(tagId: string, scopeKey: ScopeKey): Promise<readonly string[]> {
+    const result = await this.repository.deleteMeetingTag(tagId, scopeKey);
+    requestMeetingTagCatalogSync(scopeKey);
+    return result;
   }
 
   async replaceMeetingTags(
@@ -89,7 +96,9 @@ export class ManageMeetingOrganizationUseCase {
     tagIds: readonly string[],
   ): Promise<readonly MeetingTagRecord[]> {
     const meetingId = await this.requireCanonicalMeetingId(navigationMeetingId, scopeKey);
-    return this.repository.replaceMeetingTags(meetingId, scopeKey, tagIds, Date.now());
+    const tags = await this.repository.replaceMeetingTags(meetingId, scopeKey, tagIds, Date.now());
+    requestMeetingTagCatalogSync(scopeKey);
+    return tags;
   }
 
   search(

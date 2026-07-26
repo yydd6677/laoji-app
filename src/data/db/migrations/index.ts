@@ -25,6 +25,7 @@ import { meetingActionCollaborationV24 } from './0024MeetingActionCollaboration'
 import { transcriptRecordingProvenanceV25 } from './0025TranscriptRecordingProvenance';
 import { recordingAssetTranscriptionTasksV26 } from './0026RecordingAssetTranscriptionTasks';
 import { meetingRetentionCleanupV27 } from './0027MeetingRetentionCleanup';
+import { meetingTagCatalogSyncV28 } from './0028MeetingTagCatalogSync';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -55,6 +56,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   transcriptRecordingProvenanceV25,
   recordingAssetTranscriptionTasksV26,
   meetingRetentionCleanupV27,
+  meetingTagCatalogSyncV28,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -84,4 +86,5 @@ export { MEETING_ACTION_COLLABORATION_V24_SQL } from './0024MeetingActionCollabo
 export { TRANSCRIPT_RECORDING_PROVENANCE_V25_SQL } from './0025TranscriptRecordingProvenance';
 export { RECORDING_ASSET_TRANSCRIPTION_TASKS_V26_SQL } from './0026RecordingAssetTranscriptionTasks';
 export { MEETING_RETENTION_CLEANUP_V27_SQL } from './0027MeetingRetentionCleanup';
+export { MEETING_TAG_CATALOG_SYNC_V28_SQL } from './0028MeetingTagCatalogSync';
 export type { MeetingDatabaseMigration } from './types';

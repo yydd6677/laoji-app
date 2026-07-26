@@ -63,6 +63,7 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     actionCollaborationV1: booleanField(value, 'action_collaboration_v1'),
     recordingAssetsV2: booleanField(value, 'recording_assets_v2'),
     manualNotesV2: booleanField(value, 'manual_notes_v2'),
+    meetingTagsV1: booleanField(value, 'meeting_tags_v1'),
     occurrenceLinksV2: booleanField(value, 'occurrence_links_v2'),
     speakerCorrections: booleanField(value, 'speaker_corrections'),
     mediaImport: media && Number.isSafeInteger(maxBytes) && maxBytes > 0
@@ -108,6 +109,7 @@ async function readCache(): Promise<CapabilityCache | null> {
           ? parsed.capabilities.recordingAssetsV2
           : undefined,
         manual_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.manualNotesV2 : undefined,
+        meeting_tags_v1: isRecord(parsed.capabilities) ? parsed.capabilities.meetingTagsV1 : undefined,
         occurrence_links_v2: isRecord(parsed.capabilities)
           ? parsed.capabilities.occurrenceLinksV2
           : undefined,
@@ -169,7 +171,7 @@ export async function loadMeetingCapabilities(
 export async function requireFreshMeetingCapability(
   capability: keyof Pick<
     MeetingCapabilities,
-    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'recordingAssetsV2' | 'manualNotesV2' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
+    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'recordingAssetsV2' | 'manualNotesV2' | 'meetingTagsV1' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
   >,
   accessToken?: string | null,
 ): Promise<MeetingCapabilities> {
