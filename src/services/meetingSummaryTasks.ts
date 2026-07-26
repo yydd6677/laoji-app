@@ -99,13 +99,21 @@ export function meetingSummaryInputFingerprint(
       feed(item.attachmentId);
       feed(item.kind);
       feed(item.positionMs);
-      feed(item.content);
-      feed(item.contentSha256);
+      if (item.kind === 'text') {
+        feed(item.content);
+        feed(item.contentSha256);
+      } else {
+        feed(item.remoteAttachmentId);
+        feed(item.remoteRevision);
+        feed(item.mimeType);
+        feed(item.byteSize);
+        feed(item.checksumSha256);
+      }
       feed(item.updatedAtMs);
     });
   }
 
-  const version = 'v5';
+  const version = 'v6';
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 
@@ -277,29 +285,53 @@ function parseCarryForwardAuthorization(value: unknown): MeetingSummaryCarryForw
 
 function parseAttachmentItem(value: unknown): MeetingSummaryAttachmentItem | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const item = value as Partial<MeetingSummaryAttachmentItem>;
+  const item = value as Record<string, unknown>;
   const attachmentId = pendingText(item.attachmentId, 512);
-  const content = pendingText(item.content, 2_000);
-  const contentSha256 = pendingText(item.contentSha256, 71);
   if (
     !attachmentId
-    || item.kind !== 'text'
     || !Number.isSafeInteger(item.positionMs)
     || Number(item.positionMs) < 0
-    || !content
-    || !contentSha256
-    || !/^sha256:[0-9a-f]{64}$/.test(contentSha256)
     || !Number.isSafeInteger(item.updatedAtMs)
     || Number(item.updatedAtMs) < 0
   ) return null;
-  return {
+  const common = {
     attachmentId,
-    kind: 'text',
     positionMs: Number(item.positionMs),
-    content,
-    contentSha256,
     updatedAtMs: Number(item.updatedAtMs),
   };
+  if (item.kind === 'text') {
+    const content = pendingText(item.content, 2_000);
+    const contentSha256 = pendingText(item.contentSha256, 71);
+    if (!content || !contentSha256 || !/^sha256:[0-9a-f]{64}$/.test(contentSha256)) return null;
+    return { ...common, kind: 'text', content, contentSha256 };
+  }
+  if (item.kind === 'image') {
+    const remoteAttachmentId = pendingText(item.remoteAttachmentId, 160);
+    const mimeType = pendingText(item.mimeType, 160)?.toLowerCase() ?? null;
+    const checksumSha256 = pendingText(item.checksumSha256, 71);
+    if (
+      !remoteAttachmentId
+      || !Number.isSafeInteger(item.remoteRevision)
+      || Number(item.remoteRevision) < 1
+      || !mimeType
+      || !['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(mimeType)
+      || !Number.isSafeInteger(item.byteSize)
+      || Number(item.byteSize) < 1
+      || Number(item.byteSize) > 25 * 1024 * 1024
+      || !checksumSha256
+      || !/^sha256:[0-9a-f]{64}$/.test(checksumSha256)
+    ) return null;
+    return {
+      ...common,
+      kind: 'image',
+      remoteAttachmentId,
+      remoteRevision: Number(item.remoteRevision),
+      mimeType,
+      byteSize: Number(item.byteSize),
+      checksumSha256,
+    };
+  }
+  return null;
 }
 
 function parseAttachmentAuthorization(value: unknown): MeetingSummaryAttachmentAuthorization | null {
@@ -315,7 +347,15 @@ function parseAttachmentAuthorization(value: unknown): MeetingSummaryAttachmentA
   const resolved = items as MeetingSummaryAttachmentItem[];
   if (
     new Set(resolved.map(item => item.attachmentId)).size !== resolved.length
-    || resolved.reduce((total, item) => total + item.content.length, 0) > 12_000
+    || resolved.filter(item => item.kind === 'image').length > 4
+    || resolved.reduce(
+      (total, item) => total + (item.kind === 'text' ? item.content.length : 0),
+      0,
+    ) > 12_000
+    || resolved.reduce(
+      (total, item) => total + (item.kind === 'image' ? item.byteSize : 0),
+      0,
+    ) > 40 * 1024 * 1024
   ) return null;
   return { requestId, items: resolved };
 }

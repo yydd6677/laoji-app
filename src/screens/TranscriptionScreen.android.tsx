@@ -185,6 +185,7 @@ import {
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
 import {
   authorizeMeetingSummaryAttachments,
+  canUseMeetingSummaryImageAttachments,
   meetingSummaryAttachmentAuthorizationIsCurrent,
   MeetingSummaryAttachmentSelectionStaleError,
 } from '../services/meetingSummaryAttachments';
@@ -500,6 +501,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     template: MeetingTemplate;
     forceRegenerate: boolean;
     attachments: readonly MeetingAttachmentRecord[];
+    imageSelectionEnabled: boolean;
   } | null>(null);
   const [summaryCarryForwardRequest, setSummaryCarryForwardRequest] = useState<{
     meetingId: string;
@@ -1900,6 +1902,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               scopeKey: currentMeetingScopeKey,
               meetingId: currentMeeting.id,
               authorization: attachmentAuthorization,
+              accessToken,
             }),
           );
           if (!authorizationIsCurrent) {
@@ -2232,10 +2235,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const generation = summaryCarryLookupGenerationRef.current + 1;
     summaryCarryLookupGenerationRef.current = generation;
     try {
-      const attachments = await loadMeetingAttachments(currentScopeKey, currentMeetingId);
+      const [attachments, imageSelectionEnabled] = await Promise.all([
+        loadMeetingAttachments(currentScopeKey, currentMeetingId),
+        canUseMeetingSummaryImageAttachments({
+          scopeKey: currentScopeKey,
+          accessToken,
+        }).catch(() => false),
+      ]);
       if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
       if (attachments.length > 0) {
-        setSummaryAttachmentRequest({ ...input, attachments });
+        setSummaryAttachmentRequest({ ...input, attachments, imageSelectionEnabled });
         return;
       }
       await continueSummaryAfterAttachmentSelection(input, null);
@@ -4523,6 +4532,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingSummaryAttachmentSheet
         visible={summaryAttachmentRequest !== null}
         attachments={summaryAttachmentRequest?.attachments ?? []}
+        imageSelectionEnabled={summaryAttachmentRequest?.imageSelectionEnabled ?? false}
         onClose={() => setSummaryAttachmentRequest(null)}
         onSkip={() => {
           const request = summaryAttachmentRequest;

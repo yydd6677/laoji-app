@@ -9750,11 +9750,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         if (row.sync_state === 'local' && row.pending_operation === null) {
           const repaired = await database.runAsync(
             `UPDATE meeting_attachments SET sync_state = 'pending',
-               pending_operation = 'create', last_error_code = NULL,
-               updated_at_ms = MAX(updated_at_ms, ?)
+               pending_operation = 'create', last_error_code = NULL
              WHERE id = ? AND scope_key = ? AND sync_state = 'local'
                AND pending_operation IS NULL`,
-            createdAtMs,
             row.id,
             scopeKey,
           );
@@ -10034,8 +10032,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       const updated = await database.runAsync(
         `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
            checksum_sha256 = ?, sync_state = ?, pending_operation = ?,
-           last_error_code = NULL, remote_updated_at_ms = ?,
-           updated_at_ms = MAX(updated_at_ms, ?)
+           last_error_code = NULL, remote_updated_at_ms = ?, updated_at_ms = ?
          WHERE id = ? AND scope_key = ?`,
         remote.remoteId,
         remote.revision,
@@ -10043,7 +10040,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         deleting ? 'pending' : 'synced',
         deleting ? 'delete' : null,
         remote.serverUpdatedAtMs,
-        completedAtMs,
+        remote.clientUpdatedAtMs,
         attachment.id,
         claim.scopeKey,
       );
@@ -10187,12 +10184,10 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       );
       if (failed.changes !== 1) return false;
       await database.runAsync(
-        `UPDATE meeting_attachments SET sync_state = ?, last_error_code = ?,
-           updated_at_ms = MAX(updated_at_ms, ?)
+        `UPDATE meeting_attachments SET sync_state = ?, last_error_code = ?
          WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
         attachmentState,
         errorCode,
-        failure.updatedAtMs,
         claim.attachmentId,
         claim.meetingId,
         claim.scopeKey,
@@ -10243,9 +10238,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if (reset.changes < 1) return false;
       await database.runAsync(
         `UPDATE meeting_attachments SET sync_state = 'pending',
-           last_error_code = NULL, updated_at_ms = MAX(updated_at_ms, ?)
+           last_error_code = NULL
          WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
-        retriedAtMs,
         attachmentId,
         meetingId,
         scopeKey,
@@ -10321,12 +10315,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         }
         await database.runAsync(
           `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
-             remote_updated_at_ms = ?, updated_at_ms = MAX(updated_at_ms, ?)
+             remote_updated_at_ms = ?, updated_at_ms = ?
            WHERE id = ? AND scope_key = ?`,
           input.remote.remoteId,
           input.remote.revision,
           input.remote.serverUpdatedAtMs,
-          input.mergedAtMs,
+          input.remote.clientUpdatedAtMs,
           existing.id,
           input.scopeKey,
         );
@@ -10354,8 +10348,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         await database.runAsync(
           `UPDATE meeting_attachments SET remote_id = ?, remote_revision = ?,
              local_uri = ?, checksum_sha256 = ?, sync_state = ?, pending_operation = ?,
-             last_error_code = NULL, remote_updated_at_ms = ?,
-             updated_at_ms = MAX(updated_at_ms, ?)
+             last_error_code = NULL, remote_updated_at_ms = ?, updated_at_ms = ?
            WHERE id = ? AND scope_key = ?`,
           input.remote.remoteId,
           input.remote.revision,
@@ -10364,7 +10357,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
           deleting ? 'pending' : 'synced',
           deleting ? 'delete' : null,
           input.remote.serverUpdatedAtMs,
-          input.mergedAtMs,
+          input.remote.clientUpdatedAtMs,
           existing.id,
           input.scopeKey,
         );
@@ -10410,7 +10403,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         lastErrorCode: null,
         remoteUpdatedAtMs: input.remote.serverUpdatedAtMs,
         createdAtMs: input.remote.clientCreatedAtMs,
-        updatedAtMs: Math.max(input.remote.clientUpdatedAtMs, input.mergedAtMs),
+        updatedAtMs: input.remote.clientUpdatedAtMs,
       };
       assertMeetingAttachmentValue(inserted);
       await database.runAsync(

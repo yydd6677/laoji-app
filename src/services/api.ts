@@ -481,14 +481,24 @@ function summaryAttachmentAuthorizationPayload(
   if (!authorization) return null;
   return {
     request_id: authorization.requestId,
-    items: authorization.items.map(item => ({
+    items: authorization.items.map(item => item.kind === 'text' ? {
       attachment_id: item.attachmentId,
-      kind: item.kind,
+      kind: 'text',
       position_ms: item.positionMs,
       content: item.content,
       content_sha256: item.contentSha256,
       updated_at_ms: item.updatedAtMs,
-    })),
+    } : {
+      attachment_id: item.attachmentId,
+      kind: 'image',
+      position_ms: item.positionMs,
+      remote_attachment_id: item.remoteAttachmentId,
+      remote_revision: item.remoteRevision,
+      mime_type: item.mimeType,
+      byte_size: item.byteSize,
+      checksum_sha256: item.checksumSha256,
+      updated_at_ms: item.updatedAtMs,
+    }),
   };
 }
 

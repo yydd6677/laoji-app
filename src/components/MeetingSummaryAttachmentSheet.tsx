@@ -14,10 +14,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryAttachmentAuthorization } from '../domain/meeting';
 import type { MeetingAttachmentRecord } from '../data/repositories';
+import { meetingSummaryImageAttachmentIsSelectable } from '../services/meetingSummaryAttachments';
 import { getFeishuTokens } from '../theme/feishuTokens';
 
 const MOTION_MS = 300;
 const MAX_SELECTION = 12;
+const MAX_IMAGE_SELECTION = 4;
+const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 
 function timeLabel(positionMs: number): string {
   const seconds = Math.max(0, Math.floor(positionMs / 1_000));
@@ -35,6 +38,7 @@ function authorizationErrorMessage(error: unknown): string {
 export function MeetingSummaryAttachmentSheet({
   visible,
   attachments,
+  imageSelectionEnabled,
   onClose,
   onSkip,
   onAuthorize,
@@ -42,6 +46,7 @@ export function MeetingSummaryAttachmentSheet({
 }: {
   visible: boolean;
   attachments: readonly MeetingAttachmentRecord[];
+  imageSelectionEnabled: boolean;
   onClose: () => void;
   onSkip: () => void;
   onAuthorize: (attachmentIds: readonly string[]) => Promise<MeetingSummaryAttachmentAuthorization>;
@@ -52,6 +57,7 @@ export function MeetingSummaryAttachmentSheet({
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
   const mountedRef = useRef(visible);
+  const visibleRef = useRef(false);
   const closingRef = useRef(false);
   const closeRef = useRef(onClose);
   const skipRef = useRef(onSkip);
@@ -91,11 +97,12 @@ export function MeetingSummaryAttachmentSheet({
 
   useEffect(() => {
     if (visible) {
-      if (!mountedRef.current) {
+      if (!visibleRef.current) {
         setSelectedIds(new Set());
         setError('');
         setSaving(false);
       }
+      visibleRef.current = true;
       mountedRef.current = true;
       closingRef.current = false;
       setMounted(true);
@@ -109,6 +116,7 @@ export function MeetingSummaryAttachmentSheet({
       }).start();
       return;
     }
+    visibleRef.current = false;
     finishClose(false);
   }, [finishClose, progress, visible]);
 
@@ -116,7 +124,14 @@ export function MeetingSummaryAttachmentSheet({
 
   if (!mounted) return null;
   const presented = attachmentsRef.current;
-  const selected = presented.filter(item => item.kind === 'text' && selectedIds.has(item.id));
+  const imageAvailable = (attachment: MeetingAttachmentRecord) => (
+    imageSelectionEnabled
+    && meetingSummaryImageAttachmentIsSelectable(attachment)
+  );
+  const available = (attachment: MeetingAttachmentRecord) => (
+    attachment.kind === 'text' || imageAvailable(attachment)
+  );
+  const selected = presented.filter(item => available(item) && selectedIds.has(item.id));
   const canSubmit = selected.length > 0 && !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
@@ -125,10 +140,26 @@ export function MeetingSummaryAttachmentSheet({
     if (!saving) finishClose(true, skipRef.current);
   };
   const toggle = (attachment: MeetingAttachmentRecord) => {
-    if (attachment.kind !== 'text' || saving || closing) return;
+    if (!available(attachment) || saving || closing) return;
     if (!selectedIds.has(attachment.id) && selectedIds.size >= MAX_SELECTION) {
       setError(`最多选择 ${MAX_SELECTION} 个附件。`);
       return;
+    }
+    if (!selectedIds.has(attachment.id) && attachment.kind === 'image') {
+      const selectedImages = presented.filter(item => (
+        item.kind === 'image' && selectedIds.has(item.id)
+      ));
+      if (selectedImages.length >= MAX_IMAGE_SELECTION) {
+        setError(`最多选择 ${MAX_IMAGE_SELECTION} 张照片。`);
+        return;
+      }
+      if (
+        selectedImages.reduce((total, item) => total + (item.byteSize ?? 0), 0)
+        + (attachment.byteSize ?? 0) > MAX_IMAGE_BYTES
+      ) {
+        setError('所选照片总大小不能超过 40 MB。');
+        return;
+      }
     }
     setError('');
     setSelectedIds(current => {
@@ -204,43 +235,43 @@ export function MeetingSummaryAttachmentSheet({
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false}>
             {presented.map(attachment => {
-              const available = attachment.kind === 'text';
-              const checked = available && selectedIds.has(attachment.id);
-              const content = available
+              const itemAvailable = available(attachment);
+              const checked = itemAvailable && selectedIds.has(attachment.id);
+              const content = attachment.kind === 'text'
                 ? attachment.textContent?.trim() || '文字附件'
                 : attachment.fileName?.trim() || '照片';
-              const meta = available
+              const meta = attachment.kind === 'text'
                 ? `文字 · ${timeLabel(attachment.positionMs)}`
-                : `照片 · ${timeLabel(attachment.positionMs)} · 暂不可用`;
+                : `照片 · ${timeLabel(attachment.positionMs)}${itemAvailable ? '' : ' · 暂不可用'}`;
               return (
                 <Pressable
                   key={attachment.id}
                   style={({ pressed }) => [
                     styles.row,
                     { borderBottomColor: colors.divider },
-                    pressed && available && !saving && { backgroundColor: colors.pressedFill },
+                    pressed && itemAvailable && !saving && { backgroundColor: colors.pressedFill },
                   ]}
                   onPress={() => toggle(attachment)}
-                  disabled={!available || saving || closing}
+                  disabled={!itemAvailable || saving || closing}
                   accessibilityRole="checkbox"
                   accessibilityLabel={`${content}，${meta}`}
-                  accessibilityState={{ checked, disabled: !available || saving || closing }}
+                  accessibilityState={{ checked, disabled: !itemAvailable || saving || closing }}
                 >
-                  <View style={[styles.iconSlot, { backgroundColor: available ? colors.primarySoft : colors.backgroundBase }]}>
+                  <View style={[styles.iconSlot, { backgroundColor: itemAvailable ? colors.primarySoft : colors.backgroundBase }]}>
                     <Ionicons
-                      name={available ? 'document-text-outline' : 'image-outline'}
+                      name={attachment.kind === 'text' ? 'document-text-outline' : 'image-outline'}
                       size={20}
-                      color={available ? colors.primary : colors.iconDisabled}
+                      color={itemAvailable ? colors.primary : colors.iconDisabled}
                     />
                   </View>
                   <View style={styles.rowBody}>
                     <Text
-                      style={[styles.rowText, { color: available ? colors.textTitle : colors.textDisabled }]}
+                      style={[styles.rowText, { color: itemAvailable ? colors.textTitle : colors.textDisabled }]}
                       numberOfLines={2}
                     >
                       {content}
                     </Text>
-                    <Text style={[styles.rowMeta, { color: available ? colors.textCaption : colors.textDisabled }]}>
+                    <Text style={[styles.rowMeta, { color: itemAvailable ? colors.textCaption : colors.textDisabled }]}>
                       {meta}
                     </Text>
                   </View>
@@ -248,7 +279,7 @@ export function MeetingSummaryAttachmentSheet({
                     style={[
                       styles.checkbox,
                       {
-                        borderColor: checked ? colors.primary : available ? colors.iconTertiary : colors.iconDisabled,
+                        borderColor: checked ? colors.primary : itemAvailable ? colors.iconTertiary : colors.iconDisabled,
                         backgroundColor: checked ? colors.primary : colors.backgroundFloat,
                       },
                     ]}

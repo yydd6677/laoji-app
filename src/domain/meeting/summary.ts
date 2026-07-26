@@ -61,7 +61,7 @@ export interface MeetingSummaryCarryForwardAuthorization {
   items: readonly MeetingSummaryCarryForwardItem[];
 }
 
-export interface MeetingSummaryAttachmentItem {
+export interface MeetingSummaryTextAttachmentItem {
   attachmentId: string;
   kind: 'text';
   positionMs: number;
@@ -69,6 +69,22 @@ export interface MeetingSummaryAttachmentItem {
   contentSha256: string;
   updatedAtMs: number;
 }
+
+export interface MeetingSummaryImageAttachmentItem {
+  attachmentId: string;
+  kind: 'image';
+  positionMs: number;
+  remoteAttachmentId: string;
+  remoteRevision: number;
+  mimeType: string;
+  byteSize: number;
+  checksumSha256: string;
+  updatedAtMs: number;
+}
+
+export type MeetingSummaryAttachmentItem =
+  | MeetingSummaryTextAttachmentItem
+  | MeetingSummaryImageAttachmentItem;
 
 /** A fresh, generation-scoped opt-in. It is deliberately unrelated to sharing consent. */
 export interface MeetingSummaryAttachmentAuthorization {

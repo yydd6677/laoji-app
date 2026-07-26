@@ -14,7 +14,7 @@ import {
   type MeetingTemplate,
 } from '../domain/meeting';
 import { HttpResponseError } from './errors';
-import { requireFreshMeetingCapability } from '../data/api/v2';
+import { loadMeetingCapabilities } from '../data/api/v2';
 import {
   meetingSummaryToText,
   normalizeMeetingSummaryResult,
@@ -110,9 +110,30 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
 }
 
-async function requireSummaryAttachmentCapability(accessToken?: string | null): Promise<void> {
+async function requireSummaryAttachmentCapability(
+  authorization: MeetingSummaryAttachmentAuthorization,
+  accessToken?: string | null,
+  isGuest = false,
+): Promise<void> {
   try {
-    await requireFreshMeetingCapability('summaryAttachmentsText', accessToken);
+    const usesText = authorization.items.some(item => item.kind === 'text');
+    const usesImage = authorization.items.some(item => item.kind === 'image');
+    if (usesImage) {
+      if (isGuest || !accessToken) throw new Error('guest image input is unavailable');
+    }
+    const state = await loadMeetingCapabilities({
+      accessToken,
+      forceRefresh: true,
+      allowStaleOnError: false,
+    });
+    if (
+      state.source !== 'remote'
+      || (usesText && !state.capabilities.summaryAttachmentsText)
+      || (usesImage && (
+        !state.capabilities.meetingAttachmentsV1
+        || !state.capabilities.summaryAttachmentsImage
+      ))
+    ) throw new Error('summary attachment capability is unavailable');
   } catch {
     throw new Error('附件暂时无法用于整理。');
   }
@@ -251,14 +272,20 @@ async function waitForTask(
 }
 
 export function summaryTaskFailureMessage(result: unknown): string {
-  if (typeof result === 'string' && result.trim()) return result.trim();
+  let raw = typeof result === 'string' ? result.trim() : '';
   if (result && typeof result === 'object') {
     const value = result as Record<string, unknown>;
     for (const key of ['message', 'detail', 'error', 'reason']) {
       const nested = value[key];
-      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+      if (typeof nested === 'string' && nested.trim()) {
+        raw = nested.trim();
+        break;
+      }
     }
   }
+  if (/照片|image/i.test(raw)) return '所选照片暂时无法用于整理，请重新选择后重试。';
+  if (/timeout|timed out|超时/i.test(raw)) return '会议整理超时，请稍后重试。';
+  if (raw && !/[A-Za-z]{2,}/.test(raw)) return raw;
   return '会议总结任务执行失败';
 }
 
@@ -307,7 +334,7 @@ export async function generateSummaryForMeeting(options: {
   if (isGuest) {
     const submitTask = async (force: boolean): Promise<string> => {
       if (attachmentAuthorization) {
-        await requireSummaryAttachmentCapability();
+        await requireSummaryAttachmentCapability(attachmentAuthorization, undefined, true);
       }
       const task = await generateGuestMeetingSummary(
         meetingId,
@@ -354,7 +381,7 @@ export async function generateSummaryForMeeting(options: {
   if (!accessToken) throw new Error('not authenticated');
   const submitTask = async (force: boolean): Promise<string> => {
     if (attachmentAuthorization) {
-      await requireSummaryAttachmentCapability(accessToken);
+      await requireSummaryAttachmentCapability(attachmentAuthorization, accessToken);
     }
     const task = await generateMeetingSummary(
       meetingId,
