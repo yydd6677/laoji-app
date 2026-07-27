@@ -1,15 +1,15 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包又补齐游客“永久删除”的物理清理语义。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链。第 7 条的离线 outbox 重试仍引用此前分散证据，V3 第 1 条的账号/墓碑/journal 分支和第 3–6 条没有在本轮集中重跑。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领和长 Summary 任务恢复。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；ASR 和本轮 Summary 生成也分别被已知 NVML 与 CPU/Ollama 超时阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
 - APK：`android/app/build/outputs/apk/preview/app-preview.apk`
-- 移动端代码内容基线：`17172b9 fix: purge permanently deleted guest meetings`
+- 移动端代码内容基线：`d74c04d fix: complete guest migration and summary recovery`
 - 版本：`versionCode=104`，`versionName=1.0.0-source-preview`
-- 构建时间：`2026-07-27 22:19:30 +08:00`
-- 大小：`91,056,424` bytes
-- SHA-256：`f89fd94259b74e493c9b74a3352545482d8d4308087bf36a5b25e5a81502a78b`
+- 构建时间：`2026-07-27 23:29:42 +08:00`
+- 大小：`91,060,600` bytes
+- SHA-256：`24d6c75b9dfa4a50ca104a34edeb064ad00205a58ed3f056070069adb38fca0a`
 - 稳定回溯标签继续固定在 `stable-before-meeting-memory-roadmap -> cde96f9d5266961e380957893ecba39855aea39b`。
 
 ## V3 第 1 条：稳定包游客数据保留升级（紧邻前一 Preview）
@@ -19,21 +19,33 @@
 - 不清 App 数据，以 `adb install -r` 覆盖为当轮 Preview。设备 base.apk 变为 `6ed2b6c9…40b34080`，冷启动恢复 guest canonical owner，日志为 `meetings=1`、`canonical_revision=5`、mirror unchanged，未见 FATAL、React Native 致命异常、SQLiteException、缺表或缺列。
 - 升级后月历仍显示原日程，会议列表仍有原 `新录音`；详情保留 `V34_NOTE`、总时长 `03:16`，播放器实测进入 `PLAYING` 并推进到 2,957 ms。应用私有 WAV 仍为 6,272,044 bytes。
 - 用同签名 Debug 仅打开只读窗口检查升级后的私有库：`user_version=34`、`quick_check=ok`、`foreign_key_check=0`，1 条 MeetingNote、1 条 RecordingAsset、1 条 manual note，且 `meeting_marker_sync_state` 已存在。检查后重新覆盖安装当轮 Preview，SHA-256 再次逐字节一致并冷启动成功。
-- 这条证据覆盖稳定包游客日程、会议、录音、人工笔记和 v34 additive migration；没有登录测试账号，也没有制造游客迁移 journal 或账号墓碑，因此不把 V3 第 1 条写成 guest/user/tombstone/journal 全部完成。顶部当前包只改游客删除事务、没有新增 migration，但没有重跑这条覆盖升级，所以不能把前一 hash 的运行证据改写成当前 hash 单轮证据。
+- 这条证据覆盖稳定包游客日程、会议、录音、人工笔记和 v34 additive migration；没有登录测试账号，也没有制造游客迁移 journal 或账号墓碑，因此不能单靠该轮写成 guest/user/tombstone/journal 全部完成。顶部当前包包含后续删除和迁移修复，但没有重新从稳定包执行覆盖升级，所以不能把前一 hash 的运行证据改写成当前 hash 单轮证据。
 
 ## 游客永久删除的物理清理闭环
 
 - 修复前先读取稳定升级样本删除后的私有库：界面虽为“暂无会议记录”，但仍有 1 条 `meeting_notes` 删除墓碑、1 条 RecordingAsset 和 1 条 manual note；该 guest 根无远端 identity，且游客 retention cleanup 明确不处理它，因此旧行为与“永久删除”文案不一致。
-- 在清 App 数据的 `LaoJi_Candidate_V34 / emulator-5554` 安装顶部当前 Preview，游客模式完成一场 `01:28` 本机录音、保存并进入详情，在“我的笔记”写入 `PURGE_NOTE`。无音频窗口仍有 PCM I/O 噪声，本样本只验证数据和文件生命周期。
+- 在清 App 数据的 `LaoJi_Candidate_V34 / emulator-5554` 安装当轮删除候选 Preview `f89fd942…02a78b`，游客模式完成一场 `01:28` 本机录音、保存并进入详情，在“我的笔记”写入 `PURGE_NOTE`。无音频窗口仍有 PCM I/O 噪声，本样本只验证数据和文件生命周期。
 - 从详情菜单选择“删除会议”，确认“永久删除本机会议”后返回空会议列表；没有“清理未完成”、删除失败、FATAL、React Native 致命异常或 SQLiteException。当前实现先保留 canonical tombstone、清理录音/缓存/通知，只有文件步骤全部成功才在一个事务中物理清除 guest 根及子对象，并强制重建 compatibility mirror。
 - 同签名 Debug 只读检查确认 MeetingNote、RecordingAsset、manual note、Transcript、Summary、Action、Marker、附件、片段、问答、分享、FTS 搜索行、outbox 和 conflict 均为 0；私有录音目录没有音频文件，`user_version=34`、`quick_check=ok`、`foreign_key_check=0`。
-- guest scope 的 `canonical_revision=8`、`legacy_mirror_revision=8`、`legacy_mirror_status=clean`，RKStorage 中没有会议、转写或总结兼容键；检查后重新覆盖顶部 Preview，设备 base.apk 与 `f89fd942…02a78b` 逐字节一致并冷启动仍为“暂无会议记录”。
+- guest scope 的 `canonical_revision=8`、`legacy_mirror_revision=8`、`legacy_mirror_status=clean`，RKStorage 中没有会议、转写或总结兼容键；检查后重新覆盖当轮删除候选 Preview，设备 base.apk 与 `f89fd942…02a78b` 逐字节一致并冷启动仍为“暂无会议记录”。
 - 安全失败分支另用一次性夹具把 RecordingAsset URI 注入为本地 Expo 实现确定拒绝的 `https://` scheme。确认删除后界面明确显示“会议已删除，清理未完成”；同签名 Debug 实读仍有 1 条 guest `deleted/deleted` tombstone、1 条 RecordingAsset 和 sentinel manual note，且没有 remote identity，证明文件失败没有越过物理 purge 边界。该库 `canonical_revision=14`、mirror revision 14、mirror clean、`quick_check=ok`、`foreign_key_check=0`。
 - 这条证据覆盖游客本机永久删除的成功与文件失败保护路径；账号回收站、30 天保留和物理 USB 设备不由它替代。
 
+## 游客显式迁移、录音唯一身份与长任务恢复
+
+- `[PRODUCT]` 游客数据只在用户点击“立即合并”后复制到账号，游客源数据和源文件继续保留，声纹资料不迁移。此前自动提示错误地要求相邻的 `guest -> authenticated`，但真实登录必经 `guest -> signed_out -> authenticated`；当前实现改为每个新认证会话检查一次待迁移资料，模拟器实际流程自动显示“1 条会议记录、1 份录音、1 份我的笔记”，没有静默合并。
+- 旧版本曾以迁移专用 `guest-migration:<meeting>:primary` 直接上传，同时正常上传队列又用本机 RecordingAsset ID 注册，形成两个主录音身份和 409。当前迁移本身不再充当第二个 uploader：新录音只交给既有持久上传注册表；旧 journal 若已经直接上传，则按精确旧 client ID 查询并认领相同云端资产，不覆盖账号中不同的主录音，也不删除游客文件。
+- 旧冲突夹具在账号 `user:84` 上完成安全认领。云端 RecordingAsset `bb4ad11a-c7bd-494a-a8f1-d65847bf1510` 与本机资产建立 immutable remote link；详情播放器同时按 client ID 和 remote ID 去重，只显示一段 `01:05` 录音，不再出现“录音 1 + 录音 2·仅本机”。`V3KEEP` 在覆盖安装、退出登录、游客/账号切换和冷启动后仍存在。
+- 另以全新临时账号 `user:85` 从同一游客源执行一次首次合并。云端只产生会议 `bd2a8b2e-4cf7-4a62-a48d-5cb6711e9399` 和一个主录音 `c1e02462-6361-44fa-843e-4a2532f0a874`；其 `client_asset_id=08918917-d553-41f5-b8ff-0e8e27bb6de9` 与本机 SQLite RecordingAsset ID 完全一致，且不是迁移专用 ID。服务端为 `uploaded`、2,087,502 bytes、65,232 ms；本机 scope 只有一个 RecordingAsset、没有 `guest-migration:%` 资产 ID，pending 上传键已清空，WorkManager 只有一个 `user:85` 上传任务并以相同 UUID 成功结束。
+- 全新合并后退出账号再次进入游客模式，源会议、`01:05` 录音和 `V3KEEP` 仍完整；重新登录原账号后账号副本也完整。临时账号随后通过正式账号删除合同清理：删除 1 条会议、1 个会话，`cleanup_pending=0`，没有留下活动测试任务。测试凭据未写入仓库或证据文档。
+- 本轮音频是十段中文 TTS 拼接，不是真人会议。真实 RecordingAsset 转写任务 `9f023f53-12d1-4cc1-a1d5-772fc1a8ca24` 连续失败于 VibeVoice 推理阶段的 `NVML_SUCCESS == ... nvmlInit_v2_()` 断言；为验证下游而通过测试 API 导入的十段文字明确属于“期望文字夹具”，不能算 ASR 成功。基于该夹具，搜索“赵敏”显示 `1/1` 并定位高亮，点击对应段准确跳到 `00:13`，播放器继续正常推进，三名合成讲话人可见。
+- Summary task `7bbedf3e-d72f-44e1-bd7c-d67eed55bbaf` 是真实运行任务。旧页面在服务端仍运行时先错误写成超时失败；当前包把前台等待预算扩到 10 分钟，暂时取不到状态时继续重连，预算耗尽只保留 `queued/generating` 和 pending task ID。保留数据覆盖安装并冷启动后，页面从持久 task ID 恢复为“正在整理会议记录”，没有伪装失败。
+- 服务端该任务随后确实失败：精简路径等待 Ollama 120 秒超时，完整管线再等待 600 秒超时并返回 FAILURE。App 随后把 Summary 单独收敛为“整理失败，可重试”，录音、人工笔记和 Transcript 的独立状态不被改写。这证明了“仍运行”和“真实失败”的区分，不证明整理内容、引用、行动项来源或重生成保护已经在这份样本上通过。
+- 当前代码通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和一次完整 `assemblePreview`（627 tasks，45 秒）；APK 保留数据覆盖安装 `LaoJi_Candidate_V34 / emulator-5554`，冷启动 resumed 且无 App FATAL、React Native 致命异常或 SQLiteException。同签名 Debug 只用于停机实读 SQLite/RKStorage/WorkManager，随后已恢复同一 Preview。当前没有 USB 真机。
+
 ## V3 第 2 条的隔离环境
 
-本节完整录制/播放证据对应 SHA-256 为 `b8f710ad0f308cdc24237f395fa980735d2e635c35ad99b178cae5ede058b8ad` 的前一候选包。顶部当前包继续包含后续 fresh account canonical cutover 与 Marker 账号同步；后述分轮证据完成录音结束/本机保存/上传和 Marker 跳转，顶部当前包又完成游客录音保存/永久删除，但没有把完整详情播放器步骤全部重跑。
+本节完整录制/播放证据对应 SHA-256 为 `b8f710ad0f308cdc24237f395fa980735d2e635c35ad99b178cae5ede058b8ad` 的前一候选包。顶部当前包继续包含后续 fresh account canonical cutover 与 Marker 账号同步；后述分轮证据完成录音结束/本机保存/上传和 Marker 跳转，`f89fd942…02a78b` 删除候选又完成游客录音保存/永久删除，但顶部当前 hash 没有把完整详情播放器步骤全部重跑。
 
 - 使用 AVD `LaoJi_CAL_EDIT_RT`、序列号 `emulator-5558`，以 `-read-only -no-snapshot-save` 启动；安装候选 APK 后清空该临时实例的 App 数据并进入游客模式。主模拟器 `emulator-5556` 的既有会议和数据未修改。
 - Android Emulator 的 headless QEMU 不提供可用 PulseAudio 驱动，因此改用 `-qt-hide-window` 的完整 QEMU，并将输入/输出接到临时 PipeWire/Pulse null sink。录制期间注入两段不同幅度的纯音，用于证明采集、分贝波形和播放器读取的不是固定占位数据。
@@ -85,16 +97,16 @@
 
 ## 当前外部边界
 
-- `18020 /api/health` 返回 HTTP 200，`models_ready=true`。
+- `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`，但本轮真实 VibeVoice 任务仍触发 NVML 断言，Summary 的 qwen3.5:9b CPU 路径也分别在 120/600 秒超时；该健康字段不能替代任务成功证据。
 - `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 当前为目标工作区进程 PID `2891853`；部署 Marker 时在无活动任务后继承原 34 项环境重启，18035 未触碰。后续只执行上述精确测试夹具清理。
+- 18020 当前为目标工作区进程 PID `2891853`；部署 Marker 时在无活动任务后继承原 34 项环境重启，18035 未触碰。本轮临时 `user:85` 已连同云端会议删除；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR、Summary 引用和行动项验收。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
 
-- V3 第 2 条在同一候选代码线已有完整模拟器证据；顶部当前包重跑了游客录音保存和物理删除，账号上传及播放器步骤没有在当前 hash 重复，因此锁定功能主链，但不写成当前 APK 单轮全链。
-- V3 第 1 条已由紧邻前一 hash 补稳定包游客保留升级并实读 v34 数据库；顶部当前 hash 没有重跑覆盖升级，账号数据、墓碑与迁移 journal 也仍引用既有分散证据或留待物理设备窗口，不写成一次全覆盖。
+- V3 第 2 条在同一候选代码线已有完整模拟器证据；`f89fd942…02a78b` 删除候选重跑了游客录音保存和物理删除，顶部当前 hash 新增的是迁移/长任务恢复，没有重复完整播放器步骤，因此锁定功能主链，但不写成当前 APK 单轮全链。
+- V3 第 1 条已由紧邻前一 hash 补稳定包游客保留升级并实读 v34 数据库；顶部当前 hash 没有重跑覆盖升级，但已补 guest/user 数据、迁移 journal 和两边源数据保留。账号墓碑与物理设备窗口仍待，不写成一次全覆盖。
 - V3 第 7 条的第二实例 pull 和真实 409/412 选择已集中完成；离线 outbox 重试仍由此前分散证据支持，故不把第 7 条写成三项均在本轮重跑。
 - V3 第 3–6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
 - ATT-01 的对象层、线上服务及双模拟器新增/墓碑闭环已完成；真实图片理解仍因没有已确认视觉模型而关闭，物理 USB 仍待。
