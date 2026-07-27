@@ -1,6 +1,6 @@
 # Phase 6 内置会议模板证据：TPL-01
 
-状态：四个内置模板的移动端注册、请求身份、任务恢复、结果校验、不可变版本保护和模板选择 sheet 已形成一个本机纵向切片；服务端 additive 适配已与共享服务器目标工作区当前源码合并并同步。本文件记录合同、源码、目标 Python 环境测试和模拟器实测；目标服务尚未启动，不代表真实模型四模板输出、账号端到端或 Phase 6 退出条件已经完成。
+状态：四个内置模板的移动端注册、请求身份、任务恢复、结果校验、不可变版本保护和模板选择 sheet 已形成一个本机纵向切片；服务端 additive 适配已合并到共享服务器目标工作区并由运行中的 18020 加载。`general@1` 已取得登录态非平凡真实模型结果、持久恢复和移动端引用跳转证据；另外三个模板尚未完成同等级真实模型验证，不能由 `general@1` 结果代替。
 
 ## 当前移动端范围
 
@@ -14,7 +14,7 @@
 
 ## 部署补丁与目标源码
 
-本机补丁路径：`/home/yydd/桌面/light_plan/server-work/summary`。共享服务器目标工作区是独立的非运行源码；模板适配首次同步前备份在 `backups/20260724-meeting-contract-template-v2`。后续 carry-forward 增量再次执行同步前 SHA-256 并只更新会议 API 与 summary worker，直接前态备份在 `backups/20260724-summary-carry-forward-v1`。当前 8020 进程来自另一旧工作区，未受同步影响。
+本机补丁路径：`/home/yydd/桌面/light_plan/server-work/summary`。共享服务器目标工作区为 `/home/zhong/laoji-service-platform/smart-meeting-ai`；模板适配首次同步前备份在 `backups/20260724-meeting-contract-template-v2`，后续 carry-forward 增量前态保存在 `backups/20260724-summary-carry-forward-v1`。当前 18020 从该目标工作区运行，8020 仍来自另一旧工作区，未被当作模板运行证据。
 
 - API 与 worker 共用四模板严格白名单；未知 ID 或 revision 返回中文 422，不把未知 prompt 透传给模型。
 - 模板 prompt suffix 明确固定 key/title/kind、空值和禁止编造规则；CLI 新增 `--summary-prompt-suffix-file`，worker 使用临时文件传递并在子进程结束后清理。
@@ -24,6 +24,13 @@
 - 新输出文件使用带时间部分的 `final3_*` 前缀，匹配现有模型产物查找顺序，避免同日连续生成读到旧文件。
 - App Summary 响应返回稳定 action candidate 和校验后的 schema v2；`full_text` 只使用兼容 Markdown/结构化 section/overview，不再因缺 Markdown 把 raw 模型 JSON 当正文，也不再向移动端返回 `raw_json`。
 - 合并以服务器当前 worker 为基线，保留同会议串行、不同会议有界并发、task scope/meeting 归属、长轮询、短期幂等复用、失败不复用、墓碑阻止写入和原有总结质量清洗。compact general 路径在无历史授权时保留；有授权时必须走支持 prompt suffix 的路径，否则历史内容不会真正送入模型。旧本机副本中会回退这些能力的 `chunker.py`、`ollama_client.py` 和启动脚本已恢复为服务器当前版本。
+
+## 当前真实模型证据
+
+- 目标 18020 以 PID `114654` 从目标 backend 运行，并继承原 34 项环境；18035 保持 PID `3293181`，本轮未触碰。Transcript/Summary 恢复补丁前态保存在 `backups/20260728-transcript-summary-recovery-v1`。
+- 登录态 `general@1` task `06b9ae52-581a-4847-8604-5f9b3be431e7` 约 92.3 秒成功，durable version 为 `10f1af3f-ef92-4a23-ae08-8164eede3dde`。结果包含 3 个 section、3 条决定、7 条待办和 9 个有效引用，未把 raw JSON 展示为正文。
+- 三个抽查引用在 Android 详情页分别定位到 `0 ms`、`20,712 ms` 和 `50,904 ms`；冷启动后同一版本保持当前，重复 durable 响应为幂等 `unchanged`，没有覆盖用户版本选择或重复推进 canonical revision。
+- 本样本 Transcript 是测试 API 导入的十段文字，不是 VibeVoice 自动转写结果；它证明 `general@1` 的模板身份、结构化结果、引用和恢复，不证明 ASR，也不证明 `one_on_one@1`、`project_sync@1` 或 `interview@1` 的模型质量。
 
 ## UI 证据分类
 
@@ -44,17 +51,18 @@
 - 目标 `local.db` 只读 schema 检查确认 `client_request_id/location/recorded_at` 三列和 `(user_id, client_request_id)` 唯一索引存在；未读取标题、正文、账号或音频路径。
 - 部署后 API、任务生命周期、总结质量清洗、模板、空标题、幂等、显式清空和稳定 action ID 共 81 项通过；meetingsummary chunker/Ollama/阈值共 34 项通过，CLI template prompt 参数另行断言通过。
 - carry-forward 增量在再次从目标源码复制的隔离候选中执行 56 项相关合同并通过，覆盖账号来源归属、授权指纹/结构化结果往返、compact 路径隔离和短会议 durable identity 保留；目标文件与本机补丁最终 SHA-256 一致。
-- 最新 Preview 于 `2026-07-24 17:12:11 +0800` 构建，大小 `90,121,368` bytes，SHA-256 `06b4225234b6b72de1a98355d3b0f95424563c43d6805c541c652ef399fa7c91`；`emulator-5556` 覆盖安装时间为 `2026-07-24 17:12:23`，冷启动无应用崩溃。
+- 首个模板 UI Preview 于 `2026-07-24 17:12:11 +0800` 构建，大小 `90,121,368` bytes，SHA-256 `06b4225234b6b72de1a98355d3b0f95424563c43d6805c541c652ef399fa7c91`；`emulator-5556` 覆盖安装时间为 `2026-07-24 17:12:23`，冷启动无应用崩溃。
 - `:app:assemblePreview --parallel --max-workers=$(nproc)`：通过；627 个 task，59 executed，耗时 34 秒。
 - Preview 已覆盖安装到唯一设备 `emulator-5556`，安装变体确认为 `versionName=1.0.0-source-preview`、`versionCode=101`，包 flags 不含 `DEBUGGABLE`。
 - 先验证默认选中和四项布局，再点击遮罩，UI tree 确认 sheet 完整移除。重新打开选择“项目同步”，sheet 正常关闭；当前服务不可达时页内显示“暂时无法连接老记服务，请检查网络后重试。”，对话框显示“生成失败 / 知道了”。
 - 关闭错误对话框后再次打开，UI tree 为 `项目同步 selected=true`、`通用 selected=false`。进程保持存活，清空后的 logcat 没有应用 FATAL、React Native exception、SIGSEGV 或 SIGABRT。
 - 验证使用的临时 ended meeting 和一条测试转写均已恢复：最终会议列表重新显示 `OccueneSmoke，7月22日 21:04，失败`，临时 Transcript cache 已删除，最终仍安装 Preview；本轮 `/tmp` 备份、截图和设备 XML 已清理。
+- 当前可安装 Preview 于 `2026-07-28 01:50:37 +0800` 构建，大小 `91,061,768` bytes，SHA-256 `618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`；已保留数据覆盖安装到 `LaoJi_Candidate_V34 / emulator-5554`，设备 `base.apk` 与构建产物逐字节一致。
 
 ## 未完成边界
 
 1. 当前没有 USB 真机；不同物理设备密度、字体缩放、深色模式、手势导航 inset 和真实触觉尚未验证。
-2. 目标源码已同步但共享服务未启动或重启；配置中的 18020/18035 当前没有监听，8020 是另一旧工作区进程。因此没有真实模型运行四模板、固定 schema 质量、prompt 遵循率或账号鉴权读写证据。
-3. 没有可用测试账号完成登录态生成、快速连续切换模板、进程中断恢复和跨设备版本选择；本轮设备任务是游客失败路径与本机状态验证。
-4. 真实模型 action/section 内容质量、空 section、长 Transcript、多人会议、模板间污染及历史参考利用质量仍需服务恢复后的样本任务；当前只证明合同与 fallback，不证明生成质量。
+2. 目标 18020 已运行并完成登录态 `general@1` 非平凡生成；另外三个模板没有同等级真实模型结果，固定 schema 质量、模板间污染和 prompt 遵循率仍不能宣称四模板完成。
+3. 测试账号已完成 `general@1` 生成、进程/页面恢复和当前版本幂等；快速连续切换模板、跨设备版本选择及三个非默认模板的恢复仍未验证。
+4. `general@1` 已证明当前样本的 action/section/citation 结构和移动端消费；长 Transcript、真人多人会议、历史参考利用质量和另外三个模板仍需后续样本。
 5. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或大样本矩阵；只执行类型检查、服务端纯函数 smoke、Preview 构建、定向模拟器交互和崩溃日志检查。

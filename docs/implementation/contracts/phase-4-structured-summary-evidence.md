@@ -1,6 +1,6 @@
 # Phase 4 整理结果与行动：首个纵向切片
 
-状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得真实独立任务、结构化结果和重启后 durable result 证据；这仍不代表非平凡会议的真实模型引用质量、线上版本列表或全账号跨设备同步已完成。
+状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 真实模型结果、9 个有效引用、7 个行动项、重启后 durable result 和移动端引用跳转证据；这仍不代表自动 ASR、另外三个模板、线上版本列表或全账号跨设备同步已完成。
 
 ## 独立 Summary 运行增量
 
@@ -11,6 +11,9 @@
 - 服务重启后，旧内存 task ID 正确返回 404，但同一 durable final version `d587b3ee-d65a-4921-b5dd-f155c48ad1e6` 仍从最终结果 endpoint 返回。移动端既有恢复顺序先检查 durable 结果，只有无匹配结果时才以同一 fingerprint 重提，因此进程重启不要求把 Summary 重新塞回 Transcript job。
 - 兼容 `SummaryService` 又以最短输入实际执行模块入口，subprocess `returncode=0` 并生成 JSON/Markdown；私有模型字典只在服务内解析，App API 仍只返回规范化结构，不把原始 JSON 展示给用户。
 - 共享服务器 NVIDIA kernel `595.71.05` 与 NVML `595.84` 的版本失配影响 VibeVoice 转写，但本次 Summary 使用 CPU Ollama 完成；两者证据必须分开记录。
+- 后续 Transcript 状态合同修复允许“已有正文且没有活动转写任务”的稳定 final revision 继续作为 Summary 输入；录制中、queued/running、空正文失败仍分别保持 incomplete/failed，Summary 必须绑定稳定 Transcript 的门禁没有放宽。目标 `app_meetings.py` 前态保存在 `backups/20260728-transcript-summary-recovery-v1`，部署文件 SHA-256 为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`。
+- 修复后登录态 `general@1` task `06b9ae52-581a-4847-8604-5f9b3be431e7` 约 92.3 秒成功，durable version 为 `10f1af3f-ef92-4a23-ae08-8164eede3dde`。结果包含 3 条决定、7 条待办和 9 个有效引用；`00:00`、`00:20`、`00:50` 分别在移动端跳到正确文字段和 `0 ms`、`20,712 ms`、`50,904 ms`。
+- 同签名 Debug 停机实读确认 10 段 active final Transcript、1 个 ready Summary version、3 个 section、9 个 citation 和 7 个 action；冷启动后 canonical revision 保持 `23`，重复 durable 结果为 `unchanged`。这证明本场内容、来源跳转和幂等恢复，但十段 Transcript 来自测试 API 导入，不能写成 VibeVoice ASR 成功。
 
 ## 当前范围
 
@@ -50,7 +53,7 @@
 - action 稳定 ID 加入排序后的来源 segment IDs；模型 citation 顺序不改变 action identity。历史参考仍明确不是本场证据，且历史-only quote 无法通过当前 Transcript 校验。
 - 游客 summary 请求现在传递本机 Transcript line ID。旧实现由服务端创建 `guest:...:index`，无法映射客户端锁定 revision，因而会使所有游客 citation 在客户端 fail closed；该断链已消除。
 
-上述 citation delta 已同步到共享服务器目标源码，修改前备份为 `backups/20260724-summary-citations-v1`。18020/18035 未启动或重启，8020 仍属于另一旧工作区，因此不宣称运行协议已经切换或真实模型已产生可靠引用。
+上述 citation delta 已同步到共享服务器目标源码，修改前备份为 `backups/20260724-summary-citations-v1`。后续目标 18020 已从该工作区运行并取得上述 9 个 canonical 引用；8020 仍属于另一旧工作区，未作为证据来源。
 
 行动项 additive delta 现已同步到同一目标源码：
 
@@ -61,11 +64,11 @@
 - 服务端 action 表与响应现在保存客户端创建时间、人工编辑时间、完成时间和生成 fingerprint；创建/来源 identity 更新后不可改变。SQLite 兼容 helper 对已存在的 action 表 additive 补列，新建表直接包含完整字段。完成状态必须有有效完成时间，非 pending 不得保留提醒，手动/Marker action 不得伪装 generated fingerprint。
 - 冲突选择 UI 和会议详情级 action list/cursor/pull 已完成源码纵切；全账号 change feed、全局 sync cursor、batch、删除 tombstone 与运行中跨设备验证仍未完成，因此不能称为完整跨设备同步。
 
-同步前远端三份既有文件哈希无漂移，三个新生产文件和窄合同文件均不存在；修改前备份为 `backups/20260724-action-items-v2-v1`。目标服务仍未启动或重启，新表尚未在目标数据库实例化，运行中的鉴权请求、ACK/重试和真实 409/412 仍无证据。
+同步前远端三份既有文件哈希无漂移，三个新生产文件和窄合同文件均不存在；修改前备份为 `backups/20260724-action-items-v2-v1`。后续目标服务已实例化新表，并用测试账号两个独立登录会话完成 action upsert/pull、真实 409/412 和显式版本选择；物理双机与全账号 change feed 仍不由该证据代替。
 
-provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希一致，修改前备份为 `backups/20260724-action-items-v2-provenance-v1`。同步后目标源码重新通过同两项 action 合同与完成状态中文校验，5 个文件哈希与本机 overlay 一致；服务和数据库仍未启动。
+provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希一致，修改前备份为 `backups/20260724-action-items-v2-provenance-v1`。同步后目标源码重新通过同两项 action 合同与完成状态中文校验，5 个文件哈希与本机 overlay 一致；后续运行 action 往返沿用同一 provenance 合同。
 
-会议级 pull 同步前远端上述 5 个 action 文件哈希与 provenance 版本一致，修改前备份为 `backups/20260724-action-items-v2-pull-v1`。隔离候选和正式目标源码均通过原两项 upsert 合同与一项所有权/分页/后续更新 cursor 合同，均为 `3 passed`；5 个正式目标文件与本机 overlay 哈希一致。18020/18035 仍未监听，8020 仍是另一旧工作区，新表、实时 capability、真实账号拉取与跨设备收敛仍无运行证据。
+会议级 pull 同步前远端上述 5 个 action 文件哈希与 provenance 版本一致，修改前备份为 `backups/20260724-action-items-v2-pull-v1`。隔离候选和正式目标源码均通过原两项 upsert 合同与一项所有权/分页/后续更新 cursor 合同，均为 `3 passed`；5 个正式目标文件与本机 overlay 哈希一致。后续 18020 已提供实时 capability 和真实账号拉取；跨物理设备与全账号 cursor 仍无运行证据。
 
 ## UI 证据分类
 
@@ -118,13 +121,13 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - `git diff --check`：通过。
 - `:app:compilePreviewKotlin`：通过。
 - `:app:assemblePreview`：通过。
-- action sync 本批再次通过 TypeScript、diff whitespace、Preview Kotlin 与 assemble；客户端 capability/API 代码可编译，但 capability 实时探测和 Action 写请求不是同一证据。先前 `18035 /api/laoji/capabilities` 与 `18020 /openapi.json` 返回空体 HTTP 502；2026-07-24 复核为两个端口均无监听，当前 8020 来自另一旧工作区且没有 action 合同。客户端按设计不 claim/send。
+- action sync 本批再次通过 TypeScript、diff whitespace、Preview Kotlin 与 assemble；后续运行批次已在目标 18020 取得 fresh action capability、测试账号写入/pull 和真实冲突选择。此前端口未监听只保留为首次同步时的历史边界，8020 仍来自另一旧工作区。
 - 服务端 `python3 -m py_compile`：通过；抽取生产函数的 AST 合同验证 schema v2、稳定 action ID、`due_at`、空 citation 和 UTC `Z` 时间通过。抽取副本不是完整 `app.workers` 包，现有 pytest 在收集阶段因缺少 `app` 包停止，不记为断言通过或失败。
 - SUM-02 使用目标源码隔离候选运行 61 项 backend 摘要/API/生命周期合同和 38 项 Map-Reduce/chunker 合同，全部通过。同步后直接针对目标源码再次运行同样的 61 + 38 项合同并通过；生命周期测试中的预期失败任务会打印受控 traceback，但测试断言通过。目标 8 个 delta 文件与本机 overlay 的 SHA-256 逐一一致。
 - `action_items_v2` 在目标源码执行 Python 编译、两项窄纵向合同与路由静态检查：创建 revision 1、同 key 原样重放、If-Match 更新至 revision 2、陈旧 revision 412，以及第二次 If-None-Match 不覆盖已有 action，结果 `2 passed`。目标 7 个 action delta 文件与本机 overlay 的 SHA-256 逐一一致；未运行全量测试。
-- action 冲突选择纵切通过 TypeScript、原生模块 Kotlin、diff whitespace 和 Preview assemble；纯解析器窄检查覆盖新 wrapper、旧 direct payload、云端缺失与损坏 payload 四条分支；内存 SQLite 窄状态检查覆盖“使用云端后旧 operation 全部结束”和“保留本机后只留下一个新 pending operation”两条路径。目标服务未运行，故没有伪造真实账号 409/412 或把 synthetic 检查记为线上冲突闭环。
+- action 冲突选择纵切通过 TypeScript、原生模块 Kotlin、diff whitespace 和 Preview assemble；纯解析器窄检查覆盖新 wrapper、旧 direct payload、云端缺失与损坏 payload 四条分支；内存 SQLite 窄状态检查覆盖“使用云端后旧 operation 全部结束”和“保留本机后只留下一个新 pending operation”两条路径。后续两个独立账号会话又取得真实 409/412 与显式版本选择证据，仍不把双会话写成物理双机。
 - action provenance 扩展通过移动端 TypeScript 与服务端 Python 编译；目标源码两项 action 合同再次 `2 passed`，另有一个 Pydantic 窄检查确认 completed action 缺少完成时间时以中文拒绝。未增加全量门禁。
-- action 会议级 pull 通过移动端 TypeScript 与服务端 Python 编译；目标源码窄合同 `3 passed`，覆盖上行幂等/冲突、会议所有权、不透明分页和越过游标后的后续更新。未运行全量后端套件，也未启动目标服务。
+- action 会议级 pull 通过移动端 TypeScript 与服务端 Python 编译；目标源码窄合同 `3 passed`，覆盖上行幂等/冲突、会议所有权、不透明分页和越过游标后的后续更新。后续目标服务已运行并完成测试账号详情级 pull；未运行全量后端套件。
 - 模拟器原始数据从 `PRAGMA user_version = 4` 升至 6；meeting/Transcript/Summary/action 关键计数迁移前后未减少，v5 citation identity 与 v6 reminder 列/索引均存在，冷启动无应用 FATAL。
 - synthetic 文档可见 section、citation 和待办行；citation/行动来源在无音频时切到正确 Transcript segment。
 - 行动项首次运行时更新稳定复现 `meeting_action_update_failed/error_code=action_missing`。根因是详情 route 使用 legacy meeting ID，而结构化行动项属于 canonical meeting；mutation 现通过当前 canonical Summary 状态取得 canonical meeting ID，行动项 ID 与 `updated_at_ms` CAS revision 保持不变。
@@ -141,12 +144,12 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 上一稳定 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，当时构建时间 `2026-07-23 22:47:53 +0800`，大小 `89,782,623` bytes，SHA-256 `cc1034081193fad6b167f521df7c92ebf670fd29b8c5669ea2a04b70e8d8ff29`；已被本批构建取代。
 - action sync migration 前通过同签名 Debug 包的 `debuggable` 只读窗口归档模拟器数据：`/tmp/laoji-pre-action-sync-v8-20260723.tar.gz`，大小 `1,549,596` bytes，SHA-256 `f011af7279ee44af3b7fe6023b790d86ae2df7140b6e25759d1332037bdfd6f7`。归档内 SQLite 为 `user_version=6`、meeting 1、action/outbox/conflict 均为 0。
 - 最终 Preview 首次启动后再次只读归档，SQLite 为 `user_version=8`、meeting 1、action/outbox/conflict 均为 0；`remote_revision`、`request_payload_json`、`claim_token` 和三个目标索引均存在，`foreign_key_check` 无输出。post 归档 SHA-256 为 `5c92f86d803b1fb6d1fb519a1f6d9c74879876e4544ff643b4b2fd5a31d73d21`。
-- 当前可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 18:47:09 +0800`，大小 `90,168,352` bytes，SHA-256 `8fb32db944f8342f841c8472037284714f43ad45c12b61d657a8ece29e9f4e23`。最终包已覆盖安装到唯一设备 `emulator-5556`，包版本为 `1.0.0-source-preview`，`lastUpdateTime=2026-07-24 18:48:05`；强制停止后的冷启动进程存活，logcat 无应用 FATAL、React Native exception、SQLiteException 或 bundle 加载失败。migration v14 已编入该包，真实升级启动无数据库错误；Preview 不可调试且该模拟器禁止 `adb root`，因此本轮不把私有 SQLite 的 `PRAGMA user_version=14` 当作已直读证据。当前没有 USB 真机。
+- 当前可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 01:50:37 +0800`，大小 `91,061,768` bytes，SHA-256 `618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`。最终包已保留数据覆盖安装到 `LaoJi_Candidate_V34 / emulator-5554`，设备 `base.apk` 与构建产物逐字节一致；强制停止后的冷启动进程存活，logcat 无应用 FATAL、React Native 致命异常、SQLiteException、SIGSEGV 或 SIGABRT。当前没有 USB 真机。
 
 ## 未完成边界
 
 1. 版本列表和当前指针切换目前只覆盖本机 canonical 数据；没有跨设备当前版本同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；section 人工编辑、引用移除和更细版本预览仍未实现。
-2. 客户端 action capability/API/outbox、冲突落库/选择/新 operation、会议详情级 cursor/pull/来源映射和目标服务端 action upsert/list 源码均已存在，但目标服务未运行，新表未在目标数据库创建，客户端仍不会获得实时 `action_items_v2/action_items_pull_v2=true`。账号鉴权 ACK/重试/真实 409/412、真实会议拉取、冲突 sheet 设备分支与跨设备收敛尚未实测；全账号 change feed、全局 sync cursor、batch 和 action tombstone 仍未实现。
-3. 服务端 citation prompt、compact/Map-Reduce 传递、canonical segment 校验、唯一 quote 回填和 schema v2 输出源码已同步，但目标服务未运行；真实模型遵循率、引用覆盖率/准确率、线上 Summary completeness 和 revision identity 仍待服务启动后的样本验证。
+2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412 和显式版本选择均已有运行证据；仍缺物理双机收敛、提醒跨设备、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
+3. `general@1` 已取得非平凡真实模型 section、行动项、9 个有效引用、线上 durable result 与移动端跳转证据；仍缺自动 ASR 直连样本、另外三个模板、更多真人/长会议的质量抽查和线上版本列表/切换合同。
 4. 当前只有模拟器，没有 USB 真机。引用 seek、编辑键盘/inset、完成动效、通知及后续日程命令仍缺真机轻量复核；通知回跳的长文档 action 长距离定位也未单独验证。
 5. 按当前目标不执行已归档门禁、60 分钟样本、压力/穷举交互；这些留到候选功能框架稳定后。

@@ -1,15 +1,15 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领和长 Summary 任务恢复。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；ASR 和本轮 Summary 生成也分别被已知 NVML 与 CPU/Ollama 超时阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领，以及长 Summary 的成功恢复、持久落库、引用跳转和重复响应幂等。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；当前 `general@1` 已有非平凡真实模型结果，但自动 ASR 仍被已知 NVML/VibeVoice 问题阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
 - APK：`android/app/build/outputs/apk/preview/app-preview.apk`
-- 移动端代码内容基线：`d74c04d fix: complete guest migration and summary recovery`
+- 移动端代码内容基线：`4b0edb3 fix: recover durable meeting summaries`
 - 版本：`versionCode=104`，`versionName=1.0.0-source-preview`
-- 构建时间：`2026-07-27 23:29:42 +08:00`
-- 大小：`91,060,600` bytes
-- SHA-256：`24d6c75b9dfa4a50ca104a34edeb064ad00205a58ed3f056070069adb38fca0a`
+- 构建时间：`2026-07-28 01:50:37 +08:00`
+- 大小：`91,061,768` bytes
+- SHA-256：`618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`
 - 稳定回溯标签继续固定在 `stable-before-meeting-memory-roadmap -> cde96f9d5266961e380957893ecba39855aea39b`。
 
 ## V3 第 1 条：稳定包游客数据保留升级（紧邻前一 Preview）
@@ -39,9 +39,11 @@
 - 另以全新临时账号 `user:85` 从同一游客源执行一次首次合并。云端只产生会议 `bd2a8b2e-4cf7-4a62-a48d-5cb6711e9399` 和一个主录音 `c1e02462-6361-44fa-843e-4a2532f0a874`；其 `client_asset_id=08918917-d553-41f5-b8ff-0e8e27bb6de9` 与本机 SQLite RecordingAsset ID 完全一致，且不是迁移专用 ID。服务端为 `uploaded`、2,087,502 bytes、65,232 ms；本机 scope 只有一个 RecordingAsset、没有 `guest-migration:%` 资产 ID，pending 上传键已清空，WorkManager 只有一个 `user:85` 上传任务并以相同 UUID 成功结束。
 - 全新合并后退出账号再次进入游客模式，源会议、`01:05` 录音和 `V3KEEP` 仍完整；重新登录原账号后账号副本也完整。临时账号随后通过正式账号删除合同清理：删除 1 条会议、1 个会话，`cleanup_pending=0`，没有留下活动测试任务。测试凭据未写入仓库或证据文档。
 - 本轮音频是十段中文 TTS 拼接，不是真人会议。真实 RecordingAsset 转写任务 `9f023f53-12d1-4cc1-a1d5-772fc1a8ca24` 连续失败于 VibeVoice 推理阶段的 `NVML_SUCCESS == ... nvmlInit_v2_()` 断言；为验证下游而通过测试 API 导入的十段文字明确属于“期望文字夹具”，不能算 ASR 成功。基于该夹具，搜索“赵敏”显示 `1/1` 并定位高亮，点击对应段准确跳到 `00:13`，播放器继续正常推进，三名合成讲话人可见。
-- Summary task `7bbedf3e-d72f-44e1-bd7c-d67eed55bbaf` 是真实运行任务。旧页面在服务端仍运行时先错误写成超时失败；当前包把前台等待预算扩到 10 分钟，暂时取不到状态时继续重连，预算耗尽只保留 `queued/generating` 和 pending task ID。保留数据覆盖安装并冷启动后，页面从持久 task ID 恢复为“正在整理会议记录”，没有伪装失败。
-- 服务端该任务随后确实失败：精简路径等待 Ollama 120 秒超时，完整管线再等待 600 秒超时并返回 FAILURE。App 随后把 Summary 单独收敛为“整理失败，可重试”，录音、人工笔记和 Transcript 的独立状态不被改写。这证明了“仍运行”和“真实失败”的区分，不证明整理内容、引用、行动项来源或重生成保护已经在这份样本上通过。
-- 当前代码通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和一次完整 `assemblePreview`（627 tasks，45 秒）；APK 保留数据覆盖安装 `LaoJi_Candidate_V34 / emulator-5554`，冷启动 resumed 且无 App FATAL、React Native 致命异常或 SQLiteException。同签名 Debug 只用于停机实读 SQLite/RKStorage/WorkManager，随后已恢复同一 Preview。当前没有 USB 真机。
+- Summary task `7bbedf3e-d72f-44e1-bd7c-d67eed55bbaf` 是前一部署的真实失败样本：页面在服务端仍运行时不再伪装超时，保留数据覆盖安装后可从持久 task ID 恢复；服务端最终在旧精简/完整路径的 120/600 秒预算耗尽后返回 FAILURE，App 才把 Summary 单独收敛为可重试失败。该样本继续证明运行态与真实失败分流，但不再代表当前 Summary 服务仍被相同超时阻塞。
+- 目标 18020 修复“有正文但最新重试失败时隐藏稳定 final Transcript”的状态合同后，真实 `general@1` task `06b9ae52-581a-4847-8604-5f9b3be431e7` 在约 92.3 秒后成功；durable final version 为 `10f1af3f-ef92-4a23-ae08-8164eede3dde`。Summary 仍严格绑定 active final Transcript，录制中、活动 queued/running task 或空正文失败都没有被放宽。
+- 该结果包含 3 条决定、7 条待办和 9 个通过 canonical segment 校验的引用，没有被拒引用。`00:00`、`00:20`、`00:50` 三个引用在模拟器分别切到正确文字段，并把播放器定位到 `0 ms`、`20,712 ms`、`50,904 ms`；这证明本场结构化内容、行动项来源与引用跳转，但上游十段文字仍是测试 API 导入夹具，不能改写成自动 ASR 成功。
+- 同签名 Debug 停机实读确认 active final Transcript 10 段、Summary `ready`、1 个版本、3 个 section、9 个引用和 7 个 action；`quick_check=ok`，`foreign_key_check` 无输出。冷启动后 canonical revision 保持 `23`，重复 durable 响应记录 `meeting_summary_shadow_write status=unchanged`，没有覆盖当前版本或重复推进处理阶段。
+- 当前代码通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和一次完整 `assemblePreview`；APK 保留数据覆盖安装 `LaoJi_Candidate_V34 / emulator-5554`，设备 `base.apk` 与顶部构建产物逐字节一致。冷启动 resumed，页面不再显示旧失败；无 App FATAL、React Native 致命异常、SQLiteException、SIGSEGV 或 SIGABRT。同签名 Debug 只用于停机实读，随后已恢复同一 Preview。当前没有 USB 真机。
 
 ## V3 第 2 条的隔离环境
 
@@ -97,10 +99,10 @@
 
 ## 当前外部边界
 
-- `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`，但本轮真实 VibeVoice 任务仍触发 NVML 断言，Summary 的 qwen3.5:9b CPU 路径也分别在 120/600 秒超时；该健康字段不能替代任务成功证据。
+- `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`；当前 `general@1` 已有独立真实成功任务，因此不再用旧 120/600 秒失败描述当前 Summary。真实 VibeVoice 任务仍触发 NVML 断言，健康字段仍不能替代 ASR 任务成功证据。
 - `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 当前为目标工作区进程 PID `2891853`；部署 Marker 时在无活动任务后继承原 34 项环境重启，18035 未触碰。本轮临时 `user:85` 已连同云端会议删除；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR、Summary 引用和行动项验收。
+- 18020 当前为目标工作区进程 PID `114654`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。Summary/Transcript 恢复补丁前态保存在 `backups/20260728-transcript-summary-recovery-v1`，当前远端 `app_meetings.py` 与本机 overlay 的 SHA-256 同为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`。`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
@@ -108,6 +110,6 @@
 - V3 第 2 条在同一候选代码线已有完整模拟器证据；`f89fd942…02a78b` 删除候选重跑了游客录音保存和物理删除，顶部当前 hash 新增的是迁移/长任务恢复，没有重复完整播放器步骤，因此锁定功能主链，但不写成当前 APK 单轮全链。
 - V3 第 1 条已由紧邻前一 hash 补稳定包游客保留升级并实读 v34 数据库；顶部当前 hash 没有重跑覆盖升级，但已补 guest/user 数据、迁移 journal 和两边源数据保留。账号墓碑与物理设备窗口仍待，不写成一次全覆盖。
 - V3 第 7 条的第二实例 pull 和真实 409/412 选择已集中完成；离线 outbox 重试仍由此前分散证据支持，故不把第 7 条写成三项均在本轮重跑。
-- V3 第 3–6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
+- V3 第 5 条已在当前 APK 上补齐导入 Transcript 的非平凡整理、引用跳转和行动项来源；它没有补齐自动 ASR。第 3–4/6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
 - ATT-01 的对象层、线上服务及双模拟器新增/墓碑闭环已完成；真实图片理解仍因没有已确认视觉模型而关闭，物理 USB 仍待。
 - MRK-01 的本机、服务端和双独立模拟器功能纵切已完成；仍缺物理双机、USB 与长离线抽查，不能把双 AVD 写成物理跨设备完成。
