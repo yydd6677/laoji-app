@@ -28,7 +28,8 @@
 - 从详情菜单选择“删除会议”，确认“永久删除本机会议”后返回空会议列表；没有“清理未完成”、删除失败、FATAL、React Native 致命异常或 SQLiteException。当前实现先保留 canonical tombstone、清理录音/缓存/通知，只有文件步骤全部成功才在一个事务中物理清除 guest 根及子对象，并强制重建 compatibility mirror。
 - 同签名 Debug 只读检查确认 MeetingNote、RecordingAsset、manual note、Transcript、Summary、Action、Marker、附件、片段、问答、分享、FTS 搜索行、outbox 和 conflict 均为 0；私有录音目录没有音频文件，`user_version=34`、`quick_check=ok`、`foreign_key_check=0`。
 - guest scope 的 `canonical_revision=8`、`legacy_mirror_revision=8`、`legacy_mirror_status=clean`，RKStorage 中没有会议、转写或总结兼容键；检查后重新覆盖顶部 Preview，设备 base.apk 与 `f89fd942…02a78b` 逐字节一致并冷启动仍为“暂无会议记录”。
-- 这条证据只覆盖游客本机永久删除成功路径；账号回收站、30 天保留、文件删除故障注入和物理 USB 设备不由它替代。
+- 安全失败分支另用一次性夹具把 RecordingAsset URI 注入为本地 Expo 实现确定拒绝的 `https://` scheme。确认删除后界面明确显示“会议已删除，清理未完成”；同签名 Debug 实读仍有 1 条 guest `deleted/deleted` tombstone、1 条 RecordingAsset 和 sentinel manual note，且没有 remote identity，证明文件失败没有越过物理 purge 边界。该库 `canonical_revision=14`、mirror revision 14、mirror clean、`quick_check=ok`、`foreign_key_check=0`。
+- 这条证据覆盖游客本机永久删除的成功与文件失败保护路径；账号回收站、30 天保留和物理 USB 设备不由它替代。
 
 ## V3 第 2 条的隔离环境
 
