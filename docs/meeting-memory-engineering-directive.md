@@ -211,7 +211,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机/线上账号双会话闭环；多录音运行合同与 `secondary + recovered` 通用上传源码已接通 | 恢复 secondary 的特定 App 运行样本；第二台移动设备抽查 |
 | NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机/线上账号双会话闭环 | 第二台移动设备冲突选择抽查 |
 | TRN-01 | 搜索、跳转、按录音来源回听、高亮、复制/分享、重新生成 | 本机闭环；per-asset provenance 已运行；reprocessed 移动端/v31/overlay 纵切完成 | 运行服务的真实 reprocess job；候选版长录音抽查 |
-| ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机闭环；运行 action pull 与协作者 revision 收敛完成 | 非协作 action 的真实冲突选择、提醒跨设备收敛 |
+| ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机闭环；运行 action pull、协作者 revision 与双 Android 实例提醒重建/取消收敛完成 | 非协作 action 的真实冲突选择、物理双机抽查 |
 | SUM-01 | 有序结构化整理结果 | 本机/线上纵切闭环；四模板结构、durable 恢复、历史授权和幂等当前版本已运行 | 更多真人样本、附件授权质量和线上版本列表 |
 | SUM-02 | 结论/行动项引用 Transcript | 本机/线上纵切闭环；9 个 canonical 引用及移动端跳转已运行 | 自动 ASR 直连样本和更多真人会议质量抽查 |
 | SUM-03 | 结果版本与用户修改保护 | 已锁定 | 只随真实模型/冲突路径做候选抽查 |
@@ -1235,7 +1235,7 @@ interface MinutesTranscriptLineSnapshot {
 
 当前 additive 纵切已在目标服务落地可靠上行 upsert：`MeetingActionItem` 保存稳定远端 ID 和单调 revision，`MeetingActionOperation` 持久保存幂等请求哈希及原成功响应；首次创建、同 key 重放、revision 更新、陈旧写拒绝均有窄合同。客户端把 409/412 的错误码与当前云端 payload 一起持久化，详情行显式标记冲突并暂停会产生新版本的完成/后续日程命令。用户选择本机版本时，旧未完成 operation 全部标记为被取代，并以云端当前 revision 创建新 operation；选择云端版本时，只覆盖当前协议能安全表达的字段，保留本机来源/创建身份，清除设备通知 ID 后对账。冲突状态、action、outbox、meeting sync state 和 canonical revision 同事务更新，CAS 或 payload 校验失败时保持 unresolved。会议级 action list/cursor/pull 已在运行实例生效：测试账号所有者创建 action，匿名 editor 将 revision 2 更新为 3，所有者 App pull 后观察到修改；viewer 越权写入被拒绝，陈旧 editor revision 返回 412。来源 segment 只在 active Transcript revision 唯一映射时保留链接。仍没有全账号 change feed、全局 sync cursor、batch、action tombstone 或第二台物理设备证据，不得据此宣称完整全账号同步。
 
-为避免 pull 丢失用户语义，action v2 envelope 携带 `client_created_at_ms`、`user_edited_at_ms`、`completed_at_ms` 与 `generation_fingerprint`。创建时间、source kind、source Summary/segment/time 和 generation fingerprint 是 identity/provenance，首次创建或旧表一次性补全后不得被普通更新改变；content/status/assignee/due/reminder/follow-up 和相应用户时间是 revision 管理字段。completed 必须有处于 action 生命周期内的完成时间，非 pending 不保留提醒，manual/marker 不携带 generated fingerprint。字段已同步到目标运行库，账号拉取及匿名协作者 revision 回流已有运行证据；真实旧表大批量升级、非协作冲突选择和第二台物理设备仍待候选抽查。
+为避免 pull 丢失用户语义，action v2 envelope 携带 `client_created_at_ms`、`user_edited_at_ms`、`completed_at_ms` 与 `generation_fingerprint`。创建时间、source kind、source Summary/segment/time 和 generation fingerprint 是 identity/provenance，首次创建或旧表一次性补全后不得被普通更新改变；content/status/assignee/due/reminder/follow-up 和相应用户时间是 revision 管理字段。completed 必须有处于 action 生命周期内的完成时间，非 pending 不保留提醒，manual/marker 不携带 generated fingerprint。字段已同步到目标运行库，账号拉取及匿名协作者 revision 回流已有运行证据。两个隔离 Android App 实例又验证：A 创建日期型提醒后，B pull 以同一 action identity 重建设备专属 09:00 通知；B 完成将同一 action 推进 revision 并清空远端提醒，A/B 各自在下一次本机对账中取消自己的闹钟。真实旧表大批量升级、非协作冲突选择和第二台物理设备仍待候选抽查。
 
 #### 候选版关键任务
 

@@ -1,6 +1,6 @@
 # Phase 4 整理结果与行动：首个纵向切片
 
-状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 结果、四模板真实模型运行、canonical 引用、durable result 和移动端消费证据；这仍不代表自动 ASR、线上版本列表或全账号跨设备同步已完成。
+状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 结果、四模板真实模型运行、canonical 引用、durable result 和移动端消费证据；两个隔离 Android App 实例又完成提醒意图同步、设备通知重建以及跨端完成后的双端取消。这仍不代表自动 ASR、线上版本列表或全账号跨设备同步已完成。
 
 ## 独立 Summary 运行增量
 
@@ -135,6 +135,9 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 双版本 synthetic 冒烟先以受保护 v1 为当前、较新 v2 为候选：版本 sheet 正确显示“新版本/当前版本/含人工修改”；切至 v2 后正文立即更新，强制停止/冷启动仍保持。再次打开显示“当前版本/历史版本”，切回 v1 后旧 section、已完成且编辑过的 action 均保留。SQLite 最终仍有两条 immutable `summary_versions`，只更新 `meeting_notes.current_summary_version_id`。
 - 提醒 synthetic 冒烟从编辑 sheet 开启未来提醒后，页面显示 `提醒：7月23日 21:27`，AlarmManager 登记对应 `RTC_WAKEUP`；实际通知栏显示中文 `老记待办提醒` / `待办事项：完成提醒链路验证`。点击后回到正确会议并选中“整理结果”，目标 action 可见且过期后显示“已提醒”。该 synthetic 文档较短，未把首屏可见误记为长距离滚动已验证。
 - 第二次未来提醒在完成前存在系统闹钟；勾选完成后 AlarmManager 记录 `Reason=alarm_cancelled`，SQLite 复核 action 为 `completed` 且 `reminder_at_ms`、`reminder_notification_id` 均为 NULL。全程无新的 `meeting_action_update_failed`、SQLiteException 或应用 FATAL。
+- 跨设备提醒使用同一 v104 Preview、同一隔离账号和会议 `e297e061-3681-41ad-9d5d-2730efe3366b`。A 端 App 从“更多 → 本场待办”创建 `ACT REMINDER CROSS DEVICE 941401`，服务端 action `0bf41770-bdf4-4c9f-aadd-52f06f4a2295` / client action `8f813a2c-af0f-4872-9245-6f7dead3f22b` 初始为 `revision=1/status=pending`，`due_at_ms=1785168000000`、`reminder_at_ms=1785200400000`；A 的 AlarmManager 同时登记 `2026-07-28 09:00`。
+- B 端在 action 尚不存在的基线上强停冷启动，详情 pull 后 canonical SQLite 插入同一 client/remote ID、revision 1 和完整 13 位时间，并生成设备专属通知 ID `c26d75b9-90f8-41ac-b197-91e110ac39fd`；AlarmManager 同样登记 09:00，sheet 正确显示“待完成 · 截止：7月28日”。B 在 App 内完成后，18020 推进同一 action 为 `revision=2/status=completed`，保留 due、清空 reminder 并写入 `completed_at_ms=1785185095169`；B 的 SQLite 同步清空 reminder/notification ID，系统闹钟不再存在。
+- B 完成后、A 拉取前，A 的旧 09:00 闹钟仍真实存在；A 强停冷启动重新进入详情后显示同一 action“已完成 · 截止：7月28日”，原设备闹钟也被 pull 后的提醒对账取消。该轮证明跨端同步的是业务提醒意图，每台设备只保存自己的通知 ID；没有把 A 的通知标识复制到 B，也没有因完成操作残留重复闹钟。两端日志无应用 FATAL、React Native 致命异常或 SQLiteException。
 - 所有 synthetic 冒烟后已恢复 SHA-256 `fa9a2d50a3bf62e3fb3f751fd228288d352a63fdef3e0756c6a64aa0f15ec6bf` 的模拟器原始数据备份；最终迁移态 `user_version = 6`，`p4-*` 和 `reminder-*` synthetic 计数均为 0、现存 action reminder 数为 0，最终 Preview 冷启动无应用 FATAL。
 - 后续日程 synthetic 冒烟以日期型截止预填 `2026-07-24 10:00–10:30`，首次保存后 action 从“创建后续日程”变为“查看后续日程”，点击进入同标题、同时间的 EventDetail。随后模拟“事件已创建但 action 链接丢失”，第二次保存仍保持游客事件总数 2（原有事件 1 + 后续事件 1），`action-followup:*` 事件严格为 1，action 重新链接到同一 `guest-*` source ID；无 SQLiteException、应用 FATAL 或 `meeting_action_update_failed`。
 - 后续日程冒烟后已恢复 SHA-256 `f40728a1adad19f3963191494e82c0b0b1db3fd07d82e761170ac0da5dcbed0b` 的测试前模拟器备份。复核 `user_version = 6`、meeting 数 1、action 数 0、follow-up link 数 0、游客事件数 1、`followup-smoke` 存储/UI 命中数 0；通知权限恢复为未授权，最终 Preview 冷启动无应用 FATAL。
@@ -149,7 +152,7 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 ## 未完成边界
 
 1. 版本列表和当前指针切换目前只覆盖本机 canonical 数据；没有跨设备当前版本同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；section 人工编辑、引用移除和更细版本预览仍未实现。
-2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412 和显式版本选择均已有运行证据；仍缺物理双机收敛、提醒跨设备、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
+2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412、显式版本选择和双 Android 实例提醒收敛均已有运行证据；仍缺物理双机收敛、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
 3. 四模板均取得真实模型 section/action 与 durable identity，定向访谈又取得四类 section 和 5 个 canonical 引用；仍缺自动 ASR 直连样本、更多真人/长会议与历史/附件授权质量抽查，以及线上版本列表/切换合同。
 4. 当前只有模拟器，没有 USB 真机。引用 seek、编辑键盘/inset、完成动效、通知及后续日程命令仍缺真机轻量复核；通知回跳的长文档 action 长距离定位也未单独验证。
 5. 按当前目标不执行已归档门禁、60 分钟样本、压力/穷举交互；这些留到候选功能框架稳定后。
