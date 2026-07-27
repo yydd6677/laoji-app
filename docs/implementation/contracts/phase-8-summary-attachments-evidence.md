@@ -1,6 +1,6 @@
 # Phase 8 附件显式参与整理证据：ATT-01
 
-状态：文字与照片附件的逐次选择、能力协商、任务身份、恢复重验、不可变图片快照和真实多模态请求格式已形成源码纵向切片。本文件只证明移动端源码、本机 deployment overlay、模拟器交互和轻量合同；目标服务当前仍未广告附件/图片能力，不代表真实视觉模型、真实账号、跨设备或 USB 真机已经完成。
+状态：文字与照片附件的逐次选择、能力协商、任务身份、恢复重验、不可变图片快照和真实多模态请求格式已形成源码纵向切片；账号附件对象服务也已部署并用真实测试账号完成鉴权闭环。两个独立 Android 模拟器实例已完成文字附件新增、pull 与墓碑删除，但没有运行图片整理。`meeting_attachments_v1=true`，在没有确认视觉模型前 `summary_attachments_image=false`；这不代表真实图片理解、第二台物理手机或 USB 真机已经完成。
 
 ## 产品与数据合同
 
@@ -13,7 +13,7 @@
 - 附件被标记为本场补充材料而非系统指令或 Transcript；服务端禁止为附件内容伪造 Transcript citation。有附件时禁用不接收额外上下文的 compact 路径，也不使用只检查转写的短问候确定性结果。
 - 账号服务端对照片重新校验 owner、meeting、client ID、remote revision、时间点、MIME、大小、SHA-256 与 client update clock，再复制到请求独占的不可变任务快照。相同授权的 dedupe replay 清理本次多余副本；任务结束清理已用副本；进程中断残留由期限回收。
 - CLI 支持可重复 `--summary-image`。Ollama 的最终 user message 使用真实 base64 `images`，OpenAI-compatible 使用 data-URI `image_url`；长 Transcript 的 Map 阶段仍只读 Transcript，图片只进入 Reduce。prompt 只记录图片序号，不以文件名或时间点冒充视觉理解。
-- capability 只有在附件 schema 可查询且 `MEETING_SUMMARY_IMAGE_INPUTS_ENABLED=true` 时返回 `summary_attachments_image=true`。该开关必须由部署者在确认当前模型具备视觉能力后显式开启；源码存在不等于线上开启。
+- 多模态发送实现已保留，但当前部署候选将 `summary_attachments_image` 硬性保持为 false，而不是只靠环境变量打开。选定并验证真实视觉模型后，才能恢复“schema 可查询 + 显式开关”的广告逻辑；源码存在不等于线上开启。
 
 ## UI 证据分类
 
@@ -33,7 +33,7 @@
 - 从实际服务端函数 AST 执行两个无落盘窄合同：附件正文/hash 校验通过，正文变化返回 409；附件 request/content 改变会改变服务端 fingerprint，有授权时 compact=false，prompt 包含正文和“不得伪造 Transcript 引用”约束。
 - `:app:assemblePreview --parallel --max-workers=$(nproc)` 通过：627 tasks，59 executed、568 up-to-date，最终一轮 36 秒。
 - 模拟器夹具包含一条文字附件和一条照片。UI tree 确认默认两个 checkbox 均未选、照片 `enabled=false`、提交按钮禁用；选中文字后只有文字 `checked=true`，按钮启用并显示“使用（1）”。
-- 当前 18035 服务没有声明新能力。点击“使用（1）”后 sheet 保持打开并显示中文错误，没有进入 Summary POST；点击“不使用”后正常进入既有总结流程，随后只因当前会议服务不可达显示既有中文网络错误。
+- 早期 fail-closed 基线中，18035 没有声明新能力。点击“使用（1）”后 sheet 保持打开并显示中文错误，没有进入 Summary POST；点击“不使用”后正常进入既有总结流程。该条只证明旧服务不会误接收附件，不是当前 18020 能力状态。
 - 验证期间没有应用 FATAL、React Native exception、SQLiteException 或 IllegalStateException。
 - 测试前 canonical DB 主文件/WAL/SHM 和 RKStorage/journal 已逐文件备份；恢复写回后的 SHA-256 分别为 `42ff97c95cc1bfdec2a1308048455b28a55be04d1ac66a846f725a807b4f5f93`、`63b56aa422452b0a1ed428deeb2914733e373a0c5b480516999852c581a23a0f`、`9fbd53a9519cb8954b91535bc61afa66288588a7fa4ceefefaea41ac05e5c1bd`、`b6794955bc10431175588d54942eee2b8c2b4fd3b1061bcab8d06ae906c76928`、`e3b0c44298fc1c149afbf4c8996fb92427ae41ac66a846f725a807b4f5f93`。冷启动回到原 `OccueneSmoke / 录音中断`，UI tree 不含附件夹具文本。
 - 最终 APK 为 `android/app/build/outputs/apk/preview/app-preview.apk`，90,555,664 bytes，SHA-256 `f9eeb8194879594af5ff73028eee601bcc0ce0557ff9bd5df53db5be1ec620b4`；已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-26 01:25:47`。
@@ -45,10 +45,16 @@
 - 指纹合同确认同一原始图片授权与增加服务器临时 `snapshot_path` 后的授权得到相同 dedupe fingerprint；快照合同确认流式前置 SHA-256/大小校验、受管目录复制、过期孤儿删除和请求目录清理。
 - Preview 以全 CPU 并行构建通过：627 tasks，59 executed、568 up-to-date，39 秒。APK 为 `android/app/build/outputs/apk/preview/app-preview.apk`，90,961,888 bytes，SHA-256 `b8f710ad0f308cdc24237f395fa980735d2e635c35ad99b178cae5ede058b8ad`。
 - 设备列表仅有 `emulator-5556`。APK 以保留数据方式覆盖安装，`versionCode=104`、`versionName=1.0.0-source-preview`、`lastUpdateTime=2026-07-27 00:37:09`；冷启动进入 `MainActivity`，进程存活，日志没有 FATAL、React Native exception、SQLiteException 或 IllegalStateException。真机已断开，因此没有 USB 结论。
-- 实时 18020 capability 仍为 `summary_attachments_text=true`、`summary_attachments_image=false`，且响应没有 `meeting_attachments_v1`；18035 对该 capability 路径返回 404。故本候选只验证 fail-closed 启动，不存在可诚实执行的线上照片选择或真实视觉模型任务。
+- 实时 18020 capability 现为 `summary_attachments_text=true`、`meeting_attachments_v1=true`、`summary_attachments_image=false`。因此账号附件可诚实执行线上同步，照片多模态整理仍必须 fail closed。
+
+### 双模拟器对象边界
+
+- 当前 Preview 在两个全新同账号模拟器实例中完成文字附件的 A 新增→B pull→A 删除→B 墓碑收敛；两端 APK SHA-256 均为 `ee24ffc2343f8edc52b1777ceff559e2aae82e39a2648ef2ae3719a8cdcc97e4`。这补强的是整理输入所依赖的账号附件对象当前性，不是模型整理结果证据。
+- 本轮没有从“选择附件”sheet 提交线上 Summary，也没有图片附件；因此不能由对象同步推导 `summary_attachments_text` 输出质量，更不能推导图片理解。A 的 Marker 也没有同步到 B，附件由 `meeting + position_ms` 独立恢复。
 
 ## 服务端边界
 
-- 本机 overlay 的关键 SHA-256 为：`api/app_meetings.py` = `3436541dfc0fa9f9d80dce26bd0c2afd853114af2b49285ee5fda06e545fe3dd`，`summary_tasks.py` = `c4716f00b0c9f6a64429c55cbd0ad21935dfbaf1d728116047134d3b449e9541`，`backend/app/api/app_meeting_v2.py` = `dba5793ce690462e59198bc5e4d3d4cc6c5537c430140be56999ef2acf102dc5`，`meetingsummary/main.py` = `375d282655641e269b6b4af1cb3dbb8e8b50eb2620405bab6711e396cffb2da2`，`map_reduce.py` = `b4bdbc630334d9d86dd3df81d58c516891f93e1b85f18aaf0751558dcf274bfe`，`ollama_client.py` = `e83f4c466e430b85ef19123cd09741b260d03744f40a4c9e74ee301c21748739`。
-- 这些文件是 `/home/yydd/桌面/light_plan/server-work/summary` deployment overlay，不是运行服务。对已知 `zhong@183.36.243.124` 的非交互 SSH 认证仍返回 `Permission denied (publickey,password)`；未猜密码、未修改共享服务器目标工作区，也未启动或重启 18020/18035。
-- 因此已完成的是照片多模态的移动端与服务端源码纵切；服务端同步、开关启用、真实视觉模型输出、真实账号/跨设备、USB 真机仍未完成，不能扩写为线上多模态闭环。
+- 附件对象纵切已合并到 `/home/zhong/laoji-service-platform/smart-meeting-ai`；隔离候选为 `/home/zhong/laoji-service-platform/candidates/20260727-meeting-attachments-v1`，部署前备份为 `/home/zhong/laoji-service-platform/backups/20260727-meeting-attachments-v1`。本机 `/home/yydd/桌面/light_plan/server-work/summary` 已用当前运行候选更新，不再是缺少日程会议接替逻辑的旧 overlay。
+- 生产库的 `meeting_attachments_v1` 与 `meeting_attachment_operations_v1` 已完成 additive migration，`quick_check=ok`。真实测试账号闭环覆盖 201 登记/幂等重放、图片上传与鉴权下载对账、401 未鉴权拒绝、412 陈旧 revision、墓碑列表及测试数据清理。
+- 仅 18020 在无活动任务时重启；重启后发现既有分享密钥未被新进程继承，随即以不输出密钥的方式补回。当前 `action_collaboration_v1=true`、`meeting_content_shares_v1=true`、`meeting_attachments_v1=true`，18035 未触碰。
+- 因此 ATT-01 的本机/账号对象功能、线上纵切和双模拟器文字附件收敛已完成；真实视觉模型输出、第二台物理手机和 USB 真机仍未完成，不能扩写为线上照片理解闭环。
