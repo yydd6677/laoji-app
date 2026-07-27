@@ -1,6 +1,6 @@
 # Phase 6 重复会议系列记忆证据：SERIES-01
 
-状态：重复会议的系列身份、最近一次已结束会议、最多三条决定、最多五条同系列未完成事项、可靠决定引用定位、来源跳转、用户明确选择后“带入我的笔记”，以及生成新整理结果时独立选择历史参考，已形成源码纵向切片。migration v13 已把笔记导入去重从整块文本提升为逐来源实体 ledger；模型引用授权则使用独立 request identity，不复用笔记选择。本文件记录轻量合同、源码映射和模拟器实测；它不代表账号/跨设备同步、真实模型运行或 Phase 6 退出条件已经完成。
+状态：重复会议的系列身份、最近一次已结束会议、最多三条决定、最多五条同系列未完成事项、可靠决定引用定位、来源跳转、用户明确选择后“带入我的笔记”，以及生成新整理结果时独立选择历史参考，已形成本机/线上纵切。migration v13 保持逐来源实体去重；Summary 授权使用独立 request identity，不复用笔记选择。目标 18020 已以真实账号、不同来源/目标会议完成决定型和行动型历史授权、未选内容隔离、引用隔离、幂等复用与冷启动持久读取；跨移动设备 action 更新仍是候选证据尾项。
 
 ## 当前数据与查询合同
 
@@ -16,6 +16,7 @@
 - 选择整理模板后，移动端重新按本场 meeting 的 occurrence 查询同一份系列记忆；无候选直接生成，有候选则打开独立的“引用上次会议内容”sheet。默认零选择；“取消”终止本次生成，“不引用”明确继续，笔记 sheet 的既有勾选不构成模型授权。
 - 提交引用时再次查询 SQLite 并校验所选 ID。账号作用域必须把来源映射为归属当前账号的远端 meeting ID；缺少远端来源身份时拒绝授权。最多八项，授权 request ID、完整项目快照、模板和 Transcript 共同进入 v3 input fingerprint，并完整写入 pending task；恢复、任务丢失重提和结果校验沿用同一授权身份。任务入口区分“未提供 carry 参数”和“明确传入 null”，因此用户选择“不引用”会覆盖旧 pending 授权，不会因 nullish fallback 把历史内容重新带回。
 - 登录与游客 Summary 请求均只发送本次明确授权的 `carry_forward`；服务端把 request ID 纳入去重指纹和 schema v2 结果。历史 JSON 被标记为背景而非本场 Transcript 证据，不得生成本场引用；账号端额外验证每个来源 meeting 都归当前用户，且禁止引用本场自身。
+- 纯文字历史授权进入可控 4B JSON 路径；附件/图片授权仍走完整上下文管线。用户选中的历史项会以来源日期/标题进入各模板既有讨论类 section；未选项没有进入该投影的通道。与授权历史重叠的决定/待办若未被本场 Transcript 明确重新确认，在落库前确定性移除；历史独有文字所在 section 不携带本场引用。
 - 用例先通过统一 occurrence 用例查找或创建目标会议，再按 scope 读取 canonical aggregate，以 revision CAS 保存人工笔记。已有笔记原文完整保留；来源块追加日期、会议标题、负责人和截止时间，不创建 action 副本，也不改变原 action 状态。
 - migration v13 新增 `meeting_series_carry_imports`，以 `(target_meeting_id, source_kind, source_item_id)` 为主键，并保存来源会议、日期、标题、正文、负责人、截止时间、segment 与 start time 快照。目标会议删除时 ledger 级联删除；来源会议 ID 刻意不设外键，来源删除后已导入快照仍可解释人工笔记。
 - 每个新选项先在与人工笔记 CAS 保存相同的 SQLite transaction 中插入 ledger；只把本次成功插入的决定/事项组成追加块。相同请求在进程内仍按 scope、occurrence 和排序后的选择 ID 合并；跨进程重试和部分重叠选择由逐项主键去重，ledger 与正文不会出现半提交。
@@ -58,8 +59,10 @@
 
 - `npx tsc --noEmit`：通过。
 - `git diff --check`：通过。
-- carry-forward 增量在共享服务器当前源码的隔离副本中执行 API、任务生命周期、总结解析、幂等、上传与游客 Transcript 相关窄合同，56 项通过；本机 `py_compile` 通过。复核发现通用模板的 compact 快路径不接收历史上下文，现规定有授权时跳过该路径，避免“返回授权 ID 但模型未收到内容”。
-- 同步前后均校验目标文件 SHA-256，只更新 `app_meetings.py` 与 `summary_tasks.py`；新备份为服务器 `backups/20260724-summary-carry-forward-v1`。目标 18020/18035 仍无监听，8020 仍属于另一旧工作区，没有启动或重启服务。
+- 历史 compact/隔离增量使用 18020 实际进程环境执行 40 项 Summary/API 相关窄合同并通过，目标 Python 3.11 `py_compile` 通过。线上回滚前态为 `backups/20260728-history-compact-v6`。
+- 9B 完整管线基线 task `4631376b-a5de-4b8a-a5f8-e98c6678effc` 用时 392.7 秒，暴露了历史文字与本场 citation 混在同一 section 的歧义。修复后决定+行动授权 task `10d44db3-65f9-4dba-8fde-a0e9b3da7710` 使用 4B 在 50.6 秒成功；只保留本场演示决定和周敏待办，方案乙只作背景，旧待办未被复制。
+- 反向行动单项授权 task `1ac18bbf-dc8b-48ca-91c4-a9ecf2f23387` 在 53.0 秒成功，durable version `c7608cc4-eee4-4d4d-8ba1-b32fb9442048`。`王磊周三前完成安卓回归测试。` 完整进入来源背景行且 citation 为 0；未授权的方案乙/方案甲、游客入口、十五分钟、安卓优先、数据库迁移和张伟均未出现。唯一决定/行动来自本场，2 个 citation 均属于本场 8 段 Transcript。
+- 以同一 request ID 重提返回 `reused=true` 且复用同一 task ID；18020 冷启动后 durable endpoint 仍返回同一 version/授权 ID/来源背景。最终 18020 PID `984809`，继承 34 项环境；18035 保持 PID `3293181`。
 - 当前统一交付 APK 为 `android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 17:12:11 +0800`，大小 `90,121,368` bytes，SHA-256 `06b4225234b6b72de1a98355d3b0f95424563c43d6805c541c652ef399fa7c91`；已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-24 17:12:23`。冷启动进程存活，日志无应用 FATAL、React Native exception 或 SQLite/schema error。
 - `:app:assemblePreview --parallel --max-workers=$(nproc)`：通过；627 个 task，59 executed，耗时 34 秒。
 - 临时设备数据把原 `OccueneSmoke` 改为每周重复：2026-07-22 为已结束来源会议，2026-07-29 为未来 occurrence；来源 Summary 注入三条真实换行决定，并保留两条 pending action。UI tree 分别读到三条决定，而不是显示字面 `\n`。
@@ -77,8 +80,8 @@
 ## 未完成边界
 
 1. 当前没有 USB 真机；不同物理设备密度、字体缩放、深色模式、手势导航 inset、长文截断和触觉尚未验证。
-2. 独立 Summary 授权、默认零选择、任务指纹/pending 恢复、服务端来源归属和结果 request ID 校验已接通，但目标服务没有运行；尚未用真实模型证明所选历史内容被合理利用、未选内容不进入 prompt，也未在恢复后的原始模拟器数据上完成新 sheet 的点击录像。
+2. 真实账号历史授权、利用/隔离、引用边界、幂等与冷启动已完成；尚未在当前恢复的模拟器数据上制造未来系列 occurrence 并重跑新授权 sheet 录像。
 3. 多决定 citation 数量不等时会安全退回来源 Summary，不做模糊猜测。v13 之前已写入的纯文本来源块不能可靠反推 ledger；Summary 重生成若改变 section/item identity，语义相同的新决定仍可能被视为新来源实体。
 4. recurrence exception、`following` segment 和服务端拆分新 source ID 的身份规则已由 key 设计支持，但本轮只实测普通周重复，没有做完整编辑矩阵。
-5. 没有可用测试账号和线上系列接口完成登录态迁移、跨设备 action 更新、并发冲突或远端 series identity 验证；配置中的远端 `18020` 与 `18035` 先前出现 HTTP 502，最终绕过代理直连均未收到 HTTP 响应（curl `000`），非 Android 页面也尚未接入该信息组。
+5. 已使用真实测试账号和运行中 18020 完成不同会议来源归属与生成；跨移动设备 action 更新、并发冲突和远端 series identity 仍待候选抽查。非 Android 页面仍未接入该信息组。
 6. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或压力矩阵；只执行类型检查、最终 Preview 构建、定向模拟器交互、数据恢复和崩溃日志检查。

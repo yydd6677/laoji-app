@@ -104,7 +104,7 @@
 - `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`；当前 `general@1` 已有独立真实成功任务，因此不再用旧 120/600 秒失败描述当前 Summary。真实 VibeVoice 任务仍触发 NVML 断言，健康字段仍不能替代 ASR 任务成功证据。
 - `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 当前为目标工作区进程 PID `702467`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。当前远端/本机 overlay 的 `app_meetings.py`、`app_summary_generator.py`、`summary_tasks.py` SHA-256 分别为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`、`11767e2841333632671b6ad6bb19d1d11c09ab74e6e09263f7fd1184bba5c644`、`af3f762c269c40a223f4e23687c362e2f5bd3bf6b040aaa7ea94d46c4188bcae`。最新前态备份为 `backups/20260728-template-prompt-v5`；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
+- 18020 当前为目标工作区进程 PID `984809`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。当前远端/本机 overlay 的 `app_meetings.py`、`app_summary_generator.py`、`summary_tasks.py` SHA-256 分别为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`、`bccb3112639ba2436701c74e4782bf27e2b8c2b93a9a35e2091ded8a4f614da7`、`64c0ffbb8c741120eaf49c876d228cfb02c1c36e04764d0a39624bbe32516108`。最新前态备份为 `backups/20260728-history-compact-v6`；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
