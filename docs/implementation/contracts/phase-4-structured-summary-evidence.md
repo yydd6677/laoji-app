@@ -1,6 +1,6 @@
 # Phase 4 整理结果与行动：首个纵向切片
 
-状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 真实模型结果、9 个有效引用、7 个行动项、重启后 durable result 和移动端引用跳转证据；这仍不代表自动 ASR、另外三个模板、线上版本列表或全账号跨设备同步已完成。
+状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 结果、四模板真实模型运行、canonical 引用、durable result 和移动端消费证据；这仍不代表自动 ASR、线上版本列表或全账号跨设备同步已完成。
 
 ## 独立 Summary 运行增量
 
@@ -150,6 +150,6 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 
 1. 版本列表和当前指针切换目前只覆盖本机 canonical 数据；没有跨设备当前版本同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；section 人工编辑、引用移除和更细版本预览仍未实现。
 2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412 和显式版本选择均已有运行证据；仍缺物理双机收敛、提醒跨设备、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
-3. `general@1` 已取得非平凡真实模型 section、行动项、9 个有效引用、线上 durable result 与移动端跳转证据；仍缺自动 ASR 直连样本、另外三个模板、更多真人/长会议的质量抽查和线上版本列表/切换合同。
+3. 四模板均取得真实模型 section/action 与 durable identity，定向访谈又取得四类 section 和 5 个 canonical 引用；仍缺自动 ASR 直连样本、更多真人/长会议与历史/附件授权质量抽查，以及线上版本列表/切换合同。
 4. 当前只有模拟器，没有 USB 真机。引用 seek、编辑键盘/inset、完成动效、通知及后续日程命令仍缺真机轻量复核；通知回跳的长文档 action 长距离定位也未单独验证。
 5. 按当前目标不执行已归档门禁、60 分钟样本、压力/穷举交互；这些留到候选功能框架稳定后。

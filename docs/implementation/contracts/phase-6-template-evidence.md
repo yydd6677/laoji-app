@@ -1,6 +1,6 @@
 # Phase 6 内置会议模板证据：TPL-01
 
-状态：四个内置模板的移动端注册、请求身份、任务恢复、结果校验、不可变版本保护和模板选择 sheet 已形成一个本机纵向切片；服务端 additive 适配已合并到共享服务器目标工作区并由运行中的 18020 加载。`general@1` 已取得登录态非平凡真实模型结果、持久恢复和移动端引用跳转证据；另外三个模板尚未完成同等级真实模型验证，不能由 `general@1` 结果代替。
+状态：四个内置模板的移动端注册、请求身份、任务恢复、结果校验、不可变版本保护和模板选择 sheet 已形成纵向闭环；服务端 additive 适配已由目标 18020 加载。四模板均取得真实模型成功结果，非默认模板又修复了短会议误走 9B/2048-token 完整管线导致的 600 秒超时；定向访谈夹具证明四个访谈 section 和 canonical citation 均可生成。自动 ASR、物理设备和更广质量样本仍是独立边界。
 
 ## 当前移动端范围
 
@@ -23,14 +23,18 @@
 - 当前真实 `FinalSummary` 表只有旧六列。本切片没有假定不存在的模板列，而是把 v2 envelope 合并进输出 JSON 的 `_laoji_structured_summary`，并用模板 sections 生成兼容 Markdown。
 - 新输出文件使用带时间部分的 `final3_*` 前缀，匹配现有模型产物查找顺序，避免同日连续生成读到旧文件。
 - App Summary 响应返回稳定 action candidate 和校验后的 schema v2；`full_text` 只使用兼容 Markdown/结构化 section/overview，不再因缺 Markdown 把 raw 模型 JSON 当正文，也不再向移动端返回 `raw_json`。
-- 合并以服务器当前 worker 为基线，保留同会议串行、不同会议有界并发、task scope/meeting 归属、长轮询、短期幂等复用、失败不复用、墓碑阻止写入和原有总结质量清洗。compact general 路径在无历史授权时保留；有授权时必须走支持 prompt suffix 的路径，否则历史内容不会真正送入模型。旧本机副本中会回退这些能力的 `chunker.py`、`ollama_client.py` 和启动脚本已恢复为服务器当前版本。
+- 合并以服务器当前 worker 为基线，保留同会议串行、不同会议有界并发、task scope/meeting 归属、长轮询、短期幂等复用、失败不复用、墓碑阻止写入和原有总结质量清洗。无历史/无附件的四模板现在都走 4B、动态 JSON schema、受限 token 的精简路径；非默认模板使用独立无矛盾提示，并为模板专属 section 返回同段 `source_segment_id + source_quote`，继续经过 canonical 校验。带历史授权或附件的请求仍走支持完整上下文的管线，不因性能修复丢失授权内容。
 
 ## 当前真实模型证据
 
-- 目标 18020 以 PID `114654` 从目标 backend 运行，并继承原 34 项环境；18035 保持 PID `3293181`，本轮未触碰。Transcript/Summary 恢复补丁前态保存在 `backups/20260728-transcript-summary-recovery-v1`。
+- 目标 18020 以 PID `702467` 从目标 backend 运行，并继承原 34 项环境；18035 保持 PID `3293181`，本轮未触碰。Transcript/Summary 恢复补丁前态保存在 `backups/20260728-transcript-summary-recovery-v1`；非默认模板性能与引用增量的连续前态保存在 `backups/20260728-template-compact-v3`、`backups/20260728-template-citations-v4` 和 `backups/20260728-template-prompt-v5`。
 - 登录态 `general@1` task `06b9ae52-581a-4847-8604-5f9b3be431e7` 约 92.3 秒成功，durable version 为 `10f1af3f-ef92-4a23-ae08-8164eede3dde`。结果包含 3 个 section、3 条决定、7 条待办和 9 个有效引用，未把 raw JSON 展示为正文。
 - 三个抽查引用在 Android 详情页分别定位到 `0 ms`、`20,712 ms` 和 `50,904 ms`；冷启动后同一版本保持当前，重复 durable 响应为幂等 `unchanged`，没有覆盖用户版本选择或重复推进 canonical revision。
-- 本样本 Transcript 是测试 API 导入的十段文字，不是 VibeVoice 自动转写结果；它证明 `general@1` 的模板身份、结构化结果、引用和恢复，不证明 ASR，也不证明 `one_on_one@1`、`project_sync@1` 或 `interview@1` 的模型质量。
+- 初次真实 `one_on_one@1` task `dd2f3d12-ebe5-4d7b-98c5-33542a23a34b` 走 9B 完整管线并在 600 秒 Ollama ReadTimeout 后失败，证明旧实现的非默认模板并非只是“缺验证”。接入模板精简路径并清除旧 9B orphan runner 后，`one_on_one@1` task `ba284d56-a144-4cd3-8d2a-521793dbbce2` 在 113.6 秒成功，version `17277b84-a86e-4814-865c-26eb59eee02f`，生成 3 个非空 section、7 条行动和 16 个引用对象。
+- `project_sync@1` task `39cd4497-e9dd-4f36-ac14-42f6d411ca9c` 在 136.2 秒成功，version `78a7912a-ebf6-4d7a-94bb-a08402993c47`，生成进展/决定/行动项、9 条行动和 16 个引用对象；无可靠风险时没有编造风险 section。
+- `interview@1` task `3328c8b5-b8b3-4194-b428-1bc1b4d21067` 在 135.4 秒成功，version `ebc24d95-6005-423c-8b8c-fefdfe935fc6`；模拟器冷启动从 durable endpoint 激活该版本，真实 UI 显示“主题/受访者观点”和待办，未见致命日志。该账号样本本质是项目协调内容，因此访谈专属来源为空，不能据此判断访谈 prompt 质量。
+- 为排除样本不匹配，游客真实模型 task `0a62ea84-809f-40fd-b6bb-267b1c3dc012` 使用四段定向合成访谈，在 157.6 秒生成 `topics/interviewee_views/evidence_quotes/follow_up_questions` 全部四个 section；四类分别有 `2/1/1/1` 个通过 canonical segment/逐字 quote 校验的引用，且没有凭空生成行动项。
+- 账号十段 Transcript 和游客四段访谈都来自测试夹具，不是 VibeVoice 自动转写；它们证明四模板运行、模板区分、结构化来源和移动端消费，不证明 ASR 或真人会议长期质量。
 
 ## UI 证据分类
 
@@ -58,11 +62,12 @@
 - 关闭错误对话框后再次打开，UI tree 为 `项目同步 selected=true`、`通用 selected=false`。进程保持存活，清空后的 logcat 没有应用 FATAL、React Native exception、SIGSEGV 或 SIGABRT。
 - 验证使用的临时 ended meeting 和一条测试转写均已恢复：最终会议列表重新显示 `OccueneSmoke，7月22日 21:04，失败`，临时 Transcript cache 已删除，最终仍安装 Preview；本轮 `/tmp` 备份、截图和设备 XML 已清理。
 - 当前可安装 Preview 于 `2026-07-28 01:50:37 +0800` 构建，大小 `91,061,768` bytes，SHA-256 `618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`；已保留数据覆盖安装到 `LaoJi_Candidate_V34 / emulator-5554`，设备 `base.apk` 与构建产物逐字节一致。
+- 非默认模板增量通过目标 Python `py_compile`、2 项模板动态 schema/来源保留合同和 compact gate 定向检查。Android 冷启动激活访谈 durable 结果时日志为 `meeting_summary_shadow_write status=activated`，无 App FATAL、React Native 致命异常、SQLiteException、SIGSEGV 或 SIGABRT。
 
 ## 未完成边界
 
 1. 当前没有 USB 真机；不同物理设备密度、字体缩放、深色模式、手势导航 inset 和真实触觉尚未验证。
-2. 目标 18020 已运行并完成登录态 `general@1` 非平凡生成；另外三个模板没有同等级真实模型结果，固定 schema 质量、模板间污染和 prompt 遵循率仍不能宣称四模板完成。
-3. 测试账号已完成 `general@1` 生成、进程/页面恢复和当前版本幂等；快速连续切换模板、跨设备版本选择及三个非默认模板的恢复仍未验证。
-4. `general@1` 已证明当前样本的 action/section/citation 结构和移动端消费；长 Transcript、真人多人会议、历史参考利用质量和另外三个模板仍需后续样本。
+2. 四模板均有真实模型成功结果，访谈另有匹配语料的四 section/引用证据；仍不是长 Transcript、真人多人会议、模板污染率或大样本 prompt 遵循率。
+3. 测试账号已完成通用与访谈的移动端恢复，并由 task/durable identity 核对 1:1 与项目同步；快速连续切换、跨设备版本选择和每个中间版本都在移动端下载仍未验证。
+4. 历史参考和附件请求按设计不走模板精简路径；其真实利用质量与未选内容隔离仍需带授权样本，不能由本轮空授权任务代替。
 5. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或大样本矩阵；只执行类型检查、服务端纯函数 smoke、Preview 构建、定向模拟器交互和崩溃日志检查。

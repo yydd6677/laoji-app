@@ -1,6 +1,6 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领，以及长 Summary 的成功恢复、持久落库、引用跳转和重复响应幂等。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；当前 `general@1` 已有非平凡真实模型结果，但自动 ASR 仍被已知 NVML/VibeVoice 问题阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领，以及长 Summary 的成功恢复、持久落库、引用跳转和重复响应幂等。运行服务又完成四个内置模板的真实模型纵切，并修复非默认模板短会议 600 秒超时。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；自动 ASR 仍被已知 NVML/VibeVoice 问题阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
@@ -44,6 +44,8 @@
 - 该结果包含 3 条决定、7 条待办和 9 个通过 canonical segment 校验的引用，没有被拒引用。`00:00`、`00:20`、`00:50` 三个引用在模拟器分别切到正确文字段，并把播放器定位到 `0 ms`、`20,712 ms`、`50,904 ms`；这证明本场结构化内容、行动项来源与引用跳转，但上游十段文字仍是测试 API 导入夹具，不能改写成自动 ASR 成功。
 - 同签名 Debug 停机实读确认 active final Transcript 10 段、Summary `ready`、1 个版本、3 个 section、9 个引用和 7 个 action；`quick_check=ok`，`foreign_key_check` 无输出。冷启动后 canonical revision 保持 `23`，重复 durable 响应记录 `meeting_summary_shadow_write status=unchanged`，没有覆盖当前版本或重复推进处理阶段。
 - 当前代码通过 `npx tsc --noEmit --pretty false`、`git diff --check` 和一次完整 `assemblePreview`；APK 保留数据覆盖安装 `LaoJi_Candidate_V34 / emulator-5554`，设备 `base.apk` 与顶部构建产物逐字节一致。冷启动 resumed，页面不再显示旧失败；无 App FATAL、React Native 致命异常、SQLiteException、SIGSEGV 或 SIGABRT。同签名 Debug 只用于停机实读，随后已恢复同一 Preview。当前没有 USB 真机。
+- 初次 `one_on_one@1` 真实任务在旧 9B/2048-token 完整管线跑满 600 秒并 ReadTimeout；无历史/无附件的非默认模板现改走 4B 动态 JSON schema 精简路径，历史/附件授权仍保留完整管线。修复后 1:1、项目同步、访谈分别在 113.6、136.2、135.4 秒成功并形成独立 durable version；项目样本未编造空风险段。
+- 定向四段访谈游客 task `0a62ea84-809f-40fd-b6bb-267b1c3dc012` 又在 157.6 秒生成主题、受访者观点、证据摘录和后续问题，四类分别有 `2/1/1/1` 个 canonical 引用且行动项为 0。账号 durable 访谈版本已被当前 Preview 冷启动激活，UI 显示模板内容与待办；这仍是导入/合成 Transcript，不是自动 ASR。
 
 ## V3 第 2 条的隔离环境
 
@@ -102,7 +104,7 @@
 - `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`；当前 `general@1` 已有独立真实成功任务，因此不再用旧 120/600 秒失败描述当前 Summary。真实 VibeVoice 任务仍触发 NVML 断言，健康字段仍不能替代 ASR 任务成功证据。
 - `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 当前为目标工作区进程 PID `114654`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。Summary/Transcript 恢复补丁前态保存在 `backups/20260728-transcript-summary-recovery-v1`，当前远端 `app_meetings.py` 与本机 overlay 的 SHA-256 同为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`。`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
+- 18020 当前为目标工作区进程 PID `702467`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。当前远端/本机 overlay 的 `app_meetings.py`、`app_summary_generator.py`、`summary_tasks.py` SHA-256 分别为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`、`11767e2841333632671b6ad6bb19d1d11c09ab74e6e09263f7fd1184bba5c644`、`af3f762c269c40a223f4e23687c362e2f5bd3bf6b040aaa7ea94d46c4188bcae`。最新前态备份为 `backups/20260728-template-prompt-v5`；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
