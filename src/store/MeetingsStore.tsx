@@ -1602,14 +1602,45 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       ...(result.errorCode ? { error_code: result.errorCode } : {}),
     });
     if (result.source === 'sqlite') {
-      canonicalReadProjectionRef.current = result.projection;
-      setMeetings(result.projection.meetings);
+      let projection = result.projection;
+      if (canonicalWritesEnabledForScope(flags, scope)) {
+        const writeState = await sqliteMeetingNoteRepository.getScopeWriteState(scope);
+        if (writeState.writeOwner !== 'canonical') {
+          canonicalStoreMutationDepthRef.current += 1;
+          try {
+            await sqliteMeetingNoteRepository.transaction(transaction => (
+              transaction.advanceCanonicalWrite(scope, Date.now())
+            ));
+            const owned = await loadCanonicalOwnedScope(true);
+            if (!owned) throw new Error('meeting canonical cutover ownership was not persisted');
+            projection = owned.projection;
+            diagnosticAudit('meeting_db_write_cutover', {
+              status: 'active',
+              scope: scope === 'guest' ? 'guest' : 'account',
+              canonical_revision: owned.canonicalRevision,
+              mirror_status: owned.mirrorStatus,
+            });
+          } finally {
+            canonicalStoreMutationDepthRef.current = Math.max(
+              0,
+              canonicalStoreMutationDepthRef.current - 1,
+            );
+          }
+        }
+      }
+      if (
+        generationRef.current !== operationGeneration
+        || activeScopeRef.current !== scope
+        || canonicalReadRequestRef.current !== readRequest
+      ) return 'legacy';
+      canonicalReadProjectionRef.current = projection;
+      setMeetings(projection.meetings);
       return 'sqlite';
     }
     canonicalReadProjectionRef.current = null;
     setMeetings(result.projection.meetings);
     return 'legacy';
-  }, [scope]);
+  }, [loadCanonicalOwnedScope, scope]);
 
   useEffect(() => {
     if (!getFeatureFlags().localMeetingDbCanonicalReadV1 || !isScopeKey(scope)) return undefined;

@@ -8,7 +8,7 @@ import type { PendingMeetingSummaryTask } from '../../services/meetingSummaryTas
 import { meetingSummaryToText } from '../../services/meetingSummaryFormat';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from './openDatabase';
 
-const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v5';
+const LEGACY_SOURCE_VERSION = 'async-storage-meeting-v2-shadow-v6';
 const PROCESSING_STAGES = ['capture', 'upload', 'transcript', 'summary', 'speaker'] as const;
 
 export interface LegacyMeetingShadowSource {
@@ -132,6 +132,11 @@ function summaryStatus(
 
 function transcriptStatus(meeting: Meeting, lines: readonly TranscriptLine[]): string {
   if (lines.length > 0) return meeting.status === 'recording' ? 'realtime_draft' : 'ready';
+  // A fresh account device receives transcript availability in the meeting
+  // list before it has downloaded the transcript body. Preserve that durable
+  // remote fact during the compatibility import so canonical read cutover can
+  // complete; the detail/background fetch will install the real revision.
+  if (meeting.hasTranscript) return 'ready';
   if (meeting.status === 'processing') return 'finalizing';
   return 'none';
 }
