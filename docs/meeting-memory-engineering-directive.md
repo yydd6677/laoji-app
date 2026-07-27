@@ -78,8 +78,8 @@
 | 第 4 节无 `进行中/部分完成/未开始` | 除 ATT-01 外均已达到本机、源码或线上纵切；ATT-01 的移动端、账号同步和多模态 overlay 已实现，但运行服务没有 `meeting_attachments_v1` 且图片能力为 false | **未满足**；这是当前唯一仍带实现状态阻塞的优化项 |
 | 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
 | 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 18020 当前健康、模型就绪，root/action/note/occurrence/RecordingAsset/QA/协作/片段/讲话人 capability 在线；既有账号与双资产证据仍有效；附件 schema 未部署 | **部分满足**；不能由其他 capability 推导附件完成 |
-| V3 七条关键任务 | 当前候选已在独立只读模拟器集中通过第 2 条录制主链；第 1、3–6 条仍为分散的升级、日程冲突、人工保护、来源和隐私证据；第 7 条及整包集中复核仍缺附件运行和第二设备 | **未满足候选版完成口径** |
-| 默认候选 APK、回溯提交与稳定标签 | 当前默认 Preview 可安装且保留数据冷启动正常，对应照片多模态基线 `0594d42`；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足** |
+| V3 七条关键任务 | 当前候选已在独立只读模拟器集中通过第 2 条录制主链，并在 USB 真机完成同包覆盖、保留数据启动和既有录音播放；真机新录音未在正式账号制造同步测试数据。第 1、3–6 条仍为分散证据；第 7 条及整包集中复核仍缺附件运行和第二设备 | **未满足候选版完成口径** |
+| 默认候选 APK、回溯提交与稳定标签 | 当前默认 Preview 已在 USB 真机保留数据覆盖安装，设备 APK 哈希与候选一致且冷启动正常，对应照片多模态基线 `0594d42`；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足** |
 
 源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
 
