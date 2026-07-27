@@ -31,6 +31,7 @@ import { remoteMediaClipsV30 } from './0030RemoteMediaClips';
 import { transcriptReprocessTasksV31 } from './0031TranscriptReprocessTasks';
 import { meetingAttachmentSyncV32 } from './0032MeetingAttachmentSync';
 import { meetingListOrderV33 } from './0033MeetingListOrder';
+import { meetingMarkerSyncV34 } from './0034MeetingMarkerSync';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -67,6 +68,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   transcriptReprocessTasksV31,
   meetingAttachmentSyncV32,
   meetingListOrderV33,
+  meetingMarkerSyncV34,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -102,4 +104,5 @@ export { REMOTE_MEDIA_CLIPS_V30_SQL } from './0030RemoteMediaClips';
 export { TRANSCRIPT_REPROCESS_TASKS_V31_SQL } from './0031TranscriptReprocessTasks';
 export { MEETING_ATTACHMENT_SYNC_V32_SQL } from './0032MeetingAttachmentSync';
 export { MEETING_LIST_ORDER_V33_SQL } from './0033MeetingListOrder';
+export { MEETING_MARKER_SYNC_V34_SQL } from './0034MeetingMarkerSync';
 export type { MeetingDatabaseMigration } from './types';

@@ -152,6 +152,7 @@ import { useMeetingManualNote } from '../hooks/useMeetingManualNote';
 import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
 import { requestMeetingTranscriptReprocess } from '../services/meetingTranscriptReprocess';
 import { deleteMeetingMarker, loadMeetingMarkers } from '../services/meetingMarkers';
+import { subscribeMeetingMarkersChanged } from '../application/meeting/markerSyncTrigger';
 import { loadMeetingAttachments } from '../services/meetingAttachments';
 import { loadMeetingActions } from '../services/meetingActions';
 import { pullMeetingActionsForDetail } from '../services/meetingActionPull';
@@ -1101,6 +1102,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   useEffect(() => {
     void refreshMarkers();
   }, [refreshMarkers, transcriptCached, transcriptCompleting]);
+
+  useEffect(() => {
+    if (!meetingScopeKey) return undefined;
+    return subscribeMeetingMarkersChanged(changedScope => {
+      if (changedScope === meetingScopeKey) void refreshMarkers();
+    });
+  }, [meetingScopeKey, refreshMarkers]);
 
   useFocusEffect(useCallback(() => {
     void refreshMeetingAttachments();

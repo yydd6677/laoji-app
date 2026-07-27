@@ -10,6 +10,7 @@ export interface LaoJiFeatureFlags {
   meetingAutomaticTopicsV1: boolean;
   meetingTagSyncV1: boolean;
   meetingAttachmentSyncV1: boolean;
+  meetingMarkerSyncV1: boolean;
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
   meetingTranscriptReprocessV1: boolean;
@@ -63,6 +64,11 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     meetingAttachmentSyncV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.meetingAttachmentSyncV1 === true,
+    // Account markers stay local-first and only contact a server that freshly
+    // advertises meeting_markers_v1.
+    meetingMarkerSyncV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
+      && extra.featureFlags?.meetingMarkerSyncV1 === true,
     // Explicitly attaching imported media requires canonical multi-asset writes.
     meetingMediaImportExistingV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaImportExistingV1 === true,

@@ -5,4 +5,5 @@ export * from './meetingMediaClipRepository';
 export * from './meetingActionShareRepository';
 export * from './meetingTagCatalogSyncRepository';
 export * from './meetingContentShareRepository';
+export * from './meetingMarkerSyncRepository';
 export * from './sqliteMeetingNoteRepository';

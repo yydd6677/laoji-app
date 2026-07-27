@@ -2370,6 +2370,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               } : {}),
             });
             void reconcileNativeMeetingRecordings(canonicalScope, { force: true });
+            // Canonical ownership only changes the local source of truth. An
+            // authenticated cold start must still pull newer account roots;
+            // otherwise a second device remains frozen at its last local
+            // projection and downstream content (including markers) has no
+            // meeting identity to attach to.
+            if (mode === 'authenticated' && isCurrent()) await refreshMeetings();
             return;
           }
         }

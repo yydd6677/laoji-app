@@ -11,6 +11,7 @@ import {
 } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
 import { assertScopeKey } from '../domain/meeting';
+import { requestMeetingMarkerSync } from '../application/meeting/markerSyncTrigger';
 
 const createMarkerUseCase = new CreateMeetingMarkerUseCase(sqliteMeetingNoteRepository);
 const deleteMarkerUseCase = new DeleteMeetingMarkerUseCase(sqliteMeetingNoteRepository);
@@ -54,11 +55,13 @@ export async function createMeetingMarker(
   positionMs: number,
 ): Promise<CreateMeetingMarkerResult> {
   const aggregate = await resolveCanonicalMeeting(scopeKey, meetingId);
-  return createMarkerUseCase.execute({
+  const result = await createMarkerUseCase.execute({
     meetingId: aggregate.note.id,
     scopeKey,
     positionMs,
   });
+  if (scopeKey !== 'guest') requestMeetingMarkerSync(scopeKey);
+  return result;
 }
 
 export async function deleteMeetingMarker(
@@ -67,9 +70,11 @@ export async function deleteMeetingMarker(
   markerId: string,
 ): Promise<DeleteMeetingMarkerResult> {
   const aggregate = await resolveCanonicalMeeting(scopeKey, meetingId);
-  return deleteMarkerUseCase.execute({
+  const result = await deleteMarkerUseCase.execute({
     meetingId: aggregate.note.id,
     markerId,
     scopeKey,
   });
+  if (result.applied && scopeKey !== 'guest') requestMeetingMarkerSync(scopeKey);
+  return result;
 }

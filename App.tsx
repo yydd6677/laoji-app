@@ -36,6 +36,7 @@ import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTra
 import { MeetingRetentionCleanupProvider } from './src/components/MeetingRetentionCleanupProvider';
 import { MeetingTagCatalogSyncProvider } from './src/components/MeetingTagCatalogSyncProvider';
 import { MeetingAttachmentSyncProvider } from './src/components/MeetingAttachmentSyncProvider';
+import { MeetingMarkerSyncProvider } from './src/components/MeetingMarkerSyncProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -60,6 +61,7 @@ function RuntimeProviders({ onRestart }: {
                   <MeetingManualNoteSyncProvider>
                     <MeetingTagCatalogSyncProvider>
                     <MeetingAttachmentSyncProvider>
+                    <MeetingMarkerSyncProvider>
                     <MeetingSpeakerCorrectionSyncProvider>
                     <EventsProvider>
                     <MeetingsProvider>
@@ -86,6 +88,7 @@ function RuntimeProviders({ onRestart }: {
                     </MeetingsProvider>
                     </EventsProvider>
                     </MeetingSpeakerCorrectionSyncProvider>
+                    </MeetingMarkerSyncProvider>
                     </MeetingAttachmentSyncProvider>
                     </MeetingTagCatalogSyncProvider>
                   </MeetingManualNoteSyncProvider>

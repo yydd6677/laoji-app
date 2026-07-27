@@ -8,6 +8,7 @@ export interface MeetingCapabilities {
   summaryAttachmentsText: boolean;
   summaryAttachmentsImage: boolean;
   meetingAttachmentsV1: boolean;
+  meetingMarkersV1: boolean;
   meetingQuestionsV1: boolean;
   actionItemsV2: boolean;
   actionItemsPullV2: boolean;
@@ -260,6 +261,32 @@ export interface RemoteMeetingAttachmentV1 {
   serverDeletedAtMs: number | null;
 }
 
+export interface MeetingMarkerV1Registration {
+  schema_version: 1;
+  client_marker_id: string;
+  position_ms: number;
+  label: string | null;
+  kind: 'important';
+  client_created_at_ms: number;
+  client_updated_at_ms: number;
+}
+
+export interface RemoteMeetingMarkerV1 {
+  remoteId: string;
+  meetingRemoteId: string;
+  clientMarkerId: string;
+  revision: number;
+  lifecycle: 'active' | 'deleted';
+  positionMs: number;
+  label: string | null;
+  kind: 'important';
+  clientCreatedAtMs: number;
+  clientUpdatedAtMs: number;
+  serverCreatedAtMs: number;
+  serverUpdatedAtMs: number;
+  serverDeletedAtMs: number | null;
+}
+
 export interface RecordingAssetTranscriptionJobV2 {
   jobId: string;
   meetingRemoteId: string;
@@ -452,6 +479,7 @@ export const LEGACY_MEETING_CAPABILITIES: MeetingCapabilities = {
   summaryAttachmentsText: false,
   summaryAttachmentsImage: false,
   meetingAttachmentsV1: false,
+  meetingMarkersV1: false,
   meetingQuestionsV1: false,
   actionItemsV2: false,
   actionItemsPullV2: false,

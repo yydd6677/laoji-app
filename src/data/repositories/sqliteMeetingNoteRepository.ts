@@ -454,6 +454,25 @@ type MarkerRow = {
   updated_at_ms: number;
 };
 
+type MarkerSyncStateRow = {
+  scope_key: string;
+  marker_id: string;
+  meeting_id: string;
+  remote_id: string | null;
+  remote_revision: number | null;
+  lifecycle: 'active' | 'deleted';
+  position_ms: number;
+  label: string | null;
+  kind: MarkerRecord['kind'];
+  client_created_at_ms: number;
+  client_updated_at_ms: number;
+  sync_state: 'local' | 'pending' | 'synced' | 'failed_retryable' | 'blocked';
+  pending_operation: 'create' | 'delete' | null;
+  last_error_code: string | null;
+  remote_updated_at_ms: number | null;
+  deleted_at_ms: number | null;
+};
+
 type MeetingAttachmentRow = {
   id: string;
   meeting_id: string;
@@ -1337,6 +1356,19 @@ function markerFromRow(row: MarkerRow): MarkerRecord {
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
   };
+}
+
+function meetingMarkerCreatePayload(marker: Pick<MarkerRecord,
+  'id' | 'positionMs' | 'label' | 'kind' | 'createdAtMs' | 'updatedAtMs'>): string {
+  return JSON.stringify({
+    schema_version: 1,
+    client_marker_id: marker.id,
+    position_ms: marker.positionMs,
+    label: marker.label,
+    kind: marker.kind,
+    client_created_at_ms: marker.createdAtMs,
+    client_updated_at_ms: marker.updatedAtMs,
+  });
 }
 
 function meetingAttachmentFromRow(row: MeetingAttachmentRow): MeetingAttachmentRecord {
@@ -2306,7 +2338,7 @@ function speakerCorrectionSyncRequestPayload(row: SpeakerCorrectionSyncOutboxRow
   });
 }
 
-async function refreshMeetingSyncState(
+export async function refreshMeetingSyncState(
   database: SQLiteDatabase,
   meetingId: string,
   scopeKey: ScopeKey,
@@ -2367,6 +2399,13 @@ async function refreshMeetingSyncState(
              WHERE attachment.meeting_id = ? AND attachment.scope_key = ?
            )
          )
+         OR (
+           outbox.aggregate_type = 'meeting_marker'
+           AND outbox.aggregate_id IN (
+             SELECT marker.marker_id FROM meeting_marker_sync_state marker
+             WHERE marker.meeting_id = ? AND marker.scope_key = ?
+           )
+         )
        )`,
     scopeKey,
     meetingId,
@@ -2374,6 +2413,8 @@ async function refreshMeetingSyncState(
     meetingId,
     meetingId,
     meetingId,
+    meetingId,
+    scopeKey,
     meetingId,
     scopeKey,
   );
@@ -2813,7 +2854,48 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       marker.createdAtMs,
       marker.updatedAtMs,
     );
-    if (result.changes > 0) this.touchedMeetingIds.add(marker.meetingId);
+    if (result.changes > 0) {
+      const accountScope = scopeKey !== 'guest';
+      await this.database.runAsync(
+        `INSERT INTO meeting_marker_sync_state (
+           scope_key, marker_id, meeting_id, remote_id, remote_revision,
+           lifecycle, position_ms, label, kind,
+           client_created_at_ms, client_updated_at_ms,
+           sync_state, pending_operation, last_error_code,
+           remote_updated_at_ms, deleted_at_ms
+         ) VALUES (?, ?, ?, NULL, NULL, 'active', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)`,
+        scopeKey,
+        marker.id,
+        marker.meetingId,
+        marker.positionMs,
+        marker.label,
+        marker.kind,
+        marker.createdAtMs,
+        marker.updatedAtMs,
+        accountScope ? 'pending' : 'local',
+        accountScope ? 'create' : null,
+      );
+      if (accountScope) {
+        const operationId = secureClientIdFactory.create();
+        await this.database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_marker', ?, 'meeting_marker.create',
+             NULL, ?, 'pending', 0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          marker.id,
+          meetingMarkerCreatePayload(marker),
+          marker.createdAtMs,
+          marker.updatedAtMs,
+        );
+        await refreshMeetingSyncState(this.database, marker.meetingId, scopeKey);
+      }
+      this.touchedMeetingIds.add(marker.meetingId);
+    }
     return result.changes > 0;
   }
 
@@ -2825,6 +2907,107 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     assertScopeKey(scopeKey);
     assertRecordId(markerId, 'meeting marker ID');
     assertRecordId(meetingId, 'meeting ID');
+    const marker = await this.database.getFirstAsync<MarkerRow>(
+      `SELECT marker.* FROM markers marker
+       INNER JOIN meeting_notes meeting ON meeting.id = marker.meeting_id
+       WHERE marker.id = ? AND marker.meeting_id = ?
+         AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'`,
+      markerId,
+      meetingId,
+      scopeKey,
+    );
+    if (!marker) return false;
+    if (scopeKey !== 'guest') {
+      let sync = await this.database.getFirstAsync<MarkerSyncStateRow>(
+        `SELECT * FROM meeting_marker_sync_state
+         WHERE scope_key = ? AND marker_id = ? AND meeting_id = ?`,
+        scopeKey,
+        markerId,
+        meetingId,
+      );
+      if (!sync) {
+        await this.database.runAsync(
+          `INSERT INTO meeting_marker_sync_state (
+             scope_key, marker_id, meeting_id, remote_id, remote_revision,
+             lifecycle, position_ms, label, kind,
+             client_created_at_ms, client_updated_at_ms,
+             sync_state, pending_operation, last_error_code,
+             remote_updated_at_ms, deleted_at_ms
+           ) VALUES (?, ?, ?, NULL, NULL, 'active', ?, ?, ?, ?, ?,
+             'pending', 'create', NULL, NULL, NULL)`,
+          scopeKey,
+          marker.id,
+          marker.meeting_id,
+          marker.position_ms,
+          marker.label,
+          marker.kind,
+          marker.created_at_ms,
+          marker.updated_at_ms,
+        );
+        sync = await this.database.getFirstAsync<MarkerSyncStateRow>(
+          'SELECT * FROM meeting_marker_sync_state WHERE scope_key = ? AND marker_id = ?',
+          scopeKey,
+          markerId,
+        );
+      }
+      if (!sync) throw new Error('meeting marker sync state was not created');
+      const deletedAtMs = Math.max(Date.now(), sync.client_updated_at_ms, marker.updated_at_ms);
+      const pendingOperation = sync.remote_id !== null && sync.remote_revision !== null
+        ? 'delete'
+        : 'create';
+      const updated = await this.database.runAsync(
+        `UPDATE meeting_marker_sync_state SET lifecycle = 'deleted',
+           sync_state = 'pending', pending_operation = ?, last_error_code = NULL,
+           deleted_at_ms = ?
+         WHERE scope_key = ? AND marker_id = ? AND meeting_id = ?`,
+        pendingOperation,
+        deletedAtMs,
+        scopeKey,
+        markerId,
+        meetingId,
+      );
+      if (updated.changes !== 1) throw new Error('meeting marker delete state changed');
+      const operationType = pendingOperation === 'delete'
+        ? 'meeting_marker.delete'
+        : 'meeting_marker.create';
+      const outstanding = await this.database.getFirstAsync<{ operation_id: string }>(
+        `SELECT operation_id FROM sync_outbox
+         WHERE scope_key = ? AND aggregate_type = 'meeting_marker'
+           AND aggregate_id = ? AND operation_type = ? AND status <> 'completed'
+         LIMIT 1`,
+        scopeKey,
+        markerId,
+        operationType,
+      );
+      if (!outstanding) {
+        const operationId = secureClientIdFactory.create();
+        const payload = operationType === 'meeting_marker.create'
+          ? meetingMarkerCreatePayload(markerFromRow(marker))
+          : JSON.stringify({
+              schema_version: 1,
+              client_marker_id: markerId,
+              remote_id: sync.remote_id,
+              expected_remote_revision: sync.remote_revision,
+            });
+        await this.database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_marker', ?, ?, ?, ?, 'pending',
+             0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          markerId,
+          operationType,
+          operationType === 'meeting_marker.delete' ? sync.remote_revision : null,
+          payload,
+          deletedAtMs,
+          deletedAtMs,
+        );
+      }
+    }
     const result = await this.database.runAsync(
       `DELETE FROM markers
        WHERE id = ? AND meeting_id = ? AND EXISTS (
@@ -2836,7 +3019,18 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       meetingId,
       scopeKey,
     );
-    if (result.changes > 0) this.touchedMeetingIds.add(meetingId);
+    if (result.changes > 0) {
+      if (scopeKey === 'guest') {
+        await this.database.runAsync(
+          'DELETE FROM meeting_marker_sync_state WHERE scope_key = ? AND marker_id = ?',
+          scopeKey,
+          markerId,
+        );
+      } else {
+        await refreshMeetingSyncState(this.database, meetingId, scopeKey);
+      }
+      this.touchedMeetingIds.add(meetingId);
+    }
     return result.changes > 0;
   }
 
