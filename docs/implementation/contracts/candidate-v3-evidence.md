@@ -1,20 +1,20 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”；顶部当前 Preview 又在两个全新、彼此独立的 Android 模拟器实例上完成录音保存/上传，并补齐第 7 条中的同账号第二实例 pull 与真实 409/412 用户选择。完整的“开始→暂停/继续→结束→详情播放”来自前一候选包，本轮当前 hash 没有重复播放器步骤；不能把两轮合写成当前 APK 单次全链。第 7 条的离线 outbox 重试仍引用此前分散证据，V3 第 1、3–6 条也没有在本轮重跑，因此不宣称七条均由一次集中验收完整覆盖。两个模拟器不能替代第二台物理手机，当前 APK 也尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。完整的“开始→暂停/继续→结束→详情播放”仍来自前一候选包，不能把分轮证据合写成当前 APK 单次全链。第 7 条的离线 outbox 重试仍引用此前分散证据，V3 第 1、3–6 条也没有在本轮重跑。两个模拟器不能替代第二台物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
 - APK：`android/app/build/outputs/apk/preview/app-preview.apk`
-- 移动端代码内容基线：`b3ea399 fix: complete fresh-device canonical cutover`
+- 移动端代码内容基线：`4a83730 feat: sync meeting markers across account devices`
 - 版本：`versionCode=104`，`versionName=1.0.0-source-preview`
-- 构建时间：`2026-07-27 19:25:13 +08:00`
-- 大小：`91,009,536` bytes
-- SHA-256：`ee24ffc2343f8edc52b1777ceff559e2aae82e39a2648ef2ae3719a8cdcc97e4`
+- 构建时间：`2026-07-27 21:44:13 +08:00`
+- 大小：`91,052,456` bytes
+- SHA-256：`6ed2b6c93030140c29acdd4b4bb39b946af473b81372893c68e8a8e930b34080`
 - 稳定回溯标签继续固定在 `stable-before-meeting-memory-roadmap -> cde96f9d5266961e380957893ecba39855aea39b`。
 
 ## V3 第 2 条的隔离环境
 
-本节完整录制/播放证据对应 SHA-256 为 `b8f710ad0f308cdc24237f395fa980735d2e635c35ad99b178cae5ede058b8ad` 的前一候选包。顶部当前包只改变 fresh account canonical cutover，并在后述双实例轮次重新完成录音结束、本机保存和上传，没有重复详情播放器步骤。
+本节完整录制/播放证据对应 SHA-256 为 `b8f710ad0f308cdc24237f395fa980735d2e635c35ad99b178cae5ede058b8ad` 的前一候选包。顶部当前包继续包含后续 fresh account canonical cutover 与 Marker 账号同步；后述分轮证据重新完成录音结束/本机保存/上传和 Marker 跳转，但没有把完整详情播放器步骤全部重跑。
 
 - 使用 AVD `LaoJi_CAL_EDIT_RT`、序列号 `emulator-5558`，以 `-read-only -no-snapshot-save` 启动；安装候选 APK 后清空该临时实例的 App 数据并进入游客模式。主模拟器 `emulator-5556` 的既有会议和数据未修改。
 - Android Emulator 的 headless QEMU 不提供可用 PulseAudio 驱动，因此改用 `-qt-hide-window` 的完整 QEMU，并将输入/输出接到临时 PipeWire/Pulse null sink。录制期间注入两段不同幅度的纯音，用于证明采集、分贝波形和播放器读取的不是固定占位数据。
@@ -39,10 +39,14 @@
 - B 将测试会议移到回收站后，A 在显式刷新中拉到同一 tombstone，并显示 30 天可恢复状态。验收结束后，服务端按标题、账号与会议 ID 三重匹配物理清理这一条测试会议、15,481,644-byte 录音、失败转写任务、附件墓碑及操作记录；只减少一条 Meeting，剩余引用为 0，文件已删除，`PRAGMA quick_check=ok`。
 - 本轮没有重新断网制造 outbox 重试；V3 第 7 条中的该分支仍使用此前持久 outbox/恢复证据。这里的“第二实例”是两台独立移动模拟器，不是第二台物理手机。
 
-### Marker 边界
+### MRK-01 后续双实例收敛
 
-- A 端录制时创建的 Marker 没有出现在 B 的文字记录页；B 端能查看附件，是因为附件保留 `meeting + position_ms` 并从会议全局入口读取，而不是 Marker 已同步。
-- 当前客户端 Marker 仍只有 canonical 本机事务，目标服务也没有已部署的 Marker schema/API/outbox/pull。工程指示第 12.7 节保留了 Marker 同步契约，因此这是独立的 MRK-01 剩余功能缺口，不能用本轮 ATT-01 结果抵消。
+- 上述 ATT-01 轮次中 A 的 Marker 确实没有出现在 B；这条历史观察只证明当时附件凭自身 `meeting + position_ms` 恢复，不是 Marker 已同步。后续 MRK-01 以独立纵切补齐服务端 schema/capability/owner API 和移动端 v34/outbox/pull，未把附件结果改写成 Marker 证据。
+- 使用 `LaoJi_Marker_A / emulator-5554` 与 `LaoJi_Marker_B / emulator-5556` 两个独立 AVD，两端安装 SHA-256 均为 `d80254b3d920de318742f453137bd4607e9d82fc7f8d6910e54090a8db64f7e0` 的同一 Preview 并登录同一测试账号。A 在录音中创建 02:33 Marker，服务端保存 active revision 1。
+- 清数据后的 B 首次登录时 Marker 首轮因会议根尚未落库而看到 0 个会议；账号会议根恢复后 provider 自动重跑，随后拉取 4 个会议并显示 02:33 Marker，不需要第二次重启。为此修复了 canonical owner 冷启动提前返回，以及根/Marker 首轮竞态。
+- B 点击 Marker 后播放器从 00:00 精确跳到 02:33。A 删除后服务端变为 deleted revision 2，B 回前台后 Marker 消失；两端未见应用 FATAL、React Native 崩溃或 SQLiteException。
+- 收口时数据库 operation 数继续增长，反向证明 synced tombstone 被 repair 逻辑重复入队。最终代码将修复条件限定为“尚未 synced 的删除状态”，实际修复 SQL 窄检查通过。顶部最终 Preview 已在两个模拟器保留数据覆盖安装，设备 base.apk 均与 `6ed2b6c9…40b34080` 一致，冷启动进程存活且未产生新的服务端 Marker operation。
+- 测试会议按账号、标题和会议 ID 精确物理清理：Meeting 总数从 45 回到 44，Marker/operation 回到 0，13,360,044-byte 录音、失败转写任务和空目录均删除；`quick_check=ok`，历史 7 条既有外键异常未增加。这里仍是两个模拟器，不是两台物理手机。
 
 ## 前一候选包的 USB 真机增量
 
@@ -63,9 +67,9 @@
 ## 当前外部边界
 
 - `18020 /api/health` 返回 HTTP 200，`models_ready=true`。
-- `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人和 `meeting_attachments_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
+- `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 仍为目标工作区进程 PID `2474395`；本轮未重启 18020/18035，只执行上述精确测试夹具清理。
+- 18020 当前为目标工作区进程 PID `2891853`；部署 Marker 时在无活动任务后继承原 34 项环境重启，18035 未触碰。后续只执行上述精确测试夹具清理。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
@@ -74,4 +78,4 @@
 - V3 第 7 条的第二实例 pull 和真实 409/412 选择已集中完成；离线 outbox 重试仍由此前分散证据支持，故不把第 7 条写成三项均在本轮重跑。
 - V3 第 1、3–6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
 - ATT-01 的对象层、线上服务及双模拟器新增/墓碑闭环已完成；真实图片理解仍因没有已确认视觉模型而关闭，物理 USB 仍待。
-- Marker 本身尚未跨设备同步。由于工程指示明确保留 Marker 服务端同步契约，MRK-01 不能再仅写作“只差抽查”，应作为后续实现项。
+- MRK-01 的本机、服务端和双独立模拟器功能纵切已完成；仍缺物理双机、USB 与长离线抽查，不能把双 AVD 写成物理跨设备完成。

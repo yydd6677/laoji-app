@@ -55,7 +55,7 @@
 - `LaoJi_V3_Account_A / emulator-5560` 与 `LaoJi_V3_Account_B / emulator-5562` 都从清空 App 数据开始，登录同一测试账号并安装 SHA-256 为 `ee24ffc2343f8edc52b1777ceff559e2aae82e39a2648ef2ae3719a8cdcc97e4` 的 Preview；保存游客夹具的 `emulator-5556` 未触碰。
 - A 在约 `01:15.9` 的时间点新增唯一文字附件 `V3_A2B_1943`，上行诊断为 `meeting_attachment_sync pushed=1`。B 在显式云端刷新后从会议全局入口看到 `附件（1）` 及相同正文。
 - A 删除附件并上传 revision 2 墓碑，B 再同步后自动变为“暂无附件”。验收会议随后跨设备进入回收站；最终在服务端按账号、标题和会议 ID 三重匹配物理清理，15,481,644-byte 测试录音、失败转写任务、附件墓碑和操作记录均清除，剩余引用 0，`quick_check=ok`。18020/18035 均未因此重启。
-- A 录制时创建的 Marker 没有出现在 B 的文字记录页。B 能读取附件，是因为附件自身保存了 `meeting + position_ms` 并从会议级总入口拉取；本轮不能扩写为 Marker 已同步。Marker 服务端同步仍是 MRK-01 的独立缺口。
+- A 录制时创建的 Marker 没有出现在 B 的文字记录页。B 能读取附件，是因为附件自身保存了 `meeting + position_ms` 并从会议级总入口拉取；本轮不能扩写为 Marker 已同步。这是 ATT-01 轮次当时的真实边界；后续 MRK-01 已在独立 v34/18020 纵切中完成 Marker 本身的双模拟器同步，见 `phase-5-marker-evidence.md`。
 - 以上是两个独立 Android 模拟器实例，不是第二台物理手机；图片上传/下载已有真实账号 API 对账，但本轮双实例只使用文字附件。
 
 ## 未完成边界

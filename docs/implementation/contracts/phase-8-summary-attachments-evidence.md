@@ -50,7 +50,7 @@
 ### 双模拟器对象边界
 
 - 当前 Preview 在两个全新同账号模拟器实例中完成文字附件的 A 新增→B pull→A 删除→B 墓碑收敛；两端 APK SHA-256 均为 `ee24ffc2343f8edc52b1777ceff559e2aae82e39a2648ef2ae3719a8cdcc97e4`。这补强的是整理输入所依赖的账号附件对象当前性，不是模型整理结果证据。
-- 本轮没有从“选择附件”sheet 提交线上 Summary，也没有图片附件；因此不能由对象同步推导 `summary_attachments_text` 输出质量，更不能推导图片理解。A 的 Marker 也没有同步到 B，附件由 `meeting + position_ms` 独立恢复。
+- 本轮没有从“选择附件”sheet 提交线上 Summary，也没有图片附件；因此不能由对象同步推导 `summary_attachments_text` 输出质量，更不能推导图片理解。A 的 Marker 在该附件轮次也没有同步到 B，附件由 `meeting + position_ms` 独立恢复；后续 MRK-01 已另行补齐 Marker 同步，不改变这里对图片整理证据的限制。
 
 ## 服务端边界
 
