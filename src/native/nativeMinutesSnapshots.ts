@@ -625,7 +625,10 @@ export function buildNativeMinutesDetailSnapshot(
     ?? input.summaryDocument?.actionItemCandidates
     ?? [];
   const summary = input.summaryDocument
-    ? structuredSummarySections(input.summaryDocument, actionItemCandidates.length > 0)
+    ? structuredSummarySections(
+      input.summaryDocument,
+      actionItemCandidates.length > 0 || input.summaryDocument.actionItemCandidates.length > 0,
+    )
     : legacySummarySections(input.summaryText?.trim() ?? '');
   const actions = structuredSummaryActions(
     actionItemCandidates,

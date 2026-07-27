@@ -7,6 +7,7 @@ import type {
   MeetingListProjectionItem,
   MeetingNoteRepository,
 } from './meetingNoteRepository';
+import { sortMeetingDisplayItems } from '../../services/meetingDisplayOrder';
 
 export interface MeetingDualReadReport {
   status: 'consistent' | 'mismatch';
@@ -108,7 +109,10 @@ export class MeetingRepositoryFacade {
       if (legacyById.has(id)) duplicateLegacyIdentities += 1;
       else legacyById.set(id, meeting);
     });
-    const comparableRepositoryItems = repositoryItems.filter(item => item.lifecycle !== 'deleted');
+    const comparableRepositoryItems = sortMeetingDisplayItems(
+      repositoryItems.filter(item => item.lifecycle !== 'deleted'),
+      await this.repository.listMeetingDisplayOrder(scopeKey),
+    );
     const repositoryTombstones = repositoryItems.length - comparableRepositoryItems.length;
     const repositoryByIdentity = new Map<string, MeetingListProjectionItem>();
     let duplicateRepositoryIdentities = 0;

@@ -75,6 +75,12 @@ export interface MeetingListProjection {
   hasMore: boolean;
 }
 
+export interface MeetingListOrderEntry {
+  meetingId: string;
+  position: number;
+  updatedAtMs: number;
+}
+
 export interface MeetingRetentionCleanupJob {
   id: string;
   scopeKey: ScopeKey;
@@ -1459,6 +1465,12 @@ export interface MeetingNoteRepository {
   getScopeWriteState(scopeKey: ScopeKey): Promise<MeetingScopeWriteState>;
   getMeetingRootPullState(scopeKey: ScopeKey): Promise<MeetingRootPullState | null>;
   advanceMeetingRootPullCursor(input: AdvanceMeetingRootPullCursorInput): Promise<boolean>;
+  repairLegacyCalendarMeetingRootCreate(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    repairedAtMs: number,
+  ): Promise<boolean>;
+  repairLegacyCalendarMeetingRootCreates(scopeKey: ScopeKey, repairedAtMs: number): Promise<number>;
   claimMeetingRootSyncOperations(
     scopeKey: ScopeKey,
     options: ClaimMeetingRootSyncOptions,
@@ -1671,6 +1683,12 @@ export interface MeetingNoteRepository {
     updatedAtMs: number,
   ): Promise<boolean>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
+  listMeetingDisplayOrder(scopeKey: ScopeKey): Promise<readonly MeetingListOrderEntry[]>;
+  replaceMeetingDisplayOrder(
+    scopeKey: ScopeKey,
+    orderedMeetingIds: readonly string[],
+    updatedAtMs: number,
+  ): Promise<boolean>;
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe;
   observeList(scopeKey: ScopeKey, listener: () => void): Unsubscribe;
 }

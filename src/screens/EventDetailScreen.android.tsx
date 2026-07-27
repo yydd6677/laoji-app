@@ -55,6 +55,7 @@ import {
 } from '../application/meeting/resolveMeetingOccurrenceSyncConflict';
 import { mergeDetachedMeetingRecordings } from '../application/meeting';
 import { MeetingOccurrenceConflictSheet } from '../components/MeetingOccurrenceConflictSheet';
+import { diagnosticWarn } from '../services/diagnostics';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -203,7 +204,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       return { kind: 'retry' as const, label: '重试', statusLabel: '会议状态暂时无法读取', enabled: true };
     }
     if (meetingProjection) {
-      if (meetingProjection.syncConflict) {
+      if (meetingProjection.syncConflict && meetingProjection.action === 'view') {
         return {
           kind: 'resolve' as const,
           label: '处理关联',
@@ -214,7 +215,9 @@ export function EventDetailScreen({ navigation, route }: Props) {
       return {
         kind: meetingProjection.action,
         label: meetingProjection.label,
-        statusLabel: meetingProjection.statusLabel,
+        statusLabel: meetingProjection.syncConflict
+          ? '日程关联待确认'
+          : meetingProjection.statusLabel,
         enabled: true,
       };
     }
@@ -237,7 +240,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       await refreshMeetingProjection();
       return;
     }
-    if (meetingProjection?.syncConflict) {
+    if (meetingProjection?.syncConflict && meetingProjection.action === 'view') {
       meetingActionBusyRef.current = true;
       try {
         const occurrence = eventRefForEvent(event);
@@ -293,9 +296,10 @@ export function EventDetailScreen({ navigation, route }: Props) {
       setMeetingActionPhase('ready');
       if (target.route === 'Transcription') navigation.navigate('Transcription', target.params);
       else navigation.navigate('MeetingLive', target.params);
-    } catch {
+    } catch (error) {
       meetingActionBusyRef.current = false;
       setMeetingActionPhase('error');
+      diagnosticWarn('[calendar-meeting] open occurrence failed', error);
       showDialog({
         title: '暂时无法开始记录',
         message: '会议记录或日程关联尚未准备好，请稍后重试。',

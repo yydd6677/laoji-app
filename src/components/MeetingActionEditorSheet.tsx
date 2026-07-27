@@ -200,7 +200,7 @@ export function MeetingActionEditorSheet({
   const canSave = content.trim().length > 0 && !saving && !closing;
   const reminderAvailable = dueAtMs !== null && action?.status === 'pending';
   const isCreating = action?.mode === 'create';
-  const statusAction = action?.status === 'dismissed' ? '恢复' : '忽略';
+  const statusAction = action?.status === 'dismissed' ? '恢复' : '删除';
   const requestClose = () => {
     if (!saving) finishClose(true);
   };
@@ -262,7 +262,7 @@ export function MeetingActionEditorSheet({
                   onPress={() => onStatusChange(action?.status === 'dismissed' ? 'pending' : 'dismissed')}
                   disabled={saving || closing}
                   accessibilityRole="button"
-                  accessibilityLabel={action?.status === 'dismissed' ? '恢复待办事项' : '忽略待办事项'}
+                  accessibilityLabel={action?.status === 'dismissed' ? '恢复待办事项' : '删除待办事项'}
                   accessibilityState={{ disabled: saving || closing, busy: saving }}
                 >
                   <Text
@@ -271,7 +271,7 @@ export function MeetingActionEditorSheet({
                       {
                         color: saving
                           ? colors.textDisabled
-                          : action?.status === 'dismissed' ? colors.primary : colors.textCaption,
+                          : action?.status === 'dismissed' ? colors.primary : colors.danger,
                       },
                     ]}
                   >

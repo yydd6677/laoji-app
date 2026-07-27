@@ -4,6 +4,7 @@ import type { MeetingEntryPoint, ScopeKey } from '../../domain/meeting';
 import {
   bindLegacyMeetingToOccurrence,
   calendarMeetingContext,
+  resolveDeletedOccurrenceMeetingIdentity,
   resolveOccurrenceMeeting,
   type CalendarMeetingContext,
   type OccurrenceMeetingProjection,
@@ -21,6 +22,7 @@ export interface OccurrenceMeetingCreateOptions {
   clientRequestId: string;
   calendarContext: CalendarMeetingContext;
   entryPoint: OccurrenceMeetingEntryPoint;
+  supersededRemoteMeetingId: string | null;
 }
 
 export type CreateOccurrenceMeeting = (
@@ -57,12 +59,22 @@ function operationKey(scopeKey: ScopeKey, context: CalendarMeetingContext): stri
   ]);
 }
 
-async function stableClientRequestId(context: CalendarMeetingContext): Promise<string> {
-  const readable = `calendar:${context.occurrence.sourceEventId}:${context.occurrence.occurrenceDate}`;
-  if (readable.length <= 512) return readable;
+async function stableClientRequestId(
+  context: CalendarMeetingContext,
+  supersededDeletedMeetingId: string | null,
+): Promise<string> {
+  const base = `calendar:${context.occurrence.sourceEventId}:${context.occurrence.occurrenceDate}`;
+  const readable = supersededDeletedMeetingId
+    ? `${base}:after:${supersededDeletedMeetingId}`
+    : base;
+  // The deployed meeting root contract accepts at most 96 characters.
+  if (readable.length <= 96) return readable;
   const digest = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    JSON.stringify(context.occurrence),
+    JSON.stringify({
+      occurrence: context.occurrence,
+      supersededDeletedMeetingId,
+    }),
   );
   return `calendar:sha256:${digest}`;
 }
@@ -93,17 +105,32 @@ async function executeOpenOccurrenceMeeting(
 ): Promise<OccurrenceMeetingOpenTarget> {
   const existing = await resolveOccurrenceMeeting(input.scopeKey, context.occurrence);
   if (existing) {
-    if (existing.syncConflict) throw new Error('日程关联正在处理，请稍后重试');
+    // [PRODUCT] Occurrence synchronization is metadata recovery, not a
+    // recording gate. Keep opening the local meeting while its association is
+    // reconciled; an ended meeting exposes the dedicated resolution entry.
     return occurrenceMeetingOpenTarget(existing);
   }
+
+  // A deleted meeting intentionally stays as a tombstone, but it must not
+  // reserve this occurrence forever. Carry both its local ID (for a stable,
+  // distinct retry identity) and remote ID (for the server's guarded atomic
+  // replacement contract) into the new local root.
+  const supersededDeletedMeeting = await resolveDeletedOccurrenceMeetingIdentity(
+    input.scopeKey,
+    context.occurrence,
+  );
 
   const created = await input.createMeeting(input.event.title ?? '', {
     description: input.event.description ?? input.event.detail ?? null,
     location: input.event.location ?? null,
     mode: 'realtime',
-    clientRequestId: await stableClientRequestId(context),
+    clientRequestId: await stableClientRequestId(
+      context,
+      supersededDeletedMeeting?.localMeetingId ?? null,
+    ),
     calendarContext: context,
     entryPoint: input.entryPoint,
+    supersededRemoteMeetingId: supersededDeletedMeeting?.remoteMeetingId ?? null,
   });
   const projection = await bindLegacyMeetingToOccurrence(input.scopeKey, created, context);
   return occurrenceMeetingOpenTarget(projection);

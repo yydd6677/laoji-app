@@ -29,6 +29,7 @@ import {
   type MeetingActionEditorSaveValue,
   type MeetingActionEditorValue,
 } from '../components/MeetingActionEditorSheet';
+import { MeetingActionsSheet } from '../components/MeetingActionsSheet';
 import {
   MeetingActionConflictSheet,
   type MeetingActionConflictChoice,
@@ -534,6 +535,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [contentShareBusyId, setContentShareBusyId] = useState<string | null>(null);
   const [contentShareError, setContentShareError] = useState('');
   const [moreVisible, setMoreVisible] = useState(false);
+  const [meetingActionsVisible, setMeetingActionsVisible] = useState(false);
+  const [meetingActionsSheetLoading, setMeetingActionsSheetLoading] = useState(false);
+  const [meetingActionsSheetError, setMeetingActionsSheetError] = useState('');
+  const [meetingActionsFocusId, setMeetingActionsFocusId] = useState<string | null>(null);
   const [questionVisible, setQuestionVisible] = useState(false);
   const [mediaClipsVisible, setMediaClipsVisible] = useState(false);
   const [mediaClipEditorVisible, setMediaClipEditorVisible] = useState(false);
@@ -611,6 +616,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const activeMeetingScopeRef = useRef<ScopeKey | null>(null);
   const openingFollowupRef = useRef(false);
   const actionRequestGenerationRef = useRef(0);
+  const handledActionFocusRequestRef = useRef<number | null>(null);
   const manualNoteConflictRequestGenerationRef = useRef(0);
   const rootConflictRequestGenerationRef = useRef(0);
   const markerRequestGenerationRef = useRef(0);
@@ -2364,13 +2370,101 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const displayedSummaryDocument = summary && summaryDocument?.meetingId === (meeting?.id ?? route.params.meetingId)
     ? summaryDocument
     : null;
-  const displayedActionCandidates = meetingActionsLoaded
-    ? meetingActions
-    : displayedSummaryDocument?.actionItemCandidates ?? [];
+  const sourceActionCandidates = useMemo(
+    () => meetingActionsLoaded
+      ? meetingActions
+      : displayedSummaryDocument?.actionItemCandidates ?? [],
+    [displayedSummaryDocument, meetingActions, meetingActionsLoaded],
+  );
   const conflictedActionIds = useMemo(
     () => new Set(meetingActionConflicts.map(conflict => conflict.actionId)),
     [meetingActionConflicts],
   );
+  const displayedActionCandidates = useMemo(
+    () => sourceActionCandidates.filter(action => {
+      const actionId = action.canonicalId ?? action.id;
+      return action.status !== 'dismissed' || conflictedActionIds.has(actionId);
+    }),
+    [conflictedActionIds, sourceActionCandidates],
+  );
+  const summaryActionCandidates = useMemo(
+    () => displayedActionCandidates.filter(action => (
+      action.sourceKind === undefined || action.sourceKind === 'generated'
+    )),
+    [displayedActionCandidates],
+  );
+
+  const refreshMeetingActionsSheet = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey) {
+      setMeetingActionsSheetError('当前会议尚未完成本机保存。');
+      return null;
+    }
+    setMeetingActionsSheetLoading(true);
+    setMeetingActionsSheetError('');
+    try {
+      const state = await refreshMeetingActions();
+      if (
+        !state
+        && mountedRef.current
+        && routeMeetingIdRef.current === requestedMeetingId
+      ) setMeetingActionsSheetError('本场待办暂时无法加载，请稍后重试。');
+      return state;
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setMeetingActionsSheetLoading(false);
+      }
+    }
+  }, [meeting?.id, meetingScopeKey, refreshMeetingActions]);
+
+  const openMeetingActions = useCallback((focusActionId: string | null = null) => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId || !meetingScopeKey) {
+      showDialog({
+        title: '暂时无法打开',
+        message: '当前会议尚未完成本机保存，请稍后重试。',
+        tone: 'warning',
+      });
+      return;
+    }
+    const delay = moreVisible ? 320 : 0;
+    setMoreVisible(false);
+    setMeetingActionsFocusId(focusActionId);
+    setTimeout(() => {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      setMeetingActionsVisible(true);
+      void refreshMeetingActionsSheet();
+    }, delay);
+  }, [meeting?.id, meetingScopeKey, moreVisible, refreshMeetingActionsSheet, showDialog]);
+
+  const openMeetingActionSource = useCallback((actionId: string) => {
+    const candidate = meetingAction(displayedActionCandidates, actionId);
+    const citation = candidate?.citations[0];
+    const positionMs = citation?.startMs ?? candidate?.sourceStartMs;
+    const segmentId = citation?.segmentId ?? candidate?.sourceSegmentId;
+    if (
+      !candidate
+      || positionMs === null
+      || positionMs === undefined
+      || !Number.isFinite(positionMs)
+    ) {
+      ToastAndroid.show('这条待办没有可定位的文字来源。', ToastAndroid.SHORT);
+      return;
+    }
+    const requestedMeetingId = meeting?.id;
+    setMeetingActionsVisible(false);
+    setTimeout(() => {
+      if (!mountedRef.current || !requestedMeetingId || routeMeetingIdRef.current !== requestedMeetingId) return;
+      navigation.setParams({
+        focus: 'transcript',
+        actionId: undefined,
+        actionFocusRequestId: undefined,
+        segmentId: segmentId ?? undefined,
+        positionMs,
+        transcriptFocusRequestId: Date.now(),
+      });
+    }, 320);
+  }, [displayedActionCandidates, meeting?.id, navigation]);
 
   const shareAvailability = useMemo<MeetingShareAvailability>(() => ({
     info: Boolean(meeting),
@@ -2850,10 +2944,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     if (!route.params.actionFocusRequestId || !meeting) return;
+    if (handledActionFocusRequestRef.current === route.params.actionFocusRequestId) return;
+    handledActionFocusRequestRef.current = route.params.actionFocusRequestId;
+    if (route.params.actionId) {
+      openMeetingActions(route.params.actionId);
+      return;
+    }
     void refreshCanonicalSummary(meeting.id).then(current => {
       if (current) advancePageGenerations('summary');
     }).catch(() => null);
-  }, [advancePageGenerations, meeting?.id, refreshCanonicalSummary, route.params.actionFocusRequestId]);
+  }, [advancePageGenerations, meeting?.id, openMeetingActions, refreshCanonicalSummary, route.params.actionFocusRequestId, route.params.actionId]);
 
   const openMeetingActionFollowup = useCallback(async (actionId: string) => {
     if (!meeting || !meetingScopeKey || openingFollowupRef.current) return;
@@ -2907,6 +3007,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       openingFollowupRef.current = false;
     }
   }, [displayedActionCandidates, events, meeting, meetingScopeKey, navigation, searchableEvents, showDialog]);
+
+  const openMeetingActionFollowupFromList = useCallback((actionId: string) => {
+    const requestedMeetingId = meeting?.id;
+    setMeetingActionsVisible(false);
+    navigation.setParams({ actionId: undefined, actionFocusRequestId: undefined });
+    setTimeout(() => {
+      if (!mountedRef.current || !requestedMeetingId || routeMeetingIdRef.current !== requestedMeetingId) return;
+      void openMeetingActionFollowup(actionId);
+    }, 320);
+  }, [meeting?.id, navigation, openMeetingActionFollowup]);
 
   const selectSummaryVersion = useCallback(async (versionId: string) => {
     if (!meeting || !meetingScopeKey || !summaryVersionsState || switchingSummaryVersionId) return;
@@ -3321,12 +3431,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [actionEditorSaving, editingAction, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog]);
 
-  const changeMeetingActionStatus = useCallback(async (status: 'pending' | 'dismissed') => {
+  const changeMeetingActionStatus = useCallback(async (
+    status: 'pending' | 'dismissed',
+    target: MeetingActionEditorValue | null = editingAction,
+    reopenOnFailure = false,
+  ) => {
     if (
       !meeting
       || !meetingScopeKey
-      || !editingAction
-      || editingAction.mode !== 'edit'
+      || !target
+      || target.mode !== 'edit'
       || actionEditorSaving
     ) return;
     setActionEditorSaving(true);
@@ -3335,13 +3449,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
       await updateMeetingActionUseCase.execute({
         meetingId: canonical.canonicalMeetingId,
-        actionId: editingAction.id,
+        actionId: target.id,
         scopeKey: meetingScopeKey,
-        expectedUpdatedAtMs: editingAction.expectedUpdatedAtMs,
+        expectedUpdatedAtMs: target.expectedUpdatedAtMs,
         status,
       });
-      if (status === 'dismissed' && editingAction.reminderNotificationId) {
-        await cancelMeetingActionNotification(editingAction.reminderNotificationId).catch(reason => {
+      if (status === 'dismissed' && target.reminderNotificationId) {
+        await cancelMeetingActionNotification(target.reminderNotificationId).catch(reason => {
           diagnosticWarn('cancel dismissed meeting action notification failed', reason);
         });
       }
@@ -3353,7 +3467,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setEditingAction(null);
       if (!current) {
         showDialog({
-          title: status === 'dismissed' ? '已忽略' : '已恢复',
+          title: status === 'dismissed' ? '已删除' : '已恢复',
           message: '待办状态已保存，但页面内容暂未刷新，请重新打开会议查看。',
           tone: 'warning',
         });
@@ -3369,13 +3483,54 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         await refreshCanonicalSummary(meeting.id).catch(() => null);
       } else {
         setActionEditorError(status === 'dismissed'
-          ? '暂时无法忽略，请稍后重试。'
+          ? '暂时无法删除，请稍后重试。'
           : '暂时无法恢复，请稍后重试。');
       }
+      if (reopenOnFailure && mountedRef.current) setEditingAction(target);
     } finally {
       if (mountedRef.current) setActionEditorSaving(false);
     }
   }, [actionEditorSaving, editingAction, meeting, meetingScopeKey, refreshCanonicalSummary, refreshMeetingActions, showDialog]);
+
+  const requestMeetingActionStatusChange = useCallback((status: 'pending' | 'dismissed') => {
+    if (status !== 'dismissed') {
+      void changeMeetingActionStatus(status);
+      return;
+    }
+    if (!editingAction || editingAction.mode !== 'edit' || actionEditorSaving) return;
+    const target = editingAction;
+    const targetMeetingId = meeting?.id ?? '';
+    setEditingAction(null);
+    setActionEditorError('');
+    setTimeout(() => {
+      if (
+        !mountedRef.current
+        || !targetMeetingId
+        || routeMeetingIdRef.current !== targetMeetingId
+      ) return;
+      showDialog({
+        title: '删除待办事项',
+        message: '删除后，这条待办事项将不再显示。',
+        tone: 'danger',
+        actions: [
+          {
+            text: '删除',
+            role: 'destructive',
+            onPress: () => { void changeMeetingActionStatus('dismissed', target, true); },
+          },
+          {
+            text: '取消',
+            role: 'cancel',
+            onPress: () => {
+              if (mountedRef.current && routeMeetingIdRef.current === targetMeetingId) {
+                setEditingAction(target);
+              }
+            },
+          },
+        ],
+      });
+    }, 320);
+  }, [actionEditorSaving, changeMeetingActionStatus, editingAction, meeting?.id, showDialog]);
 
   const removeMarker = useCallback(async (markerId: string) => {
     if (!meeting || !meetingScopeKey || deletingMarkerId) return;
@@ -3789,12 +3944,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (target.kind === 'summary') {
       navigation.setParams({
         focus: 'summary',
+        actionId: undefined,
         actionFocusRequestId: requestId,
       });
       return;
     }
     navigation.setParams({
       focus: 'notes',
+      actionId: undefined,
       actionFocusRequestId: requestId,
     });
   }, [navigation]);
@@ -4236,7 +4393,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     manualNoteRetryable: manualNote.retryable,
     manualNoteConflict: manualNoteConflict !== null,
     transcript,
-    actionItemCandidates: displayedActionCandidates,
+    actionItemCandidates: summaryActionCandidates,
     conflictedActionIds,
     markers: markers.map(marker => ({
       id: marker.id,
@@ -4258,11 +4415,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     canShare: Boolean(meeting && !sharing),
     canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
-    canCreateAction: Boolean(
-      meeting
-      && meetingScopeKey
-      && (displayedSummaryDocument || displayedActionCandidates.length > 0),
-    ),
+    canCreateAction: false,
     canShareActions: meetingActionCollaborationEnabled,
     canCreateClip: canCreateMediaClip,
     summaryGenerating: loadingSummary || summaryStageLoading,
@@ -4295,11 +4448,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeStatusLabel,
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
-  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedActionCandidates, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
     return [
+      {
+        key: 'meeting-actions',
+        label: displayedActionCandidates.length > 0
+          ? `本场待办（${displayedActionCandidates.length}）`
+          : '本场待办',
+        disabled: !meetingScopeKey,
+        onPress: () => openMeetingActions(),
+      },
       ...(meetingQuestionsEnabled
         ? [{
             key: 'questions',
@@ -4354,7 +4515,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         : []),
       { key: 'delete', label: '删除会议', destructive: true, onPress: confirmDelete },
     ];
-  }, [accessToken, confirmDelete, confirmTranscriptReprocess, isGuest, loadingTranscript, manageSpeaker, mediaClips.length, mediaClipsLoading, meeting, meetingAttachments.length, meetingMediaClipsEnabled, meetingQuestionsEnabled, meetingScopeKey, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, refreshMeetingMediaClips, requestingTranscriptReprocess, retryingAudioUpload, summaryDocument?.remoteVersionId, transcript.length, transcriptReprocessAvailable, transcriptStageLoading]);
+  }, [accessToken, confirmDelete, confirmTranscriptReprocess, displayedActionCandidates.length, isGuest, loadingTranscript, manageSpeaker, mediaClips.length, mediaClipsLoading, meeting, meetingAttachments.length, meetingMediaClipsEnabled, meetingQuestionsEnabled, meetingScopeKey, openMeetingActions, openMeetingAttachments, openSummaryVersions, pendingAudioUpload, performPendingAudioUpload, refreshMeetingMediaClips, requestingTranscriptReprocess, retryingAudioUpload, summaryDocument?.remoteVersionId, transcript.length, transcriptReprocessAvailable, transcriptStageLoading]);
 
   const markerForActions = useMemo(
     () => markers.find(marker => marker.id === markerActionsId) ?? null,
@@ -4471,6 +4632,30 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         onRetry={clip => { void retryMediaClip(clip); }}
         onShare={clip => { void shareMediaClip(clip); }}
         onDelete={confirmDeleteMediaClip}
+      />
+      <MeetingActionsSheet
+        visible={meetingActionsVisible}
+        actions={displayedActionCandidates}
+        conflictedActionIds={conflictedActionIds}
+        loading={meetingActionsSheetLoading}
+        busyActionId={updatingActionId}
+        error={meetingActionsSheetError}
+        focusActionId={meetingActionsFocusId}
+        onClose={() => {
+          if (updatingActionId) return;
+          setMeetingActionsVisible(false);
+          if (meetingActionsFocusId) {
+            navigation.setParams({ actionId: undefined, actionFocusRequestId: undefined });
+          }
+          setMeetingActionsFocusId(null);
+          setMeetingActionsSheetError('');
+        }}
+        onRetry={() => { void refreshMeetingActionsSheet(); }}
+        onCreate={() => openMeetingActionCreator()}
+        onToggle={(actionId, completed) => { void toggleMeetingAction(actionId, completed); }}
+        onEdit={openMeetingActionEditor}
+        onOpenSource={openMeetingActionSource}
+        onOpenFollowup={openMeetingActionFollowupFromList}
       />
       <MeetingActionCollaborationSheet
         visible={actionShareTarget !== null}
@@ -4649,7 +4834,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           setActionEditorError('');
         }}
         onSave={value => { void saveMeetingActionEdit(value); }}
-        onStatusChange={status => { void changeMeetingActionStatus(status); }}
+        onStatusChange={requestMeetingActionStatusChange}
       />
       <MeetingActionConflictSheet
         visible={actionConflictTarget !== null}

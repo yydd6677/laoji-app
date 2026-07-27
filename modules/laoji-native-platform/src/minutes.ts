@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 15 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 16 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -176,6 +176,7 @@ export interface MinutesListSnapshot {
   showingCachedData?: boolean;
   mode?: 'meetings' | 'recycleBin';
   canOpenRecycleBin?: boolean;
+  canReorder?: boolean;
   meetings: readonly MinutesMeetingSnapshot[];
 }
 
@@ -282,6 +283,7 @@ export type MinutesSemanticAction =
   | { type: 'openMeetingMenu'; surface: MinutesSurface; meetingId: string; canResume: boolean }
   | { type: 'renameMeeting' | 'setMeetingTags' | 'deleteMeeting'; surface: 'list'; meetingId: string }
   | { type: 'restoreMeeting'; surface: 'list'; meetingId: string }
+  | { type: 'reorderMeetings'; surface: 'list'; meetingIds: readonly string[] }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
   | { type: 'createMarker'; surface: 'recording'; meetingId: string; positionMs: number }
   | { type: 'requestMeetingLocation'; surface: 'recording'; meetingId?: string }

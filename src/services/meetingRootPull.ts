@@ -1,4 +1,5 @@
 import {
+  getMeetingNoteV2,
   listMeetingNotesV2,
   loadMeetingCapabilities,
   type RemoteMeetingNoteV2,
@@ -39,6 +40,19 @@ export interface PullMeetingRootsV2Result {
   ignoredStale: number;
   occurrenceConflicts: number;
   occurrenceDeferred: number;
+}
+
+export interface RefreshMeetingRootIdentityV2Input {
+  scopeKey: ScopeKey;
+  accessToken: string;
+  meetingRemoteId: string;
+  signal?: AbortSignal;
+  isCurrent?: () => boolean;
+}
+
+export interface RefreshMeetingRootIdentityV2Result {
+  outcome: 'refreshed' | 'stale';
+  remoteRevision: number | null;
 }
 
 function emptyResult(
@@ -178,6 +192,51 @@ function addMerge(
   total.remoteTombstonesApplied += merged.remoteTombstonesApplied;
   total.remoteRestoresApplied += merged.remoteRestoresApplied;
   total.ignoredStale += merged.ignoredStale;
+}
+
+/**
+ * Resolve a legacy-imported root that already knows its server ID but has not
+ * yet observed the v2 revision. This is intentionally a targeted GET instead
+ * of advancing the account cursor: deletion must establish the exact root
+ * identity before it creates a recoverable tombstone.
+ */
+export async function refreshMeetingRootIdentityV2(
+  input: RefreshMeetingRootIdentityV2Input,
+): Promise<RefreshMeetingRootIdentityV2Result> {
+  const isCurrent = input.isCurrent ?? (() => true);
+  if (
+    input.scopeKey === 'guest'
+    || !input.accessToken
+    || input.signal?.aborted
+    || !isCurrent()
+  ) return { outcome: 'stale', remoteRevision: null };
+
+  const remote = await getMeetingNoteV2({
+    accessToken: input.accessToken,
+    meetingRemoteId: input.meetingRemoteId,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted || !isCurrent()) {
+    return { outcome: 'stale', remoteRevision: null };
+  }
+
+  const merged = await mergeRemoteRoots.execute({
+    scopeKey: input.scopeKey,
+    snapshots: [rootSnapshot(remote)],
+    canonicalWrite: true,
+  });
+  if (
+    (merged.created > 0 || merged.updated > 0 || merged.attachedRemoteIdentities > 0)
+    && merged.canonicalRevision === null
+  ) throw new Error('会议云端状态未能写入本机数据版本');
+
+  diagnosticAudit('meeting_root_identity_refresh', {
+    status: 'refreshed',
+    updated: merged.updated,
+    identities_attached: merged.attachedRemoteIdentities,
+    ignored_stale: merged.ignoredStale,
+  });
+  return { outcome: 'refreshed', remoteRevision: remote.revision };
 }
 
 export async function pullMeetingRootsV2(

@@ -38,6 +38,8 @@ export interface MeetingSummaryActionCandidate {
   reminderNotificationId: string | null;
   followupEventSourceId: string | null;
   status: 'pending' | 'completed' | 'dismissed';
+  /** Canonical meeting-level ownership; absent raw provider candidates are generated. */
+  sourceKind?: 'generated' | 'manual' | 'marker';
   citations: readonly MeetingSummaryCitation[];
   /** Meeting-global action provenance can retain time even when no Transcript segment covers it. */
   sourceSegmentId?: string | null;

@@ -182,6 +182,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     meetings,
     loading,
     error,
+    reorderMeetings,
     deleteMeeting,
     restoreDeletedMeeting,
     refreshMeetings,
@@ -199,6 +200,8 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
+  const [optimisticMeetingOrder, setOptimisticMeetingOrder] = useState<readonly string[] | null>(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
   const [staleRecordingIds, setStaleRecordingIds] = useState<ReadonlySet<string>>(new Set());
   const [recycleBinVisible, setRecycleBinVisible] = useState(false);
   const [recycleBinEntries, setRecycleBinEntries] = useState<readonly MeetingRecycleBinEntry[]>([]);
@@ -214,6 +217,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const [searchError, setSearchError] = useState('');
   const searchRequestRef = useRef(0);
   const focusRequestRef = useRef(0);
+  const reorderInFlightRef = useRef(false);
   const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
   const meetingScope = isGuest ? 'guest' as ScopeKey : accountScope;
 
@@ -418,9 +422,19 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     () => new Map(meetingTags.map(tag => [tag.id, tag.name])),
     [meetingTags],
   );
+  const orderedMeetings = useMemo(() => {
+    if (!optimisticMeetingOrder) return meetings;
+    const byId = new Map(meetings.map(meeting => [meeting.id, meeting]));
+    const optimistic = optimisticMeetingOrder
+      .map(id => byId.get(id))
+      .filter((meeting): meeting is Meeting => Boolean(meeting));
+    return optimistic.length === meetings.length && new Set(optimisticMeetingOrder).size === meetings.length
+      ? optimistic
+      : meetings;
+  }, [meetings, optimisticMeetingOrder]);
   const meetingById = useMemo(() => new Map(meetings.map(meeting => [meeting.id, meeting])), [meetings]);
   const activeSearch = searching && query.normalize('NFKC').trim().length > 0;
-  const normalMeetingSnapshots = useMemo(() => meetings.map(meeting => {
+  const normalMeetingSnapshots = useMemo(() => orderedMeetings.map(meeting => {
     const presentation = meetingListPresentation(meeting, staleRecordingIds.has(meeting.id));
     const assignedNames = (tagAssignments.get(meeting.id) ?? [])
       .map(tagId => tagNameById.get(tagId))
@@ -443,7 +457,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       supportText,
       ...inferredMeetingCover(getCachedSummary(meeting.id), getCachedTranscript(meeting.id)),
     };
-  }), [getCachedSummary, getCachedTranscript, meetings, staleRecordingIds, tagAssignments, tagNameById]);
+  }), [getCachedSummary, getCachedTranscript, orderedMeetings, staleRecordingIds, tagAssignments, tagNameById]);
   const searchMeetingSnapshots = useMemo(() => searchResults.flatMap(result => {
     const meeting = meetingById.get(result.navigationMeetingId);
     if (!meeting) return [];
@@ -503,6 +517,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         title: recycleBinVisible ? '回收站' : '会议记录',
         mode: recycleBinVisible ? 'recycleBin' : 'meetings',
         canOpenRecycleBin: retentionDays !== null,
+        canReorder: !recycleBinVisible
+          && !searching
+          && !reorderSaving
+          && orderedMeetings.length > 1,
         searching: recycleBinVisible ? false : searching,
         query: recycleBinVisible ? '' : query,
         mediaImporting: recycleBinVisible ? false : mediaImporting,
@@ -528,7 +546,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           : activeSearch ? searchMeetingSnapshots : normalMeetingSnapshots,
       },
     };
-  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
+  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings.length, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
 
   const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
@@ -618,6 +636,40 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     });
   };
 
+  const persistMeetingOrder = async (meetingIds: readonly string[]) => {
+    if (reorderInFlightRef.current || searching || recycleBinVisible) return;
+    const currentIds = orderedMeetings.map(meeting => meeting.id);
+    if (
+      meetingIds.length !== currentIds.length
+      || new Set(meetingIds).size !== meetingIds.length
+      || currentIds.some(id => !meetingIds.includes(id))
+    ) {
+      showDialog({
+        title: '顺序未保存',
+        message: '会议列表已经变化，请重新拖动排序。',
+        tone: 'warning',
+      });
+      return;
+    }
+    reorderInFlightRef.current = true;
+    setOptimisticMeetingOrder([...meetingIds]);
+    setReorderSaving(true);
+    try {
+      await reorderMeetings(meetingIds);
+      setOptimisticMeetingOrder(null);
+    } catch (reason) {
+      setOptimisticMeetingOrder(null);
+      showDialog({
+        title: '顺序未保存',
+        message: readableErrorMessage(reason, '会议顺序暂时无法保存，请稍后重试。'),
+        tone: 'error',
+      });
+    } finally {
+      reorderInFlightRef.current = false;
+      setReorderSaving(false);
+    }
+  };
+
   const handleAction = (action: MinutesSemanticAction) => {
     switch (action.type) {
       case 'openMeeting': {
@@ -683,6 +735,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
       case 'restoreMeeting':
         confirmRestore(action.meetingId);
+        break;
+      case 'reorderMeetings':
+        void persistMeetingOrder(action.meetingIds);
         break;
       case 'renameMeeting':
         navigation.navigate('Transcription', { meetingId: action.meetingId, focus: 'title' });

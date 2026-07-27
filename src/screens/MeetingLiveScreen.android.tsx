@@ -152,6 +152,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     meetings,
     loading: meetingsLoading,
     createMeeting,
+    ensureMeetingRemoteIdentity,
     updateMeetingStatus,
     updateMeetingTitle,
     updateMeetingDetails,
@@ -651,22 +652,25 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         location: locationRef.current || null,
         entryPoint,
       });
-      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(meeting);
-      startedMeetingId = meeting.id;
-      navigation.setParams({ meetingId: meeting.id, startRequested: false });
-      setMeetingId(meeting.id);
-      activeMeetingIdRef.current = meeting.id;
-      currentSessionIdRef.current = meeting.id;
+      const readyMeeting = isGuest
+        ? meeting
+        : await ensureMeetingRemoteIdentity(meeting.id);
+      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(readyMeeting);
+      startedMeetingId = readyMeeting.id;
+      navigation.setParams({ meetingId: readyMeeting.id, startRequested: false });
+      setMeetingId(readyMeeting.id);
+      activeMeetingIdRef.current = readyMeeting.id;
+      currentSessionIdRef.current = readyMeeting.id;
       startedAtRef.current = new Date();
-      const initialTranscript = reusable ? getCachedTranscript(meeting.id) : [];
+      const initialTranscript = reusable ? getCachedTranscript(readyMeeting.id) : [];
       transcriptRef.current = initialTranscript;
       setTranscript(initialTranscript);
       checkpointRef.current = {
         lineCount: finalizedNativeMinutesTranscript(initialTranscript).length,
         savedAtMs: Date.now(),
       };
-      const latestTitle = titleRef.current.trim() || meeting.title;
-      await updateMeetingStatus(meeting.id, 'recording');
+      const latestTitle = titleRef.current.trim() || readyMeeting.title;
+      await updateMeetingStatus(readyMeeting.id, 'recording');
       if (isGuest) guestSession = await createGuestRealtimeSession(latestTitle);
       if (!isGuest && !accessToken) throw new Error('登录会话已失效，请重新登录');
 
@@ -689,7 +693,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         ? { guestToken: guestSession!.guest_token }
         : { accessToken: accessToken! };
       const snapshot = await startNativeRecorder({
-        sessionId: meeting.id,
+        sessionId: readyMeeting.id,
         purpose: 'meeting',
         storageScope: recordingStorageScope,
         websocketUrl,
@@ -698,7 +702,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       });
       nativeCaptureStarted = true;
       applyRecorderSnapshot(snapshot);
-      const active = createActiveRecording(meeting.id, remoteMeetingId, guestSession);
+      const active = createActiveRecording(readyMeeting.id, remoteMeetingId, guestSession);
       startedSession = active;
       if (!recordingControllerRef.current.completeStart(startToken, active)) {
         // Android has already opened the recorder. Never turn a JS ownership
@@ -710,10 +714,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           throw new Error('录音已开始，但页面状态暂未同步；请返回后重新打开本记录');
         }
       }
-      setActiveSessionId(meeting.id);
+      setActiveSessionId(readyMeeting.id);
       setPhase('recording');
       if (meetingScopeKey) {
-        await reconcileMeetingPlannedEndReminder(meeting.id, meetingScopeKey).catch(reason => {
+        await reconcileMeetingPlannedEndReminder(readyMeeting.id, meetingScopeKey).catch(reason => {
           diagnosticWarn('reconcile planned meeting end reminder after recorder start failed', reason);
         });
       }
@@ -755,7 +759,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } finally {
       recordingControllerRef.current.abandonStart(startToken);
     }
-  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, entryPoint, existing, getCachedTranscript, isGuest, meetingId, meetingScopeKey, meetings, navigation, showDialog, updateMeetingStatus]);
+  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, ensureMeetingRemoteIdentity, entryPoint, existing, getCachedTranscript, isGuest, meetingId, meetingScopeKey, meetings, navigation, showDialog, updateMeetingStatus]);
 
   const stopRecording = useCallback(async (navigateAfter = true) => {
     if (!recordingControllerRef.current.current()) return false;

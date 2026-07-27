@@ -14,8 +14,10 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import androidx.core.view.accessibility.AccessibilityViewCommand
 import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 
 internal enum class MinutesHomeViewMode {
@@ -25,9 +27,10 @@ internal enum class MinutesHomeViewMode {
 
 internal class MinutesMeetingAdapter(
   private val onAction: (Map<String, Any?>) -> Unit,
-  private val onLongPress: (View, MinutesMeeting) -> Unit,
-) : ListAdapter<MinutesMeeting, MinutesMeetingAdapter.Holder>(DIFF) {
+  private val onContextMenu: (View, MinutesMeeting) -> Unit,
+) : RecyclerView.Adapter<MinutesMeetingAdapter.Holder>() {
   private var viewMode = MinutesHomeViewMode.LIST
+  private val items = mutableListOf<MinutesMeeting>()
 
   init {
     setHasStableIds(true)
@@ -39,7 +42,9 @@ internal class MinutesMeetingAdapter(
     notifyItemRangeChanged(0, itemCount)
   }
 
-  override fun getItemId(position: Int): Long = getItem(position).id.hashCode().toLong()
+  override fun getItemCount(): Int = items.size
+
+  override fun getItemId(position: Int): Long = items[position].id.hashCode().toLong()
 
   override fun getItemViewType(position: Int): Int = viewMode.ordinal
 
@@ -49,7 +54,42 @@ internal class MinutesMeetingAdapter(
   )
 
   override fun onBindViewHolder(holder: Holder, position: Int) {
-    holder.bind(getItem(position), onAction, onLongPress)
+    holder.bind(items[position], onAction, onContextMenu)
+  }
+
+  fun itemAt(position: Int): MinutesMeeting? = items.getOrNull(position)
+
+  fun orderedTargetMeetingIds(): List<String> = items.map { it.targetMeetingId }
+
+  fun moveItem(fromPosition: Int, toPosition: Int): Boolean {
+    if (fromPosition !in items.indices || toPosition !in items.indices || fromPosition == toPosition) {
+      return false
+    }
+    val moved = items.removeAt(fromPosition)
+    items.add(toPosition, moved)
+    notifyItemMoved(fromPosition, toPosition)
+    return true
+  }
+
+  fun submitList(next: List<MinutesMeeting>, committed: (() -> Unit)? = null) {
+    val previous = items.toList()
+    if (previous == next) {
+      committed?.invoke()
+      return
+    }
+    val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+      override fun getOldListSize(): Int = previous.size
+      override fun getNewListSize(): Int = next.size
+      override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+        previous[oldItemPosition].id == next[newItemPosition].id
+
+      override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+        previous[oldItemPosition] == next[newItemPosition]
+    })
+    items.clear()
+    items.addAll(next)
+    diff.dispatchUpdatesTo(this)
+    committed?.invoke()
   }
 
   override fun onViewRecycled(holder: Holder) {
@@ -277,7 +317,7 @@ internal class MinutesMeetingAdapter(
     fun bind(
       meeting: MinutesMeeting,
       onAction: (Map<String, Any?>) -> Unit,
-      onLongPress: (View, MinutesMeeting) -> Unit,
+      onContextMenu: (View, MinutesMeeting) -> Unit,
     ) {
       title.text = meeting.title
       support.text = meeting.supportText
@@ -330,10 +370,22 @@ internal class MinutesMeetingAdapter(
           ),
         )
       }
-      root.setOnLongClickListener {
-        if (!meeting.actionEnabled) return@setOnLongClickListener false
-        onLongPress(root, meeting)
-        true
+      root.isLongClickable = meeting.actionEnabled
+      if (meeting.actionEnabled) {
+        ViewCompat.replaceAccessibilityAction(
+          root,
+          AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK,
+          "会议记录操作",
+          AccessibilityViewCommand { _, _ ->
+            onContextMenu(root, meeting)
+            true
+          },
+        )
+      } else {
+        ViewCompat.removeAccessibilityAction(
+          root,
+          AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK.id,
+        )
       }
     }
 
@@ -429,17 +481,17 @@ internal class MinutesMeetingAdapter(
 
     fun recycle() {
       root.setOnClickListener(null)
-      root.setOnLongClickListener(null)
+      ViewCompat.removeAccessibilityAction(
+        root,
+        AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK.id,
+      )
+      root.isLongClickable = false
+      root.animate().cancel()
+      root.scaleX = 1f
+      root.scaleY = 1f
+      root.translationZ = 0f
     }
-  }
 
-  companion object {
-    private val DIFF = object : DiffUtil.ItemCallback<MinutesMeeting>() {
-      override fun areItemsTheSame(oldItem: MinutesMeeting, newItem: MinutesMeeting): Boolean =
-        oldItem.id == newItem.id
-
-      override fun areContentsTheSame(oldItem: MinutesMeeting, newItem: MinutesMeeting): Boolean =
-        oldItem == newItem
-    }
+    fun contextMenuAnchor(): View = root
   }
 }

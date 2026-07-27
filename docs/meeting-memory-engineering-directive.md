@@ -1199,7 +1199,7 @@ interface MinutesTranscriptLineSnapshot {
 
 #### 创建与合并
 
-- 用户可以手动创建；Summary 只返回 candidate。
+- 用户从会议“更多 → 本场待办”手动创建；Summary 只返回 candidate。手动事项属于 meeting-global action，`source_summary_version_id` 必须为空，不得写入或伪装成整理版本内容。
 - candidate 的稳定 fingerprint：规范化 content、assignee、due、排序后的 source segment IDs、template key 的 hash。
 - 若 fingerprint 对应一个从未被用户编辑且仍 pending 的旧 generated action，可以关联新 summary version，但不改变用户可见字段。
 - 若旧 action 有 `user_edited_at_ms`、已完成或已 dismiss，重生成不得覆盖或复活。
@@ -1212,7 +1212,7 @@ interface MinutesTranscriptLineSnapshot {
 - due time 可为空；有 due 时可创建本机提醒。提醒 deep link 定位 meeting + action item。
 - “创建后续日程”复用现有 AddEvent draft，并在 action 保存 `followup_event_source_id`；重复点击不得创建多个 event。
 - 每个 action 保留 meeting、summary version、segment/time 来源；从 action 点击来源必须回到具体 Transcript 时间。
-- 第一阶段行动项只在会议详情和由提醒打开的详情中管理；不因 Fireflies 有 Tasks 主 Tab 就立即增加第三个底栏入口。
+- 第一阶段行动项统一在会议详情的“本场待办”sheet 和由提醒打开的同一列表中管理；不因 Fireflies 有 Tasks 主 Tab 就立即增加第三个底栏入口。
 
 #### 同步冲突
 
@@ -1912,7 +1912,7 @@ openOccurrenceMeeting
 - 在 360 dp 宽真机上若五项等宽导致文字挤压，使用可滚动 tab strip，但首次打开必须完整露出前三个核心 Tab；不缩小到难读字号。
 - 录音页只在内容区切换我的笔记/实时文字；标题、位置、计时、波形、pause/stop/marker 固定。
 - Summary 页面旧版本继续渲染，顶部状态区显示生成中/新版本已生成；不得用全页 spinner 擦除旧内容。
-- Action 在 Summary 对应 section 内渲染为真正可操作 row；如果 Summary 没有行动项，用户仍可手动新增。
+- Summary 只渲染 `source_kind='generated'` 的行动项，不显示新建入口；`manual` / `marker` 不回填进 AI 整理内容。会议“更多 → 本场待办”汇总三种来源并承担手动新建、编辑、完成、来源和后续日程操作。
 
 ### 13.5 具体尺寸与状态
 

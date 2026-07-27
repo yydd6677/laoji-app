@@ -298,8 +298,24 @@ function parseCreateMutation(
     parsed.occurrence_ref,
     parsed.schedule_snapshot,
   );
+  if (
+    Object.prototype.hasOwnProperty.call(parsed, 'defer_remote_occurrence_link')
+    && parsed.defer_remote_occurrence_link === true
+  ) {
+    throw new UnsupportedMeetingRootPayloadError(
+      'legacy deferred calendar create requires local replacement repair',
+    );
+  }
+  const supersededRemoteMeetingId = nullableIdentifier(
+    parsed.superseded_remote_meeting_id,
+    'superseded meeting remote identity',
+    160,
+  );
   if ((origin === 'calendar') !== Boolean(occurrenceContext.occurrence_ref)) {
     throw new InvalidMeetingRootPayloadError('meeting origin and occurrence context differ');
+  }
+  if (supersededRemoteMeetingId && origin !== 'calendar') {
+    throw new InvalidMeetingRootPayloadError('only a calendar meeting can supersede an occurrence root');
   }
   const title = requiredString(parsed.title, 'meeting title', {
     allowEmpty: true,
@@ -335,6 +351,9 @@ function parseCreateMutation(
       mode,
       recorded_at: recordedAt,
       ...occurrenceContext,
+      ...(supersededRemoteMeetingId
+        ? { supersedes_meeting_id: supersededRemoteMeetingId }
+        : {}),
     },
   };
 }
@@ -583,7 +602,8 @@ function requiresV2Transport(
   mutation: MeetingRootMutation,
 ): boolean {
   return claim.remoteRevision !== null
-    || (mutation.kind !== 'create' && mutation.baseRevision !== null);
+    || (mutation.kind !== 'create' && mutation.baseRevision !== null)
+    || (mutation.kind === 'create' && Boolean(mutation.v2Request.supersedes_meeting_id));
 }
 
 type ClaimResult = {
@@ -854,6 +874,20 @@ async function drainMeetingRootSyncOnce(
   const writeState = await sqliteMeetingNoteRepository.getScopeWriteState(input.scopeKey);
   if (writeState.writeOwner !== 'canonical') {
     return { outcome: 'not_owned', processedCount: 0, retryAfterMs: null };
+  }
+  try {
+    const repaired = await sqliteMeetingNoteRepository.repairLegacyCalendarMeetingRootCreates(
+      input.scopeKey,
+      Date.now(),
+    );
+    if (repaired > 0) {
+      diagnosticAudit('meeting_root_legacy_calendar_repair', {
+        status: 'repaired',
+        count: repaired,
+      });
+    }
+  } catch (error) {
+    diagnosticWarn('[meeting-root-sync] legacy calendar repair failed', error);
   }
   let processedCount = 0;
   let earliestRetryMs: number | null = null;

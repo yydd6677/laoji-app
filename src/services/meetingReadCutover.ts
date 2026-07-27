@@ -21,6 +21,7 @@ import {
   transcriptProjectionToLegacyLines,
 } from './meetingContentProjection';
 import { meetingSummaryToText } from './meetingSummaryFormat';
+import { sortMeetingDisplayItems } from './meetingDisplayOrder';
 
 export interface MeetingReadSnapshot {
   meetings: readonly Meeting[];
@@ -225,7 +226,11 @@ export async function buildCanonicalMeetingReadProjection(
   repository: MeetingNoteRepository,
   scopeKey: ScopeKey,
 ): Promise<MeetingReadProjection> {
-  const items = await listAllMeetings(repository, scopeKey);
+  const rawItems = await listAllMeetings(repository, scopeKey);
+  const items = sortMeetingDisplayItems(
+    rawItems,
+    await repository.listMeetingDisplayOrder(scopeKey),
+  );
   const meetings = items.map(item => compatibilityMeeting(item, scopeKey));
   const transcripts: Record<string, TranscriptLine[]> = {};
   const summaries: Record<string, MeetingSummary | null> = {};

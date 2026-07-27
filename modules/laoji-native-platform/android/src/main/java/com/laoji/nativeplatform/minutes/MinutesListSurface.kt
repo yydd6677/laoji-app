@@ -32,7 +32,18 @@ internal class MinutesListSurface(
   private val list = RecyclerView(context)
   private val itemContextMenu = MinutesItemContextMenu(context, onAction)
   private val mainMenu = MinutesMainMenu(context, onAction)
+  private var viewMode = MinutesHomeViewMode.GRID
   private val adapter = MinutesMeetingAdapter(onAction, itemContextMenu::show)
+  private val reorderController = MinutesMeetingReorderController(
+    list = list,
+    adapter = adapter,
+    viewMode = { viewMode },
+    showContextMenu = itemContextMenu::show,
+    dismissContextMenu = itemContextMenu::dismiss,
+    onOrderChanged = { meetingIds ->
+      onAction(mapOf("type" to "reorderMeetings", "meetingIds" to meetingIds))
+    },
+  )
   private val stateOverlay = LinearLayout(context)
   private val progress = ProgressBar(context)
   private val emptyImage = ImageView(context)
@@ -55,7 +66,6 @@ internal class MinutesListSurface(
   private var renderedTitle = "会议记录"
   // Feishu's home V2 opens in the two-column cover grid; the list is an
   // explicit secondary mode exposed by the trailing switch icon.
-  private var viewMode = MinutesHomeViewMode.GRID
   private var recycleBin = false
   private var canOpenRecycleBin = false
   private var mainListFirstVisible = 0
@@ -273,6 +283,9 @@ internal class MinutesListSurface(
         || it.statusLabel.contains(normalizedQuery, ignoreCase = true)
         || it.supportText.contains(normalizedQuery, ignoreCase = true)
     }
+    reorderController.setCanReorder(
+      state.canReorder && !state.searching && !recycleBin && normalizedQuery.isBlank(),
+    )
     adapter.submitList(visibleMeetings) {
       pendingMainListScrollRestore?.let { position ->
         pendingMainListScrollRestore = null

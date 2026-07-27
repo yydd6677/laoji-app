@@ -5,7 +5,10 @@ import type {
   TranscriptRevisionRecord,
   TranscriptSegmentRecord,
 } from '../../data/repositories';
-import { transitionProcessingStage } from '../../domain/meeting/processing';
+import {
+  transitionProcessingStage,
+  type ProcessingStage,
+} from '../../domain/meeting/processing';
 import { assertScopeKey, type ScopeKey } from '../../domain/meeting';
 import type { TranscriptLine } from '../../types';
 import {
@@ -168,6 +171,35 @@ function sameActiveContent(
       && segment.confidence === line.confidence
       && segment.createdAtMs === line.createdAtMs;
   });
+}
+
+function sameActiveRevision(
+  current: TranscriptRevisionProjection | null,
+  revision: TranscriptRevisionRecord,
+  lines: readonly NormalizedTranscriptLine[],
+): boolean {
+  if (!sameActiveContent(current, revision.id, lines) || !current) return false;
+  const active = current.revision;
+  return active.remoteId === revision.remoteId
+    && active.kind === revision.kind
+    && active.status === revision.status
+    && active.sourceProvider === revision.sourceProvider
+    && active.sourceModel === revision.sourceModel
+    && active.isActive === revision.isActive
+    && active.createdAtMs === revision.createdAtMs
+    && active.finalizedAtMs === revision.finalizedAtMs;
+}
+
+function sameProcessingStageState(current: ProcessingStage, next: ProcessingStage): boolean {
+  return current.status === next.status
+    && current.attemptCount === next.attemptCount
+    && current.progress === next.progress
+    && current.jobId === next.jobId
+    && current.inputFingerprint === next.inputFingerprint
+    && current.errorCode === next.errorCode
+    && current.userMessageKey === next.userMessageKey
+    && current.retryable === next.retryable
+    && current.nextRetryAtMs === next.nextRetryAtMs;
 }
 
 function transcriptStageStatus(
@@ -338,20 +370,49 @@ export class SaveGuestMeetingTranscriptUseCase {
       const replacingDraftWithShorterCandidate = Boolean(
         current?.id === revisionId && realtimeDraft && !decision.useCandidate,
       );
-      if (lines.length > 0 && !replacingDraftWithShorterCandidate) {
-        const revision: TranscriptRevisionRecord = {
-          id: revisionId,
-          meetingId,
-          remoteId: remoteRevisionId,
-          kind: input.candidateKind,
-          status: realtimeDraft ? 'realtime_draft' : 'ready',
-          sourceProvider: scopeKey === 'guest' ? 'canonical-guest' : 'canonical-account',
-          sourceModel: null,
-          isActive: activate,
-          createdAtMs,
-          finalizedAtMs,
-        };
-        activeContentChanged = activate && !sameActiveContent(currentContent, revisionId, lines);
+      const revision: TranscriptRevisionRecord | null = lines.length > 0 ? {
+        id: revisionId,
+        meetingId,
+        remoteId: remoteRevisionId,
+        kind: input.candidateKind,
+        status: realtimeDraft ? 'realtime_draft' : 'ready',
+        sourceProvider: scopeKey === 'guest' ? 'canonical-guest' : 'canonical-account',
+        sourceModel: null,
+        isActive: activate,
+        createdAtMs,
+        finalizedAtMs,
+      } : null;
+      activeContentChanged = activate && !sameActiveContent(currentContent, revisionId, lines);
+      const revisionNeedsWrite = Boolean(
+        revision
+        && !replacingDraftWithShorterCandidate
+        && !(activate && sameActiveRevision(currentContent, revision, lines)),
+      );
+      const stageStatus = transcriptStageStatus(
+        meeting.lifecycle,
+        current,
+        input.candidateKind,
+        serverCompleteness,
+        lines.length > 0,
+        activate,
+        decision,
+      );
+      const stageTransition = {
+        stage: 'transcript' as const,
+        status: stageStatus,
+        progress: stageStatus === 'ready' ? 1 : null,
+        inputFingerprint: lines.length > 0 ? `sha256:${fingerprint}` : null,
+      };
+      const initialNextStage = transitionProcessingStage(stage, stageTransition, updatedAtMs);
+      const stageChanged = !sameProcessingStageState(stage, initialNextStage);
+      const meetingSyncStateChanged = scopeKey === 'guest' && meeting.syncState !== 'local';
+
+      // Detail loading may replay the already-active transcript. Keep that a
+      // true no-op: no revision upsert, stage timestamp, meeting timestamp, or
+      // canonical revision is allowed to change.
+      if (!revisionNeedsWrite && !stageChanged && !meetingSyncStateChanged) return;
+
+      if (revisionNeedsWrite && revision) {
         await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
           activate,
           replaceSegments: realtimeDraft,
@@ -367,22 +428,12 @@ export class SaveGuestMeetingTranscriptUseCase {
           }, updatedAtMs), scopeKey);
         }
       }
-
-      const stageStatus = transcriptStageStatus(
-        meeting.lifecycle,
-        current,
-        input.candidateKind,
-        serverCompleteness,
-        lines.length > 0,
-        activate,
-        decision,
-      );
-      await transaction.upsertStage(transitionProcessingStage(stage, {
-        stage: 'transcript',
-        status: stageStatus,
-        progress: stageStatus === 'ready' ? 1 : null,
-        inputFingerprint: lines.length > 0 ? `sha256:${fingerprint}` : null,
-      }, updatedAtMs), scopeKey);
+      if (stageChanged) {
+        await transaction.upsertStage(
+          transitionProcessingStage(stage, stageTransition, updatedAtMs),
+          scopeKey,
+        );
+      }
       await transaction.updateMeeting(meetingId, scopeKey, {
         syncState: scopeKey === 'guest' ? 'local' : meeting.syncState,
         updatedAtMs,

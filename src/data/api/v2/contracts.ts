@@ -55,6 +55,7 @@ export interface CreateMeetingNoteV2Request {
   location: string | null;
   mode: 'realtime' | 'offline' | 'whisper' | 'qwen';
   recorded_at: string | null;
+  supersedes_meeting_id?: string;
   occurrence_ref?: {
     source_event_id: string;
     occurrence_date: string;

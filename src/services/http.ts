@@ -15,7 +15,11 @@ export function requestTimeoutMs(url: string): number {
   if (/\/api\/laoji\/(?:asr\/transcribe|parse-audio)/.test(url)) return 120_000;
   if (/\/api\/laoji\/parse(?:\?|$)/.test(url) || /\/api\/laoji\/clarify/.test(url)) return 60_000;
   if (/\/summaries\//.test(url) || /guest-summary/.test(url)) return 90_000;
-  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 90_000;
+  // Meeting QA is currently a synchronous model call. A cold model can cross
+  // 90 seconds even for a short evidence set, so keep the visible request alive
+  // long enough for the server's validated answer instead of discarding it at
+  // the old boundary. The sheet remains cancellable through its external signal.
+  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 180_000;
   if (/\/api\/laoji\/speakers(?:\/|\?|$)/.test(url)) return 90_000;
   if (/\/audio(?:\/|\?|$)/.test(url) || /\/upload(?:\?|$)/.test(url)) return 180_000;
   return 20_000;

@@ -682,11 +682,13 @@ internal class MinutesSummaryPage(
   context: Context,
   private val emitAction: (Map<String, Any?>) -> Unit,
 ) : MinutesDetailPage(context, MinutesDetailTab.SUMMARY, emitAction) {
+  private val root = LinearLayout(context)
+  private val summaryActionBar = LinearLayout(context)
+  private val regenerateAction = context.textView("重新生成", 16, MinutesPalette.primary)
   internal val scroll = NestedScrollView(context)
   private val rows = LinearLayout(context)
   private var renderedSections: List<MinutesSummarySection> = emptyList()
   private var renderedActions: List<MinutesActionItem> = emptyList()
-  private var renderedCanCreateAction = false
   private var renderedCanGenerateSummary = false
   private var renderedSummaryGenerating = false
   private var renderedSummaryActionLabel = ""
@@ -699,13 +701,49 @@ internal class MinutesSummaryPage(
   private var scrollStateListener: () -> Unit = {}
 
   init {
+    root.orientation = LinearLayout.VERTICAL
+    summaryActionBar.orientation = LinearLayout.HORIZONTAL
+    summaryActionBar.gravity = Gravity.CENTER_VERTICAL or Gravity.END
+    summaryActionBar.setPadding(context.dp(12), 0, context.dp(8), 0)
+    regenerateAction.apply {
+      gravity = Gravity.CENTER
+      isClickable = true
+      isFocusable = true
+      contentDescription = "重新生成整理结果"
+      setTextColor(
+        statefulIconTint(
+          MinutesPalette.primary,
+          MinutesPalette.primary,
+          MinutesPalette.disabled,
+        ),
+      )
+      background = context.roundedStateBackground(
+        defaultColor = MinutesPalette.surface,
+        pressedColor = MinutesPalette.primarySoft,
+        disabledColor = MinutesPalette.surface,
+        radiusDp = 6,
+      )
+      setOnClickListener { emitAction(mapOf("type" to "generateSummary")) }
+    }
+    summaryActionBar.addView(
+      regenerateAction,
+      LinearLayout.LayoutParams(context.dp(104), context.dp(44)),
+    )
+    root.addView(
+      summaryActionBar,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)),
+    )
     scroll.isFillViewport = true
     scroll.overScrollMode = View.OVER_SCROLL_NEVER
     scroll.setOnScrollChangeListener { _, _, _, _, _ -> scrollStateListener() }
     rows.orientation = LinearLayout.VERTICAL
     rows.setPadding(context.dp(20), context.dp(10), context.dp(20), context.dp(48))
     scroll.addView(rows, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    installContent(scroll)
+    root.addView(
+      scroll,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+    )
+    installContent(root)
   }
 
   override fun captureScrollPosition(): MinutesDetailPageScrollPosition =
@@ -720,10 +758,22 @@ internal class MinutesSummaryPage(
   }
 
   fun render(state: MinutesDetailState) {
+    val hasSummaryContent = state.summary.isNotEmpty() || state.actions.isNotEmpty()
+    summaryActionBar.visibility = if (state.canGenerateSummary && hasSummaryContent) View.VISIBLE else View.GONE
+    regenerateAction.isEnabled = !state.summaryGenerating
+    regenerateAction.text = if (state.summaryGenerating) {
+      "正在生成"
+    } else {
+      state.summaryActionLabel.ifBlank { "重新生成" }
+    }
+    regenerateAction.contentDescription = if (state.summaryGenerating) {
+      "正在生成整理结果"
+    } else {
+      "重新生成整理结果"
+    }
     replaceContent(
       state.summary,
       state.actions,
-      state.canCreateAction,
       state.canGenerateSummary,
       state.summaryGenerating,
       state.summaryActionLabel,
@@ -731,7 +781,7 @@ internal class MinutesSummaryPage(
     focusAction(state.focusActionId, state.focusActionRequestId)
     renderPageChrome(
       pageState = state.pageState(tab),
-      hasContent = state.summary.isNotEmpty() || state.actions.isNotEmpty() || state.canCreateAction,
+      hasContent = state.summary.isNotEmpty() || state.actions.isNotEmpty(),
       emptyMessage = "该会议暂未生成整理结果",
       canGenerateSummary = state.canGenerateSummary,
       summaryGenerating = state.summaryGenerating,
@@ -742,7 +792,6 @@ internal class MinutesSummaryPage(
   private fun replaceContent(
     sections: List<MinutesSummarySection>,
     actions: List<MinutesActionItem>,
-    canCreateAction: Boolean,
     canGenerateSummary: Boolean,
     summaryGenerating: Boolean,
     summaryActionLabel: String,
@@ -750,7 +799,6 @@ internal class MinutesSummaryPage(
     if (
       renderedSections == sections
       && renderedActions == actions
-      && renderedCanCreateAction == canCreateAction
       && renderedCanGenerateSummary == canGenerateSummary
       && renderedSummaryGenerating == summaryGenerating
       && renderedSummaryActionLabel == summaryActionLabel
@@ -758,56 +806,27 @@ internal class MinutesSummaryPage(
     val retainedScrollY = scroll.scrollY
     renderedSections = sections.toList()
     renderedActions = actions.toList()
-    renderedCanCreateAction = canCreateAction
     renderedCanGenerateSummary = canGenerateSummary
     renderedSummaryGenerating = summaryGenerating
     renderedSummaryActionLabel = summaryActionLabel
     actionRows.clear()
     rows.removeAllViews()
-    if (sections.isEmpty() && actions.isNotEmpty() && canGenerateSummary) {
-      rows.addView(
-        context.textView(
-          if (summaryGenerating) "正在生成整理结果" else summaryActionLabel.ifBlank { "生成整理结果" },
-          16,
-          if (summaryGenerating) MinutesPalette.disabled else MinutesPalette.primary,
-        ).apply {
-          gravity = Gravity.CENTER
-          isEnabled = !summaryGenerating
-          isClickable = isEnabled
-          isFocusable = isEnabled
-          background = context.roundedStateBackground(
-            defaultColor = MinutesPalette.primarySoft,
-            pressedColor = MinutesPalette.primaryTransparent,
-            disabledColor = MinutesPalette.page,
-            radiusDp = 6,
-          )
-          contentDescription = if (summaryGenerating) "正在生成整理结果" else "生成整理结果"
-          setOnClickListener { emitAction(mapOf("type" to "generateSummary")) }
-        },
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)).apply {
-          bottomMargin = context.dp(8)
-        },
-      )
-    }
     sections.forEach { section ->
       rows.addView(
         summarySection(section),
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
     }
-    if (actions.isNotEmpty() || canCreateAction) {
+    if (actions.isNotEmpty()) {
       rows.addView(
-        actionSection(actions, canCreateAction),
+        actionSection(actions),
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
     }
     scroll.post { scroll.scrollTo(0, retainedScrollY.coerceAtMost(rows.height)) }
   }
 
-  private fun actionSection(
-    actions: List<MinutesActionItem>,
-    canCreateAction: Boolean,
-  ): View = LinearLayout(context).apply {
+  private fun actionSection(actions: List<MinutesActionItem>): View = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setPadding(0, context.dp(12), 0, context.dp(8))
     val header = LinearLayout(context).apply {
@@ -820,24 +839,10 @@ internal class MinutesSummaryPage(
       },
       LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
     )
-    if (canCreateAction) {
-      header.addView(
-        context.iconButton(
-          com.laoji.nativeplatform.R.drawable.laoji_ud_icon_add_outlined,
-          "新建待办事项",
-        ).apply {
-          imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.primary)
-          setOnClickListener {
-            emitAction(mapOf("type" to "createAction"))
-          }
-        },
-        LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
-      )
-    }
     addView(
       header,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)).apply {
-        bottomMargin = if (actions.isEmpty()) 0 else context.dp(2)
+        bottomMargin = context.dp(2)
       },
     )
     actions.forEachIndexed { index, action ->

@@ -66,6 +66,7 @@ import type {
   MeetingRecordingMergeTaskRecord,
   MeetingListProjection,
   MeetingListProjectionItem,
+  MeetingListOrderEntry,
   MeetingListQuery,
   MeetingNoteAggregate,
   MeetingNoteRepository,
@@ -4931,6 +4932,295 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       );
       return created.changes === 1;
     });
+  }
+
+  async repairLegacyCalendarMeetingRootCreate(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    repairedAtMs: number,
+  ): Promise<boolean> {
+    assertRecordId(meetingId, 'meeting ID');
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(repairedAtMs, 'calendar meeting repair time');
+    if (scopeKey === 'guest') return false;
+
+    const repaired = await withMeetingDatabaseTransaction(async database => {
+      const meeting = await database.getFirstAsync<MeetingRow>(
+        'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ?',
+        meetingId,
+        scopeKey,
+      );
+      if (!meeting || meeting.remote_id !== null) return false;
+
+      const createRows = await database.getAllAsync<SyncOutboxRow>(
+        `SELECT * FROM sync_outbox
+         WHERE scope_key = ? AND aggregate_type = 'meeting_note'
+           AND aggregate_id = ? AND operation_type = 'meeting.create'
+         ORDER BY created_at_ms, rowid`,
+        scopeKey,
+        meetingId,
+      );
+      const localOccurrence = await database.getFirstAsync<OccurrenceLinkRow>(
+        'SELECT * FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+        meetingId,
+        scopeKey,
+      );
+      if (!localOccurrence) return false;
+      const asRecord = (value: unknown): Record<string, unknown> | null => (
+        value !== null && typeof value === 'object' && !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : null
+      );
+      const parsedRecord = (value: string): Record<string, unknown> | null => {
+        try {
+          return asRecord(JSON.parse(value));
+        } catch {
+          return null;
+        }
+      };
+      const stringValue = (value: unknown): string => (
+        typeof value === 'string' ? value.trim() : ''
+      );
+      const matchesLocalOccurrence = (payload: Record<string, unknown>): boolean => {
+        const occurrence = asRecord(payload.occurrence_ref);
+        return Boolean(
+          occurrence
+          && stringValue(occurrence.sourceEventId ?? occurrence.source_event_id)
+            === localOccurrence.calendar_source_event_id
+          && stringValue(occurrence.occurrenceDate ?? occurrence.occurrence_date)
+            === localOccurrence.occurrence_date
+          && asRecord(payload.schedule_snapshot),
+        );
+      };
+      let legacyCreate: SyncOutboxRow | null = null;
+      let legacyPayload: Record<string, unknown> | null = null;
+      let supersededRemoteMeetingId = '';
+      let resolvedConflictId: string | null = null;
+      for (const row of createRows) {
+        const parsed = parsedRecord(row.payload_json);
+        if (
+          parsed
+          && parsed.defer_remote_occurrence_link === true
+          && matchesLocalOccurrence(parsed)
+        ) {
+          legacyCreate = row;
+          legacyPayload = parsed;
+          break;
+        }
+      }
+      if (legacyCreate && legacyPayload) {
+        const clientRequestId = stringValue(legacyPayload.client_request_id);
+        const supersededLocalMatch = /:after:(.+)$/.exec(clientRequestId);
+        const supersededLocalMeetingId = supersededLocalMatch?.[1]?.trim() ?? '';
+        if (!supersededLocalMeetingId) return false;
+        assertRecordId(supersededLocalMeetingId, 'superseded local meeting ID');
+        const superseded = await database.getFirstAsync<MeetingRow>(
+          `SELECT * FROM meeting_notes
+           WHERE id = ? AND scope_key = ? AND lifecycle = 'deleted'`,
+          supersededLocalMeetingId,
+          scopeKey,
+        );
+        supersededRemoteMeetingId = superseded?.remote_id?.trim() ?? '';
+      } else {
+        const conflicts = await database.getAllAsync<MeetingRootSyncConflictRow>(
+          `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+             conflict.local_revision, conflict.remote_revision,
+             conflict.local_payload_json, conflict.remote_payload_json,
+             conflict.created_at_ms
+           FROM sync_conflicts conflict
+           WHERE conflict.scope_key = ? AND conflict.aggregate_type = 'meeting_note'
+             AND conflict.aggregate_id = ? AND conflict.status = 'unresolved'
+           ORDER BY conflict.created_at_ms DESC, conflict.id DESC`,
+          scopeKey,
+          meetingId,
+        );
+        for (const conflict of conflicts) {
+          const remoteEnvelope = parsedRecord(conflict.remote_payload_json);
+          const remote = asRecord(remoteEnvelope?.current);
+          const remoteOccurrence = asRecord(remote?.occurrence_ref);
+          const localPayload = parsedRecord(conflict.local_payload_json);
+          const operationId = conflict.id.startsWith('meeting-note:')
+            ? conflict.id.slice('meeting-note:'.length)
+            : '';
+          const create = createRows.find(row => row.operation_id === operationId) ?? null;
+          if (
+            !remoteEnvelope
+            || remoteEnvelope.status !== 409
+            || remoteEnvelope.code !== 'occurrence_already_bound'
+            || !remote
+            || remote.lifecycle !== 'deleted'
+            || remote.origin !== 'calendar'
+            || !remoteOccurrence
+            || !localPayload
+            || localPayload.schema_version !== 1
+            || stringValue(localPayload.client_note_id) !== meetingId
+            || !matchesLocalOccurrence(localPayload)
+            || stringValue(remoteOccurrence.source_event_id)
+              !== localOccurrence.calendar_source_event_id
+            || stringValue(remoteOccurrence.occurrence_date) !== localOccurrence.occurrence_date
+            || !create
+          ) continue;
+          const remoteMeetingId = stringValue(remote.id);
+          if (!remoteMeetingId) continue;
+          legacyCreate = create;
+          legacyPayload = localPayload;
+          supersededRemoteMeetingId = remoteMeetingId;
+          resolvedConflictId = conflict.id;
+          break;
+        }
+      }
+      if (!legacyCreate || !legacyPayload || !supersededRemoteMeetingId) return false;
+      assertRecordId(supersededRemoteMeetingId, 'superseded meeting remote ID');
+
+      const replacementPayload: Record<string, unknown> = {
+        ...legacyPayload,
+        superseded_remote_meeting_id: supersededRemoteMeetingId,
+      };
+      delete replacementPayload.defer_remote_occurrence_link;
+      const payloadJson = JSON.stringify(replacementPayload);
+      const operationId = `meeting.create.replacement:${meetingId}`;
+      assertRecordId(operationId, 'replacement meeting create operation');
+      const replacement = await database.getFirstAsync<SyncOutboxRow>(
+        'SELECT * FROM sync_outbox WHERE operation_id = ?',
+        operationId,
+      );
+      if (replacement && (
+        replacement.scope_key !== scopeKey
+        || replacement.aggregate_type !== 'meeting_note'
+        || replacement.aggregate_id !== meetingId
+        || replacement.operation_type !== 'meeting.create'
+      )) throw new Error('replacement meeting create operation identity changed');
+      if (replacement?.status === 'completed') {
+        throw new Error('replacement meeting create completed without a remote identity');
+      }
+
+      const earliest = await database.getFirstAsync<{ created_at_ms: number | null }>(
+        `SELECT MIN(created_at_ms) AS created_at_ms FROM sync_outbox
+         WHERE scope_key = ? AND aggregate_type = 'meeting_note'
+           AND aggregate_id = ? AND status <> 'completed'`,
+        scopeKey,
+        meetingId,
+      );
+      const priorityCreatedAtMs = Math.max(
+        0,
+        Math.min(legacyCreate.created_at_ms, earliest?.created_at_ms ?? legacyCreate.created_at_ms) - 1,
+      );
+
+      if (legacyCreate.status === 'in_flight' || replacement?.status === 'in_flight') return false;
+      if (legacyCreate.status !== 'completed') {
+        await database.runAsync(
+          `UPDATE sync_outbox SET status = 'completed', next_attempt_at_ms = NULL,
+             last_error_code = 'superseded_by_replacement_create', claim_token = NULL,
+             updated_at_ms = ?
+           WHERE operation_id = ? AND scope_key = ? AND aggregate_id = ?
+             AND status <> 'in_flight'`,
+          repairedAtMs,
+          legacyCreate.operation_id,
+          scopeKey,
+          meetingId,
+        );
+      }
+      if (replacement) {
+        await database.runAsync(
+          `UPDATE sync_outbox SET payload_json = ?, status = 'pending',
+             attempt_count = 0, next_attempt_at_ms = NULL, last_error_code = NULL,
+             request_payload_json = NULL, claim_token = NULL,
+             created_at_ms = ?, updated_at_ms = ?
+           WHERE operation_id = ?`,
+          payloadJson,
+          priorityCreatedAtMs,
+          repairedAtMs,
+          operationId,
+        );
+      } else {
+        await database.runAsync(
+          `INSERT INTO sync_outbox (
+             operation_id, scope_key, aggregate_type, aggregate_id,
+             operation_type, base_revision, payload_json, status,
+             attempt_count, next_attempt_at_ms, last_error_code,
+             request_payload_json, claim_token, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, 'meeting_note', ?, 'meeting.create', NULL, ?,
+             'pending', 0, NULL, NULL, NULL, NULL, ?, ?)`,
+          operationId,
+          scopeKey,
+          meetingId,
+          payloadJson,
+          priorityCreatedAtMs,
+          repairedAtMs,
+        );
+      }
+      if (resolvedConflictId) {
+        const resolved = await database.runAsync(
+          `UPDATE sync_conflicts SET status = 'resolved', resolved_at_ms = ?
+           WHERE id = ? AND scope_key = ? AND aggregate_type = 'meeting_note'
+             AND aggregate_id = ? AND status = 'unresolved'`,
+          repairedAtMs,
+          resolvedConflictId,
+          scopeKey,
+          meetingId,
+        );
+        if (resolved.changes !== 1) {
+          throw new Error('legacy calendar meeting conflict changed during repair');
+        }
+      }
+      await database.runAsync(
+        `UPDATE sync_outbox SET status = 'pending', attempt_count = 0,
+           next_attempt_at_ms = NULL, last_error_code = NULL,
+           request_payload_json = NULL, claim_token = NULL, updated_at_ms = ?
+         WHERE scope_key = ? AND aggregate_type = 'meeting_occurrence'
+           AND aggregate_id = ? AND operation_type = 'occurrence.upsert'
+           AND status IN ('retry', 'blocked', 'permanent_error')`,
+        repairedAtMs,
+        scopeKey,
+        meetingId,
+      );
+      await database.runAsync(
+        `UPDATE meeting_occurrence_links SET sync_state = 'pending',
+           last_sync_error_code = NULL, synced_at_ms = NULL
+         WHERE meeting_id = ? AND scope_key = ?`,
+        meetingId,
+        scopeKey,
+      );
+      await refreshMeetingSyncState(database, meetingId, scopeKey);
+      const transaction = new SqliteMeetingTransaction(database);
+      await transaction.advanceCanonicalWrite(scopeKey, repairedAtMs);
+      return true;
+    });
+    if (repaired) this.notify([meetingId]);
+    return repaired;
+  }
+
+  async repairLegacyCalendarMeetingRootCreates(
+    scopeKey: ScopeKey,
+    repairedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(repairedAtMs, 'calendar meeting repair time');
+    if (scopeKey === 'guest') return 0;
+    const database = await openMeetingDatabase();
+    const candidates = await database.getAllAsync<{ id: string }>(
+      `SELECT DISTINCT meeting.id
+       FROM meeting_notes meeting
+       INNER JOIN sync_outbox outbox ON outbox.aggregate_id = meeting.id
+       WHERE meeting.scope_key = ? AND outbox.scope_key = ?
+         AND meeting.origin = 'calendar' AND meeting.lifecycle <> 'deleted'
+         AND meeting.remote_id IS NULL
+         AND outbox.aggregate_type = 'meeting_note'
+         AND outbox.operation_type = 'meeting.create'
+         AND outbox.status IN ('pending', 'retry', 'blocked', 'permanent_error')
+       ORDER BY meeting.created_at_ms, meeting.id`,
+      scopeKey,
+      scopeKey,
+    );
+    let repaired = 0;
+    for (const candidate of candidates) {
+      if (await this.repairLegacyCalendarMeetingRootCreate(
+        candidate.id,
+        scopeKey,
+        repairedAtMs + repaired,
+      )) repaired += 1;
+    }
+    return repaired;
   }
 
   async claimMeetingRootSyncOperations(
@@ -12536,6 +12826,78 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       stages: stagesByMeeting.get(row.id) ?? [],
     }));
     return { items, hasMore: rows.length > limit };
+  }
+
+  async listMeetingDisplayOrder(scopeKey: ScopeKey): Promise<readonly MeetingListOrderEntry[]> {
+    assertScopeKey(scopeKey);
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<{
+      meeting_id: string;
+      position: number;
+      updated_at_ms: number;
+    }>(
+      `SELECT list_order.meeting_id, list_order.position, list_order.updated_at_ms
+       FROM meeting_list_order list_order
+       INNER JOIN meeting_notes meeting ON meeting.id = list_order.meeting_id
+       WHERE list_order.scope_key = ? AND meeting.scope_key = ?
+       ORDER BY list_order.position, list_order.meeting_id`,
+      scopeKey,
+      scopeKey,
+    );
+    return rows.map(row => ({
+      meetingId: row.meeting_id,
+      position: row.position,
+      updatedAtMs: row.updated_at_ms,
+    }));
+  }
+
+  async replaceMeetingDisplayOrder(
+    scopeKey: ScopeKey,
+    orderedMeetingIds: readonly string[],
+    updatedAtMs: number,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(updatedAtMs, 'meeting list order update time');
+    const normalizedIds = orderedMeetingIds.map(id => {
+      assertRecordId(id, 'meeting list order ID');
+      return id.trim();
+    });
+    if (new Set(normalizedIds).size !== normalizedIds.length) {
+      throw new Error('meeting list order contains duplicate meetings');
+    }
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const activeRows = await database.getAllAsync<{ id: string }>(
+        `SELECT id FROM meeting_notes
+         WHERE scope_key = ?
+           AND (lifecycle != 'deleted' OR sync_state = 'conflicted')`,
+        scopeKey,
+      );
+      const activeIds = activeRows.map(row => row.id);
+      if (
+        activeIds.length !== normalizedIds.length
+        || activeIds.some(id => !normalizedIds.includes(id))
+      ) return false;
+      await database.runAsync(
+        `DELETE FROM meeting_list_order WHERE scope_key = ?`,
+        scopeKey,
+      );
+      for (let position = 0; position < normalizedIds.length; position += 1) {
+        await database.runAsync(
+          `INSERT INTO meeting_list_order(scope_key, meeting_id, position, updated_at_ms)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(scope_key, meeting_id) DO UPDATE SET
+             position = excluded.position,
+             updated_at_ms = excluded.updated_at_ms`,
+          scopeKey,
+          normalizedIds[position],
+          position,
+          updatedAtMs,
+        );
+      }
+      return true;
+    });
+    if (applied && normalizedIds.length > 0) this.notify(normalizedIds);
+    return applied;
   }
 
   observeMeeting(id: string, scopeKey: ScopeKey, listener: () => void): Unsubscribe {

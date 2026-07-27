@@ -208,7 +208,10 @@ export function parseMeetingNoteV2(
   const occurrenceRef = parseOccurrence(value.occurrence_ref);
   const scheduleSnapshot = parseScheduleSnapshot(value.schedule_snapshot);
   if ((occurrenceRef === null) !== (scheduleSnapshot === null)) throw new Error('会议日程上下文不完整');
-  if ((origin === 'calendar') !== (occurrenceRef !== null)) throw new Error('会议来源与日程上下文不一致');
+  if (origin !== 'calendar' && occurrenceRef !== null) throw new Error('会议来源与日程上下文不一致');
+  if (origin === 'calendar' && lifecycle === 'active' && occurrenceRef === null) {
+    throw new Error('可用的日程会议缺少日程上下文');
+  }
   const serverCreatedAtMs = serverTime(value.created_at, '会议云端创建时间');
   const serverUpdatedAtMs = serverTime(value.updated_at, '会议云端更新时间');
   if (serverCreatedAtMs > serverUpdatedAtMs) throw new Error('会议云端时间顺序无效');

@@ -80,9 +80,9 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 
 - Classification：LaoJi-only；最近容器为 Minutes 整理内容，控件语义参考 Universe Design form/button。
 - `[SOURCE]`：编辑 sheet 使用 12dp 顶角、16dp 页面边距、6dp input/button radius、48dp primary commit；文本、divider、pressed、disabled、danger 全部使用共享 Feishu tokens。
-- `[SOURCE]`：新建入口 glyph 取自飞书 7.71.8 `ud_icon_add_outlined.xml`，置于固定 44dp 触控目标；不以文本胶囊替代熟悉的加号命令。
-- `[PRODUCT]`：Summary 没有候选事项时仍可手动新增；忽略是可恢复状态，不删除用户事项，也不新增底栏任务入口。
-- `[INFERENCE]`：22dp 完成圆位于固定 44dp 目标；正文和 edit icon 均可打开编辑；忽略/恢复使用平衡 title action，已忽略圆点显示减号。表单内容区可随软键盘滚动，标题栏保持固定。无渐变、装饰卡片或说明书文案。
+- `[SOURCE]`：“本场待办”复用既有 12dp 顶角、52dp 标题栏、语义 surface/divider/pressed 状态和固定 44dp 图标触控目标。
+- `[PRODUCT]`：Summary 只展示 AI 生成的行动项且不提供新建入口；手动与 Marker 事项保存在 meeting-global action 集合，由会议“更多 → 本场待办”统一展示和创建，不新增底栏任务入口。
+- `[INFERENCE]`：React Native 加号只承担熟悉的新建语义，不声称逐路径复刻飞书 glyph；22dp 完成圆位于固定 44dp 目标，正文打开编辑，日历图标进入后续日程。表单内容区可随软键盘滚动，标题栏保持固定。无渐变、装饰卡片或说明书文案。
 
 组件：待办事项同步冲突 sheet
 
@@ -136,6 +136,7 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 后续日程 synthetic 冒烟以日期型截止预填 `2026-07-24 10:00–10:30`，首次保存后 action 从“创建后续日程”变为“查看后续日程”，点击进入同标题、同时间的 EventDetail。随后模拟“事件已创建但 action 链接丢失”，第二次保存仍保持游客事件总数 2（原有事件 1 + 后续事件 1），`action-followup:*` 事件严格为 1，action 重新链接到同一 `guest-*` source ID；无 SQLiteException、应用 FATAL 或 `meeting_action_update_failed`。
 - 后续日程冒烟后已恢复 SHA-256 `f40728a1adad19f3963191494e82c0b0b1db3fd07d82e761170ac0da5dcbed0b` 的测试前模拟器备份。复核 `user_version = 6`、meeting 数 1、action 数 0、follow-up link 数 0、游客事件数 1、`followup-smoke` 存储/UI 命中数 0；通知权限恢复为未授权，最终 Preview 冷启动无应用 FATAL。
 - 手动 action synthetic 冒烟从“整理结果有 section、无 action”开始：44dp 加号打开“新建待办事项”，输入后软键盘表单可滚动并显式 `on-drag` 收起，创建结果严格为一条 `source_kind='manual'`、`status='pending'` 的 action。忽略后完成圆和后续日程命令均不可执行；强制停止/冷启动仍显示“已忽略”，编辑页显示“恢复”；恢复后回到 pending，原 `created_at_ms` 保留且 `updated_at_ms` 前进。全程无 `meeting_action_*_failed`、SQLiteException 或应用 FATAL。
+- 后续产品修正保留上述数据与恢复证据，但废止“整理结果标题栏加号”的信息架构：“更多 → 本场待办”成为 meeting-global action 的唯一手动新建入口，Summary 投影排除 `manual` / `marker`，提醒和搜索携带 action ID 时打开同一待办列表。
 - 手动 action 冒烟前备份 `/tmp/laoji-action-phase4-pre-20260723.tar` 的 SHA-256 为 `fbb04830db08aacaa46f73bfeeb6b6b07d51716e53c8b3f92419d2b37b1bcb3d`；恢复后以同一目录顺序重新打包，SHA-256 完全相同。最终 UI 不含 `manual-action-smoke`、synthetic summary version 或 synthetic section。
 - 上一稳定 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，当时构建时间 `2026-07-23 22:47:53 +0800`，大小 `89,782,623` bytes，SHA-256 `cc1034081193fad6b167f521df7c92ebf670fd29b8c5669ea2a04b70e8d8ff29`；已被本批构建取代。
 - action sync migration 前通过同签名 Debug 包的 `debuggable` 只读窗口归档模拟器数据：`/tmp/laoji-pre-action-sync-v8-20260723.tar.gz`，大小 `1,549,596` bytes，SHA-256 `f011af7279ee44af3b7fe6023b790d86ae2df7140b6e25759d1332037bdfd6f7`。归档内 SQLite 为 `user_version=6`、meeting 1、action/outbox/conflict 均为 0。

@@ -57,6 +57,7 @@ export interface CreateMeetingNoteInput {
   scheduleSnapshot?: ScheduleSnapshot | null;
   recurrenceSegmentId?: string | null;
   seriesKey?: string | null;
+  supersededRemoteMeetingId?: string | null;
   recordingAsset?: InitialRecordingAssetInput | null;
   initialStageStatuses?: Partial<MeetingProcessingStatuses>;
   canonicalWrite?: boolean;
@@ -218,6 +219,14 @@ export class CreateMeetingNoteUseCase {
     const seriesKey = occurrence
       ? calendarMeetingSeriesKey(input.scopeKey, occurrence.sourceEventId)
       : normalizeOptionalText(input.seriesKey, 512, 'calendar series key');
+    const supersededRemoteMeetingId = normalizeOptionalText(
+      input.supersededRemoteMeetingId,
+      160,
+      'superseded meeting remote ID',
+    );
+    if (supersededRemoteMeetingId && !occurrence) {
+      throw new Error('superseded meeting requires a calendar occurrence');
+    }
     const title = input.title?.trim() ?? '';
     const description = normalizeOptionalText(input.description, 100_000, 'meeting description');
     const participants = normalizeParticipants(input.participants);
@@ -367,6 +376,7 @@ export class CreateMeetingNoteUseCase {
               seriesKey,
             } : null,
             schedule_snapshot: snapshot,
+            superseded_remote_meeting_id: supersededRemoteMeetingId,
           }),
           createdAtMs: nowMs,
         });

@@ -125,6 +125,7 @@ export function meetingActionRecordToCandidate(
     reminderNotificationId: action.reminderNotificationId,
     followupEventSourceId: action.followupEventSourceId,
     status: action.status,
+    sourceKind: action.sourceKind,
     updatedAtMs: action.updatedAtMs,
     sourceSegmentId: action.sourceSegmentSourceId ?? action.sourceSegmentId,
     sourceStartMs: action.sourceStartMs,

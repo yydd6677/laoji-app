@@ -143,6 +143,24 @@ export async function resolveOccurrenceMeeting(
   };
 }
 
+export interface DeletedOccurrenceMeetingIdentity {
+  localMeetingId: string;
+  remoteMeetingId: string | null;
+}
+
+export async function resolveDeletedOccurrenceMeetingIdentity(
+  scopeKey: ScopeKey,
+  occurrence: OccurrenceReference,
+  repository: MeetingNoteRepository = sqliteMeetingNoteRepository,
+): Promise<DeletedOccurrenceMeetingIdentity | null> {
+  assertScopeKey(scopeKey);
+  const aggregate = await repository.findByOccurrence(occurrence, scopeKey);
+  return aggregate?.note.lifecycle === 'deleted' ? {
+    localMeetingId: aggregate.note.id,
+    remoteMeetingId: aggregate.note.remoteId?.trim() || null,
+  } : null;
+}
+
 export async function bindLegacyMeetingToOccurrence(
   scopeKey: ScopeKey,
   meeting: Pick<Meeting, 'id'>,
