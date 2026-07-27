@@ -38,6 +38,7 @@ function localOperationPayload(
   action: ActionItemRecord,
   remoteId: string | null,
   remoteRevision: number | null,
+  resolvedAtMs: number,
 ): string {
   return JSON.stringify({
     schema_version: 2,
@@ -46,8 +47,8 @@ function localOperationPayload(
     remote_id: remoteId,
     expected_remote_revision: remoteRevision,
     client_created_at_ms: action.createdAtMs,
-    client_updated_at_ms: action.updatedAtMs,
-    user_edited_at_ms: action.userEditedAtMs,
+    client_updated_at_ms: resolvedAtMs,
+    user_edited_at_ms: resolvedAtMs,
     completed_at_ms: action.completedAtMs,
     content: action.content,
     status: action.status,
@@ -119,7 +120,11 @@ export class ResolveMeetingActionSyncConflictUseCase {
       clockMs,
       view.local.updatedAtMs + 1,
       current.meetingUpdatedAtMs + 1,
+      view.remote ? view.remote.clientUpdatedAtMs + 1 : 0,
     );
+    if (!Number.isSafeInteger(resolvedAtMs)) {
+      throw new Error('meeting action conflict resolution clock is invalid');
+    }
     let remoteId: string | null;
     let remoteRevision: number | null;
     let remoteFields: MeetingActionRemoteConflictFields | null = null;
@@ -137,7 +142,7 @@ export class ResolveMeetingActionSyncConflictUseCase {
         aggregateId: actionId,
         operationType: 'action_item.upsert',
         baseRevision: remoteRevision,
-        payloadJson: localOperationPayload(view.local, remoteId, remoteRevision),
+        payloadJson: localOperationPayload(view.local, remoteId, remoteRevision, resolvedAtMs),
         createdAtMs: resolvedAtMs,
       };
     } else {

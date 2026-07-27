@@ -12200,10 +12200,13 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         if (updated.changes !== 1) return false;
       } else {
         const updated = await database.runAsync(
-          `UPDATE action_items SET remote_id = ?, remote_revision = ?
+          `UPDATE action_items SET remote_id = ?, remote_revision = ?,
+             user_edited_at_ms = ?, updated_at_ms = ?
            WHERE id = ? AND meeting_id = ? AND updated_at_ms = ?`,
           input.remoteId,
           input.remoteRevision,
+          input.resolvedAtMs,
+          input.resolvedAtMs,
           input.actionId,
           input.meetingId,
           input.expectedUpdatedAtMs,
