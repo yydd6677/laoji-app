@@ -26,7 +26,7 @@ export {
   normalizeMeetingSummaryResult,
 } from './meetingSummaryFormat';
 
-const MAX_POLL_DURATION_MS = 180_000;
+const MAX_POLL_DURATION_MS = 10 * 60 * 1_000;
 const SUMMARY_LONG_POLL_MS = 5_000;
 
 export const BRIEF_GREETING_SUMMARY = '本次录音仅包含简短问候，暂无可总结的议题、决定或行动项。';
@@ -84,6 +84,13 @@ export class MeetingSummaryTaskFailureError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MeetingSummaryTaskFailureError';
+  }
+}
+
+export class MeetingSummaryTaskPendingError extends Error {
+  constructor() {
+    super('整理任务仍在后台进行，再次打开会议可继续获取。');
+    this.name = 'MeetingSummaryTaskPendingError';
   }
 }
 
@@ -251,8 +258,10 @@ async function waitForTask(
         elapsedMs: Date.now() - startedAt,
         stage: 'reconnecting',
       });
-      if (consecutiveFetchFailures < 5) continue;
-      throw error;
+      // A submitted task is durable on the service. Transient status fetch
+      // failures must not turn a still-running task into a user-visible
+      // failure; keep reconnecting until the page wait budget is exhausted.
+      continue;
     }
     lastStatus = status.status;
     const elapsedMs = Date.now() - startedAt;
@@ -267,8 +276,8 @@ async function waitForTask(
       throw new MeetingSummaryTaskFailureError(summaryTaskFailureMessage(status.result));
     }
   }
-  if (lastFetchError instanceof Error) throw lastFetchError;
-  throw new Error('meeting summary task timed out');
+  void lastFetchError;
+  throw new MeetingSummaryTaskPendingError();
 }
 
 export function summaryTaskFailureMessage(result: unknown): string {

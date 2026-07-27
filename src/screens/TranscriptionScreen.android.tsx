@@ -78,6 +78,7 @@ import {
 import {
   generateSummaryForMeeting,
   briefGreetingSummaryText,
+  MeetingSummaryTaskPendingError,
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
@@ -1507,6 +1508,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : [];
     const localSources: MinutesPlayerSourceSnapshot[] = [];
     const localSourceIdByAsset = new Map<string, string>();
+    const localSourceIdByRemoteAsset = new Map<string, string>();
     const seenUris = new Set<string>();
     if (meeting.audioLocalUri) {
       seenUris.add(meeting.audioLocalUri);
@@ -1529,6 +1531,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             existing.recordingAssetId = asset.id;
             existing.recordingAssetRemoteId = asset.remoteAssetId ?? undefined;
             localSourceIdByAsset.set(asset.id, existing.sourceId);
+            if (asset.remoteAssetId) {
+              localSourceIdByRemoteAsset.set(asset.remoteAssetId, existing.sourceId);
+            }
           }
           return;
         }
@@ -1548,6 +1553,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         );
         localSources.push(source);
         localSourceIdByAsset.set(asset.id, source.sourceId);
+        if (asset.remoteAssetId) {
+          localSourceIdByRemoteAsset.set(asset.remoteAssetId, source.sourceId);
+        }
       });
     const labelSources = (sources: readonly MinutesPlayerSourceSnapshot[]) => sources.map((source, index) => ({
       ...source,
@@ -1599,7 +1607,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         let remoteDownloadFailed = false;
         for (const asset of remoteAssets) {
           if (asset.uploadState !== 'uploaded' || !asset.contentUrl) continue;
-          const localSourceId = localSourceIdByAsset.get(asset.clientAssetId);
+          // A repaired guest migration can legitimately retain the server's
+          // historical client ID while the canonical local asset is linked by
+          // its immutable remote ID. Both identities describe one recording.
+          const localSourceId = localSourceIdByAsset.get(asset.clientAssetId)
+            ?? localSourceIdByRemoteAsset.get(asset.remoteId);
           if (localSourceId) {
             matchedLocalSourceIds.add(localSourceId);
             const local = localSources.find(source => source.sourceId === localSourceId);
@@ -2105,6 +2117,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
       } catch (reason) {
+        const taskStillRunning = reason instanceof MeetingSummaryTaskPendingError;
         if (shouldDiscardPendingMeetingSummaryTask(reason)) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
@@ -2112,7 +2125,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           await recordMeetingSummaryProcessing({
             scopeKey: currentMeetingScopeKey,
             legacyMeetingId: currentMeeting.id,
-            signal: (reason as Error)?.name === 'AbortError'
+            signal: (reason as Error)?.name === 'AbortError' || taskStillRunning
               ? {
                 type: 'aborted',
                 taskId: knownTaskId,
@@ -2127,7 +2140,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           });
         }
         if (!isCurrentPageRequest(summaryRequest)) return;
-        if ((reason as Error)?.name === 'AbortError') {
+        if (taskStillRunning) {
+          setSummaryError('');
+          setSummaryProgress('整理任务仍在后台进行');
+          if (!options.automatic) {
+            showDialog({
+              title: '整理仍在进行',
+              message: '任务会继续在后台生成，再次打开会议可继续获取。',
+              tone: 'info',
+            });
+          }
+        } else if ((reason as Error)?.name === 'AbortError') {
           if (!options.automatic && !silentSummaryAbortRef.current.has(controller)) {
             showDialog({
               title: '已停止等待',

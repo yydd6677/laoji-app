@@ -40,7 +40,6 @@ export function GuestDataMigrationProvider({ children }: { children: React.React
   const { showDialog } = useAppDialog();
   const [migrationBusy, setMigrationBusy] = useState(false);
   const busyRef = useRef(false);
-  const previousModeRef = useRef(mode);
   const promptedSessionRef = useRef('');
 
   const mergeGuestData = useCallback(async () => {
@@ -94,11 +93,8 @@ export function GuestDataMigrationProvider({ children }: { children: React.React
   }, [accessToken, mode, refreshEvents, refreshMeetings, session, showDialog]);
 
   useEffect(() => {
-    const previousMode = previousModeRef.current;
-    previousModeRef.current = mode;
     if (
-      previousMode !== 'guest'
-      || mode !== 'authenticated'
+      mode !== 'authenticated'
       || !session
       || !accessToken
       || promptedSessionRef.current === String(session.user.id)
@@ -106,6 +102,10 @@ export function GuestDataMigrationProvider({ children }: { children: React.React
     const userId = String(session.user.id);
     promptedSessionRef.current = userId;
     let active = true;
+    // Guest mode exits through a signed-out screen before authentication, so
+    // an adjacent guest -> authenticated transition can never be relied on.
+    // Inspect each newly observed authenticated session instead; the dialog
+    // remains explicit and never merges or overwrites data without consent.
     void inspectGuestDataMigration(userId).then(preview => {
       if (!active || preview.pendingCount === 0) return;
       showDialog({

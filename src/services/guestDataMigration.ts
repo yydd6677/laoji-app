@@ -1,7 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { ReconcileMeetingAudioUploadUseCase } from '../application/meeting/reconcileMeetingAudioUpload';
+import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
 import type {
   MeetingNoteAggregate,
   ManualNoteRecord,
+  RecordingAssetRecord,
 } from '../data/repositories';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
@@ -19,9 +22,16 @@ import { mirrorLegacyMeetingCreated } from './meetingStageMirror';
 import type { CalendarMeetingContext } from './occurrenceMeeting';
 import { requestMeetingOccurrenceSync } from '../application/meeting/occurrenceSyncTrigger';
 import {
+  listRecordingAssetsV2,
   loadMeetingCapabilities,
-  uploadRecordingAssetV2,
+  uploadRecordingAssetContentV2,
 } from '../data/api/v2';
+import { cancelNativeMeetingUpload } from '../native/nativeTransferCoordinator';
+import {
+  clearPendingMeetingAudioUpload,
+  getPendingMeetingAudioUpload,
+  upsertPendingMeetingAudioUpload,
+} from './meetingRecording';
 
 const GUEST_EVENTS_KEY = '@laoji:guestEvents:v1';
 const GUEST_MEETINGS_KEY = '@laoji:meetings:v2:guest';
@@ -29,6 +39,11 @@ const GUEST_TRANSCRIPTS_KEY = '@laoji:meetingTranscripts:v1:guest';
 const GUEST_SUMMARIES_KEY = '@laoji:meetingSummaries:v1:guest';
 const MIGRATION_V1_KEY_PREFIX = '@laoji:guestDataMigration:v1';
 const MIGRATION_V2_KEY_PREFIX = '@laoji:guestDataMigration:v2';
+const AUDIO_HANDOFF_VERSION = 1 as const;
+
+const reconcileMigrationAudioUpload = new ReconcileMeetingAudioUploadUseCase({
+  repository: sqliteMeetingNoteRepository,
+});
 
 type MeetingMigrationPhase =
   | 'create'
@@ -61,7 +76,15 @@ type MeetingMigrationStateV2 = {
   summaryVersionsSynced: boolean;
   actionsSynced: boolean;
   markersSynced: boolean;
+  /**
+   * Historical name retained in journal v2. Since handoff v1 this means the
+   * account asset is either reconciled with cloud or durably owned by the
+   * normal account upload queue; migration itself is not a second uploader.
+   */
   audioUploaded: boolean;
+  audioHandoffVersion?: typeof AUDIO_HANDOFF_VERSION;
+  /** Old builds uploaded with a migration-only client asset ID. */
+  legacyDirectAudioNeedsAdoption?: boolean;
   statusSynced: boolean;
   completed: boolean;
   updatedAt: string;
@@ -285,6 +308,44 @@ function meetingHasAudio(meeting: Meeting): boolean {
   return Boolean(meeting.audioLocalUri?.trim());
 }
 
+async function normalizeLegacyAudioJournal(
+  userId: string,
+  source: GuestMigrationSource,
+  journal: GuestMigrationJournalV2,
+): Promise<void> {
+  const scopeKey = `user:${userId}` as ScopeKey;
+  assertScopeKey(scopeKey);
+  let changed = false;
+  for (const meeting of source.meetings) {
+    const state = meeting?.id ? journal.meetings[meeting.id] : undefined;
+    if (
+      !state
+      || !meetingHasAudio(meeting)
+      || !state.audioUploaded
+      || state.audioHandoffVersion === AUDIO_HANDOFF_VERSION
+    ) continue;
+    const aggregate = state.cloudMeetingId
+      ? await sqliteMeetingNoteRepository.findByNativeSessionId(state.cloudMeetingId, scopeKey)
+      : null;
+    const linkedAsset = aggregate?.recordingAssets.find(asset => (
+      asset.role === 'primary' && Boolean(asset.remoteAssetId)
+    ));
+    if (linkedAsset) {
+      state.audioHandoffVersion = AUDIO_HANDOFF_VERSION;
+    } else {
+      // Old migration code could finish its direct upload while leaving the
+      // account-scoped canonical asset unlinked. Re-open only this phase so a
+      // later explicit merge can adopt the exact legacy remote asset.
+      state.audioUploaded = false;
+      state.completed = false;
+      state.legacyDirectAudioNeedsAdoption = true;
+    }
+    state.updatedAt = nowIso();
+    changed = true;
+  }
+  if (changed) await saveJournal(journal);
+}
+
 function meetingTranscript(source: GuestMigrationSource, meetingId: string): TranscriptLine[] {
   const value = source.transcripts[meetingId];
   return Array.isArray(value) ? value.filter(line => Boolean(line?.text?.trim())) : [];
@@ -325,6 +386,10 @@ function initialMeetingState(
     actionsSynced: !hasActions || previous?.actionsSynced === true,
     markersSynced: true,
     audioUploaded: !hasAudio || previous?.audioUploaded === true,
+    audioHandoffVersion: previous?.audioHandoffVersion === AUDIO_HANDOFF_VERSION
+      ? AUDIO_HANDOFF_VERSION
+      : undefined,
+    legacyDirectAudioNeedsAdoption: previous?.legacyDirectAudioNeedsAdoption === true,
     statusSynced: previous?.statusSynced ?? false,
     completed: false,
     updatedAt: previous?.updatedAt ?? nowIso(),
@@ -376,6 +441,7 @@ export async function inspectGuestDataMigration(
 ): Promise<GuestMigrationPreview> {
   const source = await loadSource();
   const journal = await loadJournal(userId);
+  await normalizeLegacyAudioJournal(userId, source, journal);
   return previewFor(source, journal);
 }
 
@@ -494,6 +560,169 @@ async function ensureAccountCanonicalMeeting(
   return aggregate;
 }
 
+function accountRecordingAssetForMigration(
+  aggregate: MeetingNoteAggregate,
+  sourceAudioUri: string,
+) {
+  return aggregate.recordingAssets.find(asset => asset.localUri === sourceAudioUri)
+    ?? aggregate.recordingAssets.find(asset => asset.role === 'primary' && Boolean(asset.localUri))
+    ?? null;
+}
+
+async function clearMigrationPendingUpload(
+  scopeKey: ScopeKey,
+  remoteMeetingId: string,
+  recordingAssetId: string,
+): Promise<void> {
+  const pending = await getPendingMeetingAudioUpload(
+    scopeKey,
+    remoteMeetingId,
+    recordingAssetId,
+  );
+  if (pending?.nativeWorkId) {
+    await cancelNativeMeetingUpload(pending.nativeWorkId).catch(() => {});
+  }
+  await clearPendingMeetingAudioUpload(scopeKey, recordingAssetId);
+}
+
+async function reconcileMigratedRemoteRecording(
+  scopeKey: ScopeKey,
+  aggregate: MeetingNoteAggregate,
+  localAsset: RecordingAssetRecord,
+  sourceMeetingId: string,
+  remote: Awaited<ReturnType<typeof listRecordingAssetsV2>>[number],
+): Promise<void> {
+  const pending = await getPendingMeetingAudioUpload(
+    scopeKey,
+    remote.meetingRemoteId,
+    localAsset.id,
+  );
+  if (pending?.nativeWorkId) {
+    await cancelNativeMeetingUpload(pending.nativeWorkId).catch(() => {});
+  }
+  await reconcileMigrationAudioUpload.execute({
+    meetingId: aggregate.note.id,
+    scopeKey,
+    canonicalWrite: true,
+    evidence: {
+      status: 'uploaded',
+      recordingAssetId: localAsset.id,
+      role: localAsset.role,
+      origin: localAsset.origin,
+      nativeSessionId: localAsset.nativeSessionId,
+      localUri: localAsset.localUri,
+      mimeType: localAsset.mimeType,
+      fileName: localAsset.fileName,
+      byteSize: remote.byteSize ?? localAsset.byteSize,
+      durationMs: remote.durationMs ?? localAsset.durationMs,
+      checksumSha256: remote.checksumSha256 ?? localAsset.checksumSha256,
+      remoteAssetId: remote.remoteId,
+      remoteAssetRevision: remote.revision,
+      attemptCount: Math.max(1, pending?.attemptCount ?? 0),
+      operationId: `guest-migration-audio:${sourceMeetingId}`,
+      retryable: false,
+    },
+  });
+  await clearPendingMeetingAudioUpload(scopeKey, localAsset.id);
+  requestMeetingTranscriptCompletion(scopeKey, { discoverRecordingAssets: true });
+}
+
+async function handoffMigratedRecording(
+  scopeKey: ScopeKey,
+  accessToken: string,
+  sourceMeeting: Meeting,
+  aggregate: MeetingNoteAggregate,
+  remoteMeetingId: string,
+  fileSize: number | null,
+): Promise<void> {
+  const sourceAudioUri = sourceMeeting.audioLocalUri?.trim() ?? '';
+  if (!sourceAudioUri) throw new Error('访客录音地址无效。');
+  const localAsset = accountRecordingAssetForMigration(aggregate, sourceAudioUri);
+  if (!localAsset || localAsset.localUri !== sourceAudioUri) {
+    throw new Error('账号录音资产与访客源文件不一致。');
+  }
+
+  // Listing first makes retries deterministic. It also detects the one legacy
+  // client ID used by older builds without guessing or replacing another
+  // primary recording that may already belong to the account meeting.
+  const remoteAssets = await listRecordingAssetsV2({
+    accessToken,
+    meetingRemoteId: remoteMeetingId,
+  });
+  const legacyClientAssetId = `guest-migration:${sourceMeeting.id}:primary`;
+  const linkedRemote = localAsset.remoteAssetId
+    ? remoteAssets.find(asset => asset.remoteId === localAsset.remoteAssetId)
+    : undefined;
+  const canonicalRemote = remoteAssets.find(asset => asset.clientAssetId === localAsset.id);
+  const legacyRemote = remoteAssets.find(asset => asset.clientAssetId === legacyClientAssetId);
+  let matchingRemote = linkedRemote ?? canonicalRemote ?? legacyRemote;
+
+  if (matchingRemote?.uploadState === 'uploaded') {
+    await reconcileMigratedRemoteRecording(
+      scopeKey,
+      aggregate,
+      localAsset,
+      sourceMeeting.id,
+      matchingRemote,
+    );
+    return;
+  }
+
+  if (matchingRemote?.clientAssetId === legacyClientAssetId) {
+    matchingRemote = await uploadRecordingAssetContentV2({
+      accessToken,
+      remoteAsset: matchingRemote,
+      idempotencyKey: `guest-recording-content:${sourceMeeting.id}`,
+      audioUri: sourceAudioUri,
+      fileName: matchingRemote.fileName,
+      mimeType: matchingRemote.mimeType,
+    });
+    await reconcileMigratedRemoteRecording(
+      scopeKey,
+      aggregate,
+      localAsset,
+      sourceMeeting.id,
+      matchingRemote,
+    );
+    return;
+  }
+
+  if (!matchingRemote && remoteAssets.some(asset => asset.role === localAsset.role)) {
+    throw new Error('账号会议中已有不同的主录音，本机未自动覆盖。');
+  }
+
+  // Normal and interrupted-new-build paths are handed to the existing durable
+  // upload registry. Refreshing the meeting store starts its sole WorkManager /
+  // JS retry pipeline, so migration cannot race it with a second client ID.
+  await clearMigrationPendingUpload(scopeKey, remoteMeetingId, localAsset.id);
+  await upsertPendingMeetingAudioUpload(scopeKey, {
+    meetingId: remoteMeetingId,
+    canonicalMeetingId: aggregate.note.id,
+    remoteMeetingId,
+    recordingAssetId: localAsset.id,
+    role: localAsset.role,
+    origin: localAsset.origin,
+    nativeSessionId: localAsset.nativeSessionId ?? undefined,
+    audioUri: sourceAudioUri,
+    fileName: localAsset.fileName ?? `${sourceMeeting.id}.wav`,
+    mimeType: localAsset.mimeType?.trim() || 'audio/wav',
+    byteSize: fileSize ?? localAsset.byteSize ?? undefined,
+    durationMs: localAsset.durationMs ?? (
+      typeof sourceMeeting.audioDurationSec === 'number'
+      && Number.isFinite(sourceMeeting.audioDurationSec)
+        ? Math.max(0, Math.round(sourceMeeting.audioDurationSec * 1_000))
+        : undefined
+    ),
+    checksumSha256: localAsset.checksumSha256 ?? undefined,
+    remoteAssetId: matchingRemote?.remoteId,
+    remoteAssetRevision: matchingRemote?.revision,
+    createdAt: new Date(localAsset.createdAtMs).toISOString(),
+    lastAttemptAt: new Date(0).toISOString(),
+    attemptCount: 0,
+    uploadState: 'pending',
+  });
+}
+
 async function migrateManualNoteToAccount(
   userId: string,
   sourceNote: ManualNoteRecord | null,
@@ -596,6 +825,7 @@ export async function migrateGuestData(
   assertScopeKey(accountScopeKey);
   const source = await loadSource();
   const journal = await loadJournal(userId);
+  await normalizeLegacyAudioJournal(userId, source, journal);
   const initial = previewFor(source, journal);
   let migratedEvents = 0;
   let migratedMeetings = 0;
@@ -804,33 +1034,20 @@ export async function migrateGuestData(
     if (!state.audioUploaded && meeting.audioLocalUri) {
       try {
         if (!canUploadRecordingAssets) throw new Error('当前会议服务暂不支持录音迁移。');
+        if (!accountAggregate) throw new Error('账号会议尚未准备好，无法迁移录音。');
         const info = await FileSystem.getInfoAsync(meeting.audioLocalUri);
         if (!info.exists) throw new Error('访客录音文件已不存在，无法迁移该录音。');
-        const clientAssetId = `guest-migration:${meeting.id}:primary`;
-        await uploadRecordingAssetV2({
+        await handoffMigratedRecording(
+          accountScopeKey,
           accessToken,
-          meetingRemoteId: cloudMeetingId,
-          registerIdempotencyKey: `guest-recording-register:${meeting.id}`,
-          contentIdempotencyKey: `guest-recording-content:${meeting.id}`,
-          registration: {
-            schema_version: 2,
-            client_asset_id: clientAssetId,
-            role: 'primary',
-            origin: 'captured',
-            mime_type: 'audio/wav',
-            file_name: `${meeting.id}.wav`,
-            byte_size: typeof info.size === 'number' && Number.isSafeInteger(info.size)
-              ? info.size
-              : null,
-            duration_ms: typeof meeting.audioDurationSec === 'number'
-              && Number.isFinite(meeting.audioDurationSec)
-              ? Math.max(0, Math.round(meeting.audioDurationSec * 1_000))
-              : null,
-            checksum_sha256: null,
-          },
-          audioUri: meeting.audioLocalUri,
-        });
+          meeting,
+          accountAggregate,
+          cloudMeetingId,
+          typeof info.size === 'number' && Number.isSafeInteger(info.size) ? info.size : null,
+        );
         state.audioUploaded = true;
+        state.audioHandoffVersion = AUDIO_HANDOFF_VERSION;
+        delete state.legacyDirectAudioNeedsAdoption;
         clearPhaseError(state, 'audio');
       } catch (error) {
         setPhaseError(state, 'audio', error);
