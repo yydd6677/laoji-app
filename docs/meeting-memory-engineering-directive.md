@@ -78,8 +78,8 @@
 | 第 4 节无 `进行中/部分完成/未开始` | MRK-01 已补齐 18020 schema/capability/API 与移动端 v34/outbox/pull，并完成双独立模拟器新增、跳转和墓碑收敛 | **满足完整功能量口径**；剩余是真实模型、物理设备和候选版证据，不再是缺失功能框架 |
 | 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
 | 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 18020 当前健康、模型就绪，root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 在线；两个全新同账号模拟器完成 canonical 接管、录音上传、会议/附件 pull、附件墓碑、根冲突选择和回收站收敛；附件生产库 `quick_check=ok` | **满足运行与双模拟器纵切口径**；不等于第二台物理手机 |
-| V3 七条关键任务 | 第 2 条已有完整模拟器主链，当前包又完成录音保存/上传；第 7 条的第二实例 pull 与真实 409/412 选择已集中完成，离线 outbox 重试仍引用分散证据。第 1、3–6 条未在本轮重跑，当前 hash 未装 USB | **未满足一次性候选版完成口径**；不得写成七条全量重跑 |
-| 默认候选 APK、回溯提交与稳定标签 | Preview `6ed2b6c9…40b34080`（91,052,456 bytes，v104）已在两个独立模拟器逐字节安装并冷启动，对应移动端提交 `4a83730`；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足可回溯候选包口径**；当前 hash 的 USB 安装与物理双机仍待 |
+| V3 七条关键任务 | 第 1 条已由紧邻前一 hash 补稳定包游客日程/会议/录音/笔记到 v34 的保留升级；第 2 条已有完整模拟器主链；顶部当前 hash 又验证游客录音保存与永久物理删除；第 7 条的第二实例 pull、Marker 收敛与真实 409/412 选择已集中完成，离线 outbox 重试仍引用分散证据。第 1 条账号/墓碑/journal 分支和第 3–6 条未在本轮集中重跑，当前 hash 未装 USB | **未满足一次性候选版全量重跑口径**；已有分轮证据不反向抹掉功能完成，也不得改写成七条单轮全覆盖 |
+| 默认候选 APK、回溯提交与稳定标签 | Preview `f89fd942…02a78b`（91,056,424 bytes，v104）已在清数据模拟器完成游客录音、笔记、永久删除、私有库实读和冷启动，对应移动端提交 `17172b9`；紧邻前一 `6ed2b6c9…40b34080` 已完成双模拟器 Marker 收口与稳定包保留升级；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足可回溯候选包口径**；当前 hash 的 USB 安装、物理双机与稳定包覆盖升级重跑仍待 |
 
 源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
 
