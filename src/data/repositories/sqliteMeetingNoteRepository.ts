@@ -12677,6 +12677,130 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return applied;
   }
 
+  async purgeDeletedGuestMeeting(meetingId: string, purgedAtMs: number): Promise<boolean> {
+    assertRecordId(meetingId, 'guest meeting purge ID');
+    assertNonNegativeInteger(purgedAtMs, 'guest meeting purge time');
+    let purged = false;
+    await withMeetingDatabaseTransaction(async database => {
+      const candidate = await database.getFirstAsync<MeetingRow>(
+        `SELECT * FROM meeting_notes
+         WHERE id = ? AND scope_key = 'guest'`,
+        meetingId,
+      );
+      if (!candidate) return;
+      if (
+        candidate.lifecycle !== 'deleted'
+        || candidate.sync_state !== 'deleted'
+        || candidate.deleted_at_ms === null
+        || candidate.deleted_from_lifecycle !== null
+        || candidate.remote_id !== null
+        || candidate.remote_revision !== null
+      ) {
+        throw new Error('guest meeting purge target is not a local-only tombstone');
+      }
+      const writeState = await database.getFirstAsync<MeetingScopeWriteStateRow>(
+        "SELECT * FROM meeting_scope_write_state WHERE scope_key = 'guest'",
+      );
+      if (!writeState || writeState.write_owner !== 'canonical') {
+        throw new Error('guest meeting purge requires canonical ownership');
+      }
+
+      // Detached occurrence history is intentionally restrictive. Remove its
+      // merge work and conflict references before deleting the meeting root.
+      const detached = await database.getAllAsync<{ conflict_id: string }>(
+        `SELECT conflict_id FROM meeting_occurrence_detached_history
+         WHERE scope_key = 'guest' AND (local_meeting_id = ? OR remote_meeting_id = ?)`,
+        meetingId,
+        meetingId,
+      );
+      await database.runAsync(
+        `DELETE FROM meeting_recording_merge_tasks
+         WHERE scope_key = 'guest' AND (source_meeting_id = ? OR target_meeting_id = ?)`,
+        meetingId,
+        meetingId,
+      );
+      await database.runAsync(
+        `DELETE FROM meeting_occurrence_detached_history
+         WHERE scope_key = 'guest' AND (local_meeting_id = ? OR remote_meeting_id = ?)`,
+        meetingId,
+        meetingId,
+      );
+      for (const history of detached) {
+        await database.runAsync(
+          "DELETE FROM sync_conflicts WHERE id = ? AND scope_key = 'guest'",
+          history.conflict_id,
+        );
+      }
+
+      // Generic sync rows have no foreign keys. Resolve every aggregate ID
+      // owned by this meeting before child tables cascade away.
+      const ownedAggregatePredicate = `
+        aggregate_id = ?
+        OR aggregate_id IN (SELECT id FROM action_items WHERE meeting_id = ?)
+        OR aggregate_id IN (SELECT id FROM speaker_corrections WHERE meeting_id = ?)
+        OR aggregate_id IN (
+          SELECT id FROM meeting_attachments WHERE meeting_id = ? AND scope_key = 'guest'
+        )
+        OR aggregate_id IN (SELECT id FROM markers WHERE meeting_id = ?)
+        OR aggregate_id IN (
+          SELECT marker_id FROM meeting_marker_sync_state
+          WHERE meeting_id = ? AND scope_key = 'guest'
+        )`;
+      const ownedAggregateArguments = [
+        meetingId,
+        meetingId,
+        meetingId,
+        meetingId,
+        meetingId,
+        meetingId,
+      ] as const;
+      await database.runAsync(
+        `DELETE FROM sync_outbox
+         WHERE scope_key = 'guest' AND (${ownedAggregatePredicate})`,
+        ...ownedAggregateArguments,
+      );
+      await database.runAsync(
+        `DELETE FROM sync_conflicts
+         WHERE scope_key = 'guest' AND (${ownedAggregatePredicate})`,
+        ...ownedAggregateArguments,
+      );
+      await database.runAsync(
+        `DELETE FROM meeting_retention_cleanup_jobs
+         WHERE scope_key = 'guest' AND canonical_meeting_id = ?`,
+        meetingId,
+      );
+      await database.runAsync(
+        `DELETE FROM meeting_search_fts
+         WHERE scope_key = 'guest' AND meeting_id = ?`,
+        meetingId,
+      );
+      await database.runAsync(
+        'DELETE FROM meeting_series_carry_imports WHERE source_meeting_id = ?',
+        meetingId,
+      );
+
+      const deleted = await database.runAsync(
+        `DELETE FROM meeting_notes
+         WHERE id = ? AND scope_key = 'guest'
+           AND lifecycle = 'deleted' AND sync_state = 'deleted'
+           AND deleted_at_ms IS NOT NULL AND deleted_from_lifecycle IS NULL
+           AND remote_id IS NULL AND remote_revision IS NULL`,
+        meetingId,
+      );
+      if (deleted.changes !== 1) {
+        throw new Error('guest meeting purge target changed concurrently');
+      }
+      const transaction = new SqliteMeetingTransaction(database);
+      await transaction.advanceCanonicalWrite(
+        'guest',
+        Math.max(purgedAtMs, candidate.updated_at_ms, candidate.deleted_at_ms),
+      );
+      purged = true;
+    });
+    if (purged) this.notify([meetingId]);
+    return purged;
+  }
+
   async queueExpiredMeetingRetentionCleanup(
     input: QueueExpiredMeetingRetentionCleanupInput,
   ): Promise<readonly MeetingRetentionCleanupJob[]> {

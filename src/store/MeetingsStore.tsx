@@ -997,7 +997,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
     }
 
-    let deletionError: unknown = null;
     let deleted = false;
     canonicalStoreMutationDepthRef.current += 1;
     try {
@@ -1027,13 +1026,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         }
         adoptCanonicalOwnedProjection(owned, operationGeneration);
       } catch (error) {
-        deletionError = error;
+        if (!deleted) throw error;
+        // The tombstone is already authoritative. Continue owned-file cleanup
+        // and repair the compatibility mirror after physical purge.
+        diagnosticWarn('[meeting-db] guest tombstone projection failed', error);
       }
-    } finally {
-      canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
-    }
-
-    if (deleted) {
       const cleanupResults = await Promise.allSettled([
         deletePendingMeetingAudioUpload(scope, legacyMeetingId),
         deleteNativeMeetingArtifacts(scope, legacyMeetingId),
@@ -1046,8 +1043,30 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       ]);
       const failures = cleanupResults.filter(result => result.status === 'rejected').length;
       if (failures > 0) throw new MeetingDeletionCleanupError(failures);
+      try {
+        const purged = await sqliteMeetingNoteRepository.purgeDeletedGuestMeeting(
+          canonicalMeetingId,
+          Date.now(),
+        );
+        if (!purged) throw new Error('guest meeting tombstone was not purged');
+        const owned = await loadCanonicalOwnedScope(true);
+        if (!owned || owned.mirrorStatus !== 'clean') {
+          throw new Error('guest meeting compatibility mirror was not rebuilt');
+        }
+        if (
+          owned.projection.canonicalIdByLegacyId[legacyMeetingId]
+          || owned.projection.meetings.some(meeting => meeting.id === legacyMeetingId)
+        ) {
+          throw new Error('guest meeting remained in projection after purge');
+        }
+        adoptCanonicalOwnedProjection(owned, operationGeneration);
+      } catch (error) {
+        diagnosticWarn('[meeting-db] guest physical purge failed', error);
+        throw new MeetingDeletionCleanupError(1);
+      }
+    } finally {
+      canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
     }
-    if (deletionError) throw deletionError;
   }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, scope]);
 
   const saveCanonicalMeetingTranscript = useCallback(async (
