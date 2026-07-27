@@ -1,6 +1,6 @@
 # Phase 6 重复会议系列记忆证据：SERIES-01
 
-状态：重复会议的系列身份、最近一次已结束会议、最多三条决定、最多五条同系列未完成事项、可靠决定引用定位、来源跳转、用户明确选择后“带入我的笔记”，以及生成新整理结果时独立选择历史参考，已形成本机/线上纵切。migration v13 保持逐来源实体去重；Summary 授权使用独立 request identity，不复用笔记选择。目标 18020 已以真实账号、不同来源/目标会议完成决定型和行动型历史授权、未选内容隔离、引用隔离、幂等复用与冷启动持久读取；跨移动设备 action 更新仍是候选证据尾项。
+状态：重复会议的系列身份、最近一次已结束会议、最多三条决定、最多五条同系列未完成事项、可靠决定引用定位、来源跳转、用户明确选择后“带入我的笔记”，以及生成新整理结果时独立选择历史参考，已形成本机/线上纵切。migration v13 保持逐来源实体去重；Summary 授权使用独立 request identity，不复用笔记选择。目标 18020 已以真实账号、不同来源/目标会议完成决定型和行动型历史授权、未选内容隔离、引用隔离、幂等复用与冷启动持久读取；两个隔离 Android App 实例又完成同一 action 的创建、拉取、完成和原设备回拉收敛。物理双机与远端 series identity 仍属于候选证据边界。
 
 ## 当前数据与查询合同
 
@@ -63,7 +63,11 @@
 - 9B 完整管线基线 task `4631376b-a5de-4b8a-a5f8-e98c6678effc` 用时 392.7 秒，暴露了历史文字与本场 citation 混在同一 section 的歧义。修复后决定+行动授权 task `10d44db3-65f9-4dba-8fde-a0e9b3da7710` 使用 4B 在 50.6 秒成功；只保留本场演示决定和周敏待办，方案乙只作背景，旧待办未被复制。
 - 反向行动单项授权 task `1ac18bbf-dc8b-48ca-91c4-a9ecf2f23387` 在 53.0 秒成功，durable version `c7608cc4-eee4-4d4d-8ba1-b32fb9442048`。`王磊周三前完成安卓回归测试。` 完整进入来源背景行且 citation 为 0；未授权的方案乙/方案甲、游客入口、十五分钟、安卓优先、数据库迁移和张伟均未出现。唯一决定/行动来自本场，2 个 citation 均属于本场 8 段 Transcript。
 - 以同一 request ID 重提返回 `reused=true` 且复用同一 task ID；18020 冷启动后 durable endpoint 仍返回同一 version/授权 ID/来源背景。最终 18020 PID `984809`，继承 34 项环境；18035 保持 PID `3293181`。
-- 当前统一交付 APK 为 `android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 17:12:11 +0800`，大小 `90,121,368` bytes，SHA-256 `06b4225234b6b72de1a98355d3b0f95424563c43d6805c541c652ef399fa7c91`；已覆盖安装到 `emulator-5556`，`lastUpdateTime=2026-07-24 17:12:23`。冷启动进程存活，日志无应用 FATAL、React Native exception 或 SQLite/schema error。
+- 当前统一交付 APK 为 `android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 01:50:37 +0800`，大小 `91,061,768` bytes，SHA-256 `618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`。同一 v104 包运行于 `emulator-5554` 的独立 Android user 10 和 `emulator-5560` 的 user 0；两端都通过产品登录流程进入同一隔离测试账号，没有清理 `emulator-5554` 主用户中的旧证据。
+- A 端 App 真实录制并保存一场 72 秒会议，随后从详情“本场待办”创建 `SERIES MOBILE ACTION 140543`。18020 读到 meeting `e297e061-3681-41ad-9d5d-2730efe3366b`、remote action `6c460617-289f-49ee-923b-68d114e00632`、client action `7f3ef856-3cfd-42b4-a2c3-733f39c0546e`，初始 `revision=1/status=pending`。
+- B 端强停冷启动后由账号根 pull 恢复同一会议；打开详情时 action pull 使菜单显示“本场待办（1）”，sheet 显示同一内容和“待完成”。B 在 App 内勾选完成后界面改为“已完成”，18020 保持 remote/client action ID 不变并推进为 `revision=2/status=completed`，写入 `completed_at_ms=1785183328467`。B 端 canonical SQLite 同时保存本机 action ID `7f3ef856-3cfd-42b4-a2c3-733f39c0546e`、同一 remote ID、`remote_revision=2/status=completed` 和相同完成时间。
+- A 端随后强停冷启动并重新进入同一详情，sheet 显示同一 action 的“恢复待办事项/已完成”，证明原创建端已回拉 revision 2，而不是 B 端生成同名副本。两端最近 3000 行 logcat 均未发现应用 FATAL、React Native exception、SQLite/schema error。
+- 这轮临时录音没有伪造 calendar series identity。系列投影的设备证据仍由下述真实未来 occurrence 夹具承担：同一 canonical action 完成后，下一次 `status='pending'` 查询会把它从“未完成事项”移除；本轮新增证据补齐的是该 action 状态可经另一移动实例更新并回到原设备。
 - `:app:assemblePreview --parallel --max-workers=$(nproc)`：通过；627 个 task，59 executed，耗时 34 秒。
 - 临时设备数据把原 `OccueneSmoke` 改为每周重复：2026-07-22 为已结束来源会议，2026-07-29 为未来 occurrence；来源 Summary 注入三条真实换行决定，并保留两条 pending action。UI tree 分别读到三条决定，而不是显示字面 `\n`。
 - 在未来 occurrence 点击历史事项，实际进入来源会议的整理结果并精确聚焦原 action。把该 action 标记完成后返回未来日程，该项从“未完成事项”消失，证明 projection 使用同一个 canonical action，没有复制文本。
@@ -83,5 +87,5 @@
 2. 真实账号历史授权、利用/隔离、引用边界、幂等与冷启动已完成；尚未在当前恢复的模拟器数据上制造未来系列 occurrence 并重跑新授权 sheet 录像。
 3. 多决定 citation 数量不等时会安全退回来源 Summary，不做模糊猜测。v13 之前已写入的纯文本来源块不能可靠反推 ledger；Summary 重生成若改变 section/item identity，语义相同的新决定仍可能被视为新来源实体。
 4. recurrence exception、`following` segment 和服务端拆分新 source ID 的身份规则已由 key 设计支持，但本轮只实测普通周重复，没有做完整编辑矩阵。
-5. 已使用真实测试账号和运行中 18020 完成不同会议来源归属与生成；跨移动设备 action 更新、并发冲突和远端 series identity 仍待候选抽查。非 Android 页面仍未接入该信息组。
+5. 已使用真实测试账号和运行中 18020 完成不同会议来源归属与生成；两个隔离 Android App 实例已补齐 action 创建端→第二端完成→创建端回拉的同 ID/revision 收敛。物理双机、并发冲突和远端 series identity 仍待候选抽查；非 Android 页面仍未接入该信息组。
 6. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或压力矩阵；只执行类型检查、最终 Preview 构建、定向模拟器交互、数据恢复和崩溃日志检查。
