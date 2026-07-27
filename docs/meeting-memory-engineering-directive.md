@@ -209,7 +209,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | SRC-01 | 日程、临时录音、文件导入统一为 `MeetingNote` | 本机与账号音视频、多录音、per-asset Transcript、账号附件线上对象同步、非 WAV 派生片段纵切闭环 | 第二设备抽查 |
 | PROC-01 | 五类处理独立状态与独立重试 | 本机闭环；RecordingAsset transcript 与独立 Summary 均有运行/恢复纵切 | 自动任务候选复核和账号长期重试收敛 |
 | CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机/线上账号双会话闭环；多录音运行合同与 `secondary + recovered` 通用上传源码已接通 | 恢复 secondary 的特定 App 运行样本；第二台移动设备抽查 |
-| NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机/线上账号双会话闭环 | 第二台移动设备冲突选择抽查 |
+| NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机/线上闭环；双 Android 实例断网冲突、选版与回拉收敛完成 | 物理双机、USB 与长离线抽查 |
 | TRN-01 | 搜索、跳转、按录音来源回听、高亮、复制/分享、重新生成 | 本机闭环；per-asset provenance 已运行；reprocessed 移动端/v31/overlay 纵切完成 | 运行服务的真实 reprocess job；候选版长录音抽查 |
 | ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机闭环；运行 action pull、协作者 revision 与双 Android 实例提醒重建/取消收敛完成 | 非协作 action 的真实冲突选择、物理双机抽查 |
 | SUM-01 | 有序结构化整理结果 | 本机/线上纵切闭环；四模板结构、durable 恢复、历史授权和幂等当前版本已运行 | 更多真人样本、附件授权质量和线上版本列表 |
@@ -1032,6 +1032,8 @@ journal v2 继续按 `userId + guest source ID` 保存每阶段完成位和错�
 - 详情页和录制页进入及回前台执行会议级 GET。完全相同的内容、编辑时间和客户端时间可以安全附着；存在未完成 outbox 或 unresolved conflict 时，不同云端内容不得覆盖本机。
 - 409/412 或 pull 分歧进入同一 `manual_note` conflict。旧 operation 被阻塞，状态槽显示“笔记同步冲突，点击处理”；版本 sheet 只提供本机/云端两个候选和一个提交动作。
 - 选择本机时先推进本机 revision/clock，再以当前云端 revision 创建新 operation；选择云端时原子应用云端内容或明确接受云端空白，并使当前 Summary 进入 `stale`。
+
+v104 已用两个隔离 Android App 实例完成真实冲突纵切：共同云端基线为 revision 14；B 端只阻断目标服务地址后编辑到本机 revision 20，保留 `base_remote_revision=14`、dirty 笔记和 6 个 pending outbox，A 端在线把不同内容提交为云端 revision 15。B 恢复网络并冷启动后，旧操作全部 blocked、pull 进入同一 unresolved conflict，页面仍保留本机内容；版本 sheet 同时展示本机/云端候选，选择本机后旧操作被 supersede，新 operation 把服务端推进为 revision 16 / `client_note_revision=21`。A 冷启动再从本机 revision 15 拉到 21。该证据关闭“双 Android 实例 App 冲突选择”功能项，但不冒充物理双机、USB 或长离线验收。
 
 #### Summary 输入
 
@@ -2007,7 +2009,7 @@ openOccurrenceMeeting
 1. 已确认并启动目标工作区的 18020/18035，运行数据库已实例化 additive schema；8020 的旧工作区未被替代使用。
 2. Meeting root、occurrence、manual note、action、collaboration、soft-delete 和 speaker correction/profile/reprocess capability 已运行；SPK-01 服务端纵切不再是批次 B 的功能阻塞。
 3. RecordingAsset 已从单主录音兼容 API 扩成多资产 v2：稳定 asset ID、role、revision、upload operation、独立转写输入和下载列表均已在目标 18020 运行；旧主录音端点继续投影兼容。移动端 v104 已完成 WorkManager 真实账号上传，并修复 native/JS 并发 412 覆盖成功状态。
-4. 测试账号两个独立登录会话已覆盖 create/update、相同请求重放、409/412、delete/restore、occurrence、笔记、action 和第二会话 pull；App 离线队列、冲突选择页及第二台物理设备留到对应纵切/候选抽查。
+4. 测试账号两个独立登录会话已覆盖 create/update、相同请求重放、409/412、delete/restore、occurrence、笔记、action 和第二会话 pull；NOTE-01 又由两个隔离 Android App 实例完成断网 outbox、冲突选择和双端回拉。其他实体的 App 离线冲突纵切及第二台物理设备仍留到对应纵切/候选抽查。
 5. 普通包账号根写与独立账号上传写均已开启；上传和逐资产转写每个认证会话仍要求 fresh `recording_assets_v2=true`，保留 capability fail-closed 和旧版本回滚窗口。per-asset provenance、v26 transcription job、独立 Summary 恢复/成功引用、四模板及 speaker correction/profile 已完成；批次 B 只剩 GPU 自动 ASR 与第二移动设备抽查。
 
 ### 15.4 批次 C：补齐剩余功能量

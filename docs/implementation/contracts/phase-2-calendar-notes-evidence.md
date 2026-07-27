@@ -4,9 +4,9 @@
 
 ## 当前结论
 
-NOTE-01 与 CAL-01 已从本机纵向路径扩展到运行服务的账号双会话闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、安全附着、冲突保留和删除后 orphan 均已接通；服务端真实完成 root 与 occurrence 原子创建、幂等重放、计划快照不可变、active/orphaned revision、人工笔记跨会话修改、陈旧写拒绝和删除/恢复保留。日历详情、通知动作和 Widget 明确动作在没有本机关联时共用 occurrence 云端回查；已有本机关联仍保持离线可打开。游客迁移 journal 继续按实体分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
+NOTE-01 与 CAL-01 已从本机纵向路径扩展到运行服务的账号双会话闭环：本机 occurrence 唯一绑定、独立 outbox、能力探测、会议级 GET/PUT、按 occurrence 查询、乐观并发、安全附着、冲突保留和删除后 orphan 均已接通；服务端真实完成 root 与 occurrence 原子创建、幂等重放、计划快照不可变、active/orphaned revision、人工笔记跨会话修改、陈旧写拒绝和删除/恢复保留。NOTE-01 又由两个隔离 Android App 实例完成实际断网分歧、冷启动冲突恢复、版本 sheet 选择和双端回拉收敛。日历详情、通知动作和 Widget 明确动作在没有本机关联时共用 occurrence 云端回查；已有本机关联仍保持离线可打开。游客迁移 journal 继续按实体分别记账、分别重试；单个录音失败不会阻断其他阶段或下一场会议。
 
-目标 18020/18035 已由目标工作区运行，`manual_notes_v2` 与 `occurrence_links_v2` capability、认证 GET/PUT、持久幂等结果和 revision precondition 均在实际数据库上生效。运行检查使用同一账号的两个独立登录会话，不等于第二台物理设备，也不替代 App outbox 的断网/强杀恢复或真实游客迁移。两个设备创建不同本机会议时，客户端仍按既有合同保留本机会议和全部内容为独立记录，把原 occurrence 身份写入不可变 detached history，并为可读取或仍在录制的本机录音持久化恢复任务。已结束录音的本机复制只有合成模拟器证据；多 RecordingAsset 的服务端上传、转写和跨设备下载仍未实现。
+目标 18020/18035 已由目标工作区运行，`manual_notes_v2` 与 `occurrence_links_v2` capability、认证 GET/PUT、持久幂等结果和 revision precondition 均在实际数据库上生效。此前账号合同检查使用同一账号的两个独立登录会话；本轮 NOTE-01 进一步使用两个独立 Android App 数据实例和真实网络阻断验证 App outbox、冲突保留与选版收敛，但仍不等于第二台物理设备或 USB 真机。两个设备创建不同本机会议时，客户端仍按既有合同保留本机会议和全部内容为独立记录，把原 occurrence 身份写入不可变 detached history，并为可读取或仍在录制的本机录音持久化恢复任务。多 RecordingAsset 的服务端登记、上传、下载和逐资产转写合同已在后续批次完成；已结束录音的 occurrence 冲突复制仍只有合成模拟器证据，尚缺恢复 secondary 的特定 App 上下行样本。
 
 ## 已实现合同
 
@@ -48,6 +48,7 @@ Component: 我的笔记编辑器与详情五 Tab
 - `[PRODUCT]`: 人工主稿与 AI 结果分离；录音页底部控制切页不动；所有术语和提示使用中文。
 - `[SOURCE]`: 复用既有 source-mapped Minutes surface、text/divider/primary token 和原生 pager 容器；飞书 7.71.8 没有与老记人工笔记完全相同的组件，不声称直接复刻。
 - `[DEVICE]`: 模拟器 1080×2400、420 dpi、手势导航下，五页可切换、输入和冷启动恢复通过；临时调整为 480 dpi 的 360 dp 等效宽度后五个 Tab 均完整可读，前三个核心 Tab 无裁切。
+- `[DEVICE]`: v104 的 1440×3120 与 1080×2274 两个隔离 Android App 实例中，冲突状态槽可点击，版本 sheet 同时显示可区分的本机/云端正文与更新时间；未选择时提交按钮禁用，选择本机后按钮启用并完成收敛。
 - `[INFERENCE]`: 16 sp 无卡片纯文本编辑器、固定 32 dp 状态槽、录音页双内容页和详情页 notes-first 顺序。
 - `[INFERENCE]`: 远端冲突复用既有 Minutes 版本选择 sheet：12 dp 顶角、16 dp 页边距、6 dp 卡片/按钮、48 dp 单一提交动作及约 300 ms 全高度进退；飞书没有老记人工笔记云冲突的直接页面。
 - Intentional deviation: 当前没有富文本工具栏、AI 渐变、保存按钮或持续“自动保存”提示。
@@ -87,6 +88,9 @@ Component: 会议详情多录音选择
 - 服务端 occurrence 隔离候选：`tests/test_occurrence_links_v2.py` 为 `2 passed`；覆盖 create/replay/lookup/orphan、用户内唯一冲突、快照不可变和账号隔离。
 - 服务端目标源码同步后复跑 occurrence 窄合同：`2 passed`；6 份部署文件与 overlay SHA-256 逐项一致，旧文件备份位于 `backups/20260724-occurrence-links-v2-v1`，18020/18035 未启动。
 - 运行服务账号双会话：20 个断言通过，覆盖 root+occurrence 原子创建、响应丢失等价的相同请求重放、occurrence lookup 与 active/orphaned/active revision、不可变计划快照 409、root/occurrence/manual-note 陈旧版本 412、第二会话笔记更新、root pull、soft-delete、子实体隐藏、restore 后 occurrence/note 原版本保留；测试根最终软删除。该证据不冒充第二台物理设备。
+- 两个隔离 Android App 实例先从同一云端笔记 revision 14 建立共同基线。B 端只阻断目标服务地址后继续编辑，本机落为 revision 20、`base_remote_revision=14`、`dirty=1`，保留 6 个 pending outbox；A 端保持在线并把不同版本提交为云端 revision 15。
+- B 端恢复网络并强停冷启动后，6 个陈旧 outbox 进入 blocked，详情 pull 记录 `status=conflicted`，本机 revision 20 和正文未被覆盖；App 状态槽显示“笔记同步冲突，点击处理”，版本 sheet 同时呈现本机与云端候选。选择“本机版本”后冲突原子标为 resolved，旧操作以 `superseded_by_conflict_resolution` 完成，新操作把服务端推进到 revision 16 / `client_note_revision=21`，B 端为 `dirty=0`。
+- A 端随后强停冷启动，`manual_note_detail_pull` 从本机 revision 15 更新到 21，页面与服务端均显示 B 端明确选择的版本；两端没有应用 FATAL、React Native 致命异常或 SQLiteException。该轮证明双 Android 实例的实际断网 outbox、冲突选择和回拉收敛，不冒充物理双机或 USB 真机。
 - 模拟器保留数据覆盖安装：PackageManager 返回 `Success`，随后冷启动无应用进程 FATAL。
 - 详情页五个 pager 页面真实渲染；输入临时笔记后切换到文字记录再返回，内容保持。
 - 输入后强制停止 App 并冷启动，已落盘内容恢复；随后清除临时内容并再次冷启动，确认测试正文未遗留。
@@ -104,16 +108,16 @@ Component: 会议详情多录音选择
 
 - 路径：`android/app/build/outputs/apk/preview/app-preview.apk`
 - 包名：`com.laoji.app`
-- 版本：`1.0.0-source-preview`（versionCode 103）
-- 大小：90,702,684 bytes
-- SHA-256：`1fd6ee81c27a5957d6ab68e38c0fa0dfbe294c7757fd84fe9609203b17b550d0`
-- 安装状态：已在 `emulator-5556` 保留测试账号和数据库覆盖安装；账号根 canonical read/write 与真实 action pull 已接通，没有应用 FATAL、React Native 致命错误或 SQLite 损坏/缺表日志。当前没有 USB 真机。
+- 版本：`1.0.0-source-preview`（versionCode 104）
+- 大小：91,061,768 bytes
+- SHA-256：`618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`
+- 安装状态：已在两个隔离 Android App 实例保留账号和数据库运行；NOTE-01 断网冲突选择、ACT-01 提醒及 SERIES-01 行动项均使用该包完成双端收敛，没有应用 FATAL、React Native 致命错误或 SQLite 损坏/缺表日志。当前没有 USB 真机。
 
 ## 未决项与停线边界
 
-1. 人工笔记与 occurrence v2 已有运行 capability、真实鉴权读写和双会话收敛；第二台物理设备、App 冲突选择页面及断网 outbox 恢复仍待候选抽查，不能由 API 双会话替代。
+1. 人工笔记 v2 已有运行 capability、真实鉴权读写，并由双 Android App 实例完成断网 outbox、冲突选择和回拉收敛；仍缺第二台物理设备、USB 真机、长离线/弱网和编辑中强杀抽查。Occurrence v2 的真实跨设备双会议制造仍未完成。
 2. 游客迁移 v2 已有恢复 journal 和本机账号作用域实现，但尚未执行完整真实迁移任务；仍需 event/meeting 幂等响应后的退出重进、单音频失败不阻塞和 link 回查。
-3. Occurrence 双会议的本机独立保留、detached history、可恢复录音复制、多录音播放与当前录音分享已用合成模拟器闭环；真实跨设备双会议制造和目标服务多 RecordingAsset 上下行仍未完成。
+3. Occurrence 双会议的本机独立保留、detached history、可恢复录音复制、多录音播放与当前录音分享已用合成模拟器闭环；目标服务多 RecordingAsset 上下行已在后续批次完成，但真实跨设备双会议制造及恢复 secondary 的特定 App 上下行样本仍未完成。
 4. USB 真机未连接，录音页键盘/inset、切页视频、停止录音前 flush 和覆盖安装仍需真机复核。
 5. 普通包已完成游客和账号根 canonical cutover；账号上传写继续关闭。
 6. 通知和 Widget 的无本机关联回查、同会议 409/412 安全收敛及不同会议恢复已有客户端代码路径；跨入口与第二台物理设备仍留到候选抽查。
