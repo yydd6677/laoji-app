@@ -122,6 +122,7 @@ import {
   meetingTemplateById,
   processingStatusesFromStages,
   secureClientIdFactory,
+  transitionProcessingStage,
   type MeetingProcessingStatuses,
   type MeetingSummaryAttachmentAuthorization,
   type MeetingTemplate,
@@ -287,6 +288,30 @@ type CanonicalProcessingSnapshot = {
   recordingAssets: readonly RecordingAssetRecord[];
   recordingMergeRecovery: MeetingRecordingMergeRecoveryState;
 };
+
+function reconcileRecoveredSummaryStage(
+  snapshot: CanonicalProcessingSnapshot | null,
+  document: MeetingSummaryDocument | null,
+): CanonicalProcessingSnapshot | null {
+  if (!snapshot || !document) return snapshot;
+  const current = snapshot.stages.find(stage => stage.stage === 'summary');
+  if (
+    !current
+    || current.status === 'ready'
+    || current.status === 'stale'
+    || document.completedAtMs < current.updatedAtMs
+  ) return snapshot;
+  const recovered = transitionProcessingStage(current, {
+    stage: 'summary',
+    status: document.status,
+    progress: 1,
+    jobId: null,
+  }, Math.max(current.updatedAtMs, document.completedAtMs));
+  return {
+    ...snapshot,
+    stages: snapshot.stages.map(stage => stage.stage === 'summary' ? recovered : stage),
+  };
+}
 
 const EMPTY_PROCESSING_STATUSES: MeetingProcessingStatuses = {
   capture: 'not_started',
@@ -1266,7 +1291,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setLoadingSummary(false);
 
     setLoadingTranscript(true);
-    void (async () => {
+    const transcriptLoad = (async () => {
       let baseline = cachedTranscript;
       let baselineCached = cachedTranscript.length > 0;
       let hasStableFinal = false;
@@ -1415,6 +1440,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (alive && isCurrentPageRequest(transcriptRequest)) setLoadingTranscript(false);
       }
     })();
+    void transcriptLoad;
 
     const summaryRequest = beginPageRequest(meeting.id, 'summary');
     void (async () => {
@@ -1431,7 +1457,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           setSummaryCached(true);
         }
       }
-      if (!meeting.hasSummary || isGuest || !accessToken) return;
+      // The list snapshot can still say hasSummary=false when a durable task
+      // finishes while this account is signed out or the App is not polling.
+      // The authenticated final endpoint is a cheap nullable read (404 ->
+      // null), so it must remain the recovery authority on every detail open.
+      if (isGuest || !accessToken) return;
       setLoadingSummary(true);
       setSummaryProgress('正在同步整理结果');
       try {
@@ -1442,9 +1472,32 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         const text = meetingSummaryToText(normalized);
         if (normalized && text) {
           const generatedDocument = summaryDocumentFor(meeting.id, normalized);
+          setSummaryError('');
           try {
-            const cacheResult = await saveCachedSummary(meeting.id, normalized);
+            const saveRecoveredSummary = async () => {
+              try {
+                return await saveCachedSummary(meeting.id, normalized);
+              } catch (reason) {
+                const beforeRetry = meetingScopeKey
+                  ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
+                  : null;
+                if (beforeRetry?.kind !== 'realtime_draft') throw reason;
+                await transcriptLoad;
+                if (!alive || !isCurrentPageRequest(summaryRequest)) throw reason;
+                const afterRetry = meetingScopeKey
+                  ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
+                  : null;
+                if (!afterRetry || afterRetry.kind === 'realtime_draft' || afterRetry.completing) {
+                  throw reason;
+                }
+                return saveCachedSummary(meeting.id, normalized);
+              }
+            };
+            const cacheResult = await saveRecoveredSummary();
             if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+            setCanonicalProcessingSnapshot(current => (
+              reconcileRecoveredSummaryStage(current, generatedDocument)
+            ));
             const shouldReadCanonical = Boolean(
               meetingScopeKey
               && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
@@ -2076,6 +2129,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           const cacheResult = await saveCachedSummary(currentMeeting.id, generated);
           cached = cacheResult.mirrorStatus !== 'stale_scope';
           if (isCurrentPageRequest(summaryRequest)) {
+            setCanonicalProcessingSnapshot(current => (
+              reconcileRecoveredSummaryStage(current, generatedDocument)
+            ));
             const shouldReadCanonical = Boolean(
               meetingScopeKey
               && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),

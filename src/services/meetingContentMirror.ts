@@ -612,6 +612,12 @@ export function mirrorLegacySummaryContent(
         const currentProtected = current
           ? await transaction.hasUserProtectedSummaryState(current.id, scopeKey)
           : false;
+        if (existingVersion) {
+          const remainsCurrent = current?.id === versionId;
+          replaceLegacyProjection = remainsCurrent && !currentProtected;
+          mirrorStatus = remainsCurrent ? 'unchanged' : 'preserved_existing_candidate';
+          return;
+        }
         const incomingLegacyCanReplace = document.templateId !== 'legacy'
           || !current
           || isLegacyProvider(current.generatedBy);
@@ -646,8 +652,7 @@ export function mirrorLegacySummaryContent(
           createdAtMs: document.createdAtMs,
           completedAtMs: generatedAtMs,
         };
-        const version = existingVersion ?? newVersion;
-        await transaction.saveSummaryVersion(version, sections, actions, scopeKey, { activate, citations });
+        await transaction.saveSummaryVersion(newVersion, sections, actions, scopeKey, { activate, citations });
         const stage = await transaction.getStage(note.id, scopeKey, 'summary');
         if (!stage) throw new Error('meeting summary processing stage is missing');
         const nowMs = Math.max(Date.now(), generatedAtMs, stage.updatedAtMs, note.updatedAtMs);

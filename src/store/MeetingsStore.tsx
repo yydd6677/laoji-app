@@ -1150,7 +1150,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         canonicalWrite: true,
         throwOnFailure: true,
       });
-      if (summary && result.canonicalRevision === null) {
+      const existingSummaryConfirmed = result.status === 'unchanged'
+        || result.status === 'preserved_existing_candidate';
+      if (summary && result.canonicalRevision === null && !existingSummaryConfirmed) {
         throw new Error('会议整理结果未能写入本机数据版本，请重试。');
       }
       const owned = await loadCanonicalOwnedScope();
