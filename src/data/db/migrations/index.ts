@@ -32,6 +32,7 @@ import { transcriptReprocessTasksV31 } from './0031TranscriptReprocessTasks';
 import { meetingAttachmentSyncV32 } from './0032MeetingAttachmentSync';
 import { meetingListOrderV33 } from './0033MeetingListOrder';
 import { meetingMarkerSyncV34 } from './0034MeetingMarkerSync';
+import { meetingQuestionScopesV35 } from './0035MeetingQuestionScopes';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -69,6 +70,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingAttachmentSyncV32,
   meetingListOrderV33,
   meetingMarkerSyncV34,
+  meetingQuestionScopesV35,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -105,4 +107,5 @@ export { TRANSCRIPT_REPROCESS_TASKS_V31_SQL } from './0031TranscriptReprocessTas
 export { MEETING_ATTACHMENT_SYNC_V32_SQL } from './0032MeetingAttachmentSync';
 export { MEETING_LIST_ORDER_V33_SQL } from './0033MeetingListOrder';
 export { MEETING_MARKER_SYNC_V34_SQL } from './0034MeetingMarkerSync';
+export { MEETING_QUESTION_SCOPES_V35_SQL } from './0035MeetingQuestionScopes';
 export type { MeetingDatabaseMigration } from './types';

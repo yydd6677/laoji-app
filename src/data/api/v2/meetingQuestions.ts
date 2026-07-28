@@ -20,6 +20,7 @@ export interface MeetingQuestionSummaryEvidenceWire {
 export interface MeetingQuestionContextWire {
   ordinal: number;
   question: string;
+  answer_scope: 'meeting' | 'general';
   answer_kind: 'answer' | 'insufficient';
   answer: string;
   citations: readonly {
@@ -58,6 +59,7 @@ export interface MeetingQuestionResponseWire {
   transcript_revision_id: string;
   summary_version_id: string | null;
   manual_note_revision: number | null;
+  answer_scope: 'meeting' | 'general';
   answer_kind: 'answer' | 'insufficient';
   answer: string;
   citations: readonly {

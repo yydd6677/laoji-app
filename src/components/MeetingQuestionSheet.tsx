@@ -88,6 +88,25 @@ function QuestionTurnView({
   );
 }
 
+function PendingQuestionView({ question }: { question: string }) {
+  const { colors } = getFeishuTokens();
+  return (
+    <View
+      style={styles.turn}
+      testID="meeting-question-pending-turn"
+      accessibilityLiveRegion="polite"
+    >
+      <View style={[styles.questionBubble, { backgroundColor: colors.primarySoft }]}>
+        <Text selectable style={[styles.questionText, { color: colors.textTitle }]}>{question}</Text>
+      </View>
+      <View style={[styles.answerCard, styles.loadingAnswer, { backgroundColor: colors.backgroundFloat }]}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={[styles.loadingAnswerText, { color: colors.textCaption }]}>正在回答</Text>
+      </View>
+    </View>
+  );
+}
+
 /**
  * [INFERENCE] LaoJi-only Minutes secondary page. The title bar, state hierarchy,
  * input geometry, tokens and motion follow the nearest Feishu page families.
@@ -114,6 +133,7 @@ export function MeetingQuestionSheet({
   const { width } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
   const listRef = useRef<FlatList<MeetingQuestionTurn> | null>(null);
+  const inputRef = useRef<TextInput | null>(null);
   const closeRef = useRef(onClose);
   const citationRef = useRef(onOpenCitation);
   const mountedRef = useRef(visible);
@@ -126,6 +146,7 @@ export function MeetingQuestionSheet({
   const [sending, setSending] = useState(false);
   const [session, setSession] = useState<MeetingQuestionSession | null>(null);
   const [draft, setDraft] = useState('');
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   closeRef.current = onClose;
@@ -189,6 +210,7 @@ export function MeetingQuestionSheet({
       setMounted(true);
       setClosing(false);
       setDraft('');
+      setPendingQuestion(null);
       setStatus('');
       progress.stopAnimation();
       progress.setValue(0);
@@ -210,9 +232,9 @@ export function MeetingQuestionSheet({
   }, [progress]);
 
   useEffect(() => {
-    if (!session?.thread.turns.length) return;
+    if (!session?.thread.turns.length && !pendingQuestion) return;
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  }, [session?.thread.turns.length]);
+  }, [pendingQuestion, session?.thread.turns.length]);
 
   if (!mounted) return null;
   const turns = session?.thread.turns ?? [];
@@ -222,10 +244,15 @@ export function MeetingQuestionSheet({
 
   const send = async () => {
     if (!canSend || !session || !scopeKey) return;
-    const question = draft.trim();
+    const submittedDraft = draft;
+    const question = submittedDraft.trim();
     const controller = new AbortController();
     requestControllerRef.current?.abort();
     requestControllerRef.current = controller;
+    setPendingQuestion(question);
+    setDraft('');
+    inputRef.current?.blur();
+    Keyboard.dismiss();
     setSending(true);
     setError('');
     setStatus('');
@@ -240,9 +267,11 @@ export function MeetingQuestionSheet({
       });
       if (!mountedRef.current || controller.signal.aborted) return;
       setSession(next);
-      setDraft('');
+      setPendingQuestion(null);
     } catch (reason) {
       if (!mountedRef.current || controller.signal.aborted) return;
+      setPendingQuestion(null);
+      setDraft(submittedDraft);
       if (reason instanceof MeetingQuestionEvidenceChangedError) {
         await loadSession(includeManualNote, true);
         if (mountedRef.current) setStatus('会议内容已更新，已切换到新的问答记录。');
@@ -280,7 +309,7 @@ export function MeetingQuestionSheet({
       >
         <KeyboardAvoidingView
           style={styles.page}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <View style={[styles.titleBar, { backgroundColor: colors.backgroundBody, borderBottomColor: colors.divider }]}>
             <Pressable
@@ -346,24 +375,24 @@ export function MeetingQuestionSheet({
             <FlatList
               ref={listRef}
               style={styles.list}
-              contentContainerStyle={[styles.listContent, turns.length === 0 && styles.emptyListContent]}
+              contentContainerStyle={[
+                styles.listContent,
+                turns.length === 0 && !pendingQuestion && styles.emptyListContent,
+              ]}
               data={turns}
               keyExtractor={turn => turn.id}
               renderItem={({ item }) => <QuestionTurnView turn={item} onCitation={openCitation} />}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              ListEmptyComponent={(
+              ListEmptyComponent={!pendingQuestion ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="chatbubble-ellipses-outline" size={32} color={colors.iconTertiary} />
                   <Text style={[styles.emptyText, { color: colors.textCaption }]}>暂无问答</Text>
                 </View>
-              )}
-              ListFooterComponent={sending ? (
-                <View style={[styles.answerCard, styles.loadingAnswer, { backgroundColor: colors.backgroundFloat }]}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.loadingAnswerText, { color: colors.textCaption }]}>正在查找会议来源</Text>
-                </View>
               ) : null}
+              ListFooterComponent={pendingQuestion
+                ? <PendingQuestionView question={pendingQuestion} />
+                : null}
             />
           ) : (
             <View style={styles.centerState}>
@@ -403,6 +432,7 @@ export function MeetingQuestionSheet({
               </View>
               <View style={styles.inputRow}>
                 <TextInput
+                  ref={inputRef}
                   value={draft}
                   onChangeText={value => {
                     setDraft(value);

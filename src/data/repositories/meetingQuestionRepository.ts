@@ -26,6 +26,7 @@ type TurnRow = {
   remote_turn_id: string | null;
   ordinal: number;
   question: string;
+  answer_scope: MeetingQuestionTurn['answerScope'];
   answer_kind: MeetingQuestionTurn['answerKind'];
   answer: string;
   created_at_ms: number;
@@ -74,7 +75,7 @@ function assertId(value: string, label: string): string {
 }
 
 function assertText(value: string, label: string, maximum: number): string {
-  const normalized = value.normalize('NFKC').replace(/\r\n?/g, '\n').trim();
+  const normalized = value.normalize('NFC').replace(/\r\n?/g, '\n').trim();
   if (!normalized || normalized.length > maximum || normalized.includes('\u0000')) {
     throw new Error(`${label}无效`);
   }
@@ -128,7 +129,7 @@ async function projectThread(
   const activeDatabase = database ?? await openMeetingDatabase();
   const [turnRows, citationRows] = await Promise.all([
     activeDatabase.getAllAsync<TurnRow>(
-      `SELECT id, request_id, remote_turn_id, ordinal, question, answer_kind,
+      `SELECT id, request_id, remote_turn_id, ordinal, question, answer_scope, answer_kind,
               answer, created_at_ms, completed_at_ms
        FROM meeting_question_turns
        WHERE thread_id = ?
@@ -166,6 +167,7 @@ async function projectThread(
       remoteTurnId: turn.remote_turn_id,
       ordinal: turn.ordinal,
       question: turn.question,
+      answerScope: turn.answer_scope,
       answerKind: turn.answer_kind,
       answer: turn.answer,
       citations: citations.get(turn.id) ?? [],
@@ -297,14 +299,26 @@ export async function saveMeetingQuestionTurn(
   if (!Number.isSafeInteger(input.turn.ordinal) || input.turn.ordinal < 0) {
     throw new Error('问答轮次无效');
   }
-  if (input.turn.answerKind === 'answer' && input.turn.citations.length === 0) {
+  if (
+    input.turn.answerScope === 'meeting'
+    && input.turn.answerKind === 'answer'
+    && input.turn.citations.length === 0
+  ) {
     throw new Error('回答缺少会议来源');
   }
   if (
+    input.turn.answerScope === 'meeting'
+    &&
     input.turn.answerKind === 'insufficient'
     && (answer !== '当前会议记录中没有足够信息' || input.turn.citations.length !== 0)
   ) {
     throw new Error('无来源回答格式无效');
+  }
+  if (
+    input.turn.answerScope === 'general'
+    && (input.turn.answerKind !== 'answer' || input.turn.citations.length !== 0)
+  ) {
+    throw new Error('普通回答格式无效');
   }
   if (input.turn.citations.length > 20) throw new Error('回答引用数量过多');
 
@@ -330,6 +344,7 @@ export async function saveMeetingQuestionTurn(
         existing.id !== turnId
         || existing.ordinal !== input.turn.ordinal
         || existing.question !== question
+        || existing.answer_scope !== input.turn.answerScope
         || existing.answer_kind !== input.turn.answerKind
         || existing.answer !== answer
       ) {
@@ -387,14 +402,15 @@ export async function saveMeetingQuestionTurn(
     await database.runAsync(
       `INSERT INTO meeting_question_turns (
          id, thread_id, request_id, remote_turn_id, ordinal, question,
-         answer_kind, answer, created_at_ms, completed_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         answer_scope, answer_kind, answer, created_at_ms, completed_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       turnId,
       threadId,
       requestId,
       remoteTurnId,
       input.turn.ordinal,
       question,
+      input.turn.answerScope,
       input.turn.answerKind,
       answer,
       createdAtMs,

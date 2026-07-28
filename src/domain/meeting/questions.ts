@@ -1,4 +1,5 @@
 export type MeetingQuestionAnswerKind = 'answer' | 'insufficient';
+export type MeetingQuestionAnswerScope = 'meeting' | 'general';
 
 export type MeetingQuestionCitation =
   | {
@@ -31,6 +32,7 @@ export interface MeetingQuestionTurn {
   remoteTurnId: string | null;
   ordinal: number;
   question: string;
+  answerScope: MeetingQuestionAnswerScope;
   answerKind: MeetingQuestionAnswerKind;
   answer: string;
   citations: readonly MeetingQuestionCitation[];

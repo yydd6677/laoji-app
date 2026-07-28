@@ -88,7 +88,7 @@ async function sha256(value: string): Promise<string> {
 }
 
 function normalizedText(value: string, maximum: number): string {
-  return value.normalize('NFKC').replace(/\r\n?/g, '\n').trim().slice(0, maximum);
+  return value.normalize('NFC').replace(/\r\n?/g, '\n').trim().slice(0, maximum);
 }
 
 function sectionText(section: SummarySectionRecord): string {
@@ -273,6 +273,10 @@ function parseQuestionResponse(
     throw new Error('服务端返回的问答来源与本次会议不一致，结果未保存。');
   }
   const remoteTurnId = strictNullableString(response.remote_turn_id, '远端问答标识');
+  const answerScope = response.answer_scope;
+  if (answerScope !== 'meeting' && answerScope !== 'general') {
+    throw new Error('问答响应范围无效');
+  }
   const answerKind = response.answer_kind;
   if (answerKind !== 'answer' && answerKind !== 'insufficient') {
     throw new Error('会议问答响应状态无效');
@@ -326,11 +330,18 @@ function parseQuestionResponse(
       sourceExcerpt: excerpt(evidence.manualNote),
     };
   });
-  if (answerKind === 'answer' && citations.length === 0) {
+  if (answerScope === 'meeting' && answerKind === 'answer' && citations.length === 0) {
     throw new Error('会议回答缺少可定位来源，结果未保存。');
   }
-  if (answerKind === 'insufficient' && (answer !== INSUFFICIENT_ANSWER || citations.length !== 0)) {
+  if (
+    answerScope === 'meeting'
+    && answerKind === 'insufficient'
+    && (answer !== INSUFFICIENT_ANSWER || citations.length !== 0)
+  ) {
     throw new Error('会议无来源回答格式无效');
+  }
+  if (answerScope === 'general' && (answerKind !== 'answer' || citations.length !== 0)) {
+    throw new Error('普通问答响应格式无效');
   }
   const createdAtMs = strictTime(response.created_at_ms, '提问时间');
   const completedAtMs = strictTime(response.completed_at_ms, '回答时间');
@@ -340,6 +351,7 @@ function parseQuestionResponse(
     remoteTurnId,
     ordinal: request.expected_ordinal,
     question: request.question,
+    answerScope,
     answerKind,
     answer,
     citations,
@@ -385,6 +397,7 @@ export async function askMeetingQuestion(input: {
   const context = input.session.thread.turns.slice(-MAX_CONTEXT_TURNS).map(turn => ({
     ordinal: turn.ordinal,
     question: turn.question,
+    answer_scope: turn.answerScope,
     answer_kind: turn.answerKind,
     answer: turn.answer,
     citations: turn.citations.map(citation => ({
