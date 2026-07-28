@@ -5,6 +5,7 @@ import type {
 } from '../../data/repositories';
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
+import { requestMeetingSummarySync } from './summarySyncTrigger';
 
 const MAX_SUMMARY_SECTION_LENGTH = 20_000;
 
@@ -197,6 +198,8 @@ export class EditMeetingSummarySectionUseCase {
     });
 
     if (!result) throw new Error('meeting summary section edit produced no result');
-    return result;
+    const committed = result as EditMeetingSummarySectionResult;
+    if (committed.applied) requestMeetingSummarySync(input.scopeKey);
+    return committed;
   }
 }

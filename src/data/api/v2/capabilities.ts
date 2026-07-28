@@ -59,6 +59,7 @@ function normalizeCapabilities(value: unknown): MeetingCapabilities {
     meetingNotesV2: booleanField(value, 'meeting_notes_v2'),
     structuredSummaryV2: booleanField(value, 'structured_summary_v2'),
     summaryCitations: booleanField(value, 'summary_citations'),
+    summaryVersionsV1: booleanField(value, 'summary_versions_v1'),
     summaryAttachmentsText: booleanField(value, 'summary_attachments_text'),
     summaryAttachmentsImage: booleanField(value, 'summary_attachments_image'),
     meetingAttachmentsV1: booleanField(value, 'meeting_attachments_v1'),
@@ -109,6 +110,9 @@ async function readCache(): Promise<CapabilityCache | null> {
         meeting_notes_v2: isRecord(parsed.capabilities) ? parsed.capabilities.meetingNotesV2 : undefined,
         structured_summary_v2: isRecord(parsed.capabilities) ? parsed.capabilities.structuredSummaryV2 : undefined,
         summary_citations: isRecord(parsed.capabilities) ? parsed.capabilities.summaryCitations : undefined,
+        summary_versions_v1: isRecord(parsed.capabilities)
+          ? parsed.capabilities.summaryVersionsV1
+          : undefined,
         summary_attachments_text: isRecord(parsed.capabilities)
           ? parsed.capabilities.summaryAttachmentsText
           : undefined,
@@ -211,7 +215,7 @@ export async function loadMeetingCapabilities(
 export async function requireFreshMeetingCapability(
   capability: keyof Pick<
     MeetingCapabilities,
-    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingAttachmentsV1' | 'meetingMarkersV1' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'meetingContentSharesV1' | 'recordingAssetsV2' | 'transcriptReprocessV1' | 'manualNotesV2' | 'meetingTagsV1' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
+    'meetingNotesV2' | 'structuredSummaryV2' | 'summaryCitations' | 'summaryVersionsV1' | 'summaryAttachmentsText' | 'summaryAttachmentsImage' | 'meetingAttachmentsV1' | 'meetingMarkersV1' | 'meetingQuestionsV1' | 'actionItemsV2' | 'actionItemsPullV2' | 'meetingContentSharesV1' | 'recordingAssetsV2' | 'transcriptReprocessV1' | 'manualNotesV2' | 'meetingTagsV1' | 'occurrenceLinksV2' | 'speakerCorrections' | 'syncCursor'
   >,
   accessToken?: string | null,
 ): Promise<MeetingCapabilities> {

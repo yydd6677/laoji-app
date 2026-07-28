@@ -11,6 +11,7 @@ export interface LaoJiFeatureFlags {
   meetingTagSyncV1: boolean;
   meetingAttachmentSyncV1: boolean;
   meetingMarkerSyncV1: boolean;
+  meetingSummarySyncV1: boolean;
   meetingMediaImportExistingV1: boolean;
   meetingMediaClipsV1: boolean;
   meetingTranscriptReprocessV1: boolean;
@@ -69,6 +70,11 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     meetingMarkerSyncV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.meetingMarkerSyncV1 === true,
+    // Generated Summary content stays immutable; only the current pointer and
+    // explicit section overrides use the account outbox transport.
+    meetingSummarySyncV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
+      && extra.featureFlags?.meetingSummarySyncV1 === true,
     // Explicitly attaching imported media requires canonical multi-asset writes.
     meetingMediaImportExistingV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingMediaImportExistingV1 === true,

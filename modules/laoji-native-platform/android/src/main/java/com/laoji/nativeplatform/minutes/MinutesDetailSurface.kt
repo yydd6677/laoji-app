@@ -235,6 +235,15 @@ internal class MinutesDetailSurface(
         )
         return@setOnClickListener
       }
+      if (renderedState.summarySyncConflict) {
+        onAction(
+          mapOf(
+            "type" to "openSummarySyncConflict",
+            "meetingId" to renderedState.meetingId,
+          ),
+        )
+        return@setOnClickListener
+      }
       if (renderedState.recordingMergeStatusLabel.isNotBlank()) {
         if (!renderedState.recordingMergeActionEnabled) return@setOnClickListener
         onAction(
@@ -520,12 +529,14 @@ internal class MinutesDetailSurface(
     val mergeLabel = state.recordingMergeStatusLabel.trim()
     val label = when {
       state.rootSyncConflict -> "会议同步冲突"
+      state.summarySyncConflict -> "整理结果同步冲突"
       mergeLabel.isNotBlank() -> mergeLabel
       else -> state.processingStatusLabel.trim()
     }
     val retryStage = state.processingRetryStage
     val tone = when {
       state.rootSyncConflict -> "danger"
+      state.summarySyncConflict -> "danger"
       mergeLabel.isNotBlank() -> "warning"
       else -> state.processingStatusTone
     }
@@ -541,15 +552,17 @@ internal class MinutesDetailSurface(
       radiusDp = 6,
     )
     val hasMergeAction = mergeLabel.isNotBlank() && state.recordingMergeActionLabel.isNotBlank()
-    val hasAction = state.rootSyncConflict || hasMergeAction || retryStage != null
+    val hasAction = state.rootSyncConflict || state.summarySyncConflict || hasMergeAction || retryStage != null
     processingRetry.visibility = if (hasAction) View.VISIBLE else View.GONE
     processingRetry.isEnabled = when {
       state.rootSyncConflict -> true
+      state.summarySyncConflict -> true
       hasMergeAction -> state.recordingMergeActionEnabled
       else -> retryStage != null && !state.processingRetrying
     }
     processingRetry.text = when {
       state.rootSyncConflict -> "处理"
+      state.summarySyncConflict -> "处理"
       hasMergeAction -> state.recordingMergeActionLabel
       state.processingRetrying -> "重试中"
       else -> "重试"
@@ -558,7 +571,7 @@ internal class MinutesDetailSurface(
       statefulIconTint(actionColor, actionColor, MinutesPalette.disabled),
     )
     processingRetry.contentDescription = if (!hasAction) null else {
-      if (state.rootSyncConflict) "$label，处理"
+      if (state.rootSyncConflict || state.summarySyncConflict) "$label，处理"
       else if (hasMergeAction) "$label，${state.recordingMergeActionLabel}"
       else if (state.processingRetrying) "$label，正在重试" else "$label，重试"
     }

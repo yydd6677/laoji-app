@@ -129,6 +129,7 @@ export interface BuildNativeDetailSnapshotInput {
   processingStatusLabel?: string;
   processingStatusTone?: MinutesStatusTone;
   rootSyncConflict?: boolean;
+  summarySyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
   recordingMergeStatusLabel?: string;
@@ -697,6 +698,7 @@ export function buildNativeMinutesDetailSnapshot(
     processingStatusLabel: input.processingStatusLabel ?? '',
     processingStatusTone: input.processingStatusTone ?? 'neutral',
     rootSyncConflict: input.rootSyncConflict ?? false,
+    summarySyncConflict: input.summarySyncConflict ?? false,
     processingRetryStage: input.processingRetryStage,
     processingRetrying: input.processingRetrying ?? false,
     recordingMergeStatusLabel: input.recordingMergeStatusLabel ?? '',

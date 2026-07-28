@@ -217,6 +217,10 @@ module.exports = () => {
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_MARKER_SYNC_V1 ?? 'true').trim().toLowerCase(),
     );
+  const meetingSummarySyncV1 = localMeetingDbCanonicalWriteV1
+    && !['0', 'false', 'no', 'off'].includes(
+      String(process.env.EXPO_PUBLIC_MEETING_SUMMARY_SYNC_V1 ?? 'true').trim().toLowerCase(),
+    );
   const meetingContentShareLinksV1 = localMeetingDbCanonicalWriteV1
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_CONTENT_SHARE_LINKS_V1 ?? 'true').trim().toLowerCase(),
@@ -285,6 +289,7 @@ module.exports = () => {
         meetingTagSyncV1,
         meetingAttachmentSyncV1,
         meetingMarkerSyncV1,
+        meetingSummarySyncV1,
         meetingContentShareLinksV1,
         meetingMediaImportExistingV1,
         meetingMediaClipsV1,

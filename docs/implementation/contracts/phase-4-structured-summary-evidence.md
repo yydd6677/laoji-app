@@ -1,6 +1,6 @@
 # Phase 4 整理结果与行动：首个纵向切片
 
-状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变本机版本、本机行动项、提醒/日程、action outbox、冲突选择，以及服务端 action upsert/pull 已形成纵切。目标 18020 已取得非平凡 `general@1` 结果、四模板真实模型运行、canonical 引用、durable result 和移动端消费证据；两个隔离 Android App 实例又完成提醒意图同步、设备通知重建、跨端完成后的双端取消，以及非协作行动项的离线分歧、版本选择和双端回拉收敛。这仍不代表自动 ASR、线上版本列表或全账号跨设备同步已完成。
+状态：结构化整理结果、独立 Summary task、服务端引用生成与规范化、不可变版本、账号版本目录/当前指针/section 人工覆盖同步、本机行动项、提醒/日程、outbox 与冲突选择均已形成纵切。目标 18020 已取得四模板真实模型、canonical 引用、durable result、`summary_versions_v1` 运行合同和移动端消费证据；两个隔离 Android App 实例另完成 action 提醒及冲突收敛。仍未取得自动 ASR、Summary 物理双机或 USB 真机证据。
 
 ## 独立 Summary 运行增量
 
@@ -73,6 +73,13 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 
 会议级 pull 同步前远端上述 5 个 action 文件哈希与 provenance 版本一致，修改前备份为 `backups/20260724-action-items-v2-pull-v1`。隔离候选和正式目标源码均通过原两项 upsert 合同与一项所有权/分页/后续更新 cursor 合同，均为 `3 passed`；5 个正式目标文件与本机 overlay 哈希一致。后续 18020 已提供实时 capability 和真实账号拉取；跨物理设备与全账号 cursor 仍无运行证据。
 
+## SUM-03 账号版本同步增量
+
+- 服务端新增 owner-scoped `meeting_summary_versions_v1`、section、citation、current 与 operation 数据面；版本目录只投影不可变生成内容，只有 section 人工正文/引用可见性和 current 指针可写。两个写入口使用稳定 Idempotency-Key、If-Match revision 与客户端时钟，陈旧 revision 返回 412 和完整 `current`，key 被不同请求复用返回 409。
+- 目标 18020 已部署三个新路由并实时返回 `summary_versions_v1=true`；部署前文件保存在 `/home/zhong/laoji-service-platform/backups/20260729-summary-versions-v1`。远端 `.venv` 聚焦合同 `1 passed`；运行测试账号的 7 个真实版本覆盖目录、current 切换/恢复、section 正文与引用移除/恢复、幂等重放及两类陈旧 revision，最终生成正文哈希和用户可见内容均恢复。只重启 18020，18035 与旧 8020 未动。
+- 移动端 migration v37 保存远端 version/section/citation/current 映射，复用共享 outbox/conflict 表；账号 scope 在事务内保持收窄。编辑 section 和切换版本与本机 canonical mutation 同事务排队，fresh capability 才允许网络 claim；重启、前台和持久绝对唤醒恢复 retry。pull 只应用可证明的更高 revision或完全一致状态，后者以 `satisfied_by_pull` 结束待发送操作。
+- 409/412 不做 last-write-wins：详情状态条显示“整理结果同步冲突”，处理 sheet 展示本机/云端正文与更新时间，必须先单选再提交。保留本机会基于云端 revision 生成新 operation；使用云端会应用明确 payload 并结束旧操作；身份、revision、引用集合或本机快照变化时 fail closed。
+
 ## UI 证据分类
 
 组件：结构化整理结果与引用
@@ -125,12 +132,22 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - `[PRODUCT]`：标题为“编辑整理内容”，只保留关闭、正文、已有引用、条件式“恢复生成内容”和“保存”；时间引用可通过明确的关闭图标移除，所有错误为中文，不增加说明书式帮助文案。
 - `[INFERENCE]`：编辑入口位于 section 标题行右侧；引用使用 44dp 触控目标内的 quiet-blue 时间 chip。Android 软键盘出现时整层上移，较小高度由正文区滚动，固定错误槽与提交按钮不被遮挡。
 
+组件：整理结果同步冲突 sheet
+
+- Classification：LaoJi-only；最近容器为 Minutes/UD bottom sheet 与版本选择列表，不声称飞书存在同一账号冲突功能。
+- `[SOURCE]`：使用 12dp 顶角、16dp 页面边距、6dp 选项边框和 primary button、48dp 提交高度、17sp 提交文字、语义 mask/surface/divider/primary/pressed/disabled/danger，以及约 300ms 全高度进退。
+- `[PRODUCT]`：只显示“本机版本、云端版本、同步冲突”等中文术语，不显示 wire JSON；必须明确选择后才能提交，保存期间尺寸和状态槽不移动。
+- `[INFERENCE]`：两个对等单选版本块加底部单一提交动作，是 LaoJi 保护人工整理内容所需；冲突入口复用详情固定状态条，避免另建说明页。
+
 ## 轻量验证
 
 - `npx tsc --noEmit --pretty false`：通过。
 - `git diff --check`：通过。
 - `:app:compilePreviewKotlin`：通过。
 - `:app:assemblePreview`：通过。
+- SUM-03 服务端 overlay 同步前备份为 `/home/zhong/laoji-service-platform/backups/20260729-summary-versions-v1`；目标 `.venv` 聚焦合同 `1 passed`。实时 18020 health、capability 和 OpenAPI 均包含版本能力，未登录目录返回 401。测试账号对 7 个版本完成目录/current/section/引用/幂等/409/412 HTTP 纵切，测试 operation 清理后运行库 `quick_check=ok`，current 恢复为 `b03d03ab-fc10-4dd0-94ff-99c30a348e7a` revision 9。
+- 保留数据的 `emulator-5556` 由 v36 升至 v37：会议数据计数不减、`quick_check=ok`、`foreign_key_check=0`；真实会议映射 7 个远端版本，current 与 18020 一致，初始和最终均无未完成 Summary outbox 或 unresolved conflict。Debug 冷启动取得 `summary_versions_pull versions=7/conflicts=0`，版本目录与 section 编辑 sheet 均可打开并无写入。
+- 可回滚离线夹具先证明在线相同状态会自动收敛，再在飞行模式下显示详情冲突条及本机/云端选择 sheet；两种单选均正确切换提交动作。保留本机后冲突变为 resolved、outbox 为 pending；恢复网络后同内容由 pull 收敛为 `completed/satisfied_by_pull`、attempt 仍为 0。两轮均恢复原数据库，最终 unresolved Summary conflict 和未完成 outbox 为 0。
 - SUM-03 本批在保留数据的 `emulator-5556` 完成当前 section 编辑、页面即时刷新、强停冷启动保留、“恢复生成内容”及再次冷启动；恢复后生成原文精确回到页面，人工修改标记清除。另切换到标准 LatinIME 复现并修复了初版只剩标题栏、正文与保存按钮被键盘遮挡的问题；修复后输入区、恢复操作和 48dp 保存按钮均位于键盘上方。logcat 无应用 FATAL、React Native 致命异常或 SQLiteException。
 - v35 保留数据覆盖安装后正常读取既有会议与版本，证明 v36 citation 覆盖列已迁移并参与普通查询。真实 `V3_CANDIDATE_SPOKEN` 的“决定”section 初始显示 `00:00/00:20/00:50`；编辑层移除 `00:00` 后页面和冷启动均只显示后两条，section 标记人工修改；“恢复生成内容”后 3 条引用全部回归且标记清除。两轮恢复成功，最终切回测试前的 03:00“访谈”当前版本并恢复 ADB Keyboard。首次旧进程恢复曾返回通用失败，后续包加入不含用户正文的 `meeting_summary_section_edit` 原因审计；新包冷启动及重复恢复未再出现该审计或失败。
 - action sync 本批再次通过 TypeScript、diff whitespace、Preview Kotlin 与 assemble；后续运行批次已在目标 18020 取得 fresh action capability、测试账号写入/pull 和真实冲突选择。此前端口未监听只保留为首次同步时的历史边界，8020 仍来自另一旧工作区。
@@ -164,12 +181,14 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 最终 Preview 首次启动后再次只读归档，SQLite 为 `user_version=8`、meeting 1、action/outbox/conflict 均为 0；`remote_revision`、`request_payload_json`、`claim_token` 和三个目标索引均存在，`foreign_key_check` 无输出。post 归档 SHA-256 为 `5c92f86d803b1fb6d1fb519a1f6d9c74879876e4544ff643b4b2fd5a31d73d21`。
 - 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 05:16:01 +0800`，大小 `91,061,920` bytes，SHA-256 `46a4e412dfa3e3e055c6671a7506a4a4288e2faeb86334c649d93213d41a1ec8`。该包曾完成上述 action 冲突双端收敛；本轮未触碰既有第二模拟器。
 - 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 00:51:07 +0800`，大小 `91,083,336` bytes，SHA-256 `eeb63d04bf49edb273a820233f206aff0be170be3d2050e01712a8e0abfa75cf`。已被 v36 引用覆盖候选取代。
-- SUM-03 当轮 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 01:17:52 +0800`，大小 `91,091,112` bytes，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。该包已保留数据覆盖安装到 `emulator-5556` 并完成上述 SUM-03、v36 引用覆盖和正常软键盘纵切；最新候选包身份以 [`candidate-v3-evidence.md`](candidate-v3-evidence.md) 为准，USB 仍已断开。
+- 上一 SUM-03 本机版 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 01:17:52 +0800`，大小 `91,091,112` bytes，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。该包已被账号版本同步候选取代。
+- 上一 SUM-03 账号同步 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 04:20:11 +0800`，大小 `91,159,536` bytes，SHA-256 `89cb34ff577b95fecaef4e5aeaf6ebd06c9c3f46c24b9438a7b2d84a04fffd0c`。该包已完成 7 版本目录和离线冲突纵切，随后被最终收尾包取代。
+- 最终 SUM-03 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 04:32:29 +0800`，大小 `91,159,636` bytes，SHA-256 `9e63a7c7bd8f79b22338341bc91e44ad703191e56d0cb1cedb0fc9ac23ffe21c`。该包包含损坏冻结 payload 的 `invalid_local_payload` 终止处理；已保留数据覆盖安装到 `emulator-5556`，release bundle 冷启动后仍读取 7 个版本、0 个冲突、0 个待处理同步操作，前台页面非空，crash buffer 无记录，未见应用 FATAL、React Native 致命异常或 SQLiteException。USB 已断开，未写成真机证据。
 
 ## 未完成边界
 
-1. 版本列表、当前指针切换、section 人工覆盖和引用移除目前只覆盖本机 canonical 数据；没有跨设备当前版本/人工内容同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；更细版本预览仍未实现。
+1. 版本列表、当前指针切换、section 人工覆盖和引用移除已完成本机/线上纵切、离线 outbox 和显式冲突选择；仍缺物理双机往返、USB 真机与长离线抽查。目录当前一次返回受控数量，尚无分页；更细版本预览后置。
 2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412、显式版本选择、双 Android 实例提醒及非协作 action 冲突收敛均已有运行证据；仍缺物理双机收敛、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
-3. 四模板均取得真实模型 section/action 与 durable identity，定向访谈又取得四类 section 和 5 个 canonical 引用；仍缺自动 ASR 直连样本、更多真人/长会议与历史/附件授权质量抽查，以及线上版本列表/切换合同。
+3. 四模板均取得真实模型 section/action 与 durable identity，定向访谈又取得四类 section 和 5 个 canonical 引用；仍缺自动 ASR 直连样本、更多真人/长会议与历史/附件授权质量抽查。
 4. 当前只有模拟器，没有 USB 真机。引用 seek、编辑键盘/inset、完成动效、通知及后续日程命令仍缺真机轻量复核；通知回跳的长文档 action 长距离定位也未单独验证。
 5. 按当前目标不执行已归档门禁、60 分钟样本、压力/穷举交互；这些留到候选功能框架稳定后。

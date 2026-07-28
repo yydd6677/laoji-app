@@ -2372,6 +2372,15 @@ export async function refreshMeetingSyncState(
              WHERE correction.meeting_id = ?
            )
          )
+         OR (conflict.aggregate_type = 'summary_current' AND conflict.aggregate_id = ?)
+         OR (
+           conflict.aggregate_type = 'summary_section'
+           AND conflict.aggregate_id IN (
+             SELECT section.local_section_id
+             FROM meeting_summary_remote_sections section
+             WHERE section.meeting_id = ? AND section.scope_key = ?
+           )
+         )
        )
      LIMIT 1`,
     scopeKey,
@@ -2380,6 +2389,10 @@ export async function refreshMeetingSyncState(
     meetingId,
     meetingId,
     meetingId,
+    meetingId,
+    meetingId,
+    meetingId,
+    scopeKey,
   );
   const outstanding = await database.getAllAsync<{ status: string }>(
     `SELECT outbox.status FROM sync_outbox outbox
@@ -2415,6 +2428,15 @@ export async function refreshMeetingSyncState(
              WHERE marker.meeting_id = ? AND marker.scope_key = ?
            )
          )
+         OR (outbox.aggregate_type = 'summary_current' AND outbox.aggregate_id = ?)
+         OR (
+           outbox.aggregate_type = 'summary_section'
+           AND outbox.aggregate_id IN (
+             SELECT section.local_section_id
+             FROM meeting_summary_remote_sections section
+             WHERE section.meeting_id = ? AND section.scope_key = ?
+           )
+         )
        )`,
     scopeKey,
     meetingId,
@@ -2424,6 +2446,9 @@ export async function refreshMeetingSyncState(
     meetingId,
     meetingId,
     scopeKey,
+    meetingId,
+    scopeKey,
+    meetingId,
     meetingId,
     scopeKey,
   );

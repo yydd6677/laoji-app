@@ -80,6 +80,8 @@ export interface SummaryMirrorResult {
   replaceLegacyProjection: boolean;
   status: string;
   canonicalRevision: number | null;
+  /** Local immutable identity corresponding to the provider version, when materialized. */
+  localVersionId?: string | null;
 }
 
 export interface MirrorLegacySummaryOptions {
@@ -694,7 +696,12 @@ export function mirrorLegacySummaryContent(
         rejected_citations: rejectedCitationCount,
         actions: actions.length,
       });
-      return { replaceLegacyProjection, status: mirrorStatus, canonicalRevision };
+      return {
+        replaceLegacyProjection,
+        status: mirrorStatus,
+        canonicalRevision,
+        localVersionId: versionId,
+      };
     } catch (error) {
       reportFailure('summary', scopeKey, error);
       if (options.throwOnFailure) throw error;

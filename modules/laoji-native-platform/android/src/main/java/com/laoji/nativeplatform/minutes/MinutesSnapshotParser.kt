@@ -244,6 +244,7 @@ object MinutesSnapshotParser {
         ?.takeIf { it == "neutral" || it == "primary" || it == "success" || it == "warning" || it == "danger" }
         ?: "neutral",
       rootSyncConflict = raw.boolean("rootSyncConflict"),
+      summarySyncConflict = raw.boolean("summarySyncConflict"),
       processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
       processingRetrying = raw.boolean("processingRetrying"),
       recordingMergeStatusLabel = raw.string("recordingMergeStatusLabel")?.takeIf { it.isNotBlank() }?.let {

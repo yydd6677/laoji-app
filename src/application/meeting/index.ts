@@ -19,6 +19,7 @@ export * from './recordingSessionController';
 export * from './reconcileMeetingAudioUpload';
 export * from './resolveMeetingActionSyncConflict';
 export * from './resolveMeetingManualNoteSyncConflict';
+export * from './resolveMeetingSummarySyncConflict';
 export * from './resolveMeetingOccurrenceSyncConflict';
 export * from './resolveMeetingRootSyncConflict';
 export * from './retryMeetingSpeakerCorrectionSync';

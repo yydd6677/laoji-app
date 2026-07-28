@@ -15,21 +15,23 @@ export async function loadMeetingSummaryVersions(
 ): Promise<MeetingSummaryVersionsState | null> {
   const current = await loadCurrentMeetingSummaryState(scopeKey, legacyMeetingId);
   if (!current?.document.remoteVersionId) return null;
+  const currentVersion = await sqliteMeetingNoteRepository.getCurrentSummaryVersion(
+    current.canonicalMeetingId,
+    scopeKey,
+  );
+  if (!currentVersion || (currentVersion.status !== 'ready' && currentVersion.status !== 'stale')) {
+    return null;
+  }
   const versions = [...await sqliteMeetingNoteRepository.listReadableSummaryVersions(
     current.canonicalMeetingId,
     scopeKey,
   )];
-  if (!versions.some(version => version.id === current.document.remoteVersionId)) {
-    const currentVersion = await sqliteMeetingNoteRepository.getCurrentSummaryVersion(
-      current.canonicalMeetingId,
-      scopeKey,
-    );
-    if (!currentVersion || (currentVersion.status !== 'ready' && currentVersion.status !== 'stale')) return null;
+  if (!versions.some(version => version.id === currentVersion.id)) {
     versions.push(currentVersion);
   }
   return {
     canonicalMeetingId: current.canonicalMeetingId,
-    currentVersionId: current.document.remoteVersionId,
+    currentVersionId: currentVersion.id,
     versions,
   };
 }

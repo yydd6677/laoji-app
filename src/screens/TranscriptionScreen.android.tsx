@@ -52,6 +52,10 @@ import {
   type MeetingSummarySectionEditorValue,
 } from '../components/MeetingSummarySectionEditorSheet';
 import {
+  MeetingSummaryConflictSheet,
+  type MeetingSummaryConflictChoice,
+} from '../components/MeetingSummaryConflictSheet';
+import {
   MeetingSpeakerAssignmentSheet,
   type MeetingSpeakerAssignmentValue,
 } from '../components/MeetingSpeakerAssignmentSheet';
@@ -165,6 +169,12 @@ import { loadMeetingActions } from '../services/meetingActions';
 import { pullMeetingActionsForDetail } from '../services/meetingActionPull';
 import type { MeetingActionSyncConflictView } from '../services/meetingActionConflicts';
 import { pullMeetingManualNote } from '../services/meetingManualNotePull';
+import { pullMeetingSummaryVersions } from '../services/meetingSummaryPull';
+import {
+  loadMeetingSummarySyncConflicts,
+  type MeetingSummarySyncConflictView,
+} from '../services/meetingSummaryConflicts';
+import { subscribeMeetingSummaryChanged } from '../application/meeting/summarySyncTrigger';
 import {
   loadMeetingManualNoteSyncConflict,
   type MeetingManualNoteSyncConflictView,
@@ -210,6 +220,7 @@ import {
   MeetingSummarySectionConflictError,
   MeetingSummarySectionContentError,
   MeetingSummarySectionUnavailableError,
+  MeetingSummarySyncConflictChangedError,
   EditMeetingSummarySectionUseCase,
   loadMeetingRecordingMergeRecovery,
   mergeDetachedMeetingRecordings,
@@ -219,6 +230,7 @@ import {
   ResolveMeetingActionSyncConflictUseCase,
   ResolveMeetingManualNoteSyncConflictUseCase,
   ResolveMeetingRootSyncConflictUseCase,
+  ResolveMeetingSummarySyncConflictUseCase,
   UpdateMeetingActionUseCase,
   UpdateMeetingSpeakerAssignmentUseCase,
   SpeakerAssignmentDraftError,
@@ -452,6 +464,7 @@ const resolveMeetingRootSyncConflictUseCase = new ResolveMeetingRootSyncConflict
 );
 const selectMeetingSummaryVersionUseCase = new SelectMeetingSummaryVersionUseCase(sqliteMeetingNoteRepository);
 const editMeetingSummarySectionUseCase = new EditMeetingSummarySectionUseCase(sqliteMeetingNoteRepository);
+const resolveMeetingSummarySyncConflictUseCase = new ResolveMeetingSummarySyncConflictUseCase();
 const updateMeetingSpeakerAssignmentUseCase = new UpdateMeetingSpeakerAssignmentUseCase(
   sqliteMeetingNoteRepository,
 );
@@ -634,6 +647,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [summarySectionEditorTarget, setSummarySectionEditorTarget] = useState<SummarySectionEditorTarget | null>(null);
   const [summarySectionEditorSaving, setSummarySectionEditorSaving] = useState(false);
   const [summarySectionEditorError, setSummarySectionEditorError] = useState('');
+  const [summarySyncConflicts, setSummarySyncConflicts] = useState<readonly MeetingSummarySyncConflictView[]>([]);
+  const [summarySyncConflictTarget, setSummarySyncConflictTarget] = useState<MeetingSummarySyncConflictView | null>(null);
+  const [summarySyncConflictSaving, setSummarySyncConflictSaving] = useState(false);
+  const [summarySyncConflictError, setSummarySyncConflictError] = useState('');
   const [meetingActions, setMeetingActions] = useState<readonly MeetingSummaryActionCandidate[]>([]);
   const [meetingActionsLoaded, setMeetingActionsLoaded] = useState(false);
   const [meetingActionsCanonicalId, setMeetingActionsCanonicalId] = useState<string | null>(null);
@@ -681,6 +698,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const handledActionFocusRequestRef = useRef<number | null>(null);
   const manualNoteConflictRequestGenerationRef = useRef(0);
   const rootConflictRequestGenerationRef = useRef(0);
+  const summaryConflictRequestGenerationRef = useRef(0);
   const markerRequestGenerationRef = useRef(0);
   const markerLoadErrorShownRef = useRef(false);
   const attachmentRequestGenerationRef = useRef(0);
@@ -981,6 +999,41 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }, [meeting?.id, meetingScopeKey, route.params.meetingId]);
 
+  const refreshSummarySyncConflicts = useCallback(async () => {
+    const requestedMeetingId = meeting?.id;
+    if (
+      !requestedMeetingId
+      || !meetingScopeKey
+      || meetingScopeKey === 'guest'
+      || !meetingActionsCanonicalId
+    ) {
+      setSummarySyncConflicts([]);
+      setSummarySyncConflictTarget(null);
+      return [];
+    }
+    const generation = summaryConflictRequestGenerationRef.current + 1;
+    summaryConflictRequestGenerationRef.current = generation;
+    try {
+      const conflicts = await loadMeetingSummarySyncConflicts(
+        meetingScopeKey,
+        meetingActionsCanonicalId,
+      );
+      if (
+        !mountedRef.current
+        || summaryConflictRequestGenerationRef.current !== generation
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return [];
+      setSummarySyncConflicts(conflicts);
+      setSummarySyncConflictTarget(current => current
+        ? conflicts.find(conflict => conflict.id === current.id) ?? null
+        : null);
+      return conflicts;
+    } catch (reason) {
+      diagnosticWarn('load meeting summary sync conflicts failed', reason);
+      return [];
+    }
+  }, [meeting?.id, meetingActionsCanonicalId, meetingScopeKey]);
+
   const loadSummaryVersions = useCallback(async () => {
     if (!meeting || !meetingScopeKey) {
       setSummaryVersionsState(null);
@@ -1114,6 +1167,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSummarySectionEditorTarget(null);
     setSummarySectionEditorSaving(false);
     setSummarySectionEditorError('');
+    setSummarySyncConflicts([]);
+    setSummarySyncConflictTarget(null);
+    setSummarySyncConflictSaving(false);
+    setSummarySyncConflictError('');
     setMeetingActions([]);
     setMeetingActionsLoaded(false);
     setMeetingActionsCanonicalId(null);
@@ -1149,6 +1206,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     actionRequestGenerationRef.current += 1;
     manualNoteConflictRequestGenerationRef.current += 1;
     rootConflictRequestGenerationRef.current += 1;
+    summaryConflictRequestGenerationRef.current += 1;
     markerRequestGenerationRef.current += 1;
     markerLoadErrorShownRef.current = false;
     attachmentRequestGenerationRef.current += 1;
@@ -1206,6 +1264,27 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [refreshRootConflict]);
 
   useEffect(() => {
+    void refreshSummarySyncConflicts();
+  }, [refreshSummarySyncConflicts]);
+
+  useEffect(() => {
+    if (!meetingScopeKey) return undefined;
+    return subscribeMeetingSummaryChanged(changedScope => {
+      if (changedScope !== meetingScopeKey) return;
+      void refreshSummarySyncConflicts();
+      if (meeting?.id) {
+        void loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).then(current => {
+          if (!current || !mountedRef.current) return;
+          setSummaryDocument(current.document);
+          setSummary(meetingSummaryDocumentToText(current.document));
+          setSummaryCached(true);
+          advancePageGenerations('summary');
+        }).catch(() => null);
+      }
+    });
+  }, [advancePageGenerations, meeting?.id, meetingScopeKey, refreshSummarySyncConflicts]);
+
+  useEffect(() => {
     if (!meetingActionsCanonicalId || !meetingScopeKey) return undefined;
     return sqliteMeetingNoteRepository.observeMeeting(
       meetingActionsCanonicalId,
@@ -1241,7 +1320,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             controller = new AbortController();
             try {
               await manualNote.flush();
-              const [, notePull] = await Promise.all([
+              const [, notePull, summaryPull] = await Promise.all([
                 pullMeetingActionsForDetail({
                   scopeKey: meetingScopeKey,
                   canonicalMeetingId: meetingActionsCanonicalId,
@@ -1256,17 +1335,43 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                   accessToken,
                   signal: controller.signal,
                 }),
+                meeting ? pullMeetingSummaryVersions({
+                  scopeKey: meetingScopeKey,
+                  canonicalMeetingId: meetingActionsCanonicalId,
+                  meeting,
+                  meetingRemoteId: remoteMeetingId,
+                  accessToken,
+                  signal: controller.signal,
+                }) : Promise.resolve({
+                  outcome: 'stale' as const,
+                  versionCount: 0,
+                  conflictCount: 0,
+                }),
               ]);
               if (notePull.outcome === 'updated' || notePull.outcome === 'attached') {
                 await manualNote.reload();
               }
+              if (meeting && (summaryPull.outcome === 'updated' || summaryPull.outcome === 'conflicted')) {
+                const current = await loadCurrentMeetingSummaryState(
+                  meetingScopeKey,
+                  meeting.id,
+                ).catch(() => null);
+                if (current && active) {
+                  setSummaryDocument(current.document);
+                  setSummary(meetingSummaryDocumentToText(current.document));
+                  setSummaryCached(true);
+                  setSummaryError('');
+                  advancePageGenerations('summary');
+                }
+              }
               await refreshManualNoteConflict();
+              await refreshSummarySyncConflicts();
             } finally {
               controller = null;
             }
           }
         } catch (reason) {
-          if (active) diagnosticWarn('pull meeting actions for detail failed', reason);
+          if (active) diagnosticWarn('pull meeting detail account content failed', reason);
         } finally {
           running = false;
           if (active && requested) requestPull();
@@ -1283,7 +1388,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       controller?.abort();
       appStateSubscription.remove();
     };
-  }, [accessToken, isGuest, manualNote.flush, manualNote.reload, meetingActionsCanonicalId, meetingScopeKey, refreshManualNoteConflict, remoteMeetingId]);
+  }, [accessToken, advancePageGenerations, isGuest, manualNote.flush, manualNote.reload, meeting, meetingActionsCanonicalId, meetingScopeKey, refreshManualNoteConflict, refreshSummarySyncConflicts, remoteMeetingId]);
 
   useEffect(() => {
     const previousScope = summaryScopeRef.current;
@@ -3070,6 +3175,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       const refreshed = await refreshCanonicalSummary(requestedMeetingId);
       if (!refreshed) throw new MeetingSummarySectionUnavailableError();
       if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      await refreshSummarySyncConflicts();
       advancePageGenerations('summary');
       setSummarySectionEditorTarget(null);
       ToastAndroid.show(
@@ -3100,7 +3206,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         setSummarySectionEditorSaving(false);
       }
     }
-  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, summarySectionEditorSaving, summarySectionEditorTarget]);
+  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, refreshSummarySyncConflicts, summarySectionEditorSaving, summarySectionEditorTarget]);
 
   const saveSpeakerAssignment = useCallback(async (value: MeetingSpeakerAssignmentValue) => {
     const target = speakerAssignmentTarget;
@@ -3266,6 +3372,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       const current = await refreshCanonicalSummary(meeting.id);
       if (!current) throw new MeetingSummaryVersionUnavailableError();
       setSummaryVersionsState(previous => previous ? { ...previous, currentVersionId: versionId } : previous);
+      await refreshSummarySyncConflicts();
       advancePageGenerations('summary');
       setSummaryVersionsVisible(false);
     } catch (reason) {
@@ -3275,7 +3382,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setSwitchingSummaryVersionId(null);
     }
-  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, summaryVersionsState, switchingSummaryVersionId]);
+  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, refreshSummarySyncConflicts, summaryVersionsState, switchingSummaryVersionId]);
 
   const toggleMeetingAction = useCallback(async (
     actionId: string,
@@ -3517,6 +3624,55 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       if (mountedRef.current) setRootConflictSaving(false);
     }
   }, [meetingScopeKey, navigation, refreshMeetings, refreshRootConflict, rootConflictSaving, rootConflictTarget]);
+
+  const openSummarySyncConflict = useCallback(async () => {
+    const conflicts = summarySyncConflicts.length > 0
+      ? summarySyncConflicts
+      : await refreshSummarySyncConflicts();
+    const conflict = conflicts[0];
+    if (!conflict) {
+      ToastAndroid.show('整理结果冲突已处理', ToastAndroid.SHORT);
+      return;
+    }
+    setSummarySyncConflictError('');
+    setSummarySyncConflictTarget(conflict);
+  }, [refreshSummarySyncConflicts, summarySyncConflicts]);
+
+  const resolveSummarySyncConflict = useCallback(async (
+    choice: MeetingSummaryConflictChoice,
+  ) => {
+    if (!meetingScopeKey || !summarySyncConflictTarget || summarySyncConflictSaving) return;
+    setSummarySyncConflictSaving(true);
+    setSummarySyncConflictError('');
+    try {
+      await resolveMeetingSummarySyncConflictUseCase.execute({
+        conflictId: summarySyncConflictTarget.id,
+        meetingId: summarySyncConflictTarget.meetingId,
+        scopeKey: meetingScopeKey,
+        resolution: choice,
+      });
+      setSummarySyncConflictTarget(null);
+      await refreshSummarySyncConflicts();
+      if (meeting) await refreshCanonicalSummary(meeting.id).catch(() => null);
+      if (summaryVersionsVisible) await loadSummaryVersions().catch(() => null);
+      advancePageGenerations('summary');
+      ToastAndroid.show(
+        choice === 'keep_local' ? '本机整理结果将重新同步' : '已使用云端整理结果',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      setSummarySyncConflictError(reason instanceof MeetingSummarySyncConflictChangedError
+        ? '这次冲突已发生变化，请关闭后重新打开。'
+        : choice === 'keep_local'
+          ? '本机整理结果暂时无法重新同步，请稍后重试。'
+          : '云端整理结果暂时无法应用，请稍后重试。');
+      if (reason instanceof MeetingSummarySyncConflictChangedError) {
+        await refreshSummarySyncConflicts().catch(() => null);
+      }
+    } finally {
+      if (mountedRef.current) setSummarySyncConflictSaving(false);
+    }
+  }, [advancePageGenerations, loadSummaryVersions, meeting, meetingScopeKey, refreshCanonicalSummary, refreshSummarySyncConflicts, summarySyncConflictSaving, summarySyncConflictTarget, summaryVersionsVisible]);
 
   const openMeetingActionCreator = useCallback((sourceMarkerId: string | null = null) => {
     if (!meeting || !meetingScopeKey) {
@@ -4465,6 +4621,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (action.meetingId !== route.params.meetingId) break;
         void openRootConflict();
         break;
+      case 'openSummarySyncConflict':
+        if (action.meetingId !== route.params.meetingId) break;
+        void openSummarySyncConflict();
+        break;
       case 'retryDetailContent':
         if (action.meetingId !== route.params.meetingId) break;
         if (action.tab === 'transcript' && processingStatuses.transcript === 'failed_retryable') {
@@ -4562,7 +4722,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, openSummarySectionEditor, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, openSummarySectionEditor, openSummarySyncConflict, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
 
   const transcriptStageLoading = processingStatuses.transcript === 'realtime_draft'
     || processingStatuses.transcript === 'finalizing';
@@ -4686,12 +4846,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     processingStatusLabel,
     processingStatusTone: processingPresentation.tone,
     rootSyncConflict: rootConflict !== null,
+    summarySyncConflict: summarySyncConflicts.length > 0,
     processingRetryStage: processingPresentation.retryStage ?? undefined,
     processingRetrying,
     recordingMergeStatusLabel,
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
-  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, summarySyncConflicts, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
@@ -5115,6 +5276,18 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           setManualNoteConflictError('');
         }}
         onResolve={choice => { void resolveManualNoteConflict(choice); }}
+      />
+      <MeetingSummaryConflictSheet
+        visible={summarySyncConflictTarget !== null}
+        conflict={summarySyncConflictTarget}
+        saving={summarySyncConflictSaving}
+        error={summarySyncConflictError}
+        onClose={() => {
+          if (summarySyncConflictSaving) return;
+          setSummarySyncConflictTarget(null);
+          setSummarySyncConflictError('');
+        }}
+        onResolve={choice => { void resolveSummarySyncConflict(choice); }}
       />
       <MeetingRootConflictSheet
         visible={rootConflictTarget !== null}
