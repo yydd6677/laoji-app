@@ -1,16 +1,27 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领，以及长 Summary 的成功恢复、持久落库、引用跳转和重复响应幂等。运行服务又完成四个内置模板的真实模型纵切，并修复非默认模板短会议 600 秒超时。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据，不能合写成当前 APK 单次全链；自动 ASR 仍被已知 NVML/VibeVoice 问题阻塞。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级，顶部当前包继续包含游客永久删除，并补齐游客显式迁移、录音唯一上传身份、旧冲突录音安全认领、长 Summary 恢复、问答持久化，以及 occurrence 从日程、通知和 Widget 进入同一 MeetingNote。当前账号模拟器样本又完成日程开始、离开后继续、结束、04:09 录音、远端 Transcript 与通用整理结果；同一远端 Transcript revision 的 provenance 补齐不再误建第二版本或永久重试。完整的“开始→暂停/继续→结束→详情播放”仍来自分轮证据；当前样本是模拟器收音，不是可用于判断真人 ASR 或讲话人质量的样本。模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
 - APK：`android/app/build/outputs/apk/preview/app-preview.apk`
-- 移动端代码内容基线：`4b0edb3 fix: recover durable meeting summaries`
+- 移动端代码内容基线：`7b4766b fix: reuse durable remote transcript revisions`
 - 版本：`versionCode=104`，`versionName=1.0.0-source-preview`
-- 构建时间：`2026-07-28 01:50:37 +08:00`
-- 大小：`91,061,768` bytes
-- SHA-256：`618d405d47345db9c19e8decbab22da0b22d3b47a117dfedc12d419812574458`
+- 构建时间：`2026-07-28 23:29:28 +08:00`
+- 大小：`91,071,052` bytes
+- SHA-256：`8756696f335fca2afd0afb97cf2cf76ba8ee5814d9fe2ba20336dbb3e74d33b5`
+- `emulator-5556` 保留数据覆盖安装时间为 `2026-07-28 23:29:35 +08:00`；设备 `base.apk` 大小和 SHA-256 与上述产物完全一致。
 - 稳定回溯标签继续固定在 `stable-before-meeting-memory-roadmap -> cde96f9d5266961e380957893ecba39855aea39b`。
+
+## 当前包：日程入口、录音处理与远端版本收敛
+
+- `[DEVICE]` 只使用老记候选 AVD `emulator-5556`；KataCR 的 `emulator-5560` 未操作。账号作用域新建日程 `V3日程入口验证`，`sourceEventId=39`、occurrence 为 `2026-07-28`。
+- 日程详情点击“开始记录”进入同名会议；返回日程后显示“继续记录，正在录音”，再次进入恢复同一原生录音服务，没有创建第二条会议。结束后生成 `04:09` 本机录音，日程动作变为“查看记录”，点击后仍打开同一 MeetingNote。
+- 日程提醒通知的显式“开始记录”动作打开这条已结束的 `04:09` 记录；`laoji://calendar/occurrence?...&action=meeting&origin=widget` 也打开同一记录，`action=open` 只打开日程详情。三条动作期间没有新的 `meeting_create`；冷启动 canonical 审计始终为 4 条会议且 missing/extra/duplicate/context mismatch 全为 0。通知权限只为本轮验证临时授予，结束后已恢复为未授予。
+- 录音结束后页面曾短暂显示可重试上传状态，后台随后自动恢复；详情可见 5 段远端 final Transcript、`04:09` 播放器和 1 个讲话人。选择通用模板后约 2.5 秒形成 1 段“会议概述”，无行动项；这证明上传后的远端文字与整理链可达，不证明模拟器输入的识别质量。
+- 冷启动时旧代码重复收到相同 `remoteRevisionId`，但服务器补齐的 RecordingAsset/job provenance 改变了本机 fingerprint，于是误插入第二个本地 revision，并触发 `transcript_revisions(meeting_id, remote_id)` 唯一约束。当前实现先按远端 revision ID 复用既有不可变版本，只补空的来源身份并保留既有 segment ID；正文、时间、说话人或既有来源身份若变化则拒绝覆盖。
+- 修复包第一次运行只把 canonical revision 从 85 推进到 86 以补齐 provenance；随后强杀冷启动保持 revision 86，未再出现 `meeting_transcript_processing_failure`。04:09 音频、5 段文字、整理结果和播放器均保留，日志无 App FATAL、React Native 致命异常或 SQLiteException。
+- 本轮没有 USB 设备；录音来自 Android 模拟器环境，不能替代真人、多讲话人、物理麦克风、弱网或长录音候选验收。
 
 ## V3 第 1 条：稳定包游客数据保留升级（紧邻前一 Preview）
 
@@ -101,17 +112,17 @@
 
 ## 当前外部边界
 
-- `18020 /api/health` 返回 HTTP 200 并广告 `models_ready=true`；当前 `general@1` 已有独立真实成功任务，因此不再用旧 120/600 秒失败描述当前 Summary。真实 VibeVoice 任务仍触发 NVML 断言，健康字段仍不能替代 ASR 任务成功证据。
+- `18020 /api/health` 的前次快照返回 HTTP 200 并广告 `models_ready=true`；当前 `general@1` 已有独立真实成功任务，因此不再用旧 120/600 秒失败描述当前 Summary。`user:84` 的 NVML/VibeVoice 断言是历史失败样本；顶部当前包已经从新 occurrence 录音取得远端 final Transcript，因此它不能继续代表 ASR 整体阻塞，但模拟器收音也不能替代真人质量验收。
 - `18020 /api/laoji/capabilities` 返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 `meeting_markers_v1` 均在线，`summary_attachments_image=false` 继续 fail closed。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 当前为目标工作区进程 PID `984809`，cwd 为 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`，继承 34 项环境；18035 保持原 PID `3293181`，未触碰。当前远端/本机 overlay 的 `app_meetings.py`、`app_summary_generator.py`、`summary_tasks.py` SHA-256 分别为 `1a316c964019ddcb21336c34f3f793aeb917b0f3fda8618e99e4dded358b691b`、`bccb3112639ba2436701c74e4782bf27e2b8c2b93a9a35e2091ded8a4f614da7`、`64c0ffbb8c741120eaf49c876d228cfb02c1c36e04764d0a39624bbe32516108`。最新前态备份为 `backups/20260728-history-compact-v6`；`user:84` 合成音频夹具暂时保留，用于 GPU/NVML 恢复后继续真实 ASR。
+- 18020 的 PID/cwd、18035 PID 和三份 overlay SHA-256 仍是前次已记录快照；本轮 SSH BatchMode 认证失败，未据此重启或改写共享服务。当前移动端 HTTP 往返可用不等于这些进程身份仍未变化。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
 
-- V3 第 2 条在同一候选代码线已有完整模拟器证据；`f89fd942…02a78b` 删除候选重跑了游客录音保存和物理删除，顶部当前 hash 新增的是迁移/长任务恢复，没有重复完整播放器步骤，因此锁定功能主链，但不写成当前 APK 单轮全链。
+- V3 第 2 条在同一候选代码线已有完整模拟器证据；顶部当前 hash 又以日程 occurrence 完成开始、离开后继续、结束、04:09 保存、详情、远端文字和整理结果，但没有重跑暂停/继续按钮分支，因此仍不写成当前 APK 单轮全链。
 - V3 第 1 条已由紧邻前一 hash 补稳定包游客保留升级并实读 v34 数据库；顶部当前 hash 没有重跑覆盖升级，但已补 guest/user 数据、迁移 journal 和两边源数据保留。账号墓碑与物理设备窗口仍待，不写成一次全覆盖。
 - V3 第 7 条的第二实例 pull 和真实 409/412 选择已集中完成；离线 outbox 重试仍由此前分散证据支持，故不把第 7 条写成三项均在本轮重跑。
-- V3 第 5 条已在当前 APK 上补齐导入 Transcript 的非平凡整理、引用跳转和行动项来源；它没有补齐自动 ASR。第 3–4/6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
+- V3 第 5 条已有导入 Transcript 的非平凡整理、引用跳转和行动项来源；顶部当前包又补到 occurrence 录音的远端 final Transcript 和无行动项短整理。它仍不是可判断真人识别质量的样本。第 3–4/6 条仍是此前分散证据；当前 fresh-device APK 尚未安装到 USB 真机，前一候选包的 USB 保留数据/播放证据不能自动继承为当前包的物理设备证明。
 - ATT-01 的对象层、线上服务及双模拟器新增/墓碑闭环已完成；真实图片理解仍因没有已确认视觉模型而关闭，物理 USB 仍待。
 - MRK-01 的本机、服务端和双独立模拟器功能纵切已完成；仍缺物理双机、USB 与长离线抽查，不能把双 AVD 写成物理跨设备完成。
