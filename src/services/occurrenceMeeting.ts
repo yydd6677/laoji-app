@@ -75,9 +75,15 @@ export function calendarMeetingContext(
 }
 
 function legacyFacingMeetingId(aggregate: MeetingNoteAggregate): string {
-  return aggregate.note.legacySourceId
-    ?? aggregate.note.remoteId
-    ?? aggregate.note.id;
+  if (aggregate.note.legacySourceId) return aggregate.note.legacySourceId;
+  // Keep occurrence navigation on the same identity exposed by the canonical
+  // meeting-list projection. Newly created account meetings retain their local
+  // canonical ID after the remote ACK; only imported legacy-store rows use the
+  // remote ID as their compatibility identity.
+  if (aggregate.note.entryPoint === 'legacy_store' && aggregate.note.remoteId) {
+    return aggregate.note.remoteId;
+  }
+  return aggregate.note.id;
 }
 
 function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingProjection {
