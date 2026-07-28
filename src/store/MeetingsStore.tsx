@@ -1081,8 +1081,22 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       || activeScopeRef.current !== scope
     ) return;
     const projection = canonicalReadProjectionRef.current;
-    const canonicalMeetingId = projection?.canonicalIdByLegacyId[legacyMeetingId]?.trim();
-    const current = projection?.meetings.find(meeting => meeting.id === legacyMeetingId);
+    const projectedCanonicalMeetingId = projection
+      ?.canonicalIdByLegacyId[legacyMeetingId]
+      ?.trim();
+    const initialProjectedMeeting = projection?.meetings.find(meeting => meeting.id === legacyMeetingId);
+    // A detail screen can recover remote content before the provider finishes
+    // rebuilding its in-memory canonical projection. SQLite is already the
+    // write owner in that window, so resolve the durable identity there and
+    // use the loaded compatibility meeting instead of rejecting a valid save.
+    const canonicalMeetingId = projectedCanonicalMeetingId
+      || await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(legacyMeetingId, scope);
+    if (
+      generationRef.current !== operationGeneration
+      || activeScopeRef.current !== scope
+    ) return;
+    const current = initialProjectedMeeting
+      ?? meetingsRef.current.find(meeting => meeting.id === legacyMeetingId);
     if (!canonicalMeetingId || !current) {
       throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
     }
@@ -1109,7 +1123,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       // Reopening a detail page can replay an identical cached transcript.
       // The canonical use case intentionally returns a null revision for that
       // no-op, so it must not be presented as a failed save or rewrite the list.
-      if (result.canonicalRevision === null) return;
+      if (
+        result.canonicalRevision === null
+        && projectedCanonicalMeetingId
+        && initialProjectedMeeting
+      ) return;
       const owned = await loadCanonicalOwnedScope();
       if (!owned) throw new Error('会议本机数据状态异常，请刷新后重试。');
       const projectedCanonicalId = owned.projection.canonicalIdByLegacyId[legacyMeetingId];
@@ -1137,8 +1155,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       || activeScopeRef.current !== scope
     ) return { projection: 'preserved', mirrorStatus: 'stale_scope' };
     const projection = canonicalReadProjectionRef.current;
-    const canonicalMeetingId = projection?.canonicalIdByLegacyId[legacyMeetingId]?.trim();
-    const current = projection?.meetings.find(meeting => meeting.id === legacyMeetingId);
+    const projectedCanonicalMeetingId = projection
+      ?.canonicalIdByLegacyId[legacyMeetingId]
+      ?.trim();
+    const initialProjectedMeeting = projection?.meetings.find(meeting => meeting.id === legacyMeetingId);
+    const canonicalMeetingId = projectedCanonicalMeetingId
+      || await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(legacyMeetingId, scope);
+    if (
+      generationRef.current !== operationGeneration
+      || activeScopeRef.current !== scope
+    ) return { projection: 'preserved', mirrorStatus: 'stale_scope' };
+    const current = initialProjectedMeeting
+      ?? meetingsRef.current.find(meeting => meeting.id === legacyMeetingId);
     if (!canonicalMeetingId || !current) {
       throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
     }

@@ -382,6 +382,24 @@ function summaryDocumentFor(
   return summary ? meetingSummaryDocumentForLegacy(meetingId, summary) : null;
 }
 
+function summaryCacheFailureCode(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  if (message.includes('stable canonical transcript')) return 'transcript_not_stable';
+  if (message.includes('transcript revision is not the active')) return 'transcript_revision_changed';
+  if (message.includes('canonical meeting identity changed')) return 'meeting_identity_changed';
+  if (message.includes('canonical meeting became unavailable')) return 'meeting_became_unavailable';
+  if (message.includes('本机升级')) return 'canonical_projection_missing';
+  if (message.includes('本机数据状态异常')) return 'canonical_reload_failed';
+  if (message.includes('保存后的数据不完整')) return 'canonical_projection_incomplete';
+  if (message.includes('数据作用域已变化')) return 'scope_changed';
+  if (message.includes('未能写入本机数据版本')) return 'canonical_revision_missing';
+  if (message.includes('constraint')) return 'sqlite_constraint';
+  if (message.includes('database is locked')) return 'sqlite_locked';
+  return reason instanceof Error && reason.name
+    ? reason.name.replace(/[^a-z0-9_.-]/gi, '_').slice(0, 80)
+    : 'unknown';
+}
+
 const TRANSCRIPT_COMPLETION_RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const TRANSCRIPT_COMPLETION_RECHECK_MS = 15_000;
 
@@ -1478,19 +1496,44 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               try {
                 return await saveCachedSummary(meeting.id, normalized);
               } catch (reason) {
-                const beforeRetry = meetingScopeKey
-                  ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
-                  : null;
-                if (beforeRetry?.kind !== 'realtime_draft') throw reason;
+                diagnosticAudit('meeting_summary_cache_write_retry', {
+                  phase: 'initial',
+                  error_code: summaryCacheFailureCode(reason),
+                });
+                // Transcript and summary recovery start together when detail opens.
+                // Any canonical version transition can make the first summary write
+                // stale, not only a realtime draft, so always wait for transcript
+                // recovery before deciding that the summary is unwritable.
                 await transcriptLoad;
                 if (!alive || !isCurrentPageRequest(summaryRequest)) throw reason;
-                const afterRetry = meetingScopeKey
-                  ? await loadActiveMeetingTranscriptState(meetingScopeKey, meeting.id).catch(() => null)
+                const alreadyPersisted = meetingScopeKey
+                  ? await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null)
                   : null;
-                if (!afterRetry || afterRetry.kind === 'realtime_draft' || afterRetry.completing) {
-                  throw reason;
+                if (
+                  alreadyPersisted
+                  && meetingSummaryDocumentToText(alreadyPersisted.document) === text
+                ) {
+                  return { projection: 'preserved' as const, mirrorStatus: 'already_current' };
                 }
-                return saveCachedSummary(meeting.id, normalized);
+                try {
+                  return await saveCachedSummary(meeting.id, normalized);
+                } catch (retryReason) {
+                  const persistedAfterRetry = meetingScopeKey
+                    ? await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null)
+                    : null;
+                  if (
+                    persistedAfterRetry
+                    && meetingSummaryDocumentToText(persistedAfterRetry.document) === text
+                  ) {
+                    return { projection: 'preserved' as const, mirrorStatus: 'already_current' };
+                  }
+                  diagnosticAudit('meeting_summary_cache_write_retry', {
+                    phase: 'final',
+                    error_code: summaryCacheFailureCode(retryReason),
+                  });
+                  diagnosticWarn('persist recovered meeting summary failed', retryReason);
+                  throw retryReason;
+                }
               }
             };
             const cacheResult = await saveRecoveredSummary();
@@ -1509,8 +1552,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             setSummary(current ? meetingSummaryDocumentToText(current.document) : text);
             setSummaryDocument(current?.document ?? generatedDocument);
             setSummaryCached(true);
-          } catch {
+          } catch (reason) {
             if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+            diagnosticAudit('meeting_summary_cache_write_failed', {
+              error_code: summaryCacheFailureCode(reason),
+            });
+            diagnosticWarn('cache synchronized meeting summary failed', reason);
             setSummary(text);
             setSummaryDocument(generatedDocument);
             setSummaryCached(false);
