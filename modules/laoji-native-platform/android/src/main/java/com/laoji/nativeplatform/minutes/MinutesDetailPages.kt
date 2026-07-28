@@ -1120,19 +1120,50 @@ internal class MinutesSummaryPage(
     val container = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
       setPadding(0, context.dp(10), 0, context.dp(10))
-      contentDescription = listOf(section.title, section.text).filter { it.isNotBlank() }.joinToString("，")
     }
     val heading = section.title.ifBlank {
       section.text.takeIf { section.kind == "heading" }.orEmpty()
     }
-    if (heading.isNotBlank()) {
+    if (heading.isNotBlank() || section.editable) {
+      val headingRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = context.dp(44)
+      }
+      if (heading.isNotBlank()) {
+        headingRow.addView(
+          context.textView(heading, 17, MinutesPalette.text, Typeface.BOLD).apply {
+            setLineSpacing(0f, 1.2f)
+            setTextIsSelectable(true)
+          },
+          LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+      } else {
+        headingRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+      }
+      if (section.editable) {
+        headingRow.addView(
+          context.iconButton(
+            com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
+            if (section.userEdited) "编辑整理内容，当前含人工修改" else "编辑整理内容",
+          ).apply {
+            imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+            setOnClickListener {
+              emitAction(
+                mapOf(
+                  "type" to "editSummarySection",
+                  "sectionId" to section.id,
+                ),
+              )
+            }
+          },
+          LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+        )
+      }
       container.addView(
-        context.textView(heading, 17, MinutesPalette.text, Typeface.BOLD).apply {
-          setLineSpacing(0f, 1.2f)
-          setTextIsSelectable(true)
-        },
+        headingRow,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-          bottomMargin = if (section.text.isBlank() || section.kind == "heading") 0 else context.dp(6)
+          bottomMargin = if (section.text.isBlank() || section.kind == "heading") 0 else context.dp(2)
         },
       )
     }

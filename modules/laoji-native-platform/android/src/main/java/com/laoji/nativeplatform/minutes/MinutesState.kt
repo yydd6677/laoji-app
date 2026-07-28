@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 16
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 17
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -244,6 +244,8 @@ data class MinutesSummarySection(
   val kind: String = "paragraph",
   val title: String = "",
   val text: String,
+  val editable: Boolean = false,
+  val userEdited: Boolean = false,
   val citations: List<MinutesSummaryCitation> = emptyList(),
 )
 

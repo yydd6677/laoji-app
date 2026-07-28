@@ -1200,6 +1200,11 @@ export interface MeetingTransaction {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<SummaryVersionRecord | null>;
+  getSummarySection(
+    sectionId: string,
+    versionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummarySectionRecord | null>;
   getMeetingAction(
     actionId: string,
     meetingId: string,
@@ -1283,6 +1288,15 @@ export interface MeetingTransaction {
     scopeKey: ScopeKey,
     options: SaveSummaryVersionOptions,
   ): Promise<void>;
+  /** Updates only the user-owned overlay of a section in the current summary version. */
+  updateCurrentSummarySectionUserText(
+    meetingId: string,
+    versionId: string,
+    sectionId: string,
+    scopeKey: ScopeKey,
+    userText: string | null,
+    userEditedAtMs: number | null,
+  ): Promise<boolean>;
   /** Returns true only when this transaction inserted a new operation. */
   insertOutbox(operation: SyncOperationRecord): Promise<boolean>;
   advanceCanonicalWrite(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;

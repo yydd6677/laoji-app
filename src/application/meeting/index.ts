@@ -5,6 +5,7 @@ export * from './createMeetingMarker';
 export * from './carrySeriesMemoryToManualNote';
 export * from './deleteMeetingNote';
 export * from './deleteMeetingMarker';
+export * from './editMeetingSummarySection';
 export * from './finalizeNativeMeetingRecording';
 export * from './linkMeetingActionFollowupEvent';
 export * from './mergeAccountMeetingRemoteSnapshot';

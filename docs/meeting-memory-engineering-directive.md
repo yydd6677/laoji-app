@@ -214,7 +214,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机/线上闭环；运行 action pull、协作者 revision、双 Android 实例提醒重建/取消及非协作 action 断网冲突选版收敛完成 | 物理双机抽查；全账号 change feed、batch 和 tombstone 不作为本项框架重做理由 |
 | SUM-01 | 有序结构化整理结果 | 本机/线上纵切闭环；四模板结构、durable 恢复、历史授权和幂等当前版本已运行 | 更多真人样本、附件授权质量和线上版本列表 |
 | SUM-02 | 结论/行动项引用 Transcript | 本机/线上纵切闭环；9 个 canonical 引用及移动端跳转已运行 | 自动 ASR 直连样本和更多真人会议质量抽查 |
-| SUM-03 | 结果版本与用户修改保护 | 已锁定 | 只随真实模型/冲突路径做候选抽查 |
+| SUM-03 | 结果版本与用户修改保护 | 本机闭环；不可变生成内容、section 人工覆盖/恢复、版本保护和候选切换已接通 | 引用移除、线上 section 修改/版本列表与物理设备抽查 |
 | IMP-01 | 文件选择与系统分享导入音视频 | 本机/线上纵切闭环；视频、远端多资产处理和已有会议显式加入已完成 | 格式兼容矩阵、第二台移动设备与 USB 真机 |
 | MRK-01 | Marker、会后跳转、转行动项/分享 | 功能/线上纵切完成；本机能力、v34 create/delete outbox、revision/tombstone/pull、18020 owner API 和双独立模拟器新增/跳转/删除收敛已闭环 | 物理双机、USB 真机和长离线/弱网抽查；不重建第二套同步系统 |
 | ENTRY-01 | 会前通知开始/继续/查看 | 本机闭环；当前候选包补 ended 记录通知直达 | notification 的 App Lock、首次成功录音/active 继续和物理设备抽查 |
@@ -1203,6 +1203,8 @@ interface MinutesTranscriptLineSnapshot {
 5. 用户编辑不删除 citations；若编辑后引用已不再支撑内容，允许用户移除引用，系统不得伪造新引用。
 6. Transcript revision、notes revision、template revision 或 speaker assignment 改变时旧版本标 `stale`，但不隐藏。
 7. 历史版本入口放在更多菜单，不在主页面堆叠版本说明。
+
+当前移动端已为当前可读版本的每个 section 提供原子编辑入口：人工内容只写 `user_text/user_edited_at_ms`，`generated_text`、citation 和历史版本保持不变；“恢复生成内容”清除人工覆盖，并按其他 section 与关联行动项的状态重新计算版本保护。保存使用当前版本、section 身份和打开时内容做并发校验，成功后推进 canonical revision 并重读当前文档。该本机纵切不等于线上 section 修改或跨设备版本列表已经实现。
 
 #### 客户端渲染
 

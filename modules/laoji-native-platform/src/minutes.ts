@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 16 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 17 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -108,6 +108,8 @@ export interface MinutesSummarySectionSnapshot {
   kind?: string;
   title?: string | null;
   text: string;
+  editable?: boolean;
+  userEdited?: boolean;
   citations?: readonly MinutesSummaryCitationSnapshot[];
 }
 
@@ -319,6 +321,7 @@ export type MinutesSemanticAction =
     }
   | { type: 'deleteMarker'; surface: 'detail'; meetingId: string; markerId: string }
   | { type: 'seekSummaryCitation'; surface: 'detail'; meetingId: string; segmentId: string; positionMs: number }
+  | { type: 'editSummarySection'; surface: 'detail'; meetingId: string; sectionId: string }
   | { type: 'toggleAction'; surface: 'detail'; meetingId: string; actionId: string; completed: boolean }
   | { type: 'createAction'; surface: 'detail'; meetingId: string }
   | { type: 'editAction'; surface: 'detail'; meetingId: string; actionId: string }

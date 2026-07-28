@@ -101,6 +101,7 @@ export interface BuildNativeDetailSnapshotInput {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
+  canEditSummary?: boolean;
   canCreateAction?: boolean;
   canShareActions?: boolean;
   canCreateClip?: boolean;
@@ -356,6 +357,7 @@ function legacySummarySections(markdown: string): MinutesSummarySectionSnapshot[
 function structuredSummarySections(
   document: MeetingSummaryDocument,
   hasActions: boolean,
+  editable: boolean,
 ): MinutesSummarySectionSnapshot[] {
   return document.sections
     .filter(section => !hasActions
@@ -366,6 +368,8 @@ function structuredSummarySections(
     kind: section.kind,
     title: section.title,
     text: section.content,
+    editable,
+    userEdited: section.userEdited === true,
     citations: section.citations.map(citation => ({
       id: citation.id,
       segmentId: citation.segmentId,
@@ -628,6 +632,7 @@ export function buildNativeMinutesDetailSnapshot(
     ? structuredSummarySections(
       input.summaryDocument,
       actionItemCandidates.length > 0 || input.summaryDocument.actionItemCandidates.length > 0,
+      input.canEditSummary === true,
     )
     : legacySummarySections(input.summaryText?.trim() ?? '');
   const actions = structuredSummaryActions(

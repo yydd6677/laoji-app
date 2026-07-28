@@ -97,6 +97,10 @@ function optionalNonNegativeInteger(value: unknown): number | null {
     : null;
 }
 
+function boolean(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 function timestamp(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
   const parsed = typeof value === 'string' ? Date.parse(value) : Number.NaN;
@@ -176,6 +180,8 @@ function parseSections(value: unknown): MeetingSummarySection[] | null {
       kind: summaryKind(record.kind),
       title,
       content,
+      userEdited: boolean(firstValue(record, 'userEdited', 'user_edited')),
+      userEditedAtMs: optionalNonNegativeInteger(firstValue(record, 'userEditedAtMs', 'user_edited_at_ms')),
       citations: citations(record.citations, id),
     });
   }

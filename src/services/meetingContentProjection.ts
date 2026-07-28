@@ -82,6 +82,8 @@ export function summaryProjectionToDocument(
       kind: sectionKind(section.kind),
       title: section.title,
       content: sectionText(section),
+      userEdited: section.userText !== null,
+      userEditedAtMs: section.userEditedAtMs,
       citations: (citationsBySection.get(section.id) ?? []).map(citation => ({
         id: citation.id,
         segmentId: citation.sourceSegmentId ?? citation.segmentId,

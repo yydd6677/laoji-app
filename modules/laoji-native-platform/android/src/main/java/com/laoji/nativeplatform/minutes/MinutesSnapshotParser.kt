@@ -124,6 +124,8 @@ object MinutesSnapshotParser {
         kind = item.string("kind").orDefault("paragraph"),
         title = item.string("title").orEmpty(),
         text = item.string("text").orEmpty(),
+        editable = item.boolean("editable"),
+        userEdited = item.boolean("userEdited"),
         citations = item.maps("citations")
           .asSequence()
           .mapIndexedNotNull { citationIndex, citation ->

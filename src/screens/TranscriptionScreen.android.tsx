@@ -47,6 +47,10 @@ import {
   type MeetingSummaryVersionChoice,
 } from '../components/MeetingSummaryVersionSheet';
 import {
+  MeetingSummarySectionEditorSheet,
+  type MeetingSummarySectionEditorValue,
+} from '../components/MeetingSummarySectionEditorSheet';
+import {
   MeetingSpeakerAssignmentSheet,
   type MeetingSpeakerAssignmentValue,
 } from '../components/MeetingSpeakerAssignmentSheet';
@@ -202,6 +206,10 @@ import {
   MeetingRootSyncConflictChangedError,
   MeetingSummaryVersionConflictError,
   MeetingSummaryVersionUnavailableError,
+  MeetingSummarySectionConflictError,
+  MeetingSummarySectionContentError,
+  MeetingSummarySectionUnavailableError,
+  EditMeetingSummarySectionUseCase,
   loadMeetingRecordingMergeRecovery,
   mergeDetachedMeetingRecordings,
   type MeetingRecordingMergeRecoveryState,
@@ -278,6 +286,10 @@ type EditTranscriptSpeakerAction = Extract<MinutesSemanticAction, { type: 'editT
 
 type SpeakerAssignmentTarget = EditTranscriptSpeakerAction & {
   clusterCount: number;
+};
+
+type SummarySectionEditorTarget = MeetingSummarySectionEditorValue & {
+  versionId: string;
 };
 
 type CanonicalProcessingSnapshot = {
@@ -438,6 +450,7 @@ const resolveMeetingRootSyncConflictUseCase = new ResolveMeetingRootSyncConflict
   sqliteMeetingNoteRepository,
 );
 const selectMeetingSummaryVersionUseCase = new SelectMeetingSummaryVersionUseCase(sqliteMeetingNoteRepository);
+const editMeetingSummarySectionUseCase = new EditMeetingSummarySectionUseCase(sqliteMeetingNoteRepository);
 const updateMeetingSpeakerAssignmentUseCase = new UpdateMeetingSpeakerAssignmentUseCase(
   sqliteMeetingNoteRepository,
 );
@@ -617,6 +630,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [summaryVersionsLoading, setSummaryVersionsLoading] = useState(false);
   const [summaryVersionsError, setSummaryVersionsError] = useState('');
   const [switchingSummaryVersionId, setSwitchingSummaryVersionId] = useState<string | null>(null);
+  const [summarySectionEditorTarget, setSummarySectionEditorTarget] = useState<SummarySectionEditorTarget | null>(null);
+  const [summarySectionEditorSaving, setSummarySectionEditorSaving] = useState(false);
+  const [summarySectionEditorError, setSummarySectionEditorError] = useState('');
   const [meetingActions, setMeetingActions] = useState<readonly MeetingSummaryActionCandidate[]>([]);
   const [meetingActionsLoaded, setMeetingActionsLoaded] = useState(false);
   const [meetingActionsCanonicalId, setMeetingActionsCanonicalId] = useState<string | null>(null);
@@ -1094,6 +1110,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSummaryVersionsLoading(false);
     setSummaryVersionsError('');
     setSwitchingSummaryVersionId(null);
+    setSummarySectionEditorTarget(null);
+    setSummarySectionEditorSaving(false);
+    setSummarySectionEditorError('');
     setMeetingActions([]);
     setMeetingActionsLoaded(false);
     setMeetingActionsCanonicalId(null);
@@ -1541,11 +1560,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             setCanonicalProcessingSnapshot(current => (
               reconcileRecoveredSummaryStage(current, generatedDocument)
             ));
-            const shouldReadCanonical = Boolean(
-              meetingScopeKey
-              && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
-            );
-            const current = shouldReadCanonical && meetingScopeKey
+            // A successful mirror can report `updated + unchanged` when the
+            // immutable version already exists. Re-read canonical content in
+            // every success branch so a remote-ID compatibility document never
+            // replaces the local structured identity used by native actions.
+            const current = meetingScopeKey
               ? await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null)
               : null;
             if (!alive || !isCurrentPageRequest(summaryRequest)) return;
@@ -2179,11 +2198,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             setCanonicalProcessingSnapshot(current => (
               reconcileRecoveredSummaryStage(current, generatedDocument)
             ));
-            const shouldReadCanonical = Boolean(
-              meetingScopeKey
-              && (cacheResult.projection === 'preserved' || cacheResult.mirrorStatus === 'activated'),
-            );
-            const current = shouldReadCanonical && meetingScopeKey
+            const current = meetingScopeKey
               ? await loadCurrentMeetingSummaryState(meetingScopeKey, currentMeeting.id).catch(() => null)
               : null;
             if (isCurrentPageRequest(summaryRequest)) {
@@ -3002,6 +3017,77 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSummaryError('');
     return current.document;
   }, [meetingScopeKey]);
+
+  const openSummarySectionEditor = useCallback((sectionId: string) => {
+    const document = displayedSummaryDocument;
+    const versionId = document?.remoteVersionId?.trim();
+    const section = document?.sections.find(item => item.id === sectionId);
+    if (!document || !versionId || !section || loadingSummary) {
+      showDialog({
+        title: '暂时无法编辑',
+        message: '整理内容尚未准备好，请稍后重试。',
+        tone: 'warning',
+      });
+      return;
+    }
+    setSummarySectionEditorError('');
+    setSummarySectionEditorTarget({
+      id: section.id,
+      versionId,
+      title: section.title,
+      content: section.content,
+      userEdited: section.userEdited === true,
+    });
+  }, [displayedSummaryDocument, loadingSummary, showDialog]);
+
+  const saveSummarySectionEdit = useCallback(async (content: string | null) => {
+    const target = summarySectionEditorTarget;
+    if (!meeting || !meetingScopeKey || !target || summarySectionEditorSaving) return;
+    const requestedMeetingId = meeting.id;
+    setSummarySectionEditorSaving(true);
+    setSummarySectionEditorError('');
+    try {
+      const current = await loadCurrentMeetingSummaryState(meetingScopeKey, requestedMeetingId);
+      if (!current) throw new MeetingSummarySectionUnavailableError();
+      const result = await editMeetingSummarySectionUseCase.execute({
+        meetingId: current.canonicalMeetingId,
+        versionId: target.versionId,
+        sectionId: target.id,
+        content,
+        expectedContent: target.content,
+        expectedUserEdited: target.userEdited,
+        scopeKey: meetingScopeKey,
+        canonicalWrite: true,
+      });
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      const refreshed = await refreshCanonicalSummary(requestedMeetingId);
+      if (!refreshed) throw new MeetingSummarySectionUnavailableError();
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      advancePageGenerations('summary');
+      setSummarySectionEditorTarget(null);
+      ToastAndroid.show(
+        result.restored ? '已恢复生成内容' : '整理内容已保存',
+        ToastAndroid.SHORT,
+      );
+    } catch (reason) {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      if (
+        reason instanceof MeetingSummarySectionConflictError
+        || reason instanceof MeetingSummarySectionUnavailableError
+      ) {
+        setSummarySectionEditorError('整理内容已发生变化，请关闭后重新打开。');
+      } else if (reason instanceof MeetingSummarySectionContentError) {
+        setSummarySectionEditorError('整理内容不能为空，且不能超过 20000 个字符。');
+      } else {
+        diagnosticWarn('save meeting summary section edit failed', reason);
+        setSummarySectionEditorError('整理内容暂时无法保存，请稍后重试。');
+      }
+    } finally {
+      if (mountedRef.current && routeMeetingIdRef.current === requestedMeetingId) {
+        setSummarySectionEditorSaving(false);
+      }
+    }
+  }, [advancePageGenerations, meeting, meetingScopeKey, refreshCanonicalSummary, summarySectionEditorSaving, summarySectionEditorTarget]);
 
   const saveSpeakerAssignment = useCallback(async (value: MeetingSpeakerAssignmentValue) => {
     const target = speakerAssignmentTarget;
@@ -4408,6 +4494,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (action.meetingId !== route.params.meetingId) break;
         setTemplateSheetVisible(true);
         break;
+      case 'editSummarySection':
+        if (action.meetingId !== route.params.meetingId) break;
+        openSummarySectionEditor(action.sectionId);
+        break;
       case 'editTranscriptSpeaker':
         openSpeakerAssignment(action);
         break;
@@ -4459,7 +4549,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
+  }, [manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openRootConflict, openSpeakerAssignment, openSummarySectionEditor, playerSources, processingStatuses, removeMarker, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, toggleMeetingAction]);
 
   const transcriptStageLoading = processingStatuses.transcript === 'realtime_draft'
     || processingStatuses.transcript === 'finalizing';
@@ -4549,6 +4639,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     canShare: Boolean(meeting && !sharing),
     canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
+    canEditSummary: Boolean(
+      meetingScopeKey
+      && displayedSummaryDocument?.remoteVersionId
+      && !loadingSummary
+      && !summaryStageLoading
+    ),
     canCreateAction: false,
     canShareActions: meetingActionCollaborationEnabled,
     canCreateClip: canCreateMediaClip,
@@ -4582,7 +4678,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeStatusLabel,
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
-  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  }), [accessToken, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, pendingAudioError, playerSource, playerSourceError, playerSources, processingPresentation.retryStage, processingPresentation.tone, processingRetrying, processingStatusLabel, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, rootConflict, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryProgress, summaryStageError, summaryStageLoading, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];
@@ -4838,6 +4934,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         }}
         onRetry={() => { void loadSummaryVersions(); }}
         onSelect={versionId => { void selectSummaryVersion(versionId); }}
+      />
+      <MeetingSummarySectionEditorSheet
+        visible={summarySectionEditorTarget !== null}
+        value={summarySectionEditorTarget}
+        saving={summarySectionEditorSaving}
+        error={summarySectionEditorError}
+        onClose={() => {
+          if (summarySectionEditorSaving) return;
+          setSummarySectionEditorTarget(null);
+          setSummarySectionEditorError('');
+        }}
+        onSave={content => { void saveSummarySectionEdit(content); }}
+        onRestore={() => { void saveSummarySectionEdit(null); }}
       />
       <MeetingTemplateSheet
         visible={templateSheetVisible}

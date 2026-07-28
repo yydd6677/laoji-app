@@ -24,6 +24,8 @@ export interface MeetingSummarySection {
   kind: MeetingSummarySectionKind;
   title: string | null;
   content: string;
+  userEdited?: boolean;
+  userEditedAtMs?: number | null;
   citations: readonly MeetingSummaryCitation[];
 }
 

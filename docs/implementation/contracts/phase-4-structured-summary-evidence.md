@@ -17,6 +17,8 @@
 
 ## 当前范围
 
+- 当前可读 Summary section 已有 44dp 原子编辑入口和老记自有底部编辑层。保存只更新 `user_text/user_edited_at_ms`，保留不可变 `generated_text`、citation 和历史版本；恢复时清除人工覆盖，并按其余人工 section、已编辑或已处理行动项重新计算 `summary_versions.user_edited`。
+- 编辑事务同时校验 scope、当前版本、section 身份、打开时正文与人工状态；删除会议、版本切换或并发变化均 fail closed。成功写入推进 canonical revision，页面重新读取 canonical Summary，兼容远端 ID 的临时文档不得覆盖本机结构化身份。
 - 客户端归一化 `schema_version = 2`：sections、citations、action candidates、模板/输入版本和生成时间；旧 JSON/Markdown 仅通过 legacy adapter 进入同一文档模型，原始 JSON 不直接展示给用户。
 - SQLite migration v5 为 Transcript segment 增加 provider `source_segment_id` 和 revision 内唯一索引。Summary citation 写入前必须解析到锁定 Transcript revision 内的 segment，且时间范围必须落在该 segment 内。
 - 每次不同生成结果创建 immutable `summary_version`；重复响应幂等。当前版本无人工修改时可以自动激活；section 已编辑、关联行动项已编辑/完成/忽略，或 legacy 响应试图替换非 legacy 版本时，只保存候选而不替换当前可读投影。
@@ -116,12 +118,20 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - `[PRODUCT]`：入口位于详情更多菜单；列表只显示可读版本，使用“当前版本、新版本、历史版本、含人工修改、内容可能已过期”等中文产品术语。
 - `[INFERENCE]`：72dp 双行版本 row、当前 checkmark 和滚动列表为 LaoJi 版本管理所需，不声称飞书 7.71.8 存在相同页面。
 
+组件：整理 section 编辑 sheet
+
+- Classification：LaoJi-only；最近容器为 Minutes 整理页与 Universe Design bottom sheet/input/button，不声称飞书存在同一编辑能力。
+- `[SOURCE]`：使用 12dp 顶角、16dp 页面边距、6dp input/button radius、48dp primary commit、44dp 图标目标及共享 surface/divider/primary/pressed/disabled/danger tokens。
+- `[PRODUCT]`：标题为“编辑整理内容”，只保留关闭、正文、条件式“恢复生成内容”和“保存”；所有错误为中文，不增加说明书式帮助文案。
+- `[INFERENCE]`：编辑入口位于 section 标题行右侧；Android 软键盘出现时整层上移，较小高度由正文区滚动，固定错误槽与提交按钮不被遮挡。
+
 ## 轻量验证
 
 - `npx tsc --noEmit --pretty false`：通过。
 - `git diff --check`：通过。
 - `:app:compilePreviewKotlin`：通过。
 - `:app:assemblePreview`：通过。
+- SUM-03 本批在保留数据的 `emulator-5556` 完成当前 section 编辑、页面即时刷新、强停冷启动保留、“恢复生成内容”及再次冷启动；恢复后生成原文精确回到页面，人工修改标记清除。另切换到标准 LatinIME 复现并修复了初版只剩标题栏、正文与保存按钮被键盘遮挡的问题；修复后输入区、恢复操作和 48dp 保存按钮均位于键盘上方。logcat 无应用 FATAL、React Native 致命异常或 SQLiteException。
 - action sync 本批再次通过 TypeScript、diff whitespace、Preview Kotlin 与 assemble；后续运行批次已在目标 18020 取得 fresh action capability、测试账号写入/pull 和真实冲突选择。此前端口未监听只保留为首次同步时的历史边界，8020 仍来自另一旧工作区。
 - 服务端 `python3 -m py_compile`：通过；抽取生产函数的 AST 合同验证 schema v2、稳定 action ID、`due_at`、空 citation 和 UTC `Z` 时间通过。抽取副本不是完整 `app.workers` 包，现有 pytest 在收集阶段因缺少 `app` 包停止，不记为断言通过或失败。
 - SUM-02 使用目标源码隔离候选运行 61 项 backend 摘要/API/生命周期合同和 38 项 Map-Reduce/chunker 合同，全部通过。同步后直接针对目标源码再次运行同样的 61 + 38 项合同并通过；生命周期测试中的预期失败任务会打印受控 traceback，但测试断言通过。目标 8 个 delta 文件与本机 overlay 的 SHA-256 逐一一致。
@@ -151,11 +161,12 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 上一稳定 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，当时构建时间 `2026-07-23 22:47:53 +0800`，大小 `89,782,623` bytes，SHA-256 `cc1034081193fad6b167f521df7c92ebf670fd29b8c5669ea2a04b70e8d8ff29`；已被本批构建取代。
 - action sync migration 前通过同签名 Debug 包的 `debuggable` 只读窗口归档模拟器数据：`/tmp/laoji-pre-action-sync-v8-20260723.tar.gz`，大小 `1,549,596` bytes，SHA-256 `f011af7279ee44af3b7fe6023b790d86ae2df7140b6e25759d1332037bdfd6f7`。归档内 SQLite 为 `user_version=6`、meeting 1、action/outbox/conflict 均为 0。
 - 最终 Preview 首次启动后再次只读归档，SQLite 为 `user_version=8`、meeting 1、action/outbox/conflict 均为 0；`remote_revision`、`request_payload_json`、`claim_token` 和三个目标索引均存在，`foreign_key_check` 无输出。post 归档 SHA-256 为 `5c92f86d803b1fb6d1fb519a1f6d9c74879876e4544ff643b4b2fd5a31d73d21`。
-- 当前可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 05:16:01 +0800`，大小 `91,061,920` bytes，SHA-256 `46a4e412dfa3e3e055c6671a7506a4a4288e2faeb86334c649d93213d41a1ec8`。最终包已保留数据覆盖安装到 `emulator-5554` 与 `emulator-5560`，并完成上述 action 冲突双端收敛；强制停止后的冷启动进程存活，logcat 无应用 FATAL、React Native 致命异常、SQLiteException、SIGSEGV 或 SIGABRT。当前没有 USB 真机。
+- 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 05:16:01 +0800`，大小 `91,061,920` bytes，SHA-256 `46a4e412dfa3e3e055c6671a7506a4a4288e2faeb86334c649d93213d41a1ec8`。该包曾完成上述 action 冲突双端收敛；本轮未触碰既有第二模拟器。
+- 当前可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 00:51:07 +0800`，大小 `91,083,336` bytes，SHA-256 `eeb63d04bf49edb273a820233f206aff0be170be3d2050e01712a8e0abfa75cf`。已保留数据覆盖安装到 `emulator-5556` 并完成上述 SUM-03 与正常软键盘纵切；当前 USB 已断开。
 
 ## 未完成边界
 
-1. 版本列表和当前指针切换目前只覆盖本机 canonical 数据；没有跨设备当前版本同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；section 人工编辑、引用移除和更细版本预览仍未实现。
+1. 版本列表、当前指针切换和 section 人工覆盖目前只覆盖本机 canonical 数据；没有跨设备当前版本/人工内容同步，也没有线上版本列表/切换合同。列表读取最近 50 个版本并无条件补入当前版本，尚无分页；引用移除和更细版本预览仍未实现。
 2. action capability/API/outbox、会议详情级 cursor/pull、真实账号 ACK、409/412、显式版本选择、双 Android 实例提醒及非协作 action 冲突收敛均已有运行证据；仍缺物理双机收敛、全账号 change feed、全局 sync cursor、batch 和 action tombstone。
 3. 四模板均取得真实模型 section/action 与 durable identity，定向访谈又取得四类 section 和 5 个 canonical 引用；仍缺自动 ASR 直连样本、更多真人/长会议与历史/附件授权质量抽查，以及线上版本列表/切换合同。
 4. 当前只有模拟器，没有 USB 真机。引用 seek、编辑键盘/inset、完成动效、通知及后续日程命令仍缺真机轻量复核；通知回跳的长文档 action 长距离定位也未单独验证。

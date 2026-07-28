@@ -2736,6 +2736,26 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     return row ? summaryVersionFromRow(row) : null;
   }
 
+  async getSummarySection(
+    sectionId: string,
+    versionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<SummarySectionRecord | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(sectionId, 'summary section ID');
+    assertRecordId(versionId, 'summary version ID');
+    const row = await this.database.getFirstAsync<SummarySectionRow>(
+      `SELECT section.* FROM summary_sections section
+       INNER JOIN summary_versions version ON version.id = section.version_id
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE section.id = ? AND section.version_id = ? AND meeting.scope_key = ?`,
+      sectionId,
+      versionId,
+      scopeKey,
+    );
+    return row ? summarySectionFromRow(row) : null;
+  }
+
   async hasUserProtectedSummaryState(versionId: string, scopeKey: ScopeKey): Promise<boolean> {
     assertScopeKey(scopeKey);
     const row = await this.database.getFirstAsync<{ protected: number }>(
@@ -4636,6 +4656,72 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       });
     }
     this.touchedMeetingIds.add(version.meetingId);
+  }
+
+  async updateCurrentSummarySectionUserText(
+    meetingId: string,
+    versionId: string,
+    sectionId: string,
+    scopeKey: ScopeKey,
+    userText: string | null,
+    userEditedAtMs: number | null,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    assertRecordId(versionId, 'summary version ID');
+    assertRecordId(sectionId, 'summary section ID');
+    if ((userText === null) !== (userEditedAtMs === null)) {
+      throw new Error('summary section user edit ownership is invalid');
+    }
+    if (
+      userText !== null
+      && (!userText.trim() || userText.length > 20_000 || userText.includes('\u0000'))
+    ) throw new Error('summary section user text is invalid');
+    assertOptionalNonNegativeInteger(userEditedAtMs, 'summary section edit time');
+
+    const updated = await this.database.runAsync(
+      `UPDATE summary_sections SET user_text = ?, user_edited_at_ms = ?
+       WHERE id = ? AND version_id = ?
+         AND EXISTS (
+           SELECT 1 FROM summary_versions version
+           INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+           WHERE version.id = summary_sections.version_id
+             AND version.meeting_id = ? AND meeting.scope_key = ?
+             AND meeting.lifecycle <> 'deleted'
+             AND meeting.current_summary_version_id = version.id
+             AND version.status IN ('ready', 'stale')
+         )`,
+      userText,
+      userEditedAtMs,
+      sectionId,
+      versionId,
+      meetingId,
+      scopeKey,
+    );
+    if (updated.changes !== 1) return false;
+
+    const ownership = await this.database.runAsync(
+      `UPDATE summary_versions SET user_edited = CASE WHEN
+         EXISTS (
+           SELECT 1 FROM summary_sections section
+           WHERE section.version_id = summary_versions.id
+             AND (section.user_text IS NOT NULL OR section.user_edited_at_ms IS NOT NULL)
+         )
+         OR EXISTS (
+           SELECT 1 FROM action_items action
+           WHERE action.source_summary_version_id = summary_versions.id
+             AND (action.user_edited_at_ms IS NOT NULL OR action.status <> 'pending')
+         )
+         THEN 1 ELSE 0 END
+       WHERE id = ? AND meeting_id = ?`,
+      versionId,
+      meetingId,
+    );
+    if (ownership.changes !== 1) {
+      throw new Error('summary section ownership could not be updated');
+    }
+    this.touchedMeetingIds.add(meetingId);
+    return true;
   }
 
   async insertOutbox(operation: SyncOperationRecord): Promise<boolean> {
