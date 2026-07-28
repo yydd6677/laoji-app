@@ -640,6 +640,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const guestMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const canonicalStoreMutationDepthRef = useRef(0);
   const audioResumeOperationsRef = useRef(new Map<string, Promise<void>>());
+  const audioResumeRerunScopesRef = useRef(new Set<string>());
   const lastAudioResumeAtRef = useRef(new Map<string, number>());
   const audioResumePollTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const audioResumePollCountsRef = useRef(new Map<string, number>());
@@ -669,6 +670,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     audioResumePollTimersRef.current.forEach(timer => clearTimeout(timer));
     audioResumePollTimersRef.current.clear();
     audioResumePollCountsRef.current.clear();
+    audioResumeRerunScopesRef.current.clear();
     recordingAssetCapabilityScopesRef.current.clear();
   }, [scope]);
 
@@ -2108,7 +2110,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     const operationKey = scope;
     const existing = audioResumeOperationsRef.current.get(operationKey);
-    if (existing) return existing;
+    if (existing) {
+      if (force) audioResumeRerunScopesRef.current.add(operationKey);
+      return existing;
+    }
     const now = Date.now();
     const lastAttemptAt = lastAudioResumeAtRef.current.get(operationKey) ?? 0;
     if (!force && now - lastAttemptAt < 30_000) return Promise.resolve();
@@ -2116,7 +2121,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const operationGeneration = generationRef.current;
 
     let operation: Promise<void>;
-    let shouldPollNativeUploads = false;
+    let shouldPollPendingUploads = false;
     operation = (async () => {
       const flags = getFeatureFlags();
       if (flags.localMeetingDbAccountUploadWriteV1 && isScopeKey(scope)) {
@@ -2270,8 +2275,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         2,
       );
       const after = await listPendingMeetingAudioUploads(scope);
-      shouldPollNativeUploads = after.some(item => Boolean(item.nativeWorkId));
-      if (!shouldPollNativeUploads) audioResumePollCountsRef.current.delete(operationKey);
+      shouldPollPendingUploads = after.some(item => (
+        Boolean(item.nativeWorkId) || !item.remoteMeetingId
+      ));
+      if (!shouldPollPendingUploads) audioResumePollCountsRef.current.delete(operationKey);
       const afterInspections = await inspectPendingMeetingAudioUploads(after);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       if (
@@ -2289,8 +2296,17 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (audioResumeOperationsRef.current.get(operationKey) === operation) {
         audioResumeOperationsRef.current.delete(operationKey);
       }
+      const rerunRequested = audioResumeRerunScopesRef.current.delete(operationKey);
       if (
-        shouldPollNativeUploads
+        rerunRequested
+        && generationRef.current === operationGeneration
+        && activeScopeRef.current === scope
+      ) {
+        void resumePendingAudioUploads(true).catch(() => {});
+        return;
+      }
+      if (
+        shouldPollPendingUploads
         && generationRef.current === operationGeneration
         && activeScopeRef.current === scope
       ) {
@@ -2331,11 +2347,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (mode !== 'authenticated' || !accessToken) return undefined;
+    if (!loading) void resumePendingAudioUploads(true).catch(() => {});
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState === 'active') void resumePendingAudioUploads().catch(() => {});
     });
     return () => subscription.remove();
-  }, [accessToken, mode, resumePendingAudioUploads]);
+  }, [accessToken, loading, mode, resumePendingAudioUploads]);
 
   useEffect(() => {
     if (!isScopeKey(scope)) return undefined;

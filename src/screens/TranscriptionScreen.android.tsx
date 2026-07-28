@@ -607,6 +607,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [contentShareBusyId, setContentShareBusyId] = useState<string | null>(null);
   const [contentShareError, setContentShareError] = useState('');
   const [moreVisible, setMoreVisible] = useState(false);
+  const [deletingMeeting, setDeletingMeeting] = useState(false);
   const [meetingActionsVisible, setMeetingActionsVisible] = useState(false);
   const [meetingActionsSheetLoading, setMeetingActionsSheetLoading] = useState(false);
   const [meetingActionsSheetError, setMeetingActionsSheetError] = useState('');
@@ -3011,6 +3012,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           onPress: async () => {
             try {
               await manualNote.flush();
+              setDeletingMeeting(true);
+              await new Promise<void>(resolve => {
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+              });
               await deleteMeeting(meeting.id, {
                 recoverable: presentation.recoverable,
                 expectedRetentionDays: presentation.retentionDays,
@@ -3025,6 +3030,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                   tone: 'warning',
                 });
               } else {
+                if (mountedRef.current) setDeletingMeeting(false);
                 showDialog({
                   title: '删除失败',
                   message: readableErrorMessage(reason, '请检查网络后重试。'),
@@ -4965,13 +4971,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         collapsable={false}
         collapsableChildren={false}
       >
-        <LaojiMinutesView
-          style={styles.surface}
-          surface="detail"
-          snapshot={snapshot}
-          onMinutesAction={event => handleAction(event.nativeEvent)}
-          testID="meeting-detail-native-surface"
-        />
+        {!deletingMeeting ? (
+          <LaojiMinutesView
+            style={styles.surface}
+            surface="detail"
+            snapshot={snapshot}
+            onMinutesAction={event => handleAction(event.nativeEvent)}
+            testID="meeting-detail-native-surface"
+          />
+        ) : null}
       </View>
       <MeetingShareSheet
         visible={shareVisible}
