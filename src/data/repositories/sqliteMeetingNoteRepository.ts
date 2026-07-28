@@ -9814,6 +9814,28 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return revision ? this.transcriptProjectionFromRow(database, revision, scopeKey) : null;
   }
 
+  async getTranscriptRevisionContentByRemoteId(
+    meetingId: string,
+    remoteRevisionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null> {
+    assertScopeKey(scopeKey);
+    assertRecordId(meetingId, 'meeting ID');
+    const normalizedRemoteRevisionId = remoteRevisionId.trim();
+    assertRecordId(normalizedRemoteRevisionId, 'transcript remote revision ID');
+    const database = await openMeetingDatabase();
+    const revision = await database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.meeting_id = ? AND revision.remote_id = ? AND meeting.scope_key = ?
+       LIMIT 1`,
+      meetingId,
+      normalizedRemoteRevisionId,
+      scopeKey,
+    );
+    return revision ? this.transcriptProjectionFromRow(database, revision, scopeKey) : null;
+  }
+
   async getActiveTranscriptContent(
     meetingId: string,
     scopeKey: ScopeKey,

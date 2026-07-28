@@ -305,12 +305,58 @@ function transcriptProcessingFailureCode(
     ? `${reason.name} ${reason.message}`.toLowerCase()
     : '';
   if (kind === 'persistence') {
+    if (/recording asset does not belong|录音.*不属于/.test(message)) {
+      return 'transcript_recording_asset_missing';
+    }
+    if (/recording asset.*identity|录音.*身份/.test(message)) {
+      return 'transcript_recording_asset_identity_changed';
+    }
+    if (/processing stage is missing|处理阶段.*缺失/.test(message)) {
+      return 'transcript_stage_missing';
+    }
+    if (/does not accept transcript|会议记录已不存在/.test(message)) {
+      return 'transcript_meeting_unavailable';
+    }
+    if (/本机升级/.test(message)) return 'transcript_canonical_projection_missing';
+    if (/本机数据状态异常/.test(message)) return 'transcript_canonical_reload_failed';
+    if (/保存后的数据不完整/.test(message)) return 'transcript_canonical_projection_incomplete';
+    if (/clock is invalid|时钟/.test(message)) return 'transcript_clock_invalid';
+    if (/transaction did not evaluate|事务.*未完成/.test(message)) {
+      return 'transcript_transaction_incomplete';
+    }
     if (/storage|disk|space|quota|full|存储|磁盘|空间/.test(message)) {
       return 'transcript_local_storage_unavailable';
     }
-    if (/sqlite|database|transaction|locked|数据库|事务|锁定/.test(message)) {
-      return 'transcript_database_write_failed';
+    if (/foreign key.*constraint/.test(message)) return 'transcript_database_foreign_key';
+    if (/unique.*transcript_revisions\.meeting_id.*remote_id/.test(message)) {
+      return 'transcript_remote_revision_duplicate';
     }
+    if (/unique.*transcript_revisions\.meeting_id/.test(message)) {
+      return 'transcript_active_revision_duplicate';
+    }
+    if (/unique.*transcript_segments\.revision_id.*source_segment_id/.test(message)) {
+      return 'transcript_source_segment_duplicate';
+    }
+    if (/unique.*transcript_segments\.revision_id.*ordinal/.test(message)) {
+      return 'transcript_segment_ordinal_duplicate';
+    }
+    if (/unique.*transcript_segments\.id/.test(message)) {
+      return 'transcript_segment_id_duplicate';
+    }
+    if (/unique.*transcript_revisions\.id/.test(message)) {
+      return 'transcript_revision_id_duplicate';
+    }
+    if (/unique.*constraint/.test(message)) return 'transcript_database_unique';
+    if (/not null.*constraint/.test(message)) return 'transcript_database_not_null';
+    if (/constraint|约束/.test(message)) return 'transcript_database_constraint';
+    if (/database is locked|database is busy|locked|busy|锁定/.test(message)) {
+      return 'transcript_database_busy';
+    }
+    if (/cannot start.*transaction|no transaction is active/.test(message)) {
+      return 'transcript_database_transaction_state';
+    }
+    if (/sqlite/.test(message)) return 'transcript_sqlite_write_failed';
+    if (/database|transaction|数据库|事务/.test(message)) return 'transcript_database_write_failed';
     if (/scope|account|session|作用域|账号|会话/.test(message)) return 'transcript_scope_changed';
     return 'transcript_persistence_failed';
   }
@@ -360,6 +406,7 @@ export async function mirrorLegacyTranscriptProcessingFailure(
       status: outcome,
       failure_kind: kind,
       scope: scopeKey === 'guest' ? 'guest' : 'account',
+      error_code: transcriptProcessingFailureCode(kind, reason),
     });
   } catch (error) {
     diagnosticWarn('[meeting-db] transcript failure shadow write failed', error);

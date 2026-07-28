@@ -1337,6 +1337,11 @@ export interface MeetingNoteRepository {
     id: string,
     scopeKey: ScopeKey,
   ): Promise<TranscriptRevisionProjection | null>;
+  getTranscriptRevisionContentByRemoteId(
+    meetingId: string,
+    remoteRevisionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null>;
   getActiveTranscriptContent(
     meetingId: string,
     scopeKey: ScopeKey,
