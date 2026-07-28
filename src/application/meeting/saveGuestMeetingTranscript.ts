@@ -467,6 +467,7 @@ export class SaveGuestMeetingTranscriptUseCase {
         createdAtMs,
         finalizedAtMs,
       } : null;
+      const activeRevisionChanged = activate && current?.id !== revisionId;
       activeContentChanged = activate && !sameSemanticContent(currentContent, lines);
       const revisionNeedsWrite = Boolean(
         revision
@@ -502,7 +503,10 @@ export class SaveGuestMeetingTranscriptUseCase {
           activate,
           replaceSegments: realtimeDraft,
         });
-        if (activeContentChanged && await transaction.markCurrentSummaryStale(meetingId, scopeKey)) {
+        if (
+          (activeRevisionChanged || activeContentChanged)
+          && await transaction.markCurrentSummaryStale(meetingId, scopeKey)
+        ) {
           const summaryStage = await transaction.getStage(meetingId, scopeKey, 'summary');
           if (!summaryStage) throw new Error('meeting summary processing stage is missing');
           updatedAtMs = Math.max(updatedAtMs, summaryStage.updatedAtMs);

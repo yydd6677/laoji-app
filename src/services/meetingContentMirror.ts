@@ -613,6 +613,20 @@ export function mirrorLegacySummaryContent(
         const currentProtected = current
           ? await transaction.hasUserProtectedSummaryState(current.id, scopeKey)
           : false;
+        let currentMatchesUndeclaredSource = false;
+        if (current && !declaredTranscriptRevisionId) {
+          const currentSourceFingerprint = await sha256({
+            ...fingerprintPayload,
+            transcriptRevisionId: current.transcriptRevisionId,
+          });
+          currentMatchesUndeclaredSource = current.id
+            === `${note.id}:summary:${document.templateId}:${currentSourceFingerprint}`;
+        }
+        if (currentMatchesUndeclaredSource) {
+          replaceLegacyProjection = !currentProtected;
+          mirrorStatus = 'unchanged';
+          return;
+        }
         if (existingVersion) {
           const remainsCurrent = current?.id === versionId;
           replaceLegacyProjection = remainsCurrent && !currentProtected;
