@@ -18,6 +18,8 @@
 - `[DEVICE]` 只使用老记候选 AVD `emulator-5556`；KataCR 的 `emulator-5560` 未操作。账号作用域新建日程 `V3日程入口验证`，`sourceEventId=39`、occurrence 为 `2026-07-28`。
 - 日程详情点击“开始记录”进入同名会议；返回日程后显示“继续记录，正在录音”，再次进入恢复同一原生录音服务，没有创建第二条会议。结束后生成 `04:09` 本机录音，日程动作变为“查看记录”，点击后仍打开同一 MeetingNote。
 - 日程提醒通知的显式“开始记录”动作打开这条已结束的 `04:09` 记录；`laoji://calendar/occurrence?...&action=meeting&origin=widget` 也打开同一记录，`action=open` 只打开日程详情。三条动作期间没有新的 `meeting_create`；冷启动 canonical 审计始终为 4 条会议且 missing/extra/duplicate/context mismatch 全为 0。通知权限只为本轮验证临时授予，结束后已恢复为未授予。
+- Quick Settings Tile 初始显示“会议录音 / 开始记录”；点击后创建临时会议并成功持续录音，系统 Tile 切为 active“录音中”，录音中再次点击返回同一录音而不新建第二条，结束后恢复 inactive“开始记录”。删除这条临时会议后默认列表仍为原有 3 条。
+- 临时为 `emulator-5556` 配置设备 PIN 并开启“系统验证 / 启动时验证”后，Tile 点击先停在系统“解锁老记”凭据页；错误 PIN 期间没有 RecordingService 或新会议，正确 PIN 后才执行同一个持久 pending 目标并开始录音。任务结束后测试会议已删除、两项开关已关闭、临时 PIN 已清除，模拟器恢复无锁屏状态。
 - 录音结束后页面曾短暂显示可重试上传状态，后台随后自动恢复；详情可见 5 段远端 final Transcript、`04:09` 播放器和 1 个讲话人。选择通用模板后约 2.5 秒形成 1 段“会议概述”，无行动项；这证明上传后的远端文字与整理链可达，不证明模拟器输入的识别质量。
 - 冷启动时旧代码重复收到相同 `remoteRevisionId`，但服务器补齐的 RecordingAsset/job provenance 改变了本机 fingerprint，于是误插入第二个本地 revision，并触发 `transcript_revisions(meeting_id, remote_id)` 唯一约束。当前实现先按远端 revision ID 复用既有不可变版本，只补空的来源身份并保留既有 segment ID；正文、时间、说话人或既有来源身份若变化则拒绝覆盖。
 - 修复包第一次运行只把 canonical revision 从 85 推进到 86 以补齐 provenance；随后强杀冷启动保持 revision 86，未再出现 `meeting_transcript_processing_failure`。04:09 音频、5 段文字、整理结果和播放器均保留，日志无 App FATAL、React Native 致命异常或 SQLiteException。

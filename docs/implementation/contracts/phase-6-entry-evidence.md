@@ -1,6 +1,6 @@
 # Phase 6 快速入口证据：ENTRY-01 通知与 ENTRY-02 Widget/Tile
 
-状态：ENTRY-01 已形成“默认点击查看日程 / 明确动作开始、继续或查看会议记录”的本机纵向闭环；ENTRY-02 已接通严格语义链接、最小日程投影、近期日程 Widget 和临时会议 Quick Settings Tile。本文件记录轻量合同、源码映射和模拟器实测，不代表 App Lock 生物识别、Tile 录音中状态、真机/不同 ROM、服务端冲突裁决或 Phase 6 退出条件已经完成。
+状态：ENTRY-01 已形成“默认点击查看日程 / 明确动作开始、继续或查看会议记录”的本机纵向闭环；ENTRY-02 已接通严格语义链接、最小日程投影、近期日程 Widget 和临时会议 Quick Settings Tile。顶部候选包又补齐 Tile 录音中 active 状态、重复点击返回同一录音，以及 Tile 在 App Lock 下先验证再执行 pending 目标。本文件记录轻量合同、源码映射和模拟器实测，不代表通知/Widget 的 App Lock 分支、真机/不同 ROM、服务端冲突裁决或 Phase 6 全部退出条件已经完成。
 
 ## ENTRY-01 当前范围
 
@@ -42,9 +42,9 @@
 ## ENTRY-01 未完成边界
 
 1. 当前没有 USB 真机；不同 ROM 的通知展开/动作、物理设备后台限制、触觉、字体缩放和通知权限首轮引导尚未验证。
-2. App Lock 的代码门禁和 pending 恢复顺序已保留，但本轮没有在模拟器配置生物识别锁后执行 notification -> 解锁 -> 创建的完整任务。
-3. 当前会议服务不可达，无法证明通知动作成功进入持续录音、active recording 的真实继续或 ended meeting 的真实详情分支；本轮只实测了首次创建/自动开始尝试和 failed-recoverable 继续。
-4. 账号作用域、服务端 occurrence 唯一约束、两设备同时创建及 409 后本机音频合并仍缺可用服务端和测试账号。
+2. 顶部候选包已用系统设备凭据完成 Tile -> App Lock -> pending -> 创建/录音；notification -> App Lock -> occurrence 的设备任务仍未单独执行。
+3. 顶部候选包已由同一 occurrence 的通知显式动作和 Widget ended 分支打开既有记录，但通知首次开始并持续录音、active recording 通知继续仍没有集中设备样本。
+4. 当前账号和 occurrence 运行服务已有单设备证据；两台物理设备同时创建及真正不同会议的 409 后本机音频合并仍未完成。
    客户端已经能在 409/412 的 current 严格匹配同一会议和不可变快照时自动收敛；真正不同会议仍只保留冲突和资产，尚无用户恢复界面。
 5. 本轮按当前目标没有恢复归档测试、做通知投递压力矩阵或执行快速连点录音 session 压测；重复 response、稳定请求 ID和最终计数已做轻量验证。
 
@@ -74,8 +74,9 @@
 - Classification：LaoJi-only Android system entry。
 - `[SOURCE]`：本轮没有飞书 7.71.8 页面或资源证据支持同一 Tile，不作飞书来源声明。
 - `[PRODUCT]`：快捷入口必须经过 Activity、App Lock 和现有录音页；录音中点击只返回当前录音，不提供容易误触的 stop。
-- `[DEVICE]`：`emulator-5556` 的快速设置实际显示“会议录音 / 开始记录”和麦克风图标；点击进入 `laoji://meeting/new?origin=quick_tile`，创建 `entryPoint=quick_tile` 的临时会议并尝试自动开始。当前服务不可达，最终停在中文可恢复失败态。
-- `[INFERENCE]`：active/subtitle/stateDescription 遵循 Android Tile 状态语义；当前没有成功持续录音，active 外观与返回同一录音只完成代码链路，未做设备实测。
+- `[DEVICE]`：`emulator-5556` 的快速设置实际显示“会议录音 / 开始记录”和麦克风图标；顶部候选包点击后创建 `entryPoint=quick_tile` 的临时会议并成功持续录音，Tile 同步切为“录音中”。录音中再次点击返回同一录音，结束后恢复“开始记录”。
+- `[DEVICE]`：临时开启 App Lock 并配置系统设备凭据后，Tile 点击先进入系统“解锁老记”凭据页；错误凭据期间没有创建会议或启动录音服务，正确凭据通过后才执行同一个 pending 目标并开始录音。
+- `[INFERENCE]`：active/subtitle/stateDescription 遵循 Android Tile 状态语义；录音中点击不停止、App Lock 前不创建会议均已由当前候选包的模拟器任务实测，物理设备与不同 ROM 仍不能由此替代。
 
 ## ENTRY-02 轻量验证
 
@@ -90,12 +91,15 @@
 - Widget 选择器原先因缺少 `previewLayout` 显示应用图标占位；补充真实 layout preview 和静态中文预览值后，选择器可展示日期/空态构图。运行时日期和状态仍由 provider 覆盖。
 - 模拟器测试前已保存快照 `codex-laoji-entry02-pretest-20260724`。验证完成后加载快照并覆盖安装最终 Preview；临时 `Entrydget` 日程及其失败会议已消失，原始 `OccueneSmoke` 保留。最终冷启动 audit 回到 `legacy_meetings=1`、`projected_meetings=1`、`context_mismatches=0`，无应用 FATAL、`SQLiteException` 或 RemoteViews inflate 错误。
 - 最终 APK：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-24 05:27:38 +0800`，大小 `89,935,956` bytes，SHA-256 `e23ebadc121257d35698b59c9b48b96443f13daacda5a05cf3f6d3932bae0184`。已覆盖安装到唯一设备 `emulator-5556`，`lastUpdateTime=2026-07-24 05:29:02`；最终 Widget 空态、选择器 preview 以及 Tile“会议录音 / 开始记录”再次实测通过。
+- 顶部候选 APK `8756696f…e74d33b5` 在 `emulator-5556` 上补充运行 Tile：inactive 点击后生成一条 `02:54` 录音，Android 记录前台麦克风 service，系统 Tile 显示“会议录音 / 录音中”；第二次点击没有产生第二条会议，结束后 Tile 回到“开始记录”。测试会议经正常删除路径移除后，默认列表仍只有原有 3 条会议。
+- 同一候选包临时为该 AVD 配置设备 PIN 并开启“系统验证 / 启动时验证”。Tile 点击后错误 PIN 阶段没有 RecordingService；正确 PIN 后 pending 目标创建并开始一条录音。结束和删除测试会议后，两项隐私开关恢复关闭，临时 PIN 清除，`locksettings get-disabled=true`，默认列表仍为原有 3 条。
+- 两轮补充任务均未出现 App FATAL、React Native 致命异常或 SQLiteException；模拟器持续波形会令 `uiautomator dump` 等待 idle 超时，因此录音中页面使用系统 service 状态和截图取证，未把该超时归为应用缺陷。
 
 ## ENTRY-02 未完成边界
 
 1. 当前没有 USB 真机；不同 ROM 的 Widget cell/span、选择器 preview、RemoteViews 列表滚动、Tile 展开层、字体缩放和后台限制尚未验证。
-2. App Lock、pending 持久化和 `navigationUnlocked` 的执行顺序已复核，但没有在模拟器配置系统生物识别后完成 Widget/Tile -> 解锁 -> 导航/创建任务；“锁屏隐藏标题”也没有设备切换录像。
-3. 当前会议服务不可达，Tile active 外观、录音中点击返回当前录音、Widget 的 ended“查看记录”分支和成功持续录音尚未实测。
+2. Tile 的 App Lock/pending 顺序已完成系统设备凭据正反分支；Widget/通知的相同门禁仍未做设备任务。“锁屏隐藏标题”开关会随 App Lock 出现且默认开启，但尚未在真实 Launcher 锁屏场景抽查标题投影。
+3. Tile 的 recording active、录音中点击返回同一录音、停止后 inactive，以及 Widget 的 ended“查看记录”均已有当前候选包证据；paused 状态的 Tile 外观尚未单独采样。
 4. 过期投影有独立原生分支，但本轮没有改系统时钟等待 24 小时；真实跨日、时区变化和夏令时行为仍需后续设备任务。
-5. 账号 scope 切换、两设备 occurrence 冲突和后端 409 合并仍缺可用服务端与测试账号；本轮只验证游客本机 occurrence 去重。
+5. 当前账号 scope 的 occurrence/Widget 已有单设备运行证据；账号切换中的 pending 处理、两设备 occurrence 冲突和后端 409 合并仍缺物理设备任务。
 6. 本轮遵循轻量工作区约束，没有恢复归档测试、门禁或压力矩阵；只执行了类型检查、最终 Preview 构建、定向 intent/Widget/Tile 设备任务和崩溃日志检查。

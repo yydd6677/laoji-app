@@ -28,7 +28,7 @@
 | 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；当前 occurrence 账号模拟器又完成 04:09 录音、上传恢复、远端 final Transcript、播放器和整理结果，旧 NVML 事故不再是已确认当前阻塞 | 补真人录音质量、reprocessed 新鲜完整任务和一次物理设备候选抽查；不再重复模拟器短录音主链 |
 | 结构化整理、版本、引用、行动项 | 本机/线上闭环；服务端独立 Summary task、四模板与 additive 同步框架运行 | `general@1` 完成非平凡 durable/引用/移动端跳转；四模板完成真实任务；历史授权完成利用、未选隔离、引用隔离、幂等与 durable 闭环；双 Android 实例完成提醒与非协作 action 冲突收敛 | 只续线上版本列表、更广真人样本、附件授权质量和物理设备抽查；候选包自动 ASR 主链另案收口 |
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音视频导入、已有会议多资产加入、Marker 本机事务与账号 create/delete outbox/pull/tombstone、附件分享、可撤销文字链接、本机 WAV 与非 WAV 异步片段、软删除/恢复及双端到期物理清理纵切完成 | 视频/双录音模拟器、真实 MP4 上传/抽取/逐资产转写、v29/v30/v34 保留数据模拟器、18020 共享/清理/片段/Marker 合同；两个独立模拟器完成 Marker 新增、精确跳转和墓碑收敛 | Marker 只续物理双机/USB 与长离线抽查；导入续格式矩阵；片段、分享、删除续跨设备与真机抽查 |
-| 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成；四模板与历史授权运行闭环 | 模拟器、运行模板服务、四模板真实结果、决定/行动历史利用与隔离；通知显式动作与 Widget `action=meeting` 已复用同一 occurrence MeetingNote，`action=open` 只进日程；双 Android 实例 action 往返、提醒和非协作冲突已收敛 | 不重做页面；只补 App Lock、Tile active、物理设备与发现的缺陷 |
+| 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成；四模板与历史授权运行闭环 | 模拟器、运行模板服务、四模板真实结果、决定/行动历史利用与隔离；通知显式动作与 Widget `action=meeting` 已复用同一 occurrence MeetingNote，`action=open` 只进日程；当前候选包又完成 Tile active/重复点击幂等及 Tile 的 App Lock pending 正反分支；双 Android 实例 action 往返、提醒和非协作冲突已收敛 | 不重做页面；只补通知/Widget 的 App Lock、物理设备与发现的缺陷 |
 | 讲话人 | segment/cluster/future profile 修正、显式资料同意/撤销、账号离线识别和旧会议重匹配纵切完成 | 运行 correction 201/重放/412/overlay；模拟器资料详情与 reprocess；无真实人声改善证据 | 只补真实多人录音质量、第二设备与 USB；不重做 profile/correction/job 框架 |
 | QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01、COLLAB-01、ORG-01、CLIP-01 与 ATT-01 均已形成功能/线上纵切 | QA 真实模型/账号持久化与混合检索，v35 保留升级及第二设备本机 ID 问答已运行；COLLAB 模拟器所有者 + 匿名第二客户端；ORG v20/v28 + 18020 标签目录；ATT v21/v32 + 18020 真实账号登记/上传/鉴权下载/墓碑，并完成两个独立模拟器的文字附件新增/pull/墓碑；CLIP v23/v30 + 18020 M4A/MP4 任务 | QA 只续真实长会议开放世界观察和 USB；ATT 只续真实视觉模型、跨设备图片与物理设备；其余按各项补候选抽查 |
 
@@ -217,8 +217,8 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | SUM-03 | 结果版本与用户修改保护 | 已锁定 | 只随真实模型/冲突路径做候选抽查 |
 | IMP-01 | 文件选择与系统分享导入音视频 | 本机/线上纵切闭环；视频、远端多资产处理和已有会议显式加入已完成 | 格式兼容矩阵、第二台移动设备与 USB 真机 |
 | MRK-01 | Marker、会后跳转、转行动项/分享 | 功能/线上纵切完成；本机能力、v34 create/delete outbox、revision/tombstone/pull、18020 owner API 和双独立模拟器新增/跳转/删除收敛已闭环 | 物理双机、USB 真机和长离线/弱网抽查；不重建第二套同步系统 |
-| ENTRY-01 | 会前通知开始/继续/查看 | 本机闭环 | App Lock 和成功录音分支集中验收 |
-| ENTRY-02 | Widget 与 Quick Settings Tile | 本机闭环 | 真机 Launcher/Tile、active 状态集中验收 |
+| ENTRY-01 | 会前通知开始/继续/查看 | 本机闭环；当前候选包补 ended 记录通知直达 | notification 的 App Lock、首次成功录音/active 继续和物理设备抽查 |
+| ENTRY-02 | Widget 与 Quick Settings Tile | 本机闭环；当前候选包补 Tile active、重复点击同一录音与 App Lock pending 正反分支 | Widget/通知 App Lock、Tile paused 状态和真机 Launcher/Tile 抽查 |
 | TPL-01 | 四个内置模板 | 本机/线上纵切闭环；四模板真实输出、定向访谈与历史授权已运行 | 快速连续切换、跨设备与 USB 抽查 |
 | SERIES-01 | 重复会议系列记忆 | 本机/线上闭环；真实账号历史利用/隔离/durable 与双 Android 实例 action 往返收敛已运行 | 物理双机、并发冲突和远端 series identity 抽查 |
 | SHARE-01 | 内容级分层分享 | 功能/线上纵切完成；Marker/附件默认关闭，可撤销文字链接默认冻结且可选跟随最新整理 | 第二台移动设备、USB 真机；录音仍走文件分享 |
