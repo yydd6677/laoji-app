@@ -1707,7 +1707,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       alive = false;
       transcriptController.abort();
     };
-  }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, meeting?.hasSummary, meeting?.id, meetingScopeKey, reloadKey, remoteMeetingId, saveCachedSummary, saveCachedTranscript]);
+  }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, meeting?.hasSummary, meeting?.id, meeting?.updatedAt, meetingScopeKey, reloadKey, remoteMeetingId, saveCachedSummary, saveCachedTranscript]);
 
   useEffect(() => {
     if (!meeting) {
