@@ -34,6 +34,6 @@
 
 ## 尚未宣称
 
-- 当前 18020/18035 没有监听，因此没有真实账号的新 job、combined Transcript、截断候选和重启恢复运行证据。
+- 当前 18020 已健康监听并广告其他会议能力，但实时 capability 仍未包含 `transcript_reprocess_v1`；18035 的 capability 路径为 404。因此没有真实账号的新 reprocess job、combined Transcript、截断候选和重启恢复运行证据，移动端入口继续 fail closed。
 - 当前只有 `emulator-5556`，没有第二台移动设备或 USB 真机证据。
 - 服务恢复后只需补单/多 RecordingAsset 新 job、旧版本保留、全批完成、截断不覆盖、同请求重放和重启恢复；不重做 v31 数据平面或 UI 入口。
