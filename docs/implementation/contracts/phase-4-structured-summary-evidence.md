@@ -183,7 +183,7 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 00:51:07 +0800`，大小 `91,083,336` bytes，SHA-256 `eeb63d04bf49edb273a820233f206aff0be170be3d2050e01712a8e0abfa75cf`。已被 v36 引用覆盖候选取代。
 - 上一 SUM-03 本机版 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 01:17:52 +0800`，大小 `91,091,112` bytes，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。该包已被账号版本同步候选取代。
 - 上一 SUM-03 账号同步 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 04:20:11 +0800`，大小 `91,159,536` bytes，SHA-256 `89cb34ff577b95fecaef4e5aeaf6ebd06c9c3f46c24b9438a7b2d84a04fffd0c`。该包已完成 7 版本目录和离线冲突纵切，随后被最终收尾包取代。
-- 最终 SUM-03 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 04:32:29 +0800`，大小 `91,159,636` bytes，SHA-256 `9e63a7c7bd8f79b22338341bc91e44ad703191e56d0cb1cedb0fc9ac23ffe21c`。该包包含损坏冻结 payload 的 `invalid_local_payload` 终止处理；已保留数据覆盖安装到 `emulator-5556`，release bundle 冷启动后仍读取 7 个版本、0 个冲突、0 个待处理同步操作，前台页面非空，crash buffer 无记录，未见应用 FATAL、React Native 致命异常或 SQLiteException。USB 已断开，未写成真机证据。
+- 最终 SUM-03 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 04:32:29 +0800`，大小 `91,159,636` bytes，SHA-256 `9e63a7c7bd8f79b22338341bc91e44ad703191e56d0cb1cedb0fc9ac23ffe21c`。该包包含损坏冻结 payload 的 `invalid_local_payload` 终止处理；同字节包已冻结为 `/home/yydd/LaoJi-stable-builds/laoji-v104-meeting-memory-candidate-20260729.apk`，并保留数据覆盖安装到 `emulator-5556`。release bundle 冷启动后仍读取 7 个版本、0 个冲突、0 个待处理同步操作，前台页面非空，crash buffer 无记录，未见应用 FATAL、React Native 致命异常或 SQLiteException。USB 已断开，未写成真机证据。
 
 ## 未完成边界
 
