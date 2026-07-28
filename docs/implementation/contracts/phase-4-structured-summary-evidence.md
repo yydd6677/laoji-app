@@ -164,7 +164,7 @@ provenance 扩展同步前远端 5 个 action 文件与首个部署版本哈希�
 - 最终 Preview 首次启动后再次只读归档，SQLite 为 `user_version=8`、meeting 1、action/outbox/conflict 均为 0；`remote_revision`、`request_payload_json`、`claim_token` 和三个目标索引均存在，`foreign_key_check` 无输出。post 归档 SHA-256 为 `5c92f86d803b1fb6d1fb519a1f6d9c74879876e4544ff643b4b2fd5a31d73d21`。
 - 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-28 05:16:01 +0800`，大小 `91,061,920` bytes，SHA-256 `46a4e412dfa3e3e055c6671a7506a4a4288e2faeb86334c649d93213d41a1ec8`。该包曾完成上述 action 冲突双端收敛；本轮未触碰既有第二模拟器。
 - 上一可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 00:51:07 +0800`，大小 `91,083,336` bytes，SHA-256 `eeb63d04bf49edb273a820233f206aff0be170be3d2050e01712a8e0abfa75cf`。已被 v36 引用覆盖候选取代。
-- 当前可安装 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 01:17:52 +0800`，大小 `91,091,112` bytes，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。已保留数据覆盖安装到 `emulator-5556` 并完成上述 SUM-03、v36 引用覆盖和正常软键盘纵切；当前 USB 已断开。
+- SUM-03 当轮 Preview：`android/app/build/outputs/apk/preview/app-preview.apk`，构建时间 `2026-07-29 01:17:52 +0800`，大小 `91,091,112` bytes，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。该包已保留数据覆盖安装到 `emulator-5556` 并完成上述 SUM-03、v36 引用覆盖和正常软键盘纵切；最新候选包身份以 [`candidate-v3-evidence.md`](candidate-v3-evidence.md) 为准，USB 仍已断开。
 
 ## 未完成边界
 

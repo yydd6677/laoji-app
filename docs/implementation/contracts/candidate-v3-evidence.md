@@ -1,16 +1,16 @@
 # 候选版 V3 集中证据
 
-状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级。顶部当前包继续保留这些功能，并补齐 SUM-03 section 人工编辑、引用移除与可恢复 v36 覆盖；同一账号保留数据又完成正常软键盘、冷启动和分享/删除隐私只读检查。完整录制、账号恢复和来源跳转仍包含分轮证据；模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
+状态：同一候选代码线已完成 V3 第 2 条“录制主链”和第 7 条中的同账号第二实例 pull/真实 409/412 选择；后续 MRK-01 又在两份独立 Android 模拟器数据上完成 Marker 新增、首次登录恢复、精确跳转和删除墓碑收敛。紧邻前一 Preview 完成稳定回溯包的游客日程、会议、录音和人工笔记保留升级。顶部当前包继续保留这些功能，并补齐 SUM-03 section 人工编辑、引用移除与可恢复 v36 覆盖；同一账号保留数据又完成双录音整批重转写、Summary lineage、正常软键盘、冷启动和分享/删除隐私只读检查。完整录制、账号恢复和来源跳转仍包含分轮证据；模拟器不能替代物理手机，当前 APK 尚未覆盖安装到 USB 真机。
 
 ## 候选身份
 
 - APK：`android/app/build/outputs/apk/preview/app-preview.apk`
-- 移动端代码内容基线：`ff8707e feat: allow removing summary citations`
+- 移动端代码内容基线：`81fe86d fix: preserve summary lineage during transcript reprocessing`
 - 版本：`versionCode=104`，`versionName=1.0.0-source-preview`
-- 构建时间：`2026-07-29 01:17:52 +08:00`
-- 大小：`91,091,112` bytes
-- SHA-256：`b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`
-- `emulator-5556` 保留数据覆盖安装时间为 `2026-07-29 01:18:11 +08:00`；设备 `base.apk` SHA-256 与上述产物完全一致。
+- 构建时间：`2026-07-29 02:26:41 +08:00`
+- 大小：`91,091,308` bytes
+- SHA-256：`634999b97df998ab0ca7fd6ca09d91f6658f5962d1ab7265ab013722321b716c`
+- `emulator-5556` 保留数据覆盖安装时间为 `2026-07-29 02:34:04 +08:00`；设备 `base.apk` SHA-256 与上述产物完全一致。
 - 稳定回溯标签继续固定在 `stable-before-meeting-memory-roadmap -> cde96f9d5266961e380957893ecba39855aea39b`。
 
 ## 当前包：日程入口、录音处理与远端版本收敛
@@ -24,6 +24,14 @@
 - 冷启动时旧代码重复收到相同 `remoteRevisionId`，但服务器补齐的 RecordingAsset/job provenance 改变了本机 fingerprint，于是误插入第二个本地 revision，并触发 `transcript_revisions(meeting_id, remote_id)` 唯一约束。当前实现先按远端 revision ID 复用既有不可变版本，只补空的来源身份并保留既有 segment ID；正文、时间、说话人或既有来源身份若变化则拒绝覆盖。
 - 修复包第一次运行只把 canonical revision 从 85 推进到 86 以补齐 provenance；随后强杀冷启动保持 revision 86，未再出现 `meeting_transcript_processing_failure`。04:09 音频、5 段文字、整理结果和播放器均保留，日志无 App FATAL、React Native 致命异常或 SQLiteException。
 - 本轮没有 USB 设备；录音来自 Android 模拟器环境，不能替代真人、多讲话人、物理麦克风、弱网或长录音候选验收。
+
+## 当前包：双录音文字重新生成与整理版本保护
+
+- `[DEVICE]` 账号会议 `V3_CANDIDATE_SPOKEN` 已有 65.232 秒 primary 和 7.176 秒 imported secondary，两条均为远端 `uploaded`。最终 Preview 从“更多 → 重新生成文字记录”真实确认，不通过测试接口代替用户入口。
+- `[SERVICE]` 18020 为两条资产创建全新 job `1d598abc-a1b2-440e-b5d5-42573a417aec` 与 `52bb8555-7b34-4b16-8ff2-b3ba853425ad`，共享 batch `b865e16d-12aa-49c0-82f9-38eb2569621a`，均以 `attempt=1` 完成。服务端 primary 20 段、secondary 2 段和 10 段历史无资产内容均保留。
+- `[DEVICE]` 停机实读确认两条当前任务为 `reprocessed` 且 batch 相同，combined active revision 为 `reprocessed/ready`、共 32 段；旧任务完整进入 generation history。旧活动文字在整批完成前保持，整批完成后才切换 combined revision。
+- 同正文的新 revision 曾使旧整理错误保持 `ready`，详情刷新还会把未声明 Transcript identity 的同一远端整理复制到当前文字版本。最终代码改为按 revision identity 失效整理，并按原锁定 revision 识别同一不可变整理；最终当前 Summary 与 processing stage 均为 `stale`，Summary version 数在刷新和重转写前后保持 7。
+- 数据库 `quick_check=ok`、`foreign_key_check=0`。最终 Preview 强停冷启动后恢复“整理结果可更新”、两条录音和文字入口；日志无应用 FATAL、React Native 致命异常、SQLiteException、缺表或缺列。
 
 ## 当前包：人工内容、来源与默认隐私
 

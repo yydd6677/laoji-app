@@ -25,7 +25,7 @@
 
 ## 当前证据
 
-- 最新 Preview APK：`versionCode=104`、`versionName=1.0.0-source-preview`、91,091,112 字节，SHA-256 `b5a1068f3299457535cc85db7115813841696b7190ba863c929b8a007d769fcb`。
+- 最新 Preview APK：`versionCode=104`、`versionName=1.0.0-source-preview`、91,091,308 字节，SHA-256 `634999b97df998ab0ca7fd6ca09d91f6658f5962d1ab7265ab013722321b716c`。
 - `emulator-5556` 在覆盖安装前的真实数据库为 `user_version=30`、`quick_check=ok`；覆盖安装并冷启动后为 `user_version=31`、`quick_check=ok`，`foreign_key_check` 为空。
 - v31 四个新增列和历史表存在。迁移前后 15 条会议、15 条人工笔记、11 条 RecordingAsset、4 条逐资产转写任务、2 个 Transcript revision、2 个 Transcript segment 及关键同步行数一致。
 - Preview 冷启动为 `LaunchState: COLD`，主 Activity 正常 resumed；AndroidRuntime、ReactNativeJS、SQLite migration 未出现 fatal。
@@ -34,9 +34,13 @@
 - 后续复核发现 `app_meeting_v2.py` 曾被较新的汇总版本覆盖：RecordingAsset 路由和重转写合同仍在，但 `transcript_reprocess_v1` 能力键丢失，README 与实际源码发生漂移。当前持久 overlay 已在 `recording_assets_v2` 旁恢复该键并再次通过 Python 语法检查，文件 SHA-256 为 `dd96d3a907db6b3ffa5a50355892aaa1367d6d9abb146550c3c02ffdc65623a1`；此前“overlay 已完整保留能力键”的结论以本条修正为准。
 - 目标 18020 已从 canonical 工作目录加载上述文件并实时广告 `transcript_reprocess_v1=true`；只重启 18020，18035 PID 保持不变。远端保留替换前文件，部署后健康和 capability 均通过。
 - `emulator-5556` 的账号会议 `V3_CANDIDATE_SPOKEN` 已创建一个全新逐资产 job：65.232 秒录音在约 5 秒后以 `attempt=1` 完成并得到新的 result revision。服务端只替换该 RecordingAsset 的 20 段文字，另 10 段无 RecordingAsset 身份的历史夹具保持不变；移动端 canonical revision 前进，旧整理结果持续可读，强停冷启动 580 ms 后文字、整理结果和再次生成入口均恢复。
+- 最终 Preview 从会议“更多”真实触发双资产整批重转写。65.232 秒 primary 与 7.176 秒 imported secondary 创建两个全新 job，共用 batch `b865e16d-12aa-49c0-82f9-38eb2569621a`，均以 `attempt=1` 完成；secondary 约 1.2 秒完成，primary 约 7.5 秒完成。服务端最终仍为 primary 20 段、secondary 2 段和 10 段无资产身份的历史内容，未发生跨资产误删。
+- 本机停机只读确认两条当前任务均为 `request_kind=reprocessed`，共享上述 batch；secondary generation 为 3、primary generation 为 4，旧 generation 共 7 条完整归档。combined Transcript 只在整批完成后激活为新的 immutable `reprocessed` revision，包含 32 段并保留各自 asset/job provenance。
+- 同正文重转写曾暴露两个真实回归：新 revision identity 被正文相等判断绕过，旧 Summary 错误保持 `ready`；无 Transcript 声明的同一远端 Summary 又会在详情刷新时被复制并重新绑定。当前实现以 revision identity 使既有 Summary 进入 `stale`，并用旧锁定 revision 复算不可变 Summary identity，命中时不创建副本。最终库的当前 Summary 与 summary stage 均为 `stale`，Summary version 数在详情刷新和整批完成前后保持 7，`quick_check=ok`、`foreign_key_check=0`。
+- 最终 Preview 已保留数据覆盖安装回 `emulator-5556`；设备 `base.apk` 与上述 SHA-256 完全一致。强停冷启动后“整理结果可更新”、两条录音和文字入口恢复，未见 AndroidRuntime、React Native、SQLite/schema fatal。
 
 ## 尚未宣称
 
-- 当前单 RecordingAsset 的真实新 job、combined Transcript 接收和移动端冷启动恢复已完成；仍未注入空结果/截断候选，也未在同一批次运行多 RecordingAsset、处理中进程重启或同请求网络重放。
+- 单 RecordingAsset 与双 RecordingAsset 整批的真实新 job、combined Transcript 接收、Summary lineage 和移动端冷启动恢复已完成；仍未注入空结果/截断候选，也未执行处理中进程重启或同请求网络重放。
 - 当前只有 `emulator-5556`，没有第二台移动设备或 USB 真机证据。
-- 后续只补多 RecordingAsset 全批完成、截断不覆盖、同请求重放、处理中重启与物理设备抽查；不重做 v31 数据平面或 UI 入口。
+- 后续只补截断不覆盖、同请求重放、处理中重启、长真人录音与物理设备抽查；不重做 v31 数据平面或 UI 入口。

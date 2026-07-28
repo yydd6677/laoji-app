@@ -25,7 +25,7 @@
 |---|---|---|---|
 | 本机数据平面、作用域、迁移、独立处理阶段 | 本机闭环；游客、账号根、RecordingAsset 上传、逐资产转写及独立 Summary 均已形成普通包/运行纵切 | 源码、TypeScript/Kotlin、v26 迁移窄合同、保留数据模拟器、线上账号根/action pull、真实 upload/transcript/Summary job；fresh 账号又完成显式游客迁移和唯一 WorkManager 上传；当前 occurrence 样本补齐同一远端 Transcript revision 的 provenance 幂等落库 | 批次 B 只续物理设备候选复核；不重建第二套数据库、迁移 uploader 或状态机 |
 | 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通；迁移录音统一交给正常上传队列 | 运行目标服务上两个独立账号会话已完成 occurrence/note/root delete/restore 与双 RecordingAsset 往返；另有旧迁移冲突安全认领和全新账号单资产上传，游客源会议/录音/笔记保留 | 只补恢复 secondary 的特定 App 运行样本和物理设备抽查；不再复制迁移专用上传器 |
-| 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；当前 occurrence 账号模拟器完成 04:09 录音、上传恢复、远端 final Transcript、播放器和整理结果，随后当前候选又完成 65.232 秒单资产 reprocessed 新 job、旧内容保留及冷启动恢复 | 只补真人质量、多资产 reprocessed 整批与一次物理设备候选抽查；不再重复模拟器短录音主链 |
+| 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；当前 occurrence 账号模拟器完成 04:09 录音、上传恢复、远端 final Transcript、播放器和整理结果；当前候选又完成 65.232 秒 primary + 7.176 秒 secondary 的整批 reprocessed 新 job、旧内容/Summary lineage 保留及冷启动恢复 | 只补真人质量、截断保护、处理中恢复与一次物理设备候选抽查；不再重复模拟器短录音主链 |
 | 结构化整理、版本、引用、行动项 | 本机/线上闭环；服务端独立 Summary task、四模板与 additive 同步框架运行 | `general@1` 完成非平凡 durable/引用/移动端跳转；四模板完成真实任务；历史授权完成利用、未选隔离、引用隔离、幂等与 durable 闭环；双 Android 实例完成提醒与非协作 action 冲突收敛 | 只续线上版本列表、更广真人样本、附件授权质量和物理设备抽查；候选包自动 ASR 主链另案收口 |
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音视频导入、已有会议多资产加入、Marker 本机事务与账号 create/delete outbox/pull/tombstone、附件分享、可撤销文字链接、本机 WAV 与非 WAV 异步片段、软删除/恢复及双端到期物理清理纵切完成 | 视频/双录音模拟器、真实 MP4 上传/抽取/逐资产转写、v29/v30/v34 保留数据模拟器、18020 共享/清理/片段/Marker 合同；两个独立模拟器完成 Marker 新增、精确跳转和墓碑收敛 | Marker 只续物理双机/USB 与长离线抽查；导入续格式矩阵；片段、分享、删除续跨设备与真机抽查 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成；四模板与历史授权运行闭环 | 模拟器、运行模板服务、四模板真实结果、决定/行动历史利用与隔离；通知显式动作与 Widget `action=meeting` 已复用同一 occurrence MeetingNote，`action=open` 只进日程；当前候选包又完成 Tile active/重复点击幂等及 Tile 的 App Lock pending 正反分支；双 Android 实例 action 往返、提醒和非协作冲突已收敛 | 不重做页面；只补通知/Widget 的 App Lock、物理设备与发现的缺陷 |
@@ -56,7 +56,7 @@
 | 批次 | 目标产物 | 纳入内容 | 不纳入内容 |
 |---|---|---|---|
 | A：关闭本机架构尾项（已完成） | 普通 Preview 对游客 scope 稳定使用 canonical 主路径 | v19 冲突录音恢复、多录音选择与分享；活动写入口审计；默认包 cutover、覆盖升级、首次 mutation、镜像与冷启动恢复 | 不做全格式、长录音、全故障矩阵 |
-| B：启用账号线上闭环（功能纵切完成，证据收口中） | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 18020/18035、账号根、实体双会话、action 协作、RecordingAsset、per-asset provenance/job、独立 Summary 与 speaker correction 已完成；当前 occurrence 录音又补齐上传→final Transcript→Summary 及远端 revision 幂等；续真人质量和实体跨物理设备抽查 | 不重复已经通过的本机 UI 冒烟 |
+| B：启用账号线上闭环（功能纵切完成，证据收口中） | 真实测试账号可完成根、occurrence、笔记、行动项、录音资产和讲话人 correction 往返 | 18020/18035、账号根、实体双会话、action 协作、RecordingAsset、per-asset provenance/job、独立 Summary 与 speaker correction 已完成；当前 occurrence 录音补齐上传→final Transcript→Summary 及远端 revision 幂等，双 RecordingAsset 又完成同批重转写和 Summary lineage；续真人质量和实体跨物理设备抽查 | 不重复已经通过的本机 UI 冒烟 |
 | C：补齐尚缺功能量（已完成） | P0/P1 尾项和五个 P2 纵切均有真实入口、持久化与失败状态 | 视频导入/已有会议加入、附件分层分享、可撤销分享链接、QA/轻协作/账号标签目录、账号附件与 Marker 对象同步、非 WAV 异步片段、整理主题聚合与 reprocessed Transcript 移动端/持久 overlay 纵切均已完成 | 不先建设复杂 Agent、团队权限树或完整编辑器；后续证据尾项进入批次 D，不新造同步系统 |
 | D：一次候选版收口 | 一个默认能力配置的可安装候选包 | 数据升级、录制→保存→播放、日程绑定、账号同步、默认隐私和核心恢复任务 | 不把穷举 ROM/格式/时长组合当作目标完成前置条件 |
 
@@ -77,9 +77,9 @@
 |---|---|---|
 | 第 4 节无 `进行中/部分完成/未开始` | MRK-01 已补齐 18020 schema/capability/API 与移动端 v34/outbox/pull，并完成双独立模拟器新增、跳转和墓碑收敛 | **满足完整功能量口径**；剩余是真实模型、物理设备和候选版证据，不再是缺失功能框架 |
 | 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
-| 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 当前 18020 已实时确认从 canonical backend 运行并报告 `qwen3-asr` / `models_ready=true`；root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 已有线上证据，reprocess capability 与单资产新 job 也已补齐。两个全新同账号模拟器已完成 canonical 接管、录音上传、会议/附件 pull、墓碑、根冲突选择和回收站收敛；v35 候选又完成跨设备本机 ID 问答，当前 occurrence 样本完成上传后的远端 final Transcript 与 Summary | **满足对象合同与双模拟器纵切口径**；仍不等于真人 ASR 质量或第二台物理手机 |
-| V3 七条关键任务 | 第 1 条已有稳定包游客日程/会议/录音/笔记到 v34 的保留升级，当前 Preview 又在保留账号数据上完成 v35→v36；第 2 条既有完整模拟器录制链，前一当前包又从 occurrence 完成 04:09 详情；第 4 条当前包补 section 正文/引用人工覆盖、冷启动保留与恢复；第 5 条当前包再次以既有 3 条 canonical 引用完成移除/恢复，仍不是自动 ASR；第 6 条当前包实读安全分享默认值和账号 30 天回收站确认并取消；第 7 条第二实例 pull、Marker 收敛与真实 409/412 选择已有分轮证据。当前 hash 又补齐单资产重生成、旧 Summary 保留和冷启动恢复；账号墓碑及第 3 条冲突录音没有集中重跑，当前 hash 未装 USB | **未满足一次性候选版全量重跑口径**；已有分轮证据不反向抹掉功能完成，也不得把模拟器录音或双模拟器改写成真人 ASR/物理双机证据 |
-| 默认候选 APK、回溯提交与稳定标签 | Preview `b5a1068f…d769fcb`（91,091,112 bytes，v104，构建于 `2026-07-29 01:17:52 +0800`）内容对应 `ff8707e`，已保留数据覆盖安装到仅供老记候选验证的 `emulator-5556`，设备内 `base.apk` 哈希完全一致；v36、section 编辑/引用覆盖、正常软键盘、冷启动恢复及隐私只读检查无 SQLite/React Native/native fatal。`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足当前可回溯候选包与保留数据模拟器口径**；USB 已断开，当前 hash 的真机安装、物理双机与稳定包覆盖升级重跑仍待 |
+| 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 当前 18020 已实时确认从 canonical backend 运行并报告 `qwen3-asr` / `models_ready=true`；root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 已有线上证据，reprocess capability、单资产及双资产同批新 job 均已补齐。两个全新同账号模拟器已完成 canonical 接管、录音上传、会议/附件 pull、墓碑、根冲突选择和回收站收敛；v35 候选又完成跨设备本机 ID 问答，当前 occurrence 样本完成上传后的远端 final Transcript 与 Summary | **满足对象合同与双模拟器纵切口径**；仍不等于真人 ASR 质量或第二台物理手机 |
+| V3 七条关键任务 | 第 1 条已有稳定包游客日程/会议/录音/笔记到 v34 的保留升级，当前 Preview 又在保留账号数据上完成 v35→v36；第 2 条既有完整模拟器录制链，前一当前包又从 occurrence 完成 04:09 详情；第 4 条当前包补 section 正文/引用人工覆盖、冷启动保留与恢复；第 5 条当前包再次以既有 3 条 canonical 引用完成移除/恢复，仍不是自动 ASR；第 6 条当前包实读安全分享默认值和账号 30 天回收站确认并取消；第 7 条第二实例 pull、Marker 收敛与真实 409/412 选择已有分轮证据。当前 hash 又补齐双资产同批重生成、同正文 revision 切换、旧 Summary stale/lineage 和冷启动恢复；账号墓碑及第 3 条冲突录音没有集中重跑，当前 hash 未装 USB | **未满足一次性候选版全量重跑口径**；已有分轮证据不反向抹掉功能完成，也不得把模拟器录音或双模拟器改写成真人 ASR/物理双机证据 |
+| 默认候选 APK、回溯提交与稳定标签 | Preview `634999b9…21b716c`（91,091,308 bytes，v104，构建于 `2026-07-29 02:26:41 +0800`）内容对应 `81fe86d`，已保留数据覆盖安装到仅供老记候选验证的 `emulator-5556`，设备内 `base.apk` 哈希完全一致；v36、section 编辑/引用覆盖、双资产重转写、Summary lineage、正常软键盘、冷启动恢复及隐私只读检查无 SQLite/React Native/native fatal。`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足当前可回溯候选包与保留数据模拟器口径**；USB 已断开，当前 hash 的真机安装、物理双机与稳定包覆盖升级重跑仍待 |
 
 源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
 
@@ -210,7 +210,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 | PROC-01 | 五类处理独立状态与独立重试 | 本机闭环；RecordingAsset transcript 与独立 Summary 均有运行/恢复纵切 | 自动任务候选复核和账号长期重试收敛 |
 | CAL-01 | occurrence 绑定、状态化动作、计划快照 | 本机/线上账号双会话闭环；多录音运行合同与 `secondary + recovered` 通用上传源码已接通 | 恢复 secondary 的特定 App 运行样本；第二台移动设备抽查 |
 | NOTE-01 | 永不被 AI 覆盖的“我的笔记” | 本机/线上闭环；双 Android 实例断网冲突、选版与回拉收敛完成 | 物理双机、USB 与长离线抽查 |
-| TRN-01 | 搜索、跳转、按录音来源回听、高亮、复制/分享、重新生成 | 本机/线上闭环；per-asset provenance 与单资产 reprocessed 新 job、旧内容保留、冷启动恢复已运行 | 只续多资产整批、截断保护、长录音和物理设备抽查 |
+| TRN-01 | 搜索、跳转、按录音来源回听、高亮、复制/分享、重新生成 | 本机/线上闭环；per-asset provenance、单/双资产 reprocessed 新 job、整批原子激活、旧内容与 Summary lineage、冷启动恢复已运行 | 只续截断保护、处理中恢复、长真人录音和物理设备抽查 |
 | ACT-01 | 行动项编辑、完成、提醒/日程、来源 | 本机/线上闭环；运行 action pull、协作者 revision、双 Android 实例提醒重建/取消及非协作 action 断网冲突选版收敛完成 | 物理双机抽查；全账号 change feed、batch 和 tombstone 不作为本项框架重做理由 |
 | SUM-01 | 有序结构化整理结果 | 本机/线上纵切闭环；四模板结构、durable 恢复、历史授权和幂等当前版本已运行 | 更多真人样本、附件授权质量和线上版本列表 |
 | SUM-02 | 结论/行动项引用 Transcript | 本机/线上纵切闭环；9 个 canonical 引用及移动端跳转已运行 | 自动 ASR 直连样本和更多真人会议质量抽查 |
