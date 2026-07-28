@@ -25,12 +25,12 @@
 |---|---|---|---|
 | 本机数据平面、作用域、迁移、独立处理阶段 | 本机闭环；游客、账号根、RecordingAsset 上传、逐资产转写及独立 Summary 均已形成普通包/运行纵切 | 源码、TypeScript/Kotlin、v26 迁移窄合同、保留数据模拟器、线上账号根/action pull、真实 upload/transcript/Summary job；fresh 账号又完成显式游客迁移和唯一 WorkManager 上传 | 批次 B 只续物理设备候选复核；不重建第二套数据库、迁移 uploader 或状态机 |
 | 日程 occurrence、人工笔记、游客迁移 | 本机闭环；冲突录音恢复、多录音选择/分享及账号同步框架已接通；迁移录音统一交给正常上传队列 | 运行目标服务上两个独立账号会话已完成 occurrence/note/root delete/restore 与双 RecordingAsset 往返；另有旧迁移冲突安全认领和全新账号单资产上传，游客源会议/录音/笔记保留 | 只补恢复 secondary 的特定 App 运行样本和物理设备抽查；不再复制迁移专用上传器 |
-| 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；当前合成中文音频上传成功、期望文字夹具完成搜索/00:13 回听，但真实 ASR 被已知 NVML 断言阻塞 | GPU/服务恢复后补这份样本的自动转写和 reprocessed 真实任务；候选版一次物理设备抽查 |
-| 结构化整理、版本、引用、行动项 | 本机/线上闭环；服务端独立 Summary task、四模板与 additive 同步框架运行 | `general@1` 完成非平凡 durable/引用/移动端跳转；四模板完成真实任务；历史授权完成利用、未选隔离、引用隔离、幂等与 durable 闭环；双 Android 实例完成提醒与非协作 action 冲突收敛 | 只续线上版本列表、更广真人样本、附件授权质量和物理设备抽查；ASR 的 GPU/NVML 问题另案处理 |
+| 录音结束、Transcript 搜索回听、后台播放 | 本机主链、RecordingAsset v2 上传/下载、逐录音 provenance/回听、每资产 job、独立 Summary 恢复和 reprocessed Transcript 生产入口已形成纵切 | 既有双资产 GPU 转写与 Summary 运行证据；当前 18020 健康接口报告 `qwen3-asr` 与 `models_ready=true`，旧 NVML 事故不再是已确认当前阻塞 | 补当前候选包的新鲜真实录音→自动转写→reprocessed 完整任务；候选版一次物理设备抽查 |
+| 结构化整理、版本、引用、行动项 | 本机/线上闭环；服务端独立 Summary task、四模板与 additive 同步框架运行 | `general@1` 完成非平凡 durable/引用/移动端跳转；四模板完成真实任务；历史授权完成利用、未选隔离、引用隔离、幂等与 durable 闭环；双 Android 实例完成提醒与非协作 action 冲突收敛 | 只续线上版本列表、更广真人样本、附件授权质量和物理设备抽查；候选包自动 ASR 主链另案收口 |
 | 文件导入、Marker、片段、分层分享、删除/回收站 | 音视频导入、已有会议多资产加入、Marker 本机事务与账号 create/delete outbox/pull/tombstone、附件分享、可撤销文字链接、本机 WAV 与非 WAV 异步片段、软删除/恢复及双端到期物理清理纵切完成 | 视频/双录音模拟器、真实 MP4 上传/抽取/逐资产转写、v29/v30/v34 保留数据模拟器、18020 共享/清理/片段/Marker 合同；两个独立模拟器完成 Marker 新增、精确跳转和墓碑收敛 | Marker 只续物理双机/USB 与长离线抽查；导入续格式矩阵；片段、分享、删除续跨设备与真机抽查 |
 | 通知、Widget、Tile、模板、系列记忆 | 本机纵切完成；四模板与历史授权运行闭环 | 模拟器、运行模板服务、四模板真实结果、决定/行动历史利用与隔离；双 Android 实例 action 往返、提醒和非协作冲突已收敛 | 不重做页面；只补 App Lock、物理设备与发现的缺陷 |
 | 讲话人 | segment/cluster/future profile 修正、显式资料同意/撤销、账号离线识别和旧会议重匹配纵切完成 | 运行 correction 201/重放/412/overlay；模拟器资料详情与 reprocess；无真实人声改善证据 | 只补真实多人录音质量、第二设备与 USB；不重做 profile/correction/job 框架 |
-| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01、COLLAB-01、ORG-01、CLIP-01 与 ATT-01 均已形成功能/线上纵切 | QA 真实模型/账号持久化；COLLAB 模拟器所有者 + 匿名第二客户端；ORG v20/v28 + 18020 标签目录；ATT v21/v32 + 18020 真实账号登记/上传/鉴权下载/墓碑，并完成两个独立模拟器的文字附件新增/pull/墓碑；CLIP v23/v30 + 18020 M4A/MP4 任务 | ATT 只续真实视觉模型、跨设备图片与物理设备；其余仍按各项补第二移动实例/USB 候选抽查 |
+| QA、跨会议组织、轻协作、媒体片段、时间点附件 | QA-01、COLLAB-01、ORG-01、CLIP-01 与 ATT-01 均已形成功能/线上纵切 | QA 真实模型/账号持久化与混合检索，v35 保留升级及第二设备本机 ID 问答已运行；COLLAB 模拟器所有者 + 匿名第二客户端；ORG v20/v28 + 18020 标签目录；ATT v21/v32 + 18020 真实账号登记/上传/鉴权下载/墓碑，并完成两个独立模拟器的文字附件新增/pull/墓碑；CLIP v23/v30 + 18020 M4A/MP4 任务 | QA 只续真实长会议开放世界观察和 USB；ATT 只续真实视觉模型、跨设备图片与物理设备；其余按各项补候选抽查 |
 
 ### 0.3 已完成并锁定的基础
 
@@ -77,9 +77,9 @@
 |---|---|---|
 | 第 4 节无 `进行中/部分完成/未开始` | MRK-01 已补齐 18020 schema/capability/API 与移动端 v34/outbox/pull，并完成双独立模拟器新增、跳转和墓碑收敛 | **满足完整功能量口径**；剩余是真实模型、物理设备和候选版证据，不再是缺失功能框架 |
 | 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
-| 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 18020 健康接口仍广告 `models_ready=true`，但本轮真实 VibeVoice 推理被 NVML 断言阻塞，不能把健康字段当作 ASR 可用；root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 在线，两个全新同账号模拟器已完成 canonical 接管、录音上传、会议/附件 pull、墓碑、根冲突选择和回收站收敛 | **满足对象合同与双模拟器纵切口径**；不等于当前模型成功或第二台物理手机 |
-| V3 七条关键任务 | 第 1 条已有稳定包游客日程/会议/录音/笔记到 v34 的保留升级，当前代码线又补全一次 guest→fresh user 的显式迁移、journal、唯一录音上传和两边源数据保留；第 2 条已有完整模拟器主链；第 5 条已用导入 Transcript 完成搜索/回听、非平凡 `general@1`、9 个引用和 7 个行动项，但仍不是自动 ASR；第 7 条的第二实例 pull、Marker 收敛与真实 409/412 选择已集中完成。账号墓碑、第 3–4/6 条未在当前包集中重跑，当前 hash 未装 USB | **未满足一次性候选版全量重跑口径**；已有分轮证据不反向抹掉功能完成，也不得把导入 Transcript 或双模拟器改写成自动 ASR/物理双机证据 |
-| 默认候选 APK、回溯提交与稳定标签 | Preview `46a4e412…41a1ec8`（91,061,920 bytes，v104）已在 `emulator-5554/5560` 保留数据覆盖安装，并完成非协作 action 冲突选版与双端回拉，对应移动端提交 `48168fa`；此前同版本候选已完成迁移/唯一上传、durable Summary 恢复、引用跳转、游客永久删除、Marker 收口与稳定包保留升级；`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足可回溯候选包口径**；当前 hash 的 USB 安装、物理双机与稳定包覆盖升级重跑仍待 |
+| 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 18020 当前健康并报告 `qwen3-asr` / `models_ready=true`；root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 在线。两个全新同账号模拟器已完成 canonical 接管、录音上传、会议/附件 pull、墓碑、根冲突选择和回收站收敛；v35 候选模拟器又完成跨设备本机 ID 问答 | **满足对象合同与双模拟器纵切口径**；仍不等于当前候选包的新鲜自动 ASR 或第二台物理手机 |
+| V3 七条关键任务 | 第 1 条已有稳定包游客日程/会议/录音/笔记到 v34 的保留升级，当前 Preview 又在保留数据 `emulator-5556` 完成 v34→v35：3 条账号会议、整理结果、19 个待办和播放器状态均保留；第 2 条在同一候选包完成开始、暂停/继续、结束、本机提交和 02:02 录音回放；第 5 条既有导入 Transcript 搜索/回听、非平凡 `general@1`、9 个引用和 7 个行动项，本轮又确认会议问答及引用跨冷启动保留，但新录音仍未形成可归因于真实人声的自动 ASR 证据；第 7 条的第二实例 pull、Marker 收敛与真实 409/412 选择已有分轮证据。账号墓碑、第 3–4/6 条尚未在当前包集中重跑，当前 hash 未装 USB | **未满足一次性候选版全量重跑口径**；已有分轮证据不反向抹掉功能完成，也不得把模拟器录音、导入 Transcript 或双模拟器改写成真实人声自动 ASR/物理双机证据 |
+| 默认候选 APK、回溯提交与稳定标签 | Preview `03cc64d4…f752d89`（91,065,252 bytes，v104，构建于 `2026-07-28 18:17:13 +0800`）对应业务提交 `d4da381`，已安装到仅供老记候选验证的 `emulator-5556`，设备内 `base.apk` 哈希完全一致；冷启动 canonical account projection 为 3 条会议且无 SQLite/React Native/native fatal，02:02 新录音实际播放进度正常推进。`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足当前可回溯候选包与保留数据模拟器口径**；USB 已断开，当前 hash 的真机安装、物理双机与稳定包覆盖升级重跑仍待 |
 
 源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
 
@@ -861,7 +861,7 @@ type SpeakerStatus =
 
 Summary 生命周期纵切已把页面内 loading 提升为 canonical 阶段状态：准备提交写 `queued`；得到稳定 task ID 后写 `job_id/input_fingerprint`，且同一 task 恢复或重复轮询不增加 attempt；服务端 `PENDING/STARTED` 分别投影为 `queued/generating`。当前 API 不提供可信百分比，因此 `progress` 保持 `null`，禁止从耗时推算虚假进度。页面关闭或请求 generation 变化只停止可见 UI 更新，已提交任务的 pending registry、阶段状态和最终结果保存继续按捕获时的 meeting/scope 执行；已知后台 task 的 Abort 保持运行态，只有没有 task 身份的提交中断、明确 worker/传输失败、恢复 registry 不可读或 pending 被明确丢弃时才进入可重试失败或 `stale`。阶段写入按 meeting 串行且只记诊断，SQLite 失败不得反向伪装为服务端提交失败。`saveCachedSummary()` 仍是 `ready` 和 Summary version 落盘的唯一完成路径。候选 v104 先证明了长任务恢复与真实失败分流，随后又以 `general@1` 任务补齐成功路径：约 92.3 秒生成 3 条决定、7 条待办和 9 个有效引用，页面关闭/覆盖安装后的 durable 读取可恢复，冷启动重复响应为 `unchanged`，不覆盖用户当前版本、不重写处理阶段，也不增加 canonical revision。前一任务的 120/600 秒超时只保留为旧部署失败样本，不再代表当前 Summary 阻塞。
 
-Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同步失败和本机持久化失败映射为独立路径：明确 `incomplete` 时只写可替换 draft/finalizing，并按 1/2/4 秒有限重取，随后降为 15 秒检查；服务端虽然明确 `complete`、但候选覆盖范围明显短于当前可读 draft 时，同样保留 draft/finalizing 并沿该节奏复查，直到取得不退化的 final 或页面失效。已有稳定 final 时不因更短 complete 候选进入无意义轮询；旧服务的 `unknown` 兼容读取和明确 `failed` 也仍只走原有终止路径。页面失效或 Abort 静默退出，不写失败。每次候选保存后必须重读 canonical active revision 作为下一轮 baseline；远端失败或传输失败进入 `failed_retryable`，但已有稳定 final 时保留 `ready`。状态百分比继续为 `null`，不得把轮询次数伪装成进度。当前详情重试可重新发起 Transcript 同步；目标 18020 又补齐“有正文、无活动任务时暴露稳定 final”的运行合同，使最新重试失败不再隐藏可用 Transcript。录制中或 queued/running 仍是 incomplete，空正文失败仍是 failed；自动 ASR 的 NVML/VibeVoice 阻塞和真实长录音收敛仍是独立边界。
+Transcript 远端完成状态纵切将 `incomplete`、远端处理失败、同步失败和本机持久化失败映射为独立路径：明确 `incomplete` 时只写可替换 draft/finalizing，并按 1/2/4 秒有限重取，随后降为 15 秒检查；服务端虽然明确 `complete`、但候选覆盖范围明显短于当前可读 draft 时，同样保留 draft/finalizing 并沿该节奏复查，直到取得不退化的 final 或页面失效。已有稳定 final 时不因更短 complete 候选进入无意义轮询；旧服务的 `unknown` 兼容读取和明确 `failed` 也仍只走原有终止路径。页面失效或 Abort 静默退出，不写失败。每次候选保存后必须重读 canonical active revision 作为下一轮 baseline；远端失败或传输失败进入 `failed_retryable`，但已有稳定 final 时保留 `ready`。状态百分比继续为 `null`，不得把轮询次数伪装成进度。当前详情重试可重新发起 Transcript 同步；目标 18020 又补齐“有正文、无活动任务时暴露稳定 final”的运行合同，使最新重试失败不再隐藏可用 Transcript。录制中或 queued/running 仍是 incomplete，空正文失败仍是 failed；当时的 NVML/VibeVoice 事故已恢复，当前候选包的新鲜真实录音收敛仍是独立边界。
 
 ### 8.3 错误合同
 
@@ -1074,7 +1074,7 @@ speaker assignment revision
 
 final 候选与当前 active revision 的读取、候选 revision 保存、active 切换和 processing stage 更新必须位于同一 SQLite transaction。被拒绝的 immutable final 仍以 inactive revision 保存，不能写入旧缓存覆盖当前可读 draft；相同内容后续仅声明从 incomplete 变 complete 时，不得通过修改 immutable revision 元数据伪造新版本。当前兼容层把 incomplete 内容写入可替换的 `legacy-live` draft，只有得到 final 候选且完整性通过时才创建并激活 immutable final。
 
-客户端只把服务端明确 `complete` 的 `transcript_revision_id` 交给 final revision；`incomplete`、空正文 `failed` 或互相矛盾的声明一律 fail closed，丢弃该远端 revision ID。无新增字段的旧服务继续按 `unknown` 兼容路径读取一次，不启动轮询。相关 `transcript_status`、nullable `is_complete`、稳定 combined revision 与 RecordingAsset 处理源码已保留在持久 deployment overlay `server-work/summary`；目标 18020 已加载修复后的状态合同，并以“有正文、无活动任务”的稳定 final 支撑一次成功 Summary。自动 ASR 仍受 NVML/VibeVoice 阻塞，不能由该下游成功代替。
+客户端只把服务端明确 `complete` 的 `transcript_revision_id` 交给 final revision；`incomplete`、空正文 `failed` 或互相矛盾的声明一律 fail closed，丢弃该远端 revision ID。无新增字段的旧服务继续按 `unknown` 兼容路径读取一次，不启动轮询。相关 `transcript_status`、nullable `is_complete`、稳定 combined revision 与 RecordingAsset 处理源码已保留在持久 deployment overlay `server-work/summary`；目标 18020 已加载修复后的状态合同，并以“有正文、无活动任务”的稳定 final 支撑一次成功 Summary。旧 NVML/VibeVoice 阻塞已恢复，但仍需当前候选包的新鲜自动 ASR 证据，不能由该下游成功代替。
 
 #### 重新生成文字记录
 
@@ -1117,7 +1117,7 @@ data class TranscriptSearchState(
 - 本机可由远端 ID 唯一解析 RecordingAsset 时补全 local ID；会议恰好一段资产时可安全回填旧文字。多资产且来源未知时不得按 primary、列表顺序或当前播放器猜测。
 - 文字、Summary/Action 引用、Marker 和外部 focus 在 seek 前先切换到 segment 对应 player source；来源未知且有多段可播放录音时保持当前来源和位置。片段生成同样只使用目标资产及其重叠文字。
 
-当前 v25 provenance、v26 每资产任务账本、双录音模拟器定位和目标 18020 的 14 项真实 HTTP provenance 断言已完成；保留数据模拟器又实际创建并恢复了账号 transcription job。共享 GPU 驱动/NVML 失配使本轮 job 最终保持 `failed_retryable`，成功 combined Transcript、第二移动设备和 USB 真机仍后置。证据见 [`implementation/contracts/batch-b-recording-assets-v2-evidence.md`](implementation/contracts/batch-b-recording-assets-v2-evidence.md)。
+当前 v25 provenance、v26 每资产任务账本、双录音模拟器定位和目标 18020 的 14 项真实 HTTP provenance 断言已完成；保留数据模拟器又实际创建并恢复了账号 transcription job。当时共享 GPU 驱动/NVML 失配使该 job 保持 `failed_retryable`；目标服务当前已恢复健康，但候选包的新鲜 combined Transcript、第二移动设备和 USB 真机仍后置。证据见 [`implementation/contracts/batch-b-recording-assets-v2-evidence.md`](implementation/contracts/batch-b-recording-assets-v2-evidence.md)。
 
 #### 长按与选择
 
@@ -1546,16 +1546,16 @@ POST /api/laoji/v2/meeting-notes/{id}/speaker-corrections
 
 默认开放门槛：引用有效率、Transcript 时间跳转成功率和 Summary 独立重试率均已达到第 16 节阈值；实现本身不等待这些后验指标。
 
-- 检索范围默认仅当前 meeting 的 active Transcript、active Summary 和用户选择包含的我的笔记。
-- 每个普通答案必须返回一到多个 `segment_id`/section citation；用户显式纳入“我的笔记”时允许使用锁定的 note revision citation。无足够来源时回答“当前会议记录中没有足够信息”，不得补常识。
-- 后续问题保留单场 thread context，但每轮重新校验引用仍属于当前 meeting/revision。
+- 问答助手先自动判断当前问题是否需要会议背景。明确相关或有歧义的问题只检索当前 meeting 的 active Transcript、active Summary 和用户选择包含的我的笔记；明显无关的问题进入普通问答，不向模型注入会议来源。
+- 会议范围的普通答案必须返回一到多个 `segment_id`/section citation；用户显式纳入“我的笔记”时允许使用锁定的 note revision citation。会议范围无足够来源时回答“当前会议记录中没有足够信息”，不得补常识。普通问答以独立 `general` scope 保存，必须无会议引用。
+- 后续问题保留单场 thread context与回答 scope；会议追问每轮重新校验引用仍属于当前 meeting/revision，普通追问只携带连续的普通问答上下文。
 - 默认不把“我的笔记”发往问答服务；首次使用时由用户选择是否纳入，选择按 thread 保存。
 - 服务端保存问题、答案和 citation，不保存模型隐藏推理。
 - UI 放在会议更多动作或详情次级入口，不增加底栏 Agent。
 
-当前已用 migration v22 完成受独立 flag 保护的本机纵切。每个线程锁定 active final/reprocessed Transcript、当前可读 Summary 和可选 manual-note revision 的完整 SHA-256 证据指纹；来源变化会切换新线程，不把旧回答续接到新内容。问题、最终回答和规范化引用保存在 canonical SQLite，引用可跳回文字记录时间点、整理结果或我的笔记；普通回答无有效引用时客户端拒绝落库。会议详情“更多”中的独立问答页复用老记会议页的标题栏、UD 输入/按钮与中性色阶，没有新增底栏入口或说明书式文案。
+当前已用 migration v22 完成受独立 flag 保护的本机纵切，migration v35 又为每轮增加 `meeting/general` 范围。每个线程锁定 active final/reprocessed Transcript、当前可读 Summary 和可选 manual-note revision 的完整 SHA-256 证据指纹；来源变化会切换新线程，不把旧回答续接到新内容。问题、最终回答、范围和规范化引用保存在 canonical SQLite；会议回答无有效引用时客户端拒绝落库，普通回答必须为无引用 `general`。引用可跳回文字记录时间点、整理结果或我的笔记。会议详情“更多”中的独立问答页复用老记会议页的标题栏、UD 输入/按钮与中性色阶，没有新增底栏入口或说明书式文案。
 
-服务端 overlay 新增游客临时问答与账号问答合同：账号线程按 owner/meeting/client thread 持久化 question、final answer、citation、revision 与 idempotency hash，不保存隐藏推理；游客远端响应为 transient，本机仍持久化。服务端重算完整输入指纹，模型返回的未知、重复或伪造引用会被丢弃，普通回答失去全部有效引用时降级为固定拒答。客户端在保存前再次校验 meeting/thread/request/ordinal/fingerprint/revision 全部回显身份。该 overlay 已部署到目标 18020，并完成真实模型、账号持久化、引用/拒答和多轮幂等纵切；剩余只是真实 final Transcript 的完整移动端页面与 USB 抽查。实现与边界见 `implementation/contracts/phase-8-meeting-question-evidence.md`。
+服务端 overlay 新增游客临时问答与账号问答合同：账号线程按 owner/meeting/client thread 持久化 question、final answer、citation、revision 与 idempotency hash，不保存隐藏推理；游客远端响应为 transient，本机仍持久化。服务端重算完整输入指纹，会议回答的未知、重复或伪造引用会被丢弃，普通问答必须为无会议引用的 `general`。客户端在保存前再次校验 meeting/thread/request/ordinal/fingerprint/revision/scope 全部回显身份。该 overlay 已部署到目标 18020，并完成精确+语义混合检索、真实模型、账号持久化、引用/拒答、多轮幂等和第二设备本机 ID 问答纵切；剩余是真实长会议开放世界观察与 USB 抽查。实现与边界见 `implementation/contracts/phase-8-meeting-question-evidence.md`。
 
 ### 11.2 ORG-01：组织与多场找回
 
