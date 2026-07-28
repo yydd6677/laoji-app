@@ -603,6 +603,7 @@ type SummaryCitationRow = {
   end_ms: number;
   quote_hash: string | null;
   ordinal: number;
+  user_removed_at_ms: number | null;
 };
 
 type ActionItemRow = {
@@ -762,6 +763,13 @@ const SUMMARY_VERSION_STATUSES = new Set<SummaryVersionRecord['status']>([
 ]);
 const SUMMARY_EFFECTIVE_USER_EDITED_SQL = `CASE WHEN
   version.user_edited = 1
+  OR EXISTS (
+    SELECT 1 FROM summary_citations ownership_citation
+    INNER JOIN summary_sections ownership_citation_section
+      ON ownership_citation_section.id = ownership_citation.section_id
+    WHERE ownership_citation_section.version_id = version.id
+      AND ownership_citation.user_removed_at_ms IS NOT NULL
+  )
   OR EXISTS (
     SELECT 1 FROM summary_sections ownership_section
     WHERE ownership_section.version_id = version.id
@@ -1638,6 +1646,7 @@ function summaryCitationFromRow(row: SummaryCitationRow): SummaryCitationRecord 
     endMs: row.end_ms,
     quoteHash: row.quote_hash,
     ordinal: row.ordinal,
+    userRemovedAtMs: row.user_removed_at_ms,
   };
 }
 
@@ -2756,6 +2765,30 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     return row ? summarySectionFromRow(row) : null;
   }
 
+  async getSummarySectionCitations(
+    sectionId: string,
+    versionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<readonly SummaryCitationRecord[]> {
+    assertScopeKey(scopeKey);
+    assertRecordId(sectionId, 'summary section ID');
+    assertRecordId(versionId, 'summary version ID');
+    const rows = await this.database.getAllAsync<SummaryCitationRow>(
+      `SELECT citation.*, segment.source_segment_id AS source_segment_id
+       FROM summary_citations citation
+       INNER JOIN summary_sections section ON section.id = citation.section_id
+       INNER JOIN summary_versions version ON version.id = section.version_id
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       INNER JOIN transcript_segments segment ON segment.id = citation.segment_id
+       WHERE citation.section_id = ? AND section.version_id = ? AND meeting.scope_key = ?
+       ORDER BY citation.ordinal, citation.id`,
+      sectionId,
+      versionId,
+      scopeKey,
+    );
+    return rows.map(summaryCitationFromRow);
+  }
+
   async hasUserProtectedSummaryState(versionId: string, scopeKey: ScopeKey): Promise<boolean> {
     assertScopeKey(scopeKey);
     const row = await this.database.getFirstAsync<{ protected: number }>(
@@ -2765,6 +2798,12 @@ class SqliteMeetingTransaction implements MeetingTransaction {
            SELECT 1 FROM summary_sections section
            WHERE section.version_id = version.id
              AND (section.user_text IS NOT NULL OR section.user_edited_at_ms IS NOT NULL)
+         ) THEN 1
+         WHEN EXISTS (
+           SELECT 1 FROM summary_citations citation
+           INNER JOIN summary_sections section ON section.id = citation.section_id
+           WHERE section.version_id = version.id
+             AND citation.user_removed_at_ms IS NOT NULL
          ) THEN 1
          WHEN EXISTS (
            SELECT 1 FROM action_items action
@@ -4406,6 +4445,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       assertNonNegativeInteger(citation.startMs, 'summary citation start time');
       assertNonNegativeInteger(citation.endMs, 'summary citation end time');
       assertNonNegativeInteger(citation.ordinal, 'summary citation ordinal');
+      assertOptionalNonNegativeInteger(citation.userRemovedAtMs, 'summary citation removal time');
       if (citation.endMs < citation.startMs) throw new Error('summary citation time range is invalid');
       if (citationIds.has(citation.id)) throw new Error('summary version contains duplicate citation identity');
       citationIds.add(citation.id);
@@ -4580,8 +4620,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       for (const citation of citations) {
         await this.database.runAsync(
           `INSERT INTO summary_citations (
-             id, section_id, segment_id, start_ms, end_ms, quote_hash, ordinal
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             id, section_id, segment_id, start_ms, end_ms, quote_hash, ordinal,
+             user_removed_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           citation.id,
           citation.sectionId,
           citation.segmentId,
@@ -4589,6 +4630,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           citation.endMs,
           citation.quoteHash,
           citation.ordinal,
+          citation.userRemovedAtMs,
         );
       }
     }
@@ -4658,13 +4700,15 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     this.touchedMeetingIds.add(version.meetingId);
   }
 
-  async updateCurrentSummarySectionUserText(
+  async updateCurrentSummarySectionUserState(
     meetingId: string,
     versionId: string,
     sectionId: string,
     scopeKey: ScopeKey,
     userText: string | null,
     userEditedAtMs: number | null,
+    visibleCitationIds: readonly string[],
+    citationRemovedAtMs: number | null,
   ): Promise<boolean> {
     assertScopeKey(scopeKey);
     assertRecordId(meetingId, 'meeting ID');
@@ -4678,6 +4722,38 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       && (!userText.trim() || userText.length > 20_000 || userText.includes('\u0000'))
     ) throw new Error('summary section user text is invalid');
     assertOptionalNonNegativeInteger(userEditedAtMs, 'summary section edit time');
+    assertOptionalNonNegativeInteger(citationRemovedAtMs, 'summary citation removal time');
+    const normalizedVisibleCitationIds = visibleCitationIds.map(citationId => {
+      assertRecordId(citationId, 'summary citation ID');
+      return citationId.trim();
+    });
+    if (new Set(normalizedVisibleCitationIds).size !== normalizedVisibleCitationIds.length) {
+      throw new Error('summary citation visibility contains duplicate IDs');
+    }
+
+    const citationRows = await this.database.getAllAsync<SummaryCitationRow>(
+      `SELECT citation.* FROM summary_citations citation
+       INNER JOIN summary_sections section ON section.id = citation.section_id
+       INNER JOIN summary_versions version ON version.id = section.version_id
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE citation.section_id = ? AND section.version_id = ?
+         AND version.meeting_id = ? AND meeting.scope_key = ?
+         AND meeting.lifecycle <> 'deleted'
+         AND meeting.current_summary_version_id = version.id
+         AND version.status IN ('ready', 'stale')
+       ORDER BY citation.ordinal, citation.id`,
+      sectionId,
+      versionId,
+      meetingId,
+      scopeKey,
+    );
+    const citationIds = new Set(citationRows.map(citation => citation.id));
+    if (normalizedVisibleCitationIds.some(citationId => !citationIds.has(citationId))) {
+      throw new Error('summary citation visibility contains an unknown ID');
+    }
+    if (normalizedVisibleCitationIds.length < citationRows.length && citationRemovedAtMs === null) {
+      throw new Error('summary citation removal requires an edit time');
+    }
 
     const updated = await this.database.runAsync(
       `UPDATE summary_sections SET user_text = ?, user_edited_at_ms = ?
@@ -4700,12 +4776,36 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     );
     if (updated.changes !== 1) return false;
 
+    const visibleCitationSet = new Set(normalizedVisibleCitationIds);
+    for (const citation of citationRows) {
+      const nextRemovedAtMs = visibleCitationSet.has(citation.id)
+        ? null
+        : citation.user_removed_at_ms ?? citationRemovedAtMs;
+      if (nextRemovedAtMs === citation.user_removed_at_ms) continue;
+      const citationUpdate = await this.database.runAsync(
+        `UPDATE summary_citations SET user_removed_at_ms = ?
+         WHERE id = ? AND section_id = ?`,
+        nextRemovedAtMs,
+        citation.id,
+        sectionId,
+      );
+      if (citationUpdate.changes !== 1) {
+        throw new Error('summary citation visibility could not be updated');
+      }
+    }
+
     const ownership = await this.database.runAsync(
       `UPDATE summary_versions SET user_edited = CASE WHEN
          EXISTS (
            SELECT 1 FROM summary_sections section
            WHERE section.version_id = summary_versions.id
              AND (section.user_text IS NOT NULL OR section.user_edited_at_ms IS NOT NULL)
+         )
+         OR EXISTS (
+           SELECT 1 FROM summary_citations citation
+           INNER JOIN summary_sections section ON section.id = citation.section_id
+           WHERE section.version_id = summary_versions.id
+             AND citation.user_removed_at_ms IS NOT NULL
          )
          OR EXISTS (
            SELECT 1 FROM action_items action

@@ -48,6 +48,7 @@ import {
 } from '../components/MeetingSummaryVersionSheet';
 import {
   MeetingSummarySectionEditorSheet,
+  type MeetingSummarySectionEditorSaveValue,
   type MeetingSummarySectionEditorValue,
 } from '../components/MeetingSummarySectionEditorSheet';
 import {
@@ -3037,10 +3038,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       title: section.title,
       content: section.content,
       userEdited: section.userEdited === true,
+      citations: section.citations.map(citation => ({
+        id: citation.id,
+        startMs: citation.startMs,
+      })),
     });
   }, [displayedSummaryDocument, loadingSummary, showDialog]);
 
-  const saveSummarySectionEdit = useCallback(async (content: string | null) => {
+  const saveSummarySectionEdit = useCallback(async (value: MeetingSummarySectionEditorSaveValue | null) => {
     const target = summarySectionEditorTarget;
     if (!meeting || !meetingScopeKey || !target || summarySectionEditorSaving) return;
     const requestedMeetingId = meeting.id;
@@ -3053,8 +3058,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         meetingId: current.canonicalMeetingId,
         versionId: target.versionId,
         sectionId: target.id,
-        content,
+        content: value?.content ?? null,
+        visibleCitationIds: value?.visibleCitationIds ?? null,
         expectedContent: target.content,
+        expectedVisibleCitationIds: target.citations.map(citation => citation.id),
         expectedUserEdited: target.userEdited,
         scopeKey: meetingScopeKey,
         canonicalWrite: true,
@@ -3071,6 +3078,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       );
     } catch (reason) {
       if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId) return;
+      diagnosticAudit('meeting_summary_section_edit', {
+        status: 'failed',
+        reason: reason instanceof Error
+          ? reason.message.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 80) || reason.name
+          : 'unknown',
+      });
       if (
         reason instanceof MeetingSummarySectionConflictError
         || reason instanceof MeetingSummarySectionUnavailableError
@@ -4945,7 +4958,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           setSummarySectionEditorTarget(null);
           setSummarySectionEditorError('');
         }}
-        onSave={content => { void saveSummarySectionEdit(content); }}
+        onSave={value => { void saveSummarySectionEdit(value); }}
         onRestore={() => { void saveSummarySectionEdit(null); }}
       />
       <MeetingTemplateSheet

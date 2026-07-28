@@ -108,7 +108,7 @@ function decisionCitations(
   citations: readonly SummaryCitationRecord[],
 ): MeetingSeriesMemoryCitation[] {
   return citations
-    .filter(citation => citation.sectionId === sectionId)
+    .filter(citation => citation.sectionId === sectionId && citation.userRemovedAtMs === null)
     .sort((left, right) => left.ordinal - right.ordinal || left.id.localeCompare(right.id))
     .map(citation => ({
       id: citation.id,

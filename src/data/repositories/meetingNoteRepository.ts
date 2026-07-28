@@ -537,6 +537,7 @@ export interface SummaryCitationRecord {
   endMs: number;
   quoteHash: string | null;
   ordinal: number;
+  userRemovedAtMs: number | null;
 }
 
 export interface ActionItemRecord {
@@ -1205,6 +1206,11 @@ export interface MeetingTransaction {
     versionId: string,
     scopeKey: ScopeKey,
   ): Promise<SummarySectionRecord | null>;
+  getSummarySectionCitations(
+    sectionId: string,
+    versionId: string,
+    scopeKey: ScopeKey,
+  ): Promise<readonly SummaryCitationRecord[]>;
   getMeetingAction(
     actionId: string,
     meetingId: string,
@@ -1288,14 +1294,16 @@ export interface MeetingTransaction {
     scopeKey: ScopeKey,
     options: SaveSummaryVersionOptions,
   ): Promise<void>;
-  /** Updates only the user-owned overlay of a section in the current summary version. */
-  updateCurrentSummarySectionUserText(
+  /** Updates only user-owned text and citation visibility in the current summary version. */
+  updateCurrentSummarySectionUserState(
     meetingId: string,
     versionId: string,
     sectionId: string,
     scopeKey: ScopeKey,
     userText: string | null,
     userEditedAtMs: number | null,
+    visibleCitationIds: readonly string[],
+    citationRemovedAtMs: number | null,
   ): Promise<boolean>;
   /** Returns true only when this transaction inserted a new operation. */
   insertOutbox(operation: SyncOperationRecord): Promise<boolean>;

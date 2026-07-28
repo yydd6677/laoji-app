@@ -76,22 +76,33 @@ export function summaryProjectionToDocument(
     ]);
   });
   const sections = projection.sections
-    .map(section => ({
-      id: section.id,
-      stableKey: section.stableKey,
-      kind: sectionKind(section.kind),
-      title: section.title,
-      content: sectionText(section),
-      userEdited: section.userText !== null,
-      userEditedAtMs: section.userEditedAtMs,
-      citations: (citationsBySection.get(section.id) ?? []).map(citation => ({
-        id: citation.id,
-        segmentId: citation.sourceSegmentId ?? citation.segmentId,
-        startMs: citation.startMs,
-        endMs: citation.endMs,
-        quoteHash: citation.quoteHash,
-      })),
-    }))
+    .map(section => {
+      const sectionCitations = citationsBySection.get(section.id) ?? [];
+      const removedCitationTimes = sectionCitations
+        .map(citation => citation.userRemovedAtMs)
+        .filter((value): value is number => value !== null);
+      const userEditedAtMs = [section.userEditedAtMs, ...removedCitationTimes]
+        .filter((value): value is number => value !== null)
+        .reduce<number | null>((latest, value) => latest === null ? value : Math.max(latest, value), null);
+      return {
+        id: section.id,
+        stableKey: section.stableKey,
+        kind: sectionKind(section.kind),
+        title: section.title,
+        content: sectionText(section),
+        userEdited: section.userText !== null || removedCitationTimes.length > 0,
+        userEditedAtMs,
+        citations: sectionCitations
+          .filter(citation => citation.userRemovedAtMs === null)
+          .map(citation => ({
+            id: citation.id,
+            segmentId: citation.sourceSegmentId ?? citation.segmentId,
+            startMs: citation.startMs,
+            endMs: citation.endMs,
+            quoteHash: citation.quoteHash,
+          })),
+      };
+    })
     .filter(section => section.content || section.title);
   const actions = projection.meetingActions.map(meetingActionRecordToCandidate);
   if (sections.length === 0 && actions.length === 0) return null;

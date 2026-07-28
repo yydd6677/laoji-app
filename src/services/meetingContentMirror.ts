@@ -545,6 +545,7 @@ export function mirrorLegacySummaryContent(
             endMs: citation.endMs,
             quoteHash: citation.quoteHash,
             ordinal: citationOrdinal,
+            userRemovedAtMs: null,
           });
           citationOrdinal += 1;
         });

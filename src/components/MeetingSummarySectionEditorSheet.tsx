@@ -23,6 +23,25 @@ export interface MeetingSummarySectionEditorValue {
   title: string | null;
   content: string;
   userEdited: boolean;
+  citations: readonly {
+    id: string;
+    startMs: number;
+  }[];
+}
+
+export interface MeetingSummarySectionEditorSaveValue {
+  content: string;
+  visibleCitationIds: readonly string[];
+}
+
+function formatClock(valueMs: number): string {
+  const seconds = Math.max(0, Math.floor(valueMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function MeetingSummarySectionEditorSheet({
@@ -39,7 +58,7 @@ export function MeetingSummarySectionEditorSheet({
   saving: boolean;
   error: string;
   onClose: () => void;
-  onSave: (content: string) => void;
+  onSave: (value: MeetingSummarySectionEditorSaveValue) => void;
   onRestore: () => void;
 }) {
   const { colors } = getFeishuTokens();
@@ -53,6 +72,9 @@ export function MeetingSummarySectionEditorSheet({
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [content, setContent] = useState(value?.content ?? '');
+  const [visibleCitationIds, setVisibleCitationIds] = useState<readonly string[]>(
+    value?.citations.map(citation => citation.id) ?? [],
+  );
   closeRef.current = onClose;
 
   const finishClose = useCallback((notify: boolean) => {
@@ -81,6 +103,7 @@ export function MeetingSummarySectionEditorSheet({
       setMounted(true);
       setClosing(false);
       setContent(value?.content ?? '');
+      setVisibleCitationIds(value?.citations.map(citation => citation.id) ?? []);
       progress.stopAnimation();
       progress.setValue(0);
       Animated.timing(progress, {
@@ -100,8 +123,11 @@ export function MeetingSummarySectionEditorSheet({
   if (!mounted) return null;
   const normalizedContent = content.replace(/\r\n?/g, '\n').trim();
   const initialContent = value?.content.replace(/\r\n?/g, '\n').trim() ?? '';
+  const initialCitationIds = value?.citations.map(citation => citation.id) ?? [];
+  const contentChanged = normalizedContent !== initialContent;
+  const citationsChanged = !sameIds(visibleCitationIds, initialCitationIds);
   const canSave = Boolean(normalizedContent)
-    && normalizedContent !== initialContent
+    && (contentChanged || citationsChanged)
     && !saving
     && !closing;
   const requestClose = () => {
@@ -180,6 +206,48 @@ export function MeetingSummarySectionEditorSheet({
                 ]}
                 accessibilityLabel={value?.title ? `编辑${value.title}` : '编辑整理内容'}
               />
+              {value && value.citations.length > 0 ? (
+                <View style={styles.citationBlock}>
+                  <Text style={[styles.citationLabel, { color: colors.textCaption }]}>引用</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.citationRow}
+                  >
+                    {value.citations
+                      .filter(citation => visibleCitationIds.includes(citation.id))
+                      .map(citation => (
+                        <Pressable
+                          key={citation.id}
+                          style={styles.citationTarget}
+                          onPress={() => {
+                            if (saving || closing) return;
+                            setVisibleCitationIds(current => current.filter(id => id !== citation.id));
+                          }}
+                          disabled={saving || closing}
+                          accessibilityRole="button"
+                          accessibilityLabel={`移除引用 ${formatClock(citation.startMs)}`}
+                          accessibilityState={{ disabled: saving || closing }}
+                        >
+                          {({ pressed }) => (
+                            <View style={[
+                              styles.citationChip,
+                              { backgroundColor: pressed ? colors.primaryPressed : colors.primarySoft },
+                            ]}>
+                              <Text style={[styles.citationText, { color: pressed ? colors.onPrimary : colors.primary }]}>{formatClock(citation.startMs)}</Text>
+                              <Ionicons
+                                name="close"
+                                size={14}
+                                color={pressed ? colors.onPrimary : colors.primary}
+                              />
+                            </View>
+                          )}
+                        </Pressable>
+                      ))}
+                  </ScrollView>
+                </View>
+              ) : null}
               <View style={styles.restoreSlot}>
                 {value?.userEdited ? (
                   <Pressable
@@ -206,7 +274,7 @@ export function MeetingSummarySectionEditorSheet({
                       : colors.backgroundBase,
                   },
                 ]}
-                onPress={() => onSave(normalizedContent)}
+                onPress={() => onSave({ content: normalizedContent, visibleCitationIds })}
                 disabled={!canSave}
                 accessibilityRole="button"
                 accessibilityLabel="保存整理内容"
@@ -237,6 +305,12 @@ const styles = StyleSheet.create({
   formScroll: { flexShrink: 1 },
   form: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
   input: { minHeight: 180, maxHeight: 320, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, lineHeight: 24 },
+  citationBlock: { paddingTop: 6 },
+  citationLabel: { height: 22, fontSize: 14, lineHeight: 20 },
+  citationRow: { minHeight: 44, alignItems: 'center' },
+  citationTarget: { height: 44, justifyContent: 'center', marginRight: 4 },
+  citationChip: { height: 32, borderRadius: 6, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center' },
+  citationText: { fontSize: 14, lineHeight: 20, marginRight: 4 },
   restoreSlot: { height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   restoreAction: { minWidth: 120, height: 40, paddingHorizontal: 8, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   restoreText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
