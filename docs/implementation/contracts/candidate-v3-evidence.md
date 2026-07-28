@@ -125,9 +125,10 @@
 ## 当前外部边界
 
 - `18020 /api/health` 本轮实时返回 HTTP 200、`asr_provider=qwen3-asr`、`models_ready=true`，VAD 与两份 CAMPPlus 状态均为 true；这证明健康响应，不替代真人转写质量。
-- `18020 /api/laoji/capabilities` 本轮实时返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 Marker 均在线，`summary_attachments_image=false` 继续 fail closed。响应仍未包含 `transcript_reprocess_v1`，因此移动端重新生成文字记录必须保持关闭，不能提交真实 reprocess job。
+- `18020 /api/laoji/capabilities` 本轮实时返回 HTTP 200；根、RecordingAsset、行动项、QA、协作、片段、讲话人、附件和 Marker 均在线，`summary_attachments_image=false` 继续 fail closed。`transcript_reprocess_v1=true` 已随当前 overlay 部署，移动端重新生成文字记录入口按 fresh capability 开放。
+- 18020 的 OpenAPI 已实时确认创建转写、查询任务和重试三个 RecordingAsset 路由存在；运行文件 SHA-256 与持久 overlay 均为 `dd96d3a907db6b3ffa5a50355892aaa1367d6d9abb146550c3c02ffdc65623a1`。真实账号已从当前 APK 创建一条新 job，65.232 秒 RecordingAsset 在约 5 秒后首次尝试完成；20 段该资产文字更新，10 段无资产身份的旧夹具保留，旧整理结果及冷启动读取未被覆盖。
 - `18035 /api/laoji/capabilities` 返回 HTTP 404。
-- 18020 的 PID/cwd、18035 PID 和三份 overlay SHA-256 仍是前次已记录快照；本轮 SSH BatchMode 仍因认证失败而未取得进程身份，未据此重启或改写共享服务。当前 HTTP 往返可用不等于这些进程身份已经重新确认。
+- 18020 已实时确认从 `/home/zhong/laoji-service-platform/smart-meeting-ai/backend` 运行；只替换 `app_meeting_v2.py` 并重启 18020，18035 PID `533940` 未变化。替换前文件保存在服务器 `backups/20260729-transcript-reprocess-capability-v1`。
 - USB 真机当前断开；顶部当前 APK 没有新的 USB 安装或物理设备结论。
 
 ## 对完成状态的影响
