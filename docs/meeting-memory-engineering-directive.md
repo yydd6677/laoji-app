@@ -6,7 +6,7 @@
 > 稳定回溯标签：`stable-before-meeting-memory-roadmap`（标签包含本文件，业务代码与上述移动端基线一致。）
 > 稳定标签是不可移动的回溯点；后续实施只新增提交，不重打或强制更新该标签。
 > v19 基线：`600c274`（稳定回溯点后的第 37 个实现/证据提交）；其上由本轮独立切片完成游客普通包 canonical cutover。
-> 完成审计：核心 P0/P1 与完整优化登记表（含线上闭环和 P2）均完成 100% 的可运行功能纵切，默认候选包已收口。这是功能完成度，不是发布通过率；真人质量、物理双机、USB、长离线和兼容矩阵仍按后置证据单独计算。
+> 完成审计：核心 P0/P1 与完整优化登记表（含线上闭环和 P2）均完成 100% 的可运行功能纵切，默认候选包已收口并覆盖安装 USB 真机。这是功能完成度，不是发布通过率；真人质量、物理双机、真机新录音/设备特有交互、长离线和兼容矩阵仍按后置证据单独计算。
 
 ## 0. 执行总览（先看这里）
 
@@ -79,7 +79,7 @@
 | 普通包 canonical 为主事实源且 capability fail closed | 默认配置中 canonical read/write、账号根/上传及各 P2 flag 均为 true；运行时仍逐项要求 fresh capability，附件和 reprocess 能力缺失时不发送 | **满足源码与候选配置要求** |
 | 目标进程、migration、测试账号和多 RecordingAsset 已运行 | 当前 18020 已实时确认从 canonical backend 运行并报告 `qwen3-asr` / `models_ready=true`；root/action/note/occurrence/RecordingAsset/QA/协作/分享/片段/讲话人/附件 capability 已有线上证据，reprocess capability、单资产及双资产同批新 job 均已补齐。两个全新同账号模拟器已完成 canonical 接管、录音上传、会议/附件 pull、墓碑、根冲突选择和回收站收敛；v35 候选又完成跨设备本机 ID 问答，当前 occurrence 样本完成上传后的远端 final Transcript 与 Summary | **满足对象合同与双模拟器纵切口径**；仍不等于真人 ASR 质量或第二台物理手机 |
 | V3 七条关键任务 | 第 1 条已有稳定包游客日程/会议/录音/笔记保留升级；第 2/3 条已有完整录制链、occurrence 开始/继续/查看和冲突录音恢复；第 4 条已有人工正文/引用覆盖、重生成保护、同步冲突和冷启动证据；第 5 条已有 9 条 canonical 引用跳转，最终包又完成正式导入→自动上传→约 5 秒 ASR→同页 20 段文字→播放→通用整理；第 6 条默认分享最小披露及账号回收站删除成立；第 7 条第二实例 pull、Marker 收敛、离线 outbox 与真实 409/412 选择已有运行证据 | **满足目标的累计候选证据口径**；各分支不要求在同一轮重复破坏性重跑，也不得把合成人声或双模拟器改写成真人质量/物理双机证据 |
-| 默认候选 APK、回溯提交与稳定标签 | Preview `2da76bd6…2b13`（91,160,176 bytes，v104，构建于 `2026-07-29 05:41:30 +0800`）内容对应 `5bcc3e0`，已冻结为 `/home/yydd/LaoJi-stable-builds/laoji-v104-meeting-memory-candidate-20260729.apk` 并保留数据覆盖安装到仅供老记候选验证的 `emulator-5556`；设备内 `base.apk`、构建产物和稳定归档三者哈希一致。最终包冷启动保留数据，导入主链热更新和连续三次详情删除均无 SQLite/React Native/native fatal。`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足可回溯候选包、默认能力和保留数据模拟器口径**；USB 已断开，真机安装、物理双机与稳定包覆盖升级重跑属于后置证据 |
+| 默认候选 APK、回溯提交与稳定标签 | Preview `2da76bd6…2b13`（91,160,176 bytes，v104，构建于 `2026-07-29 05:41:30 +0800`）内容对应 `5bcc3e0`，已冻结为 `/home/yydd/LaoJi-stable-builds/laoji-v104-meeting-memory-candidate-20260729.apk` 并保留数据覆盖安装到 `emulator-5556` 和 USB 真机 `825f509d`；构建产物、归档和两台设备 `base.apk` 哈希一致。最终包冷启动保留数据，模拟器导入主链热更新和连续三次详情删除均无 SQLite/React Native/native fatal；真机冷启动 `797 ms`，既有登录态和会议详情保留。`stable-before-meeting-memory-roadmap` 仍为 `cde96f9d5266961e380957893ecba39855aea39b` | **满足可回溯候选包、默认能力、保留数据模拟器和 USB 安装/启动口径**；真机新录音、物理双机与稳定包覆盖升级重跑仍属后置证据 |
 
 源码审计还确认：冲突恢复产生的 RecordingAsset 固定为 `secondary + recovered`，Store 扫描全部本机就绪且无远端身份的资产，WorkManager 与同步 API 都保留 role/origin 和具体 asset ID。因此“恢复 secondary 尚缺 App 往返”是特定运行样本缺失，不是需要再建上传实现；后续不得为此复制第二套调度器。
 
@@ -197,7 +197,7 @@ UI 变更还必须遵守 `/home/yydd/.codex/skills/feishu-ui-style/SKILL.md`，�
 4. 讲话人 profile 同意/撤销、future correction、账号离线识别、旧会议重匹配和跨 revision 人工锁定已实现；真实结构缺口只剩带有效人声/录音资产的改善质量、跨设备收敛和物理设备证据。
 5. video ingest、远端视频音轨处理、已有会议显式加入、附件分层分享、可撤销文字链接、CLIP-01 非 WAV 异步片段和 ORG-01 账号标签目录/整理主题已经完成移动端/18020 纵切。reprocessed Transcript 已完成移动端生产入口、v31 恢复任务、不可变版本、持久服务端 overlay，以及单/双资产真实新 job、整批激活和 Summary lineage。账号附件与 Marker 均已完成移动端、18020、真实测试账号合同和双独立模拟器收敛；照片多模态仍缺真实视觉模型，Marker 仍缺物理双机/USB 与长离线证据。
 6. `MeetingLiveScreen.android.tsx` 和 `TranscriptionScreen.android.tsx` 已抽出关键用例但仍是较重 controller；只在继续增加功能会产生重复事务时再拆，不为纯洁架构单独延长路线。
-7. USB 真机、真实多人质量、长录音和物理双设备证据尚未集中取得；它们进入完成后的证据矩阵，不再阻塞候选版或每个功能切片。
+7. 最终包的 USB 保留数据安装、哈希和冷启动已经补齐；真机新录音、真实多人质量、长录音和物理双设备证据仍进入完成后的证据矩阵，不再阻塞候选版或每个功能切片。
 
 ## 4. 完整优化登记表与实现状态
 
@@ -2037,7 +2037,7 @@ openOccurrenceMeeting
 批次 D 已完成：
 
 1. 默认 feature flags、运行服务 schema/capability 和移动端回溯提交均已冻结。
-2. 默认配置 APK 已构建并保留数据覆盖安装 `emulator-5556`；USB 当前断开，因此物理设备只保留后置证据，不阻塞本轮收口。
+2. 默认配置 APK 已构建并保留数据覆盖安装 `emulator-5556` 与 USB 真机 `825f509d`；两端安装包哈希一致。真机新录音和设备特有交互继续后置，不阻塞本轮收口。
 3. 七条关键闭环使用同一候选代码线的累计证据；最终包只重跑受影响的正式导入→上传→自动 ASR→同页文字→播放→整理→回收站删除主链，没有恢复历史全量门禁。
 4. 最终归档为 `/home/yydd/LaoJi-stable-builds/laoji-v104-meeting-memory-candidate-20260729.apk`，SHA-256 为 `2da76bd6ea91d912fa3443940aa22b07689673c34dbe424de5495bde503e2b13`，内容对应 `5bcc3e0`。
 
@@ -2238,7 +2238,7 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 
 第 16.3 节后置矩阵、发布后的效果指标和未出现缺陷的兼容组合不阻塞目标完成，但必须作为已知边界记录，不能伪装成已验证。
 
-截至最终候选 `5bcc3e0` / `2da76bd6…2b13`，上述五项均已满足，目标模式可以结束。真人多人质量、物理双机、USB、长离线、目录分页、视觉模型和格式/ROM 矩阵继续留在第 16.3 节及各优化项后置栏，不反向降低已经完成的功能状态。
+截至最终候选 `5bcc3e0` / `2da76bd6…2b13`，上述五项均已满足，目标模式可以结束；最终包的 USB 安装、哈希和冷启动也已补齐。真人多人质量、物理双机、真机新录音/设备特有交互、长离线、目录分页、视觉模型和格式/ROM 矩阵继续留在第 16.3 节及各优化项后置栏，不反向降低已经完成的功能状态。
 
 ## 21. 作为目标模式附件时的执行协议
 
