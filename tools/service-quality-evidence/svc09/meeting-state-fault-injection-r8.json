@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T18:02:27.398+08:00",
+  "started_at": "2026-07-31T18:02:27.224+08:00",
+  "service": "SVC-09",
+  "scope": "real_candidate_meeting_state_machine_sqlite_cpu_only_r8",
+  "verdict": "passed_with_delete_restore_policy_observation",
+  "candidate_artifacts": {
+    "meeting_recording_asset_service.py": "4ea26c283b0aecabf88ed88a07137d74d204723785c6137944ffde294486fb55",
+    "meeting_recording_asset.py": "97147694954b9b585c7e8ca086874b6e9253008e1f74a21b922e995c78ee694d",
+    "meeting_note_root.py": "94d91904ca346a8c9ee0b9104b784c7fcf18311fac7d62289dc15308d9a47889"
+  },
+  "runtime": {
+    "python": "3.11.15 | packaged by conda-forge | (main, Jun 11 2026, 03:34:02) [GCC 14.3.0]",
+    "sqlalchemy": "2.0.30",
+    "aiosqlite": "0.20.0",
+    "database": "temporary SQLite with foreign keys and WAL",
+    "production_or_remote_contacted": false,
+    "gpu_or_model_loaded": false
+  },
+  "cases": {
+    "provider_ack_fencing": {
+      "first_ack_bound": true,
+      "duplicate_ack_idempotent": true,
+      "mismatched_ack_rejected": true,
+      "stale_lease_ack_rejected": true,
+      "persisted_provider_task_id": "task_0123456789abcdef0123456789abcdef"
+    },
+    "multi_asset_partial_failure": {
+      "first_failure_committed": true,
+      "meeting_after_first_failure": "processing",
+      "second_success_committed": true,
+      "job_states": {
+        "job-multi-1": "failed",
+        "job-multi-2": "completed"
+      },
+      "final_meeting_status": "ended"
+    },
+    "delete_restore_interleaving": {
+      "finish_while_in_recycle_bin": true,
+      "restored_lifecycle": "active",
+      "job_status_after_restore": "completed",
+      "job_count_after_restore": 1,
+      "observed_policy": "recycle-bin deletion preserves in-flight work"
+    },
+    "recovery_queue_fairness": {
+      "recovered": 3,
+      "submission_order": [
+        "job-a",
+        "job-z",
+        "job-later"
+      ],
+      "ordering_contract": "created_at_then_job_id"
+    }
+  },
+  "proved": [
+    "Duplicate provider ACK is idempotent while a different provider ID and a stale lease ACK are fenced out.",
+    "One failed and one successful asset converge independently while the meeting stays processing until no active asset remains.",
+    "A terminal transition interleaved with recycle-bin deletion survives restore without duplicating the transcription job.",
+    "Recovery submits queued jobs in created_at then job_id order."
+  ],
+  "not_proved": [
+    "SQLite serializes writes; the existing PostgreSQL r6 focused suite remains the evidence for true concurrent row-lock behavior.",
+    "No production database, complete FastAPI application, audio model, remote service or GPU was used."
+  ],
+  "policy_observations": [
+    "The candidate intentionally does not cancel an in-flight transcription merely because its meeting note root is in the recycle bin; restored meetings retain completed work. This trades compute for restore continuity and should remain an explicit product policy."
+  ],
+  "cleanup": {
+    "temporary_directory_removed": true
+  }
+}

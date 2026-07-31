@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T18:02:40.247+08:00",
+  "started_at": "2026-07-31T18:02:39.245+08:00",
+  "service": "SVC-09",
+  "scope": "real_uvicorn_pre_sigterm_admission_fence_cpu_only_r9",
+  "verdict": "passed",
+  "candidate_service": "/home/yydd/桌面/light_plan/server-work/summary/backend/app/services/meeting_recording_asset_service.py",
+  "candidate_service_sha256": "4ea26c283b0aecabf88ed88a07137d74d204723785c6137944ffde294486fb55",
+  "candidate_admission_module": "/home/yydd/桌面/light_plan/server-work/summary/backend/app/services/transcription_admission.py",
+  "candidate_admission_module_sha256": "facb9d8d0543aa6b349a6551f6d05e4460131a3515394965e8b7a526765be1e2",
+  "python": "3.11.15 | packaged by conda-forge | (main, Jun 11 2026, 03:34:02) [GCC 14.3.0]",
+  "uvicorn_version": "0.52.0",
+  "isolation": {
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "ports": "ephemeral",
+    "database": "temporary SQLite",
+    "production_or_remote_contacted": false,
+    "gpu_or_model_loaded": false
+  },
+  "cases": {
+    "cooperative": {
+      "behavior": "cooperative",
+      "drained": true,
+      "shutdown_wait_seconds": 0.051,
+      "accepting_at_return": false,
+      "post_shutdown_submit_accepted": false,
+      "pending_at_return": [],
+      "pending_after_executor": [],
+      "jobs": [
+        {
+          "id": "job-queued",
+          "status": "queued",
+          "updated_at": "2026-07-31T18:02:39.351+08:00"
+        },
+        {
+          "id": "job-running",
+          "status": "running_recoverable",
+          "updated_at": "2026-07-31T18:02:39.549+08:00"
+        }
+      ],
+      "gpu_visible": false,
+      "operator_close_snapshot": {
+        "accepting_new_transcriptions": false,
+        "probe_error": null,
+        "reason": "sentinel_present",
+        "schema_version": 1,
+        "sentinel_mtime": "2026-07-31T10:02:39.368+00:00",
+        "sentinel_path": "/tmp/laoji-svc09-uvicorn-yz_poyup/cooperative.admission.closed",
+        "state": "closed"
+      },
+      "admission_before_sigterm": {
+        "schema_version": 1,
+        "state": "closed",
+        "accepting_new_transcriptions": false,
+        "reason": "sentinel_present",
+        "sentinel_path": "/tmp/laoji-svc09-uvicorn-yz_poyup/cooperative.admission.closed",
+        "sentinel_mtime": "2026-07-31T10:02:39.368+00:00",
+        "probe_error": null
+      },
+      "request_after_fence_before_sigterm": {
+        "status_code": 503,
+        "payload": {
+          "accepted": false,
+          "detail": "服务正在平稳停机，暂时不能创建或重试转写任务，请稍后再试"
+        }
+      },
+      "external_request_immediately_after_sigterm": {
+        "outcome": "response",
+        "status_code": 503,
+        "payload": {
+          "accepted": false,
+          "detail": "服务正在平稳停机，暂时不能创建或重试转写任务，请稍后再试"
+        }
+      },
+      "process_exit_code": -15,
+      "uvicorn_reraised_captured_sigterm": true,
+      "sqlite_integrity_check": "ok",
+      "signal_dispatch_race_accepted_claim": false
+    },
+    "timeout": {
+      "behavior": "timeout",
+      "drained": false,
+      "shutdown_wait_seconds": 0.26,
+      "accepting_at_return": false,
+      "post_shutdown_submit_accepted": false,
+      "pending_at_return": [
+        "job-running"
+      ],
+      "pending_after_executor": [],
+      "jobs": [
+        {
+          "id": "job-queued",
+          "status": "queued",
+          "updated_at": "2026-07-31T18:02:39.752+08:00"
+        },
+        {
+          "id": "job-running",
+          "status": "running_recoverable",
+          "updated_at": "2026-07-31T18:02:40.201+08:00"
+        }
+      ],
+      "gpu_visible": false,
+      "operator_close_snapshot": {
+        "accepting_new_transcriptions": false,
+        "probe_error": null,
+        "reason": "sentinel_present",
+        "schema_version": 1,
+        "sentinel_mtime": "2026-07-31T10:02:39.772+00:00",
+        "sentinel_path": "/tmp/laoji-svc09-uvicorn-yz_poyup/timeout.admission.closed",
+        "state": "closed"
+      },
+      "admission_before_sigterm": {
+        "schema_version": 1,
+        "state": "closed",
+        "accepting_new_transcriptions": false,
+        "reason": "sentinel_present",
+        "sentinel_path": "/tmp/laoji-svc09-uvicorn-yz_poyup/timeout.admission.closed",
+        "sentinel_mtime": "2026-07-31T10:02:39.772+00:00",
+        "probe_error": null
+      },
+      "request_after_fence_before_sigterm": {
+        "status_code": 503,
+        "payload": {
+          "accepted": false,
+          "detail": "服务正在平稳停机，暂时不能创建或重试转写任务，请稍后再试"
+        }
+      },
+      "external_request_immediately_after_sigterm": {
+        "outcome": "response",
+        "status_code": 503,
+        "payload": {
+          "accepted": false,
+          "detail": "服务正在平稳停机，暂时不能创建或重试转写任务，请稍后再试"
+        }
+      },
+      "process_exit_code": -15,
+      "uvicorn_reraised_captured_sigterm": true,
+      "sqlite_integrity_check": "ok",
+      "signal_dispatch_race_accepted_claim": false
+    }
+  },
+  "proved": [
+    "A shared admission sentinel is observed by the running Uvicorn process before SIGTERM and a new route request receives Chinese HTTP 503 without creating a durable job.",
+    "A request racing immediately after SIGTERM cannot enter the submission registry once the pre-stop sentinel already exists.",
+    "Once Uvicorn enters lifespan shutdown, the candidate submission registry rejects an internal post-shutdown submission.",
+    "A cooperative running job reaches a recoverable safe point before the shutdown timeout while a queued Future remains durably queued.",
+    "A non-cooperative running job makes the candidate drain call return false at its configured timeout and remains explicitly visible until the executor releases it."
+  ],
+  "release_blockers": [],
+  "not_proved": [
+    "The sparse deployment overlay cannot boot the complete production meeting application, so the ASGI route shell and worker body are deterministic harness code while the admission and submission implementations are loaded unchanged from the candidate.",
+    "No real transcription model, production database, production port, remote service, systemd unit or GPU path was exercised."
+  ],
+  "cleanup": {
+    "temporary_directory_removed": true,
+    "child_processes_reaped": true
+  }
+}
