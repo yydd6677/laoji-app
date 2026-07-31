@@ -16,8 +16,12 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 class LaojiLocationModule : Module() {
+  private val activeRequests = ConcurrentHashMap<String, () -> Unit>()
+  private val cancellationTokens = ConcurrentHashMap<String, AtomicBoolean>()
+
   override fun definition() = ModuleDefinition {
     Name("LaojiLocation")
 
@@ -25,6 +29,7 @@ class LaojiLocationModule : Module() {
       maxAgeMs: Double,
       requiredAccuracyMeters: Double,
       timeoutMs: Double,
+      requestId: String,
       promise: Promise ->
       val context = requireContext()
       val hasPermission = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -34,15 +39,31 @@ class LaojiLocationModule : Module() {
         return@AsyncFunction
       }
 
+      val cancellationToken = AtomicBoolean(false)
+      if (cancellationTokens.putIfAbsent(requestId, cancellationToken) != null) {
+        promise.reject(
+          "ERR_LAOJI_LOCATION_DUPLICATE_REQUEST",
+          "location request is already active",
+          null,
+        )
+        return@AsyncFunction
+      }
       Handler(Looper.getMainLooper()).post {
         requestLocation(
           context = context,
           maxAgeMs = maxAgeMs.coerceIn(0.0, 60.0 * 60_000.0).toLong(),
           requiredAccuracyMeters = requiredAccuracyMeters.coerceIn(1.0, 10_000.0).toFloat(),
           timeoutMs = timeoutMs.coerceIn(1_000.0, 30_000.0).toLong(),
+          requestId = requestId,
+          cancellationToken = cancellationToken,
           promise = promise,
         )
       }
+    }
+
+    AsyncFunction("cancelCurrentLocation") { requestId: String ->
+      activeRequests.remove(requestId)?.invoke()
+        ?: cancellationTokens[requestId]?.set(true)
     }
   }
 
@@ -51,10 +72,19 @@ class LaojiLocationModule : Module() {
     maxAgeMs: Long,
     requiredAccuracyMeters: Float,
     timeoutMs: Long,
+    requestId: String,
+    cancellationToken: AtomicBoolean,
     promise: Promise,
   ) {
+    if (cancellationToken.get()) {
+      cancellationTokens.remove(requestId, cancellationToken)
+      promise.resolve(null)
+      return
+    }
+
     val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     if (manager == null) {
+      cancellationTokens.remove(requestId, cancellationToken)
       promise.resolve(null)
       return
     }
@@ -74,11 +104,18 @@ class LaojiLocationModule : Module() {
       }
     }.filter(::isUsableLocation)
 
+    if (cancellationToken.get()) {
+      cancellationTokens.remove(requestId, cancellationToken)
+      promise.resolve(null)
+      return
+    }
+
     val fresh = lastKnown
       .filter { locationAgeMs(it) <= maxAgeMs && accuracyMeters(it) <= requiredAccuracyMeters }
       .minWithOrNull(compareBy<Location>({ locationAgeMs(it) }, { accuracyMeters(it) }))
     if (fresh != null) {
-      promise.resolve(locationMap(fresh))
+      cancellationTokens.remove(requestId, cancellationToken)
+      promise.resolve(locationMap(fresh, "cache"))
       return
     }
 
@@ -88,6 +125,7 @@ class LaojiLocationModule : Module() {
       LocationManager.GPS_PROVIDER,
     ).filter { provider -> enabledProviders.contains(provider) }.distinct()
     if (requestProviders.isEmpty()) {
+      cancellationTokens.remove(requestId, cancellationToken)
       promise.resolve(null)
       return
     }
@@ -95,8 +133,10 @@ class LaojiLocationModule : Module() {
     val settled = AtomicBoolean(false)
     val handler = Handler(Looper.getMainLooper())
     lateinit var listener: LocationListener
-    val finish: (Location?) -> Unit = { location ->
+    val finish: (Location?, String?) -> Unit = { location, source ->
       if (settled.compareAndSet(false, true)) {
+        activeRequests.remove(requestId)
+        cancellationTokens.remove(requestId, cancellationToken)
         handler.removeCallbacksAndMessages(listener)
         try {
           manager.removeUpdates(listener)
@@ -105,19 +145,31 @@ class LaojiLocationModule : Module() {
         } catch (_: RuntimeException) {
           // Provider shutdown should not turn a recoverable miss into a crash.
         }
-        promise.resolve(location?.let(::locationMap))
+        promise.resolve(location?.let { locationMap(it, source ?: "live") })
       }
     }
     listener = LocationListener { location ->
       if (isUsableLocation(location) && accuracyMeters(location) <= requiredAccuracyMeters) {
-        finish(location)
+        finish(location, "live")
       }
     }
+    // Register only after the listener exists; cancellation can arrive from the
+    // JS thread as soon as the request is exposed in activeRequests.
+    activeRequests[requestId] = {
+      cancellationToken.set(true)
+      finish(null, "cancelled")
+    }
+    if (cancellationToken.get()) {
+      activeRequests.remove(requestId)
+      finish(null, "cancelled")
+      return
+    }
 
-    val timeout = Runnable { finish(null) }
+    val timeout = Runnable { finish(null, null) }
     handler.postAtTime(timeout, listener, SystemClock.uptimeMillis() + timeoutMs)
     var registered = false
     requestProviders.forEach { provider ->
+      if (cancellationToken.get() || settled.get()) return@forEach
       try {
         manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
         registered = true
@@ -129,7 +181,7 @@ class LaojiLocationModule : Module() {
         // Continue with the remaining system providers.
       }
     }
-    if (!registered) finish(null)
+    if (!registered && !settled.get()) finish(null, null)
   }
 
   private fun requireContext(): Context = appContext.reactContext?.applicationContext
@@ -156,11 +208,13 @@ class LaojiLocationModule : Module() {
     return (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
   }
 
-  private fun locationMap(location: Location): Map<String, Any?> = mapOf(
+  private fun locationMap(location: Location, source: String): Map<String, Any?> = mapOf(
     "latitude" to location.latitude,
     "longitude" to location.longitude,
     "accuracy" to accuracyMeters(location).toDouble(),
     "ageMs" to locationAgeMs(location).toDouble(),
     "provider" to location.provider,
+    "timestampMs" to location.time.toDouble(),
+    "source" to source,
   )
 }

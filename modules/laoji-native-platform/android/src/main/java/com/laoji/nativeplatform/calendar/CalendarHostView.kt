@@ -38,7 +38,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   val onSemanticEvent by EventDispatcher<Map<String, Any>>()
   val onTabPress by EventDispatcher<Map<String, Any?>>()
 
-  private val toolbar = CalendarToolbarView(context)
+  private val toolbar = CalendarToolbarView(context, appContext)
   private val indicator = CalendarIndicatorView(context)
   private val palette = CalendarUi.palette(context)
   private val content = FrameLayout(context)
@@ -72,6 +72,10 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private var visibleMonthInitialized = false
   private var nowProvider: () -> Calendar = { Calendar.getInstance() }
   private var disposed = false
+
+  fun setProfileEntrySnapshot(snapshot: Map<String, Any?>) {
+    toolbar.setProfileEntrySnapshot(snapshot)
+  }
 
   init {
     // CAL-ROOT-001: ExpoView's padding-box clip can suppress Android-managed child display lists.

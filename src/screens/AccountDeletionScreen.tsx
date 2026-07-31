@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -41,7 +42,18 @@ export function AccountDeletionScreen({ navigation }: Props) {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const confirmationFocusedRef = useRef(false);
   const ready = !isGuest && Boolean(accessToken) && password.length >= 6 && confirmation === '删除账号';
+
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      if (confirmationFocusedRef.current) {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }
+    });
+    return () => shown.remove();
+  }, []);
 
   const handleDelete = async () => {
     if (isGuest || !accessToken) {
@@ -86,10 +98,16 @@ export function AccountDeletionScreen({ navigation }: Props) {
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
       <SettingsTitleBar title="删除账号" onBack={() => navigation.goBack()} />
-      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={s.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'android' ? 20 : 0}
+      >
         <ScrollView
+          ref={scrollRef}
           style={s.flex}
           contentContainerStyle={s.content}
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           testID="account-deletion-page"
         >
@@ -126,6 +144,11 @@ export function AccountDeletionScreen({ navigation }: Props) {
               style={s.input}
               value={confirmation}
               onChangeText={setConfirmation}
+              onFocus={() => {
+                confirmationFocusedRef.current = true;
+                requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+              }}
+              onBlur={() => { confirmationFocusedRef.current = false; }}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="删除账号"

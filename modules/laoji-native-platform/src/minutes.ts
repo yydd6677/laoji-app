@@ -368,6 +368,7 @@ type MinutesViewEvent<T> = (event: NativeSyntheticEvent<T>) => void;
 export interface LaojiMinutesViewProps extends ViewProps {
   surface: MinutesSurface;
   snapshot: MinutesViewSnapshot;
+  profileEntry?: import('./ui').NativeProfileEntrySnapshot | null;
   // UI-SHELL-BOTTOM-MAIN-001: selection motion resumes in the newly active native root.
   bottomBarSelectionCommand?: number | null;
   onMinutesAction?: MinutesViewEvent<MinutesSemanticAction>;

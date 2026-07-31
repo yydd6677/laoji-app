@@ -138,11 +138,6 @@ internal class MinutesMainMenu(
         type = "openSpeakers",
         icon = com.laoji.nativeplatform.R.drawable.laoji_ic_member_outline,
       ),
-      MenuAction(
-        label = "个人资料",
-        type = "openProfile",
-        icon = com.laoji.nativeplatform.R.drawable.laoji_ic_personal_info_outline,
-      ),
     )
     if (canOpenRecycleBin) {
       actions += MenuAction(

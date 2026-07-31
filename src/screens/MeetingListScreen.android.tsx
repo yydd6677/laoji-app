@@ -40,6 +40,7 @@ import {
 import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/meetingRecycleBin';
 import type { ScopeKey } from '../domain/meeting';
 import { MeetingTagSheet } from '../components/MeetingTagSheet';
+import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -190,7 +191,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     getCachedTranscript,
     getCachedSummary,
   } = useMeetings();
-  const { isGuest, session } = useAuth();
+  const { isGuest, session, profile } = useAuth();
   const {
     retentionDays,
     refresh: refreshRecycleCapability,
@@ -220,6 +221,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const reorderInFlightRef = useRef(false);
   const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
   const meetingScope = isGuest ? 'guest' as ScopeKey : accountScope;
+  const profileEntry = useMemo(
+    () => buildNativeProfileEntrySnapshot(profile, isGuest),
+    [isGuest, profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
+  );
 
   const refreshRecycleBin = useCallback(async (syncRemote = false) => {
     if (!accountScope || retentionDays === null) {
@@ -901,6 +906,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         style={styles.surface}
         surface="list"
         snapshot={snapshot}
+        profileEntry={profileEntry}
         bottomBarSelectionCommand={bottomBarSelectionCommand}
         onMinutesAction={event => handleAction(event.nativeEvent)}
         onTabPress={onTabPress}

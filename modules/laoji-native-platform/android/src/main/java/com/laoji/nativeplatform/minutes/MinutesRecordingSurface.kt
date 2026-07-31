@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.audio.RecorderLevelFrame
 import com.laoji.nativeplatform.audio.RecorderLevelHub
+import com.laoji.nativeplatform.ui.installImeOverlapBottomPadding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +86,7 @@ internal class MinutesRecordingSurface(
   init {
     setBackgroundColor(MinutesPalette.surface)
     clipChildren = false
+    installImeOverlapBottomPadding()
     buildTopBar()
     buildTitleSection()
     buildContentArea()

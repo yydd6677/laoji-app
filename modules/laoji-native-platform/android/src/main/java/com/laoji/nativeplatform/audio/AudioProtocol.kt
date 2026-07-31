@@ -6,6 +6,10 @@ import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
 
 data class PcmLevel(
@@ -79,6 +83,8 @@ object WavRecoveryMath {
 }
 
 sealed class AsrServerEvent {
+  data class Config(val stopCapability: AsrStopCapability?) : AsrServerEvent()
+  data object StopAcknowledged : AsrServerEvent()
   data object ReadyToStop : AsrServerEvent()
   data class Transcript(
     val text: String,
@@ -95,6 +101,151 @@ sealed class AsrServerEvent {
   data object Ignored : AsrServerEvent()
 }
 
+data class AsrStopCapability(
+  val finalDrainTimeoutMs: Long,
+) {
+  val clientDrainWaitTimeoutMs: Long
+    get() = minOf(
+      finalDrainTimeoutMs + AsrStopProtocolContract.FINAL_DRAIN_COMPLETION_GRACE_MS,
+      AsrStopProtocolContract.MAX_CLIENT_FINAL_DRAIN_WAIT_MS,
+    )
+}
+
+object AsrStopProtocolContract {
+  const val ACK_THEN_DRAIN_V1 = "ack_then_drain_v1"
+  const val MIN_SERVER_FINAL_DRAIN_TIMEOUT_MS = 1_000L
+  const val MAX_SERVER_FINAL_DRAIN_TIMEOUT_MS = 120_000L
+  const val MAX_STOP_ACK_WAIT_MS = 5_000L
+  const val CONFIG_NEGOTIATION_GRACE_MS = 500L
+  const val FINAL_DRAIN_COMPLETION_GRACE_MS = 2_000L
+  const val MAX_CLIENT_FINAL_DRAIN_WAIT_MS =
+    MAX_SERVER_FINAL_DRAIN_TIMEOUT_MS + FINAL_DRAIN_COMPLETION_GRACE_MS
+
+  fun negotiate(stopProtocol: Any?, finalDrainTimeoutMs: Any?): AsrStopCapability? {
+    if (stopProtocol !is String || stopProtocol != ACK_THEN_DRAIN_V1) return null
+    val timeoutMs = when (finalDrainTimeoutMs) {
+      is Int -> finalDrainTimeoutMs.toLong()
+      is Long -> finalDrainTimeoutMs
+      else -> return null
+    }
+    if (timeoutMs !in MIN_SERVER_FINAL_DRAIN_TIMEOUT_MS..MAX_SERVER_FINAL_DRAIN_TIMEOUT_MS) {
+      return null
+    }
+    return AsrStopCapability(finalDrainTimeoutMs = timeoutMs)
+  }
+
+  fun ackWaitTimeoutMs(legacyTimeoutMs: Long): Long =
+    legacyTimeoutMs.coerceAtLeast(1L).coerceAtMost(MAX_STOP_ACK_WAIT_MS)
+
+  fun configNegotiationWaitMs(legacyTimeoutMs: Long): Long =
+    legacyTimeoutMs.coerceAtLeast(1L).coerceAtMost(CONFIG_NEGOTIATION_GRACE_MS)
+}
+
+private sealed interface AsrStopConfigState {
+  data object Unobserved : AsrStopConfigState
+  data object Legacy : AsrStopConfigState
+  data class Negotiated(val capability: AsrStopCapability) : AsrStopConfigState
+}
+
+class AsrStopHandshake {
+  private val configState = AtomicReference<AsrStopConfigState>(AsrStopConfigState.Unobserved)
+  private val stopStarted = AtomicBoolean(false)
+  private val stopAcknowledged = AtomicBoolean(false)
+  private val readyToStop = AtomicBoolean(false)
+  private val closed = AtomicBoolean(false)
+  private val configSignal = CountDownLatch(1)
+  private val acknowledgementSignal = CountDownLatch(1)
+  private val terminalSignal = CountDownLatch(1)
+
+  fun beginStop(): Boolean = stopStarted.compareAndSet(false, true)
+
+  fun hasStopStarted(): Boolean = stopStarted.get()
+
+  fun isReadyToStop(): Boolean = readyToStop.get()
+
+  fun observeConfig(capability: AsrStopCapability?) {
+    val next = capability?.let(AsrStopConfigState::Negotiated) ?: AsrStopConfigState.Legacy
+    if (configState.compareAndSet(AsrStopConfigState.Unobserved, next)) {
+      configSignal.countDown()
+    }
+  }
+
+  fun acknowledgeStop() {
+    if (!stopStarted.get() || configState.get() !is AsrStopConfigState.Negotiated) return
+    // ACK releases only the first phase; ready_to_stop remains the sole success terminal.
+    stopAcknowledged.set(true)
+    acknowledgementSignal.countDown()
+  }
+
+  fun markReadyToStop() {
+    if (!stopStarted.get()) return
+    val state = freezeLegacyIfUnobserved()
+    if (state is AsrStopConfigState.Negotiated && !stopAcknowledged.get()) return
+    readyToStop.set(true)
+    terminalSignal.countDown()
+  }
+
+  fun markClosed() {
+    closed.set(true)
+    configSignal.countDown()
+    acknowledgementSignal.countDown()
+    terminalSignal.countDown()
+  }
+
+  @Throws(InterruptedException::class)
+  fun awaitCompletion(legacyTimeoutMs: Long): ReadyToStopOutcome {
+    if (!stopStarted.get()) return ReadyToStopOutcome.END_FRAME_REJECTED
+    if (readyToStop.get()) return ReadyToStopOutcome.READY
+
+    if (configState.get() === AsrStopConfigState.Unobserved && !closed.get()) {
+      configSignal.await(
+        AsrStopProtocolContract.configNegotiationWaitMs(legacyTimeoutMs),
+        TimeUnit.MILLISECONDS,
+      )
+    }
+    val state = freezeLegacyIfUnobserved()
+    if (readyToStop.get()) return ReadyToStopOutcome.READY
+    if (closed.get()) return ReadyToStopOutcome.CLOSED
+
+    if (state !is AsrStopConfigState.Negotiated) {
+      val signaled = terminalSignal.await(legacyTimeoutMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+      return when {
+        readyToStop.get() -> ReadyToStopOutcome.READY
+        closed.get() || signaled -> ReadyToStopOutcome.CLOSED
+        else -> ReadyToStopOutcome.LEGACY_TIMEOUT
+      }
+    }
+
+    if (!stopAcknowledged.get()) {
+      acknowledgementSignal.await(
+        AsrStopProtocolContract.ackWaitTimeoutMs(legacyTimeoutMs),
+        TimeUnit.MILLISECONDS,
+      )
+    }
+    if (!stopAcknowledged.get()) {
+      return if (closed.get()) ReadyToStopOutcome.CLOSED else ReadyToStopOutcome.ACK_TIMEOUT
+    }
+    if (readyToStop.get()) return ReadyToStopOutcome.READY
+    if (closed.get()) return ReadyToStopOutcome.CLOSED
+
+    val signaled = terminalSignal.await(
+      state.capability.clientDrainWaitTimeoutMs,
+      TimeUnit.MILLISECONDS,
+    )
+    return when {
+      readyToStop.get() -> ReadyToStopOutcome.READY
+      closed.get() || signaled -> ReadyToStopOutcome.CLOSED
+      else -> ReadyToStopOutcome.DRAIN_TIMEOUT
+    }
+  }
+
+  private fun freezeLegacyIfUnobserved(): AsrStopConfigState {
+    configState.compareAndSet(AsrStopConfigState.Unobserved, AsrStopConfigState.Legacy)
+    if (configState.get() !== AsrStopConfigState.Unobserved) configSignal.countDown()
+    return configState.get()
+  }
+}
+
 object AsrProtocol {
   fun parse(text: String): AsrServerEvent {
     val json = try {
@@ -102,7 +253,14 @@ object AsrProtocol {
     } catch (_: Exception) {
       return AsrServerEvent.Ignored
     }
-    return when (json.optString("type")) {
+    return when (json.opt("type") as? String) {
+      "config" -> AsrServerEvent.Config(
+        stopCapability = AsrStopProtocolContract.negotiate(
+          json.opt("stop_protocol"),
+          json.opt("final_drain_timeout_ms"),
+        ),
+      )
+      "stop_acknowledged" -> AsrServerEvent.StopAcknowledged
       "ready_to_stop" -> AsrServerEvent.ReadyToStop
       "transcript.completed", "transcript.partial", "transcript.delta" -> {
         val transcript = json.optString("text").trim()

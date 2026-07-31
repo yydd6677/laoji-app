@@ -30,6 +30,8 @@ data class NativeUiPalette(
 
 object NativeUiTokens {
   const val ICON_HIT_SIZE_DP = 48f
+  const val PROFILE_ENTRY_HIT_SIZE_DP = 44f
+  const val PROFILE_ENTRY_AVATAR_SIZE_DP = 36f
   const val DIALOG_MAX_WIDTH_DP = 296f
   const val DIALOG_CONTENT_WIDTH_DP = 260f
   const val DIALOG_ACTION_HEIGHT_DP = 50f

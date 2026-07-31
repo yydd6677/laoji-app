@@ -556,9 +556,17 @@ class RecorderEngine(
             )
           }
         }
-        ReadyToStopOutcome.TIMEOUT -> failure = failure ?: RecorderFailure(
+        ReadyToStopOutcome.LEGACY_TIMEOUT -> failure = failure ?: RecorderFailure(
           RecorderErrorCode.READY_TO_STOP_TIMEOUT,
           "realtime transcription did not confirm ready_to_stop",
+        )
+        ReadyToStopOutcome.ACK_TIMEOUT -> failure = failure ?: RecorderFailure(
+          RecorderErrorCode.STOP_ACK_TIMEOUT,
+          "realtime transcription did not acknowledge the stop request",
+        )
+        ReadyToStopOutcome.DRAIN_TIMEOUT -> failure = failure ?: RecorderFailure(
+          RecorderErrorCode.FINAL_DRAIN_TIMEOUT,
+          "realtime transcription did not finish the final drain",
         )
         ReadyToStopOutcome.CLOSED -> failure = failure ?: RecorderFailure(
           RecorderErrorCode.WEBSOCKET_DISCONNECTED,

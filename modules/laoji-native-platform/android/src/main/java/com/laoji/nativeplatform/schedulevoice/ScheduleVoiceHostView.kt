@@ -6,6 +6,7 @@ import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
@@ -35,6 +36,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.laoji.nativeplatform.ui.NativeUiPalette
 import com.laoji.nativeplatform.ui.NativeUiTokens
 import com.laoji.nativeplatform.ui.NativeUserMessages
@@ -316,6 +318,11 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
   private val confirmPanel = LinearLayout(context)
   private val confirmTitle = TextView(context)
   private val fields = LinearLayout(context)
+  private val clarificationPanel = LinearLayout(context)
+  private val clarificationQuestion = TextView(context)
+  private val clarificationAnswer = EditText(context)
+  private val clarifyButton = VoiceButton(context)
+  private val confirmFeedback = TextView(context)
   private val retryButton = VoiceButton(context)
   private val detailButton = VoiceButton(context)
   private val saveButton = VoiceButton(context)
@@ -323,6 +330,8 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
   private var snapshot = ScheduleVoiceSnapshot()
   private var touchStartedAt = 0L
   private var touchStartedFromInput = false
+  private var imeInsetBottom = 0
+  private var dismissing = false
 
   init {
     // UI-OVERLAY-001: The native sheet and backdrop must share the full host display list.
@@ -347,8 +356,19 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     backdrop.setOnClickListener { emit("close") }
     close.setOnClickListener { emit("close") }
     ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
-      val bottomInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-      if (sheet.paddingBottom != bottomInset) sheet.setPadding(0, 0, 0, bottomInset)
+      val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+      val nextImeInset = if (imeVisible) {
+        insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+      } else {
+        0
+      }
+      val navigationInset = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+      val sheetPaddingBottom = if (imeVisible) 0 else navigationInset
+      if (sheet.paddingBottom != sheetPaddingBottom) {
+        sheet.setPadding(0, 0, 0, sheetPaddingBottom)
+      }
+      imeInsetBottom = nextImeInset
+      if (!dismissing) sheet.translationY = restingSheetTranslationY()
       insets
     }
     requestInsetsWhenAttached()
@@ -371,7 +391,9 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
   }
 
   fun dismiss(onClosed: () -> Unit) {
+    dismissing = true
     input.clearFocus()
+    clarificationAnswer.clearFocus()
     (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
       ?.hideSoftInputFromWindow(windowToken, 0)
     backdrop.animate().cancel()
@@ -383,6 +405,19 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       .setInterpolator(DecelerateInterpolator())
       .withEndAction(onClosed)
       .start()
+  }
+
+  fun hideImeIfVisible(): Boolean {
+    val insets = ViewCompat.getRootWindowInsets(this) ?: return false
+    if (!insets.isVisible(WindowInsetsCompat.Type.ime())) return false
+    val window = (context as? Activity)?.window
+    if (window != null) {
+      WindowInsetsControllerCompat(window, this).hide(WindowInsetsCompat.Type.ime())
+    } else {
+      (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+        ?.hideSoftInputFromWindow(windowToken, 0)
+    }
+    return true
   }
 
   private fun buildHeader() {
@@ -425,6 +460,9 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     }
     input.maxLines = 4
     input.imeOptions = EditorInfo.IME_ACTION_DONE
+    input.setOnEditorActionListener { _, actionId, _ ->
+      actionId == EditorInfo.IME_ACTION_DONE && hideImeIfVisible()
+    }
     input.addTextChangedListener(object : TextWatcher {
       override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
       override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -482,7 +520,75 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       addView(fields)
     }
     fields.setPadding(0, 0, VoiceUi.dp(context, 12f), 0)
+    clarificationPanel.orientation = LinearLayout.VERTICAL
+    clarificationPanel.setPadding(0, VoiceUi.dp(context, 8f), 0, 0)
+    clarificationQuestion.textSize = 14f
+    clarificationQuestion.setTextColor(palette.textSecondary)
+    clarificationQuestion.includeFontPadding = false
+    clarificationQuestion.maxLines = 3
+    clarificationPanel.addView(
+      clarificationQuestion,
+      LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 52f)),
+    )
+    val clarificationRow = LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+    }
+    clarificationAnswer.textSize = 16f
+    clarificationAnswer.setTextColor(palette.textPrimary)
+    clarificationAnswer.setHintTextColor(palette.textTertiary)
+    clarificationAnswer.hint = "补充信息"
+    clarificationAnswer.setSingleLine(true)
+    clarificationAnswer.imeOptions = EditorInfo.IME_ACTION_DONE
+    clarificationAnswer.setOnEditorActionListener { _, actionId, _ ->
+      actionId == EditorInfo.IME_ACTION_DONE && hideImeIfVisible()
+    }
+    clarificationAnswer.includeFontPadding = false
+    clarificationAnswer.setPadding(VoiceUi.dp(context, 12f), 0, VoiceUi.dp(context, 12f), 0)
+    clarificationAnswer.background = GradientDrawable().apply {
+      setColor(palette.surfaceOverlay)
+      cornerRadius = VoiceUi.dp(context, 6f).toFloat()
+    }
+    clarificationAnswer.addTextChangedListener(object : TextWatcher {
+      override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+      override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+        if (!rendering) emit("clarification-change", mapOf("text" to (s?.toString() ?: "")))
+      }
+      override fun afterTextChanged(s: Editable?) = Unit
+    })
+    clarificationRow.addView(
+      clarificationAnswer,
+      LinearLayout.LayoutParams(0, VoiceUi.dp(context, 44f), 1f),
+    )
+    clarifyButton.text = "补充"
+    clarifyButton.contentDescription = "提交补充信息"
+    clarifyButton.applyFeishuStyle(palette, VoiceButtonStyle.SECONDARY)
+    clarifyButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+    clarifyButton.setPadding(VoiceUi.dp(context, 16f), 0, VoiceUi.dp(context, 16f), 0)
+    clarificationRow.addView(
+      clarifyButton,
+      LinearLayout.LayoutParams(VoiceUi.dp(context, 76f), VoiceUi.dp(context, 36f)).apply {
+        leftMargin = VoiceUi.dp(context, 8f)
+      },
+    )
+    clarificationPanel.addView(
+      clarificationRow,
+      LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 52f)),
+    )
+    clarificationPanel.visibility = View.GONE
     confirmPanel.addView(scroll, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+    confirmPanel.addView(
+      clarificationPanel,
+      LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 112f)),
+    )
+
+    confirmFeedback.textSize = 13f
+    confirmFeedback.setTextColor(palette.danger)
+    confirmFeedback.gravity = Gravity.CENTER_VERTICAL
+    confirmFeedback.includeFontPadding = false
+    confirmFeedback.maxLines = 1
+    confirmFeedback.ellipsize = TextUtils.TruncateAt.END
+    confirmPanel.addView(confirmFeedback, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 28f)))
 
     val actions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     retryButton.text = "重新输入"
@@ -491,6 +597,7 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     retryButton.setOnClickListener { emit("retry-input") }
     detailButton.setOnClickListener { emit("edit-details") }
     saveButton.setOnClickListener { emit("save") }
+    clarifyButton.setOnClickListener { emit("clarify") }
     retryButton.applyFeishuStyle(palette, VoiceButtonStyle.TEXT)
     detailButton.applyFeishuStyle(palette, VoiceButtonStyle.SECONDARY)
     saveButton.applyFeishuStyle(palette, VoiceButtonStyle.PRIMARY)
@@ -529,7 +636,7 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       value.statusLabel,
       if (value.phase == ScheduleVoicePhase.SAVING) "正在保存日程" else "正在解析日程",
     )
-    confirmTitle.text = value.title.ifBlank { "(无主题)" }
+    confirmTitle.text = value.title.ifBlank { "无主题" }
     fields.removeAllViews()
     value.fields.forEach { field ->
       val row = LinearLayout(context).apply {
@@ -551,7 +658,17 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       row.addView(content, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
       fields.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 44f)))
     }
-    saveButton.isEnabled = value.canSave
+    clarificationPanel.visibility = if (value.needsClarification) View.VISIBLE else View.GONE
+    clarificationQuestion.text = value.clarificationQuestion
+    if (clarificationAnswer.text.toString() != value.clarificationAnswer) {
+      clarificationAnswer.setText(value.clarificationAnswer)
+      clarificationAnswer.setSelection(clarificationAnswer.text.length)
+    }
+    clarificationAnswer.isEnabled = value.needsClarification
+    clarifyButton.isEnabled = value.canClarify && value.needsClarification
+    confirmFeedback.text = readableError
+    confirmFeedback.setTextColor(if (readableError.isNotBlank()) palette.danger else palette.textSecondary)
+    saveButton.isEnabled = value.canSave && !value.needsClarification
     detailButton.isEnabled = value.canEditDetails
     rendering = false
   }
@@ -602,7 +719,12 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       AnimatorSet().apply {
         playTogether(
           ObjectAnimator.ofFloat(backdrop, View.ALPHA, 0f, 1f),
-          ObjectAnimator.ofFloat(sheet, View.TRANSLATION_Y, sheet.translationY, 0f),
+          ObjectAnimator.ofFloat(
+            sheet,
+            View.TRANSLATION_Y,
+            sheet.translationY,
+            restingSheetTranslationY(),
+          ),
         )
         duration = NativeUiTokens.SHEET_DURATION_MS
         interpolator = DecelerateInterpolator()
@@ -610,6 +732,8 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       }
     }
   }
+
+  private fun restingSheetTranslationY(): Float = -imeInsetBottom.toFloat()
 
   override fun onDetachedFromWindow() {
     backdrop.animate().cancel()

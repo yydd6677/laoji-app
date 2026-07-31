@@ -191,6 +191,12 @@ internal class WindowOverlayController(
         override fun handleOnBackPressed() {
           val top = topModalEntry() ?: return
           if (
+            top.kind == WindowOverlayKind.SCHEDULE_VOICE &&
+            (top.view as? ScheduleVoiceHostView)?.hideImeIfVisible() == true
+          ) {
+            return
+          }
+          if (
             top.kind == WindowOverlayKind.SCHEDULE_VOICE ||
             top.kind == WindowOverlayKind.CALENDAR_SEARCH
           ) {

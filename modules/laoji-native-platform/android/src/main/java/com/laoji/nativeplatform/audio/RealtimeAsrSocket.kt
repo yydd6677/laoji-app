@@ -10,7 +10,6 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -19,7 +18,9 @@ private const val MAX_WEBSOCKET_QUEUE_BYTES = 4L * 1_048_576L
 enum class ReadyToStopOutcome {
   READY,
   CLOSED,
-  TIMEOUT,
+  LEGACY_TIMEOUT,
+  ACK_TIMEOUT,
+  DRAIN_TIMEOUT,
   END_FRAME_REJECTED,
 }
 
@@ -34,10 +35,8 @@ class RealtimeAsrSocket(
   private val listener: RealtimeAsrSocketListener,
 ) {
   private val opened = AtomicBoolean(false)
-  private val readyToStop = AtomicBoolean(false)
-  private val endFrameSent = AtomicBoolean(false)
   private val clientClosing = AtomicBoolean(false)
-  private val terminalSignal = CountDownLatch(1)
+  private val stopHandshake = AsrStopHandshake()
   private val connection = CompletableFuture<Unit>()
   private val client = sharedClient.newBuilder()
     .connectTimeout(config.connectionTimeoutMs, TimeUnit.MILLISECONDS)
@@ -65,7 +64,7 @@ class RealtimeAsrSocket(
   fun sendPcm(buffer: ByteArray, count: Int): Boolean {
     val socket = webSocket ?: return false
     val byteCount = count.coerceIn(0, buffer.size) and -2
-    if (!opened.get() || endFrameSent.get() || byteCount == 0) return false
+    if (!opened.get() || stopHandshake.hasStopStarted() || byteCount == 0) return false
     if (socket.queueSize() > MAX_WEBSOCKET_QUEUE_BYTES) {
       listener.onTransportFailure(
         RecorderErrorCode.WEBSOCKET_SEND_FAILED,
@@ -85,21 +84,14 @@ class RealtimeAsrSocket(
   }
 
   fun sendEndFrame(): Boolean {
-    if (!endFrameSent.compareAndSet(false, true)) return true
+    if (!stopHandshake.beginStop()) return true
     val socket = webSocket ?: return false
     if (!opened.get()) return false
     return socket.send(ByteString.EMPTY)
   }
 
   fun awaitReadyToStop(timeoutMs: Long): ReadyToStopOutcome {
-    if (!endFrameSent.get()) return ReadyToStopOutcome.END_FRAME_REJECTED
-    if (readyToStop.get()) return ReadyToStopOutcome.READY
-    val signaled = terminalSignal.await(timeoutMs, TimeUnit.MILLISECONDS)
-    return when {
-      readyToStop.get() -> ReadyToStopOutcome.READY
-      signaled -> ReadyToStopOutcome.CLOSED
-      else -> ReadyToStopOutcome.TIMEOUT
-    }
+    return stopHandshake.awaitCompletion(timeoutMs)
   }
 
   fun close() {
@@ -115,7 +107,7 @@ class RealtimeAsrSocket(
     clientClosing.set(true)
     opened.set(false)
     webSocket?.cancel()
-    terminalSignal.countDown()
+    stopHandshake.markClosed()
   }
 
   private inner class SocketListener : WebSocketListener() {
@@ -126,27 +118,27 @@ class RealtimeAsrSocket(
 
     override fun onMessage(webSocket: WebSocket, text: String) {
       when (val event = AsrProtocol.parse(text)) {
+        is AsrServerEvent.Config -> {
+          stopHandshake.observeConfig(event.stopCapability)
+        }
         is AsrServerEvent.Transcript -> listener.onTranscript(event)
         is AsrServerEvent.Error -> listener.onServerError(event.detail)
-        AsrServerEvent.ReadyToStop -> {
-          if (endFrameSent.get()) {
-            readyToStop.set(true)
-            terminalSignal.countDown()
-          }
-        }
+        AsrServerEvent.StopAcknowledged -> stopHandshake.acknowledgeStop()
+        AsrServerEvent.ReadyToStop -> stopHandshake.markReadyToStop()
         AsrServerEvent.Ignored -> Unit
       }
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
       opened.set(false)
+      signalClosed()
       webSocket.close(code, null)
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
       opened.set(false)
-      terminalSignal.countDown()
-      if (!readyToStop.get() && !clientClosing.get()) {
+      signalClosed()
+      if (!stopHandshake.isReadyToStop() && !clientClosing.get()) {
         listener.onTransportFailure(
           RecorderErrorCode.WEBSOCKET_DISCONNECTED,
           "realtime transcription connection closed before completion",
@@ -156,7 +148,7 @@ class RealtimeAsrSocket(
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
       opened.set(false)
-      terminalSignal.countDown()
+      signalClosed()
       if (!connection.isDone) {
         connection.completeExceptionally(
           RecorderRuntimeException(
@@ -170,6 +162,10 @@ class RealtimeAsrSocket(
           "realtime transcription connection failed",
         )
       }
+    }
+
+    private fun signalClosed() {
+      stopHandshake.markClosed()
     }
   }
 

@@ -34,6 +34,8 @@ import { recurrenceEditDialog } from '../services/recurrenceActions';
 import { readableErrorMessage } from '../services/errors';
 import { buildNativeCalendarSearchSnapshot } from '../native/nativeCalendarPages';
 import { useCurrentDate } from '../hooks/useCurrentDate';
+import { useAuth } from '../store/AuthStore';
+import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
@@ -85,6 +87,7 @@ export function ScheduleScreen({
     refreshEvents,
     updateEvent,
   } = useEvents();
+  const { profile, isGuest } = useAuth();
   const { showDialog } = useAppDialog();
   const currentDate = useCurrentDate();
   const today = useMemo(() => calendarEpochDay(localCalendarDate(currentDate)), [currentDate]);
@@ -98,6 +101,10 @@ export function ScheduleScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const generationRef = useRef(0);
   const searchOwnerId = useMemo(() => createNativeOverlayOwnerId('calendar-search'), []);
+  const profileEntry = useMemo(
+    () => buildNativeProfileEntrySnapshot(profile, isGuest),
+    [isGuest, profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
+  );
 
   useEffect(() => {
     let active = true;
@@ -254,6 +261,7 @@ export function ScheduleScreen({
         style={styles.surface}
         mode={mode}
         snapshot={snapshot}
+        profileEntry={profileEntry}
         selectedEpochDay={selectedEpochDay}
         bottomBarSelectionCommand={bottomBarSelectionCommand}
         mutationResolution={mutationResolution}

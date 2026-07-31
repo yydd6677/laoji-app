@@ -6,8 +6,12 @@ import android.os.Build
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Rect
 import android.view.View
 import android.view.WindowInsets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import java.util.WeakHashMap
 
 private val insetAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
@@ -76,4 +80,78 @@ fun View.requestInsetsWhenAttached() {
     addOnAttachStateChangeListener(listener)
   }
   if (isAttachedToWindow) requestApplyInsets()
+}
+
+/**
+ * Keeps a full-screen native form's fixed bottom operation above the IME only
+ * when the window did not already resize it. The overlap measurement avoids
+ * double-applying IME height on devices where adjustResize is effective.
+ */
+fun View.installImeOverlapBottomPadding() {
+  val baselineBottom = paddingBottom
+  var pendingApply: Runnable? = null
+
+  fun resetBottomPadding() {
+    pendingApply?.let(::removeCallbacks)
+    pendingApply = null
+    if (paddingBottom != baselineBottom) {
+      setPadding(paddingLeft, paddingTop, paddingRight, baselineBottom)
+    }
+  }
+
+  fun applyImeOverlap(insets: WindowInsetsCompat) {
+    pendingApply?.let(::removeCallbacks)
+    pendingApply = null
+    val visible = insets.isVisible(WindowInsetsCompat.Type.ime())
+    if (!visible) {
+      resetBottomPadding()
+      return
+    }
+    val task = Runnable {
+      val latest = ViewCompat.getRootWindowInsets(this)
+      if (!isAttachedToWindow || latest?.isVisible(WindowInsetsCompat.Type.ime()) != true) {
+        resetBottomPadding()
+        return@Runnable
+      }
+      val visibleFrame = Rect()
+      getWindowVisibleDisplayFrame(visibleFrame)
+      val location = IntArray(2)
+      getLocationOnScreen(location)
+      val naturalBottom = location[1] + height
+      val overlap = (naturalBottom - visibleFrame.bottom).coerceAtLeast(0)
+      val nextBottom = baselineBottom + overlap
+      if (paddingBottom != nextBottom) {
+        setPadding(paddingLeft, paddingTop, paddingRight, nextBottom)
+      }
+    }
+    pendingApply = task
+    post(task)
+  }
+
+  ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+    applyImeOverlap(insets)
+    insets
+  }
+  ViewCompat.setWindowInsetsAnimationCallback(
+    this,
+    object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+      override fun onProgress(
+        insets: WindowInsetsCompat,
+        runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+      ): WindowInsetsCompat {
+        applyImeOverlap(insets)
+        return insets
+      }
+    },
+  )
+  addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+    override fun onViewAttachedToWindow(view: View) {
+      view.requestApplyInsets()
+    }
+
+    override fun onViewDetachedFromWindow(view: View) {
+      resetBottomPadding()
+    }
+  })
+  requestInsetsWhenAttached()
 }

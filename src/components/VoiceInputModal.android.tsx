@@ -25,6 +25,7 @@ import {
 import {
   ApiGuestRealtimeSession,
   ParseResult,
+  clarifyText,
   createGuestRealtimeSession,
   deleteGuestRealtimeSession,
   parseAudio,
@@ -71,6 +72,11 @@ function reminderLabel(value: number | null | undefined): string {
   if (value % 1440 === 0) return `提前 ${value / 1440} 天`;
   if (value % 60 === 0) return `提前 ${value / 60} 小时`;
   return `提前 ${value} 分钟`;
+}
+
+function localToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 function scheduleVoiceErrorMessage(reason: unknown, fallback: string): string {
@@ -144,6 +150,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [draft, setDraft] = useState<ParseResult | null>(null);
+  const [clarificationAnswer, setClarificationAnswer] = useState('');
   const activeRef = useRef<ActiveScheduleRecording | null>(null);
   const transcriptRef = useRef(new Map<string, { text: string; startMs: number | null }>());
   const stopPromiseRef = useRef<Promise<ParseResult | null> | null>(null);
@@ -222,6 +229,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setPhase('input');
       setError('');
       setDraft(null);
+      setClarificationAnswer('');
       setText('');
       transcriptRef.current.clear();
       createRequestRef.current = createClientRequestState('event');
@@ -315,9 +323,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   }, [phase, releaseGuestSession, showDialog]);
 
   const parseSourceText = useCallback(async (sourceText: string): Promise<ParseResult> => {
-    const result = await parseText(sourceText.trim());
-    if (!result.start_date) throw new Error('未识别到有效日期');
-    return result;
+    return parseText(sourceText.trim());
   }, []);
 
   const stopAndParse = useCallback((): Promise<ParseResult | null> => {
@@ -344,13 +350,17 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         const result = transcript
           ? await parseSourceText(transcript)
           : localUri
-            ? await parseAudio(localUri)
+            ? await parseAudio(localUri, {
+                reference_datetime: new Date().toISOString(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              })
             : null;
         if (!result) throw new Error('未识别到语音内容');
         if (runRef.current !== runId) return null;
         const rawText = result.raw_text?.trim() || transcript;
         setText(rawText);
         setDraft(result);
+        setClarificationAnswer('');
         setPhase('confirm');
         return result;
       } catch (reason) {
@@ -380,6 +390,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const result = await parseSourceText(source);
       if (runRef.current !== runId) return;
       setDraft(result);
+      setClarificationAnswer('');
       setPhase('confirm');
     } catch (reason) {
       if (runRef.current !== runId) return;
@@ -416,6 +427,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 
   const save = useCallback(async () => {
     if (!draft) return;
+    if (draft.needs_clarification || !draft.start_date) {
+      setError(draft.clarification_question || '需要先补充日程信息');
+      return;
+    }
     const payload = eventPayloadFromDraft(draft, text);
     const validation = validateEventDraft(payload);
     if (!validation.valid || !validation.value) {
@@ -425,33 +440,56 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     await persistDraft(validation.value);
   }, [draft, persistDraft, text]);
 
+  const clarify = useCallback(async () => {
+    const answer = clarificationAnswer.trim();
+    if (!draft?.needs_clarification || !answer) return;
+    const runId = ++runRef.current;
+    setPhase('parsing');
+    setError('');
+    try {
+      const result = await clarifyText(text, answer, draft);
+      if (runRef.current !== runId) return;
+      setDraft(result);
+      setClarificationAnswer('');
+      setPhase('confirm');
+    } catch (reason) {
+      if (runRef.current !== runId) return;
+      setError(scheduleVoiceErrorMessage(reason, '没有理解这次补充，请修改后重试。'));
+      setPhase('confirm');
+    }
+  }, [clarificationAnswer, draft, text]);
+
   const openDetails = useCallback(() => {
     if (!draft) return;
-    const params = { date: draft.start_date, draft: detailedDraft(draft, text) };
+    const editable = draft.start_date ? draft : { ...draft, start_date: localToday() };
+    const params = { date: editable.start_date, draft: detailedDraft(editable, text) };
     onClose();
     navigation.navigate('AddEvent', params);
   }, [draft, navigation, onClose, text]);
 
   const handleAction = useCallback((action: ScheduleVoiceAction) => {
     if (action.type === 'text-change') setText(action.text);
+    else if (action.type === 'clarification-change') setClarificationAnswer(action.text);
     else if (action.type === 'close') close();
     else if (action.type === 'record-start') void startRecording();
     else if (action.type === 'record-stop') void stopAndParse();
     else if (action.type === 'parse') void parseManualText();
     else if (action.type === 'save') void save();
+    else if (action.type === 'clarify') void clarify();
     else if (action.type === 'edit-details') openDetails();
     else if (action.type === 'retry-input') {
       setDraft(null);
+      setClarificationAnswer('');
       setPhase('input');
       setError('');
     }
-  }, [close, openDetails, parseManualText, save, startRecording, stopAndParse]);
+  }, [clarify, close, openDetails, parseManualText, save, startRecording, stopAndParse]);
 
   const snapshot = useMemo<ScheduleVoiceSnapshot>(() => {
     const dateRange = draft
       ? draft.end_date && draft.end_date !== draft.start_date
         ? `${dateLabel(draft.start_date)} - ${dateLabel(draft.end_date)}`
-        : dateLabel(draft.start_date)
+        : draft.start_date ? dateLabel(draft.start_date) : '待补充'
       : '';
     const fields = draft ? [
       { key: 'date', label: '日期', value: dateRange },
@@ -484,10 +522,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       title: draft?.title,
       fields,
       canParse: Boolean(text.trim()),
-      canSave: Boolean(draft?.start_date),
-      canEditDetails: Boolean(draft?.start_date),
+      canSave: Boolean(draft?.start_date && !draft.needs_clarification),
+      canEditDetails: Boolean(draft),
+      needsClarification: Boolean(draft?.needs_clarification),
+      clarificationQuestion: draft?.clarification_question ?? '',
+      clarificationAnswer,
+      canClarify: Boolean(draft?.needs_clarification && clarificationAnswer.trim()),
     };
-  }, [draft, error, phase, text]);
+  }, [clarificationAnswer, draft, error, phase, text]);
 
   useEffect(() => {
     const matchesOwner = (event: NativeWindowOverlayEvent) => (

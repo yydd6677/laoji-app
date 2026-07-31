@@ -1,4 +1,4 @@
-export const SCHEDULE_VOICE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+export const SCHEDULE_VOICE_SNAPSHOT_SCHEMA_VERSION = 2 as const;
 
 export type ScheduleVoicePhase =
   | 'input'
@@ -25,10 +25,14 @@ export interface ScheduleVoiceSnapshot {
   canParse?: boolean;
   canSave?: boolean;
   canEditDetails?: boolean;
+  needsClarification?: boolean;
+  clarificationQuestion?: string;
+  clarificationAnswer?: string;
+  canClarify?: boolean;
 }
 
 export type ScheduleVoiceAction =
-  | { type: 'close' | 'record-start' | 'record-stop' | 'parse' | 'save' | 'edit-details' | 'retry-input' }
-  | { type: 'text-change'; text: string };
+  | { type: 'close' | 'record-start' | 'record-stop' | 'parse' | 'save' | 'edit-details' | 'retry-input' | 'clarify' }
+  | { type: 'text-change' | 'clarification-change'; text: string };
 
 /** UI-OVERLAY-WINDOW-001 / MIN-AUDIO-001: the snapshot is hosted by LaojiUi's Activity owner. */

@@ -9,6 +9,8 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -19,6 +21,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.laoji.nativeplatform.ui.installImeOverlapBottomPadding
 
 internal class SpeakerManagerSurface(
   context: Context,
@@ -207,6 +210,7 @@ internal class SpeakerEnrollmentSurface(
   init {
     orientation = VERTICAL
     setBackgroundColor(SpeakerPalette.page)
+    installImeOverlapBottomPadding()
     addView(titleBar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(44)))
     content.orientation = VERTICAL
     content.setPadding(context.speakerDp(20), context.speakerDp(16), context.speakerDp(20), context.speakerDp(24))
@@ -240,7 +244,16 @@ internal class SpeakerEnrollmentSurface(
     nameInput.setTextColor(SpeakerPalette.text)
     nameInput.setHintTextColor(SpeakerPalette.tertiary)
     nameInput.hint = "输入人名"
+    nameInput.isSingleLine = true
     nameInput.maxLines = 1
+    nameInput.imeOptions = EditorInfo.IME_ACTION_DONE
+    nameInput.setOnEditorActionListener { view, actionId, _ ->
+      if (actionId != EditorInfo.IME_ACTION_DONE) return@setOnEditorActionListener false
+      context.getSystemService(InputMethodManager::class.java)
+        ?.hideSoftInputFromWindow(view.windowToken, 0)
+      view.clearFocus()
+      true
+    }
     nameInput.speakerBackground(SpeakerPalette.surfaceOverlay, 6)
     nameInput.setPadding(context.speakerDp(12), 0, context.speakerDp(12), 0)
     nameInput.addTextChangedListener(object : TextWatcher {

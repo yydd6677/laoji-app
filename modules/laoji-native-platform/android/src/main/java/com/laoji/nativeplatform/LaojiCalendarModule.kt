@@ -202,6 +202,10 @@ class LaojiCalendarModule : Module() {
         view.setSnapshot(snapshot?.toModel())
       }
 
+      Prop("profileEntry") { view: CalendarHostView, snapshot: Map<String, Any?>? ->
+        view.setProfileEntrySnapshot(snapshot.orEmpty())
+      }
+
       Prop("selectedEpochDay") { view: CalendarHostView, epochDay: Int? ->
         view.setSelectedEpochDay(epochDay)
       }

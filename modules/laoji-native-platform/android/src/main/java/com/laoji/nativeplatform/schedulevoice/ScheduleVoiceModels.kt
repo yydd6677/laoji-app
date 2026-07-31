@@ -21,7 +21,7 @@ internal data class ScheduleVoiceField(
 )
 
 internal data class ScheduleVoiceSnapshot(
-  val schemaVersion: Int = 1,
+  val schemaVersion: Int = 2,
   val phase: ScheduleVoicePhase = ScheduleVoicePhase.INPUT,
   val text: String = "",
   val errorMessage: String = "",
@@ -31,10 +31,14 @@ internal data class ScheduleVoiceSnapshot(
   val canParse: Boolean = false,
   val canSave: Boolean = false,
   val canEditDetails: Boolean = false,
+  val needsClarification: Boolean = false,
+  val clarificationQuestion: String = "",
+  val clarificationAnswer: String = "",
+  val canClarify: Boolean = false,
 ) {
   companion object {
     fun parse(raw: Map<String, Any?>?): ScheduleVoiceSnapshot? {
-      if ((raw?.get("schemaVersion") as? Number)?.toInt() != 1) return null
+      if ((raw?.get("schemaVersion") as? Number)?.toInt() != 2) return null
       val fields = (raw["fields"] as? List<*>)?.mapNotNull { value ->
         val item = value as? Map<*, *> ?: return@mapNotNull null
         ScheduleVoiceField(
@@ -44,7 +48,7 @@ internal data class ScheduleVoiceSnapshot(
         )
       }.orEmpty()
       return ScheduleVoiceSnapshot(
-        schemaVersion = 1,
+        schemaVersion = 2,
         phase = ScheduleVoicePhase.fromWireName(raw.string("phase")),
         text = raw.string("text").take(2000),
         errorMessage = raw.string("errorMessage").take(240),
@@ -54,6 +58,10 @@ internal data class ScheduleVoiceSnapshot(
         canParse = raw.boolean("canParse"),
         canSave = raw.boolean("canSave"),
         canEditDetails = raw.boolean("canEditDetails"),
+        needsClarification = raw.boolean("needsClarification"),
+        clarificationQuestion = raw.string("clarificationQuestion").take(240),
+        clarificationAnswer = raw.string("clarificationAnswer").take(1000),
+        canClarify = raw.boolean("canClarify"),
       )
     }
 

@@ -4987,7 +4987,8 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   private readonly meetingListeners = new Map<ScopeKey, Map<string, Set<() => void>>>();
   private readonly listListeners = new Map<ScopeKey, Set<() => void>>();
-  private readonly indexedSearchScopes = new Set<ScopeKey>();
+  private readonly indexedSearchScopes = new Map<ScopeKey, number>();
+  private searchIndexGeneration = 0;
 
   async transaction<T>(work: (transaction: MeetingTransaction) => Promise<T>): Promise<T> {
     let touchedMeetingIds: readonly string[] = [];
@@ -11681,7 +11682,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     const predicate = meetingSearchPredicate(query);
     if (!predicate) return [];
     const safeLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 60;
-    if (!this.indexedSearchScopes.has(scopeKey)) {
+    while (this.indexedSearchScopes.get(scopeKey) !== this.searchIndexGeneration) {
+      const generationAtStart = this.searchIndexGeneration;
       await withMeetingDatabaseTransaction(async database => {
         await database.runAsync('DELETE FROM meeting_search_fts WHERE scope_key = ?', scopeKey);
       await database.runAsync(
@@ -11763,7 +11765,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       });
-      this.indexedSearchScopes.add(scopeKey);
+      // A mutation can commit while the rebuild transaction is yielding. Do
+      // not publish a snapshot that predates that mutation; the next loop
+      // iteration rebuilds against the newer generation.
+      if (generationAtStart === this.searchIndexGeneration) {
+        this.indexedSearchScopes.set(scopeKey, generationAtStart);
+      }
     }
     const database = await openMeetingDatabase();
     const predicateSql = predicate.kind === 'match'
@@ -13623,6 +13630,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
   private notify(touchedMeetingIds: readonly string[]): void {
     const touched = new Set(touchedMeetingIds);
     if (touched.size === 0) return;
+    this.searchIndexGeneration += 1;
     this.indexedSearchScopes.clear();
     const invoke = (listener: () => void) => {
       try {

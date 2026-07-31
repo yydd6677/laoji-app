@@ -39,6 +39,8 @@ export type NativeRecorderErrorCode =
   | 'websocket_send_failed'
   | 'server_error'
   | 'ready_to_stop_timeout'
+  | 'stop_ack_timeout'
+  | 'final_drain_timeout'
   | 'recovery_failed';
 
 interface NativeRecorderStartBase {

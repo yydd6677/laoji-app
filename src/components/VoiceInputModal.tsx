@@ -86,6 +86,7 @@ function VoiceSheetTitleBar({
   rightText,
   onLeft,
   onRight,
+  rightDisabled = false,
   onClose,
   testID,
 }: {
@@ -94,6 +95,7 @@ function VoiceSheetTitleBar({
   rightText?: string;
   onLeft?: () => void;
   onRight?: () => void;
+  rightDisabled?: boolean;
   onClose?: () => void;
   testID?: string;
 }) {
@@ -121,11 +123,13 @@ function VoiceSheetTitleBar({
           <TouchableOpacity
             style={[s.sheetTextAction, s.sheetTextActionRight]}
             onPress={onRight}
+            disabled={rightDisabled}
             activeOpacity={0.65}
             accessibilityRole="button"
             accessibilityLabel={rightText}
+            accessibilityState={{ disabled: rightDisabled }}
           >
-            <Text style={s.sheetSaveText}>{rightText}</Text>
+            <Text style={[s.sheetSaveText, rightDisabled && s.sheetSaveTextDisabled]}>{rightText}</Text>
           </TouchableOpacity>
         ) : onClose ? (
           <TouchableOpacity
@@ -658,7 +662,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       recordingModeRef.current = null;
       setRecordingMode(null);
       if (!uri) throw new Error('recording uri is empty');
-      const result = await parseAudio(uri);
+      const result = await parseAudio(uri, {
+        reference_datetime: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
       if (recordingRunRef.current !== runId) return;
       const transcribed = result.raw_text ?? '';
       if (!transcribed.trim()) { setError('未识别到语音内容'); setStep('input'); return; }
@@ -787,6 +794,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const validateDraftForSave = (source: ParseResult): boolean => {
+    if (source.needs_clarification || !source.start_date) {
+      setError(source.clarification_question || '需要先补充日程信息');
+      return false;
+    }
     const result = validateEventDraft(eventPayloadFromDraft(source));
     if (result.valid) return true;
     setError(result.issues[0]?.message ?? '日程信息不完整');
@@ -833,8 +844,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const openDetailedEdit = () => {
-    if (!draft || !validateDraftForSave(draft)) return;
-    const params = { date: draft.start_date, draft: routeDraftFromParseResult(draft) };
+    if (!draft) return;
+    const now = new Date();
+    const fallbackDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const editable = draft.start_date ? draft : { ...draft, start_date: fallbackDate };
+    const params = { date: editable.start_date, draft: routeDraftFromParseResult(editable) };
     finishPresentation(() => {
       onCloseRef.current();
       navigation.navigate('AddEvent', params);
@@ -1035,6 +1049,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                 rightText="保存"
                 onLeft={requestClose}
                 onRight={handleSave}
+                rightDisabled={draft.needs_clarification || !draft.start_date}
                 testID="schedule-voice-confirm-actions"
               />
 
@@ -1194,6 +1209,7 @@ const s = StyleSheet.create({
   sheetTextActionRight: { alignItems: 'flex-end' },
   sheetCancelText: { fontSize: 16, lineHeight: 22, color: C.text },
   sheetSaveText: { fontSize: 16, lineHeight: 22, fontWeight: '500', color: C.primary },
+  sheetSaveTextDisabled: { color: C.faint },
   sheetCloseAction: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   confirmScroll:{ flexGrow: 0, flexShrink: 1, minHeight: 0 },
   confirmScrollContent: { paddingHorizontal: 16, paddingBottom: 8 },

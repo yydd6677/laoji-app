@@ -4,7 +4,9 @@ import {
   ActivityIndicator,
   Animated,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -53,6 +55,7 @@ export function MeetingTagSheet({
   const closingRef = useRef(false);
   const closeRef = useRef(onClose);
   const selectedTagIdsRef = useRef(selectedTagIds);
+  const keyboardVisibleRef = useRef(false);
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -63,6 +66,7 @@ export function MeetingTagSheet({
   );
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
   closeRef.current = onClose;
   selectedTagIdsRef.current = selectedTagIds;
 
@@ -89,12 +93,14 @@ export function MeetingTagSheet({
   useEffect(() => {
     if (visible) {
       if (!mountedRef.current) {
+        keyboardVisibleRef.current = false;
         setSelection(new Set(selectedTagIdsRef.current ?? []));
         setDraft('');
         setEditingTagId(null);
         setMessage('');
         setError('');
         setBusy(false);
+        setAndroidKeyboardInset(0);
       }
       mountedRef.current = true;
       closingRef.current = false;
@@ -113,6 +119,23 @@ export function MeetingTagSheet({
   }, [finishClose, progress, visible]);
 
   useEffect(() => () => progress.stopAnimation(), [progress]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const shown = Keyboard.addListener('keyboardDidShow', event => {
+      keyboardVisibleRef.current = true;
+      const inset = Math.max(0, height - event.endCoordinates.screenY);
+      setAndroidKeyboardInset(Math.min(height, inset));
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardVisibleRef.current = false;
+      setAndroidKeyboardInset(0);
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, [height]);
 
   if (!mounted) return null;
   const selectedCount = selection.size;
@@ -187,36 +210,72 @@ export function MeetingTagSheet({
       return next;
     });
   };
+  const requestClose = () => {
+    if (!busy) finishClose(true);
+  };
+  const requestSystemClose = () => {
+    if (keyboardVisibleRef.current) {
+      keyboardVisibleRef.current = false;
+      Keyboard.dismiss();
+      return;
+    }
+    if (busy) return;
+    requestClose();
+  };
+  const baseSheetHeight = Math.min(height * 0.82, 700);
+  const sheetHeight = Math.max(
+    0,
+    Math.min(
+      baseSheetHeight,
+      height - androidKeyboardInset - Math.max(insets.top, 12),
+    ),
+  );
 
   return (
-    <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={() => finishClose(true)}>
+    <Modal
+      visible
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={requestSystemClose}
+    >
       <View style={styles.root} accessibilityViewIsModal>
         <Animated.View style={[styles.backdrop, { backgroundColor: colors.backgroundMask, opacity: progress }]}>
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={() => { if (!busy) finishClose(true); }}
+            onPress={requestClose}
+            accessibilityRole="button"
             accessibilityLabel="关闭标签面板"
           />
         </Animated.View>
-        <Animated.View
-          pointerEvents={closing ? 'none' : 'auto'}
+        <KeyboardAvoidingView
           style={[
-            styles.sheet,
-            {
-              maxHeight: Math.min(height * 0.82, 700),
-              paddingBottom: Math.max(12, insets.bottom),
-              backgroundColor: colors.backgroundFloat,
-              transform: [{
-                translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }),
-              }],
-            },
+            styles.keyboardHost,
+            Platform.OS === 'android' ? { paddingBottom: androidKeyboardInset } : null,
           ]}
-          testID="meeting-tag-sheet"
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          pointerEvents="box-none"
         >
+          <Animated.View
+            pointerEvents={closing ? 'none' : 'auto'}
+            style={[
+              styles.sheet,
+              {
+                height: sheetHeight,
+                paddingBottom: Math.max(12, insets.bottom),
+                backgroundColor: colors.backgroundFloat,
+                transform: [{
+                  translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [baseSheetHeight, 0] }),
+                }],
+              },
+            ]}
+            testID="meeting-tag-sheet"
+          >
           <View style={[styles.titleBar, { borderBottomColor: colors.divider }]}>
             <Pressable
               style={({ pressed }) => [styles.titleAction, pressed && !busy && { backgroundColor: colors.pressedFill }]}
-              onPress={() => { if (!busy) finishClose(true); }}
+              onPress={requestClose}
               disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="取消标签操作"
@@ -229,7 +288,7 @@ export function MeetingTagSheet({
             {mode === 'manage' ? (
               <Pressable
                 style={({ pressed }) => [styles.titleAction, pressed && !busy && { backgroundColor: colors.pressedFill }]}
-                onPress={() => { if (!busy) finishClose(true); }}
+                onPress={requestClose}
                 disabled={busy}
                 accessibilityRole="button"
                 accessibilityLabel="完成标签管理"
@@ -295,7 +354,13 @@ export function MeetingTagSheet({
             </Pressable>
           </View>
 
-          <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.list}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+          >
             {tags.length === 0 ? (
               <View style={styles.empty}><Text style={[styles.emptyText, { color: colors.textCaption }]}>暂无标签</Text></View>
             ) : tags.map(tag => {
@@ -386,7 +451,8 @@ export function MeetingTagSheet({
               </Pressable>
             </View>
           ) : null}
-        </Animated.View>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -395,6 +461,7 @@ export function MeetingTagSheet({
 const styles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
+  keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
@@ -407,7 +474,7 @@ const styles = StyleSheet.create({
   inputClear: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   inputAction: { width: 76, height: 36, marginLeft: 8, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   inputActionText: { fontSize: 16, lineHeight: 22, fontWeight: '400' },
-  list: { flexGrow: 0, flexShrink: 1 },
+  list: { flex: 1 },
   empty: { height: 84, alignItems: 'center', justifyContent: 'center' },
   emptyText: { fontSize: 14, lineHeight: 20 },
   row: { minHeight: 64, paddingLeft: 16, paddingRight: 8, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },

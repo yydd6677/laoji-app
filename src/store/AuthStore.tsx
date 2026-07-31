@@ -390,7 +390,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isAuthUnauthorizedError(error)) throw error;
       try {
         const localUri = await persistLocalAvatar(uri, scope);
-        const fallback = { ...profile, avatarLocalUri: localUri, avatarInitial: '', avatarInitialManual: false };
+        const fallback = { ...profile, avatarLocalUri: localUri, avatarUrl: null, avatarInitial: '', avatarInitialManual: false };
         await saveProfile(fallback, scope);
         if (isCurrentAuthOperation(operationGeneration, operationToken)) setProfile(fallback);
         if (profile.avatarLocalUri !== localUri) await removeManagedLocalAvatar(profile.avatarLocalUri);

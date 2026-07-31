@@ -12,6 +12,11 @@ export interface NativeTabPressEvent {
   tab: NativeBottomTab;
 }
 
+export interface NativeProfileEntrySnapshot {
+  avatarUri?: string | null;
+  accessibilityLabel?: string;
+}
+
 export interface NativeDialogActionSnapshot {
   text: string;
   role?: 'primary' | 'secondary' | 'cancel' | 'destructive';

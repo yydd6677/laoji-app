@@ -25,6 +25,9 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
+import com.laoji.nativeplatform.ui.ProfileEntryView
+import com.laoji.nativeplatform.ui.NativeUiTokens
+import expo.modules.kotlin.AppContext
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -38,9 +41,11 @@ interface CalendarToolbarListener {
   fun onModeClicked(mode: CalendarMode)
 }
 
-class CalendarToolbarView(context: Context) : LinearLayout(context) {
+class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayout(context) {
   private val palette = CalendarUi.palette(context)
-  private val profileView = CalendarShellIconView(context, CalendarShellIcon.PROFILE)
+  // [PRODUCT] Both main tabs use this shared global profile entry. Calendar
+  // keeps ownership of its title/picker layout and pre-navigation behavior.
+  private val profileView = ProfileEntryView(context, appContext)
   private val titleCluster = LinearLayout(context)
   private val titleView = TextView(context)
   private val titleExpandIcon = CalendarTitleExpandIconView(context)
@@ -62,8 +67,8 @@ class CalendarToolbarView(context: Context) : LinearLayout(context) {
     addView(
       profileView,
       LayoutParams(
-        CalendarUi.dp(context, CalendarShellContract.ICON_HIT_SIZE_DP).toInt(),
-        CalendarUi.dp(context, CalendarShellContract.ICON_HIT_SIZE_DP).toInt()
+        CalendarUi.dp(context, NativeUiTokens.PROFILE_ENTRY_HIT_SIZE_DP).toInt(),
+        CalendarUi.dp(context, NativeUiTokens.PROFILE_ENTRY_HIT_SIZE_DP).toInt()
       )
     )
 
@@ -105,6 +110,10 @@ class CalendarToolbarView(context: Context) : LinearLayout(context) {
 
   fun setListener(listener: CalendarToolbarListener?) {
     this.listener = listener
+  }
+
+  fun setProfileEntrySnapshot(snapshot: Map<String, Any?>) {
+    profileView.setSnapshot(snapshot)
   }
 
   fun setTitle(title: String) {

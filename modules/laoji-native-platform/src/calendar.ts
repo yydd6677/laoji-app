@@ -10,6 +10,7 @@ import type {
   NativeCalendarRangeSnapshot,
 } from './contracts';
 import type { NativeTabPressEvent } from './ui';
+import type { NativeProfileEntrySnapshot } from './ui';
 
 export type NativeCalendarMode = 'month' | 'day';
 
@@ -98,6 +99,7 @@ type NativeEventHandler<T> = (event: NativeSyntheticEvent<T>) => void;
 export interface LaojiCalendarViewProps extends ViewProps {
   mode?: NativeCalendarMode;
   snapshot?: NativeCalendarRangeSnapshot | null;
+  profileEntry?: NativeProfileEntrySnapshot | null;
   selectedEpochDay?: number | null;
   visibleMonthEpochDay?: number | null;
   // UI-SHELL-BOTTOM-MAIN-001: selection motion resumes in the newly active native root.

@@ -18,12 +18,14 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import android.text.Editable
 import android.text.TextWatcher
+import expo.modules.kotlin.AppContext
 
 internal class MinutesListSurface(
   context: Context,
+  appContext: AppContext,
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : LinearLayout(context) {
-  private val titleBar = MinutesMainTitleBar(context)
+  private val titleBar = MinutesMainTitleBar(context, appContext)
   private val searchBar = LinearLayout(context)
   private val searchBack = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "退出搜索")
   private val searchInput = EditText(context)
@@ -70,6 +72,10 @@ internal class MinutesListSurface(
   private var canOpenRecycleBin = false
   private var mainListFirstVisible = 0
   private var pendingMainListScrollRestore: Int? = null
+
+  fun setProfileEntrySnapshot(snapshot: Map<String, Any?>) {
+    titleBar.setProfileEntrySnapshot(snapshot)
+  }
 
   init {
     orientation = VERTICAL

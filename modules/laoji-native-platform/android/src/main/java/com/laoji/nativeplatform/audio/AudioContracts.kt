@@ -72,6 +72,8 @@ enum class RecorderErrorCode(val wireValue: String) {
   WEBSOCKET_SEND_FAILED("websocket_send_failed"),
   SERVER_ERROR("server_error"),
   READY_TO_STOP_TIMEOUT("ready_to_stop_timeout"),
+  STOP_ACK_TIMEOUT("stop_ack_timeout"),
+  FINAL_DRAIN_TIMEOUT("final_drain_timeout"),
   RECOVERY_FAILED("recovery_failed"),
 }
 

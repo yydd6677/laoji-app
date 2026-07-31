@@ -16,6 +16,9 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.laoji.nativeplatform.ui.ProfileEntryView
+import com.laoji.nativeplatform.ui.NativeUiTokens
+import expo.modules.kotlin.AppContext
 import kotlin.math.roundToInt
 
 internal object MinutesPalette {
@@ -281,7 +284,7 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
 }
 
 /** Main-tab title mirrors MmInviteTitleBar in the in-main-tab, left-title branch. */
-internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
+internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : FrameLayout(context) {
   private val titleView = context.textView(textSizeSp = 20, weight = Typeface.BOLD).apply {
     gravity = Gravity.CENTER
     maxLines = 1
@@ -304,8 +307,17 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
     com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
     "更多会议记录操作",
   )
+  // [PRODUCT] Global app profile entry; the surrounding Minutes title bar
+  // remains source-shaped and keeps its own palette/inset ownership.
+  private val profileEntry = ProfileEntryView(context, appContext).apply {
+    setOnClickListener { actionHandler?.invoke("openProfile") }
+  }
 
   fun moreAnchor(): View = moreButton
+
+  fun setProfileEntrySnapshot(snapshot: Map<String, Any?>) {
+    profileEntry.setSnapshot(snapshot)
+  }
 
   init {
     setBackgroundColor(MinutesPalette.page)
@@ -375,6 +387,13 @@ internal class MinutesMainTitleBar(context: Context) : FrameLayout(context) {
       )
       return
     }
+    leading.addView(
+      profileEntry,
+      LinearLayout.LayoutParams(
+        context.dp(NativeUiTokens.PROFILE_ENTRY_HIT_SIZE_DP.toInt()),
+        context.dp(NativeUiTokens.PROFILE_ENTRY_HIT_SIZE_DP.toInt()),
+      ),
+    )
     actions.addView(
       context.iconButton(
         com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,

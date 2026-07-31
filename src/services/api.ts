@@ -1,11 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
-import { readResponseError } from './errors';
+import { readResponseData, readResponseError, stringifyErrorDetail } from './errors';
 import {
-  isNonScheduleControlText,
+  classifyScheduleParseRoute,
   normalizeScheduleParseResult,
   parseLocalScheduleText,
-  shouldUseLocalScheduleParseFirst,
 } from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
 import type { EventRecurrenceScope, MeetingSummary, TranscriptLine } from '../types';
@@ -79,6 +78,33 @@ export interface ParseResult {
   confidence: number;
   needs_clarification: boolean;
   clarification_question: string | null;
+  reference_datetime?: string;
+  timezone?: string;
+}
+
+export type ScheduleParseErrorCode =
+  | 'not_schedule'
+  | 'missing_date'
+  | 'missing_edit_target'
+  | 'ambiguous_range'
+  | 'conflicting_time'
+  | 'invalid_schedule'
+  | 'parser_unavailable';
+
+export interface ScheduleParseContext {
+  reference_datetime?: string;
+  timezone?: string;
+}
+
+export class ScheduleParseError extends Error {
+  constructor(
+    public readonly code: ScheduleParseErrorCode,
+    message: string,
+    public readonly status: number | null = null,
+  ) {
+    super(message);
+    this.name = 'ScheduleParseError';
+  }
 }
 
 export interface ApiEvent {
@@ -198,32 +224,107 @@ export interface ApiEventEditCommandResponse {
 
 // ── Parse natural language ──────────────────────────────────────────────────
 
-export async function parseText(text: string): Promise<ParseResult> {
-  if (isNonScheduleControlText(text)) throw new Error('parse skipped: non-schedule control text');
+const SCHEDULE_ERROR_MESSAGES: Record<ScheduleParseErrorCode, string> = {
+  not_schedule: '这段内容不是日程安排',
+  missing_date: '需要补充具体日期',
+  missing_edit_target: '需要先选择要修改的日程',
+  ambiguous_range: '日期范围不够明确，请确认开始和结束日期',
+  conflicting_time: '时间存在冲突，请确认最终时间',
+  invalid_schedule: '日程信息不完整，请修改后重试',
+  parser_unavailable: '日程解析服务暂时不可用，请稍后重试',
+};
 
-  const local = parseLocalScheduleText(text);
-  if (local && shouldUseLocalScheduleParseFirst(text, local)) {
-    return normalizeScheduleParseResult(text, local);
+function currentScheduleParseContext(context: ScheduleParseContext = {}): Required<ScheduleParseContext> {
+  const reference = context.reference_datetime?.trim();
+  const parsedReference = reference ? new Date(reference) : new Date();
+  const referenceDatetime = Number.isNaN(parsedReference.getTime())
+    ? new Date().toISOString()
+    : parsedReference.toISOString();
+  let timezone = context.timezone?.trim() ?? '';
+  if (!timezone) {
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      timezone = '';
+    }
+  }
+  return { reference_datetime: referenceDatetime, timezone: timezone || 'Asia/Shanghai' };
+}
+
+function scheduleErrorCode(value: unknown): ScheduleParseErrorCode | null {
+  return typeof value === 'string' && value in SCHEDULE_ERROR_MESSAGES
+    ? value as ScheduleParseErrorCode
+    : null;
+}
+
+async function readScheduleParseError(
+  res: Response,
+  fallbackCode: ScheduleParseErrorCode = 'invalid_schedule',
+): Promise<ScheduleParseError> {
+  const data = await readResponseData(res);
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : null;
+  const detail = record?.detail && typeof record.detail === 'object'
+    ? record.detail as Record<string, unknown>
+    : null;
+  const code = scheduleErrorCode(record?.code)
+    ?? scheduleErrorCode(detail?.code)
+    ?? (res.status >= 500 ? 'parser_unavailable' : fallbackCode);
+  const backendMessage = stringifyErrorDetail(
+    record?.message ?? detail?.message ?? record?.detail ?? record?.error,
+  );
+  const message = backendMessage && /[\u3400-\u9fff]/.test(backendMessage) && !/[A-Za-z]/.test(backendMessage)
+    ? backendMessage
+    : SCHEDULE_ERROR_MESSAGES[code];
+  return new ScheduleParseError(code, message, res.status);
+}
+
+function normalizedParseResult(
+  text: string,
+  result: ParseResult,
+  context: Required<ScheduleParseContext>,
+): ParseResult {
+  return {
+    ...normalizeScheduleParseResult(text, result, new Date(context.reference_datetime)),
+    reference_datetime: context.reference_datetime,
+    timezone: context.timezone,
+  };
+}
+
+export async function parseText(
+  text: string,
+  contextInput: ScheduleParseContext = {},
+): Promise<ParseResult> {
+  const context = currentScheduleParseContext(contextInput);
+  const referenceDate = new Date(context.reference_datetime);
+
+  const local = parseLocalScheduleText(text, referenceDate);
+  const decision = classifyScheduleParseRoute(text, local, referenceDate);
+  if (decision.route === 'reject') {
+    const code = decision.code ?? 'not_schedule';
+    throw new ScheduleParseError(code, decision.message ?? SCHEDULE_ERROR_MESSAGES[code]);
+  }
+  if ((decision.route === 'local_safe' || decision.route === 'clarify') && decision.result) {
+    return normalizedParseResult(text, decision.result, context);
   }
 
-  let error: Error | null = null;
   try {
     const res = await fetch(laojiUrl('/api/laoji/parse'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...context }),
     });
     if (res.ok) {
       const parsed = await res.json() as ParseResult;
-      return normalizeScheduleParseResult(text, parsed);
+      return normalizedParseResult(text, parsed, context);
     }
-    error = await readResponseError('parse failed', res);
+    throw await readScheduleParseError(res, decision.code ?? 'invalid_schedule');
   } catch (err) {
-    error = err instanceof Error ? err : new Error(String(err));
+    if (err instanceof ScheduleParseError) throw err;
+    throw new ScheduleParseError(
+      'parser_unavailable',
+      SCHEDULE_ERROR_MESSAGES.parser_unavailable,
+    );
   }
-
-  if (local) return normalizeScheduleParseResult(text, local);
-  throw error ?? new Error('parse failed');
 }
 
 // ── Clarify (follow-up) ─────────────────────────────────────────────────────
@@ -231,16 +332,25 @@ export async function parseText(text: string): Promise<ParseResult> {
 export async function clarifyText(
   original: string,
   supplement: string,
-  draft: ParseResult
+  draft: ParseResult,
+  contextInput: ScheduleParseContext = {},
 ): Promise<ParseResult> {
+  const context = currentScheduleParseContext({
+    reference_datetime: contextInput.reference_datetime ?? draft.reference_datetime,
+    timezone: contextInput.timezone ?? draft.timezone,
+  });
   const res = await fetch(laojiUrl('/api/laoji/clarify'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ current: { ...draft, raw_text: draft.raw_text ?? original }, answer: supplement }),
+    body: JSON.stringify({
+      current: { ...draft, raw_text: draft.raw_text ?? original },
+      answer: supplement,
+      ...context,
+    }),
   });
-  if (!res.ok) throw await readResponseError('clarify failed', res);
+  if (!res.ok) throw await readScheduleParseError(res, 'invalid_schedule');
   const parsed = await res.json() as ParseResult;
-  return normalizeScheduleParseResult(`${original}\n${supplement}`, parsed);
+  return normalizedParseResult(`${original}\n${supplement}`, parsed, context);
 }
 
 // ── Save event ──────────────────────────────────────────────────────────────
@@ -311,38 +421,73 @@ async function audioUriToBase64(audioUri: string): Promise<string> {
   return blobToBase64(await res.blob());
 }
 
+function requireAudioPayload(value: string): string {
+  const payload = value.trim();
+  if (!payload) {
+    throw new ScheduleParseError('invalid_schedule', '录音内容为空，请重新录音。');
+  }
+  return payload;
+}
+
+function parseAudioResult(value: unknown): ParseResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ScheduleParseError('invalid_schedule', '未识别到日程，请重试。');
+  }
+  const data = value as Partial<ParseResult> & Record<string, unknown>;
+  const rawText = typeof data.raw_text === 'string' ? data.raw_text.trim() : '';
+  if (!rawText) {
+    throw new ScheduleParseError('invalid_schedule', '未识别到语音内容，请重新录音。');
+  }
+  if (typeof data.title !== 'string' || typeof data.start_date !== 'string') {
+    throw new ScheduleParseError('invalid_schedule', '日程解析结果不完整，请重试。');
+  }
+  return normalizeScheduleParseResult(rawText, data as ParseResult);
+}
+
 function filenameFromUri(audioUri: string): string {
   const fallback = 'recording.m4a';
   const file = audioUri.split('?')[0].split('#')[0].split('/').pop();
   return decodeURIComponent(file || fallback);
 }
 
-export async function transcribeAudio(audioUri: string): Promise<string> {
-  const audio_base64 = await audioUriToBase64(audioUri);
+export async function transcribeAudio(
+  audioUri: string,
+  contextInput: ScheduleParseContext = {},
+): Promise<string> {
+  const audio_base64 = requireAudioPayload(await audioUriToBase64(audioUri));
   const filename = filenameFromUri(audioUri);
+  const context = currentScheduleParseContext(contextInput);
 
   const res = await fetch(meetingUrl('/api/laoji/asr/transcribe'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio_base64, filename }),
+    body: JSON.stringify({ audio_base64, filename, ...context }),
   });
-  if (!res.ok) throw await readResponseError('ASR failed', res);
+  if (!res.ok) throw await readResponseError('语音识别失败', res);
   const data = await res.json();
-  return data.text ?? data.result ?? '';
+  const text = typeof data?.text === 'string'
+    ? data.text.trim()
+    : typeof data?.result === 'string' ? data.result.trim() : '';
+  if (!text) throw new ScheduleParseError('invalid_schedule', '未识别到语音内容，请重新录音。');
+  return text;
 }
 
-export async function parseAudio(audioUri: string): Promise<ParseResult> {
-  const audio_base64 = await audioUriToBase64(audioUri);
+export async function parseAudio(
+  audioUri: string,
+  contextInput: ScheduleParseContext = {},
+): Promise<ParseResult> {
+  const audio_base64 = requireAudioPayload(await audioUriToBase64(audioUri));
   const filename = filenameFromUri(audioUri);
+  const context = currentScheduleParseContext(contextInput);
 
   const res = await fetch(meetingUrl('/api/laoji/parse-audio'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio_base64, filename }),
+    body: JSON.stringify({ audio_base64, filename, ...context }),
   });
-  if (!res.ok) throw await readResponseError('audio parse failed', res);
-  const parsed = await res.json() as ParseResult;
-  return normalizeScheduleParseResult(parsed.raw_text, parsed);
+  if (!res.ok) throw await readResponseError('日程语音解析失败', res);
+  const parsed = parseAudioResult(await res.json());
+  return { ...parsed, ...context };
 }
 
 // ── Delete event ────────────────────────────────────────────────────────────

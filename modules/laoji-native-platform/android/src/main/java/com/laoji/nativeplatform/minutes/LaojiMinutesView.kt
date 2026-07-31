@@ -39,6 +39,7 @@ class LaojiMinutesView(
   }
   private var surfaceName = MinutesSurface.LIST.wireName
   private var snapshot: Map<String, Any?> = emptyMap()
+  private var profileEntrySnapshot: Map<String, Any?> = emptyMap()
   private var surfaceView: View? = null
   private var renderedSurface: MinutesSurface? = null
 
@@ -64,6 +65,11 @@ class LaojiMinutesView(
     snapshot = value
   }
 
+  fun setProfileEntrySnapshot(value: Map<String, Any?>) {
+    profileEntrySnapshot = value
+    (surfaceView as? MinutesListSurface)?.setProfileEntrySnapshot(value)
+  }
+
   fun setBottomBarSelectionCommand(command: Int?) {
     bottomBar.setSelectionAnimationCommand(command)
   }
@@ -78,7 +84,7 @@ class LaojiMinutesView(
       content.removeAllViews()
       renderedSurface = state.surface
       surfaceView = when (state.surface) {
-        MinutesSurface.LIST -> MinutesListSurface(context, ::handleAction)
+        MinutesSurface.LIST -> MinutesListSurface(context, appContext, ::handleAction)
         MinutesSurface.RECORDING -> MinutesRecordingSurface(context, ::handleAction)
         MinutesSurface.DETAIL -> MinutesDetailSurface(context, ::handleAction, ::handlePlaybackState)
       }
@@ -89,7 +95,10 @@ class LaojiMinutesView(
     }
     bottomBar.visibility = if (state.surface == MinutesSurface.LIST) View.VISIBLE else View.GONE
     when (val view = surfaceView) {
-      is MinutesListSurface -> view.render(state.list)
+      is MinutesListSurface -> {
+        view.setProfileEntrySnapshot(profileEntrySnapshot)
+        view.render(state.list)
+      }
       is MinutesRecordingSurface -> view.render(state.recording)
       is MinutesDetailSurface -> view.render(state.detail)
     }
