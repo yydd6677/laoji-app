@@ -1,0 +1,42 @@
+{
+  "category_counts": {
+    "健康": 24,
+    "其他": 40,
+    "出行": 24,
+    "学习": 24,
+    "工作": 24,
+    "生活": 24,
+    "社交": 25,
+    "财务": 24,
+    "重要": 40
+  },
+  "corpus": "/home/yydd/LaoJi-worktrees/feishu-source-driven/tools/schedule-quality-v3/event-category-corpus.jsonl",
+  "generator": "generate_event_category_corpus.py",
+  "independent_oracle": true,
+  "label_source": "authored_metadata_v1",
+  "precedence": [
+    "explicit_category_override",
+    "relative_reminder_priority",
+    "urgency_priority",
+    "title_domain",
+    "body_domain",
+    "other"
+  ],
+  "scenarios": [
+    "all_day_domain",
+    "asr_traditional",
+    "body_domain",
+    "body_location_only",
+    "body_note_only",
+    "explicit_category_override",
+    "explicit_other_override",
+    "fallback_other",
+    "relative_reminder_priority",
+    "title_domain",
+    "title_precedes_location",
+    "urgency_priority"
+  ],
+  "schema_version": 1,
+  "total": 249,
+  "unique_inputs": 249
+}

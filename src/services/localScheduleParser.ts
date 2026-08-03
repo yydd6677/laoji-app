@@ -61,6 +61,7 @@ const SCHEDULE_TRADITIONAL_MAP: Record<string, string> = {
   '記': '记',
   '繳': '缴',
   '費': '费',
+  '電': '电',
   '還': '还',
   '總': '总',
   '預': '预',
@@ -81,6 +82,18 @@ const SCHEDULE_TRADITIONAL_MAP: Record<string, string> = {
   '實': '实',
   '務': '务',
   '過': '过',
+  '復': '复',
+  '習': '习',
+  '約': '约',
+  '體': '体',
+  '檢': '检',
+  '買': '买',
+  '鐵': '铁',
+  '發': '发',
+  '緊': '紧',
+  '錄': '录',
+  '靈': '灵',
+  '聯': '联',
 };
 
 function simplifyScheduleGlyphs(value: string): string {
@@ -428,6 +441,36 @@ function parseRelativeOffsetDateTime(
 }
 
 function parseExplicitOrRelativeDate(text: string, today: LocalDate): LocalDate | null {
+  // An absolute date outranks incidental words such as “今天主题是”.
+  let match = text.match(/([0-9]{4})年([0-9一二两三四五六七八九十]{1,2})月([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = cnToInt(match[2]);
+    const day = cnToInt(match[3]);
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
+    return { year, month, day };
+  }
+  match = text.match(/([0-9一二两三四五六七八九十]{1,2})月([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
+  if (match) {
+    const month = cnToInt(match[1]);
+    const day = cnToInt(match[2]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    let year = today.year;
+    if (day > daysInMonth(year, month)) {
+      if (month !== 2 || day !== 29) return null;
+      while (year < today.year + 8 && daysInMonth(year, month) < day) year += 1;
+    }
+    let candidate = { year, month, day };
+    if (compareDate(candidate, today) < 0) {
+      year = today.year + 1;
+      if (month === 2 && day === 29) {
+        while (year < today.year + 8 && daysInMonth(year, month) < day) year += 1;
+      }
+      if (day > daysInMonth(year, month)) return null;
+      candidate = { year, month, day };
+    }
+    return candidate;
+  }
   const explicitMonthEnd = parseExplicitMonthEnd(text, today);
   if (explicitMonthEnd) return explicitMonthEnd;
   if (text.includes('下个月底') || text.includes('下个月末') || text.includes('下月底') || text.includes('下月末')) {
@@ -443,7 +486,7 @@ function parseExplicitOrRelativeDate(text: string, today: LocalDate): LocalDate 
   if (text.includes('明天')) return addDays(today, 1);
   if (text.includes('今天') || text.includes('今日')) return today;
 
-  let match = text.match(/(下个月|下月|本月|这个月)([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
+  match = text.match(/(下个月|下月|本月|这个月)([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
   if (match) {
     let year = today.year;
     let month = today.month;
@@ -453,40 +496,6 @@ function parseExplicitOrRelativeDate(text: string, today: LocalDate): LocalDate 
     }
     const day = Math.max(1, Math.min(daysInMonth(year, month), cnToInt(match[2])));
     return { year, month, day };
-  }
-
-  match = text.match(/([0-9]{4})年([0-9一二两三四五六七八九十]{1,2})月([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
-  if (match) {
-    const year = Number(match[1]);
-    const month = cnToInt(match[2]);
-    const day = cnToInt(match[3]);
-    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
-    return { year, month, day };
-  }
-
-  match = text.match(/([0-9一二两三四五六七八九十]{1,2})月([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
-  if (match) {
-    const month = cnToInt(match[1]);
-    const day = cnToInt(match[2]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    let year = today.year;
-    if (day > daysInMonth(year, month)) {
-      if (month === 2 && day === 29) {
-        while (year < today.year + 8 && daysInMonth(year, month) < day) year += 1;
-      } else {
-        return null;
-      }
-    }
-    let candidate = { year, month, day };
-    if (compareDate(candidate, today) < 0) {
-      year = today.year + 1;
-      if (month === 2 && day === 29) {
-        while (year < today.year + 8 && daysInMonth(year, month) < day) year += 1;
-      }
-      if (day > daysInMonth(year, month)) return null;
-      candidate = { year, month, day };
-    }
-    return candidate;
   }
 
   match = text.match(/(?:(下下|下|本|这)?(?:周|星期|礼拜))([一二三四五六日天1-7])/);
@@ -703,7 +712,8 @@ function parseAuthoritativeDate(text: string, today: LocalDate): LocalDate | nul
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text))) tokens.push(match[0]);
     if (tokens.length > 0) {
-      const parsed = parseDateToken(tokens[tokens.length - 1], today);
+      const absolute = tokens.filter(token => /(?:[0-9]{4}年)?[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)/.test(token));
+      const parsed = parseDateToken((absolute.length > 0 ? absolute : tokens)[(absolute.length > 0 ? absolute : tokens).length - 1], today);
       if (parsed) return parsed;
     }
   }
@@ -812,7 +822,9 @@ function extractLocation(text: string): string | null {
   const location = (explicitWithMarker?.[1] ?? explicitBare?.[1] ?? inferred?.[1] ?? '')
     .replace(/^[，,。.!！?？；;的\s]+|[，,。.!！?？；;的\s]+$/g, '');
   if (!location) return null;
-  if (/(今天|明天|后天|月|号|日|周|星期|礼拜|点)/.test(location)) return null;
+  // Numbered rooms such as “青松一号室” are valid locations. Reject only a
+  // candidate that is itself a complete date/time token.
+  if (new RegExp(`^(?:${DATE_TOKEN})$`).test(location) || new RegExp(`^(?:${TIME_TOKEN})$`).test(location)) return null;
   return location.slice(0, 100) || null;
 }
 
@@ -943,7 +955,7 @@ function stripScheduleMarkers(text: string): string {
     '(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?',
     '([01]?\\d|2[0-3])[:：]([0-5]\\d)',
     '^(?:凌晨|早上|上午|中午|下午(?!茶)|傍晚|晚上|晚间)(?=[^，,。.!！?？]{1,})',
-    '(提醒我|记一下|安排|日程|待办|要|需要|完成)',
+    '(提醒我|记一下|安排|日程|待办|需要|完成)',
   ];
   return patterns
     .reduce((cleaned, pattern) => cleaned.replace(new RegExp(pattern, 'g'), ''), text)
@@ -971,7 +983,7 @@ function normalizeTitle(title: string): string {
     .replace(/(持续处理|处理|完成|提交|整理|跟进|准备)?完$/, '')
     .replace(/^在[^，,。.!！?？]{1,30}(?=开会|会议|见面|上课|办事)/, '')
     .replace(/^(开|召开|举行|进行)(?=.{2,})/, '')
-    .replace(/^(和|跟|与)(?=.{2,})/, '')
+    .replace(/^(?:和|跟(?!进)|与)(?=.{2,})/, '')
     .replace(/^[，,。.!！?？的]+|[，,。.!！?？的]+$/g, '');
 }
 
@@ -991,8 +1003,23 @@ function selectCorrectionTail(text: string): string {
 
 function extractTitleAndDescription(text: string): [string, string | null] {
   const authoritativeText = selectCorrectionTail(text);
-  const explicitTitle = authoritativeText.match(/标题(?:不要太长)?[，,]?(就)?(写|叫|设为|是)([^，,。.!！?？]{1,40})/);
-  if (explicitTitle) return [normalizeTitle(explicitTitle[3]).slice(0, 20), null];
+  const explicitTitle = authoritativeText.match(
+    /(?:标题(?:不要太长)?[，,]?(?:就)?(?:写|叫|设为|是)|(?:本次|这次|今天|当前|新的|该项|接下来|随后|下一个|待办)?(?:主题|事项|日程|计划|任务|活动|内容|安排|工作|会议)?(?:名称|名字|名)?(?:写成|写为|记为|定名为|定为|安排为|叫作|叫做|叫|就写|写|是|为))\s*([^，,。.!！?？；;]{1,60}?)(?=\s*(?:地点|地址|位置|提前|无需提醒|不提醒|需要通知|和[^，,。.!！?？；;]{1,16}一起|[，,。.!！?？；;]|$))/,
+  );
+  if (explicitTitle) return [normalizeTitle(explicitTitle[1]).slice(0, 20), null];
+
+  const implicitTitle = authoritativeText.match(
+    /(?:提醒我|叫我)[^，,。.!！?？；;]{0,30}?(处理|完成|提交|跟进|安排|准备|确认|整理|讨论|联系|参加)\s*([^，,。.!！?？；;]{1,60})/,
+  );
+  if (implicitTitle) {
+    // “提交材料” is a complete task name; keep the action instead of
+    // reducing it to the generic noun “材料”.
+    const source = implicitTitle[1] === '提交'
+      ? `${implicitTitle[1]}${implicitTitle[2]}`
+      : implicitTitle[2];
+    const candidate = normalizeTitle(source);
+    if (candidate) return [candidate.slice(0, 20), null];
+  }
   let description: string | null = null;
   let titleText = authoritativeText;
   // Remove a physical-location prefix before stripping schedule markers. The
@@ -1108,9 +1135,12 @@ export function parseLocalScheduleText(
     // server and event model both support this representation.
     parsedDate = parsedDate ?? today;
   } else if (eventType === 'weekly' && recurrenceRule.weekdays?.length) {
-    parsedDate = recurrenceRule.weekdays
-      .map(value => nextWeekday(value - 1, today, true))
-      .sort(compareDate)[0] ?? parsedDate;
+    const hasExplicitCalendarDate = /(?:[0-9]{4}年)?[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)/.test(normalized);
+    if (!hasExplicitCalendarDate) {
+      parsedDate = recurrenceRule.weekdays
+        .map(value => nextWeekday(value - 1, today, true))
+        .sort(compareDate)[0] ?? parsedDate;
+    }
   } else if (eventType === 'monthly' && (recurrenceText.match(/(?:每月|每(?:隔)?[一二两三四五六七八九十0-9]+个月)([0-9一二两三四五六七八九十]{1,3})(?:号|日)/))) {
     const match = recurrenceText.match(/(?:每月|每(?:隔)?[一二两三四五六七八九十0-9]+个月)([0-9一二两三四五六七八九十]{1,3})(?:号|日)/);
     const day = Math.max(1, Math.min(31, cnToInt(match?.[1])));

@@ -1,0 +1,55 @@
+{
+  "audit": {
+    "distinct_atom_count": {
+      "connector_key": 1000,
+      "correction_intent_key": 100,
+      "date_expression_key": 1000,
+      "event_concept_key": 1000,
+      "location_key": 800,
+      "oral_style_key": 1000,
+      "reminder_expression_key": 900,
+      "semantic_signature": 10000,
+      "template_signature": 1000,
+      "time_expression_key": 900
+    },
+    "max_atom_count": {
+      "connector_key": 10,
+      "correction_intent_key": 10,
+      "date_expression_key": 10,
+      "event_concept_key": 10,
+      "location_key": 10,
+      "oral_style_key": 10,
+      "reminder_expression_key": 10,
+      "semantic_signature": 1,
+      "template_signature": 10,
+      "time_expression_key": 10
+    },
+    "passed": true,
+    "semantic_unique": true,
+    "text_unique": true,
+    "total": 10000,
+    "violations": []
+  },
+  "controlled_keys": [
+    "event_concept_key",
+    "oral_style_key",
+    "connector_key",
+    "date_expression_key",
+    "time_expression_key",
+    "location_key",
+    "reminder_expression_key",
+    "correction_intent_key",
+    "template_signature",
+    "semantic_signature"
+  ],
+  "corpus_sha256": "f8190252e25be7b60b1ac54cd74e2bf68979aced621f15b7fc0b3528c5b25d64",
+  "dataset_version": "schedule-real-10k-v1",
+  "evidence_type": "real_http_per_case_pending",
+  "generator_sha256": "0ab5615f5b9289cefbe10258eeaf901e2ae029dc91b82adf6f6f8e1d6ee5effa",
+  "independent_oracle": true,
+  "label_source": "authored_metadata_v1",
+  "max_atom_uses": 10,
+  "remote_service": true,
+  "schema_version": 1,
+  "total": 10000
+}
