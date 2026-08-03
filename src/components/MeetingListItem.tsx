@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Meeting } from '../types';
-import { Colors as C } from '../theme/colors';
+import { Appearance, Colors as C } from '../theme/colors';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 
 export const MEETING_LIST_ITEM_GEOMETRY = Object.freeze({
@@ -54,7 +54,22 @@ export function MeetingListItem({
   return (
     <TouchableOpacity
       testID={`meeting-list-item-${meeting.id}`}
-      style={s.row}
+      style={[
+        s.row,
+        Appearance.cardRadius > 6 && {
+          marginHorizontal: 8,
+          marginVertical: 4,
+          backgroundColor: C.card,
+          borderRadius: Appearance.cardRadius,
+          borderWidth: Appearance.borderWidth,
+          borderColor: C.border,
+          shadowColor: C.purpleDark,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: Appearance.shadowOpacity,
+          shadowRadius: 6,
+          elevation: 2,
+        },
+      ]}
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={320}

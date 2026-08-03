@@ -15,7 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Waveform } from '../components/Common';
 import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
@@ -444,14 +444,16 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           if (mountedRef.current) setAudioStats(stats);
         },
         onTranscript: item => {
+          const speakerId = item.speakerId?.trim() || 'unknown';
+          const speakerLabel = item.speakerName?.trim() || '发言人';
           appendTranscript({
             meeting_id: meeting.id,
-            speaker_id: item.speakerName ?? 'unknown',
-            speaker_label: item.speakerName ?? '发言人',
+            speaker_id: speakerId,
+            speaker_label: speakerLabel,
             text: item.text,
             start_time: item.startTime,
             end_time: item.endTime,
-            confidence: typeof item.raw.speaker_confidence === 'number' ? item.raw.speaker_confidence : undefined,
+            confidence: item.speakerConfidence,
             created_at: new Date().toISOString(),
           });
         },
@@ -877,7 +879,7 @@ const s = StyleSheet.create({
   errorBox: {
     minHeight: 44,
     paddingHorizontal: 20,
-    backgroundColor: '#FFF3F3',
+    backgroundColor: withAlpha(C.red, 0.08),
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

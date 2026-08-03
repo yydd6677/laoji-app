@@ -6,7 +6,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NavigationAction, RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ResponsiveContentFrame } from '../components/ResponsiveContentFrame';
 import { CalendarDetailTitleBar, CalendarEditTitleBar } from '../components/CalendarTitleBar';
@@ -873,7 +873,7 @@ const s = StyleSheet.create({
     zIndex: 80,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: withAlpha(C.body, 0.72),
   },
   savingText: { marginTop: 10, fontSize: 14, lineHeight: 20, color: C.sub },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: C.body },

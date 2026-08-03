@@ -23,6 +23,7 @@ import android.widget.Space
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import com.laoji.nativeplatform.ui.ProfileEntryView
@@ -1545,7 +1546,15 @@ internal class QuickChooseDragBarView(context: Context) : View(context) {
   }
 }
 
-fun calendarContentLayoutParams(): FrameLayout.LayoutParams = FrameLayout.LayoutParams(
+fun calendarContentLayoutParams(context: Context): FrameLayout.LayoutParams = FrameLayout.LayoutParams(
   FrameLayout.LayoutParams.MATCH_PARENT,
-  FrameLayout.LayoutParams.MATCH_PARENT
-)
+  FrameLayout.LayoutParams.MATCH_PARENT,
+).apply {
+  if (NativeThemePreference.isVivid(context)) {
+    val inset = CalendarUi.dp(context, 8f).roundToInt()
+    marginStart = inset
+    marginEnd = inset
+    topMargin = inset
+    bottomMargin = inset
+  }
+}

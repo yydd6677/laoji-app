@@ -1858,7 +1858,7 @@ private class MinutesSpeakersPageAdapter(
     fun bind(row: MinutesSpeakerTimelineRow, onAction: (Map<String, Any?>) -> Unit) {
       val speaker = row.speaker
       val tone = minutesSpeakerTone(speaker.id)
-      val timelineColor = minutesSpeakerTimelineColors[row.colorIndex % minutesSpeakerTimelineColors.size]
+      val timelineColor = minutesSpeakerTimelineColor(row.colorIndex)
       avatar.backgroundShape(tone.first, radiusDp = 22)
       (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
       name.text = speaker.label
@@ -1938,7 +1938,7 @@ private class MinutesSpeakerTimelineView(context: Context) : FrameLayout(context
   }
 }
 
-private val minutesSpeakerTones = listOf(
+private val minutesNeutralSpeakerTones = listOf(
   Color.rgb(232, 243, 255) to Color.rgb(51, 112, 255),
   Color.rgb(228, 247, 237) to Color.rgb(32, 161, 98),
   Color.rgb(240, 235, 255) to Color.rgb(127, 90, 240),
@@ -1947,8 +1947,20 @@ private val minutesSpeakerTones = listOf(
   Color.rgb(253, 234, 242) to Color.rgb(214, 79, 130),
 )
 
+// [PRODUCT] The vivid skin keeps the multi-speaker distinction but removes
+// the isolated source-blue swatch that otherwise survives inside an otherwise
+// pink-purple surface.
+private val minutesVividSpeakerTones = listOf(
+  Color.rgb(252, 224, 240) to Color.rgb(214, 79, 130),
+  Color.rgb(228, 247, 237) to Color.rgb(37, 136, 50),
+  Color.rgb(237, 232, 255) to Color.rgb(123, 92, 184),
+  Color.rgb(255, 240, 226) to Color.rgb(240, 124, 43),
+  Color.rgb(225, 246, 245) to Color.rgb(22, 156, 150),
+  Color.rgb(255, 240, 248) to Color.rgb(255, 77, 79),
+)
+
 // [SOURCE] MmSpeakerTimelineViewModel.COLOR_ARRAY, indexed by sorted speaker row position.
-private val minutesSpeakerTimelineColors = intArrayOf(
+private val minutesNeutralSpeakerTimelineColors = intArrayOf(
   Color.rgb(80, 131, 251),
   Color.rgb(50, 166, 69),
   Color.rgb(117, 125, 240),
@@ -1958,5 +1970,26 @@ private val minutesSpeakerTimelineColors = intArrayOf(
   Color.rgb(159, 111, 241),
 )
 
-private fun minutesSpeakerTone(key: String): Pair<Int, Int> =
-  minutesSpeakerTones[(key.hashCode() and Int.MAX_VALUE) % minutesSpeakerTones.size]
+private val minutesVividSpeakerTimelineColors = intArrayOf(
+  Color.rgb(214, 79, 130),
+  Color.rgb(37, 136, 50),
+  Color.rgb(123, 92, 184),
+  Color.rgb(240, 124, 43),
+  Color.rgb(22, 156, 150),
+  Color.rgb(255, 77, 79),
+  Color.rgb(146, 104, 224),
+)
+
+private fun minutesSpeakerTone(key: String): Pair<Int, Int> {
+  val tones = if (MinutesPalette.vivid) minutesVividSpeakerTones else minutesNeutralSpeakerTones
+  return tones[(key.hashCode() and Int.MAX_VALUE) % tones.size]
+}
+
+private fun minutesSpeakerTimelineColor(index: Int): Int {
+  val colors = if (MinutesPalette.vivid) {
+    minutesVividSpeakerTimelineColors
+  } else {
+    minutesNeutralSpeakerTimelineColors
+  }
+  return colors[index % colors.size]
+}

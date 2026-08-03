@@ -16,7 +16,7 @@ import {
 } from '../services/realtimeAsr';
 import { deleteSpeaker, fetchSpeakers, registerSpeaker, renameSpeaker, SpeakerProfile, supplementSpeaker } from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
 import { meetingAudioLevelPercent } from '../utils/meetingAudioStatus';
 
@@ -510,7 +510,7 @@ const s = StyleSheet.create({
   centerState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 10 },
   stateTitle: { fontSize: 16, color: C.text, fontWeight: '600' },
   stateHint: { maxWidth: 300, fontSize: 14, lineHeight: 20, color: C.sub, textAlign: 'center' },
-  loadErrorIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF0F0', marginBottom: 2 },
+  loadErrorIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: withAlpha(C.red, 0.08), marginBottom: 2 },
   retryButton: { minWidth: 112, height: 40, borderRadius: 6, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 6 },
   retryButtonText: { fontSize: 14, lineHeight: 20, color: '#fff', fontWeight: '500' },
 });

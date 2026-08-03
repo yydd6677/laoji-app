@@ -18,31 +18,96 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.laoji.nativeplatform.ui.ProfileEntryView
 import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.NativeThemePreference
 import expo.modules.kotlin.AppContext
 import kotlin.math.roundToInt
 
 internal object MinutesPalette {
-  val page = Color.rgb(248, 249, 250)
-  val surface = Color.WHITE
-  val filler = Color.rgb(239, 240, 241)
-  val text = Color.rgb(31, 35, 41)
-  val secondary = Color.rgb(100, 106, 115)
-  val faint = Color.rgb(143, 149, 158)
-  val disabled = Color.rgb(187, 191, 196)
-  val divider = Color.rgb(222, 224, 227)
-  val timelineTrack = Color.argb(13, 31, 35, 41)
-  val primary = Color.rgb(20, 86, 240)
-  val primarySoft = Color.rgb(240, 244, 255)
-  val primaryTransparent = Color.argb(38, 51, 109, 244)
-  val primaryTransparentStrong = Color.argb(76, 51, 109, 244)
-  val coverDefault = Color.rgb(220, 229, 250)
-  val coverSummary = Color.rgb(230, 238, 247)
-  val coverContent = Color.rgb(240, 241, 242)
-  val danger = Color.rgb(226, 46, 40)
-  val dangerSoft = Color.rgb(255, 243, 243)
-  val warning = Color.rgb(194, 87, 5)
-  val success = Color.rgb(37, 136, 50)
+  var vivid = false
+  var page = Color.rgb(248, 249, 250)
+  var surface = Color.WHITE
+  var filler = Color.rgb(239, 240, 241)
+  var text = Color.rgb(31, 35, 41)
+  var secondary = Color.rgb(100, 106, 115)
+  var faint = Color.rgb(143, 149, 158)
+  var disabled = Color.rgb(187, 191, 196)
+  var divider = Color.rgb(222, 224, 227)
+  var timelineTrack = Color.argb(13, 31, 35, 41)
+  var primary = Color.rgb(20, 86, 240)
+  var primarySoft = Color.rgb(240, 244, 255)
+  var primaryTransparent = Color.argb(38, 51, 109, 244)
+  var primaryTransparentStrong = Color.argb(76, 51, 109, 244)
+  var coverDefault = Color.rgb(220, 229, 250)
+  var coverSummary = Color.rgb(230, 238, 247)
+  var coverContent = Color.rgb(240, 241, 242)
+  var danger = Color.rgb(226, 46, 40)
+  var dangerSoft = Color.rgb(255, 243, 243)
+  var warning = Color.rgb(194, 87, 5)
+  var success = Color.rgb(37, 136, 50)
+  var recordGradientStart = Color.rgb(85, 95, 242)
+  var recordGradientEnd = Color.rgb(139, 118, 245)
+
+  fun configure(context: Context) {
+    vivid = NativeThemePreference.isVivid(context)
+    if (!vivid) {
+      page = Color.rgb(248, 249, 250)
+      surface = Color.WHITE
+      filler = Color.rgb(239, 240, 241)
+      text = Color.rgb(31, 35, 41)
+      secondary = Color.rgb(100, 106, 115)
+      faint = Color.rgb(143, 149, 158)
+      disabled = Color.rgb(187, 191, 196)
+      divider = Color.rgb(222, 224, 227)
+      timelineTrack = Color.argb(13, 31, 35, 41)
+      primary = Color.rgb(20, 86, 240)
+      primarySoft = Color.rgb(240, 244, 255)
+      primaryTransparent = Color.argb(38, 51, 109, 244)
+      primaryTransparentStrong = Color.argb(76, 51, 109, 244)
+      coverDefault = Color.rgb(220, 229, 250)
+      coverSummary = Color.rgb(230, 238, 247)
+      coverContent = Color.rgb(240, 241, 242)
+      danger = Color.rgb(226, 46, 40)
+      dangerSoft = Color.rgb(255, 243, 243)
+      warning = Color.rgb(194, 87, 5)
+      success = Color.rgb(37, 136, 50)
+      recordGradientStart = Color.rgb(85, 95, 242)
+      recordGradientEnd = Color.rgb(139, 118, 245)
+      return
+    }
+    page = Color.rgb(255, 240, 246)
+    surface = Color.rgb(253, 234, 245)
+    filler = Color.rgb(240, 232, 255)
+    text = Color.rgb(28, 27, 51)
+    secondary = Color.rgb(148, 144, 181)
+    faint = Color.rgb(184, 180, 212)
+    disabled = Color.rgb(210, 206, 227)
+    divider = Color.rgb(229, 207, 232)
+    timelineTrack = Color.argb(18, 123, 92, 184)
+    primary = Color.rgb(123, 92, 184)
+    primarySoft = Color.rgb(237, 232, 255)
+    primaryTransparent = Color.argb(38, 146, 104, 224)
+    primaryTransparentStrong = Color.argb(76, 146, 104, 224)
+    coverDefault = Color.rgb(231, 217, 255)
+    coverSummary = Color.rgb(252, 224, 240)
+    coverContent = Color.rgb(244, 240, 255)
+    danger = Color.rgb(255, 77, 79)
+    dangerSoft = Color.rgb(255, 240, 248)
+    warning = Color.rgb(255, 149, 0)
+    success = Color.rgb(82, 196, 26)
+    // [PRODUCT] The historical LaoJi vivid skin uses a warmer pink-purple
+    // recording action while preserving the source control geometry.
+    recordGradientStart = Color.rgb(227, 91, 196)
+    recordGradientEnd = Color.rgb(126, 80, 221)
+  }
 }
+
+/** Keep translucent media tokens tied to the active skin instead of a source-blue literal. */
+internal fun withAlpha(color: Int, alpha: Int): Int = Color.argb(
+  alpha.coerceIn(0, 255),
+  Color.red(color),
+  Color.green(color),
+  Color.blue(color),
+)
 
 internal fun Context.dp(value: Int): Int =
   TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).toInt()

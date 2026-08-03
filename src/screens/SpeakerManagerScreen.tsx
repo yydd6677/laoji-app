@@ -8,7 +8,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
 import { fetchSpeakers, SpeakerProfile } from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
@@ -153,7 +153,7 @@ const s = StyleSheet.create({
   stateText: { fontSize: 14, lineHeight: 20, color: C.sub, textAlign: 'center' },
   primaryButton: { minHeight: 40, borderRadius: 6, backgroundColor: C.primary, paddingHorizontal: 20, marginTop: 20, alignItems: 'center', justifyContent: 'center' },
   primaryButtonText: { fontSize: 14, lineHeight: 20, color: '#fff', fontWeight: '500' },
-  errorBox: { minHeight: 44, backgroundColor: '#FFF3F3', paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  errorBox: { minHeight: 44, backgroundColor: withAlpha(C.red, 0.08), paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 9 },
   errorText: { flex: 1, fontSize: 13, lineHeight: 20, color: C.red },
   speakerRow: { height: 66, backgroundColor: C.body, paddingLeft: 16, paddingRight: 16, flexDirection: 'row', alignItems: 'center' },
   rowDivider: { height: StyleSheet.hairlineWidth, marginLeft: 76, backgroundColor: C.border },

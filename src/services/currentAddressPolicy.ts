@@ -38,6 +38,8 @@ export type LocationRaceOptions = {
 
 export type GeocodedAddressParts = {
   formattedAddress?: string | null;
+  /** Optional provider label echoed by a configured proxy. */
+  provider?: string | null;
   country?: string | null;
   region?: string | null;
   city?: string | null;
@@ -242,13 +244,41 @@ export function formatGeocodedAddressParts(value: GeocodedAddressParts | undefin
 }
 
 export function addressGranularity(value: GeocodedAddressParts): AddressGranularity {
-  if (cleanPart(value.street)) return 'street';
-  if (cleanPart(value.name)) return 'place';
-  if (cleanPart(value.district) || cleanPart(value.subregion)) return 'district';
-  if (cleanPart(value.city)) return 'city';
-  if (cleanPart(value.region)) return 'region';
-  if (cleanPart(value.country)) return 'country';
+  const street = cleanPart(value.street);
+  const name = cleanPart(value.name);
+  const district = cleanPart(value.district);
+  const subregion = cleanPart(value.subregion);
+  const city = cleanPart(value.city);
+  const region = cleanPart(value.region);
+  const country = cleanPart(value.country);
+
+  // A house number without a street name is insufficient to claim street
+  // precision; retain a coarser classification until the provider supplies
+  // the missing street component.
+  if (street) return 'street';
+  // Some providers repeat the city in `name` for a city-only result. That is
+  // not a POI and must not be promoted to `place`; only a distinct name is a
+  // place-level result.
+  if (
+    name
+    && name !== district
+    && name !== subregion
+    && name !== city
+    && name !== region
+    && name !== country
+  ) return 'place';
+  if (district || subregion) return 'district';
+  if (city) return 'city';
+  if (region) return 'region';
+  if (country) return 'country';
   return 'unknown';
+}
+
+function normalizedProvider(value: string | null | undefined): string | null {
+  const provider = cleanPart(value);
+  return provider && provider.length <= 64 && /^[A-Za-z0-9._:-]+$/.test(provider)
+    ? provider
+    : null;
 }
 
 export function addressConfidence(
@@ -285,7 +315,7 @@ export async function resolveGeocodedAddress(
   const granularity = addressGranularity(first);
   return {
     address,
-    provider: adapter.provider,
+    provider: normalizedProvider(first.provider) ?? adapter.provider,
     granularity,
     confidence: addressConfidence(granularity, fix.accuracyMeters),
   };

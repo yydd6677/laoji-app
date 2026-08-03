@@ -47,7 +47,7 @@ import {
   createMeetingRecordingFinalizer,
 } from '../services/meetingRecording';
 import { buildRealtimeAsrUrl } from '../services/realtimeAsr';
-import { readableErrorMessage } from '../services/errors';
+import { readableErrorMessage, readableRecorderErrorMessage } from '../services/errors';
 import {
   buildNativeMinutesRecordingSnapshot,
   finalizedNativeMinutesTranscript,
@@ -87,6 +87,7 @@ import {
   type MeetingManualNoteSyncConflictView,
 } from '../services/meetingManualNoteConflicts';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
+import { Colors as C } from '../theme/colors';
 import {
   findOwnedRecoveredMeetingRecording,
   nativeMeetingSnapshotFromRecovery,
@@ -362,7 +363,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
     } else if (snapshot.state === 'failed' && snapshot.errorMessage) {
       recorderErrorVisibleRef.current = true;
-      setError(readableErrorMessage(snapshot.errorMessage, '录音暂时不可用，请稍后重试。'));
+      setError(readableRecorderErrorMessage(
+        snapshot.errorCode,
+        snapshot.errorMessage,
+        '录音暂时不可用，请稍后重试。',
+        Boolean(snapshot.localUri && snapshot.transcriptRecoveryRequired),
+      ));
     }
   }, [recordingStorageScope]);
 
@@ -415,7 +421,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (event.recoverable) return;
         if (mountedRef.current) {
           recorderErrorVisibleRef.current = true;
-          setError(readableErrorMessage(event.errorMessage, '录音暂时不可用，请稍后重试'));
+          setError(readableRecorderErrorMessage(
+            event.errorCode,
+            event.errorMessage,
+            '录音暂时不可用，请稍后重试',
+            event.recoverable,
+          ));
         }
       }),
     ];
@@ -1064,7 +1075,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }), [activeContent, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, manualNoteConflict, meetingId, phase, requestedMeetingId, title, transcript]);
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
       <View
         style={styles.root}
         testID="meeting-live-native-root"

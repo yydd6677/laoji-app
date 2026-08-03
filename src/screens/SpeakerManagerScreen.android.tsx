@@ -12,6 +12,7 @@ import { fetchSpeakers, type SpeakerProfile } from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
 import type { RootStackParamList } from '../types';
 import { buildNativeSpeakerManagerSnapshot } from '../native/nativeSpeakerSnapshots';
+import { Colors as C } from '../theme/colors';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
 
@@ -82,7 +83,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
   }, [load, navigation, signOut]);
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#F8F9FA">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>
       <View
         style={styles.root}
         testID="speaker-manager-native-root"

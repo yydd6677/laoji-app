@@ -21,7 +21,7 @@ internal class ContentUriRequestBody(
 
   override fun writeTo(sink: BufferedSink) {
     val input = contentResolver.openInputStream(uri)
-      ?: throw IllegalStateException("Meeting audio file cannot be opened")
+      ?: throw IllegalStateException("无法打开会议录音文件")
     input.use { stream -> sink.writeAll(stream.source()) }
   }
 }

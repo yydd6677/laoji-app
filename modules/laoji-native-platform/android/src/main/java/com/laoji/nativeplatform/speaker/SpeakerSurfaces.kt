@@ -27,6 +27,7 @@ internal class SpeakerManagerSurface(
   context: Context,
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : LinearLayout(context) {
+  private val paletteReady = SpeakerPalette.configure(context)
   private val titleBar = speakerTitleBar(context, "讲话人管理", onAction)
   private val list = RecyclerView(context)
   private val adapter = SpeakerProfileAdapter(onAction)
@@ -166,6 +167,7 @@ internal class SpeakerEnrollmentSurface(
   context: Context,
   private val onAction: (Map<String, Any?>) -> Unit,
 ) : LinearLayout(context) {
+  private val paletteReady = SpeakerPalette.configure(context)
   private val titleBar = speakerTitleBar(context, "声纹采集", onAction, showDelete = true)
   private val scroll = ScrollView(context)
   private val content = LinearLayout(context)

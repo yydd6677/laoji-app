@@ -450,9 +450,19 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
     super.onDraw(canvas)
     val rowWidth = (width - horizontalGapPx).coerceAtLeast(1).toFloat()
     events.forEachIndexed { index, event ->
+      val visual = CalendarUi.eventVisual(context, event.category)
+      eventPaint.color = visual.fill
+      textPaint.color = visual.text
+      pressedPaint.color = visual.pressedOverlay
       drawChip(canvas, index, rowWidth, CalendarUi.listEventTitle(event.title), eventPaint, textPaint, false)
     }
     if (overflowCount > 0) {
+      pressedPaint.color = Color.argb(
+        26,
+        Color.red(palette.eventPressedOverlay),
+        Color.green(palette.eventPressedOverlay),
+        Color.blue(palette.eventPressedOverlay),
+      )
       drawChip(
         canvas,
         events.size,

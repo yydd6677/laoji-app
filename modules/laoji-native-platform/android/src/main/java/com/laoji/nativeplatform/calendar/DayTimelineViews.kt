@@ -388,7 +388,16 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   private fun drawEvent(canvas: Canvas, geometry: TimelineEventGeometry) {
     val rect = geometry.contentRect
     val androidRect = RectF(rect.left, rect.top, rect.right, rect.bottom)
-    val radius = CalendarUi.dp(context, DayEventVisualContract.EVENT_RADIUS_DP)
+    val radius = CalendarUi.dp(
+      context,
+      CalendarUi.eventRadiusDp(context, DayEventVisualContract.EVENT_RADIUS_DP),
+    )
+    val visual = CalendarUi.eventVisual(context, geometry.segment.event.category)
+    eventPaint.color = visual.fill
+    eventBorderPaint.color = visual.border
+    eventPressedPaint.color = visual.pressedOverlay
+    eventTitlePaint.color = visual.text
+    eventTimePaint.color = visual.text
     canvas.drawRoundRect(androidRect, radius, radius, eventPaint)
     if (geometry.segment.startsBeforeDay) {
       canvas.drawRect(rect.left, rect.top, rect.right, rect.top + CalendarUi.dp(context, 4f), eventPaint)

@@ -31,6 +31,7 @@ class CalendarDetailPageView(
 ) : ExpoView(context, appContext) {
   override val shouldUseAndroidLayout: Boolean = true
 
+  private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
   private val root = FrameLayout(context)
   private val titleBar = CalendarCommonTitleBar(context)
@@ -107,7 +108,7 @@ class CalendarDetailPageView(
     titleBar.setLeftIconAction(
       com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back,
       "返回",
-      Color.BLACK,
+      CalendarPagePalette.text,
       CalendarTitleIconSize.SMALL,
       trailingPaddingDp = 0f,
       debounce = false,
@@ -116,14 +117,14 @@ class CalendarDetailPageView(
       titleBar.addRightIconAction(
         com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
         "编辑日程",
-        Color.BLACK,
+        CalendarPagePalette.text,
         CalendarTitleIconSize.SMALL,
         debounce = true,
       ) { emit("edit") }
       titleBar.addRightIconAction(
         com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
         "删除日程",
-        Color.BLACK,
+        CalendarPagePalette.text,
         CalendarTitleIconSize.SMALL,
         debounce = true,
       ) {
@@ -173,7 +174,7 @@ class CalendarDetailPageView(
     setPadding(context.pageDp(16), 0, context.pageDp(16), context.pageDp(30))
     background = GradientDrawable(
       GradientDrawable.Orientation.TOP_BOTTOM,
-      intArrayOf(Color.rgb(240, 244, 255), CalendarPagePalette.body),
+      intArrayOf(CalendarPagePalette.primarySoft, CalendarPagePalette.body),
     )
     val summaryRow = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
@@ -207,7 +208,7 @@ class CalendarDetailPageView(
     )
     state.repeatLabel?.takeIf(String::isNotBlank)?.let { label ->
       addView(
-        context.pageText(label, 14f, Color.rgb(148, 180, 255)).apply { maxLines = 2 },
+        context.pageText(label, 14f, CalendarPagePalette.placeholder).apply { maxLines = 2 },
         LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
           leftMargin = context.pageDp(32)
         },
@@ -486,7 +487,7 @@ class CalendarDetailPageView(
   private fun seriesRowBackground(): StateListDrawable = StateListDrawable().apply {
     addState(
       intArrayOf(android.R.attr.state_pressed),
-      GradientDrawable().apply { setColor(Color.rgb(245, 246, 247)) },
+      GradientDrawable().apply { setColor(CalendarPagePalette.neutralBackground) },
     )
     addState(
       intArrayOf(),

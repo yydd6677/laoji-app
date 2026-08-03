@@ -14,7 +14,7 @@ import {
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingTemplate,
 } from '../domain/meeting';
-import { fetchWithTimeout as fetch } from './http';
+import { fetchWithTimeout as fetch, readBlobWithTimeout, readJsonWithTimeout } from './http';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 import {
@@ -31,6 +31,8 @@ import {
 // Endpoints are embedded by app.config.js from EXPO_PUBLIC_* build variables.
 // Production builds reject missing, plain-HTTP, and bare-IP values.
 const SUMMARY_TASK_WAIT_MS = 5_000;
+const SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+const API_RESPONSE_BODY_TIMEOUT_MS = 10_000;
 
 function laojiUrl(path: string): string {
   return `${getApiConfig().laojiApiBase}${path}`;
@@ -60,6 +62,9 @@ async function apiResponseError(prefix: string, res: Response, accessToken?: str
 export interface ParseResult {
   title: string;
   event_type: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  recurrence_interval?: number | null;
+  recurrence_weekdays?: number[] | null;
+  recurrence_until_date?: string | null;
   start_date: string;        // YYYY-MM-DD
   end_date?: string | null;  // YYYY-MM-DD, for multi-day events
   color?: string | null;
@@ -284,7 +289,12 @@ function normalizedParseResult(
   context: Required<ScheduleParseContext>,
 ): ParseResult {
   return {
-    ...normalizeScheduleParseResult(text, result, new Date(context.reference_datetime)),
+    ...normalizeScheduleParseResult(
+      text,
+      result,
+      new Date(context.reference_datetime),
+      context.timezone,
+    ),
     reference_datetime: context.reference_datetime,
     timezone: context.timezone,
   };
@@ -297,8 +307,8 @@ export async function parseText(
   const context = currentScheduleParseContext(contextInput);
   const referenceDate = new Date(context.reference_datetime);
 
-  const local = parseLocalScheduleText(text, referenceDate);
-  const decision = classifyScheduleParseRoute(text, local, referenceDate);
+  const local = parseLocalScheduleText(text, referenceDate, context.timezone);
+  const decision = classifyScheduleParseRoute(text, local, referenceDate, context.timezone);
   if (decision.route === 'reject') {
     const code = decision.code ?? 'not_schedule';
     throw new ScheduleParseError(code, decision.message ?? SCHEDULE_ERROR_MESSAGES[code]);
@@ -314,7 +324,10 @@ export async function parseText(
       body: JSON.stringify({ text, ...context }),
     });
     if (res.ok) {
-      const parsed = await res.json() as ParseResult;
+      const parsed = await readJsonWithTimeout<ParseResult>(
+        res,
+        SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
+      );
       return normalizedParseResult(text, parsed, context);
     }
     throw await readScheduleParseError(res, decision.code ?? 'invalid_schedule');
@@ -349,7 +362,10 @@ export async function clarifyText(
     }),
   });
   if (!res.ok) throw await readScheduleParseError(res, 'invalid_schedule');
-  const parsed = await res.json() as ParseResult;
+  const parsed = await readJsonWithTimeout<ParseResult>(
+    res,
+    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
+  );
   return normalizedParseResult(`${original}\n${supplement}`, parsed, context);
 }
 
@@ -362,7 +378,7 @@ export async function saveEvent(event: ApiEvent, accessToken?: string): Promise<
     body: JSON.stringify(event),
   });
   if (!res.ok) throw await apiResponseError('save event failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiEvent>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 // ── Fetch events by month ───────────────────────────────────────────────────
@@ -374,11 +390,13 @@ export async function fetchEvents(year?: number, month?: number, accessToken?: s
     { headers: authHeaders(accessToken) },
   );
   if (!res.ok) throw await apiResponseError('fetch events failed', res, accessToken);
-  const data = await res.json();
+  const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   return Array.isArray(data) ? data : data.events ?? [];
 }
 
 // ── ASR transcribe ──────────────────────────────────────────────────────────
+
+const MAX_SCHEDULE_AUDIO_BYTES = 25 * 1024 * 1024;
 
 async function blobToBase64(blob: Blob): Promise<string> {
   if (typeof blob.arrayBuffer === 'function') {
@@ -407,7 +425,12 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 async function audioUriToBase64(audioUri: string): Promise<string> {
   if (audioUri.startsWith('data:')) {
-    return audioUri.includes(',') ? audioUri.split(',')[1] : audioUri;
+    const separator = audioUri.indexOf(',');
+    const metadata = separator >= 0 ? audioUri.slice(5, separator).toLowerCase() : '';
+    if (separator < 0 || !metadata.split(';').includes('base64')) {
+      throw new ScheduleParseError('invalid_schedule', '录音格式无效，请重新录音。');
+    }
+    return audioUri.slice(separator + 1);
   }
 
   if (audioUri.startsWith('file://') || audioUri.startsWith('content://')) {
@@ -418,18 +441,43 @@ async function audioUriToBase64(audioUri: string): Promise<string> {
 
   const res = await fetch(audioUri);
   if (!res.ok) throw await readResponseError('read audio failed', res);
-  return blobToBase64(await res.blob());
+  return blobToBase64(await readBlobWithTimeout(res, SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS));
 }
 
 function requireAudioPayload(value: string): string {
-  const payload = value.trim();
+  const payload = value.replace(/\s+/g, '');
   if (!payload) {
     throw new ScheduleParseError('invalid_schedule', '录音内容为空，请重新录音。');
+  }
+  if (
+    payload.length % 4 === 1
+    || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)
+  ) {
+    throw new ScheduleParseError('invalid_schedule', '录音格式无效，请重新录音。');
+  }
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  const decodedBytes = (payload.length * 3) / 4 - padding;
+  if (decodedBytes > MAX_SCHEDULE_AUDIO_BYTES) {
+    throw new ScheduleParseError('invalid_schedule', '录音文件不能超过 25 MB。');
   }
   return payload;
 }
 
-function parseAudioResult(value: unknown): ParseResult {
+const SCHEDULE_AUDIO_FALLBACK_STATUSES = new Set([404, 405, 501, 502, 503]);
+
+function shouldFallbackScheduleAudioStatus(status: number): boolean {
+  return SCHEDULE_AUDIO_FALLBACK_STATUSES.has(status);
+}
+
+function shouldFallbackScheduleAudioError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  // A timeout means the direct route may still be processing the request. Do
+  // not submit the same audio again and create duplicate ASR work.
+  if (error.name === 'AbortError' || error.name === 'RequestTimeoutError') return false;
+  return /Network request failed|Failed to fetch|connection refused|ECONNREFUSED|network error/i.test(error.message);
+}
+
+function parseAudioResult(value: unknown, context: Required<ScheduleParseContext>): ParseResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ScheduleParseError('invalid_schedule', '未识别到日程，请重试。');
   }
@@ -441,13 +489,22 @@ function parseAudioResult(value: unknown): ParseResult {
   if (typeof data.title !== 'string' || typeof data.start_date !== 'string') {
     throw new ScheduleParseError('invalid_schedule', '日程解析结果不完整，请重试。');
   }
-  return normalizeScheduleParseResult(rawText, data as ParseResult);
+  return normalizeScheduleParseResult(
+    rawText,
+    data as ParseResult,
+    new Date(context.reference_datetime),
+    context.timezone,
+  );
 }
 
 function filenameFromUri(audioUri: string): string {
   const fallback = 'recording.m4a';
   const file = audioUri.split('?')[0].split('#')[0].split('/').pop();
-  return decodeURIComponent(file || fallback);
+  try {
+    return decodeURIComponent(file || fallback) || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function transcribeAudio(
@@ -458,18 +515,40 @@ export async function transcribeAudio(
   const filename = filenameFromUri(audioUri);
   const context = currentScheduleParseContext(contextInput);
 
+  return transcribeAudioPayload(audio_base64, filename, context);
+}
+
+async function transcribeAudioPayload(
+  audio_base64: string,
+  filename: string,
+  context: Required<ScheduleParseContext>,
+): Promise<string> {
   const res = await fetch(meetingUrl('/api/laoji/asr/transcribe'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audio_base64, filename, ...context }),
   });
   if (!res.ok) throw await readResponseError('语音识别失败', res);
-  const data = await res.json();
+  const data = await readJsonWithTimeout<Record<string, unknown>>(
+    res,
+    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
+  );
   const text = typeof data?.text === 'string'
     ? data.text.trim()
     : typeof data?.result === 'string' ? data.result.trim() : '';
   if (!text) throw new ScheduleParseError('invalid_schedule', '未识别到语音内容，请重新录音。');
   return text;
+}
+
+async function parseAudioViaTranscribe(
+  audio_base64: string,
+  filename: string,
+  context: Required<ScheduleParseContext>,
+): Promise<ParseResult> {
+  const transcript = await transcribeAudioPayload(audio_base64, filename, context);
+  // Reuse the same text parser and request context as realtime voice input;
+  // this keeps direct parse-audio and transcribe -> parse semantics aligned.
+  return parseText(transcript, context);
 }
 
 export async function parseAudio(
@@ -480,13 +559,29 @@ export async function parseAudio(
   const filename = filenameFromUri(audioUri);
   const context = currentScheduleParseContext(contextInput);
 
-  const res = await fetch(meetingUrl('/api/laoji/parse-audio'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio_base64, filename, ...context }),
-  });
-  if (!res.ok) throw await readResponseError('日程语音解析失败', res);
-  const parsed = parseAudioResult(await res.json());
+  let res: Response;
+  try {
+    res = await fetch(meetingUrl('/api/laoji/parse-audio'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio_base64, filename, ...context }),
+    });
+  } catch (error) {
+    if (shouldFallbackScheduleAudioError(error)) {
+      return parseAudioViaTranscribe(audio_base64, filename, context);
+    }
+    throw error;
+  }
+  if (!res.ok) {
+    if (shouldFallbackScheduleAudioStatus(res.status)) {
+      return parseAudioViaTranscribe(audio_base64, filename, context);
+    }
+    throw await readResponseError('日程语音解析失败', res);
+  }
+  const parsed = parseAudioResult(await readJsonWithTimeout<unknown>(
+    res,
+    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
+  ), context);
   return { ...parsed, ...context };
 }
 
@@ -511,7 +606,7 @@ export async function commandEventState(
     body: JSON.stringify(command),
   });
   if (!res.ok) throw await apiResponseError('event state command failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiEventStateCommandResponse>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 // ── Update event ────────────────────────────────────────────────────────────
@@ -527,7 +622,7 @@ export async function updateEvent(
     body: JSON.stringify(changes),
   });
   if (!res.ok) throw await apiResponseError('update event failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiEvent>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function commandEventEdit(
@@ -541,7 +636,7 @@ export async function commandEventEdit(
     body: JSON.stringify(command),
   });
   if (!res.ok) throw await apiResponseError('event edit command failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiEventEditCommandResponse>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function fetchEventEditCommand(
@@ -553,7 +648,7 @@ export async function fetchEventEditCommand(
     { headers: authHeaders(accessToken) },
   );
   if (!res.ok) throw await apiResponseError('fetch event edit command failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiEventEditCommandResponse>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 // ── Meetings ────────────────────────────────────────────────────────────────
@@ -653,7 +748,7 @@ export async function fetchMeetings(page = 1, size = 20, accessToken?: string): 
     { headers: authHeaders(accessToken) },
   );
   if (!res.ok) throw await apiResponseError('fetch meetings failed', res, accessToken);
-  const data = await res.json();
+  const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   return data.items ?? data ?? [];
 }
 
@@ -702,7 +797,7 @@ export async function createMeeting(
     }),
   });
   if (!res.ok) throw await apiResponseError('create meeting failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiMeeting>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export interface ApiGuestRealtimeSession {
@@ -719,7 +814,7 @@ export async function createGuestRealtimeSession(title: string): Promise<ApiGues
     body: JSON.stringify({ title: title.trim() || null }),
   });
   if (!res.ok) throw await readResponseError('create guest meeting session failed', res);
-  return res.json();
+  return readJsonWithTimeout<ApiGuestRealtimeSession>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function deleteGuestRealtimeSession(meetingId: string, guestToken: string): Promise<void> {
@@ -750,7 +845,7 @@ export async function fetchGuestMeetingTranscriptSnapshot(
       { headers: { 'X-Guest-Session-Token': guestToken }, signal: options.signal },
     );
     if (!res.ok) throw await readResponseError('fetch guest meeting transcript failed', res);
-    const data = await res.json();
+    const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS, options.signal);
     completeness = combineTranscriptServerCompleteness(
       completeness,
       transcriptServerCompletenessFromPayload(data),
@@ -801,7 +896,7 @@ export async function updateMeeting(
     signal,
   });
   if (!res.ok) throw await apiResponseError('update meeting failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiMeeting>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export interface GuestMeetingImportResult {
@@ -844,7 +939,7 @@ export async function importGuestMeetingData(
     },
   );
   if (!res.ok) throw await apiResponseError('import guest meeting failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<GuestMeetingImportResult>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export interface FetchMeetingTranscriptOptions {
@@ -907,7 +1002,7 @@ export async function fetchMeetingTranscriptSnapshot(
       { headers: authHeaders(accessToken), signal: options.signal },
     );
     if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, accessToken);
-    const data = await res.json();
+    const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS, options.signal);
     const pageRevisionId = transcriptRemoteRevisionId(data);
     if (remoteRevisionId && pageRevisionId && remoteRevisionId !== pageRevisionId) {
       throw new Error('transcript pagination changed remote revision');
@@ -964,7 +1059,7 @@ export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?:
   );
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<unknown>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export async function generateMeetingSummary(
@@ -992,7 +1087,7 @@ export async function generateMeetingSummary(
     }),
   });
   if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiMeetingSummaryTask>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export async function fetchMeetingSummaryTask(
@@ -1008,7 +1103,7 @@ export async function fetchMeetingSummaryTask(
     { headers: authHeaders(accessToken), signal },
   );
   if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, accessToken);
-  return res.json();
+  return readJsonWithTimeout<ApiMeetingTaskStatus>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export async function generateGuestMeetingSummary(
@@ -1049,7 +1144,7 @@ export async function generateGuestMeetingSummary(
     }),
   });
   if (!res.ok) throw await readResponseError('generate guest meeting summary failed', res);
-  return res.json();
+  return readJsonWithTimeout<ApiMeetingSummaryTask>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export async function fetchGuestMeetingSummaryTask(
@@ -1063,7 +1158,7 @@ export async function fetchGuestMeetingSummaryTask(
     { signal },
   );
   if (!res.ok) throw await readResponseError('fetch guest meeting summary task failed', res);
-  return res.json();
+  return readJsonWithTimeout<ApiMeetingTaskStatus>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
 export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: string): Promise<ApiMeetingAudioInfo | null> {
@@ -1073,7 +1168,7 @@ export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: str
   );
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw await apiResponseError('fetch meeting audio failed', res, accessToken);
-  const data = await res.json();
+  const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   const url = typeof data?.url === 'string' ? data.url.trim() : '';
   if (!url) return null;
   const requiresAuth = data.requires_auth ?? data.requiresAuth ?? false;
@@ -1119,7 +1214,7 @@ export async function uploadMeetingAudio(
     body: form,
   });
   if (!res.ok) throw await apiResponseError('upload meeting audio failed', res, accessToken);
-  const data = await res.json();
+  const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   const audio = data.audio ?? data;
   if (!audio?.url) return null;
   const requiresAuth = audio.requires_auth ?? false;

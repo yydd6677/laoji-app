@@ -170,15 +170,15 @@ internal fun inspectMeetingMediaSource(
   hintedMimeType: String? = null,
 ): InspectedMeetingMediaSource {
   val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
-    ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "invalid media import URI")
+    ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
   if (uri.scheme !in setOf("content", "file")) {
-    throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "unsupported media import URI scheme")
+    throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
   }
   val metadata = resolveMediaSourceMetadata(context, uri, hintedMimeType)
   val mimeType = resolvedSupportedMimeType(metadata.fileName, metadata.mimeType)
-    ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "unsupported media type")
+    ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "不支持此录音格式")
   if (metadata.byteSize != null && metadata.byteSize <= 0L) {
-    throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "media file is empty")
+    throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
   }
   return InspectedMeetingMediaSource(
     uri,

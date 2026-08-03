@@ -33,7 +33,7 @@ import {
   isSameMonth,
   startOfMonth,
 } from '../utils/calendarDate';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import type { CalEvent, MainTabsParamList, RootStackParamList } from '../types';
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { eventOverlapsDateRange } from '../utils/eventDateSemantics';
@@ -494,7 +494,7 @@ const s = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(100,106,115,0.10)',
+    backgroundColor: withAlpha(C.sub, 0.10),
   },
   titleArrowTriangle: {
     width: 0,
@@ -547,7 +547,7 @@ const s = StyleSheet.create({
     left: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: withAlpha(C.body, 0.72),
     zIndex: 2,
   },
   syncToastLayer: {
@@ -574,7 +574,7 @@ const s = StyleSheet.create({
     paddingRight: 8,
     paddingVertical: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(31,35,41,0.92)',
+    backgroundColor: withAlpha(C.text, 0.92),
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -584,7 +584,7 @@ const s = StyleSheet.create({
     marginLeft: 9,
     fontSize: 14,
     lineHeight: 20,
-    color: '#FFFFFF',
+    color: C.body,
   },
   cacheNoticeDismiss: {
     width: 36,
@@ -603,5 +603,5 @@ const s = StyleSheet.create({
     gap: 8,
     backgroundColor: C.text,
   },
-  syncToastText: { flexShrink: 1, fontSize: 14, lineHeight: 20, color: '#FFFFFF' },
+  syncToastText: { flexShrink: 1, fontSize: 14, lineHeight: 20, color: C.body },
 });

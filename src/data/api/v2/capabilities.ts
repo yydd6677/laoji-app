@@ -1,7 +1,7 @@
 import { getAppStorageItem, setAppStorageItem } from '../../../services/appStorage';
 import { getApiConfig } from '../../../services/config';
 import { readResponseError } from '../../../services/errors';
-import { fetchWithTimeout } from '../../../services/http';
+import { fetchWithTimeout, readJsonWithTimeout } from '../../../services/http';
 import {
   LEGACY_MEETING_CAPABILITIES,
   type MeetingCapabilities,
@@ -186,7 +186,7 @@ async function fetchRemoteCapabilities(accessToken?: string | null): Promise<Mee
       unauthorizedToken: accessToken ?? undefined,
     });
   }
-  return normalizeCapabilities(await response.json());
+  return normalizeCapabilities(await readJsonWithTimeout<unknown>(response, 10_000));
 }
 
 export async function loadMeetingCapabilities(

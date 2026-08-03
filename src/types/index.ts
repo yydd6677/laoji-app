@@ -137,6 +137,8 @@ export interface EventDraftParams {
   endTime?: string;
   isAllDay: boolean;
   repeat?: CalEvent['repeat'];
+  recurrenceInterval?: number;
+  recurrenceWeekdays?: number[];
   recurrenceUntilDate?: string;
   description?: string;
   rawText?: string;

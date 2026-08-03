@@ -313,6 +313,8 @@ data class RecorderSnapshot(
   val transcriptRecoveryRequired: Boolean,
   val errorCode: RecorderErrorCode?,
   val errorMessage: String?,
+  val providerErrorCode: String?,
+  val providerErrorRetryable: Boolean?,
 ) {
   val asrRequired: Boolean
     get() = mode == RecorderMode.REALTIME
@@ -337,6 +339,8 @@ data class RecorderSnapshot(
     "transcriptRecoveryRequired" to transcriptRecoveryRequired,
     "errorCode" to errorCode?.wireValue,
     "errorMessage" to errorMessage,
+    "providerErrorCode" to providerErrorCode,
+    "providerErrorRetryable" to providerErrorRetryable,
   )
 }
 

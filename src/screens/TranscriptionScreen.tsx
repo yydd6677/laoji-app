@@ -14,7 +14,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect, type RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList, TranscriptLine } from '../types';
@@ -120,7 +120,7 @@ const MEETING_DETAIL_TAB_GEOMETRY = Object.freeze({
 });
 
 const SPEAKER_AVATAR_TONES = [
-  { backgroundColor: '#E8F3FF', foregroundColor: '#3370FF' },
+  { backgroundColor: C.primaryLight, foregroundColor: C.primary },
   { backgroundColor: '#E4F7ED', foregroundColor: '#20A162' },
   { backgroundColor: '#F0EBFF', foregroundColor: '#7F5AF0' },
   { backgroundColor: '#FFF0E2', foregroundColor: '#F07C2B' },
@@ -1571,7 +1571,7 @@ const s = StyleSheet.create({
     marginTop: 12,
     paddingLeft: 20,
     paddingRight: 8,
-    backgroundColor: '#FFF7E8',
+    backgroundColor: withAlpha(C.orange, 0.10),
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1627,7 +1627,7 @@ const s = StyleSheet.create({
   emptyStateText: { fontSize: 14, lineHeight: 20, color: C.sub },
   syncWarning: {
     minHeight: 44,
-    backgroundColor: '#FFF3F3',
+    backgroundColor: withAlpha(C.red, 0.08),
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,

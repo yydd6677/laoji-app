@@ -74,15 +74,61 @@ function text(value: unknown, maximum = MAX_CONTENT_LENGTH): string {
   return String(value).replace(/\r\n?/g, '\n').trim().slice(0, maximum);
 }
 
-function contentText(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map(item => {
-      if (typeof item === 'string' || typeof item === 'number') return text(item);
-      const record = asRecord(item);
-      return record ? text(firstValue(record, 'content', 'text', 'description', 'decision', 'title')) : '';
-    }).filter(Boolean).join('\n').slice(0, MAX_CONTENT_LENGTH);
+const SUMMARY_TEXT_KEYS = [
+  'overview', 'tldr', 'summary', 'content', 'text', 'description', 'decision',
+  'task', 'title', 'name', 'person', 'date', 'due_date', 'deadline', 'question', 'answer',
+] as const;
+
+function parseSummaryJsonText(value: string): unknown {
+  let clean = value.trim();
+  if (clean.startsWith('```')) {
+    clean = clean
+      .replace(/^```(?:json|javascript|js)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
   }
-  return text(value);
+  if (!clean || !['{', '[', '"'].includes(clean[0] ?? '')) return undefined;
+  try {
+    return JSON.parse(clean) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function looksLikeSummaryJsonContainer(value: string): boolean {
+  const clean = value.trim();
+  if (clean.startsWith('{')) return /^\{\s*(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_-]*)\s*:/.test(clean);
+  if (clean.startsWith('[')) return /^\[\s*(?:\{|"|\[)/.test(clean);
+  return false;
+}
+
+function contentText(value: unknown, depth = 0): string {
+  if (depth > 3) return '';
+  if (Array.isArray(value)) {
+    return value
+      .map(item => contentText(item, depth + 1))
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, MAX_CONTENT_LENGTH);
+  }
+  if (typeof value === 'string') {
+    const decoded = parseSummaryJsonText(value);
+    if (decoded !== undefined && decoded !== value) {
+      return contentText(decoded, depth + 1);
+    }
+    if (looksLikeSummaryJsonContainer(value)) return '';
+    return text(value);
+  }
+  if (typeof value === 'number') return text(value);
+  const record = asRecord(value);
+  if (!record) return '';
+  for (const key of SUMMARY_TEXT_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+    const result = contentText(record[key], depth + 1);
+    if (result) return result;
+  }
+  // Metadata-only objects must not be stringified into user-visible content.
+  return '';
 }
 
 function nonNegativeInteger(value: unknown, fallback = 0): number {
@@ -206,7 +252,7 @@ function parseActions(value: unknown): MeetingSummaryActionCandidate[] {
     result.push({
       id,
       content,
-      assignee: text(firstValue(record ?? {}, 'assignee', 'owner', 'responsible_person'), 200) || null,
+      assignee: contentText(firstValue(record ?? {}, 'assignee', 'owner', 'responsible_person')).slice(0, 200) || null,
       dueAtMs,
       reminderAtMs: null,
       reminderNotificationId: null,
@@ -267,8 +313,8 @@ export function legacyMeetingSummaryToDocument(
   meetingId: string,
   summary: LegacyMeetingSummaryLike,
 ): MeetingSummaryDocument | null {
-  const overview = text(summary.overview || summary.full_text);
-  const decisions = (summary.key_decisions ?? []).map(item => text(item)).filter(Boolean);
+  const overview = contentText(summary.overview || summary.full_text);
+  const decisions = (summary.key_decisions ?? []).map(item => contentText(item)).filter(Boolean);
   const actions = parseActions(summary.action_items ?? []);
   const sections: MeetingSummarySection[] = [];
   if (overview) {
@@ -341,8 +387,8 @@ export function meetingSummaryDocumentToText(document: MeetingSummaryDocument): 
   const sections = document.sections.map(section => {
     const heading = section.title ? `## ${section.title}\n` : '';
     const body = ['bullets', 'decisions', 'topics', 'risks', 'action_items'].includes(section.kind)
-      ? section.content.split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => `- ${item}`).join('\n')
-      : section.content;
+      ? contentText(section.content).split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => `- ${item}`).join('\n')
+      : contentText(section.content);
     return `${heading}${body}`.trim();
   }).filter(Boolean);
   if (document.actionItemCandidates.length > 0) {

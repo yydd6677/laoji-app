@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
+import { getApiConfig } from './config';
 import {
   getNativeCurrentLocationAttempt,
   type NativeCurrentLocation,
@@ -20,10 +21,13 @@ import {
   type LocationProviderAttempt,
   type ReverseGeocoderAdapter,
 } from './currentAddressPolicy';
+import { createHttpReverseGeocoder } from './reverseGeocoder';
 
 const CURRENT_LOCATION_TIMEOUT_MS = 12_000;
 const NATIVE_LOCATION_TIMEOUT_MS = 10_000;
 const DEGRADED_LOCATION_GRACE_MS = 1_200;
+const SYSTEM_GEOCODER_TIMEOUT_MS = 4_000;
+const CONFIGURED_GEOCODER_TIMEOUT_MS = 5_000;
 
 export type CurrentAddressResult = {
   address: string;
@@ -135,6 +139,18 @@ const systemGeocoder: ReverseGeocoderAdapter = {
   },
 };
 
+function configuredGeocoder(): ReverseGeocoderAdapter | null {
+  const url = getApiConfig().reverseGeocoderUrl;
+  if (!url) return null;
+  try {
+    return createHttpReverseGeocoder(url, undefined, CONFIGURED_GEOCODER_TIMEOUT_MS);
+  } catch {
+    // Configuration validation normally rejects this before a build is made;
+    // keep a malformed runtime extra fail-closed and retain coordinate fallback.
+    return null;
+  }
+}
+
 async function position(): Promise<LocationFix> {
   const cached = await Location.getLastKnownPositionAsync({
     maxAge: DEFAULT_LAST_KNOWN_MAX_AGE_MS,
@@ -147,6 +163,7 @@ async function position(): Promise<LocationFix> {
 
   const candidates: LocationProviderAttempt[] = [
     expoLiveLocationAttempt(),
+    expoCurrentPositionAttempt(),
   ];
   if (Platform.OS === 'android') {
     const nativeAttempt = getNativeCurrentLocationAttempt(
@@ -208,15 +225,44 @@ function expoLiveLocationAttempt(): LocationProviderAttempt {
   };
 }
 
+function expoCurrentPositionAttempt(): LocationProviderAttempt {
+  let cancelled = false;
+  const result = Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.Balanced,
+    // The watch provider owns the optional system-settings prompt. Avoid two
+    // simultaneous prompts when both Expo providers race on Android.
+    mayShowUserSettingsDialog: false,
+  }).then(value => {
+    if (cancelled) return null;
+    return expoLocationFix(value, 'live', 'expo-current');
+  });
+  return {
+    provider: 'expo-current',
+    result,
+    cancel: () => {
+      cancelled = true;
+    },
+  };
+}
+
 async function resolveCurrentAddress(): Promise<CurrentAddressResult> {
-  const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => false);
+  const servicesEnabled = await Location.hasServicesEnabledAsync().catch(() => null);
+  if (servicesEnabled === null) {
+    throw new CurrentAddressError('unavailable', '暂时无法检查系统定位服务，请稍后重试。');
+  }
   if (!servicesEnabled) {
     throw new CurrentAddressError('services-disabled', '系统定位服务未开启，请开启后重试。');
   }
 
-  let permission = await Location.getForegroundPermissionsAsync();
+  let permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+  if (!permission) {
+    throw new CurrentAddressError('unavailable', '暂时无法检查位置权限，请稍后重试。');
+  }
   if (permission.status !== 'granted' && permission.canAskAgain) {
-    permission = await Location.requestForegroundPermissionsAsync();
+    permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
+    if (!permission) {
+      throw new CurrentAddressError('unavailable', '暂时无法申请位置权限，请稍后重试。');
+    }
   }
   if (permission.status !== 'granted') {
     throw new CurrentAddressError(
@@ -228,26 +274,35 @@ async function resolveCurrentAddress(): Promise<CurrentAddressResult> {
   }
 
   const current = await position();
-  try {
-    const resolution = await withTimeout(
-      resolveGeocodedAddress(systemGeocoder, current),
-      CURRENT_LOCATION_TIMEOUT_MS,
-    );
-    if (resolution) {
-      return {
-        address: resolution.address.slice(0, 400),
-        usedCoordinateFallback: false,
-        locationProvider: current.provider,
-        addressProvider: resolution.provider,
-        granularity: resolution.granularity,
-        confidence: resolution.confidence,
-        accuracyMeters: current.accuracyMeters,
-        ageMs: current.ageMs,
-        timestampMs: current.timestampMs,
-      };
+  const configured = configuredGeocoder();
+  // An explicitly configured provider is the product's deliberate address
+  // source; prefer it so a coarse system result cannot hide a more precise
+  // server result. The system provider remains the privacy-preserving fallback.
+  const adapters = configured ? [configured, systemGeocoder] : [systemGeocoder];
+  for (const adapter of adapters) {
+    try {
+      const resolution = await withTimeout(
+        resolveGeocodedAddress(adapter, current),
+        adapter.provider === systemGeocoder.provider
+          ? SYSTEM_GEOCODER_TIMEOUT_MS
+          : CONFIGURED_GEOCODER_TIMEOUT_MS,
+      );
+      if (resolution) {
+        return {
+          address: resolution.address.slice(0, 400),
+          usedCoordinateFallback: false,
+          locationProvider: current.provider,
+          addressProvider: resolution.provider,
+          granularity: resolution.granularity,
+          confidence: resolution.confidence,
+          accuracyMeters: current.accuracyMeters,
+          ageMs: current.ageMs,
+          timestampMs: current.timestampMs,
+        };
+      }
+    } catch {
+      // A provider failure must not discard an already verified coordinate.
     }
-  } catch {
-    // Coordinates remain useful when the platform geocoder has no result.
   }
 
   return {

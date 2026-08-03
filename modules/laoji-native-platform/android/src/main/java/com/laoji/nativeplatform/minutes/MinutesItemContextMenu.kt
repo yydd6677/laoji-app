@@ -240,7 +240,7 @@ private fun View.captureBitmap(): Bitmap? = try {
 private fun menuRowBackground(context: Context): StateListDrawable = StateListDrawable().apply {
   addState(
     intArrayOf(android.R.attr.state_pressed),
-    GradientDrawable().apply { setColor(Color.rgb(242, 243, 245)) },
+    GradientDrawable().apply { setColor(MinutesPalette.filler) },
   )
   addState(
     intArrayOf(),

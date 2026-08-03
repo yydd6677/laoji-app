@@ -1,6 +1,11 @@
 import { CalEvent } from '../types';
 import type { ApiEvent, ApiEventEditPatch } from './api';
-import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
+import {
+  colorForEvent,
+  inferEventCategory,
+  isEventCategory,
+  normalizeEventCategory,
+} from '../utils/eventColors';
 import { sourceEventId } from '../utils/eventIdentity';
 
 export { sourceEventId } from '../utils/eventIdentity';
@@ -9,6 +14,25 @@ export type EventDisplayMetadata = Partial<Pick<
   CalEvent,
   'color' | 'location' | 'category' | 'detail' | 'reminderMinutes' | 'notificationId'
 >>;
+
+function categoryFromEventFields(
+  candidate: string | null | undefined,
+  title: string,
+  text: string,
+): ReturnType<typeof normalizeEventCategory> {
+  if (isEventCategory(candidate) && candidate !== '其他') return candidate;
+  const inferred = inferEventCategory(title, text);
+  return inferred !== '其他' ? inferred : '其他';
+}
+
+function eventCategoryText(
+  title: string,
+  description?: string | null,
+  detail?: string | null,
+  rawText?: string | null,
+): string {
+  return [description, detail, rawText].filter((value): value is string => Boolean(value?.trim())).join(' ');
+}
 
 export function apiEventClientId(event: ApiEvent & { id: number }): string {
   if (event.occurrence_id) return event.occurrence_id;
@@ -21,11 +45,12 @@ export function apiEventClientId(event: ApiEvent & { id: number }): string {
 }
 
 export function applyEventMetadata(event: CalEvent, metadata?: EventDisplayMetadata): CalEvent {
+  const sourceText = eventCategoryText(event.title, event.description, event.detail, event.rawText);
   if (!metadata) {
-    const category = normalizeEventCategory(event.category);
+    const category = categoryFromEventFields(event.category, event.title, sourceText);
     return { ...event, category, color: colorForEvent({ category }) };
   }
-  const category = normalizeEventCategory(metadata.category ?? event.category);
+  const category = categoryFromEventFields(metadata.category ?? event.category, event.title, sourceText);
   return { ...event, ...metadata, category, color: colorForEvent({ category }) };
 }
 
@@ -34,7 +59,11 @@ export function apiEventToCalEvent(
   metadata?: EventDisplayMetadata,
 ): CalEvent {
   const endDate = event.end_date ?? undefined;
-  const category = normalizeEventCategory(event.category ?? metadata?.category);
+  const category = categoryFromEventFields(
+    metadata?.category ?? event.category,
+    event.title,
+    eventCategoryText(event.title, event.description, event.detail, event.raw_text),
+  );
   const local: CalEvent = {
     id: apiEventClientId(event),
     sourceEventId: String(event.source_event_id ?? event.id),
@@ -75,12 +104,17 @@ export function apiEventToCalEvent(
 }
 
 export function calEventToApiEvent(event: Omit<CalEvent, 'id'>): ApiEvent {
+  const category = categoryFromEventFields(
+    event.category,
+    event.title,
+    eventCategoryText(event.title, event.description, event.detail, event.rawText),
+  );
   return {
     title: event.title,
     event_type: event.repeat || 'once',
     start_date: event.startDate,
     end_date: event.endDate ?? null,
-    color: colorForEvent({ category: event.category }),
+    color: colorForEvent({ category }),
     spanning: event.spanning ?? Boolean(event.endDate && event.endDate !== event.startDate),
     start_time: event.startTime ?? null,
     end_time: event.endTime ?? null,
@@ -89,7 +123,7 @@ export function calEventToApiEvent(event: Omit<CalEvent, 'id'>): ApiEvent {
     raw_text: event.rawText ?? null,
     client_request_id: event.clientRequestId ?? null,
     location: event.location ?? null,
-    category: normalizeEventCategory(event.category),
+    category,
     detail: event.detail ?? null,
     status: event.status ?? null,
     reminder_minutes: event.reminderMinutes ?? null,

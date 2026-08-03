@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
 import { eventDisplaysAsAllDay, sortAllDayEvents } from '../utils/eventAllDay';
@@ -36,6 +36,11 @@ import {
   timeToMinutes,
 } from '../utils/calendarDate';
 import { eventListTitle } from '../utils/eventTitle';
+import {
+  colorForEventCategory,
+  fillColorForEventCategory,
+  textColorForEventCategory,
+} from '../utils/eventColors';
 
 const TIME_GUTTER = 56;
 const DAY_CANVAS_HEIGHT = 1236;
@@ -679,7 +684,10 @@ function DayPage({
               ).map(event => (
                 <TouchableOpacity
                   key={event.id}
-                  style={s.allDayChip}
+                  style={[s.allDayChip, {
+                    backgroundColor: fillColorForEventCategory(event.category),
+                    borderLeftColor: colorForEventCategory(event.category),
+                  }]}
                   onPress={() => openEvent(event)}
                   disabled={!active}
                   activeOpacity={0.72}
@@ -689,7 +697,13 @@ function DayPage({
                   accessibilityLabel={`${eventListTitle(event.title)}，全天`}
                   accessibilityHint="双击查看日程详情"
                 >
-                  <Text style={s.allDayTitle} numberOfLines={1} accessible={false}>{eventListTitle(event.title)}</Text>
+                  <Text
+                    style={[s.allDayTitle, { color: textColorForEventCategory(event.category) }]}
+                    numberOfLines={1}
+                    accessible={false}
+                  >
+                    {eventListTitle(event.title)}
+                  </Text>
                 </TouchableOpacity>
               ))}
               {!allDayExpanded && allDayEvents.length > ALL_DAY_COLLAPSED_ROWS ? (
@@ -883,6 +897,9 @@ function DayPage({
                   s.timelineEvent,
                   selectedEdit && s.timelineEventEditing,
                   {
+                    backgroundColor: fillColorForEventCategory(item.event.category),
+                    borderLeftColor: colorForEventCategory(item.event.category),
+                    borderColor: colorForEventCategory(item.event.category),
                     top,
                     height,
                     left: TIME_GUTTER + 3 + item.column * (eventWidth + columnGap),
@@ -926,11 +943,19 @@ function DayPage({
                 testID={active ? `timeline-event-${item.event.id}` : undefined}
                 {...(selectedEdit ? moveTimelineResponder.panHandlers : {})}
               >
-                <Text style={s.timelineEventTitle} numberOfLines={height < 39 ? 1 : 2} accessible={false}>
+                <Text
+                  style={[s.timelineEventTitle, { color: textColorForEventCategory(item.event.category) }]}
+                  numberOfLines={height < 39 ? 1 : 2}
+                  accessible={false}
+                >
                   {eventListTitle(item.event.title)}
                 </Text>
                 {height >= 39 ? (
-                  <Text style={s.timelineEventTime} numberOfLines={1} accessible={false}>
+                  <Text
+                    style={[s.timelineEventTime, { color: textColorForEventCategory(item.event.category) }]}
+                    numberOfLines={1}
+                    accessible={false}
+                  >
                     {formatTimelineRange(displayStart, displayEnd, ' - ')}
                   </Text>
                 ) : null}
@@ -1158,7 +1183,7 @@ const s = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: C.primary,
     borderRadius: 4,
-    backgroundColor: 'rgba(20,86,240,0.15)',
+    backgroundColor: withAlpha(C.primary, 0.15),
     overflow: 'visible',
   },
   quickCreateText: { fontSize: 13, lineHeight: 18, color: C.primary },
@@ -1221,7 +1246,7 @@ const s = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: withAlpha(C.body, 0.72),
     zIndex: 4,
   },
   timelineEventTitle: { fontSize: 12, lineHeight: 16, color: C.primaryPressed },

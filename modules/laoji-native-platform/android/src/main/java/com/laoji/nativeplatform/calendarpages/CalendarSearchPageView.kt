@@ -34,6 +34,7 @@ class CalendarSearchPageView(
 ) : ExpoView(context, appContext) {
   override val shouldUseAndroidLayout: Boolean = true
 
+  private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
   private var bridgeEventsEnabled = true
   private var actionListener: ((Map<String, Any?>) -> Unit)? = null

@@ -600,6 +600,6 @@ const s = StyleSheet.create({
   eventTitle: { fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.text },
   eventMeta: { marginTop: 2, fontSize: 12, lineHeight: 16, color: C.sub },
   eventSupporting: { marginTop: 2, fontSize: 12, lineHeight: 16, color: C.sub },
-  highlight: { color: C.primary, backgroundColor: '#DDE8FF', fontWeight: '700' },
+  highlight: { color: C.primary, backgroundColor: C.primaryLight, fontWeight: '700' },
   dayGap: { height: 12 },
 });

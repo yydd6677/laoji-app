@@ -13,7 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import {
   ResponsiveContentFrame,
@@ -35,7 +35,7 @@ type Props = {
 };
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
-const DEFAULT_CALENDAR_TITLE_COLOR = '#0442D2';
+const DEFAULT_CALENDAR_TITLE_COLOR = C.primaryPressed;
 const DETAIL_TITLE_BAR_HEIGHT = 44;
 const HEADER_BG_MIN_HEIGHT_WIDTH_RATIO = 0.30113637;
 const SUMMARY_FADE_RANGE = 40;
@@ -235,9 +235,9 @@ export function EventDetailScreen({ navigation, route }: Props) {
         testID="event-detail-header-wash"
         pointerEvents="none"
         colors={[
-          'rgba(122, 162, 255, 0.18)',
-          'rgba(194, 212, 255, 0.10)',
-          'rgba(255, 255, 255, 0)',
+          withAlpha(C.primary, 0.18),
+          withAlpha(C.primaryLight, 0.42),
+          withAlpha(C.body, 0),
         ]}
         locations={[0, 0.55, 1]}
         style={[s.headerWash, { height: headerWashHeight }]}
@@ -346,7 +346,7 @@ const s = StyleSheet.create({
   colorSymbol: { width: 14, height: 14, marginTop: 7, marginRight: 18, borderRadius: 4, backgroundColor: DEFAULT_CALENDAR_TITLE_COLOR },
   summary: { flex: 1, fontSize: 20, lineHeight: 28, fontWeight: '600', color: DEFAULT_CALENDAR_TITLE_COLOR, paddingRight: 8 },
   headerMeta: { marginLeft: 32, marginTop: 4, minHeight: 22, fontSize: 14, lineHeight: 22, color: DEFAULT_CALENDAR_TITLE_COLOR },
-  headerRule: { marginLeft: 32, minHeight: 22, fontSize: 14, lineHeight: 22, color: '#94B4FF' },
+  headerRule: { marginLeft: 32, minHeight: 22, fontSize: 14, lineHeight: 22, color: C.primaryHover },
   infoRow: { minHeight: 44, paddingVertical: 10, flexDirection: 'row', alignItems: 'flex-start' },
   iconLane: { width: 48, height: 22, alignItems: 'center', justifyContent: 'center' },
   infoContent: { flex: 1, minHeight: 22, justifyContent: 'center', paddingRight: 16 },

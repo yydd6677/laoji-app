@@ -247,7 +247,7 @@ internal class MeetingUploadWorker(
     val digest = MessageDigest.getInstance("SHA-256")
     var total = 0L
     val input = applicationContext.contentResolver.openInputStream(uri)
-      ?: throw IllegalStateException("Meeting audio file cannot be opened")
+      ?: throw IllegalStateException("无法打开会议录音文件")
     input.use { stream ->
       val buffer = ByteArray(256 * 1024)
       while (true) {
@@ -258,19 +258,19 @@ internal class MeetingUploadWorker(
         total += count
       }
     }
-    if (total <= 0) throw IllegalStateException("Meeting audio file is empty")
+    if (total <= 0) throw IllegalStateException("会议录音文件为空")
     if (expectedBytes != null && expectedBytes != total) {
-      throw IllegalStateException("Meeting audio file size changed")
+      throw IllegalStateException("会议录音文件大小发生变化")
     }
     val actualChecksum = "sha256:${digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }}"
     if (normalizedChecksum != null && normalizedChecksum != actualChecksum) {
-      throw IllegalStateException("Meeting audio checksum changed")
+      throw IllegalStateException("会议录音校验值发生变化")
     }
     return FileMetadata(total, actualChecksum)
   }
 
   private fun parseAssetResponse(raw: String?, meetingId: String, clientAssetId: String): AssetResponse {
-    val value = JSONObject(raw ?: throw IllegalStateException("Missing response"))
+    val value = JSONObject(raw ?: throw IllegalStateException("服务器未返回有效响应"))
     require(value.getInt("schema_version") == 2)
     require(value.getString("meeting_id") == meetingId)
     require(value.getString("client_asset_id") == clientAssetId)

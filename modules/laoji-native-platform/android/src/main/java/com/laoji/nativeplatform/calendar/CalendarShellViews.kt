@@ -107,7 +107,7 @@ class CalendarCreateFabView(context: Context) : View(context) {
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
   private val fabPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
   private val pressedFabPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = if (palette.surface == Color.WHITE) Color.rgb(12, 76, 211) else palette.accent
+    color = palette.accent
   }
   private val actionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surface }
   private val selectedActionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }

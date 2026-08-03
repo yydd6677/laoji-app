@@ -142,31 +142,31 @@ internal class MediaIngestor(context: Context) {
     val normalizedMeetingId = validateIdentity(meetingId, "meeting")
     val normalizedAssetId = validateIdentity(assetId, "asset")
     if (origin !in setOf("file_import", "share_intent", "recording_merge")) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "invalid media import origin")
+      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "会议录音来源无效")
     }
     if (maximumBytes <= 0L || maximumBytes > MAXIMUM_SUPPORTED_BYTES) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "invalid media import size limit")
+      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "会议录音大小限制无效")
     }
     val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
-      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "invalid media import URI")
+      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
     if (uri.scheme !in setOf("content", "file")) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "unsupported media import URI scheme")
+      throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
     }
     val metadata = resolveMediaSourceMetadata(appContext, uri)
     val mimeType = resolvedSupportedMimeType(metadata.fileName, metadata.mimeType)
-      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "unsupported media type")
+      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "不支持此录音格式")
     metadata.byteSize?.let { size ->
-      if (size <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "media file is empty")
-      if (size > maximumBytes) throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "media file exceeds size limit")
+      if (size <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
+      if (size > maximumBytes) throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "录音文件超过大小限制")
     }
     ensureRoot()
     ensureSpace(metadata.byteSize, maximumBytes)
     val directory = File(root, normalizedMeetingId)
     if (!directory.exists() && !directory.mkdirs()) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "unable to create media import directory")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
     }
     if (!directory.isDirectory) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "media import path is not a directory")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
     }
     val extension = preferredMediaExtension(metadata.fileName, mimeType)
     val finalFile = File(directory, "$normalizedAssetId.$extension")
@@ -179,13 +179,13 @@ internal class MediaIngestor(context: Context) {
           current.origin != origin ||
           current.sourceUri != uri.toString()
       )) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "media import identity already exists")
+      throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
     }
     current?.readyResult(directory)?.takeIf {
       it.meetingId == normalizedMeetingId && it.assetId == normalizedAssetId
     }?.let { return@synchronized it }
     if (finalFile.exists() || tempFile.exists()) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "media import identity already exists")
+      throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
     }
     val createdAtMs = System.currentTimeMillis().coerceAtLeast(0L)
     var journal = MediaIngestJournal(
@@ -217,7 +217,7 @@ internal class MediaIngestor(context: Context) {
             if (count == 0) continue
             copied += count
             if (copied > maximumBytes) {
-              throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "media file exceeds size limit")
+              throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "录音文件超过大小限制")
             }
             output.write(buffer, 0, count)
             digest.update(buffer, 0, count)
@@ -226,10 +226,10 @@ internal class MediaIngestor(context: Context) {
           output.fd.sync()
         }
       }
-      if (copied <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "media file is empty")
+      if (copied <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
       metadata.byteSize?.let { expected ->
         if (expected != copied) {
-          throw MediaImportException("ERR_MEDIA_IMPORT_CHANGED", "media source changed while importing")
+          throw MediaImportException("ERR_MEDIA_IMPORT_CHANGED", "录音文件在导入过程中发生变化")
         }
       }
       val durationMs = inspectAudio(tempFile)
@@ -248,13 +248,13 @@ internal class MediaIngestor(context: Context) {
       journal = journal.copy(state = "ready")
       writeJournal(directory, journalFile, journal)
       journal.readyResult(directory)
-        ?: throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "media import result is incomplete")
+        ?: throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存结果不完整")
     } catch (error: Throwable) {
       tempFile.delete()
       if (!finalFile.exists()) journalFile.delete()
       syncDirectory(directory)
       if (error is MediaImportException) throw error
-      throw MediaImportException("ERR_MEDIA_IMPORT_FAILED", "media import failed", error)
+      throw MediaImportException("ERR_MEDIA_IMPORT_FAILED", "录音导入失败", error)
     }
   }
 
@@ -324,11 +324,11 @@ internal class MediaIngestor(context: Context) {
     val directory = File(root, validateIdentity(meetingId, "meeting"))
     if (!directory.exists()) return@synchronized 0
     if (!directory.isDirectory) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "media import path is not a directory")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
     }
     val files = directory.walkBottomUp().count { it.isFile }
     if (!directory.deleteRecursively()) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "unable to delete meeting media")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法删除会议录音")
     }
     syncDirectory(root)
     files
@@ -336,10 +336,10 @@ internal class MediaIngestor(context: Context) {
 
   private fun ensureRoot() {
     if (!root.exists() && !root.mkdirs()) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "unable to create media import root")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
     }
     if (!root.isDirectory) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "media import root is not a directory")
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
     }
   }
 
@@ -348,7 +348,7 @@ internal class MediaIngestor(context: Context) {
       ?: max(maximumBytes / 10L, MINIMUM_SPACE_HEADROOM)
     val available = runCatching { StatFs(root.absolutePath).availableBytes }.getOrDefault(0L)
     if (available <= 0L || available < required) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_NO_SPACE", "insufficient storage for media import")
+      throw MediaImportException("ERR_MEDIA_IMPORT_NO_SPACE", "本机存储空间不足")
     }
   }
 
@@ -356,7 +356,7 @@ internal class MediaIngestor(context: Context) {
     "content" -> appContext.contentResolver.openInputStream(uri)
     "file" -> uri.path?.let(::File)?.let(::FileInputStream)
     else -> null
-  } ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "media source cannot be opened")
+  } ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法打开所选录音")
 
   private fun inspectAudio(file: File): Long {
     val retriever = MediaMetadataRetriever()
@@ -364,18 +364,18 @@ internal class MediaIngestor(context: Context) {
       retriever.setDataSource(file.absolutePath)
       val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
       if (hasAudio != null && !hasAudio.equals("yes", ignoreCase = true)) {
-        throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "selected media has no audio track")
+        throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "所选文件不包含音轨")
       }
       val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-        ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "media duration is unavailable")
+        ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "无法读取录音时长")
       if (duration < 0L) {
-        throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "media duration is invalid")
+        throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "录音时长无效")
       }
       return duration
     } catch (error: MediaImportException) {
       throw error
     } catch (error: Throwable) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "media metadata is unreadable", error)
+      throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "无法读取录音信息", error)
     } finally {
       runCatching { retriever.release() }
     }
@@ -410,7 +410,7 @@ internal class MediaIngestor(context: Context) {
 
   private fun validateIdentity(value: String, label: String): String = value.trim().also {
     if (!IDENTITY_PATTERN.matches(it)) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "invalid media import $label identity")
+      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "会议录音标识无效")
     }
   }
 

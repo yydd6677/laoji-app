@@ -45,6 +45,7 @@ class LaojiMinutesView(
 
   init {
     // MIN-ROOT-001: Let the Android-owned surface render its complete child hierarchy.
+    MinutesPalette.configure(context)
     setWillNotDraw(false)
     clipToPadding = false
     orientation = VERTICAL

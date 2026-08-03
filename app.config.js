@@ -225,6 +225,10 @@ module.exports = () => {
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_CONTENT_SHARE_LINKS_V1 ?? 'true').trim().toLowerCase(),
     );
+  const meetingCrossMeetingSearchV1 = localMeetingDbCanonicalReadV1
+    && ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_MEETING_CROSS_MEETING_SEARCH_V1 ?? 'false').trim().toLowerCase(),
+    );
   const meetingMediaImportExistingV1 = localMeetingDbCanonicalReadV1
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_MEDIA_IMPORT_EXISTING_V1 ?? 'true').trim().toLowerCase(),
@@ -249,6 +253,7 @@ module.exports = () => {
   const accountDeletionUrl = cleanUrl(
     process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL || (laojiApiBase ? `${laojiApiBase}/account-deletion` : ''),
   );
+  const reverseGeocoderUrl = cleanUrl(process.env.EXPO_PUBLIC_REVERSE_GEOCODER_URL);
 
   if (!laojiApiBase || !meetingApiBase || !realtimeAsrHost
       || !privacyPolicyUrl || !termsOfServiceUrl || !accountDeletionUrl) {
@@ -256,6 +261,9 @@ module.exports = () => {
   }
   assertServiceUrl('EXPO_PUBLIC_LAOJI_API_BASE', laojiApiBase, appEnv);
   assertServiceUrl('EXPO_PUBLIC_MEETING_API_BASE', meetingApiBase, appEnv);
+  if (reverseGeocoderUrl) {
+    assertServiceUrl('EXPO_PUBLIC_REVERSE_GEOCODER_URL', reverseGeocoderUrl, appEnv);
+  }
   assertServiceUrl('EXPO_PUBLIC_PRIVACY_POLICY_URL', privacyPolicyUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_TERMS_OF_SERVICE_URL', termsOfServiceUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_ACCOUNT_DELETION_URL', accountDeletionUrl, appEnv);
@@ -275,6 +283,7 @@ module.exports = () => {
       realtimeAsrPort,
       realtimeAsrSecure,
       realtimeAsrProvider,
+      reverseGeocoderUrl,
       privacyPolicyUrl,
       termsOfServiceUrl,
       accountDeletionUrl,
@@ -291,6 +300,7 @@ module.exports = () => {
         meetingMarkerSyncV1,
         meetingSummarySyncV1,
         meetingContentShareLinksV1,
+        meetingCrossMeetingSearchV1,
         meetingMediaImportExistingV1,
         meetingMediaClipsV1,
         meetingTranscriptReprocessV1,

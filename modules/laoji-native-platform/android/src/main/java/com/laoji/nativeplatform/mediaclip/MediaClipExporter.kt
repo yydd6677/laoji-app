@@ -108,15 +108,15 @@ internal class MediaClipExporter(context: Context) {
     val endFrame = ceil(endMs * source.sampleRateHz / 1_000.0).toLong()
       .coerceAtMost(source.dataBytes / source.bytesPerFrame)
     val frameCount = endFrame - startFrame
-    if (frameCount <= 0L) throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "media clip range is empty")
+    if (frameCount <= 0L) throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "片段时间范围为空")
     val pcmBytes = frameCount * source.bytesPerFrame
     if (pcmBytes > 0xfffffff0L) {
-      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "media clip is too large")
+      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "音频片段过长")
     }
 
     val directory = File(root, normalizedMeetingId)
     if (!directory.exists() && !directory.mkdirs()) {
-      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip directory is unavailable")
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段保存位置不可用")
     }
     val finalFile = File(directory, "$normalizedClipId.wav")
     val temporaryFile = File(directory, "$normalizedClipId.wav.part")
@@ -135,7 +135,7 @@ internal class MediaClipExporter(context: Context) {
           var remaining = pcmBytes
           while (remaining > 0L) {
             val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-            if (count <= 0) throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "media clip source ended early")
+            if (count <= 0) throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "录音在读取过程中提前结束")
             output.write(buffer, 0, count)
             digest.update(buffer, 0, count)
             remaining -= count
@@ -144,20 +144,20 @@ internal class MediaClipExporter(context: Context) {
         }
       }
       if (temporaryFile.length() != pcmBytes + AudioRuntimeContract.WAV_HEADER_BYTES) {
-        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip file size is invalid")
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段文件大小无效")
       }
       if (finalFile.exists() && !finalFile.delete()) {
-        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "existing media clip could not be replaced")
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "无法替换已有片段")
       }
       if (!temporaryFile.renameTo(finalFile)) {
-        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip could not be finalized")
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段无法保存")
       }
     } catch (error: MediaClipException) {
       temporaryFile.delete()
       throw error
     } catch (error: Exception) {
       temporaryFile.delete()
-      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip export failed")
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段生成失败")
     }
 
     ExportedWavClip(
@@ -184,14 +184,14 @@ internal class MediaClipExporter(context: Context) {
     val source = requireDownloadedSource(sourceUri)
     val checksum = expectedChecksumSha256.trim().lowercase()
     if (!SHA256.matches(checksum)) {
-      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "remote media clip checksum is invalid")
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "远端片段校验值无效")
     }
     if (expectedByteSize <= AudioRuntimeContract.WAV_HEADER_BYTES || source.length() != expectedByteSize) {
-      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip size changed")
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "远端片段大小发生变化")
     }
     val directory = File(root, normalizedMeetingId)
     if (!directory.exists() && !directory.mkdirs()) {
-      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip directory is unavailable")
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段保存位置不可用")
     }
     val finalFile = File(directory, "$normalizedClipId.wav")
     val temporaryFile = File(directory, "$normalizedClipId.wav.part")
@@ -208,7 +208,7 @@ internal class MediaClipExporter(context: Context) {
             if (count == 0) continue
             total += count
             if (total > expectedByteSize) {
-              throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip grew during import")
+              throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "远端片段在导入过程中变大")
             }
             output.write(buffer, 0, count)
             digest.update(buffer, 0, count)
@@ -216,23 +216,23 @@ internal class MediaClipExporter(context: Context) {
           output.flush()
           output.fd.sync()
           if (total != expectedByteSize) {
-            throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip ended early")
+            throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "远端片段在导入过程中提前结束")
           }
         }
       }
       val actualChecksum = "sha256:${digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }}"
       if (actualChecksum != checksum) {
-        throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "remote media clip checksum changed")
+        throw MediaClipException("ERR_MEDIA_CLIP_SOURCE_CHANGED", "远端片段校验值发生变化")
       }
       val inspected = parsePcmWav(Uri.fromFile(temporaryFile).toString())
       if (kotlin.math.abs(inspected.durationMs - expectedDurationMs) > 250L) {
-        throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "remote media clip duration is inconsistent")
+        throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "远端片段时长不一致")
       }
       if (finalFile.exists() && !finalFile.delete()) {
-        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "existing media clip could not be replaced")
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "无法替换已有片段")
       }
       if (!temporaryFile.renameTo(finalFile)) {
-        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip could not be finalized")
+        throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段无法保存")
       }
       return@synchronized ExportedWavClip(
         meetingId = normalizedMeetingId,
@@ -248,7 +248,7 @@ internal class MediaClipExporter(context: Context) {
       throw error
     } catch (error: Exception) {
       temporaryFile.delete()
-      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "remote media clip import failed")
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "远端片段导入失败")
     }
   }
 
@@ -262,7 +262,7 @@ internal class MediaClipExporter(context: Context) {
     var deleted = false
     files.forEach { file ->
       if (file.exists()) {
-        if (!file.delete()) throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "media clip could not be deleted")
+        if (!file.delete()) throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "片段无法删除")
         deleted = true
       }
     }
@@ -276,26 +276,26 @@ internal class MediaClipExporter(context: Context) {
     val files = directory.walkBottomUp().filter { it.isFile }.toList()
     val count = files.size
     if (!directory.deleteRecursively()) {
-      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "meeting media clips could not be deleted")
+      throw MediaClipException("ERR_MEDIA_CLIP_STORAGE", "会议片段无法删除")
     }
     count
   }
 
   private fun parsePcmWav(sourceUri: String): PcmWavSource {
     val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
-      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "invalid media clip source")
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "片段来源无效")
     if (uri.scheme != "file") {
-      throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "only local WAV recordings can be clipped on this device")
+      throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "本机仅支持从 WAV 录音生成片段")
     }
     val sourcePath = uri.path?.takeIf { it.isNotBlank() }
-      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "media clip source path is missing")
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "片段来源路径缺失")
     val file = runCatching { File(sourcePath).canonicalFile }.getOrNull()
-      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "media clip source path is invalid")
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "片段来源路径无效")
     val filesRoot = applicationContext.filesDir.canonicalFile
     if (!file.path.startsWith("${filesRoot.path}${File.separator}") || !file.isFile || !file.canRead()) {
-      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "media clip source is unavailable")
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "片段来源不可用")
     }
-    if (file.length() < 44L) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV source is incomplete")
+    if (file.length() < 44L) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 录音不完整")
 
     RandomAccessFile(file, "r").use { input ->
       val rootHeader = ByteArray(12)
@@ -303,7 +303,7 @@ internal class MediaClipExporter(context: Context) {
       if (
         String(rootHeader, 0, 4, Charsets.US_ASCII) != "RIFF"
         || String(rootHeader, 8, 4, Charsets.US_ASCII) != "WAVE"
-      ) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "source is not a WAV file")
+      ) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "录音不是 WAV 格式")
 
       var offset = 12L
       var sampleRateHz: Int? = null
@@ -318,10 +318,10 @@ internal class MediaClipExporter(context: Context) {
         val chunkBytes = uint32LittleEndian(chunkHeader, 4)
         val payloadOffset = offset + 8L
         if (chunkBytes < 0L || payloadOffset + chunkBytes > file.length()) {
-          throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV chunk is invalid")
+          throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 数据块无效")
         }
         if (chunkId == "fmt ") {
-          if (chunkBytes < 16L) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV format is incomplete")
+          if (chunkBytes < 16L) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 格式信息不完整")
           val format = ByteArray(16)
           input.readFully(format)
           val values = ByteBuffer.wrap(format).order(ByteOrder.LITTLE_ENDIAN)
@@ -337,7 +337,7 @@ internal class MediaClipExporter(context: Context) {
             || sampleRate != AudioRuntimeContract.SAMPLE_RATE_HZ
             || bitsPerSample != AudioRuntimeContract.BITS_PER_SAMPLE
             || blockAlign != AudioRuntimeContract.CHANNEL_COUNT * AudioRuntimeContract.BYTES_PER_SAMPLE
-          ) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV format is not supported for local clipping")
+          ) throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "本机不支持此 WAV 格式的片段生成")
           sampleRateHz = sampleRate
           bytesPerFrame = blockAlign
         } else if (chunkId == "data") {
@@ -348,15 +348,15 @@ internal class MediaClipExporter(context: Context) {
         offset = payloadOffset + chunkBytes + (chunkBytes and 1L)
       }
       val rate = sampleRateHz
-        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV format chunk is missing")
+        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 格式块缺失")
       val frameBytes = bytesPerFrame
-        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV frame size is missing")
+        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 帧大小缺失")
       val pcmOffset = dataOffset
-        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV data chunk is missing")
+        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 音频数据块缺失")
       val pcmBytes = dataBytes
-        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV data size is missing")
+        ?: throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 音频数据大小缺失")
       if (pcmBytes <= 0L || pcmBytes % frameBytes != 0L) {
-        throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV data is not frame aligned")
+        throw MediaClipException("ERR_MEDIA_CLIP_FORMAT", "WAV 音频数据未按帧对齐")
       }
       return PcmWavSource(file, pcmOffset, pcmBytes, rate, frameBytes)
     }
@@ -364,36 +364,36 @@ internal class MediaClipExporter(context: Context) {
 
   private fun requireDownloadedSource(sourceUri: String): File {
     val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
-      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "invalid downloaded media clip URI")
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "下载的片段地址无效")
     if (uri.scheme != "file") {
-      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip must be a local file")
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "下载的片段必须是本机文件")
     }
     val source = runCatching { File(uri.path.orEmpty()).canonicalFile }.getOrNull()
-      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip path is invalid")
+      ?: throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "下载的片段路径无效")
     val cacheRoot = applicationContext.cacheDir.canonicalFile
     val filesRoot = applicationContext.filesDir.canonicalFile
     val allowed = source.path.startsWith("${cacheRoot.path}${File.separator}")
       || source.path.startsWith("${filesRoot.path}${File.separator}")
     if (!allowed || !source.isFile || !source.canRead()) {
-      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "downloaded media clip is unavailable")
+      throw MediaClipException("ERR_MEDIA_CLIP_SOURCE", "下载的片段不可用")
     }
     return source
   }
 
   private fun validateRange(startMs: Long, endMs: Long, durationMs: Long) {
     if (startMs < 0L || endMs <= startMs || endMs > durationMs) {
-      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "media clip range is invalid")
+      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "片段时间范围无效")
     }
     val length = endMs - startMs
     if (length < capabilities.minimumDurationMs || length > capabilities.maximumDurationMs) {
-      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "media clip duration is outside supported limits")
+      throw MediaClipException("ERR_MEDIA_CLIP_RANGE", "片段时长超出支持范围")
     }
   }
 
   private fun validateIdentity(value: String, label: String): String {
     val normalized = value.trim()
     if (!SAFE_ID.matches(normalized)) {
-      throw MediaClipException("ERR_MEDIA_CLIP_IDENTITY", "$label identity is invalid")
+      throw MediaClipException("ERR_MEDIA_CLIP_IDENTITY", "片段标识无效")
     }
     return normalized
   }

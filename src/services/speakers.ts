@@ -1,6 +1,8 @@
 import { getApiConfig } from './config';
 import { readResponseError } from './errors';
-import { fetchWithTimeout as fetch } from './http';
+import { fetchWithTimeout as fetch, readJsonWithTimeout } from './http';
+
+const SPEAKER_RESPONSE_BODY_TIMEOUT_MS = 10_000;
 
 export interface SpeakerProfile {
   speaker_id: string;
@@ -47,7 +49,10 @@ async function speakerError(prefix: string, response: Response, accessToken: str
 export async function fetchSpeakers(accessToken: string): Promise<SpeakerProfile[]> {
   const response = await fetch(endpoint(), { headers: authHeaders(accessToken) });
   if (!response.ok) throw await speakerError('读取讲话人失败', response, accessToken);
-  const data = await response.json() as SpeakerListResponse | SpeakerProfile[];
+  const data = await readJsonWithTimeout<SpeakerListResponse | SpeakerProfile[]>(
+    response,
+    SPEAKER_RESPONSE_BODY_TIMEOUT_MS,
+  );
   return Array.isArray(data) ? data : Array.isArray(data.speakers) ? data.speakers : [];
 }
 
@@ -89,7 +94,7 @@ export async function startSpeakerReprocess(
     headers: { ...authHeaders(accessToken), 'Idempotency-Key': idempotencyKey },
   });
   if (!response.ok) throw await speakerError('重新匹配旧会议失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerReprocessJob>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function fetchSpeakerReprocess(
@@ -101,7 +106,7 @@ export async function fetchSpeakerReprocess(
     `/${encodeURIComponent(speakerId)}/reprocess/${encodeURIComponent(jobId)}`,
   ), { headers: authHeaders(accessToken) });
   if (!response.ok) throw await speakerError('读取重新匹配进度失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerReprocessJob>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function fetchLatestSpeakerReprocess(
@@ -112,7 +117,10 @@ export async function fetchLatestSpeakerReprocess(
     headers: authHeaders(accessToken),
   });
   if (!response.ok) throw await speakerError('读取重新匹配进度失败', response, accessToken);
-  const data = await response.json() as { job?: SpeakerReprocessJob | null };
+  const data = await readJsonWithTimeout<{ job?: SpeakerReprocessJob | null }>(
+    response,
+    SPEAKER_RESPONSE_BODY_TIMEOUT_MS,
+  );
   return data.job ?? null;
 }
 
@@ -125,7 +133,7 @@ export async function retrySpeakerReprocess(
     `/${encodeURIComponent(speakerId)}/reprocess/${encodeURIComponent(jobId)}/retry`,
   ), { method: 'POST', headers: authHeaders(accessToken) });
   if (!response.ok) throw await speakerError('重试旧会议匹配失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerReprocessJob>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function registerSpeaker(
@@ -140,7 +148,7 @@ export async function registerSpeaker(
     body: voiceForm(audioUri, fileName, name.trim()),
   });
   if (!response.ok) throw await speakerError('新建讲话人失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerMutationResponse>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function supplementSpeaker(
@@ -155,7 +163,7 @@ export async function supplementSpeaker(
     body: voiceForm(audioUri, fileName),
   });
   if (!response.ok) throw await speakerError('补录音色失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerMutationResponse>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function renameSpeaker(
@@ -169,7 +177,7 @@ export async function renameSpeaker(
     body: JSON.stringify({ name: name.trim() }),
   });
   if (!response.ok) throw await speakerError('修改讲话人失败', response, accessToken);
-  return response.json();
+  return readJsonWithTimeout<SpeakerMutationResponse>(response, SPEAKER_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 export async function deleteSpeaker(speakerId: string, accessToken: string): Promise<void> {

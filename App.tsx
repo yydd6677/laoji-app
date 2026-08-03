@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation';
 import { AuthProvider } from './src/store/AuthStore';
@@ -38,11 +39,18 @@ import { MeetingTagCatalogSyncProvider } from './src/components/MeetingTagCatalo
 import { MeetingAttachmentSyncProvider } from './src/components/MeetingAttachmentSyncProvider';
 import { MeetingMarkerSyncProvider } from './src/components/MeetingMarkerSyncProvider';
 import { MeetingSummarySyncProvider } from './src/components/MeetingSummarySyncProvider';
+import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
   feishuEvidence?: string;
 }) {
+  const { colors } = useTheme();
+
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(colors.appBg).catch(() => undefined);
+  }, [colors.appBg]);
+
   useEffect(() => {
     void cleanupStaleMeetingShareCache().catch(() => {});
   }, []);
@@ -76,7 +84,7 @@ function RuntimeProviders({ onRestart }: {
                                 <NotificationPermissionPrimer />
                                 <View style={{ flex: 1 }}>
                                   <RestorableNavigationContainer>
-                                    <StatusBar style="dark" backgroundColor="#FFFFFF" />
+                                    <StatusBar style="dark" backgroundColor={colors.appBg} />
                                     <RootNavigator />
                                     <NotificationNavigationHandler />
                                   </RestorableNavigationContainer>
@@ -130,17 +138,19 @@ export default function App() {
   }, []);
 
   return (
-    <AppStartupBoundary
-      feishuEvidence="feishu:UI-BOOT-READINESS-001:startup-boundary"
-      resetKey={runtimeGeneration}
-      onRetry={restart}
-    >
-      <SafeAreaProvider key={`runtime:${runtimeGeneration}`}>
-        <ValidatedRuntime
-          feishuEvidence="feishu:UI-BOOT-READINESS-001:validated-runtime"
-          onRestart={restart}
-        />
-      </SafeAreaProvider>
-    </AppStartupBoundary>
+    <ThemeProvider>
+      <AppStartupBoundary
+        feishuEvidence="feishu:UI-BOOT-READINESS-001:startup-boundary"
+        resetKey={runtimeGeneration}
+        onRetry={restart}
+      >
+        <SafeAreaProvider key={`runtime:${runtimeGeneration}`}>
+          <ValidatedRuntime
+            feishuEvidence="feishu:UI-BOOT-READINESS-001:validated-runtime"
+            onRestart={restart}
+          />
+        </SafeAreaProvider>
+      </AppStartupBoundary>
+    </ThemeProvider>
   );
 }

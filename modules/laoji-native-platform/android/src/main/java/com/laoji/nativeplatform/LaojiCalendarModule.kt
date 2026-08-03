@@ -68,6 +68,9 @@ class CalendarEventRecord : Record {
   var title: String = ""
 
   @Field
+  var category: String? = null
+
+  @Field
   var startEpochDay: Int = 0
 
   @Field
@@ -101,6 +104,7 @@ class CalendarEventRecord : Record {
     sourceEventId = sourceEventId,
     occurrenceDate = occurrenceDate,
     title = title,
+    category = category ?: "其他",
     startEpochDay = startEpochDay,
     endEpochDay = endEpochDay,
     endEpochDayExclusive = endEpochDayExclusive,

@@ -35,6 +35,7 @@ import type { RootStackParamList } from '../types';
 import { meetingAudioLevelPercent } from '../utils/meetingAudioStatus';
 import { buildNativeSpeakerEnrollmentSnapshot } from '../native/nativeSpeakerSnapshots';
 import { secureClientIdFactory } from '../domain/meeting';
+import { Colors as C } from '../theme/colors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerEnrollment'>;
@@ -453,7 +454,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }, [confirmDelete, load, navigation, runReprocess, saveName, signOut, startRecording, stopRecording, submit]);
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#F8F9FA">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>
       <View
         style={styles.root}
         testID="speaker-enrollment-native-root"

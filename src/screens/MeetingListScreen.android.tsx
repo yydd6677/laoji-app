@@ -41,6 +41,7 @@ import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/
 import type { ScopeKey } from '../domain/meeting';
 import { MeetingTagSheet } from '../components/MeetingTagSheet';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
+import { meetingMatchesSearchMetadata } from '../services/meetingSearchQuery';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -62,6 +63,7 @@ const SEARCH_SOURCE_LABELS: Record<MeetingSearchResult['sourceKind'], string> = 
   summary: '整理结果',
   action: '事项',
 };
+const SEARCH_RESULT_LIMIT = 60;
 
 function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) {
   const presentation = deriveLegacyMeetingPresentationState(meeting, captureInterrupted
@@ -314,7 +316,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     setSearchResults([]);
     setSearchError('');
     const timer = setTimeout(() => {
-      void meetingOrganization.search(meetingScope, normalized).then(results => {
+      void meetingOrganization.search(meetingScope, normalized, SEARCH_RESULT_LIMIT).then(results => {
         if (searchRequestRef.current !== request) return;
         setSearchResults(results);
         setSearchLoading(false);
@@ -463,32 +465,49 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       ...inferredMeetingCover(getCachedSummary(meeting.id), getCachedTranscript(meeting.id)),
     };
   }), [getCachedSummary, getCachedTranscript, orderedMeetings, staleRecordingIds, tagAssignments, tagNameById]);
-  const searchMeetingSnapshots = useMemo(() => searchResults.flatMap(result => {
-    const meeting = meetingById.get(result.navigationMeetingId);
-    if (!meeting) return [];
-    const presentation = meetingListPresentation(meeting, staleRecordingIds.has(meeting.id));
-    const sourceLabel = SEARCH_SOURCE_LABELS[result.sourceKind];
-    const snippet = result.snippet || displayMeetingTitle(meeting.title);
-    return [{
-      id: result.resultId,
-      targetMeetingId: meeting.id,
-      title: displayMeetingTitle(meeting.title),
-      dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
-      durationLabel: meeting.audioDurationSec
-        ? formatDuration(meeting.audioDurationSec)
-        : meeting.duration,
-      statusLabel: presentation.label === '已完成' ? '' : presentation.label,
-      statusTone: presentation.tone,
-      canResume: false,
-      coverType: 'summary' as const,
-      coverTitle: sourceLabel,
-      coverText: snippet,
-      supportText: `${sourceLabel} · ${snippet}`,
-      searchSource: result.sourceKind,
-      searchSourceId: result.sourceId,
-      ...(result.startMs !== null ? { searchPositionMs: result.startMs } : {}),
-    }];
-  }), [meetingById, searchResults, staleRecordingIds]);
+  const metadataSearchMeetings = useMemo(
+    () => activeSearch
+      ? meetings.filter(meeting => meetingMatchesSearchMetadata(meeting, query))
+      : [],
+    [activeSearch, meetings, query],
+  );
+  const searchMeetingSnapshots = useMemo(() => {
+    const indexedMeetingIds = new Set(searchResults.map(result => result.navigationMeetingId));
+    const indexedSnapshots = searchResults.flatMap(result => {
+      const meeting = meetingById.get(result.navigationMeetingId);
+      if (!meeting) return [];
+      const presentation = meetingListPresentation(meeting, staleRecordingIds.has(meeting.id));
+      const sourceLabel = SEARCH_SOURCE_LABELS[result.sourceKind];
+      const snippet = result.snippet || displayMeetingTitle(meeting.title);
+      return [{
+        id: result.resultId,
+        targetMeetingId: meeting.id,
+        title: displayMeetingTitle(meeting.title),
+        dateTimeLabel: compactMeetingDateTime(meeting.date, meeting.time),
+        durationLabel: meeting.audioDurationSec
+          ? formatDuration(meeting.audioDurationSec)
+          : meeting.duration,
+        statusLabel: presentation.label === '已完成' ? '' : presentation.label,
+        statusTone: presentation.tone,
+        canResume: false,
+        coverType: 'summary' as const,
+        coverTitle: sourceLabel,
+        coverText: snippet,
+        supportText: `${sourceLabel} · ${snippet}`,
+        searchSource: result.sourceKind,
+        searchSourceId: result.sourceId,
+        ...(result.startMs !== null ? { searchPositionMs: result.startMs } : {}),
+      }];
+    });
+    const metadataOnlySnapshots = metadataSearchMeetings
+      .filter(meeting => !indexedMeetingIds.has(meeting.id))
+      .slice(0, Math.max(0, SEARCH_RESULT_LIMIT - indexedSnapshots.length))
+      .flatMap(meeting => {
+        const snapshot = normalMeetingSnapshots.find(item => item.targetMeetingId === meeting.id);
+        return snapshot ? [{ ...snapshot, id: `metadata-search:${meeting.id}` }] : [];
+      });
+    return [...indexedSnapshots, ...metadataOnlySnapshots];
+  }, [metadataSearchMeetings, meetingById, normalMeetingSnapshots, searchResults, staleRecordingIds]);
 
   const snapshot = useMemo<MinutesViewSnapshot>(() => {
     const recycleMeetings = recycleBinEntries.map(entry => {
@@ -511,10 +530,14 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     });
     const searchPhase = searchLoading
       ? 'loading' as const
-      : searchError ? 'error' as const : searchMeetingSnapshots.length === 0 ? 'empty' as const : 'ready' as const;
+      : searchError && searchMeetingSnapshots.length === 0
+        ? 'error' as const
+        : searchMeetingSnapshots.length === 0 ? 'empty' as const : 'ready' as const;
     const searchMessage = searchLoading
       ? '正在搜索会议记录'
-      : searchError || (searchMeetingSnapshots.length === 0 ? '未找到相关会议记录' : '');
+      : searchError && searchMeetingSnapshots.length === 0
+        ? searchError
+        : (searchMeetingSnapshots.length === 0 ? '未找到相关会议记录' : '');
     return {
       schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
       surface: 'list',

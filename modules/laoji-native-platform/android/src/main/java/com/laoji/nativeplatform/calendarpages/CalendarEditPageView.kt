@@ -55,6 +55,7 @@ class CalendarEditPageView(
 ) : ExpoView(context, appContext) {
   override val shouldUseAndroidLayout: Boolean = true
 
+  private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
   private val root = FrameLayout(context)
   private val titleBar = CalendarCommonTitleBar(context)
@@ -130,7 +131,7 @@ class CalendarEditPageView(
       null,
       GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(Color.WHITE)
+        setColor(CalendarPagePalette.float)
       },
     )
     addView(locateIcon, FrameLayout.LayoutParams(context.pageDp(48), context.pageDp(48), Gravity.CENTER))

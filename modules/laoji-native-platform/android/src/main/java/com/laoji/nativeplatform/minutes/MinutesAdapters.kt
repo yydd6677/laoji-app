@@ -19,6 +19,7 @@ import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.view.accessibility.AccessibilityViewCommand
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
+import com.laoji.nativeplatform.NativeThemePreference
 
 internal enum class MinutesHomeViewMode {
   LIST,
@@ -131,10 +132,16 @@ internal class MinutesMeetingAdapter(
       root.gravity = Gravity.CENTER_VERTICAL
       root.isClickable = true
       root.isFocusable = true
-      root.backgroundShape(MinutesPalette.surface, radiusDp = 12)
+      root.backgroundShape(
+        MinutesPalette.surface,
+        radiusDp = if (MinutesPalette.vivid) 16 else 12,
+      )
       root.clipToOutline = true
 
-      cover.backgroundShape(MinutesPalette.coverDefault)
+      cover.backgroundShape(
+        MinutesPalette.coverDefault,
+        radiusDp = if (MinutesPalette.vivid) 12 else 0,
+      )
       coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
       coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
       coverIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -397,7 +404,10 @@ internal class MinutesMeetingAdapter(
       when (effectiveType) {
         MinutesListCoverType.DEFAULT -> {
           applyDefaultCoverGeometry()
-          cover.backgroundShape(MinutesPalette.coverDefault)
+          cover.backgroundShape(
+            MinutesPalette.coverDefault,
+            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+          )
           coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
           coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
           coverIcon.visibility = View.VISIBLE
@@ -405,10 +415,21 @@ internal class MinutesMeetingAdapter(
         }
         MinutesListCoverType.SUMMARY -> {
           applyDynamicCoverGeometry(topPaddingDp = 24, bottomPaddingDp = 28)
-          cover.backgroundShape(MinutesPalette.coverSummary)
+          cover.backgroundShape(
+            MinutesPalette.coverSummary,
+            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+          )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book)
+          // The source book glyph is multicolor blue/red. In LaoJi's vivid
+          // skin it must follow the active purple semantic accent so the cover
+          // does not become an isolated Feishu-blue island.
+          coverHeaderIcon.imageTintList = if (NativeThemePreference.isVivid(itemView.context)) {
+            ColorStateList.valueOf(MinutesPalette.primary)
+          } else {
+            null
+          }
           coverHeaderIcon.background = null
           coverTitle.text = meeting.coverTitle.ifBlank { "整理结果" }
           coverTitle.setTextColor(MinutesPalette.secondary)
@@ -422,10 +443,14 @@ internal class MinutesMeetingAdapter(
           // source surface is mm_item_list_cover_content, not the separate
           // blue-gray server-selected speaker-summary cover.
           applyDynamicCoverGeometry(topPaddingDp = 26, bottomPaddingDp = 20)
-          cover.backgroundShape(MinutesPalette.coverContent)
+          cover.backgroundShape(
+            MinutesPalette.coverContent,
+            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+          )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageDrawable(null)
+          coverHeaderIcon.imageTintList = null
           coverHeaderIcon.background = speakerAvatarBackground(meeting.coverTitle)
           coverTitle.text = meeting.coverTitle.ifBlank { "讲话人" }
           coverTitle.setTextColor(MinutesPalette.secondary)

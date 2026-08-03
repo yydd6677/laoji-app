@@ -11,7 +11,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { MainTabsParamList, RootStackParamList } from '../types';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
@@ -32,7 +32,14 @@ type MeetingListNavigationProp = CompositeNavigationProp<
 type Props = { navigation: MeetingListNavigationProp };
 
 export function MeetingListScreen({ navigation }: Props) {
-  const { meetings, loading, error, deleteMeeting, refreshMeetings } = useMeetings();
+  const {
+    meetings,
+    loading,
+    error,
+    deleteMeeting,
+    refreshMeetings,
+    searchMeetingContent,
+  } = useMeetings();
   const { showDialog } = useAppDialog();
   const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
   const [searchVisible, setSearchVisible] = useState(false);
@@ -169,7 +176,7 @@ export function MeetingListScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top']} bg="#F8F9FA">
+    <ScreenContainer edges={['top']} bg={C.appBg}>
       <View testID="meeting-home-titlebar" style={s.header}>
         <Text style={s.title}>会议记录</Text>
         <View style={s.headerActions}>
@@ -234,6 +241,7 @@ export function MeetingListScreen({ navigation }: Props) {
         onClose={() => setSearchVisible(false)}
         onOpenMeeting={openMeeting}
         onOpenMenu={setMeetingMenuId}
+        searchMeetingContent={searchMeetingContent}
       />
       {appMenuVisible ? (
         <AppActionSheet
@@ -261,7 +269,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: C.appBg,
   },
   title: {
     position: 'absolute',
@@ -275,7 +283,7 @@ const s = StyleSheet.create({
   },
   headerActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center' },
   headerAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  list: { flex: 1, backgroundColor: '#F8F9FA' },
+  list: { flex: 1, backgroundColor: C.appBg },
   content: { paddingBottom: BOTTOM_TAB_BAR_GEOMETRY.sceneContentClearance },
   emptyContent: { flexGrow: 1 },
   listTopSpace: { height: 12 },
@@ -296,7 +304,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FFF2F2',
+    backgroundColor: withAlpha(C.red, 0.08),
   },
   cachedErrorText: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 20, color: C.red },
   cachedRetry: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },

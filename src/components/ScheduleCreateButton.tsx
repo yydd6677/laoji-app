@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors as C, Motion } from '../theme/colors';
+import { Colors as C, Motion, withAlpha } from '../theme/colors';
 
 type CreateTarget = 'voice' | 'manual';
 
@@ -250,7 +250,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderTopLeftRadius: ARC_RADIUS,
-    borderColor: 'rgba(20,86,240,0.30)',
+    borderColor: withAlpha(C.primary, 0.30),
   },
   arcActive: { borderColor: C.primary },
   option: {

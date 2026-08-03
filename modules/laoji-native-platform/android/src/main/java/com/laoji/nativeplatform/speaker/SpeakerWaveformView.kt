@@ -8,6 +8,7 @@ import kotlin.math.max
 
 // MIN-SPEAKER-001: this is a level visualization only; no PCM bytes cross JS.
 internal class SpeakerWaveformView(context: Context) : View(context) {
+  private val paletteReady = SpeakerPalette.configure(context)
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private var level = 0f
 
@@ -44,4 +45,3 @@ internal class SpeakerWaveformView(context: Context) : View(context) {
   private fun centerIndex(index: Int, count: Int): Float =
     1f - kotlin.math.abs((index - (count - 1) / 2f) / ((count - 1) / 2f))
 }
-

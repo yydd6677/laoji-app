@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Colors as C } from '../theme/colors';
+import { Appearance, Colors as C, withAlpha } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
 import { layoutMonthWeekEvents } from '../utils/monthEventLayout';
@@ -27,6 +27,11 @@ import {
 } from '../utils/calendarDate';
 import { useCurrentDate } from '../hooks/useCurrentDate';
 import { eventListTitle } from '../utils/eventTitle';
+import {
+  colorForEventCategory,
+  fillColorForEventCategory,
+  textColorForEventCategory,
+} from '../utils/eventColors';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_HEIGHT = 32;
@@ -175,7 +180,24 @@ export function MonthCalendarView({
   };
 
   return (
-    <View style={s.calendar}>
+    <View
+      style={[
+        s.calendar,
+        Appearance.surfaceRadius > 0 && {
+          marginTop: 6,
+          marginBottom: 6,
+          borderRadius: Appearance.surfaceRadius,
+          borderWidth: Appearance.borderWidth,
+          borderColor: C.border,
+          shadowColor: C.purpleDark,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: Appearance.shadowOpacity,
+          shadowRadius: 8,
+          elevation: 2,
+          overflow: 'hidden',
+        },
+      ]}
+    >
       <View style={s.weekdayRow}>
         {WEEKDAYS.map((day, index) => (
           <Text key={day} style={s.weekday} testID={`calendar-weekday-${index}`}>{day}</Text>
@@ -488,6 +510,14 @@ function MonthWeekRow({
       ]}
       testID={`calendar-week-row-${row[0].key}`}
     >
+      <View style={s.weekGridLayer} pointerEvents="none">
+        {Array.from({ length: 6 }, (_, index) => (
+          <View
+            key={`calendar-column-divider-${row[0].key}-${index}`}
+            style={[s.weekColumnDivider, { left: `${((index + 1) / 7) * 100}%` }]}
+          />
+        ))}
+      </View>
       {row.map((cell, column) => (
         <MonthDayCell
           key={cell.key}
@@ -510,14 +540,24 @@ function MonthWeekRow({
             style={[
               s.weekEventChip,
               {
+                borderLeftColor: colorForEventCategory(segment.event.category),
+                backgroundColor: fillColorForEventCategory(segment.event.category),
+              },
+              {
                 top: segment.slot * (EVENT_HEIGHT + EVENT_GAP),
                 left: segment.column * cellWidth,
                 width: Math.max(1, segment.span * cellWidth - 3),
+                borderRadius: Appearance.cardRadius > 6 ? 5 : 2,
               },
             ]}
             testID={`calendar-event-chip-${segment.event.id}-${row[segment.column].key}`}
           >
-            <Text style={s.eventChipText} numberOfLines={1}>{eventListTitle(segment.event.title)}</Text>
+            <Text
+              style={[s.eventChipText, { color: textColorForEventCategory(segment.event.category) }]}
+              numberOfLines={1}
+            >
+              {eventListTitle(segment.event.title)}
+            </Text>
           </View>
         ))}
       </View>
@@ -710,16 +750,34 @@ function ExpandedDayPage({
       {events.map(event => (
         <TouchableOpacity
           key={event.id}
-          style={s.expandedEventRow}
+          style={[
+            s.expandedEventRow,
+            Appearance.cardRadius > 6 && {
+              marginHorizontal: 12,
+              marginBottom: 8,
+              paddingBottom: 8,
+              backgroundColor: C.card,
+              borderRadius: Appearance.cardRadius,
+              borderWidth: Appearance.borderWidth,
+              borderColor: C.border,
+            },
+          ]}
           onPress={() => onOpenEvent(event)}
           activeOpacity={0.74}
           accessibilityRole="button"
           accessibilityLabel={`${eventListTitle(event.title)}，${eventTimeLabel(event)}`}
         >
-          <View style={s.expandedEventDot} />
+          <View
+            style={[s.expandedEventDot, { backgroundColor: colorForEventCategory(event.category) }]}
+          />
           <View style={s.expandedEventCopy}>
-            <Text style={s.expandedEventTitle} numberOfLines={1}>{eventListTitle(event.title)}</Text>
-            <Text style={s.expandedEventMeta} numberOfLines={1}>
+            <Text
+              style={[s.expandedEventTitle, { color: textColorForEventCategory(event.category) }]}
+              numberOfLines={1}
+            >
+              {eventListTitle(event.title)}
+            </Text>
+            <Text style={[s.expandedEventMeta, { color: textColorForEventCategory(event.category) }]} numberOfLines={1}>
               {[eventTimeLabel(event), event.location].filter(Boolean).join(' · ')}
             </Text>
           </View>
@@ -763,6 +821,22 @@ const s = StyleSheet.create({
     paddingRight: GRID_SIDE_END,
     flexDirection: 'row',
     backgroundColor: C.body,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.calendarGridDivider,
+  },
+  weekGridLayer: {
+    position: 'absolute',
+    left: GRID_SIDE_START,
+    right: GRID_SIDE_END,
+    top: 0,
+    bottom: 0,
+  },
+  weekColumnDivider: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: C.calendarGridDivider,
   },
   dayCell: { flex: 1, minWidth: 0, position: 'relative', paddingTop: DATE_TOP },
   dateCircle: {
@@ -789,7 +863,7 @@ const s = StyleSheet.create({
     borderRadius: 2.5,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(100,106,115,0.12)',
+    backgroundColor: withAlpha(C.sub, 0.12),
   },
   overflowText: { fontSize: 10, lineHeight: 12, color: C.sub },
   weekEventLayer: {

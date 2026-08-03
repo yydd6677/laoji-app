@@ -43,6 +43,7 @@ import {
   nativeCalendarEditDraft,
 } from '../native/nativeCalendarPages';
 import { linkMeetingActionFollowup } from '../services/meetingActionFollowup';
+import { Colors as C } from '../theme/colors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -239,7 +240,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     recurrenceUntilDate: value.repeat === 'once' ? undefined : value.recurrenceUntilDate ?? undefined,
     description: value.notes,
     rawText: route.params?.draft?.rawText,
-    color: '#1456F0',
+    color: C.primary,
     category: categoryRef.current,
     location: value.location || undefined,
     detail: route.params?.draft?.detail,
@@ -516,7 +517,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   }), [dirty, draft, editing, editingEvent?.isRecurrenceException, editingEvent?.repeat, locating, missing, saving, selectedRecurrenceScope]);
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
       <View
         style={styles.root}
         testID="event-editor-native-root"

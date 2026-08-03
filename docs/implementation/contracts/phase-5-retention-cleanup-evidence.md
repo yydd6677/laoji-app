@@ -13,9 +13,15 @@
 ## 服务端事务与文件合同
 
 - 目标 18020 新增 `meeting_retention_cleanup_jobs_v2` 和六小时后台任务，启动时立即运行。每批最多 20 条，只选择 `meeting_note_roots_v2.lifecycle=deleted` 且 `deleted_at <= now-30d` 的当前所有者记录。
-- 服务端先在同一 `BEGIN IMMEDIATE` 事务保存 `meetings.audio_path`、`meeting_segments.audio_path` 与全部 RecordingAsset `storage_path`，显式清除四类历史 NO ACTION 子表，再删除 Meeting；其余 root/operation、occurrence、manual note、action/share、question、RecordingAsset/job 和 speaker 表由外键级联。
+- 服务端先在同一事务保存 `meetings.audio_path`、`meeting_segments.audio_path` 与全部 RecordingAsset `storage_path`；SQLite 使用 `BEGIN IMMEDIATE`，PostgreSQL 使用 `SERIALIZABLE`，再显式清除四类历史 NO ACTION 子表并删除 Meeting。其余 root/operation、occurrence、manual note、action/share、question、RecordingAsset/job 和 speaker 表由外键级联。
 - 文件任务只允许删除 `settings.audio_storage_abs_path` 内的普通文件；越界、目录或无效 JSON 均保留 job 并记稳定错误码。DB 删除后、文件删除前崩溃可恢复，文件删除后、job ACK 前崩溃可幂等重放。
 - 真实 `local.db` 副本加入 expired 与 recent 两条夹具、RecordingAsset、Transcript、segment 及两个临时 WAV 后，单次任务返回 `queued=1/completed=1/failed=0`；expired 及子内容和两个文件均消失，recent 保留。副本原有 7 条历史外键孤儿前后不变，`integrity_check=ok`。
+
+### 多 worker 调度归属补充
+
+- 清理循环在 PostgreSQL 每轮执行前获取固定命名空间的事务级 advisory lock；锁未取得的 worker 跳过整轮，不能进入队列扫描或文件删除。事务结束、取消或连接异常会自动释放锁，不留下连接级孤儿锁。
+- SQLite 仅承诺单进程 scheduler；进程内使用串行锁，跨进程由既有 `BEGIN IMMEDIATE` 与唯一会议约束保证队列幂等。多进程 SQLite 开发部署必须只启一个 scheduler，或关闭内置监督并交给外部调度器。
+- 两个完整候选源和本地部署 overlay 的静态合同均通过，SQLite 探针无重叠；一次性 PostgreSQL 16 loopback 两连接抢锁探针通过（持锁连接 `true`，第二连接 `false`）。证据：`tools/service-quality-evidence/svc09/svc09-retention-scheduler-guard-r1.json`。overlay 修改前备份位于 `/home/yydd/桌面/light_plan/server-work/backups/20260802-retention-scheduler/`。
 
 ## 运行部署证据
 
@@ -27,6 +33,7 @@
 
 ## 未完成证据边界
 
-1. 没有真实等满 30 天的用户会议；运行证据证明调度、schema 和“零到期安全”，真实销毁行为来自隔离副本夹具。
+1. 没有真实等满 30 天的用户会议；运行证据证明调度、schema、单 scheduler 归属和“零到期安全”，真实销毁行为来自隔离副本夹具。
 2. 本机尚未用带真实 WorkManager、播放器缓存、通知、附件和多段录音的同一账号组合做高成本到期抽查；该组合与 USB 真机留在候选版。
-3. 共享服务器仍有既存的 7 条 `final_summaries → meetings` 历史孤儿；本切片未增加，也没有越界清理与当前 tombstone 无关的旧数据。
+3. 尚未在生产 systemd/容器编排中验证 scheduler 角色注入、PostgreSQL 故障转移、连接池耗尽、吞吐、重启恢复或两小时 soak；`promotion_eligible=false` 保持。
+4. 共享服务器仍有既存的 7 条 `final_summaries → meetings` 历史孤儿；本切片未增加，也没有越界清理与当前 tombstone 无关的旧数据。

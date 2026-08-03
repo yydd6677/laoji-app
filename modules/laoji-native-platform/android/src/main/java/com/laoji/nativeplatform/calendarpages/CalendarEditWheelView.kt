@@ -104,6 +104,7 @@ internal object CalendarEditWheelContract {
 
 @FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-REPEAT-RRULE-001")
 internal class CalendarEditWheelView(context: Context) : View(context) {
+  private val paletteReady = CalendarPagePalette.configure(context)
   private val baseTextSizePx = sp(17f)
   private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = CalendarPagePalette.placeholder

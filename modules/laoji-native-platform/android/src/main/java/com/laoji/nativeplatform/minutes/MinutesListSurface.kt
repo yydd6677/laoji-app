@@ -195,8 +195,8 @@ internal class MinutesListSurface(
     recordButton.minimumWidth = context.dp(88)
     recordButton.setPadding(context.dp(12), 0, context.dp(12), 0)
     recordButton.backgroundHorizontalGradient(
-      startColor = android.graphics.Color.rgb(85, 95, 242),
-      endColor = android.graphics.Color.rgb(139, 118, 245),
+      startColor = MinutesPalette.recordGradientStart,
+      endColor = MinutesPalette.recordGradientEnd,
       radiusDp = 24,
     )
     // Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
@@ -376,7 +376,9 @@ internal class MinutesListSurface(
     }
 
   private fun applyListPadding(topPadding: Int = 0) {
-    val sidePadding = if (!recycleBin && viewMode == MinutesHomeViewMode.GRID) context.dp(7) else 0
+    val sidePadding = if (!recycleBin && viewMode == MinutesHomeViewMode.GRID) {
+      context.dp(if (MinutesPalette.vivid) 12 else 7)
+    } else 0
     list.setPadding(sidePadding, topPadding, sidePadding, context.dp(84))
   }
 

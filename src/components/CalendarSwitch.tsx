@@ -96,6 +96,6 @@ const s = StyleSheet.create({
     width: CALENDAR_SWITCH_GEOMETRY.thumbSize,
     height: CALENDAR_SWITCH_GEOMETRY.thumbSize,
     borderRadius: CALENDAR_SWITCH_GEOMETRY.thumbSize / 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: C.body,
   },
 });

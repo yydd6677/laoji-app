@@ -63,6 +63,8 @@ class RecorderEngine(
   private var localUri: String? = null
   private var errorCode: RecorderErrorCode? = null
   private var errorMessage: String? = null
+  private var providerErrorCode: String? = null
+  private var providerErrorRetryable: Boolean? = null
   private var audioRecord: AudioRecord? = null
   private var recordingThread: Thread? = null
   private var fileSession: RecordingFileSession? = null
@@ -186,6 +188,8 @@ class RecorderEngine(
       transcriptRecoveryRequired = transcriptRecoveryRequired,
       errorCode = errorCode,
       errorMessage = errorMessage,
+      providerErrorCode = providerErrorCode,
+      providerErrorRetryable = providerErrorRetryable,
     )
   }
 
@@ -254,6 +258,7 @@ class RecorderEngine(
         "text" to transcript.text,
         "speakerId" to transcript.speakerId,
         "speakerName" to transcript.speakerName,
+        "speakerConfidence" to transcript.speakerConfidence,
         "startMs" to transcript.startMs?.toDouble(),
         "endMs" to transcript.endMs?.toDouble(),
         "source" to transcript.source,
@@ -263,15 +268,27 @@ class RecorderEngine(
     )
   }
 
-  override fun onServerError(detail: String) {
+  override fun onServerError(error: AsrServerEvent.Error) {
     if (config.mode != RecorderMode.REALTIME) return
+    // The socket can deliver a queued error while stop is finalizing.  Once
+    // the local file is terminal, a late server warning must not re-open a
+    // failed-looking recorder state.
+    if (state == RecorderState.LOCAL_SAVED || state == RecorderState.FAILED) return
     synchronized(stateLock) {
       errorCode = RecorderErrorCode.SERVER_ERROR
-      errorMessage = detail
+      errorMessage = error.detail
+      providerErrorCode = error.code
+      providerErrorRetryable = error.retryable
       transcriptRecoveryRequired = config.purpose == AudioPurpose.MEETING
       updatedAtMs = System.currentTimeMillis()
     }
-    emitError(RecorderErrorCode.SERVER_ERROR, detail, recoverable = true)
+    emitError(
+      RecorderErrorCode.SERVER_ERROR,
+      error.detail,
+      recoverable = true,
+      providerCode = error.code,
+      providerRetryable = error.retryable,
+    )
     publishSnapshot()
   }
 
@@ -548,7 +565,15 @@ class RecorderEngine(
         ReadyToStopOutcome.READY -> {
           readyToStop = true
           try {
-            fileSession?.updateAsrState(JournalAsrState.READY)
+            // A server-side warning can be emitted while the local recorder
+            // keeps capturing.  If the final drain succeeds, that warning is
+            // recoverable metadata rather than a terminal recording failure;
+            // keep transcriptRecoveryRequired for a later background retry,
+            // but do not let SERVER_ERROR poison the stop result.
+            val needsTranscriptRecovery = clearRecoverableServerErrorAfterReady()
+            fileSession?.updateAsrState(
+              if (needsTranscriptRecovery) JournalAsrState.FAILED else JournalAsrState.READY,
+            )
           } catch (_: Exception) {
             failure = failure ?: RecorderFailure(
               RecorderErrorCode.STORAGE_FAILED,
@@ -720,6 +745,20 @@ class RecorderEngine(
     else -> JournalAsrState.FAILED
   }
 
+  private fun clearRecoverableServerErrorAfterReady(): Boolean {
+    synchronized(stateLock) {
+      val needsTranscriptRecovery =
+        errorCode == RecorderErrorCode.SERVER_ERROR && transcriptRecoveryRequired
+      if (errorCode == RecorderErrorCode.SERVER_ERROR) {
+        errorCode = null
+        errorMessage = null
+        providerErrorCode = null
+        providerErrorRetryable = null
+      }
+      return needsTranscriptRecovery
+    }
+  }
+
   private fun failedStopResult(failure: RecorderFailure): RecorderStopResult {
     synchronized(stateLock) {
       errorCode = failure.code
@@ -796,7 +835,13 @@ class RecorderEngine(
     RecorderEventBus.emit(RecorderEvents.STATE_CHANGED, current.toMap())
   }
 
-  private fun emitError(code: RecorderErrorCode, message: String, recoverable: Boolean) {
+  private fun emitError(
+    code: RecorderErrorCode,
+    message: String,
+    recoverable: Boolean,
+    providerCode: String? = null,
+    providerRetryable: Boolean? = null,
+  ) {
     RecorderEventBus.emit(
       RecorderEvents.ERROR,
       mapOf(
@@ -806,6 +851,8 @@ class RecorderEngine(
         "recoverable" to recoverable,
         "localUri" to localUri,
         "transcriptRecoveryRequired" to transcriptRecoveryRequired,
+        "providerCode" to providerCode,
+        "providerRetryable" to providerRetryable,
       ),
     )
   }

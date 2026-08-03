@@ -39,6 +39,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.Locale
@@ -74,7 +75,7 @@ private class MonthWeekdayHeaderView(context: Context) : View(context) {
   private val weekdayPaint = CalendarUi.textPaint(context, palette.textPrimary, 12f, true)
   private var todayWeekdayIndex: Int? = null
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.divider
+    color = palette.monthGridDivider
     strokeWidth = maxOf(1f, CalendarUi.dp(context, 0.5f))
   }
 
@@ -165,7 +166,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
     strokeWidth = CalendarUi.dp(context, CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP)
   }
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.divider
+    color = palette.monthGridDivider
     strokeWidth = maxOf(1f, 0.5f * density)
   }
   private val selectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -272,6 +273,10 @@ private class MonthWeekRowView(context: Context) : View(context) {
     val cellWidth = ((width - gridStart - gridEnd) / MonthExpandedLayoutContract.DAY_PAGE_COUNT).coerceAtLeast(1f)
     val monthParts = CalendarDateMath.fromEpochDay(monthEpochDay)
     canvas.drawLine(0f, 0f, width.toFloat(), 0f, dividerPaint)
+    for (column in 1 until MonthExpandedLayoutContract.DAY_PAGE_COUNT) {
+      val x = gridStart + column * cellWidth
+      canvas.drawLine(x, 0f, x, height.toFloat(), dividerPaint)
+    }
 
     for (column in 0 until MonthExpandedLayoutContract.DAY_PAGE_COUNT) {
       val epochDay = rowStartEpochDay + column
@@ -336,7 +341,14 @@ private class MonthWeekRowView(context: Context) : View(context) {
       )
       val top = chipTopInset + segment.lane * (chipHeight + chipGap)
       val rect = RectF(horizontal.left, top, horizontal.right, top + chipHeight)
-      val radius = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_RADIUS_DP)
+      val radius = CalendarUi.dp(
+        context,
+        CalendarUi.eventRadiusDp(context, MonthExpandedLayoutContract.EVENT_RADIUS_DP),
+      )
+      val visual = CalendarUi.eventVisual(context, segment.event.category)
+      eventPaint.color = visual.fill
+      eventBorderPaint.color = visual.border
+      eventTextPaint.color = visual.text
       canvas.drawRoundRect(rect, radius, radius, eventPaint)
       val borderInset = eventBorderPaint.strokeWidth / 2f
       val borderRect = RectF(rect).apply { inset(borderInset, borderInset) }
@@ -701,7 +713,16 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     contentDescription = "暂无日程安排"
   }
   private val emptyImage = ImageView(context).apply {
-    setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_empty)
+    // Keep the illustration's layered shape. The vivid variant changes only
+    // the accent paths; tinting the whole vector collapses the paper, text and
+    // accent layers into one purple silhouette.
+    setImageResource(
+      if (NativeThemePreference.isVivid(context)) {
+        com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_empty_vivid
+      } else {
+        com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_empty
+      },
+    )
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
   private val emptyMessage = LinearLayout(context).apply {
@@ -786,6 +807,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     event: CalendarEvent,
     listener: MonthCalendarListener?,
   ): View = LinearLayout(context).apply {
+    val visual = CalendarUi.eventVisual(context, event.category)
     FeishuEvidenceRuntime.bind(
       this,
       "CAL-MONTH-EXPAND-001",
@@ -807,20 +829,20 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
       addState(
         intArrayOf(android.R.attr.state_pressed),
         CalendarUi.background(
-          palette.eventFill,
-          CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP,
+          visual.fill,
+          CalendarUi.eventBorderRadiusDp(context),
           context,
-          palette.eventBorder,
+          visual.border,
           CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP,
         ),
       )
       addState(
         intArrayOf(),
         CalendarUi.background(
-          palette.surfaceMuted,
-          CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP,
+          visual.fill,
+          CalendarUi.eventBorderRadiusDp(context),
           context,
-          palette.eventBorder,
+          visual.border,
           CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP,
         ),
       )
@@ -834,7 +856,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
         addView(
           TextView(context).apply {
             text = CalendarUi.listEventTitle(event.title)
-            setTextColor(palette.textPrimary)
+            setTextColor(visual.text)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
@@ -844,7 +866,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
         addView(
           TextView(context).apply {
             text = eventTimeLabel(epochDay, event)
-            setTextColor(palette.textPrimary)
+            setTextColor(visual.text)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END

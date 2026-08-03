@@ -76,5 +76,5 @@ const s = StyleSheet.create({
   },
   text: { flex: 1, color: tokens.colors.onTips, fontSize: 13, fontWeight: '500' },
   undoButton: { minWidth: 52, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
-  undoText: { color: '#8FB4FF', fontSize: 13, fontWeight: '600' },
+  undoText: { color: tokens.colors.primaryPressed, fontSize: 13, fontWeight: '600' },
 });

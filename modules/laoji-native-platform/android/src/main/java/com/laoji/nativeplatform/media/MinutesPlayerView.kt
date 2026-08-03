@@ -23,6 +23,7 @@ import com.laoji.nativeplatform.minutes.dp
 import com.laoji.nativeplatform.minutes.formatClock
 import com.laoji.nativeplatform.minutes.iconButton
 import com.laoji.nativeplatform.minutes.textView
+import com.laoji.nativeplatform.minutes.withAlpha
 
 class MinutesPlayerView(
   context: Context,
@@ -120,12 +121,17 @@ class MinutesPlayerView(
     // or the endpoint thumbs are clipped by its bounds.
     seekBar.setPadding(context.dp(8), 0, context.dp(8), 0)
     seekBar.max = SEEK_RANGE
-    seekBar.progressBackgroundTintList = ColorStateList.valueOf(PLAYER_TRACK_COLOR)
-    seekBar.secondaryProgressTintList = ColorStateList.valueOf(PLAYER_BUFFER_COLOR)
-    seekBar.progressTintList = ColorStateList.valueOf(PLAYER_GRADIENT_START)
+    seekBar.progressBackgroundTintList = ColorStateList.valueOf(MinutesPalette.timelineTrack)
+    seekBar.secondaryProgressTintList = ColorStateList.valueOf(withAlpha(MinutesPalette.recordGradientStart, 77))
+    seekBar.progressTintList = ColorStateList.valueOf(MinutesPalette.recordGradientStart)
     seekBar.thumbTintList = null
     seekBar.thumbTintMode = null
-    seekBar.thumb = MinutesSeekThumbDrawable(context)
+    seekBar.thumb = MinutesSeekThumbDrawable(
+      context,
+      outerColor = MinutesPalette.primarySoft,
+      ringColor = MinutesPalette.surface,
+      coreColor = MinutesPalette.primary,
+    )
     seekBar.thumbTintList = null
     seekBar.thumbTintMode = null
     seekBar.splitTrack = false
@@ -195,7 +201,11 @@ class MinutesPlayerView(
         rightMargin = context.dp(36)
       },
     )
-    playPause.backgroundHorizontalGradient(PLAYER_GRADIENT_START, PLAYER_GRADIENT_END, radiusDp = 24)
+    playPause.backgroundHorizontalGradient(
+      MinutesPalette.recordGradientStart,
+      MinutesPalette.recordGradientEnd,
+      radiusDp = 24,
+    )
     playPause.imageTintList = ColorStateList.valueOf(android.graphics.Color.WHITE)
     playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
     playPause.setOnClickListener { controller.toggle() }
@@ -322,26 +332,27 @@ class MinutesPlayerView(
 
   companion object {
     private const val SEEK_RANGE = 1_000
-    private val PLAYER_GRADIENT_START = android.graphics.Color.rgb(85, 95, 242)
-    private val PLAYER_GRADIENT_END = android.graphics.Color.rgb(139, 118, 245)
-    private val PLAYER_BUFFER_COLOR = android.graphics.Color.argb(77, 85, 95, 242)
-    private val PLAYER_TRACK_COLOR = android.graphics.Color.argb(26, 31, 35, 41)
   }
 }
 
 /** Keeps the source asset's three colors even when the platform theme tints SeekBar thumbs. */
-private class MinutesSeekThumbDrawable(context: Context) : Drawable() {
+private class MinutesSeekThumbDrawable(
+  context: Context,
+  outerColor: Int,
+  ringColor: Int,
+  coreColor: Int,
+) : Drawable() {
   private val sizePx = context.dp(16)
   private val ringInsetPx = context.dp(1).toFloat()
   private val coreInsetPx = context.dp(3).toFloat()
   private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = android.graphics.Color.rgb(204, 216, 251)
+    color = outerColor
   }
   private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = android.graphics.Color.WHITE
+    color = ringColor
   }
   private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = android.graphics.Color.rgb(73, 83, 230)
+    color = coreColor
   }
 
   override fun draw(canvas: Canvas) {

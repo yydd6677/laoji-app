@@ -1,4 +1,7 @@
 import { notifyUnauthorized } from './authInvalidation';
+import { readJsonWithTimeout, readTextWithTimeout } from './http';
+
+const ERROR_RESPONSE_BODY_TIMEOUT_MS = 10_000;
 
 export class HttpResponseError extends Error {
   constructor(
@@ -53,14 +56,99 @@ export function stringifyErrorDetail(value: unknown): string | null {
   return null;
 }
 
-export async function readResponseData(res: Response): Promise<unknown> {
+type RecorderErrorLike = {
+  code?: unknown;
+  errorCode?: unknown;
+  providerCode?: unknown;
+  providerRetryable?: unknown;
+  recoverable?: unknown;
+  errorMessage?: unknown;
+  message?: unknown;
+  result?: {
+    errorCode?: unknown;
+    errorMessage?: unknown;
+    localSaved?: unknown;
+  } | null;
+};
+
+function recorderErrorMetadata(value: unknown): {
+  code: string | null;
+  providerCode: string | null;
+  recoverable: boolean;
+  detail: unknown;
+} {
+  if (!value || typeof value !== 'object') {
+    return { code: null, providerCode: null, recoverable: false, detail: value };
+  }
+  const record = value as RecorderErrorLike;
+  const result = record.result;
+  const rawCode = record.errorCode ?? record.code ?? result?.errorCode;
+  const code = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : null;
+  const providerCode = typeof record.providerCode === 'string' && record.providerCode.trim()
+    ? record.providerCode.trim()
+    : null;
+  const rawDetail = record.errorMessage ?? record.message ?? result?.errorMessage ?? value;
+  return {
+    code,
+    providerCode,
+    recoverable: record.recoverable === true || (
+      code !== null
+      && ['server_error', 'service_unavailable', 'websocket_connect_failed', 'websocket_disconnected', 'websocket_send_failed'].includes(code)
+      && result?.localSaved === true
+    ),
+    detail: rawDetail,
+  };
+}
+
+/**
+ * Native recorder errors carry a stable code in addition to provider text.
+ * Provider text can be stale or misleading (for example “检查麦克风权限”
+ * while PCM is still being recorded), so user-visible copy must prefer the
+ * code and never expose that raw detail for a recoverable ASR failure.
+ */
+export function readableRecorderErrorMessage(
+  errorCode: string | null | undefined,
+  detail: unknown,
+  fallback: string,
+  recoverable = false,
+  providerCode: string | null | undefined = null,
+): string {
+  const code = typeof errorCode === 'string' ? errorCode.trim() : '';
+  const normalizedProviderCode = typeof providerCode === 'string' ? providerCode.trim() : '';
+  if (normalizedProviderCode === 'qwen_asr_queue_full') {
+    return recoverable
+      ? '实时转写暂时繁忙，录音仍会保存在本机，结束后可继续同步。'
+      : '实时转写暂时繁忙，请稍后重试。';
+  }
+  if (code === 'permission_denied') return '请允许麦克风权限后重试。';
+  if (code === 'storage_limit') return '本机存储空间不足，请清理空间后重试。';
+  if (code === 'storage_failed') return '录音已保存，但本机记录暂时未能更新，请稍后重试。';
+  if (code === 'audio_unavailable' || code === 'audio_read_failed') {
+    return '录音暂时不可用，请检查麦克风权限后重试。';
+  }
+  if (code === 'ready_to_stop_timeout' || code === 'stop_ack_timeout' || code === 'final_drain_timeout') {
+    return '录音已保存在本机，但实时转写结束确认超时；可在会议详情中继续同步。';
+  }
+  if (code === 'recovery_failed') return '录音恢复失败，请稍后重试。';
+  if (['server_error', 'service_unavailable', 'websocket_connect_failed', 'websocket_disconnected', 'websocket_send_failed'].includes(code)) {
+    return recoverable
+      ? '实时转写服务暂时不可用，录音仍会保存在本机，结束后可继续同步。'
+      : '实时转写服务暂时不可用，录音仍会保存在本机，请稍后重试。';
+  }
+  return readableErrorMessage(detail, fallback);
+}
+
+export async function readResponseData(
+  res: Response,
+  timeoutMs = ERROR_RESPONSE_BODY_TIMEOUT_MS,
+): Promise<unknown> {
   const response = res as Response & {
     text?: () => Promise<string>;
     json?: () => Promise<unknown>;
   };
   if (typeof response.text === 'function') {
     try {
-      const raw = await response.text();
+      const raw = await readTextWithTimeout(response, timeoutMs);
       if (!raw.trim()) return null;
       try {
         return JSON.parse(raw);
@@ -75,7 +163,7 @@ export async function readResponseData(res: Response): Promise<unknown> {
   // Lightweight test doubles and a few legacy fetch shims expose json() only.
   if (typeof response.json === 'function') {
     try {
-      return await response.json();
+      return await readJsonWithTimeout(response, timeoutMs);
     } catch {
       return null;
     }
@@ -104,6 +192,16 @@ export async function readResponseError(
 }
 
 export function readableErrorMessage(err: unknown, fallback: string): string {
+  const metadata = recorderErrorMetadata(err);
+  if (metadata.code) {
+    return readableRecorderErrorMessage(
+      metadata.code,
+      metadata.detail,
+      fallback,
+      metadata.recoverable,
+      metadata.providerCode,
+    );
+  }
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : stringifyErrorDetail(err) ?? '';
   const message = raw.trim();
   if (!message || message === '[object Object]') return fallback;
@@ -111,6 +209,9 @@ export function readableErrorMessage(err: unknown, fallback: string): string {
   const cleaned = message.replace(/^[^:]+:\s*\d{3}\s*/, '').trim();
   if (/Network request failed|Failed to fetch|connection refused/i.test(cleaned)) {
     return '暂时无法连接老记服务，请检查网络后重试。';
+  }
+  if (/support[_ -]?models?[_ -]?not[_ -]?ready|models?[_ -]?not[_ -]?ready|qwen[_ -]?asr[_ -]?unreachable/i.test(cleaned)) {
+    return '实时转写服务暂时未就绪，录音仍会保存在本机，请稍后重试。';
   }
   if (/timeout|timed out/i.test(cleaned)) return '请求超时，请稍后重试。';
   if (/401|unauthorized|token expired/i.test(cleaned)) return '登录已过期，请重新登录。';

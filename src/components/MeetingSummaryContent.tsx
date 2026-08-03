@@ -123,7 +123,7 @@ function renderBlock(block: MeetingSummaryBlock, index: number) {
     return (
       <View key={testID} testID={testID} style={[s.block, s.listRow]}>
         <View style={[s.checkbox, block.checked && s.checkboxChecked]}>
-          {block.checked ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
+          {block.checked ? <Ionicons name="checkmark" size={12} color={C.body} /> : null}
         </View>
         <Text style={s.content}>{block.text}</Text>
       </View>

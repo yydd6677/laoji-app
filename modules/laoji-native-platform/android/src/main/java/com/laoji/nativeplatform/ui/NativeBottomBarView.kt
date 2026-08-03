@@ -7,7 +7,6 @@ package com.laoji.nativeplatform.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
@@ -25,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.graphics.PathParser
+import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import expo.modules.kotlin.AppContext
@@ -48,7 +48,7 @@ private class NativeBottomTabItemView(
   private val palette: NativeUiPalette,
   private val onClick: () -> Unit,
 ) : FrameLayout(context) {
-  private val selectedColor = Color.rgb(20, 86, 240)
+  private val selectedColor = palette.primary
   private val iconDrawable = NativeBottomTabIconDrawable(tab, palette.textSecondary, selectedColor)
   private val iconContainer = FrameLayout(context).apply {
     clipChildren = false
@@ -252,7 +252,13 @@ class LaojiNativeBottomBarView(
 
   init {
     setWillNotDraw(false)
-    setBackgroundColor(palette.surface)
+    if (NativeThemePreference.isVivid(context)) {
+      // The vivid skin turns the flat source bar into a lightly inset panel;
+      // the standard skin keeps the source-shaped edge-to-edge surface.
+      background = NativeUiTokens.roundedBackground(context, palette.surface, 18f, palette.divider)
+    } else {
+      setBackgroundColor(palette.surface)
+    }
     clipChildren = false
     clipToPadding = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO

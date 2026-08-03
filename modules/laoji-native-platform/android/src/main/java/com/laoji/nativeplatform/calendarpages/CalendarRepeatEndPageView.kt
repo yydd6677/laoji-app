@@ -82,6 +82,7 @@ internal class CalendarRepeatEndPageView(
   private val onCancel: () -> Unit,
   private val onComplete: (CalendarEditDraft) -> Unit,
 ) : LinearLayout(context) {
+  private val paletteReady = CalendarPagePalette.configure(context)
   private var state = initialState
   private var applyingState = false
   private val titleBar = CalendarCommonTitleBar(context)

@@ -62,6 +62,7 @@ import { getFeatureFlags } from '../config/featureFlags';
 import {
   MeetingRepositoryFacade,
   sqliteMeetingNoteRepository,
+  type MeetingSearchResult,
   type MeetingDualReadReport,
 } from '../data/repositories';
 import { reconcileNativeMeetingRecordings } from '../services/meetingRecordingReconciliation';
@@ -94,6 +95,7 @@ import { requestMeetingActionSync } from '../application/meeting/actionSyncTrigg
 import { requestMeetingRootSync } from '../application/meeting/rootSyncTrigger';
 import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
 import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
+import { requestImportedMeetingTranscriptDiscovery } from '../application/meeting/importTranscriptDiscovery';
 import { CreateMeetingNoteUseCase } from '../application/meeting/createMeetingNote';
 import {
   AttachImportedMeetingMediaError,
@@ -126,6 +128,7 @@ import {
 } from '../services/meetingRootPull';
 import {
   loadMeetingCapabilities,
+  searchMeetingContentV1,
   uploadRecordingAssetV2,
 } from '../data/api/v2';
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
@@ -586,6 +589,7 @@ interface MeetingsContextType {
     options?: MeetingStatusUpdateOptions,
   ) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
+  searchMeetingContent: (query: string, limit?: number) => Promise<readonly MeetingSearchResult[]>;
   reconcileAudioUploads: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
   getCachedTranscript: (id: string) => TranscriptLine[];
   saveCachedTranscript: (
@@ -687,6 +691,57 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     () => writeAppStorageJson(summaryKey, summaryCacheRef.current, { removeIfEmpty: true }),
     [summaryKey],
   );
+  const searchMeetingContent = useCallback(async (
+    query: string,
+    limit = 60,
+  ): Promise<readonly MeetingSearchResult[]> => {
+    if (!isScopeKey(scope) || !query.trim()) return [];
+    const flags = getFeatureFlags();
+    const localPromise = sqliteMeetingNoteRepository.searchMeetingContent(scope, query, limit)
+      .catch(reason => {
+        // Search is an enhancement over the cached list. A migration/index
+        // failure must not make the meeting list unusable; the search surface
+        // keeps its title/metadata fallback and logs only a diagnostic code.
+        diagnosticWarn('[meeting-search] local content index unavailable', reason);
+        return [] as readonly MeetingSearchResult[];
+      });
+    const remotePromise = flags.meetingCrossMeetingSearchV1
+      && mode === 'authenticated' && accessToken
+      ? searchMeetingContentV1({ accessToken, query, limit }).catch(reason => {
+        // The remote semantic path is optional during rollout. Keep local FTS
+        // results and metadata fallback usable when the candidate endpoint is
+        // unavailable or the session has just expired.
+        diagnosticWarn('[meeting-search] remote hybrid index unavailable', reason);
+        return [] as readonly MeetingSearchResult[];
+      })
+      : Promise.resolve([] as readonly MeetingSearchResult[]);
+    const [localResults, remoteResults] = await Promise.all([localPromise, remotePromise]);
+    const meetingsByIdentity = new Map(
+      meetingsRef.current.flatMap(meeting => [
+        [meeting.id, meeting] as const,
+        ...(meeting.remoteId ? [[meeting.remoteId, meeting] as const] : []),
+      ]),
+    );
+    const resultKey = (result: MeetingSearchResult) => {
+      const meeting = meetingsByIdentity.get(result.navigationMeetingId)
+        ?? meetingsByIdentity.get(result.meetingId);
+      const meetingKey = meeting?.remoteId ?? meeting?.id ?? result.meetingId;
+      const sourceKey = result.sourceKind === 'title' ? 'title' : result.sourceId;
+      return `${meetingKey}:${result.sourceKind}:${sourceKey}`;
+    };
+    const merged = new Map<string, MeetingSearchResult>();
+    localResults.forEach(result => merged.set(resultKey(result), result));
+    remoteResults.forEach(result => {
+      const meeting = meetingsByIdentity.get(result.meetingId);
+      if (!meeting) return;
+      const normalized = { ...result, meetingId: meeting.id, navigationMeetingId: meeting.id };
+      const key = resultKey(normalized);
+      if (!merged.has(key)) merged.set(key, normalized);
+    });
+    return [...merged.values()]
+      .sort((left, right) => left.rank - right.rank || left.resultId.localeCompare(right.resultId))
+      .slice(0, limit);
+  }, [accessToken, mode, scope]);
   const canonicalLegacyWriter = useMemo<LegacyMeetingProjectionWriter>(() => ({
     writeMeetings: async (targetScope, next) => {
       if (targetScope !== scope) throw new Error('meeting legacy mirror scope changed');
@@ -2687,7 +2742,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           diagnosticWarn('[meeting-import] stale summary task cleanup failed', error);
         });
         if (scope !== 'guest') {
-          requestMeetingTranscriptCompletion(scope, { discoverRecordingAssets: true });
+          requestImportedMeetingTranscriptDiscovery(scope);
           void resumePendingAudioUploads(true).catch(error => {
             diagnosticWarn('[meeting-import] upload resume failed', error);
           });
@@ -2747,11 +2802,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const projected = owned.projection.meetings.find(meeting => meeting.id === media.meetingId);
       if (!projected) throw new Error('meeting canonical projection lost imported media');
       adoptCanonicalOwnedProjection(owned, operationGeneration);
-      if (scope !== 'guest' && flags.localMeetingDbAccountRootWriteV1) {
-        requestMeetingRootSync(scope);
-        void resumePendingAudioUploads(true).catch(error => {
-          diagnosticWarn('[meeting-import] upload resume failed', error);
-        });
+      if (scope !== 'guest') {
+        requestImportedMeetingTranscriptDiscovery(scope);
+        if (flags.localMeetingDbAccountRootWriteV1) {
+          requestMeetingRootSync(scope);
+          void resumePendingAudioUploads(true).catch(error => {
+            diagnosticWarn('[meeting-import] upload resume failed', error);
+          });
+        }
       }
       return projected;
     }
@@ -2792,6 +2850,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     deactivateCanonicalRead();
     meetingsRef.current = next;
     setMeetings(next);
+    // Signal after the legacy write is committed, before optional read-cutover
+    // work can fail or become stale. The coordinator still waits for a remote
+    // identity before creating an account transcription task.
+    if (scope !== 'guest') {
+      requestImportedMeetingTranscriptDiscovery(scope);
+    }
     if (getFeatureFlags().localMeetingDbCanonicalReadV1) {
       await applyMeetingReadCutover(next);
     }
@@ -3376,6 +3440,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         updateMeetingDetails,
         updateMeetingStatus,
         refreshMeetings,
+        searchMeetingContent,
         reconcileAudioUploads,
         getCachedTranscript,
         saveCachedTranscript,

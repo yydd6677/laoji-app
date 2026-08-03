@@ -4,6 +4,9 @@ import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
 import { useAppDialog } from './AppDialog';
+import { getAppStorageItem, setAppStorageItem } from '../services/appStorage';
+
+const GUEST_MIGRATION_PROMPT_KEY_PREFIX = '@laoji:guestDataMigrationPrompt:v1';
 
 type GuestDataMigrationContextValue = {
   migrationBusy: boolean;
@@ -106,8 +109,16 @@ export function GuestDataMigrationProvider({ children }: { children: React.React
     // an adjacent guest -> authenticated transition can never be relied on.
     // Inspect each newly observed authenticated session instead; the dialog
     // remains explicit and never merges or overwrites data without consent.
-    void inspectGuestDataMigration(userId).then(preview => {
+    void inspectGuestDataMigration(userId).then(async preview => {
       if (!active || preview.pendingCount === 0) return;
+      const promptKey = `${GUEST_MIGRATION_PROMPT_KEY_PREFIX}:${userId}`;
+      const promptedForCount = await getAppStorageItem(promptKey).catch(() => null);
+      if (!active || promptedForCount === String(preview.pendingCount)) return;
+      // Mark the current pending count before displaying the dialog. Activity
+      // recreation (for example after a skin switch) must not show it again;
+      // new guest data changes the count and will make the prompt eligible.
+      await setAppStorageItem(promptKey, String(preview.pendingCount)).catch(() => {});
+      if (!active) return;
       showDialog({
         title: '合并访客数据',
         message: `检测到${countMessage(preview)}。可将它们合并到当前账号；声纹资料不迁移。`,

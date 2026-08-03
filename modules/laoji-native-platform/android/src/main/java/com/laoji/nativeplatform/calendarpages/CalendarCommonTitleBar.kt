@@ -138,7 +138,7 @@ internal object CalendarTitleSaveContract {
 
   fun color(type: CalendarTitleSaveType): Int = when (type) {
     CalendarTitleSaveType.ENABLE_SAVE -> CalendarPagePalette.primary
-    CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> Color.rgb(194, 212, 255)
+    CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> CalendarPagePalette.disabled
     CalendarTitleSaveType.DISABLE_SAVE_TOTALLY -> CalendarPagePalette.placeholder
   }
 }
@@ -147,6 +147,7 @@ internal object CalendarTitleSaveContract {
 internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) {
   private enum class TitlePlacement { CENTER, SECONDARY_LEFT }
 
+  private val paletteReady = CalendarPagePalette.configure(context)
   private val leftAction = sourceText().apply {
     gravity = Gravity.CENTER_VERTICAL
     visibility = GONE
@@ -182,7 +183,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     setPadding(context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP), 0, 0, 0)
   }
   private val divider = View(context).apply {
-    setBackgroundColor(Color.argb(38, 31, 35, 41))
+    setBackgroundColor(CalendarPagePalette.divider)
     visibility = GONE
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
@@ -298,7 +299,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
       // a control. Keep the pill inside the 44dp title bar so it does not alter
       // title alignment or the save action's geometry.
       val pill = GradientDrawable().apply {
-        setColor(Color.rgb(242, 243, 245))
+        setColor(CalendarPagePalette.neutralBackground)
         cornerRadius = context.dp(18f).toFloat()
       }
       val outerInset = context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP)

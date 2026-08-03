@@ -35,6 +35,7 @@ export interface NativeMinutesTranscriptEventLike {
   text: string;
   speakerId: string | null;
   speakerName: string | null;
+  speakerConfidence?: number | null;
   startMs: number | null;
   endMs: number | null;
   source?: string | null;
@@ -217,6 +218,7 @@ export function mergeNativeMinutesTranscript(
     text,
     start_time: event.startMs == null ? existing?.start_time : event.startMs / 1000,
     end_time: event.endMs == null ? existing?.end_time : event.endMs / 1000,
+    confidence: event.speakerConfidence ?? existing?.confidence,
     created_at: existing?.created_at ?? new Date(event.receivedAtMs).toISOString(),
     isFinal: event.isFinal || event.kind === 'final',
   };
@@ -426,7 +428,8 @@ export function nativeMinutesSpeakers(
   const grouped = new Map<string, { label: string; count: number; durationSec: number }>();
   transcript.forEach(line => {
     if (!line.text.trim()) return;
-    const id = line.speaker_id?.trim() || line.speaker_label?.trim() || 'unknown';
+    // Display labels are mutable and must never become speaker identities.
+    const id = line.speaker_id?.trim() || 'unknown';
     const label = speakerDisplayLabel(line.speaker_label, line.speaker_id);
     const previous = grouped.get(id) ?? { label, count: 0, durationSec: 0 };
     const start = finiteSeconds(line.start_time);

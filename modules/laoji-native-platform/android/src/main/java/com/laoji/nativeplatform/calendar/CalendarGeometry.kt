@@ -103,6 +103,18 @@ object CalendarGeometry {
     }.sortedWith(
       compareBy<MonthEventSegment> { it.weekIndex }
         .thenBy { it.startColumn }
+        // Keep the month grid's lane order consistent with the day list and
+        // React fallback. A same-day pair must be ordered by its start clock,
+        // not by the source/event id returned from the API.
+        .thenByDescending { it.event.allDay }
+        .thenBy {
+          if (it.event.allDay) Int.MAX_VALUE
+          else if (it.startsBeforeSegment) 0
+          else it.event.startMinutes ?: Int.MAX_VALUE
+        }
+        .thenByDescending { it.event.endMinutes ?: Int.MAX_VALUE }
+        // Once chronology is fixed, keep longer spans ahead for deterministic
+        // lane allocation without letting duration reorder different times.
         .thenByDescending { it.endColumn - it.startColumn }
         .thenBy { it.event.identity }
     )

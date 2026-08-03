@@ -56,6 +56,7 @@ import {
 import { mergeDetachedMeetingRecordings } from '../application/meeting';
 import { MeetingOccurrenceConflictSheet } from '../components/MeetingOccurrenceConflictSheet';
 import { diagnosticWarn } from '../services/diagnostics';
+import { Colors as C } from '../theme/colors';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EventDetail'>;
@@ -493,7 +494,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
   ]);
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
       <View
         style={styles.root}
         testID="event-detail-native-root"

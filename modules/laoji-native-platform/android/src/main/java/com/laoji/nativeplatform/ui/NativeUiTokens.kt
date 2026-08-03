@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
+import com.laoji.nativeplatform.NativeThemePreference
 
 data class NativeUiPalette(
   val body: Int,
@@ -57,6 +58,45 @@ object NativeUiTokens {
   fun palette(context: Context): NativeUiPalette {
     val isDark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
       Configuration.UI_MODE_NIGHT_YES
+    val isVivid = NativeThemePreference.isVivid(context)
+    if (isVivid && !isDark) {
+      return NativeUiPalette(
+        body = Color.rgb(255, 240, 246),
+        surface = Color.rgb(253, 234, 245),
+        surfaceOverlay = Color.rgb(240, 232, 255),
+        textPrimary = Color.rgb(28, 27, 51),
+        textSecondary = Color.rgb(148, 144, 181),
+        textTertiary = Color.rgb(184, 180, 212),
+        textDisabled = Color.rgb(210, 206, 227),
+        divider = Color.argb(46, 150, 100, 200),
+        primary = Color.rgb(123, 92, 184),
+        primaryPressed = Color.rgb(46, 24, 128),
+        primarySoft = Color.rgb(237, 232, 255),
+        danger = Color.rgb(255, 77, 79),
+        mask = Color.argb(87, 46, 24, 128),
+        backgroundTips = Color.rgb(46, 24, 128),
+        onTips = Color.WHITE,
+      )
+    }
+    if (isVivid && isDark) {
+      return NativeUiPalette(
+        body = Color.rgb(23, 19, 30),
+        surface = Color.rgb(33, 28, 43),
+        surfaceOverlay = Color.rgb(68, 55, 90),
+        textPrimary = Color.rgb(247, 241, 255),
+        textSecondary = Color.rgb(197, 183, 216),
+        textTertiary = Color.rgb(152, 137, 174),
+        textDisabled = Color.rgb(102, 89, 117),
+        divider = Color.argb(41, 235, 220, 255),
+        primary = Color.rgb(169, 130, 232),
+        primaryPressed = Color.rgb(216, 196, 255),
+        primarySoft = Color.rgb(59, 44, 85),
+        danger = Color.rgb(255, 123, 123),
+        mask = Color.argb(153, 0, 0, 0),
+        backgroundTips = Color.rgb(91, 67, 133),
+        onTips = Color.WHITE,
+      )
+    }
     return if (isDark) {
       NativeUiPalette(
         body = Color.rgb(16, 16, 16),

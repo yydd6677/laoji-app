@@ -390,7 +390,12 @@ export async function askMeetingQuestion(input: {
   ) {
     throw new MeetingQuestionEvidenceChangedError();
   }
-  await requireFreshMeetingCapability('meetingQuestionsV1', input.accessToken);
+  // Guest questions use the public transient endpoint and do not have an
+  // account capability token to refresh. Account-scoped questions still
+  // require a fresh capability response before sending meeting evidence.
+  if (input.scopeKey !== 'guest') {
+    await requireFreshMeetingCapability('meetingQuestionsV1', input.accessToken);
+  }
   const ordinal = input.session.thread.turns.length;
   const questionDigest = await sha256(question);
   const requestId = `question:${input.session.thread.id}:${ordinal}:${questionDigest.slice(0, 20)}`;
@@ -439,6 +444,11 @@ export async function askMeetingQuestion(input: {
     request,
     remoteMeetingId: currentEvidence.remoteMeetingId,
     accessToken: input.accessToken,
+    // A synced account meeting has an owner-bound server identity. If its
+    // token is absent/expired, fail closed instead of sending the full local
+    // transcript to the transient guest route. Unsynced account meetings may
+    // still use the guest compute path because they have no server identity.
+    requiresAuthentication: input.scopeKey !== 'guest' && Boolean(currentEvidence.remoteMeetingId),
     signal: input.signal,
   });
   const parsed = parseQuestionResponse(raw, request, currentEvidence);

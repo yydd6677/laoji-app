@@ -25,6 +25,8 @@ export interface NativeCalendarEventSnapshot {
   sourceEventId: string;
   occurrenceDate: string;
   title: string;
+  /** Legacy LaoJi event bucket; native rendering derives its stable hue from this value. */
+  category?: string | null;
   startEpochDay: number;
   endEpochDay: number;
   /** Half-open end used by all-day layout; timed events leave it null. */

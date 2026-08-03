@@ -76,6 +76,7 @@ import {
   uploadMeetingAudio,
 } from '../services/api';
 import { readableErrorMessage } from '../services/errors';
+import { Colors as C } from '../theme/colors';
 import { fetchSpeakers, type SpeakerProfile } from '../services/speakers';
 import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import {
@@ -4964,7 +4965,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   );
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg="#FFFFFF">
+    <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
       <View
         style={styles.root}
         testID="meeting-detail-native-root"

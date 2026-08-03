@@ -98,6 +98,9 @@ function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<Cal
     endTime: source.is_all_day ? undefined : source.end_time ?? undefined,
     isAllDay: source.is_all_day,
     repeat: source.event_type === 'once' ? undefined : source.event_type,
+    recurrenceInterval: source.recurrence_interval ?? undefined,
+    recurrenceWeekdays: source.recurrence_weekdays ?? undefined,
+    recurrenceUntilDate: source.recurrence_until_date ?? undefined,
     description: source.description ?? undefined,
     rawText: source.raw_text || inputText,
     location: source.location ?? undefined,
@@ -120,6 +123,9 @@ function detailedDraft(source: ParseResult, inputText: string): EventDraftParams
     endTime: payload.endTime,
     isAllDay: payload.isAllDay ?? false,
     repeat: payload.repeat,
+    recurrenceInterval: payload.recurrenceInterval,
+    recurrenceWeekdays: payload.recurrenceWeekdays,
+    recurrenceUntilDate: payload.recurrenceUntilDate,
     description: payload.description,
     rawText: payload.rawText,
     location: payload.location,
@@ -180,7 +186,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           setError('');
         }
         if (event.state === 'failed') {
-          setError(scheduleVoiceErrorMessage(event.errorMessage, '语音输入暂时不可用'));
+          setError(scheduleVoiceErrorMessage({
+            errorCode: event.errorCode,
+            errorMessage: event.errorMessage,
+            // State snapshots do not expose a separate `recoverable` field.
+            // A local URI plus recovery marker means PCM was preserved and
+            // the user can continue syncing after the live ASR failure.
+            recoverable: Boolean(event.localUri && event.transcriptRecoveryRequired),
+          }, '语音输入暂时不可用'));
         }
       }),
       addNativeRecorderTranscriptListener(event => {
@@ -198,7 +211,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         // not compete visually with an active recording/transcript state.
         if (event.recoverable) return;
         if (mountedRef.current) {
-          setError(scheduleVoiceErrorMessage(event.errorMessage, '语音输入暂时不可用'));
+          setError(scheduleVoiceErrorMessage({
+            errorCode: event.errorCode,
+            errorMessage: event.errorMessage,
+            recoverable: event.recoverable,
+          }, '语音输入暂时不可用'));
         }
       }),
     ];

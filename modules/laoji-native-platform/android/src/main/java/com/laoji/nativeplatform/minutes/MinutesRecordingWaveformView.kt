@@ -87,8 +87,10 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
   context: Context,
   attrs: AttributeSet? = null,
 ) : View(context, attrs) {
+  private val paletteReady = MinutesPalette.configure(context)
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.argb(128, 31, 35, 41)
+    color = MinutesPalette.secondary
+    alpha = 128
     strokeCap = Paint.Cap.ROUND
     strokeWidth = context.dp(BAR_WIDTH_DP).toFloat()
   }

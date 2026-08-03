@@ -26,7 +26,7 @@ enum class ReadyToStopOutcome {
 
 interface RealtimeAsrSocketListener {
   fun onTranscript(transcript: AsrServerEvent.Transcript)
-  fun onServerError(detail: String)
+  fun onServerError(error: AsrServerEvent.Error)
   fun onTransportFailure(code: RecorderErrorCode, message: String)
 }
 
@@ -122,7 +122,7 @@ class RealtimeAsrSocket(
           stopHandshake.observeConfig(event.stopCapability)
         }
         is AsrServerEvent.Transcript -> listener.onTranscript(event)
-        is AsrServerEvent.Error -> listener.onServerError(event.detail)
+        is AsrServerEvent.Error -> listener.onServerError(event)
         AsrServerEvent.StopAcknowledged -> stopHandshake.acknowledgeStop()
         AsrServerEvent.ReadyToStop -> stopHandshake.markReadyToStop()
         AsrServerEvent.Ignored -> Unit

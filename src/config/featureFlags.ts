@@ -17,6 +17,7 @@ export interface LaoJiFeatureFlags {
   meetingTranscriptReprocessV1: boolean;
   meetingActionCollaborationV1: boolean;
   meetingContentShareLinksV1: boolean;
+  meetingCrossMeetingSearchV1: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -94,5 +95,9 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     meetingContentShareLinksV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.localMeetingDbCanonicalWriteV1 === true
       && extra.featureFlags?.meetingContentShareLinksV1 === true,
+    // Remote cross-meeting search remains off until the deployed service
+    // advertises the read-only endpoint and passes its permission audit.
+    meetingCrossMeetingSearchV1: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingCrossMeetingSearchV1 === true,
   };
 }

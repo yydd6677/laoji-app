@@ -28,6 +28,8 @@ Migration v22 新增三张 canonical 表：
 - 游客：`POST /api/laoji/meetings/guest-questions`，服务端响应 `transient=true`，移动端 canonical 保存完整线程。
 - 账号：`POST /api/laoji/meetings/{meeting_id}/questions`，验证会议 owner 与 MeetingNote client identity，持久化 thread/turn/citation 和 request hash。
 
+账号会议已有远端标识时，客户端令牌缺失或过期必须 fail-closed，不能把完整本机 Transcript/Summary 静默降级发送到游客接口；只有未同步、没有远端会议标识的本地会议才允许使用游客计算路径。该边界通过模拟 HTTP 路由合同覆盖，真实服务仍需独立验证。
+
 两条路径都重算与移动端相同的排序 JSON SHA-256。范围路由先处理高置信问候、身份、通用定义、显式会议词和连续追问；其余问题仅把当前问题与最近 scope/question 交给同一 9B 模型分类，不读取 Transcript、Summary 或笔记。只有判为 `meeting` 后才选择会议来源；`general` 通道的模型输入只有问题和连续普通问答上下文。服务端只接受请求集合内的 source ID，去除未知和重复引用；客户端严格校验回显 scope 与全部身份，并从本机证据生成可展示 label/excerpt，忽略服务端自报的显示文本。
 
 ## UI 行为
@@ -67,3 +69,9 @@ Migration v22 新增三张 canonical 表：
 - 移动端问答超时已调整为 180 秒，原有页内固定加载/错误槽和取消信号保持不变。本地服务候选把模型来源上限从 60,000 字符收紧为 8,000，先保留最相关的 Summary 段再加 Transcript，且单个过大来源不再阻断后续来源；模型输出上限收紧为 512 tokens。
 - 长 Transcript 纯合同确认首个模型来源为 `summary-overview`、仍含 Transcript，且总来源字符未超过 8,000；TypeScript、Python 编译和 Preview 构建通过。完整 Python 用例在本机因缺少 SQLAlchemy 未收集，未将该环境问题冒充为业务失败。
 - 最新 Preview APK 已覆盖安装真机；范围路由、部分回答复核和引用约束已同步到运行中的目标 18020，18035 未重启。
+
+## 2026-08-02 候选语义检索截止边界
+
+问答服务的单轮剩余预算现在必须同时覆盖每一批来源向量和查询向量。旧 SVC-07 冻结候选的 `semantic_source_scores` 不接受 `embed_timeout`，会在问答侧传参时触发异常并静默走词法回退；候选已与权威服务源码同步，旧文件保留在 `tools/service-quality-evidence/svc07/source-backups/candidate-sync-20260802/`。
+
+合同 `tools/service-quality-evidence/svc07/svc07-question-semantic-deadline-contract-r1.json`：`6/6` 通过。覆盖签名、候选/权威哈希一致、来源/查询 embedding 收到同一剩余预算、匹配维度正常返回和错维度 fail-closed。运行只使用确定性 embedding stub，不代表真实 embedding、9B 模型、GPU、ASGI 或生产数据库性能。

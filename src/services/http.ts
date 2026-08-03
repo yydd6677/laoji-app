@@ -5,6 +5,8 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+const DEFAULT_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+
 function requestAbortError(): Error {
   const error = new Error('请求已取消');
   error.name = 'AbortError';
@@ -15,11 +17,11 @@ export function requestTimeoutMs(url: string): number {
   if (/\/api\/laoji\/(?:asr\/transcribe|parse-audio)/.test(url)) return 120_000;
   if (/\/api\/laoji\/parse(?:\?|$)/.test(url) || /\/api\/laoji\/clarify/.test(url)) return 60_000;
   if (/\/summaries\//.test(url) || /guest-summary/.test(url)) return 90_000;
-  // Meeting QA is currently a synchronous model call. A cold model can cross
-  // 90 seconds even for a short evidence set, so keep the visible request alive
-  // long enough for the server's validated answer instead of discarding it at
-  // the old boundary. The sheet remains cancellable through its external signal.
-  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 180_000;
+  // SVC-07 gives each interactive question one shared 30-second budget. The
+  // server forwards the remaining budget to model and retrieval calls; the
+  // client must stop at the same boundary instead of leaving the sheet blocked
+  // for several minutes when a model is cold or unavailable.
+  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 30_000;
   if (/\/api\/laoji\/speakers(?:\/|\?|$)/.test(url)) return 90_000;
   if (/\/audio(?:\/|\?|$)/.test(url) || /\/upload(?:\?|$)/.test(url)) return 180_000;
   return 20_000;
@@ -66,4 +68,117 @@ export async function fetchWithTimeout(
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', forwardAbort);
   }
+}
+
+async function readBodyWithTimeout<T>(
+  read: () => Promise<T>,
+  timeoutMs: number,
+  externalSignal?: AbortSignal,
+  cancelBody?: () => void | Promise<void>,
+): Promise<T> {
+  const timeout = Number.isFinite(timeoutMs)
+    ? Math.max(10, Math.floor(timeoutMs))
+    : DEFAULT_RESPONSE_BODY_TIMEOUT_MS;
+  if (externalSignal?.aborted) throw requestAbortError();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let externallyAborted = false;
+  let bodyCancelled = false;
+  let rejectAbort: (reason: Error) => void = () => {};
+  const cancelBodyOnce = () => {
+    if (bodyCancelled) return;
+    bodyCancelled = true;
+    try {
+      const result = cancelBody?.();
+      if (result && typeof (result as Promise<void>).catch === 'function') {
+        void (result as Promise<void>).catch(() => undefined);
+      }
+    } catch {
+      // A body may already be locked or closed. The request boundary still
+      // converges even when the platform cannot cancel the stream.
+    }
+  };
+  const abortBoundary = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const forwardAbort = () => {
+    externallyAborted = true;
+    cancelBodyOnce();
+    rejectAbort(requestAbortError());
+  };
+  externalSignal?.addEventListener('abort', forwardAbort, { once: true });
+  const timeoutBoundary = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      cancelBodyOnce();
+      reject(new RequestTimeoutError(timeout));
+    }, timeout);
+  });
+  try {
+    return await Promise.race([
+      read(),
+      timeoutBoundary,
+      abortBoundary,
+    ]);
+  } catch (error) {
+    if (externallyAborted && (error as Error)?.name !== 'AbortError') {
+      throw requestAbortError();
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', forwardAbort);
+  }
+}
+
+/**
+ * Bound a small JSON response after fetch headers have arrived.
+ *
+ * `fetchWithTimeout` owns the request deadline, but the platform's `Response`
+ * body is read by callers after that function returns.  Keeping this helper
+ * explicit avoids making binary downloads or file uploads eagerly buffered,
+ * while preventing interactive JSON surfaces (question/summary metadata) from
+ * waiting forever on a stalled body stream.
+ */
+export async function readJsonWithTimeout<T = unknown>(
+  response: Response,
+  timeoutMs = DEFAULT_RESPONSE_BODY_TIMEOUT_MS,
+  externalSignal?: AbortSignal,
+): Promise<T> {
+  return readBodyWithTimeout(
+    () => response.json() as Promise<T>,
+    timeoutMs,
+    externalSignal,
+    () => response.body?.cancel(),
+  );
+}
+
+/**
+ * Bound a text response after fetch headers have arrived.  Error responses
+ * commonly use text or JSON interchangeably; both paths must share the same
+ * finite body deadline so a stalled proxy cannot block error presentation.
+ */
+export async function readTextWithTimeout(
+  response: Response,
+  timeoutMs = DEFAULT_RESPONSE_BODY_TIMEOUT_MS,
+  externalSignal?: AbortSignal,
+): Promise<string> {
+  return readBodyWithTimeout(
+    () => response.text(),
+    timeoutMs,
+    externalSignal,
+    () => response.body?.cancel(),
+  );
+}
+
+/** Bound a remote binary response before converting it to an audio payload. */
+export async function readBlobWithTimeout(
+  response: Response,
+  timeoutMs = DEFAULT_RESPONSE_BODY_TIMEOUT_MS,
+  externalSignal?: AbortSignal,
+): Promise<Blob> {
+  return readBodyWithTimeout(
+    () => response.blob(),
+    timeoutMs,
+    externalSignal,
+    () => response.body?.cancel(),
+  );
 }

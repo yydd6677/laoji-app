@@ -27,7 +27,10 @@ export type RealtimeAsrStatus = 'connecting' | 'connected' | 'recording' | 'paus
 
 export interface RealtimeAsrTranscript {
   text: string;
+  /** Stable server/profile identity; never substitute the display name here. */
+  speakerId?: string;
   speakerName?: string;
+  speakerConfidence?: number;
   startTime?: number;
   endTime?: number;
   raw: Record<string, unknown>;
@@ -145,6 +148,24 @@ function toError(reason: unknown, fallback: string): Error {
   return new Error(message || fallback);
 }
 
+function recorderEventError(event: {
+  errorCode: string;
+  errorMessage: string;
+  recoverable: boolean;
+  providerCode?: string | null;
+  providerRetryable?: boolean | null;
+}): Error {
+  return Object.assign(
+    new Error(event.errorMessage || 'native recorder failed'),
+    {
+      errorCode: event.errorCode,
+      recoverable: event.recoverable,
+      providerCode: event.providerCode ?? null,
+      providerRetryable: event.providerRetryable ?? null,
+    },
+  );
+}
+
 function resultFromStopError(reason: unknown): NativeRecorderStopResult | null {
   return (reason as { result?: NativeRecorderStopResult } | null)?.result ?? null;
 }
@@ -198,7 +219,11 @@ export async function startRealtimeAsr(
         audioUri: event.localUri ?? undefined,
       });
       else if (event.state === 'failed') {
-        options.onError?.(new Error(event.errorMessage || 'native recorder failed'));
+        options.onError?.(recorderEventError({
+          errorCode: event.errorCode ?? 'service_unavailable',
+          errorMessage: event.errorMessage || 'native recorder failed',
+          recoverable: Boolean(event.localUri && event.transcriptRecoveryRequired),
+        }));
         settleCompletion({ reason: 'connection-closed', audioUri: event.localUri ?? undefined });
       }
     }),
@@ -206,7 +231,9 @@ export async function startRealtimeAsr(
       if (event.sessionId !== meetingId || !event.text.trim()) return;
       options.onTranscript?.({
         text: event.text.trim(),
+        speakerId: event.speakerId ?? undefined,
         speakerName: event.speakerName ?? undefined,
+        speakerConfidence: event.speakerConfidence ?? undefined,
         startTime: event.startMs == null ? undefined : event.startMs / 1000,
         endTime: event.endMs == null ? undefined : event.endMs / 1000,
         raw: { ...event },
@@ -227,7 +254,13 @@ export async function startRealtimeAsr(
     }),
     addNativeRecorderErrorListener(event => {
       if (event.sessionId && event.sessionId !== meetingId) return;
-      options.onError?.(new Error(event.errorMessage || 'native recorder failed'));
+      options.onError?.(recorderEventError({
+        errorCode: event.errorCode ?? 'service_unavailable',
+        errorMessage: event.errorMessage || 'native recorder failed',
+        recoverable: event.recoverable,
+        providerCode: event.providerCode,
+        providerRetryable: event.providerRetryable,
+      }));
     }),
   ];
   const releaseListeners = () => subscriptions.splice(0).forEach(subscription => subscription.remove());

@@ -29,6 +29,7 @@ internal class CalendarEditTimePageView(
   private val onCancel: () -> Unit,
   private val onComplete: (CalendarEditDraft) -> Unit,
 ) : LinearLayout(context) {
+  private val paletteReady = CalendarPagePalette.configure(context)
   private var state = initialState
   private val is24Hour = true
   private var applyingState = false

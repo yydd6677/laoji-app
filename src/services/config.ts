@@ -21,6 +21,7 @@ interface ApiConfigSource {
   realtimeAsrPort?: string | number;
   realtimeAsrSecure?: string | boolean;
   realtimeAsrProvider?: string;
+  reverseGeocoderUrl?: string;
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
   accountDeletionUrl?: string;
@@ -34,6 +35,7 @@ export interface ApiConfig {
   realtimeAsrPort: number;
   realtimeAsrSecure: boolean;
   realtimeAsrProvider: RealtimeAsrProvider;
+  reverseGeocoderUrl: string;
   privacyPolicyUrl: string;
   termsOfServiceUrl: string;
   accountDeletionUrl: string;
@@ -109,6 +111,7 @@ function runtimeSource(): ApiConfigSource {
     realtimeAsrPort: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PORT || extra.realtimeAsrPort,
     realtimeAsrSecure: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_SECURE ?? extra.realtimeAsrSecure,
     realtimeAsrProvider: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || extra.realtimeAsrProvider,
+    reverseGeocoderUrl: runtimeEnv?.EXPO_PUBLIC_REVERSE_GEOCODER_URL || extra.reverseGeocoderUrl,
     privacyPolicyUrl: runtimeEnv?.EXPO_PUBLIC_PRIVACY_POLICY_URL || extra.privacyPolicyUrl,
     termsOfServiceUrl: runtimeEnv?.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || extra.termsOfServiceUrl,
     accountDeletionUrl: runtimeEnv?.EXPO_PUBLIC_ACCOUNT_DELETION_URL || extra.accountDeletionUrl,
@@ -126,6 +129,7 @@ export function getApiConfig(source: ApiConfigSource = runtimeSource()): ApiConf
     realtimeAsrPort: envInt(source.realtimeAsrPort, DEFAULT_REALTIME_ASR_PORT),
     realtimeAsrSecure: envBool(source.realtimeAsrSecure),
     realtimeAsrProvider: realtimeAsrProvider(source.realtimeAsrProvider),
+    reverseGeocoderUrl: normalizeBaseUrl(String(source.reverseGeocoderUrl ?? '')),
     privacyPolicyUrl: normalizeBaseUrl(String(source.privacyPolicyUrl ?? (laojiApiBase ? `${laojiApiBase}/privacy` : ''))),
     termsOfServiceUrl: normalizeBaseUrl(String(source.termsOfServiceUrl ?? (laojiApiBase ? `${laojiApiBase}/terms` : ''))),
     accountDeletionUrl: normalizeBaseUrl(String(source.accountDeletionUrl ?? (laojiApiBase ? `${laojiApiBase}/account-deletion` : ''))),
@@ -146,6 +150,7 @@ export function assertProductionApiConfig(config: ApiConfig = getApiConfig()): v
   const urls = [
     config.laojiApiBase,
     config.meetingApiBase,
+    ...(config.reverseGeocoderUrl ? [config.reverseGeocoderUrl] : []),
     config.privacyPolicyUrl,
     config.termsOfServiceUrl,
     config.accountDeletionUrl,

@@ -135,7 +135,7 @@ export function FeishuToast({
             hitSlop={10}
             style={[
               styles.toastAction,
-              { borderLeftColor: 'rgba(255,255,255,0.20)' },
+              { borderLeftColor: colors.divider },
             ]}
             testID={`${testID}-action`}
           >

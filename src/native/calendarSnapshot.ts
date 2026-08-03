@@ -9,6 +9,7 @@ import { timeToMinutes } from '../utils/calendarDate';
 import { eventEffectiveEndDate, eventEndsAtExclusiveMidnight } from '../utils/eventDateSemantics';
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { isValidEventDate } from '../utils/eventDraftValidation';
+import { normalizeEventCategory } from '../utils/eventColors';
 
 const DAY_MS = 86_400_000;
 
@@ -75,6 +76,7 @@ export function nativeCalendarEventSnapshot(
     sourceEventId: ref.sourceEventId,
     occurrenceDate: ref.occurrenceDate,
     title: event.title,
+    category: normalizeEventCategory(event.category),
     startEpochDay: calendarEpochDay(event.startDate),
     endEpochDay,
     endEpochDayExclusive: allDay ? endEpochDay + 1 : null,

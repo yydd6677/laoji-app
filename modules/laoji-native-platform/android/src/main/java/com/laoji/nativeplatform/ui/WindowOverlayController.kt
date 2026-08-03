@@ -4,6 +4,9 @@ package com.laoji.nativeplatform.ui
 // contains every temporary page, sheet and dialog above the Fabric surface.
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -14,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import com.laoji.nativeplatform.calendarpages.CalendarSearchPageView
 import com.laoji.nativeplatform.schedulevoice.ScheduleVoiceHostView
 import expo.modules.kotlin.AppContext
+import java.util.concurrent.CountDownLatch
 
 internal enum class WindowOverlayKind(val wireName: String) {
   CALENDAR_SEARCH("calendar-search"),
@@ -61,6 +65,8 @@ internal class WindowOverlayController(
   private val onAction: (Map<String, Any?>) -> Unit,
   private val onDismiss: (Map<String, Any?>) -> Unit,
 ) {
+  private val mainHandler = Handler(Looper.getMainLooper())
+
   private data class Entry(
     val kind: WindowOverlayKind,
     val ownerId: String,
@@ -146,7 +152,37 @@ internal class WindowOverlayController(
     entries[kind]?.let { removeEntry(it, reason, notify = true) }
   }
 
+  /**
+   * Expo may invalidate a module from its executor thread during a ReactHost
+   * reload. Android View ownership is stricter than the module lifecycle, so
+   * the complete teardown must run on the main thread before invalidation
+   * returns. Waiting here also prevents a newly-created React surface from
+   * racing the old overlay root's removeView calls.
+   */
   fun destroy() {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      destroyOnMain()
+      return
+    }
+
+    val completed = CountDownLatch(1)
+    var failure: Throwable? = null
+    mainHandler.post {
+      try {
+        destroyOnMain()
+      } catch (error: Throwable) {
+        failure = error
+      } finally {
+        completed.countDown()
+      }
+    }
+    completed.await()
+    failure?.let { error ->
+      Log.e(LOG_TAG, "overlay teardown failed on main thread", error)
+    }
+  }
+
+  private fun destroyOnMain() {
     entries.values().toList().forEach { removeEntry(it, "activity-destroyed", notify = false) }
     restoreActivityAccessibility()
     closing.clear()
@@ -368,4 +404,8 @@ internal class WindowOverlayController(
     ViewGroup.LayoutParams.MATCH_PARENT,
     ViewGroup.LayoutParams.MATCH_PARENT,
   )
+
+  private companion object {
+    const val LOG_TAG = "LaojiWindowOverlay"
+  }
 }

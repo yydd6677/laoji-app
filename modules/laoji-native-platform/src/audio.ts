@@ -84,6 +84,8 @@ export interface NativeRecorderSnapshot {
   transcriptRecoveryRequired: boolean;
   errorCode: NativeRecorderErrorCode | null;
   errorMessage: string | null;
+  providerErrorCode?: string | null;
+  providerErrorRetryable?: boolean | null;
 }
 
 export interface NativeRealtimeRecorderSnapshot extends NativeRecorderSnapshot {
@@ -115,6 +117,7 @@ export interface NativeRecorderTranscriptEvent {
   text: string;
   speakerId: string | null;
   speakerName: string | null;
+  speakerConfidence: number | null;
   startMs: number | null;
   endMs: number | null;
   source: string | null;
@@ -129,6 +132,10 @@ export interface NativeRecorderErrorEvent {
   recoverable: boolean;
   localUri: string | null;
   transcriptRecoveryRequired: boolean;
+  /** Provider-level code, when the realtime server returned a structured error. */
+  providerCode?: string | null;
+  /** Whether the provider says the same audio may be retried later. */
+  providerRetryable?: boolean | null;
   fileName?: string;
 }
 

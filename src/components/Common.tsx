@@ -101,10 +101,10 @@ function NeutralAvatar({ size }: { size: number }) {
   return (
     <View style={[styles.neutralAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
       <Svg width={size * 0.72} height={size * 0.72} viewBox="0 0 100 100">
-        <Circle cx="50" cy="36" r="18" fill="#A6ABB2" />
+        <Circle cx="50" cy="36" r="18" fill={C.faint} />
         <Path
           d="M20 86c4-22 18-34 30-34s26 12 30 34c-8 6-18 9-30 9s-22-3-30-9z"
-          fill="#A6ABB2"
+          fill={C.faint}
         />
       </Svg>
     </View>
@@ -174,12 +174,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#fff',
-    backgroundColor: '#E5E6E8',
+    borderColor: C.body,
+    backgroundColor: C.inputBg,
   },
   avatarImage: {
     borderWidth: 1,
-    borderColor: '#fff',
+    borderColor: C.body,
     backgroundColor: C.primaryLight,
   },
   tag: { borderRadius: 6, paddingHorizontal: 9, paddingVertical: 3 },

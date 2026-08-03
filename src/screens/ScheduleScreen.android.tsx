@@ -36,6 +36,7 @@ import { buildNativeCalendarSearchSnapshot } from '../native/nativeCalendarPages
 import { useCurrentDate } from '../hooks/useCurrentDate';
 import { useAuth } from '../store/AuthStore';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
+import { Colors as C } from '../theme/colors';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
@@ -299,5 +300,5 @@ export function ScheduleScreen({
 }
 
 const styles = StyleSheet.create({
-  surface: { flex: 1, backgroundColor: '#FAFBFC' },
+  surface: { flex: 1, backgroundColor: C.appBg },
 });

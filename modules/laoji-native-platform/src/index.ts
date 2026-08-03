@@ -21,6 +21,9 @@ interface LaojiNativePlatformModule {
   createRandomUuid(): string;
   sha256File(fileUri: string): Promise<{ checksumSha256: string; byteSize: number }>;
   getCapabilities(): Promise<NativePlatformCapabilities>;
+  getThemePreference?(): string;
+  setThemePreference?(themeId: string): void;
+  restartActivity?(): void;
 }
 
 const nativeModule = requireOptionalNativeModule<LaojiNativePlatformModule>(

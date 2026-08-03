@@ -100,10 +100,12 @@ function normalizeEvent(event: CalEvent, sourceIndex: number): NormalizedEvent |
 
 function compareMonthEvents(left: NormalizedEvent, right: NormalizedEvent): number {
   return left.startDay - right.startDay
-    || right.endDay - left.endDay
     || Number(right.allDay) - Number(left.allDay)
     || left.startMinute - right.startMinute
     || right.endMinute - left.endMinute
+    // Once the clock is equal, keep longer spans ahead so lane allocation
+    // remains stable without allowing duration to override chronology.
+    || right.endDay - left.endDay
     || left.event.title.localeCompare(right.event.title, 'zh-Hans-CN')
     || left.key.localeCompare(right.key)
     || left.sourceIndex - right.sourceIndex;

@@ -1,3 +1,6 @@
+import { getSynchronousThemeId } from './nativeTheme';
+import { type ThemeId } from './themeIds';
+
 export type FeishuColorScheme = 'light' | 'dark';
 
 export const FEISHU_FONT_SIZES = Object.freeze({
@@ -149,6 +152,71 @@ export const FEISHU_DARK_COLORS: FeishuSemanticColors = Object.freeze({
   shadow: '#000000',
 });
 
+// [PRODUCT] LaoJi's vivid skin keeps the same semantic roles and geometry as
+// the neutral Feishu-aligned skin while restoring the historical Figma
+// lavender/pink direction. It is not presented as a Feishu source palette.
+export const VIVID_LIGHT_COLORS: FeishuSemanticColors = Object.freeze({
+  backgroundBody: '#FFF7FB',
+  backgroundBodyOverlay: '#FFE8F4',
+  backgroundBase: '#FFF0F6',
+  backgroundFloat: '#FDEAF5',
+  backgroundFloatOverlay: '#F0E8FF',
+  backgroundMask: 'rgba(46,24,128,0.34)',
+  backgroundTips: '#2E1880',
+  textTitle: '#1C1B33',
+  textCaption: '#9490B5',
+  textPlaceholder: '#B8B4D4',
+  textDisabled: '#D2CEE3',
+  textLink: '#7B5CB8',
+  iconPrimary: '#2E1880',
+  iconSecondary: '#7B5CB8',
+  iconTertiary: '#B8B4D4',
+  iconDisabled: '#D2CEE3',
+  divider: 'rgba(150,100,200,0.18)',
+  pressedFill: 'rgba(123,92,184,0.12)',
+  primary: '#7B5CB8',
+  primarySoft: '#EDE8FF',
+  primaryHover: '#9268E0',
+  primaryPressed: '#2E1880',
+  primaryLoading: '#C7B5ED',
+  danger: '#FF4D4F',
+  dangerPressed: '#D9363E',
+  onPrimary: '#FFFFFF',
+  onTips: '#FFFFFF',
+  shadow: '#2E1880',
+});
+
+export const VIVID_DARK_COLORS: FeishuSemanticColors = Object.freeze({
+  backgroundBody: '#211C2B',
+  backgroundBodyOverlay: '#30283D',
+  backgroundBase: '#17131E',
+  backgroundFloat: '#30283D',
+  backgroundFloatOverlay: '#44375A',
+  backgroundMask: 'rgba(0,0,0,0.60)',
+  backgroundTips: '#5B4385',
+  textTitle: '#F7F1FF',
+  textCaption: '#C5B7D8',
+  textPlaceholder: '#9889AE',
+  textDisabled: '#665975',
+  textLink: '#C3A3FF',
+  iconPrimary: '#F7F1FF',
+  iconSecondary: '#C5B7D8',
+  iconTertiary: '#9889AE',
+  iconDisabled: '#665975',
+  divider: 'rgba(235,220,255,0.16)',
+  pressedFill: 'rgba(235,220,255,0.12)',
+  primary: '#A982E8',
+  primarySoft: '#3B2C55',
+  primaryHover: '#C3A3FF',
+  primaryPressed: '#D8C4FF',
+  primaryLoading: '#6E588C',
+  danger: '#FF7B7B',
+  dangerPressed: '#FF4D4F',
+  onPrimary: '#211C2B',
+  onTips: '#FFFFFF',
+  shadow: '#000000',
+});
+
 export type FeishuTokens = Readonly<{
   scheme: FeishuColorScheme;
   colors: FeishuSemanticColors;
@@ -177,6 +245,17 @@ export const FEISHU_TOKENS: Readonly<Record<FeishuColorScheme, FeishuTokens>> = 
   dark: createTokens('dark', FEISHU_DARK_COLORS),
 });
 
-export function getFeishuTokens(scheme: FeishuColorScheme = 'light'): FeishuTokens {
-  return FEISHU_TOKENS[scheme];
+export const THEME_FEISHU_TOKENS: Readonly<Record<ThemeId, Readonly<Record<FeishuColorScheme, FeishuTokens>>>> = Object.freeze({
+  neutral: FEISHU_TOKENS,
+  vivid: Object.freeze({
+    light: createTokens('light', VIVID_LIGHT_COLORS),
+    dark: createTokens('dark', VIVID_DARK_COLORS),
+  }),
+});
+
+export function getFeishuTokens(
+  scheme: FeishuColorScheme = 'light',
+  themeId: ThemeId = getSynchronousThemeId(),
+): FeishuTokens {
+  return THEME_FEISHU_TOKENS[themeId][scheme];
 }

@@ -91,13 +91,18 @@ sealed class AsrServerEvent {
     val isFinal: Boolean,
     val speakerId: String?,
     val speakerName: String?,
+    val speakerConfidence: Double?,
     val startMs: Long?,
     val endMs: Long?,
     val source: String?,
     val purpose: String?,
   ) : AsrServerEvent()
 
-  data class Error(val detail: String) : AsrServerEvent()
+  data class Error(
+    val detail: String,
+    val code: String?,
+    val retryable: Boolean,
+  ) : AsrServerEvent()
   data object Ignored : AsrServerEvent()
 }
 
@@ -271,6 +276,7 @@ object AsrProtocol {
           isFinal = type == "transcript.completed" || json.optBoolean("is_final", false),
           speakerId = json.optionalString("speaker_id"),
           speakerName = json.optionalString("speaker_name"),
+          speakerConfidence = json.optionalFiniteDouble("speaker_confidence", "speakerConfidence"),
           startMs = json.optionalMilliseconds("start_ms", "start_time"),
           endMs = json.optionalMilliseconds("end_ms", "end_time"),
           source = json.optionalString("source"),
@@ -278,7 +284,9 @@ object AsrProtocol {
         )
       }
       "error" -> AsrServerEvent.Error(
-        sanitizeServerDetail(json.optionalString("detail") ?: json.optionalString("message")),
+        detail = sanitizeServerDetail(json.optionalString("detail") ?: json.optionalString("message")),
+        code = json.optionalErrorCode(),
+        retryable = json.optBoolean("retryable", false),
       )
       else -> AsrServerEvent.Ignored
     }
@@ -308,6 +316,22 @@ object AsrProtocol {
 
   private fun JSONObject.optionalString(key: String): String? =
     optString(key).trim().takeIf { it.isNotEmpty() && it != "null" }
+
+  private fun JSONObject.optionalErrorCode(): String? {
+    val candidate = optionalString("code") ?: optionalString("error_code") ?: return null
+    return candidate.takeIf {
+      it.length <= 64 && it.all { character -> character.isLetterOrDigit() || character == '_' || character == '-' || character == '.' }
+    }
+  }
+
+  private fun JSONObject.optionalFiniteDouble(vararg keys: String): Double? {
+    for (key in keys) {
+      if (!has(key) || isNull(key)) continue
+      val value = optDouble(key, Double.NaN)
+      if (value.isFinite() && value in 0.0..1.0) return value
+    }
+    return null
+  }
 
   private fun JSONObject.optionalMilliseconds(millisecondsKey: String, secondsKey: String): Long? {
     if (has(millisecondsKey) && !isNull(millisecondsKey)) return optLong(millisecondsKey)

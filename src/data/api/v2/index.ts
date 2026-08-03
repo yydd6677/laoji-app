@@ -14,3 +14,4 @@ export * from './meetingQuestions';
 export * from './meetingAttachments';
 export * from './meetingMarkers';
 export * from './summaryVersions';
+export * from './meetingSearch';

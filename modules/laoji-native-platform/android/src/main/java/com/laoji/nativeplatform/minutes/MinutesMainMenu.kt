@@ -183,7 +183,7 @@ internal class MinutesMainMenu(
 private fun mainMenuRowBackground(): StateListDrawable = StateListDrawable().apply {
   addState(
     intArrayOf(android.R.attr.state_pressed),
-    GradientDrawable().apply { setColor(Color.rgb(242, 243, 245)) },
+    GradientDrawable().apply { setColor(MinutesPalette.filler) },
   )
   addState(
     intArrayOf(),

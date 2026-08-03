@@ -17,6 +17,10 @@ import {
   transitionProcessingStage,
 } from '../../domain/meeting';
 import { withMeetingDatabaseTransaction, openMeetingDatabase } from '../db/openDatabase';
+import {
+  parseMeetingSearchQuery,
+  type MeetingSearchFilters,
+} from '../../services/meetingSearchQuery';
 import type {
   ActionItemRecord,
   ActionSyncClaim,
@@ -1550,29 +1554,31 @@ function meetingNavigationIdentity(
 }
 
 type MeetingSearchPredicate =
-  | { kind: 'match'; query: string; terms: readonly string[] }
-  | { kind: 'like'; patterns: readonly string[]; terms: readonly string[] };
+  | { kind: 'match'; query: string; terms: readonly string[]; filters: MeetingSearchFilters }
+  | { kind: 'like'; patterns: readonly string[]; terms: readonly string[]; filters: MeetingSearchFilters }
+  | { kind: 'all'; terms: readonly string[]; filters: MeetingSearchFilters };
 
 function escapeMeetingSearchLike(value: string): string {
   return value.replace(/[\\%_]/g, character => `\\${character}`);
 }
 
 function meetingSearchPredicate(value: string): MeetingSearchPredicate | null {
-  const normalized = value.normalize('NFKC').trim().toLocaleLowerCase();
-  if (!normalized || normalized.length > 200 || /[\u0000-\u001f\u007f]/.test(normalized)) return null;
-  const terms = normalized
+  const parsed = parseMeetingSearchQuery(value);
+  if (!parsed) return null;
+  const terms = parsed.contentTokens
+    .join(' ')
     .replace(/[^\p{L}\p{N}_]+/gu, ' ')
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 12);
-  if (terms.length === 0) return null;
+  if (terms.length === 0) return { kind: 'all', terms, filters: parsed.filters };
   if (terms.every(term => [...term].length >= 3)) {
     const expression = terms.map(term => `"${term.replace(/"/g, '""')}"`).join(' AND ');
     // Every FTS row carries the meeting title for display, but only the row's
     // own content determines its source label. Without the column filter, a
     // title match incorrectly returns one result for every tag/note/section
     // in the same meeting.
-    return { kind: 'match', query: `content : (${expression})`, terms };
+    return { kind: 'match', query: `content : (${expression})`, terms, filters: parsed.filters };
   }
   // Every FTS row carries the meeting title for display, but only the row's
   // own content is searched. FTS5 trigram cannot match a one- or two-codepoint
@@ -1582,6 +1588,61 @@ function meetingSearchPredicate(value: string): MeetingSearchPredicate | null {
     kind: 'like',
     patterns: terms.map(term => `%${escapeMeetingSearchLike(term)}%`),
     terms,
+    filters: parsed.filters,
+  };
+}
+
+function meetingSearchFilterSql(filters: MeetingSearchFilters): {
+  sql: string;
+  arguments: readonly (string | number)[];
+} {
+  const clauses: string[] = [];
+  const argumentsList: (string | number)[] = [];
+  for (const tag of filters.tags) {
+    clauses.push(`EXISTS (
+      SELECT 1
+      FROM meeting_tag_links filter_link
+      INNER JOIN meeting_tags filter_tag
+        ON filter_tag.id = filter_link.tag_id AND filter_tag.scope_key = filter_link.scope_key
+      WHERE filter_link.meeting_id = meeting.id
+        AND filter_link.scope_key = meeting.scope_key
+        AND lower(filter_tag.normalized_name) LIKE ? ESCAPE '\\'
+    )`);
+    argumentsList.push(`%${escapeMeetingSearchLike(tag)}%`);
+  }
+  for (const person of filters.people) {
+    clauses.push(`EXISTS (
+      SELECT 1
+      FROM json_each(
+        CASE
+          WHEN json_valid(COALESCE(meeting.participants_json, '[]'))
+            THEN COALESCE(meeting.participants_json, '[]')
+          ELSE '[]'
+        END
+      ) AS filter_person
+      WHERE lower(CAST(filter_person.value AS TEXT)) LIKE ? ESCAPE '\\'
+    )`);
+    argumentsList.push(`%${escapeMeetingSearchLike(person)}%`);
+  }
+  if (filters.sourceKinds.length > 0) {
+    clauses.push(`search.source_kind IN (${filters.sourceKinds.map(() => '?').join(', ')})`);
+    argumentsList.push(...filters.sourceKinds);
+  }
+  const recordedAt = 'COALESCE(meeting.recorded_at_ms, meeting.started_at_ms, meeting.created_at_ms)';
+  if (filters.fromDate) {
+    // Meeting dates are user-facing local calendar days. SQLite's plain
+    // unixepoch conversion is UTC and can move a late-night local meeting to
+    // the adjacent day; localtime keeps the query aligned with the device UI.
+    clauses.push(`date(${recordedAt} / 1000, 'unixepoch', 'localtime') >= date(?)`);
+    argumentsList.push(filters.fromDate);
+  }
+  if (filters.toDate) {
+    clauses.push(`date(${recordedAt} / 1000, 'unixepoch', 'localtime') < date(?, '+1 day')`);
+    argumentsList.push(filters.toDate);
+  }
+  return {
+    sql: clauses.length > 0 ? clauses.join(' AND ') : '1 = 1',
+    arguments: argumentsList,
   };
 }
 
@@ -11748,6 +11809,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          FROM action_items action
          INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
          WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+           AND action.status <> 'dismissed'
            AND TRIM(action.content) <> ''`,
         scopeKey,
       );
@@ -11773,16 +11835,20 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       }
     }
     const database = await openMeetingDatabase();
+    const filter = meetingSearchFilterSql(predicate.filters);
     const predicateSql = predicate.kind === 'match'
       ? 'meeting_search_fts MATCH ?'
-      : predicate.patterns.map(() => "search.content LIKE ? ESCAPE '\\'").join(' AND ');
+      : predicate.kind === 'like'
+        ? predicate.patterns.map(() => "search.content LIKE ? ESCAPE '\\'").join(' AND ')
+        : '1 = 1';
     const predicateArguments = predicate.kind === 'match'
       ? [predicate.query]
-      : [...predicate.patterns];
+      : predicate.kind === 'like' ? [...predicate.patterns] : [];
     const firstTerm = predicate.terms[0];
     const snippetSql = predicate.kind === 'match'
       ? "snippet(meeting_search_fts, 6, '', '', '…', 24)"
-      : `CASE
+      : predicate.kind === 'like'
+        ? `CASE
            WHEN instr(lower(search.content), lower(?)) > 81 THEN
              '…' || substr(
                search.content,
@@ -11790,7 +11856,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
                240
              )
            ELSE substr(search.content, 1, 240)
-         END`;
+         END`
+        : 'substr(search.content, 1, 240)';
     const rankSql = predicate.kind === 'match'
       ? 'bm25(meeting_search_fts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)'
       : '0.0';
@@ -11805,7 +11872,8 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
            ${rankSql} AS rank
          FROM meeting_search_fts search
          INNER JOIN meeting_notes meeting ON meeting.id = search.meeting_id
-         WHERE ${predicateSql} AND search.scope_key = ?
+         WHERE ${predicateSql} AND ${filter.sql}
+           AND search.scope_key = ?
            AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
          ORDER BY CASE search.source_kind
            WHEN 'title' THEN 0 WHEN 'tag' THEN 1 WHEN 'manual_note' THEN 2
@@ -11814,6 +11882,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          LIMIT ?`,
         ...snippetArguments,
         ...predicateArguments,
+        ...filter.arguments,
         scopeKey,
         scopeKey,
       safeLimit,

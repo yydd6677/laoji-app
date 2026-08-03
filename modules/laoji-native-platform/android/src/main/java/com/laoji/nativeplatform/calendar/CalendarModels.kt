@@ -50,6 +50,7 @@ data class CalendarEvent(
   val sourceEventId: String,
   val occurrenceDate: String,
   val title: String,
+  val category: String = "其他",
   val startEpochDay: Int,
   val endEpochDay: Int,
   val endEpochDayExclusive: Int? = null,
@@ -65,12 +66,14 @@ data class CalendarEvent(
     get() = "$sourceEventId@$occurrenceDate"
 
   fun normalized(): CalendarEvent {
+    val normalizedCategory = CalendarUi.normalizeEventCategory(category)
     if (allDay) {
       val normalizedExclusiveEnd = maxOf(
         startEpochDay + 1,
         endEpochDayExclusive ?: endEpochDay + 1,
       )
       return copy(
+        category = normalizedCategory,
         endEpochDay = maxOf(startEpochDay, endEpochDay),
         endEpochDayExclusive = normalizedExclusiveEnd,
         startMinutes = null,
@@ -86,6 +89,7 @@ data class CalendarEvent(
     val endAbsolute = CalendarDateMath.absoluteMinute(normalizedEndDay, normalizedEnd)
     if (endAbsolute > startAbsolute) {
       return copy(
+        category = normalizedCategory,
         endEpochDay = normalizedEndDay,
         endEpochDayExclusive = null,
         startMinutes = normalizedStart,
@@ -97,6 +101,7 @@ data class CalendarEvent(
     val fallbackEnd = startAbsolute + 5
     val canonicalEnd = CalendarDateMath.canonicalEnd(fallbackEnd)
     return copy(
+      category = normalizedCategory,
       startMinutes = normalizedStart,
       endEpochDay = canonicalEnd.epochDay,
       endEpochDayExclusive = null,

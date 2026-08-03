@@ -2,7 +2,7 @@ import React from 'react';
 import { Animated, Easing, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors as C } from '../theme/colors';
+import { Appearance, Colors as C } from '../theme/colors';
 
 const BAR_H = 65;
 const ACTION_D = 48;
@@ -76,7 +76,21 @@ export function BottomTabBar({
   const action = ACTION_META[tone];
 
   return (
-    <View style={[s.outer, { paddingBottom: bottomFill }]} testID="bottom-tab-bar">
+    <View
+      style={[
+        s.outer,
+        Appearance.bottomBarRadius > 0 && {
+          marginHorizontal: Appearance.bottomBarInset,
+          borderTopLeftRadius: Appearance.bottomBarRadius,
+          borderTopRightRadius: Appearance.bottomBarRadius,
+          borderLeftWidth: Appearance.borderWidth,
+          borderRightWidth: Appearance.borderWidth,
+          borderColor: C.border,
+        },
+        { paddingBottom: bottomFill },
+      ]}
+      testID="bottom-tab-bar"
+    >
       <View testID="bottom-tab-row" style={s.tabRow}>
         <TabButton
           label="日程"
@@ -217,7 +231,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
+    shadowOpacity: Appearance.shadowOpacity,
     shadowRadius: 8,
     elevation: 6,
   },

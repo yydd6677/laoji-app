@@ -11,7 +11,7 @@ export type NativeBridgeValue =
 export function compactNativeBridgeValue(value: unknown): NativeBridgeValue | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
-    return value;
+    return value as null | boolean | number | string;
   }
   if (Array.isArray(value)) {
     const result: NativeBridgeValue[] = [];

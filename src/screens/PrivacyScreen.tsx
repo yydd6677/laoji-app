@@ -6,6 +6,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
+import { AppActionSheet } from '../components/AppActionSheet';
 import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import {
@@ -19,6 +20,9 @@ import { clearAppStorage } from '../services/appStorage';
 import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
 import { useGuestDataMigration } from '../components/GuestDataMigrationProvider';
 import { deleteMeetingDatabase } from '../data/db/openDatabase';
+import { useTheme } from '../theme/ThemeProvider';
+import { THEME_LABELS, type ThemeId } from '../theme/themeIds';
+import { clearThemePreference } from '../services/themePreferences';
 
 const { colors: F } = getFeishuTokens();
 
@@ -90,7 +94,9 @@ export function PrivacyScreen({ navigation }: Props) {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const { mode, session, signOut } = useAuth();
   const { showDialog } = useAppDialog();
+  const { themeId, setTheme } = useTheme();
   const { migrationBusy, mergeGuestData } = useGuestDataMigration();
+  const [themeSheetVisible, setThemeSheetVisible] = useState(false);
   const scope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
 
   useEffect(() => {
@@ -213,6 +219,7 @@ export function PrivacyScreen({ navigation }: Props) {
               clearScheduledAppNotifications(),
               clearAppStorage(),
               deleteMeetingDatabase(),
+              clearThemePreference(),
             ]);
             const failures = cleanupResults.filter(result => result.status === 'rejected').length
               + (signOutFailed ? 1 : 0);
@@ -247,6 +254,12 @@ export function PrivacyScreen({ navigation }: Props) {
           <SettingsRow
             label="文件分享说明"
             onPress={() => showDialog({ title: '文件分享说明', message: '分享前可选择基本信息、整理结果、行动项、文字记录、标记、附件、录音或我的笔记；确认后会打开系统分享面板。', tone: 'info' })}
+          />
+          <SettingsRow
+            label="皮肤主题"
+            value={THEME_LABELS[themeId]}
+            onPress={() => setThemeSheetVisible(true)}
+            testID="privacy-theme-row"
           />
           {mode === 'authenticated' ? (
             <SettingsRow
@@ -305,6 +318,24 @@ export function PrivacyScreen({ navigation }: Props) {
           <SettingsRow label="联系我们" onPress={() => navigation.navigate('Legal', { kind: 'contact' })} last />
         </SettingsGroup>
       </ScrollView>
+      <AppActionSheet
+        visible={themeSheetVisible}
+        title="皮肤主题"
+        items={([
+          ['neutral', THEME_LABELS.neutral],
+          ['vivid', THEME_LABELS.vivid],
+        ] as const).map(([id, label]) => ({
+          key: id,
+          label: id === themeId ? `${label}（当前）` : label,
+          onPress: () => {
+            setThemeSheetVisible(false);
+            void setTheme(id as ThemeId).catch(() => {
+              showDialog({ title: '主题未保存', message: '皮肤主题暂时无法保存，请稍后重试。', tone: 'error' });
+            });
+          },
+        }))}
+        onClose={() => setThemeSheetVisible(false)}
+      />
     </ScreenContainer>
   );
 }

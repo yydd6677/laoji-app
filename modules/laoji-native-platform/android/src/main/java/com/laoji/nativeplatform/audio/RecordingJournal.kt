@@ -294,10 +294,15 @@ class RecordingRepository(context: Context) {
                 entry.uploadState != RecordingPersistencePolicy.completedUploadState(entry.mode) ||
                   entry.asrState != JournalAsrState.NOT_REQUIRED
                 )
+              val failedMeetingAsrNeedsRecovery =
+                entry.purpose == AudioPurpose.MEETING &&
+                  entry.mode == RecorderMode.REALTIME &&
+                  entry.asrState == JournalAsrState.FAILED
               val needsRecovery =
                 entry.state != JournalState.LOCAL_SAVED ||
                 entry.pcmBytes != pcmBytes ||
-                localPolicyMismatch
+                localPolicyMismatch ||
+                failedMeetingAsrNeedsRecovery
               val finalizedEntry = if (needsRecovery) {
                 entry.copy(
                   state = JournalState.LOCAL_SAVED,

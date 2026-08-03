@@ -5,8 +5,10 @@ package com.laoji.nativeplatform.calendar
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
@@ -107,8 +109,10 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     monthPager.setListener(this)
     monthPager.jumpToMonth(selectedEpochDay)
     dayView.setListener(this)
-    content.addView(monthPager, calendarContentLayoutParams())
-    content.addView(dayView, calendarContentLayoutParams())
+    content.addView(monthPager, calendarContentLayoutParams(context))
+    content.addView(dayView, calendarContentLayoutParams(context))
+    styleVividSurface(monthPager)
+    styleVividSurface(dayView)
     createFab.setActionListener(this)
     content.addView(
       createFab,
@@ -603,5 +607,21 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
       calendar.get(Calendar.MONTH) + 1,
       calendar.get(Calendar.DAY_OF_MONTH)
     )
+  }
+
+  // [PRODUCT] The vivid skin changes the calendar silhouette as well as its
+  // palette: both retained views become an inset, rounded surface while the
+  // standard skin remains edge-to-edge and source-shaped.
+  private fun styleVividSurface(view: View) {
+    if (!NativeThemePreference.isVivid(context)) return
+    view.background = CalendarUi.background(
+      palette.surface,
+      16f,
+      context,
+      palette.divider,
+      1f,
+    )
+    view.clipToOutline = true
+    view.outlineProvider = ViewOutlineProvider.BACKGROUND
   }
 }

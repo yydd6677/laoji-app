@@ -15,6 +15,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.widget.CompoundButton
 import androidx.core.content.ContextCompat
+import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.R
 import com.laoji.nativeplatform.evidence.FeishuEvidence
 import kotlin.math.abs
@@ -22,6 +23,8 @@ import kotlin.math.abs
 @SuppressLint("ViewConstructor")
 @FeishuEvidence("CAL-REPEAT-RRULE-001")
 internal class CalendarSourceSwitch(context: Context) : CompoundButton(context) {
+  private val paletteReady = CalendarPagePalette.configure(context)
+  private val vivid = NativeThemePreference.isVivid(context)
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val switchBounds = RectF()
   private val trackBounds = RectF()
@@ -164,25 +167,41 @@ internal class CalendarSourceSwitch(context: Context) : CompoundButton(context) 
     super.onDraw(canvas)
     val thumbSize = context.pageDp(THUMB_SIZE_DP).toFloat()
 
-    paint.color = color(
+    paint.color = if (vivid) {
       when {
-        !isEnabled && isChecked -> R.color.laoji_ud_switch_on_disabled_track
-        !isEnabled -> R.color.laoji_ud_switch_off_disabled_track
-        isChecked -> R.color.laoji_ud_switch_on_track
-        else -> R.color.laoji_ud_switch_off_track
-      },
-    )
+        !isEnabled -> CalendarPagePalette.disabled
+        isChecked -> CalendarPagePalette.primarySoft
+        else -> CalendarPagePalette.divider
+      }
+    } else {
+      color(
+        when {
+          !isEnabled && isChecked -> R.color.laoji_ud_switch_on_disabled_track
+          !isEnabled -> R.color.laoji_ud_switch_off_disabled_track
+          isChecked -> R.color.laoji_ud_switch_on_track
+          else -> R.color.laoji_ud_switch_off_track
+        },
+      )
+    }
     canvas.drawRoundRect(trackBounds, trackBounds.height() / 2f, trackBounds.height() / 2f, paint)
 
     val thumbLeft = switchBounds.left + thumbOffset()
-    paint.color = color(
+    paint.color = if (vivid) {
       when {
-        !isEnabled && isChecked -> R.color.laoji_ud_switch_on_disabled_thumb
-        !isEnabled -> R.color.laoji_ud_switch_off_disabled_thumb
-        isChecked -> R.color.laoji_ud_switch_on_thumb
-        else -> R.color.laoji_ud_switch_off_thumb
-      },
-    )
+        !isEnabled -> CalendarPagePalette.disabled
+        isChecked -> CalendarPagePalette.primary
+        else -> CalendarPagePalette.placeholder
+      }
+    } else {
+      color(
+        when {
+          !isEnabled && isChecked -> R.color.laoji_ud_switch_on_disabled_thumb
+          !isEnabled -> R.color.laoji_ud_switch_off_disabled_thumb
+          isChecked -> R.color.laoji_ud_switch_on_thumb
+          else -> R.color.laoji_ud_switch_off_thumb
+        },
+      )
+    }
     canvas.drawCircle(
       thumbLeft + thumbSize / 2f,
       switchBounds.centerY(),
