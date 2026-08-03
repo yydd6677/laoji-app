@@ -44,6 +44,21 @@
 
 `422` 在本轮不是传输失败：它是语料明确要求拒绝的“不是日程”输入，运行器将 `422/not_schedule` 作为通过条件。所有请求均是对 `/api/laoji/parse` 的单条 `POST`，每条结果保留原始请求、原始响应和独立比较结果。
 
+## 修复前后对比
+
+修复前的远端逐条结果和汇总仍保存在：
+
+- 结果：`tools/schedule-quality-v3/schedule-real-10k-results.jsonl`
+- 汇总：`tools/schedule-quality-v3/reports/schedule-real-10k-report.json`
+
+同一组 case、同一套独立标签的对比为：
+
+- 修复前：1,335/10,000 通过（13.35%），8,665 条失败
+- 修复后：10,000/10,000 通过（100%），0 条失败
+- 原来失败的 8,665 条全部转为通过，没有出现旧通过、新失败的回归
+
+修复前失败主要集中于标题提取 6,716 条、地点 1,547 条、开始日期 1,492 条、澄清状态 1,000 条、否定控制 1,000 条和结束日期 256 条。对应修复包括绝对日期优先级、口语/任务标题保留、地点候选判定、否定控制拒绝、需要澄清状态以及传统字归一化；修改位于移动端 `src/services/localScheduleParser.ts` 和分类规则 `src/utils/eventColors.ts`，服务端部署了相同解析修复。
+
 ## 服务身份边界
 
 服务快照保存在每条结果和汇总文件中：健康检查与 OpenAPI 响应哈希一致，服务头为 `uvicorn`。公开端点没有源码提交哈希或模型 digest，因此响应哈希只能证明本次 HTTP 评估所见的 API 快照，不能单独证明源码或模型版本。
@@ -68,6 +83,27 @@
 本次候选源码备份位于：
 `/home/yydd/LaoJi/server-staging/qwen35-9b-cutover/smart-meeting-ai/backend/backups/schedule-real10k-title-action-20260803/`。
 候选阶段记录的源码 SHA-256 为 `ee2de3b52f715060af0fc2a55957ab70612f67a656185f416d947678dc624466`；它与部署侧记录的远端修复版本摘要不同，不能混用。
+
+## 事件类型分类专项
+
+分类语料和独立标签：
+
+- 语料：`tools/schedule-quality-v3/event-category-corpus.jsonl`
+- 清单：`tools/schedule-quality-v3/event-category-manifest.json`
+- 标签来源：`authored_metadata_v1`，运行器不从 parser 响应反推标签
+- 规模：249 条唯一输入，覆盖工作、学习、健康、生活、社交、出行、财务、重要、其他 9 类
+- 场景：12 种，包括标题/备注领域词、明确分类覆盖、地点干扰、传统字 ASR、全天、重要性优先级、相对提醒、显式“其他”和兜底
+
+当前远端独立复核：`tools/schedule-quality-v3/reports/event-category-server-recheck-20260803.json`。
+
+- 249/249 通过，失败 0
+- Macro-F1：1.0
+- HTTP 状态：249 条均为 200
+- 解析来源：249 条均为 `rules`
+- 修复前远端：175/249，通过率 70.28%，Macro-F1 0.711
+- 修复后候选与远端复核：249/249，通过率 100%，Macro-F1 1.0
+
+分类优先级固定为：明确分类覆盖 > 相对提醒/紧急语义 > 标题领域词 > 备注领域词 > 其他；分类测试与日程字段测试独立统计，不能用分类通过掩盖日期、时间、澄清或拒绝语义问题。
 
 ## 后续覆盖范围
 
