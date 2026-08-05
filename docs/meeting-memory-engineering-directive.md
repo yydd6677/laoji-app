@@ -2261,6 +2261,7 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 - 生成链已收敛到单一 `LlmProvider`：日程解析、整理和问答使用 `qwen3.5:9b`，语义问答 embedding 使用同一 Ollama 的 `qwen3-embedding:0.6b`；精简 Python 环境不安装旧 `meetingsummary` 包时，关键模块仍可直接导入。
 - 生产 `/api/ready` 已报告 ASR、9B、embedding、VAD/CAM++、持久任务、三套 SQLite WAL 和磁盘准入；HTTP 问答真实记录 `meeting.question.embedding` 与 `llm.chat` 成功。最新只读快照为服务器 `/home/zhong/laoji-service-platform/migration-baselines/compact-production-final-state-20260805-r6/manifest.json`。
 - 当前源码已重新构建统一域名 Preview APK：`/home/yydd/LaoJi-stable-builds/laoji-compact-production-preview-20260806.apk`，versionCode `106`，大小 `91,313,864` 字节，SHA-256 `c5200a4d4604e6c1e2c9f30ef1961ce5d3c2d589cb730e8099106fa4c400480a`。APK 内嵌 `apiBase=https://laoji.cloud`、反向地址同域；已覆盖安装到 `emulator-5560` 并冷启动，无 FATAL/SQLite 崩溃。此前同路径 Preview 产物曾残留旧 `18035/18020` 配置，不能继续使用。
+- 新增 `tools/verify_compact_apk_config.py` 作为交付前只读门禁；当前候选通过，旧 `migration-baseline-20260805/laoji-preview-20260805.apk` 被明确拒绝（旧 18035/IP/双入口标记）。后续任何安装包必须先通过该检查，避免陈旧产物覆盖交付。
 
 ### 当前状态与外部阻塞
 
