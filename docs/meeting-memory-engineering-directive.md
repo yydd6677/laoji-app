@@ -2268,6 +2268,7 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 - `laoji.cloud` 当前仍没有 A/AAAA 记录，服务器外部 TCP 80/443 也尚未完全放行。HTTP-only ACME 引导站点和 Certbot timer 已预置，但完整 TLS/WSS virtual host 尚未启用。
 - 因 DNS、证书和公网入口尚未就绪，统一域名 APK 的公网真机闭环（登录、日程、录音、整理、问答、分享、地址、回收站和自动同步）仍不能宣称完成；内部 loopback HTTP 验证不替代该验收。
 - 后续获得 DNS 和公网入口后，按 `server-work/laoji-compact-production/deploy/nginx/README-laoji-app-production.md` 申请证书、切换 Nginx、验证 WSS，再进行公网真机验收；不要恢复旧端口或旧模型作为回退。
+- Nginx 切换已具备受保护脚本 `deploy/scripts/activate-laoji-ingress.sh`：先检查 DNS、证书和语法，失败自动恢复 ACME bootstrap；当前 `--check-only` 因 DNS 无 A 记录明确失败且未改动入口。
 
 ## 21. 作为目标模式附件时的执行协议
 
