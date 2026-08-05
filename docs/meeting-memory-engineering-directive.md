@@ -2257,12 +2257,16 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 - 持久整理任务租约、心跳、检查点和 API 重启后原 ID 恢复；游客整理不写持久检查点。
 - ASR 暂时不可用时自动退避重试；API 启动清理中断 `.part` 上传分片。
 - 真实 M4A、MP3、MP4、FLAC、WebM、超过一小时 WAV 矩阵已经过；已登记与未知说话人均已实际跑通。
+- 服务器紧凑生产切换已完成：`laoji-api`、`laoji-asr`、`laoji-ollama` 均由 systemd 常驻，内部只监听 `127.0.0.1:18020`、`127.0.0.1:8030`、`127.0.0.1:21434`；旧 `18035`、`8002`、`21436`、VibeVoice、Whisper 和旧重资产已停用并按删除清单清理。
+- 生成链已收敛到单一 `LlmProvider`：日程解析、整理和问答使用 `qwen3.5:9b`，语义问答 embedding 使用同一 Ollama 的 `qwen3-embedding:0.6b`；精简 Python 环境不安装旧 `meetingsummary` 包时，关键模块仍可直接导入。
+- 生产 `/api/ready` 已报告 ASR、9B、embedding、VAD/CAM++、持久任务、三套 SQLite WAL 和磁盘准入；HTTP 问答真实记录 `meeting.question.embedding` 与 `llm.chat` 成功。最新只读快照为服务器 `/home/zhong/laoji-service-platform/migration-baselines/compact-production-final-state-20260805-r6/manifest.json`。
 
-### 当前阻塞
+### 当前状态与外部阻塞
 
-- 生产还未切换；18035、8002、21436、VibeVoice 和旧 Whisper 环境仍保留。
-- `laoji.cloud` 尚无 A/AAAA 记录（DNS 已明确延后）；高德 Web Key 已由用户提供并从服务器真实调用验证成功（`status=1/info=OK/infocode=10000`），但尚未写入仓库或生产环境文件。公网 TLS/WSS、真机统一域名仍不能声称已完成；地址高德配额待正式环境注入 Key 后验收。
-- 候选 systemd/Nginx 文件已准备但未安装；旧环境只能在完整验收后按清单删除，不作自动删除。
+- 内部生产切换和高德 Key 的受限环境注入已完成；高德真实调用返回 `status=1/info=OK/infocode=10000`，密钥未写入仓库、APK、日志或普通文档。
+- `laoji.cloud` 当前仍没有 A/AAAA 记录，服务器外部 TCP 80/443 也尚未完全放行。HTTP-only ACME 引导站点和 Certbot timer 已预置，但完整 TLS/WSS virtual host 尚未启用。
+- 因 DNS、证书和公网入口尚未就绪，统一域名 APK 的公网真机闭环（登录、日程、录音、整理、问答、分享、地址、回收站和自动同步）仍不能宣称完成；内部 loopback HTTP 验证不替代该验收。
+- 后续获得 DNS 和公网入口后，按 `server-work/laoji-compact-production/deploy/nginx/README-laoji-app-production.md` 申请证书、切换 Nginx、验证 WSS，再进行公网真机验收；不要恢复旧端口或旧模型作为回退。
 
 ## 21. 作为目标模式附件时的执行协议
 
