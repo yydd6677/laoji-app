@@ -291,7 +291,7 @@ export async function getMeetingSummaryCatalogV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteSummaryCatalogV1> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/summary-versions`,
     {
@@ -322,7 +322,7 @@ export async function updateMeetingSummarySectionV1(input: {
 }): Promise<RemoteSummarySectionStateV1> {
   const remoteVersionId = identifier(input.remoteVersionId, '整理结果云端标识', 160);
   const remoteSectionId = identifier(input.remoteSectionId, '整理内容云端标识');
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-summary-versions/${encodeURIComponent(remoteVersionId)}/sections/${encodeURIComponent(remoteSectionId)}`,
     {
@@ -357,7 +357,7 @@ export async function selectMeetingSummaryCurrentV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteSummaryCurrentV1> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/summary-current`,
     {

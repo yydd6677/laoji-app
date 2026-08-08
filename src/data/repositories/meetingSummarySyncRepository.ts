@@ -28,6 +28,11 @@ type RemoteVersionRow = {
   remote_updated_at_ms: number;
 };
 
+type RemoteVersionIdentityRow = Pick<
+  RemoteVersionRow,
+  'local_version_id' | 'remote_version_id' | 'generated_document_sha256'
+>;
+
 type RemoteSectionRow = {
   scope_key: string;
   meeting_id: string;
@@ -70,6 +75,18 @@ type LocalSectionRow = {
   user_text: string | null;
   user_edited_at_ms: number | null;
 };
+
+const REMOTE_VERSION_SCHEMA_COLUMNS = [
+  'scope_key',
+  'meeting_id',
+  'local_version_id',
+  'remote_version_id',
+  'remote_status',
+  'generated_document_sha256',
+  'remote_created_at_ms',
+  'remote_completed_at_ms',
+  'remote_updated_at_ms',
+] as const;
 
 type OutboxRow = {
   operation_id: string;
@@ -499,6 +516,13 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
   versions: readonly MappedRemoteSummaryVersionV1[];
   mergedAtMs: number;
 }): Promise<{ outcome: 'updated' | 'conflicted' | 'unchanged'; conflictCount: number }> {
+  let mergePhase = 'validate_input';
+  let versionIndex = -1;
+  let sectionIndex = -1;
+  const merge = async (): Promise<{
+    outcome: 'updated' | 'conflicted' | 'unchanged';
+    conflictCount: number;
+  }> => {
   const scopeKey = input.scopeKey;
   assertAccountScope(scopeKey);
   identifier(input.meetingId, '整理结果会议本机标识');
@@ -510,6 +534,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
   if (input.versions.length !== input.catalog.versions.length) {
     throw new Error('整理结果本机映射数量不一致');
   }
+  mergePhase = 'load_meeting';
   return withMeetingDatabaseTransaction(async database => {
     const meeting = await database.getFirstAsync<{
       id: string;
@@ -524,14 +549,36 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
     if (!meeting || meeting.remote_id !== input.meetingRemoteId) {
       throw new Error('整理结果合并会议身份已变化');
     }
+    mergePhase = 'load_version_mappings';
+    const storedVersionMappings = await database.getAllAsync<RemoteVersionIdentityRow>(
+      `SELECT local_version_id, remote_version_id, generated_document_sha256
+       FROM meeting_summary_remote_versions WHERE scope_key = ?`,
+      scopeKey,
+    );
+    const versionMappingByRemote = new Map<string, RemoteVersionIdentityRow>();
+    const versionMappingByLocal = new Map<string, RemoteVersionIdentityRow>();
+    for (const mapping of storedVersionMappings) {
+      const priorRemote = versionMappingByRemote.get(mapping.remote_version_id);
+      const priorLocal = versionMappingByLocal.get(mapping.local_version_id);
+      if (
+        (priorRemote && priorRemote.local_version_id !== mapping.local_version_id)
+        || (priorLocal && priorLocal.remote_version_id !== mapping.remote_version_id)
+      ) throw new Error('整理结果版本映射存在歧义');
+      versionMappingByRemote.set(mapping.remote_version_id, mapping);
+      versionMappingByLocal.set(mapping.local_version_id, mapping);
+    }
     let changed = false;
     let conflictCount = 0;
-    for (const mapped of input.versions) {
+    for (const [mappedIndex, mapped] of input.versions.entries()) {
+      versionIndex = mappedIndex;
+      sectionIndex = -1;
+      mergePhase = 'validate_version';
       const remote = mapped.remote;
       if (
         remote.meetingRemoteId !== input.meetingRemoteId
         || remote.document.remoteVersionId !== remote.remoteId
       ) throw new Error('整理结果版本映射身份无效');
+      mergePhase = 'load_local_version';
       const localVersion = await database.getFirstAsync<{ id: string; meeting_id: string }>(
         'SELECT id, meeting_id FROM summary_versions WHERE id = ?',
         mapped.localVersionId,
@@ -539,25 +586,20 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
       if (!localVersion || localVersion.meeting_id !== input.meetingId) {
         throw new Error('整理结果本机版本不存在');
       }
-      const existingRemote = await database.getFirstAsync<RemoteVersionRow>(
-        `SELECT * FROM meeting_summary_remote_versions
-         WHERE scope_key = ? AND remote_version_id = ?`,
-        scopeKey,
-        remote.remoteId,
-      );
-      const existingLocal = await database.getFirstAsync<RemoteVersionRow>(
-        `SELECT * FROM meeting_summary_remote_versions
-         WHERE scope_key = ? AND local_version_id = ?`,
-        scopeKey,
-        mapped.localVersionId,
-      );
+      mergePhase = 'lookup_version_mappings';
+      const existingRemote = versionMappingByRemote.get(remote.remoteId);
+      const existingLocal = versionMappingByLocal.get(mapped.localVersionId);
       if (
         (existingRemote && existingRemote.local_version_id !== mapped.localVersionId)
         || (existingLocal && existingLocal.remote_version_id !== remote.remoteId)
       ) throw new Error('整理结果版本映射存在歧义');
-      if (existingRemote && existingRemote.generated_document_sha256 !== mapped.generatedDocumentSha256) {
+      if (
+        existingRemote?.generated_document_sha256.startsWith('sha256:v2:')
+        && existingRemote.generated_document_sha256 !== mapped.generatedDocumentSha256
+      ) {
         throw new Error('整理结果生成内容被云端改写');
       }
+      mergePhase = 'upsert_version_mapping';
       await database.runAsync(
         `INSERT INTO meeting_summary_remote_versions (
            scope_key, meeting_id, local_version_id, remote_version_id,
@@ -566,6 +608,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(scope_key, remote_version_id) DO UPDATE SET
            remote_status = excluded.remote_status,
+           generated_document_sha256 = excluded.generated_document_sha256,
            remote_updated_at_ms = MAX(
              meeting_summary_remote_versions.remote_updated_at_ms,
              excluded.remote_updated_at_ms
@@ -580,6 +623,14 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
         remote.serverCompletedAtMs,
         remote.serverUpdatedAtMs,
       );
+      const storedMapping: RemoteVersionIdentityRow = {
+        local_version_id: mapped.localVersionId,
+        remote_version_id: remote.remoteId,
+        generated_document_sha256: mapped.generatedDocumentSha256,
+      };
+      versionMappingByRemote.set(remote.remoteId, storedMapping);
+      versionMappingByLocal.set(mapped.localVersionId, storedMapping);
+      mergePhase = 'load_local_sections';
       const localSections = await database.getAllAsync<LocalSectionRow>(
         `SELECT id, version_id, stable_key, ordinal, title, generated_text,
            user_text, user_edited_at_ms
@@ -590,6 +641,8 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
         throw new Error('整理结果 section 本机映射数量不一致');
       }
       for (let index = 0; index < remote.sections.length; index += 1) {
+        sectionIndex = index;
+        mergePhase = 'validate_section';
         const remoteSection = remote.sections[index];
         const generatedSection = remote.document.sections[index];
         const localSection = localSections[index];
@@ -611,6 +664,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
         }
         if (prior && remoteSection.revision < prior.remote_revision) continue;
         const generatedCitationIds = generatedSection.citations.map(citation => citation.id);
+        mergePhase = 'upsert_section_mapping';
         await database.runAsync(
           `INSERT INTO meeting_summary_remote_sections (
              scope_key, meeting_id, local_version_id, local_section_id,
@@ -639,6 +693,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
           remoteSection.clientUpdatedAtMs,
           remoteSection.serverUpdatedAtMs,
         );
+        mergePhase = 'load_citations';
         const localCitations = await database.getAllAsync<{
           id: string;
           ordinal: number;
@@ -651,6 +706,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
           localSection.id,
         );
         const citationMap = new Map<string, string>();
+        mergePhase = 'upsert_citation_mapping';
         for (const localCitation of localCitations) {
           const remoteCitation = generatedSection.citations[localCitation.ordinal];
           if (
@@ -691,6 +747,7 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
           ...remoteSection,
           generatedCitationIds,
         });
+        mergePhase = 'merge_section_state';
         const pending = await hasOutstanding(
           database,
           scopeKey,
@@ -743,6 +800,9 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
       }
     }
 
+    versionIndex = -1;
+    sectionIndex = -1;
+    mergePhase = 'merge_current';
     const remoteCurrent = input.catalog.current;
     if (remoteCurrent) {
       const target = await database.getFirstAsync<RemoteVersionRow>(
@@ -835,6 +895,60 @@ export async function mergeMeetingSummaryCatalogMappings(input: {
       conflictCount,
     };
   });
+  };
+  try {
+    return await merge();
+  } catch (reason) {
+    const error = reason instanceof Error ? reason : new Error('整理结果映射事务失败');
+    let schemaTableCount = -1;
+    let schemaVersion = -1;
+    let remoteVersionColumnCount = -1;
+    let remoteVersionColumnMask = -1;
+    let remoteVersionRowCount = -1;
+    try {
+      const database = await openMeetingDatabase();
+      const tables = await database.getAllAsync<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type = 'table'
+         AND name IN (
+           'meeting_summary_remote_versions',
+           'meeting_summary_remote_sections',
+           'meeting_summary_current_sync'
+        )`,
+      );
+      schemaTableCount = tables.length;
+      const version = await database.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
+      schemaVersion = Number(version?.user_version ?? -1);
+      const columns = await database.getAllAsync<{ name: string }>(
+        'PRAGMA table_info("meeting_summary_remote_versions")',
+      );
+      const columnNames = new Set(columns.map(column => column.name));
+      remoteVersionColumnCount = columns.length;
+      remoteVersionColumnMask = REMOTE_VERSION_SCHEMA_COLUMNS.reduce(
+        (mask, column, index) => mask | (columnNames.has(column) ? 1 << index : 0),
+        0,
+      );
+      const row = await database.getFirstAsync<{ row_count: number }>(
+        'SELECT COUNT(*) AS row_count FROM meeting_summary_remote_versions',
+      );
+      remoteVersionRowCount = Number(row?.row_count ?? -1);
+    } catch {
+      schemaTableCount = -2;
+    }
+    Object.assign(error, {
+      mergePhase,
+      versionIndex,
+      sectionIndex,
+      schemaTableCount,
+      schemaVersion,
+      remoteVersionColumnCount,
+      remoteVersionColumnMask,
+      remoteVersionRowCount,
+      localVersionIdLength: versionIndex >= 0
+        ? input.versions[versionIndex]?.localVersionId.length ?? -1
+        : -1,
+    });
+    throw error;
+  }
 }
 
 export async function ensureMeetingSummarySyncOperations(

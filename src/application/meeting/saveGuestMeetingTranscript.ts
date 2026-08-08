@@ -467,7 +467,6 @@ export class SaveGuestMeetingTranscriptUseCase {
         createdAtMs,
         finalizedAtMs,
       } : null;
-      const activeRevisionChanged = activate && current?.id !== revisionId;
       activeContentChanged = activate && !sameSemanticContent(currentContent, lines);
       const revisionNeedsWrite = Boolean(
         revision
@@ -503,8 +502,12 @@ export class SaveGuestMeetingTranscriptUseCase {
           activate,
           replaceSegments: realtimeDraft,
         });
+        // A final/replayed transcript can receive a new revision identity
+        // without changing any user-visible words. A summary is invalidated
+        // only when the active semantic content changes; revision identity
+        // alone must not produce "整理结果可更新" after stopping a meeting.
         if (
-          (activeRevisionChanged || activeContentChanged)
+          activeContentChanged
           && await transaction.markCurrentSummaryStale(meetingId, scopeKey)
         ) {
           const summaryStage = await transaction.getStage(meetingId, scopeKey, 'summary');

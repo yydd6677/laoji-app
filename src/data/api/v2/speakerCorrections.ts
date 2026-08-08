@@ -81,7 +81,7 @@ export interface SubmitSpeakerCorrectionV2Input {
 export async function submitSpeakerCorrectionV2(
   input: SubmitSpeakerCorrectionV2Input,
 ): Promise<SpeakerCorrectionV2Response> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const meetingId = encodeURIComponent(input.meetingRemoteId);
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${meetingId}/speaker-corrections`,

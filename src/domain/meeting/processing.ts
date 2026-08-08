@@ -31,6 +31,7 @@ export type TranscriptStatus =
   | 'realtime_draft'
   | 'finalizing'
   | 'ready'
+  | 'no_speech'
   | 'failed_retryable'
   | 'unavailable';
 
@@ -103,7 +104,7 @@ const STATUS_VALUES: { [Stage in ProcessingStageName]: ReadonlySet<ProcessingSta
     'not_required', 'queued', 'uploading', 'uploaded', 'failed_retryable', 'blocked',
   ]),
   transcript: new Set<TranscriptStatus>([
-    'none', 'realtime_draft', 'finalizing', 'ready', 'failed_retryable', 'unavailable',
+    'none', 'realtime_draft', 'finalizing', 'ready', 'no_speech', 'failed_retryable', 'unavailable',
   ]),
   summary: new Set<SummaryStatus>([
     'none', 'queued', 'generating', 'ready', 'stale', 'failed_retryable',
@@ -241,6 +242,7 @@ export interface MeetingPresentationState {
     | 'uploading'
     | 'upload_failed'
     | 'transcribing'
+    | 'transcript_empty'
     | 'transcript_failed'
     | 'summarizing'
     | 'summary_failed'
@@ -267,6 +269,7 @@ const PRESENTATION_STATES_BY_LABEL: Readonly<Record<string, MeetingPresentationS
   '上传失败，可重试': { key: 'upload_failed', label: '上传失败，可重试', tone: 'danger', retryStage: 'upload' },
   '正在生成文字记录': { key: 'transcribing', label: '正在生成文字记录', tone: 'neutral', retryStage: null },
   '文字记录仍在补全': { key: 'transcribing', label: '文字记录仍在补全', tone: 'neutral', retryStage: null },
+  '未检测到人声': { key: 'transcript_empty', label: '未检测到人声', tone: 'neutral', retryStage: null },
   '文字处理失败，可重试': { key: 'transcript_failed', label: '文字处理失败，可重试', tone: 'danger', retryStage: 'transcript' },
   '正在整理会议记录': { key: 'summarizing', label: '正在整理会议记录', tone: 'neutral', retryStage: null },
   '整理失败，可重试': { key: 'summary_failed', label: '整理失败，可重试', tone: 'danger', retryStage: 'summary' },
@@ -343,6 +346,9 @@ export function deriveMeetingPresentationState(
   }
   if (stages.transcript === 'realtime_draft') {
     return meetingPresentationStateFromLabel('文字记录仍在补全')!;
+  }
+  if (stages.transcript === 'no_speech') {
+    return meetingPresentationStateFromLabel('未检测到人声')!;
   }
   if (stages.transcript === 'failed_retryable') {
     return meetingPresentationStateFromLabel('文字处理失败，可重试')!;

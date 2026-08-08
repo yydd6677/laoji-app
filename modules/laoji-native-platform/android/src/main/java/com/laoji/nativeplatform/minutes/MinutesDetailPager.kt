@@ -4,6 +4,7 @@ package com.laoji.nativeplatform.minutes
 
 import android.content.Context
 import android.graphics.Typeface
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -136,6 +137,11 @@ internal class MinutesDetailTabBar(
     private val text = context.textView(label, 14, MinutesPalette.secondary).apply {
       gravity = Gravity.CENTER
       typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      // Speaker counts are appended asynchronously. Keep the tab single-line
+      // while its normal/bold measurement is being updated to avoid a one-frame
+      // wrap when the selected state changes.
+      setSingleLine(true)
+      ellipsize = TextUtils.TruncateAt.END
       // [DEVICE] Matches Feishu's theme-resolved glyph advance on the same 420 dpi device.
       textScaleX = 1.025f
     }
@@ -143,11 +149,18 @@ internal class MinutesDetailTabBar(
     private val boldMeasureText = context.textView(label, 14, MinutesPalette.secondary, Typeface.BOLD).apply {
       gravity = Gravity.CENTER
       typeface = Typeface.create("sans-serif", Typeface.BOLD)
+      setSingleLine(true)
+      ellipsize = TextUtils.TruncateAt.END
       textScaleX = 1.025f
       visibility = View.INVISIBLE
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    private val indicator = View(context).apply { backgroundShape(MinutesPalette.primary, radiusDp = 1) }
+    private val indicator = View(context).apply {
+      backgroundShape(MinutesPalette.primary, radiusDp = 1)
+      // The first selection pass may be a no-op for unselected tabs; keep their
+      // indicators hidden from the initial frame.
+      visibility = View.INVISIBLE
+    }
 
     init {
       isClickable = true
@@ -177,6 +190,11 @@ internal class MinutesDetailTabBar(
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
       super.onMeasure(widthMeasureSpec, heightMeasureSpec)
       val contentWidth = maxOf(text.measuredWidth, boldMeasureText.measuredWidth)
+      // Keep the normal label at least as wide as its selected/bold variant.
+      // Without this lower bound, the first selected frame can ellipsize before
+      // the parent LinearLayout completes its second measurement pass.
+      if (text.minWidth < contentWidth) text.minWidth = contentWidth
+      if (boldMeasureText.minWidth < contentWidth) boldMeasureText.minWidth = contentWidth
       if (indicator.layoutParams.width != contentWidth) {
         indicator.layoutParams = indicator.layoutParams.apply { width = contentWidth }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
@@ -191,6 +209,7 @@ internal class MinutesDetailTabBar(
     }
 
     fun setSelectedState(selected: Boolean) {
+      if (isSelected == selected) return
       isSelected = selected
       text.isSelected = selected
       text.setTextColor(if (selected) MinutesPalette.primary else MinutesPalette.secondary)

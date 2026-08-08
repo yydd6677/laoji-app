@@ -88,6 +88,11 @@ internal class MinutesListSurface(
     adapter.setViewMode(viewMode)
     list.layoutManager = createGridLayoutManager()
     list.adapter = adapter
+    // List refreshes and recording completion can add/move a cover in the same
+    // frame that the surface is being replaced. The product does not rely on
+    // RecyclerView's default change animation, and disabling it avoids delayed
+    // recycling of an attached cover during that hand-off.
+    list.itemAnimator = null
     list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
       override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
         if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {

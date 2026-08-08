@@ -2246,7 +2246,7 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 
 ### 目标拓扑
 
-1. Nginx 只负责 `laoji.cloud` HTTPS/WSS、流式上传和公开分享。
+1. Cloudflare Edge 负责 `laoji.cloud` HTTPS/WSS，服务器的 `cloudflared` 以出站隧道回源 `127.0.0.1:18020`；Nginx 保留为服务器共享 HTTP 层和直连回退，不在当前老记生产请求链中。
 2. `laoji-api` 统一负责账号、日程、会议、上传、持久转写、整理、问答、地址和分享，只监听 `127.0.0.1:18020`。
 3. `laoji-asr` 以 Qwen3-ASR-1.7B 统一处理实时、日程短语音和长音频 batch，只监听 `127.0.0.1:8030`。
 4. Ollama 在 `127.0.0.1:21434` 常驻 9B 和 0.6B embedding；业务代码不得绕过 `LlmProvider`。
@@ -2257,19 +2257,18 @@ P2 的标签、检索、轻协作和片段也不得反向污染 P0 领域模型�
 - 持久整理任务租约、心跳、检查点和 API 重启后原 ID 恢复；游客整理不写持久检查点。
 - ASR 暂时不可用时自动退避重试；API 启动清理中断 `.part` 上传分片。
 - 真实 M4A、MP3、MP4、FLAC、WebM、超过一小时 WAV 矩阵已经过；已登记与未知说话人均已实际跑通。
-- 服务器紧凑生产切换已完成：`laoji-api`、`laoji-asr`、`laoji-ollama` 均由 systemd 常驻，内部只监听 `127.0.0.1:18020`、`127.0.0.1:8030`、`127.0.0.1:21434`；旧 `18035`、`8002`、`21436`、VibeVoice、Whisper 和旧重资产已停用并按删除清单清理。
+- 服务器紧凑生产切换已完成：`laoji-api`、`laoji-asr`、`laoji-ollama`、`cloudflared` 均由 systemd 常驻，内部只监听 `127.0.0.1:18020`、`127.0.0.1:8030`、`127.0.0.1:21434`；旧 `18035`、`8002`、`21436` 已停用。最终现场审计又删除 `63,773,990,912` 字节无引用的旧候选区、ASR venv、旧 Ollama 模型和 Whisper 缓存，前后证据位于服务器 `migration-baselines/compact-production-final-cleanup-20260806/`。
 - 生成链已收敛到单一 `LlmProvider`：日程解析、整理和问答使用 `qwen3.5:9b`，语义问答 embedding 使用同一 Ollama 的 `qwen3-embedding:0.6b`；精简 Python 环境不安装旧 `meetingsummary` 包时，关键模块仍可直接导入。
 - 生产 `/api/ready` 已报告 ASR、9B、embedding、VAD/CAM++、持久任务、三套 SQLite WAL 和磁盘准入；HTTP 问答真实记录 `meeting.question.embedding` 与 `llm.chat` 成功。最新只读快照为服务器 `/home/zhong/laoji-service-platform/migration-baselines/compact-production-final-state-20260805-r7/manifest.json`，同时包含统一域名候选 APK。
 - 当前源码已重新构建统一域名 Preview APK：`/home/yydd/LaoJi-stable-builds/laoji-compact-production-preview-20260806.apk`，versionCode `106`，大小 `91,313,864` 字节，SHA-256 `c5200a4d4604e6c1e2c9f30ef1961ce5d3c2d589cb730e8099106fa4c400480a`。APK 内嵌 `apiBase=https://laoji.cloud`、反向地址同域；已覆盖安装到 `emulator-5560` 并冷启动，无 FATAL/SQLite 崩溃。此前同路径 Preview 产物曾残留旧 `18035/18020` 配置，不能继续使用。
 - 新增 `tools/verify_compact_apk_config.py` 作为交付前只读门禁；当前候选通过，旧 `migration-baseline-20260805/laoji-preview-20260805.apk` 被明确拒绝（旧 18035/IP/双入口标记）。后续任何安装包必须先通过该检查，避免陈旧产物覆盖交付。
 
-### 当前状态与外部阻塞
+### 当前完成状态
 
 - 内部生产切换和高德 Key 的受限环境注入已完成；高德真实调用返回 `status=1/info=OK/infocode=10000`，密钥未写入仓库、APK、日志或普通文档。
-- `laoji.cloud` 当前仍没有 A/AAAA 记录，服务器外部 TCP 80/443 也尚未完全放行。HTTP-only ACME 引导站点和 Certbot timer 已预置，但完整 TLS/WSS virtual host 尚未启用。
-- 因 DNS、证书和公网入口尚未就绪，统一域名 APK 的公网真机闭环（登录、日程、录音、整理、问答、分享、地址、回收站和自动同步）仍不能宣称完成；内部 loopback HTTP 验证不替代该验收。
-- 后续获得 DNS 和公网入口后，按 `server-work/laoji-compact-production/deploy/nginx/README-laoji-app-production.md` 申请证书、切换 Nginx、验证 WSS，再进行公网真机验收；不要恢复旧端口或旧模型作为回退。
-- Nginx 切换已具备受保护脚本 `deploy/scripts/activate-laoji-ingress.sh`：先检查 DNS、证书和语法，失败自动恢复 ACME bootstrap；当前 `--check-only` 因 DNS 无 A 记录明确失败且未改动入口。
+- Cloudflare Tunnel 已投产：`laoji.cloud` 公网 `/api/ready` 返回 HTTP 200，WSS 握手返回 101，服务器常态保持 4 条 HA 连接。Nginx/Let’s Encrypt 脚本只保留为直连入口回退，不是当前阻塞。
+- 当前紧凑运行资产约 `18.2 GiB`，老记 GPU 占用约 `18.45 GiB`，GPU0 剩余约 `10.84 GiB`，`/home` 可用约 `518 GiB`。
+- 用户明确要求跳过本轮真机验证；真机登录、日程、录音、整理、问答、分享、地址、回收站和自动同步闭环不在本轮范围内，也不写成已验收。除该豁免外，紧凑生产架构计划无剩余外部阻塞。
 
 ## 21. 作为目标模式附件时的执行协议
 

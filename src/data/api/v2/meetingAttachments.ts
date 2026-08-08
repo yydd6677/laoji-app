@@ -64,7 +64,7 @@ function nullableServerTime(value: unknown, label: string): number | null {
 function absoluteContentUrl(value: unknown, remoteId: string): string | null {
   if (value === null) return null;
   const raw = identifier(value, '附件下载地址', 4_096);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   let configured: URL;
   let resolved: URL;
   try {
@@ -215,7 +215,7 @@ export async function registerMeetingAttachmentV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteMeetingAttachmentV1> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/attachments`,
     {
@@ -252,7 +252,7 @@ export async function uploadMeetingAttachmentContentV1(input: {
     name: input.remoteAttachment.fileName!,
     type: input.remoteAttachment.mimeType!,
   } as any);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-attachments/${encodeURIComponent(input.remoteAttachment.remoteId)}/content`,
     {
@@ -285,7 +285,7 @@ export async function deleteMeetingAttachmentV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteMeetingAttachmentV1> {
   const remoteAttachmentId = identifier(input.remoteAttachmentId, '附件云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-attachments/${encodeURIComponent(remoteAttachmentId)}`,
     {
@@ -312,7 +312,7 @@ export async function listMeetingAttachmentsV1(input: {
   signal?: AbortSignal;
 }): Promise<readonly RemoteMeetingAttachmentV1[]> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/attachments`,
     {

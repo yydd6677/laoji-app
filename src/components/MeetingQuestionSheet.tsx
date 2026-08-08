@@ -49,6 +49,7 @@ function QuestionTurnView({
   onCitation: (citation: MeetingQuestionCitation) => void;
 }) {
   const { colors } = getFeishuTokens();
+  const [citationsExpanded, setCitationsExpanded] = useState(false);
   return (
     <View style={styles.turn} testID={`meeting-question-turn-${turn.ordinal}`}>
       <View style={[styles.questionBubble, { backgroundColor: colors.primarySoft }]}>
@@ -58,7 +59,28 @@ function QuestionTurnView({
         <Text selectable style={[styles.answerText, { color: colors.textTitle }]}>{turn.answer}</Text>
         {turn.citations.length > 0 ? (
           <View style={styles.citations}>
-            {turn.citations.map(citation => (
+            <Pressable
+              testID={`meeting-question-citations-toggle-${turn.ordinal}`}
+              style={({ pressed }) => [
+                styles.citationsToggle,
+                { backgroundColor: pressed ? colors.pressedFill : colors.backgroundFloatOverlay },
+              ]}
+              onPress={() => setCitationsExpanded(expanded => !expanded)}
+              accessibilityRole="button"
+              accessibilityLabel={`${citationsExpanded ? '收起' : '展开'}${turn.citations.length}条引用`}
+              accessibilityState={{ expanded: citationsExpanded }}
+            >
+              <Ionicons name="link-outline" size={15} color={colors.textLink} />
+              <Text style={[styles.citationsToggleLabel, { color: colors.textLink }]}>
+                {`引用 ${turn.citations.length} 条`}
+              </Text>
+              <Ionicons
+                name={citationsExpanded ? 'chevron-up' : 'chevron-down'}
+                size={15}
+                color={colors.iconTertiary}
+              />
+            </Pressable>
+            {citationsExpanded ? turn.citations.map(citation => (
               <Pressable
                 key={citation.id}
                 style={({ pressed }) => [
@@ -80,7 +102,7 @@ function QuestionTurnView({
                   {citation.sourceExcerpt}
                 </Text>
               </Pressable>
-            ))}
+            )) : null}
           </View>
         ) : null}
       </View>
@@ -517,7 +539,18 @@ const styles = StyleSheet.create({
   questionText: { fontSize: 16, lineHeight: 24 },
   answerCard: { marginTop: 10, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12 },
   answerText: { fontSize: 16, lineHeight: 25 },
-  citations: { marginTop: 10, gap: 8 },
+  citations: { marginTop: 8, gap: 8 },
+  // [INFERENCE] LaoJi-only evidence disclosure. Keep the Feishu-neutral
+  // container family and a 44dp action target while collapsing verbose source
+  // excerpts by default.
+  citationsToggle: {
+    minHeight: 44,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  citationsToggleLabel: { flex: 1, marginLeft: 6, fontSize: 13, lineHeight: 20 },
   citation: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
   citationTitleRow: { flexDirection: 'row', alignItems: 'center' },
   citationLabel: { flex: 1, marginLeft: 5, fontSize: 13, lineHeight: 20 },

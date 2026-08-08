@@ -5,11 +5,13 @@ const {
   resolveDeploymentMode,
 } = require('./config/deploymentMode');
 
+const DEFAULT_API_BASE = 'https://laoji.cloud';
+
 const base = {
   name: '老记',
   slug: 'laoji-app',
   scheme: 'laoji',
-  version: '1.0.0',
+  version: '1.0.6',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
@@ -85,6 +87,7 @@ const base = {
     'expo-localization',
     'expo-secure-store',
     'expo-sqlite',
+    './plugins/withAndroidAppVersion',
     ['expo-image-picker', {
       photosPermission: '老记需要访问照片，用于选择账号头像。',
       cameraPermission: false,
@@ -99,10 +102,6 @@ const base = {
     ['expo-local-authentication', { faceIDPermission: '老记需要使用系统验证，用于保护你的日程和会议记录。' }],
   ],
 };
-
-function boolEnv(value) {
-  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
-}
 
 function cleanUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
@@ -150,36 +149,9 @@ function assertServiceUrl(name, value, deploymentMode) {
   }
 }
 
-function assertRealtimeHost(host, port, secure, deploymentMode) {
-  const clean = String(host || '').trim();
-  const hostIsDevelopmentIp = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(clean);
-  const validHost = clean === 'localhost' || hostIsDevelopmentIp || isDomainName(clean);
-  if (!validHost || clean.includes('/') || clean.includes('://')) {
-    throw new Error('EXPO_PUBLIC_REALTIME_ASR_HOST must contain only a host name or IP address.');
-  }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('EXPO_PUBLIC_REALTIME_ASR_PORT must be an integer between 1 and 65535.');
-  }
-  if (isSecureDeploymentMode(deploymentMode)
-      && (!secure || hostIsDevelopmentIp || !isDomainName(clean))) {
-    throw new Error('EXPO_PUBLIC_REALTIME_ASR_HOST must be a secure domain for production-like builds.');
-  }
-  if (isSubmissionDeploymentMode(deploymentMode)
-      && isPlaceholderProductionHost(clean)) {
-    throw new Error('EXPO_PUBLIC_REALTIME_ASR_HOST must not use a reserved or placeholder domain in a production submission.');
-  }
-}
-
 module.exports = () => {
   const appEnv = resolveDeploymentMode(process.env);
-  const laojiApiBase = cleanUrl(process.env.EXPO_PUBLIC_LAOJI_API_BASE);
-  const meetingApiBase = cleanUrl(process.env.EXPO_PUBLIC_MEETING_API_BASE);
-  const realtimeAsrHost = String(process.env.EXPO_PUBLIC_REALTIME_ASR_HOST || '').trim();
-  const realtimeAsrPort = Number(process.env.EXPO_PUBLIC_REALTIME_ASR_PORT || 18020);
-  const realtimeAsrSecure = boolEnv(process.env.EXPO_PUBLIC_REALTIME_ASR_SECURE);
-  const realtimeAsrProvider = String(
-    process.env.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || 'qwen',
-  ).trim().toLowerCase();
+  const apiBase = cleanUrl(process.env.EXPO_PUBLIC_API_BASE || DEFAULT_API_BASE);
   const localMeetingDbV1 = !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
   );
@@ -245,44 +217,33 @@ module.exports = () => {
       String(process.env.EXPO_PUBLIC_MEETING_ACTION_COLLABORATION_V1 ?? 'true').trim().toLowerCase(),
     );
   const privacyPolicyUrl = cleanUrl(
-    process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (laojiApiBase ? `${laojiApiBase}/privacy` : ''),
+    process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (apiBase ? `${apiBase}/privacy` : ''),
   );
   const termsOfServiceUrl = cleanUrl(
-    process.env.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || (laojiApiBase ? `${laojiApiBase}/terms` : ''),
+    process.env.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || (apiBase ? `${apiBase}/terms` : ''),
   );
   const accountDeletionUrl = cleanUrl(
-    process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL || (laojiApiBase ? `${laojiApiBase}/account-deletion` : ''),
+    process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL || (apiBase ? `${apiBase}/account-deletion` : ''),
   );
-  const reverseGeocoderUrl = cleanUrl(process.env.EXPO_PUBLIC_REVERSE_GEOCODER_URL);
+  const reverseGeocoderUrl = apiBase ? `${apiBase}/api/location/reverse` : '';
 
-  if (!laojiApiBase || !meetingApiBase || !realtimeAsrHost
+  if (!apiBase
       || !privacyPolicyUrl || !termsOfServiceUrl || !accountDeletionUrl) {
-    throw new Error('LaoJi production configuration is incomplete. Set the API, realtime ASR, privacy policy, and account deletion endpoints.');
+    throw new Error('LaoJi production configuration is incomplete. Set EXPO_PUBLIC_API_BASE and legal document endpoints.');
   }
-  assertServiceUrl('EXPO_PUBLIC_LAOJI_API_BASE', laojiApiBase, appEnv);
-  assertServiceUrl('EXPO_PUBLIC_MEETING_API_BASE', meetingApiBase, appEnv);
-  if (reverseGeocoderUrl) {
-    assertServiceUrl('EXPO_PUBLIC_REVERSE_GEOCODER_URL', reverseGeocoderUrl, appEnv);
-  }
+  assertServiceUrl('EXPO_PUBLIC_API_BASE', apiBase, appEnv);
+  assertServiceUrl('reverseGeocoderUrl', reverseGeocoderUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_PRIVACY_POLICY_URL', privacyPolicyUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_TERMS_OF_SERVICE_URL', termsOfServiceUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_ACCOUNT_DELETION_URL', accountDeletionUrl, appEnv);
-  assertRealtimeHost(realtimeAsrHost, realtimeAsrPort, realtimeAsrSecure, appEnv);
-  if (!['whisper', 'qwen'].includes(realtimeAsrProvider)) {
-    throw new Error('EXPO_PUBLIC_REALTIME_ASR_PROVIDER must be whisper or qwen.');
-  }
 
   return {
     ...base,
     extra: {
       ...(base.extra || {}),
       appEnv,
-      laojiApiBase,
-      meetingApiBase,
-      realtimeAsrHost,
-      realtimeAsrPort,
-      realtimeAsrSecure,
-      realtimeAsrProvider,
+      apiBase,
+      realtimeAsrProvider: 'qwen',
       reverseGeocoderUrl,
       privacyPolicyUrl,
       termsOfServiceUrl,

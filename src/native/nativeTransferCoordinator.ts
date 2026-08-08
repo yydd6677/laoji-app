@@ -55,7 +55,7 @@ function transferAvailable(): boolean {
 export async function ensureNativeTransferLease(
   scope: string,
   accessToken: string,
-  apiBaseUrl = getApiConfig().meetingApiBase,
+  apiBaseUrl = getApiConfig().apiBase,
 ): Promise<NativeTransferLease | null> {
   const normalizedScope = scope.trim();
   const normalizedBaseUrl = apiBaseUrl.trim().replace(/\/+$/, '');

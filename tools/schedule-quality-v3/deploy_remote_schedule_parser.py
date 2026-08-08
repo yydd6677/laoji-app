@@ -165,13 +165,18 @@ def main() -> int:
     old_environment = read_environment(args.pid)
     old_hash = sha256(target)
     new_hash = sha256(source_temp)
+    staged_target = target.with_name(f".{target.name}.staged-{os.getpid()}")
     backup.parent.mkdir(parents=True, exist_ok=True)
     if backup.exists():
         if sha256(backup) != old_hash:
             raise SystemExit(f"已有备份与当前源码不一致，拒绝使用: {backup}")
     else:
         shutil.copy2(target, backup)
-    os.replace(source_temp, target)
+    # /tmp may be a different filesystem from the application volume.  Copy
+    # into the target directory first, then use an in-directory replace so the
+    # service never observes a partially written Python module.
+    shutil.copy2(source_temp, staged_target)
+    os.replace(staged_target, target)
 
     old_stopped = False
     new_pid: int | None = None
@@ -196,6 +201,10 @@ def main() -> int:
         }, ensure_ascii=False, sort_keys=True))
         return 0
     except Exception as exc:
+        try:
+            staged_target.unlink()
+        except FileNotFoundError:
+            pass
         if new_pid is not None:
             try:
                 stop_process(new_pid)

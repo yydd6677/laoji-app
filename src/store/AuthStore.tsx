@@ -31,11 +31,12 @@ import {
   removeManagedLocalAvatar,
   saveProfile,
 } from '../services/profile';
-import { isStoredSessionExpired, shouldRefreshStoredSession } from '../services/authSession';
+import { shouldRefreshStoredSession } from '../services/authSession';
 import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
 import { clearAppStorage, getAppStorageItem, setAppStorageItem } from '../services/appStorage';
 import { setUnauthorizedHandler } from '../services/authInvalidation';
 import { deleteMeetingDatabase } from '../data/db/openDatabase';
+import { diagnosticAudit } from '../services/diagnostics';
 
 const AUTH_MODE_KEY = '@laoji:authMode:v1';
 
@@ -206,21 +207,98 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let alive = true;
+
+    const refreshCachedSessionInBackground = async (cached: AuthSession) => {
+      let refreshed: AuthSession;
+      try {
+        refreshed = shouldRefreshStoredSession(cached)
+          ? await refreshAccountSession(cached.accessToken)
+          : {
+            accessToken: cached.accessToken,
+            expiresAt: cached.expiresAt,
+            user: await fetchCurrentUser(cached.accessToken),
+          };
+      } catch (error) {
+        if (isAuthUnauthorizedError(error) && alive && authStateRef.current.accessToken === cached.accessToken) {
+          await clearStoredToken();
+          if (!alive || authStateRef.current.accessToken !== cached.accessToken) return;
+          commitAuthState('signed_out', null);
+          setProfile(DEFAULT_PROFILE);
+          setSessionNotice('登录状态已失效，为保护账号数据，请重新登录。');
+          await setAppStorageItem(AUTH_MODE_KEY, 'signed_out');
+        }
+        return;
+      }
+      if (!alive || authStateRef.current.accessToken !== cached.accessToken) return;
+
+      let nextProfile = userToProfile(refreshed.user);
+      try {
+        const remote = await fetchRemoteProfile(refreshed.accessToken);
+        nextProfile = mergeRemoteProfile(nextProfile, remote);
+      } catch (error) {
+        if (isAuthUnauthorizedError(error) && alive && authStateRef.current.accessToken === cached.accessToken) {
+          await clearStoredToken();
+          if (!alive || authStateRef.current.accessToken !== cached.accessToken) return;
+          commitAuthState('signed_out', null);
+          setProfile(DEFAULT_PROFILE);
+          setSessionNotice('登录状态已失效，为保护账号数据，请重新登录。');
+          await setAppStorageItem(AUTH_MODE_KEY, 'signed_out');
+        }
+        return;
+      }
+      if (!alive || authStateRef.current.accessToken !== cached.accessToken) return;
+      commitAuthState('authenticated', refreshed);
+      setProfile(nextProfile);
+      void Promise.all([
+        saveStoredSession(refreshed),
+        setAppStorageItem(AUTH_MODE_KEY, 'authenticated'),
+        saveProfile(nextProfile, `user:${refreshed.user.id}`),
+      ]).catch(() => undefined);
+    };
+
     async function restore() {
+      const startedAtMs = Date.now();
       try {
         const [storedMode, cachedSession, legacyToken] = await Promise.all([
           getAppStorageItem(AUTH_MODE_KEY),
           loadStoredSession(),
           loadStoredToken(),
         ]);
+        diagnosticAudit('app_start_auth_storage', {
+          elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+          cached_session: Boolean(cachedSession),
+          legacy_token: Boolean(legacyToken),
+          stored_mode: storedMode === 'authenticated' || storedMode === 'guest' || storedMode === 'signed_out'
+            ? storedMode
+            : 'unknown',
+        });
         if (!alive) return;
         let token = cachedSession?.accessToken ?? legacyToken;
         if (token) {
           let restored = cachedSession;
-          if (restored && isStoredSessionExpired(restored)) {
-            await clearStoredToken();
-            restored = null;
-            token = null;
+          if (restored) {
+            // A cached session, including one that has just expired, is enough
+            // to render the local shell. A daily-open workflow must not turn a
+            // slow refresh endpoint into a blank screen; the background
+            // refresher below will either renew it or invoke the normal
+            // unauthorized-session path. Local meeting data remains readable
+            // while that decision is pending.
+            commitAuthState('authenticated', restored);
+            const cachedAccessToken = restored.accessToken;
+            const cachedProfile = userToProfile(restored.user);
+            setProfile(cachedProfile);
+            if (alive) setInitializing(false);
+            diagnosticAudit('app_start_auth_shell', {
+              elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+              source: 'cached_session',
+            });
+            void loadProfile(`user:${restored.user.id}`, cachedProfile)
+              .then(profile => {
+                if (alive && authStateRef.current.accessToken === cachedAccessToken) setProfile(profile);
+              })
+              .catch(() => undefined);
+            void refreshCachedSessionInBackground(restored);
+            return;
           }
           try {
             if (token) {
@@ -228,7 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 restored = await refreshAccountSession(token);
               } else {
                 const user = await fetchCurrentUser(token);
-                restored = { accessToken: token, expiresAt: restored?.expiresAt ?? '', user };
+                restored = { accessToken: token, expiresAt: cachedSession?.expiresAt ?? '', user };
               }
               await saveStoredSession(restored);
             }
@@ -262,6 +340,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               await saveProfile(restoredProfile, `user:${restoredUser.id}`);
               commitAuthState('authenticated', restored);
               setProfile(restoredProfile);
+              diagnosticAudit('app_start_auth_shell', {
+                elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+                source: 'network_restore',
+              });
               return;
             }
           }

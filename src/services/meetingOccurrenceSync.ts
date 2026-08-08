@@ -232,7 +232,11 @@ async function attachMatchingConflictCurrent(
         serverUpdatedAtMs: remote.serverUpdatedAtMs,
       },
     });
-    if (merged.outcome === 'conflicted') return 'conflicted';
+    // The merge may have recorded a conflict for a different local meeting
+    // that currently owns the same calendar occurrence. That does not release
+    // this claim; let the caller record the current operation as conflicted so
+    // it cannot remain `in_flight` forever.
+    if (merged.outcome === 'conflicted') return 'unavailable';
     if (merged.meetingId !== claim.meetingId) return 'unavailable';
     if (merged.outcome === 'unchanged') {
       const completed = await sqliteMeetingNoteRepository.completeOccurrenceSyncClaim(
@@ -416,6 +420,14 @@ export async function drainMeetingOccurrenceSync(
   if (capability.source !== 'remote' || !capability.capabilities.occurrenceLinksV2) {
     return { outcome: 'disabled', processedCount: 0, retryAfterMs: null };
   }
+  const repairedInvalidLinks = await sqliteMeetingNoteRepository
+    .repairInvalidOccurrenceSyncOperations(input.scopeKey, Date.now());
+  if (repairedInvalidLinks > 0) {
+    diagnosticAudit('occurrence_sync_repair', {
+      status: 'detached_invalid_local_links',
+      count: repairedInvalidLinks,
+    });
+  }
   await sqliteMeetingNoteRepository.ensureOccurrenceSyncOperations(input.scopeKey, Date.now());
 
   let processedCount = 0;
@@ -447,12 +459,42 @@ export async function drainMeetingOccurrenceSync(
       });
       return { outcome: 'drained', processedCount, retryAfterMs };
     }
-    const results = await Promise.all(claims.map(claim => processClaim(
-      claim,
-      input.accessToken,
-      input.signal,
-      input.isCurrent,
-    )));
+    const results = await Promise.all(claims.map(async claim => {
+      try {
+        return await processClaim(
+          claim,
+          input.accessToken,
+          input.signal,
+          input.isCurrent,
+        );
+      } catch (error) {
+        // A failure in conflict handling must not strand the durable claim in
+        // `in_flight`; the next foreground heartbeat can then retry it.
+        if (!input.isCurrent() || input.signal.aborted) {
+          return { processed: false, retryAfterMs: STALE_CLAIM_MS, outcome: 'stale' } as const;
+        }
+        let released = false;
+        try {
+          const nowMs = Date.now();
+          released = await sqliteMeetingNoteRepository.failOccurrenceSyncClaim(claim, {
+            disposition: 'retry',
+            errorCode: 'sync_handler_failure',
+            nextAttemptAtMs: nowMs + 30_000,
+            updatedAtMs: nowMs,
+          });
+        } catch (releaseError) {
+          // A later heartbeat can reclaim a stale claim if the release itself
+          // races with another database writer.
+          diagnosticWarn('[occurrence-sync] failed to release stale claim', releaseError);
+        }
+        diagnosticWarn('[occurrence-sync] claim handler failed; claim released', error);
+        return {
+          processed: released,
+          retryAfterMs: 30_000,
+          outcome: released ? 'retry' : 'stale',
+        } as const;
+      }
+    }));
     processedCount += results.filter(result => result.processed).length;
     results.forEach(result => {
       if (result.retryAfterMs === null) return;

@@ -20,6 +20,7 @@ import {
   flushPendingNotificationNavigation,
   navigationRef,
 } from './notificationNavigation';
+import { diagnosticAudit } from '../services/diagnostics';
 
 type NavigationDecision = {
   scope: NavigationAuthScope;
@@ -64,6 +65,7 @@ export function NavigationStateProvider({
     const previousScope = previousScopeRef.current;
     previousScopeRef.current = desiredScope;
     let active = true;
+    const startedAtMs = Date.now();
 
     const restore = async (): Promise<InitialState> => {
       if (previousScope === null) {
@@ -80,10 +82,18 @@ export function NavigationStateProvider({
     void restore()
       .then(initialState => {
         if (!active || restoreRequestRef.current !== request) return;
+        diagnosticAudit('app_start_navigation_ready', {
+          elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+          restored: true,
+        });
         setDecision({ scope: desiredScope, initialState });
       })
       .catch(() => {
         if (!active || restoreRequestRef.current !== request) return;
+        diagnosticAudit('app_start_navigation_ready', {
+          elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+          restored: false,
+        });
         setDecision({ scope: desiredScope, initialState: defaultNavigationState(desiredScope) });
       });
     return () => { active = false; };

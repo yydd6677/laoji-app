@@ -872,6 +872,39 @@ export interface MeetingRootSyncConflictRecord {
   createdAtMs: number;
 }
 
+/**
+ * Requeues a root operation after the automatic conflict reconciler could not
+ * safely construct a local/remote merge yet.  The conflict row is retained as
+ * resolved history; the meeting returns to the normal pending state and the
+ * worker retries it without exposing a permanent manual-repair state.
+ */
+export interface RequeueMeetingRootSyncConflictInput {
+  conflictId: string;
+  meetingId: string;
+  scopeKey: ScopeKey;
+  remoteId: string | null;
+  remoteRevision: number | null;
+  retryAtMs: number;
+  resolvedAtMs: number;
+}
+
+export interface RequeueStaleMeetingRootSyncOperationsInput {
+  scopeKey: ScopeKey;
+  retryAtMs: number;
+  updatedAtMs: number;
+}
+
+/**
+ * Repairs account-local roots that predate the canonical outbox. Older
+ * shadow-imported meetings can have a local recording but no meeting.create
+ * operation, or can retain a terminal outbox status from a previous build.
+ * They must be returned to the ordinary automatic sync queue.
+ */
+export interface MeetingRootSyncRepairResult {
+  created: number;
+  requeued: number;
+}
+
 export interface MeetingRootRemoteConflictFields {
   remoteId: string;
   clientNoteId: string;
@@ -1188,6 +1221,10 @@ export interface MeetingTransaction {
     scopeKey: ScopeKey,
   ): Promise<RecordingAssetRecord | null>;
   getTranscriptRevision(id: string, scopeKey: ScopeKey): Promise<TranscriptRevisionRecord | null>;
+  getTranscriptRevisionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null>;
   getActiveTranscriptRevision(
     meetingId: string,
     scopeKey: ScopeKey,
@@ -1263,6 +1300,12 @@ export interface MeetingTransaction {
   saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void>;
   /** Keeps the readable version active while marking its inputs outdated. */
   markCurrentSummaryStale(meetingId: string, scopeKey: ScopeKey): Promise<boolean>;
+  /** Reverses only a proven false stale transition for the expected current version. */
+  restoreCurrentSummaryReady(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    expectedVersionId: string,
+  ): Promise<boolean>;
   saveRecordingAsset(asset: RecordingAssetRecord, scopeKey: ScopeKey): Promise<void>;
   /** Enriches immutable Transcript segments without guessing when several assets are possible. */
   enrichTranscriptRecordingProvenance(
@@ -1498,6 +1541,10 @@ export interface MeetingNoteRepository {
     repairedAtMs: number,
   ): Promise<boolean>;
   repairLegacyCalendarMeetingRootCreates(scopeKey: ScopeKey, repairedAtMs: number): Promise<number>;
+  repairOrphanedMeetingRootSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    repairedAtMs: number,
+  ): Promise<MeetingRootSyncRepairResult>;
   claimMeetingRootSyncOperations(
     scopeKey: ScopeKey,
     options: ClaimMeetingRootSyncOptions,
@@ -1519,10 +1566,19 @@ export interface MeetingNoteRepository {
     claim: MeetingRootSyncClaim,
     conflict: MeetingRootSyncConflict,
   ): Promise<boolean>;
+  listMeetingRootSyncConflicts(
+    scopeKey: ScopeKey,
+  ): Promise<readonly MeetingRootSyncConflictRecord[]>;
   getMeetingRootSyncConflict(
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<MeetingRootSyncConflictRecord | null>;
+  requeueMeetingRootSyncConflict(
+    input: RequeueMeetingRootSyncConflictInput,
+  ): Promise<boolean>;
+  requeueStaleMeetingRootSyncOperations(
+    input: RequeueStaleMeetingRootSyncOperationsInput,
+  ): Promise<number>;
   resolveMeetingRootSyncConflict(input: ResolveMeetingRootSyncConflictInput): Promise<boolean>;
   ensureOccurrenceSyncOperations(scopeKey: ScopeKey, createdAtMs: number): Promise<number>;
   claimOccurrenceSyncOperations(

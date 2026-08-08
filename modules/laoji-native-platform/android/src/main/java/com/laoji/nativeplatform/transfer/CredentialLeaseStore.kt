@@ -45,7 +45,7 @@ internal class CredentialLeaseStore(context: Context) {
   }
 
   fun get(scope: String, generation: Long): CredentialLease? {
-    if (!SCOPE_PATTERN.matches(scope)) return null
+    if (!SCOPE_PATTERN.matches(scope) || generation < 0) return null
     val encoded = preferences.getString(key(scope), null) ?: return null
     return runCatching {
       val wrapper = JSONObject(encoded)
@@ -67,7 +67,14 @@ internal class CredentialLeaseStore(context: Context) {
         apiBaseUrl = payload.getString("apiBaseUrl"),
         accessToken = payload.getString("accessToken")
       )
-    }.getOrNull()?.takeIf { it.scope == scope && it.generation == generation }
+    }.getOrNull()?.takeIf {
+      // A token refresh replaces the encrypted lease for the same account.
+      // Work that was already queued must be allowed to use that newer lease;
+      // otherwise a normal refresh permanently strands a durable upload with
+      // `credential-expired`.  A lease older than the work remains invalid,
+      // and signing out still clears the scoped lease and cancels scoped work.
+      it.scope == scope && it.generation >= generation
+    }
   }
 
   fun clear(scope: String) {

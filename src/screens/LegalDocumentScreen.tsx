@@ -20,7 +20,7 @@ type Props = {
   route: RouteProp<RootStackParamList, 'Legal'>;
 };
 
-const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '未知';
 
 const DOCS: Record<RootStackParamList['Legal']['kind'], {
   title: string;
@@ -58,6 +58,8 @@ const DOCS: Record<RootStackParamList['Legal']['kind'], {
       { heading: '创建日程', body: '在日程页点击右下角新建按钮，可以选择语音输入或手动新建。语音识别失败时，可以直接使用文字输入。' },
       { heading: '提醒设置', body: '新建有具体开始时间的日程默认提前 15 分钟提醒。你可以在新建/编辑日程页调整为不提醒、开始时提醒或其他提前时间。' },
       { heading: '会议记录', body: '会议页可以直接录音并实时显示转写。结束录音后可查看转写、生成总结、播放本机或云端录音，并按你选择的内容生成分享文件。' },
+      { heading: '数据存储', body: '登录账号的日程、会议列表与资料会按账号隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号已读取的会议内容也会缓存到本机，断网时仍可查看缓存。' },
+      { heading: '录音与文件分享', body: '日程语音和会议录音会发送到老记服务器上的语音识别服务；会议录音结束后会先保存在本机，登录账号会尝试上传，访客录音不上传。分享前可选择基本信息、整理结果、行动项、文字记录、标记、附件、录音或我的笔记，确认后会打开系统分享面板。' },
       { heading: '常见问题', body: '登录失败时请检查账号、密码和网络；语音识别不准确时请靠近麦克风并保持语句完整；通知没有弹出时请确认系统通知权限已开启。' },
     ],
   },
@@ -117,7 +119,7 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
   if (route.params.kind === 'version') {
     return (
       <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
-        <SettingsTitleBar title="关于老记" onBack={() => navigation.goBack()} />
+        <SettingsTitleBar title="版本信息" onBack={() => navigation.goBack()} />
         <ScrollView style={s.scroll} contentContainerStyle={s.aboutContent} showsVerticalScrollIndicator={false}>
           <View style={s.aboutBrand}>
             <View style={s.aboutLogo} testID="legal-about-logo">
@@ -131,8 +133,7 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
 
           <SettingsGroup testID="legal-about-group">
             <SettingsRow label="当前版本" value={APP_VERSION} />
-            <SettingsRow label="用户协议" onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />
-            <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} last />
+            <SettingsRow label="构建编号" value={String(Constants.expoConfig?.android?.versionCode ?? '未知')} last />
           </SettingsGroup>
 
         </ScrollView>

@@ -105,7 +105,7 @@ function nextAttemptForJob(
   nowMs: number,
 ): number | null {
   if (job.status === 'queued' || job.status === 'running') return nowMs + ACTIVE_JOB_RECHECK_MS;
-  if (job.status === 'failed' && job.retryable) {
+  if (job.status === 'failed' && job.retryable && job.errorCode !== 'no_speech') {
     return nowMs + remoteRetryDelayMs(task, job.attempt);
   }
   return null;
@@ -120,6 +120,7 @@ async function applyJob(
     job.meetingRemoteId !== task.remoteMeetingId
     || job.recordingAssetRemoteId !== task.remoteRecordingAssetId
   ) throw new Error('录音转写任务不属于当前录音');
+  const noSpeech = job.status === 'failed' && job.errorCode === 'no_speech';
   await sqliteMeetingNoteRepository.applyRecordingAssetTranscriptionJob({
     taskId: task.id,
     scopeKey: task.scopeKey,
@@ -130,7 +131,7 @@ async function applyJob(
     remoteAttempt: job.attempt,
     progress: job.progress,
     errorCode: job.errorCode,
-    retryable: job.retryable,
+    retryable: noSpeech ? false : job.retryable,
     resultRevisionId: job.resultRevisionId,
     nextAttemptAtMs: nextAttemptForJob(task, job, nowMs),
     remoteUpdatedAtMs: job.serverUpdatedAtMs,

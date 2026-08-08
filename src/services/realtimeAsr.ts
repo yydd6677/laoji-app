@@ -18,7 +18,6 @@ import {
 import { getApiConfig } from './config';
 import type { RealtimeAsrProvider } from './config';
 
-const DEFAULT_PORT = 18020;
 const DEFAULT_PROVIDER: RealtimeAsrProvider = 'qwen';
 
 export type { RealtimeAsrProvider } from './config';
@@ -74,9 +73,7 @@ export interface StartRealtimeAsrOptions {
   storageScope?: string;
   provider?: RealtimeAsrProvider;
   purpose?: RealtimeAsrPurpose;
-  host?: string;
-  port?: number;
-  secure?: boolean;
+  realtimeAsrBase?: string;
   accessToken?: string | null;
   guestToken?: string | null;
   connectionTimeoutMs?: number;
@@ -108,29 +105,33 @@ export function buildRealtimeAsrUrl({
   meetingId,
   provider = DEFAULT_PROVIDER,
   purpose = 'meeting',
-  host,
-  port = DEFAULT_PORT,
-  secure = false,
+  realtimeAsrBase,
 }: {
   meetingId: string;
   provider?: RealtimeAsrProvider;
   purpose?: RealtimeAsrPurpose;
-  host: string;
-  port?: number;
-  secure?: boolean;
+  realtimeAsrBase: string;
 }): string {
-  const cleanHost = host.trim();
-  if (!cleanHost) throw new Error('realtime ASR host is not configured');
-  const protocol = secure ? 'wss' : 'ws';
-  const normalizedHost = cleanHost
-    .replace(/^https?:\/\//, '')
-    .replace(/^wss?:\/\//, '')
-    .replace(/\/+$/, '');
-  const hostWithPort = normalizedHost.includes(':') ? normalizedHost : `${normalizedHost}:${port}`;
+  let base: URL;
+  try {
+    base = new URL(realtimeAsrBase.trim());
+  } catch {
+    throw new Error('实时语音服务地址无效');
+  }
+  if (base.protocol === 'https:') base.protocol = 'wss:';
+  else if (base.protocol === 'http:') base.protocol = 'ws:';
+  if (!['ws:', 'wss:'].includes(base.protocol)
+      || base.username
+      || base.password
+      || base.search
+      || base.hash) {
+    throw new Error('实时语音服务地址无效');
+  }
+  const normalizedBase = base.toString().replace(/\/+$/, '');
   const route = purpose === 'schedule'
     ? `/ws/laoji/schedule/${encodeURIComponent(meetingId)}/${provider}`
     : `/ws/meeting/${encodeURIComponent(meetingId)}/${provider}`;
-  return `${protocol}://${hostWithPort}${route}`;
+  return `${normalizedBase}${route}`;
 }
 
 export function buildRealtimeAsrHeaders({
@@ -180,15 +181,13 @@ export async function startRealtimeAsr(
   const config = getApiConfig();
   const meetingId = options.meetingId ?? createRealtimeMeetingId();
   const purpose = options.purpose ?? 'meeting';
-  const secure = options.secure ?? config.realtimeAsrSecure;
   const url = buildRealtimeAsrUrl({
     meetingId,
     provider: options.provider ?? config.realtimeAsrProvider,
     purpose,
-    host: options.host ?? config.realtimeAsrHost,
-    port: options.port ?? config.realtimeAsrPort,
-    secure,
+    realtimeAsrBase: options.realtimeAsrBase ?? config.realtimeAsrBase,
   });
+  const secure = url.startsWith('wss://');
   const accessToken = options.accessToken?.trim() || undefined;
   const guestToken = options.guestToken?.trim() || undefined;
   if ((accessToken === undefined) === (guestToken === undefined)) {

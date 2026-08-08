@@ -30,7 +30,7 @@ const { colors: F } = getFeishuTokens();
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Privacy'> };
 
-const APP_VERSION = Constants.expoConfig?.version ?? '未知';
+const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '未知';
 
 function Toggle({
   label,
@@ -243,18 +243,6 @@ export function PrivacyScreen({ navigation }: Props) {
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="privacy-settings-group">
           <SettingsRow label="账号与安全" onPress={() => navigation.navigate('Account')} />
-          <SettingsRow
-            label="数据存储说明"
-            onPress={() => showDialog({ title: '数据存储说明', message: '登录账号的日程、会议列表与资料会按用户隔离；访客日程、会议、转写、总结和录音只保存在本机。登录账号也会缓存已读取的会议内容，断网时可继续查看缓存。', tone: 'info' })}
-          />
-          <SettingsRow
-            label="录音数据说明"
-            onPress={() => showDialog({ title: '录音数据说明', message: '日程语音和会议录音会发送到老记服务器上的语音识别服务。会议录音结束后会先保存在本机；登录账号会尝试上传，访客录音不上传。', tone: 'info' })}
-          />
-          <SettingsRow
-            label="文件分享说明"
-            onPress={() => showDialog({ title: '文件分享说明', message: '分享前可选择基本信息、整理结果、行动项、文字记录、标记、附件、录音或我的笔记；确认后会打开系统分享面板。', tone: 'info' })}
-          />
           <SettingsRow
             label="皮肤主题"
             value={THEME_LABELS[themeId]}

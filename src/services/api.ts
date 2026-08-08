@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
 import { readResponseData, readResponseError, stringifyErrorDetail } from './errors';
 import {
+  classifyScheduleParseIntent,
   classifyScheduleParseRoute,
   normalizeScheduleParseResult,
   parseLocalScheduleText,
@@ -18,6 +19,10 @@ import { fetchWithTimeout as fetch, readBlobWithTimeout, readJsonWithTimeout } f
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 import {
+  meetingSummaryTraceHeaders,
+  type MeetingSummaryTraceContext,
+} from './meetingSummaryTrace';
+import {
   combineTranscriptRemoteState,
   combineTranscriptServerCompleteness,
   evaluateTranscriptLineCandidate,
@@ -33,13 +38,14 @@ import {
 const SUMMARY_TASK_WAIT_MS = 5_000;
 const SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS = 5_000;
 const API_RESPONSE_BODY_TIMEOUT_MS = 10_000;
+const MEETING_AUDIO_INFO_TIMEOUT_MS = 20_000;
 
 function laojiUrl(path: string): string {
-  return `${getApiConfig().laojiApiBase}${path}`;
+  return `${getApiConfig().apiBase}${path}`;
 }
 
 function meetingUrl(path: string): string {
-  return `${getApiConfig().meetingApiBase}${path}`;
+  return `${getApiConfig().apiBase}${path}`;
 }
 
 function jsonHeaders(accessToken?: string): Record<string, string> {
@@ -86,6 +92,13 @@ export interface ParseResult {
   reference_datetime?: string;
   timezone?: string;
 }
+
+// The HTTP/OpenAPI contract uses null when the parser cannot determine a
+// date. Keep the app-facing ParseResult string-only so existing draft and
+// calendar code continues to use an explicit empty value after normalization.
+type ParseResultWire = Omit<ParseResult, 'start_date'> & {
+  start_date?: string | null;
+};
 
 export type ScheduleParseErrorCode =
   | 'not_schedule'
@@ -285,13 +298,17 @@ async function readScheduleParseError(
 
 function normalizedParseResult(
   text: string,
-  result: ParseResult,
+  result: ParseResultWire,
   context: Required<ScheduleParseContext>,
 ): ParseResult {
+  const normalizedWire: ParseResult = {
+    ...result,
+    start_date: typeof result.start_date === 'string' ? result.start_date : '',
+  };
   return {
     ...normalizeScheduleParseResult(
       text,
-      result,
+      normalizedWire,
       new Date(context.reference_datetime),
       context.timezone,
     ),
@@ -320,11 +337,15 @@ export async function parseText(
   try {
     const res = await fetch(laojiUrl('/api/laoji/parse'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Laoji-Mobile-Route': decision.route,
+        'X-Laoji-Mobile-Intent': classifyScheduleParseIntent(text),
+      },
       body: JSON.stringify({ text, ...context }),
     });
     if (res.ok) {
-      const parsed = await readJsonWithTimeout<ParseResult>(
+      const parsed = await readJsonWithTimeout<ParseResultWire>(
         res,
         SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
       );
@@ -362,7 +383,7 @@ export async function clarifyText(
     }),
   });
   if (!res.ok) throw await readScheduleParseError(res, 'invalid_schedule');
-  const parsed = await readJsonWithTimeout<ParseResult>(
+  const parsed = await readJsonWithTimeout<ParseResultWire>(
     res,
     SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
   );
@@ -481,20 +502,18 @@ function parseAudioResult(value: unknown, context: Required<ScheduleParseContext
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ScheduleParseError('invalid_schedule', '未识别到日程，请重试。');
   }
-  const data = value as Partial<ParseResult> & Record<string, unknown>;
+  const data = value as Partial<ParseResultWire> & Record<string, unknown>;
   const rawText = typeof data.raw_text === 'string' ? data.raw_text.trim() : '';
   if (!rawText) {
     throw new ScheduleParseError('invalid_schedule', '未识别到语音内容，请重新录音。');
   }
-  if (typeof data.title !== 'string' || typeof data.start_date !== 'string') {
+  if (
+    typeof data.title !== 'string'
+    || (data.start_date !== undefined && data.start_date !== null && typeof data.start_date !== 'string')
+  ) {
     throw new ScheduleParseError('invalid_schedule', '日程解析结果不完整，请重试。');
   }
-  return normalizeScheduleParseResult(
-    rawText,
-    data as ParseResult,
-    new Date(context.reference_datetime),
-    context.timezone,
-  );
+  return normalizedParseResult(rawText, data as ParseResultWire, context);
 }
 
 function filenameFromUri(audioUri: string): string {
@@ -837,6 +856,8 @@ export async function fetchGuestMeetingTranscriptSnapshot(
   const seenIds = new Set<string>();
   let completeness: TranscriptServerCompleteness = 'unknown';
   let remoteState: TranscriptRemoteState = 'unknown';
+  let errorCode: string | null = null;
+  let script: 'zh-Hans' | 'unknown' = 'unknown';
   let offset = 0;
 
   while (true) {
@@ -850,10 +871,12 @@ export async function fetchGuestMeetingTranscriptSnapshot(
       completeness,
       transcriptServerCompletenessFromPayload(data),
     );
+    if (transcriptScriptFromPayload(data) === 'zh-Hans') script = 'zh-Hans';
     remoteState = combineTranscriptRemoteState(
       remoteState,
       transcriptRemoteStateFromPayload(data),
     );
+    errorCode = errorCode ?? transcriptErrorCodeFromPayload(data);
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
       ? data.total
@@ -871,7 +894,7 @@ export async function fetchGuestMeetingTranscriptSnapshot(
     if (all.length === previousCount) break;
   }
 
-  return { items: all, completeness, remoteState, remoteRevisionId: null };
+  return { items: all, completeness, remoteState, errorCode, remoteRevisionId: null, script };
 }
 
 export async function fetchGuestMeetingTranscript(
@@ -952,7 +975,29 @@ export interface ApiTranscriptSnapshot {
   items: TranscriptLine[];
   completeness: TranscriptServerCompleteness;
   remoteState: TranscriptRemoteState;
+  errorCode: string | null;
   remoteRevisionId: string | null;
+  /** Server-side OpenCC policy marker; unknown is a legacy endpoint/cache. */
+  script: 'zh-Hans' | 'unknown';
+}
+
+function transcriptErrorCodeFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const value = record.transcript_error_code ?? record.error_code;
+  if (value == null) return null;
+  if (typeof value !== 'string') throw new Error('transcript remote error code is invalid');
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 160 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('transcript remote error code is invalid');
+  }
+  return normalized;
+}
+
+function transcriptScriptFromPayload(payload: unknown): 'zh-Hans' | 'unknown' {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 'unknown';
+  const value = (payload as Record<string, unknown>).script;
+  return value === 'zh-Hans' ? 'zh-Hans' : 'unknown';
 }
 
 function transcriptRemoteRevisionId(payload: unknown): string | null {
@@ -993,7 +1038,9 @@ export async function fetchMeetingTranscriptSnapshot(
   const seenIds = new Set<string>();
   let completeness: TranscriptServerCompleteness = 'unknown';
   let remoteState: TranscriptRemoteState = 'unknown';
+  let errorCode: string | null = null;
   let remoteRevisionId: string | null = null;
+  let script: 'zh-Hans' | 'unknown' = 'unknown';
   let offset = 0;
 
   while (true) {
@@ -1008,6 +1055,8 @@ export async function fetchMeetingTranscriptSnapshot(
       throw new Error('transcript pagination changed remote revision');
     }
     remoteRevisionId = remoteRevisionId ?? pageRevisionId;
+    const pageScript = transcriptScriptFromPayload(data);
+    if (pageScript === 'zh-Hans') script = 'zh-Hans';
     completeness = combineTranscriptServerCompleteness(
       completeness,
       transcriptServerCompletenessFromPayload(data),
@@ -1016,6 +1065,7 @@ export async function fetchMeetingTranscriptSnapshot(
       remoteState,
       transcriptRemoteStateFromPayload(data),
     );
+    errorCode = errorCode ?? transcriptErrorCodeFromPayload(data);
     const batch: TranscriptLine[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     const total = !Array.isArray(data) && typeof data?.total === 'number' && data.total >= 0
       ? data.total
@@ -1039,7 +1089,9 @@ export async function fetchMeetingTranscriptSnapshot(
     items: all,
     completeness,
     remoteState,
+    errorCode,
     remoteRevisionId: remoteState === 'complete' ? remoteRevisionId : null,
+    script,
   };
 }
 
@@ -1052,10 +1104,15 @@ export async function fetchMeetingTranscript(
   return transcriptWithFallback(snapshot, options.fallbackItems ?? []);
 }
 
-export async function fetchMeetingSummaryDetail(meetingId: string, accessToken?: string, signal?: AbortSignal): Promise<unknown | null> {
+export async function fetchMeetingSummaryDetail(
+  meetingId: string,
+  accessToken?: string,
+  signal?: AbortSignal,
+  trace?: MeetingSummaryTraceContext,
+): Promise<unknown | null> {
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/final`),
-    { headers: authHeaders(accessToken), signal },
+    { headers: { ...(authHeaders(accessToken) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
   );
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, accessToken);
@@ -1070,6 +1127,7 @@ export async function generateMeetingSummary(
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward?: MeetingSummaryCarryForwardAuthorization | null,
   attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
+  trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingSummaryTask> {
   const query = new URLSearchParams({
     summary_type: 'final',
@@ -1079,7 +1137,7 @@ export async function generateMeetingSummary(
   });
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/generate?${query}`), {
     method: 'POST',
-    headers: jsonHeaders(accessToken),
+    headers: { ...jsonHeaders(accessToken), ...meetingSummaryTraceHeaders(trace) },
     signal,
     body: JSON.stringify({
       carry_forward: summaryCarryForwardPayload(carryForward),
@@ -1096,11 +1154,12 @@ export async function fetchMeetingSummaryTask(
   accessToken?: string,
   signal?: AbortSignal,
   waitMs = SUMMARY_TASK_WAIT_MS,
+  trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingTaskStatus> {
   const query = new URLSearchParams({ wait_ms: String(waitMs) });
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/task/${taskId}?${query}`),
-    { headers: authHeaders(accessToken), signal },
+    { headers: { ...(authHeaders(accessToken) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
   );
   if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, accessToken);
   return readJsonWithTimeout<ApiMeetingTaskStatus>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
@@ -1116,10 +1175,11 @@ export async function generateGuestMeetingSummary(
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward?: MeetingSummaryCarryForwardAuthorization | null,
   attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
+  trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingSummaryTask> {
   const res = await fetch(meetingUrl('/api/laoji/meetings/guest-summary'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...meetingSummaryTraceHeaders(trace) },
     signal,
     body: JSON.stringify({
       meeting_id: meetingId,
@@ -1151,11 +1211,12 @@ export async function fetchGuestMeetingSummaryTask(
   taskId: string,
   signal?: AbortSignal,
   waitMs = SUMMARY_TASK_WAIT_MS,
+  trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingTaskStatus> {
   const query = new URLSearchParams({ wait_ms: String(waitMs) });
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/guest-summary/tasks/${encodeURIComponent(taskId)}?${query}`),
-    { signal },
+    { headers: meetingSummaryTraceHeaders(trace), signal },
   );
   if (!res.ok) throw await readResponseError('fetch guest meeting summary task failed', res);
   return readJsonWithTimeout<ApiMeetingTaskStatus>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
@@ -1165,6 +1226,7 @@ export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: str
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/audio`),
     { headers: authHeaders(accessToken) },
+    MEETING_AUDIO_INFO_TIMEOUT_MS,
   );
   if (res.status === 404 || res.status === 204) return null;
   if (!res.ok) throw await apiResponseError('fetch meeting audio failed', res, accessToken);

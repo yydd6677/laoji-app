@@ -148,7 +148,7 @@ export async function getMeetingManualNoteV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteManualNoteV2> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/manual-note`,
     {
@@ -172,7 +172,7 @@ export async function upsertMeetingManualNoteV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteManualNoteV2> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/manual-note`,
     {

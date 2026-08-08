@@ -80,7 +80,7 @@ export async function searchMeetingContentV1(input: {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new Error('搜索数量无效');
   }
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const params = new URLSearchParams({
     q: parsedQuery.contentTokens.join(' '),
     limit: String(limit),

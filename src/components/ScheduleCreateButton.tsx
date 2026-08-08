@@ -13,9 +13,9 @@ import { Colors as C, Motion, withAlpha } from '../theme/colors';
 type CreateTarget = 'voice' | 'manual';
 
 const BUTTON_SIZE = 48;
-const OPTION_SIZE = 60;
-const ARC_RADIUS = 116;
-const CLUSTER_SIZE = 236;
+const OPTION_SIZE = 64;
+const ARC_RADIUS = 132;
+const CLUSTER_SIZE = 268;
 const LONG_PRESS_DELAY = 350;
 const TARGET_HIT_RADIUS = 42;
 const PRESSED_TRANSLATE_Y = 1;
@@ -25,8 +25,8 @@ const OPEN_ROTATION = 45;
 const HOVER_SCALE = 1.12;
 
 const TARGET_OFFSETS: Record<CreateTarget, { x: number; y: number }> = {
-  voice: { x: -98, y: -58 },
-  manual: { x: -34, y: -112 },
+  voice: { x: -110, y: -72 },
+  manual: { x: -44, y: -126 },
 };
 
 export const SCHEDULE_CREATE_GEOMETRY = Object.freeze({
@@ -184,7 +184,7 @@ export function ScheduleCreateButton({
             ]}
             testID="calendar-create-target-voice"
           >
-            <Ionicons name="mic-outline" size={20} color={hovered === 'voice' ? '#FFFFFF' : C.primary} />
+            <Ionicons name="mic-outline" size={26} color={hovered === 'voice' ? '#FFFFFF' : C.primary} />
             <Text style={[s.optionLabel, hovered === 'voice' && s.optionLabelHovered]}>语音</Text>
           </Animated.View>
           <Animated.View
@@ -196,7 +196,7 @@ export function ScheduleCreateButton({
             ]}
             testID="calendar-create-target-manual"
           >
-            <Ionicons name="create-outline" size={20} color={hovered === 'manual' ? '#FFFFFF' : C.primary} />
+            <Ionicons name="pencil-outline" size={26} color={hovered === 'manual' ? '#FFFFFF' : C.primary} />
             <Text style={[s.optionLabel, hovered === 'manual' && s.optionLabelHovered]}>手动</Text>
           </Animated.View>
         </Animated.View>

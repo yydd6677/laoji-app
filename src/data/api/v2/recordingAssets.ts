@@ -57,7 +57,7 @@ function checksum(value: unknown): string | null {
 function absoluteContentUrl(value: unknown, remoteId: string): string | null {
   if (value === null) return null;
   const raw = identifier(value, '录音下载地址', 4_096);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   let resolved: URL;
   let configured: URL;
   try {
@@ -189,7 +189,7 @@ export async function registerRecordingAssetV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteRecordingAssetV2> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/recording-assets`,
     {
@@ -226,7 +226,7 @@ export async function uploadRecordingAssetContentV2(input: {
     name: input.fileName ?? input.remoteAsset.fileName,
     type: input.mimeType ?? input.remoteAsset.mimeType,
   } as any);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/recording-assets/${encodeURIComponent(input.remoteAsset.remoteId)}/content`,
     {
@@ -282,7 +282,7 @@ export async function listRecordingAssetsV2(input: {
   signal?: AbortSignal;
 }): Promise<readonly RemoteRecordingAssetV2[]> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/recording-assets`,
     {
@@ -379,7 +379,7 @@ export async function createRecordingAssetTranscriptionV2(input: {
   signal?: AbortSignal;
 }): Promise<RecordingAssetTranscriptionJobV2> {
   const remoteAssetId = identifier(input.remoteAssetId, '录音资产云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/recording-assets/${encodeURIComponent(remoteAssetId)}/transcriptions`,
     {
@@ -409,7 +409,7 @@ export async function getRecordingProcessingJobV2(input: {
 }): Promise<RecordingAssetTranscriptionJobV2> {
   const jobId = identifier(input.jobId, '录音转写任务标识', 160);
   const waitMs = Math.max(0, Math.min(5_000, Math.trunc(input.waitMs ?? 0)));
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/processing-jobs/${encodeURIComponent(jobId)}?wait_ms=${waitMs}`,
     {
@@ -427,7 +427,7 @@ export async function retryRecordingProcessingJobV2(input: {
   signal?: AbortSignal;
 }): Promise<RecordingAssetTranscriptionJobV2> {
   const jobId = identifier(input.jobId, '录音转写任务标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/processing-jobs/${encodeURIComponent(jobId)}/retry`,
     {

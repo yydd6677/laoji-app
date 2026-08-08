@@ -39,7 +39,7 @@ function contentUrl(value: unknown, jobId: string): string | null {
   const path = identifier(value, '片段下载地址', 2_048);
   const expected = `/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}/content`;
   if (path !== expected) throw new Error('片段下载地址无效');
-  return `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}${path}`;
+  return `${getApiConfig().apiBase.replace(/\/+$/, '')}${path}`;
 }
 
 export function parseRemoteMediaClipJobV1(
@@ -134,7 +134,7 @@ export async function createRemoteMediaClipJobV1(input: {
   const remoteAssetId = identifier(input.remoteAssetId, '录音资产云端标识', 160);
   const clientClipId = identifier(input.clientClipId, '本机片段标识');
   const response = await fetchWithTimeout(
-    `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}/api/laoji/v2/recording-assets/${encodeURIComponent(remoteAssetId)}/media-clips`,
+    `${getApiConfig().apiBase.replace(/\/+$/, '')}/api/laoji/v2/recording-assets/${encodeURIComponent(remoteAssetId)}/media-clips`,
     {
       method: 'POST',
       signal: input.signal,
@@ -164,7 +164,7 @@ export async function getRemoteMediaClipJobV1(input: {
   const jobId = identifier(input.jobId, '片段任务标识', 160);
   const waitMs = Math.max(0, Math.min(5_000, Math.trunc(input.waitMs ?? 0)));
   const response = await fetchWithTimeout(
-    `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}?wait_ms=${waitMs}`,
+    `${getApiConfig().apiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}?wait_ms=${waitMs}`,
     {
       signal: input.signal,
       headers: { Accept: 'application/json', Authorization: `Bearer ${input.accessToken}` },
@@ -181,7 +181,7 @@ export async function retryRemoteMediaClipJobV1(input: {
 }): Promise<RemoteMediaClipJobV1> {
   const jobId = identifier(input.jobId, '片段任务标识', 160);
   const response = await fetchWithTimeout(
-    `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}/retry`,
+    `${getApiConfig().apiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}/retry`,
     {
       method: 'POST',
       signal: input.signal,
@@ -202,7 +202,7 @@ export async function deleteRemoteMediaClipJobV1(input: {
 }): Promise<void> {
   const jobId = identifier(input.jobId, '片段任务标识', 160);
   const response = await fetchWithTimeout(
-    `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}`,
+    `${getApiConfig().apiBase.replace(/\/+$/, '')}/api/laoji/v2/media-clip-jobs/${encodeURIComponent(jobId)}`,
     {
       method: 'DELETE',
       signal: input.signal,

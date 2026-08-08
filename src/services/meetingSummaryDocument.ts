@@ -5,6 +5,7 @@ import type {
   MeetingSummarySection,
   MeetingSummarySectionKind,
 } from '../domain/meeting';
+import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -71,7 +72,7 @@ function firstValue(record: UnknownRecord, ...keys: readonly string[]): unknown 
 
 function text(value: unknown, maximum = MAX_CONTENT_LENGTH): string {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
-  return String(value).replace(/\r\n?/g, '\n').trim().slice(0, maximum);
+  return toSimplifiedChinese(String(value).replace(/\r\n?/g, '\n').trim().slice(0, maximum));
 }
 
 const SUMMARY_TEXT_KEYS = [
@@ -264,6 +265,105 @@ function parseActions(value: unknown): MeetingSummaryActionCandidate[] {
   return result;
 }
 
+function isDecisionSection(section: Pick<MeetingSummarySection, 'kind' | 'stableKey' | 'title'>): boolean {
+  const normalized = [section.kind, section.stableKey, section.title ?? '']
+    .map(value => toSimplifiedChinese(String(value)).replace(/[\s:：\-—_（）()【】\[\]]/g, '').toLowerCase());
+  return normalized.some(value => value === 'decisions' || value === 'decision' || value === '决定' || value === '关键决定' || value === 'commitments' || value === '双方约定');
+}
+
+export function meetingSummarySectionsForPresentation(
+  sections: readonly MeetingSummarySection[],
+): MeetingSummarySection[] {
+  const decisions = sections
+    .filter(isDecisionSection)
+    .map(section => contentText(section.content))
+    .filter(Boolean);
+  const kept = sections.filter(section => !isDecisionSection(section));
+  if (decisions.length === 0) return kept;
+  const overview = kept.find(section => section.stableKey === 'overview' || section.kind === 'paragraph');
+  if (!overview) return kept;
+  const existing = normalizedActionPart(overview.content);
+  const additions = decisions.filter(decision => !existing.includes(normalizedActionPart(decision)));
+  if (additions.length === 0) return kept;
+  return kept.map(section => section.id === overview.id
+    ? {
+      ...section,
+      content: `${section.content.trim().replace(/[。；;]+$/, '')}。会议明确：${additions.join('；')}。`,
+    }
+    : section);
+}
+
+function normalizedActionPart(value: string): string {
+  return toSimplifiedChinese(value)
+    .replace(/^\s*(?:[-*+•]|\d+[.)、])\s*/, '')
+    .replace(/^\s*(?:待办事项|待办|行动项|行动事项|任务|后续事项|下一步)\s*[：:]\s*/i, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+/** Returns a stable semantic key so provider duplicates do not render twice. */
+function meetingSummaryActionKey(action: MeetingSummaryActionCandidate): string {
+  return [
+    normalizedActionPart(action.content),
+    normalizedActionPart(action.assignee ?? ''),
+    action.dueAtMs === null ? '' : String(action.dueAtMs),
+  ].join('|');
+}
+
+export function dedupeMeetingSummaryActions(
+  actions: readonly MeetingSummaryActionCandidate[],
+): MeetingSummaryActionCandidate[] {
+  const byKey = new Map<string, MeetingSummaryActionCandidate>();
+  actions.forEach(action => {
+    if (!action.content.trim()) return;
+    const key = meetingSummaryActionKey(action);
+    const previous = byKey.get(key);
+    if (!previous) {
+      byKey.set(key, {
+        ...action,
+        content: toSimplifiedChinese(action.content.trim()),
+        assignee: action.assignee ? toSimplifiedChinese(action.assignee.trim()) : null,
+      });
+      return;
+    }
+    // Keep the first stable order, but retain richer metadata from a duplicate.
+    byKey.set(key, {
+      ...previous,
+      canonicalId: previous.canonicalId ?? action.canonicalId ?? null,
+      assignee: previous.assignee || action.assignee || null,
+      dueAtMs: previous.dueAtMs ?? action.dueAtMs,
+      reminderAtMs: previous.reminderAtMs ?? action.reminderAtMs,
+      reminderNotificationId: previous.reminderNotificationId ?? action.reminderNotificationId,
+      followupEventSourceId: previous.followupEventSourceId ?? action.followupEventSourceId,
+      status: previous.status === 'pending' && action.status !== 'pending'
+        ? action.status
+        : previous.status,
+      citations: previous.citations.length > 0 ? previous.citations : action.citations,
+      sourceSegmentId: previous.sourceSegmentId ?? action.sourceSegmentId,
+      sourceStartMs: previous.sourceStartMs ?? action.sourceStartMs,
+      updatedAtMs: Math.max(previous.updatedAtMs ?? 0, action.updatedAtMs ?? 0) || null,
+    });
+  });
+  return [...byKey.values()];
+}
+
+function normalizedSectionLabel(value: string): string {
+  return toSimplifiedChinese(value)
+    .trim()
+    .replace(/[\s:：\-—_（）()【】\[\]]/g, '')
+    .toLowerCase();
+}
+
+/** Recognizes action sections even when a provider uses a non-standard kind. */
+export function isMeetingSummaryActionSection(section: Pick<MeetingSummarySection, 'kind' | 'stableKey' | 'title'>): boolean {
+  if (section.kind === 'action_items') return true;
+  const labels = [section.stableKey, section.title ?? ''].map(normalizedSectionLabel);
+  return labels.some(label => (
+    /^(?:待办事项|待办|行动项|行动事项|任务|任务清单|后续事项|后续行动|下一步|跟进事项|todo(?:s)?|actionitems?|tasks?|followups?)$/.test(label)
+      || /^(?:待办|行动|任务|后续|下一步|跟进)/.test(label)
+  ));
+}
+
 /** Strictly normalizes the additive v2 API or a previously cached camelCase document. */
 export function normalizeMeetingSummaryDocument(
   meetingId: string,
@@ -315,25 +415,18 @@ export function legacyMeetingSummaryToDocument(
 ): MeetingSummaryDocument | null {
   const overview = contentText(summary.overview || summary.full_text);
   const decisions = (summary.key_decisions ?? []).map(item => contentText(item)).filter(Boolean);
+  const mergedOverview = decisions.length > 0 && overview
+    ? `${overview.replace(/[。；;]+$/, '')}。会议明确：${decisions.join('；')}。`
+    : overview;
   const actions = parseActions(summary.action_items ?? []);
   const sections: MeetingSummarySection[] = [];
-  if (overview) {
+  if (mergedOverview) {
     sections.push({
       id: 'legacy-section:overview',
       stableKey: 'overview',
       kind: 'paragraph',
       title: '会议概述',
-      content: overview,
-      citations: [],
-    });
-  }
-  if (decisions.length > 0) {
-    sections.push({
-      id: 'legacy-section:decisions',
-      stableKey: 'decisions',
-      kind: 'decisions',
-      title: '关键决定',
-      content: decisions.join('\n'),
+      content: mergedOverview,
       citations: [],
     });
   }
@@ -384,15 +477,24 @@ function actionText(action: MeetingSummaryActionCandidate): string {
 }
 
 export function meetingSummaryDocumentToText(document: MeetingSummaryDocument): string {
-  const sections = document.sections.map(section => {
-    const heading = section.title ? `## ${section.title}\n` : '';
+  const actions = dedupeMeetingSummaryActions(document.actionItemCandidates);
+  let keptFallbackActionSection = false;
+  const sections = meetingSummarySectionsForPresentation(document.sections).map(section => {
+    if (isDecisionSection(section)) return '';
+    const actionSection = isMeetingSummaryActionSection(section);
+    if (actionSection && actions.length > 0) return '';
+    if (actionSection) {
+      if (keptFallbackActionSection) return '';
+      keptFallbackActionSection = true;
+    }
+    const heading = section.title ? `## ${toSimplifiedChinese(section.title)}\n` : '';
     const body = ['bullets', 'decisions', 'topics', 'risks', 'action_items'].includes(section.kind)
       ? contentText(section.content).split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => `- ${item}`).join('\n')
       : contentText(section.content);
     return `${heading}${body}`.trim();
   }).filter(Boolean);
-  if (document.actionItemCandidates.length > 0) {
-    sections.push(`## 待办事项\n${document.actionItemCandidates.map(item => `- ${actionText(item)}`).join('\n')}`);
+  if (actions.length > 0) {
+    sections.push(`## 待办事项\n${actions.map(item => `- ${actionText(item)}`).join('\n')}`);
   }
   return sections.join('\n\n');
 }

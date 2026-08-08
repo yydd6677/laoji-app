@@ -6,6 +6,7 @@ import {
   meetingSummaryDocumentToText,
   normalizeMeetingSummaryDocument,
 } from './meetingSummaryDocument';
+import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 type UnknownRecord = Record<string, unknown>;
 type SummaryActionItem = NonNullable<MeetingSummary['action_items']>[number];
@@ -38,7 +39,7 @@ function parseRecord(value: unknown): UnknownRecord | null {
 
 function meaningfulText(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
-  const text = String(value).trim();
+  const text = toSimplifiedChinese(String(value).trim());
   if (!text) return '';
   const placeholder = text.replace(/[。.!！?？:：;；]+$/g, '').trim();
   return EMPTY_VALUE_PATTERN.test(placeholder) ? '' : text;
@@ -229,7 +230,7 @@ export function meetingSummaryDocumentToLegacySummary(
 }
 
 export function meetingSummaryTextToPlainText(value: string): string {
-  return value
+  return toSimplifiedChinese(value)
     .replace(/```(?:\w+)?\s*\n?([\s\S]*?)```/g, '$1')
     .replace(/^\s*#{1,6}\s+/gm, '')
     .replace(/^\s*[-*+]\s+(?:\[[ xX]\]\s*)?/gm, '• ')
@@ -258,4 +259,58 @@ export function normalizeMeetingSummaryResult(meetingId: string, value: unknown)
   };
   const legacyDocument = legacyMeetingSummaryToDocument(meetingId, summary);
   return legacyDocument ? { ...summary, structured_document: legacyDocument } : summary;
+}
+
+/**
+ * Binds a response fetched through a verified remote-meeting endpoint to the
+ * local meeting identity used by the device cache.
+ *
+ * Remote and local meeting IDs are intentionally different: the endpoint
+ * proves ownership with `remoteMeetingId`, while the local SQLite projection
+ * must remain keyed by `localMeetingId`. Do not weaken the normalizer's
+ * identity check; rewrite only after every explicit response identity has
+ * matched the endpoint identity.
+ */
+export function normalizeRemoteMeetingSummaryResult(
+  localMeetingId: string,
+  remoteMeetingId: string,
+  value: unknown,
+): MeetingSummary | null {
+  const localId = localMeetingId.trim();
+  const remoteId = remoteMeetingId.trim();
+  if (!localId || !remoteId) return null;
+  const outer = parseRecord(value);
+  if (!outer) return null;
+  const nestedKey = Object.prototype.hasOwnProperty.call(outer, 'structured_document')
+    ? 'structured_document'
+    : Object.prototype.hasOwnProperty.call(outer, 'structuredDocument')
+      ? 'structuredDocument'
+      : null;
+  const nested = nestedKey ? asRecord(outer[nestedKey]) : null;
+  const explicitIds = [
+    outer.meeting_id,
+    outer.meetingId,
+    nested?.meeting_id,
+    nested?.meetingId,
+  ]
+    .filter((candidate): candidate is string => typeof candidate === 'string')
+    .map(candidate => candidate.trim())
+    .filter(Boolean);
+  // A remote response without an explicit meeting identity cannot be safely
+  // rebound, even when it happens to contain otherwise valid summary text.
+  const identityMatches = explicitIds.length > 0 && explicitIds.every(candidate => candidate === remoteId);
+  if (!identityMatches) return null;
+  const rebound: UnknownRecord = {
+    ...outer,
+    meeting_id: localId,
+    meetingId: localId,
+  };
+  if (nested && nestedKey) {
+    rebound[nestedKey] = {
+      ...nested,
+      meeting_id: localId,
+      meetingId: localId,
+    };
+  }
+  return normalizeMeetingSummaryResult(localId, rebound);
 }

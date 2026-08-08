@@ -215,6 +215,8 @@ export interface MinutesDetailSnapshot {
   title: string;
   dateTimeLabel?: string;
   location?: string;
+  locationLoading?: boolean;
+  canEditLocation?: boolean;
   activeTab: MinutesDetailTab;
   tabGeneration?: number;
   activeTabIsExplicit?: boolean;
@@ -289,7 +291,7 @@ export type MinutesSemanticAction =
   | { type: 'reorderMeetings'; surface: 'list'; meetingIds: readonly string[] }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
   | { type: 'createMarker'; surface: 'recording'; meetingId: string; positionMs: number }
-  | { type: 'requestMeetingLocation'; surface: 'recording'; meetingId?: string }
+  | { type: 'requestMeetingLocation'; surface: 'recording' | 'detail'; meetingId?: string }
   | { type: 'setFollowLatest'; surface: MinutesSurface; meetingId: string; followLatest: boolean }
   | { type: 'selectRecordingContent'; surface: 'recording'; meetingId: string; content: MinutesRecordingContent }
   | { type: 'updateManualNote'; surface: 'detail' | 'recording'; meetingId: string; content: string }

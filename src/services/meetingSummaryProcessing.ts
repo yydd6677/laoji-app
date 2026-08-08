@@ -136,23 +136,25 @@ export function meetingSummaryProcessingTransition(
       nextRetryAtMs: null,
     };
   }
+  // Discarding a missing or mismatched task is not evidence that the
+  // transcript changed. In particular, opening a finished meeting can clear
+  // an orphaned queued task after recording stopped and must leave a valid
+  // summary valid. Only a summary that was already marked stale remains stale;
+  // a valid current summary returns to its terminal ready state.
   if (hasCurrentSummary) {
     return {
       stage: 'summary',
-      status: 'stale',
-      progress: null,
+      status: current.status === 'stale' ? 'stale' : 'ready',
+      progress: current.status === 'stale' ? null : 1,
       jobId: null,
     };
   }
   return {
     stage: 'summary',
-    status: 'failed_retryable',
+    status: 'none',
     progress: null,
     jobId: null,
-    errorCode: 'summary_task_recovery_missing',
-    userMessageKey: 'meeting.summary.retryable',
-    retryable: true,
-    nextRetryAtMs: null,
+    inputFingerprint: null,
   };
 }
 

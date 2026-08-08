@@ -76,6 +76,7 @@ import {
   mirrorLegacyTranscriptContent,
 } from '../services/meetingContentMirror';
 import {
+  buildCanonicalMeetingListProjection,
   buildCanonicalMeetingReadProjection,
   resolveMeetingReadCutover,
   type MeetingReadProjection,
@@ -97,6 +98,7 @@ import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/spea
 import { requestMeetingTranscriptCompletion } from '../application/meeting/transcriptCompletionTrigger';
 import { requestImportedMeetingTranscriptDiscovery } from '../application/meeting/importTranscriptDiscovery';
 import { CreateMeetingNoteUseCase } from '../application/meeting/createMeetingNote';
+import { simplifyTranscriptLines } from '../utils/simplifiedChinese';
 import {
   AttachImportedMeetingMediaError,
   AttachImportedMeetingMediaUseCase,
@@ -133,9 +135,27 @@ import {
 } from '../data/api/v2';
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
 
+const AUTOMATIC_MEETING_REFRESH_INTERVAL_MS = 30_000;
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
+// The canonical SQLite mirror can take several seconds on its first open.
+// Keep a roots-only projection separately so the list surface never depends
+// on transcript/summary hydration or a database migration completing first.
+const MEETING_ROOTS_CACHE_KEY = '@laoji:meetingRoots:v1';
 const TRANSCRIPT_CACHE_KEY = '@laoji:meetingTranscripts:v1';
 const SUMMARY_CACHE_KEY = '@laoji:meetingSummaries:v1';
+
+function simplifyTranscriptCache(
+  cache: Record<string, TranscriptLine[]>,
+): { cache: Record<string, TranscriptLine[]>; changed: boolean } {
+  let changed = false;
+  const next: Record<string, TranscriptLine[]> = {};
+  Object.entries(cache).forEach(([meetingId, lines]) => {
+    const simplified = simplifyTranscriptLines(lines);
+    if (simplified.some((line, index) => line.text !== lines[index]?.text)) changed = true;
+    next[meetingId] = simplified;
+  });
+  return { cache: next, changed };
+}
 
 function canonicalWritesEnabledForScope(
   flags: ReturnType<typeof getFeatureFlags>,
@@ -657,6 +677,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   }, [mode, session?.user.id]);
 
   const meetingsKey = `${MEETINGS_CACHE_KEY}:${scope}`;
+  const meetingRootsKey = `${MEETING_ROOTS_CACHE_KEY}:${scope}`;
   const transcriptKey = `${TRANSCRIPT_CACHE_KEY}:${scope}`;
   const summaryKey = `${SUMMARY_CACHE_KEY}:${scope}`;
 
@@ -682,6 +703,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   const persistMeetingsStrict = useCallback(
     (next: Meeting[]) => writeAppStorageJson(meetingsKey, next, { removeIfEmpty: true }),
     [meetingsKey],
+  );
+  const persistMeetingRoots = useCallback(
+    (next: Meeting[]) => writeAppStorageJson(meetingRootsKey, next, { removeIfEmpty: true, bestEffort: true }),
+    [meetingRootsKey],
   );
   const persistTranscripts = useCallback(
     () => writeAppStorageJson(transcriptKey, transcriptCacheRef.current, { removeIfEmpty: true }),
@@ -771,6 +796,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     forceLegacyMirror = false,
   ): Promise<CanonicalOwnedScopeProjection | null> => {
     if (!isScopeKey(scope)) return null;
+    const startedAtMs = Date.now();
     try {
       const result = await mirrorCanonicalMeetingScopeToLegacy({
         repository: sqliteMeetingNoteRepository,
@@ -786,6 +812,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         scope: scope === 'guest' ? 'guest' : 'account',
         canonical_revision: result.state.canonicalRevision,
         legacy_mirror_revision: result.state.legacyMirrorRevision,
+        elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+        meetings: projection.meetings.length,
       });
       return {
         projection,
@@ -803,6 +831,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         canonical_revision: state.canonicalRevision,
         legacy_mirror_revision: state.legacyMirrorRevision,
         error_code: error instanceof Error ? error.name : 'UnknownError',
+        elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+        meetings: projection.meetings.length,
       });
       return {
         projection,
@@ -823,11 +853,15 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     canonicalReadRequestRef.current += 1;
     canonicalReadProjectionRef.current = owned.projection;
     meetingsRef.current = owned.projection.meetings;
-    transcriptCacheRef.current = owned.projection.transcripts;
+    transcriptCacheRef.current = simplifyTranscriptCache(owned.projection.transcripts).cache;
     summaryCacheRef.current = owned.projection.summaries;
     setMeetings(owned.projection.meetings);
+    // Root cards are intentionally independent of the legacy full cache. They
+    // are safe to render while the canonical content projection is still
+    // hydrating and make the next cold start independent of SQLite open time.
+    void persistMeetingRoots(owned.projection.meetings);
     return true;
-  }, [scope]);
+  }, [persistMeetingRoots, scope]);
 
   const reorderMeetings = useCallback((orderedLegacyIds: readonly string[]): Promise<void> => (
     enqueueGuestMutation(async () => {
@@ -1531,9 +1565,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (!meetingRemoteId) {
           throw new Error('会议云端标识尚未同步完成，请刷新后重试。');
         }
-        if (canonicalTarget.note.syncState === 'conflicted') {
-          throw new Error('请先处理会议同步冲突，再移到回收站。');
-        }
         if (canonicalTarget.note.remoteRevision === null) {
           const controller = new AbortController();
           let refreshOutcome: 'refreshed' | 'stale';
@@ -1567,7 +1598,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         if (
           !canonicalTarget?.note.remoteId
           || canonicalTarget.note.remoteRevision === null
-          || canonicalTarget.note.syncState !== 'synced'
         ) throw new Error('会议云端状态同步未完成，请稍后重试。');
       }
       const result = await deleteCanonicalMeetingNote.execute({
@@ -1798,7 +1828,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     scope,
   ]);
 
-  const refreshMeetingsFromCloud = useCallback(async () => {
+  const refreshMeetingsFromCloud = useCallback(async (options: { silent?: boolean } = {}) => {
+    const silent = options.silent === true;
     const requestGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) return;
     if (mode === 'signed_out') {
@@ -1812,7 +1843,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     }
     if (!accessToken) return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const flags = getFeatureFlags();
       const canonicalAccountRefresh = flags.localMeetingDbAccountRootWriteV1
@@ -1980,9 +2011,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       setError(null);
     } catch (err) {
       if (generationRef.current !== requestGeneration || activeScopeRef.current !== scope) return;
-      setError(err instanceof Error ? err.message : '会议服务暂时不可用');
+      if (!silent) setError(err instanceof Error ? err.message : '会议服务暂时不可用');
+      else diagnosticWarn('[meeting-cloud-refresh] automatic refresh failed', err);
     } finally {
-      if (generationRef.current === requestGeneration && activeScopeRef.current === scope) {
+      if (!silent && generationRef.current === requestGeneration && activeScopeRef.current === scope) {
         setLoading(false);
       }
     }
@@ -2366,12 +2398,22 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         && activeScopeRef.current === scope
       ) {
         const count = audioResumePollCountsRef.current.get(operationKey) ?? 0;
-        if (count < 24 && !audioResumePollTimersRef.current.has(operationKey)) {
-          audioResumePollCountsRef.current.set(operationKey, count + 1);
+        if (!audioResumePollTimersRef.current.has(operationKey)) {
+          const nextCount = count + 1;
+          // WorkManager owns the durable upload and may legitimately wait for
+          // connectivity for hours.  Keep the foreground projection alive
+          // after the initial fast window so a completed native upload is
+          // reflected without requiring a restart or a manual refresh.
+          const delayMs = count < 24
+            ? 5_000
+            : count < 72
+              ? 15_000
+              : 60_000;
+          audioResumePollCountsRef.current.set(operationKey, nextCount);
           const timer = setTimeout(() => {
             audioResumePollTimersRef.current.delete(operationKey);
             void resumePendingAudioUploads(true).catch(() => {});
-          }, 5_000);
+          }, delayMs);
           audioResumePollTimersRef.current.set(operationKey, timer);
         }
       }
@@ -2395,10 +2437,49 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   }, [reconcilePendingAudioUploads, resumePendingAudioUploads, scope]);
 
   const refreshMeetings = useCallback(async () => {
-    if (mode === 'authenticated' && isScopeKey(scope)) requestMeetingActionSync(scope);
+    if (mode === 'authenticated' && isScopeKey(scope)) {
+      requestMeetingRootSync(scope);
+      requestMeetingActionSync(scope);
+    }
     await refreshMeetingsFromCloud();
     void resumePendingAudioUploads(true).catch(() => {});
   }, [mode, refreshMeetingsFromCloud, resumePendingAudioUploads, scope]);
+
+  useEffect(() => {
+    if (mode !== 'authenticated' || !accessToken || !isScopeKey(scope)) return undefined;
+    let active = true;
+    let running = false;
+    let requested = false;
+
+    const requestCloudRefresh = () => {
+      if (!active) return;
+      requested = true;
+      if (running) return;
+      running = true;
+      void (async () => {
+        try {
+          while (active && requested) {
+            requested = false;
+            await refreshMeetingsFromCloud({ silent: true });
+          }
+        } finally {
+          running = false;
+          if (active && requested) requestCloudRefresh();
+        }
+      })();
+    };
+
+    const interval = setInterval(requestCloudRefresh, AUTOMATIC_MEETING_REFRESH_INTERVAL_MS);
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') requestCloudRefresh();
+    });
+    return () => {
+      active = false;
+      requested = false;
+      clearInterval(interval);
+      appStateSubscription.remove();
+    };
+  }, [accessToken, mode, refreshMeetingsFromCloud, scope]);
 
   useEffect(() => {
     if (mode !== 'authenticated' || !accessToken) return undefined;
@@ -2427,14 +2508,66 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'signed_out') return;
       setLoading(true);
       try {
+        // The meeting roots are tiny compared with transcript and summary
+        // caches. Render them first so a cold start never waits for full-text
+        // JSON parsing, pending-task inspection, or the cloud refresh before
+        // showing the user's existing list.
+        const rootsStartedAtMs = Date.now();
+        const [cachedMeetings, cachedRootMeetings] = await Promise.all([
+          loadJson<Meeting[]>(meetingsKey, []),
+          loadJson<Meeting[]>(meetingRootsKey, []),
+        ]);
+        if (!isCurrent()) return;
+        const cachedRootSource = cachedMeetings.length > 0 ? 'legacy' : cachedRootMeetings.length > 0 ? 'roots' : 'none';
+        const initialRoots = cachedMeetings.length > 0 ? cachedMeetings : cachedRootMeetings;
+        meetingsRef.current = initialRoots;
+        setMeetings(initialRoots);
+        if (initialRoots.length > 0) setLoading(false);
+        diagnosticAudit('meeting_start_roots_cache', {
+          elapsed_ms: Math.max(0, Date.now() - rootsStartedAtMs),
+          legacy_meetings: cachedMeetings.length,
+          cached_roots: cachedRootMeetings.length,
+          source: cachedRootSource,
+        });
+
+        const flags = getFeatureFlags();
+        if (
+          initialRoots.length === 0
+          && flags.localMeetingDbV1
+          && isScopeKey(scope)
+        ) {
+          // Canonical installs may intentionally leave the old JSON root cache
+          // empty. Read only meeting roots/stages for the first frame; the
+          // transcript and summary bodies are filled by the normal projection
+          // pass below.
+          const fastProjectionPromise = buildCanonicalMeetingListProjection(
+            sqliteMeetingNoteRepository,
+            scope,
+          ).catch(() => null);
+          // Do not make the first render wait for SQLite open/migrations. The
+          // canonical list is adopted as soon as it is ready, while the rest
+          // of the scope continues through the normal hydration path.
+          void fastProjectionPromise.then(fastProjection => {
+            if (!isCurrent() || canonicalReadProjectionRef.current) return;
+            if (fastProjection && fastProjection.meetings.length > 0) {
+              meetingsRef.current = fastProjection.meetings;
+              setMeetings(fastProjection.meetings);
+              setLoading(false);
+              void persistMeetingRoots(fastProjection.meetings);
+              diagnosticAudit('meeting_start_fast_projection', {
+                elapsed_ms: Math.max(0, Date.now() - rootsStartedAtMs),
+                meetings: fastProjection.meetings.length,
+              });
+            }
+          });
+        }
+
         const [
-          cachedMeetings,
           cachedTranscripts,
           cachedSummaries,
           pendingAudioUploads,
           pendingSummaryTasks,
         ] = await Promise.all([
-          loadJson<Meeting[]>(meetingsKey, []),
           loadJson<Record<string, TranscriptLine[]>>(transcriptKey, {}),
           loadJson<Record<string, MeetingSummary | null>>(summaryKey, {}),
           mode === 'authenticated'
@@ -2443,16 +2576,21 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           listPendingMeetingSummaryTasks(scope).catch(() => []),
         ]);
         if (!isCurrent()) return;
-        transcriptCacheRef.current = cachedTranscripts;
+        const normalizedTranscriptCache = simplifyTranscriptCache(cachedTranscripts);
+        transcriptCacheRef.current = normalizedTranscriptCache.cache;
+        if (normalizedTranscriptCache.changed) {
+          void writeAppStorageJson(transcriptKey, normalizedTranscriptCache.cache, { removeIfEmpty: true }).catch(() => {});
+        }
         summaryCacheRef.current = cachedSummaries;
         const pendingAudioById = new Map(pendingAudioUploads.map(item => [item.meetingId, item]));
-        const hydratedMeetings = cachedMeetings.map(meeting => {
+        const rootMeetings = initialRoots.length > 0 ? initialRoots : meetingsRef.current;
+        const hydratedMeetings = rootMeetings.map(meeting => {
           const pendingAudio = pendingAudioById.get(meeting.id);
           const audioSyncPending = Boolean(pendingAudio);
           const audioSyncBlocked = pendingAudio?.uploadState === 'blocked';
           return {
             ...meeting,
-            hasTranscript: meeting.hasTranscript || (cachedTranscripts[meeting.id]?.length ?? 0) > 0,
+            hasTranscript: meeting.hasTranscript || (normalizedTranscriptCache.cache[meeting.id]?.length ?? 0) > 0,
             hasSummary: meeting.hasSummary || Boolean(cachedSummaries[meeting.id]),
             audioSyncPending,
             audioSyncBlocked,
@@ -2461,7 +2599,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         });
         meetingsRef.current = hydratedMeetings;
         setMeetings(hydratedMeetings);
-        const flags = getFeatureFlags();
+        void persistMeetingRoots(hydratedMeetings);
         if (canonicalWritesEnabledForScope(flags, scope) && isScopeKey(scope)) {
           const canonicalScope = scope;
           const owned = await loadCanonicalOwnedScope();
@@ -2584,7 +2722,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     deactivateCanonicalRead,
     loadCanonicalOwnedScope,
     meetingsKey,
+    meetingRootsKey,
     mode,
+    persistMeetingRoots,
     refreshMeetings,
     scope,
     summaryKey,
@@ -3295,13 +3435,15 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
   const getCachedTranscript = useCallback((id: string) => {
     const canonical = canonicalReadProjectionRef.current;
-    return canonical ? canonical.transcripts[id] ?? [] : transcriptCacheRef.current[id] ?? [];
+    const cached = canonical ? canonical.transcripts[id] ?? [] : transcriptCacheRef.current[id] ?? [];
+    return simplifyTranscriptLines(cached);
   }, []);
   const saveCachedTranscript = useCallback(async (
     id: string,
     transcript: TranscriptLine[],
     options: SaveCachedTranscriptOptions = {},
   ) => {
+    const simplifiedTranscript = simplifyTranscriptLines(transcript);
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) {
       throw new Error('会议账号已切换，文字记录将在返回原账号后继续保存。');
@@ -3315,14 +3457,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     ) {
       return enqueueGuestMutation(() => saveCanonicalMeetingTranscript(
         id,
-        transcript,
+        simplifiedTranscript,
         options,
         operationGeneration,
       ));
     }
     deactivateCanonicalRead();
     const previous = transcriptCacheRef.current;
-    const baseline = previous[id] ?? [];
+    const baseline = simplifyTranscriptLines(previous[id] ?? []);
     const derivedKind: TranscriptCandidateKind = contentMeeting?.status === 'recording'
       || contentMeeting?.status === 'paused'
       ? 'realtime_draft'
@@ -3332,14 +3474,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       && requestedKind === 'final'
       ? 'realtime_draft'
       : requestedKind;
-    const decision = evaluateTranscriptLineCandidate(baseline, transcript, {
+    const decision = evaluateTranscriptLineCandidate(baseline, simplifiedTranscript, {
       candidateKind,
       serverCompleteness: options.serverCompleteness,
     });
     const effectiveTranscript = decision.useCandidate ? transcript : baseline;
     let next = previous;
     if (decision.useCandidate) {
-      next = { ...previous, [id]: transcript };
+      next = { ...previous, [id]: simplifiedTranscript };
       transcriptCacheRef.current = next;
       try {
         await persistTranscripts();
@@ -3359,7 +3501,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
     const latestMeeting = meetingsRef.current.find(meeting => meeting.id === id) ?? contentMeeting;
     if (latestMeeting && isScopeKey(scope)) {
-      await mirrorLegacyTranscriptContent(scope, latestMeeting, transcript, {
+      await mirrorLegacyTranscriptContent(scope, latestMeeting, simplifiedTranscript, {
         candidateKind,
         serverCompleteness: options.serverCompleteness,
         remoteRevisionId: options.remoteRevisionId,

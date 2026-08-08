@@ -18,6 +18,12 @@ import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../d
 import type { TranscriptLine } from '../types';
 import { formatDuration } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
+import { toSimplifiedChinese } from '../utils/simplifiedChinese';
+import {
+  dedupeMeetingSummaryActions,
+  isMeetingSummaryActionSection,
+  meetingSummarySectionsForPresentation,
+} from '../services/meetingSummaryDocument';
 
 export type NativeMinutesTranscriptLine = TranscriptLine & {
   isFinal?: boolean;
@@ -84,6 +90,8 @@ export interface BuildNativeDetailSnapshotInput {
   title: string;
   dateTimeLabel?: string;
   location?: string;
+  locationLoading?: boolean;
+  canEditLocation?: boolean;
   activeTab: MinutesDetailTab;
   tabGeneration?: number;
   activeTabIsExplicit?: boolean;
@@ -203,7 +211,7 @@ export function mergeNativeMinutesTranscript(
   const existing = existingIndex >= 0 ? current[existingIndex] : null;
   if (existing?.isFinal && !event.isFinal) return [...current];
 
-  const text = event.text.trim();
+  const text = toSimplifiedChinese(event.text.trim());
   if (!text) {
     return existingIndex >= 0
       ? current.filter((_, index) => index !== existingIndex)
@@ -214,7 +222,7 @@ export function mergeNativeMinutesTranscript(
     id,
     meeting_id: meetingId,
     speaker_id: event.speakerId ?? existing?.speaker_id ?? 'unknown',
-    speaker_label: event.speakerName ?? existing?.speaker_label ?? '讲话人',
+    speaker_label: toSimplifiedChinese(event.speakerName ?? existing?.speaker_label ?? '讲话人'),
     text,
     start_time: event.startMs == null ? existing?.start_time : event.startMs / 1000,
     end_time: event.endMs == null ? existing?.end_time : event.endMs / 1000,
@@ -231,7 +239,10 @@ export function finalizedNativeMinutesTranscript(
 ): TranscriptLine[] {
   return lines
     .filter(line => line.isFinal !== false && line.text.trim())
-    .map(({ isFinal: _isFinal, ...line }) => ({ ...line, text: line.text.trim() }));
+    .map(({ isFinal: _isFinal, ...line }) => ({
+      ...line,
+      text: toSimplifiedChinese(line.text.trim()),
+    }));
 }
 
 export function toNativeMinutesTranscript(
@@ -247,7 +258,7 @@ export function toNativeMinutesTranscript(
   return lines
     .filter(line => line.text.trim())
     .map((line, index) => {
-      const text = line.text.trim();
+      const text = toSimplifiedChinese(line.text.trim());
       const leadingTrim = line.text.length - line.text.trimStart().length;
       const searchRanges = line.searchRanges
         ?.map(range => ({ start: range.start - leadingTrim, end: range.end - leadingTrim }))
@@ -269,7 +280,7 @@ export function toNativeMinutesTranscript(
         ),
         speakerId: line.speaker_id || 'unknown',
         speakerClusterId: line.speakerClusterId,
-        speakerLabel: speakerDisplayLabel(line.speaker_label, line.speaker_id),
+        speakerLabel: toSimplifiedChinese(speakerDisplayLabel(line.speaker_label, line.speaker_id)),
         timestampLabel: formatNativeMinutesTimestamp(line.start_time),
         startMs: Math.round(finiteSeconds(line.start_time) * 1000),
         endMs: Math.round(Math.max(finiteSeconds(line.start_time), finiteSeconds(line.end_time)) * 1000),
@@ -285,7 +296,7 @@ export function toNativeMinutesTranscript(
 }
 
 function stripSummaryMarkdown(value: string): string {
-  return value
+  return toSimplifiedChinese(value)
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/(\*\*|__|~~|`)(.*?)\1/g, '$2')
@@ -294,11 +305,22 @@ function stripSummaryMarkdown(value: string): string {
 
 type NativeSummaryKind = NonNullable<import('laoji-native-platform').MinutesSummaryBlockSnapshot['kind']>;
 
-function legacySummarySections(markdown: string): MinutesSummarySectionSnapshot[] {
+function isDecisionSummarySection(section: Pick<MinutesSummarySectionSnapshot, 'kind' | 'stableKey' | 'title'>): boolean {
+  const values = [section.kind, section.stableKey, section.title ?? '']
+    .map(value => toSimplifiedChinese(String(value)).replace(/[\s:：\-—_（）()【】\[\]]/g, '').toLowerCase());
+  return values.some(value => value === 'decisions' || value === 'decision' || value === '决定' || value === '关键决定' || value === 'commitments' || value === '双方约定');
+}
+
+function legacySummarySections(
+  markdown: string,
+  hideActionSection = false,
+): MinutesSummarySectionSnapshot[] {
   const blocks: Array<{ kind: NativeSummaryKind; text: string; checked?: boolean }> = [];
   const paragraph: string[] = [];
   const code: string[] = [];
   let inCode = false;
+  let skippedActionHeadingLevel: number | null = null;
+  let keptActionSection = false;
   const flushParagraph = () => {
     const text = stripSummaryMarkdown(paragraph.join('\n'));
     if (text) blocks.push({ kind: 'paragraph', text });
@@ -309,7 +331,7 @@ function legacySummarySections(markdown: string): MinutesSummarySectionSnapshot[
     if (text) blocks.push({ kind: 'code', text });
     code.length = 0;
   };
-  markdown.replace(/\r\n?/g, '\n').split('\n').forEach(rawLine => {
+  toSimplifiedChinese(markdown).replace(/\r\n?/g, '\n').split('\n').forEach(rawLine => {
     const line = rawLine.trimEnd();
     if (/^\s*```/.test(line)) {
       if (inCode) flushCode();
@@ -331,6 +353,35 @@ function legacySummarySections(markdown: string): MinutesSummarySectionSnapshot[
     const bullet = /^\s*[-*+]\s+(.+)$/.exec(normalized);
     const ordered = /^\s*\d+[.)]\s+(.+)$/.exec(normalized);
     const quote = /^\s*>\s?(.*)$/.exec(normalized);
+
+    if (heading) {
+      const headingLevel = heading[1].length;
+      const headingText = stripSummaryMarkdown(heading[2]);
+      if (skippedActionHeadingLevel !== null) {
+        // Keep nested headings inside a skipped action section hidden. A
+        // same-level (or higher-level) heading starts the next real section.
+        if (headingLevel > skippedActionHeadingLevel) return;
+        skippedActionHeadingLevel = null;
+      }
+      const isActionSection = isMeetingSummaryActionSection({
+        kind: 'paragraph',
+        stableKey: headingText,
+        title: headingText,
+      });
+      const isDecisionSection = isDecisionSummarySection({
+        kind: 'paragraph',
+        stableKey: headingText,
+        title: headingText,
+      });
+      if (isDecisionSection || (isActionSection && (hideActionSection || keptActionSection))) {
+        flushParagraph();
+        skippedActionHeadingLevel = headingLevel;
+        return;
+      }
+      if (isActionSection) keptActionSection = true;
+    }
+    if (skippedActionHeadingLevel !== null) return;
+
     const matched = heading || task || bullet || ordered || quote;
     if (!matched) {
       paragraph.push(normalized);
@@ -362,15 +413,22 @@ function structuredSummarySections(
   hasActions: boolean,
   editable: boolean,
 ): MinutesSummarySectionSnapshot[] {
-  return document.sections
-    .filter(section => !hasActions
-      || (section.stableKey !== 'action_items' && section.kind !== 'action_items'))
+  let keptFallbackActionSection = false;
+  return meetingSummarySectionsForPresentation(document.sections)
+    .filter(section => {
+      if (isDecisionSummarySection(section)) return false;
+      if (!isMeetingSummaryActionSection(section)) return true;
+      if (hasActions) return false;
+      if (keptFallbackActionSection) return false;
+      keptFallbackActionSection = true;
+      return true;
+    })
     .map(section => ({
     id: section.id,
     stableKey: section.stableKey,
     kind: section.kind,
-    title: section.title,
-    text: section.content,
+    title: section.title ? toSimplifiedChinese(section.title) : section.title,
+    text: toSimplifiedChinese(section.content),
     editable,
     userEdited: section.userEdited === true,
     citations: section.citations.map(citation => ({
@@ -389,7 +447,7 @@ function structuredSummaryActions(
   conflictedActionIds: ReadonlySet<string> = new Set<string>(),
   canShare = false,
 ) {
-  return actions.map(action => {
+  return dedupeMeetingSummaryActions(actions).map(action => {
     const actionId = action.canonicalId ?? action.id;
     const source = action.citations[0];
     const sourceSegmentId = source?.segmentId ?? action.sourceSegmentId ?? undefined;
@@ -398,7 +456,7 @@ function structuredSummaryActions(
     const reminder = action.reminderAtMs === null ? null : new Date(action.reminderAtMs);
     return {
       id: actionId,
-      content: action.content,
+      content: toSimplifiedChinese(action.content),
       status: action.status,
       assigneeLabel: action.assignee ?? undefined,
       dueLabel: due && !Number.isNaN(due.getTime())
@@ -430,7 +488,7 @@ export function nativeMinutesSpeakers(
     if (!line.text.trim()) return;
     // Display labels are mutable and must never become speaker identities.
     const id = line.speaker_id?.trim() || 'unknown';
-    const label = speakerDisplayLabel(line.speaker_label, line.speaker_id);
+    const label = toSimplifiedChinese(speakerDisplayLabel(line.speaker_label, line.speaker_id));
     const previous = grouped.get(id) ?? { label, count: 0, durationSec: 0 };
     const start = finiteSeconds(line.start_time);
     const end = finiteSeconds(line.end_time);
@@ -567,6 +625,9 @@ function detailContentState(
       return { phase: 'loading', message: '正在同步文字记录' };
     }
     if (input.transcriptError) return { phase: 'error', message: input.transcriptError };
+    if (input.transcriptStatusMessage === '未检测到人声') {
+      return { phase: 'empty', message: input.transcriptStatusMessage };
+    }
     if (input.transcriptStatusMessage && input.transcript.length > 0) {
       return { phase: 'loading', message: input.transcriptStatusMessage };
     }
@@ -632,19 +693,24 @@ export function buildNativeMinutesDetailSnapshot(
   const actionItemCandidates = input.actionItemCandidates
     ?? input.summaryDocument?.actionItemCandidates
     ?? [];
-  const summary = input.summaryDocument
-    ? structuredSummarySections(
-      input.summaryDocument,
-      actionItemCandidates.length > 0 || input.summaryDocument.actionItemCandidates.length > 0,
-      input.canEditSummary === true,
-    )
-    : legacySummarySections(input.summaryText?.trim() ?? '');
+  const dedupedActionCandidates = dedupeMeetingSummaryActions(actionItemCandidates);
   const actions = structuredSummaryActions(
-    actionItemCandidates,
+    dedupedActionCandidates,
     input.updatingActionId,
     input.conflictedActionIds,
     input.canShareActions ?? false,
   );
+  const summary = input.summaryDocument
+    ? structuredSummarySections(
+      input.summaryDocument,
+      dedupedActionCandidates.length > 0
+        || dedupeMeetingSummaryActions(input.summaryDocument.actionItemCandidates).length > 0,
+      input.canEditSummary === true,
+    )
+    // A legacy Markdown summary may already contain an "行动项" section.
+    // Once structured action rows are available, that section is only a
+    // second projection of the same data and must not be rendered as well.
+    : legacySummarySections(input.summaryText?.trim() ?? '', actions.length > 0);
   const speakers = nativeMinutesSpeakers(input.transcript, Boolean(input.canManageSpeakers));
   const markers: MinutesMarkerSnapshot[] = (input.markers ?? [])
     .filter(marker => marker.id.trim() && Number.isSafeInteger(marker.positionMs) && marker.positionMs >= 0)
@@ -663,6 +729,8 @@ export function buildNativeMinutesDetailSnapshot(
     title: input.title,
     dateTimeLabel: input.dateTimeLabel,
     location: input.location,
+    locationLoading: input.locationLoading ?? false,
+    canEditLocation: input.canEditLocation ?? false,
     activeTab: input.activeTab,
     tabGeneration: pageGeneration(input.tabGeneration),
     activeTabIsExplicit: input.activeTabIsExplicit ?? false,
@@ -700,7 +768,10 @@ export function buildNativeMinutesDetailSnapshot(
     audioErrorMessage: input.audioErrorMessage ?? '',
     processingStatusLabel: input.processingStatusLabel ?? '',
     processingStatusTone: input.processingStatusTone ?? 'neutral',
-    rootSyncConflict: input.rootSyncConflict ?? false,
+    // Root revisions are reconciled by the durable sync worker.  They are not
+    // a user-selectable version-merge workflow, so never expose a manual
+    // "处理" action while a background retry is in progress.
+    rootSyncConflict: false,
     summarySyncConflict: input.summarySyncConflict ?? false,
     processingRetryStage: input.processingRetryStage,
     processingRetrying: input.processingRetrying ?? false,

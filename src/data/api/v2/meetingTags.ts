@@ -156,7 +156,7 @@ export async function getMeetingTagCatalogV1(input: {
   accessToken: string;
   signal?: AbortSignal;
 }): Promise<RemoteMeetingTagCatalogV1> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(`${base}/api/laoji/v1/meeting-tags`, {
     signal: input.signal,
     headers: { Accept: 'application/json', Authorization: `Bearer ${input.accessToken}` },
@@ -173,7 +173,7 @@ export async function replaceMeetingTagCatalogV1(input: {
   mutation: MeetingTagCatalogV1Mutation;
   signal?: AbortSignal;
 }): Promise<RemoteMeetingTagCatalogV1> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(`${base}/api/laoji/v1/meeting-tags`, {
     method: 'PUT',
     signal: input.signal,

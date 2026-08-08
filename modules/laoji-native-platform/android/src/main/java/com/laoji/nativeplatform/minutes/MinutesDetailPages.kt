@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.util.TypedValue
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -45,12 +46,13 @@ internal class MinutesNotesPage(
 ) : MinutesDetailPage(context, MinutesDetailTab.NOTES, onAction) {
   private val root = LinearLayout(context)
   private val status = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  private val scroll = NestedScrollView(context)
   private val editor = EditText(context)
   private var applyingSnapshot = false
   private var manualNoteConflict = false
 
   override val scrollingChild: View
-    get() = editor
+    get() = scroll
 
   init {
     root.orientation = LinearLayout.VERTICAL
@@ -78,7 +80,6 @@ internal class MinutesNotesPage(
         InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
       filters = arrayOf(InputFilter.LengthFilter(200_000))
       setLineSpacing(0f, 1.25f)
-      isVerticalScrollBarEnabled = false
       overScrollMode = View.OVER_SCROLL_NEVER
       contentDescription = "我的笔记"
       addTextChangedListener(object : TextWatcher {
@@ -91,19 +92,25 @@ internal class MinutesNotesPage(
         }
       })
     }
-    root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    scroll.isFillViewport = true
+    scroll.overScrollMode = View.OVER_SCROLL_NEVER
+    scroll.addView(
+      editor,
+      ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     installContent(root)
   }
 
   override fun captureScrollPosition(): MinutesDetailPageScrollPosition =
-    MinutesDetailPageScrollPosition(offsetPx = editor.scrollY)
+    MinutesDetailPageScrollPosition(offsetPx = scroll.scrollY)
 
   override fun restoreScrollPosition(position: MinutesDetailPageScrollPosition) {
-    editor.post { editor.scrollTo(0, position.offsetPx.coerceAtLeast(0)) }
+    scroll.post { scroll.scrollTo(0, position.offsetPx.coerceAtLeast(0)) }
   }
 
   override fun setScrollStateListener(listener: () -> Unit) {
-    editor.setOnScrollChangeListener { _, _, _, _, _ -> listener() }
+    scroll.setOnScrollChangeListener { _, _, _, _, _ -> listener() }
   }
 
   fun render(state: MinutesDetailState) {
@@ -161,12 +168,6 @@ internal abstract class MinutesDetailPage(
   private val stateMessage = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
   private val retry = context.textView("重试", 16, MinutesPalette.primary, Typeface.BOLD)
   private val summaryAction = context.textView("生成整理结果", 16, MinutesPalette.primary, Typeface.BOLD)
-  private val warning = LinearLayout(context)
-  private val warningText = context.textView(textSizeSp = 13, color = MinutesPalette.danger)
-  private val warningRetry = context.iconButton(
-    com.laoji.nativeplatform.R.drawable.laoji_ic_refresh,
-    "重试加载当前内容",
-  )
   private lateinit var content: View
 
   internal var renderedPageState: MinutesDetailPageState = MinutesDetailPageState()
@@ -174,9 +175,6 @@ internal abstract class MinutesDetailPage(
 
   internal val renderedGeneration: Int
     get() = renderedPageState.generation
-
-  internal val warningBanner: View
-    get() = warning
 
   internal val contentContainer: View
     get() = contentHost
@@ -227,14 +225,6 @@ internal abstract class MinutesDetailPage(
       },
     )
 
-    warning.orientation = LinearLayout.HORIZONTAL
-    warning.gravity = Gravity.CENTER_VERTICAL
-    warning.setPadding(context.dp(16), 0, context.dp(4), 0)
-    warning.backgroundShape(MinutesPalette.dangerSoft)
-    warning.visibility = View.GONE
-    warning.addView(warningText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    warningRetry.setOnClickListener { retry.performClick() }
-    warning.addView(warningRetry, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
     body.orientation = LinearLayout.VERTICAL
     addView(body, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
   }
@@ -242,10 +232,17 @@ internal abstract class MinutesDetailPage(
   protected fun installContent(view: View) {
     check(!::content.isInitialized) { "Detail page content can only be installed once" }
     content = view
-    body.addView(warning, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
     body.addView(contentHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
     contentHost.addView(view, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-    contentHost.addView(stateOverlay, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    contentHost.addView(
+      stateOverlay,
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+        // Summary owns a fixed 44dp operation row even before content exists.
+        // Keep the empty/loading surface below that row so its action remains
+        // discoverable and the page does not reflow when generation starts.
+        if (tab == MinutesDetailTab.SUMMARY) topMargin = context.dp(44)
+      },
+    )
   }
 
   protected fun renderPageChrome(
@@ -260,13 +257,20 @@ internal abstract class MinutesDetailPage(
     val phase = renderedPageState.phase
     val showBlockingState = !hasContent
     stateOverlay.visibility = if (showBlockingState) View.VISIBLE else View.GONE
-    content.visibility = if (!hasContent && showBlockingState) View.INVISIBLE else View.VISIBLE
+    content.visibility = if (
+      !hasContent && showBlockingState && tab != MinutesDetailTab.SUMMARY
+    ) View.INVISIBLE else View.VISIBLE
     progress.visibility = if (phase == MinutesContentPhase.LOADING) View.VISIBLE else View.GONE
     emptyImage.visibility = if (
       phase == MinutesContentPhase.READY || phase == MinutesContentPhase.EMPTY
     ) View.VISIBLE else View.GONE
     retry.visibility = if (phase == MinutesContentPhase.ERROR) View.VISIBLE else View.GONE
-    val showSummaryAction = tab == MinutesDetailTab.SUMMARY && canGenerateSummary && phase != MinutesContentPhase.LOADING
+    // SummaryPage owns one fixed action slot; do not alternate with a
+    // centered overlay button as content changes phase.
+    val showSummaryAction = tab != MinutesDetailTab.SUMMARY
+      && canGenerateSummary
+      && !summaryGenerating
+      && phase != MinutesContentPhase.LOADING
     summaryAction.visibility = if (showSummaryAction) View.VISIBLE else View.GONE
     summaryAction.isEnabled = !summaryGenerating
     summaryAction.alpha = if (summaryGenerating) 0.45f else 1f
@@ -277,13 +281,6 @@ internal abstract class MinutesDetailPage(
         MinutesContentPhase.ERROR -> "${tab.label}暂时不可用"
         else -> emptyMessage
       }
-    }
-    val showWarning = hasContent && (phase == MinutesContentPhase.ERROR || (phase == MinutesContentPhase.LOADING && renderedPageState.cached))
-    warning.visibility = if (showWarning) View.VISIBLE else View.GONE
-    warning.backgroundShape(if (phase == MinutesContentPhase.ERROR) MinutesPalette.dangerSoft else MinutesPalette.primarySoft)
-    warningText.setTextColor(if (phase == MinutesContentPhase.ERROR) MinutesPalette.danger else MinutesPalette.secondary)
-    warningText.text = renderedPageState.message.ifBlank {
-      if (phase == MinutesContentPhase.LOADING) "正在同步，当前显示本机缓存" else "同步失败，正在显示本机缓存"
     }
   }
 }
@@ -758,18 +755,26 @@ internal class MinutesSummaryPage(
   }
 
   fun render(state: MinutesDetailState) {
-    val hasSummaryContent = state.summary.isNotEmpty() || state.actions.isNotEmpty()
-    summaryActionBar.visibility = if (state.canGenerateSummary && hasSummaryContent) View.VISIBLE else View.GONE
+    // Reserve the same slot before and after generation. Only the label and
+    // enabled state change, so the body does not jump when content arrives.
+    // Keep the operation row mounted. The text action itself becomes
+    // INVISIBLE when there is no transcript, preserving the measured height
+    // while cached/remote page snapshots settle.
+    summaryActionBar.visibility = View.VISIBLE
+    regenerateAction.visibility = if (state.canGenerateSummary) View.VISIBLE else View.INVISIBLE
     regenerateAction.isEnabled = !state.summaryGenerating
+    val idleActionLabel = state.summaryActionLabel.ifBlank { "重新生成" }
     regenerateAction.text = if (state.summaryGenerating) {
       "正在生成"
     } else {
-      state.summaryActionLabel.ifBlank { "重新生成" }
+      idleActionLabel
     }
     regenerateAction.contentDescription = if (state.summaryGenerating) {
       "正在生成整理结果"
-    } else {
+    } else if (idleActionLabel.startsWith("重新")) {
       "重新生成整理结果"
+    } else {
+      "生成整理结果"
     }
     replaceContent(
       state.summary,
@@ -1336,10 +1341,17 @@ internal class MinutesSpeakersPage(
  * not local-file, sync, or transcript implementation state. LaoJi currently
  * Missing capabilities are not represented by invented placeholders.
  */
+private data class MinutesInfoRow(
+  val label: String,
+  val value: String,
+  val action: String? = null,
+  val accent: Boolean = false,
+)
+
 internal class MinutesInfoPage(
   context: Context,
-  onAction: (Map<String, Any?>) -> Unit,
-) : MinutesDetailPage(context, MinutesDetailTab.INFO, onAction) {
+  private val onInfoAction: (Map<String, Any?>) -> Unit,
+) : MinutesDetailPage(context, MinutesDetailTab.INFO, onInfoAction) {
   private val scroll = NestedScrollView(context)
   private val rows = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
@@ -1370,22 +1382,45 @@ internal class MinutesInfoPage(
 
   fun render(state: MinutesDetailState) {
     val values = buildList {
-      state.dateTimeLabel.takeIf { it.isNotBlank() }?.let { add("创建时间" to it) }
-      state.location.takeIf { it.isNotBlank() }?.let { add("地址" to it) }
+      state.dateTimeLabel.takeIf { it.isNotBlank() }?.let { add(MinutesInfoRow("创建时间", it)) }
+      add(MinutesInfoRow(
+        label = "地址",
+        value = when {
+          state.locationLoading -> "正在定位"
+          state.location.isNotBlank() -> state.location
+          else -> "添加地点"
+        },
+        action = "requestMeetingLocation".takeIf { state.canEditLocation && !state.locationLoading },
+        accent = state.location.isBlank(),
+      ))
     }
-    val key = values.joinToString("|") { "${it.first}=${it.second}" }
+    val key = values.joinToString("|") { "${it.label}=${it.value}:${it.action}:${it.accent}" }
     if (key != renderedKey) {
       renderedKey = key
       val retainedScroll = scroll.scrollY
       rows.removeAllViews()
-      values.forEachIndexed { index, (label, value) ->
+      values.forEachIndexed { index, item ->
         val row = LinearLayout(context).apply {
           orientation = LinearLayout.VERTICAL
           setPadding(context.dp(16), 0, context.dp(16), 0)
           minimumHeight = context.dp(66)
+          if (item.action != null) {
+            val selectable = TypedValue()
+            if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
+              setBackgroundResource(selectable.resourceId)
+            }
+            isClickable = true
+            isFocusable = true
+            contentDescription = item.value
+            setOnClickListener { onInfoAction(mapOf("type" to item.action)) }
+          }
         }
-        row.addView(context.textView(label, 14, MinutesPalette.secondary))
-        row.addView(context.textView(value, 16, MinutesPalette.text).apply {
+        row.addView(context.textView(item.label, 14, MinutesPalette.secondary))
+        row.addView(context.textView(
+          item.value,
+          16,
+          if (item.accent) MinutesPalette.primary else MinutesPalette.text,
+        ).apply {
           setLineSpacing(0f, 1.2f)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
           topMargin = context.dp(8)

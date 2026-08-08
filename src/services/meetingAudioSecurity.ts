@@ -27,7 +27,7 @@ export function validateMeetingAudioUrl(
   let parsed: URL;
   let meetingOrigin: string;
   try {
-    const base = new URL(config.meetingApiBase);
+    const base = new URL(config.apiBase);
     parsed = new URL(rawUrl, base);
     meetingOrigin = base.origin;
   } catch {

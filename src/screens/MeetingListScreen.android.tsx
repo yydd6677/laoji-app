@@ -71,8 +71,10 @@ function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) 
     : undefined);
   const hasRootSyncPending = Boolean(meeting.statusSyncPending)
     || meeting.tags.some(tag => tag.label === '待同步');
+  // Root revision conflicts are handled by the background sync worker.  Do
+  // not expose a permanent red state that implies a manual repair action.
   if (meeting.tags.some(tag => tag.label === '同步冲突')) {
-    return { label: '同步冲突', tone: 'danger' as const };
+    return { label: '待同步', tone: 'warning' as const };
   }
   if (
     hasRootSyncPending
@@ -521,8 +523,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         dateTimeLabel: compactMeetingDateTime(date, time),
         statusLabel: restoringMeetingId === entry.meetingId
           ? '正在恢复'
-          : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '同步冲突',
-        statusTone: entry.canRestore ? 'warning' as const : 'danger' as const,
+          : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '正在同步',
+        // A deleted root revision conflict is retried by the background
+        // reconciler. It must not be presented as a permanent red error.
+        statusTone: 'warning' as const,
         action: 'restore' as const,
         actionEnabled: entry.canRestore && restoringMeetingId === null,
         coverType: 'default' as const,

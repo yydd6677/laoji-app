@@ -1,5 +1,6 @@
 import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import { meetingDatabaseMigrations } from './migrations';
+import { diagnosticAudit } from '../../services/diagnostics';
 
 const MEETING_DATABASE_NAME = 'laoji-meeting-memory.db';
 
@@ -38,7 +39,9 @@ async function applyMigrations(database: SQLiteDatabase): Promise<void> {
 }
 
 async function initializeMeetingDatabase(): Promise<SQLiteDatabase> {
+  const startedAtMs = Date.now();
   const database = await openDatabaseAsync(MEETING_DATABASE_NAME);
+  const openedAtMs = Date.now();
   try {
     await database.execAsync(`
       PRAGMA foreign_keys = ON;
@@ -46,7 +49,15 @@ async function initializeMeetingDatabase(): Promise<SQLiteDatabase> {
       PRAGMA synchronous = NORMAL;
       PRAGMA busy_timeout = 5000;
     `);
+    const pragmasAtMs = Date.now();
     await applyMigrations(database);
+    const migratedAtMs = Date.now();
+    diagnosticAudit('meeting_db_open', {
+      open_ms: Math.max(0, openedAtMs - startedAtMs),
+      setup_ms: Math.max(0, pragmasAtMs - openedAtMs),
+      migration_ms: Math.max(0, migratedAtMs - pragmasAtMs),
+      total_ms: Math.max(0, migratedAtMs - startedAtMs),
+    });
     return database;
   } catch (error) {
     await database.closeAsync().catch(() => undefined);

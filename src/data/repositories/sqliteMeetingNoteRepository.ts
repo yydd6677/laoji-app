@@ -78,6 +78,9 @@ import type {
   MeetingRootSyncCompletion,
   MeetingRootSyncConflict,
   MeetingRootSyncConflictRecord,
+  MeetingRootSyncRepairResult,
+  RequeueMeetingRootSyncConflictInput,
+  RequeueStaleMeetingRootSyncOperationsInput,
   MeetingRootSyncFailure,
   MeetingRootPullState,
   MeetingRootPatch,
@@ -347,6 +350,24 @@ type MeetingRootSyncOutboxRow = SyncOutboxRow & {
   meeting_remote_id: string | null;
   meeting_remote_revision: number | null;
   transport_order: number;
+};
+
+type MeetingRootRepairRow = MeetingRow & {
+  calendar_source_event_id: string | null;
+  occurrence_date: string | null;
+  calendar_revision: number | null;
+  recurrence_segment_id: string | null;
+  series_key: string | null;
+  event_title: string | null;
+  planned_start_ms: number | null;
+  planned_end_ms: number | null;
+  all_day: number | null;
+  timezone_id: string | null;
+  occurrence_location: string | null;
+  occurrence_participants_json: string | null;
+  occurrence_description: string | null;
+  captured_event_revision: number | null;
+  captured_at_ms: number | null;
 };
 
 type MeetingRootPullStateRow = {
@@ -785,6 +806,32 @@ const SUMMARY_EFFECTIVE_USER_EDITED_SQL = `CASE WHEN
       AND (ownership_action.user_edited_at_ms IS NOT NULL OR ownership_action.status <> 'pending')
   )
   THEN 1 ELSE 0 END AS effective_user_edited`;
+const CURRENT_MEETING_ACTION_VISIBILITY_SQL = `(
+  action.source_kind <> 'generated'
+  OR action.user_edited_at_ms IS NOT NULL
+  OR action.status <> 'pending'
+  OR action.source_summary_version_id = meeting.current_summary_version_id
+  OR EXISTS (
+    SELECT 1 FROM meeting_summary_remote_versions action_version
+    WHERE action_version.scope_key = meeting.scope_key
+      AND action_version.meeting_id = meeting.id
+      AND action_version.local_version_id = meeting.current_summary_version_id
+      AND action_version.remote_version_id = action.source_summary_version_id
+  )
+)`;
+const SUMMARY_VERSION_ACTION_VISIBILITY_SQL = `(
+  action.source_kind <> 'generated'
+  OR action.user_edited_at_ms IS NOT NULL
+  OR action.status <> 'pending'
+  OR action.source_summary_version_id = ?
+  OR EXISTS (
+    SELECT 1 FROM meeting_summary_remote_versions action_version
+    WHERE action_version.scope_key = meeting.scope_key
+      AND action_version.meeting_id = meeting.id
+      AND action_version.local_version_id = ?
+      AND action_version.remote_version_id = action.source_summary_version_id
+  )
+)`;
 
 function noteFromRow(row: MeetingRow): MeetingNote {
   assertScopeKey(row.scope_key);
@@ -1171,6 +1218,7 @@ function recordingAssetTranscriptionFingerprint(
     feed(row.request_batch_id);
     feed(row.remote_job_id);
     feed(row.status);
+    feed(row.error_code);
     feed(row.result_revision_id);
   });
   return `recording-assets-v2:${rows.length}:${hash.toString(16).padStart(8, '0')}`;
@@ -1201,9 +1249,11 @@ async function reconcileRecordingAssetTranscriptionStage(
   if (rows.length === 0) return false;
 
   const retryableFailure = rows.find(row => row.status === 'failed_retryable');
-  const blocked = rows.find(row => row.status === 'blocked');
+  const noSpeech = rows.filter(row => row.status === 'blocked' && row.error_code === 'no_speech');
+  const blocked = rows.find(row => row.status === 'blocked' && row.error_code !== 'no_speech');
   const unfinished = rows.filter(row => (
-    row.status !== 'completed' || row.content_synced_at_ms === null
+    !(row.status === 'blocked' && row.error_code === 'no_speech')
+    && (row.status !== 'completed' || row.content_synced_at_ms === null)
   ));
   const activeReady = await database.getFirstAsync<{ id: string }>(
     `SELECT id FROM transcript_revisions
@@ -1218,7 +1268,9 @@ async function reconcileRecordingAssetTranscriptionStage(
         ? 'finalizing'
         : activeReady
           ? 'ready'
-          : 'none';
+          : noSpeech.length > 0
+            ? 'no_speech'
+            : 'none';
   const progressValues = rows.map(row => (
     row.status === 'completed' ? 1 : row.progress ?? 0
   ));
@@ -2416,6 +2468,10 @@ export async function refreshMeetingSyncState(
   const unresolvedConflict = await database.getFirstAsync<{ found: number }>(
     `SELECT 1 AS found FROM sync_conflicts conflict
      WHERE conflict.scope_key = ? AND conflict.status = 'unresolved'
+       -- Root revision conflicts are reconciled by the authenticated worker;
+       -- they are not a user-facing conflict state. Other aggregate conflicts
+       -- still retain their existing product semantics.
+       AND conflict.aggregate_type <> 'meeting_note'
        AND (
          (conflict.aggregate_type = 'meeting_note' AND conflict.aggregate_id = ?)
          OR (
@@ -2455,8 +2511,12 @@ export async function refreshMeetingSyncState(
     meetingId,
     scopeKey,
   );
-  const outstanding = await database.getAllAsync<{ status: string }>(
-    `SELECT outbox.status FROM sync_outbox outbox
+  const outstanding = await database.getAllAsync<{
+    status: string;
+    aggregate_type: string;
+    last_error_code: string | null;
+  }>(
+    `SELECT outbox.status, outbox.aggregate_type, outbox.last_error_code FROM sync_outbox outbox
      WHERE outbox.scope_key = ? AND outbox.status <> 'completed'
        AND (
          (outbox.aggregate_type = 'meeting_note' AND outbox.aggregate_id = ?)
@@ -2513,11 +2573,28 @@ export async function refreshMeetingSyncState(
     meetingId,
     scopeKey,
   );
+  const autoRecoverableRootPending = outstanding.some(item => (
+    item.aggregate_type === 'meeting_note'
+    && (item.status === 'blocked' || item.status === 'permanent_error')
+    && (
+      item.last_error_code === 'revision_conflict'
+      || item.last_error_code === 'automatic_revision_conflict_recovery'
+    )
+  ));
   const conflicted = Boolean(unresolvedConflict)
-    || outstanding.some(item => item.status === 'blocked' || item.status === 'permanent_error');
+    || outstanding.some(item => (
+      (item.status === 'blocked' || item.status === 'permanent_error')
+      && !(
+        item.aggregate_type === 'meeting_note'
+        && (
+          item.last_error_code === 'revision_conflict'
+          || item.last_error_code === 'automatic_revision_conflict_recovery'
+        )
+      )
+    ));
   const syncState: MeetingNote['syncState'] = conflicted
     ? 'conflicted'
-    : outstanding.length > 0
+    : outstanding.length > 0 || autoRecoverableRootPending
       ? 'pending'
       : 'synced';
   await database.runAsync(
@@ -2751,6 +2828,32 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       scopeKey,
     );
     return row ? transcriptRevisionFromRow(row) : null;
+  }
+
+  async getTranscriptRevisionContent(
+    id: string,
+    scopeKey: ScopeKey,
+  ): Promise<TranscriptRevisionProjection | null> {
+    assertScopeKey(scopeKey);
+    const revision = await this.database.getFirstAsync<TranscriptRevisionRow>(
+      `SELECT revision.* FROM transcript_revisions revision
+       INNER JOIN meeting_notes meeting ON meeting.id = revision.meeting_id
+       WHERE revision.id = ? AND meeting.scope_key = ?`,
+      id,
+      scopeKey,
+    );
+    if (!revision) return null;
+    const segments = await this.database.getAllAsync<TranscriptSegmentRow>(
+      `SELECT segment.* FROM transcript_segments segment
+       WHERE segment.revision_id = ? AND segment.meeting_id = ?
+       ORDER BY segment.ordinal, segment.id`,
+      revision.id,
+      revision.meeting_id,
+    );
+    return {
+      revision: transcriptRevisionFromRow(revision),
+      segments: segments.map(transcriptSegmentFromRow),
+    };
   }
 
   async getActiveTranscriptRevision(
@@ -3813,6 +3916,31 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       meetingId,
       scopeKey,
       meetingId,
+    );
+    if (result.changes > 0) this.touchedMeetingIds.add(meetingId);
+    return result.changes > 0;
+  }
+
+  async restoreCurrentSummaryReady(
+    meetingId: string,
+    scopeKey: ScopeKey,
+    expectedVersionId: string,
+  ): Promise<boolean> {
+    assertScopeKey(scopeKey);
+    await this.assertMeetingInScope(meetingId, scopeKey);
+    assertRecordId(expectedVersionId, 'summary version ID');
+    const result = await this.database.runAsync(
+      `UPDATE summary_versions
+       SET status = 'ready'
+       WHERE id = ? AND meeting_id = ? AND status = 'stale'
+         AND id = (
+           SELECT current_summary_version_id FROM meeting_notes
+           WHERE id = ? AND scope_key = ?
+         )`,
+      expectedVersionId,
+      meetingId,
+      meetingId,
+      scopeKey,
     );
     if (result.changes > 0) this.touchedMeetingIds.add(meetingId);
     return result.changes > 0;
@@ -5156,6 +5284,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          AND link.link_state = 'active'
          AND meeting.lifecycle = 'ended'
          AND action.status = 'pending'
+         AND ${CURRENT_MEETING_ACTION_VISIBILITY_SQL}
        ORDER BY CASE WHEN action.due_at_ms IS NULL THEN 1 ELSE 0 END,
          action.due_at_ms,
          link.occurrence_date DESC,
@@ -5287,6 +5416,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
        INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
        WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
          AND action.reminder_at_ms IS NOT NULL
+         AND ${CURRENT_MEETING_ACTION_VISIBILITY_SQL}
        ORDER BY action.reminder_at_ms, action.id`,
       scopeKey,
     );
@@ -5690,6 +5820,206 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return repaired;
   }
 
+  /**
+   * Backfill the root outbox for records imported by older builds.  The old
+   * AsyncStorage shadow import copied local meetings into the canonical tables
+   * but did not create a meeting.create operation.  A recording belonging to
+   * such a root could therefore wait for an identity forever.  This repair is
+   * deliberately automatic and idempotent: an in-flight create is left alone,
+   * a terminal create is rebuilt from the current canonical row, and a missing
+   * create is inserted with the canonical meeting ID as its idempotency key.
+   */
+  async repairOrphanedMeetingRootSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    repairedAtMs: number,
+  ): Promise<MeetingRootSyncRepairResult> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(repairedAtMs, 'orphaned meeting root repair time');
+
+    const result = await withMeetingDatabaseTransaction(async database => {
+      const candidates = await database.getAllAsync<MeetingRootRepairRow>(
+        `SELECT meeting.*,
+           link.calendar_source_event_id,
+           link.occurrence_date,
+           link.calendar_revision,
+           link.recurrence_segment_id,
+           link.series_key,
+           snapshot.event_title,
+           snapshot.planned_start_ms,
+           snapshot.planned_end_ms,
+           snapshot.all_day,
+           snapshot.timezone_id,
+           snapshot.location AS occurrence_location,
+           snapshot.participants_json AS occurrence_participants_json,
+           snapshot.description AS occurrence_description,
+           snapshot.captured_event_revision,
+           snapshot.captured_at_ms
+         FROM meeting_notes meeting
+         LEFT JOIN meeting_occurrence_links link
+           ON link.meeting_id = meeting.id AND link.scope_key = ?
+              AND link.link_state = 'active'
+         LEFT JOIN meeting_schedule_snapshots snapshot
+           ON snapshot.meeting_id = meeting.id
+         WHERE meeting.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'
+           AND meeting.remote_id IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_conflicts conflict
+             WHERE conflict.scope_key = meeting.scope_key
+               AND conflict.aggregate_type = 'meeting_note'
+               AND conflict.aggregate_id = meeting.id
+               AND conflict.status = 'unresolved'
+           )
+         ORDER BY meeting.created_at_ms, meeting.id`,
+        scopeKey,
+        scopeKey,
+      );
+      const transaction = new SqliteMeetingTransaction(database);
+      const touched: string[] = [];
+      let created = 0;
+      let requeued = 0;
+
+      const supportedEntryPoints = new Set([
+        'calendar_detail',
+        'notification',
+        'widget',
+        'meeting_tab',
+        'quick_tile',
+        'document_picker',
+        'share_intent',
+        'legacy_store',
+        'recorder_recovery',
+      ]);
+
+      for (const row of candidates) {
+        const createRows = await database.getAllAsync<SyncOutboxRow>(
+          `SELECT * FROM sync_outbox
+           WHERE scope_key = ? AND aggregate_type = 'meeting_note'
+             AND aggregate_id = ? AND operation_type = 'meeting.create'
+           ORDER BY created_at_ms, rowid`,
+          scopeKey,
+          row.id,
+        );
+        const nonCompleted = createRows.filter(item => item.status !== 'completed');
+        // Never race a create that another worker currently owns.  The next
+        // drain will revisit it after the normal stale-claim timeout.
+        if (nonCompleted.some(item => item.status === 'in_flight')) continue;
+        if (nonCompleted.length > 1) continue;
+
+        const linkIsUsable = Boolean(
+          row.origin === 'calendar'
+          && row.calendar_source_event_id
+          && row.occurrence_date
+          && row.event_title !== null
+          && row.captured_at_ms !== null,
+        );
+        // A legacy row may have been labelled calendar while its occurrence
+        // was never persisted.  Sending it as an ad-hoc meeting is the only
+        // lossless way to make its recording reachable; it is preferable to a
+        // permanent local conflict and does not alter the audio/transcript.
+        const origin = row.origin === 'calendar' && !linkIsUsable
+          ? 'ad_hoc'
+          : row.origin;
+        const entryPoint = row.entry_point && supportedEntryPoints.has(row.entry_point)
+          ? row.entry_point
+          : 'meeting_tab';
+        const clientRequestId = (row.client_request_id?.trim() || row.id).slice(0, 96);
+        const occurrenceRef = linkIsUsable ? {
+          source_event_id: row.calendar_source_event_id,
+          occurrence_date: row.occurrence_date,
+          calendar_revision: row.calendar_revision,
+          recurrence_segment_id: row.recurrence_segment_id,
+          series_key: row.series_key,
+        } : null;
+        const scheduleSnapshot = linkIsUsable ? {
+          event_title: row.event_title ?? '',
+          planned_start_ms: row.planned_start_ms,
+          planned_end_ms: row.planned_end_ms,
+          all_day: row.all_day === 1,
+          timezone_id: row.timezone_id,
+          location: row.occurrence_location,
+          participants: participantsFromJson(row.occurrence_participants_json ?? '[]'),
+          description: row.occurrence_description,
+          captured_event_revision: row.captured_event_revision,
+          captured_at_ms: row.captured_at_ms,
+        } : null;
+        const payloadJson = JSON.stringify({
+          schema_version: 1,
+          client_note_id: row.id,
+          origin,
+          entry_point: entryPoint,
+          title: row.title ?? '',
+          description: row.description,
+          participants: participantsFromJson(row.participants_json),
+          location: row.location,
+          mode: row.mode ?? 'realtime',
+          client_request_id: clientRequestId,
+          recorded_at_ms: row.recorded_at_ms,
+          started_at_ms: row.started_at_ms,
+          ended_at_ms: row.ended_at_ms,
+          occurrence_ref: occurrenceRef,
+          schedule_snapshot: scheduleSnapshot,
+          superseded_remote_meeting_id: null,
+        });
+        const create = nonCompleted[0] ?? createRows[0] ?? null;
+        const operationId = create?.operation_id ?? `meeting.create:${row.id}`;
+        if (create && create.status !== 'in_flight') {
+          const updated = await database.runAsync(
+            `UPDATE sync_outbox SET payload_json = ?, status = 'pending',
+               attempt_count = 0, next_attempt_at_ms = NULL,
+               last_error_code = NULL, request_payload_json = NULL,
+               claim_token = NULL, updated_at_ms = ?
+             WHERE operation_id = ? AND scope_key = ?
+               AND aggregate_type = 'meeting_note' AND aggregate_id = ?
+               AND operation_type = 'meeting.create'
+               AND status IN ('blocked', 'permanent_error', 'completed')`,
+            payloadJson,
+            repairedAtMs,
+            operationId,
+            scopeKey,
+            row.id,
+          );
+          if (updated.changes === 1) requeued += 1;
+        } else if (!create) {
+          const inserted = await transaction.insertOutbox({
+            operationId,
+            scopeKey,
+            aggregateType: 'meeting_note',
+            aggregateId: row.id,
+            operationType: 'meeting.create',
+            baseRevision: null,
+            payloadJson,
+            createdAtMs: Math.max(0, Math.min(row.created_at_ms, repairedAtMs)),
+          });
+          if (inserted) created += 1;
+        }
+        await database.runAsync(
+          `UPDATE meeting_notes SET sync_state = 'pending', updated_at_ms = ?
+           WHERE id = ? AND scope_key = ? AND lifecycle <> 'deleted'`,
+          repairedAtMs,
+          row.id,
+          scopeKey,
+        );
+        touched.push(row.id);
+      }
+      for (const meetingId of new Set(touched)) {
+        await refreshMeetingSyncState(database, meetingId, scopeKey);
+      }
+      return { created, requeued };
+    });
+    if (result.created > 0 || result.requeued > 0) {
+      const candidates = await openMeetingDatabase().then(database => (
+        database.getAllAsync<{ id: string }>(
+          `SELECT id FROM meeting_notes WHERE scope_key = ? AND remote_id IS NULL
+             AND lifecycle <> 'deleted'`,
+          scopeKey,
+        )
+      )).catch(() => []);
+      this.notify(candidates.map(item => item.id));
+    }
+    return result;
+  }
+
   async claimMeetingRootSyncOperations(
     scopeKey: ScopeKey,
     options: ClaimMeetingRootSyncOptions,
@@ -6082,11 +6412,19 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       );
       if (!operation) return false;
       await database.runAsync(
-        `INSERT OR IGNORE INTO sync_conflicts (
+        `INSERT INTO sync_conflicts (
            id, scope_key, aggregate_type, aggregate_id,
            local_revision, remote_revision, local_payload_json,
            remote_payload_json, status, created_at_ms
-         ) VALUES (?, ?, 'meeting_note', ?, ?, ?, ?, ?, 'unresolved', ?)`,
+         ) VALUES (?, ?, 'meeting_note', ?, ?, ?, ?, ?, 'unresolved', ?)
+         ON CONFLICT(id) DO UPDATE SET
+           local_revision = excluded.local_revision,
+           remote_revision = excluded.remote_revision,
+           local_payload_json = excluded.local_payload_json,
+           remote_payload_json = excluded.remote_payload_json,
+           status = 'unresolved', created_at_ms = excluded.created_at_ms,
+           resolved_at_ms = NULL
+         WHERE sync_conflicts.status = 'resolved'`,
         conflictId,
         claim.scopeKey,
         claim.meetingId,
@@ -6136,6 +6474,36 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return applied;
   }
 
+  async listMeetingRootSyncConflicts(
+    scopeKey: ScopeKey,
+  ): Promise<readonly MeetingRootSyncConflictRecord[]> {
+    assertScopeKey(scopeKey);
+    if (scopeKey === 'guest') return [];
+    const database = await openMeetingDatabase();
+    const rows = await database.getAllAsync<MeetingRootSyncConflictRow>(
+      `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+         conflict.local_revision, conflict.remote_revision,
+         conflict.local_payload_json, conflict.remote_payload_json,
+         conflict.created_at_ms
+       FROM sync_conflicts conflict
+       INNER JOIN meeting_notes meeting ON meeting.id = conflict.aggregate_id
+       WHERE conflict.scope_key = ? AND conflict.aggregate_type = 'meeting_note'
+         AND conflict.status = 'unresolved' AND meeting.scope_key = ?
+       ORDER BY conflict.created_at_ms, conflict.id`,
+      scopeKey,
+      scopeKey,
+    );
+    return rows.map(row => ({
+      id: row.id,
+      meetingId: row.meeting_id,
+      localRevision: row.local_revision,
+      remoteRevision: row.remote_revision,
+      localPayloadJson: row.local_payload_json,
+      remotePayloadJson: row.remote_payload_json,
+      createdAtMs: row.created_at_ms,
+    }));
+  }
+
   async getMeetingRootSyncConflict(
     meetingId: string,
     scopeKey: ScopeKey,
@@ -6169,6 +6537,247 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       remotePayloadJson: row.remote_payload_json,
       createdAtMs: row.created_at_ms,
     } : null;
+  }
+
+  async requeueMeetingRootSyncConflict(
+    input: RequeueMeetingRootSyncConflictInput,
+  ): Promise<boolean> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') {
+      throw new Error('guest meeting cannot requeue a root sync conflict');
+    }
+    assertRecordId(input.conflictId, 'meeting root conflict ID');
+    assertRecordId(input.meetingId, 'meeting ID');
+    if (input.remoteId !== null) assertRecordId(input.remoteId, 'meeting remote ID');
+    assertOptionalNonNegativeInteger(input.remoteRevision, 'meeting remote revision');
+    if (input.remoteRevision !== null && input.remoteRevision < 1) {
+      throw new Error('meeting remote revision is invalid');
+    }
+    assertNonNegativeInteger(input.retryAtMs, 'meeting root conflict retry time');
+    assertNonNegativeInteger(input.resolvedAtMs, 'meeting root conflict resolution time');
+    if (input.retryAtMs < input.resolvedAtMs) {
+      throw new Error('meeting root conflict retry time is invalid');
+    }
+
+    const applied = await withMeetingDatabaseTransaction(async database => {
+      const conflict = await database.getFirstAsync<MeetingRootSyncConflictRow>(
+        `SELECT conflict.id, conflict.aggregate_id AS meeting_id,
+           conflict.local_revision, conflict.remote_revision,
+           conflict.local_payload_json, conflict.remote_payload_json,
+           conflict.created_at_ms
+         FROM sync_conflicts conflict
+         WHERE conflict.id = ? AND conflict.scope_key = ?
+           AND conflict.aggregate_type = 'meeting_note'
+           AND conflict.aggregate_id = ? AND conflict.status = 'unresolved'`,
+        input.conflictId,
+        input.scopeKey,
+        input.meetingId,
+      );
+      if (!conflict) return false;
+      const meeting = await database.getFirstAsync<MeetingRow>(
+        'SELECT * FROM meeting_notes WHERE id = ? AND scope_key = ?',
+        input.meetingId,
+        input.scopeKey,
+      );
+      if (!meeting) return false;
+      if (meeting.remote_id !== null && input.remoteId !== null && meeting.remote_id !== input.remoteId) {
+        throw new Error('meeting root conflict remote identity changed');
+      }
+      if (meeting.remote_id === null && input.remoteId !== null) {
+        const owner = await database.getFirstAsync<{ id: string }>(
+          `SELECT id FROM meeting_notes
+           WHERE scope_key = ? AND remote_id = ? AND id <> ? LIMIT 1`,
+          input.scopeKey,
+          input.remoteId,
+          input.meetingId,
+        );
+        if (owner) throw new Error('meeting root conflict remote identity belongs to another local meeting');
+      }
+
+      const operationId = input.conflictId.startsWith('meeting-note:')
+        ? input.conflictId.slice('meeting-note:'.length)
+        : '';
+      if (!operationId) throw new Error('meeting root conflict operation identity is invalid');
+      const requeued = await database.runAsync(
+        `UPDATE sync_outbox SET status = 'retry', next_attempt_at_ms = ?,
+           last_error_code = 'automatic_revision_conflict_recovery',
+           -- Keep the original local mutation.  The retry worker uses the
+           -- refreshed remote revision from the claim as its optimistic
+           -- base; clearing this payload would turn the next attempt into an
+           -- invalid-local-payload failure and recreate the permanent block.
+           claim_token = NULL, updated_at_ms = ?
+         WHERE operation_id = ? AND scope_key = ?
+           AND aggregate_type = 'meeting_note' AND aggregate_id = ?
+           AND status IN ('blocked', 'permanent_error', 'retry')`,
+        input.retryAtMs,
+        input.resolvedAtMs,
+        operationId,
+         input.scopeKey,
+         input.meetingId,
+      );
+      let operationRecovered = requeued.changes === 1;
+      if (!operationRecovered) {
+        // A few pre-canonical builds marked the outbox row completed while
+        // retaining the conflict row.  There is no user action that can
+        // reconstruct that row, so rebuild one from the immutable conflict
+        // payload and the current local lifecycle.  The conflict is still
+        // resolved atomically below; audio/transcript rows are untouched.
+        const existing = await database.getFirstAsync<SyncOutboxRow>(
+          `SELECT * FROM sync_outbox
+           WHERE operation_id = ? AND scope_key = ?
+             AND aggregate_type = 'meeting_note' AND aggregate_id = ?`,
+          operationId,
+          input.scopeKey,
+          input.meetingId,
+        );
+        if (existing?.status === 'in_flight') return false;
+        const recoveryOperationId = existing
+          ? `${operationId}:auto-recovery:${input.resolvedAtMs}`.slice(0, 512)
+          : operationId;
+        let payloadKind: 'meeting.create' | 'meeting.update' | 'meeting.delete' =
+          input.remoteId === null && meeting.remote_id === null
+            ? 'meeting.create'
+            : meeting.lifecycle === 'deleted'
+              ? 'meeting.delete'
+              : 'meeting.update';
+        try {
+          const parsedPayload = JSON.parse(conflict.local_payload_json) as Record<string, unknown>;
+          if (parsedPayload && typeof parsedPayload === 'object') {
+            if (parsedPayload.changes && typeof parsedPayload.changes === 'object') {
+              payloadKind = 'meeting.update';
+            } else if (
+              Object.prototype.hasOwnProperty.call(parsedPayload, 'deleted_at_ms')
+              && !Object.prototype.hasOwnProperty.call(parsedPayload, 'client_request_id')
+            ) {
+              payloadKind = 'meeting.delete';
+            } else if (Object.prototype.hasOwnProperty.call(parsedPayload, 'client_request_id')) {
+              payloadKind = 'meeting.create';
+            }
+          }
+        } catch {
+          // The normal parser will report a malformed payload on the retry;
+          // choosing create here still gives the reconciler a finite retry
+          // path instead of a permanent conflict row.
+        }
+        const transaction = new SqliteMeetingTransaction(database);
+        operationRecovered = await transaction.insertOutbox({
+          operationId: recoveryOperationId,
+          scopeKey: input.scopeKey,
+          aggregateType: 'meeting_note',
+          aggregateId: input.meetingId,
+          operationType: payloadKind,
+          baseRevision: input.remoteRevision ?? meeting.remote_revision,
+          payloadJson: conflict.local_payload_json,
+          createdAtMs: input.resolvedAtMs,
+        });
+      }
+      if (!operationRecovered) return false;
+
+      if (input.remoteId !== null || input.remoteRevision !== null) {
+        await database.runAsync(
+          `UPDATE meeting_notes SET
+             remote_id = COALESCE(?, remote_id),
+             remote_revision = CASE
+               WHEN ? IS NULL THEN remote_revision
+               WHEN remote_revision IS NULL OR remote_revision < ? THEN ?
+               ELSE remote_revision
+             END,
+             sync_state = 'pending', updated_at_ms = ?
+           WHERE id = ? AND scope_key = ?`,
+          input.remoteId,
+          input.remoteRevision,
+          input.remoteRevision,
+          input.remoteRevision,
+          input.resolvedAtMs,
+          input.meetingId,
+          input.scopeKey,
+        );
+      } else {
+        await database.runAsync(
+          `UPDATE meeting_notes SET sync_state = 'pending', updated_at_ms = ?
+           WHERE id = ? AND scope_key = ?`,
+          input.resolvedAtMs,
+          input.meetingId,
+          input.scopeKey,
+        );
+      }
+      const resolved = await database.runAsync(
+        `UPDATE sync_conflicts SET status = 'resolved', resolved_at_ms = ?
+         WHERE id = ? AND scope_key = ? AND aggregate_type = 'meeting_note'
+           AND aggregate_id = ? AND status = 'unresolved'`,
+        input.resolvedAtMs,
+        input.conflictId,
+        input.scopeKey,
+        input.meetingId,
+      );
+      if (resolved.changes !== 1) {
+        throw new Error('meeting root conflict changed during automatic recovery');
+      }
+      await refreshMeetingSyncState(database, input.meetingId, input.scopeKey);
+      const transaction = new SqliteMeetingTransaction(database);
+      await transaction.advanceCanonicalWrite(input.scopeKey, input.resolvedAtMs);
+      return true;
+    });
+    if (applied) this.notify([input.meetingId]);
+    return applied;
+  }
+
+  async requeueStaleMeetingRootSyncOperations(
+    input: RequeueStaleMeetingRootSyncOperationsInput,
+  ): Promise<number> {
+    assertScopeKey(input.scopeKey);
+    if (input.scopeKey === 'guest') return 0;
+    assertNonNegativeInteger(input.retryAtMs, 'meeting root stale retry time');
+    assertNonNegativeInteger(input.updatedAtMs, 'meeting root stale update time');
+
+    const meetingIds = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<{ operation_id: string; meeting_id: string }>(
+        `SELECT outbox.operation_id, outbox.aggregate_id AS meeting_id
+         FROM sync_outbox outbox
+         INNER JOIN meeting_notes meeting ON meeting.id = outbox.aggregate_id
+         WHERE outbox.scope_key = ? AND meeting.scope_key = ?
+           AND outbox.aggregate_type = 'meeting_note'
+           AND outbox.status IN ('blocked', 'permanent_error')
+           AND outbox.last_error_code IN (
+             'revision_conflict', 'automatic_revision_conflict_recovery'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM sync_conflicts conflict
+             WHERE conflict.scope_key = outbox.scope_key
+               AND conflict.aggregate_type = 'meeting_note'
+               AND conflict.aggregate_id = outbox.aggregate_id
+               AND conflict.status = 'unresolved'
+           )
+         ORDER BY outbox.updated_at_ms, outbox.operation_id`,
+        input.scopeKey,
+        input.scopeKey,
+      );
+      const recovered: string[] = [];
+      for (const row of rows) {
+        const updated = await database.runAsync(
+          `UPDATE sync_outbox SET status = 'retry', next_attempt_at_ms = ?,
+             last_error_code = 'automatic_revision_conflict_recovery',
+             claim_token = NULL, updated_at_ms = ?
+           WHERE operation_id = ? AND scope_key = ?
+             AND aggregate_type = 'meeting_note'
+             AND status IN ('blocked', 'permanent_error')
+             AND last_error_code IN (
+               'revision_conflict', 'automatic_revision_conflict_recovery'
+             )`,
+          input.retryAtMs,
+          input.updatedAtMs,
+          row.operation_id,
+          input.scopeKey,
+        );
+        if (updated.changes === 1) recovered.push(row.meeting_id);
+      }
+      for (const meetingId of new Set(recovered)) {
+        await refreshMeetingSyncState(database, meetingId, input.scopeKey);
+      }
+      return recovered;
+    });
+    if (meetingIds.length > 0) this.notify([...new Set(meetingIds)]);
+    return meetingIds.length;
   }
 
   async resolveMeetingRootSyncConflict(
@@ -6491,6 +7100,72 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     });
     if (insertedMeetingIds.length > 0) this.notify(insertedMeetingIds);
     return insertedMeetingIds.length;
+  }
+
+  /**
+   * A file-import or ad-hoc meeting cannot carry a calendar occurrence in the
+   * canonical contract. Older builds could nevertheless leave the copied
+   * calendar link behind, which made the occurrence worker retry forever when
+   * the same calendar instance was already bound to another meeting. Remove
+   * only that invalid local projection and close its transport rows; the
+   * imported recording and all transcript/summary data stay untouched.
+   */
+  async repairInvalidOccurrenceSyncOperations(
+    scopeKey: Exclude<ScopeKey, 'guest'>,
+    repairedAtMs: number,
+  ): Promise<number> {
+    assertScopeKey(scopeKey);
+    assertNonNegativeInteger(repairedAtMs, 'invalid occurrence repair time');
+    const repairedMeetingIds = await withMeetingDatabaseTransaction(async database => {
+      const rows = await database.getAllAsync<{ meeting_id: string }>(
+        `SELECT link.meeting_id
+         FROM meeting_occurrence_links link
+         INNER JOIN meeting_notes meeting
+           ON meeting.id = link.meeting_id AND meeting.scope_key = link.scope_key
+         WHERE link.scope_key = ?
+           AND meeting.lifecycle <> 'deleted'
+           AND meeting.origin <> 'calendar'
+           AND EXISTS (
+             SELECT 1 FROM sync_outbox outbox
+             WHERE outbox.scope_key = link.scope_key
+               AND outbox.aggregate_type = 'meeting_occurrence'
+               AND outbox.aggregate_id = link.meeting_id
+               AND outbox.status <> 'completed'
+           )
+         ORDER BY link.meeting_id`,
+        scopeKey,
+      );
+      const touched: string[] = [];
+      for (const row of rows) {
+        await database.runAsync(
+          `UPDATE sync_outbox SET status = 'completed',
+             next_attempt_at_ms = NULL,
+             last_error_code = 'detached_invalid_local_occurrence',
+             claim_token = NULL,
+             request_payload_json = NULL,
+             updated_at_ms = ?
+           WHERE scope_key = ? AND aggregate_type = 'meeting_occurrence'
+             AND aggregate_id = ? AND status <> 'completed'`,
+          repairedAtMs,
+          scopeKey,
+          row.meeting_id,
+        );
+        await database.runAsync(
+          'DELETE FROM meeting_occurrence_links WHERE meeting_id = ? AND scope_key = ?',
+          row.meeting_id,
+          scopeKey,
+        );
+        await database.runAsync(
+          'DELETE FROM meeting_schedule_snapshots WHERE meeting_id = ?',
+          row.meeting_id,
+        );
+        await refreshMeetingSyncState(database, row.meeting_id, scopeKey);
+        touched.push(row.meeting_id);
+      }
+      return touched;
+    });
+    if (repairedMeetingIds.length > 0) this.notify(repairedMeetingIds);
+    return repairedMeetingIds.length;
   }
 
   async claimOccurrenceSyncOperations(
@@ -7623,8 +8298,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         return false;
       }
       if (row.status === 'completed' && input.status !== 'completed') return false;
+      const noSpeech = input.status === 'failed' && input.errorCode === 'no_speech';
       const status: RecordingAssetTranscriptionTaskRecord['status'] = input.status === 'failed'
-        ? input.retryable ? 'failed_retryable' : 'blocked'
+        ? noSpeech ? 'blocked' : input.retryable ? 'failed_retryable' : 'blocked'
         : input.status;
       const preserveSynced = status === 'completed'
         && row.status === 'completed'
@@ -7647,7 +8323,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.progress,
         input.resultRevisionId,
         input.status === 'failed' ? input.errorCode ?? 'transcription_failed' : null,
-        status === 'failed_retryable' ? 1 : 0,
+        status === 'failed_retryable' && !noSpeech ? 1 : 0,
         status === 'completed' || status === 'blocked' ? null : input.nextAttemptAtMs,
         input.remoteUpdatedAtMs,
         preserveSynced ? 1 : 0,
@@ -7747,6 +8423,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
              WHERE pending.scope_key = task.scope_key
                AND pending.meeting_id = task.meeting_id
                AND pending.status <> 'completed'
+               AND NOT (pending.status = 'blocked' AND pending.error_code = 'no_speech')
            )
          LIMIT 1`,
         scopeKey,
@@ -7952,6 +8629,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
            WHERE pending.scope_key = task.scope_key
              AND pending.meeting_id = task.meeting_id
              AND pending.status <> 'completed'
+             AND NOT (pending.status = 'blocked' AND pending.error_code = 'no_speech')
          )
        ORDER BY task.remote_meeting_id,
          CASE WHEN task.request_kind = 'reprocessed' THEN 0 ELSE 1 END,
@@ -11810,6 +12488,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
          WHERE meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
            AND action.status <> 'dismissed'
+           AND ${CURRENT_MEETING_ACTION_VISIBILITY_SQL}
            AND TRIM(action.content) <> ''`,
         scopeKey,
       );
@@ -11916,6 +12595,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
        LEFT JOIN transcript_segments segment ON segment.id = action.source_segment_id
        INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
        WHERE action.meeting_id = ? AND meeting.scope_key = ? AND meeting.lifecycle <> 'deleted'
+         AND ${CURRENT_MEETING_ACTION_VISIBILITY_SQL}
        ORDER BY CASE action.status WHEN 'pending' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,
          CASE WHEN action.due_at_ms IS NULL THEN 1 ELSE 0 END,
          action.due_at_ms, action.created_at_ms, action.id`,
@@ -13620,11 +14300,14 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          LEFT JOIN transcript_segments segment ON segment.id = action.source_segment_id
          INNER JOIN meeting_notes meeting ON meeting.id = action.meeting_id
          WHERE action.meeting_id = ? AND meeting.scope_key = ?
+           AND ${SUMMARY_VERSION_ACTION_VISIBILITY_SQL}
          ORDER BY CASE action.status WHEN 'pending' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,
            CASE WHEN action.due_at_ms IS NULL THEN 1 ELSE 0 END,
            action.due_at_ms, action.created_at_ms, action.id`,
         version.meeting_id,
         scopeKey,
+        version.id,
+        version.id,
       ),
     ]);
     return {

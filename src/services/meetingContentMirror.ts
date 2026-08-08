@@ -624,14 +624,77 @@ export function mirrorLegacySummaryContent(
           currentMatchesUndeclaredSource = current.id
             === `${note.id}:summary:${document.templateId}:${currentSourceFingerprint}`;
         }
-        if (currentMatchesUndeclaredSource) {
+        if (current && currentMatchesUndeclaredSource) {
           replaceLegacyProjection = !currentProtected;
+          if (
+            current.status === 'stale'
+            && !currentProtected
+            && sourceTranscriptStillActive
+            && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
+            && current.manualNoteRevision === summaryPayload.manualNoteRevision
+          ) {
+            const restored = await transaction.restoreCurrentSummaryReady(
+              note.id,
+              scopeKey,
+              current.id,
+            );
+            if (restored) {
+              const stage = await transaction.getStage(note.id, scopeKey, 'summary');
+              if (!stage) throw new Error('meeting summary processing stage is missing');
+              const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+              await transaction.upsertStage(transitionProcessingStage(stage, {
+                stage: 'summary',
+                status: 'ready',
+                progress: 1,
+                jobId: null,
+                inputFingerprint: current.inputFingerprint,
+              }, nowMs), scopeKey);
+              await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+              if (options.canonicalWrite) {
+                canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+              }
+              mirrorStatus = 'restored_ready';
+              return;
+            }
+          }
           mirrorStatus = 'unchanged';
           return;
         }
         if (existingVersion) {
           const remainsCurrent = current?.id === versionId;
           replaceLegacyProjection = remainsCurrent && !currentProtected;
+          if (
+            remainsCurrent
+            && current?.status === 'stale'
+            && !currentProtected
+            && sourceTranscriptStillActive
+            && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
+            && current.manualNoteRevision === summaryPayload.manualNoteRevision
+          ) {
+            const restored = await transaction.restoreCurrentSummaryReady(
+              note.id,
+              scopeKey,
+              current.id,
+            );
+            if (restored) {
+              const stage = await transaction.getStage(note.id, scopeKey, 'summary');
+              if (!stage) throw new Error('meeting summary processing stage is missing');
+              const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
+              await transaction.upsertStage(transitionProcessingStage(stage, {
+                stage: 'summary',
+                status: 'ready',
+                progress: 1,
+                jobId: null,
+                inputFingerprint: current.inputFingerprint,
+              }, nowMs), scopeKey);
+              await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+              if (options.canonicalWrite) {
+                canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+              }
+              mirrorStatus = 'restored_ready';
+              return;
+            }
+          }
           mirrorStatus = remainsCurrent ? 'unchanged' : 'preserved_existing_candidate';
           return;
         }

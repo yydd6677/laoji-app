@@ -79,7 +79,7 @@ export class MeetingQuestionAuthenticationRequiredError extends Error {
 }
 
 function meetingApiUrl(path: string): string {
-  return `${getApiConfig().meetingApiBase.replace(/\/+$/, '')}${path}`;
+  return `${getApiConfig().apiBase.replace(/\/+$/, '')}${path}`;
 }
 
 export async function askMeetingQuestionRemote(input: {

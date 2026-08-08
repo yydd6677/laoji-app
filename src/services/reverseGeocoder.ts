@@ -23,6 +23,8 @@ export type ReverseGeocoderFetch = (
   },
 ) => Promise<ReverseGeocoderHttpResponse>;
 
+export type ReverseGeocoderAccessToken = () => Promise<string | null>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -161,6 +163,7 @@ export function createHttpReverseGeocoder(
   url: string,
   fetchImpl: ReverseGeocoderFetch = defaultFetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  accessToken: ReverseGeocoderAccessToken | null = null,
 ): ReverseGeocoderAdapter {
   const endpoint = endpointUrl(url);
   const requestTimeoutMs = timeoutValue(timeoutMs);
@@ -174,22 +177,26 @@ export function createHttpReverseGeocoder(
         // A server can accept the connection and then never finish `text()`;
         // timing only the first promise would leave the UI waiting forever.
         const request = Promise.resolve()
-          .then(() => fetchImpl(endpoint, {
-            method: 'POST',
-            headers: {
-              accept: 'application/json',
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-              schema_version: 1,
-              latitude: fix.latitude,
-              longitude: fix.longitude,
-              accuracy_meters: fix.accuracyMeters,
-              timestamp_ms: fix.timestampMs,
-              source: fix.source,
-            }),
-            ...(controller ? { signal: controller.signal } : {}),
-          }))
+          .then(async () => {
+            const token = await accessToken?.().catch(() => null);
+            return fetchImpl(endpoint, {
+              method: 'POST',
+              headers: {
+                accept: 'application/json',
+                'content-type': 'application/json',
+                ...(token ? { authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                schema_version: 1,
+                latitude: fix.latitude,
+                longitude: fix.longitude,
+                accuracy_meters: fix.accuracyMeters,
+                timestamp_ms: fix.timestampMs,
+                source: fix.source,
+              }),
+              ...(controller ? { signal: controller.signal } : {}),
+            });
+          })
           .then(async response => {
             if (!response.ok || response.status < 200 || response.status >= 300) {
               throw new Error('reverse geocoder request failed');

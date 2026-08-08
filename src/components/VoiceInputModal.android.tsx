@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, PermissionsAndroid } from 'react-native';
+import { AppState, InteractionManager, PermissionsAndroid } from 'react-native';
 import { NavigationProp, useIsFocused, useNavigation } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
@@ -53,6 +53,10 @@ type Phase = ScheduleVoiceSnapshot['phase'];
 type ActiveScheduleRecording = {
   session: ApiGuestRealtimeSession;
   sessionId: string;
+};
+
+type WarmGuestSession = {
+  promise: Promise<ApiGuestRealtimeSession>;
 };
 
 function dateLabel(value: string): string {
@@ -160,14 +164,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const activeRef = useRef<ActiveScheduleRecording | null>(null);
   const transcriptRef = useRef(new Map<string, { text: string; startMs: number | null }>());
   const stopPromiseRef = useRef<Promise<ParseResult | null> | null>(null);
+  const warmGuestSessionRef = useRef<WarmGuestSession | null>(null);
   const mountedRef = useRef(true);
   const runRef = useRef(0);
   const createRequestRef = useRef(createClientRequestState('event'));
   const ownerId = useMemo(() => createNativeOverlayOwnerId('schedule-voice'), []);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-
-  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const currentTranscript = useCallback(() => [...transcriptRef.current.values()]
     .sort((left, right) => (left.startMs ?? Number.MAX_SAFE_INTEGER) - (right.startMs ?? Number.MAX_SAFE_INTEGER))
@@ -227,6 +230,35 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     await deleteGuestRealtimeSession(active.session.meeting_id, active.session.guest_token).catch(() => undefined);
   }, []);
 
+  const createWarmGuestSession = useCallback((): WarmGuestSession => {
+    const existing = warmGuestSessionRef.current;
+    if (existing) return existing;
+    const warm: WarmGuestSession = {
+      promise: createGuestRealtimeSession('日程语音输入'),
+    };
+    warmGuestSessionRef.current = warm;
+    void warm.promise.catch(() => {
+      if (warmGuestSessionRef.current === warm) warmGuestSessionRef.current = null;
+    });
+    return warm;
+  }, []);
+
+  const claimWarmGuestSession = useCallback((): Promise<ApiGuestRealtimeSession> => {
+    const warm = createWarmGuestSession();
+    if (warmGuestSessionRef.current === warm) warmGuestSessionRef.current = null;
+    return warm.promise;
+  }, [createWarmGuestSession]);
+
+  const discardWarmGuestSession = useCallback(async () => {
+    const warm = warmGuestSessionRef.current;
+    warmGuestSessionRef.current = null;
+    if (!warm) return;
+    const session = await warm.promise.catch(() => null);
+    if (session) {
+      await deleteGuestRealtimeSession(session.meeting_id, session.guest_token).catch(() => undefined);
+    }
+  }, []);
+
   const stopAndDiscard = useCallback(async () => {
     const active = activeRef.current;
     activeRef.current = null;
@@ -241,6 +273,23 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     }
   }, [releaseGuestSession]);
 
+  // Keep one short-lived guest lease ready while the calendar screen is open.
+  // The request is deferred until the first interaction batch has completed so
+  // it cannot extend the app's first-frame work, but it normally finishes
+  // before the user reaches the microphone button.
+  useEffect(() => {
+    if (!hasNativeRecorder()) return undefined;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      createWarmGuestSession();
+    });
+    return () => {
+      interaction.cancel();
+      mountedRef.current = false;
+      runRef.current += 1;
+      void Promise.allSettled([stopAndDiscard(), discardWarmGuestSession()]);
+    };
+  }, [createWarmGuestSession, discardWarmGuestSession, stopAndDiscard]);
+
   useEffect(() => {
     if (visible) {
       setPhase('input');
@@ -250,12 +299,17 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setText('');
       transcriptRef.current.clear();
       createRequestRef.current = createClientRequestState('event');
+      // The transient session lasts two hours. Preparing it while the sheet is
+      // entering removes the public HTTP round trip from the microphone press.
+      createWarmGuestSession();
       return undefined;
     }
     runRef.current += 1;
+    // A prewarmed lease remains available across sheet open/close cycles. It
+    // is released on component unmount or once it is claimed by a recording.
     void stopAndDiscard();
     return undefined;
-  }, [stopAndDiscard, visible]);
+  }, [createWarmGuestSession, discardWarmGuestSession, stopAndDiscard, visible]);
 
   const close = useCallback(() => {
     runRef.current += 1;
@@ -287,30 +341,42 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setText('');
     let guestSession: ApiGuestRealtimeSession | null = null;
     try {
-      const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+      const permissionPromise = PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)
+        .then(granted => granted
+          ? PermissionsAndroid.RESULTS.GRANTED
+          : PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO));
+      const guestSessionPromise = claimWarmGuestSession();
+      const [permissionResult, guestSessionResult] = await Promise.allSettled([
+        permissionPromise,
+        guestSessionPromise,
+      ]);
+      if (permissionResult.status === 'rejected') throw permissionResult.reason;
+      if (guestSessionResult.status === 'rejected') throw guestSessionResult.reason;
+      guestSession = guestSessionResult.value;
+      const permission = permissionResult.value;
       if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+        await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => undefined);
+        guestSession = null;
         setPhase('input');
         showDialog({ title: '无法录音', message: '请在系统设置中允许老记使用麦克风。', tone: 'warning' });
         return;
       }
-      guestSession = await createGuestRealtimeSession('日程语音输入');
       if (runRef.current !== runId) {
         await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => undefined);
         return;
       }
       const config = getApiConfig();
+      const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
       const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(
         config.isProduction,
-        config.realtimeAsrSecure,
+        realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
       const websocketUrl = buildRealtimeAsrUrl({
         meetingId: guestSession.meeting_id,
         purpose: 'schedule',
         provider: config.realtimeAsrProvider,
-        host: config.realtimeAsrHost,
-        port: config.realtimeAsrPort,
-        secure: config.realtimeAsrSecure,
+        realtimeAsrBase: config.realtimeAsrBase,
       });
       activeRef.current = {
         session: guestSession,
@@ -337,7 +403,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setError(scheduleVoiceErrorMessage(reason, '语音服务连接失败，请稍后重试。'));
       }
     }
-  }, [phase, releaseGuestSession, showDialog]);
+  }, [claimWarmGuestSession, phase, releaseGuestSession, showDialog]);
 
   const parseSourceText = useCallback(async (sourceText: string): Promise<ParseResult> => {
     return parseText(sourceText.trim());
@@ -574,8 +640,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   }, [ownerId, snapshot, visible]);
 
   useEffect(() => () => {
+    void discardWarmGuestSession();
     void dismissNativeWindowOverlay(ownerId, 'schedule-voice', 'component-unmounted');
-  }, [ownerId]);
+  }, [discardWarmGuestSession, ownerId]);
 
   return null;
 }

@@ -123,8 +123,12 @@ function compatibilityTags(
   if (scopeKey !== 'guest' && item.mode) {
     tags.push({ label: item.mode === 'offline' ? '离线' : '实时', color: C.blue });
   }
-  if (item.syncState === 'pending') tags.push({ label: '待同步', color: C.orange });
-  if (item.syncState === 'conflicted') tags.push({ label: '同步冲突', color: C.red });
+  // Revision conflicts are reconciled by the background worker.  They are an
+  // implementation state, not a user-facing version-choice workflow; keep the
+  // card in the ordinary pending-sync state while the worker retries.
+  if (item.syncState === 'pending' || item.syncState === 'conflicted') {
+    tags.push({ label: '待同步', color: C.orange });
+  }
   if (uploadBlocked) tags.push({ label: '上传受阻', color: C.red });
   else if (uploadPending) tags.push({ label: '待上传', color: C.orange });
   return tags;
@@ -185,7 +189,10 @@ function compatibilityMeeting(
     hasTranscript: item.activeTranscriptSegmentCount > 0 || stageStatus(item, 'transcript') === 'ready',
     hasSummary: item.currentSummaryReady || stageStatus(item, 'summary') === 'ready',
     status,
-    statusSyncPending: item.syncState === 'pending',
+    // A root revision conflict is an automatic retry state, never a manual
+    // choice. Keep the compatibility projection pending until the worker
+    // finishes so the card cannot expose a permanent conflict label.
+    statusSyncPending: item.syncState === 'pending' || item.syncState === 'conflicted',
     mode: item.mode ?? 'realtime',
     description: item.description,
     location: item.location,
@@ -260,6 +267,32 @@ export async function buildCanonicalMeetingReadProjection(
     }));
   }
   return { meetings, transcripts, summaries, canonicalIdByLegacyId };
+}
+
+/**
+ * Fast cold-start projection for the list surface. Root rows and processing
+ * stages are enough to render cards; transcript/summary bodies are hydrated by
+ * the full projection immediately afterward.
+ */
+export async function buildCanonicalMeetingListProjection(
+  repository: MeetingNoteRepository,
+  scopeKey: ScopeKey,
+): Promise<MeetingReadProjection> {
+  const rawItems = await listAllMeetings(repository, scopeKey);
+  const items = sortMeetingDisplayItems(
+    rawItems,
+    await repository.listMeetingDisplayOrder(scopeKey),
+  );
+  const meetings = items.map(item => compatibilityMeeting(item, scopeKey));
+  const canonicalIdByLegacyId: Record<string, string> = {};
+  items.forEach(item => {
+    const legacyId = legacyIdentityForRepositoryItem(item, scopeKey);
+    if (canonicalIdByLegacyId[legacyId]) {
+      throw new Error('meeting canonical list projection has duplicate compatibility identity');
+    }
+    canonicalIdByLegacyId[legacyId] = item.id;
+  });
+  return { meetings, transcripts: {}, summaries: {}, canonicalIdByLegacyId };
 }
 
 function normalizedTimestamp(value: string | undefined): number | null {

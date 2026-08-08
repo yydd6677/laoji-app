@@ -21,7 +21,7 @@ npm run android
 
 `.env.example` 只使用文档域名。请在本机 `.env.local` 中设置自己的 API、WebSocket、隐私政策、用户协议和账号删除地址；`.env.local` 已被 Git 忽略。
 
-实时语音配置中的 `EXPO_PUBLIC_REALTIME_ASR_HOST` 只填写主机名，不包含协议或路径。生产构建必须使用 HTTPS/WSS 域名，并将 `EXPO_PUBLIC_REALTIME_ASR_SECURE` 设为 `true`。
+所有 HTTP 与实时语音请求统一由 `EXPO_PUBLIC_API_BASE` 派生。默认为 `https://laoji.cloud`，对应 WebSocket 为 `wss://laoji.cloud`。
 
 ## 验证
 

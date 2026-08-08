@@ -54,7 +54,7 @@ function validToken(value: string): string {
 }
 
 function apiBase(): string {
-  return getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  return getApiConfig().apiBase.replace(/\/+$/, '');
 }
 
 export interface MeetingActionShareRemoteReceipt {

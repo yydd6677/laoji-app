@@ -347,6 +347,8 @@ data class MinutesDetailState(
   val title: String = "会议记录",
   val dateTimeLabel: String = "",
   val location: String = "",
+  val locationLoading: Boolean = false,
+  val canEditLocation: Boolean = false,
   val activeTab: MinutesDetailTab = MinutesDetailTab.NOTES,
   val tabGeneration: Int = 0,
   val activeTabIsExplicit: Boolean = false,
@@ -501,8 +503,17 @@ object MinutesStateReducer {
       return next
     }
 
-    fun fresh(tab: MinutesDetailTab): Boolean =
-      nextDetail.pageState(tab).generation >= currentDetail.pageState(tab).generation
+    fun fresh(tab: MinutesDetailTab): Boolean {
+      val incoming = nextDetail.pageState(tab)
+      val currentPage = currentDetail.pageState(tab)
+      if (incoming.generation != currentPage.generation) {
+        return incoming.generation > currentPage.generation
+      }
+      // React/native snapshots can arrive out of order at the same generation.
+      // Never let an older loading projection replace a terminal page state.
+      return !(currentPage.phase != MinutesContentPhase.LOADING
+        && incoming.phase == MinutesContentPhase.LOADING)
+    }
 
     val transcriptFresh = fresh(MinutesDetailTab.TRANSCRIPT)
     val notesFresh = fresh(MinutesDetailTab.NOTES)
@@ -519,11 +530,48 @@ object MinutesStateReducer {
       info = if (infoFresh) nextDetail.pageStates.info else currentDetail.pageStates.info,
     )
     val activeTab = if (tabFresh) nextDetail.activeTab else currentDetail.activeTab
+    fun summaryProcessing(detail: MinutesDetailState): Boolean =
+      detail.summaryGenerating
+        || detail.processingRetryStage == MinutesProcessingStage.SUMMARY
+        || detail.processingStatusLabel.contains("整理")
+        || detail.processingStatusLabel.contains("总结")
+        || detail.pageState(MinutesDetailTab.SUMMARY).phase == MinutesContentPhase.LOADING
+        || detail.pageState(MinutesDetailTab.SUMMARY).phase == MinutesContentPhase.ERROR
+    fun transcriptProcessing(detail: MinutesDetailState): Boolean =
+      detail.processingRetryStage == MinutesProcessingStage.TRANSCRIPT
+        || detail.processingStatusLabel.contains("文字")
+        || detail.processingStatusLabel.contains("转写")
+        || detail.pageState(MinutesDetailTab.TRANSCRIPT).phase == MinutesContentPhase.LOADING
+        || detail.pageState(MinutesDetailTab.TRANSCRIPT).phase == MinutesContentPhase.ERROR
+    // Aggregate processing text is derived from one of the page requests. If
+    // either snapshot is in that page's domain, apply the same freshness rule
+    // so a late page response cannot resurrect an obsolete global banner.
+    val processingFresh = when {
+      summaryProcessing(currentDetail) || summaryProcessing(nextDetail) -> summaryFresh
+      transcriptProcessing(currentDetail) || transcriptProcessing(nextDetail) -> transcriptFresh
+      else -> true
+    }
 
     return next.copy(
       detail = nextDetail.copy(
         activeTab = activeTab,
         tabGeneration = if (tabFresh) nextDetail.tabGeneration else currentDetail.tabGeneration,
+        // These controls are projections of a page request, not independent
+        // global state. A late snapshot from before a summary/transcript
+        // request must not switch the action slot back to its old label or
+        // clear the running state while the newer page is still rendering.
+        canGenerateSummary = if (transcriptFresh) {
+          nextDetail.canGenerateSummary
+        } else {
+          currentDetail.canGenerateSummary
+        },
+        summaryGenerating = if (summaryFresh) nextDetail.summaryGenerating else currentDetail.summaryGenerating,
+        summaryActionLabel = if (summaryFresh) nextDetail.summaryActionLabel else currentDetail.summaryActionLabel,
+        summarySyncConflict = if (summaryFresh) nextDetail.summarySyncConflict else currentDetail.summarySyncConflict,
+        processingStatusLabel = if (processingFresh) nextDetail.processingStatusLabel else currentDetail.processingStatusLabel,
+        processingStatusTone = if (processingFresh) nextDetail.processingStatusTone else currentDetail.processingStatusTone,
+        processingRetryStage = if (processingFresh) nextDetail.processingRetryStage else currentDetail.processingRetryStage,
+        processingRetrying = if (processingFresh) nextDetail.processingRetrying else currentDetail.processingRetrying,
         manualNote = if (notesFresh) nextDetail.manualNote else currentDetail.manualNote,
         manualNoteLoading = if (notesFresh) nextDetail.manualNoteLoading else currentDetail.manualNoteLoading,
         manualNoteSaving = if (notesFresh) nextDetail.manualNoteSaving else currentDetail.manualNoteSaving,

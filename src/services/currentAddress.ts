@@ -22,6 +22,7 @@ import {
   type ReverseGeocoderAdapter,
 } from './currentAddressPolicy';
 import { createHttpReverseGeocoder } from './reverseGeocoder';
+import { loadStoredToken } from './auth';
 
 const CURRENT_LOCATION_TIMEOUT_MS = 12_000;
 const NATIVE_LOCATION_TIMEOUT_MS = 10_000;
@@ -143,7 +144,12 @@ function configuredGeocoder(): ReverseGeocoderAdapter | null {
   const url = getApiConfig().reverseGeocoderUrl;
   if (!url) return null;
   try {
-    return createHttpReverseGeocoder(url, undefined, CONFIGURED_GEOCODER_TIMEOUT_MS);
+    return createHttpReverseGeocoder(
+      url,
+      undefined,
+      CONFIGURED_GEOCODER_TIMEOUT_MS,
+      loadStoredToken,
+    );
   } catch {
     // Configuration validation normally rejects this before a build is made;
     // keep a malformed runtime extra fail-closed and retain coordinate fallback.

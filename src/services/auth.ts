@@ -69,7 +69,7 @@ function toSession(data: ApiAuthSession): AuthSession {
 function resolveApiUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   if (/^https?:\/\//i.test(value) || value.startsWith('file://')) return value;
-  const base = getApiConfig().laojiApiBase.replace(/\/$/, '');
+  const base = getApiConfig().apiBase.replace(/\/$/, '');
   return `${base}/${value.replace(/^\//, '')}`;
 }
 
@@ -143,7 +143,7 @@ export async function registerAccount(
   password: string,
   nickname?: string,
 ): Promise<AuthSession> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/register`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account, password, nickname }),
@@ -152,7 +152,7 @@ export async function registerAccount(
 }
 
 export async function loginAccount(account: string, password: string): Promise<AuthSession> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/login`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account, password }),
@@ -161,7 +161,7 @@ export async function loginAccount(account: string, password: string): Promise<A
 }
 
 export async function refreshAccountSession(accessToken: string): Promise<AuthSession> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/refresh`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/refresh`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -169,14 +169,14 @@ export async function refreshAccountSession(accessToken: string): Promise<AuthSe
 }
 
 export async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me`, {
     headers: bearer(accessToken),
   });
   return normalizeAuthUser(await parseJsonResponse<AuthUser>(res, '恢复登录失败', { unauthorizedToken: accessToken }));
 }
 
 export async function logoutAccount(accessToken: string): Promise<void> {
-  await fetch(`${getApiConfig().laojiApiBase}/api/auth/logout`, {
+  await fetch(`${getApiConfig().apiBase}/api/auth/logout`, {
     method: 'POST',
     headers: bearer(accessToken),
   });
@@ -187,7 +187,7 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<void> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/change-password`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/change-password`, {
     method: 'POST',
     headers: { ...bearer(accessToken), 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
@@ -209,7 +209,7 @@ export async function deleteAccount(
   currentPassword: string,
   confirmation: string,
 ): Promise<AccountDeleteResult> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me`, {
     method: 'DELETE',
     headers: { ...bearer(accessToken), 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password: currentPassword, confirmation }),
@@ -218,7 +218,7 @@ export async function deleteAccount(
 }
 
 export async function requestPasswordReset(account: string): Promise<{ request_id?: string; message?: string }> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/password-reset-requests`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/password-reset-requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account }),
@@ -227,7 +227,7 @@ export async function requestPasswordReset(account: string): Promise<{ request_i
 }
 
 export async function fetchRemoteProfile(accessToken: string): Promise<RemoteProfile> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me/profile`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me/profile`, {
     headers: bearer(accessToken),
   });
   return normalizeRemoteProfile(await parseJsonResponse<RemoteProfile>(res, '获取资料失败', { unauthorizedToken: accessToken }));
@@ -237,7 +237,7 @@ export async function updateRemoteProfile(
   accessToken: string,
   profile: RemoteProfile,
 ): Promise<RemoteProfile> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me/profile`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me/profile`, {
     method: 'PATCH',
     headers: { ...bearer(accessToken), 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
@@ -265,7 +265,7 @@ export async function uploadRemoteAvatar(
 ): Promise<RemoteProfile> {
   const form = new FormData();
   form.append('file', { uri, name: fileName, type: mimeType } as any);
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me/avatar`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me/avatar`, {
     method: 'POST',
     headers: bearer(accessToken),
     body: form,
@@ -274,7 +274,7 @@ export async function uploadRemoteAvatar(
 }
 
 export async function deleteRemoteAvatar(accessToken: string): Promise<RemoteProfile> {
-  const res = await fetch(`${getApiConfig().laojiApiBase}/api/auth/me/avatar`, {
+  const res = await fetch(`${getApiConfig().apiBase}/api/auth/me/avatar`, {
     method: 'DELETE',
     headers: bearer(accessToken),
   });

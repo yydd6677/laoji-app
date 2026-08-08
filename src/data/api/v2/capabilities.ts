@@ -174,7 +174,7 @@ async function readCache(): Promise<CapabilityCache | null> {
 }
 
 async function fetchRemoteCapabilities(accessToken?: string | null): Promise<MeetingCapabilities> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(`${base}/api/laoji/capabilities`, {
     headers: {
       Accept: 'application/json',

@@ -9,19 +9,13 @@ declare const process:
   | { env?: Record<string, string | undefined> }
   | undefined;
 
-const DEFAULT_REALTIME_ASR_PORT = 18020;
+const DEFAULT_API_BASE = 'https://laoji.cloud';
 
-export type RealtimeAsrProvider = 'whisper' | 'qwen';
+export type RealtimeAsrProvider = 'qwen';
 
 interface ApiConfigSource {
   appEnv?: string;
-  laojiApiBase?: string;
-  meetingApiBase?: string;
-  realtimeAsrHost?: string;
-  realtimeAsrPort?: string | number;
-  realtimeAsrSecure?: string | boolean;
-  realtimeAsrProvider?: string;
-  reverseGeocoderUrl?: string;
+  apiBase?: string;
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
   accountDeletionUrl?: string;
@@ -29,11 +23,8 @@ interface ApiConfigSource {
 
 export interface ApiConfig {
   appEnv: string;
-  laojiApiBase: string;
-  meetingApiBase: string;
-  realtimeAsrHost: string;
-  realtimeAsrPort: number;
-  realtimeAsrSecure: boolean;
+  apiBase: string;
+  realtimeAsrBase: string;
   realtimeAsrProvider: RealtimeAsrProvider;
   reverseGeocoderUrl: string;
   privacyPolicyUrl: string;
@@ -78,26 +69,17 @@ function validServiceUrl(value: string, production: boolean): boolean {
   }
 }
 
-function validRealtimeHost(host: string, production: boolean): boolean {
-  const clean = host.trim();
-  if (!clean || clean.includes('/') || clean.includes('://')) return false;
-  if (production) return !isIpLiteral(clean) && isDomainName(clean);
-  return clean === 'localhost' || isIpLiteral(clean) || isDomainName(clean);
-}
-
-function envBool(value: string | boolean | undefined): boolean {
-  if (typeof value === 'boolean') return value;
-  return ['1', 'true', 'yes', 'on'].includes((value ?? '').trim().toLowerCase());
-}
-
-function envInt(value: string | number | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function realtimeAsrProvider(value: string | undefined): RealtimeAsrProvider {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === 'whisper' ? normalized : 'qwen';
+function realtimeBaseUrl(apiBase: string): string {
+  if (!apiBase) return '';
+  try {
+    const parsed = new URL(apiBase);
+    if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+    else if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+    else return '';
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
 }
 
 function runtimeSource(): ApiConfigSource {
@@ -105,13 +87,7 @@ function runtimeSource(): ApiConfigSource {
   const runtimeEnv = typeof process !== 'undefined' ? process.env : undefined;
   return {
     appEnv: runtimeEnv?.APP_ENV || runtimeEnv?.EAS_BUILD_PROFILE || extra.appEnv,
-    laojiApiBase: runtimeEnv?.EXPO_PUBLIC_LAOJI_API_BASE || extra.laojiApiBase,
-    meetingApiBase: runtimeEnv?.EXPO_PUBLIC_MEETING_API_BASE || extra.meetingApiBase,
-    realtimeAsrHost: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_HOST || extra.realtimeAsrHost,
-    realtimeAsrPort: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PORT || extra.realtimeAsrPort,
-    realtimeAsrSecure: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_SECURE ?? extra.realtimeAsrSecure,
-    realtimeAsrProvider: runtimeEnv?.EXPO_PUBLIC_REALTIME_ASR_PROVIDER || extra.realtimeAsrProvider,
-    reverseGeocoderUrl: runtimeEnv?.EXPO_PUBLIC_REVERSE_GEOCODER_URL || extra.reverseGeocoderUrl,
+    apiBase: runtimeEnv?.EXPO_PUBLIC_API_BASE || extra.apiBase,
     privacyPolicyUrl: runtimeEnv?.EXPO_PUBLIC_PRIVACY_POLICY_URL || extra.privacyPolicyUrl,
     termsOfServiceUrl: runtimeEnv?.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || extra.termsOfServiceUrl,
     accountDeletionUrl: runtimeEnv?.EXPO_PUBLIC_ACCOUNT_DELETION_URL || extra.accountDeletionUrl,
@@ -120,43 +96,36 @@ function runtimeSource(): ApiConfigSource {
 
 export function getApiConfig(source: ApiConfigSource = runtimeSource()): ApiConfig {
   const appEnv = String(source.appEnv ?? '').trim().toLowerCase();
-  const laojiApiBase = normalizeBaseUrl(String(source.laojiApiBase ?? ''));
+  const apiBase = normalizeBaseUrl(String(source.apiBase ?? DEFAULT_API_BASE));
   return {
     appEnv,
-    laojiApiBase,
-    meetingApiBase: normalizeBaseUrl(String(source.meetingApiBase ?? '')),
-    realtimeAsrHost: String(source.realtimeAsrHost ?? '').trim(),
-    realtimeAsrPort: envInt(source.realtimeAsrPort, DEFAULT_REALTIME_ASR_PORT),
-    realtimeAsrSecure: envBool(source.realtimeAsrSecure),
-    realtimeAsrProvider: realtimeAsrProvider(source.realtimeAsrProvider),
-    reverseGeocoderUrl: normalizeBaseUrl(String(source.reverseGeocoderUrl ?? '')),
-    privacyPolicyUrl: normalizeBaseUrl(String(source.privacyPolicyUrl ?? (laojiApiBase ? `${laojiApiBase}/privacy` : ''))),
-    termsOfServiceUrl: normalizeBaseUrl(String(source.termsOfServiceUrl ?? (laojiApiBase ? `${laojiApiBase}/terms` : ''))),
-    accountDeletionUrl: normalizeBaseUrl(String(source.accountDeletionUrl ?? (laojiApiBase ? `${laojiApiBase}/account-deletion` : ''))),
+    apiBase,
+    realtimeAsrBase: realtimeBaseUrl(apiBase),
+    realtimeAsrProvider: 'qwen',
+    reverseGeocoderUrl: apiBase ? `${apiBase}/api/location/reverse` : '',
+    privacyPolicyUrl: normalizeBaseUrl(String(source.privacyPolicyUrl ?? (apiBase ? `${apiBase}/privacy` : ''))),
+    termsOfServiceUrl: normalizeBaseUrl(String(source.termsOfServiceUrl ?? (apiBase ? `${apiBase}/terms` : ''))),
+    accountDeletionUrl: normalizeBaseUrl(String(source.accountDeletionUrl ?? (apiBase ? `${apiBase}/account-deletion` : ''))),
     isProduction: isSecureDeploymentMode(appEnv),
   };
 }
 
 export function assertProductionApiConfig(config: ApiConfig = getApiConfig()): void {
-  if (!config.laojiApiBase || !config.meetingApiBase || !config.realtimeAsrHost
+  if (!config.apiBase || !config.realtimeAsrBase
       || !config.privacyPolicyUrl || !config.termsOfServiceUrl || !config.accountDeletionUrl) {
-    throw new Error('API endpoint configuration is missing. Rebuild LaoJi with the required EXPO_PUBLIC_* values.');
-  }
-  if (!Number.isInteger(config.realtimeAsrPort) || config.realtimeAsrPort < 1 || config.realtimeAsrPort > 65535) {
-    throw new Error('Realtime ASR port configuration is invalid.');
+    throw new Error('API endpoint configuration is missing. Rebuild LaoJi with EXPO_PUBLIC_API_BASE.');
   }
   if (!config.isProduction) return;
 
   const urls = [
-    config.laojiApiBase,
-    config.meetingApiBase,
-    ...(config.reverseGeocoderUrl ? [config.reverseGeocoderUrl] : []),
+    config.apiBase,
+    config.reverseGeocoderUrl,
     config.privacyPolicyUrl,
     config.termsOfServiceUrl,
     config.accountDeletionUrl,
   ];
   const hasInvalidUrl = urls.some(url => !validServiceUrl(url, true));
-  if (hasInvalidUrl || !config.realtimeAsrSecure || !validRealtimeHost(config.realtimeAsrHost, true)) {
+  if (hasInvalidUrl || !config.realtimeAsrBase.startsWith('wss://')) {
     throw new Error('Production API endpoints must use HTTPS/WSS domain names.');
   }
   if (isSubmissionDeploymentMode(config.appEnv)) {
@@ -166,7 +135,7 @@ export function assertProductionApiConfig(config: ApiConfig = getApiConfig()): v
       } catch {
         return true;
       }
-    }) || isPlaceholderProductionHost(config.realtimeAsrHost);
+    });
     if (usesPlaceholderHost) {
       throw new Error('Production submission endpoints must not use reserved or placeholder domains.');
     }

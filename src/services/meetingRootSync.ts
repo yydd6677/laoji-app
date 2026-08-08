@@ -10,6 +10,12 @@ import {
   type MeetingRootSyncCompletion,
 } from '../data/repositories';
 import {
+  ResolveMeetingRootSyncConflictUseCase,
+} from '../application/meeting/resolveMeetingRootSyncConflict';
+import {
+  meetingRootSyncConflictView,
+} from './meetingRootConflicts';
+import {
   createMeetingNoteV2,
   deleteMeetingNoteV2,
   getMeetingNoteV2,
@@ -26,10 +32,14 @@ import type { ScopeKey } from '../domain/meeting';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 import { HttpResponseError } from './errors';
 import { mergeSyncRetryAfterMs } from './syncRetryWake';
+import { requestMeetingRootSync } from '../application/meeting/rootSyncTrigger';
 
 const STALE_CLAIM_MS = 90_000;
 const MAX_BATCHES_PER_DRAIN = 20;
 const drainTailByScope = new Map<ScopeKey, Promise<unknown>>();
+const resolveMeetingRootSyncConflictUseCase = new ResolveMeetingRootSyncConflictUseCase(
+  sqliteMeetingNoteRepository,
+);
 
 class InvalidMeetingRootPayloadError extends Error {}
 class UnsupportedMeetingRootPayloadError extends Error {}
@@ -627,6 +637,113 @@ async function rejectLocalClaim(
   return { processed: applied, retryAfterMs: null, outcome: applied ? 'blocked' : 'stale' };
 }
 
+/**
+ * Root conflicts are an implementation detail of optimistic sync, not a
+ * product workflow.  Resolve the safe case (same meeting identity and
+ * occurrence) by replaying the local intent against the server revision.  If
+ * the server payload is temporarily unusable, move the operation back to the
+ * normal retry queue instead of leaving a permanent red "同步冲突" marker.
+ */
+async function automaticallyRecoverRootConflicts(
+  input: DrainMeetingRootSyncInput,
+  transport: RootTransport,
+): Promise<number> {
+  const staleRequeued = await sqliteMeetingNoteRepository.requeueStaleMeetingRootSyncOperations({
+    scopeKey: input.scopeKey,
+    retryAtMs: Date.now() + 30_000,
+    updatedAtMs: Date.now(),
+  });
+  if (staleRequeued > 0) {
+    diagnosticAudit('meeting_root_conflict_auto_recovered', {
+      status: 'stale_block_requeued',
+      count: staleRequeued,
+    });
+  }
+  const conflicts = await sqliteMeetingNoteRepository.listMeetingRootSyncConflicts(
+    input.scopeKey,
+  );
+  let recovered = staleRequeued;
+  for (const conflict of conflicts) {
+    if (!input.isCurrent() || input.signal.aborted) break;
+    const aggregate = await sqliteMeetingNoteRepository.get(
+      conflict.meetingId,
+      input.scopeKey,
+    );
+    if (!aggregate) continue;
+    const view = meetingRootSyncConflictView(aggregate, conflict);
+    const expectedLocalUpdatedAtMs = aggregate.note.updatedAtMs;
+    // Legacy transport cannot safely replay a revisioned v2 mutation.  Keep
+    // the operation in the ordinary retry queue until the capability probe
+    // returns v2 instead of turning the automatic repair into another block.
+    if (view.canKeepLocal && transport === 'v2') {
+      try {
+        await resolveMeetingRootSyncConflictUseCase.execute({
+          conflictId: conflict.id,
+          meetingId: conflict.meetingId,
+          scopeKey: input.scopeKey,
+          expectedLocalUpdatedAtMs,
+          resolution: 'keep_local',
+        });
+        recovered += 1;
+        diagnosticAudit('meeting_root_conflict_auto_recovered', {
+          status: 'local_intent_requeued',
+          meeting_id: conflict.meetingId,
+          conflict_id: conflict.id,
+        });
+        continue;
+      } catch (error) {
+        diagnosticWarn('[meeting-root-sync] automatic conflict resolution failed', error);
+      }
+    }
+
+    let remoteRevision = aggregate.note.remoteRevision;
+    const remoteId = aggregate.note.remoteId;
+    if (transport === 'v2' && remoteId) {
+      try {
+        const remote = await getMeetingNoteV2({
+          accessToken: input.accessToken,
+          meetingRemoteId: remoteId,
+          signal: input.signal,
+        });
+        if (!input.isCurrent() || input.signal.aborted) break;
+        remoteRevision = remote.revision;
+      } catch (error) {
+        diagnosticWarn('[meeting-root-sync] automatic conflict refresh failed', error);
+      }
+    }
+    try {
+      const nowMs = Date.now();
+      const resolvedAtMs = Math.max(
+        nowMs,
+        expectedLocalUpdatedAtMs + 1,
+        (remoteRevision ?? 0) + 1,
+      );
+      const requeued = await sqliteMeetingNoteRepository.requeueMeetingRootSyncConflict({
+        conflictId: conflict.id,
+        meetingId: conflict.meetingId,
+        scopeKey: input.scopeKey,
+        remoteId,
+        remoteRevision,
+        retryAtMs: resolvedAtMs + 30_000,
+        resolvedAtMs,
+      });
+      if (requeued) {
+        requestMeetingRootSync(input.scopeKey);
+        recovered += 1;
+        diagnosticAudit('meeting_root_conflict_auto_recovered', {
+          status: 'retry_queued',
+          meeting_id: conflict.meetingId,
+          conflict_id: conflict.id,
+          remote_revision: remoteRevision,
+        });
+      }
+    } catch (error) {
+      diagnosticWarn('[meeting-root-sync] automatic conflict retry enqueue failed', error);
+    }
+  }
+  return recovered;
+}
+
 async function processClaim(
   claim: MeetingRootSyncClaim,
   accessToken: string,
@@ -876,6 +993,23 @@ async function drainMeetingRootSyncOnce(
     return { outcome: 'not_owned', processedCount: 0, retryAfterMs: null };
   }
   try {
+    // Older shadow-imported local meetings may have a recording and a
+    // canonical row but no root outbox operation.  Repair that identity before
+    // claiming work so audio upload can obtain the remote meeting ID without
+    // any user-facing conflict or delete/re-import flow.
+    const orphaned = await sqliteMeetingNoteRepository
+      .repairOrphanedMeetingRootSyncOperations(input.scopeKey, Date.now());
+    if (orphaned.created > 0 || orphaned.requeued > 0) {
+      diagnosticAudit('meeting_root_orphan_auto_recovered', {
+        status: 'queued',
+        created: orphaned.created,
+        requeued: orphaned.requeued,
+      });
+    }
+  } catch (error) {
+    diagnosticWarn('[meeting-root-sync] orphaned root repair failed', error);
+  }
+  try {
     const repaired = await sqliteMeetingNoteRepository.repairLegacyCalendarMeetingRootCreates(
       input.scopeKey,
       Date.now(),
@@ -889,9 +1023,36 @@ async function drainMeetingRootSyncOnce(
   } catch (error) {
     diagnosticWarn('[meeting-root-sync] legacy calendar repair failed', error);
   }
+  let transport: RootTransport | null = null;
+  try {
+    // Older builds could leave a revision-conflict outbox row blocked after
+    // the conflict record itself had been marked resolved.  Such rows are
+    // invisible to the normal conflict scan, so repair them independently on
+    // every authenticated drain.
+    const staleRequeued = await sqliteMeetingNoteRepository.requeueStaleMeetingRootSyncOperations({
+      scopeKey: input.scopeKey,
+      retryAtMs: Date.now() + 30_000,
+      updatedAtMs: Date.now(),
+    });
+    if (staleRequeued > 0) {
+      diagnosticAudit('meeting_root_conflict_auto_recovered', {
+        status: 'stale_block_requeued',
+        count: staleRequeued,
+      });
+      requestMeetingRootSync(input.scopeKey);
+    }
+    const existingConflicts = await sqliteMeetingNoteRepository.listMeetingRootSyncConflicts(
+      input.scopeKey,
+    );
+    if (existingConflicts.length > 0) {
+      transport = await resolveRootTransport(input.accessToken);
+      await automaticallyRecoverRootConflicts(input, transport);
+    }
+  } catch (error) {
+    diagnosticWarn('[meeting-root-sync] automatic conflict recovery scan failed', error);
+  }
   let processedCount = 0;
   let earliestRetryMs: number | null = null;
-  let transport: RootTransport | null = null;
   for (let batch = 0; batch < MAX_BATCHES_PER_DRAIN; batch += 1) {
     if (!input.isCurrent() || input.signal.aborted) {
       return { outcome: 'stale', processedCount, retryAfterMs: earliestRetryMs };
@@ -933,6 +1094,9 @@ async function drainMeetingRootSyncOnce(
       input.isCurrent,
       selectedTransport,
     )));
+    if (results.some(result => result.outcome === 'conflict')) {
+      await automaticallyRecoverRootConflicts(input, selectedTransport);
+    }
     processedCount += results.filter(result => result.processed).length;
     results.forEach(result => {
       if (result.retryAfterMs === null) return;

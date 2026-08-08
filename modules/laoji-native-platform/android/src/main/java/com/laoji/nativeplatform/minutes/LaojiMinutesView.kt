@@ -6,6 +6,7 @@ import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.media.MinutesPlaybackRegistry
 import com.laoji.nativeplatform.media.MinutesPlaybackState
 import com.laoji.nativeplatform.evidence.FeishuEvidence
@@ -82,6 +83,11 @@ class LaojiMinutesView(
 
   private fun render(state: MinutesUiState) {
     if (renderedSurface != state.surface || surfaceView == null) {
+      // Recording finalization can publish the reconciled transcript and switch
+      // surfaces in the same React commit. Detach RecyclerView adapters before
+      // removing the old native tree so an in-flight DiffUtil result cannot try
+      // to recycle a row that is still attached to the disappearing surface.
+      prepareForSurfaceReplacement(surfaceView)
       content.removeAllViews()
       renderedSurface = state.surface
       surfaceView = when (state.surface) {
@@ -102,6 +108,22 @@ class LaojiMinutesView(
       }
       is MinutesRecordingSurface -> view.render(state.recording)
       is MinutesDetailSurface -> view.render(state.detail)
+    }
+  }
+
+  private fun prepareForSurfaceReplacement(view: View?) {
+    when (view) {
+      is RecyclerView -> {
+        view.stopScroll()
+        view.itemAnimator?.endAnimations()
+        view.itemAnimator = null
+        view.adapter = null
+      }
+      is ViewGroup -> {
+        for (index in 0 until view.childCount) {
+          prepareForSurfaceReplacement(view.getChildAt(index))
+        }
+      }
     }
   }
 

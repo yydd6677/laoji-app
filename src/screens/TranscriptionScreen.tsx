@@ -31,6 +31,7 @@ import {
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
+  normalizeRemoteMeetingSummaryResult,
   normalizeMeetingSummaryResult,
   shouldDiscardPendingMeetingSummaryTask,
 } from '../services/meetingSummary';
@@ -71,6 +72,7 @@ import {
 } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
+import { simplifyTranscriptLines } from '../utils/simplifiedChinese';
 import { evaluateTranscriptLineCandidate } from '../services/transcriptCompleteness';
 import { meetingSummaryDocumentForLegacy } from '../services/meetingSummaryDocument';
 import {
@@ -101,6 +103,8 @@ type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
   route: RouteProp<RootStackParamList, 'Transcription'>;
 };
+
+type DetailVisualPhase = 'idle' | 'running' | 'ready' | 'error' | 'background';
 
 function transcriptTimestamp(seconds?: number): string {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds ?? 0) : 0;
@@ -180,6 +184,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   } | null>(null);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [transcriptVisualPhase, setTranscriptVisualPhase] = useState<DetailVisualPhase>('idle');
+  const [summaryVisualPhase, setSummaryVisualPhase] = useState<DetailVisualPhase>('idle');
   const [activeTab, setActiveTab] = useState<'transcript' | 'summary'>(
     route.params.focus === 'summary' ? 'summary' : 'transcript',
   );
@@ -377,7 +383,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [m?.id, m?.title, titleEditing]);
 
   useEffect(() => {
-    if (!m) return;
+    if (!m) {
+      setTranscriptVisualPhase('idle');
+      setSummaryVisualPhase('idle');
+      return;
+    }
     let alive = true;
     const cachedTranscript = getCachedTranscript(m.id);
     const cachedSummaryValue = getCachedSummary(m.id);
@@ -394,40 +404,62 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setTemplateSheetVisible(false);
     setTranscriptError('');
     setSummaryError('');
+    setTranscriptVisualPhase('running');
+    setSummaryVisualPhase('idle');
 
     setLoadingTranscript(true);
     if (isGuest || !accessToken) {
+      setTranscriptVisualPhase('ready');
       setLoadingTranscript(false);
     } else if (remoteMeetingId) {
       fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken)
         .then(async remote => {
           if (!alive) return;
+          // New server responses are already canonical OpenCC zh-Hans. Only
+          // legacy endpoints without the script marker use the client cache
+          // fallback; this keeps visible text byte-for-byte equal to cloud.
+          const remoteItems = remote.script === 'zh-Hans'
+            ? remote.items
+            : simplifyTranscriptLines(remote.items);
           const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
-          const decision = evaluateTranscriptLineCandidate(cachedTranscript, remote.items, {
+          const decision = evaluateTranscriptLineCandidate(cachedTranscript, remoteItems, {
             candidateKind,
             serverCompleteness: remote.completeness,
           });
-          setTranscriptItems(decision.useCandidate ? remote.items : cachedTranscript);
-          await saveCachedTranscript(m.id, remote.items, {
+          setTranscriptItems(decision.useCandidate ? remoteItems : cachedTranscript);
+          setTranscriptVisualPhase('ready');
+          await saveCachedTranscript(m.id, remoteItems, {
             candidateKind,
             serverCompleteness: remote.completeness,
           });
         })
-        .catch(() => { if (alive) setTranscriptError('转写同步失败，当前显示本机缓存。'); })
+        .catch(() => {
+          if (alive) {
+            setTranscriptVisualPhase('error');
+            setTranscriptError('转写同步失败，当前显示本机缓存。');
+          }
+        })
         .finally(() => { if (alive) setLoadingTranscript(false); });
     } else {
+      setTranscriptVisualPhase(cachedTranscript.length > 0 ? 'ready' : 'idle');
       setLoadingTranscript(false);
       setTranscriptError('会议正在同步，当前显示本机缓存。');
     }
 
     if (m.hasSummary && !isGuest && accessToken && remoteMeetingId) {
+      setSummaryVisualPhase('running');
       setLoadingSummary(true);
       setSummaryProgress('正在同步总结');
       fetchMeetingSummaryDetail(remoteMeetingId, accessToken)
         .then(value => {
           if (!alive) return;
-          const normalized = normalizeMeetingSummaryResult(m.id, value);
+          const normalized = normalizeRemoteMeetingSummaryResult(
+            m.id,
+            remoteMeetingId,
+            value,
+          );
           const text = meetingSummaryToText(normalized);
+          setSummaryVisualPhase(text ? 'ready' : 'idle');
           setSummary(text || cachedSummary);
           const document = normalized?.structured_document;
           const template = meetingTemplateById(document?.templateId, document?.templateRevision);
@@ -438,9 +470,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             });
           }
         })
-        .catch(() => { if (alive) setSummaryError('总结同步失败，可重试或重新生成。'); })
+        .catch(() => {
+          if (alive) {
+            setSummaryVisualPhase('error');
+            setSummaryError('总结同步失败，可重试或重新生成。');
+          }
+        })
         .finally(() => { if (alive) setLoadingSummary(false); });
     } else if (m.hasSummary && !isGuest && accessToken) {
+      setSummaryVisualPhase('error');
       setSummaryError('会议正在同步，当前显示本机缓存。');
     }
     return () => { alive = false; };
@@ -449,7 +487,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     getCachedSummary,
     getCachedTranscript,
     isGuest,
-    m?.hasSummary,
     m?.id,
     remoteMeetingId,
     reloadKey,
@@ -554,6 +591,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const expectedMode = isGuest ? 'guest' : 'authenticated';
     let operation: Promise<void> | null = null;
     operation = (async () => {
+      setSummaryVisualPhase('running');
       setLoadingSummary(true);
       setSummaryError('');
       setSummaryProgress('正在检查上次总结任务');
@@ -632,6 +670,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           meetingId: isGuest
             ? currentMeeting.id
             : requireMeetingRemoteIdentity(currentMeeting),
+          localMeetingId: currentMeeting.id,
           title: currentMeeting.title,
           meetingDate,
           transcriptLines: lines,
@@ -643,6 +682,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           resumeTaskId: pending?.taskId,
           forceRegenerate: Boolean(options.forceRegenerate),
           signal: controller.signal,
+          traceSource: options.automatic
+            ? 'automatic_resume'
+            : options.forceRegenerate
+              ? 'regenerate'
+              : options.resumeTask
+                ? 'resume'
+                : 'manual',
+          inputFingerprint,
           onTaskSubmitted: async taskId => {
             try {
               await savePendingMeetingSummaryTask(recordingStorageScope, {
@@ -679,6 +726,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         } catch {
           if (mountedRef.current) {
             setSummaryError('总结已生成，但本机缓存写入失败。');
+            setSummaryVisualPhase('ready');
             showDialog({
               title: '总结已生成，保存失败',
               message: '当前页面仍可查看总结，但退出后可能无法离线恢复。请释放存储空间后重试。',
@@ -686,6 +734,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             });
           }
         }
+        // Publish the terminal visual state after the local mirror settles so
+        // the loading slot and final action label change together.
+        if (mountedRef.current) setSummaryVisualPhase('ready');
         if (cacheSaved || !isGuest) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
@@ -695,6 +746,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         }
         if (!mountedRef.current) return;
         if ((error as Error)?.name === 'AbortError') {
+          setSummaryVisualPhase('background');
           if (!options.automatic && !silentSummaryAbortRef.current.has(controller)) {
             showDialog({
               title: '已停止等待',
@@ -703,6 +755,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             });
           }
         } else {
+          setSummaryVisualPhase('error');
           const fallback = options.automatic
             ? '上次会议总结暂时无法恢复，点击重试可继续获取。'
             : '会议总结暂时无法生成，请稍后重试。';
@@ -889,7 +942,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         template: pendingTemplate,
       });
     }).catch(() => {
-      if (alive) setSummaryError('无法读取上次总结任务，点击重试可重新生成。');
+      if (alive) {
+        setSummaryVisualPhase('error');
+        setSummaryError('无法读取上次总结任务，点击重试可重新生成。');
+      }
     });
     return () => { alive = false; };
   }, [
@@ -957,6 +1013,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ? shareSummaryDocument.sections.some(section => (
         section.kind !== 'action_items'
         && section.stableKey !== 'action_items'
+        && section.kind !== 'decisions'
+        && !['decisions', 'commitments'].includes(section.stableKey)
         && Boolean(section.title?.trim() || section.content.trim())
       ))
       : Boolean(shareSummaryText.trim()),
@@ -1123,6 +1181,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
   };
 
+  // The visual phase is the single UI authority. The request booleans remain
+  // available for cancellation/retry bookkeeping but cannot reintroduce a
+  // loading layout after a terminal phase has been committed.
+  const transcriptBusy = transcriptVisualPhase === 'running';
+  const summaryBusy = summaryVisualPhase === 'running';
+
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
       <MinutesDetailTitleBar
@@ -1286,7 +1350,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 <Text style={s.retryText}>重试</Text>
               </TouchableOpacity>
             ) : null}
-            {loadingTranscript && transcriptItems.length === 0 ? (
+            {transcriptBusy && transcriptItems.length === 0 ? (
               <View style={s.loadingState}>
                 <ActivityIndicator size="small" color={C.primary} />
                 <Text style={s.loadingText}>正在同步文字记录</Text>
@@ -1349,7 +1413,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 <Text style={s.retryText}>重试</Text>
               </TouchableOpacity>
             ) : null}
-            {loadingSummary ? (
+            {summaryBusy ? (
               <View style={s.summaryLoading}>
                 <ActivityIndicator size="small" color={C.primary} />
                 <Text style={s.summaryLoadingText}>{summaryProgress}</Text>
@@ -1366,7 +1430,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 <Text style={s.emptyStateText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
               </View>
             )}
-            {!loadingSummary && !summaryError && transcriptItems.length > 0 ? (
+            {!summaryBusy && !summaryError && transcriptItems.length > 0 ? (
               <TouchableOpacity
                 style={[s.generateBtn, summary && s.regenerateBtn]}
                 onPress={handleGenerateSummary}
@@ -1403,7 +1467,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingTemplateSheet
         visible={templateSheetVisible}
         selectedTemplate={summaryTemplate}
-        busy={loadingSummary}
+        busy={summaryBusy}
         onClose={() => setTemplateSheetVisible(false)}
         onSelect={template => {
           void prepareSummaryGeneration(template);

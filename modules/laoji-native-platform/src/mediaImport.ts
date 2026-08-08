@@ -1,5 +1,6 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
+import { File as ExpoFileSystemFile } from 'expo-file-system';
 
 export type MeetingMediaImportOrigin = 'file_import' | 'share_intent';
 export type MeetingMediaIngestOrigin = MeetingMediaImportOrigin | 'recording_merge';
@@ -180,10 +181,24 @@ export async function inspectMeetingMediaSource(sourceUri: string): Promise<Meet
 }
 
 export async function pickMeetingMedia(includeVideo: boolean): Promise<string> {
-  return requireString(
-    await requireNativeModule().pickMeetingMedia(includeVideo),
-    'selected media URI',
-  );
+  try {
+    return requireString(
+      await requireNativeModule().pickMeetingMedia(includeVideo),
+      'selected media URI',
+    );
+  } catch (reason) {
+    const code = reason && typeof reason === 'object'
+      ? (reason as { code?: unknown }).code
+      : null;
+    if (code === 'ERR_PICKER_CANCELLED') throw reason;
+
+    const selected = await ExpoFileSystemFile.pickFileAsync(
+      undefined,
+      includeVideo ? '*/*' : 'audio/*',
+    );
+    const file = Array.isArray(selected) ? selected[0] : selected;
+    return requireString(file?.uri, 'selected media URI');
+  }
 }
 
 export async function ingestMeetingMedia(input: {

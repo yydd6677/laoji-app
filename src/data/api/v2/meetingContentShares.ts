@@ -110,7 +110,7 @@ function ownerReceipt(value: unknown): RemoteMeetingContentShareReceipt {
 }
 
 function apiBase(): string {
-  return getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  return getApiConfig().apiBase.replace(/\/+$/, '');
 }
 
 function validToken(value: string): string {

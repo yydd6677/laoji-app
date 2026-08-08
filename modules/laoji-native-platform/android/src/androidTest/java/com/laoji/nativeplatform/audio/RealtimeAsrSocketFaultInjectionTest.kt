@@ -21,6 +21,19 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class RealtimeAsrSocketFaultInjectionTest {
   @Test
+  fun preservesStructuredRetryableProviderError() {
+    val parsed = AsrProtocol.parse(
+      "{\"type\":\"error\",\"code\":\"qwen_asr_queue_full\"," +
+        "\"detail\":\"queue full, retry later\",\"retryable\":true}",
+    )
+    assertTrue(parsed is AsrServerEvent.Error)
+    val error = parsed as AsrServerEvent.Error
+    assertEquals("qwen_asr_queue_full", error.code)
+    assertEquals("queue full, retry later", error.detail)
+    assertTrue(error.retryable)
+  }
+
+  @Test
   fun reportsAckTimeoutWhenNegotiatedServerNeverAcknowledges() {
     runScenario(
       onStop = { _ -> Unit },
@@ -95,7 +108,7 @@ class RealtimeAsrSocketFaultInjectionTest {
       object : RealtimeAsrSocketListener {
         override fun onTranscript(transcript: AsrServerEvent.Transcript) = Unit
 
-        override fun onServerError(detail: String) = Unit
+        override fun onServerError(error: AsrServerEvent.Error) = Unit
 
         override fun onTransportFailure(code: RecorderErrorCode, message: String) {
           failures += code

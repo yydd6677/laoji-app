@@ -10,7 +10,7 @@
       "env": {
         "APP_ENV": "development",
         "EXPO_ALLOW_CLEARTEXT": "true",
-        "EXPO_PUBLIC_REALTIME_ASR_PROVIDER": "qwen"
+        "EXPO_PUBLIC_API_BASE": "https://laoji.cloud"
       },
       "ios": { "simulator": true }
     },
@@ -21,8 +21,8 @@
       "channel": "preview",
       "env": {
         "APP_ENV": "preview",
-        "EXPO_ALLOW_CLEARTEXT": "true",
-        "EXPO_PUBLIC_REALTIME_ASR_PROVIDER": "qwen"
+        "EXPO_ALLOW_CLEARTEXT": "false",
+        "EXPO_PUBLIC_API_BASE": "https://laoji.cloud"
       }
     },
     "production": {
@@ -35,7 +35,7 @@
       "env": {
         "APP_ENV": "production",
         "EXPO_ALLOW_CLEARTEXT": "false",
-        "EXPO_PUBLIC_REALTIME_ASR_PROVIDER": "qwen"
+        "EXPO_PUBLIC_API_BASE": "https://laoji.cloud"
       }
     }
   }

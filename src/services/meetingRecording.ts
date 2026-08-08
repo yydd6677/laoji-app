@@ -12,6 +12,7 @@ import {
 } from '../native/nativeTransferCoordinator';
 import type { NativeUploadState } from 'laoji-native-platform';
 import { getFeatureFlags } from '../config/featureFlags';
+import { diagnosticAudit } from './diagnostics';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v3';
 const PREVIOUS_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v2';
@@ -333,13 +334,28 @@ export async function retryPendingMeetingAudioUpload(
         return uploaded;
       }
       if (
-        nativeState === null
-        || nativeState.state === 'enqueued'
-        || nativeState.state === 'running'
-        || nativeState.state === 'blocked'
+        nativeState !== null
+        && (
+          nativeState.state === 'enqueued'
+          || nativeState.state === 'running'
+        )
       ) {
         await deferPendingMeetingAudioUploadPoll(storageScope, recordingAssetId).catch(() => {});
         return null;
+      }
+      // A WorkManager job with no prerequisites must never remain BLOCKED.
+      // Older builds also leave a work id that no longer resolves after an
+      // application update.  Waiting for either state forever strands the
+      // local recording and forces the user to open the detail page.  Drop the
+      // unusable native registration and continue through the durable JS
+      // uploader; the idempotency keys keep a late native request harmless.
+      if (nativeState === null || nativeState.state === 'blocked') {
+        diagnosticAudit('meeting_audio_upload_native_fallback', {
+          status: 'fallback_to_js',
+          meeting_id: pending.meetingId,
+          recording_asset_id: pending.recordingAssetId,
+          reason: nativeState === null ? 'work_missing' : 'work_blocked',
+        });
       }
       await clearNativeUploadRegistration(storageScope, recordingAssetId);
       pending = { ...pending };

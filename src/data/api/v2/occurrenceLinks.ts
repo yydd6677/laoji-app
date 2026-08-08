@@ -233,7 +233,7 @@ export async function getOccurrenceLinkByReferenceV2(input: {
 }): Promise<RemoteOccurrenceLinkV2> {
   const sourceEventId = identifier(input.sourceEventId, '日程标识');
   const date = occurrenceDate(input.occurrenceDate, '日程实例日期');
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/occurrence-links/lookup?source_event_id=${encodeURIComponent(sourceEventId)}&occurrence_date=${encodeURIComponent(date)}`,
     {
@@ -258,7 +258,7 @@ export async function getMeetingOccurrenceLinkV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteOccurrenceLinkV2> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/occurrence-link`,
     {
@@ -282,7 +282,7 @@ export async function upsertMeetingOccurrenceLinkV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteOccurrenceLinkV2> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const snapshot = input.mutation.schedule_snapshot;
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(meetingRemoteId)}/occurrence-link`,

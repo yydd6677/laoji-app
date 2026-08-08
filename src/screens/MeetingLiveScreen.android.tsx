@@ -686,9 +686,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       if (!isGuest && !accessToken) throw new Error('登录会话已失效，请重新登录');
 
       const config = getApiConfig();
+      const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
       const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(
         config.isProduction,
-        config.realtimeAsrSecure,
+        realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
       const websocketMeetingId = guestSession?.meeting_id ?? remoteMeetingId!;
@@ -696,9 +697,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         meetingId: websocketMeetingId,
         provider: config.realtimeAsrProvider,
         purpose: 'meeting',
-        host: config.realtimeAsrHost,
-        port: config.realtimeAsrPort,
-        secure: config.realtimeAsrSecure,
+        realtimeAsrBase: config.realtimeAsrBase,
       });
       const credentials = isGuest
         ? { guestToken: guestSession!.guest_token }

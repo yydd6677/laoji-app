@@ -294,12 +294,13 @@ export async function mirrorLegacyMeetingStageState(
   }
 }
 
-export type MeetingTranscriptFailureKind = 'persistence' | 'sync' | 'remote_processing';
+export type MeetingTranscriptFailureKind = 'persistence' | 'sync' | 'remote_processing' | 'no_speech';
 
 function transcriptProcessingFailureCode(
   kind: MeetingTranscriptFailureKind,
   reason: unknown,
 ): string {
+  if (kind === 'no_speech') return 'transcript_no_speech';
   if (kind === 'remote_processing') return 'transcript_remote_processing_failed';
   const message = reason instanceof Error
     ? `${reason.name} ${reason.message}`.toLowerCase()
@@ -389,18 +390,19 @@ export async function mirrorLegacyTranscriptProcessingFailure(
       const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
       if (!stage) throw new Error('meeting transcript processing stage is missing');
       const nowMs = Math.max(Date.now(), note.updatedAtMs, stage.updatedAtMs);
+      const noSpeech = kind === 'no_speech';
       await transaction.upsertStage(transitionProcessingStage(stage, {
         stage: 'transcript',
-        status: 'failed_retryable',
+        status: noSpeech ? 'no_speech' : 'failed_retryable',
         attemptStarted: true,
         progress: null,
         errorCode: transcriptProcessingFailureCode(kind, reason),
-        userMessageKey: 'meeting.transcript.retryable',
-        retryable: true,
+        userMessageKey: noSpeech ? 'meeting.transcript.no_speech' : 'meeting.transcript.retryable',
+        retryable: !noSpeech,
         nextRetryAtMs: null,
       }, nowMs), scopeKey);
       await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
-      outcome = 'failed_retryable';
+      outcome = noSpeech ? 'no_speech' : 'failed_retryable';
     });
     diagnosticAudit('meeting_transcript_processing_failure', {
       status: outcome,

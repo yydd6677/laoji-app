@@ -319,7 +319,7 @@ export async function createMeetingNoteV2(input: {
   request: CreateMeetingNoteV2Request;
   signal?: AbortSignal;
 }): Promise<RemoteMeetingNoteV2> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(`${base}/api/laoji/v2/meeting-notes`, {
     method: 'POST',
     signal: input.signal,
@@ -342,7 +342,7 @@ export async function getMeetingNoteV2(input: {
   signal?: AbortSignal;
 }): Promise<RemoteMeetingNoteV2> {
   const remoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(remoteId)}`,
     {
@@ -380,7 +380,7 @@ export async function listMeetingNotesV2(input: {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new Error('会议记录拉取数量无效');
   }
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const query = [
     `limit=${limit}`,
     ...(cursor ? [`cursor=${encodeURIComponent(cursor)}`] : []),
@@ -466,7 +466,7 @@ export async function updateMeetingNoteV2(input: {
 }): Promise<RemoteMeetingNoteV2> {
   const remoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
   const expectedRevision = safeInteger(input.expectedRevision, '会议云端版本', 1);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(remoteId)}`,
     {
@@ -494,7 +494,7 @@ export async function deleteMeetingNoteV2(input: {
 }): Promise<RemoteMeetingNoteV2> {
   const remoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
   const expectedRevision = safeInteger(input.expectedRevision, '会议云端版本', 1);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(remoteId)}`,
     {
@@ -520,7 +520,7 @@ export async function restoreMeetingNoteV2(input: {
 }): Promise<RemoteMeetingNoteV2> {
   const remoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
   const expectedRevision = safeInteger(input.expectedRevision, '会议云端版本', 1);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v2/meeting-notes/${encodeURIComponent(remoteId)}/restore`,
     {

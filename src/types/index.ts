@@ -113,6 +113,8 @@ export interface TranscriptLine {
   /** Compatibility metadata projected from the local transcript revision model. */
   isFinal?: boolean;
   revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
+  /** Canonical server script. Missing means a legacy/cache row. */
+  script?: 'zh-Hans' | 'unknown';
 }
 
 export interface MeetingSummary {

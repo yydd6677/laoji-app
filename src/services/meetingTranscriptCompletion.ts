@@ -120,8 +120,12 @@ export async function completeMeetingTranscriptAfterCapture(
       lastCandidateAccepted = decision.useCandidate;
       if (decision.useCandidate) selected = [...remote.items];
       if (remote.remoteState === 'failed') {
-        failureKind = 'remote_processing';
-        failureReason = new Error('remote transcript processing failed');
+        failureKind = remote.errorCode === 'no_speech' ? 'no_speech' : 'remote_processing';
+        failureReason = new Error(
+          remote.errorCode === 'no_speech'
+            ? 'remote transcript contains no speech'
+            : 'remote transcript processing failed',
+        );
         break;
       }
       if (decision.useCandidate && !decision.completing && remote.items.length > 0) break;

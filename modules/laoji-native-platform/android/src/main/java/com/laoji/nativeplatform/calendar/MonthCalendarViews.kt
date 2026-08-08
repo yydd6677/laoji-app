@@ -212,6 +212,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
   private var listener: MonthWeekRowListener? = null
   private var downX = 0f
   private var downY = 0f
+  private var collapseGestureOwned = false
 
   init {
     setBackgroundColor(palette.surface)
@@ -408,22 +409,55 @@ private class MonthWeekRowView(context: Context) : View(context) {
     canvas.drawPath(collapseChevronPath, collapseChevronPaint)
   }
 
+  private fun collapseControlBounds(): CalendarRect? {
+    val column = collapseColumn ?: return null
+    if (width <= 0 || height <= 0) return null
+    val gridStart = CalendarUi.dp(context, MonthExpandedLayoutContract.GRID_START_MARGIN_DP)
+    val gridEnd = CalendarUi.dp(context, MonthExpandedLayoutContract.GRID_END_MARGIN_DP)
+    val cellWidth = ((width - gridStart - gridEnd) / MonthExpandedLayoutContract.DAY_PAGE_COUNT)
+      .coerceAtLeast(1f)
+    val left = gridStart + column * cellWidth
+    return CalendarRect(
+      left,
+      CalendarUi.dp(context, MonthExpandedLayoutContract.COLLAPSE_OVERLAY_TOP_DP)
+        .coerceAtMost(height.toFloat()),
+      left + cellWidth,
+      height.toFloat(),
+    )
+  }
+
+  private fun isCollapseControlHit(x: Float, y: Float): Boolean =
+    collapseControlBounds()?.contains(x, y) == true
+
+  private fun collapseSelection() {
+    val column = collapseColumn ?: return
+    listener?.onDateTapped(rowStartEpochDay + column, rowIndex, column)
+    performClick()
+  }
+
   override fun onTouchEvent(event: MotionEvent): Boolean {
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
         downX = event.x
         downY = event.y
+        collapseGestureOwned = isCollapseControlHit(event.x, event.y)
         isPressed = true
         return true
       }
       MotionEvent.ACTION_UP -> {
         isPressed = false
-        if (MonthExpandedLayoutContract.isTapWithinThreshold(
+        val isTap = MonthExpandedLayoutContract.isTapWithinThreshold(
             event.x - downX,
             event.y - downY,
             density,
           )
-        ) {
+        val releasedOnCollapseControl = isCollapseControlHit(event.x, event.y)
+        if (collapseGestureOwned || releasedOnCollapseControl) {
+          if (isTap && collapseGestureOwned && releasedOnCollapseControl) collapseSelection()
+          collapseGestureOwned = false
+          return true
+        }
+        if (isTap) {
           eventHits.asReversed().firstOrNull { it.rect.contains(event.x, event.y) }?.let {
             listener?.onWeekEventTapped(it.event)
             performClick()
@@ -444,6 +478,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
       }
       MotionEvent.ACTION_CANCEL -> {
         isPressed = false
+        collapseGestureOwned = false
         return true
       }
     }
@@ -473,6 +508,9 @@ private class MonthWeekRowView(context: Context) : View(context) {
   }
 
   private fun dateBounds(column: Int): CalendarRect {
+    if (column == collapseColumn) {
+      collapseControlBounds()?.let { return it }
+    }
     val gridStart = CalendarUi.dp(context, MonthExpandedLayoutContract.GRID_START_MARGIN_DP)
     val gridEnd = CalendarUi.dp(context, MonthExpandedLayoutContract.GRID_END_MARGIN_DP)
     val cellWidth = ((width - gridStart - gridEnd) / MonthExpandedLayoutContract.DAY_PAGE_COUNT)
@@ -654,9 +692,14 @@ private class MonthWeekRowView(context: Context) : View(context) {
         createAccessibilityNodeInfo(accessibilityFocusedVirtualId)
       } else {
         null
-      }
+    }
 
     fun virtualViewAt(x: Float, y: Float): Int {
+      if (isCollapseControlHit(x, y)) {
+        val column = collapseColumn ?: return INVALID_VIRTUAL_ID
+        val id = DATE_VIRTUAL_ID_BASE + column
+        return id.takeIf { accessibilityBoundsForVirtualId(it) != null } ?: INVALID_VIRTUAL_ID
+      }
       eventHits.asReversed().firstOrNull { it.rect.contains(x, y) }?.let { hit ->
         val id = eventVirtualIds[hit.event.identity] ?: return INVALID_VIRTUAL_ID
         return id.takeIf { accessibilityBoundsForVirtualId(it) != null } ?: INVALID_VIRTUAL_ID

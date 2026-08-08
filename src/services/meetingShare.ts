@@ -13,10 +13,16 @@ import { Meeting, TranscriptLine } from '../types';
 import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { meetingSummaryTextToPlainText } from './meetingSummaryFormat';
+import {
+  dedupeMeetingSummaryActions,
+  isMeetingSummaryActionSection,
+  meetingSummarySectionsForPresentation,
+} from './meetingSummaryDocument';
 import { diagnosticAudit } from './diagnostics';
 import { meetingRemoteIdentity } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { isStoredMeetingAttachmentUri } from './meetingAttachmentStorage';
+import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 export type MeetingShareContentKey =
   | 'info'
@@ -108,7 +114,7 @@ export function selectedMeetingShareContents(
 }
 
 export function safeMeetingFileName(value: string): string {
-  return value
+  return toSimplifiedChinese(value)
     .trim()
     .replace(/[\\/:*?"<>|／：＊？＂＜＞｜\r\n]+/g, '_')
     .replace(/\s+/g, '_')
@@ -128,12 +134,12 @@ function formatTranscriptTime(seconds?: number): string {
 
 export function buildMeetingInfoText(meeting: Meeting): string {
   const location = meeting.location?.trim();
-  return [
+  return toSimplifiedChinese([
     `会议标题：${meeting.title.trim() || '无标题会议'}`,
     `会议日期：${meeting.date}`,
     meeting.time?.trim() ? `会议时间：${meeting.time.trim()}` : '',
     location ? `会议地址：${location}` : '',
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n'));
 }
 
 export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
@@ -142,7 +148,7 @@ export function buildMeetingTranscriptText(lines: TranscriptLine[]): string {
     .map(line => {
       const time = formatTranscriptTime(line.start_time);
       const speaker = speakerDisplayLabel(line.speaker_label, line.speaker_id);
-      return `${time ? `[${time}] ` : ''}${speaker}：${line.text.trim()}`;
+      return `${time ? `[${time}] ` : ''}${toSimplifiedChinese(speaker)}：${toSimplifiedChinese(line.text.trim())}`;
     })
     .join('\n');
 }
@@ -154,7 +160,7 @@ export function buildMeetingAttachmentsText(
     const time = formatTranscriptTime(attachment.positionMs / 1_000);
     const prefix = `${index + 1}. ${time ? `[${time}] ` : ''}`;
     if (attachment.kind === 'text') {
-      return `${prefix}文字\n${attachment.textContent?.trim() ?? ''}`.trimEnd();
+      return `${prefix}文字\n${toSimplifiedChinese(attachment.textContent?.trim() ?? '')}`.trimEnd();
     }
     return `${prefix}照片：${attachment.fileName?.trim() || '照片'}`;
   }).filter(Boolean).join('\n\n');
@@ -170,7 +176,7 @@ export function buildMeetingMarkersText(markers: readonly MarkerRecord[]): strin
     ))
     .map((marker, index) => {
       const time = formatTranscriptTime(marker.positionMs / 1_000);
-      const label = marker.label?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+      const label = toSimplifiedChinese(marker.label?.normalize('NFKC').replace(/\s+/g, ' ').trim() ?? '');
       return `${index + 1}. ${time || '00:00'}${label ? ` · ${label}` : ''}`;
     })
     .join('\n');
@@ -178,9 +184,9 @@ export function buildMeetingMarkersText(markers: readonly MarkerRecord[]): strin
 
 function structuredSummaryText(document: MeetingSummaryDocument | null | undefined): string {
   if (!document) return '';
-  return document.sections
-    .filter(section => section.kind !== 'action_items' && section.stableKey !== 'action_items')
-    .map(section => [section.title?.trim(), section.content.trim()].filter(Boolean).join('\n'))
+  return meetingSummarySectionsForPresentation(document.sections)
+    .filter(section => !isMeetingSummaryActionSection(section))
+    .map(section => [section.title?.trim(), toSimplifiedChinese(section.content.trim())].filter(Boolean).join('\n'))
     .filter(Boolean)
     .join('\n\n');
 }
@@ -190,9 +196,11 @@ function withoutMarkdownActionSections(value: string): string {
   const kept: string[] = [];
   let skipping = false;
   lines.forEach(line => {
-    const heading = /^\s*#{1,6}\s+(.+?)\s*$/.exec(line);
+    const heading = /^\s*#{1,6}\s+(.+?)\s*$/.exec(toSimplifiedChinese(line));
     if (heading) {
-      skipping = /^(?:待办事项|行动项|任务)(?:\s|$)/.test(heading[1].trim());
+      const label = heading[1].trim().replace(/[：:]$/, '');
+      skipping = /^(?:待办事项|待办|行动项|行动事项|任务|后续事项|下一步|跟进事项)(?:\s|$)/.test(label)
+        || /^(?:todo|action item|task|follow[- ]?up)s?$/i.test(label);
       if (!skipping) kept.push(line);
       return;
     }
@@ -217,7 +225,7 @@ function formatActionDate(value: number | null): string | null {
 export function buildMeetingActionsText(
   actions: readonly MeetingSummaryActionCandidate[],
 ): string {
-  return actions
+  return dedupeMeetingSummaryActions(actions)
     .filter(action => action.content.trim())
     .map(action => {
       const status = action.status === 'completed'
@@ -228,7 +236,7 @@ export function buildMeetingActionsText(
         action.assignee?.trim() ? `负责人：${action.assignee.trim()}` : '',
         due ? `截止：${due}` : '',
       ].filter(Boolean);
-      return `- [${status}] ${action.content.trim()}${details.length ? `（${details.join('，')}）` : ''}`;
+      return `- [${status}] ${toSimplifiedChinese(action.content.trim())}${details.length ? `（${toSimplifiedChinese(details.join('，'))}）` : ''}`;
     })
     .join('\n');
 }
@@ -282,7 +290,11 @@ function buildSelectedMeetingSections(
       sections.push({ key: 'manualNote', title: '我的笔记', content: note });
     }
   }
-  return sections;
+  return sections.map(section => ({
+    ...section,
+    title: toSimplifiedChinese(section.title),
+    content: toSimplifiedChinese(section.content),
+  }));
 }
 
 function buildSelectedMeetingDocument(
@@ -290,10 +302,19 @@ function buildSelectedMeetingDocument(
   input: MeetingShareInput,
 ): TextShareContent {
   const sections = buildSelectedMeetingSections(selection, input);
+  const markdownSection = (section: MeetingContentShareSection): string => {
+    const content = toSimplifiedChinese(section.content).replace(/^\s*•\s+/gm, '- ');
+    if (section.key === 'info') {
+      return content.split('\n').filter(Boolean).map(line => `- ${line}`).join('\n');
+    }
+    return content;
+  };
   return {
     document: sections.length > 0
-      ? ['老记会议资料', ...sections.map(section => `${section.title}\n${section.content}`)]
-        .join('\n\n--------------------\n\n')
+      ? [
+          '# 老记会议资料',
+          ...sections.map(section => `## ${toSimplifiedChinese(section.title)}\n${markdownSection(section)}`),
+        ].join('\n\n')
       : '',
     included: sections.map(section => section.key),
   };
@@ -557,7 +578,7 @@ export async function shareMeetingContent(
     }
     const textContent = buildSelectedMeetingDocument(selection, input);
     const documentUri = textContent.document
-      ? await writeTextFile(`${directoryUri}${baseName}_会议资料.txt`, textContent.document)
+      ? await writeTextFile(`${directoryUri}${baseName}_会议资料.md`, textContent.document)
       : null;
     let audio: { uri: string; mimeType: string } | null = null;
     if (selection.audio) {
@@ -596,7 +617,7 @@ export async function shareMeetingContent(
     } else if (audio) {
       await shareFile(audio.uri, audio.mimeType, '分享会议录音', 'public.audio');
     } else if (documentUri) {
-      await shareFile(documentUri, 'text/plain', '分享会议资料', 'public.plain-text');
+      await shareFile(documentUri, 'text/markdown', '分享会议资料', 'net.daringfireball.markdown');
     }
     shareCompleted = true;
   } finally {

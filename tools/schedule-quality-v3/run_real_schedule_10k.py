@@ -185,8 +185,9 @@ def run(args: argparse.Namespace) -> int:
     corpus = load_json_lines(Path(args.corpus))
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     audit = manifest.get("audit", {})
-    if len(corpus) != 10_000 or not audit.get("passed") or not manifest.get("independent_oracle"):
-        raise SystemExit("corpus manifest is not a passed independent 10k corpus")
+    expected_total = int(manifest.get("total") or len(corpus))
+    if len(corpus) != expected_total or not audit.get("passed") or not manifest.get("independent_oracle"):
+        raise SystemExit("corpus manifest is not a passed independent authored corpus")
     server = snapshot_server(args.endpoint, args.timeout)
     completed = read_completed(Path(args.output)) if args.resume else {}
     output = Path(args.output)
@@ -243,6 +244,16 @@ def run(args: argparse.Namespace) -> int:
                 },
                 "server_identity": server["identity"],
                 "http": http_result,
+                "route_observation": {
+                    "route": (http_result.get("response") or {}).get("route") if isinstance(http_result.get("response"), dict) else None,
+                    "parse_source": (http_result.get("response") or {}).get("parse_source") if isinstance(http_result.get("response"), dict) else None,
+                    "model_attempted": (http_result.get("response") or {}).get("model_attempted") if isinstance(http_result.get("response"), dict) else None,
+                    "model_success": (http_result.get("response") or {}).get("model_success") if isinstance(http_result.get("response"), dict) else None,
+                    "fallback_used": (http_result.get("response") or {}).get("fallback_used") if isinstance(http_result.get("response"), dict) else None,
+                    "model_id": (http_result.get("response") or {}).get("model_id") if isinstance(http_result.get("response"), dict) else None,
+                    "request_id": http_result.get("headers", {}).get("x-request-id"),
+                    "observability_status": "response_fields_or_headers_only; null means server did not expose it",
+                },
                 "evaluation": evaluation,
                 "recorded_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             }
@@ -265,6 +276,7 @@ def run(args: argparse.Namespace) -> int:
         "real_asr": False,
         "independent_oracle": True,
         "endpoint": args.endpoint,
+        "corpus_total": len(corpus),
         "requested": len(selected),
         "new_cases_written": total_new,
         "passed": passed,

@@ -147,7 +147,7 @@ export async function registerMeetingMarkerV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteMeetingMarkerV1> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/markers`,
     {
@@ -178,7 +178,7 @@ export async function deleteMeetingMarkerV1(input: {
   signal?: AbortSignal;
 }): Promise<RemoteMeetingMarkerV1> {
   const remoteMarkerId = identifier(input.remoteMarkerId, '标记云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-markers/${encodeURIComponent(remoteMarkerId)}`,
     {
@@ -205,7 +205,7 @@ export async function listMeetingMarkersV1(input: {
   signal?: AbortSignal;
 }): Promise<readonly RemoteMeetingMarkerV1[]> {
   const meetingRemoteId = identifier(input.meetingRemoteId, '会议云端标识', 160);
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(
     `${base}/api/laoji/v1/meeting-notes/${encodeURIComponent(meetingRemoteId)}/markers`,
     {

@@ -53,12 +53,12 @@ check('uncertain_location_never_enters_local_safe', () => {
   assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
 });
 
-check('relative_offset_crosses_midnight_with_complete_interval', () => {
+check('relative_offset_does_not_invent_an_end_time', () => {
   const parsed = parser.parseLocalScheduleText('十五分钟后提醒我提交材料', referenceDate);
   assert.equal(parsed.start_date, '2026-07-09');
-  assert.equal(parsed.end_date, '2026-07-10');
+  assert.equal(parsed.end_date, null);
   assert.equal(parsed.start_time, '23:45');
-  assert.equal(parsed.end_time, '00:45');
+  assert.equal(parsed.end_time, null);
   assert.equal(parsed.needs_clarification, false);
 });
 
@@ -116,7 +116,7 @@ check('afternoon_tea_context_sets_implicit_afternoon', () => {
   const parsed = parser.parseLocalScheduleText('今天下午茶三点喝咖啡', referenceDate);
   assert.equal(parsed.start_date, '2026-07-09');
   assert.equal(parsed.start_time, '15:00');
-  assert.equal(parsed.end_time, '16:00');
+  assert.equal(parsed.end_time, null);
 });
 
 check('next_month_end_is_not_current_month_end', () => {
@@ -183,6 +183,58 @@ check('context_edit_still_requires_an_existing_target', () => {
   assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
 });
 
+check('calendar_query_never_enters_local_safe', () => {
+  const text = '我这周还有几个会';
+  const parsed = parser.parseLocalScheduleText(text, referenceDate);
+  assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
+});
+
+check('calendar_delete_never_enters_local_safe', () => {
+  const text = '帮我把周五那个牙医的取消掉';
+  const parsed = parser.parseLocalScheduleText(text, referenceDate);
+  assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
+});
+
+check('natural_calendar_question_never_becomes_an_event', () => {
+  const text = '我今天有事吗';
+  const parsed = parser.parseLocalScheduleText(text, referenceDate);
+  assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
+});
+
+check('existing_appointment_query_never_enters_local_safe', () => {
+  const text = '周三的预约';
+  const parsed = parser.parseLocalScheduleText(text, referenceDate);
+  assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
+});
+
+check('broad_date_window_query_never_gets_rejected', () => {
+  const text = '本周发薪吗';
+  const parsed = parser.parseLocalScheduleText(text, referenceDate);
+  assert.equal(parser.classifyScheduleParseIntent(text), 'query');
+  assert.equal(parser.classifyScheduleParseRoute(text, parsed, referenceDate).route, 'server_required');
+});
+
+check('mobile_intent_create_is_explicit', () => {
+  assert.equal(parser.classifyScheduleParseIntent('明天下午三点开会'), 'create');
+});
+
+check('mobile_intent_query_is_state_operation', () => {
+  assert.equal(parser.classifyScheduleParseIntent('我这周还有几个会'), 'query');
+  assert.equal(parser.classifyScheduleParseIntent('周三的预约'), 'query');
+});
+
+check('mobile_intent_delete_is_state_operation', () => {
+  assert.equal(parser.classifyScheduleParseIntent('帮我把周五那个牙医的取消掉'), 'delete');
+});
+
+check('mobile_intent_clarify_requires_existing_context', () => {
+  assert.equal(parser.classifyScheduleParseIntent('把之前的日程改到明天下午三点'), 'clarify');
+});
+
+check('mobile_intent_rejects_explicit_non_schedule_control', () => {
+  assert.equal(parser.classifyScheduleParseIntent('不要真的创建日程，只是测试麦克风'), 'reject');
+});
+
 check('known_credit_card_homophone_requires_server_resolution', () => {
   const text = '每月十五号还新用卡';
   const parsed = parser.parseLocalScheduleText(text, referenceDate);
@@ -206,7 +258,7 @@ check('request_timezone_controls_relative_offset_boundary', () => {
   const parsed = parser.parseLocalScheduleText('十五分钟后提醒我提交材料', instant, 'UTC');
   assert.equal(parsed.start_date, '2027-01-01');
   assert.equal(parsed.start_time, '00:05');
-  assert.equal(parsed.end_time, '01:05');
+  assert.equal(parsed.end_time, null);
 });
 
 check('unsupported_request_timezone_keeps_legacy_parser_safe', () => {
@@ -223,7 +275,7 @@ check('evening_clock_is_not_parsed_as_morning', () => {
     'Asia/Shanghai',
   );
   assert.equal(parsed.start_time, '18:00');
-  assert.equal(parsed.end_time, '19:00');
+  assert.equal(parsed.end_time, null);
 });
 
 check('finite_daily_range_keeps_daily_event_type', () => {
@@ -270,7 +322,7 @@ check('multi_month_and_year_intervals_are_not_once', () => {
     'Asia/Shanghai',
   );
   const yearly = parser.parseLocalScheduleText(
-    '每两年1月1号安排年度复盘',
+    '每两年1月1号上午十点安排年度复盘',
     referenceDate,
     'Asia/Shanghai',
   );

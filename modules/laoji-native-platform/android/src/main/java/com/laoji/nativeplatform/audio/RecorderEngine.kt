@@ -13,8 +13,10 @@ import android.os.SystemClock
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.ArrayDeque
+
+private const val MAX_PENDING_ASR_BYTES = 64 * 1024
 
 interface RecorderEngineHost {
   fun onSnapshotChanged(snapshot: RecorderSnapshot)
@@ -39,6 +41,11 @@ class RecorderEngine(
   private val startFuture = CompletableFuture<RecorderSnapshot>()
   private val emergencyScheduled = AtomicBoolean(false)
   private val asrFailureReported = AtomicBoolean(false)
+  private val asrConnectionHandled = AtomicBoolean(false)
+  private val asrQueueLock = Any()
+  private val pendingAsrFrames = ArrayDeque<ByteArray>()
+  private var pendingAsrBytes = 0
+  private var flushingPendingAsr = false
 
   @Volatile
   private var state = RecorderState.IDLE
@@ -306,8 +313,6 @@ class RecorderEngine(
       ensureRecordPermission()
       fileSession = repository.createSession(config, startedAtMs)
 
-      if (config.mode == RecorderMode.REALTIME) connectRealtimeAsr()
-
       val recorder = createAudioRecord()
       audioRecord = recorder
       if (stopRequested) {
@@ -337,6 +342,16 @@ class RecorderEngine(
       transition(RecorderState.RECORDING)
       startRecordingThread(recorder)
       startFuture.complete(snapshot())
+      // Local capture is the latency-critical path. Start it as soon as the
+      // microphone is ready and establish the realtime ASR socket in parallel;
+      // frames are journaled locally and buffered briefly until onOpen. This
+      // removes the network round trip from the user's recording start while
+      // preserving the same transcript/recovery behavior when the service is
+      // slow or temporarily unavailable.
+      if (config.mode == RecorderMode.REALTIME) {
+        val asrConnection = startRealtimeAsrConnection()
+        observeRealtimeAsrConnection(asrConnection)
+      }
     } catch (error: RecorderRuntimeException) {
       failStart(error)
     } catch (_: Exception) {
@@ -349,38 +364,58 @@ class RecorderEngine(
     }
   }
 
-  private fun connectRealtimeAsr() {
+  private fun startRealtimeAsrConnection(): CompletableFuture<Unit> {
     val socket = RealtimeAsrSocket(config, this)
     asrSocket = socket
-    try {
-      socket.connect().get(config.connectionTimeoutMs + 500L, TimeUnit.MILLISECONDS)
-    } catch (_: TimeoutException) {
-      socket.cancel()
-      throw RecorderRuntimeException(
-        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
-        "realtime transcription connection timed out",
-      )
+    asrConnectionHandled.set(false)
+    return try {
+      socket.connect()
     } catch (error: Exception) {
-      socket.cancel()
-      val cause = error.cause
-      throw if (cause is RecorderRuntimeException) cause else RecorderRuntimeException(
-        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
-        "unable to connect to realtime transcription",
-      )
+      CompletableFuture<Unit>().also { failed -> failed.completeExceptionally(error) }
     }
-    if (!socket.isOpen()) {
-      throw RecorderRuntimeException(
-        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
-        "realtime transcription connection closed during startup",
-      )
+  }
+
+  private fun observeRealtimeAsrConnection(connection: CompletableFuture<Unit>) {
+    Thread({
+      val failure = try {
+        connection.get(config.connectionTimeoutMs + 500L, TimeUnit.MILLISECONDS)
+        null
+      } catch (error: Exception) {
+        asrSocket?.cancel()
+        error
+      }
+      try {
+        commandExecutor.execute { finishRealtimeAsrConnection(failure) }
+      } catch (_: Exception) {
+        // The recorder may already be stopping; its terminal path owns cleanup.
+      }
+    }, "laoji-asr-connect").apply {
+      isDaemon = true
+      start()
     }
-    if (stopRequested) {
-      throw RecorderRuntimeException(
-        RecorderErrorCode.SERVICE_UNAVAILABLE,
-        "recording service stopped during startup",
+  }
+
+  private fun finishRealtimeAsrConnection(failure: Throwable?) {
+    if (!asrConnectionHandled.compareAndSet(false, true)) return
+    if (stopRequested || state == RecorderState.LOCAL_SAVED || state == RecorderState.FAILED) {
+      asrSocket?.close()
+      return
+    }
+    if (failure != null || asrSocket?.isOpen() != true) {
+      markAsrUnavailable(
+        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
+        if (failure != null) "实时语音服务连接失败" else "实时语音服务连接已关闭",
       )
+      return
     }
     asrConnected = true
+    try {
+      fileSession?.updateAsrState(JournalAsrState.CONNECTED)
+    } catch (_: Exception) {
+      // The audio stream remains usable; the final journal will reconcile it.
+    }
+    flushPendingAsrFrames()
+    publishSnapshot()
   }
 
   @SuppressLint("MissingPermission")
@@ -459,13 +494,8 @@ class RecorderEngine(
         scheduleEmergencyStop(RecorderErrorCode.STORAGE_FAILED, "recording could not be written to storage")
         break
       }
-      if (append.bytesWritten > 0 && asrConnected) {
-        if (asrSocket?.sendPcm(buffer, append.bytesWritten) != true) {
-          markAsrUnavailable(
-            RecorderErrorCode.WEBSOCKET_SEND_FAILED,
-            "realtime transcription stopped accepting audio",
-          )
-        }
+      if (append.bytesWritten > 0 && config.mode == RecorderMode.REALTIME) {
+        sendOrQueueAsrFrame(buffer.copyOf(append.bytesWritten))
       }
 
       val now = SystemClock.elapsedRealtime()
@@ -720,6 +750,11 @@ class RecorderEngine(
   private fun markAsrUnavailable(code: RecorderErrorCode, message: String) {
     if (config.mode != RecorderMode.REALTIME) return
     asrConnected = false
+    synchronized(asrQueueLock) {
+      pendingAsrFrames.clear()
+      pendingAsrBytes = 0
+      flushingPendingAsr = false
+    }
     transcriptRecoveryRequired = config.purpose == AudioPurpose.MEETING
     try {
       fileSession?.updateAsrState(JournalAsrState.FAILED)
@@ -742,7 +777,52 @@ class RecorderEngine(
   private fun currentJournalAsrState(): JournalAsrState = when {
     config.mode == RecorderMode.LOCAL_ONLY -> JournalAsrState.NOT_REQUIRED
     asrConnected -> JournalAsrState.CONNECTED
+    asrSocket != null -> JournalAsrState.CONNECTING
     else -> JournalAsrState.FAILED
+  }
+
+  private fun sendOrQueueAsrFrame(frame: ByteArray) {
+    val sendNow = synchronized(asrQueueLock) {
+      if (!asrConnected || flushingPendingAsr) {
+        if (pendingAsrBytes + frame.size <= MAX_PENDING_ASR_BYTES) {
+          pendingAsrFrames.addLast(frame)
+          pendingAsrBytes += frame.size
+        }
+        false
+      } else {
+        true
+      }
+    }
+    if (sendNow && asrSocket?.sendPcm(frame, frame.size) != true) {
+      markAsrUnavailable(
+        RecorderErrorCode.WEBSOCKET_SEND_FAILED,
+        "实时语音服务暂时无法接收音频",
+      )
+    }
+  }
+
+  private fun flushPendingAsrFrames() {
+    synchronized(asrQueueLock) { flushingPendingAsr = true }
+    while (true) {
+      val frame = synchronized(asrQueueLock) {
+        if (!asrConnected) {
+          flushingPendingAsr = false
+          return
+        }
+        pendingAsrFrames.pollFirst()?.also { pendingAsrBytes -= it.size }
+          ?: run {
+            flushingPendingAsr = false
+            return
+          }
+      }
+      if (asrSocket?.sendPcm(frame, frame.size) != true) {
+        markAsrUnavailable(
+          RecorderErrorCode.WEBSOCKET_SEND_FAILED,
+          "实时语音服务暂时无法接收音频",
+        )
+        return
+      }
+    }
   }
 
   private fun clearRecoverableServerErrorAfterReady(): Boolean {

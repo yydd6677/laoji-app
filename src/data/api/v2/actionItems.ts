@@ -89,7 +89,7 @@ export interface UpsertMeetingActionV2Input {
 export async function upsertMeetingActionV2(
   input: UpsertMeetingActionV2Input,
 ): Promise<ActionItemV2Response> {
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const meetingId = encodeURIComponent(input.meetingRemoteId);
   const actionId = encodeURIComponent(input.mutation.action_id);
   const response = await fetchWithTimeout(
@@ -320,7 +320,7 @@ export async function listMeetingActionsV2(
   if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
     throw new Error('行动项拉取数量无效');
   }
-  const base = getApiConfig().meetingApiBase.replace(/\/+$/, '');
+  const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const query = [
     `limit=${requestedLimit}`,
     ...(cursor ? [`cursor=${encodeURIComponent(cursor)}`] : []),

@@ -197,6 +197,8 @@ object MinutesSnapshotParser {
       title = raw.string("title").orDefault("会议记录"),
       dateTimeLabel = raw.string("dateTimeLabel").orEmpty(),
       location = raw.string("location").orEmpty(),
+      locationLoading = raw.boolean("locationLoading"),
+      canEditLocation = raw.boolean("canEditLocation"),
       activeTab = activeTab,
       tabGeneration = raw["tabGeneration"].pageGeneration(),
       activeTabIsExplicit = raw.boolean("activeTabIsExplicit"),

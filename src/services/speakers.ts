@@ -35,7 +35,7 @@ export interface SpeakerMutationResponse {
 }
 
 function endpoint(path = ''): string {
-  return `${getApiConfig().meetingApiBase}/api/laoji/speakers${path}`;
+  return `${getApiConfig().apiBase}/api/laoji/speakers${path}`;
 }
 
 function authHeaders(accessToken: string): Record<string, string> {

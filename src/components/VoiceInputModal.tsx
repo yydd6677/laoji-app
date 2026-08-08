@@ -484,10 +484,27 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     recordingRunRef.current = runId;
     setStep('connecting');
     setError('');
+    // Start the guest-session handshake while Android is resolving the
+    // microphone permission. These requests are independent; keeping them
+    // serial made the connecting state include both network round trips.
+    const authorizationResultPromise = createGuestRealtimeSession('日程语音输入').then(
+      session => ({ session, error: null as unknown }),
+      error => ({ session: null, error }),
+    );
     try {
       const permission = await requestRecordingPermissionsAsync();
-      if (recordingRunRef.current !== runId) return;
+      if (recordingRunRef.current !== runId) {
+        const authorizationResult = await authorizationResultPromise;
+        if (authorizationResult.session) {
+          void releaseRealtimeAuthorization(authorizationResult.session);
+        }
+        return;
+      }
       if (!permission.granted) {
+        const authorizationResult = await authorizationResultPromise;
+        if (authorizationResult.session) {
+          void releaseRealtimeAuthorization(authorizationResult.session);
+        }
         if (micHoldTimerRef.current) clearTimeout(micHoldTimerRef.current);
         micHoldTimerRef.current = null;
         setMicInteraction('idle');
@@ -496,7 +513,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      if (recordingRunRef.current !== runId) return;
+      if (recordingRunRef.current !== runId) {
+        const authorizationResult = await authorizationResultPromise;
+        if (authorizationResult.session) {
+          void releaseRealtimeAuthorization(authorizationResult.session);
+        }
+        return;
+      }
       setError('');
       setText('');
       transcriptRef.current = '';
@@ -505,7 +528,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
 
       let authorization: ApiGuestRealtimeSession | null = null;
       try {
-        authorization = await createGuestRealtimeSession('日程语音输入');
+        const authorizationResult = await authorizationResultPromise;
+        if (authorizationResult.error || !authorizationResult.session) {
+          throw authorizationResult.error instanceof Error
+            ? authorizationResult.error
+            : new Error('语音服务暂时不可用');
+        }
+        authorization = authorizationResult.session;
         if (recordingRunRef.current !== runId) {
           await releaseRealtimeAuthorization(authorization);
           return;
@@ -621,14 +650,36 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const realtime = realtimeRef.current;
       if (!realtime) return;
       setStep('parsing');
+      let audioUri: string | undefined;
       try {
-        await discardScheduleRecording(await realtime.stop());
+        audioUri = await realtime.stop();
         if (recordingRunRef.current !== runId) return;
         const transcribed = transcriptRef.current.trim();
         realtimeRef.current = null;
         recordingModeRef.current = null;
         setRecordingMode(null);
         if (!transcribed) {
+          // Native capture now starts before the WebSocket is ready. If the
+          // connection failed or produced no final text, use the preserved
+          // local WAV as the same file-based fallback instead of discarding
+          // the only audio immediately.
+          if (audioUri) {
+            try {
+              const fallback = await parseAudio(audioUri, {
+                reference_datetime: new Date().toISOString(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              });
+              const fallbackText = fallback.raw_text?.trim() ?? '';
+              if (fallbackText) {
+                setText(fallbackText);
+                acceptNewDraft(fallback);
+                setStep('confirm');
+                return;
+              }
+            } catch (fallbackError) {
+              diagnosticWarn('realtime audio fallback parsing failed', fallbackError);
+            }
+          }
           setError(noTranscriptText());
           setStep('input');
           return;
@@ -647,6 +698,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         recordingModeRef.current = null;
         setRecordingMode(null);
       } finally {
+        await discardScheduleRecording(audioUri);
         await releaseRealtimeAuthorization();
       }
       return;

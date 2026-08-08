@@ -44,6 +44,7 @@ import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator'
 import { readableErrorMessage } from '../services/errors';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
+import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -344,9 +345,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
 
   const appendTranscript = (line: Omit<TranscriptLine, 'id'>) => {
     const current = transcriptRef.current;
-    const id = `${activeMeetingIdRef.current || meetingId}-${line.start_time ?? current.length}-${line.text}`;
-    if (current.some(item => item.id === id || (item.text === line.text && item.start_time === line.start_time))) return;
-    const next = [...current, { id, ...line }];
+    const normalizedLine = {
+      ...line,
+      text: toSimplifiedChinese(line.text),
+      speaker_label: line.speaker_label ? toSimplifiedChinese(line.speaker_label) : line.speaker_label,
+    };
+    const id = `${activeMeetingIdRef.current || meetingId}-${normalizedLine.start_time ?? current.length}-${normalizedLine.text}`;
+    if (current.some(item => item.id === id || (item.text === normalizedLine.text && item.start_time === normalizedLine.start_time))) return;
+    const next = [...current, { id, ...normalizedLine }];
     transcriptRef.current = next;
     setTranscript(next);
     if (activeMeetingIdRef.current) {

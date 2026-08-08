@@ -5,11 +5,21 @@ import { requestMeetingActionSync } from '../application/meeting/actionSyncTrigg
 import { requestMeetingSpeakerCorrectionSync } from '../application/meeting/speakerCorrectionSyncTrigger';
 import { requestMeetingOccurrenceSync } from '../application/meeting/occurrenceSyncTrigger';
 import { requestMeetingTagCatalogSync } from '../application/meeting/tagCatalogSyncTrigger';
+import { requestMeetingAttachmentSync } from '../application/meeting/attachmentSyncTrigger';
+import { requestMeetingManualNoteSync } from '../application/meeting/manualNoteSyncTrigger';
+import { requestMeetingMarkerSync } from '../application/meeting/markerSyncTrigger';
+import { requestMeetingSummarySync } from '../application/meeting/summarySyncTrigger';
 import { getFeatureFlags } from '../config/featureFlags';
 import type { ScopeKey } from '../domain/meeting';
 import { diagnosticWarn } from '../services/diagnostics';
 import { drainMeetingRootSync } from '../services/meetingRootSync';
 import { useAuth } from '../store/AuthStore';
+
+// Keep foreground sync self-healing when a provider was interrupted after
+// claiming an operation (network handoff, token refresh, or process pressure).
+// Individual workers still honor their durable retry times, so this heartbeat
+// does not bypass backoff for ordinary retryable failures.
+const FOREGROUND_SYNC_HEARTBEAT_MS = 30_000;
 
 export function MeetingRootSyncProvider({ children }: { children: React.ReactNode }) {
   const { mode, session, accessToken } = useAuth();
@@ -78,15 +88,28 @@ export function MeetingRootSyncProvider({ children }: { children: React.ReactNod
     const unsubscribe = subscribeMeetingRootSync(requestedScope => {
       if (requestedScope === scopeKey) requestRun();
     });
+    const requestAllSync = () => {
+      requestRun();
+      requestMeetingOccurrenceSync(scopeKey);
+      requestMeetingActionSync(scopeKey);
+      requestMeetingSpeakerCorrectionSync(scopeKey);
+      requestMeetingTagCatalogSync(scopeKey);
+      requestMeetingAttachmentSync(scopeKey);
+      requestMeetingManualNoteSync(scopeKey);
+      requestMeetingMarkerSync(scopeKey);
+      requestMeetingSummarySync(scopeKey);
+    };
+    const heartbeat = setInterval(requestAllSync, FOREGROUND_SYNC_HEARTBEAT_MS);
     const appStateSubscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') requestRun();
+      if (nextState === 'active') requestAllSync();
     });
-    requestRun();
+    requestAllSync();
     return () => {
       active = false;
       requested = false;
       clearRetryTimer();
       unsubscribe();
+      clearInterval(heartbeat);
       appStateSubscription.remove();
       controllers.forEach(controller => controller.abort());
       controllers.clear();

@@ -17,11 +17,12 @@ export function requestTimeoutMs(url: string): number {
   if (/\/api\/laoji\/(?:asr\/transcribe|parse-audio)/.test(url)) return 120_000;
   if (/\/api\/laoji\/parse(?:\?|$)/.test(url) || /\/api\/laoji\/clarify/.test(url)) return 60_000;
   if (/\/summaries\//.test(url) || /guest-summary/.test(url)) return 90_000;
-  // SVC-07 gives each interactive question one shared 30-second budget. The
-  // server forwards the remaining budget to model and retrieval calls; the
-  // client must stop at the same boundary instead of leaving the sheet blocked
-  // for several minutes when a model is cold or unavailable.
-  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 30_000;
+  // A foreground question can arrive while one non-preemptible background
+  // summary block is already running. The provider gives it the next queue
+  // slot, but a 30-second client abort can still discard a successful response
+  // (observed at 48 seconds under real summary contention). Keep a bounded
+  // window that covers one block plus the interactive inference.
+  if (/\/questions(?:\/|\?|$)/.test(url) || /guest-questions/.test(url)) return 75_000;
   if (/\/api\/laoji\/speakers(?:\/|\?|$)/.test(url)) return 90_000;
   if (/\/audio(?:\/|\?|$)/.test(url) || /\/upload(?:\?|$)/.test(url)) return 180_000;
   return 20_000;

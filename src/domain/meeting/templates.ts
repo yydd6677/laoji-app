@@ -19,43 +19,39 @@ export interface MeetingTemplate {
 export const MEETING_TEMPLATES: readonly MeetingTemplate[] = [
   {
     id: 'general',
-    revision: 1,
+    revision: 2,
     title: '通用',
     sectionSchema: [
       { stableKey: 'overview', title: '概述', kind: 'paragraph' },
       { stableKey: 'key_discussion', title: '关键讨论', kind: 'topics' },
-      { stableKey: 'decisions', title: '决定', kind: 'decisions' },
-      { stableKey: 'action_items', title: '行动项', kind: 'action_items' },
     ],
     actionExtraction: 'standard',
   },
   {
     id: 'one_on_one',
-    revision: 1,
+    revision: 2,
     title: '1:1',
     sectionSchema: [
       { stableKey: 'topics', title: '讨论主题', kind: 'topics' },
       { stableKey: 'feedback_concerns', title: '反馈与关注', kind: 'bullets' },
-      { stableKey: 'commitments', title: '双方约定', kind: 'decisions' },
-      { stableKey: 'follow_ups', title: '后续事项', kind: 'action_items' },
+      { stableKey: 'support_improvements', title: '支持与改进', kind: 'bullets' },
     ],
     actionExtraction: 'follow_up_focused',
   },
   {
     id: 'project_sync',
-    revision: 1,
+    revision: 2,
     title: '项目同步',
     sectionSchema: [
       { stableKey: 'progress', title: '进展', kind: 'bullets' },
       { stableKey: 'risks', title: '风险与阻塞', kind: 'risks' },
-      { stableKey: 'decisions', title: '决定', kind: 'decisions' },
-      { stableKey: 'action_items', title: '行动项', kind: 'action_items' },
+      { stableKey: 'scope_milestones', title: '范围与里程碑', kind: 'bullets' },
     ],
     actionExtraction: 'follow_up_focused',
   },
   {
     id: 'interview',
-    revision: 1,
+    revision: 2,
     title: '访谈',
     sectionSchema: [
       { stableKey: 'topics', title: '主题', kind: 'topics' },

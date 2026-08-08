@@ -1,19 +1,19 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-31T18:02:27.398+08:00",
-  "started_at": "2026-07-31T18:02:27.224+08:00",
+  "generated_at": "2026-08-01T11:44:11.303+08:00",
+  "started_at": "2026-08-01T11:44:11.166+08:00",
   "service": "SVC-09",
   "scope": "real_candidate_meeting_state_machine_sqlite_cpu_only_r8",
   "verdict": "passed_with_delete_restore_policy_observation",
   "candidate_artifacts": {
-    "meeting_recording_asset_service.py": "4ea26c283b0aecabf88ed88a07137d74d204723785c6137944ffde294486fb55",
+    "meeting_recording_asset_service.py": "2a19fa22b3cdd94215936ebc613b2fef42b1d0250eefb3394970dce3311956c0",
     "meeting_recording_asset.py": "97147694954b9b585c7e8ca086874b6e9253008e1f74a21b922e995c78ee694d",
     "meeting_note_root.py": "94d91904ca346a8c9ee0b9104b784c7fcf18311fac7d62289dc15308d9a47889"
   },
   "runtime": {
-    "python": "3.11.15 | packaged by conda-forge | (main, Jun 11 2026, 03:34:02) [GCC 14.3.0]",
-    "sqlalchemy": "2.0.30",
-    "aiosqlite": "0.20.0",
+    "python": "3.13.5 (main, May  5 2026, 21:05:52) [GCC 14.2.0]",
+    "sqlalchemy": "2.0.41",
+    "aiosqlite": "0.21.0",
     "database": "temporary SQLite with foreign keys and WAL",
     "production_or_remote_contacted": false,
     "gpu_or_model_loaded": false

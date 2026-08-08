@@ -17,12 +17,20 @@ import { HttpResponseError } from './errors';
 import { loadMeetingCapabilities } from '../data/api/v2';
 import {
   meetingSummaryToText,
+  normalizeRemoteMeetingSummaryResult,
   normalizeMeetingSummaryResult,
 } from './meetingSummaryFormat';
+import {
+  createMeetingSummaryTrace,
+  persistMeetingSummaryTrace,
+  type MeetingSummaryCallSource,
+  type MeetingSummaryTraceContext,
+} from './meetingSummaryTrace';
 
 export {
   meetingSummaryTextToPlainText,
   meetingSummaryToText,
+  normalizeRemoteMeetingSummaryResult,
   normalizeMeetingSummaryResult,
 } from './meetingSummaryFormat';
 
@@ -298,8 +306,20 @@ export function summaryTaskFailureMessage(result: unknown): string {
   return '会议总结任务执行失败';
 }
 
+function summaryTraceErrorCode(error: unknown): string {
+  const name = error instanceof Error && error.name.trim() ? error.name.trim() : 'Error';
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const hint = message
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 96);
+  return hint ? `${name}:${hint}`.slice(0, 120) : name.slice(0, 120);
+}
+
 export async function generateSummaryForMeeting(options: {
   meetingId: string;
+  localMeetingId?: string;
   title?: string;
   meetingDate?: string;
   transcriptLines: TranscriptLine[];
@@ -313,9 +333,12 @@ export async function generateSummaryForMeeting(options: {
   signal?: AbortSignal;
   onProgress?: MeetingSummaryProgressListener;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
+  traceSource?: MeetingSummaryCallSource;
+  inputFingerprint?: string;
 }): Promise<MeetingSummary> {
   const {
     meetingId,
+    localMeetingId,
     title,
     meetingDate,
     transcriptLines,
@@ -329,16 +352,46 @@ export async function generateSummaryForMeeting(options: {
     signal,
     onProgress,
     onTaskSubmitted,
+    traceSource = 'manual',
+    inputFingerprint,
   } = options;
   if (transcriptLines.length === 0) throw new Error('meeting transcript is empty');
   throwIfAborted(signal);
 
-  const reportResubmission = () => onProgress?.({
-    attempt: 0,
-    status: 'RESUBMITTING',
-    elapsedMs: 0,
-    stage: 'resubmitting',
+  const trace: MeetingSummaryTraceContext = await createMeetingSummaryTrace({
+    meetingId,
+    title,
+    meetingDate,
+    transcriptLines,
+    template,
+    carryForward,
+    attachmentAuthorization,
+    source: traceSource,
+    authMode: isGuest ? 'guest' : 'authenticated',
+    inputFingerprint,
   });
+  void persistMeetingSummaryTrace(trace, {
+    phase: 'started',
+    taskId: resumeTaskId ?? null,
+  });
+
+  let traceTaskId = resumeTaskId ?? null;
+  const bindSummaryToLocalMeeting = (summary: MeetingSummary): MeetingSummary => {
+    const localId = localMeetingId?.trim();
+    if (isGuest || !localId || localId === meetingId) return summary;
+    const rebound = normalizeRemoteMeetingSummaryResult(localId, meetingId, summary);
+    if (!rebound) {
+      throw new Error('云端整理结果与本机会议身份不一致，未保存本次结果。');
+    }
+    return rebound;
+  };
+  try {
+    const reportResubmission = () => onProgress?.({
+      attempt: 0,
+      status: 'RESUBMITTING',
+      elapsedMs: 0,
+      stage: 'resubmitting',
+    });
 
   if (isGuest) {
     const submitTask = async (force: boolean): Promise<string> => {
@@ -355,15 +408,18 @@ export async function generateSummaryForMeeting(options: {
         template,
         carryForward,
         attachmentAuthorization,
+        trace,
       );
+      void persistMeetingSummaryTrace(trace, { phase: 'submitted', taskId: task.task_id });
       if (onTaskSubmitted) await onTaskSubmitted(task.task_id);
       return task.task_id;
     };
     let taskId = resumeTaskId || await submitTask(forceRegenerate);
+    traceTaskId = taskId;
     let status: ApiMeetingTaskStatus;
     try {
       status = await waitForTask(
-        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs),
+        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs, trace),
         { signal, onProgress },
       );
     } catch (error) {
@@ -371,8 +427,9 @@ export async function generateSummaryForMeeting(options: {
       throwIfAborted(signal);
       await reportResubmission();
       taskId = await submitTask(false);
+      traceTaskId = taskId;
       status = await waitForTask(
-        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs),
+        waitMs => fetchGuestMeetingSummaryTask(taskId, signal, waitMs, trace),
         { signal, onProgress },
       );
     }
@@ -384,6 +441,7 @@ export async function generateSummaryForMeeting(options: {
       attachmentAuthorization,
     );
     if (!summary) throw new Error('guest meeting summary is empty');
+    void persistMeetingSummaryTrace(trace, { phase: 'completed', taskId });
     return summary;
   }
 
@@ -400,23 +458,26 @@ export async function generateSummaryForMeeting(options: {
       template,
       carryForward,
       attachmentAuthorization,
+      trace,
     );
+    void persistMeetingSummaryTrace(trace, { phase: 'submitted', taskId: task.task_id });
     if (onTaskSubmitted) await onTaskSubmitted(task.task_id);
     return task.task_id;
   };
   let taskId = resumeTaskId || await submitTask(forceRegenerate);
+  traceTaskId = taskId;
   let completedStatus: ApiMeetingTaskStatus | null = null;
   if (taskId) {
     try {
       completedStatus = await waitForTask(
-        waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
+        waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs, trace),
         { signal, onProgress },
       );
     } catch (error) {
       // A polling request can fail after the worker has already committed the
       // summary. Check the durable result once before showing a terminal error.
       throwIfAborted(signal);
-      const completed = await fetchMeetingSummaryDetail(meetingId, accessToken, signal).catch(() => null);
+      const completed = await fetchMeetingSummaryDetail(meetingId, accessToken, signal, trace).catch(() => null);
       let normalizedCompleted: MeetingSummary | null = null;
       if (completed) {
         try {
@@ -432,12 +493,16 @@ export async function generateSummaryForMeeting(options: {
           // being recovered. Only a matching version can satisfy this request.
         }
       }
-      if (normalizedCompleted) return normalizedCompleted;
+      if (normalizedCompleted) {
+        void persistMeetingSummaryTrace(trace, { phase: 'completed', taskId });
+        return bindSummaryToLocalMeeting(normalizedCompleted);
+      }
       if (isMissingTaskError(error)) {
         await reportResubmission();
         taskId = await submitTask(false);
+        traceTaskId = taskId;
         completedStatus = await waitForTask(
-          waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs),
+          waitMs => fetchMeetingSummaryTask(meetingId, taskId, accessToken, signal, waitMs, trace),
           { signal, onProgress },
         );
       } else {
@@ -454,15 +519,28 @@ export async function generateSummaryForMeeting(options: {
       carryForward,
       attachmentAuthorization,
     );
-    if (taskSummary) return taskSummary;
+    if (taskSummary) {
+      void persistMeetingSummaryTrace(trace, { phase: 'completed', taskId });
+      return bindSummaryToLocalMeeting(taskSummary);
+    }
   }
   const summary = normalizeSummaryForTemplate(
     meetingId,
-    await fetchMeetingSummaryDetail(meetingId, accessToken, signal),
+    await fetchMeetingSummaryDetail(meetingId, accessToken, signal, trace),
     template,
     carryForward,
     attachmentAuthorization,
   );
   if (!summary) throw new Error('meeting summary is empty');
-  return summary;
+  void persistMeetingSummaryTrace(trace, { phase: 'completed', taskId });
+  return bindSummaryToLocalMeeting(summary);
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError';
+    void persistMeetingSummaryTrace(trace, {
+      phase: aborted ? 'background' : 'failed',
+      taskId: traceTaskId,
+      errorCode: aborted ? null : summaryTraceErrorCode(error),
+    });
+    throw error;
+  }
 }

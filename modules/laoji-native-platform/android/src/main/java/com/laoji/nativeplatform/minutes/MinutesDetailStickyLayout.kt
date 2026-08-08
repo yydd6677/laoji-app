@@ -18,7 +18,9 @@ internal interface MinutesDetailStickyListener {
 
 internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context), NestedScrollingParent2 {
   private lateinit var header: View
+  private lateinit var selection: View
   private lateinit var tabs: View
+  private lateinit var status: View
   private lateinit var pager: View
   private var nestedScrollAxes = ViewCompat.SCROLL_AXIS_NONE
   private var scrollEnabled = true
@@ -37,13 +39,19 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
   internal val visibleHeaderHeightPx: Int
     get() = (headerMeasuredHeightPx - headerCollapseOffsetPx).coerceAtLeast(0)
 
-  fun setOwners(header: View, tabs: View, pager: View) {
+  fun setOwners(header: View, selection: View, tabs: View, status: View, pager: View) {
     check(childCount == 0) { "Minutes detail sticky owners can only be installed once" }
     this.header = header
+    this.selection = selection
+    this.status = status
     this.tabs = tabs
     this.pager = pager
     addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    addView(selection, LayoutParams(LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.RECORDING_SELECTOR_HEIGHT_DP)))
     addView(tabs, LayoutParams(LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)))
+    // The status row belongs below the page selector. It collapses when empty so
+    // a hidden message does not leave a blank line under the selector.
+    addView(status, LayoutParams(LayoutParams.MATCH_PARENT, 0))
     addView(pager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
   }
 
@@ -80,11 +88,21 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     header.measure(exactWidth, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
     val maxCollapse = if (topViewNotScroll) 0 else header.measuredHeight
     headerCollapseOffsetPx = if (forceHideTopView) maxCollapse else headerCollapseOffsetPx.coerceIn(0, maxCollapse)
+    val selectionHeight = context.dpRounded(MinutesDetailLayoutContract.RECORDING_SELECTOR_HEIGHT_DP)
+    selection.measure(exactWidth, MeasureSpec.makeMeasureSpec(selectionHeight, MeasureSpec.EXACTLY))
     val tabHeight = context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)
     tabs.measure(exactWidth, MeasureSpec.makeMeasureSpec(tabHeight, MeasureSpec.EXACTLY))
+    val statusHeight = if (status.visibility == View.VISIBLE) {
+      context.dpRounded(MinutesDetailLayoutContract.STATUS_SLOT_HEIGHT_DP)
+    } else {
+      0
+    }
+    status.measure(exactWidth, MeasureSpec.makeMeasureSpec(statusHeight, MeasureSpec.EXACTLY))
     val pagerHeight = MinutesDetailLayoutContract.pagerHeightPx(
       stickyHeightPx = height,
       tabHeightPx = tabHeight,
+      statusHeightPx = statusHeight,
+      selectionHeightPx = selectionHeight,
     )
     pager.measure(exactWidth, MeasureSpec.makeMeasureSpec(pagerHeight, MeasureSpec.EXACTLY))
     setMeasuredDimension(resolveSize(width, widthMeasureSpec), resolveSize(height, heightMeasureSpec))
@@ -95,9 +113,13 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     val width = right - left
     val headerTop = -headerCollapseOffsetPx
     header.layout(0, headerTop, width, headerTop + header.measuredHeight)
-    val tabsTop = headerTop + header.measuredHeight
+    val selectionTop = headerTop + header.measuredHeight
+    selection.layout(0, selectionTop, width, selectionTop + selection.measuredHeight)
+    val tabsTop = selectionTop + selection.measuredHeight
     tabs.layout(0, tabsTop, width, tabsTop + tabs.measuredHeight)
-    val pagerTop = tabsTop + tabs.measuredHeight
+    val statusTop = tabsTop + tabs.measuredHeight
+    status.layout(0, statusTop, width, statusTop + status.measuredHeight)
+    val pagerTop = statusTop + status.measuredHeight
     pager.layout(0, pagerTop, width, pagerTop + pager.measuredHeight)
   }
 
@@ -150,6 +172,8 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     listener?.onCollapseOffsetChanged(next)
     if (ViewCompat.isLaidOut(this)) {
       header.offsetTopAndBottom(-delta)
+      selection.offsetTopAndBottom(-delta)
+      status.offsetTopAndBottom(-delta)
       tabs.offsetTopAndBottom(-delta)
       pager.offsetTopAndBottom(-delta)
       invalidate()

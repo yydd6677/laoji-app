@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that a real-HTTP run contains one complete record per corpus case."""
+"""Verify completeness *and* per-case quality for a real-HTTP run."""
 
 from __future__ import annotations
 
@@ -72,7 +72,15 @@ def main() -> int:
         "passed_count": pass_count,
         "failed_count": len(results) - pass_count,
         "errors": errors,
-        "passed": len(corpus) == 10_000 and len(results) == 10_000 and not errors,
+        # Completeness is necessary but not sufficient. The previous gate
+        # returned passed=true even when most evaluations failed, which made a
+        # diagnostic HTTP run look like a successful quality benchmark.
+        "passed": (
+            len(corpus) == 10_000
+            and len(results) == 10_000
+            and pass_count == len(corpus)
+            and not errors
+        ),
         "evidence_type": "real_http_per_case_verified",
     }
     text = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
