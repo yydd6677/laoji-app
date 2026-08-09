@@ -39,8 +39,9 @@ def verify(root: Path) -> list[str]:
     eas = root / "eas.json"
     env_example = root / ".env.example"
     config_ts = root / "src/services/config.ts"
+    device_api_ts = root / "src/services/deviceApi.ts"
 
-    required = (app_config, eas, env_example, config_ts)
+    required = (app_config, eas, env_example, config_ts, device_api_ts)
     for path in required:
         if not path.is_file():
             failures.append(f"缺少统一入口文件: {path.relative_to(root)}")
@@ -51,9 +52,12 @@ def verify(root: Path) -> list[str]:
     eas_text = _read(eas)
     env_text = _read(env_example)
     config_text = _read(config_ts)
+    device_api_text = _read(device_api_ts)
 
     if EXPECTED_BASE not in app_text:
         failures.append("app.config.js 未声明 laoji.cloud 默认入口")
+    if "deviceBootstrapKey.length < 32" not in app_text:
+        failures.append("app.config.js 未在非开发构建阶段阻止缺失的设备注册引导密钥")
     if EXPECTED_BASE not in config_text:
         failures.append("src/services/config.ts 未声明 laoji.cloud 默认入口")
     if env_text.count("EXPO_PUBLIC_API_BASE=") != 1:
@@ -75,6 +79,20 @@ def verify(root: Path) -> list[str]:
         failures.append("实时 ASR 地址未从统一 API 基址派生 WS/WSS")
     if "reverseGeocoderUrl: apiBase ? `${apiBase}/api/location/reverse` : ''" not in config_text:
         failures.append("运行时配置未由统一 API 基址派生 reverseGeocoderUrl")
+
+    # The local identity object intentionally uses camelCase, while the
+    # FastAPI registration contract is strict snake_case with extra fields
+    # forbidden. A spread of the local object here silently turns every fresh
+    # APK into an unregistered device (HTTP 422), so keep this wire mapping in
+    # the source-level gate as well as the live registration smoke check.
+    registration_start = device_api_text.find("export async function registerDevice")
+    registration_end = device_api_text.find("export async function ensureDeviceReady", registration_start)
+    registration_block = device_api_text[registration_start:registration_end]
+    for field in ("device_id: current.deviceId", "device_secret: current.deviceSecret", "epoch_id: current.epochId"):
+        if field not in registration_block:
+            failures.append(f"设备注册请求缺少严格 wire 字段: {field}")
+    if "...current" in registration_block:
+        failures.append("设备注册请求不得直接展开 camelCase 本机身份")
 
     # Only build/runtime inputs are scanned. Exclude generated/cache paths and
     # documentation, where retired endpoints are intentionally retained as

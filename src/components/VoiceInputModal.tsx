@@ -15,18 +15,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { Colors as C, Motion } from '../theme/colors';
 import {
-  ApiGuestRealtimeSession,
   clarifyText,
-  createGuestRealtimeSession,
-  deleteGuestRealtimeSession,
   parseAudio,
   parseText,
   ParseResult,
 } from '../services/api';
+import { getDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
 import {
   RealtimeAsrAudioStats,
   RealtimeAsrSession,
   RealtimeAsrTranscript,
+  createRealtimeMeetingId,
   startRealtimeAsr,
 } from '../services/realtimeAsr';
 import {
@@ -214,7 +213,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const fileRecorder            = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const fileRecordingActiveRef  = useRef(false);
   const realtimeRef             = useRef<RealtimeAsrSession | null>(null);
-  const realtimeAuthorizationRef = useRef<ApiGuestRealtimeSession | null>(null);
+  const realtimeAuthorizationRef = useRef<DeviceRealtimeAuth | null>(null);
   const recordingModeRef        = useRef<RecordingMode | null>(null);
   const recordingRunRef         = useRef(0);
   const recordingStartRef       = useRef(false);
@@ -336,19 +335,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   };
 
   const releaseRealtimeAuthorization = async (
-    authorization: ApiGuestRealtimeSession | null = realtimeAuthorizationRef.current,
+    authorization: DeviceRealtimeAuth | null = realtimeAuthorizationRef.current,
   ) => {
     if (!authorization) return;
     if (realtimeAuthorizationRef.current === authorization) {
       realtimeAuthorizationRef.current = null;
-    }
-    try {
-      await deleteGuestRealtimeSession(
-        authorization.meeting_id,
-        authorization.guest_token,
-      );
-    } catch (err) {
-      diagnosticWarn('schedule realtime authorization cleanup failed', err);
     }
   };
 
@@ -484,10 +475,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     recordingRunRef.current = runId;
     setStep('connecting');
     setError('');
-    // Start the guest-session handshake while Android is resolving the
-    // microphone permission. These requests are independent; keeping them
-    // serial made the connecting state include both network round trips.
-    const authorizationResultPromise = createGuestRealtimeSession('日程语音输入').then(
+    // Register the device while the microphone permission is being resolved.
+    // No temporary guest session is created; the WebSocket carries the same
+    // device/epoch credential as the rest of the service API.
+    const authorizationResultPromise = getDeviceRealtimeAuth().then(
       session => ({ session, error: null as unknown }),
       error => ({ session: null, error }),
     );
@@ -526,7 +517,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       transcriptSegmentsRef.current = [];
       audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
 
-      let authorization: ApiGuestRealtimeSession | null = null;
+      let authorization: DeviceRealtimeAuth | null = null;
       try {
         const authorizationResult = await authorizationResultPromise;
         if (authorizationResult.error || !authorizationResult.session) {
@@ -541,8 +532,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
         realtimeAuthorizationRef.current = authorization;
         const realtime = await startRealtimeAsr({
-          meetingId: authorization.meeting_id,
-          guestToken: authorization.guest_token,
+          meetingId: createRealtimeMeetingId(),
+          deviceToken: authorization.deviceToken,
+          dataEpoch: authorization.dataEpoch,
           purpose: 'schedule',
           onTranscript: transcript => {
             if (recordingRunRef.current === runId) appendRealtimeTranscript(transcript);

@@ -83,6 +83,8 @@ export interface PendingMeetingAudioUpload {
   checksumSha256?: string;
   remoteAssetId?: string;
   remoteAssetRevision?: number;
+  /** Device transcription job identity retained until completion is pulled. */
+  transcriptionTaskId?: string;
   createdAt: string;
   lastAttemptAt: string;
   attemptCount: number;
@@ -198,6 +200,46 @@ function nativeFailureIsBlocked(reason: string | undefined): boolean {
     || /^http-(?:400|404|409|412|413|415|422)$/.test(normalized);
 }
 
+/**
+ * A WorkManager handle can survive an APK upgrade while the native module no
+ * longer has a resolvable record for it.  Never let that stale promise block
+ * the device-primary JS uploader forever; a null result deliberately enters
+ * the existing idempotent fallback path below.
+ */
+async function readNativeUploadStateBounded(
+  workId: string,
+  timeoutMs = 3_000,
+): Promise<NativeUploadState | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      getNativeMeetingUploadState(workId).catch(() => null),
+      new Promise<NativeUploadState | null>(resolve => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function cancelNativeUploadBounded(
+  workId: string,
+  timeoutMs = 3_000,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      cancelNativeMeetingUpload(workId).catch(() => undefined),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function uploadAttemptCount(
   pending: PendingMeetingAudioUpload,
   nativeState: NativeUploadState | null,
@@ -284,7 +326,7 @@ export async function inspectPendingMeetingAudioUpload(
   pending: PendingMeetingAudioUpload,
 ): Promise<PendingMeetingAudioUploadInspection> {
   const nativeState = pending.nativeWorkId
-    ? await getNativeMeetingUploadState(pending.nativeWorkId).catch(() => null)
+    ? await readNativeUploadStateBounded(pending.nativeWorkId)
     : null;
   return derivePendingMeetingAudioUploadInspection(pending, nativeState);
 }
@@ -326,8 +368,18 @@ export async function retryPendingMeetingAudioUpload(
     if (!pending) return null;
     const deletedKey = deletedMeetingAudioKey(storageScope, pending.meetingId);
     if (deletedMeetingAudio.has(deletedKey)) return null;
-    if (pending.nativeWorkId) {
-      const nativeState = await getNativeMeetingUploadState(pending.nativeWorkId).catch(() => null);
+    if (pending.nativeWorkId && accessToken === 'device') {
+      // Guest/device uploads do not use the account WorkManager protocol.
+      // An old handle may point at a removed native worker and can block while
+      // crossing the Expo module boundary, so discard it in memory and go
+      // straight to the device API. The eventual idempotent success clears
+      // the durable registry below.
+      pending = { ...pending };
+      delete pending.nativeWorkId;
+      delete pending.nativeOperationId;
+      delete pending.nativeGeneration;
+    } else if (pending.nativeWorkId) {
+      const nativeState = await readNativeUploadStateBounded(pending.nativeWorkId);
       if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
         const uploaded = derivePendingMeetingAudioUploadInspection(pending, nativeState).pending;
         await clearPendingMeetingAudioUpload(storageScope, recordingAssetId);
@@ -407,7 +459,10 @@ export async function retryPendingMeetingAudioUploads(
     while (cursor < pending.length) {
       const index = cursor;
       cursor += 1;
-      if (!pending[index].remoteMeetingId) {
+      // Account uploads require a server meeting identity. Device-primary
+      // uploads intentionally use the local meeting UUID as their binding and
+      // must not wait for the legacy remote-identity repair path.
+      if (!pending[index].remoteMeetingId && accessToken !== 'device') {
         outcomes[index] = 'skipped';
         continue;
       }
@@ -421,7 +476,15 @@ export async function retryPendingMeetingAudioUploads(
         );
         uploaded[index] = completed;
         outcomes[index] = completed ? 'uploaded' : 'skipped';
-      } catch {
+      } catch (error) {
+        diagnosticAudit('meeting_audio_upload_failed', {
+          meeting_id: pending[index].meetingId,
+          recording_asset_id: pending[index].recordingAssetId,
+          reason: error instanceof Error ? error.name : 'unknown',
+          status: typeof (error as any)?.status === 'number' ? (error as any).status : null,
+          code: typeof (error as any)?.code === 'string' ? (error as any).code : null,
+          message: error instanceof Error ? error.message.slice(0, 160) : null,
+        });
         outcomes[index] = 'failed';
       }
     }
@@ -442,16 +505,30 @@ function pendingWithRemoteUploadResult(
   value: unknown,
 ): PendingMeetingAudioUpload {
   if (!value || typeof value !== 'object') return pending;
-  const result = value as { remoteId?: unknown; revision?: unknown };
+  const result = value as {
+    remoteId?: unknown;
+    revision?: unknown;
+    transcriptionTaskId?: unknown;
+    transcription_task_id?: unknown;
+    task_id?: unknown;
+    job_id?: unknown;
+  };
   const remoteAssetId = typeof result.remoteId === 'string' ? result.remoteId.trim() : '';
   const remoteAssetRevision = Number(result.revision);
+  const transcriptionTaskId = [
+    result.transcriptionTaskId,
+    result.transcription_task_id,
+    result.task_id,
+    result.job_id,
+  ].map(value => typeof value === 'string' ? value.trim() : '')
+    .find(value => Boolean(value) && value.length <= 160 && !/[\u0000-\u001f\u007f]/.test(value));
   if (
     !remoteAssetId
     || /[\u0000-\u001f\u007f]/.test(remoteAssetId)
     || !Number.isSafeInteger(remoteAssetRevision)
     || remoteAssetRevision < 1
-  ) return pending;
-  return { ...pending, remoteAssetId, remoteAssetRevision };
+  ) return transcriptionTaskId ? { ...pending, transcriptionTaskId } : pending;
+  return { ...pending, remoteAssetId, remoteAssetRevision, transcriptionTaskId };
 }
 
 async function deferPendingMeetingAudioUploadPoll(
@@ -497,10 +574,14 @@ export async function finalizeMeetingRecording(
   let retryQueued = false;
   let uploadInBackground = false;
   let pendingAudio: PendingMeetingAudioUpload | null = null;
-  if (!input.isGuest && audioUri) {
+  // Guest meetings are local-first, but their generated transcript still
+  // needs the device-scoped service.  Keep the source URI on the phone and
+  // queue the same durable upload record used by account meetings; the guest
+  // uploader assigns the local UUID as its temporary service binding.
+  if (audioUri) {
     pendingAudio = {
       meetingId: input.meetingId,
-      remoteMeetingId: input.remoteMeetingId?.trim() || undefined,
+      remoteMeetingId: input.isGuest ? undefined : input.remoteMeetingId?.trim() || undefined,
       recordingAssetId: `legacy-primary:${input.meetingId}`,
       role: 'primary',
       origin: 'captured',
@@ -519,7 +600,7 @@ export async function finalizeMeetingRecording(
     } catch {
       retryQueued = false;
     }
-    if (!input.accessToken) uploadFailed = true;
+    if (!input.isGuest && !input.accessToken) uploadFailed = true;
   }
 
   const meetingPatch: Partial<Meeting> = {
@@ -736,7 +817,7 @@ export async function upsertPendingMeetingAudioUpload(
       nativeGeneration: existing?.nativeGeneration,
     };
   });
-  await Promise.all(cancelled.map(workId => cancelNativeMeetingUpload(workId).catch(() => {})));
+  await Promise.all(cancelled.map(workId => cancelNativeUploadBounded(workId)));
 }
 
 export async function attachPendingMeetingAudioUploadRemoteIdentity(
@@ -765,7 +846,7 @@ export async function attachPendingMeetingAudioUploadRemoteIdentity(
       changed = true;
     });
   });
-  await Promise.all(nativeWorkIds.map(workId => cancelNativeMeetingUpload(workId).catch(() => {})));
+  await Promise.all(nativeWorkIds.map(workId => cancelNativeUploadBounded(workId)));
   return changed;
 }
 
@@ -779,7 +860,7 @@ export async function deletePendingMeetingAudioUpload(storageScope: string, meet
       delete records[assetId];
     });
   });
-  await Promise.all(nativeWorkIds.map(workId => cancelNativeMeetingUpload(workId)));
+  await Promise.all(nativeWorkIds.map(workId => cancelNativeUploadBounded(workId)));
 }
 
 /** Re-enables future local audio work after a recoverable root tombstone is restored. */
@@ -899,6 +980,12 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
       remoteAssetRevision: Number.isSafeInteger(item.remoteAssetRevision)
         && Number(item.remoteAssetRevision) >= 1
         ? Number(item.remoteAssetRevision)
+        : undefined,
+      transcriptionTaskId: typeof item.transcriptionTaskId === 'string'
+        && item.transcriptionTaskId.trim()
+        && item.transcriptionTaskId.trim().length <= 160
+        && !/[\u0000-\u001f\u007f]/.test(item.transcriptionTaskId)
+        ? item.transcriptionTaskId.trim()
         : undefined,
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
       lastAttemptAt: typeof item.lastAttemptAt === 'string' ? item.lastAttemptAt : new Date(0).toISOString(),

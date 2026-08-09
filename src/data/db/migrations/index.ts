@@ -35,6 +35,7 @@ import { meetingMarkerSyncV34 } from './0034MeetingMarkerSync';
 import { meetingQuestionScopesV35 } from './0035MeetingQuestionScopes';
 import { summaryCitationUserOverridesV36 } from './0036SummaryCitationUserOverrides';
 import { summaryVersionSyncV37 } from './0037SummaryVersionSync';
+import { localScheduleEventsV38 } from './0038LocalScheduleEvents';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -75,6 +76,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   meetingQuestionScopesV35,
   summaryCitationUserOverridesV36,
   summaryVersionSyncV37,
+  localScheduleEventsV38,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -114,4 +116,5 @@ export { MEETING_MARKER_SYNC_V34_SQL } from './0034MeetingMarkerSync';
 export { MEETING_QUESTION_SCOPES_V35_SQL } from './0035MeetingQuestionScopes';
 export { SUMMARY_CITATION_USER_OVERRIDES_V36_SQL } from './0036SummaryCitationUserOverrides';
 export { SUMMARY_VERSION_SYNC_V37_SQL } from './0037SummaryVersionSync';
+export { LOCAL_SCHEDULE_EVENTS_V38_SQL } from './0038LocalScheduleEvents';
 export type { MeetingDatabaseMigration } from './types';

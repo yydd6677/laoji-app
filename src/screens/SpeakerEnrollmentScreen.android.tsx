@@ -20,13 +20,18 @@ import {
 import {
   deleteSpeaker,
   fetchLatestSpeakerReprocess,
+  fetchDeviceSpeakerProfiles,
   fetchSpeakerReprocess,
   fetchSpeakers,
   registerSpeaker,
+  registerDeviceSpeaker,
   renameSpeaker,
+  renameDeviceSpeaker,
   retrySpeakerReprocess,
   startSpeakerReprocess,
   supplementSpeaker,
+  supplementDeviceSpeaker,
+  deleteDeviceSpeakerProfile,
   type SpeakerProfile,
   type SpeakerReprocessJob,
 } from '../services/speakers';
@@ -48,7 +53,8 @@ const MAX_RECORDING_MS = 15_000;
 // MIN-SPEAKER-001 / MIN-AUDIO-001: native AudioRecord owns samples; TS coordinates CRUD only.
 export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   const speakerId = route.params?.speakerId;
-  const { accessToken, isGuest, signOut } = useAuth();
+  const { accessToken, isGuest } = useAuth();
+  const deviceMode = isGuest || !accessToken;
   const { showDialog } = useAppDialog();
   const [speaker, setSpeaker] = useState<SpeakerProfile | null>(null);
   const [name, setName] = useState('');
@@ -79,13 +85,18 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }, []);
 
   const load = useCallback(async () => {
-    if (!speakerId || !accessToken) return;
+    if (!speakerId) return;
     setLoading(true);
     setLoadError('');
     try {
-      const found = (await fetchSpeakers(accessToken)).find(item => item.speaker_id === speakerId);
+      const profiles = deviceMode
+        ? await fetchDeviceSpeakerProfiles()
+        : await fetchSpeakers(accessToken!);
+      const found = profiles.find(item => item.speaker_id === speakerId);
       if (!found) throw new Error('讲话人不存在或已被删除');
-      const latestReprocess = await fetchLatestSpeakerReprocess(speakerId, accessToken).catch(() => null);
+      const latestReprocess = deviceMode
+        ? null
+        : await fetchLatestSpeakerReprocess(speakerId, accessToken!).catch(() => null);
       if (!mountedRef.current) return;
       setSpeaker(found);
       setName(found.name);
@@ -95,7 +106,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [accessToken, speakerId]);
+  }, [accessToken, deviceMode, speakerId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -248,7 +259,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }, [discard, enrollmentPhase, restoreAudioMode, showDialog]);
 
   const submit = useCallback(async () => {
-    if (!accessToken || !audioUri || elapsedMs < MIN_RECORDING_MS || uploadRef.current) return;
+    if (!audioUri || elapsedMs < MIN_RECORDING_MS || uploadRef.current) return;
     if (!voiceprintConsentAccepted) {
       showDialog({
         title: '请先确认声纹用途',
@@ -266,8 +277,12 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setError('');
     try {
       const result = speakerId
-        ? await supplementSpeaker(speakerId, audioUri, fileName, accessToken)
-        : await registerSpeaker(name, audioUri, fileName, accessToken);
+        ? deviceMode
+          ? await supplementDeviceSpeaker(speakerId, audioUri, fileName)
+          : await supplementSpeaker(speakerId, audioUri, fileName, accessToken!)
+        : deviceMode
+          ? await registerDeviceSpeaker(name, audioUri, fileName)
+          : await registerSpeaker(name, audioUri, fileName, accessToken!);
       await discard(audioUri);
       audioUriRef.current = '';
       if (!mountedRef.current) return;
@@ -287,14 +302,16 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     } finally {
       uploadRef.current = false;
     }
-  }, [accessToken, audioUri, discard, elapsedMs, fileName, name, navigation, showDialog, speakerId, voiceprintConsentAccepted]);
+  }, [accessToken, audioUri, deviceMode, discard, elapsedMs, fileName, name, navigation, showDialog, speakerId, voiceprintConsentAccepted]);
 
   const saveName = useCallback(async (nextName: string) => {
-    if (!speaker || !speakerId || !accessToken || !nextName.trim() || nextName.trim() === speaker.name) return;
+    if (!speaker || !speakerId || !nextName.trim() || nextName.trim() === speaker.name) return;
     setEnrollmentPhase('saving');
     setError('');
     try {
-      const result = await renameSpeaker(speakerId, nextName, accessToken);
+      const result = deviceMode
+        ? await renameDeviceSpeaker(speakerId, nextName)
+        : await renameSpeaker(speakerId, nextName, accessToken!);
       setSpeaker(result.speaker);
       setName(result.speaker.name);
       setEnrollmentPhase(audioUri ? 'ready' : 'idle');
@@ -302,10 +319,10 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
       setError(readableErrorMessage(reason, '名称保存失败，请稍后重试。'));
       setEnrollmentPhase('error');
     }
-  }, [accessToken, audioUri, speaker, speakerId]);
+  }, [accessToken, audioUri, deviceMode, speaker, speakerId]);
 
   const runReprocess = useCallback(() => {
-    if (!speakerId || !accessToken || reprocessBusy) return;
+    if (deviceMode || !speakerId || !accessToken || reprocessBusy) return;
     const retryable = reprocessJob?.status === 'failed' && reprocessJob.retryable;
     showDialog({
       title: retryable ? '重试旧会议匹配' : '重新匹配旧会议',
@@ -339,10 +356,10 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
         { text: '取消', role: 'cancel' },
       ],
     });
-  }, [accessToken, reprocessBusy, reprocessJob, showDialog, speakerId]);
+  }, [accessToken, deviceMode, reprocessBusy, reprocessJob, showDialog, speakerId]);
 
   const confirmDelete = useCallback(() => {
-    if (!speakerId || !accessToken || enrollmentPhase === 'recording' || enrollmentPhase === 'saving') return;
+    if (!speakerId || enrollmentPhase === 'recording' || enrollmentPhase === 'saving') return;
     showDialog({
       title: '删除讲话人',
       message: `删除“${speaker?.name ?? name}”后，后续会议将不再使用这份音色。`,
@@ -354,7 +371,8 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
           onPress: async () => {
             setEnrollmentPhase('saving');
             try {
-              await deleteSpeaker(speakerId, accessToken);
+              if (deviceMode) await deleteDeviceSpeakerProfile(speakerId);
+              else await deleteSpeaker(speakerId, accessToken!);
               navigation.goBack();
             } catch (reason) {
               setError(readableErrorMessage(reason, '删除失败，请稍后重试。'));
@@ -365,15 +383,13 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
         { text: '取消', role: 'cancel' },
       ],
     });
-  }, [accessToken, enrollmentPhase, name, navigation, showDialog, speaker?.name, speakerId]);
+  }, [accessToken, deviceMode, enrollmentPhase, name, navigation, showDialog, speaker?.name, speakerId]);
 
-  const contentPhase = isGuest || !accessToken
-    ? 'empty'
-    : speakerId && loading ? 'loading'
+  const contentPhase = speakerId && loading ? 'loading'
       : speakerId && !speaker ? 'error'
         : 'ready';
   const snapshot = useMemo(() => buildNativeSpeakerEnrollmentSnapshot({
-    guest: isGuest || !accessToken,
+    guest: false,
     speakerId,
     title: speakerId ? '讲话人详情' : '声纹采集',
     phase: contentPhase,
@@ -401,7 +417,8 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
             ? '旧会议匹配不可用'
             : '重新匹配旧会议',
     canReprocess: Boolean(
-      speakerId
+      !deviceMode
+      && speakerId
       && speaker
       && !reprocessBusy
       && reprocessJob?.status !== 'queued'
@@ -410,7 +427,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
       && enrollmentPhase !== 'recording'
       && enrollmentPhase !== 'saving'
     ),
-  }), [accessToken, audioUri, contentPhase, elapsedMs, enrollmentPhase, error, isGuest, level, loadError, loading, name, reprocessBusy, reprocessJob, speaker, speakerId, voiceprintConsentAccepted]);
+  }), [accessToken, audioUri, contentPhase, deviceMode, elapsedMs, enrollmentPhase, error, level, loadError, loading, name, reprocessBusy, reprocessJob, speaker, speakerId, voiceprintConsentAccepted]);
 
   const handleAction = useCallback((action: NativeSpeakerAction) => {
     switch (action.type) {
@@ -418,7 +435,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
         navigation.goBack();
         break;
       case 'login':
-        void signOut().catch(() => {});
+        void load();
         break;
       case 'retry':
         void load();
@@ -451,7 +468,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [confirmDelete, load, navigation, runReprocess, saveName, signOut, startRecording, stopRecording, submit]);
+  }, [confirmDelete, load, navigation, runReprocess, saveName, startRecording, stopRecording, submit]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>

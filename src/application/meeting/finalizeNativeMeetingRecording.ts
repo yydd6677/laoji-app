@@ -20,11 +20,6 @@ import { runAccountMeetingTranscriptCompletion } from '../../services/meetingTra
 import { savePendingMeetingTranscriptCompletion } from '../../services/meetingTranscriptCompletionTasks';
 import { requestMeetingTranscriptCompletion } from './transcriptCompletionTrigger';
 
-export interface GuestRealtimeSessionIdentity {
-  meetingId: string;
-  guestToken: string;
-}
-
 export interface FinalizeNativeMeetingRecordingInput {
   meetingId: string;
   remoteMeetingId: string | null;
@@ -32,7 +27,6 @@ export interface FinalizeNativeMeetingRecordingInput {
   scopeKey: ScopeKey | null;
   isGuest: boolean;
   accessToken?: string | null;
-  guestSession?: GuestRealtimeSessionIdentity;
   getTranscriptLines: () => TranscriptLine[];
   getAudioDurationSec: () => number | undefined;
   getAudioBars: () => number[] | undefined;
@@ -80,7 +74,6 @@ export interface FinalizeNativeMeetingRecordingDependencies {
   ) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   reconcileUploads?: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
-  deleteGuestSession?: (session: GuestRealtimeSessionIdentity) => Promise<void>;
 }
 
 /** ANDR-01: application orchestration starts only after Android owns capture. */
@@ -194,27 +187,14 @@ export class FinalizeNativeMeetingRecordingUseCase {
         requestMeetingTranscriptCompletion(input.scopeKey);
       }
       return { status: 'failed', lines: localLines };
-    } finally {
-      const guestSession = input.guestSession;
-      const deleteGuestSession = this.dependencies.deleteGuestSession;
-      if (guestSession && deleteGuestSession) {
-        void Promise.resolve()
-          .then(() => deleteGuestSession(guestSession))
-          .catch(() => {});
-      }
     }
   }
 
   private remoteTranscriptIdentity(input: FinalizeNativeMeetingRecordingInput) {
-    if (input.isGuest) {
-      return input.guestSession
-        ? {
-            kind: 'guest' as const,
-            meetingId: input.guestSession.meetingId,
-            guestToken: input.guestSession.guestToken,
-          }
-        : null;
-    }
+    // Guest is the local device scope. It must never become an anonymous
+    // HTTP transcript session; the durable device uploader is responsible for
+    // the server-side completion after the local recording commit.
+    if (input.isGuest) return null;
     return input.accessToken && input.remoteMeetingId
       ? {
           kind: 'account' as const,

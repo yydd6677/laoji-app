@@ -82,6 +82,7 @@ import {
   retryPendingMeetingAudioUpload,
   type PendingMeetingAudioUpload,
 } from '../services/meetingRecording';
+import { uploadMeetingRecordingToDeviceService } from '../services/deviceMeetingService';
 import {
   generateSummaryForMeeting,
   briefGreetingSummaryText,
@@ -2018,7 +2019,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     pending: PendingMeetingAudioUpload,
     notifyUser: boolean,
   ): Promise<void> => {
-    if (!accessToken) return Promise.resolve();
+    // Guest mode has no account token by design. Its retry still goes through
+    // the device/epoch uploader; only the old account compatibility path needs
+    // an access token.
+    if (!isGuest && !accessToken) return Promise.resolve();
     if (uploadInFlightRef.current) return uploadInFlightRef.current;
     setRetryingAudioUpload(true);
     setPendingAudioError('');
@@ -2045,16 +2049,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           }
           return;
         }
+        const uploadCredential = accessToken ?? 'device';
         const uploaded = await retryPendingMeetingAudioUpload(
           recordingStorageScope,
           pending.recordingAssetId,
-          accessToken,
-          (item, token) => uploadMeetingAudio(
-            item.remoteMeetingId ?? item.meetingId,
-            item.audioUri,
-            token,
-            { fileName: item.fileName, mimeType: item.mimeType },
-          ),
+          uploadCredential,
+          isGuest
+            ? item => uploadMeetingRecordingToDeviceService(item)
+            : (item, token) => uploadMeetingAudio(
+              item.remoteMeetingId ?? item.meetingId,
+              item.audioUri,
+              token,
+              { fileName: item.fileName, mimeType: item.mimeType },
+            ),
           { automatic: !notifyUser },
         );
         const stillPending = uploaded
@@ -2098,12 +2105,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })();
     uploadInFlightRef.current = operation;
     return operation;
-  }, [accessToken, reconcileAudioUploads, recordingStorageScope, showDialog]);
+  }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, showDialog]);
 
   useEffect(() => {
     let alive = true;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    if (!meeting || isGuest) {
+    if (!meeting) {
       setPendingAudioUpload(null);
       setPendingAudioError('');
       return () => { alive = false; };
@@ -2114,7 +2121,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setPendingAudioError(pending?.failureMessage
         ? readableErrorMessage(pending.failureMessage, '自动同步未完成，录音仍保存在本机')
         : '');
-      if (!pending || !accessToken) return;
+      if (!pending || (!accessToken && !isGuest)) return;
       const key = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
       if (automaticAudioUploadKeyRef.current === key) return;
       automaticAudioUploadKeyRef.current = key;
@@ -4483,7 +4490,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
     if (stage === 'upload') {
       if (retryingAudioUpload) return;
-      if (!accessToken) {
+      if (!isGuest && !accessToken) {
         showDialog({
           title: '暂时无法重试上传',
           message: '登录状态已失效，请重新登录后再试。',

@@ -9,3 +9,4 @@ export * from './questions';
 export * from './speakerIdentity';
 export * from './summary';
 export * from './templates';
+export * from './scopeTelemetry';

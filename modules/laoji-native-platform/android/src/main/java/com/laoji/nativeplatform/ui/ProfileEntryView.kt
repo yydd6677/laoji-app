@@ -1,6 +1,6 @@
 package com.laoji.nativeplatform.ui
 
-// [PRODUCT] Calendar and Minutes expose one global profile entry in the same
+// [PRODUCT] Calendar and Minutes expose one global settings entry in the same
 // leading-title-bar position. The surrounding title bars keep domain ownership.
 
 import android.content.Context
@@ -33,7 +33,7 @@ class ProfileEntryView(
 
   init {
     isFocusable = true
-    updateAccessibilityLabel("打开个人资料")
+    updateAccessibilityLabel("打开设置")
     background = RippleDrawable(
       ColorStateList.valueOf(palette.primarySoft),
       null,
@@ -84,7 +84,7 @@ class ProfileEntryView(
     updateAccessibilityLabel((snapshot["accessibilityLabel"] as? String)
       ?.trim()
       ?.takeIf(String::isNotEmpty)
-      ?: "打开个人资料")
+      ?: "打开设置")
     val nextUri = (snapshot["avatarUri"] as? String)
       ?.trim()
       ?.takeIf(String::isNotEmpty)

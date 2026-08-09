@@ -182,8 +182,8 @@ export function ScheduleScreen({
 
   const handleSemantic = useCallback((event: NativeCalendarSemanticEvent) => {
     switch (event.type) {
-      case 'profile-open':
-        navigation.navigate('Profile');
+      case 'settings-open':
+        navigation.navigate('Privacy');
         break;
       case 'search-open':
         setSearchVisible(true);

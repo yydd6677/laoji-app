@@ -8,7 +8,7 @@ import {
 } from 'laoji-native-platform';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
-import { fetchSpeakers, type SpeakerProfile } from '../services/speakers';
+import { fetchDeviceSpeakerProfiles, fetchSpeakers, type SpeakerProfile } from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
 import type { RootStackParamList } from '../types';
 import { buildNativeSpeakerManagerSnapshot } from '../native/nativeSpeakerSnapshots';
@@ -18,11 +18,12 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Speake
 
 // MIN-SPEAKER-001: Android renders the speaker repository through one native list owner.
 export function SpeakerManagerScreen({ navigation }: Props) {
-  const { accessToken, isGuest, signOut } = useAuth();
+  const { accessToken, isGuest } = useAuth();
   const [speakers, setSpeakers] = useState<SpeakerProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const generationRef = useRef(0);
+  const deviceMode = isGuest || !accessToken;
 
   useLayoutEffect(() => {
     generationRef.current += 1;
@@ -33,11 +34,12 @@ export function SpeakerManagerScreen({ navigation }: Props) {
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
-    if (!accessToken || isGuest) return;
     setLoading(true);
     setError('');
     try {
-      const result = await fetchSpeakers(accessToken);
+      const result = deviceMode
+        ? await fetchDeviceSpeakerProfiles()
+        : await fetchSpeakers(accessToken!);
       if (generationRef.current === generation) setSpeakers(result);
     } catch (reason) {
       if (generationRef.current === generation) {
@@ -46,7 +48,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     } finally {
       if (generationRef.current === generation) setLoading(false);
     }
-  }, [accessToken, isGuest]);
+  }, [accessToken, deviceMode]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -54,8 +56,11 @@ export function SpeakerManagerScreen({ navigation }: Props) {
   }, [load]));
 
   const snapshot = useMemo(() => buildNativeSpeakerManagerSnapshot({
-    guest: isGuest || !accessToken,
-    phase: isGuest || !accessToken ? 'empty' : loading ? 'loading' : error ? 'error' : 'ready',
+    // The native surface's guest flag means “account login required”.  The
+    // device-primary service is usable without an account, so keep it false
+    // and represent an unavailable service as an ordinary retryable error.
+    guest: false,
+    phase: loading ? 'loading' : error ? 'error' : 'ready',
     message: error,
     speakers,
   }), [accessToken, error, isGuest, loading, speakers]);
@@ -66,7 +71,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
         navigation.goBack();
         break;
       case 'login':
-        void signOut().catch(() => {});
+        void load();
         break;
       case 'retry':
         void load();
@@ -80,7 +85,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
       default:
         break;
     }
-  }, [load, navigation, signOut]);
+  }, [load, navigation]);
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={C.appBg}>

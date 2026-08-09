@@ -14,7 +14,19 @@ import {
   startLocalWavRecording,
   LocalWavRecordingSession,
 } from '../services/realtimeAsr';
-import { deleteSpeaker, fetchSpeakers, registerSpeaker, renameSpeaker, SpeakerProfile, supplementSpeaker } from '../services/speakers';
+import {
+  deleteDeviceSpeakerProfile,
+  fetchDeviceSpeakerProfiles,
+  registerDeviceSpeaker,
+  renameDeviceSpeaker,
+  supplementDeviceSpeaker,
+  deleteSpeaker,
+  fetchSpeakers,
+  registerSpeaker,
+  renameSpeaker,
+  SpeakerProfile,
+  supplementSpeaker,
+} from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
@@ -38,6 +50,7 @@ function clock(ms: number): string {
 export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   const speakerId = route.params?.speakerId;
   const { accessToken, isGuest } = useAuth();
+  const deviceMode = isGuest || !accessToken;
   const { showDialog } = useAppDialog();
   const [speaker, setSpeaker] = useState<SpeakerProfile | null>(null);
   const [name, setName] = useState('');
@@ -71,11 +84,14 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   }, []);
 
   const loadSpeaker = useCallback(async () => {
-    if (!speakerId || !accessToken) return;
+    if (!speakerId) return;
     setLoading(true);
     setError('');
     try {
-      const found = (await fetchSpeakers(accessToken)).find(item => item.speaker_id === speakerId);
+      const profiles = deviceMode
+        ? await fetchDeviceSpeakerProfiles()
+        : await fetchSpeakers(accessToken!);
+      const found = profiles.find(item => item.speaker_id === speakerId);
       if (!found) throw new Error('讲话人不存在或已被删除');
       setSpeaker(found);
       setName(found.name);
@@ -84,7 +100,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, speakerId]);
+  }, [accessToken, deviceMode, speakerId]);
 
   useEffect(() => {
     void loadSpeaker();
@@ -201,7 +217,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   };
 
   const submit = async () => {
-    if (!accessToken || !audioUri || elapsedMs < MIN_RECORDING_MS || uploadInFlightRef.current) return;
+    if (!audioUri || elapsedMs < MIN_RECORDING_MS || uploadInFlightRef.current) return;
     if (!speakerId && !name.trim()) {
       setError('请先填写讲话人名称。');
       return;
@@ -211,8 +227,12 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setError('');
     try {
       const result = speakerId
-        ? await supplementSpeaker(speakerId, audioUri, fileName, accessToken)
-        : await registerSpeaker(name, audioUri, fileName, accessToken);
+        ? deviceMode
+          ? await supplementDeviceSpeaker(speakerId, audioUri, fileName)
+          : await supplementSpeaker(speakerId, audioUri, fileName, accessToken!)
+        : deviceMode
+          ? await registerDeviceSpeaker(name, audioUri, fileName)
+          : await registerSpeaker(name, audioUri, fileName, accessToken!);
       await discardRecording(audioUri);
       audioUriRef.current = '';
       if (!mountedRef.current) return;
@@ -239,11 +259,13 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   };
 
   const saveName = async () => {
-    if (!speaker || !speakerId || !accessToken || !name.trim() || name.trim() === speaker.name) return;
+    if (!speaker || !speakerId || !name.trim() || name.trim() === speaker.name) return;
     setBusy(true);
     setError('');
     try {
-      const result = await renameSpeaker(speakerId, name, accessToken);
+      const result = deviceMode
+        ? await renameDeviceSpeaker(speakerId, name)
+        : await renameSpeaker(speakerId, name, accessToken!);
       setSpeaker(result.speaker);
       setName(result.speaker.name);
     } catch (reason) {
@@ -254,7 +276,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   };
 
   const confirmDelete = () => {
-    if (!speakerId || !accessToken || busy || recording || startingRecording) return;
+    if (!speakerId || busy || recording || startingRecording) return;
     showDialog({
       title: '删除讲话人',
       message: `删除“${speaker?.name ?? name}”后，后续会议将不再使用这份音色识别名称。`,
@@ -266,7 +288,8 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
           onPress: async () => {
             setBusy(true);
             try {
-              await deleteSpeaker(speakerId, accessToken);
+              if (deviceMode) await deleteDeviceSpeakerProfile(speakerId);
+              else await deleteSpeaker(speakerId, accessToken!);
               navigation.goBack();
             } catch (reason) {
               setError(readableErrorMessage(reason, '删除失败，请稍后重试。'));
@@ -295,15 +318,6 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     : audioUri
       ? '重新录制音色'
       : '开始录制音色';
-
-  if (isGuest || !accessToken) {
-    return (
-      <ScreenContainer edges={['top']} bg={C.appBg}>
-        <BackHeader title="声纹采集" onBack={() => navigation.goBack()} />
-        <View style={s.centerState}><Text style={s.stateTitle}>请先登录账号</Text></View>
-      </ScreenContainer>
-    );
-  }
 
   if (speakerId && !speaker) {
     return (

@@ -55,8 +55,9 @@ interface NativeRecorderStartBase {
 }
 
 export type NativeRecorderStartOptions = NativeRecorderStartBase & (
-  | { accessToken: string; guestToken?: never }
-  | { accessToken?: never; guestToken: string }
+  | { accessToken: string; guestToken?: never; deviceToken?: never; dataEpoch?: never }
+  | { accessToken?: never; guestToken: string; deviceToken?: never; dataEpoch?: never }
+  | { accessToken?: never; guestToken?: never; deviceToken: string; dataEpoch: string }
 );
 
 export interface NativeLocalRecorderOptions {
@@ -244,8 +245,17 @@ export function normalizeNativeRecorderStartOptions(
   );
   const accessToken = normalizeToken(options.accessToken);
   const guestToken = normalizeToken(options.guestToken);
-  if ((accessToken === undefined) === (guestToken === undefined)) {
-    throw new TypeError('exactly one of accessToken or guestToken is required');
+  const deviceToken = normalizeToken(options.deviceToken);
+  const dataEpoch = normalizeToken(options.dataEpoch);
+  const credentialCount = [accessToken, guestToken, deviceToken].filter(Boolean).length;
+  if (credentialCount !== 1) {
+    throw new TypeError('exactly one of accessToken, guestToken, or deviceToken is required');
+  }
+  if (deviceToken !== undefined && dataEpoch === undefined) {
+    throw new TypeError('dataEpoch is required with deviceToken');
+  }
+  if (deviceToken === undefined && dataEpoch !== undefined) {
+    throw new TypeError('dataEpoch requires deviceToken');
   }
 
   const normalizedBase: NativeRecorderStartBase = {
@@ -253,6 +263,7 @@ export function normalizeNativeRecorderStartOptions(
     purpose: options.purpose,
     storageScope: normalizeStorageScope(options.storageScope),
     websocketUrl,
+    ...(dataEpoch !== undefined ? { dataEpoch } : {}),
     allowInsecureDevelopment,
     connectionTimeoutMs: boundedInteger(
       options.connectionTimeoutMs,
@@ -264,9 +275,9 @@ export function normalizeNativeRecorderStartOptions(
     levelIntervalMs: boundedInteger(options.levelIntervalMs, 50, 1_000, 'levelIntervalMs'),
   };
 
-  return accessToken !== undefined
-    ? { ...normalizedBase, accessToken }
-    : { ...normalizedBase, guestToken: guestToken! };
+  if (accessToken !== undefined) return { ...normalizedBase, accessToken };
+  if (guestToken !== undefined) return { ...normalizedBase, guestToken };
+  return { ...normalizedBase, deviceToken: deviceToken!, dataEpoch: dataEpoch! };
 }
 
 function normalizeStorageScope(value: string | undefined): string | undefined {

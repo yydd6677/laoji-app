@@ -2,7 +2,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { getApiConfig } from './config';
 import { readResponseData, readResponseError, stringifyErrorDetail } from './errors';
 import {
-  classifyScheduleParseIntent,
   classifyScheduleParseRoute,
   normalizeScheduleParseResult,
   parseLocalScheduleText,
@@ -15,7 +14,12 @@ import {
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingTemplate,
 } from '../domain/meeting';
-import { fetchWithTimeout as fetch, readBlobWithTimeout, readJsonWithTimeout } from './http';
+import { fetchWithTimeout as fetch, readJsonWithTimeout } from './http';
+import {
+  clarifyScheduleRemotely,
+  parseScheduleAudioRemotely,
+  parseScheduleRemotely,
+} from './deviceApi';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 import {
@@ -36,7 +40,6 @@ import {
 // Endpoints are embedded by app.config.js from EXPO_PUBLIC_* build variables.
 // Production builds reject missing, plain-HTTP, and bare-IP values.
 const SUMMARY_TASK_WAIT_MS = 5_000;
-const SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS = 5_000;
 const API_RESPONSE_BODY_TIMEOUT_MS = 10_000;
 const MEETING_AUDIO_INFO_TIMEOUT_MS = 20_000;
 
@@ -57,6 +60,22 @@ function jsonHeaders(accessToken?: string): Record<string, string> {
 
 function authHeaders(accessToken?: string): Record<string, string> | undefined {
   return accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+}
+
+/**
+ * Account endpoints remain in this module only as a compatibility layer for
+ * authenticated installs.  The accountless product must never silently send
+ * a request without an account credential: doing so would re-open an old
+ * guest/anonymous route and could upload phone-owned content outside the
+ * device/epoch contract.  Keep the optional parameter on legacy signatures
+ * so older callers still compile, but fail before any network I/O.
+ */
+function requireAccountAccessToken(accessToken: string | undefined, operation: string): string {
+  const token = accessToken?.trim();
+  if (!token) {
+    throw new Error(`${operation}仅支持已登录的兼容服务`);
+  }
+  return token;
 }
 
 async function apiResponseError(prefix: string, res: Response, accessToken?: string): Promise<Error> {
@@ -335,23 +354,9 @@ export async function parseText(
   }
 
   try {
-    const res = await fetch(laojiUrl('/api/laoji/parse'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Laoji-Mobile-Route': decision.route,
-        'X-Laoji-Mobile-Intent': classifyScheduleParseIntent(text),
-      },
-      body: JSON.stringify({ text, ...context }),
-    });
-    if (res.ok) {
-      const parsed = await readJsonWithTimeout<ParseResultWire>(
-        res,
-        SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
-      );
-      return normalizedParseResult(text, parsed, context);
-    }
-    throw await readScheduleParseError(res, decision.code ?? 'invalid_schedule');
+    const response = await parseScheduleRemotely(text, context.reference_datetime, context.timezone);
+    const parsed = (response?.result ?? response) as ParseResultWire;
+    return normalizedParseResult(text, parsed, context);
   } catch (err) {
     if (err instanceof ScheduleParseError) throw err;
     throw new ScheduleParseError(
@@ -373,129 +378,45 @@ export async function clarifyText(
     reference_datetime: contextInput.reference_datetime ?? draft.reference_datetime,
     timezone: contextInput.timezone ?? draft.timezone,
   });
-  const res = await fetch(laojiUrl('/api/laoji/clarify'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      current: { ...draft, raw_text: draft.raw_text ?? original },
-      answer: supplement,
-      ...context,
-    }),
-  });
-  if (!res.ok) throw await readScheduleParseError(res, 'invalid_schedule');
-  const parsed = await readJsonWithTimeout<ParseResultWire>(
-    res,
-    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
-  );
-  return normalizedParseResult(`${original}\n${supplement}`, parsed, context);
+  try {
+    const parsed = await clarifyScheduleRemotely(
+      { ...draft, raw_text: draft.raw_text ?? original },
+      supplement,
+      context.reference_datetime,
+      context.timezone,
+    );
+    return normalizedParseResult(`${original}\n${supplement}`, parsed as ParseResultWire, context);
+  } catch (err) {
+    if (err instanceof ScheduleParseError) throw err;
+    throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+  }
 }
 
 // ── Save event ──────────────────────────────────────────────────────────────
 
 export async function saveEvent(event: ApiEvent, accessToken?: string): Promise<ApiEvent> {
+  const token = requireAccountAccessToken(accessToken, '保存远程日程');
   const res = await fetch(laojiUrl('/api/laoji/events'), {
     method: 'POST',
-    headers: jsonHeaders(accessToken),
+    headers: jsonHeaders(token),
     body: JSON.stringify(event),
   });
-  if (!res.ok) throw await apiResponseError('save event failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('save event failed', res, token);
   return readJsonWithTimeout<ApiEvent>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
 // ── Fetch events by month ───────────────────────────────────────────────────
 
 export async function fetchEvents(year?: number, month?: number, accessToken?: string): Promise<ApiEvent[]> {
+  const token = requireAccountAccessToken(accessToken, '读取远程日程');
   const query = year != null && month != null ? `?year=${year}&month=${month}` : '';
   const res = await fetch(
     laojiUrl(`/api/laoji/events${query}`),
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(token) },
   );
-  if (!res.ok) throw await apiResponseError('fetch events failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('fetch events failed', res, token);
   const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   return Array.isArray(data) ? data : data.events ?? [];
-}
-
-// ── ASR transcribe ──────────────────────────────────────────────────────────
-
-const MAX_SCHEDULE_AUDIO_BYTES = 25 * 1024 * 1024;
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  if (typeof blob.arrayBuffer === 'function') {
-    const buffer = await blob.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const chunkSize = 0x8000;
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-    }
-    if (typeof btoa === 'function') return btoa(binary);
-    const nodeBuffer = (globalThis as any).Buffer;
-    if (nodeBuffer) return nodeBuffer.from(bytes).toString('base64');
-  }
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('read audio failed'));
-    reader.onloadend = () => {
-      const result = String(reader.result ?? '');
-      resolve(result.includes(',') ? result.split(',')[1] : result);
-    };
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function audioUriToBase64(audioUri: string): Promise<string> {
-  if (audioUri.startsWith('data:')) {
-    const separator = audioUri.indexOf(',');
-    const metadata = separator >= 0 ? audioUri.slice(5, separator).toLowerCase() : '';
-    if (separator < 0 || !metadata.split(';').includes('base64')) {
-      throw new ScheduleParseError('invalid_schedule', '录音格式无效，请重新录音。');
-    }
-    return audioUri.slice(separator + 1);
-  }
-
-  if (audioUri.startsWith('file://') || audioUri.startsWith('content://')) {
-    return FileSystem.readAsStringAsync(audioUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-  }
-
-  const res = await fetch(audioUri);
-  if (!res.ok) throw await readResponseError('read audio failed', res);
-  return blobToBase64(await readBlobWithTimeout(res, SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS));
-}
-
-function requireAudioPayload(value: string): string {
-  const payload = value.replace(/\s+/g, '');
-  if (!payload) {
-    throw new ScheduleParseError('invalid_schedule', '录音内容为空，请重新录音。');
-  }
-  if (
-    payload.length % 4 === 1
-    || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)
-  ) {
-    throw new ScheduleParseError('invalid_schedule', '录音格式无效，请重新录音。');
-  }
-  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
-  const decodedBytes = (payload.length * 3) / 4 - padding;
-  if (decodedBytes > MAX_SCHEDULE_AUDIO_BYTES) {
-    throw new ScheduleParseError('invalid_schedule', '录音文件不能超过 25 MB。');
-  }
-  return payload;
-}
-
-const SCHEDULE_AUDIO_FALLBACK_STATUSES = new Set([404, 405, 501, 502, 503]);
-
-function shouldFallbackScheduleAudioStatus(status: number): boolean {
-  return SCHEDULE_AUDIO_FALLBACK_STATUSES.has(status);
-}
-
-function shouldFallbackScheduleAudioError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  // A timeout means the direct route may still be processing the request. Do
-  // not submit the same audio again and create duplicate ASR work.
-  if (error.name === 'AbortError' || error.name === 'RequestTimeoutError') return false;
-  return /Network request failed|Failed to fetch|connection refused|ECONNREFUSED|network error/i.test(error.message);
 }
 
 function parseAudioResult(value: unknown, context: Required<ScheduleParseContext>): ParseResult {
@@ -526,92 +447,34 @@ function filenameFromUri(audioUri: string): string {
   }
 }
 
-export async function transcribeAudio(
-  audioUri: string,
-  contextInput: ScheduleParseContext = {},
-): Promise<string> {
-  const audio_base64 = requireAudioPayload(await audioUriToBase64(audioUri));
-  const filename = filenameFromUri(audioUri);
-  const context = currentScheduleParseContext(contextInput);
-
-  return transcribeAudioPayload(audio_base64, filename, context);
-}
-
-async function transcribeAudioPayload(
-  audio_base64: string,
-  filename: string,
-  context: Required<ScheduleParseContext>,
-): Promise<string> {
-  const res = await fetch(meetingUrl('/api/laoji/asr/transcribe'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio_base64, filename, ...context }),
-  });
-  if (!res.ok) throw await readResponseError('语音识别失败', res);
-  const data = await readJsonWithTimeout<Record<string, unknown>>(
-    res,
-    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
-  );
-  const text = typeof data?.text === 'string'
-    ? data.text.trim()
-    : typeof data?.result === 'string' ? data.result.trim() : '';
-  if (!text) throw new ScheduleParseError('invalid_schedule', '未识别到语音内容，请重新录音。');
-  return text;
-}
-
-async function parseAudioViaTranscribe(
-  audio_base64: string,
-  filename: string,
-  context: Required<ScheduleParseContext>,
-): Promise<ParseResult> {
-  const transcript = await transcribeAudioPayload(audio_base64, filename, context);
-  // Reuse the same text parser and request context as realtime voice input;
-  // this keeps direct parse-audio and transcribe -> parse semantics aligned.
-  return parseText(transcript, context);
-}
-
 export async function parseAudio(
   audioUri: string,
   contextInput: ScheduleParseContext = {},
 ): Promise<ParseResult> {
-  const audio_base64 = requireAudioPayload(await audioUriToBase64(audioUri));
-  const filename = filenameFromUri(audioUri);
   const context = currentScheduleParseContext(contextInput);
-
-  let res: Response;
   try {
-    res = await fetch(meetingUrl('/api/laoji/parse-audio'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio_base64, filename, ...context }),
-    });
-  } catch (error) {
-    if (shouldFallbackScheduleAudioError(error)) {
-      return parseAudioViaTranscribe(audio_base64, filename, context);
-    }
-    throw error;
+    const result = await parseScheduleAudioRemotely(
+      audioUri,
+      filenameFromUri(audioUri),
+      context.reference_datetime,
+      context.timezone,
+    );
+    return { ...parseAudioResult(result, context), ...context };
+  } catch (err) {
+    if (err instanceof ScheduleParseError) throw err;
+    throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
   }
-  if (!res.ok) {
-    if (shouldFallbackScheduleAudioStatus(res.status)) {
-      return parseAudioViaTranscribe(audio_base64, filename, context);
-    }
-    throw await readResponseError('日程语音解析失败', res);
-  }
-  const parsed = parseAudioResult(await readJsonWithTimeout<unknown>(
-    res,
-    SCHEDULE_AUDIO_RESPONSE_BODY_TIMEOUT_MS,
-  ), context);
-  return { ...parsed, ...context };
 }
 
 // ── Delete event ────────────────────────────────────────────────────────────
 
 export async function deleteEvent(id: number, accessToken?: string): Promise<void> {
+  const token = requireAccountAccessToken(accessToken, '删除远程日程');
   const res = await fetch(laojiUrl(`/api/laoji/events/${id}`), {
     method: 'DELETE',
-    headers: authHeaders(accessToken),
+    headers: authHeaders(token),
   });
-  if (!res.ok) throw await apiResponseError('delete event failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('delete event failed', res, token);
 }
 
 export async function commandEventState(
@@ -635,12 +498,13 @@ export async function updateEvent(
   changes: Partial<ApiEvent>,
   accessToken?: string,
 ): Promise<ApiEvent> {
+  const token = requireAccountAccessToken(accessToken, '修改远程日程');
   const res = await fetch(laojiUrl(`/api/laoji/events/${id}`), {
     method: 'PUT',
-    headers: jsonHeaders(accessToken),
+    headers: jsonHeaders(token),
     body: JSON.stringify(changes),
   });
-  if (!res.ok) throw await apiResponseError('update event failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('update event failed', res, token);
   return readJsonWithTimeout<ApiEvent>(res, API_RESPONSE_BODY_TIMEOUT_MS);
 }
 
@@ -762,11 +626,12 @@ function summaryAttachmentAuthorizationPayload(
 }
 
 export async function fetchMeetings(page = 1, size = 20, accessToken?: string): Promise<ApiMeeting[]> {
+  const token = requireAccountAccessToken(accessToken, '读取远程会议');
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings?page=${page}&size=${size}`),
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(token) },
   );
-  if (!res.ok) throw await apiResponseError('fetch meetings failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('fetch meetings failed', res, token);
   const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   return data.items ?? data ?? [];
 }
@@ -801,9 +666,10 @@ export async function createMeeting(
   accessToken?: string,
   signal?: AbortSignal,
 ): Promise<ApiMeeting> {
+  const token = requireAccountAccessToken(accessToken, '创建远程会议');
   const res = await fetch(meetingUrl('/api/laoji/meetings'), {
     method: 'POST',
-    headers: jsonHeaders(accessToken),
+    headers: jsonHeaders(token),
     signal,
     body: JSON.stringify({
       title: payload.title,
@@ -815,7 +681,7 @@ export async function createMeeting(
       recorded_at: payload.recordedAt ?? null,
     }),
   });
-  if (!res.ok) throw await apiResponseError('create meeting failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('create meeting failed', res, token);
   return readJsonWithTimeout<ApiMeeting>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
@@ -912,13 +778,14 @@ export async function updateMeeting(
   accessToken?: string,
   signal?: AbortSignal,
 ): Promise<ApiMeeting> {
+  const token = requireAccountAccessToken(accessToken, '修改远程会议');
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}`), {
     method: 'PATCH',
-    headers: jsonHeaders(accessToken),
+    headers: jsonHeaders(token),
     body: JSON.stringify(changes),
     signal,
   });
-  if (!res.ok) throw await apiResponseError('update meeting failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('update meeting failed', res, token);
   return readJsonWithTimeout<ApiMeeting>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
@@ -1033,6 +900,7 @@ export async function fetchMeetingTranscriptSnapshot(
   accessToken?: string,
   options: FetchMeetingTranscriptOptions = {},
 ): Promise<ApiTranscriptSnapshot> {
+  const token = requireAccountAccessToken(accessToken, '读取远程文字记录');
   const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 1000));
   const all: TranscriptLine[] = [];
   const seenIds = new Set<string>();
@@ -1046,9 +914,9 @@ export async function fetchMeetingTranscriptSnapshot(
   while (true) {
     const res = await fetch(
       meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}/transcripts?offset=${offset}&limit=${pageSize}`),
-      { headers: authHeaders(accessToken), signal: options.signal },
+      { headers: authHeaders(token), signal: options.signal },
     );
-    if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, accessToken);
+    if (!res.ok) throw await apiResponseError('fetch meeting transcript failed', res, token);
     const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS, options.signal);
     const pageRevisionId = transcriptRemoteRevisionId(data);
     if (remoteRevisionId && pageRevisionId && remoteRevisionId !== pageRevisionId) {
@@ -1110,12 +978,13 @@ export async function fetchMeetingSummaryDetail(
   signal?: AbortSignal,
   trace?: MeetingSummaryTraceContext,
 ): Promise<unknown | null> {
+  const token = requireAccountAccessToken(accessToken, '读取远程整理结果');
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/final`),
-    { headers: { ...(authHeaders(accessToken) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
+    { headers: { ...(authHeaders(token) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
   );
   if (res.status === 404 || res.status === 204) return null;
-  if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('fetch meeting summary failed', res, token);
   return readJsonWithTimeout<unknown>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
@@ -1129,6 +998,7 @@ export async function generateMeetingSummary(
   attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
   trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingSummaryTask> {
+  const token = requireAccountAccessToken(accessToken, '生成远程整理结果');
   const query = new URLSearchParams({
     summary_type: 'final',
     force: String(force),
@@ -1137,14 +1007,14 @@ export async function generateMeetingSummary(
   });
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/generate?${query}`), {
     method: 'POST',
-    headers: { ...jsonHeaders(accessToken), ...meetingSummaryTraceHeaders(trace) },
+    headers: { ...jsonHeaders(token), ...meetingSummaryTraceHeaders(trace) },
     signal,
     body: JSON.stringify({
       carry_forward: summaryCarryForwardPayload(carryForward),
       attachment_authorization: summaryAttachmentAuthorizationPayload(attachmentAuthorization),
     }),
   });
-  if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('generate meeting summary failed', res, token);
   return readJsonWithTimeout<ApiMeetingSummaryTask>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
@@ -1156,12 +1026,13 @@ export async function fetchMeetingSummaryTask(
   waitMs = SUMMARY_TASK_WAIT_MS,
   trace?: MeetingSummaryTraceContext,
 ): Promise<ApiMeetingTaskStatus> {
+  const token = requireAccountAccessToken(accessToken, '读取远程整理进度');
   const query = new URLSearchParams({ wait_ms: String(waitMs) });
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/summaries/task/${taskId}?${query}`),
-    { headers: { ...(authHeaders(accessToken) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
+    { headers: { ...(authHeaders(token) ?? {}), ...meetingSummaryTraceHeaders(trace) }, signal },
   );
-  if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('fetch meeting summary task failed', res, token);
   return readJsonWithTimeout<ApiMeetingTaskStatus>(res, API_RESPONSE_BODY_TIMEOUT_MS, signal);
 }
 
@@ -1223,13 +1094,14 @@ export async function fetchGuestMeetingSummaryTask(
 }
 
 export async function fetchMeetingAudioInfo(meetingId: string, accessToken?: string): Promise<ApiMeetingAudioInfo | null> {
+  const token = requireAccountAccessToken(accessToken, '读取远程录音');
   const res = await fetch(
     meetingUrl(`/api/laoji/meetings/${meetingId}/audio`),
-    { headers: authHeaders(accessToken) },
+    { headers: authHeaders(token) },
     MEETING_AUDIO_INFO_TIMEOUT_MS,
   );
   if (res.status === 404 || res.status === 204) return null;
-  if (!res.ok) throw await apiResponseError('fetch meeting audio failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('fetch meeting audio failed', res, token);
   const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   const url = typeof data?.url === 'string' ? data.url.trim() : '';
   if (!url) return null;
@@ -1252,6 +1124,7 @@ export async function uploadMeetingAudio(
   accessToken?: string,
   options: { fileName?: string; mimeType?: string; process?: boolean } = {},
 ): Promise<ApiMeetingAudioInfo | null> {
+  const token = requireAccountAccessToken(accessToken, '上传远程录音');
   if (audioUri.startsWith('file://')) {
     try {
       const info = await FileSystem.getInfoAsync(audioUri);
@@ -1272,10 +1145,10 @@ export async function uploadMeetingAudio(
   const endpoint = options.process ? 'upload' : 'audio';
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${meetingId}/${endpoint}`), {
     method: 'POST',
-    headers: authHeaders(accessToken),
+    headers: authHeaders(token),
     body: form,
   });
-  if (!res.ok) throw await apiResponseError('upload meeting audio failed', res, accessToken);
+  if (!res.ok) throw await apiResponseError('upload meeting audio failed', res, token);
   const data = await readJsonWithTimeout<any>(res, API_RESPONSE_BODY_TIMEOUT_MS);
   const audio = data.audio ?? data;
   if (!audio?.url) return null;
@@ -1297,12 +1170,13 @@ export async function deleteMeeting(
   accessToken?: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  const token = requireAccountAccessToken(accessToken, '删除远程会议');
   const res = await fetch(meetingUrl(`/api/laoji/meetings/${encodeURIComponent(meetingId)}`), {
     method: 'DELETE',
-    headers: authHeaders(accessToken),
+    headers: authHeaders(token),
     signal,
   });
   if (!res.ok && res.status !== 404) {
-    throw await apiResponseError('delete meeting failed', res, accessToken);
+    throw await apiResponseError('delete meeting failed', res, token);
   }
 }

@@ -51,6 +51,7 @@ import {
   type MeetingEntryPoint,
   type ProcessingStageTransition,
   type ScopeKey,
+  scopeTelemetry,
 } from '../domain/meeting';
 import { diagnosticAudit, diagnosticInfo, diagnosticWarn } from '../services/diagnostics';
 import {
@@ -133,7 +134,29 @@ import {
   searchMeetingContentV1,
   uploadRecordingAssetV2,
 } from '../data/api/v2';
+import { uploadMeetingRecordingToDeviceService } from '../services/deviceMeetingService';
+import {
+  drainDeviceMeetingDeletionOutbox,
+  enqueueDeviceMeetingDeletion,
+} from '../services/deviceMeetingDeletion';
+import { rememberDeviceTranscriptTask } from '../services/deviceTranscriptTasks';
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
+
+async function rememberDeviceTranscriptTaskBestEffort(
+  meetingId: string,
+  taskId: string,
+): Promise<void> {
+  try {
+    await rememberDeviceTranscriptTask(meetingId, taskId);
+  } catch (error) {
+    // The upload and server-side transcription submission already succeeded.
+    // AsyncStorage is only a local polling hint, so a transient storage error
+    // must not turn a completed upload into a failed/retryable upload.  The
+    // completion provider can still discover the result from the canonical
+    // local revision and the device transcript endpoint on its next pass.
+    diagnosticWarn('[device-transcript] task hint write deferred', error);
+  }
+}
 
 const AUTOMATIC_MEETING_REFRESH_INTERVAL_MS = 30_000;
 const MEETINGS_CACHE_KEY = '@laoji:meetings:v2';
@@ -809,7 +832,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         ?? await buildCanonicalMeetingReadProjection(sqliteMeetingNoteRepository, scope);
       diagnosticAudit('meeting_canonical_legacy_mirror', {
         status: result.status,
-        scope: scope === 'guest' ? 'guest' : 'account',
+        ...scopeTelemetry(scope, 'none'),
+        mirror_kind: 'local-sqlite-projection',
         canonical_revision: result.state.canonicalRevision,
         legacy_mirror_revision: result.state.legacyMirrorRevision,
         elapsed_ms: Math.max(0, Date.now() - startedAtMs),
@@ -827,7 +851,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       diagnosticWarn('[meeting-db] canonical legacy mirror failed', error);
       diagnosticAudit('meeting_canonical_legacy_mirror', {
         status: 'failed',
-        scope: scope === 'guest' ? 'guest' : 'account',
+        ...scopeTelemetry(scope, 'none'),
+        mirror_kind: 'local-sqlite-projection',
         canonical_revision: state.canonicalRevision,
         legacy_mirror_revision: state.legacyMirrorRevision,
         error_code: error instanceof Error ? error.name : 'UnknownError',
@@ -1075,6 +1100,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     legacyMeetingId: string,
     target: Meeting,
     operationGeneration: number,
+    preserveForRestore: boolean,
   ): Promise<void> => {
     if (
       scope !== 'guest'
@@ -1096,6 +1122,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           meetingId: canonicalMeetingId,
           scopeKey: 'guest',
           canonicalWrite: true,
+          preserveForRestore,
         });
         deleted = result.deleted;
         if (
@@ -1122,18 +1149,30 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         // and repair the compatibility mirror after physical purge.
         diagnosticWarn('[meeting-db] guest tombstone projection failed', error);
       }
+      // Local deletion is already authoritative. Queue service cleanup before
+      // any optional file purge so an offline delete cannot leave the remote
+      // temporary binding around indefinitely. The queue contains only the
+      // meeting UUID and is drained after the next foreground/startup.
+      if (deleted) {
+        void enqueueDeviceMeetingDeletion(legacyMeetingId).catch(error => {
+          diagnosticWarn('[device-delete] could not persist cleanup hint', error);
+        });
+      }
       const cleanupResults = await Promise.allSettled([
-        deletePendingMeetingAudioUpload(scope, legacyMeetingId),
-        deleteNativeMeetingArtifacts(scope, legacyMeetingId),
-        deleteMeetingPlaybackCache(legacyMeetingId),
-        deleteMeetingAttachmentFiles(legacyMeetingId),
+        ...(!preserveForRestore ? [
+          deletePendingMeetingAudioUpload(scope, legacyMeetingId),
+          deleteNativeMeetingArtifacts(scope, legacyMeetingId),
+          deleteMeetingPlaybackCache(legacyMeetingId),
+          deleteMeetingAttachmentFiles(legacyMeetingId),
+        ] : []),
         cancelMeetingActionNotificationsForMeeting('guest', legacyMeetingId),
-        ...(target.audioLocalUri
+        ...(!preserveForRestore && target.audioLocalUri
           ? [FileSystem.deleteAsync(target.audioLocalUri, { idempotent: true })]
           : []),
       ]);
       const failures = cleanupResults.filter(result => result.status === 'rejected').length;
       if (failures > 0) throw new MeetingDeletionCleanupError(failures);
+      if (preserveForRestore) return;
       try {
         const purged = await sqliteMeetingNoteRepository.purgeDeletedGuestMeeting(
           canonicalMeetingId,
@@ -1158,7 +1197,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
     }
-  }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, scope]);
+  }, [adoptCanonicalOwnedProjection, enqueueDeviceMeetingDeletion, loadCanonicalOwnedScope, scope]);
 
   const saveCanonicalMeetingTranscript = useCallback(async (
     legacyMeetingId: string,
@@ -1641,9 +1680,41 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     expectedRetentionDays: number,
   ): Promise<void> => enqueueGuestMutation(async () => {
     const operationGeneration = generationRef.current;
+    if (scope === 'guest') {
+      if (expectedRetentionDays !== 30 || activeScopeRef.current !== scope) {
+        throw new Error('回收站保留期限已更新，请重试');
+      }
+      canonicalStoreMutationDepthRef.current += 1;
+      try {
+        const result = await restoreCanonicalMeetingNote.execute({
+          meetingId: canonicalMeetingId,
+          scopeKey: 'guest',
+          retentionDays: 30,
+          syncOperation: {
+            operationId: `meeting.restore:${secureClientIdFactory.create()}`,
+            operationType: 'meeting.restore',
+          },
+          canonicalWrite: true,
+        });
+        if (!result.restored || result.canonicalRevision === null) {
+          throw new Error('会议记录未能恢复，请重试');
+        }
+        const owned = await loadCanonicalOwnedScope();
+        const restoredLegacyId = owned
+          ? Object.entries(owned.projection.canonicalIdByLegacyId)
+            .find(([, id]) => id === canonicalMeetingId)?.[0]
+          : null;
+        if (!owned || !restoredLegacyId || !adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+          throw new Error('会议恢复后的数据不完整，请刷新后重试');
+        }
+        restoreDeletedMeetingAudio(scope, restoredLegacyId);
+      } finally {
+        canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
+      }
+      return;
+    }
     if (
-      scope === 'guest'
-      || !isScopeKey(scope)
+      !isScopeKey(scope)
       || !accessToken
       || activeScopeRef.current !== scope
       || !getFeatureFlags().localMeetingDbAccountRootWriteV1
@@ -2192,7 +2263,14 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   const resumePendingAudioUploads = useCallback((force = false): Promise<void> => {
-    if (mode !== 'authenticated' || !accessToken || activeScopeRef.current !== scope) {
+    if ((mode !== 'authenticated' && mode !== 'guest') || (mode === 'authenticated' && !accessToken)
+      || activeScopeRef.current !== scope) {
+      diagnosticAudit('meeting_audio_upload_resume_skipped', {
+        mode,
+        scope,
+        active_scope: activeScopeRef.current,
+        has_access_token: Boolean(accessToken),
+      });
       return Promise.resolve();
     }
     const operationKey = scope;
@@ -2211,7 +2289,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     let shouldPollPendingUploads = false;
     operation = (async () => {
       const flags = getFeatureFlags();
-      if (flags.localMeetingDbAccountUploadWriteV1 && isScopeKey(scope)) {
+      if (mode === 'authenticated' && flags.localMeetingDbAccountUploadWriteV1 && isScopeKey(scope)) {
         const projection = canonicalReadProjectionRef.current;
         if (!projection) return;
         for (const meeting of projection.meetings) {
@@ -2250,8 +2328,15 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
 
       let before = await listPendingMeetingAudioUploads(scope);
+      diagnosticAudit('meeting_audio_upload_queue_inspected', {
+        ...scopeTelemetry(scope as ScopeKey, mode === 'guest' ? 'device-v1' : 'account-api'),
+        queue_kind: 'local-pending-registry',
+        mode,
+        pending: before.length,
+        force,
+      });
       let remoteIdentityChanged = false;
-      if (getFeatureFlags().localMeetingDbV1 && isScopeKey(scope)) {
+      if (mode === 'authenticated' && getFeatureFlags().localMeetingDbV1 && isScopeKey(scope)) {
         for (const pending of before) {
           if (pending.remoteMeetingId) continue;
           const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
@@ -2269,7 +2354,15 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
       if (remoteIdentityChanged) before = await listPendingMeetingAudioUploads(scope);
 
-      if (flags.localMeetingDbAccountUploadWriteV1) {
+      if (mode === 'guest') {
+        // The device contract uses the local meeting UUID as its temporary
+        // service binding.  It never sends title, location, participants, or
+        // the original filename; only the bounded audio processing input is
+        // uploaded. Do not mutate the legacy pending registry just to add a
+        // remote identity that this path does not need.
+      }
+
+      if (mode === 'authenticated' && flags.localMeetingDbAccountUploadWriteV1) {
         let recordingAssetsV2Ready = recordingAssetCapabilityScopesRef.current.has(scope);
         if (!recordingAssetsV2Ready) {
           const capability = await loadMeetingCapabilities({
@@ -2293,7 +2386,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           try {
             const registration = await enqueueNativeMeetingUpload({
               scope,
-              accessToken,
+              accessToken: accessToken!,
               meetingId: pending.meetingId,
               remoteMeetingId: pending.remoteMeetingId,
               operationId: `recording-asset:${pending.recordingAssetId}:${pending.createdAt}`,
@@ -2323,9 +2416,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         before = await listPendingMeetingAudioUploads(scope);
       }
 
-      const beforeInspections = await inspectPendingMeetingAudioUploads(before);
+      const beforeInspections = mode === 'guest'
+        ? before.map(item => derivePendingMeetingAudioUploadInspection(item, null))
+        : await inspectPendingMeetingAudioUploads(before);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
-      await reconcilePendingAudioUploads(beforeInspections, operationGeneration);
+      if (mode !== 'guest') {
+        await reconcilePendingAudioUploads(beforeInspections, operationGeneration);
+      }
       if (before.length === 0) {
         audioResumePollCountsRef.current.delete(operationKey);
         return;
@@ -2333,8 +2430,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
       const result = await retryPendingMeetingAudioUploads(
         scope,
-        accessToken,
-        (pending, token) => flags.localMeetingDbAccountUploadWriteV1
+        accessToken ?? 'device',
+        (pending, token) => mode === 'guest'
+          ? uploadMeetingRecordingToDeviceService(pending)
+          : flags.localMeetingDbAccountUploadWriteV1
           ? uploadRecordingAssetV2({
               accessToken: token,
               meetingRemoteId: pending.remoteMeetingId!,
@@ -2361,14 +2460,31 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
             ),
         2,
       );
+      diagnosticAudit('meeting_audio_upload_queue_processed', {
+        scope: scope === 'guest' ? 'guest' : 'account',
+        mode,
+        found: result.found,
+        uploaded: result.uploadedIds.length,
+        failed: result.failedIds.length,
+        skipped: result.skippedIds.length,
+      });
+      if (mode === 'guest') {
+        await Promise.all(result.uploaded
+          .filter(item => Boolean(item.transcriptionTaskId))
+          .map(item => rememberDeviceTranscriptTaskBestEffort(item.meetingId, item.transcriptionTaskId!)));
+      }
       const after = await listPendingMeetingAudioUploads(scope);
       shouldPollPendingUploads = after.some(item => (
         Boolean(item.nativeWorkId) || !item.remoteMeetingId
       ));
       if (!shouldPollPendingUploads) audioResumePollCountsRef.current.delete(operationKey);
-      const afterInspections = await inspectPendingMeetingAudioUploads(after);
+      const afterInspections = mode === 'guest'
+        ? after.map(item => derivePendingMeetingAudioUploadInspection(item, null))
+        : await inspectPendingMeetingAudioUploads(after);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       if (
+        mode !== 'guest'
+        &&
         (result.uploadedIds.length > 0 || after.length < before.length)
         && !getFeatureFlags().localMeetingDbAccountUploadWriteV1
       ) {
@@ -2378,7 +2494,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const uploadedInspections = result.uploaded.map(item => (
         derivePendingMeetingAudioUploadInspection(item, null)
       ));
-      await reconcilePendingAudioUploads(afterInspections, operationGeneration, uploadedInspections);
+      if (mode !== 'guest') {
+        await reconcilePendingAudioUploads(afterInspections, operationGeneration, uploadedInspections);
+      }
     })().finally(() => {
       if (audioResumeOperationsRef.current.get(operationKey) === operation) {
         audioResumeOperationsRef.current.delete(operationKey);
@@ -2426,6 +2544,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     const operationGeneration = generationRef.current;
     if (uploaded) {
       if (activeScopeRef.current !== scope) return;
+      if (scope === 'guest' && uploaded.transcriptionTaskId) {
+        await rememberDeviceTranscriptTaskBestEffort(uploaded.meetingId, uploaded.transcriptionTaskId);
+      }
       await reconcilePendingAudioUploads(
         [],
         operationGeneration,
@@ -2482,13 +2603,22 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   }, [accessToken, mode, refreshMeetingsFromCloud, scope]);
 
   useEffect(() => {
-    if (mode !== 'authenticated' || !accessToken) return undefined;
+    if (mode !== 'authenticated' && mode !== 'guest') return undefined;
     if (!loading) void resumePendingAudioUploads(true).catch(() => {});
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState === 'active') void resumePendingAudioUploads().catch(() => {});
     });
     return () => subscription.remove();
   }, [accessToken, loading, mode, resumePendingAudioUploads]);
+
+  useEffect(() => {
+    if (mode !== 'guest' || loading) return undefined;
+    void drainDeviceMeetingDeletionOutbox(true);
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') void drainDeviceMeetingDeletionOutbox();
+    });
+    return () => subscription.remove();
+  }, [loading, mode]);
 
   useEffect(() => {
     if (!isScopeKey(scope)) return undefined;
@@ -2711,7 +2841,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           if (mode === 'authenticated') await refreshMeetings();
         }
       } finally {
-        if (isCurrent()) setLoading(false);
+        if (isCurrent()) {
+          setLoading(false);
+          // The initial roots cache can make loading transition from true to
+          // false in one React commit. In that case the separate loading
+          // effect is not guaranteed to observe a change, so explicitly drain
+          // the durable device upload queue after the scope is hydrated.
+          if (mode === 'guest' || (mode === 'authenticated' && accessToken)) {
+            void resumePendingAudioUploads(true).catch(error => {
+              diagnosticWarn('[device-recording] startup upload drain failed', error);
+            });
+          }
+        }
       }
     }
     void loadForScope();
@@ -2726,6 +2867,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     mode,
     persistMeetingRoots,
     refreshMeetings,
+    resumePendingAudioUploads,
     scope,
     summaryKey,
     transcriptKey,
@@ -2936,6 +3078,30 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     ) {
       throw new Error('meeting import identity is inconsistent');
     }
+    if (scope === 'guest') {
+      // Canonical guest imports do not pass through the account-only queue
+      // hydrator. Register the local asset explicitly so the device service
+      // receives the same bounded input as a live recording.
+      await upsertPendingMeetingAudioUpload(scope, {
+        meetingId: media.meetingId,
+        recordingAssetId: primary.id,
+        role: 'primary',
+        origin: 'imported',
+        audioUri: primary.localUri,
+        fileName: primary.fileName ?? media.fileName,
+        mimeType: primary.mimeType ?? media.mimeType,
+        byteSize: primary.byteSize ?? media.byteSize,
+        durationMs: primary.durationMs ?? media.durationMs,
+        checksumSha256: primary.checksumSha256 ?? media.checksumSha256,
+        createdAt: new Date(nowMs).toISOString(),
+        lastAttemptAt: new Date(0).toISOString(),
+        attemptCount: 0,
+        uploadState: 'pending',
+      });
+      void resumePendingAudioUploads(true).catch(error => {
+        diagnosticWarn('[meeting-import] device upload resume failed', error);
+      });
+    }
     if (canonicalImportWrite) {
       const owned = await loadCanonicalOwnedScope();
       if (!owned) throw new Error('meeting canonical ownership was not established');
@@ -3017,14 +3183,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (mode !== 'guest' && !accessToken) throw new Error('not authenticated');
 
     if (mode === 'guest') {
-      if (options.recoverable) throw new Error('本机会议删除后无法恢复');
       return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
         const target = meetingsRef.current.find(meeting => meeting.id === id) ?? null;
         if (!target) return;
         assertMeetingDeletionAllowed(target);
         if (getFeatureFlags().localMeetingDbCanonicalWriteV1) {
-          return deleteCanonicalGuestMeeting(id, target, operationGeneration);
+          return deleteCanonicalGuestMeeting(id, target, operationGeneration, options.recoverable === true);
         }
         deactivateCanonicalRead();
         const nextMeetings = meetingsRef.current.filter(meeting => meeting.id !== id);
@@ -3040,6 +3205,9 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         summaryCacheRef.current = nextSummaries;
         setMeetings(nextMeetings);
         if (isScopeKey(scope)) void mirrorLegacyMeetingDeletion(scope, id);
+        void enqueueDeviceMeetingDeletion(id).catch(error => {
+          diagnosticWarn('[device-delete] could not persist cleanup hint', error);
+        });
         const cleanupResults = await Promise.allSettled([
           persistTranscripts(),
           persistSummaries(),

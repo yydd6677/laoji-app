@@ -273,7 +273,7 @@ export interface MinutesViewSnapshot {
 
 export type MinutesSemanticAction =
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
-  | { type: 'openSpeakers' | 'openProfile' | 'openMeetingTags' | 'openMeetingOrganization' | 'openRecycleBin' | 'closeRecycleBin'; surface: 'list' }
+  | { type: 'openSpeakers' | 'openSettings' | 'openMeetingTags' | 'openMeetingOrganization' | 'openRecycleBin' | 'closeRecycleBin'; surface: 'list' }
   | { type: 'importMedia'; surface: 'list' }
   | {
       type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording';

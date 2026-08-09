@@ -85,23 +85,57 @@ class RecorderRuntimeException(
 class RecorderCredentials private constructor(
   val headerName: String,
   internal val headerValue: String,
+  internal val headers: Map<String, String>,
 ) {
-  override fun toString(): String = "RecorderCredentials(headerName=$headerName, headerValue=[REDACTED])"
+  override fun toString(): String = "RecorderCredentials(headers=[REDACTED])"
 
   companion object {
-    fun create(accessToken: String?, guestToken: String?): RecorderCredentials {
+    fun create(
+      accessToken: String?,
+      guestToken: String?,
+      deviceToken: String? = null,
+      dataEpoch: String? = null,
+    ): RecorderCredentials {
       val access = normalizeToken(accessToken)
       val guest = normalizeToken(guestToken)
-      if ((access == null) == (guest == null)) {
+      val device = normalizeToken(deviceToken)
+      val epoch = normalizeToken(dataEpoch)
+      val count = listOf(access, guest, device).count { it != null }
+      if (count != 1) {
         throw RecorderRuntimeException(
           RecorderErrorCode.INVALID_OPTIONS,
-          "exactly one of accessToken or guestToken is required",
+          "exactly one of accessToken, guestToken, or deviceToken is required",
         )
       }
       return if (access != null) {
-        RecorderCredentials("Authorization", "Bearer $access")
+        RecorderCredentials(
+          "Authorization",
+          "Bearer $access",
+          mapOf("Authorization" to "Bearer $access"),
+        )
       } else {
-        RecorderCredentials("X-Guest-Session-Token", requireNotNull(guest))
+        if (guest != null) {
+          RecorderCredentials(
+            "X-Guest-Session-Token",
+            guest,
+            mapOf("X-Guest-Session-Token" to guest),
+          )
+        } else {
+          if (epoch == null) {
+            throw RecorderRuntimeException(
+              RecorderErrorCode.INVALID_OPTIONS,
+              "dataEpoch is required with deviceToken",
+            )
+          }
+          RecorderCredentials(
+            "Authorization",
+            "Bearer ${requireNotNull(device)}",
+            mapOf(
+              "Authorization" to "Bearer ${requireNotNull(device)}",
+              "X-Laoji-Data-Epoch" to epoch,
+            ),
+          )
+        }
       }
     }
 
@@ -143,6 +177,8 @@ class RecorderStartConfig(
       websocketUrl: String,
       accessToken: String?,
       guestToken: String?,
+      deviceToken: String?,
+      dataEpoch: String?,
       allowInsecureDevelopment: Boolean = false,
       connectionTimeoutMs: Double?,
       stopTimeoutMs: Double?,
@@ -162,7 +198,7 @@ class RecorderStartConfig(
         mode = RecorderMode.REALTIME,
         storageScope = normalizeStorageScope(storageScope),
         websocketUrl = validateWebSocketUrl(websocketUrl, allowInsecureDevelopment),
-        credentials = RecorderCredentials.create(accessToken, guestToken),
+        credentials = RecorderCredentials.create(accessToken, guestToken, deviceToken, dataEpoch),
         allowInsecureDevelopment = allowInsecureDevelopment,
         connectionTimeoutMs = boundedMilliseconds(
           connectionTimeoutMs,

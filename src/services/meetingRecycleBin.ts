@@ -20,7 +20,6 @@ export async function listMeetingRecycleBin(
   retentionDays: number,
   nowMs = Date.now(),
 ): Promise<readonly MeetingRecycleBinEntry[]> {
-  if (scopeKey === 'guest') return [];
   if (!Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 3_650) {
     throw new Error('回收站保留期限无效');
   }
@@ -44,10 +43,9 @@ export async function listMeetingRecycleBin(
     .flatMap(item => {
       if (
         item.lifecycle !== 'deleted'
-        || !item.remoteId
-        || item.remoteRevision === null
         || !item.deletedFromLifecycle
         || item.deletedAtMs === null
+        || (scopeKey !== 'guest' && (!item.remoteId || item.remoteRevision === null))
       ) return [];
       const expiresAtMs = item.deletedAtMs + retentionDays * DAY_MS;
       if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= nowMs) return [];

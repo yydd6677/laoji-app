@@ -41,6 +41,12 @@ class RecorderStartOptions : Record {
   var guestToken: String? = null
 
   @Field
+  var deviceToken: String? = null
+
+  @Field
+  var dataEpoch: String? = null
+
+  @Field
   var allowInsecureDevelopment: Boolean = false
 
   @Field
@@ -59,6 +65,8 @@ class RecorderStartOptions : Record {
     websocketUrl = websocketUrl,
     accessToken = accessToken,
     guestToken = guestToken,
+    deviceToken = deviceToken,
+    dataEpoch = dataEpoch,
     allowInsecureDevelopment = allowInsecureDevelopment,
     connectionTimeoutMs = connectionTimeoutMs,
     stopTimeoutMs = stopTimeoutMs,
@@ -67,7 +75,7 @@ class RecorderStartOptions : Record {
 
   override fun toString(): String =
     "RecorderStartOptions(sessionId=$sessionId, purpose=$purpose, storageScope=[REDACTED], websocketUrl=[REDACTED], " +
-      "accessToken=[REDACTED], guestToken=[REDACTED], " +
+      "accessToken=[REDACTED], guestToken=[REDACTED], deviceToken=[REDACTED], dataEpoch=[REDACTED], " +
       "allowInsecureDevelopment=$allowInsecureDevelopment, connectionTimeoutMs=$connectionTimeoutMs, " +
       "stopTimeoutMs=$stopTimeoutMs, levelIntervalMs=$levelIntervalMs)"
 }

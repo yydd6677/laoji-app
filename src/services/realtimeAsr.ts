@@ -17,6 +17,8 @@ import {
 } from 'laoji-native-platform';
 import { getApiConfig } from './config';
 import type { RealtimeAsrProvider } from './config';
+import { getDeviceRealtimeAuth } from './deviceApi';
+import { beginRealtimeNetworkPriority } from './deviceNetworkPriority';
 
 const DEFAULT_PROVIDER: RealtimeAsrProvider = 'qwen';
 
@@ -76,6 +78,8 @@ export interface StartRealtimeAsrOptions {
   realtimeAsrBase?: string;
   accessToken?: string | null;
   guestToken?: string | null;
+  deviceToken?: string | null;
+  dataEpoch?: string | null;
   connectionTimeoutMs?: number;
   stopTimeoutMs?: number;
   onStatus?: (status: RealtimeAsrStatus) => void;
@@ -137,9 +141,17 @@ export function buildRealtimeAsrUrl({
 export function buildRealtimeAsrHeaders({
   accessToken,
   guestToken,
-}: Pick<StartRealtimeAsrOptions, 'accessToken' | 'guestToken'>): Record<string, string> {
+  deviceToken,
+  dataEpoch,
+}: Pick<StartRealtimeAsrOptions, 'accessToken' | 'guestToken' | 'deviceToken' | 'dataEpoch'>): Record<string, string> {
   if (accessToken) return { Authorization: `Bearer ${accessToken}` };
   if (guestToken) return { 'X-Guest-Session-Token': guestToken };
+  if (deviceToken && dataEpoch) {
+    return {
+      Authorization: `Bearer ${deviceToken}`,
+      'X-Laoji-Data-Epoch': dataEpoch,
+    };
+  }
   return {};
 }
 
@@ -190,11 +202,30 @@ export async function startRealtimeAsr(
   const secure = url.startsWith('wss://');
   const accessToken = options.accessToken?.trim() || undefined;
   const guestToken = options.guestToken?.trim() || undefined;
-  if ((accessToken === undefined) === (guestToken === undefined)) {
-    throw new Error('realtime ASR requires exactly one account or guest token');
+  let deviceToken = options.deviceToken?.trim() || undefined;
+  let dataEpoch = options.dataEpoch?.trim() || undefined;
+  if (!accessToken && !guestToken && !deviceToken) {
+    const deviceAuth = await getDeviceRealtimeAuth();
+    deviceToken = deviceAuth.deviceToken;
+    dataEpoch = deviceAuth.dataEpoch;
+  }
+  const credentialCount = [accessToken, guestToken, deviceToken].filter(Boolean).length;
+  if (credentialCount !== 1) {
+    throw new Error('实时语音服务凭据无效');
+  }
+  if (deviceToken && !dataEpoch) {
+    throw new Error('实时语音服务数据域无效');
   }
   const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(config.isProduction, secure);
   assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
+
+  const releaseRealtimeNetworkPriority = beginRealtimeNetworkPriority();
+  let networkPriorityReleased = false;
+  const releaseNetworkPriority = () => {
+    if (networkPriorityReleased) return;
+    networkPriorityReleased = true;
+    releaseRealtimeNetworkPriority();
+  };
 
   let frameCount = 0;
   let settled = false;
@@ -204,6 +235,7 @@ export async function startRealtimeAsr(
   const settleCompletion = (value: RealtimeAsrCompletion) => {
     if (settled) return;
     settled = true;
+    releaseNetworkPriority();
     resolveCompletion(value);
   };
   const subscriptions = [
@@ -271,7 +303,11 @@ export async function startRealtimeAsr(
       purpose,
       storageScope: options.storageScope,
       websocketUrl: url,
-      ...(accessToken ? { accessToken } : { guestToken: guestToken! }),
+      ...(accessToken
+        ? { accessToken }
+        : guestToken
+          ? { guestToken }
+          : { deviceToken: deviceToken!, dataEpoch: dataEpoch! }),
       allowInsecureDevelopment,
       connectionTimeoutMs: options.connectionTimeoutMs,
       stopTimeoutMs: options.stopTimeoutMs,
@@ -280,6 +316,7 @@ export async function startRealtimeAsr(
     options.onStatus?.('recording');
   } catch (reason) {
     releaseListeners();
+    releaseNetworkPriority();
     const error = toError(reason, 'native recorder failed to start');
     options.onError?.(error);
     throw error;
@@ -318,6 +355,7 @@ export async function startRealtimeAsr(
           throw error;
         } finally {
           releaseListeners();
+          releaseNetworkPriority();
           options.onStatus?.('closed');
         }
       })();

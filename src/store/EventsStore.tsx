@@ -75,6 +75,10 @@ import {
 import { eventEffectiveEndDate, eventOverlapsDateRange } from '../utils/eventDateSemantics';
 import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
 import { isScopeKey } from '../domain/meeting';
+import {
+  loadLocalScheduleEvents,
+  replaceLocalScheduleEvents,
+} from '../data/repositories/localScheduleRepository';
 
 export { checkConflict } from '../utils/eventUtils';
 
@@ -623,7 +627,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
   }, [persistMetadata]);
 
   const persistGuestEvents = useCallback((next: CalEvent[]) => {
-    return writeAppStorageJson(GUEST_EVENTS_KEY, next, { removeIfEmpty: true });
+    // Calendar CRUD is device-primary.  AsyncStorage is read only once below
+    // as a compatibility migration for older installs; all subsequent writes
+    // go through the WAL-backed SQLite store.
+    return replaceLocalScheduleEvents(next);
   }, []);
 
   const enqueueGuestMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
@@ -855,7 +862,14 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         if (!isCurrent()) return;
         eventMetadataRef.current = metadata;
         if (mode === 'guest') {
-          const guestEvents = await loadJson<CalEvent[]>(GUEST_EVENTS_KEY, []);
+          let guestEvents = await loadLocalScheduleEvents().catch(() => []);
+          if (guestEvents.length === 0) {
+            const legacyGuestEvents = await loadJson<CalEvent[]>(GUEST_EVENTS_KEY, []);
+            if (legacyGuestEvents.length > 0) {
+              guestEvents = legacyGuestEvents;
+              await replaceLocalScheduleEvents(legacyGuestEvents).catch(() => undefined);
+            }
+          }
           if (!isCurrent()) return;
           guestBaseEventsRef.current = guestEvents;
           searchableEventsRef.current = guestEvents;

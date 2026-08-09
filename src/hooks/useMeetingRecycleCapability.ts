@@ -15,11 +15,11 @@ export function useMeetingRecycleCapability(): MeetingRecycleCapabilityState {
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (
-      isGuest
-      || !accessToken
-      || !getFeatureFlags().localMeetingDbAccountRootWriteV1
-    ) {
+    if (isGuest) {
+      setRetentionDays(30);
+      return 30;
+    }
+    if (!accessToken || !getFeatureFlags().localMeetingDbAccountRootWriteV1) {
       setRetentionDays(null);
       return null;
     }
@@ -38,11 +38,12 @@ export function useMeetingRecycleCapability(): MeetingRecycleCapabilityState {
 
   useEffect(() => {
     let alive = true;
-    if (
-      isGuest
-      || !accessToken
-      || !getFeatureFlags().localMeetingDbAccountRootWriteV1
-    ) {
+    if (isGuest) {
+      setRetentionDays(30);
+      setLoading(false);
+      return () => { alive = false; };
+    }
+    if (!accessToken || !getFeatureFlags().localMeetingDbAccountRootWriteV1) {
       setRetentionDays(null);
       setLoading(false);
       return () => { alive = false; };

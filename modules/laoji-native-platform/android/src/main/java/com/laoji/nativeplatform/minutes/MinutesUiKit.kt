@@ -372,10 +372,10 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
     com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
     "更多会议记录操作",
   )
-  // [PRODUCT] Global app profile entry; the surrounding Minutes title bar
+  // [PRODUCT] Global app settings entry; the surrounding Minutes title bar
   // remains source-shaped and keeps its own palette/inset ownership.
   private val profileEntry = ProfileEntryView(context, appContext).apply {
-    setOnClickListener { actionHandler?.invoke("openProfile") }
+    setOnClickListener { actionHandler?.invoke("openSettings") }
   }
 
   fun moreAnchor(): View = moreButton

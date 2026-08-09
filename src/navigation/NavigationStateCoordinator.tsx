@@ -9,10 +9,8 @@ import React, {
 } from 'react';
 import { AppState } from 'react-native';
 import { NavigationContainer, type InitialState, type NavigationState } from '@react-navigation/native';
-import { useAuth } from '../store/AuthStore';
 import {
   defaultNavigationState,
-  navigationScopeForAuth,
   type NavigationAuthScope,
 } from '../services/navigationState';
 import { NavigationStateWriter } from '../services/navigationStatePersistence';
@@ -44,22 +42,21 @@ export function NavigationStateProvider({
   children: React.ReactNode;
   writer?: NavigationStateWriter;
 }) {
-  const { initializing, mode, session } = useAuth();
-  const desiredScope = initializing
-    ? null
-    : navigationScopeForAuth(mode, session?.user.id);
+  // Navigation belongs to the installation, not to an account session.  Use
+  // the local scope synchronously and restore the last route in the
+  // background so a slow storage read cannot produce a white first frame.
+  const desiredScope: NavigationAuthScope = 'guest';
   const writerRef = useRef<NavigationStateWriter | null>(null);
   if (!writerRef.current) writerRef.current = suppliedWriter ?? new NavigationStateWriter();
   const writer = writerRef.current;
   const previousScopeRef = useRef<NavigationAuthScope | null>(null);
   const restoreRequestRef = useRef(0);
-  const [decision, setDecision] = useState<NavigationDecision | null>(null);
+  const [decision, setDecision] = useState<NavigationDecision>(() => ({
+    scope: 'guest',
+    initialState: defaultNavigationState('guest'),
+  }));
 
   useEffect(() => {
-    if (!desiredScope) {
-      setDecision(null);
-      return;
-    }
     const request = restoreRequestRef.current + 1;
     restoreRequestRef.current = request;
     const previousScope = previousScopeRef.current;
@@ -113,14 +110,14 @@ export function NavigationStateProvider({
     if (desiredScope && state) writer.schedule(desiredScope, state);
   }, [desiredScope, writer]);
   const flush = useCallback(() => writer.flush(), [writer]);
-  const ready = Boolean(desiredScope && decision?.scope === desiredScope);
+  const ready = decision.scope === desiredScope;
   const value = useMemo<NavigationStateContextValue>(() => ({
     ready,
     scope: desiredScope,
-    initialState: ready ? decision?.initialState : undefined,
+    initialState: ready ? decision.initialState : undefined,
     persistState,
     flush,
-  }), [decision?.initialState, desiredScope, flush, persistState, ready]);
+  }), [decision.initialState, desiredScope, flush, persistState, ready]);
 
   return (
     <NavigationStateContext.Provider value={value}>

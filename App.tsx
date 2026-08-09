@@ -9,7 +9,6 @@ import { AuthProvider } from './src/store/AuthStore';
 import { EventsProvider } from './src/store/EventsStore';
 import { MeetingsProvider } from './src/store/MeetingsStore';
 import { AppDialogProvider } from './src/components/AppDialog';
-import { GuestDataMigrationProvider } from './src/components/GuestDataMigrationProvider';
 import { AppLockGate } from './src/components/AppLockGate';
 import { assertProductionApiConfig } from './src/services/config';
 import { EventUndoBanner } from './src/components/EventUndoBanner';
@@ -22,24 +21,15 @@ import {
   RestorableNavigationContainer,
 } from './src/navigation/NavigationStateCoordinator';
 import { NativePlatformCoordinator } from './src/components/NativePlatformCoordinator';
-import { MeetingActionSyncProvider } from './src/components/MeetingActionSyncProvider';
-import { MeetingRootSyncProvider } from './src/components/MeetingRootSyncProvider';
-import { MeetingSpeakerCorrectionSyncProvider } from './src/components/MeetingSpeakerCorrectionSyncProvider';
-import { MeetingManualNoteSyncProvider } from './src/components/MeetingManualNoteSyncProvider';
-import { MeetingOccurrenceSyncProvider } from './src/components/MeetingOccurrenceSyncProvider';
 import {
   AppStartupBoundary,
   AppStartupError,
 } from './src/components/AppStartupBoundary';
 import { MeetingMediaImportProvider } from './src/components/MeetingMediaImportProvider';
 import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEventsProjectionCoordinator';
-import { MeetingTranscriptCompletionProvider } from './src/components/MeetingTranscriptCompletionProvider';
-import { MeetingRetentionCleanupProvider } from './src/components/MeetingRetentionCleanupProvider';
-import { MeetingTagCatalogSyncProvider } from './src/components/MeetingTagCatalogSyncProvider';
-import { MeetingAttachmentSyncProvider } from './src/components/MeetingAttachmentSyncProvider';
-import { MeetingMarkerSyncProvider } from './src/components/MeetingMarkerSyncProvider';
-import { MeetingSummarySyncProvider } from './src/components/MeetingSummarySyncProvider';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
+import { DeviceServiceCoordinator } from './src/components/DeviceServiceCoordinator';
+import { DeviceMeetingCompletionProvider } from './src/components/DeviceMeetingCompletionProvider';
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -58,55 +48,33 @@ function RuntimeProviders({ onRestart }: {
   return (
     <AuthProvider>
       <NavigationStateProvider>
+        <DeviceServiceCoordinator />
         <NativePlatformCoordinator />
         <AppReadinessGate
           feishuEvidence="feishu:UI-BOOT-READINESS-001:readiness-gate"
           onRetry={onRestart}
         >
-          <MeetingRootSyncProvider>
-            <MeetingRetentionCleanupProvider>
-              <MeetingOccurrenceSyncProvider>
-                <MeetingActionSyncProvider>
-                  <MeetingManualNoteSyncProvider>
-                    <MeetingTagCatalogSyncProvider>
-                    <MeetingAttachmentSyncProvider>
-                    <MeetingMarkerSyncProvider>
-                    <MeetingSummarySyncProvider>
-                    <MeetingSpeakerCorrectionSyncProvider>
-                    <EventsProvider>
-                    <MeetingsProvider>
-                      <MeetingTranscriptCompletionProvider>
-                        <UpcomingEventsProjectionCoordinator />
-                        <AppLockGate>
-                          <AppDialogProvider>
-                            <MeetingMediaImportProvider>
-                              <GuestDataMigrationProvider>
-                                <NotificationPermissionPrimer />
-                                <View style={{ flex: 1 }}>
-                                  <RestorableNavigationContainer>
-                                    <StatusBar style="dark" backgroundColor={colors.appBg} />
-                                    <RootNavigator />
-                                    <NotificationNavigationHandler />
-                                  </RestorableNavigationContainer>
-                                  <EventUndoBanner />
-                                </View>
-                              </GuestDataMigrationProvider>
-                            </MeetingMediaImportProvider>
-                          </AppDialogProvider>
-                        </AppLockGate>
-                      </MeetingTranscriptCompletionProvider>
-                    </MeetingsProvider>
-                    </EventsProvider>
-                    </MeetingSpeakerCorrectionSyncProvider>
-                    </MeetingSummarySyncProvider>
-                    </MeetingMarkerSyncProvider>
-                    </MeetingAttachmentSyncProvider>
-                    </MeetingTagCatalogSyncProvider>
-                  </MeetingManualNoteSyncProvider>
-                </MeetingActionSyncProvider>
-              </MeetingOccurrenceSyncProvider>
-            </MeetingRetentionCleanupProvider>
-          </MeetingRootSyncProvider>
+          <EventsProvider>
+            <MeetingsProvider>
+              <DeviceMeetingCompletionProvider />
+              <UpcomingEventsProjectionCoordinator />
+              <AppLockGate>
+                <AppDialogProvider>
+                  <MeetingMediaImportProvider>
+                    <NotificationPermissionPrimer />
+                    <View style={{ flex: 1 }}>
+                      <RestorableNavigationContainer>
+                        <StatusBar style="dark" backgroundColor={colors.appBg} />
+                        <RootNavigator />
+                        <NotificationNavigationHandler />
+                      </RestorableNavigationContainer>
+                      <EventUndoBanner />
+                    </View>
+                  </MeetingMediaImportProvider>
+                </AppDialogProvider>
+              </AppLockGate>
+            </MeetingsProvider>
+          </EventsProvider>
         </AppReadinessGate>
       </NavigationStateProvider>
     </AuthProvider>

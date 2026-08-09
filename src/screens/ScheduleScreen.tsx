@@ -258,10 +258,10 @@ export function ScheduleScreen({ navigation }: Props) {
         <View style={s.titleBar}>
         <TouchableOpacity
           style={s.profileButton}
-          onPress={() => navigation.navigate('Profile')}
+          onPress={() => navigation.navigate('Privacy')}
           accessibilityRole="button"
-          accessibilityLabel="打开个人资料"
-          testID="schedule-open-profile"
+          accessibilityLabel="打开设置"
+          testID="schedule-open-settings"
         >
           <Avatar size={36} profile={profile} />
         </TouchableOpacity>

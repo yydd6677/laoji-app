@@ -75,7 +75,7 @@ export interface NativeCalendarSemanticEvent {
     | 'month-change'
     | 'date-select'
     | 'event-open'
-    | 'profile-open'
+    | 'settings-open'
     | 'search-open'
     | 'create-menu'
     | 'create-voice'

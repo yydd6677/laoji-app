@@ -21,6 +21,8 @@ import {
   type ScopeKey,
 } from '../domain/meeting';
 import { getFeatureFlags } from '../config/featureFlags';
+import { askDeviceQuestion, DeviceApiError } from './deviceApi';
+import { loadGenerationRetentionPreference } from './generationPrivacy';
 
 const INSUFFICIENT_ANSWER = '当前会议记录中没有足够信息';
 const MAX_CONTEXT_TURNS = 12;
@@ -366,6 +368,48 @@ function sourceIdForCitation(citation: MeetingQuestionCitation): string {
   return `manual-note:${citation.manualNoteRevision}`;
 }
 
+function normalizeDeviceQuestionResponse(
+  value: unknown,
+  request: MeetingQuestionRequestWire,
+): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('设备问答响应格式无效');
+  }
+  const root = value as Record<string, unknown>;
+  const remoteMeetingId = typeof root.meeting_id === 'string' ? root.meeting_id.trim() : '';
+  if (remoteMeetingId && remoteMeetingId !== request.client_meeting_id) {
+    throw new Error('设备问答返回了其他会议的内容，结果未保存。');
+  }
+  const now = Date.now();
+  const createdAtMs = Number.isFinite(Number(root.created_at_ms))
+    ? Number(root.created_at_ms)
+    : now;
+  const completedAtMs = Number.isFinite(Number(root.completed_at_ms))
+    ? Number(root.completed_at_ms)
+    : Math.max(createdAtMs, now);
+  return {
+    ...root,
+    schema_version: 1,
+    client_meeting_id: request.client_meeting_id,
+    client_thread_id: request.client_thread_id,
+    client_request_id: request.client_request_id,
+    remote_thread_id: typeof root.remote_thread_id === 'string'
+      ? root.remote_thread_id
+      : typeof root.thread_id === 'string' ? root.thread_id : null,
+    remote_turn_id: typeof root.remote_turn_id === 'string'
+      ? root.remote_turn_id
+      : typeof root.turn_id === 'string' ? root.turn_id : null,
+    ordinal: request.expected_ordinal,
+    input_fingerprint: request.input_fingerprint,
+    transcript_revision_id: request.transcript_revision_id,
+    summary_version_id: request.summary_version_id,
+    manual_note_revision: request.manual_note_revision,
+    created_at_ms: createdAtMs,
+    completed_at_ms: Math.max(createdAtMs, completedAtMs),
+    transient: root.transient === true,
+  };
+}
+
 export async function askMeetingQuestion(input: {
   scopeKey: ScopeKey;
   navigationMeetingId: string;
@@ -440,7 +484,7 @@ export async function askMeetingQuestion(input: {
       : null,
     context,
   };
-  const raw = await askMeetingQuestionRemote({
+  const askLegacy = () => askMeetingQuestionRemote({
     request,
     remoteMeetingId: currentEvidence.remoteMeetingId,
     accessToken: input.accessToken,
@@ -451,6 +495,39 @@ export async function askMeetingQuestion(input: {
     requiresAuthentication: input.scopeKey !== 'guest' && Boolean(currentEvidence.remoteMeetingId),
     signal: input.signal,
   });
+  let raw: unknown;
+  if (input.scopeKey === 'guest') {
+    if (currentEvidence.includeManualNote) {
+      throw new MeetingQuestionUnavailableError('当前问答暂不支持将本机笔记发送到服务。');
+    }
+    try {
+      const retainGeneratedResult = await loadGenerationRetentionPreference();
+      raw = normalizeDeviceQuestionResponse(
+        await askDeviceQuestion(currentEvidence.meetingId, {
+          schema_version: 1,
+          client_thread_id: request.client_thread_id,
+          client_request_id: request.client_request_id,
+          expected_ordinal: request.expected_ordinal,
+          question: request.question,
+          include_manual_note: false,
+          retain_generated_result: retainGeneratedResult,
+        }, input.signal),
+        request,
+      );
+    } catch (error) {
+      // Device-primary meetings never fall back to the legacy guest route:
+      // that route would send the complete local transcript through the old
+      // account-compatible API. Historical records without a device binding
+      // are intentionally not migrated; ask the user to wait for a current
+      // device recording instead of leaking local content across scopes.
+      if (error instanceof DeviceApiError && error.status === 404) {
+        throw new MeetingQuestionUnavailableError('这场会议尚未完成设备服务绑定，暂时无法进行问答。');
+      }
+      throw error;
+    }
+  } else {
+    raw = await askLegacy();
+  }
   const parsed = parseQuestionResponse(raw, request, currentEvidence);
   const turnId = `question-turn:${input.session.thread.id}:${ordinal}:${questionDigest.slice(0, 20)}`;
   const turn: MeetingQuestionTurn = {

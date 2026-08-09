@@ -22,12 +22,8 @@ import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
-import {
-  ApiGuestRealtimeSession,
-  createGuestRealtimeSession,
-  deleteGuestRealtimeSession,
-  uploadMeetingAudio,
-} from '../services/api';
+import { uploadMeetingAudio } from '../services/api';
+import { createMeetingBinding, getDeviceRealtimeAuth } from '../services/deviceApi';
 import { createMeetingRecordingFinalizer, finalizeMeetingRecording } from '../services/meetingRecording';
 import { RealtimeAsrAudioStats, RealtimeAsrSession, RealtimeAsrStatus, startRealtimeAsr } from '../services/realtimeAsr';
 import { RootStackParamList, TranscriptLine } from '../types';
@@ -36,7 +32,6 @@ import {
   canResumeMeetingRecording,
   latestTranscriptWindow,
   pcmDurationSec,
-  requireMeetingRemoteIdentity,
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
@@ -97,7 +92,6 @@ export const MEETING_RECORDING_GEOMETRY = Object.freeze({
 interface ActiveRecording {
   meetingId: string;
   session: RealtimeAsrSession;
-  guestSession?: ApiGuestRealtimeSession;
   finalize: ReturnType<typeof createMeetingRecordingFinalizer>;
 }
 
@@ -239,7 +233,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     session: RealtimeAsrSession,
     id: string,
     remoteMeetingId: string | null,
-    guestSession?: ApiGuestRealtimeSession,
   ) => {
     const audioDurationSec = pcmDurationSec(audioStatsRef.current?.byteCount ?? 0);
     const audioBars = audioSamplesToBars(audioRmsSamplesRef.current, 50);
@@ -278,13 +271,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         reconcileUploads: reconcileAudioUploads,
       });
     } finally {
-      try {
-        if (guestSession) {
-          await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
-        }
-      } finally {
-        await restorePlaybackAudioMode();
-      }
+      await restorePlaybackAudioMode();
     }
   }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
 
@@ -390,7 +377,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     accumulatedPausedMsRef.current = 0;
     setPauseTransitioning(false);
     let startedMeetingId = '';
-    let guestSession: ApiGuestRealtimeSession | undefined;
     let createdForAttempt = false;
     let reusableStatus = 'created';
     const ensureScreenActive = () => {
@@ -416,7 +402,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         clientRequestId: createRequestRef.current.id,
         entryPoint,
       });
-      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(meeting);
+      const remoteMeetingId = null;
       startedMeetingId = meeting.id;
       ensureScreenActive();
       setMeetingId(meeting.id);
@@ -432,15 +418,14 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       transcriptRef.current = initialTranscript;
       transcriptCheckpointRef.current = { lineCount: initialTranscript.length, savedAtMs: Date.now() };
       setTranscript(initialTranscript);
-      if (isGuest) {
-        guestSession = await createGuestRealtimeSession(latestTitle || meeting.title);
-        ensureScreenActive();
-      }
+      const deviceAuth = await getDeviceRealtimeAuth();
+      await createMeetingBinding(meeting.id);
+      ensureScreenActive();
       const session = await startRealtimeAsr({
-        meetingId: guestSession?.meeting_id ?? remoteMeetingId!,
+        meetingId: meeting.id,
         storageScope: recordingStorageScope,
-        accessToken: isGuest ? null : accessToken,
-        guestToken: guestSession?.guest_token,
+        deviceToken: deviceAuth.deviceToken,
+        dataEpoch: deviceAuth.dataEpoch,
         onStatus: next => {
           if (mountedRef.current) setStatus(next);
         },
@@ -470,12 +455,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       const active: ActiveRecording = {
         meetingId: meeting.id,
         session,
-        guestSession,
         finalize: createMeetingRecordingFinalizer(() => persistStoppedSession(
           session,
           meeting.id,
           remoteMeetingId,
-          guestSession,
         )),
       };
       if (!mountedRef.current) {
@@ -498,9 +481,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } catch (err) {
       await restorePlaybackAudioMode();
       const cancelled = err instanceof MeetingStartCancelledError || !mountedRef.current;
-      if (guestSession) {
-        await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
-      }
       if (startedMeetingId) {
         if (cancelled && createdForAttempt) {
           await deleteMeeting(startedMeetingId).catch(async () => {

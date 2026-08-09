@@ -16,6 +16,7 @@ export type RealtimeAsrProvider = 'qwen';
 interface ApiConfigSource {
   appEnv?: string;
   apiBase?: string;
+  deviceBootstrapKey?: string;
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
   accountDeletionUrl?: string;
@@ -24,6 +25,7 @@ interface ApiConfigSource {
 export interface ApiConfig {
   appEnv: string;
   apiBase: string;
+  deviceBootstrapKey: string;
   realtimeAsrBase: string;
   realtimeAsrProvider: RealtimeAsrProvider;
   reverseGeocoderUrl: string;
@@ -88,6 +90,7 @@ function runtimeSource(): ApiConfigSource {
   return {
     appEnv: runtimeEnv?.APP_ENV || runtimeEnv?.EAS_BUILD_PROFILE || extra.appEnv,
     apiBase: runtimeEnv?.EXPO_PUBLIC_API_BASE || extra.apiBase,
+    deviceBootstrapKey: runtimeEnv?.EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY || extra.deviceBootstrapKey,
     privacyPolicyUrl: runtimeEnv?.EXPO_PUBLIC_PRIVACY_POLICY_URL || extra.privacyPolicyUrl,
     termsOfServiceUrl: runtimeEnv?.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || extra.termsOfServiceUrl,
     accountDeletionUrl: runtimeEnv?.EXPO_PUBLIC_ACCOUNT_DELETION_URL || extra.accountDeletionUrl,
@@ -100,6 +103,7 @@ export function getApiConfig(source: ApiConfigSource = runtimeSource()): ApiConf
   return {
     appEnv,
     apiBase,
+    deviceBootstrapKey: String(source.deviceBootstrapKey ?? '').trim(),
     realtimeAsrBase: realtimeBaseUrl(apiBase),
     realtimeAsrProvider: 'qwen',
     reverseGeocoderUrl: apiBase ? `${apiBase}/api/location/reverse` : '',

@@ -7,7 +7,6 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { RootStackParamList } from '../types';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { AppActionSheet } from '../components/AppActionSheet';
-import { useAuth } from '../store/AuthStore';
 import { useAppDialog } from '../components/AppDialog';
 import {
   authenticateWithSystem,
@@ -18,11 +17,16 @@ import {
 import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
 import { clearAppStorage } from '../services/appStorage';
 import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
-import { useGuestDataMigration } from '../components/GuestDataMigrationProvider';
 import { deleteMeetingDatabase } from '../data/db/openDatabase';
 import { useTheme } from '../theme/ThemeProvider';
 import { THEME_LABELS, type ThemeId } from '../theme/themeIds';
 import { clearThemePreference } from '../services/themePreferences';
+import { closeDeviceDataEpoch } from '../services/deviceApi';
+import { clearDeviceIdentity } from '../services/deviceIdentity';
+import {
+  loadGenerationRetentionPreference,
+  saveGenerationRetentionPreference,
+} from '../services/generationPrivacy';
 
 const { colors: F } = getFeishuTokens();
 
@@ -91,27 +95,41 @@ export function PrivacyScreen({ navigation }: Props) {
   const [faceId, setFaceId] = useState(false);
   const [appLock, setAppLock] = useState(false);
   const [hideWidgetTitles, setHideWidgetTitles] = useState(true);
+  const [retainGeneratedResults, setRetainGeneratedResults] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
-  const { mode, session, signOut } = useAuth();
   const { showDialog } = useAppDialog();
   const { themeId, setTheme } = useTheme();
-  const { migrationBusy, mergeGuestData } = useGuestDataMigration();
   const [themeSheetVisible, setThemeSheetVisible] = useState(false);
-  const scope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
+  const scope = 'guest' as const;
 
   useEffect(() => {
     let alive = true;
-    loadPrivacyPrefs(scope).then(saved => {
+    Promise.all([loadPrivacyPrefs(scope), loadGenerationRetentionPreference()]).then(([saved, retain]) => {
       if (!alive) return;
       setFaceId(saved.biometricEnabled);
       setAppLock(saved.appLockEnabled);
       setHideWidgetTitles(saved.hideWidgetTitles);
+      setRetainGeneratedResults(retain);
     }).catch(() => {
       if (!alive) return;
       showDialog({ title: '读取失败', message: '隐私设置暂时无法读取，请返回后重试。', tone: 'error' });
     });
     return () => { alive = false; };
   }, [scope, showDialog]);
+
+  const handleGenerationRetentionToggle = async () => {
+    if (privacyBusy) return;
+    setPrivacyBusy(true);
+    const next = !retainGeneratedResults;
+    try {
+      await saveGenerationRetentionPreference(next);
+      setRetainGeneratedResults(next);
+    } catch {
+      showDialog({ title: '设置未保存', message: '生成质量设置暂时无法保存，请稍后重试。', tone: 'error' });
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
 
   const persistPrivacy = async (
     nextFaceId: boolean,
@@ -201,18 +219,21 @@ export function PrivacyScreen({ navigation }: Props) {
   const handleClearLocalData = () => {
     showDialog({
       title: '清除本机数据',
-      message: '将清除访客日程、个人资料、隐私偏好和本机缓存，并返回登录页。登录账号的云端日程不会被删除。',
+      message: '将清除本机日程、会议记录、个人资料、隐私偏好和缓存。此操作不会影响手机系统中的其他应用。',
       tone: 'danger',
       actions: [
         {
           text: '清除',
           role: 'destructive',
           onPress: async () => {
-            let signOutFailed = false;
+            let deviceCleanupFailed = false;
             try {
-              await signOut();
+              await closeDeviceDataEpoch();
+              await clearDeviceIdentity();
             } catch {
-              signOutFailed = true;
+              // Keep the identity when the service is unreachable so a later
+              // foreground run can retry deleting the generated device data.
+              deviceCleanupFailed = true;
             }
             const cleanupResults = await Promise.allSettled([
               clearLocalAppFiles(),
@@ -222,14 +243,16 @@ export function PrivacyScreen({ navigation }: Props) {
               clearThemePreference(),
             ]);
             const failures = cleanupResults.filter(result => result.status === 'rejected').length
-              + (signOutFailed ? 1 : 0);
+              + (deviceCleanupFailed ? 1 : 0);
             showDialog(failures > 0
               ? {
                 title: '已退出，清理未完成',
-                message: `有 ${failures} 项本机数据未能清除。请在系统设置中清除老记的应用存储后再使用。`,
+                message: deviceCleanupFailed
+                  ? '本机文件已清除，但服务端设备数据尚未删除；联网后请再次执行清除本机数据。'
+                  : `有 ${failures} 项本机数据未能清除。请在系统设置中清除老记的应用存储后再使用。`,
                 tone: 'error',
               }
-              : { title: '本机数据已清除', message: '访客资料、会议文件、提醒和缓存均已清除。', tone: 'success' });
+              : { title: '本机数据已清除', message: '日程、会议文件、提醒和缓存均已清除。', tone: 'success' });
           },
         },
         { text: '取消', role: 'cancel' },
@@ -242,20 +265,12 @@ export function PrivacyScreen({ navigation }: Props) {
       <SettingsTitleBar title="设置" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="privacy-settings-group">
-          <SettingsRow label="账号与安全" onPress={() => navigation.navigate('Account')} />
           <SettingsRow
             label="皮肤主题"
             value={THEME_LABELS[themeId]}
             onPress={() => setThemeSheetVisible(true)}
             testID="privacy-theme-row"
           />
-          {mode === 'authenticated' ? (
-            <SettingsRow
-              label="合并访客数据"
-              value={migrationBusy ? '正在合并' : undefined}
-              onPress={() => { void mergeGuestData(); }}
-            />
-          ) : null}
           <SettingsRow
             label="系统验证"
             right={(
@@ -294,6 +309,18 @@ export function PrivacyScreen({ navigation }: Props) {
               )}
             />
           ) : null}
+          <SettingsRow
+            label="帮助改进生成质量"
+            right={(
+              <Toggle
+                label="帮助改进生成质量"
+                on={retainGeneratedResults}
+                onToggle={() => { void handleGenerationRetentionToggle(); }}
+                disabled={privacyBusy}
+                testID="privacy-generation-retention-toggle"
+              />
+            )}
+          />
           <SettingsRow label="清除本机数据" onPress={handleClearLocalData} destructive last />
         </SettingsGroup>
 

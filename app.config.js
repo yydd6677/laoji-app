@@ -152,6 +152,21 @@ function assertServiceUrl(name, value, deploymentMode) {
 module.exports = () => {
   const appEnv = resolveDeploymentMode(process.env);
   const apiBase = cleanUrl(process.env.EXPO_PUBLIC_API_BASE || DEFAULT_API_BASE);
+  // Device-primary registration is a one-time bootstrap handshake.  Keep the
+  // key outside source control and inject it through the build environment;
+  // the runtime reads the value from Expo extra rather than relying on a
+  // Node-only process.env object that is absent in a release APK.
+  const deviceBootstrapKey = String(
+    process.env.EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY || '',
+  ).trim();
+  // A preview/production APK must be able to register a fresh installation.
+  // Keep local development flexible, but fail before bundling rather than
+  // producing an apparently valid APK that can never complete device setup.
+  if (appEnv !== 'development' && deviceBootstrapKey.length < 32) {
+    throw new Error(
+      'EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY must contain at least 32 characters for non-development builds.',
+    );
+  }
   const localMeetingDbV1 = !['0', 'false', 'no', 'off'].includes(
     String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
   );
@@ -243,6 +258,7 @@ module.exports = () => {
       ...(base.extra || {}),
       appEnv,
       apiBase,
+      deviceBootstrapKey,
       realtimeAsrProvider: 'qwen',
       reverseGeocoderUrl,
       privacyPolicyUrl,

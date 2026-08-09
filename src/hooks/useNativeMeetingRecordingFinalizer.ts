@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import type { ApiGuestRealtimeSession } from '../services/api';
-import { deleteGuestRealtimeSession, uploadMeetingAudio } from '../services/api';
+import { uploadMeetingAudio } from '../services/api';
 import {
   FinalizeNativeMeetingRecordingUseCase,
   type FinalizeNativeMeetingRecordingResult,
@@ -14,7 +13,6 @@ import type { TranscriptLine } from '../types';
 export interface NativeMeetingRecordingFinalizeRequest {
   meetingId: string;
   remoteMeetingId: string | null;
-  guestSession?: ApiGuestRealtimeSession;
   getTranscriptLines: () => TranscriptLine[];
   getAudioDurationSec: () => number | undefined;
   getAudioBars: () => number[] | undefined;
@@ -68,10 +66,6 @@ export function useNativeMeetingRecordingFinalizer(): NativeMeetingRecordingFina
     updateStatus: updateMeetingStatus,
     refreshMeetings,
     reconcileUploads: reconcileAudioUploads,
-    deleteGuestSession: sessionIdentity => deleteGuestRealtimeSession(
-      sessionIdentity.meetingId,
-      sessionIdentity.guestToken,
-    ),
   }), [
     getCachedTranscript,
     reconcileAudioUploads,
@@ -88,12 +82,6 @@ export function useNativeMeetingRecordingFinalizer(): NativeMeetingRecordingFina
       scopeKey: meetingScopeKey,
       isGuest,
       accessToken,
-      guestSession: request.guestSession
-        ? {
-            meetingId: request.guestSession.meeting_id,
-            guestToken: request.guestSession.guest_token,
-          }
-        : undefined,
     })
   ), [accessToken, isGuest, meetingScopeKey, recordingStorageScope, useCase]);
 

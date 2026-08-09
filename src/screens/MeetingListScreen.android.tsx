@@ -231,7 +231,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   );
 
   const refreshRecycleBin = useCallback(async (syncRemote = false) => {
-    if (!accountScope || retentionDays === null) {
+    if (!meetingScope || retentionDays === null) {
       setRecycleBinEntries([]);
       return;
     }
@@ -241,7 +241,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       if (syncRemote) await refreshMeetings();
       setRecycleBinEntries(await listMeetingRecycleBin(
         sqliteMeetingNoteRepository,
-        accountScope,
+        meetingScope,
         retentionDays,
       ));
     } catch (reason) {
@@ -249,7 +249,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     } finally {
       setRecycleBinLoading(false);
     }
-  }, [accountScope, refreshMeetings, retentionDays]);
+  }, [meetingScope, refreshMeetings, retentionDays]);
 
   useEffect(() => {
     if (!recycleBinVisible) return;
@@ -811,8 +811,8 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       case 'openSpeakers':
         navigation.navigate('SpeakerManager');
         break;
-      case 'openProfile':
-        navigation.navigate('Profile');
+      case 'openSettings':
+        navigation.navigate('Privacy');
         break;
       default:
         break;

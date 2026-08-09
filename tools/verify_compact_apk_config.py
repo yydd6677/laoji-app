@@ -42,6 +42,9 @@ def verify(apk: Path) -> list[str]:
         failures.append("Android 包名不是 com.laoji.app")
     if extra.get("apiBase") != EXPECTED_API_BASE:
         failures.append(f"apiBase 不是 {EXPECTED_API_BASE}: {extra.get('apiBase')!r}")
+    bootstrap_key = extra.get("deviceBootstrapKey")
+    if not isinstance(bootstrap_key, str) or len(bootstrap_key.strip()) < 32:
+        failures.append("APK 缺少有效的设备注册引导密钥；新安装设备无法注册")
     for key in ("reverseGeocoderUrl", "privacyPolicyUrl", "termsOfServiceUrl", "accountDeletionUrl"):
         value = extra.get(key)
         if not isinstance(value, str) or not value.startswith(EXPECTED_API_BASE):

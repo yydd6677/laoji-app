@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar, BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
-import { fetchSpeakers, SpeakerProfile } from '../services/speakers';
+import { fetchDeviceSpeakerProfiles, fetchSpeakers, SpeakerProfile } from '../services/speakers';
 import { useAuth } from '../store/AuthStore';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
@@ -14,11 +14,12 @@ import { RootStackParamList } from '../types';
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
 
 export function SpeakerManagerScreen({ navigation }: Props) {
-  const { accessToken, isGuest, signOut } = useAuth();
+  const { accessToken, isGuest } = useAuth();
   const [speakers, setSpeakers] = useState<SpeakerProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const loadGenerationRef = useRef(0);
+  const deviceMode = isGuest || !accessToken;
 
   useLayoutEffect(() => {
     loadGenerationRef.current += 1;
@@ -29,11 +30,12 @@ export function SpeakerManagerScreen({ navigation }: Props) {
 
   const load = useCallback(async () => {
     const requestGeneration = ++loadGenerationRef.current;
-    if (!accessToken || isGuest) return;
     setLoading(true);
     setError('');
     try {
-      const result = await fetchSpeakers(accessToken);
+      const result = deviceMode
+        ? await fetchDeviceSpeakerProfiles()
+        : await fetchSpeakers(accessToken!);
       if (loadGenerationRef.current === requestGeneration) setSpeakers(result);
     } catch (reason) {
       if (loadGenerationRef.current === requestGeneration) {
@@ -42,7 +44,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     } finally {
       if (loadGenerationRef.current === requestGeneration) setLoading(false);
     }
-  }, [accessToken, isGuest]);
+  }, [accessToken, deviceMode]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -54,21 +56,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
   return (
     <ScreenContainer edges={['top']} bg={C.appBg}>
       <BackHeader title="讲话人管理" onBack={() => navigation.goBack()} />
-      {isGuest || !accessToken ? (
-        <View style={s.guestWrap}>
-          <Ionicons name="people-outline" size={72} color={C.disabled} />
-          <Text style={s.guestTitle}>请先登录账号</Text>
-          <TouchableOpacity
-            style={s.primaryButton}
-            onPress={() => { void signOut().catch(() => {}); }}
-            accessibilityRole="button"
-            accessibilityLabel="退出访客模式并登录"
-          >
-            <Text style={s.primaryButtonText}>登录账号</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
+      <FlatList
           style={s.list}
           contentContainerStyle={[s.listContent, speakers.length === 0 && s.emptyListContent]}
           data={speakers}
@@ -134,7 +122,6 @@ export function SpeakerManagerScreen({ navigation }: Props) {
             </TouchableOpacity>
           )}
         />
-      )}
     </ScreenContainer>
   );
 }

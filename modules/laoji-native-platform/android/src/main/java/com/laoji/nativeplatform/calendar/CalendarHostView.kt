@@ -307,8 +307,8 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   override fun onProfileClicked() {
-    closePicker("profile-open", emitEvent = false)
-    emitSemantic("profile-open", emptyMap())
+    closePicker("settings-open", emitEvent = false)
+    emitSemantic("settings-open", emptyMap())
   }
 
   override fun onSearchClicked() {

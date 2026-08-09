@@ -36,11 +36,7 @@ import {
 import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
-import {
-  createGuestRealtimeSession,
-  deleteGuestRealtimeSession,
-  type ApiGuestRealtimeSession,
-} from '../services/api';
+import { createMeetingBinding, getDeviceRealtimeAuth } from '../services/deviceApi';
 import { getApiConfig } from '../services/config';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import {
@@ -59,7 +55,6 @@ import type { RootStackParamList } from '../types';
 import {
   canResumeMeetingRecording,
   meetingRemoteIdentity,
-  requireMeetingRemoteIdentity,
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { defaultMeetingTitle } from '../utils/meetingTitle';
@@ -101,7 +96,6 @@ type Props = {
 interface ActiveNativeRecording {
   meetingId: string;
   sessionId: string;
-  guestSession?: ApiGuestRealtimeSession;
   finalize: () => Promise<FinalizeNativeMeetingRecordingResult>;
 }
 
@@ -153,7 +147,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     meetings,
     loading: meetingsLoading,
     createMeeting,
-    ensureMeetingRemoteIdentity,
     updateMeetingStatus,
     updateMeetingTitle,
     updateMeetingDetails,
@@ -437,11 +430,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     id: string,
     remoteMeetingId: string | null,
     stopAudio: () => Promise<string | undefined>,
-    guestSession?: ApiGuestRealtimeSession,
   ): NativeMeetingRecordingFinalizeRequest => ({
     meetingId: id,
     remoteMeetingId,
-    guestSession,
     getTranscriptLines: () => finalizedNativeMinutesTranscript(transcriptRef.current),
     getAudioDurationSec: () => {
       const durationMs = recorderSnapshotRef.current?.durationMs;
@@ -454,7 +445,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const createActiveRecording = useCallback((
     id: string,
     remoteMeetingId: string | null,
-    guestSession?: ApiGuestRealtimeSession,
   ): ActiveNativeRecording => {
     const stopAudio = async () => {
       let localUri: string | undefined;
@@ -493,9 +483,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     return {
       meetingId: id,
       sessionId: id,
-      guestSession,
       finalize: createMeetingRecordingFinalizer(() => finalizeRecording(
-        buildFinalizeRequest(id, remoteMeetingId, stopAudio, guestSession),
+        buildFinalizeRequest(id, remoteMeetingId, stopAudio),
       )),
     };
   }, [applyRecorderSnapshot, buildFinalizeRequest, finalizeRecording, recordingStorageScope]);
@@ -641,7 +630,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     setError('');
     nativeAudioBarsRef.current = [];
     let startedMeetingId = '';
-    let guestSession: ApiGuestRealtimeSession | undefined;
+    let deviceAuth: Awaited<ReturnType<typeof getDeviceRealtimeAuth>> | null = null;
     let nativeCaptureStarted = false;
     let startedSession: ActiveNativeRecording | null = null;
     try {
@@ -663,10 +652,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         location: locationRef.current || null,
         entryPoint,
       });
-      const readyMeeting = isGuest
-        ? meeting
-        : await ensureMeetingRemoteIdentity(meeting.id);
-      const remoteMeetingId = isGuest ? null : requireMeetingRemoteIdentity(readyMeeting);
+      // Guest mode is now a local-data mode, not an anonymous server session.
+      // Establish the device/epoch binding before opening the ASR socket so
+      // the server can scope the realtime meeting to this installation.
+      const readyMeeting = meeting;
+      const remoteMeetingId = null;
       startedMeetingId = readyMeeting.id;
       navigation.setParams({ meetingId: readyMeeting.id, startRequested: false });
       setMeetingId(readyMeeting.id);
@@ -680,10 +670,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         lineCount: finalizedNativeMinutesTranscript(initialTranscript).length,
         savedAtMs: Date.now(),
       };
-      const latestTitle = titleRef.current.trim() || readyMeeting.title;
       await updateMeetingStatus(readyMeeting.id, 'recording');
-      if (isGuest) guestSession = await createGuestRealtimeSession(latestTitle);
-      if (!isGuest && !accessToken) throw new Error('登录会话已失效，请重新登录');
+      deviceAuth = await getDeviceRealtimeAuth();
+      await createMeetingBinding(readyMeeting.id);
 
       const config = getApiConfig();
       const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
@@ -692,27 +681,24 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const websocketMeetingId = guestSession?.meeting_id ?? remoteMeetingId!;
       const websocketUrl = buildRealtimeAsrUrl({
-        meetingId: websocketMeetingId,
+        meetingId: readyMeeting.id,
         provider: config.realtimeAsrProvider,
         purpose: 'meeting',
         realtimeAsrBase: config.realtimeAsrBase,
       });
-      const credentials = isGuest
-        ? { guestToken: guestSession!.guest_token }
-        : { accessToken: accessToken! };
       const snapshot = await startNativeRecorder({
         sessionId: readyMeeting.id,
         purpose: 'meeting',
         storageScope: recordingStorageScope,
         websocketUrl,
         allowInsecureDevelopment,
-        ...credentials,
+        deviceToken: deviceAuth.deviceToken,
+        dataEpoch: deviceAuth.dataEpoch,
       });
       nativeCaptureStarted = true;
       applyRecorderSnapshot(snapshot);
-      const active = createActiveRecording(readyMeeting.id, remoteMeetingId, guestSession);
+      const active = createActiveRecording(readyMeeting.id, remoteMeetingId);
       startedSession = active;
       if (!recordingControllerRef.current.completeStart(startToken, active)) {
         // Android has already opened the recorder. Never turn a JS ownership
@@ -750,9 +736,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         }
         return;
       }
-      if (guestSession) {
-        await deleteGuestRealtimeSession(guestSession.meeting_id, guestSession.guest_token).catch(() => {});
-      }
       if (startedMeetingId) {
         // The local MeetingNote and its occurrence link are already durable.
         // A recorder/ASR startup failure must stay resumable instead of
@@ -769,7 +752,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } finally {
       recordingControllerRef.current.abandonStart(startToken);
     }
-  }, [accessToken, applyRecorderSnapshot, createActiveRecording, createMeeting, ensureMeetingRemoteIdentity, entryPoint, existing, getCachedTranscript, isGuest, meetingId, meetingScopeKey, meetings, navigation, showDialog, updateMeetingStatus]);
+  }, [applyRecorderSnapshot, createActiveRecording, createMeeting, entryPoint, existing, getCachedTranscript, meetingId, meetingScopeKey, meetings, navigation, showDialog, updateMeetingStatus]);
 
   const stopRecording = useCallback(async (navigateAfter = true) => {
     if (!recordingControllerRef.current.current()) return false;

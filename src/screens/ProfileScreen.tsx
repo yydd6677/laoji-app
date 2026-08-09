@@ -28,7 +28,7 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Profil
 
 export function ProfileScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { profile, isGuest, uploadAvatar, deleteAvatar } = useAuth();
+  const { profile, uploadAvatar, deleteAvatar } = useAuth();
   const { showDialog } = useAppDialog();
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarMenuVisible, setAvatarMenuVisible] = useState(false);
@@ -92,7 +92,7 @@ export function ProfileScreen({ navigation }: Props) {
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
       <SettingsTitleBar
-        title="我"
+        title="设置"
         onBack={() => navigation.goBack()}
         trailing={(
           <TouchableOpacity
@@ -163,7 +163,6 @@ export function ProfileScreen({ navigation }: Props) {
             testID="profile-phone-row"
           />
         </SettingsGroup>
-        {isGuest ? <Text style={s.accountState}>未登录账号</Text> : null}
       </ScrollView>
 
       <FeishuSheet

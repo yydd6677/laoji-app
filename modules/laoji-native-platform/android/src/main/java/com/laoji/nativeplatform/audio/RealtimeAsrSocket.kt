@@ -51,10 +51,9 @@ class RealtimeAsrSocket(
       ?: throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "realtime websocketUrl is required")
     val credentials = config.credentials
       ?: throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "realtime credentials are required")
-    val request = Request.Builder()
-      .url(websocketUrl)
-      .header(credentials.headerName, credentials.headerValue)
-      .build()
+    val requestBuilder = Request.Builder().url(websocketUrl)
+    credentials.headers.forEach { (name, value) -> requestBuilder.header(name, value) }
+    val request = requestBuilder.build()
     webSocket = client.newWebSocket(request, SocketListener())
     return connection
   }

@@ -92,14 +92,14 @@ internal class SpeakerManagerSurface(
     state.visibility = if (showState) View.VISIBLE else View.GONE
     progress.visibility = if (!value.guest && value.phase == "loading") View.VISIBLE else View.GONE
     message.text = when {
-      value.guest -> "登录后可以建立和管理讲话人声纹"
+      value.guest -> "当前设备可以建立和管理讲话人声纹"
       value.message.isNotBlank() -> value.message
       value.phase == "loading" -> "正在加载讲话人"
       value.phase == "error" -> "讲话人暂时无法加载"
       else -> "暂无讲话人"
     }
     stateAction.visibility = if (value.guest || value.phase == "error") View.VISIBLE else View.GONE
-    stateAction.text = if (value.guest) "登录账号" else "重试"
+    stateAction.text = if (value.guest) "重新加载" else "重试"
   }
 }
 
@@ -380,7 +380,7 @@ internal class SpeakerEnrollmentSurface(
       return
     }
     when {
-      value.guest -> bindBottomAction(singleAction, "登录账号", "login", primary = true)
+      value.guest -> bindBottomAction(singleAction, "重新加载", "login", primary = true)
       value.enrollmentPhase == "recording" -> bindBottomAction(
         singleAction,
         "停止录制",

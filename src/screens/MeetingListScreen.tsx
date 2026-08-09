@@ -122,9 +122,9 @@ export function MeetingListScreen({ navigation }: Props) {
       onPress: () => navigation.navigate('SpeakerManager'),
     },
     {
-      key: 'profile',
-      label: '个人资料',
-      onPress: () => navigation.navigate('Profile'),
+      key: 'settings',
+      label: '设置',
+      onPress: () => navigation.navigate('Privacy'),
     },
   ];
 

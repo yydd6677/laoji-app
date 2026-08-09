@@ -3,7 +3,7 @@ import {
   recoverNativeRecordings,
 } from 'laoji-native-platform';
 import { RecordingReconciler, type RecordingReconciliationResult } from '../application';
-import type { ScopeKey } from '../domain/meeting';
+import { scopeTelemetry, type ScopeKey } from '../domain/meeting';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import { getFeatureFlags } from '../config/featureFlags';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
@@ -36,7 +36,8 @@ export function reconcileNativeMeetingRecordings(
     .then(result => {
       diagnosticAudit('meeting_recording_reconciled', {
         status: 'completed',
-        scope: scopeKey === 'guest' ? 'guest' : 'account',
+        ...scopeTelemetry(scopeKey, 'none'),
+        reconciliation_kind: 'native-journal-local-sqlite',
         matched: result.matched,
         recovered_meetings: result.recoveredMeetingsCreated,
         assets_updated: result.recordingAssetsUpdated,
@@ -51,7 +52,8 @@ export function reconcileNativeMeetingRecordings(
       diagnosticWarn('[meeting-db] recording reconciliation failed', error);
       diagnosticAudit('meeting_recording_reconciled', {
         status: 'failed',
-        scope: scopeKey === 'guest' ? 'guest' : 'account',
+        ...scopeTelemetry(scopeKey, 'none'),
+        reconciliation_kind: 'native-journal-local-sqlite',
         error_code: error instanceof Error ? error.name : 'UnknownError',
       });
       return null;
