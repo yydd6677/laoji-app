@@ -6,6 +6,8 @@
 
 本节覆盖本文中较早的同日记录；旧段落保留作审计历史，不应覆盖这里的当前值。
 
+- 设备数据域闭环复核（2026-08-09 17:04）：通过 `https://laoji.cloud` 的全新临时设备真实完成注册 `201`、能力 `200`、日程解析 `200`、会议绑定 `201`、列表 `200`、删除 `200`、epoch 关闭 `200`；关闭后能力访问为预期 `409/EPOCH_CLOSED`。服务器 `local.db` 中该临时设备主身份保留 1 行（仅身份历史），epoch 为 `deleted`，会议、设备墓碑、删除 outbox、临时输入和质量候选均为 `0`。工作区已补回服务器正在运行的鉴权只读、旧子表清理和 epoch 控制行清理，`device_identity.py`、`device_v1.py`、`qwen_ws.py` 与服务器 SHA-256 分别为 `77196321e4faea84704861dc4bb64ca6a48b0e868aefd067225c76055ca98685`、`f8c6b8ead988de0447837807a9e5d97d4cee0ee3f328188370cde347d249d58d`、`b4b7a629bbd24bf147197992d2eef40b11b404e9c53e7f4f7e4da028b1ca9f3c`。新增设备合同门禁共 `9 passed`；移动端静态门禁、TypeScript 和服务端 Python 编译通过。完整历史 pytest 仍不宣称全量通过，因本机缺少生产测试依赖且历史断言存在已记录漂移。
+
 - 本轮收尾审计（2026-08-09）：服务器四个常驻单元仍为 `active/enabled`，`127.0.0.1:18020/8030/21434` 和公网 Tunnel 健康检查均正常，三个数据库仍为 WAL、完整性和外键通过，ASR/LLM/任务队列均为空。审计目录中未发现旧 `8002`、`18035`、`21436`、VibeVoice 或 WhisperLiveKit 的运行进程、systemd `ExecStart` 或活动 compact 源码引用；模型和精简 venv 均被现行服务引用，因此未误删。清除了 5 个过期手工运行 PID 文件及 `laoji-18035.log`、`schedule-ollama-21435.log` 两个旧端口日志；未触碰现行日志、模型、数据库、Tunnel token、其他用户目录或历史迁移证据。复核资源为 GPU0 `22964/32607 MiB`、GPU1 `31756/32607 MiB`（GPU1 未触碰），老记 API/ASR/Ollama/cloudflared RSS 约 `753/2356/2500/45 MiB`，`/home` 可用约 `517 GiB`。
 - 配置与构建门禁已前移：`app.config.js` 对非开发构建要求设备注册引导密钥至少 32 字符；使用服务器受保护运行环境临时注入密钥后，`APP_ENV=production-rehearsal` release `1.0.6`/`versionCode=106` 于 11:23 重建成功，APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`，APK 内 `appEnv=production-rehearsal`、引导密钥长度 64，入口门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，本包未安装到该设备；老记专用 `emulator-5562` 当前不在线，真机验收按约定跳过。
 - 当前工作树已形成本地可回溯检查点：commit `7ad25e4`，tag `laoji-device-primary-freeze-20260809`。没有推送远端；未纳入提交的自然语料、问答专题和历史审计杂项继续保留为脏工作区内容，未删除或重置。
