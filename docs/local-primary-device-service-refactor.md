@@ -11,6 +11,10 @@
 
 ## 当前执行对齐（2026-08-09）
 
+- 设备数据域删除边界已再次加固：关闭 epoch 现在同时删除独立 `summary_tasks_v2` 的生成结果/检查点，声纹 profile、embedding 和识别日志由可恢复 cleanup outbox 清理；启动/retention loop 会清理旧实现遗留的非 active epoch 任务。公网真实临时设备和隔离 SQLite 回归通过，详见 [`docs/device-epoch-cleanup-hardening-20260809.md`](device-epoch-cleanup-hardening-20260809.md)。
+
+- 设备失败源文件清理已补并发保护：候选会在数据库写锁下重新检查最新转写任务，锁内完成文件删除和路径清空，避免新重试读取的源被旧失败清理删掉。详见 [`docs/device-source-retention-race-hardening-20260810.md`](device-source-retention-race-hardening-20260810.md)。
+
 - 本轮收尾审计确认四个 systemd 单元仍为 `active/enabled`，公网/loopback `/api/ready` 均为 `ready=true`，业务端口仅监听回环；旧端口运行时没有进程或活动部署引用。已删除服务器上 5 个过期手工运行 PID 文件及两个旧端口日志，保留现行模型、精简 venv、数据库、Tunnel 凭据和历史迁移证据。
 - 设备源文件的失败留存边界已补齐：设备资产无任务，或最新转写任务超过 24 小时进入终态后由 retention loop 删除源文件并清空数据库路径；账号资产、近期失败和 queued/running 后续任务不受影响；隔离回归与生产现场证据见 [`docs/device-source-failure-retention-audit-20260809.md`](device-source-failure-retention-audit-20260809.md)。
 - `app.config.js` 现会在非开发构建阶段拒绝缺少设备注册引导密钥；使用受保护临时注入并以 `APP_ENV=production-rehearsal` 重建 release `1.0.6`，APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`，APK 内引导密钥长度为 64。当前未操作 `emulator-5560`，老记专用 `emulator-5562` 不在线，真机验收仍按约定跳过。

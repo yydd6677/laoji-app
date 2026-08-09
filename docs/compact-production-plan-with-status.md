@@ -6,6 +6,12 @@
 
 本节覆盖本文中较早的同日记录；旧段落保留作审计历史，不应覆盖这里的当前值。
 
+- 设备 epoch 清理加固（23:48 后）：发现独立 `summary_tasks_v2` 不受会议外键级联影响，且声纹识别日志未随设备 profile 删除；已部署精确 task-scope 清理、可恢复的声纹 cleanup outbox 和识别日志删除。启动时清除了 3 条历史临时 epoch 整理任务；公网真实临时设备回归返回 `summary_tasks_deleted=1`、`speaker_count=1`、`speaker_cleanup_pending=false`，证据见 [`docs/device-epoch-cleanup-hardening-20260809.md`](device-epoch-cleanup-hardening-20260809.md)。
+
+## 2026-08-10 续做最终对齐（当前权威状态）
+
+- 设备失败源文件清理的竞态已收紧：回收线程现在在 `BEGIN IMMEDIATE` 写锁下重新确认最新任务，再删除文件并提交 `storage_path=NULL`；queued/running 重试不会被旧终态清理误删。服务器真实 SQLite/文件回归通过，部署后 `/api/ready` 仍 ready，证据见 [`docs/device-source-retention-race-hardening-20260810.md`](device-source-retention-race-hardening-20260810.md)。
+
 - 最新运行时复核：工作区 release `1.0.6` APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码、APK 入口和 TypeScript 门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，老记专用 `emulator-5562` 离线，本轮没有跨越设备边界安装验证，真机验收继续按约定跳过。
 - 公网临时设备真实完成注册、能力、日程解析、会议绑定、两段分片上传、合并、转写和整理：转写任务 `completed`，整理任务 `success`，返回 `general@2`、结构化 schema `2` 和 Markdown；epoch 关闭返回 `200`，临时内容已清理。
 - 服务器生产 `summary_tasks.py` 已从工作区补齐两处整理候选/引用修复，备份位于 `/home/zhong/laoji-service-platform/migration-baselines/compact-summary-candidate-fix-20260809-2327/`，当前 SHA-256 为 `50fc259088eb074ed7b3943958dcdcfe4b2accaf6f7b4c9525ec6faaa3dbbcb4`。API 有序恢复后四个 systemd 单元均 `active`，公网 `/api/ready` 仍为 `ready=true`，队列为 `0`。
