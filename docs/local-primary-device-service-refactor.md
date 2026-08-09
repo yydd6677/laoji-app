@@ -2,6 +2,13 @@
 
 > 本文件是《老记服务最紧凑生产架构计划》之后的执行级补充。目标是把老记收敛为“本机保存用户事实，服务器只做短时计算和可选生成结果留存”的单设备应用。日期不作为里程碑；每个阶段以源码、接口和模拟器证据验收。
 
+## 2026-08-09 当前运行时复核增量
+
+- 当前工作区 release APK 实际文件为 `android/app/build/outputs/apk/release/app-release.apk`，`versionCode=106`，SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码静态门禁、APK 入口门禁和 TypeScript 均通过。本轮没有操作 `emulator-5560`；`emulator-5562` 当前离线，未把模拟器安装状态当作本轮证据，真机验收继续按约定跳过。
+- 通过当前 release 中的临时设备注册引导配置，对 `https://laoji.cloud` 做了新的临时设备闭环：注册 `201`、能力 `200`、日程解析 `200`、会议绑定 `201`、资产注册、两段分片上传 `200`、分片合并 `200`、转写提交 `202`、任务 `completed`，随后整理任务 `success`，返回 `general@2`、结构化 schema `2` 和 Markdown；epoch 清理 `200`，所有临时设备内容随 epoch 删除。
+- 发现并修复生产源码漂移：服务器设备核心三个文件仍与工作区一致，但 `summary_tasks.py` 缺少本轮已验证的“负责人待定具体候选保留”和“决定折叠到概述时携带真实引用”两处修复。已在服务器建立 `/home/zhong/laoji-service-platform/migration-baselines/compact-summary-candidate-fix-20260809-2327/` 回滚备份，替换后的服务器 SHA-256 为 `50fc259088eb074ed7b3943958dcdcfe4b2accaf6f7b4c9525ec6faaa3dbbcb4`。
+- `laoji-api` 已由现有 systemd 恢复并重新加载该源码；API、ASR、Ollama、Cloudflare Tunnel 均为 `active`，公网 `/api/ready` 返回 `ready=true`，任务队列和 LLM 队列均为 `0`，三套 SQLite 完整性/WAL/外键状态仍正常。
+
 ## 当前执行对齐（2026-08-09）
 
 - 本轮收尾审计确认四个 systemd 单元仍为 `active/enabled`，公网/loopback `/api/ready` 均为 `ready=true`，业务端口仅监听回环；旧端口运行时没有进程或活动部署引用。已删除服务器上 5 个过期手工运行 PID 文件及两个旧端口日志，保留现行模型、精简 venv、数据库、Tunnel 凭据和历史迁移证据。

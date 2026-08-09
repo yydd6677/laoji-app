@@ -6,6 +6,10 @@
 
 本节覆盖本文中较早的同日记录；旧段落保留作审计历史，不应覆盖这里的当前值。
 
+- 最新运行时复核：工作区 release `1.0.6` APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码、APK 入口和 TypeScript 门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，老记专用 `emulator-5562` 离线，本轮没有跨越设备边界安装验证，真机验收继续按约定跳过。
+- 公网临时设备真实完成注册、能力、日程解析、会议绑定、两段分片上传、合并、转写和整理：转写任务 `completed`，整理任务 `success`，返回 `general@2`、结构化 schema `2` 和 Markdown；epoch 关闭返回 `200`，临时内容已清理。
+- 服务器生产 `summary_tasks.py` 已从工作区补齐两处整理候选/引用修复，备份位于 `/home/zhong/laoji-service-platform/migration-baselines/compact-summary-candidate-fix-20260809-2327/`，当前 SHA-256 为 `50fc259088eb074ed7b3943958dcdcfe4b2accaf6f7b4c9525ec6faaa3dbbcb4`。API 有序恢复后四个 systemd 单元均 `active`，公网 `/api/ready` 仍为 `ready=true`，队列为 `0`。
+
 - 设备数据域闭环复核（2026-08-09 17:04）：通过 `https://laoji.cloud` 的全新临时设备真实完成注册 `201`、能力 `200`、日程解析 `200`、会议绑定 `201`、列表 `200`、删除 `200`、epoch 关闭 `200`；关闭后能力访问为预期 `409/EPOCH_CLOSED`。服务器 `local.db` 中该临时设备主身份保留 1 行（仅身份历史），epoch 为 `deleted`，会议、设备墓碑、删除 outbox、临时输入和质量候选均为 `0`。工作区已补回服务器正在运行的鉴权只读、旧子表清理和 epoch 控制行清理，`device_identity.py`、`device_v1.py`、`qwen_ws.py` 与服务器 SHA-256 分别为 `77196321e4faea84704861dc4bb64ca6a48b0e868aefd067225c76055ca98685`、`f8c6b8ead988de0447837807a9e5d97d4cee0ee3f328188370cde347d249d58d`、`b4b7a629bbd24bf147197992d2eef40b11b404e9c53e7f4f7e4da028b1ca9f3c`。新增设备合同门禁共 `9 passed`；移动端静态门禁、TypeScript 和服务端 Python 编译通过。完整历史 pytest 仍不宣称全量通过，因本机缺少生产测试依赖且历史断言存在已记录漂移。
 
 - 本轮收尾审计（2026-08-09）：服务器四个常驻单元仍为 `active/enabled`，`127.0.0.1:18020/8030/21434` 和公网 Tunnel 健康检查均正常，三个数据库仍为 WAL、完整性和外键通过，ASR/LLM/任务队列均为空。审计目录中未发现旧 `8002`、`18035`、`21436`、VibeVoice 或 WhisperLiveKit 的运行进程、systemd `ExecStart` 或活动 compact 源码引用；模型和精简 venv 均被现行服务引用，因此未误删。清除了 5 个过期手工运行 PID 文件及 `laoji-18035.log`、`schedule-ollama-21435.log` 两个旧端口日志；未触碰现行日志、模型、数据库、Tunnel token、其他用户目录或历史迁移证据。复核资源为 GPU0 `22964/32607 MiB`、GPU1 `31756/32607 MiB`（GPU1 未触碰），老记 API/ASR/Ollama/cloudflared RSS 约 `753/2356/2500/45 MiB`，`/home` 可用约 `517 GiB`。
