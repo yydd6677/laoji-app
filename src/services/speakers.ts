@@ -101,7 +101,6 @@ async function readPendingSpeakerDeletions(): Promise<PendingSpeakerDeletionMap>
 async function writePendingSpeakerDeletions(records: PendingSpeakerDeletionMap): Promise<void> {
   await writeAppStorageJson(LOCAL_DEVICE_SPEAKER_DELETE_KEY, records, {
     removeIfEmpty: true,
-    bestEffort: true,
   });
 }
 
@@ -369,9 +368,12 @@ export async function deleteDeviceSpeakerProfile(speakerId: string): Promise<voi
   const normalized = normalizeSpeakerId(speakerId);
   await removeLocalDeviceSpeakerName(normalized);
   await removeLocalDeviceSpeakerProfile(normalized);
-  await enqueueDeviceSpeakerDeletion(normalized).catch(error => {
-    diagnosticWarn('[device-speaker-delete] could not persist cleanup hint', error);
-  });
+  // A deletion hint is the only durable bridge between local-first removal
+  // and the later service cleanup. Do not swallow a storage failure here: the
+  // caller must be able to tell the user that service-side cleanup is not yet
+  // queued and offer a retry, instead of presenting a silently orphaned
+  // server profile as fully deleted.
+  await enqueueDeviceSpeakerDeletion(normalized);
   void drainDeviceSpeakerDeletionOutbox(true);
 }
 
