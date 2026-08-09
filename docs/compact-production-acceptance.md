@@ -18,6 +18,7 @@
 - 历史合同针对性测试在临时依赖和隔离 SQLite 中 `25 passed`；地址缓存与日程 ASR 旧断言已按当前设备化合同更新，完整历史 pytest 仍不宣称全量通过。详见 [`history-test-contract-20260809.md`](history-test-contract-20260809.md)。
 - 设备失败源文件留存边界已通过补充验收：过期失败设备源按 24 小时 TTL 清理，后续任务、近期失败源和账号资产均隔离保留；生产现场无待清理项。详见 [`device-source-failure-retention-audit-20260809.md`](device-source-failure-retention-audit-20260809.md)。
 - 重新构建的当前生产类 release `1.0.6`/`versionCode=106`（`APP_ENV=production-rehearsal`）SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；APK 内引导密钥长度 64，非开发配置缺少设备引导密钥会在配置阶段失败。由于当前只有 KataCR 占用的 `emulator-5560`，未将该包安装到其他工作设备。
+- 本轮源码和验收文档已提交到本地 commit `7ad25e4` 并标记 `laoji-device-primary-freeze-20260809`，没有推送远端。
 
 更新时间：2026-08-09（Asia/Shanghai）
 

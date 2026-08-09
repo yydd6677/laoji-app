@@ -8,6 +8,7 @@
 
 - 本轮收尾审计（2026-08-09）：服务器四个常驻单元仍为 `active/enabled`，`127.0.0.1:18020/8030/21434` 和公网 Tunnel 健康检查均正常，三个数据库仍为 WAL、完整性和外键通过，ASR/LLM/任务队列均为空。审计目录中未发现旧 `8002`、`18035`、`21436`、VibeVoice 或 WhisperLiveKit 的运行进程、systemd `ExecStart` 或活动 compact 源码引用；模型和精简 venv 均被现行服务引用，因此未误删。清除了 5 个过期手工运行 PID 文件及 `laoji-18035.log`、`schedule-ollama-21435.log` 两个旧端口日志；未触碰现行日志、模型、数据库、Tunnel token、其他用户目录或历史迁移证据。复核资源为 GPU0 `22964/32607 MiB`、GPU1 `31756/32607 MiB`（GPU1 未触碰），老记 API/ASR/Ollama/cloudflared RSS 约 `753/2356/2500/45 MiB`，`/home` 可用约 `517 GiB`。
 - 配置与构建门禁已前移：`app.config.js` 对非开发构建要求设备注册引导密钥至少 32 字符；使用服务器受保护运行环境临时注入密钥后，`APP_ENV=production-rehearsal` release `1.0.6`/`versionCode=106` 于 11:23 重建成功，APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`，APK 内 `appEnv=production-rehearsal`、引导密钥长度 64，入口门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，本包未安装到该设备；老记专用 `emulator-5562` 当前不在线，真机验收按约定跳过。
+- 当前工作树已形成本地可回溯检查点：commit `7ad25e4`，tag `laoji-device-primary-freeze-20260809`。没有推送远端；未纳入提交的自然语料、问答专题和历史审计杂项继续保留为脏工作区内容，未删除或重置。
 - 设备原始源失败留存边界已补齐：设备资产没有转写任务，或当前最新任务为超过 24 小时的终态时，由现有 retention loop 清除源文件；queued/running、后续新任务和账号资产不受影响。隔离 SQLite/临时文件回归通过，生产现场清理返回 `(0, 0)`；源码备份、哈希和约束见 [`docs/device-source-failure-retention-audit-20260809.md`](device-source-failure-retention-audit-20260809.md)。
 
 - 日程解析合同修复已部署并重启 API：有日期无钟点现在明确为全天，单一开始时间补一小时结束，范围起点不再因当前月份滚到下一年，模型不再凭空保留未在原文出现的提醒，标题清理“刚才/刚刚”控制壳。日程质量 `65 passed`，包含本轮安全契约更新的精简生产针对性集合 `91 passed`；真实 HTTP 样本、源码哈希、备份和未完成边界见 [`docs/schedule-parser-contract-r1-20260809.md`](schedule-parser-contract-r1-20260809.md)。

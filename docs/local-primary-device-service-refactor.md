@@ -7,6 +7,7 @@
 - 本轮收尾审计确认四个 systemd 单元仍为 `active/enabled`，公网/loopback `/api/ready` 均为 `ready=true`，业务端口仅监听回环；旧端口运行时没有进程或活动部署引用。已删除服务器上 5 个过期手工运行 PID 文件及两个旧端口日志，保留现行模型、精简 venv、数据库、Tunnel 凭据和历史迁移证据。
 - 设备源文件的失败留存边界已补齐：设备资产无任务，或最新转写任务超过 24 小时进入终态后由 retention loop 删除源文件并清空数据库路径；账号资产、近期失败和 queued/running 后续任务不受影响；隔离回归与生产现场证据见 [`docs/device-source-failure-retention-audit-20260809.md`](device-source-failure-retention-audit-20260809.md)。
 - `app.config.js` 现会在非开发构建阶段拒绝缺少设备注册引导密钥；使用受保护临时注入并以 `APP_ENV=production-rehearsal` 重建 release `1.0.6`，APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`，APK 内引导密钥长度为 64。当前未操作 `emulator-5560`，老记专用 `emulator-5562` 不在线，真机验收仍按约定跳过。
+- 本地冻结检查点为 commit `7ad25e4`、tag `laoji-device-primary-freeze-20260809`；未推送远端，工作区中未纳入本次提交的历史质量语料和审计杂项保持原样。
 
 - 当前权威 release 为 `1.0.6`/`versionCode=106`，SHA-256 `f226843a3a53d59704dd2f1f01e9e395118f1f80921447fe3b2e57d00dd3fef4`，已覆盖安装于 `emulator-5562`。构建时临时注入有效设备注册引导密钥；启动现场出现 `device_service_ready`，guest 兼容日志已明确标记 `scope_kind=device-local` 与 `network_path=device-v1/none`。详见 [`docs/device-scope-runtime-audit-20260809.md`](device-scope-runtime-audit-20260809.md)。
 - 当前有效公网混合负载证据为 5 路实时设备 WSS + 2 路后台资产上传：实时段结束到最终文字 p95 `1846.47 ms`，低于 2 秒门槛；此前 `3.61 s`、`2.44 s` 和 `903.21 ms` 均为旧夹具或旧路径的历史对照，不再作为当前门禁结论。
