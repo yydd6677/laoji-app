@@ -4,7 +4,7 @@
 
 ## 2026-08-09 当前运行时复核增量
 
-- 当前工作区 release APK 实际文件为 `android/app/build/outputs/apk/release/app-release.apk`，`versionCode=106`，SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码静态门禁、APK 入口门禁和 TypeScript 均通过。本轮没有操作 `emulator-5560`；`emulator-5562` 当前离线，未把模拟器安装状态当作本轮证据，真机验收继续按约定跳过。
+- 当前工作区 release APK 实际文件为 `android/app/build/outputs/apk/release/app-release.apk`，`versionCode=106`，SHA-256 为 `a3f16464453d13b83a334e9ffa7f543f4956162aa6d451151acc4f27af520d98`；这是讲话人删除队列改为严格持久写入后的重建包。构建时引导密钥和签名属性仅在受保护进程环境中临时注入，未写入源码、工作区或日志；源码静态门禁、APK 入口门禁、TypeScript 和差异检查均通过。本轮没有操作 `emulator-5560`；`emulator-5562` 当前离线，未把模拟器安装状态当作本轮证据，真机验收继续按约定跳过。
 - 通过当前 release 中的临时设备注册引导配置，对 `https://laoji.cloud` 做了新的临时设备闭环：注册 `201`、能力 `200`、日程解析 `200`、会议绑定 `201`、资产注册、两段分片上传 `200`、分片合并 `200`、转写提交 `202`、任务 `completed`，随后整理任务 `success`，返回 `general@2`、结构化 schema `2` 和 Markdown；epoch 清理 `200`，所有临时设备内容随 epoch 删除。
 - 发现并修复生产源码漂移：服务器设备核心三个文件仍与工作区一致，但 `summary_tasks.py` 缺少本轮已验证的“负责人待定具体候选保留”和“决定折叠到概述时携带真实引用”两处修复。已在服务器建立 `/home/zhong/laoji-service-platform/migration-baselines/compact-summary-candidate-fix-20260809-2327/` 回滚备份，替换后的服务器 SHA-256 为 `50fc259088eb074ed7b3943958dcdcfe4b2accaf6f7b4c9525ec6faaa3dbbcb4`。
 - `laoji-api` 已由现有 systemd 恢复并重新加载该源码；API、ASR、Ollama、Cloudflare Tunnel 均为 `active`，公网 `/api/ready` 返回 `ready=true`，任务队列和 LLM 队列均为 `0`，三套 SQLite 完整性/WAL/外键状态仍正常。

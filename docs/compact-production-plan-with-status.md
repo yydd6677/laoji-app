@@ -14,6 +14,7 @@
 - 8 月 10 日重启后的实时资源采样：GPU0 总占用 `27391/32607 MiB`，其中老记 API/ASR/Ollama 计算进程约 `16780 MiB`（API `566`、ASR `5128`、Ollama runner `2554+8532`）；其余为其他服务。GPU1 `31756/32607 MiB` 仍未触碰，四个目标 systemd 单元均 active，公网 ready/队列正常。
 
 - 最新运行时复核：工作区 release `1.0.6` APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码、APK 入口和 TypeScript 门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，老记专用 `emulator-5562` 离线，本轮没有跨越设备边界安装验证，真机验收继续按约定跳过。
+- 讲话人删除队列加固后的 release 已重新生成：`versionName=1.0.6`、`versionCode=106`，APK SHA-256 为 `a3f16464453d13b83a334e9ffa7f543f4956162aa6d451151acc4f27af520d98`（2026-08-10 00:18）。构建时仅在进程环境临时注入服务器引导密钥和本机受保护签名属性；未写入源码、工作区或日志。`verify_device_primary_source.py`、`verify_compact_source_config.py`、`verify_compact_apk_config.py`、TypeScript 和 `git diff --check` 均通过。设备仍离线，未安装到 `emulator-5560` 或其他设备。
 - 公网临时设备真实完成注册、能力、日程解析、会议绑定、两段分片上传、合并、转写和整理：转写任务 `completed`，整理任务 `success`，返回 `general@2`、结构化 schema `2` 和 Markdown；epoch 关闭返回 `200`，临时内容已清理。
 - 服务器生产 `summary_tasks.py` 已从工作区补齐两处整理候选/引用修复，备份位于 `/home/zhong/laoji-service-platform/migration-baselines/compact-summary-candidate-fix-20260809-2327/`，当前 SHA-256 为 `50fc259088eb074ed7b3943958dcdcfe4b2accaf6f7b4c9525ec6faaa3dbbcb4`。API 有序恢复后四个 systemd 单元均 `active`，公网 `/api/ready` 仍为 `ready=true`，队列为 `0`。
 
