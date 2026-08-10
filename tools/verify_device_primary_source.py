@@ -15,6 +15,7 @@ import sys
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     app = (root / "App.tsx").read_text(encoding="utf-8")
+    auth_store = (root / "src/store/AuthStore.tsx").read_text(encoding="utf-8")
     device_api = (root / "src/services/deviceApi.ts").read_text(encoding="utf-8")
     media_import_provider = (root / "src/components/MeetingMediaImportProvider.tsx").read_text(encoding="utf-8")
     schedule_client = (root / "src/services/api.ts").read_text(encoding="utf-8")
@@ -40,10 +41,16 @@ def main() -> int:
         "MeetingOccurrenceSyncProvider",
         "MeetingSummarySyncProvider",
         "MeetingTranscriptCompletionProvider",
+        "MeetingAttachmentSyncProvider",
+        "MeetingMarkerSyncProvider",
+        "MeetingSpeakerCorrectionSyncProvider",
+        "MeetingTagCatalogSyncProvider",
     )
     for marker in removed_providers:
         if marker in app:
             failures.append(f"App.tsx 仍挂载账号同步 Provider: {marker}")
+    if "mode: 'guest'" not in auth_store or "session: null" not in auth_store or "accessToken: null" not in auth_store:
+        failures.append("AuthStore 未固定为本机 guest/session-null/device-only 模式")
     if "@laoji:deviceSpeakerNames:v1" not in speakers:
         failures.append("讲话人显示名称没有本机映射存储")
     if "name: name.trim()" in device_api or "name: name" in device_api:
