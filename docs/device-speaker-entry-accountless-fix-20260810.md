@@ -26,4 +26,6 @@ python3 tools/verify_compact_apk_config.py android/...apk     PASS
 - `versionName=1.0.6`，`versionCode=106`
 - SHA-256：`e164815ce15bf24c947029856d9623e7408f2f517026556fb287ed4822934e37`
 
+公网设备服务烟测（临时设备、无账号）：注册 `201`、读取 `/api/device/v1/speakers` `200`（当前资料数 `0`）、读取能力 `200`、关闭 epoch `200`；临时设备没有留下会议、资产或声纹资料。
+
 本轮没有安装到 `emulator-5560` 或 USB 真机；老记专用 `emulator-5562` 当前离线，功能仍需要后续设备验收。
