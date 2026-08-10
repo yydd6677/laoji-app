@@ -24,7 +24,7 @@ import {
 import { secureClientIdFactory, type ScopeKey } from '../domain/meeting';
 import { recoverPreparedMeetingRecordingMerge } from '../application/meeting';
 import { getFeatureFlags } from '../config/featureFlags';
-import { loadMeetingCapabilities } from '../data/api/v2';
+import { loadDeviceServiceCapabilities } from '../services/deviceApi';
 import { navigationRef } from '../navigation/notificationNavigation';
 import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
@@ -94,7 +94,7 @@ function navigateToMeeting(meetingId: string): void {
 }
 
 export function MeetingMediaImportProvider({ children }: { children: React.ReactNode }) {
-  const { accessToken, initializing, mode, session } = useAuth();
+  const { initializing, mode, session } = useAuth();
   const { searchableEvents } = useEvents();
   const { importMeetingMedia, meetings } = useMeetings();
   const { showDialog } = useAppDialog();
@@ -375,13 +375,9 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       return;
     }
     promptActiveRef.current = true;
-    void loadMeetingCapabilities({
-      accessToken,
-      forceRefresh: true,
-      allowStaleOnError: false,
-    }).then(state => {
+    void loadDeviceServiceCapabilities().then(capability => {
       if (activeIntentTokenRef.current !== intent.token) return;
-      const mediaImport = state.source === 'remote' ? state.capabilities.mediaImport : null;
+      const mediaImport = capability.mediaImport;
       const supported = mediaImport?.mimeTypes.some(
         mimeType => mimeType.toLowerCase() === intent.mimeType?.toLowerCase(),
       );
@@ -408,7 +404,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         actions: [{ text: '知道了', role: 'primary', onPress: closeUnavailableVideo }],
       });
     });
-  }, [accessToken, finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
+  }, [finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
   handleIntentRef.current = handleIntent;
 
   const drainIntentInbox = useCallback(() => {
@@ -548,14 +544,8 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     }
     promptActiveRef.current = true;
     try {
-      const capability = await loadMeetingCapabilities({
-        accessToken,
-        forceRefresh: true,
-        allowStaleOnError: false,
-      }).catch(() => null);
-      const mediaImport = capability?.source === 'remote'
-        ? capability.capabilities.mediaImport
-        : null;
+      const capability = await loadDeviceServiceCapabilities().catch(() => null);
+      const mediaImport = capability?.mediaImport ?? null;
       const includeVideo = mediaImport?.mimeTypes.some(
         mimeType => mimeType.toLowerCase().startsWith('video/'),
       ) === true;
@@ -587,7 +577,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         actions: [{ text: '知道了', role: 'primary', onPress: closePickerFailure }],
       });
     }
-  }, [accessToken, presentImportConfirmation, releasePrompt, showDialog]);
+  }, [presentImportConfirmation, releasePrompt, showDialog]);
 
   const value = useMemo<MeetingMediaImportContextValue>(() => ({
     busy,

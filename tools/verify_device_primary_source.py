@@ -16,7 +16,9 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     app = (root / "App.tsx").read_text(encoding="utf-8")
     device_api = (root / "src/services/deviceApi.ts").read_text(encoding="utf-8")
+    media_import_provider = (root / "src/components/MeetingMediaImportProvider.tsx").read_text(encoding="utf-8")
     schedule_client = (root / "src/services/api.ts").read_text(encoding="utf-8")
+    capabilities = (root / "src/data/api/v2/capabilities.ts").read_text(encoding="utf-8")
     speakers = (root / "src/services/speakers.ts").read_text(encoding="utf-8")
     summary = (root / "src/services/meetingSummary.ts").read_text(encoding="utf-8")
     questions = (root / "src/services/meetingQuestions.ts").read_text(encoding="utf-8")
@@ -50,6 +52,18 @@ def main() -> int:
         failures.append("复杂日程解析没有走设备服务接口")
     if "clarifyScheduleRemotely(" not in schedule_client:
         failures.append("日程补充解析没有走设备服务接口")
+    if "loadDeviceServiceCapabilities" not in media_import_provider:
+        failures.append("文件/视频导入能力探测没有走设备服务接口")
+    if "loadMeetingCapabilities" in media_import_provider or "/api/laoji/capabilities" in media_import_provider:
+        failures.append("文件/视频导入仍依赖旧账号能力接口")
+    if "账号能力接口需要登录" not in capabilities:
+        failures.append("旧账号能力接口缺少无令牌 fail-closed 保护")
+    if "if (!options.accessToken?.trim()) throw new Error('账号能力接口需要登录')" not in capabilities:
+        failures.append("账号能力缓存路径仍可能在无令牌时返回旧能力")
+    if "export async function loadDeviceServiceCapabilities" not in device_api:
+        failures.append("设备能力探测函数缺失")
+    if "request<any>('/capabilities'" not in device_api:
+        failures.append("设备能力探测没有调用设备鉴权端点")
     if "parseScheduleAudioRemotely(" not in schedule_client:
         failures.append("日程语音解析没有走设备服务接口")
     for legacy_schedule_call in (

@@ -174,16 +174,21 @@ async function readCache(): Promise<CapabilityCache | null> {
 }
 
 async function fetchRemoteCapabilities(accessToken?: string | null): Promise<MeetingCapabilities> {
+  // The account capability route is compatibility-only.  A device-primary
+  // build must never probe it anonymously: capability discovery for imports
+  // and other device work goes through deviceApi instead.
+  const token = accessToken?.trim();
+  if (!token) throw new Error('账号能力接口需要登录');
   const base = getApiConfig().apiBase.replace(/\/+$/, '');
   const response = await fetchWithTimeout(`${base}/api/laoji/capabilities`, {
     headers: {
       Accept: 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      Authorization: `Bearer ${token}`,
     },
   });
   if (!response.ok) {
     throw await readResponseError('capabilities failed', response, {
-      unauthorizedToken: accessToken ?? undefined,
+      unauthorizedToken: token,
     });
   }
   return normalizeCapabilities(await readJsonWithTimeout<unknown>(response, 10_000));
@@ -192,6 +197,7 @@ async function fetchRemoteCapabilities(accessToken?: string | null): Promise<Mee
 export async function loadMeetingCapabilities(
   options: LoadMeetingCapabilitiesOptions = {},
 ): Promise<MeetingCapabilityState> {
+  if (!options.accessToken?.trim()) throw new Error('账号能力接口需要登录');
   const nowMs = options.nowMs ?? Date.now();
   const cache = await readCache();
   if (!options.forceRefresh && cache && nowMs - cache.fetchedAtMs < CAPABILITY_CACHE_TTL_MS) {

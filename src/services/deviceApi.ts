@@ -26,10 +26,30 @@ export interface DeviceRealtimeAuth {
   dataEpoch: string;
 }
 
+export interface DeviceMediaImportCapabilities {
+  mimeTypes: readonly string[];
+  maxBytes: number;
+}
+
+export interface DeviceServiceCapabilities {
+  schemaVersion: number;
+  deviceApi: boolean;
+  dataEpoch: boolean;
+  meetingBindings: boolean;
+  resumableUploads: boolean;
+  chunkBytes: number;
+  maxAssetBytes: number;
+  mediaImport: DeviceMediaImportCapabilities | null;
+}
+
 let identityPromise: Promise<DeviceIdentity> | null = null;
 let deviceReadyPromise: Promise<DeviceIdentity> | null = null;
 let deviceReadyKey: string | null = null;
 let deviceReadyUntil = 0;
+let deviceCapabilitiesPromise: Promise<DeviceServiceCapabilities> | null = null;
+let deviceCapabilitiesKey: string | null = null;
+let deviceCapabilitiesUntil = 0;
+let deviceCapabilitiesValue: DeviceServiceCapabilities | null = null;
 
 // Registration and capability discovery are idempotent, but doing both for
 // every recording start adds an avoidable tunnel round trip.  Keep the
@@ -56,6 +76,10 @@ export function invalidateDeviceReady(): void {
   deviceReadyPromise = null;
   deviceReadyKey = null;
   deviceReadyUntil = 0;
+  deviceCapabilitiesPromise = null;
+  deviceCapabilitiesKey = null;
+  deviceCapabilitiesUntil = 0;
+  deviceCapabilitiesValue = null;
 }
 
 function url(path: string): string {
@@ -139,7 +163,12 @@ export async function ensureDeviceReady(): Promise<DeviceIdentity> {
 
   const proof = (async () => {
     await registerDevice();
-    await request('/capabilities', {}, '读取设备服务能力失败');
+    const capabilities = normalizeDeviceCapabilities(
+      await request('/capabilities', {}, '读取设备服务能力失败'),
+    );
+    deviceCapabilitiesKey = key;
+    deviceCapabilitiesValue = capabilities;
+    deviceCapabilitiesUntil = Date.now() + DEVICE_READY_CACHE_MS;
     deviceReadyUntil = Date.now() + DEVICE_READY_CACHE_MS;
     return current;
   })();
@@ -152,6 +181,74 @@ export async function ensureDeviceReady(): Promise<DeviceIdentity> {
     throw error;
   } finally {
     if (deviceReadyPromise === proof) deviceReadyPromise = null;
+  }
+}
+
+function normalizeDeviceCapabilities(value: any): DeviceServiceCapabilities {
+  const media = value?.media_import;
+  const mimeTypes = Array.isArray(media?.mime_types)
+    ? media.mime_types.filter((item: unknown): item is string => (
+      typeof item === 'string' && item.trim().length > 0
+    ))
+    : [];
+  const maxBytes = Number(media?.max_bytes ?? 0);
+  const schemaVersion = Number(value?.schema_version ?? 0);
+  const chunkBytes = Number(value?.chunk_bytes ?? 0);
+  const maxAssetBytes = Number(value?.max_asset_bytes ?? 0);
+  if (
+    !Number.isSafeInteger(schemaVersion) || schemaVersion < 1
+    || value?.device_api !== true
+    || value?.data_epoch !== true
+    || !Number.isSafeInteger(chunkBytes) || chunkBytes <= 0
+    || !Number.isSafeInteger(maxAssetBytes) || maxAssetBytes <= 0
+    || (media !== null && media !== undefined && (
+      !Number.isSafeInteger(maxBytes) || maxBytes <= 0 || mimeTypes.length === 0
+    ))
+  ) throw new DeviceApiError('设备服务能力响应无效', 502, 'DEVICE_CAPABILITIES_INVALID');
+  return {
+    schemaVersion,
+    deviceApi: true,
+    dataEpoch: true,
+    meetingBindings: value?.meeting_bindings === true,
+    resumableUploads: value?.resumable_uploads === true,
+    chunkBytes,
+    maxAssetBytes,
+    mediaImport: media && Number.isSafeInteger(maxBytes) && maxBytes > 0 && mimeTypes.length > 0
+      ? { mimeTypes, maxBytes }
+      : null,
+  };
+}
+
+/**
+ * Capability discovery for the accountless product.  This intentionally uses
+ * the device-authenticated endpoint; the legacy account capability endpoint
+ * must never be used to decide whether a local import is allowed.
+ */
+export async function loadDeviceServiceCapabilities(
+  options: { forceRefresh?: boolean } = {},
+): Promise<DeviceServiceCapabilities> {
+  const current = await ensureDeviceReady();
+  const key = identityKey(current);
+  if (
+    !options.forceRefresh
+    && deviceCapabilitiesKey === key
+    && deviceCapabilitiesValue
+    && deviceCapabilitiesUntil > Date.now()
+  ) return deviceCapabilitiesValue;
+  if (!options.forceRefresh && deviceCapabilitiesPromise && deviceCapabilitiesKey === key) {
+    return deviceCapabilitiesPromise;
+  }
+  const capabilitiesRequest = request<any>('/capabilities', {}, '读取设备服务能力失败')
+    .then(normalizeDeviceCapabilities);
+  deviceCapabilitiesPromise = capabilitiesRequest;
+  deviceCapabilitiesKey = key;
+  deviceCapabilitiesUntil = Date.now() + DEVICE_READY_CACHE_MS;
+  try {
+    const value = await capabilitiesRequest;
+    if (deviceCapabilitiesKey === key) deviceCapabilitiesValue = value;
+    return value;
+  } finally {
+    if (deviceCapabilitiesPromise === capabilitiesRequest) deviceCapabilitiesPromise = null;
   }
 }
 
