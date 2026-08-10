@@ -11,6 +11,8 @@
 ## 2026-08-10 续做最终对齐（当前权威状态）
 
 - 设备失败源文件清理的竞态已收紧：回收线程现在在 `BEGIN IMMEDIATE` 写锁下重新确认最新任务，再删除文件并提交 `storage_path=NULL`；queued/running 重试不会被旧终态清理误删。服务器真实 SQLite/文件回归通过，部署后 `/api/ready` 仍 ready，证据见 [`docs/device-source-retention-race-hardening-20260810.md`](device-source-retention-race-hardening-20260810.md)。
+- 整理任务原始输入留存边界已收口：历史 38 条非设备账号任务的 `request_json` 已在 SQLite 备份后脱敏（最大 49,727 字节降为 57 字节），代码改为只有 `device-*` 任务进入持久任务表；生成结果和状态保留。API 重启后 ready、队列、WAL 和完整性检查均正常，证据见 [`docs/summary-task-input-redaction-20260810.md`](summary-task-input-redaction-20260810.md)。
+- 去账号化数据清理已完成：98 条旧账号会议、4,310 条旧账号转写、76 个旧账号资产、17 个账号、111 个会话、33 条远程日程和 8 个旧声纹 profile 已清理；当前设备 epoch 的 7 条会议和 230 条转写保留，95 个源音频文件删除。临时快照在公网 ready 与三库完整性复核后删除，详见 [`docs/legacy-account-data-purge-20260810.md`](legacy-account-data-purge-20260810.md)。
 - 8 月 10 日重启后的实时资源采样：GPU0 总占用 `27391/32607 MiB`，其中老记 API/ASR/Ollama 计算进程约 `16780 MiB`（API `566`、ASR `5128`、Ollama runner `2554+8532`）；其余为其他服务。GPU1 `31756/32607 MiB` 仍未触碰，四个目标 systemd 单元均 active，公网 ready/队列正常。
 
 - 最新运行时复核：工作区 release `1.0.6` APK SHA-256 为 `86e9112bd978ccbaaa3a0d4359aa45f54135804c22e978a30b75e9701ec02a24`；源码、APK 入口和 TypeScript 门禁通过。当前 ADB 只有其他工作占用的 `emulator-5560`，老记专用 `emulator-5562` 离线，本轮没有跨越设备边界安装验证，真机验收继续按约定跳过。

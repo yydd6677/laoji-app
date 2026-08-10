@@ -14,6 +14,8 @@
 - 设备数据域删除边界已再次加固：关闭 epoch 现在同时删除独立 `summary_tasks_v2` 的生成结果/检查点，声纹 profile、embedding 和识别日志由可恢复 cleanup outbox 清理；启动/retention loop 会清理旧实现遗留的非 active epoch 任务。公网真实临时设备和隔离 SQLite 回归通过，详见 [`docs/device-epoch-cleanup-hardening-20260809.md`](device-epoch-cleanup-hardening-20260809.md)。
 
 - 设备失败源文件清理已补并发保护：候选会在数据库写锁下重新检查最新转写任务，锁内完成文件删除和路径清空，避免新重试读取的源被旧失败清理删掉。详见 [`docs/device-source-retention-race-hardening-20260810.md`](device-source-retention-race-hardening-20260810.md)。
+- 整理任务的旧账号兼容路径不再将完整转写写入 `summary_tasks_v2.request_json`；只有设备任务持久化，历史 38 条账号任务已脱敏并保留生成结果，数据库快照和服务器备份见 [`docs/summary-task-input-redaction-20260810.md`](summary-task-input-redaction-20260810.md)。
+- 已清理去账号化前残留的旧账号会议、远程日程、账号会话、声纹和源音频；仅保留当前设备 epoch 数据，清理前临时快照已在验证后删除，见 [`docs/legacy-account-data-purge-20260810.md`](legacy-account-data-purge-20260810.md)。
 
 - 本轮收尾审计确认四个 systemd 单元仍为 `active/enabled`，公网/loopback `/api/ready` 均为 `ready=true`，业务端口仅监听回环；旧端口运行时没有进程或活动部署引用。已删除服务器上 5 个过期手工运行 PID 文件及两个旧端口日志，保留现行模型、精简 venv、数据库、Tunnel 凭据和历史迁移证据。
 - 设备源文件的失败留存边界已补齐：设备资产无任务，或最新转写任务超过 24 小时进入终态后由 retention loop 删除源文件并清空数据库路径；账号资产、近期失败和 queued/running 后续任务不受影响；隔离回归与生产现场证据见 [`docs/device-source-failure-retention-audit-20260809.md`](device-source-failure-retention-audit-20260809.md)。
