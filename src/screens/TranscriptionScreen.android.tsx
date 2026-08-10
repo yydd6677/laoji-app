@@ -74,7 +74,7 @@ import {
 import { readableErrorMessage } from '../services/errors';
 import { CurrentAddressError, getCurrentAddress } from '../services/currentAddress';
 import { Colors as C } from '../theme/colors';
-import { fetchSpeakers, type SpeakerProfile } from '../services/speakers';
+import { fetchDeviceSpeakerProfiles, fetchSpeakers, type SpeakerProfile } from '../services/speakers';
 import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import {
   canAutomaticallyRetryPendingMeetingAudioUpload,
@@ -729,7 +729,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
   const meetingMediaClipsEnabled = getFeatureFlags().meetingMediaClipsV1 && hasNativeMediaClip();
   const meetingTranscriptReprocessEnabled = getFeatureFlags().meetingTranscriptReprocessV1;
-  const meetingActionCollaborationEnabled = getFeatureFlags().meetingActionCollaborationV1;
+  // Device-primary meetings do not expose cross-device collaboration.  Keep
+  // the account implementation available for compatibility builds, but do
+  // not render an action-share entry that can only fail with "登录后..." in
+  // the production guest/device path.
+  const meetingActionCollaborationEnabled = !isGuest
+    && Boolean(accessToken)
+    && getFeatureFlags().meetingActionCollaborationV1;
   const meetingContentShareLinksEnabled = getFeatureFlags().meetingContentShareLinksV1;
   const canCreateMediaClip = Boolean(
     meetingMediaClipsEnabled
@@ -3244,7 +3250,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     const generation = ++speakerProfileRequestGenerationRef.current;
-    if (!speakerAssignmentTarget || !accessToken || isGuest) {
+    if (!speakerAssignmentTarget) {
       setSpeakerProfiles([]);
       setSpeakerProfilesLoading(false);
       setSpeakerProfilesError('');
@@ -3253,7 +3259,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSpeakerProfiles([]);
     setSpeakerProfilesLoading(true);
     setSpeakerProfilesError('');
-    void fetchSpeakers(accessToken).then(profiles => {
+    const loadProfiles = isGuest || !accessToken
+      ? fetchDeviceSpeakerProfiles()
+      : fetchSpeakers(accessToken);
+    void loadProfiles.then(profiles => {
       if (speakerProfileRequestGenerationRef.current !== generation) return;
       setSpeakerProfiles(profiles.filter(profile => profile.available_in_realtime !== false));
     }).catch(reason => {
@@ -4992,7 +5001,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     summaryError: summaryStageError || (briefSummary ? '' : summaryError),
     summaryProgress: summaryStageLoading ? '正在整理会议记录' : summaryProgress,
     canShare: Boolean(meeting && !sharing),
-    canManageSpeakers: Boolean(meeting && !isGuest && accessToken),
+    // Speaker profiles are device/epoch-owned in the accountless product.
+    // The detail page must keep the native row actionable even without an
+    // account; the callback selects the device service when no token exists.
+    canManageSpeakers: Boolean(meeting),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
     canEditSummary: Boolean(
       meetingScopeKey

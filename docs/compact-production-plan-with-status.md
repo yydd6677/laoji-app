@@ -10,6 +10,7 @@
 
 ## 2026-08-10 续做最终对齐（当前权威状态）
 
+- 继续审查设备模式的可达入口：会议详情的讲话人行不再被账号条件隐藏；讲话人修改面板改为无账号读取本机资料，并允许在明确同意后把 `future_profile` 修正保存为本机 `local_only`；设备模式同时隐藏只支持账号的“共享待办”入口。服务器兼容接口未删除，静态门禁和 TypeScript 已通过；本地已生成候选 release，但未安装到任何设备或做真机验收，详细记录见 [`docs/device-primary-visible-entry-audit-20260810.md`](device-primary-visible-entry-audit-20260810.md)。
 - 发现并修复一个实际的去账号化入口缺口：设备讲话人服务和管理页虽已支持无账号模式，会议详情入口仍错误弹出“登录后管理讲话人”；现在无账号点击已知讲话人直接进入本机详情，未知讲话人进入本机管理页。静态门禁和 TypeScript 通过，新的 release `1.0.6` SHA-256 为 `e164815ce15bf24c947029856d9623e7408f2f517026556fb287ed4822934e37`，证据见 [`docs/device-speaker-entry-accountless-fix-20260810.md`](device-speaker-entry-accountless-fix-20260810.md)。本轮未安装设备。
 - 阶段 0 冻结与可回溯补齐：新增 [`docs/device-primary-freeze-manifest-20260810.md`](device-primary-freeze-manifest-20260810.md)，记录当前源码 HEAD、脏工作区清单摘要、APK/服务器源码与模型身份、服务 cwd/监听、数据库完整性与脱敏资产摘要；新增 [`docs/device-primary-runtime-path-audit-20260810.md`](device-primary-runtime-path-audit-20260810.md)，核对启动、通知、设备转写回写和会议排序没有重新引入账号 CRUD 或“打开即重排”。既有未跟踪质量语料和审计资料原样保留。
 - 设备能力探测已去账号化：发现文件/视频导入原先会无令牌探测旧 `/api/laoji/capabilities`，现改为设备鉴权 `/api/device/v1/capabilities`，服务端能力响应包含媒体 MIME 与大小上限；无账号令牌的旧能力读取在缓存前直接 fail-closed。服务端重启后公网 ready 正常，临时设备能力读取与 epoch 清理通过，详见 [`docs/device-capability-accountless-audit-20260810.md`](device-capability-accountless-audit-20260810.md)。

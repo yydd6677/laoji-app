@@ -72,7 +72,7 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
     }
     if (
       input.scope === 'future_profile'
-      && (input.scopeKey === 'guest' || !speakerProfileId || !consentToProfileUpdate)
+      && (!speakerProfileId || !consentToProfileUpdate)
     ) {
       throw new Error('future speaker profile assignment is not authorized');
     }

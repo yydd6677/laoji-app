@@ -106,6 +106,18 @@ def main() -> int:
         failures.append("访客讲话人入口未能打开本机讲话人管理")
     if "navigation.navigate('SpeakerEnrollment', { speakerId })" not in transcription_android:
         failures.append("访客讲话人入口未能打开本机讲话人详情")
+    if "canManageSpeakers: Boolean(meeting)" not in transcription_android:
+        failures.append("会议详情仍把本机讲话人管理错误限制为登录账号")
+    if "const meetingActionCollaborationEnabled = !isGuest" not in transcription_android:
+        failures.append("设备模式仍可能暴露只能登录使用的共享待办入口")
+    if "fetchDeviceSpeakerProfiles, fetchSpeakers" not in transcription_android:
+        failures.append("设备讲话人修改面板没有加载本机讲话人资料")
+    assignment_use_case = (root / "src/application/meeting/updateMeetingSpeakerAssignment.ts").read_text(encoding="utf-8")
+    assignment_repository = (root / "src/data/repositories/sqliteMeetingNoteRepository.ts").read_text(encoding="utf-8")
+    if "input.scope === 'future_profile'\n      && (!speakerProfileId || !consentToProfileUpdate)" not in assignment_use_case:
+        failures.append("设备讲话人修改仍被错误限制为登录账号")
+    if "input.scope === 'future_profile'\n      && (!input.speakerProfileId || !input.consentToProfileUpdate)" not in assignment_repository:
+        failures.append("本机讲话人修正仓库仍拒绝设备声纹资料关联")
 
     # Account/profile screens remain as fail-closed compatibility source, but
     # the device-primary product must never register them in the production

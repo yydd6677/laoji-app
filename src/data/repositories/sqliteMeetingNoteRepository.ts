@@ -4391,7 +4391,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     }
     if (
       input.scope === 'future_profile'
-      && (!input.speakerProfileId || !input.consentToProfileUpdate || scopeKey === 'guest')
+      && (!input.speakerProfileId || !input.consentToProfileUpdate)
     ) {
       throw new Error('future speaker correction has no authorized profile');
     }
