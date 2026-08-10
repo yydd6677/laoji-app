@@ -28,6 +28,7 @@ def main() -> int:
     recording_reconciliation = (root / "src/services/meetingRecordingReconciliation.ts").read_text(encoding="utf-8")
     native_finalize = (root / "src/application/meeting/finalizeNativeMeetingRecording.ts").read_text(encoding="utf-8")
     native_finalize_hook = (root / "src/hooks/useNativeMeetingRecordingFinalizer.ts").read_text(encoding="utf-8")
+    navigation = (root / "src/navigation/index.tsx").read_text(encoding="utf-8")
     failures: list[str] = []
 
     removed_providers = (
@@ -73,6 +74,25 @@ def main() -> int:
             failures.append("设备问答仍可能回退到旧 guest 问答接口并上传本机转写")
     if "打开设置" not in profile or "打开个人资料" in profile:
         failures.append("原生设置入口仍使用个人资料语义")
+
+    # Account/profile screens remain as fail-closed compatibility source, but
+    # the device-primary product must never register them in the production
+    # navigator. This is a runtime-entry gate, not a claim that the dead
+    # compatibility files have been deleted.
+    for forbidden_route in (
+        'name="Login"',
+        'name="Account"',
+        'name="Profile"',
+        'name="ProfileField"',
+        'name="ChangePassword"',
+        'name="AccountDeletion"',
+        'name="SharedAction"',
+        'name="SharedMeetingContent"',
+    ):
+        if forbidden_route in navigation:
+            failures.append(f"生产导航仍暴露去账号化后禁止的入口: {forbidden_route}")
+    if 'initialRouteName="MainTabs"' not in navigation:
+        failures.append("生产导航未以本机主界面作为初始入口")
 
     # The historical SQLite scope key is intentionally retained for one-time
     # compatibility, but runtime audit events must identify its real owner and
