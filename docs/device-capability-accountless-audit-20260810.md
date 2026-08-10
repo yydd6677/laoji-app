@@ -26,11 +26,13 @@ CRUD，但违反了设备主数据改造中“移动端不调用账号接口”�
 - 服务端部署前文件备份：
   `/home/zhong/laoji-service-platform/migration-baselines/device-capabilities-20260810-pre/device_v1.py`
 - 部署后服务端文件 SHA-256：
-  `c933ce6aee2ca339e8ffd50dd6cd02ba330b0eee5d10ff70411c50ae51ff5a68`
+  `10dde960b88d5f1213280045965bcb644ee0d71a2902d95a6c9a2831cc12bac3`
 - `laoji-api.service` 重启后为 `active`；本机和公网 `/api/ready` 均为
   `ready=true`，ASR/整理队列保持空闲。
 - 新建临时设备完成注册 `201`、设备能力读取 `200`，能力响应包含 11 种音频/视频
   MIME 和 `max_bytes=1073741824`；随后关闭临时 epoch，未留下会议、资产或任务。
+- `media_import` 只有在服务端同时检测到 `ffmpeg` 与 `ffprobe` 时才报告为可用，避免
+  能力声明与实际解码依赖漂移。
 - 本地 `npx tsc --noEmit`、`git diff --check`、
   `python3 tools/verify_device_primary_source.py` 通过。
 - 服务端 `python3 -m compileall -q backend/app/api/device_v1.py` 和设备合同静态
