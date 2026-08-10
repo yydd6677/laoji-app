@@ -26,4 +26,4 @@ canManageSpeakers: Boolean(meeting && !isGuest && accessToken)
 
 - 这是入口可达性和状态快照修复，不宣称问答、真人声纹质量或真机验收完成。
 - 按当前工作约定只使用 `emulator-5562` 做后续设备验证；不操作 `emulator-5560` 或 USB 真机。
-- 本地 `APP_ENV=production-rehearsal` release 编译成功，候选包为 [`/home/yydd/LaoJi-stable-builds/laoji-v106-accountless-speaker-correction-20260810.apk`](/home/yydd/LaoJi-stable-builds/laoji-v106-accountless-speaker-correction-20260810.apk)，`versionName=1.0.6`、`versionCode=106`、SHA-256 为 `cceeb4723b10c6a008ec1df4e34d013fcea4ab8e09c734d3622cc9ab0bccc526`。`verify_compact_apk_config.py`、`verify_device_primary_source.py`、TypeScript 和 `git diff --check` 均通过；包未安装到任何设备。
+- 本地 `APP_ENV=production-rehearsal` release 编译成功，候选包为 [`/home/yydd/LaoJi-stable-builds/laoji-v106-accountless-speaker-correction-20260810.apk`](/home/yydd/LaoJi-stable-builds/laoji-v106-accountless-speaker-correction-20260810.apk)，`versionName=1.0.6`、`versionCode=106`、SHA-256 为 `cceeb4723b10c6a008ec1df4e34d013fcea4ab8e09c734d3622cc9ab0bccc526`。`verify_compact_apk_config.py`、`verify_device_primary_source.py`、TypeScript 和 `git diff --check` 均通过；随后已覆盖安装到 USB 真机 `825f509d` 并启动烟测通过，但未进行完整真机功能验收。
