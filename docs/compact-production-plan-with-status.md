@@ -10,6 +10,7 @@
 
 ## 2026-08-10 续做最终对齐（当前权威状态）
 
+- 阶段 0 冻结与可回溯补齐：新增 [`docs/device-primary-freeze-manifest-20260810.md`](device-primary-freeze-manifest-20260810.md)，记录当前源码 HEAD、脏工作区清单摘要、APK/服务器源码与模型身份、服务 cwd/监听、数据库完整性与脱敏资产摘要；新增 [`docs/device-primary-runtime-path-audit-20260810.md`](device-primary-runtime-path-audit-20260810.md)，核对启动、通知、设备转写回写和会议排序没有重新引入账号 CRUD 或“打开即重排”。既有未跟踪质量语料和审计资料原样保留。
 - 设备能力探测已去账号化：发现文件/视频导入原先会无令牌探测旧 `/api/laoji/capabilities`，现改为设备鉴权 `/api/device/v1/capabilities`，服务端能力响应包含媒体 MIME 与大小上限；无账号令牌的旧能力读取在缓存前直接 fail-closed。服务端重启后公网 ready 正常，临时设备能力读取与 epoch 清理通过，详见 [`docs/device-capability-accountless-audit-20260810.md`](device-capability-accountless-audit-20260810.md)。
 - 设备媒体能力声明进一步与运行环境绑定：只有 `ffmpeg` 与 `ffprobe` 同时存在时才报告可导入媒体，避免客户端能力展示与解码依赖不一致；API 重启后 ready 和 7 项设备合同测试仍通过。
 - 本次客户端改动已重新构建 release `1.0.6`/`versionCode=106`，APK SHA-256 为 `633e642caabc6955222aa3df5fe9c7f5a731cafe83bd10911066d6d71f7e1f83`，文件为 `/home/yydd/LaoJi-stable-builds/laoji-v106-device-capabilities-20260810.apk`；入口门禁通过。本轮不安装到其他工作占用的模拟器，也不做真机验收。
@@ -125,12 +126,12 @@
 
 ### 阶段 0：冻结与可回溯
 
-状态：部分完成。
+状态：完成（冻结当前源码与运行态；不是数据备份）。
 
-- 已保留 release APK、版本号、SHA-256、设备样本会议 ID 和服务器备份。
+- 已保留 release APK、版本号、SHA-256、设备样本会议 ID 和服务器备份；冻结清单补齐当前 APK、服务器源码/模型身份、数据库哈希、音频资产摘要和服务 cwd。
 - 当前工作树有大量既有脏改动，禁止 `reset`、`clean`、覆盖或自动提交。
 - 数据库完整性、服务 cwd、核心进程和模型路径已核对。
-- 本轮留存边界修复已提交为 `3925285`、`f9a26a7`，仅在本机分支保留、未推送；既有未跟踪质量语料和审计杂项继续保留。
+- 本轮留存边界修复已提交为 `3925285`、`f9a26a7`，本次冻结清单与入口审计随后提交到本机分支、未推送；既有未跟踪质量语料和审计杂项继续保留。清单明确记录了采集前未跟踪状态摘要，后续工作不得把它们误删。
 
 ### 阶段 1：统一 ASR 与分片上传
 
