@@ -3270,8 +3270,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [accessToken, isGuest, speakerAssignmentTarget?.lineId]);
 
   const manageSpeaker = useCallback((speakerId?: string) => {
+    // The device-primary product has no account gate.  SpeakerManager and
+    // SpeakerEnrollment already select the device/epoch service when there is
+    // no token; keeping the old login dialog here made the feature appear
+    // unavailable even though its accountless implementation was complete.
     if (isGuest || !accessToken) {
-      showDialog({ title: '登录后管理讲话人', message: '游客会议保留转写中的讲话人标签，但不上传声纹资料。', tone: 'info' });
+      if (speakerId && speakerId !== 'unknown') {
+        navigation.navigate('SpeakerEnrollment', { speakerId });
+      } else {
+        navigation.navigate('SpeakerManager');
+      }
       return;
     }
     if (speakerId && speakerId !== 'unknown') {

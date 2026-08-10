@@ -96,6 +96,17 @@ def main() -> int:
     if "打开设置" not in profile or "打开个人资料" in profile:
         failures.append("原生设置入口仍使用个人资料语义")
 
+    # Speaker enrollment/management has a device/epoch implementation and is
+    # intentionally available without an account.  A stale login-only guard
+    # in the detail-page entry would make the implemented device service
+    # unreachable while still passing API-level checks.
+    if "登录后管理讲话人" in transcription_android:
+        failures.append("会议详情的讲话人入口仍把设备服务错误地阻断为登录功能")
+    if "navigation.navigate('SpeakerManager')" not in transcription_android:
+        failures.append("访客讲话人入口未能打开本机讲话人管理")
+    if "navigation.navigate('SpeakerEnrollment', { speakerId })" not in transcription_android:
+        failures.append("访客讲话人入口未能打开本机讲话人详情")
+
     # Account/profile screens remain as fail-closed compatibility source, but
     # the device-primary product must never register them in the production
     # navigator. This is a runtime-entry gate, not a claim that the dead
