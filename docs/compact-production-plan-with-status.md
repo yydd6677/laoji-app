@@ -11,6 +11,7 @@
 ## 2026-08-10 续做最终对齐（当前权威状态）
 
 - 设备能力探测已去账号化：发现文件/视频导入原先会无令牌探测旧 `/api/laoji/capabilities`，现改为设备鉴权 `/api/device/v1/capabilities`，服务端能力响应包含媒体 MIME 与大小上限；无账号令牌的旧能力读取在缓存前直接 fail-closed。服务端重启后公网 ready 正常，临时设备能力读取与 epoch 清理通过，详见 [`docs/device-capability-accountless-audit-20260810.md`](device-capability-accountless-audit-20260810.md)。
+- 本次客户端改动已重新构建 release `1.0.6`/`versionCode=106`，APK SHA-256 为 `633e642caabc6955222aa3df5fe9c7f5a731cafe83bd10911066d6d71f7e1f83`，文件为 `/home/yydd/LaoJi-stable-builds/laoji-v106-device-capabilities-20260810.apk`；入口门禁通过。本轮不安装到其他工作占用的模拟器，也不做真机验收。
 - 设备失败源文件清理的竞态已收紧：回收线程现在在 `BEGIN IMMEDIATE` 写锁下重新确认最新任务，再删除文件并提交 `storage_path=NULL`；queued/running 重试不会被旧终态清理误删。服务器真实 SQLite/文件回归通过，部署后 `/api/ready` 仍 ready，证据见 [`docs/device-source-retention-race-hardening-20260810.md`](device-source-retention-race-hardening-20260810.md)。
 - 整理任务原始输入留存边界已收口：历史 38 条非设备账号任务的 `request_json` 已在 SQLite 备份后脱敏（最大 49,727 字节降为 57 字节），代码改为只有 `device-*` 任务进入持久任务表；生成结果和状态保留。API 重启后 ready、队列、WAL 和完整性检查均正常，证据见 [`docs/summary-task-input-redaction-20260810.md`](summary-task-input-redaction-20260810.md)。
 - 去账号化数据清理已完成：98 条旧账号会议、4,310 条旧账号转写、76 个旧账号资产、17 个账号、111 个会话、33 条远程日程和 8 个旧声纹 profile 已清理；当前设备 epoch 的 7 条会议和 230 条转写保留，95 个源音频文件删除。临时快照在公网 ready 与三库完整性复核后删除，详见 [`docs/legacy-account-data-purge-20260810.md`](legacy-account-data-purge-20260810.md)。
