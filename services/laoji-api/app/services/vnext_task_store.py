@@ -462,6 +462,74 @@ def cancel_task(context: DeviceContext, task_id: str) -> bool:
         return cursor.rowcount == 1
 
 
+def cancel_binding_tasks(context: DeviceContext, binding_id: str) -> int:
+    """Cancel every non-terminal task fenced by a purging binding.
+
+    Binding deletion is a domain-level operation; it must also advance the
+    generic task owner or a late worker could still commit an artifact after
+    the mobile binding has been purged.
+    """
+    ensure_vnext_task_schema()
+    binding_id = _safe(binding_id, "binding_id")
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        rows = connection.execute(
+            """SELECT task_id FROM vnext_tasks
+               WHERE principal_id = ? AND epoch_id = ? AND binding_id = ? AND state = 'active'""",
+            (context.principal_id, context.epoch_id, binding_id),
+        ).fetchall()
+        if not rows:
+            connection.commit()
+            return 0
+        task_ids = [str(row["task_id"]) for row in rows]
+        connection.executemany(
+            """UPDATE vnext_tasks
+                  SET state = 'cancelled', cancel_revision = cancel_revision + 1,
+                      updated_at = ?, terminal_at = COALESCE(terminal_at, ?)
+                WHERE task_id = ? AND state = 'active'""",
+            [(now, now, task_id) for task_id in task_ids],
+        )
+        connection.executemany(
+            """UPDATE vnext_task_attempts
+                  SET state = 'cancelled', updated_at = ?, terminal_at = COALESCE(terminal_at, ?)
+                WHERE task_id = ? AND state IN ('queued','running')""",
+            [(now, now, task_id) for task_id in task_ids],
+        )
+        connection.commit()
+        return len(task_ids)
+
+
+def cancel_epoch_tasks(context: DeviceContext) -> int:
+    """Cancel all active generic tasks before an epoch is physically closed."""
+    ensure_vnext_task_schema()
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        rows = connection.execute(
+            """SELECT task_id FROM vnext_tasks
+               WHERE principal_id = ? AND epoch_id = ? AND state = 'active'""",
+            (context.principal_id, context.epoch_id),
+        ).fetchall()
+        task_ids = [str(row["task_id"]) for row in rows]
+        if task_ids:
+            connection.executemany(
+                """UPDATE vnext_tasks
+                      SET state = 'cancelled', cancel_revision = cancel_revision + 1,
+                          updated_at = ?, terminal_at = COALESCE(terminal_at, ?)
+                    WHERE task_id = ? AND state = 'active'""",
+                [(now, now, task_id) for task_id in task_ids],
+            )
+            connection.executemany(
+                """UPDATE vnext_task_attempts
+                      SET state = 'cancelled', updated_at = ?, terminal_at = COALESCE(terminal_at, ?)
+                    WHERE task_id = ? AND state IN ('queued','running')""",
+                [(now, now, task_id) for task_id in task_ids],
+            )
+        connection.commit()
+        return len(task_ids)
+
+
 def recoverable_tasks(context: DeviceContext) -> list[dict[str, Any]]:
     ensure_vnext_task_schema()
     now = _now_epoch()

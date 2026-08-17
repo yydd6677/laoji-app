@@ -675,7 +675,9 @@ async def delete_epoch(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     try:
-        return device_identity.close_epoch(context, epoch_id)
+        result = device_identity.close_epoch(context, epoch_id)
+        cancelled_tasks = await asyncio.to_thread(vnext_task_store.cancel_epoch_tasks, context)
+        return {**result, "vnext_tasks_cancelled": cancelled_tasks}
     except DeviceIdentityError as error:
         raise _error(error) from error
 
@@ -798,6 +800,7 @@ async def delete_meeting_binding(
         # still owns a pending DELETE, so commit the service-owned deletion
         # before recording the idempotent device marker.
         await db.commit()
+    await asyncio.to_thread(vnext_task_store.cancel_binding_tasks, context, binding_id)
     device_identity.record_meeting_tombstone(context, binding_id)
     device_identity.complete_meeting_delete(context, binding_id)
     return {"schema_version": 1, "binding_id": binding_id, "deleted": True}

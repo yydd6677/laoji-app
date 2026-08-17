@@ -124,3 +124,34 @@ def test_binding_generation_cannot_be_reused(tmp_path, monkeypatch) -> None:
     with pytest.raises(vnext_task_store.VNextTaskError) as error:
         vnext_task_store.register_binding(context, binding_id="binding-2", binding_generation="generation-1")
     assert error.value.code == "BINDING_CONFLICT"
+
+
+def test_binding_and_epoch_cancellation_fence_active_tasks(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, monkeypatch)
+    vnext_task_store.register_binding(context, binding_id="binding-1", binding_generation="generation-1")
+    vnext_task_store.create_task(
+        context,
+        task_id="task-binding",
+        binding_id="binding-1",
+        binding_generation="generation-1",
+        capability="summary",
+        entity_id="meeting-1",
+        entity_revision=1,
+        input_sha256=_hash("d"),
+        generation_id="summary-generation-1",
+    )
+    vnext_task_store.create_task(
+        context,
+        task_id="task-epoch",
+        binding_id="binding-1",
+        binding_generation="generation-1",
+        capability="question",
+        entity_id="meeting-1",
+        entity_revision=1,
+        input_sha256=_hash("e"),
+        generation_id="question-generation-1",
+    )
+    assert vnext_task_store.cancel_binding_tasks(context, "binding-1") == 2
+    assert vnext_task_store.get_task(context, "task-binding")["state"] == "cancelled"
+    assert vnext_task_store.get_task(context, "task-epoch")["state"] == "cancelled"
+    assert vnext_task_store.cancel_epoch_tasks(context) == 0
