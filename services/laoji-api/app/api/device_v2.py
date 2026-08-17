@@ -16,12 +16,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services import (
     device_v2_identity,
+    schedule_graph_service,
     vnext_capability_cutover,
     vnext_purge_store,
     vnext_import_transcript_store,
     vnext_import_transcription_pipeline,
     vnext_task_store,
     vnext_upload_store,
+)
+from app.services.schedule_parser_service import ScheduleParserUnavailable, parse_schedule_text
+from app.schemas.vnext_contracts import (
+    ScheduleGraphClarificationRequestV1,
+    ScheduleGraphRequestV1,
+    ScheduleMentionGraph,
 )
 
 
@@ -302,12 +309,67 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "upload_sessions_v2": media_upload_v2,
         "import_transcript_events_v2": media_upload_v2,
         "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
+        "schedule_graph_v2": vnext_capability_cutover.schedule_graph_v2_enabled(),
     }
 
 
 @router.get("/ready")
 async def ready(context: device_v2_identity.DeviceV2Context = Depends(require_device_v2)) -> dict[str, Any]:
     return {"schema_version": 2, "ready": True, "device_id": context.device_id, "epoch_id": context.epoch_id}
+
+
+def _require_schedule_graph_v2() -> None:
+    if not vnext_capability_cutover.schedule_graph_v2_enabled():
+        raise HTTPException(status_code=404, detail={
+            "code": "SCHEDULE_GRAPH_V2_DISABLED",
+            "message": "日程图候选接口尚未启用",
+        })
+
+
+@router.post("/schedule/graph", response_model=ScheduleMentionGraph)
+async def create_schedule_graph(
+    payload: ScheduleGraphRequestV1,
+    _context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> ScheduleMentionGraph:
+    _require_schedule_graph_v2()
+    try:
+        parsed = await parse_schedule_text(
+            payload.text,
+            reference_datetime=payload.reference_datetime.isoformat(),
+            timezone_name=payload.timezone,
+        )
+        return schedule_graph_service.produce_schedule_graph(
+            payload.text,
+            payload.reference_datetime,
+            payload.timezone,
+            source_id=payload.source_id,
+            parsed=parsed or {},
+        )
+    except ScheduleParserUnavailable as error:
+        raise HTTPException(status_code=503, detail={
+            "code": "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE",
+            "message": "日程图生成服务暂时不可用",
+        }) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "SCHEDULE_GRAPH_INVALID",
+            "message": "日程图内容无效",
+        }) from error
+
+
+@router.post("/schedule/graph/clarify", response_model=ScheduleMentionGraph)
+async def clarify_schedule_graph(
+    payload: ScheduleGraphClarificationRequestV1,
+    _context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> ScheduleMentionGraph:
+    _require_schedule_graph_v2()
+    try:
+        return schedule_graph_service.merge_schedule_clarification(payload.graph, payload.answer)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "SCHEDULE_GRAPH_CLARIFICATION_INVALID",
+            "message": "没有理解这次日程补充",
+        }) from error
 
 
 @router.post("/purge-capabilities/{capability_id}/execute")

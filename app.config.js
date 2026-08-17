@@ -231,6 +231,9 @@ module.exports = () => {
     && !['0', 'false', 'no', 'off'].includes(
       String(process.env.EXPO_PUBLIC_MEETING_ACTION_COLLABORATION_V1 ?? 'true').trim().toLowerCase(),
     );
+  const scheduleGraphV2Candidate = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_SCHEDULE_GRAPH_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
+  );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (apiBase ? `${apiBase}/privacy` : ''),
   );
@@ -270,6 +273,7 @@ module.exports = () => {
         localMeetingDbCanonicalWriteV1,
         localMeetingDbAccountRootWriteV1,
         localMeetingDbAccountUploadWriteV1,
+        scheduleGraphV2Candidate,
         meetingQuestionsV1,
         meetingAutomaticTopicsV1,
         meetingTagSyncV1,

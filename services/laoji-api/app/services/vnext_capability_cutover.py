@@ -186,3 +186,8 @@ def realtime_asr_v2_enabled() -> bool:
     not been accepted yet.
     """
     return os.getenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", "").strip() == "1"
+
+
+def schedule_graph_v2_enabled() -> bool:
+    """Expose the MentionGraph producer only as an explicit candidate."""
+    return os.getenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "").strip() == "1"

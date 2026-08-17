@@ -46,6 +46,7 @@ export interface DeviceV2Capabilities {
   uploadSessionsV2: boolean;
   importTranscriptEventsV2: boolean;
   realtimeAsrV2: boolean;
+  scheduleGraphV2: boolean;
 }
 
 function endpoint(path: string): string {
@@ -264,6 +265,7 @@ function normalizeCapabilities(value: any): DeviceV2Capabilities {
     uploadSessionsV2: value.upload_sessions_v2 === true,
     importTranscriptEventsV2: value.import_transcript_events_v2 === true,
     realtimeAsrV2: value.realtime_asr_v2 === true,
+    scheduleGraphV2: value.schedule_graph_v2 === true,
   };
 }
 

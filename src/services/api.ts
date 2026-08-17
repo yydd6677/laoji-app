@@ -23,6 +23,13 @@ import {
   parseScheduleAudioRemotely,
   parseScheduleRemotely,
 } from './deviceApi';
+import { loadDeviceV2Capabilities } from './deviceV2Api';
+import {
+  clarifyScheduleGraphV2,
+  parseScheduleGraphV2,
+  type ScheduleGraphV1,
+} from './scheduleGraphV2';
+import { getFeatureFlags } from '../config/featureFlags';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
 import {
@@ -115,6 +122,8 @@ export interface ParseResult {
   clarification_question: string | null;
   reference_datetime?: string;
   timezone?: string;
+  /** Immutable vNext graph carried through clarification; never persisted as server-owned event data. */
+  schedule_graph?: ScheduleGraphV1;
 }
 
 // The HTTP/OpenAPI contract uses null when the parser cannot determine a
@@ -423,6 +432,82 @@ function normalizeModelOnlyParseResult(
   };
 }
 
+function graphRequestId(kind: 'parse' | 'clarify'): string {
+  return `schedule-graph-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function graphParseResult(
+  graph: ScheduleGraphV1,
+  context: Required<ScheduleParseContext>,
+): ParseResult {
+  if (graph.intent === 'reject' || graph.state === 'reject') {
+    throw new ScheduleParseError('not_schedule', SCHEDULE_ERROR_MESSAGES.not_schedule);
+  }
+  if (!['create', 'clarify'].includes(graph.intent) || graph.state === 'operation') {
+    throw new ScheduleParseError('invalid_schedule', '这段内容不是新建日程，请换一种说法。');
+  }
+  const slots = graph.slots;
+  const eventTypes = new Set<ParseResult['event_type']>(['once', 'daily', 'weekly', 'monthly', 'yearly']);
+  const eventType = eventTypes.has(slots.event_type as ParseResult['event_type'])
+    ? slots.event_type as ParseResult['event_type']
+    : 'once';
+  const recurrence = slots.recurrence ?? {};
+  const reminder = slots.reminder ?? {};
+  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(slots.start_date ?? '')
+    ? slots.start_date!
+    : '';
+  const endDate = /^\d{4}-\d{2}-\d{2}$/.test(slots.end_date ?? '')
+    ? slots.end_date
+    : null;
+  const startTime = /^\d{2}:\d{2}$/.test(slots.start_time ?? '') ? slots.start_time : null;
+  const endTime = /^\d{2}:\d{2}$/.test(slots.end_time ?? '') ? slots.end_time : null;
+  const period = slots.time_period ?? null;
+  const needsClarification = graph.state === 'needs_clarification' || graph.state === 'incomplete';
+  const missingLabels: Record<string, string> = {
+    start_date: '具体日期',
+    start_time: '具体时间',
+    title: '日程内容',
+    location: '地点',
+  };
+  const missing = graph.missing.map(item => missingLabels[item] ?? item);
+  return {
+    title: slots.title?.trim() ?? '',
+    event_type: eventType,
+    recurrence_interval: Number.isSafeInteger(recurrence.recurrence_interval)
+      ? Number(recurrence.recurrence_interval)
+      : null,
+    recurrence_weekdays: Array.isArray(recurrence.recurrence_weekdays)
+      ? recurrence.recurrence_weekdays.map(Number).filter(Number.isSafeInteger)
+      : null,
+    recurrence_until_date: typeof recurrence.recurrence_until_date === 'string'
+      ? recurrence.recurrence_until_date
+      : null,
+    start_date: startDate,
+    end_date: endDate,
+    spanning: Boolean(startDate && endDate && endDate !== startDate),
+    start_time: startTime,
+    end_time: endTime,
+    time_period: period,
+    is_all_day: !startTime && !endTime && !period,
+    description: null,
+    location: slots.location,
+    category: null,
+    detail: null,
+    status: null,
+    reminder_minutes: Number.isSafeInteger(reminder.minutes) ? Number(reminder.minutes) : null,
+    raw_text: graph.source.text,
+    parse_source: graph.provenance.engine === 'server-model' ? 'local_llm' : 'rules',
+    confidence: graph.state === 'complete' ? 0.9 : 0.5,
+    needs_clarification: needsClarification,
+    clarification_question: needsClarification
+      ? `还需要补充${missing.length > 0 ? missing.join('、') : '日程信息'}。`
+      : null,
+    reference_datetime: context.reference_datetime,
+    timezone: context.timezone,
+    schedule_graph: graph,
+  };
+}
+
 export async function parseText(
   text: string,
   contextInput: ScheduleParseContext = {},
@@ -442,6 +527,18 @@ export async function parseText(
 
   const remoteIntent = classifyScheduleParseIntent(text);
   try {
+    const v2 = getFeatureFlags().scheduleGraphV2Candidate
+      ? await loadDeviceV2Capabilities().catch(() => null)
+      : null;
+    if (v2?.scheduleGraphV2) {
+      const graph = await parseScheduleGraphV2({
+        text,
+        referenceDatetime: context.reference_datetime,
+        timezone: context.timezone,
+        clientRequestId: graphRequestId('parse'),
+      });
+      return graphParseResult(graph, context);
+    }
     const response = await parseScheduleRemotely(
       text,
       context.reference_datetime,
@@ -471,6 +568,14 @@ export async function clarifyText(
     timezone: contextInput.timezone ?? draft.timezone,
   });
   try {
+    if (draft.schedule_graph) {
+      const graph = await clarifyScheduleGraphV2({
+        graph: draft.schedule_graph,
+        answer: supplement,
+        clientRequestId: graphRequestId('clarify'),
+      });
+      return graphParseResult(graph, context);
+    }
     const parsed = await clarifyScheduleRemotely(
       { ...draft, raw_text: draft.raw_text ?? original },
       supplement,

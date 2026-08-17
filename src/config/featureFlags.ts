@@ -18,6 +18,7 @@ export interface LaoJiFeatureFlags {
   meetingActionCollaborationV1: boolean;
   meetingContentShareLinksV1: boolean;
   meetingCrossMeetingSearchV1: boolean;
+  scheduleGraphV2Candidate: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -99,5 +100,8 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // advertises the read-only endpoint and passes its permission audit.
     meetingCrossMeetingSearchV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingCrossMeetingSearchV1 === true,
+    // MentionGraph changes the parse/clarification owner.  A remote
+    // capability alone must not opt a stable APK into the candidate path.
+    scheduleGraphV2Candidate: extra.featureFlags?.scheduleGraphV2Candidate === true,
   };
 }

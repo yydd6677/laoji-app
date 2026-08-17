@@ -2,8 +2,8 @@
 
 状态：`schema slice implemented in isolation; Stage 4 not adopted`。
 
-本切片只闭合本机日程表的来源与 revision 元数据，不启用远端 graph producer、不开启 schedule
-capability barrier，也不改变稳定版或生产服务。
+本切片闭合本机日程表的来源与 revision 元数据，并提供默认关闭的 device-v2 Graph 候选；不开启
+schedule capability barrier，也不改变稳定版或生产服务。
 
 ## 已实现
 
@@ -28,7 +28,12 @@ capability barrier，也不改变稳定版或生产服务。
   路由；启用时只接收结构化 Graph，关闭时稳定返回 `SCHEDULE_GRAPH_V2_DISABLED`，不改变旧 `/parse`
   路由或 capability barrier。
 - 移动端新增独立 `scheduleGraphV2.ts` client；它校验 schema、source SHA-256、原文片段和 revision，
-  但不替换当前 `api.ts` 默认解析链路。
+  并改为只经 device-v2 鉴权调用。`api.ts` 只有在 APK 构建标志
+  `EXPO_PUBLIC_SCHEDULE_GRAPH_V2_CANDIDATE=1` 和服务端 `schedule_graph_v2=true` 同时成立时才选择
+  Graph；稳定构建不会多做 capability 探测。Graph Draft 的澄清沿用同一 source/revision，不回退为
+  独立输入。
+- device-v2 增加 `/schedule/graph`、`/schedule/graph/clarify` 和 `schedule_graph_v2` capability；服务端
+  未显式设置 `LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED=1` 时路由与能力均 fail-closed。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
@@ -46,7 +51,7 @@ capability barrier，也不改变稳定版或生产服务。
 
 ## 未完成
 
-这不是 Stage 4 退出证据。MentionGraph 和候选 v2 route 仍未默认采用，ProjectionEnvelope 尚未接入
-页面，服务端 capability barrier、自然语料 holdout 和真实 Expo SQLite/Android
+这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭，
+ProjectionEnvelope 尚未接入页面保存动作，服务端 capability barrier、自然语料 holdout 和真实 Expo SQLite/Android
 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。

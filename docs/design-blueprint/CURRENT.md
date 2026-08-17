@@ -99,5 +99,6 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 
 Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
 revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；隔离的
-Graph producer/validator、ProjectionEnvelope 工具也已实现，但均未挂入 v2 route 或 capability barrier，证据见
+Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机解析/澄清 owner；
+ProjectionEnvelope 仍未接入页面保存动作，且未跨 capability barrier，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。

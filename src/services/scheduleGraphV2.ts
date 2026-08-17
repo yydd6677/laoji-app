@@ -1,6 +1,4 @@
-import { getApiConfig } from './config';
-import { readResponseError } from './errors';
-import { fetchWithTimeout, readJsonWithTimeout } from './http';
+import { deviceV2Request } from './deviceV2Api';
 
 export type ScheduleGraphState = 'complete' | 'needs_clarification' | 'operation' | 'reject' | 'incomplete';
 export type ScheduleGraphRoute = 'local_safe' | 'server_required' | 'preflight' | 'clarify' | 'operation' | 'reject';
@@ -30,7 +28,7 @@ export interface ScheduleGraphV1 {
     end_date: string | null;
     start_time: string | null;
     end_time: string | null;
-    time_period: string | null;
+    time_period: 'early_morning' | 'morning' | 'noon' | 'afternoon' | 'evening' | 'night' | null;
     event_type: string;
     location: string | null;
     recurrence: Record<string, unknown> | null;
@@ -62,10 +60,6 @@ export interface ScheduleGraphClarificationV2Input {
   answer: string;
   clientRequestId: string;
   signal?: AbortSignal;
-}
-
-function graphUrl(path: string): string {
-  return `${getApiConfig().apiBase}/api/laoji/v2/schedule/graph${path}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -117,14 +111,12 @@ function normalizeGraph(value: unknown): ScheduleGraphV1 {
 }
 
 async function postGraph<T>(path: string, body: unknown, signal: AbortSignal | undefined, fallback: string): Promise<T> {
-  const response = await fetchWithTimeout(graphUrl(path), {
+  return deviceV2Request<T>(`/schedule/graph${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     signal,
-  });
-  if (!response.ok) throw await readResponseError(fallback, response);
-  return readJsonWithTimeout<T>(response, 60_000, signal);
+  }, fallback);
 }
 
 /** Candidate-only v2 client. Existing api.ts callers remain on the legacy route. */

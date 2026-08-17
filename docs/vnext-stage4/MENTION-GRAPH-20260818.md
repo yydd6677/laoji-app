@@ -1,6 +1,6 @@
 # Stage 4 MentionGraph 隔离证据
 
-状态：`isolated candidate`，未接入生产路由。
+状态：`device-v2 candidate wired; default off`，未接入生产默认。
 
 ## 交付边界
 
@@ -20,6 +20,8 @@
    fence；相同 revision 的不同 payload 会失败关闭。
 7. `/api/laoji/v2/schedule/graph` 与 `/api/laoji/v2/schedule/graph/clarify` 作为默认关闭的候选
    wire route 存在；关闭时不会触碰 parser，开启时复用同一 Graph producer 和 clarification owner。
+8. `/api/device/v2/schedule/graph` 和 `/clarify` 提供去账号化鉴权入口；手机客户端同时要求本地候选
+   构建标志和远端 capability，单独开启任一侧都不会改变稳定解析链路。
 
 ## 验证
 
@@ -32,6 +34,7 @@
 
 ## 尚未闭合
 
-候选 route 尚未接入 device v2 或手机端；没有 capability barrier、真实模型强制运行、自然语料
-holdout、Expo SQLite 回放或设备验收证据。旧日程 parser 仍是当前默认路径，不能把本切片称为
+候选 route 已接入 device v2 和手机解析/澄清 owner，但默认关闭；尚无 capability barrier、真实模型
+强制运行、自然语料 holdout、ProjectionEnvelope 保存动作、Expo SQLite 回放或设备验收证据。
+旧日程 parser 仍是当前默认路径，不能把本切片称为
 Stage 4 生产采用。
