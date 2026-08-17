@@ -255,6 +255,7 @@ class SpeakerOverlaySnapshotV2(VNextModel):
 
 class ScheduleGraphSource(VNextModel):
     text: str = Field(min_length=1, max_length=2000)
+    content_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     mode: Literal["text", "audio_transcript"]
     reference_datetime: datetime
     timezone: str = Field(min_length=1, max_length=64)

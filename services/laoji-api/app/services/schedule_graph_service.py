@@ -194,6 +194,7 @@ def produce_schedule_graph(
     graph = ScheduleMentionGraph(
         source=ScheduleGraphSource(
             text=text,
+            content_sha256="sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
             mode="audio_transcript" if parsed_result.get("source_mode") == "audio_transcript" else "text",
             reference_datetime=reference,
             timezone=timezone,

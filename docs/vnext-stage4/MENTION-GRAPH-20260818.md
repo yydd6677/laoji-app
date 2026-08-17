@@ -8,7 +8,8 @@
 
 1. `recognize_schedule_mentions` 只返回原文中可定位的日期、时间段、钟点、标题、地点和修正片段，
    不把规范化后的 `2026-08-19` 或 `15:30` 伪造为用户引用。
-2. `produce_schedule_graph` 接收一个解析观察，生成 `ScheduleMentionGraph`，明确区分
+2. `produce_schedule_graph` 同时保存 UTF-8 源正文的 `content_sha256`，让澄清后的同一 source_id
+   能和本机 `draft_source_sha256` 对齐；它接收一个解析观察，生成 `ScheduleMentionGraph`，明确区分
    `local_safe` 与 `server_required`，并把缺日期归为 `incomplete/needs_clarification`。
 3. `validate_schedule_graph` 重新核对所有 span 的字符边界、路由/状态一致性、complete 日期和
    revision 单调性，失败关闭。
