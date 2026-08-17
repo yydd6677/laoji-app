@@ -16,6 +16,7 @@ import {
   addNativeRecorderErrorListener,
   addNativeRecorderStateListener,
   addNativeRecorderTranscriptListener,
+  acknowledgeNativeDeviceV2Transcript,
   assertNativeRecorderDeploymentPolicy,
   getNativeRecorderState,
   hasNativeRecorder,
@@ -200,6 +201,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const autoStartAttemptedRef = useRef(false);
   const startedAtRef = useRef(new Date());
   const checkpointRef = useRef({ lineCount: finalizedNativeMinutesTranscript(transcript).length, savedAtMs: Date.now() });
+  const durableTranscriptQueueRef = useRef<Promise<void>>(Promise.resolve());
   const createRequestRef = useRef(createClientRequestState('meeting'));
   const existingRemoteMeetingId = existing && !isGuest ? meetingRemoteIdentity(existing) : null;
   const manualNote = useMeetingManualNote(meetingScopeKey, meetingId || undefined);
@@ -379,6 +381,36 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     });
   }, [saveCachedTranscript]);
 
+  const persistDurableTranscriptEvent = useCallback((
+    sessionId: string,
+    id: string,
+    eventSequence: number,
+    next: NativeMinutesTranscriptLine[],
+  ) => {
+    const finalLines = finalizedNativeMinutesTranscript(next);
+    const operation = durableTranscriptQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveCachedTranscript(id, finalLines);
+        const acknowledged = await acknowledgeNativeDeviceV2Transcript(
+          sessionId,
+          eventSequence,
+        );
+        if (!acknowledged) throw new Error('device-v2 transcript acknowledgement was rejected');
+        checkpointRef.current = {
+          lineCount: finalLines.length,
+          savedAtMs: Date.now(),
+        };
+      });
+    durableTranscriptQueueRef.current = operation;
+    void operation.catch(reason => {
+      diagnosticWarn('persist durable realtime transcript event failed', reason);
+      if (mountedRef.current) {
+        setError('文字记录正在显示，但本机持久化尚未完成；连接恢复后会继续处理');
+      }
+    });
+  }, [saveCachedTranscript]);
+
   const retryTranscriptCache = useCallback(async () => {
     const id = activeMeetingIdRef.current;
     if (!id) {
@@ -405,7 +437,12 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         const next = mergeNativeMinutesTranscript(transcriptRef.current, event, id);
         transcriptRef.current = next;
         if (mountedRef.current) setTranscript(next);
-        if (event.isFinal) checkpointTranscript(next);
+        const eventSequence = Number(event.eventSequence);
+        if (event.isFinal && Number.isSafeInteger(eventSequence) && eventSequence > 0) {
+          persistDurableTranscriptEvent(event.sessionId, id, eventSequence, next);
+        } else if (event.isFinal) {
+          checkpointTranscript(next);
+        }
       }),
       addNativeRecorderErrorListener(event => {
         if (event.sessionId && event.sessionId !== currentSessionIdRef.current) return;
@@ -424,7 +461,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }),
     ];
     return () => subscriptions.forEach(subscription => subscription.remove());
-  }, [applyRecorderSnapshot, checkpointTranscript]);
+  }, [applyRecorderSnapshot, checkpointTranscript, persistDurableTranscriptEvent]);
 
   const buildFinalizeRequest = useCallback((
     id: string,

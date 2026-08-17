@@ -51,6 +51,11 @@
 - Android native transfer 已修复三个恢复边界：`KEEP` 重入返回真实 unique WorkInfo ID；本机擦除在
   删除媒体前同时清理 `guest` 与 `device-v2:<epoch>` lease/tag；WorkManager/Uploader 不再吞掉
   `CancellationException`。v2 源在 PUT 前严格校验精确字节数、SHA-256 和 multipart part layout。
+- v2 R2 uploader 的 OkHttp 请求现在通过可取消挂起适配器执行；WorkManager 停止或删除会议会调用
+  `Call.cancel()`，不会留下脱离任务 owner 的同步网络写入。device v2 realtime capability 也改为仅在
+  `LAOJI_VNEXT_REALTIME_V2_ENABLED=1` 时宣告并接受，候选服务默认 fail-closed。
+- Android 会议录制页对带 durable event sequence 的 stable 文字使用串行本机提交：先把累计文字记录
+  写入 SQLite，再确认原生 v2 event；保存或确认失败时不推进本机游标，原生加密事件仍可重放。
 
 ## 证据
 
