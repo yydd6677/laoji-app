@@ -1,5 +1,6 @@
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
+import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
 import {
   createDeviceOperation,
@@ -164,6 +165,7 @@ export async function rememberDeviceTranscriptTask(meetingId: string, taskId: st
   const normalizedTaskIdValue = normalizedTaskId(taskId);
   const identity = await getOrCreateDeviceIdentity();
   await ensureDeviceEpoch(identity.epochId);
+  await ensureLocalMeetingServiceBinding(normalizedMeetingIdValue);
   const current = await getLatestDeviceOperation('transcript', normalizedMeetingIdValue);
   if (current?.generationId === normalizedTaskIdValue) return;
   await createDeviceOperation({

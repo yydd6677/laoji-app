@@ -6,6 +6,7 @@ import {
 } from './deviceApi';
 import { waitForBackgroundNetworkTurn } from './deviceNetworkPriority';
 import { diagnosticAudit } from './diagnostics';
+import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import type { PendingMeetingAudioUpload } from './meetingRecording';
 
 export interface DeviceMeetingUploadResult {
@@ -34,6 +35,7 @@ export async function uploadMeetingRecordingToDeviceService(
     throw new Error('本机会议标识无效，无法提交服务');
   }
   diagnosticAudit('device_recording_upload_stage', { stage: 'binding', meeting_id_suffix: meetingId.slice(-8) });
+  await ensureLocalMeetingServiceBinding(meetingId);
   await createMeetingBinding(meetingId);
   diagnosticAudit('device_recording_upload_stage', { stage: 'binding_done', meeting_id_suffix: meetingId.slice(-8) });
   const registration = await registerDeviceAsset(
