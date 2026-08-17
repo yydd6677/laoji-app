@@ -13,6 +13,7 @@ export const VNEXT_SCHEMA_SHA256 = {
   "schedule_parse_request_legacy_projection": "35cc3c14a24370dd4c3c48da341c0e40cf25ef8a11f329c4af1b36432d50f84e",
   "schedule_parse_response_legacy_projection": "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc",
   "source_ref": "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712",
+  "speaker_overlay_snapshot_v2": "aabe52c9234603c180bdc6bbd3f3a7ec778c386f971e0ab280748e94482c2ab1",
   "task_attempt": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36",
   "transcript_stream_event_v2": "af174ee12fbb7d4ac7e76830213006bef672ae3d4177e3a78d1fed9f22dede6a",
   "upload_session": "74ad944a58c4babb41c8ed834c21122d685f1a2c705bb0233cadf842865b8311"

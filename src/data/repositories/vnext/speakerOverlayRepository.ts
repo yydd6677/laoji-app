@@ -36,6 +36,11 @@ export interface SpeakerManualOverride {
   updatedAtMs: number;
 }
 
+export interface EffectiveSpeakerAssignment extends SpeakerOverlayAssignment {
+  source: 'automatic' | 'manual';
+  manualOverrideId: string | null;
+}
+
 type OverlayRow = {
   revision_id: string;
   meeting_id: string;
@@ -167,6 +172,54 @@ export async function getActiveSpeakerOverlay(
     `SELECT * FROM speaker_overlay_revisions
       WHERE transcript_revision_id = ? AND status = 'active'`,
     revisionId,
+  ));
+}
+
+export async function getEffectiveSpeakerAssignments(
+  transcriptRevisionId: string,
+): Promise<readonly EffectiveSpeakerAssignment[]> {
+  const revisionId = identifier(transcriptRevisionId, '转写版本');
+  const database = await openMeetingDatabase();
+  const transcript = await database.getFirstAsync<{ meeting_id: string }>(
+    'SELECT meeting_id FROM transcript_revisions WHERE id = ?',
+    revisionId,
+  );
+  if (!transcript) throw new Error('转写版本不存在');
+  const overlay = await overlayFromRow(database, await database.getFirstAsync<OverlayRow>(
+    `SELECT * FROM speaker_overlay_revisions
+      WHERE transcript_revision_id = ? AND status = 'active'`,
+    revisionId,
+  ));
+  const automatic = new Map<string, EffectiveSpeakerAssignment>();
+  for (const assignment of overlay?.assignments ?? []) {
+    automatic.set(assignment.stableSegmentKey, {
+      ...assignment,
+      source: 'automatic',
+      manualOverrideId: null,
+    });
+  }
+  const manualRows = await database.getAllAsync<ManualRow>(
+    `SELECT * FROM speaker_manual_overrides
+      WHERE meeting_id = ? AND expected_transcript_revision = ? AND needs_review = 0
+      ORDER BY stable_segment_key`,
+    transcript.meeting_id,
+    revisionId,
+  );
+  for (const row of manualRows) {
+    const manual = manualFromRow(row);
+    const prior = automatic.get(manual.stableSegmentKey);
+    automatic.set(manual.stableSegmentKey, {
+      stableSegmentKey: manual.stableSegmentKey,
+      automaticLabel: manual.label,
+      speakerClusterId: prior?.speakerClusterId ?? null,
+      speakerProfileId: manual.speakerProfileId,
+      confidence: prior?.confidence ?? null,
+      source: 'manual',
+      manualOverrideId: manual.overrideId,
+    });
+  }
+  return [...automatic.values()].sort((left, right) => (
+    left.stableSegmentKey.localeCompare(right.stableSegmentKey)
   ));
 }
 

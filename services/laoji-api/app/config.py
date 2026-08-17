@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     AUDIO_STORAGE_PATH: str = "./audio_files"
     VNEXT_REALTIME_SPOOL_PATH: str = "./data/vnext-realtime-spool"
+    VNEXT_SPEAKER_SPOOL_PATH: str = "./data/vnext-speaker-spool"
     MEETING_AUDIO_MAX_BYTES: int = Field(default=1024 * 1024 * 1024, ge=1024 * 1024)
     MEETING_AUDIO_CHUNK_BYTES: int = Field(
         default=4 * 1024 * 1024,
@@ -67,6 +68,15 @@ class Settings(BaseSettings):
         return os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             self.VNEXT_REALTIME_SPOOL_PATH,
+        )
+
+    @property
+    def vnext_speaker_spool_abs_path(self) -> str:
+        if os.path.isabs(self.VNEXT_SPEAKER_SPOOL_PATH):
+            return self.VNEXT_SPEAKER_SPOOL_PATH
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            self.VNEXT_SPEAKER_SPOOL_PATH,
         )
 
     @model_validator(mode="after")

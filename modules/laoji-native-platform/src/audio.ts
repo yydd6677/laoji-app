@@ -144,6 +144,7 @@ export interface NativeRecorderTranscriptEvent {
   endMs: number | null;
   source: string | null;
   eventSequence?: number | null;
+  stableSegmentKey?: string | null;
   purpose: NativeRealtimeRecorderPurpose;
   receivedAtMs: number;
 }

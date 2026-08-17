@@ -1,0 +1,212 @@
+{
+  "$defs": {
+    "SpeakerOverlayAssignmentV2": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_label": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Automatic Label"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "speaker_cluster_id": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Cluster Id"
+        },
+        "speaker_profile_id": {
+          "anyOf": [
+            {
+              "maxLength": 180,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Profile Id"
+        },
+        "stable_segment_key": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Stable Segment Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stable_segment_key"
+      ],
+      "title": "SpeakerOverlayAssignmentV2",
+      "type": "object"
+    },
+    "SpeakerOverlayDocumentV2": {
+      "additionalProperties": false,
+      "properties": {
+        "activated_at": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Activated At"
+        },
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/SpeakerOverlayAssignmentV2"
+          },
+          "maxItems": 20000,
+          "title": "Assignments",
+          "type": "array"
+        },
+        "model_revision": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Model Revision",
+          "type": "string"
+        },
+        "output_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Output Sha256",
+          "type": "string"
+        },
+        "overlay_revision": {
+          "minimum": 1,
+          "title": "Overlay Revision",
+          "type": "integer"
+        },
+        "profile_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Manifest Sha256",
+          "type": "string"
+        },
+        "source_manifest_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Source Manifest Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "overlay_revision",
+        "source_manifest_sha256",
+        "profile_manifest_sha256",
+        "model_revision",
+        "output_sha256",
+        "assignments"
+      ],
+      "title": "SpeakerOverlayDocumentV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "speaker.overlay.v2",
+      "default": "speaker.overlay.v2",
+      "title": "Contract Revision",
+      "type": "string"
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Code"
+    },
+    "overlay": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpeakerOverlayDocumentV2"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_version": {
+      "const": 2,
+      "default": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "session_id": {
+      "maxLength": 180,
+      "minLength": 8,
+      "title": "Session Id",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "collecting",
+        "queued",
+        "running",
+        "succeeded",
+        "no_content",
+        "failed",
+        "cancelled"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "task_id": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Task Id"
+    }
+  },
+  "required": [
+    "session_id",
+    "state"
+  ],
+  "title": "SpeakerOverlaySnapshotV2",
+  "type": "object"
+}

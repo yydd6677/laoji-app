@@ -97,6 +97,7 @@ sealed class AsrServerEvent {
     val source: String?,
     val purpose: String?,
     val eventSequence: Long? = null,
+    val stableSegmentKey: String? = null,
   ) : AsrServerEvent()
 
   data class Error(

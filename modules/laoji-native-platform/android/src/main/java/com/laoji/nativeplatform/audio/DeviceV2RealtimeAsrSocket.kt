@@ -315,6 +315,7 @@ internal class DeviceV2RealtimeAsrSocket(
               source = "device-v2",
               purpose = "meeting",
               eventSequence = event.eventSequence,
+              stableSegmentKey = event.stableSegmentKey,
             ),
           )
         }
@@ -358,6 +359,7 @@ internal class DeviceV2RealtimeAsrSocket(
             source = "device-v2-local-replay",
             purpose = "meeting",
             eventSequence = event.eventSequence,
+            stableSegmentKey = event.stableSegmentKey,
           ),
         )
       }

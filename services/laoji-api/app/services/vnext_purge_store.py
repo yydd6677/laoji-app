@@ -251,7 +251,7 @@ def _cancel_task_rows(connection: sqlite3.Connection, where_sql: str, parameters
 
 
 def _begin_purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
-    from app.services import vnext_upload_store
+    from app.services import vnext_speaker_store, vnext_upload_store
 
     where = "device_id = ? AND epoch_id = ? AND binding_id = ? AND binding_generation = ?"
     parameters = (
@@ -261,6 +261,13 @@ def _begin_purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row
     connection.execute(
         f"UPDATE vnext_bindings SET state = 'purging', cancel_revision = cancel_revision + 1 WHERE {where} AND state = 'active'",
         parameters,
+    )
+    vnext_speaker_store.purge_scope_in_transaction(
+        connection,
+        device_id=str(capability["device_id"]),
+        epoch_id=str(capability["epoch_id"]),
+        binding_id=str(capability["binding_id"]),
+        binding_generation=str(capability["binding_generation"]),
     )
     _cancel_task_rows(connection, where, parameters)
     vnext_upload_store.queue_scope_cleanup_in_transaction(
@@ -273,7 +280,7 @@ def _begin_purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row
 
 
 def _begin_purge_epoch(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
-    from app.services import vnext_upload_store
+    from app.services import vnext_speaker_store, vnext_upload_store
 
     device_id = str(capability["device_id"])
     epoch_id = str(capability["epoch_id"])
@@ -294,6 +301,11 @@ def _begin_purge_epoch(connection: sqlite3.Connection, capability: sqlite3.Row) 
         "UPDATE vnext_bindings SET state = 'purging', cancel_revision = cancel_revision + 1 "
         "WHERE device_id = ? AND epoch_id = ? AND state = 'active'",
         (device_id, epoch_id),
+    )
+    vnext_speaker_store.purge_scope_in_transaction(
+        connection,
+        device_id=device_id,
+        epoch_id=epoch_id,
     )
     _cancel_task_rows(connection, "device_id = ? AND epoch_id = ?", (device_id, epoch_id))
     vnext_upload_store.queue_scope_cleanup_in_transaction(
@@ -372,9 +384,10 @@ def _finish_purge_record(
 
 def execute_purge(*, capability_id: str, secret: str, request_id: str) -> dict[str, Any]:
     ensure_purge_schema()
-    from app.services import vnext_upload_store
+    from app.services import vnext_speaker_store, vnext_upload_store
 
     vnext_upload_store.ensure_vnext_upload_schema()
+    vnext_speaker_store.ensure_vnext_speaker_schema()
     request_id = _identifier(request_id, "purge_request_id", 180)
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -416,6 +429,7 @@ def execute_purge(*, capability_id: str, secret: str, request_id: str) -> dict[s
             connection.commit()
 
         vnext_upload_store.process_cleanup_obligations(limit=128)
+        vnext_speaker_store.cleanup_orphaned_after_purge()
         with control_connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             capability = _authorized_capability(connection, capability_id, secret)

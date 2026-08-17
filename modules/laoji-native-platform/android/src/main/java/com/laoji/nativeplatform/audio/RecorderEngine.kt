@@ -292,6 +292,7 @@ class RecorderEngine(
         "endMs" to transcript.endMs?.toDouble(),
         "source" to transcript.source,
         "eventSequence" to transcript.eventSequence?.toDouble(),
+        "stableSegmentKey" to transcript.stableSegmentKey,
         "purpose" to config.purpose.wireValue,
         "receivedAtMs" to receivedAtMs.toDouble(),
       ),

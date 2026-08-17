@@ -63,6 +63,11 @@
       "sha256": "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712"
     },
     {
+      "name": "speaker_overlay_snapshot_v2",
+      "path": "schemas/speaker_overlay_snapshot_v2.schema.json",
+      "sha256": "aabe52c9234603c180bdc6bbd3f3a7ec778c386f971e0ab280748e94482c2ab1"
+    },
+    {
       "name": "task_attempt",
       "path": "schemas/task_attempt.schema.json",
       "sha256": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36"

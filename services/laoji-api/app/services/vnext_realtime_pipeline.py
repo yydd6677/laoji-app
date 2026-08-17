@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from typing import Any, Awaitable, Callable
 
 import numpy as np
@@ -14,11 +15,13 @@ from app.services import (
     vnext_asr_client,
     vnext_realtime_crypto,
     vnext_realtime_store,
+    vnext_speaker_pipeline,
 )
 
 
 SendEvent = Callable[[dict[str, Any]], Awaitable[None]]
 AsrCall = Callable[..., dict[str, Any]]
+_logger = logging.getLogger(__name__)
 
 
 class VNextRealtimePipelineFailure(RuntimeError):
@@ -267,6 +270,28 @@ class VNextRealtimeTextPipeline:
         if result["outcome"] == "text":
             self._text_event_count += 1
         await self.send_event(event)
+        if (
+            result["outcome"] == "text"
+            and hasattr(self.context, "device_id")
+            and hasattr(self.context, "epoch_id")
+        ):
+            try:
+                await vnext_speaker_pipeline.collect_realtime_speaker_segment(
+                    self.context,
+                    self.session_id,
+                    stable_segment_key=stable_key,
+                    source_start_ms=source_start_ms,
+                    source_end_ms=source_end_ms,
+                    pcm_bytes=pcm16,
+                    worker_generation=self.worker_generation,
+                )
+            except Exception as error:
+                # Speaker attribution is an optional late overlay. It must never
+                # turn an already durable text event into a transcript failure.
+                _logger.warning(
+                    "vnext speaker segment collection failed: %s",
+                    type(error).__name__,
+                )
 
     async def _finish(self) -> None:
         remaining = await asyncio.to_thread(
@@ -323,3 +348,14 @@ class VNextRealtimeTextPipeline:
                 str(chunk["encrypted_spool_locator"]),
             )
         await self.send_event(event)
+        if hasattr(self.context, "device_id") and hasattr(self.context, "epoch_id"):
+            try:
+                await vnext_speaker_pipeline.finalize_realtime_speaker(
+                    self.context,
+                    self.session_id,
+                )
+            except Exception as error:
+                _logger.warning(
+                    "vnext speaker finalization failed: %s",
+                    type(error).__name__,
+                )

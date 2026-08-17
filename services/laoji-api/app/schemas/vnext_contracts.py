@@ -223,6 +223,36 @@ class RealtimeChunkHeaderV2(VNextModel):
         return self
 
 
+class SpeakerOverlayAssignmentV2(VNextModel):
+    stable_segment_key: str = Field(min_length=1, max_length=180)
+    automatic_label: str | None = Field(default=None, max_length=120)
+    speaker_cluster_id: str | None = Field(default=None, max_length=180)
+    speaker_profile_id: str | None = Field(default=None, max_length=180)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class SpeakerOverlayDocumentV2(VNextModel):
+    overlay_revision: int = Field(ge=1)
+    source_manifest_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    profile_manifest_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    model_revision: str = Field(min_length=1, max_length=180)
+    output_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    activated_at: str | None = Field(default=None, max_length=80)
+    assignments: list[SpeakerOverlayAssignmentV2] = Field(max_length=20_000)
+
+
+class SpeakerOverlaySnapshotV2(VNextModel):
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["speaker.overlay.v2"] = "speaker.overlay.v2"
+    session_id: str = Field(min_length=8, max_length=180)
+    state: Literal[
+        "collecting", "queued", "running", "succeeded", "no_content", "failed", "cancelled",
+    ]
+    task_id: str | None = Field(default=None, max_length=512)
+    error_code: str | None = Field(default=None, max_length=160)
+    overlay: SpeakerOverlayDocumentV2 | None = None
+
+
 class ScheduleGraphSource(VNextModel):
     text: str = Field(min_length=1, max_length=2000)
     mode: Literal["text", "audio_transcript"]

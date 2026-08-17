@@ -10,9 +10,10 @@ CAM++ 声纹模型管理 - 用于说话人注册和声纹比对。
 CAM++ 的网络结构已收纳在本模块目录，不依赖其他语音识别框架。
 """
 
-import os
 import asyncio
 import copy
+import hashlib
+import os
 import threading
 from typing import Optional
 from dataclasses import dataclass
@@ -111,6 +112,7 @@ class ModelManager:
         self._initialization_task: asyncio.Task | None = None
         self._paths = _get_default_model_paths()
         self._camp_device = self._paths.device
+        self._camp_model_revision = "campplus-zh-unavailable"
 
     @classmethod
     def get_instance(cls) -> "ModelManager":
@@ -266,6 +268,11 @@ class ModelManager:
             model.eval()
             self._camp_device = str(target_device)
             self.camp_model = model
+            digest = hashlib.sha256()
+            with open(model_file, "rb") as weights:
+                for chunk in iter(lambda: weights.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            self._camp_model_revision = f"campplus-zh-{digest.hexdigest()[:24]}"
             print(f"[ModelManager] CAM++ 中文声纹模型加载成功")
 
         except Exception as e:
@@ -414,6 +421,10 @@ class ModelManager:
     @property
     def device(self) -> str:
         return self._camp_device
+
+    @property
+    def camp_model_revision(self) -> str:
+        return self._camp_model_revision
 
 
 class SpeakerEmbeddingExtractor:

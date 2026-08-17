@@ -402,6 +402,20 @@ async def run_meeting_retention_cleanup_once() -> tuple[int, int, int]:
             )
     except Exception as error:
         _logger.warning("vnext realtime retention cleanup failed: %s", type(error).__name__)
+    try:
+        from app.services.vnext_speaker_store import cleanup_expired_speaker_payloads
+
+        speaker_cleanup = await asyncio.to_thread(cleanup_expired_speaker_payloads)
+        if any(speaker_cleanup.values()):
+            _logger.info(
+                "vnext speaker retention: expired=%s segments=%s orphans=%s bytes=%s",
+                speaker_cleanup["expired_runs"],
+                speaker_cleanup["released_segments"],
+                speaker_cleanup["orphan_files"],
+                speaker_cleanup["orphan_bytes"],
+            )
+    except Exception as error:
+        _logger.warning("vnext speaker retention cleanup failed: %s", type(error).__name__)
     if expired_device_rows or expired_summary_rows:
         _logger.info(
             "device transient retention cleanup: quality_rows=%s summary_rows=%s",
