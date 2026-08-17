@@ -31,6 +31,8 @@
 - v2 auth 隔离提交：`9765edb`、`81bcb4d`；服务端已具备 P-256 bootstrap/auth challenge、18-bit PoW、
   15 分钟 bearer、challenge 单次消费、bootstrap/auth 限流和旧/新密钥双签名轮换测试，但尚未接入
   Android Keystore、purge capability，不能切换生产。
+- Android Keystore bridge 提交：`65c4708`；新增不可导出 P-256 生成/签名/轮换/删除接口，`fe98679`
+  将其纳入本机身份清除；尚未完成 v2 API client、PoW native 加速和真机编译验收。
 
 ## 尚未满足的 Stage 1 退出门
 
@@ -41,7 +43,7 @@
 - 本机清除已覆盖录音、通知、更新文件和 native projection；仍缺少独立 Keystore purge-only capability
   的原生实现和清除 journal 的端到端回放测试。
 - 新 vNext task API 尚未激活 capability barrier，也未接管生产业务调用。
-- 设备 v2 仍未完成客户端 Keystore、purge capability 和 v1 业务路由迁移；当前业务 API 仍保留 v1
+- 设备 v2 仍未完成 v2 API client、purge capability 和 v1 业务路由迁移；当前业务 API 仍保留 v1
   静态设备凭据兼容层。
 
 生产 API、生产数据库、公网入口、真机、GPU 和同机其他服务均未修改。
