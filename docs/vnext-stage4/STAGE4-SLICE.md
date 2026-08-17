@@ -27,6 +27,8 @@ capability barrier，也不改变稳定版或生产服务。
 - `app/laoji/router.py` 增加默认关闭的 `/v2/schedule/graph` 和 `/v2/schedule/graph/clarify` 候选
   路由；启用时只接收结构化 Graph，关闭时稳定返回 `SCHEDULE_GRAPH_V2_DISABLED`，不改变旧 `/parse`
   路由或 capability barrier。
+- 移动端新增独立 `scheduleGraphV2.ts` client；它校验 schema、source SHA-256、原文片段和 revision，
+  但不替换当前 `api.ts` 默认解析链路。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
