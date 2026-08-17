@@ -258,6 +258,23 @@ export async function beginMeetingBindingPurge(
       nowMs,
       normalizedMeetingId,
     );
+    if (Number(result.changes) === 1) {
+      // Advance the operation fence in the same transaction as the binding
+      // transition.  Any queued/running result that arrives after this point
+      // is terminally cancelled and cannot be projected into a purged meeting.
+      await database.runAsync(
+        `UPDATE device_operations
+            SET operation_revision = operation_revision + 1,
+                cancel_revision = cancel_revision + 1,
+                remote_state = 'cancelled',
+                updated_at_ms = ?,
+                terminal_at_ms = COALESCE(terminal_at_ms, ?)
+          WHERE entity_id = ? AND remote_state IN ('queued', 'running')`,
+        nowMs,
+        nowMs,
+        normalizedMeetingId,
+      );
+    }
     return Number(result.changes) === 1;
   });
 }

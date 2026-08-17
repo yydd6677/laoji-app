@@ -162,6 +162,20 @@ export async function createDeviceOperation(
   if (!/^sha256:[0-9a-f]{64}$/.test(inputSha256)) throw new Error('inputSha256 无效');
   const nowMs = input.nowMs ?? Date.now();
   return withMeetingDatabaseTransaction(async database => {
+    // Meeting operations are admitted only while their local service binding
+    // is active in the same device epoch.  Non-meeting operations (for
+    // example a future schedule capability) have no binding row and remain
+    // valid here.
+    const binding = await database.getFirstAsync<{
+      device_epoch_id: string;
+      state: 'active' | 'purging' | 'purged';
+    }>(
+      `SELECT device_epoch_id, state FROM meeting_service_bindings WHERE meeting_id = ?`,
+      entityId,
+    );
+    if (binding && (binding.device_epoch_id !== epochId || binding.state !== 'active')) {
+      throw new Error('会议服务连接不可用于创建远端任务');
+    }
     await database.runAsync(
       `INSERT OR IGNORE INTO device_operations (
         operation_id, device_epoch_id, capability, entity_id, entity_revision, input_sha256,
