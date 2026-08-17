@@ -5076,6 +5076,13 @@ class SqliteMeetingTransaction implements MeetingTransaction {
 
   async insertOutbox(operation: SyncOperationRecord): Promise<boolean> {
     assertScopeKey(operation.scopeKey);
+    if (operation.scopeKey === 'guest') {
+      // The accountless product owns guest data entirely on-device.  A
+      // legacy sync operation here would create a second lifecycle owner and
+      // could later resurrect deleted local content, so fail closed rather
+      // than silently accepting an orphaned outbox row.
+      throw new Error('本机数据不允许写入旧同步队列');
+    }
     const operationId = operation.operationId.trim();
     const aggregateType = operation.aggregateType.trim();
     const aggregateId = operation.aggregateId.trim();
