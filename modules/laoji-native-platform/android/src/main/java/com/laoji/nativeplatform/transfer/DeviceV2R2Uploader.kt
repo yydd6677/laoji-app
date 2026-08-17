@@ -311,7 +311,7 @@ internal class DeviceV2R2Uploader(
   }
 }
 
-private class DeviceV2LeaseRefresher(
+internal class DeviceV2LeaseRefresher(
   private val client: OkHttpClient,
   private val store: CredentialLeaseStore,
 ) {

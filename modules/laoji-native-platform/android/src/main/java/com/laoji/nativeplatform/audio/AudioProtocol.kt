@@ -96,6 +96,7 @@ sealed class AsrServerEvent {
     val endMs: Long?,
     val source: String?,
     val purpose: String?,
+    val eventSequence: Long? = null,
   ) : AsrServerEvent()
 
   data class Error(

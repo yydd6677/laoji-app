@@ -60,6 +60,27 @@ export type NativeRecorderStartOptions = NativeRecorderStartBase & (
   | { accessToken?: never; guestToken?: never; deviceToken: string; dataEpoch: string }
 );
 
+export interface NativeDeviceV2RecorderStartOptions {
+  sessionId: string;
+  storageScope?: string;
+  websocketUrl: string;
+  credentialScope: string;
+  credentialGeneration: number;
+  taskId: string;
+  clientOperationId: string;
+  bindingId: string;
+  bindingGeneration: string;
+  bindingRevision: number;
+  cancelRevision: number;
+  assetId: string;
+  assetGeneration: string;
+  expiresAtEpoch: number;
+  allowInsecureDevelopment?: boolean;
+  connectionTimeoutMs?: number;
+  stopTimeoutMs?: number;
+  levelIntervalMs?: number;
+}
+
 export interface NativeLocalRecorderOptions {
   levelIntervalMs?: number;
 }
@@ -122,6 +143,7 @@ export interface NativeRecorderTranscriptEvent {
   startMs: number | null;
   endMs: number | null;
   source: string | null;
+  eventSequence?: number | null;
   purpose: NativeRealtimeRecorderPurpose;
   receivedAtMs: number;
 }
@@ -200,12 +222,14 @@ declare class LaojiRecorderNativeModule extends NativeModule<NativeRecorderEvent
     frameBytes: typeof NATIVE_AUDIO_FRAME_BYTES;
   };
   start(options: NativeRecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
+  startDeviceV2(options: NativeDeviceV2RecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
   prewarmRealtime(options: NativeRecorderStartOptions): Promise<boolean>;
   discardRealtimePrewarm(sessionId: string): void;
   startLocal(sessionId: string, levelIntervalMs: number | null): Promise<NativeLocalRecorderSnapshot>;
   pause(sessionId: string): Promise<NativeRecorderSnapshot>;
   resume(sessionId: string): Promise<NativeRecorderSnapshot>;
   stop(sessionId: string): Promise<NativeRecorderStopResult>;
+  acknowledgeDeviceV2Transcript(sessionId: string, throughEventSequence: number): Promise<boolean>;
   recover(): Promise<NativeRecorderRecoveryReport>;
   getState(sessionId: string | null): Promise<NativeRecorderSnapshot | null>;
 }
@@ -311,6 +335,50 @@ export async function startNativeRecorder(
   return requireNativeRecorder().start(normalizeNativeRecorderStartOptions(options));
 }
 
+export async function startNativeDeviceV2Recorder(
+  options: NativeDeviceV2RecorderStartOptions,
+): Promise<NativeRealtimeRecorderSnapshot> {
+  const allowInsecureDevelopment = options.allowInsecureDevelopment === true;
+  const expiresAtEpoch = positiveSafeInteger(options.expiresAtEpoch, 'expiresAtEpoch');
+  const nowEpoch = Math.floor(Date.now() / 1_000);
+  if (expiresAtEpoch <= nowEpoch || expiresAtEpoch > nowEpoch + 24 * 60 * 60) {
+    throw new TypeError('invalid expiresAtEpoch');
+  }
+  const normalized: NativeDeviceV2RecorderStartOptions = {
+    ...options,
+    sessionId: validateSessionId(options.sessionId),
+    storageScope: normalizeStorageScope(options.storageScope),
+    websocketUrl: validateNativeRecorderWebSocketUrl(
+      options.websocketUrl,
+      allowInsecureDevelopment,
+    ),
+    credentialScope: boundedIdentifier(options.credentialScope, 120, 'credentialScope'),
+    credentialGeneration: nonNegativeSafeInteger(
+      options.credentialGeneration,
+      'credentialGeneration',
+    ),
+    taskId: boundedIdentifier(options.taskId, 180, 'taskId'),
+    clientOperationId: boundedIdentifier(options.clientOperationId, 180, 'clientOperationId'),
+    bindingId: boundedIdentifier(options.bindingId, 180, 'bindingId'),
+    bindingGeneration: generation(options.bindingGeneration, 'bindingGeneration'),
+    bindingRevision: positiveSafeInteger(options.bindingRevision, 'bindingRevision'),
+    cancelRevision: nonNegativeSafeInteger(options.cancelRevision, 'cancelRevision'),
+    assetId: boundedIdentifier(options.assetId, 180, 'assetId'),
+    assetGeneration: generation(options.assetGeneration, 'assetGeneration'),
+    expiresAtEpoch,
+    allowInsecureDevelopment,
+    connectionTimeoutMs: boundedInteger(
+      options.connectionTimeoutMs,
+      1_000,
+      60_000,
+      'connectionTimeoutMs',
+    ),
+    stopTimeoutMs: boundedInteger(options.stopTimeoutMs, 1_000, 120_000, 'stopTimeoutMs'),
+    levelIntervalMs: boundedInteger(options.levelIntervalMs, 50, 1_000, 'levelIntervalMs'),
+  };
+  return requireNativeRecorder().startDeviceV2(normalized);
+}
+
 export async function prewarmNativeRecorder(
   options: NativeRecorderStartOptions,
 ): Promise<boolean> {
@@ -356,6 +424,16 @@ export async function stopNativeRecorder(sessionId: string): Promise<NativeRecor
     throw new NativeRecorderStopError(result);
   }
   return result;
+}
+
+export async function acknowledgeNativeDeviceV2Transcript(
+  sessionId: string,
+  throughEventSequence: number,
+): Promise<boolean> {
+  return requireNativeRecorder().acknowledgeDeviceV2Transcript(
+    validateSessionId(sessionId),
+    positiveSafeInteger(throughEventSequence, 'throughEventSequence'),
+  );
 }
 
 export function isNativeRecorderStopComplete(result: NativeRecorderStopResult): boolean {
@@ -485,5 +563,29 @@ function boundedInteger(
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
     throw new TypeError(`${fieldName} must be an integer between ${minimum} and ${maximum}`);
   }
+  return value;
+}
+
+function boundedIdentifier(value: string, maximum: number, fieldName: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new TypeError(`invalid ${fieldName}`);
+  }
+  return normalized;
+}
+
+function generation(value: string, fieldName: string): string {
+  const normalized = value.trim();
+  if (!/^[0-9a-f]{32}$/.test(normalized)) throw new TypeError(`invalid ${fieldName}`);
+  return normalized;
+}
+
+function nonNegativeSafeInteger(value: number, fieldName: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`invalid ${fieldName}`);
+  return value;
+}
+
+function positiveSafeInteger(value: number, fieldName: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`invalid ${fieldName}`);
   return value;
 }

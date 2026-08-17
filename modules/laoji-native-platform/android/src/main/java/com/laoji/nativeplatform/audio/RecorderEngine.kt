@@ -80,7 +80,7 @@ class RecorderEngine(
   private var audioRecord: AudioRecord? = null
   private var recordingThread: Thread? = null
   private var fileSession: RecordingFileSession? = null
-  private var asrSocket: RealtimeAsrSocket? = null
+  private var asrSocket: RealtimeAsrTransport? = null
   private var stopFuture: CompletableFuture<RecorderStopResult>? = null
   private var capturedAudioBars: List<Float>? = null
 
@@ -183,6 +183,9 @@ class RecorderEngine(
       }
     }
   }
+
+  fun acknowledgePersistedTranscript(throughEventSequence: Long): Boolean =
+    asrSocket?.acknowledgePersistedTranscript(throughEventSequence) == true
 
   fun snapshot(): RecorderSnapshot = synchronized(stateLock) {
     RecorderSnapshot(
@@ -288,6 +291,7 @@ class RecorderEngine(
         "startMs" to transcript.startMs?.toDouble(),
         "endMs" to transcript.endMs?.toDouble(),
         "source" to transcript.source,
+        "eventSequence" to transcript.eventSequence?.toDouble(),
         "purpose" to config.purpose.wireValue,
         "receivedAtMs" to receivedAtMs.toDouble(),
       ),
@@ -385,6 +389,11 @@ class RecorderEngine(
 
   private fun startRealtimeAsrConnection(): CompletableFuture<Unit> {
     asrConnectionHandled.set(false)
+    if (config.deviceV2 != null) {
+      val socket = DeviceV2RealtimeAsrSocket(applicationContext, config, this)
+      asrSocket = socket
+      return socket.connect()
+    }
     RealtimeAsrWarmPool.claim(config, this)?.let { (socket, connection) ->
       asrSocket = socket
       return connection

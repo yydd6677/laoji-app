@@ -150,6 +150,20 @@ class RecorderCredentials private constructor(
   }
 }
 
+data class DeviceV2RealtimeConfig(
+  val credentialScope: String,
+  val credentialGeneration: Long,
+  val taskId: String,
+  val clientOperationId: String,
+  val bindingId: String,
+  val bindingGeneration: String,
+  val bindingRevision: Long,
+  val cancelRevision: Long,
+  val assetId: String,
+  val assetGeneration: String,
+  val expiresAtEpoch: Long,
+)
+
 class RecorderStartConfig(
   val sessionId: String,
   val purpose: AudioPurpose,
@@ -161,12 +175,14 @@ class RecorderStartConfig(
   val connectionTimeoutMs: Long,
   val stopTimeoutMs: Long,
   val levelIntervalMs: Long,
+  val deviceV2: DeviceV2RealtimeConfig?,
 ) {
   override fun toString(): String =
     "RecorderStartConfig(sessionId=$sessionId, purpose=${purpose.wireValue}, mode=${mode.wireValue}, " +
       "storageScope=[REDACTED], " +
       "websocketUrl=[REDACTED], " +
       "credentials=$credentials, allowInsecureDevelopment=$allowInsecureDevelopment, " +
+      "deviceV2=${if (deviceV2 == null) "disabled" else "enabled"}, " +
       "connectionTimeoutMs=$connectionTimeoutMs, " +
       "stopTimeoutMs=$stopTimeoutMs, levelIntervalMs=$levelIntervalMs)"
 
@@ -222,6 +238,85 @@ class RecorderStartConfig(
           1_000L,
           "levelIntervalMs",
         ),
+        deviceV2 = null,
+      )
+    }
+
+    fun createDeviceV2(
+      sessionId: String,
+      storageScope: String?,
+      websocketUrl: String,
+      allowInsecureDevelopment: Boolean,
+      connectionTimeoutMs: Double?,
+      stopTimeoutMs: Double?,
+      levelIntervalMs: Double?,
+      credentialScope: String,
+      credentialGeneration: Long,
+      taskId: String,
+      clientOperationId: String,
+      bindingId: String,
+      bindingGeneration: String,
+      bindingRevision: Long,
+      cancelRevision: Long,
+      assetId: String,
+      assetGeneration: String,
+      expiresAtEpoch: Long,
+    ): RecorderStartConfig {
+      val nowEpoch = System.currentTimeMillis() / 1_000L
+      if (
+        !Regex("^[A-Za-z0-9:_-]{1,120}$").matches(credentialScope) ||
+        credentialGeneration < 0L ||
+        !Regex("^[0-9a-f]{32}$").matches(bindingGeneration) ||
+        !Regex("^[0-9a-f]{32}$").matches(assetGeneration) ||
+        bindingRevision < 1L ||
+        cancelRevision < 0L ||
+        expiresAtEpoch <= nowEpoch ||
+        expiresAtEpoch > nowEpoch + 24L * 60L * 60L
+      ) {
+        throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "invalid device-v2 realtime fence")
+      }
+      return RecorderStartConfig(
+        sessionId = validateSessionId(sessionId),
+        purpose = AudioPurpose.MEETING,
+        mode = RecorderMode.REALTIME,
+        storageScope = normalizeStorageScope(storageScope),
+        websocketUrl = validateWebSocketUrl(websocketUrl, allowInsecureDevelopment),
+        credentials = null,
+        allowInsecureDevelopment = allowInsecureDevelopment,
+        connectionTimeoutMs = boundedMilliseconds(
+          connectionTimeoutMs,
+          AudioRuntimeContract.DEFAULT_CONNECTION_TIMEOUT_MS,
+          1_000L,
+          60_000L,
+          "connectionTimeoutMs",
+        ),
+        stopTimeoutMs = boundedMilliseconds(
+          stopTimeoutMs,
+          AudioRuntimeContract.DEFAULT_STOP_TIMEOUT_MS,
+          1_000L,
+          120_000L,
+          "stopTimeoutMs",
+        ),
+        levelIntervalMs = boundedMilliseconds(
+          levelIntervalMs,
+          AudioRuntimeContract.DEFAULT_LEVEL_INTERVAL_MS,
+          50L,
+          1_000L,
+          "levelIntervalMs",
+        ),
+        deviceV2 = DeviceV2RealtimeConfig(
+          credentialScope = credentialScope,
+          credentialGeneration = credentialGeneration,
+          taskId = validateOpaqueId(taskId, "taskId"),
+          clientOperationId = validateOpaqueId(clientOperationId, "clientOperationId"),
+          bindingId = validateOpaqueId(bindingId, "bindingId"),
+          bindingGeneration = bindingGeneration,
+          bindingRevision = bindingRevision,
+          cancelRevision = cancelRevision,
+          assetId = validateOpaqueId(assetId, "assetId"),
+          assetGeneration = assetGeneration,
+          expiresAtEpoch = expiresAtEpoch,
+        ),
       )
     }
 
@@ -245,6 +340,7 @@ class RecorderStartConfig(
         1_000L,
         "levelIntervalMs",
       ),
+      deviceV2 = null,
     )
 
     fun validateSessionId(value: String): String {
@@ -253,6 +349,14 @@ class RecorderStartConfig(
         throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "invalid sessionId")
       }
       return sessionId
+    }
+
+    private fun validateOpaqueId(value: String, fieldName: String): String {
+      val normalized = value.trim()
+      if (normalized.length !in 1..180 || normalized.any { it.isISOControl() }) {
+        throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "invalid $fieldName")
+      }
+      return normalized
     }
 
     fun safeFileStem(sessionId: String): String {

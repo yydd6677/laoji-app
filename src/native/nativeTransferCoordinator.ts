@@ -118,7 +118,7 @@ export async function ensureNativeTransferLease(
   }
 }
 
-async function ensureNativeDeviceV2TransferLease(
+export async function ensureNativeDeviceV2TransferLease(
   session: DeviceV2Session,
 ): Promise<NativeTransferLease | null> {
   if (!transferAvailable()) return null;

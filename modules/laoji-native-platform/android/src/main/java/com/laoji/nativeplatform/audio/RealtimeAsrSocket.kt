@@ -30,10 +30,22 @@ interface RealtimeAsrSocketListener {
   fun onTransportFailure(code: RecorderErrorCode, message: String)
 }
 
+interface RealtimeAsrTransport {
+  fun connect(): CompletableFuture<Unit>
+  fun isOpen(): Boolean
+  fun attachListener(next: RealtimeAsrSocketListener)
+  fun sendPcm(buffer: ByteArray, count: Int): Boolean
+  fun sendEndFrame(): Boolean
+  fun awaitReadyToStop(timeoutMs: Long): ReadyToStopOutcome
+  fun acknowledgePersistedTranscript(throughEventSequence: Long): Boolean = false
+  fun close()
+  fun cancel()
+}
+
 class RealtimeAsrSocket(
   private val config: RecorderStartConfig,
   listener: RealtimeAsrSocketListener,
-) {
+) : RealtimeAsrTransport {
   @Volatile
   private var listener = listener
   private val opened = AtomicBoolean(false)
@@ -48,7 +60,7 @@ class RealtimeAsrSocket(
   @Volatile
   private var webSocket: WebSocket? = null
 
-  fun connect(): CompletableFuture<Unit> {
+  override fun connect(): CompletableFuture<Unit> {
     val websocketUrl = config.websocketUrl
       ?: throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "realtime websocketUrl is required")
     val credentials = config.credentials
@@ -60,13 +72,13 @@ class RealtimeAsrSocket(
     return connection
   }
 
-  fun isOpen(): Boolean = opened.get()
+  override fun isOpen(): Boolean = opened.get()
 
-  fun attachListener(next: RealtimeAsrSocketListener) {
+  override fun attachListener(next: RealtimeAsrSocketListener) {
     listener = next
   }
 
-  fun sendPcm(buffer: ByteArray, count: Int): Boolean {
+  override fun sendPcm(buffer: ByteArray, count: Int): Boolean {
     val socket = webSocket ?: return false
     val byteCount = count.coerceIn(0, buffer.size) and -2
     if (!opened.get() || stopHandshake.hasStopStarted() || byteCount == 0) return false
@@ -88,18 +100,18 @@ class RealtimeAsrSocket(
     return accepted
   }
 
-  fun sendEndFrame(): Boolean {
+  override fun sendEndFrame(): Boolean {
     if (!stopHandshake.beginStop()) return true
     val socket = webSocket ?: return false
     if (!opened.get()) return false
     return socket.send(ByteString.EMPTY)
   }
 
-  fun awaitReadyToStop(timeoutMs: Long): ReadyToStopOutcome {
+  override fun awaitReadyToStop(timeoutMs: Long): ReadyToStopOutcome {
     return stopHandshake.awaitCompletion(timeoutMs)
   }
 
-  fun close() {
+  override fun close() {
     clientClosing.set(true)
     opened.set(false)
     val socket = webSocket
@@ -108,7 +120,7 @@ class RealtimeAsrSocket(
     }
   }
 
-  fun cancel() {
+  override fun cancel() {
     clientClosing.set(true)
     opened.set(false)
     webSocket?.cancel()
