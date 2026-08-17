@@ -7,6 +7,7 @@ export interface LaoJiFeatureFlags {
   localMeetingDbAccountRootWriteV1: boolean;
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
+  meetingQuestionsQ2Candidate: boolean;
   meetingAutomaticTopicsV1: boolean;
   meetingTagSyncV1: boolean;
   meetingAttachmentSyncV1: boolean;
@@ -54,6 +55,10 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // stored in the canonical meeting database.
     meetingQuestionsV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingQuestionsV1 === true,
+    // Q2 snapshot/provider adapter is contract-ready but remains off until
+    // the independent semantic holdout accepts a real reader.
+    meetingQuestionsQ2Candidate: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.meetingQuestionsQ2Candidate === true,
     // Current structured Summary topics remain a read-only source and never
     // create or mutate user-owned meeting tags.
     meetingAutomaticTopicsV1: localMeetingDbCanonicalReadV1

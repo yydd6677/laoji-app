@@ -129,6 +129,7 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `app/services/vnext_source_stream_store.py` | source stream + bounded checkpoint owner | 加密章节来源、manifest/group 配额、双槽恢复点和 artifact 原子提交；默认关闭 |
 | `app/services/summary_v3_chapter_merge.py` | deterministic Facts V3 reducer | 事实/关系/行动有界合并；不调用模型、不使用样本专用规则 |
 | `app/services/vnext_summary_chapter_pipeline.py` | generic Task/Attempt summary adapter | 每次最多处理一章；provider 适配、checkpoint 提升和最终 artifact 提交 |
+| `src/services/questionQ2Candidate.ts` | Q2 single-reader candidate adapter | fake transport、快照/线程/分句引用原子落库；默认 feature flag 关闭，等待语义 holdout |
 | `app/services/app_meeting_question.py` | MeetingQuestionQ2 | 由 5,826 行多轮链替换为 snapshot/provider/grounding/owner 四层 |
 | `app/models/meeting_*sync.py` | none after v1 drain | 账号/跨设备同步模型按 Stage 5 删除 |
 | `app/api/location.py` | LocationProxy | 保留缓存/限流/日志脱敏 |

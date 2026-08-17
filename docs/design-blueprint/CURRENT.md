@@ -113,3 +113,8 @@ V3 章节经过确定性 reducer 合并到 40 条事实、48 条关系和 10 条
 SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据，但尚未
 接入手机 source repository、Q2、真实模型/样本或 capability barrier，因此不能称为 Stage 3 退出，
 也没有改变当前稳定版服务流量。
+
+Q2 已增加默认关闭的 `questionQ2Candidate` fake-transport adapter：它从当前 immutable evidence
+创建 snapshot/thread，provider 只接收脱离可变状态的来源视图，回答分句必须完整覆盖答案并逐字匹配
+UTF-8 引用，随后才写入 Q2 clause/citation 表。该 adapter 仍没有接入实际 reader，也没有改变现有
+问答 UI；语义 holdout、真实 provider 和 capability barrier 仍是 Stage 3 未完成项。
