@@ -8,6 +8,7 @@ export interface DeviceKeyInfo {
 interface DeviceAuthNativeModule {
   getOrCreateKey(keyVersion: number): Promise<DeviceKeyInfo>;
   sign(keyVersion: number, payloadBase64: string): string;
+  findProofOfWork(nonceBase64: string, difficultyBits: number): Promise<number>;
   rotateKey(nextKeyVersion: number): Promise<DeviceKeyInfo>;
   deleteKey(keyVersion: number): void;
   hasKey(keyVersion: number): boolean;
@@ -37,6 +38,13 @@ export function signWithDeviceKey(keyVersion: number, payloadBase64: string): st
   const payload = payloadBase64.trim();
   if (!payload) throw new Error('设备签名输入为空。');
   return requireModule().sign(validVersion(keyVersion), payload);
+}
+
+export function findDeviceProofOfWork(nonceBase64: string, difficultyBits: number): Promise<number> {
+  if (!Number.isSafeInteger(difficultyBits) || difficultyBits < 1 || difficultyBits > 24) {
+    throw new Error('设备注册难度无效。');
+  }
+  return requireModule().findProofOfWork(nonceBase64.trim(), difficultyBits);
 }
 
 export function rotateDeviceKey(nextKeyVersion: number): Promise<DeviceKeyInfo> {

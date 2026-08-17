@@ -8,6 +8,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.Signature
 
 /** Android Keystore boundary for device-v2 identity.
@@ -36,6 +37,43 @@ class LaojiDeviceAuthModule : Module() {
       signature.initSign(entry.privateKey)
       signature.update(decode(payloadBase64))
       encode(signature.sign())
+    }
+
+    AsyncFunction("findProofOfWork") { nonceBase64: String, difficultyBits: Int, promise: Promise ->
+      try {
+        require(difficultyBits in 1..24) { "工作量难度无效" }
+        val nonce = decode(nonceBase64)
+        var candidate = 0L
+        val targetShift = 256 - difficultyBits
+        while (candidate <= Long.MAX_VALUE) {
+          val input = ByteArray(nonce.size + 8)
+          nonce.copyInto(input)
+          var value = candidate
+          for (index in 0 until 8) {
+            input[input.size - 1 - index] = (value and 0xff).toByte()
+            value = value ushr 8
+          }
+          val digest = MessageDigest.getInstance("SHA-256").digest(input)
+          var leading = 0
+          for (byte in digest) {
+            val unsigned = byte.toInt() and 0xff
+            if (unsigned == 0) {
+              leading += 8
+              continue
+            }
+            leading += Integer.numberOfLeadingZeros(unsigned) - 24
+            break
+          }
+          if (leading >= difficultyBits) {
+            promise.resolve(candidate)
+            return@AsyncFunction
+          }
+          candidate += 1
+        }
+        throw IllegalStateException("工作量证明搜索空间耗尽")
+      } catch (error: Throwable) {
+        promise.reject("DEVICE_POW_ERROR", "无法完成设备注册验证", error)
+      }
     }
 
     AsyncFunction("rotateKey") { nextKeyVersion: Int, promise: Promise ->
