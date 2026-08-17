@@ -201,15 +201,18 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
       request_id: authRequestId,
     }),
   }, '设备令牌获取失败');
+  const expiresAt = token.expires_at < 1_000_000_000_000
+    ? token.expires_at * 1000
+    : token.expires_at;
   await Promise.all([
     SecureStore.setItemAsync(TOKEN_KEY, token.access_token),
-    SecureStore.setItemAsync(TOKEN_EXPIRES_KEY, String(token.expires_at)),
+    SecureStore.setItemAsync(TOKEN_EXPIRES_KEY, String(expiresAt)),
     SecureStore.setItemAsync(KEY_VERSION_KEY, String(token.key_version)),
     SecureStore.setItemAsync(PUBLIC_HASH_KEY, hash),
   ]);
   return {
     token: token.access_token,
-    expiresAt: token.expires_at,
+    expiresAt,
     deviceId: identity.deviceId,
     epochId: identity.epochId,
     keyVersion: token.key_version,

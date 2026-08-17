@@ -106,6 +106,7 @@ class UploadSession(VNextModel):
     verified_asset_id: str | None = Field(default=None, max_length=180)
     transcription_task_id: str | None = Field(default=None, max_length=180)
     put_url: str | None = Field(default=None, max_length=4096)
+    object_completed: bool = False
     uploaded_parts: list[UploadPartReceipt] = Field(default_factory=list, max_length=10_000)
 
 

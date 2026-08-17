@@ -289,9 +289,50 @@ def test_multipart_create_replay_does_not_open_second_remote_upload(upload_conte
     uploaded[1] = b"first-part"
     recovered = vnext_upload_store.get_upload_session(context, first["session_id"])
     assert recovered is not None
+    assert recovered["object_completed"] is False
     assert recovered["uploaded_parts"] == [
         {"part_number": 1, "etag": '"etag-1"'},
     ]
+
+
+def test_multipart_completion_recovers_after_remote_merge(upload_context, monkeypatch) -> None:
+    context, fake = upload_context
+    monkeypatch.setattr(vnext_upload_store, "SINGLE_UPLOAD_THRESHOLD", 4)
+    content = b"recovery"
+    session, _, digest = create_small(context, content, suffix="a")
+    assert session["mode"] == "multipart"
+    upload_id = next(iter(fake.multipart))
+    object_key, uploaded = fake.multipart[upload_id]
+    uploaded[1] = content
+    fake.complete_multipart_upload(
+        object_key=object_key,
+        upload_id=upload_id,
+        parts=[r2_storage_service.R2Part(1, '"etag-1"')],
+    )
+    with device_identity.control_connection() as connection:
+        connection.execute(
+            "UPDATE vnext_upload_sessions SET state = 'completing' WHERE session_id = ?",
+            (session["session_id"],),
+        )
+        connection.commit()
+
+    recovered = vnext_upload_store.get_upload_session(context, session["session_id"])
+    assert recovered is not None
+    assert recovered["object_completed"] is True
+    assert recovered["uploaded_parts"] == []
+    completed = vnext_upload_store.complete_upload_session(
+        context,
+        session["session_id"],
+        binding_generation=BINDING_GENERATION,
+        binding_revision=1,
+        cancel_revision=0,
+        parts=[],
+        transcription_task_id="transcription-task-recovered",
+        transcription_generation_id="transcription-generation-recovered",
+        transcription_input_sha256=digest,
+    )
+    assert completed["verified_asset"]["source_sha256"] == digest
+    assert completed["task"]["task_id"] == "transcription-task-recovered"
 
 
 def test_binding_purge_confirms_only_after_verified_object_is_absent(upload_context) -> None:

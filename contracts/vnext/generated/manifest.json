@@ -55,7 +55,7 @@
     {
       "name": "upload_session",
       "path": "schemas/upload_session.schema.json",
-      "sha256": "e83be8e790380954500a646440e37d1cc75dd4b10d5757f68b385419e1f417e3"
+      "sha256": "74ad944a58c4babb41c8ed834c21122d685f1a2c705bb0233cadf842865b8311"
     }
   ]
 }

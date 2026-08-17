@@ -74,10 +74,12 @@ mobile SQLite + app-private media (business authority)
 Stage 2 已实现 0043/0044、RecordingAsset generation/source/operation 不变量、Transcript stable
 segment/text state、speaker/manual overlay 仓储，以及隔离的 device-v2 R2 upload session、容量预留、
 流式 SHA-256 验证、verified asset + transcription Task 原子提交和 purge-aware cleanup obligation。
-v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据为 TypeScript、迁移重放、共享合同生成
-和 device-v2/upload/purge 测试；这些只证明隔离切片，不代表 Stage 2 退出。
+未激活的 Android `device-v2-r2` WorkManager 已支持 single/multipart 源 URI 直传、两片并发、ETag 和
+remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 armed binding-scoped purge capability。
+v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
+[Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
 
-下一入口是 Android `MeetingUploadWorker` v2 客户端、8030 stable batch/stream、连续文字事件和
+下一入口是 8030 stable batch/stream、连续文字事件、ASR/CAM++ 并行队列和
 NO_SPEECH/恢复/性能门；不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且

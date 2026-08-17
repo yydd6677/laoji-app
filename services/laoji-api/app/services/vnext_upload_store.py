@@ -278,12 +278,14 @@ def _session_payload(
     row: Any,
     *,
     put_url: str | None = None,
+    object_completed: bool = False,
     uploaded_parts: Iterable[r2_storage_service.R2Part] = (),
 ) -> dict[str, Any]:
     decoded = _decode_session(row)
     assert decoded is not None
     decoded["schema_version"] = 2
     decoded["put_url"] = put_url
+    decoded["object_completed"] = object_completed
     decoded["uploaded_parts"] = [
         {"part_number": part.part_number, "etag": part.etag}
         for part in uploaded_parts
@@ -494,18 +496,25 @@ def get_upload_session(context: UploadOwnerContext, session_id: str, *, probe: b
     if row is None:
         return None
     uploaded_parts: list[r2_storage_service.R2Part] = []
-    if probe and row["mode"] == "multipart" and row["state"] in {"active", "completing"} and row["multipart_upload_id"]:
+    object_completed = False
+    if probe and row["state"] in {"active", "completing"}:
         object_key = _object_key(str(row["object_key_hmac"]))
         try:
-            uploaded_parts = r2_storage_service.list_uploaded_parts(
-                object_key=object_key,
-                upload_id=str(row["multipart_upload_id"]),
-            )
+            object_completed = r2_storage_service.object_head(object_key=object_key) is not None
+            if not object_completed and row["mode"] == "multipart" and row["multipart_upload_id"]:
+                uploaded_parts = r2_storage_service.list_uploaded_parts(
+                    object_key=object_key,
+                    upload_id=str(row["multipart_upload_id"]),
+                )
         except Exception as error:
             raise VNextUploadError(
                 "UPLOAD_STORAGE_UNAVAILABLE", "录音上传状态暂时无法查询", 503,
             ) from error
-    return _session_payload(row, uploaded_parts=uploaded_parts)
+    return _session_payload(
+        row,
+        object_completed=object_completed,
+        uploaded_parts=uploaded_parts,
+    )
 
 
 def presign_upload_parts(
@@ -648,24 +657,26 @@ def complete_upload_session(
     object_key = _object_key(str(row["object_key_hmac"]))
     normalized_parts: list[r2_storage_service.R2Part] = []
     if row["mode"] == "multipart":
-        if len(parts) != int(row["total_parts"]):
-            raise VNextUploadError("UPLOAD_PARTS_INCOMPLETE", "上传分片尚未完成", 409)
-        seen: set[int] = set()
-        for item in parts:
-            number = item.get("part_number")
-            etag = str(item.get("etag") or "").strip()
-            if not isinstance(number, int) or isinstance(number, bool) or number < 1 or number > int(row["total_parts"]) or not etag or number in seen:
-                raise VNextUploadError("UPLOAD_PARTS_INVALID", "上传分片结果无效", 422)
-            seen.add(number)
-            normalized_parts.append(r2_storage_service.R2Part(number, etag))
         try:
             already_completed = r2_storage_service.object_head(object_key=object_key) is not None
             if not already_completed:
+                if len(parts) != int(row["total_parts"]):
+                    raise VNextUploadError("UPLOAD_PARTS_INCOMPLETE", "上传分片尚未完成", 409)
+                seen: set[int] = set()
+                for item in parts:
+                    number = item.get("part_number")
+                    etag = str(item.get("etag") or "").strip()
+                    if not isinstance(number, int) or isinstance(number, bool) or number < 1 or number > int(row["total_parts"]) or not etag or number in seen:
+                        raise VNextUploadError("UPLOAD_PARTS_INVALID", "上传分片结果无效", 422)
+                    seen.add(number)
+                    normalized_parts.append(r2_storage_service.R2Part(number, etag))
                 r2_storage_service.complete_multipart_upload(
                     object_key=object_key,
                     upload_id=str(row["multipart_upload_id"]),
                     parts=normalized_parts,
                 )
+        except VNextUploadError:
+            raise
         except Exception as error:
             try:
                 recovered = r2_storage_service.object_head(object_key=object_key) is not None

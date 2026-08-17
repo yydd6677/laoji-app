@@ -94,6 +94,11 @@
       "title": "Mode",
       "type": "string"
     },
+    "object_completed": {
+      "default": false,
+      "title": "Object Completed",
+      "type": "boolean"
+    },
     "part_size": {
       "minimum": 5242880,
       "title": "Part Size",

@@ -7,14 +7,26 @@ export type NativeUploadState = {
   reason?: string;
   remoteAssetId?: string;
   remoteRevision?: number;
+  transcriptionTaskId?: string;
   runAttemptCount?: number;
 };
 
 interface NativeTransferModule {
   setCredentialLease(scope: string, generation: number, apiBaseUrl: string, accessToken: string): Promise<void>;
+  setDeviceV2CredentialLease(
+    scope: string,
+    generation: number,
+    apiBaseUrl: string,
+    accessToken: string,
+    deviceId: string,
+    deviceEpochId: string,
+    keyVersion: number,
+    expiresAtMs: number,
+  ): Promise<void>;
   clearCredentialLease(scope: string): Promise<void>;
   enqueueMeetingUpload(input: {
     scope: string;
+    credentialScope?: string;
     generation: number;
     meetingId: string;
     remoteMeetingId: string;
@@ -22,13 +34,20 @@ interface NativeTransferModule {
     fileUri: string;
     mimeType: string;
     fileName: string;
-    protocol: 'legacy' | 'recording-assets-v2';
+    protocol: 'legacy' | 'recording-assets-v2' | 'device-v2-r2';
     recordingAssetId: string;
     recordingRole: 'primary' | 'secondary';
     recordingOrigin: 'captured' | 'imported' | 'recovered';
     expectedBytes: number;
     durationMs: number;
     checksumSha256: string;
+    deviceId?: string;
+    deviceEpochId?: string;
+    bindingId?: string;
+    bindingGeneration?: string;
+    bindingRevision?: number;
+    cancelRevision?: number;
+    assetGeneration?: string;
   }): Promise<string>;
   getUploadState(workId: string): Promise<NativeUploadState>;
   cancelUpload(workId: string): Promise<void>;

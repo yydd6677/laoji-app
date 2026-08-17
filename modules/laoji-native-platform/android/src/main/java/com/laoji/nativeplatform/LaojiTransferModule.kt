@@ -34,6 +34,30 @@ class LaojiTransferModule : Module() {
       )
     }
 
+    AsyncFunction("setDeviceV2CredentialLease") {
+        scope: String,
+        generation: Long,
+        apiBaseUrl: String,
+        accessToken: String,
+        deviceId: String,
+        deviceEpochId: String,
+        keyVersion: Int,
+        expiresAtMs: Long,
+      ->
+      CredentialLeaseStore(requireContext()).put(
+        CredentialLease(
+          scope = scope,
+          generation = generation,
+          apiBaseUrl = apiBaseUrl.trim().trimEnd('/'),
+          accessToken = accessToken,
+          deviceId = deviceId,
+          deviceEpochId = deviceEpochId,
+          keyVersion = keyVersion,
+          expiresAtMs = expiresAtMs,
+        )
+      )
+    }
+
     AsyncFunction("clearCredentialLease") { scope: String ->
       CredentialLeaseStore(requireContext()).clear(scope)
       WorkManager.getInstance(requireContext()).cancelAllWorkByTag(scopeTag(scope))
@@ -41,6 +65,7 @@ class LaojiTransferModule : Module() {
 
     AsyncFunction("enqueueMeetingUpload") { input: Map<String, Any?> ->
       val scope = input.requiredString("scope")
+      val credentialScope = (input["credentialScope"] as? String)?.takeIf { it.isNotBlank() } ?: scope
       val generation = input.requiredLong("generation")
       val meetingId = input.requiredString("meetingId")
       val remoteMeetingId = input.requiredString("remoteMeetingId")
@@ -55,6 +80,21 @@ class LaojiTransferModule : Module() {
       val expectedBytes = input.requiredLong("expectedBytes")
       val durationMs = input.requiredLong("durationMs")
       val checksumSha256 = input["checksumSha256"] as? String ?: ""
+      val deviceId = input["deviceId"] as? String ?: ""
+      val deviceEpochId = input["deviceEpochId"] as? String ?: ""
+      val bindingId = input["bindingId"] as? String ?: ""
+      val bindingGeneration = input["bindingGeneration"] as? String ?: ""
+      val bindingRevision = (input["bindingRevision"] as? Number)?.toLong() ?: -1L
+      val cancelRevision = (input["cancelRevision"] as? Number)?.toLong() ?: -1L
+      val assetGeneration = input["assetGeneration"] as? String ?: ""
+      if (protocol == MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2) {
+        require(deviceId.isNotBlank() && deviceEpochId.isNotBlank()) { "device identity is required" }
+        require(bindingId.isNotBlank() && bindingGeneration.matches(Regex("^[0-9a-f]{32}$"))) {
+          "binding identity is required"
+        }
+        require(bindingRevision >= 1 && cancelRevision >= 0) { "binding revision is invalid" }
+        require(assetGeneration.matches(Regex("^[0-9a-f]{32}$"))) { "asset generation is invalid" }
+      }
       if (MeetingDeletionStore(requireContext()).isDeleted(scope, meetingId)) {
         throw IllegalStateException("meeting has been deleted")
       }
@@ -64,6 +104,7 @@ class LaojiTransferModule : Module() {
         .setInputData(
           workDataOf(
             MeetingUploadWorker.KEY_SCOPE to scope,
+            MeetingUploadWorker.KEY_CREDENTIAL_SCOPE to credentialScope,
             MeetingUploadWorker.KEY_GENERATION to generation,
             MeetingUploadWorker.KEY_MEETING_ID to meetingId,
             MeetingUploadWorker.KEY_REMOTE_MEETING_ID to remoteMeetingId,
@@ -77,15 +118,28 @@ class LaojiTransferModule : Module() {
             MeetingUploadWorker.KEY_RECORDING_ORIGIN to recordingOrigin,
             MeetingUploadWorker.KEY_EXPECTED_BYTES to expectedBytes,
             MeetingUploadWorker.KEY_DURATION_MS to durationMs,
-            MeetingUploadWorker.KEY_CHECKSUM_SHA256 to checksumSha256
+            MeetingUploadWorker.KEY_CHECKSUM_SHA256 to checksumSha256,
+            MeetingUploadWorker.KEY_DEVICE_ID to deviceId,
+            MeetingUploadWorker.KEY_DEVICE_EPOCH_ID to deviceEpochId,
+            MeetingUploadWorker.KEY_BINDING_ID to bindingId,
+            MeetingUploadWorker.KEY_BINDING_GENERATION to bindingGeneration,
+            MeetingUploadWorker.KEY_BINDING_REVISION to bindingRevision,
+            MeetingUploadWorker.KEY_CANCEL_REVISION to cancelRevision,
+            MeetingUploadWorker.KEY_ASSET_GENERATION to assetGeneration,
           )
         )
         .addTag(scopeTag(scope))
+        .addTag(scopeTag(credentialScope))
         .addTag(meetingUploadTag(scope, meetingId))
         .addTag(operationTag(operationId))
         .build()
+      val uniqueWorkName = if (protocol == MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2) {
+        "laoji-device-v2-r2:$deviceEpochId:$recordingAssetId:$assetGeneration"
+      } else {
+        "laoji-meeting-upload:$scope:$operationId"
+      }
       WorkManager.getInstance(requireContext()).enqueueUniqueWork(
-        "laoji-meeting-upload:$scope:$operationId",
+        uniqueWorkName,
         ExistingWorkPolicy.KEEP,
         request
       )
@@ -130,6 +184,7 @@ class LaojiTransferModule : Module() {
       "remoteAssetId" to info.outputData.getString(MeetingUploadWorker.KEY_REMOTE_ASSET_ID),
       "remoteRevision" to info.outputData.getLong(MeetingUploadWorker.KEY_REMOTE_REVISION, -1)
         .takeIf { it >= 1 },
+      "transcriptionTaskId" to info.outputData.getString(MeetingUploadWorker.KEY_TRANSCRIPTION_TASK_ID),
       "runAttemptCount" to info.runAttemptCount
     )
   }

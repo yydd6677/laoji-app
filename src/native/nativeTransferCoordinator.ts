@@ -4,6 +4,8 @@ import {
   type NativeUploadState,
 } from 'laoji-native-platform';
 import { getApiConfig } from '../services/config';
+import { ensureRemoteMeetingServiceBinding } from '../services/deviceAuthority';
+import { ensureDeviceV2Session, type DeviceV2Session } from '../services/deviceV2Api';
 
 export interface NativeTransferLease {
   scope: string;
@@ -37,6 +39,20 @@ interface LeaseRecord extends NativeTransferLease {
   apiBaseUrl: string;
   accessToken: string;
   ready: Promise<void>;
+}
+
+export interface NativeDeviceV2MeetingUploadRequest {
+  scope: string;
+  meetingId: string;
+  operationId: string;
+  fileUri: string;
+  mimeType: string;
+  fileName: string;
+  recordingAssetId: string;
+  assetGeneration: string;
+  expectedBytes: number;
+  checksumSha256: string;
+  durationMs?: number | null;
 }
 
 const leases = new Map<string, LeaseRecord>();
@@ -102,6 +118,49 @@ export async function ensureNativeTransferLease(
   }
 }
 
+async function ensureNativeDeviceV2TransferLease(
+  session: DeviceV2Session,
+): Promise<NativeTransferLease | null> {
+  if (!transferAvailable()) return null;
+  const scope = `device-v2:${session.epochId}`;
+  const apiBaseUrl = getApiConfig().apiBase.trim().replace(/\/+$/, '');
+  const existing = leases.get(scope);
+  if (
+    existing
+    && existing.accessToken === session.token
+    && existing.apiBaseUrl === apiBaseUrl
+  ) {
+    await existing.ready;
+    return { scope, generation: existing.generation };
+  }
+  const generation = nextGeneration();
+  const ready = nativeTransfer!.setDeviceV2CredentialLease(
+    scope,
+    generation,
+    apiBaseUrl,
+    session.token,
+    session.deviceId,
+    session.epochId,
+    session.keyVersion,
+    session.expiresAt,
+  );
+  const record: LeaseRecord = {
+    scope,
+    generation,
+    apiBaseUrl,
+    accessToken: session.token,
+    ready,
+  };
+  leases.set(scope, record);
+  try {
+    await ready;
+    return { scope, generation };
+  } catch (error) {
+    if (leases.get(scope) === record) leases.delete(scope);
+    throw error;
+  }
+}
+
 export async function clearNativeTransferLease(scope: string): Promise<void> {
   const normalizedScope = scope.trim();
   if (!normalizedScope) return;
@@ -117,6 +176,7 @@ export async function enqueueNativeMeetingUpload(
   if (!lease || !nativeTransfer) return null;
   const workId = await nativeTransfer.enqueueMeetingUpload({
     scope: lease.scope,
+    credentialScope: lease.scope,
     generation: lease.generation,
     meetingId: request.meetingId,
     remoteMeetingId: request.remoteMeetingId?.trim() || request.meetingId,
@@ -131,6 +191,49 @@ export async function enqueueNativeMeetingUpload(
     expectedBytes: request.expectedBytes ?? -1,
     durationMs: request.durationMs ?? -1,
     checksumSha256: request.checksumSha256?.trim() ?? '',
+  });
+  return { ...lease, workId, operationId: request.operationId };
+}
+
+/**
+ * Isolated Stage 2 ingress. Existing callers remain on their explicit v1
+ * protocols until the device-v2 capability barrier is enabled.
+ */
+export async function enqueueNativeDeviceV2MeetingUpload(
+  request: NativeDeviceV2MeetingUploadRequest,
+): Promise<NativeMeetingUploadRegistration | null> {
+  if (!transferAvailable() || !nativeTransfer) return null;
+  const binding = await ensureRemoteMeetingServiceBinding(request.meetingId);
+  const session = await ensureDeviceV2Session();
+  if (session.epochId !== binding.deviceEpochId) {
+    throw new Error('设备上传 epoch 与会议连接不一致');
+  }
+  const lease = await ensureNativeDeviceV2TransferLease(session);
+  if (!lease) return null;
+  const workId = await nativeTransfer.enqueueMeetingUpload({
+    scope: request.scope,
+    credentialScope: lease.scope,
+    generation: lease.generation,
+    meetingId: binding.meetingId,
+    remoteMeetingId: binding.bindingId,
+    operationId: request.operationId,
+    fileUri: request.fileUri,
+    mimeType: request.mimeType,
+    fileName: request.fileName,
+    protocol: 'device-v2-r2',
+    recordingAssetId: request.recordingAssetId,
+    recordingRole: 'primary',
+    recordingOrigin: 'captured',
+    expectedBytes: request.expectedBytes,
+    durationMs: request.durationMs ?? -1,
+    checksumSha256: request.checksumSha256,
+    deviceId: session.deviceId,
+    deviceEpochId: session.epochId,
+    bindingId: binding.bindingId,
+    bindingGeneration: binding.bindingGeneration,
+    bindingRevision: binding.bindingRevision,
+    cancelRevision: binding.cancelRevision,
+    assetGeneration: request.assetGeneration,
   });
   return { ...lease, workId, operationId: request.operationId };
 }

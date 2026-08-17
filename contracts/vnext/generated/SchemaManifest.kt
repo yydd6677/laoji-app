@@ -14,6 +14,6 @@ object VNextSchemaManifest {
         "schedule_parse_response_legacy_projection" to "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc",
         "source_ref" to "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712",
         "task_attempt" to "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36",
-        "upload_session" to "e83be8e790380954500a646440e37d1cc75dd4b10d5757f68b385419e1f417e3"
+        "upload_session" to "74ad944a58c4babb41c8ed834c21122d685f1a2c705bb0233cadf842865b8311"
     )
 }
