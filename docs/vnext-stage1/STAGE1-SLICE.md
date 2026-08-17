@@ -25,8 +25,8 @@
 - `python3 tools/vnext/verify_stage1_migrations.py`：通过，包含 DDL 重放、来源指针和外键检查。
 - `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py tests/test_device_v2_identity.py`：11 passed。
 - `python3 -m compileall -q services/laoji-api/app services/laoji-api/tests`：通过。
-- `python3 tools/vnext/verify_stage1_exit.py`：8 项静态 owner/fence/auth 检查通过；明确报告
-  `v2_purge_capability=blocked`、`android_native_compile=unverified`，因此 exit gate 仍阻塞。
+- `python3 tools/vnext/verify_stage1_exit.py`：8 项静态 owner/fence/auth 检查通过，并报告
+  `android_native_compile=passed`；`v2_purge_capability=blocked`，因此 exit gate 仍阻塞。
 - 两个后续切片提交：`52e79fe`（purge journal）、`0a471c5`（日程行级写入）。
 - 绑定清除 fence 提交：`3111a84`（本机 operation）、`d2d2177`（服务端 generic task）。
 - 整理恢复 owner 提交：`c2ad18d`。
@@ -34,9 +34,9 @@
   15 分钟 bearer、challenge 单次消费、bootstrap/auth 限流和旧/新密钥双签名轮换测试，但尚未接入
   Android Keystore、purge capability，不能切换生产。
 - Android Keystore bridge 提交：`65c4708`；新增不可导出 P-256 生成/签名/轮换/删除接口，`fe98679`
-  将其纳入本机身份清除；尚未完成 v2 API client、PoW native 加速和真机编译验收。
-- v2 API client/native PoW 提交：`f6b5829`；已实现 token 缓存、bootstrap/auth 请求和 native PoW 调用，
-  但未挂到现有 `deviceApi`，也未完成 Android/真机编译验收（当前工作区没有 Gradle 工具链）。
+  将其纳入本机身份清除；隔离树已完成 native 编译。
+- v2 API client/native PoW 提交：`f6b5829`；已实现 token 缓存、bootstrap/auth 请求和 native PoW 调用。
+  编译证据见本目录 `android-compile-evidence.txt`；这不等于 APK 安装、真机运行或 v2 网络验收。
 
 ## 尚未满足的 Stage 1 退出门
 
@@ -47,7 +47,7 @@
 - 本机清除已覆盖录音、通知、更新文件和 native projection；仍缺少独立 Keystore purge-only capability
   的原生实现和清除 journal 的端到端回放测试。
 - 新 vNext task API 尚未激活 capability barrier，也未接管生产业务调用。
-- 设备 v2 仍未完成 purge capability、v1 业务路由迁移、native 编译和真机回放；当前业务 API 仍保留 v1
+- 设备 v2 仍未完成 purge capability、v1 业务路由迁移和真机回放；当前业务 API 仍保留 v1
   静态设备凭据兼容层。
 
 生产 API、生产数据库、公网入口、真机、GPU 和同机其他服务均未修改。

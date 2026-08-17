@@ -35,7 +35,9 @@ def main() -> int:
     # These gates intentionally remain explicit until the native build and
     # production-compatible purge capability are available.
     print("v2_purge_capability=blocked")
-    print("android_native_compile=unverified")
+    android_evidence = ROOT / "docs/vnext-stage1/android-compile-evidence.txt"
+    native_compiled = android_evidence.is_file() and "result: BUILD SUCCESSFUL" in android_evidence.read_text(encoding="utf-8")
+    print("android_native_compile=" + ("passed" if native_compiled else "unverified"))
     print("stage1_exit=" + ("blocked" if failures else "blocked_by_external_gates"))
     return 1 if failures else 0
 
