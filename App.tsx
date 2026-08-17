@@ -30,6 +30,13 @@ import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEv
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { DeviceServiceCoordinator } from './src/components/DeviceServiceCoordinator';
 import { DeviceMeetingCompletionProvider } from './src/components/DeviceMeetingCompletionProvider';
+import { MeetingSummaryV3UpgradeProvider } from './src/components/MeetingSummaryV3UpgradeProvider';
+import { startAutomaticAppUpdateChecks } from './src/services/appUpdate';
+
+function AppUpdateCoordinator() {
+  useEffect(() => startAutomaticAppUpdateChecks(), []);
+  return null;
+}
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
@@ -48,7 +55,8 @@ function RuntimeProviders({ onRestart }: {
   return (
     <AuthProvider>
       <NavigationStateProvider>
-        <DeviceServiceCoordinator />
+      <DeviceServiceCoordinator />
+        <AppUpdateCoordinator />
         <NativePlatformCoordinator />
         <AppReadinessGate
           feishuEvidence="feishu:UI-BOOT-READINESS-001:readiness-gate"
@@ -57,6 +65,7 @@ function RuntimeProviders({ onRestart }: {
           <EventsProvider>
             <MeetingsProvider>
               <DeviceMeetingCompletionProvider />
+              <MeetingSummaryV3UpgradeProvider />
               <UpcomingEventsProjectionCoordinator />
               <AppLockGate>
                 <AppDialogProvider>

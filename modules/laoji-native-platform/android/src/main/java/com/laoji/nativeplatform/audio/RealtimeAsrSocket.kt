@@ -32,8 +32,10 @@ interface RealtimeAsrSocketListener {
 
 class RealtimeAsrSocket(
   private val config: RecorderStartConfig,
-  private val listener: RealtimeAsrSocketListener,
+  listener: RealtimeAsrSocketListener,
 ) {
+  @Volatile
+  private var listener = listener
   private val opened = AtomicBoolean(false)
   private val clientClosing = AtomicBoolean(false)
   private val stopHandshake = AsrStopHandshake()
@@ -59,6 +61,10 @@ class RealtimeAsrSocket(
   }
 
   fun isOpen(): Boolean = opened.get()
+
+  fun attachListener(next: RealtimeAsrSocketListener) {
+    listener = next
+  }
 
   fun sendPcm(buffer: ByteArray, count: Int): Boolean {
     val socket = webSocket ?: return false
@@ -175,5 +181,87 @@ class RealtimeAsrSocket(
       .followRedirects(false)
       .followSslRedirects(false)
       .build()
+  }
+}
+
+object RealtimeAsrWarmPool {
+  private object WarmListener : RealtimeAsrSocketListener {
+    override fun onTranscript(transcript: AsrServerEvent.Transcript) = Unit
+    override fun onServerError(error: AsrServerEvent.Error) = Unit
+    override fun onTransportFailure(code: RecorderErrorCode, message: String) = Unit
+  }
+
+  private data class Entry(
+    val sessionId: String,
+    val websocketUrl: String,
+    val socket: RealtimeAsrSocket,
+    val connection: CompletableFuture<Unit>,
+  )
+
+  private val lock = Any()
+  private var entry: Entry? = null
+
+  fun prewarm(config: RecorderStartConfig): CompletableFuture<Unit> {
+    require(config.mode == RecorderMode.REALTIME) { "only realtime recording can be prewarmed" }
+    val socket = RealtimeAsrSocket(config, WarmListener)
+    val connection = try {
+      socket.connect()
+    } catch (error: Exception) {
+      CompletableFuture<Unit>().also { it.completeExceptionally(error) }
+    }
+    val created = Entry(
+      sessionId = config.sessionId,
+      websocketUrl = requireNotNull(config.websocketUrl),
+      socket = socket,
+      connection = connection,
+    )
+    val previous = synchronized(lock) {
+      entry.also { entry = created }
+    }
+    previous?.socket?.close()
+    connection.whenComplete { _, error ->
+      if (error != null) {
+        synchronized(lock) {
+          if (entry === created) entry = null
+        }
+        socket.cancel()
+      }
+    }
+    return connection
+  }
+
+  fun claim(
+    config: RecorderStartConfig,
+    listener: RealtimeAsrSocketListener,
+  ): Pair<RealtimeAsrSocket, CompletableFuture<Unit>>? {
+    var stale: Entry? = null
+    val claimed = synchronized(lock) {
+      val current = entry
+      if (
+        current == null ||
+        current.sessionId != config.sessionId ||
+        current.websocketUrl != config.websocketUrl
+      ) {
+        null
+      } else if (current.connection.isDone && !current.socket.isOpen()) {
+        entry = null
+        stale = current
+        null
+      } else {
+        entry = null
+        current
+      }
+    }
+    stale?.socket?.cancel()
+    claimed ?: return null
+    claimed.socket.attachListener(listener)
+    return claimed.socket to claimed.connection
+  }
+
+  fun discard(sessionId: String) {
+    val discarded = synchronized(lock) {
+      entry?.takeIf { it.sessionId == sessionId }?.also { entry = null }
+    }
+    discarded?.socket?.close()
   }
 }

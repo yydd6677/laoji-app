@@ -13,7 +13,7 @@ import {
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
 
-export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 18 as const;
+export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 19 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export type MinutesSurface = 'list' | 'recording' | 'detail';
@@ -102,6 +102,30 @@ export interface MinutesSummaryCitationSnapshot {
   label?: string;
 }
 
+export interface MinutesSummaryRichItemSnapshot {
+  id: string;
+  title?: string | null;
+  text: string;
+  meta?: string | null;
+  sourceId?: string | null;
+  startMs?: number | null;
+}
+
+export interface MinutesSummaryRichEdgeSnapshot {
+  from: string;
+  to: string;
+  label?: string | null;
+}
+
+export interface MinutesSummaryRichBlockSnapshot {
+  kind: 'paragraph' | 'bullet_group' | 'quote' | 'timeline' | 'flow' | 'comparison' | 'risk_card' | 'stat';
+  iconKey: 'overview' | 'topic' | 'quote' | 'time' | 'flow' | 'compare' | 'risk' | 'stat' | 'action';
+  items: readonly MinutesSummaryRichItemSnapshot[];
+  edges?: readonly MinutesSummaryRichEdgeSnapshot[];
+  edited?: boolean;
+  originalSourceLabel?: string | null;
+}
+
 export interface MinutesSummarySectionSnapshot {
   id: string;
   stableKey: string;
@@ -111,6 +135,7 @@ export interface MinutesSummarySectionSnapshot {
   editable?: boolean;
   userEdited?: boolean;
   citations?: readonly MinutesSummaryCitationSnapshot[];
+  richBlock?: MinutesSummaryRichBlockSnapshot;
 }
 
 export interface MinutesActionItemSnapshot {
@@ -226,6 +251,8 @@ export interface MinutesDetailSnapshot {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
+  canSelectSummaryTemplate?: boolean;
+  summaryTemplateLabel?: string;
   canCreateAction?: boolean;
   canCreateClip?: boolean;
   summaryGenerating?: boolean;
@@ -287,7 +314,7 @@ export type MinutesSemanticAction =
   | { type: 'saveTitle'; surface: 'detail' | 'recording'; meetingId: string; title: string }
   | { type: 'openMeetingMenu'; surface: MinutesSurface; meetingId: string; canResume: boolean }
   | { type: 'renameMeeting' | 'setMeetingTags' | 'deleteMeeting'; surface: 'list'; meetingId: string }
-  | { type: 'restoreMeeting'; surface: 'list'; meetingId: string }
+  | { type: 'restoreMeeting' | 'permanentlyDeleteMeeting'; surface: 'list'; meetingId: string }
   | { type: 'reorderMeetings'; surface: 'list'; meetingIds: readonly string[] }
   | { type: 'toggleRecordingPause'; surface: MinutesSurface; meetingId: string; resume: boolean }
   | { type: 'createMarker'; surface: 'recording'; meetingId: string; positionMs: number }
@@ -345,6 +372,7 @@ export type MinutesSemanticAction =
     }
   | { type: 'manageSpeaker'; surface: MinutesSurface; meetingId: string; speakerId: string }
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
+  | { type: 'selectSummaryTemplate'; surface: 'detail'; meetingId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }
   | { type: 'updateSearchQuery'; surface: 'list'; query: string };
 

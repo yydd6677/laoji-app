@@ -36,6 +36,7 @@ import { meetingQuestionScopesV35 } from './0035MeetingQuestionScopes';
 import { summaryCitationUserOverridesV36 } from './0036SummaryCitationUserOverrides';
 import { summaryVersionSyncV37 } from './0037SummaryVersionSync';
 import { localScheduleEventsV38 } from './0038LocalScheduleEvents';
+import { summaryFactsV3 } from './0039SummaryFactsV3';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -77,6 +78,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   summaryCitationUserOverridesV36,
   summaryVersionSyncV37,
   localScheduleEventsV38,
+  summaryFactsV3,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -117,4 +119,5 @@ export { MEETING_QUESTION_SCOPES_V35_SQL } from './0035MeetingQuestionScopes';
 export { SUMMARY_CITATION_USER_OVERRIDES_V36_SQL } from './0036SummaryCitationUserOverrides';
 export { SUMMARY_VERSION_SYNC_V37_SQL } from './0037SummaryVersionSync';
 export { LOCAL_SCHEDULE_EVENTS_V38_SQL } from './0038LocalScheduleEvents';
+export { SUMMARY_FACTS_V3_SQL } from './0039SummaryFactsV3';
 export type { MeetingDatabaseMigration } from './types';

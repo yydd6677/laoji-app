@@ -126,6 +126,15 @@ export interface NativeRecorderTranscriptEvent {
   receivedAtMs: number;
 }
 
+export interface NativeRecorderFinalTranscriptSegment {
+  segmentId: string;
+  text: string;
+  startMs: number | null;
+  endMs: number | null;
+  receivedAtMs: number;
+  source: string | null;
+}
+
 export interface NativeRecorderErrorEvent {
   sessionId: string | null;
   errorCode: NativeRecorderErrorCode;
@@ -171,6 +180,7 @@ export interface NativeRecorderStopResult {
   errorCode: NativeRecorderErrorCode | null;
   errorMessage: string | null;
   audioBars: number[];
+  transcriptSegments?: NativeRecorderFinalTranscriptSegment[];
   snapshot: NativeRecorderSnapshot;
 }
 
@@ -190,6 +200,8 @@ declare class LaojiRecorderNativeModule extends NativeModule<NativeRecorderEvent
     frameBytes: typeof NATIVE_AUDIO_FRAME_BYTES;
   };
   start(options: NativeRecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
+  prewarmRealtime(options: NativeRecorderStartOptions): Promise<boolean>;
+  discardRealtimePrewarm(sessionId: string): void;
   startLocal(sessionId: string, levelIntervalMs: number | null): Promise<NativeLocalRecorderSnapshot>;
   pause(sessionId: string): Promise<NativeRecorderSnapshot>;
   resume(sessionId: string): Promise<NativeRecorderSnapshot>;
@@ -297,6 +309,16 @@ export async function startNativeRecorder(
   options: NativeRecorderStartOptions,
 ): Promise<NativeRealtimeRecorderSnapshot> {
   return requireNativeRecorder().start(normalizeNativeRecorderStartOptions(options));
+}
+
+export async function prewarmNativeRecorder(
+  options: NativeRecorderStartOptions,
+): Promise<boolean> {
+  return requireNativeRecorder().prewarmRealtime(normalizeNativeRecorderStartOptions(options));
+}
+
+export function discardNativeRecorderPrewarm(sessionId: string): void {
+  requireNativeRecorder().discardRealtimePrewarm(validateSessionId(sessionId));
 }
 
 export function normalizeNativeLocalRecorderStartOptions(

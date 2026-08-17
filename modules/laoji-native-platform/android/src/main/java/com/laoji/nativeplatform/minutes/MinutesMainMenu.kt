@@ -129,11 +129,6 @@ internal class MinutesMainMenu(
         icon = com.laoji.nativeplatform.R.drawable.laoji_ic_grid_outline,
       ),
       MenuAction(
-        label = "管理标签",
-        type = "openMeetingTags",
-        icon = com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline,
-      ),
-      MenuAction(
         label = "管理讲话人",
         type = "openSpeakers",
         icon = com.laoji.nativeplatform.R.drawable.laoji_ic_member_outline,

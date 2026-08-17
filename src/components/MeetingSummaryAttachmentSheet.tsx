@@ -90,8 +90,11 @@ export function MeetingSummaryAttachmentSheet({
       closingRef.current = false;
       setMounted(false);
       setClosing(false);
-      if (notify) closeRef.current();
-      afterExit?.();
+      // Selection/skip callbacks clear the request in the parent. Do not
+      // also invoke onClose, which used to clear the preparation state before
+      // the next stage was started.
+      if (afterExit) afterExit();
+      else if (notify) closeRef.current();
     });
   }, [progress]);
 
@@ -132,7 +135,9 @@ export function MeetingSummaryAttachmentSheet({
     attachment.kind === 'text' || imageAvailable(attachment)
   );
   const selected = presented.filter(item => available(item) && selectedIds.has(item.id));
-  const canSubmit = selected.length > 0 && !saving && !closing;
+  // An empty selection is valid: continue without using attachments. The
+  // previous disabled button made the template flow appear stuck.
+  const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
   };
@@ -171,6 +176,11 @@ export function MeetingSummaryAttachmentSheet({
   };
   const submit = async () => {
     if (!canSubmit) return;
+    if (selected.length === 0) {
+      const skip = skipRef.current;
+      if (skip) finishClose(true, skip);
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -221,16 +231,7 @@ export function MeetingSummaryAttachmentSheet({
               <Text style={[styles.titleActionText, { color: saving ? colors.textDisabled : colors.textTitle }]}>取消</Text>
             </Pressable>
             <Text style={[styles.title, { color: colors.textTitle }]}>选择附件</Text>
-            <Pressable
-              style={({ pressed }) => [styles.titleAction, pressed && !saving && { backgroundColor: colors.pressedFill }]}
-              onPress={requestSkip}
-              disabled={saving}
-              accessibilityRole="button"
-              accessibilityLabel="不使用附件"
-              accessibilityState={{ disabled: saving }}
-            >
-              <Text style={[styles.titleActionText, { color: saving ? colors.textDisabled : colors.primary }]}>不使用</Text>
-            </Pressable>
+            <View style={styles.titleAction} />
           </View>
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false}>
@@ -299,20 +300,18 @@ export function MeetingSummaryAttachmentSheet({
               style={({ pressed }) => [
                 styles.submit,
                 {
-                  backgroundColor: canSubmit
-                    ? pressed ? colors.primaryPressed : colors.primary
-                    : colors.backgroundBase,
+                  backgroundColor: pressed ? colors.primaryPressed : colors.primary,
                 },
               ]}
               onPress={() => { void submit(); }}
               disabled={!canSubmit}
               accessibilityRole="button"
-              accessibilityLabel={selected.length > 0 ? `使用所选 ${selected.length} 个附件` : '使用所选附件'}
+              accessibilityLabel={selected.length > 0 ? `使用所选 ${selected.length} 个附件` : '继续整理'}
               accessibilityState={{ disabled: !canSubmit, busy: saving }}
             >
               {saving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : (
-                <Text style={[styles.submitText, { color: canSubmit ? colors.onPrimary : colors.textDisabled }]}>
-                  {selected.length > 0 ? `使用（${selected.length}）` : '使用'}
+                <Text style={[styles.submitText, { color: colors.onPrimary }]}>
+                  {selected.length > 0 ? `使用（${selected.length}）` : '继续整理'}
                 </Text>
               )}
             </Pressable>

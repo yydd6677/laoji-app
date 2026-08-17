@@ -49,12 +49,14 @@ import expo.modules.kotlin.views.ExpoView
 private object VoiceUi {
   fun dp(context: Context, value: Float): Int = (NativeUiTokens.dp(context, value) + 0.5f).toInt()
 
-  // [PRODUCT] The recording feedback radius is 1.4x the original treatment.
-  // Keep both geometry and density integral: 2 rings * 1.4 rounds to 3 rings,
-  // while 43dp + 17dp preserves the requested 60dp outer radius.
+  // Keep the enlarged microphone and its feedback rings as integral dp values.
+  // The visible button grows from 48dp to 58dp; the ring envelope and canvas
+  // grow together so the 72dp outer wave is never clipped.
+  const val MIC_CIRCLE_RADIUS_DP = 29f
+  const val MIC_DOCK_SIZE_DP = 152f
   const val PULSE_RING_COUNT = 3
-  const val PULSE_START_RADIUS_DP = 43f
-  const val PULSE_TRAVEL_RADIUS_DP = 17f
+  const val PULSE_START_RADIUS_DP = 52f
+  const val PULSE_TRAVEL_RADIUS_DP = 20f
 }
 
 private enum class VoiceButtonStyle { PRIMARY, SECONDARY, TEXT }
@@ -179,6 +181,9 @@ private class VoiceMicView(context: Context) : View(context) {
   }
   private var pulseProgress = 0f
   private var pulseAnimator: ValueAnimator? = null
+  private val micGlyph = requireNotNull(
+    context.getDrawable(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled),
+  ).mutate()
   var recording: Boolean = false
     set(value) {
       if (field == value) return
@@ -188,12 +193,6 @@ private class VoiceMicView(context: Context) : View(context) {
       invalidate()
     }
   private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-  private val icon = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.WHITE
-    style = Paint.Style.STROKE
-    strokeWidth = VoiceUi.dp(context, 2.2f).toFloat()
-    strokeCap = Paint.Cap.ROUND
-  }
 
   init {
     isClickable = true
@@ -220,28 +219,18 @@ private class VoiceMicView(context: Context) : View(context) {
       isPressed -> palette.primary
       else -> palette.primarySoft
     }
-    canvas.drawCircle(cx, cy, VoiceUi.dp(context, 24f).toFloat(), fill)
-    icon.color = when {
+    canvas.drawCircle(cx, cy, VoiceUi.dp(context, VoiceUi.MIC_CIRCLE_RADIUS_DP).toFloat(), fill)
+    val iconColor = when {
       !isEnabled -> palette.textDisabled
       recording || isPressed -> Color.WHITE
       else -> palette.primary
     }
-    val mic = RectF(
-      cx - VoiceUi.dp(context, 6f),
-      cy - VoiceUi.dp(context, 13f),
-      cx + VoiceUi.dp(context, 6f),
-      cy + VoiceUi.dp(context, 6f),
-    )
-    canvas.drawRoundRect(mic, VoiceUi.dp(context, 6f).toFloat(), VoiceUi.dp(context, 6f).toFloat(), icon)
-    canvas.drawArc(
-      RectF(cx - VoiceUi.dp(context, 11f), cy - VoiceUi.dp(context, 4f), cx + VoiceUi.dp(context, 11f), cy + VoiceUi.dp(context, 13f)),
-      0f,
-      180f,
-      false,
-      icon,
-    )
-    canvas.drawLine(cx, cy + VoiceUi.dp(context, 13f), cx, cy + VoiceUi.dp(context, 19f), icon)
-    canvas.drawLine(cx - VoiceUi.dp(context, 7f), cy + VoiceUi.dp(context, 19f), cx + VoiceUi.dp(context, 7f), cy + VoiceUi.dp(context, 19f), icon)
+    val glyphSize = VoiceUi.dp(context, 30f)
+    val left = (cx - glyphSize / 2f).toInt()
+    val top = (cy - glyphSize / 2f).toInt()
+    micGlyph.setTint(iconColor)
+    micGlyph.setBounds(left, top, left + glyphSize, top + glyphSize)
+    micGlyph.draw(canvas)
   }
 
   private fun drawPulseRing(canvas: Canvas, cx: Float, cy: Float, progress: Float) {
@@ -483,9 +472,16 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     val micDock = FrameLayout(context)
     micDock.addView(
       mic,
-      FrameLayout.LayoutParams(VoiceUi.dp(context, 128f), VoiceUi.dp(context, 128f), Gravity.CENTER),
+      FrameLayout.LayoutParams(
+        VoiceUi.dp(context, VoiceUi.MIC_DOCK_SIZE_DP),
+        VoiceUi.dp(context, VoiceUi.MIC_DOCK_SIZE_DP),
+        Gravity.CENTER,
+      ),
     )
-    inputPanel.addView(micDock, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 128f)))
+    inputPanel.addView(
+      micDock,
+      LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, VoiceUi.MIC_DOCK_SIZE_DP)),
+    )
     mic.setOnTouchListener { _, event -> handleMicTouch(event) }
     sheet.addView(inputPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
   }
@@ -609,7 +605,10 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       topMargin = VoiceUi.dp(context, 8f)
     })
     confirmPanel.addView(actions, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-    sheet.addView(confirmPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 430f)))
+    // Six ordinary fields (date, time, repeat, reminder, location, category)
+    // fit without hiding the final row behind the fixed action area. A
+    // clarification prompt may still scroll because it is conditional detail.
+    sheet.addView(confirmPanel, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 500f)))
   }
 
   private fun render(value: ScheduleVoiceSnapshot) {
@@ -627,8 +626,10 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
     }.orEmpty()
     feedback.text = readableError.ifBlank { readableStatus }
     feedback.setTextColor(if (readableError.isNotBlank()) palette.danger else palette.textSecondary)
-    mic.recording = value.phase == ScheduleVoicePhase.RECORDING
-    mic.isEnabled = value.phase in setOf(ScheduleVoicePhase.INPUT, ScheduleVoicePhase.RECORDING)
+    mic.recording = value.phase in setOf(ScheduleVoicePhase.PREPARING, ScheduleVoicePhase.RECORDING)
+    // Keep ownership of ACTION_UP while native capture is starting. Otherwise
+    // a fast hold-and-release can strand a recording without emitting stop.
+    mic.isEnabled = value.phase in setOf(ScheduleVoicePhase.INPUT, ScheduleVoicePhase.PREPARING, ScheduleVoicePhase.RECORDING)
     parseAction.isEnabled = value.canParse && value.phase == ScheduleVoicePhase.INPUT
     parseAction.visibility = if (value.phase in setOf(ScheduleVoicePhase.INPUT, ScheduleVoicePhase.PREPARING, ScheduleVoicePhase.RECORDING)) View.VISIBLE else View.INVISIBLE
     title.text = if (value.phase == ScheduleVoicePhase.CONFIRM) "确认日程" else "新建日程"
@@ -642,20 +643,27 @@ class ScheduleVoiceHostView(context: Context, appContext: AppContext) : ExpoView
       val row = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        isBaselineAligned = true
       }
       val label = TextView(context).apply {
         text = field.label
         textSize = 14f
         setTextColor(palette.textSecondary)
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        includeFontPadding = false
+        maxLines = 1
       }
       val content = TextView(context).apply {
         text = field.value
         textSize = 15f
         setTextColor(palette.textPrimary)
-        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        includeFontPadding = false
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
       }
-      row.addView(label, LinearLayout.LayoutParams(VoiceUi.dp(context, 86f), LayoutParams.MATCH_PARENT))
-      row.addView(content, LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+      row.addView(label, LinearLayout.LayoutParams(VoiceUi.dp(context, 86f), LayoutParams.WRAP_CONTENT))
+      row.addView(content, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
       fields.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, VoiceUi.dp(context, 44f)))
     }
     clarificationPanel.visibility = if (value.needsClarification) View.VISIBLE else View.GONE

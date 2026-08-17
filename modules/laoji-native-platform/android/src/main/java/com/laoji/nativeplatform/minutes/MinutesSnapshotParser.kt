@@ -126,6 +126,7 @@ object MinutesSnapshotParser {
         text = item.string("text").orEmpty(),
         editable = item.boolean("editable"),
         userEdited = item.boolean("userEdited"),
+        richBlock = parseSummaryRichBlock(item.mapOrNull("richBlock")),
         citations = item.maps("citations")
           .asSequence()
           .mapIndexedNotNull { citationIndex, citation ->
@@ -207,6 +208,8 @@ object MinutesSnapshotParser {
       canShare = raw.boolean("canShare"),
       canManageSpeakers = raw.boolean("canManageSpeakers"),
       canGenerateSummary = raw.boolean("canGenerateSummary"),
+      canSelectSummaryTemplate = raw.boolean("canSelectSummaryTemplate"),
+      summaryTemplateLabel = raw.string("summaryTemplateLabel").orEmpty(),
       canCreateAction = raw.boolean("canCreateAction"),
       canCreateClip = raw.boolean("canCreateClip"),
       summaryGenerating = raw.boolean("summaryGenerating"),
@@ -255,6 +258,49 @@ object MinutesSnapshotParser {
       recordingMergeActionLabel = raw.string("recordingMergeActionLabel").orEmpty(),
       recordingMergeActionEnabled = raw.boolean("recordingMergeActionEnabled"),
       pageStates = parseDetailPageStates(raw.mapOrNull("pageStates"), legacyPageStates),
+    )
+  }
+
+  private fun parseSummaryRichBlock(raw: Map<String, Any?>?): MinutesSummaryRichBlock? {
+    if (raw == null) return null
+    val kind = raw.string("kind").orEmpty()
+    val iconKey = raw.string("iconKey").orEmpty()
+    if (kind !in SUMMARY_RICH_KINDS || iconKey !in SUMMARY_ICON_KEYS) return null
+    val items = raw.maps("items")
+      .asSequence()
+      .mapIndexedNotNull { index, item ->
+        val text = item.string("text").orEmpty().trim()
+        if (text.isBlank()) return@mapIndexedNotNull null
+        MinutesSummaryRichItem(
+          id = item.string("id").orDefault("rich-item-$index"),
+          title = item.string("title").orEmpty(),
+          text = text,
+          meta = item.string("meta").orEmpty(),
+          sourceId = item.string("sourceId").orEmpty(),
+          startMs = (item["startMs"] as? Number)?.toLong()?.coerceAtLeast(0L),
+        )
+      }
+      .take(MAX_SUMMARY_RICH_ITEMS)
+      .toList()
+    if (items.isEmpty()) return null
+    val itemIds = items.mapTo(mutableSetOf()) { it.id }
+    val edges = raw.maps("edges")
+      .asSequence()
+      .mapNotNull { edge ->
+        val from = edge.string("from").orEmpty()
+        val to = edge.string("to").orEmpty()
+        if (from.isBlank() || to.isBlank() || from == to || from !in itemIds || to !in itemIds) null
+        else MinutesSummaryRichEdge(from, to, edge.string("label").orEmpty())
+      }
+      .take(MAX_SUMMARY_RICH_EDGES)
+      .toList()
+    return MinutesSummaryRichBlock(
+      kind = kind,
+      iconKey = iconKey,
+      items = items,
+      edges = edges,
+      edited = raw.boolean("edited"),
+      originalSourceLabel = raw.string("originalSourceLabel").orEmpty(),
     )
   }
 
@@ -330,6 +376,14 @@ object MinutesSnapshotParser {
   private const val MAX_MARKERS = 2_000
   private const val MAX_SUMMARY_CITATIONS = 5_000
   private const val MAX_SUMMARY_ACTIONS = 500
+  private const val MAX_SUMMARY_RICH_ITEMS = 12
+  private const val MAX_SUMMARY_RICH_EDGES = 10
+  private val SUMMARY_RICH_KINDS = setOf(
+    "paragraph", "bullet_group", "quote", "timeline", "flow", "comparison", "risk_card", "stat",
+  )
+  private val SUMMARY_ICON_KEYS = setOf(
+    "overview", "topic", "quote", "time", "flow", "compare", "risk", "stat", "action",
+  )
 
   private fun listFallback(phase: MinutesContentPhase): String = when (phase) {
     MinutesContentPhase.LOADING -> "正在加载会议记录"

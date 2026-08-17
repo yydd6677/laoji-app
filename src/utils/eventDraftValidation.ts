@@ -4,7 +4,7 @@ export type EventDraftValidationCode =
   | 'invalid-start-date'
   | 'invalid-end-date'
   | 'end-before-start'
-  | 'single-sided-time'
+  | 'end-without-start'
   | 'invalid-start-time'
   | 'invalid-end-time'
   | 'end-not-after-start'
@@ -106,11 +106,16 @@ export function validateEventDraft<T extends EventDraftForValidation>(draft: T):
   } else {
     const hasStart = Boolean(draft.startTime);
     const hasEnd = Boolean(draft.endTime);
-    if (hasStart !== hasEnd) {
-      add('single-sided-time', '开始时间和结束时间需要同时填写');
-    } else if (hasStart && hasEnd) {
+    if (hasEnd && !hasStart) {
+      add('end-without-start', '请先填写开始时间');
+    }
+    if (hasStart) {
       if (!isValidEventTime(draft.startTime)) add('invalid-start-time', '开始时间格式不正确');
+    }
+    if (hasEnd) {
       if (!isValidEventTime(draft.endTime)) add('invalid-end-time', '结束时间格式不正确');
+    }
+    if (hasStart && hasEnd) {
       const endDate = draft.endDate ?? draft.startDate;
       const startValue = eventDateTimeValue(draft.startDate, draft.startTime!);
       const endValue = eventDateTimeValue(endDate, draft.endTime!);

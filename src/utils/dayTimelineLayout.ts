@@ -21,7 +21,6 @@ export function layoutTimelineEvents(events: CalEvent[], selectedDate: string): 
     .filter(event => (
       !eventDisplaysAsAllDay(event)
       && Boolean(event.startTime)
-      && Boolean(event.endTime)
     ))
     .map(event => {
       const range = eventRangeForDate(event, selectedDate);
@@ -124,7 +123,7 @@ function eventRangeForDate(event: CalEvent, selectedDate: string): { start: numb
     }
   } else {
     if (selectedDate !== event.startDate) return null;
-    if (end === null || end <= start) end = Math.min(DAY_MINUTES, start + 60);
+    if (end === null || end <= start) end = Math.min(DAY_MINUTES, start + 30);
   }
 
   start = Math.max(0, Math.min(DAY_MINUTES - 1, start));

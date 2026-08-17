@@ -21,24 +21,67 @@ import { readableErrorMessage } from '../services/errors';
 import {
   askMeetingQuestion,
   MeetingQuestionEvidenceChangedError,
+  isMeetingQuestionCitationCurrent,
   prepareMeetingQuestionSession,
   type MeetingQuestionSession,
 } from '../services/meetingQuestions';
+import { beginSummaryV3InteractiveWork } from '../services/meetingSummaryV3Upgrade';
 import { getFeishuTokens } from '../theme/feishuTokens';
 
 const MOTION_MS = 300;
 
 export type MeetingQuestionCitationTarget =
-  | { kind: 'transcript'; segmentId: string; positionMs: number }
-  | { kind: 'summary'; sectionId: string }
-  | { kind: 'manual_note'; revision: number };
-
-function citationTarget(citation: MeetingQuestionCitation): MeetingQuestionCitationTarget {
-  if (citation.kind === 'transcript') {
-    return { kind: 'transcript', segmentId: citation.segmentId, positionMs: citation.startMs };
+  | {
+    kind: 'transcript';
+    meetingId: string;
+    transcriptRevisionId: string;
+    segmentId: string;
+    positionMs: number;
   }
-  if (citation.kind === 'summary') return { kind: 'summary', sectionId: citation.sectionId };
-  return { kind: 'manual_note', revision: citation.manualNoteRevision };
+  | {
+    kind: 'summary';
+    meetingId: string;
+    transcriptRevisionId: string;
+    summaryVersionId: string | null;
+    sectionId: string;
+  }
+  | {
+    kind: 'manual_note';
+    meetingId: string;
+    transcriptRevisionId: string;
+    manualNoteRevision: number | null;
+    revision: number;
+  };
+
+function citationTarget(
+  citation: MeetingQuestionCitation,
+  session: MeetingQuestionSession,
+): MeetingQuestionCitationTarget {
+  if (citation.kind === 'transcript') {
+    return {
+      kind: 'transcript',
+      meetingId: session.evidence.meetingId,
+      transcriptRevisionId: session.evidence.transcriptRevisionId,
+      segmentId: citation.segmentId,
+      positionMs: citation.startMs,
+    };
+  }
+  if (citation.kind === 'summary') {
+    return {
+      kind: 'summary',
+      meetingId: session.evidence.meetingId,
+      transcriptRevisionId: session.evidence.transcriptRevisionId,
+      summaryVersionId: session.evidence.summaryVersionId,
+      sectionId: citation.sectionId,
+    };
+  }
+  return {
+    kind: 'manual_note',
+    meetingId: session.evidence.meetingId,
+    transcriptRevisionId: session.evidence.transcriptRevisionId,
+    manualNoteRevision: session.evidence.manualNoteRevision,
+    revision: citation.manualNoteRevision,
+  };
 }
 
 function QuestionTurnView({
@@ -204,6 +247,13 @@ export function MeetingQuestionSheet({
     }
     const generation = loadGenerationRef.current + 1;
     loadGenerationRef.current = generation;
+    // A visible sheet can survive while the parent detail route changes.
+    // Clear the old session before the asynchronous read so its answers and
+    // citations cannot be mistaken for the new meeting's evidence.
+    requestControllerRef.current?.abort();
+    setSession(null);
+    setPendingQuestion(null);
+    setSending(false);
     setLoading(true);
     setError('');
     setStatus('');
@@ -241,7 +291,7 @@ export function MeetingQuestionSheet({
         duration: MOTION_MS,
         useNativeDriver: true,
       }).start();
-      void loadSession(false);
+      void loadSession(true);
       return;
     }
     finishClose(false);
@@ -262,7 +312,6 @@ export function MeetingQuestionSheet({
   const turns = session?.thread.turns ?? [];
   const canSend = Boolean(session && draft.trim() && !loading && !sending && !closing);
   const includeManualNote = session?.thread.includeManualNote === true;
-  const hasManualNote = session?.evidence.hasManualNote === true;
 
   const send = async () => {
     if (!canSend || !session || !scopeKey) return;
@@ -278,6 +327,7 @@ export function MeetingQuestionSheet({
     setSending(true);
     setError('');
     setStatus('');
+    const releaseInteractivePriority = beginSummaryV3InteractiveWork();
     try {
       const next = await askMeetingQuestion({
         scopeKey,
@@ -301,13 +351,21 @@ export function MeetingQuestionSheet({
         setError(readableErrorMessage(reason, '暂时未能回答，请稍后重试。'));
       }
     } finally {
+      releaseInteractivePriority();
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
       if (mountedRef.current) setSending(false);
     }
   };
 
   const openCitation = (citation: MeetingQuestionCitation) => {
-    const target = citationTarget(citation);
+    if (
+      !session
+      || !isMeetingQuestionCitationCurrent(citation, session.evidence)
+    ) {
+      setError('这条引用已不属于当前会议内容，请重新打开问答。');
+      return;
+    }
+    const target = citationTarget(citation, session);
     finishClose(true, () => citationRef.current(target));
   };
 
@@ -362,29 +420,12 @@ export function MeetingQuestionSheet({
           {session ? (
             <View style={[styles.scopeBar, { backgroundColor: colors.backgroundBody, borderBottomColor: colors.divider }]}>
               <Text style={[styles.scopeLabel, { color: colors.textCaption }]}>
-                {session.evidence.summary.length > 0 ? '文字记录 · 整理结果' : '文字记录'}
+                {[
+                  '文字记录',
+                  session.evidence.summary.length > 0 ? '整理结果' : null,
+                  session.evidence.includeManualNote ? '我的笔记' : null,
+                ].filter(Boolean).join(' · ')}
               </Text>
-              {hasManualNote ? (
-                <Pressable
-                  style={({ pressed }) => [styles.noteScope, pressed && { backgroundColor: colors.pressedFill }]}
-                  onPress={() => { if (!sending) void loadSession(!includeManualNote); }}
-                  disabled={sending || loading}
-                  accessibilityRole="checkbox"
-                  accessibilityLabel="问答包含我的笔记"
-                  accessibilityState={{ checked: includeManualNote, disabled: sending || loading }}
-                >
-                  <View style={[
-                    styles.checkbox,
-                    {
-                      borderColor: includeManualNote ? colors.primary : colors.iconTertiary,
-                      backgroundColor: includeManualNote ? colors.primary : colors.backgroundBody,
-                    },
-                  ]}>
-                    {includeManualNote ? <Ionicons name="checkmark" size={15} color={colors.onPrimary} /> : null}
-                  </View>
-                  <Text style={[styles.noteScopeText, { color: colors.textTitle }]}>我的笔记</Text>
-                </Pressable>
-              ) : null}
             </View>
           ) : null}
 
@@ -425,7 +466,7 @@ export function MeetingQuestionSheet({
                   styles.retry,
                   { backgroundColor: pressed ? colors.primaryPressed : colors.primary },
                 ]}
-                onPress={() => { void loadSession(false); }}
+                onPress={() => { void loadSession(true); }}
                 accessibilityRole="button"
                 accessibilityLabel="重试打开会议问答"
               >
@@ -526,9 +567,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   scopeLabel: { flex: 1, fontSize: 13, lineHeight: 20 },
-  noteScope: { minHeight: 40, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center' },
-  checkbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  noteScopeText: { marginLeft: 7, fontSize: 14, lineHeight: 22 },
   list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20 },
   emptyListContent: { flexGrow: 1 },

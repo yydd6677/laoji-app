@@ -20,6 +20,7 @@ export type EventTimeValue = {
   endDate: Date;
   startTime: Date;
   endTime: Date;
+  hasEndTime: boolean;
   isAllDay: boolean;
 };
 
@@ -56,6 +57,7 @@ function cloneValue(value: EventTimeValue): EventTimeValue {
     endDate: cloneDate(value.endDate),
     startTime: cloneDate(value.startTime),
     endTime: cloneDate(value.endTime),
+    hasEndTime: value.hasEndTime,
     isAllDay: value.isAllDay,
   };
 }
@@ -111,6 +113,7 @@ function normalizeValue(value: EventTimeValue): EventTimeValue {
     endDate: normalizeDate(value.endDate, startDate),
     startTime: normalizeTime(value.startTime, 10),
     endTime: normalizeTime(value.endTime, 11),
+    hasEndTime: Boolean(value.hasEndTime),
     isAllDay: Boolean(value.isAllDay),
   };
 }
@@ -313,13 +316,23 @@ export function EventTimeEditor({
   const endMoment = combineDateAndTime(draft.endDate, draft.endTime);
   const invalid = draft.isAllDay
     ? dayNumber(draft.endDate) < dayNumber(draft.startDate)
-    : endMoment.getTime() <= startMoment.getTime();
+    : draft.hasEndTime && endMoment.getTime() <= startMoment.getTime();
   const activeDate = target === 'start' ? draft.startDate : draft.endDate;
   const activeTime = target === 'start' ? draft.startTime : draft.endTime;
 
   const valueWithStartMoment = (current: EventTimeValue, nextStart: Date): EventTimeValue => {
     const currentStart = combineDateAndTime(current.startDate, current.startTime);
     const currentEnd = combineDateAndTime(current.endDate, current.endTime);
+    const dateSpan = Math.max(0, dayNumber(current.endDate) - dayNumber(current.startDate));
+    if (!current.hasEndTime) {
+      const startParts = splitDateTime(nextStart);
+      return {
+        ...current,
+        startDate: normalizeDate(startParts.date),
+        startTime: normalizeTime(startParts.time, 10),
+        endDate: normalizeDate(addDays(startParts.date, dateSpan), startParts.date),
+      };
+    }
     const duration = Math.max(5 * 60000, currentEnd.getTime() - currentStart.getTime());
     const nextEnd = new Date(nextStart.getTime() + duration);
     const startParts = splitDateTime(nextStart);
@@ -405,6 +418,7 @@ export function EventTimeEditor({
         };
       }
       const start = combineDateAndTime(current.startDate, current.startTime);
+      if (!current.hasEndTime) return { ...current, isAllDay: false };
       let end = combineDateAndTime(current.endDate, current.endTime);
       if (end.getTime() <= start.getTime()) end = new Date(start.getTime() + 60 * 60000);
       const endParts = splitDateTime(end);
@@ -417,14 +431,31 @@ export function EventTimeEditor({
     });
   };
 
+  const toggleEndTime = (checked: boolean) => {
+    setDraft(current => {
+      if (!checked) return { ...current, hasEndTime: false };
+      const start = combineDateAndTime(current.startDate, current.startTime);
+      let end = combineDateAndTime(current.endDate, current.endTime);
+      if (end.getTime() <= start.getTime()) end = new Date(start.getTime() + 60 * 60000);
+      const endParts = splitDateTime(end);
+      return {
+        ...current,
+        hasEndTime: true,
+        endDate: normalizeDate(endParts.date, current.startDate),
+        endTime: normalizeTime(endParts.time, 11),
+      };
+    });
+  };
+
   const renderSummary = (summaryTarget: TimeTarget) => {
     const selected = target === summaryTarget;
     const date = summaryTarget === 'start' ? draft.startDate : draft.endDate;
     const time = summaryTarget === 'start' ? draft.startTime : draft.endTime;
+    const timeEnabled = summaryTarget === 'start' || draft.hasEndTime;
     const dateText = formatDate(date, date.getFullYear() !== new Date().getFullYear());
     const valueText = draft.isAllDay
       ? `${dateText} ${formatWeekday(date)}`
-      : `${dateText} ${formatWeekday(date)} ${formatTime(time)}`;
+      : `${dateText} ${formatWeekday(date)} ${timeEnabled ? formatTime(time) : '未设置'}`;
     const danger = summaryTarget === 'end' && invalid;
     const color = danger ? C.red : selected ? C.primary : C.text;
     return (
@@ -437,11 +468,11 @@ export function EventTimeEditor({
         activeOpacity={0.65}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        accessibilityLabel={`编辑${summaryTarget === 'start' ? '开始' : '结束'}${draft.isAllDay ? '日期' : '时间'}`}
+        accessibilityLabel={`编辑${summaryTarget === 'start' ? '开始' : '结束'}${draft.isAllDay || !timeEnabled ? '日期' : '时间'}`}
         accessibilityValue={{ text: valueText }}
       >
         <Text style={[s.summaryMain, { color }]}>
-          {draft.isAllDay ? dateText : formatTime(time)}
+          {draft.isAllDay ? dateText : timeEnabled ? formatTime(time) : '未设置'}
         </Text>
         <Text style={[s.summaryMinor, { color }]}>
           {draft.isAllDay ? formatWeekday(date) : `${dateText} ${formatWeekday(date)}`}
@@ -455,6 +486,7 @@ export function EventTimeEditor({
     [activeDate],
   );
   const minuteIndex = Math.max(0, MINUTE_OPTIONS.indexOf(activeTime.getMinutes()));
+  const activeTimeEnabled = target === 'start' || draft.hasEndTime;
 
   return (
     <CalendarSlidePage
@@ -494,6 +526,19 @@ export function EventTimeEditor({
           />
         </View>
         <View style={s.sectionDivider} />
+
+        {!draft.isAllDay ? (
+          <View style={s.allDayRow} testID="event-time-end-enabled-row">
+            <Text style={s.allDayText}>结束时间</Text>
+            <CalendarSwitch
+              checked={draft.hasEndTime}
+              onChange={toggleEndTime}
+              accessibilityLabel="结束时间"
+              testID="event-end-time-toggle"
+            />
+          </View>
+        ) : null}
+        {!draft.isAllDay ? <View style={s.sectionDivider} /> : null}
 
         <View style={s.summaryRow}>
           {renderSummary('start')}
@@ -546,22 +591,26 @@ export function EventTimeEditor({
                 weight={2}
                 onSelect={index => updateDate(dateFromOption(index))}
               />
-              <TimeWheel
-                values={HOUR_OPTIONS}
-                selectedIndex={activeTime.getHours()}
-                labelForIndex={hour => String(hour).padStart(2, '0')}
-                accessibilityLabel="小时"
-                testID="event-time-hour-wheel"
-                onSelect={updateHour}
-              />
-              <TimeWheel
-                values={MINUTE_OPTIONS}
-                selectedIndex={minuteIndex}
-                labelForIndex={minute => String(minute).padStart(2, '0')}
-                accessibilityLabel="分钟"
-                testID="event-time-minute-wheel"
-                onSelect={updateMinute}
-              />
+              {activeTimeEnabled ? (
+                <>
+                  <TimeWheel
+                    values={HOUR_OPTIONS}
+                    selectedIndex={activeTime.getHours()}
+                    labelForIndex={hour => String(hour).padStart(2, '0')}
+                    accessibilityLabel="小时"
+                    testID="event-time-hour-wheel"
+                    onSelect={updateHour}
+                  />
+                  <TimeWheel
+                    values={MINUTE_OPTIONS}
+                    selectedIndex={minuteIndex}
+                    labelForIndex={minute => String(minute).padStart(2, '0')}
+                    accessibilityLabel="分钟"
+                    testID="event-time-minute-wheel"
+                    onSelect={updateMinute}
+                  />
+                </>
+              ) : null}
             </View>
           )}
         </View>

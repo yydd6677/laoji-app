@@ -28,6 +28,7 @@ export type UploadStatus =
 
 export type TranscriptStatus =
   | 'none'
+  | 'queued'
   | 'realtime_draft'
   | 'finalizing'
   | 'ready'
@@ -104,7 +105,7 @@ const STATUS_VALUES: { [Stage in ProcessingStageName]: ReadonlySet<ProcessingSta
     'not_required', 'queued', 'uploading', 'uploaded', 'failed_retryable', 'blocked',
   ]),
   transcript: new Set<TranscriptStatus>([
-    'none', 'realtime_draft', 'finalizing', 'ready', 'no_speech', 'failed_retryable', 'unavailable',
+    'none', 'queued', 'realtime_draft', 'finalizing', 'ready', 'no_speech', 'failed_retryable', 'unavailable',
   ]),
   summary: new Set<SummaryStatus>([
     'none', 'queued', 'generating', 'ready', 'stale', 'failed_retryable',
@@ -241,6 +242,7 @@ export interface MeetingPresentationState {
     | 'capture_failed'
     | 'uploading'
     | 'upload_failed'
+    | 'transcript_queued'
     | 'transcribing'
     | 'transcript_empty'
     | 'transcript_failed'
@@ -268,6 +270,7 @@ const PRESENTATION_STATES_BY_LABEL: Readonly<Record<string, MeetingPresentationS
   '上传受阻': { key: 'upload_failed', label: '上传受阻', tone: 'danger', retryStage: 'upload' },
   '上传失败，可重试': { key: 'upload_failed', label: '上传失败，可重试', tone: 'danger', retryStage: 'upload' },
   '正在生成文字记录': { key: 'transcribing', label: '正在生成文字记录', tone: 'neutral', retryStage: null },
+  '等待生成文字记录': { key: 'transcript_queued', label: '等待生成文字记录', tone: 'neutral', retryStage: null },
   '文字记录仍在补全': { key: 'transcribing', label: '文字记录仍在补全', tone: 'neutral', retryStage: null },
   '未检测到人声': { key: 'transcript_empty', label: '未检测到人声', tone: 'neutral', retryStage: null },
   '文字处理失败，可重试': { key: 'transcript_failed', label: '文字处理失败，可重试', tone: 'danger', retryStage: 'transcript' },
@@ -343,6 +346,9 @@ export function deriveMeetingPresentationState(
   }
   if (stages.transcript === 'finalizing') {
     return meetingPresentationStateFromLabel('正在生成文字记录')!;
+  }
+  if (stages.transcript === 'queued') {
+    return meetingPresentationStateFromLabel('等待生成文字记录')!;
   }
   if (stages.transcript === 'realtime_draft') {
     return meetingPresentationStateFromLabel('文字记录仍在补全')!;

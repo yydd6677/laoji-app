@@ -56,6 +56,7 @@ data class CalendarEvent(
   val endEpochDayExclusive: Int? = null,
   val startMinutes: Int?,
   val endMinutes: Int?,
+  val timePeriodLabel: String? = null,
   val timeZoneId: String,
   val allDay: Boolean,
   val editable: Boolean,

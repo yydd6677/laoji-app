@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "archived_on": "2026-07-18",
-  "status": "stale_historical_reference",
-  "series": ["rc34", "rc35"],
-  "represents_current_build": false,
-  "allowed_uses": ["historical_failure_analysis"],
-  "forbidden_uses": ["current_ui_review", "parity_acceptance", "release_evidence"]
-}

@@ -36,10 +36,16 @@ internal data class CalendarEditTimeState(
   val endTime: LocalTime,
   val allDay: Boolean,
   val timedEnabled: Boolean,
+  val endTimedEnabled: Boolean,
   val selectedEndpoint: CalendarEditEndpoint,
 ) {
   val hasTime: Boolean
     get() = !allDay && timedEnabled
+
+  fun timeEnabled(endpoint: CalendarEditEndpoint): Boolean = when (endpoint) {
+    CalendarEditEndpoint.START -> hasTime
+    CalendarEditEndpoint.END -> hasTime && endTimedEnabled
+  }
 
   fun selectedDate(): LocalDate = dateFor(selectedEndpoint)
 
@@ -64,6 +70,12 @@ internal data class CalendarEditTimeState(
     allDay = false,
     timedEnabled = enabled,
   ).enforceBoundary(selectedEndpoint)
+
+  fun setEndTimedEnabled(enabled: Boolean): CalendarEditTimeState = copy(
+    allDay = false,
+    timedEnabled = timedEnabled || enabled,
+    endTimedEnabled = enabled,
+  ).enforceBoundary(CalendarEditEndpoint.END)
 
   fun setDate(endpoint: CalendarEditEndpoint, value: LocalDate): CalendarEditTimeState {
     val bounded = value.coerceCalendarRange()
@@ -139,7 +151,7 @@ internal data class CalendarEditTimeState(
         startDate = safe.startDate.toString(),
         endDate = safe.endDate.toString(),
         startTime = safe.startTime.format(TIME_FORMATTER),
-        endTime = safe.endTime.format(TIME_FORMATTER),
+        endTime = safe.endTime.takeIf { safe.endTimedEnabled }?.format(TIME_FORMATTER),
         allDay = false,
       ).normalized()
     }
@@ -162,7 +174,7 @@ internal data class CalendarEditTimeState(
         CalendarEditEndpoint.END -> copy(endDate = startDate).enforceBoundary(changedEndpoint)
       }
     }
-    if (!hasTime) return this
+    if (!hasTime || !endTimedEnabled) return this
 
     val start = LocalDateTime.of(startDate, startTime)
     val end = LocalDateTime.of(endDate, endTime)
@@ -198,7 +210,8 @@ internal data class CalendarEditTimeState(
       val endDate = if (parsedEndDate.isBefore(startDate)) startDate else parsedEndDate
       val parsedStartTime = parseTime(normalized.startTime)
       val parsedEndTime = parseTime(normalized.endTime)
-      val hasTime = !normalized.allDay && parsedStartTime != null && parsedEndTime != null
+      val hasTime = !normalized.allDay && parsedStartTime != null
+      val hasEndTime = hasTime && parsedEndTime != null
       val snappedStart = snapDown(startDate, parsedStartTime ?: LocalTime.of(10, 0))
       val snappedEnd = snapUp(endDate, parsedEndTime ?: LocalTime.of(11, 0))
       return CalendarEditTimeState(
@@ -209,6 +222,7 @@ internal data class CalendarEditTimeState(
         endTime = snappedEnd.toLocalTime(),
         allDay = normalized.allDay,
         timedEnabled = hasTime,
+        endTimedEnabled = hasEndTime,
         selectedEndpoint = selectedEndpoint,
       ).enforceBoundary(CalendarEditEndpoint.END)
     }

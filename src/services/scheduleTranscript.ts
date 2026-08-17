@@ -42,19 +42,34 @@ export function appendScheduleTranscriptSegment(
 }
 
 export function scheduleTranscriptDisplayText(segments: ScheduleTranscriptSegment[]): string {
-  return segments.map(segment => segment.text.trim()).filter(Boolean).join('\n');
+  return mergeScheduleTranscriptSegments(
+    segments.map(segment => segment.text.trim()).filter(Boolean),
+  );
 }
 
 export function scheduleTranscriptText(segments: ScheduleTranscriptSegment[]): string {
   const cleaned = segments
     .map(segment => repairCommonScheduleHomophones(repairTemporalPrefix(segment.text)))
     .filter(text => !isExplicitAsrNoise(text) && !isLowInformationRepetition(text));
-  return cleaned
+  return mergeScheduleTranscriptSegments(cleaned
     .filter((text, index) => (
       cleaned.indexOf(text) === index
       && !isLikelyPartialDuplicate(text, index, cleaned)
-    ))
-    .join('\n');
+    )));
+}
+
+/**
+ * Schedule ASR chunks are transport boundaries, not sentence boundaries.
+ * Qwen commonly appends a full stop to every independently decoded VAD chunk;
+ * keeping those stops turns one spoken request into several apparent sentences
+ * and can incorrectly route an otherwise local-safe draft back to the model.
+ */
+function mergeScheduleTranscriptSegments(texts: string[]): string {
+  return texts
+    .map(text => text.trim().replace(/[。．.]+$/u, '').trim())
+    .filter(Boolean)
+    .map((text, index) => index === 0 ? text : text.replace(/^[，,。．.]+/u, ''))
+    .join('');
 }
 
 function isStandaloneFiller(text: string): boolean {

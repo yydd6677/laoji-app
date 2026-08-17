@@ -11,16 +11,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ManageMeetingOrganizationUseCase } from '../application/meeting';
+import { MeetingTagSheet } from '../components/MeetingTagSheet';
+import { useAppDialog } from '../components/AppDialog';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SettingsTitleBar } from '../components/SettingsGroup';
 import type {
   MeetingOrganizationMeeting,
   MeetingOrganizationProjection,
   MeetingPersonAggregate,
+  MeetingTagRecord,
   MeetingTopicAggregate,
 } from '../data/repositories';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
-import { getFeatureFlags } from '../config/featureFlags';
 import type { ScopeKey } from '../domain/meeting';
 import { readableErrorMessage } from '../services/errors';
 import { useAuth } from '../store/AuthStore';
@@ -34,14 +36,13 @@ import { displayMeetingTitle } from '../utils/meetingTitle';
 
 const { colors: F } = getFeishuTokens();
 const meetingOrganization = new ManageMeetingOrganizationUseCase(sqliteMeetingNoteRepository);
-const AUTOMATIC_TOPICS_ENABLED = getFeatureFlags().meetingAutomaticTopicsV1;
 const EMPTY_PROJECTION: MeetingOrganizationProjection = { people: [], topics: [] };
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingOrganization'>;
 };
 
-type OrganizationMode = 'people' | 'topics';
+type OrganizationMode = 'people' | 'tags';
 type OrganizationGroup =
   | { kind: 'person'; aggregate: MeetingPersonAggregate }
   | { kind: 'topic'; aggregate: MeetingTopicAggregate };
@@ -106,9 +107,7 @@ function OrganizationGroupCard({
   onOpenMeeting: (meetingId: string) => void;
 }) {
   const person = group.kind === 'person' ? group.aggregate : null;
-  const topic = group.kind === 'topic' ? group.aggregate : null;
   const isPerson = person !== null;
-  const isSummaryTopic = topic?.source === 'summary';
   const aggregate = group.aggregate;
   const name = aggregate.name;
   const meetingCount = aggregate.meetingCount;
@@ -118,19 +117,16 @@ function OrganizationGroupCard({
   return (
     <View style={[styles.group, { backgroundColor: F.backgroundFloat }]}>
       <View style={styles.groupHeader}>
-        <View style={[
-          styles.groupIcon,
-          { backgroundColor: isSummaryTopic ? F.backgroundBodyOverlay : F.primarySoft },
-        ]}>
+        <View style={[styles.groupIcon, { backgroundColor: F.primarySoft }]}>
           {isPerson ? (
             <Text style={[styles.groupInitial, { color: F.primary }]} numberOfLines={1}>
               {name.slice(0, 1)}
             </Text>
           ) : (
             <Ionicons
-              name={isSummaryTopic ? 'document-text-outline' : 'pricetag-outline'}
+              name="pricetag-outline"
               size={20}
-              color={isSummaryTopic ? F.iconSecondary : F.primary}
+              color={F.primary}
             />
           )}
         </View>
@@ -142,19 +138,6 @@ function OrganizationGroupCard({
             {person && !person.confirmed ? (
               <View style={[styles.badge, { backgroundColor: F.backgroundBodyOverlay }]}>
                 <Text style={[styles.badgeText, { color: F.textCaption }]}>未确认</Text>
-              </View>
-            ) : null}
-            {topic ? (
-              <View style={[
-                styles.badge,
-                { backgroundColor: isSummaryTopic ? F.backgroundBodyOverlay : F.primarySoft },
-              ]}>
-                <Text style={[
-                  styles.badgeText,
-                  { color: isSummaryTopic ? F.textCaption : F.primary },
-                ]}>
-                  {isSummaryTopic ? '整理主题' : '用户标签'}
-                </Text>
               </View>
             ) : null}
           </View>
@@ -182,9 +165,12 @@ function OrganizationGroupCard({
 
 export function MeetingOrganizationScreen({ navigation }: Props) {
   const { isGuest, session } = useAuth();
+  const { showDialog } = useAppDialog();
   const scopeKey = isGuest ? 'guest' as ScopeKey : session ? `user:${session.user.id}` as ScopeKey : null;
   const [mode, setMode] = useState<OrganizationMode>('people');
   const [projection, setProjection] = useState<MeetingOrganizationProjection>(EMPTY_PROJECTION);
+  const [tags, setTags] = useState<readonly MeetingTagRecord[]>([]);
+  const [tagSheetVisible, setTagSheetVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const generationRef = useRef(0);
@@ -200,10 +186,14 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
     setLoading(true);
     setError('');
     try {
-      const result = await meetingOrganization.listAggregates(scopeKey, {
-        includeSummaryTopics: AUTOMATIC_TOPICS_ENABLED,
-      });
-      if (generationRef.current === generation) setProjection(result);
+      const [result, tagCatalog] = await Promise.all([
+        meetingOrganization.listAggregates(scopeKey, { includeSummaryTopics: false }),
+        meetingOrganization.listTags(scopeKey),
+      ]);
+      if (generationRef.current === generation) {
+        setProjection(result);
+        setTags(tagCatalog);
+      }
     } catch (reason) {
       if (generationRef.current === generation) {
         setProjection(EMPTY_PROJECTION);
@@ -214,6 +204,60 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
     }
   }, [scopeKey]);
 
+  const refreshTags = useCallback(async () => {
+    if (!scopeKey) throw new Error('当前无法使用会议标签。');
+    const next = await meetingOrganization.listTags(scopeKey);
+    setTags(next);
+    return next;
+  }, [scopeKey]);
+
+  const createTag = useCallback(async (name: string) => {
+    if (!scopeKey) throw new Error('当前无法使用会议标签。');
+    const tag = await meetingOrganization.createTag(scopeKey, name);
+    await refreshTags();
+    await load();
+    return tag;
+  }, [load, refreshTags, scopeKey]);
+
+  const renameTag = useCallback(async (tagId: string, name: string) => {
+    if (!scopeKey) throw new Error('当前无法使用会议标签。');
+    const result = await meetingOrganization.renameOrMergeTag(tagId, scopeKey, name);
+    await refreshTags();
+    await load();
+    return result;
+  }, [load, refreshTags, scopeKey]);
+
+  const requestDeleteTag = useCallback((tag: MeetingTagRecord) => {
+    if (!scopeKey) return;
+    showDialog({
+      title: `删除标签“${tag.name}”？`,
+      message: tag.meetingCount > 0
+        ? `会从 ${tag.meetingCount} 场会议中移除此标签，会议内容不会被删除。`
+        : '会议内容不会被删除。',
+      tone: 'danger',
+      actions: [
+        {
+          text: '删除',
+          role: 'destructive',
+          onPress: async () => {
+            try {
+              await meetingOrganization.deleteTag(tag.id, scopeKey);
+              await refreshTags();
+              await load();
+            } catch (reason) {
+              showDialog({
+                title: '删除失败',
+                message: readableErrorMessage(reason, '标签暂时未能删除，请稍后重试。'),
+                tone: 'error',
+              });
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  }, [load, refreshTags, scopeKey, showDialog]);
+
   useFocusEffect(useCallback(() => {
     void load();
     return () => { generationRef.current += 1; };
@@ -222,7 +266,9 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
   const groups = useMemo<readonly OrganizationGroup[]>(() => (
     mode === 'people'
       ? projection.people.map(aggregate => ({ kind: 'person' as const, aggregate }))
-      : projection.topics.map(aggregate => ({ kind: 'topic' as const, aggregate }))
+      : projection.topics
+        .filter(aggregate => aggregate.source === 'user_tag')
+        .map(aggregate => ({ kind: 'topic' as const, aggregate }))
   ), [mode, projection.people, projection.topics]);
 
   const renderState = () => {
@@ -252,7 +298,7 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
           color={F.iconDisabled}
         />
         <Text style={[styles.emptyText, { color: F.textCaption }]}>
-          {mode === 'people' ? '暂无可归类的人物' : '暂无主题'}
+          {mode === 'people' ? '暂无可归类的人物' : '暂无标签'}
         </Text>
       </View>
     );
@@ -260,14 +306,28 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
-      <SettingsTitleBar title="分类查看" onBack={() => navigation.goBack()} />
+      <SettingsTitleBar
+        title="分类查看"
+        onBack={() => navigation.goBack()}
+        trailing={mode === 'tags' ? (
+          <Pressable
+            style={({ pressed }) => [styles.manageAction, pressed && { backgroundColor: F.pressedFill }]}
+            onPress={() => setTagSheetVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="管理标签"
+            testID="meeting-organization-manage-tags"
+          >
+            <Text style={[styles.manageActionText, { color: F.primary }]}>管理</Text>
+          </Pressable>
+        ) : null}
+      />
       <View
         style={[styles.tabs, { backgroundColor: F.backgroundBody, borderBottomColor: F.divider }]}
         accessibilityRole="tablist"
       >
-        {(['people', 'topics'] as const).map(item => {
+        {(['people', 'tags'] as const).map(item => {
           const selected = item === mode;
-          const label = item === 'people' ? '人物' : '主题';
+          const label = item === 'people' ? '人物' : '标签';
           return (
             <Pressable
               key={item}
@@ -306,11 +366,34 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
         ListEmptyComponent={renderState}
         testID="meeting-organization-list"
       />
+      {scopeKey ? (
+        <MeetingTagSheet
+          visible={tagSheetVisible}
+          mode="manage"
+          tags={tags}
+          selectedTagIds={[]}
+          onClose={() => setTagSheetVisible(false)}
+          onCreate={createTag}
+          onRename={renameTag}
+          onDelete={requestDeleteTag}
+        />
+      ) : null}
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  manageAction: {
+    width: 64,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manageActionText: {
+    fontSize: FEISHU_FONT_SIZES.body1,
+    lineHeight: 22,
+    fontWeight: '400',
+  },
   tabs: {
     height: 48,
     flexDirection: 'row',

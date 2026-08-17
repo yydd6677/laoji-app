@@ -149,6 +149,11 @@ export async function pullMeetingSummaryVersions(
       expectedCanonicalMeetingId: input.canonicalMeetingId,
       canonicalWrite: true,
       throwOnFailure: true,
+      // The catalog is an ordered replay of all immutable versions.  It must
+      // not settle the live detail-page task while older versions are being
+      // materialized; the current pointer endpoint below is the authority for
+      // version selection, and the generation path settles its own stage.
+      settleProcessingStage: false,
     });
     if (!mirror.localVersionId) throw new Error('整理结果云端版本未能建立本机映射');
     phase = 'hash';

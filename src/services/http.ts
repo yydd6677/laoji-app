@@ -14,6 +14,15 @@ function requestAbortError(): Error {
 }
 
 export function requestTimeoutMs(url: string): number {
+  // R2 multipart completion verifies the remote object, streams it to the
+  // bounded server-side audio area, and checks its SHA-256 before returning.
+  // That work is intentionally synchronous so the following transcription
+  // request cannot race an incomplete asset.  It can take longer than a
+  // normal JSON request for a large import, so give this one endpoint a
+  // longer—but still finite—deadline.  Without this special case the server
+  // completed the upload after the mobile client had already aborted at 20 s,
+  // leaving an uploaded asset with no transcription job.
+  if (/\/r2-upload\/complete(?:\?|$)/.test(url)) return 120_000;
   if (/\/api\/laoji\/(?:asr\/transcribe|parse-audio)/.test(url)) return 120_000;
   if (/\/api\/laoji\/parse(?:\?|$)/.test(url) || /\/api\/laoji\/clarify/.test(url)) return 60_000;
   if (/\/summaries\//.test(url) || /guest-summary/.test(url)) return 90_000;

@@ -20,7 +20,7 @@ import {
   parseText,
   ParseResult,
 } from '../services/api';
-import { getDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
+import { getLocalDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
 import {
   RealtimeAsrAudioStats,
   RealtimeAsrSession,
@@ -478,7 +478,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     // Register the device while the microphone permission is being resolved.
     // No temporary guest session is created; the WebSocket carries the same
     // device/epoch credential as the rest of the service API.
-    const authorizationResultPromise = getDeviceRealtimeAuth().then(
+    const authorizationResultPromise = getLocalDeviceRealtimeAuth().then(
       session => ({ session, error: null as unknown }),
       error => ({ session: null, error }),
     );
@@ -796,7 +796,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   // ── Save ───────────────────────────────────────────────────────────────────
   const eventPayloadFromDraft = (source: ParseResult): Omit<CalEvent, 'id'> => {
     const category = normalizeEventCategory(source.category);
-    const hasTimedRange = !source.is_all_day && Boolean(source.start_time && source.end_time);
+    const hasStartTime = !source.is_all_day && Boolean(source.start_time);
     return {
       title:       source.title.trim(),
       startDate:   source.start_date,
@@ -815,7 +815,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       detail:      source.detail ?? undefined,
       status:      source.status ?? undefined,
       spanning:    source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
-      reminderMinutes: hasTimedRange ? source.reminder_minutes ?? null : null,
+      reminderMinutes: hasStartTime ? source.reminder_minutes ?? null : null,
       color:       colorForEvent({ category }),
     };
   };
@@ -1011,13 +1011,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                   <View style={s.recordingStatusSlot}>
                     {(step === 'connecting' || step === 'recording') && (
                       <Text style={s.recordingLabel} numberOfLines={2}>
-                        {step === 'connecting'
-                          ? '正在连接语音服务'
-                          : micInteraction === 'holding'
-                            ? '松开结束'
-                            : recordingMode === 'realtime'
-                              ? '实时识别中，轻点结束'
-                              : '录音中，轻点结束'}
+                        {micInteraction === 'holding'
+                          ? '松开结束'
+                          : recordingMode === 'realtime'
+                            ? '实时识别中，轻点结束'
+                            : '录音中，轻点结束'}
                       </Text>
                     )}
                   </View>
@@ -1028,11 +1026,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                     onPressOut={handleMicPressOut}
                     onPress={handleMicPress}
                     accessibilityRole="button"
-                    accessibilityLabel={step === 'recording'
+                    accessibilityLabel={step === 'recording' || step === 'connecting'
                       ? '停止语音输入'
-                      : step === 'connecting'
-                        ? '正在连接语音服务'
-                        : '开始语音输入'}
+                      : '开始语音输入'}
                     accessibilityState={{
                       busy: step === 'connecting',
                     }}
@@ -1045,15 +1041,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                   >
                     <View style={[
                       s.micBtn,
-                      step === 'recording' && s.micBtnRecording,
+                      (step === 'recording' || step === 'connecting') && s.micBtnRecording,
                       micInteraction === 'holding' && s.micBtnHolding,
                     ]} testID="schedule-voice-mic-visual">
-                      {step === 'connecting'
-                        ? <ActivityIndicator size="small" color="#fff" />
-                        : <Ionicons
-                            name={step === 'recording' ? 'stop' : 'mic'}
-                            size={34} color="#fff"
-                          />}
+                      <Ionicons
+                        name={step === 'recording' || step === 'connecting' ? 'stop' : 'mic'}
+                        size={34} color="#fff"
+                      />
                     </View>
                   </Pressable>
 

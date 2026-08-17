@@ -7,14 +7,17 @@ import {
   addNativeWindowOverlayActionListener,
   addNativeWindowOverlayDismissListener,
   addNativeRecorderErrorListener,
+  addNativeRecorderLevelListener,
   addNativeRecorderStateListener,
   addNativeRecorderTranscriptListener,
   assertNativeRecorderDeploymentPolicy,
   createNativeOverlayOwnerId,
   dismissNativeWindowOverlay,
+  discardNativeRecorderPrewarm,
   hasNativeRecorder,
   resolveNativeRecorderInsecureDevelopment,
   presentNativeWindowOverlay,
+  prewarmNativeRecorder,
   startNativeRecorder,
   stopNativeRecorder,
   type NativeRecorderStopResult,
@@ -28,9 +31,16 @@ import {
   parseAudio,
   parseText,
 } from '../services/api';
+import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
 import { getApiConfig } from '../services/config';
 import { buildRealtimeAsrUrl, createRealtimeMeetingId } from '../services/realtimeAsr';
-import { getDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
+import { getLocalDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
+import {
+  ScheduleTranscriptSegment,
+  appendScheduleTranscriptSegment,
+  scheduleTranscriptDisplayText,
+  scheduleTranscriptText,
+} from '../services/scheduleTranscript';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
 import { CalEvent, EventDraftParams, RootStackParamList } from '../types';
@@ -56,6 +66,15 @@ type ActiveScheduleRecording = {
 type WarmDeviceSession = {
   promise: Promise<DeviceRealtimeAuth>;
 };
+
+type WarmScheduleConnection = {
+  authPromise: Promise<DeviceRealtimeAuth>;
+  sessionId: string;
+  prewarmPromise: Promise<boolean>;
+};
+
+const LOW_AUDIO_PEAK = 1000;
+const LOW_AUDIO_RMS = 280;
 
 function dateLabel(value: string): string {
   const date = new Date(`${value}T00:00:00`);
@@ -91,7 +110,7 @@ function scheduleVoiceErrorMessage(reason: unknown, fallback: string): string {
 
 function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<CalEvent, 'id'> {
   const category = normalizeEventCategory(source.category);
-  const hasTimedRange = !source.is_all_day && Boolean(source.start_time && source.end_time);
+  const hasStartTime = !source.is_all_day && Boolean(source.start_time);
   return {
     title: source.title.trim(),
     startDate: source.start_date,
@@ -110,7 +129,7 @@ function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<Cal
     detail: source.detail ?? undefined,
     status: source.status ?? undefined,
     spanning: source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
-    reminderMinutes: hasTimedRange ? source.reminder_minutes ?? null : null,
+    reminderMinutes: hasStartTime ? source.reminder_minutes ?? null : null,
     color: colorForEvent({ category }),
   };
 }
@@ -160,9 +179,15 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const [draft, setDraft] = useState<ParseResult | null>(null);
   const [clarificationAnswer, setClarificationAnswer] = useState('');
   const activeRef = useRef<ActiveScheduleRecording | null>(null);
-  const transcriptRef = useRef(new Map<string, { text: string; startMs: number | null }>());
+  const stoppingSessionIdRef = useRef<string | null>(null);
+  const transcriptRef = useRef<ScheduleTranscriptSegment[]>([]);
+  const audioLevelRef = useRef({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const stopPromiseRef = useRef<Promise<ParseResult | null> | null>(null);
+  const recordingStartingRunRef = useRef<number | null>(null);
+  const stopRequestedWhileStartingRef = useRef(false);
+  const stopAfterStartRef = useRef<() => void>(() => undefined);
   const warmDeviceSessionRef = useRef<WarmDeviceSession | null>(null);
+  const warmScheduleConnectionRef = useRef<WarmScheduleConnection | null>(null);
   const mountedRef = useRef(true);
   const runRef = useRef(0);
   const createRequestRef = useRef(createClientRequestState('event'));
@@ -170,11 +195,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 
-  const currentTranscript = useCallback(() => [...transcriptRef.current.values()]
-    .sort((left, right) => (left.startMs ?? Number.MAX_SAFE_INTEGER) - (right.startMs ?? Number.MAX_SAFE_INTEGER))
-    .map(item => item.text.trim())
-    .filter(Boolean)
-    .join(''), []);
+  const currentTranscript = useCallback(() => scheduleTranscriptText(transcriptRef.current), []);
 
   useEffect(() => {
     if (!visible || !hasNativeRecorder()) return undefined;
@@ -198,12 +219,25 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
       }),
       addNativeRecorderTranscriptListener(event => {
-        if (event.sessionId !== activeRef.current?.sessionId || !event.text.trim()) return;
-        transcriptRef.current.set(event.segmentId, { text: event.text, startMs: event.startMs });
+        const ownedSessionId = activeRef.current?.sessionId ?? stoppingSessionIdRef.current;
+        if (event.sessionId !== ownedSessionId || !event.text.trim()) return;
+        transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
+          text: event.text,
+          receivedAt: event.receivedAtMs,
+          startTime: event.startMs == null ? undefined : event.startMs / 1000,
+          endTime: event.endMs == null ? undefined : event.endMs / 1000,
+        });
         if (mountedRef.current) {
-          setText(currentTranscript());
+          setText(scheduleTranscriptDisplayText(transcriptRef.current));
           setError('');
         }
+      }),
+      addNativeRecorderLevelListener(event => {
+        if (event.sessionId !== activeRef.current?.sessionId) return;
+        const level = audioLevelRef.current;
+        level.frameCount += 1;
+        level.maxPeak = Math.max(level.maxPeak, event.peak);
+        level.maxRms = Math.max(level.maxRms, event.rms);
       }),
       addNativeRecorderErrorListener(event => {
         if (event.sessionId && event.sessionId !== activeRef.current?.sessionId) return;
@@ -229,7 +263,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     const existing = warmDeviceSessionRef.current;
     if (existing) return existing;
     const warm: WarmDeviceSession = {
-      promise: getDeviceRealtimeAuth(),
+      promise: getLocalDeviceRealtimeAuth(),
     };
     warmDeviceSessionRef.current = warm;
     void warm.promise.catch(() => {
@@ -238,15 +272,52 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     return warm;
   }, []);
 
-  const claimWarmDeviceSession = useCallback((): Promise<DeviceRealtimeAuth> => {
-    const warm = createWarmDeviceSession();
-    if (warmDeviceSessionRef.current === warm) warmDeviceSessionRef.current = null;
-    return warm.promise;
-  }, [createWarmDeviceSession]);
-
   const discardWarmDeviceSession = useCallback(async () => {
     warmDeviceSessionRef.current = null;
   }, []);
+
+  const discardWarmScheduleConnection = useCallback(() => {
+    const warm = warmScheduleConnectionRef.current;
+    warmScheduleConnectionRef.current = null;
+    if (warm) discardNativeRecorderPrewarm(warm.sessionId);
+  }, []);
+
+  const createWarmScheduleConnection = useCallback((): WarmScheduleConnection => {
+    const existing = warmScheduleConnectionRef.current;
+    if (existing) return existing;
+    const sessionId = createRealtimeMeetingId();
+    const authPromise = createWarmDeviceSession().promise;
+    const prewarmPromise = authPromise.then(auth => {
+      const config = getApiConfig();
+      const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
+      const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(
+        config.isProduction,
+        realtimeSecure,
+      );
+      assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
+      return prewarmNativeRecorder({
+        sessionId,
+        purpose: 'schedule',
+        websocketUrl: buildRealtimeAsrUrl({
+          meetingId: sessionId,
+          purpose: 'schedule',
+          provider: config.realtimeAsrProvider,
+          realtimeAsrBase: config.realtimeAsrBase,
+        }),
+        deviceToken: auth.deviceToken,
+        dataEpoch: auth.dataEpoch,
+        allowInsecureDevelopment,
+        levelIntervalMs: 120,
+      });
+    });
+    const warm = { authPromise, sessionId, prewarmPromise };
+    warmScheduleConnectionRef.current = warm;
+    void prewarmPromise.catch(() => {
+      // RecorderEngine transparently creates a fresh socket if this warm
+      // connection failed before the microphone was pressed.
+    });
+    return warm;
+  }, [createWarmDeviceSession]);
 
   const stopAndDiscard = useCallback(async () => {
     const active = activeRef.current;
@@ -270,14 +341,22 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     if (!hasNativeRecorder()) return undefined;
     const interaction = InteractionManager.runAfterInteractions(() => {
       createWarmDeviceSession();
+      createWarmScheduleConnection();
     });
     return () => {
       interaction.cancel();
       mountedRef.current = false;
       runRef.current += 1;
+      discardWarmScheduleConnection();
       void Promise.allSettled([stopAndDiscard(), discardWarmDeviceSession()]);
     };
-  }, [createWarmDeviceSession, discardWarmDeviceSession, stopAndDiscard]);
+  }, [
+    createWarmDeviceSession,
+    createWarmScheduleConnection,
+    discardWarmDeviceSession,
+    discardWarmScheduleConnection,
+    stopAndDiscard,
+  ]);
 
   useEffect(() => {
     if (visible) {
@@ -286,22 +365,27 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       setDraft(null);
       setClarificationAnswer('');
       setText('');
-      transcriptRef.current.clear();
+      transcriptRef.current = [];
+      audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
       createRequestRef.current = createClientRequestState('event');
       // Registration is short-lived work and never blocks the first frame.
       createWarmDeviceSession();
+      createWarmScheduleConnection();
       return undefined;
     }
     runRef.current += 1;
-    // A prewarmed device registration remains available across sheet cycles.
+    // Keep an unused warm connection while Calendar remains mounted. It owns
+    // no microphone and removes the public TLS/WebSocket handshake from the
+    // next press. Component cleanup and app backgrounding release it.
     void stopAndDiscard();
     return undefined;
-  }, [createWarmDeviceSession, discardWarmDeviceSession, stopAndDiscard, visible]);
+  }, [createWarmDeviceSession, createWarmScheduleConnection, stopAndDiscard, visible]);
 
   const close = useCallback(() => {
     runRef.current += 1;
+    discardWarmScheduleConnection();
     void stopAndDiscard().finally(onClose);
-  }, [onClose, stopAndDiscard]);
+  }, [discardWarmScheduleConnection, onClose, stopAndDiscard]);
 
   useEffect(() => {
     if (visible && !isFocused) close();
@@ -322,16 +406,23 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       return;
     }
     const runId = ++runRef.current;
-    setPhase('preparing');
+    recordingStartingRunRef.current = runId;
+    stopRequestedWhileStartingRef.current = false;
+    // The microphone owns the interaction immediately. Local AudioRecord is
+    // the critical path; service readiness and WebSocket setup stay hidden.
+    setPhase('recording');
     setError('');
-    transcriptRef.current.clear();
+    transcriptRef.current = [];
+    audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
     setText('');
     try {
       const permissionPromise = PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)
         .then(granted => granted
           ? PermissionsAndroid.RESULTS.GRANTED
           : PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO));
-      const deviceAuthPromise = claimWarmDeviceSession();
+      const warmConnection = warmScheduleConnectionRef.current ?? createWarmScheduleConnection();
+      warmScheduleConnectionRef.current = null;
+      const deviceAuthPromise = warmConnection.authPromise;
       const [permissionResult, deviceAuthResult] = await Promise.allSettled([
         permissionPromise,
         deviceAuthPromise,
@@ -341,11 +432,15 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       const deviceAuth = deviceAuthResult.value;
       const permission = permissionResult.value;
       if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
+        discardNativeRecorderPrewarm(warmConnection.sessionId);
+        if (recordingStartingRunRef.current === runId) recordingStartingRunRef.current = null;
         setPhase('input');
         showDialog({ title: '无法录音', message: '请在系统设置中允许老记使用麦克风。', tone: 'warning' });
         return;
       }
       if (runRef.current !== runId) {
+        discardNativeRecorderPrewarm(warmConnection.sessionId);
+        if (recordingStartingRunRef.current === runId) recordingStartingRunRef.current = null;
         return;
       }
       const config = getApiConfig();
@@ -355,7 +450,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const sessionId = createRealtimeMeetingId();
+      const sessionId = warmConnection.sessionId;
       const websocketUrl = buildRealtimeAsrUrl({
         meetingId: sessionId,
         purpose: 'schedule',
@@ -375,8 +470,16 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         allowInsecureDevelopment,
         levelIntervalMs: 120,
       });
-      if (mountedRef.current && runRef.current === runId) setPhase('recording');
+      if (recordingStartingRunRef.current === runId) recordingStartingRunRef.current = null;
+      if (mountedRef.current && runRef.current === runId) {
+        setPhase('recording');
+        if (stopRequestedWhileStartingRef.current) stopAfterStartRef.current();
+      }
     } catch (reason) {
+      if (recordingStartingRunRef.current === runId) {
+        recordingStartingRunRef.current = null;
+        stopRequestedWhileStartingRef.current = false;
+      }
       const active = activeRef.current;
       activeRef.current = null;
       if (active) await releaseDeviceSession(active);
@@ -385,7 +488,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setError(scheduleVoiceErrorMessage(reason, '语音服务连接失败，请稍后重试。'));
       }
     }
-  }, [claimWarmDeviceSession, phase, releaseDeviceSession, showDialog]);
+  }, [createWarmScheduleConnection, phase, releaseDeviceSession, showDialog]);
 
   const parseSourceText = useCallback(async (sourceText: string): Promise<ParseResult> => {
     return parseText(sourceText.trim());
@@ -394,8 +497,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const stopAndParse = useCallback((): Promise<ParseResult | null> => {
     if (stopPromiseRef.current) return stopPromiseRef.current;
     const active = activeRef.current;
-    if (!active) return Promise.resolve(null);
+    if (!active) {
+      if (recordingStartingRunRef.current !== null) stopRequestedWhileStartingRef.current = true;
+      return Promise.resolve(null);
+    }
     activeRef.current = null;
+    stoppingSessionIdRef.current = active.sessionId;
     const runId = ++runRef.current;
     setPhase('parsing');
     setError('');
@@ -411,10 +518,23 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           stopResult = recovered;
         }
         localUri = stopResult.localUri;
+        for (const segment of stopResult.transcriptSegments ?? []) {
+          transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
+            text: segment.text,
+            receivedAt: segment.receivedAtMs,
+            startTime: segment.startMs == null ? undefined : segment.startMs / 1000,
+            endTime: segment.endMs == null ? undefined : segment.endMs / 1000,
+          });
+        }
         const transcript = currentTranscript().trim();
-        const result = transcript
+        const needsFullAudioRecovery = stopResult.snapshot.transcriptRecoveryRequired;
+        const level = audioLevelRef.current;
+        const clearlySilent = level.frameCount >= 2
+          && level.maxPeak < LOW_AUDIO_PEAK
+          && level.maxRms < LOW_AUDIO_RMS;
+        const result = transcript && !needsFullAudioRecovery
           ? await parseSourceText(transcript)
-          : localUri
+          : localUri && !clearlySilent
             ? await parseAudio(localUri, {
                 reference_datetime: new Date().toISOString(),
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -435,6 +555,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
         return null;
       } finally {
+        if (stoppingSessionIdRef.current === active.sessionId) {
+          stoppingSessionIdRef.current = null;
+        }
         await deleteNativeScheduleAudio(localUri);
         await releaseDeviceSession(active);
       }
@@ -444,6 +567,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     stopPromiseRef.current = operation;
     return operation;
   }, [currentTranscript, parseSourceText, releaseDeviceSession]);
+  stopAfterStartRef.current = () => { void stopAndParse(); };
 
   const parseManualText = useCallback(async () => {
     const source = text.trim();
@@ -556,14 +680,19 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         ? `${dateLabel(draft.start_date)} - ${dateLabel(draft.end_date)}`
         : draft.start_date ? dateLabel(draft.start_date) : '待补充'
       : '';
+    const fuzzyTimeLabel = draft && !draft.start_time && !draft.is_all_day
+      ? scheduleTimePeriodLabel(draft.time_period ?? scheduleTimePeriodFromText(draft.raw_text))
+      : null;
     const fields = draft ? [
       { key: 'date', label: '日期', value: dateRange },
       {
         key: 'time',
         label: '时间',
-        value: draft.is_all_day || !draft.start_time
-          ? '全天 / 无具体时间'
-          : `${draft.start_time}${draft.end_time ? ` - ${draft.end_time}` : ''}`,
+        value: draft.is_all_day
+          ? '全天'
+          : fuzzyTimeLabel ?? (!draft.start_time
+            ? '无具体时间'
+            : `${draft.start_time}${draft.end_time ? ` - ${draft.end_time}` : ''}`),
       },
       { key: 'repeat', label: '重复', value: repeatLabel(draft.event_type) },
       { key: 'reminder', label: '提醒', value: reminderLabel(draft.reminder_minutes) },
@@ -576,7 +705,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       text,
       errorMessage: error,
       statusLabel: phase === 'preparing'
-          ? '正在连接语音服务'
+          ? ''
           : phase === 'recording'
           ? '正在识别'
           : phase === 'parsing'
@@ -622,9 +751,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   }, [ownerId, snapshot, visible]);
 
   useEffect(() => () => {
+    discardWarmScheduleConnection();
     void discardWarmDeviceSession();
     void dismissNativeWindowOverlay(ownerId, 'schedule-voice', 'component-unmounted');
-  }, [discardWarmDeviceSession, ownerId]);
+  }, [discardWarmDeviceSession, discardWarmScheduleConnection, ownerId]);
 
   return null;
 }

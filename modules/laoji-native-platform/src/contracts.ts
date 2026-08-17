@@ -33,6 +33,8 @@ export interface NativeCalendarEventSnapshot {
   endEpochDayExclusive?: number | null;
   startMinutes: number | null;
   endMinutes: number | null;
+  /** Spoken period such as 下午 when an exact clock was not provided. */
+  timePeriodLabel?: string | null;
   timeZoneId: string;
   allDay: boolean;
   editable: boolean;

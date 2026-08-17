@@ -25,6 +25,7 @@ import {
   getPendingMeetingAudioUpload,
   PendingMeetingAudioUpload,
   retryPendingMeetingAudioUpload,
+  subscribePendingMeetingAudioUploadChanged,
 } from '../services/meetingRecording';
 import {
   generateSummaryForMeeting,
@@ -87,6 +88,9 @@ import {
   authorizeMeetingSummaryCarryForward,
   resolveMeetingSummaryCarryForwardMemory,
 } from '../services/meetingSummaryCarryForward';
+import {
+  recordMeetingSummaryProcessing,
+} from '../services/meetingSummaryProcessing';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
 import {
   authorizeMeetingSummaryAttachments,
@@ -539,6 +543,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [accessToken, isGuest, m?.id, m?.updatedAt, performPendingAudioUpload, recordingStorageScope, reloadKey]);
 
   useEffect(() => {
+    const meetingId = m?.id;
+    if (!meetingId) return undefined;
+    const refresh = () => setReloadKey(value => value + 1);
+    const unsubscribe = subscribePendingMeetingAudioUploadChanged(changedMeetingId => {
+      if (changedMeetingId === meetingId) refresh();
+    });
+    refresh();
+    return unsubscribe;
+  }, [m?.id]);
+
+  useEffect(() => {
     autoResumeTaskRef.current = '';
   }, [m?.id, recordingStorageScope]);
 
@@ -813,6 +828,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       });
     } catch {
       if (!isActiveSummaryCarryLookup(generation, input.meetingId, input.scopeKey)) return;
+      setSummaryVisualPhase('error');
+      setLoadingSummary(false);
+      setSummaryError('暂时无法读取上次会议内容。');
       showDialog({
         title: '无法读取上次会议内容',
         message: '暂时无法检查可引用的决定和未完成事项。',
@@ -841,11 +859,27 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
   }
 
+  function cancelSummaryPreparation(meetingId: string, scopeKey: ScopeKey): void {
+    if (summaryInFlightRef.current) return;
+    void recordMeetingSummaryProcessing({
+      scopeKey,
+      legacyMeetingId: meetingId,
+      signal: { type: 'discarded' },
+    }).catch(() => undefined);
+  }
+
   async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
-    if (!m) return;
+    if (!m || summaryInFlightRef.current || summaryVisualPhase === 'running') return;
     const currentMeetingId = m.id;
     const currentScopeKey = meetingScopeKey;
     const forceRegenerate = Boolean(summary);
+    // Template/attachment/carry-forward checks are part of the same user
+    // action.  Keep the detail state visible from the first tap instead of
+    // appearing idle until the actual generation request is submitted.
+    setSummaryVisualPhase('running');
+    setLoadingSummary(true);
+    setSummaryError('');
+    setSummaryProgress('正在准备整理');
     setSummaryTemplate(template);
     setSummaryAttachmentRequest(null);
     setSummaryCarryForwardRequest(null);
@@ -868,6 +902,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     };
     const generation = summaryCarryLookupGenerationRef.current + 1;
     summaryCarryLookupGenerationRef.current = generation;
+    void recordMeetingSummaryProcessing({
+      scopeKey: currentScopeKey,
+      legacyMeetingId: currentMeetingId,
+      signal: {
+        type: 'prepare',
+        inputFingerprint: meetingSummaryInputFingerprint(
+          transcriptItems,
+          m.title,
+          meetingDateForSummary(m.date, m.createdAt),
+          template,
+        ),
+      },
+    }).catch(() => undefined);
     try {
       const [attachments, imageSelectionEnabled] = await Promise.all([
         loadMeetingAttachments(currentScopeKey, currentMeetingId),
@@ -884,6 +931,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       await continueSummaryAfterAttachmentSelection(input, null);
     } catch {
       if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
+      setSummaryVisualPhase('error');
+      setLoadingSummary(false);
+      setSummaryError('暂时无法读取会议附件。');
       showDialog({
         title: '无法读取附件',
         message: '暂时无法确认本次会议的附件。',
@@ -1071,7 +1121,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     void performPendingAudioUpload(pendingAudioUpload, true);
   };
 
-  const handleGenerateSummary = () => setTemplateSheetVisible(true);
+  const handleGenerateSummary = () => {
+    if (summaryInFlightRef.current || loadingSummary || summaryVisualPhase === 'running') return;
+    setTemplateSheetVisible(true);
+  };
 
   const runMeetingShare = async (selection: MeetingShareSelection) => {
     if (sharing) return;
@@ -1101,6 +1154,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   };
 
   const openQuestionCitation = (target: MeetingQuestionCitationTarget) => {
+    // A question sheet may finish its exit animation after the parent detail
+    // route has changed.  Do not let that stale target select a segment in a
+    // different meeting.
+    if (target.meetingId !== m.id) return;
     if (target.kind === 'transcript') {
       selectDetailTab('transcript');
       navigation.setParams({
@@ -1143,38 +1200,42 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       });
       return;
     }
+    const performDelete = async (recoverable: boolean, retentionDays: number | null) => {
+      try {
+        await deleteMeeting(m.id, {
+          recoverable,
+          expectedRetentionDays: retentionDays,
+        });
+        openMeetingsTab(navigation);
+      } catch (deleteError) {
+        if (deleteError instanceof MeetingDeletionCleanupError) {
+          openMeetingsTab(navigation);
+          showDialog({
+            title: '会议已删除，清理未完成',
+            message: deleteError.message,
+            tone: 'warning',
+          });
+        } else {
+          showDialog({
+            title: '删除失败',
+            message: readableErrorMessage(deleteError, '请检查网络后重试。'),
+            tone: 'error',
+          });
+        }
+      }
+    };
+    const canRecycle = presentation.recoverable && presentation.retentionDays !== null;
     showDialog({
-      title: presentation.title,
-      message: presentation.message,
+      title: canRecycle ? '删除会议记录？' : presentation.title,
+      message: canRecycle
+        ? `删除后会移到回收站，可在${presentation.retentionDays}天内恢复。`
+        : presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: presentation.confirmText,
+          text: '删除',
           role: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMeeting(m.id, {
-                recoverable: presentation.recoverable,
-                expectedRetentionDays: presentation.retentionDays,
-              });
-              openMeetingsTab(navigation);
-            } catch (deleteError) {
-              if (deleteError instanceof MeetingDeletionCleanupError) {
-                openMeetingsTab(navigation);
-                showDialog({
-                  title: '会议已删除，清理未完成',
-                  message: deleteError.message,
-                  tone: 'warning',
-                });
-              } else {
-                showDialog({
-                  title: '删除失败',
-                  message: readableErrorMessage(deleteError, '请检查网络后重试。'),
-                  tone: 'error',
-                });
-              }
-            }
-          },
+          onPress: () => performDelete(canRecycle, canRecycle ? presentation.retentionDays : null),
         },
         { text: '取消', role: 'cancel' },
       ],
@@ -1467,9 +1528,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingTemplateSheet
         visible={templateSheetVisible}
         selectedTemplate={summaryTemplate}
-        busy={summaryBusy}
+        // The template sheet is the start of a new operation. A stale page
+        // loading bit must not disable every row; the actual in-flight guard
+        // remains in runSummaryTask and the detail action is disabled while it
+        // is active.
+        busy={false}
         onClose={() => setTemplateSheetVisible(false)}
         onSelect={template => {
+          setTemplateSheetVisible(false);
           void prepareSummaryGeneration(template);
         }}
       />
@@ -1478,7 +1544,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         visible={summaryAttachmentRequest !== null}
         attachments={summaryAttachmentRequest?.attachments ?? []}
         imageSelectionEnabled={summaryAttachmentRequest?.imageSelectionEnabled ?? false}
-        onClose={() => setSummaryAttachmentRequest(null)}
+        onClose={() => {
+          const request = summaryAttachmentRequest;
+          setSummaryAttachmentRequest(null);
+          if (!summaryInFlightRef.current) {
+            setSummaryVisualPhase('idle');
+            setLoadingSummary(false);
+            if (request) cancelSummaryPreparation(request.meetingId, request.scopeKey);
+          }
+        }}
         onSkip={() => {
           const request = summaryAttachmentRequest;
           setSummaryAttachmentRequest(null);
@@ -1516,7 +1590,16 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       <MeetingSummaryCarryForwardSheet
         visible={summaryCarryForwardRequest !== null}
         memory={summaryCarryForwardRequest?.memory ?? null}
-        onClose={() => setSummaryCarryForwardRequest(null)}
+        onClose={() => {
+          const request = summaryCarryForwardRequest;
+          setSummaryCarryForwardRequest(null);
+          if (!summaryInFlightRef.current) {
+            setSummaryVisualPhase('idle');
+            setLoadingSummary(false);
+            setSummaryError('');
+            if (request) cancelSummaryPreparation(request.meetingId, request.scopeKey);
+          }
+        }}
         onSkip={() => {
           const request = summaryCarryForwardRequest;
           setSummaryCarryForwardRequest(null);

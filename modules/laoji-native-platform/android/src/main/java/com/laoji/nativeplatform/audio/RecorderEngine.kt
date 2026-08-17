@@ -16,7 +16,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.ArrayDeque
 
-private const val MAX_PENDING_ASR_BYTES = 64 * 1024
+// 16 kHz mono PCM16 is 32 KiB/s. Keep twelve seconds so the complete opening
+// phrase survives the default eight-second connection window plus TLS/tunnel
+// jitter. The WAV remains the authoritative full fallback beyond this bound.
+private const val MAX_PENDING_ASR_BYTES = 384 * 1024
 
 interface RecorderEngineHost {
   fun onSnapshotChanged(snapshot: RecorderSnapshot)
@@ -44,6 +47,8 @@ class RecorderEngine(
   private val asrConnectionHandled = AtomicBoolean(false)
   private val asrQueueLock = Any()
   private val pendingAsrFrames = ArrayDeque<ByteArray>()
+  private val transcriptLock = Any()
+  private val finalTranscriptSegments = linkedMapOf<String, RecorderTranscriptSegment>()
   private var pendingAsrBytes = 0
   private var flushingPendingAsr = false
 
@@ -255,11 +260,25 @@ class RecorderEngine(
     if (config.mode != RecorderMode.REALTIME) return
     val currentState = state
     if (currentState == RecorderState.IDLE || currentState == RecorderState.FAILED) return
+    val segmentId = AsrProtocol.transcriptIdentity(config.sessionId, transcript)
+    val receivedAtMs = System.currentTimeMillis()
+    if (config.purpose == AudioPurpose.SCHEDULE && transcript.isFinal) {
+      synchronized(transcriptLock) {
+        finalTranscriptSegments[segmentId] = RecorderTranscriptSegment(
+          segmentId = segmentId,
+          text = transcript.text,
+          startMs = transcript.startMs,
+          endMs = transcript.endMs,
+          receivedAtMs = receivedAtMs,
+          source = transcript.source,
+        )
+      }
+    }
     RecorderEventBus.emit(
       RecorderEvents.TRANSCRIPT,
       mapOf(
         "sessionId" to config.sessionId,
-        "segmentId" to AsrProtocol.transcriptIdentity(config.sessionId, transcript),
+        "segmentId" to segmentId,
         "kind" to if (transcript.isFinal) "final" else "partial",
         "isFinal" to transcript.isFinal,
         "text" to transcript.text,
@@ -270,7 +289,7 @@ class RecorderEngine(
         "endMs" to transcript.endMs?.toDouble(),
         "source" to transcript.source,
         "purpose" to config.purpose.wireValue,
-        "receivedAtMs" to System.currentTimeMillis().toDouble(),
+        "receivedAtMs" to receivedAtMs.toDouble(),
       ),
     )
   }
@@ -286,7 +305,7 @@ class RecorderEngine(
       errorMessage = error.detail
       providerErrorCode = error.code
       providerErrorRetryable = error.retryable
-      transcriptRecoveryRequired = config.purpose == AudioPurpose.MEETING
+      transcriptRecoveryRequired = true
       updatedAtMs = System.currentTimeMillis()
     }
     emitError(
@@ -311,6 +330,11 @@ class RecorderEngine(
     try {
       transition(RecorderState.PREPARING)
       ensureRecordPermission()
+      val asrConnection = if (config.mode == RecorderMode.REALTIME) {
+        startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
+      } else {
+        null
+      }
       fileSession = repository.createSession(config, startedAtMs)
 
       val recorder = createAudioRecord()
@@ -342,16 +366,11 @@ class RecorderEngine(
       transition(RecorderState.RECORDING)
       startRecordingThread(recorder)
       startFuture.complete(snapshot())
-      // Local capture is the latency-critical path. Start it as soon as the
-      // microphone is ready and establish the realtime ASR socket in parallel;
-      // frames are journaled locally and buffered briefly until onOpen. This
-      // removes the network round trip from the user's recording start while
-      // preserving the same transcript/recovery behavior when the service is
-      // slow or temporarily unavailable.
-      if (config.mode == RecorderMode.REALTIME) {
-        val asrConnection = startRealtimeAsrConnection()
-        observeRealtimeAsrConnection(asrConnection)
-      }
+      // Local capture and the realtime handshake start independently. PCM is
+      // journaled and queued until onOpen, so neither path waits for the other.
+      // Keeping this reference in scope also makes the parallel startup intent
+      // explicit even though completion is observed on its own daemon thread.
+      @Suppress("UNUSED_VARIABLE") val observedAsrConnection = asrConnection
     } catch (error: RecorderRuntimeException) {
       failStart(error)
     } catch (_: Exception) {
@@ -365,9 +384,13 @@ class RecorderEngine(
   }
 
   private fun startRealtimeAsrConnection(): CompletableFuture<Unit> {
+    asrConnectionHandled.set(false)
+    RealtimeAsrWarmPool.claim(config, this)?.let { (socket, connection) ->
+      asrSocket = socket
+      return connection
+    }
     val socket = RealtimeAsrSocket(config, this)
     asrSocket = socket
-    asrConnectionHandled.set(false)
     return try {
       socket.connect()
     } catch (error: Exception) {
@@ -458,7 +481,15 @@ class RecorderEngine(
 
   private fun recordingLoop(recorder: AudioRecord) {
     Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-    val buffer = ByteArray(AudioRuntimeContract.FRAME_BYTES)
+    // A schedule utterance is latency-sensitive and does not need the meeting
+    // path's larger frame. 50 ms gets the opening PCM onto an already-warm
+    // socket sooner while preserving the established 100 ms meeting cadence.
+    val frameBytes = if (config.purpose == AudioPurpose.SCHEDULE) {
+      AudioRuntimeContract.SCHEDULE_FRAME_BYTES
+    } else {
+      AudioRuntimeContract.FRAME_BYTES
+    }
+    val buffer = ByteArray(frameBytes)
     var lastLevelAtMs = Long.MIN_VALUE
     while (!stopRequested) {
       if (paused) {
@@ -660,7 +691,7 @@ class RecorderEngine(
       synchronized(stateLock) {
         errorCode = failure.code
         errorMessage = failure.message
-        transcriptRecoveryRequired = config.purpose == AudioPurpose.MEETING
+        transcriptRecoveryRequired = true
       }
       if (state != RecorderState.FAILED) transition(RecorderState.FAILED)
       emitError(failure.code, failure.message, recoverable = localUri != null)
@@ -676,6 +707,7 @@ class RecorderEngine(
       errorCode = failure?.code,
       errorMessage = failure?.message,
       audioBars = captureAudioBars(),
+      transcriptSegments = captureTranscriptSegments(),
     )
   }
 
@@ -755,7 +787,7 @@ class RecorderEngine(
       pendingAsrBytes = 0
       flushingPendingAsr = false
     }
-    transcriptRecoveryRequired = config.purpose == AudioPurpose.MEETING
+    transcriptRecoveryRequired = true
     try {
       fileSession?.updateAsrState(JournalAsrState.FAILED)
     } catch (_: Exception) {
@@ -782,16 +814,25 @@ class RecorderEngine(
   }
 
   private fun sendOrQueueAsrFrame(frame: ByteArray) {
+    var queueOverflowed = false
     val sendNow = synchronized(asrQueueLock) {
       if (!asrConnected || flushingPendingAsr) {
         if (pendingAsrBytes + frame.size <= MAX_PENDING_ASR_BYTES) {
           pendingAsrFrames.addLast(frame)
           pendingAsrBytes += frame.size
+        } else {
+          queueOverflowed = true
         }
         false
       } else {
         true
       }
+    }
+    if (queueOverflowed) {
+      // The local WAV is complete, but realtime ASR no longer has a contiguous
+      // stream. Keep recording and force the caller to parse the authoritative
+      // local file instead of accepting a partial transcript at stop.
+      transcriptRecoveryRequired = true
     }
     if (sendNow && asrSocket?.sendPcm(frame, frame.size) != true) {
       markAsrUnavailable(
@@ -856,6 +897,7 @@ class RecorderEngine(
       errorCode = failure.code,
       errorMessage = failure.message,
       audioBars = captureAudioBars(),
+      transcriptSegments = captureTranscriptSegments(),
     )
   }
 
@@ -863,6 +905,13 @@ class RecorderEngine(
     capturedAudioBars ?: RecorderLevelHub.captureSummaryAndClear(config.sessionId).also {
       capturedAudioBars = it
     }
+  }
+
+  private fun captureTranscriptSegments(): List<RecorderTranscriptSegment> = synchronized(transcriptLock) {
+    finalTranscriptSegments.values.sortedWith(
+      compareBy<RecorderTranscriptSegment> { it.startMs ?: Long.MAX_VALUE }
+        .thenBy { it.receivedAtMs },
+    )
   }
 
   private fun terminalStopResult(): RecorderStopResult {
@@ -874,6 +923,7 @@ class RecorderEngine(
       errorCode = current.errorCode,
       errorMessage = current.errorMessage,
       audioBars = captureAudioBars(),
+      transcriptSegments = captureTranscriptSegments(),
     )
   }
 

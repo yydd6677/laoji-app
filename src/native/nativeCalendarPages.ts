@@ -18,6 +18,7 @@ import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { labelForReminder } from '../services/notifications';
 import { eventDetailTitle, eventListTitle } from '../utils/eventTitle';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
+import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
 
 // CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: pure builders keep native pages deterministic.
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -105,6 +106,8 @@ function searchMatches(events: readonly CalEvent[], query: string, today: Date):
 
 function eventTimeLabel(event: CalEvent): string {
   if (event.isAllDay) return '全天';
+  const fuzzyTime = scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''));
+  if (!event.startTime && !event.endTime && fuzzyTime) return fuzzyTime;
   if (!event.startTime && !event.endTime) return '无具体时间';
   if (event.startTime && event.endTime) return `${event.startTime} - ${event.endTime}`;
   return event.startTime ?? event.endTime ?? '';
@@ -156,7 +159,12 @@ function conciseDate(value: string): string {
 export function nativeCalendarDetailTimeLabel(event: CalEvent): string {
   const start = conciseDate(event.startDate);
   const end = event.endDate && event.endDate !== event.startDate ? conciseDate(event.endDate) : undefined;
-  if (event.isAllDay || (!event.startTime && !event.endTime)) return end ? `${start} - ${end}` : start;
+  if (event.isAllDay) return end ? `${start} - ${end}` : start;
+  if (!event.startTime && !event.endTime) {
+    const fuzzyTime = scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''));
+    const dateRange = end ? `${start} - ${end}` : start;
+    return fuzzyTime ? `${dateRange} ${fuzzyTime}` : dateRange;
+  }
   const startWithTime = event.startTime ? `${start} ${event.startTime}` : start;
   if (end) return `${startWithTime} - ${end}${event.endTime ? ` ${event.endTime}` : ''}`;
   return event.endTime ? `${startWithTime} - ${event.endTime}` : startWithTime;

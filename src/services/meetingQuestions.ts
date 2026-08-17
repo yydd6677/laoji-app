@@ -203,7 +203,13 @@ export async function prepareMeetingQuestionSession(input: {
     inputFingerprint: evidence.inputFingerprint,
     includeManualNote: evidence.includeManualNote,
   });
-  if (existing) return { thread: existing, evidence };
+  // Old threads are retained for diagnostics, but never projected if any
+  // stored source snapshot no longer belongs to the current evidence.  This
+  // also repairs databases written before device/server transcript aliases
+  // were canonicalized by starting a clean thread automatically.
+  if (existing && threadBelongsToEvidence(existing, evidence)) {
+    return { thread: existing, evidence };
+  }
   const thread = await createMeetingQuestionThread({
     id: secureClientIdFactory.create(),
     meetingId: evidence.meetingId,
@@ -253,6 +259,91 @@ function excerpt(value: string): string {
   return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
 }
 
+/**
+ * Device-first transcript rows have both a local projection ID and the
+ * server/device line ID stored as `sourceSegmentId`.  The device question
+ * endpoint returns the latter, while account/guest questions normally return
+ * the former.  Resolve both aliases to one local canonical segment and mark
+ * duplicate aliases unusable instead of guessing between two segments.
+ */
+function transcriptEvidenceById(
+  evidence: MeetingQuestionEvidence,
+): Map<string, QuestionTranscriptEvidence | null> {
+  const byId = new Map<string, QuestionTranscriptEvidence | null>();
+  for (const source of evidence.transcript) {
+    for (const id of [source.segmentId, source.sourceSegmentId]) {
+      const normalized = id?.trim();
+      if (!normalized) continue;
+      const previous = byId.get(normalized);
+      if (previous && previous.segmentId !== source.segmentId) {
+        byId.set(normalized, null);
+      } else if (previous === undefined) {
+        byId.set(normalized, source);
+      }
+    }
+  }
+  return byId;
+}
+
+export function isMeetingQuestionCitationCurrent(
+  citation: MeetingQuestionCitation,
+  evidence: MeetingQuestionEvidence,
+): boolean {
+  if (citation.kind === 'transcript') {
+    const source = transcriptEvidenceById(evidence).get(citation.segmentId);
+    return Boolean(
+      source
+      && source.segmentId === citation.segmentId
+      && source.startMs === citation.startMs
+      && source.endMs === citation.endMs
+      && citation.sourceExcerpt === excerpt(source.text),
+    );
+  }
+  if (citation.kind === 'summary') {
+    const source = evidence.summary.find(item => item.sectionId === citation.sectionId);
+    return Boolean(source && citation.sourceExcerpt === excerpt(source.text));
+  }
+  return Boolean(
+    evidence.includeManualNote
+    && evidence.manualNoteRevision === citation.manualNoteRevision
+    && evidence.manualNote !== null
+    && citation.sourceExcerpt === excerpt(evidence.manualNote),
+  );
+}
+
+function threadBelongsToEvidence(
+  thread: MeetingQuestionThread,
+  evidence: MeetingQuestionEvidence,
+): boolean {
+  if (
+    thread.meetingId !== evidence.meetingId
+    || thread.inputFingerprint !== evidence.inputFingerprint
+    || thread.transcriptRevisionId !== evidence.transcriptRevisionId
+    || thread.summaryVersionId !== evidence.summaryVersionId
+    || thread.manualNoteRevision !== evidence.manualNoteRevision
+    || thread.includeManualNote !== evidence.includeManualNote
+  ) return false;
+  const seenOrdinals = new Set<number>();
+  for (const turn of thread.turns) {
+    if (seenOrdinals.has(turn.ordinal)) return false;
+    seenOrdinals.add(turn.ordinal);
+    if (turn.answerScope === 'general' && turn.citations.length > 0) return false;
+    if (
+      turn.answerScope === 'meeting'
+      && turn.answerKind === 'answer'
+      && turn.citations.length === 0
+    ) return false;
+    const citationIds = new Set<string>();
+    for (const citation of turn.citations) {
+      if (citationIds.has(citation.id) || !isMeetingQuestionCitationCurrent(citation, evidence)) {
+        return false;
+      }
+      citationIds.add(citation.id);
+    }
+  }
+  return true;
+}
+
 function parseQuestionResponse(
   value: unknown,
   request: MeetingQuestionRequestWire,
@@ -287,9 +378,10 @@ function parseQuestionResponse(
   if (!Array.isArray(response.citations) || response.citations.length > 20) {
     throw new Error('会议回答引用格式无效');
   }
-  const transcriptById = new Map(evidence.transcript.map(item => [item.segmentId, item]));
+  const transcriptById = transcriptEvidenceById(evidence);
   const summaryById = new Map(evidence.summary.map(item => [item.sectionId, item]));
   const seen = new Set<string>();
+  const canonicalSeen = new Set<string>();
   const citations = response.citations.map(item => {
     if (!isRecord(item)) throw new Error('会议回答引用格式无效');
     const kind = item.kind;
@@ -300,6 +392,9 @@ function parseQuestionResponse(
     if (kind === 'transcript') {
       const source = transcriptById.get(sourceId);
       if (!source) throw new Error('会议回答引用不属于当前文字记录');
+      const canonicalIdentity = `transcript:${source.segmentId}`;
+      if (canonicalSeen.has(canonicalIdentity)) throw new Error('会议回答包含重复引用');
+      canonicalSeen.add(canonicalIdentity);
       return {
         kind: 'transcript' as const,
         segmentId: source.segmentId,
@@ -312,6 +407,9 @@ function parseQuestionResponse(
     if (kind === 'summary') {
       const source = summaryById.get(sourceId);
       if (!source) throw new Error('会议回答引用不属于当前整理结果');
+      const canonicalIdentity = `summary:${source.sectionId}`;
+      if (canonicalSeen.has(canonicalIdentity)) throw new Error('会议回答包含重复引用');
+      canonicalSeen.add(canonicalIdentity);
       return {
         kind: 'summary' as const,
         sectionId: source.sectionId,
@@ -325,6 +423,9 @@ function parseQuestionResponse(
     if (kind !== 'manual_note' || !expectedId || sourceId !== expectedId || !evidence.manualNote) {
       throw new Error('会议回答引用了未授权的我的笔记');
     }
+    const canonicalIdentity = `manual_note:${evidence.manualNoteRevision}`;
+    if (canonicalSeen.has(canonicalIdentity)) throw new Error('会议回答包含重复引用');
+    canonicalSeen.add(canonicalIdentity);
     return {
       kind: 'manual_note' as const,
       manualNoteRevision: evidence.manualNoteRevision!,
@@ -376,9 +477,16 @@ function normalizeDeviceQuestionResponse(
     throw new Error('设备问答响应格式无效');
   }
   const root = value as Record<string, unknown>;
-  const remoteMeetingId = typeof root.meeting_id === 'string' ? root.meeting_id.trim() : '';
-  if (remoteMeetingId && remoteMeetingId !== request.client_meeting_id) {
-    throw new Error('设备问答返回了其他会议的内容，结果未保存。');
+  // Device endpoints have used both `meeting_id` and the wire contract's
+  // `client_meeting_id` during the migration.  Check every identity the
+  // server sends before stamping the request metadata below; otherwise a
+  // stale cached response could have its foreign meeting ID overwritten and
+  // reach citation parsing as if it belonged to the current meeting.
+  for (const key of ['meeting_id', 'client_meeting_id', 'meetingId'] as const) {
+    const declaredMeetingId = typeof root[key] === 'string' ? root[key].trim() : '';
+    if (declaredMeetingId && declaredMeetingId !== request.client_meeting_id) {
+      throw new Error('设备问答返回了其他会议的内容，结果未保存。');
+    }
   }
   const now = Date.now();
   const createdAtMs = Number.isFinite(Number(root.created_at_ms))
@@ -497,11 +605,15 @@ export async function askMeetingQuestion(input: {
   });
   let raw: unknown;
   if (input.scopeKey === 'guest') {
-    if (currentEvidence.includeManualNote) {
-      throw new MeetingQuestionUnavailableError('当前问答暂不支持将本机笔记发送到服务。');
-    }
     try {
       const retainGeneratedResult = await loadGenerationRetentionPreference();
+      const manualNote = currentEvidence.manualNoteRevision !== null && currentEvidence.manualNote !== null
+        ? {
+          revision: currentEvidence.manualNoteRevision,
+          content_sha256: `sha256:${await sha256(currentEvidence.manualNote)}`,
+          content: currentEvidence.manualNote,
+        }
+        : null;
       raw = normalizeDeviceQuestionResponse(
         await askDeviceQuestion(currentEvidence.meetingId, {
           schema_version: 1,
@@ -509,7 +621,11 @@ export async function askMeetingQuestion(input: {
           client_request_id: request.client_request_id,
           expected_ordinal: request.expected_ordinal,
           question: request.question,
-          include_manual_note: false,
+          summary_version_id: request.summary_version_id,
+          summary_sections: request.summary_sections,
+          include_manual_note: currentEvidence.includeManualNote,
+          manual_note: manualNote,
+          context: request.context,
           retain_generated_result: retainGeneratedResult,
         }, input.signal),
         request,

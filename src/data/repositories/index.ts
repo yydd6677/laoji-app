@@ -7,4 +7,5 @@ export * from './meetingTagCatalogSyncRepository';
 export * from './meetingContentShareRepository';
 export * from './meetingMarkerSyncRepository';
 export * from './meetingSummarySyncRepository';
+export * from './meetingSummaryV3Repository';
 export * from './sqliteMeetingNoteRepository';

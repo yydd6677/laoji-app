@@ -13669,9 +13669,14 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     return applied;
   }
 
-  async purgeDeletedGuestMeeting(meetingId: string, purgedAtMs: number): Promise<boolean> {
+  async purgeDeletedGuestMeeting(
+    meetingId: string,
+    purgedAtMs: number,
+    options: { allowRecoverable?: boolean } = {},
+  ): Promise<boolean> {
     assertRecordId(meetingId, 'guest meeting purge ID');
     assertNonNegativeInteger(purgedAtMs, 'guest meeting purge time');
+    const allowRecoverable = options.allowRecoverable === true;
     let purged = false;
     await withMeetingDatabaseTransaction(async database => {
       const candidate = await database.getFirstAsync<MeetingRow>(
@@ -13684,7 +13689,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         candidate.lifecycle !== 'deleted'
         || candidate.sync_state !== 'deleted'
         || candidate.deleted_at_ms === null
-        || candidate.deleted_from_lifecycle !== null
+        || (!allowRecoverable && candidate.deleted_from_lifecycle !== null)
         || candidate.remote_id !== null
         || candidate.remote_revision !== null
       ) {
@@ -13775,9 +13780,11 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         `DELETE FROM meeting_notes
          WHERE id = ? AND scope_key = 'guest'
            AND lifecycle = 'deleted' AND sync_state = 'deleted'
-           AND deleted_at_ms IS NOT NULL AND deleted_from_lifecycle IS NULL
+           AND deleted_at_ms IS NOT NULL
+           AND (? = 1 OR deleted_from_lifecycle IS NULL)
            AND remote_id IS NULL AND remote_revision IS NULL`,
         meetingId,
+        allowRecoverable ? 1 : 0,
       );
       if (deleted.changes !== 1) {
         throw new Error('guest meeting purge target changed concurrently');

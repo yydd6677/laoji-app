@@ -190,6 +190,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     reorderMeetings,
     deleteMeeting,
     restoreDeletedMeeting,
+    permanentlyDeleteDeletedMeeting,
     refreshMeetings,
     updateMeetingStatus,
     getCachedTranscript,
@@ -213,6 +214,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const [recycleBinLoading, setRecycleBinLoading] = useState(false);
   const [recycleBinError, setRecycleBinError] = useState('');
   const [restoringMeetingId, setRestoringMeetingId] = useState<string | null>(null);
+  const [permanentlyDeletingMeetingId, setPermanentlyDeletingMeetingId] = useState<string | null>(null);
   const [meetingTags, setMeetingTags] = useState<readonly MeetingTagRecord[]>([]);
   const [tagAssignments, setTagAssignments] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
   const [tagSheetMode, setTagSheetMode] = useState<'assign' | 'manage' | null>(null);
@@ -523,12 +525,17 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         dateTimeLabel: compactMeetingDateTime(date, time),
         statusLabel: restoringMeetingId === entry.meetingId
           ? '正在恢复'
+          : permanentlyDeletingMeetingId === entry.meetingId
+            ? '正在删除'
           : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '正在同步',
         // A deleted root revision conflict is retried by the background
         // reconciler. It must not be presented as a permanent red error.
         statusTone: 'warning' as const,
         action: 'restore' as const,
-        actionEnabled: entry.canRestore && restoringMeetingId === null,
+        // A conflicted tombstone may not be restorable, but it must remain
+        // long-pressable so the user can still permanently remove it.
+        actionEnabled: restoringMeetingId === null
+          && permanentlyDeletingMeetingId === null,
         coverType: 'default' as const,
       };
     });
@@ -578,7 +585,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           : activeSearch ? searchMeetingSnapshots : normalMeetingSnapshots,
       },
     };
-  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings.length, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
+  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings, permanentlyDeletingMeetingId, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
 
   const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
@@ -602,33 +609,74 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       });
       return;
     }
+    const performDelete = async (recoverable: boolean, retentionDays: number | null) => {
+      try {
+        await deleteMeeting(id, {
+          recoverable,
+          expectedRetentionDays: retentionDays,
+        });
+      } catch (deleteError) {
+        showDialog({
+          title: deleteError instanceof MeetingDeletionCleanupError
+            ? '会议已删除，清理未完成'
+            : '删除失败',
+          message: readableErrorMessage(
+            deleteError,
+            deleteError instanceof MeetingDeletionCleanupError
+              ? '会议已删除，但本机清理尚未完成。'
+              : '删除失败，请稍后重试。',
+          ),
+          tone: deleteError instanceof MeetingDeletionCleanupError ? 'warning' : 'error',
+        });
+      }
+    };
+    const canRecycle = presentation.recoverable && presentation.retentionDays !== null;
     showDialog({
-      title: presentation.title,
-      message: presentation.message,
+      title: canRecycle ? '删除会议记录？' : presentation.title,
+      message: canRecycle
+        ? `删除后会移到回收站，可在${presentation.retentionDays}天内恢复。`
+        : presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: presentation.confirmText,
+          text: '删除',
+          role: 'destructive',
+          onPress: () => performDelete(canRecycle, canRecycle ? presentation.retentionDays : null),
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
+  const confirmPermanentDelete = (meetingId: string) => {
+    const entry = recycleBinEntries.find(item => item.meetingId === meetingId);
+    if (!entry || retentionDays === null || permanentlyDeletingMeetingId || restoringMeetingId) return;
+    showDialog({
+      title: '永久删除会议记录？',
+      message: '删除后将清除本机录音、文字记录和整理结果，无法恢复。',
+      tone: 'danger',
+      actions: [
+        {
+          text: '永久删除',
           role: 'destructive',
           onPress: async () => {
+            setPermanentlyDeletingMeetingId(meetingId);
             try {
-              await deleteMeeting(id, {
-                recoverable: presentation.recoverable,
-                expectedRetentionDays: presentation.retentionDays,
-              });
-            } catch (deleteError) {
+              await permanentlyDeleteDeletedMeeting(meetingId, retentionDays);
+              await refreshRecycleBin(false);
+            } catch (reason) {
               showDialog({
-                title: deleteError instanceof MeetingDeletionCleanupError
-                  ? '会议已删除，清理未完成'
-                  : '删除失败',
+                title: reason instanceof MeetingDeletionCleanupError ? '删除未完成' : '永久删除失败',
                 message: readableErrorMessage(
-                  deleteError,
-                  deleteError instanceof MeetingDeletionCleanupError
-                    ? '会议已删除，但本机清理尚未完成。'
-                    : '删除失败，请稍后重试。',
+                  reason,
+                  reason instanceof MeetingDeletionCleanupError
+                    ? '永久删除未完成，会议记录仍保留在回收站，请稍后重试。'
+                    : '会议记录暂时无法永久删除，请稍后重试。',
                 ),
-                tone: deleteError instanceof MeetingDeletionCleanupError ? 'warning' : 'error',
+                tone: reason instanceof MeetingDeletionCleanupError ? 'warning' : 'error',
               });
+            } finally {
+              setPermanentlyDeletingMeetingId(null);
             }
           },
         },
@@ -767,6 +815,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
       case 'restoreMeeting':
         confirmRestore(action.meetingId);
+        break;
+      case 'permanentlyDeleteMeeting':
+        confirmPermanentDelete(action.meetingId);
         break;
       case 'reorderMeetings':
         void persistMeetingOrder(action.meetingIds);

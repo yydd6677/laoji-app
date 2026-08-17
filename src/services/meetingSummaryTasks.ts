@@ -50,6 +50,7 @@ export function meetingSummaryInputFingerprint(
   template: Pick<MeetingTemplate, 'id' | 'revision'> = DEFAULT_MEETING_TEMPLATE,
   carryForward: MeetingSummaryCarryForwardAuthorization | null = null,
   attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null,
+  manualNote: { content: string; revision: number } | null = null,
 ): string {
   let primary = 0x811c9dc5;
   let secondary = 0x9e3779b9;
@@ -76,6 +77,11 @@ export function meetingSummaryInputFingerprint(
     feed(line.start_time);
     feed(line.end_time);
   });
+
+  if (manualNote) {
+    feed(manualNote.revision);
+    feed(manualNote.content);
+  }
 
   if (carryForward) {
     feed(carryForward.requestId);
@@ -113,7 +119,7 @@ export function meetingSummaryInputFingerprint(
     });
   }
 
-  const version = 'v6';
+  const version = 'v7';
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 

@@ -23,6 +23,7 @@ export interface MeetingSummarySectionEditorValue {
   title: string | null;
   content: string;
   userEdited: boolean;
+  citationsLocked?: boolean;
   citations: readonly {
     id: string;
     startMs: number;
@@ -125,7 +126,7 @@ export function MeetingSummarySectionEditorSheet({
   const initialContent = value?.content.replace(/\r\n?/g, '\n').trim() ?? '';
   const initialCitationIds = value?.citations.map(citation => citation.id) ?? [];
   const contentChanged = normalizedContent !== initialContent;
-  const citationsChanged = !sameIds(visibleCitationIds, initialCitationIds);
+  const citationsChanged = !value?.citationsLocked && !sameIds(visibleCitationIds, initialCitationIds);
   const canSave = Boolean(normalizedContent)
     && (contentChanged || citationsChanged)
     && !saving
@@ -208,7 +209,9 @@ export function MeetingSummarySectionEditorSheet({
               />
               {value && value.citations.length > 0 ? (
                 <View style={styles.citationBlock}>
-                  <Text style={[styles.citationLabel, { color: colors.textCaption }]}>引用</Text>
+                  <Text style={[styles.citationLabel, { color: colors.textCaption }]}>
+                    {value.citationsLocked ? '原始依据' : '引用'}
+                  </Text>
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -222,13 +225,16 @@ export function MeetingSummarySectionEditorSheet({
                           key={citation.id}
                           style={styles.citationTarget}
                           onPress={() => {
+                            if (value.citationsLocked) return;
                             if (saving || closing) return;
                             setVisibleCitationIds(current => current.filter(id => id !== citation.id));
                           }}
-                          disabled={saving || closing}
+                          disabled={saving || closing || value.citationsLocked}
                           accessibilityRole="button"
-                          accessibilityLabel={`移除引用 ${formatClock(citation.startMs)}`}
-                          accessibilityState={{ disabled: saving || closing }}
+                          accessibilityLabel={value.citationsLocked
+                            ? `原始依据 ${formatClock(citation.startMs)}`
+                            : `移除引用 ${formatClock(citation.startMs)}`}
+                          accessibilityState={{ disabled: saving || closing || value.citationsLocked }}
                         >
                           {({ pressed }) => (
                             <View style={[
@@ -236,11 +242,13 @@ export function MeetingSummarySectionEditorSheet({
                               { backgroundColor: pressed ? colors.primaryPressed : colors.primarySoft },
                             ]}>
                               <Text style={[styles.citationText, { color: pressed ? colors.onPrimary : colors.primary }]}>{formatClock(citation.startMs)}</Text>
-                              <Ionicons
-                                name="close"
-                                size={14}
-                                color={pressed ? colors.onPrimary : colors.primary}
-                              />
+                              {!value.citationsLocked ? (
+                                <Ionicons
+                                  name="close"
+                                  size={14}
+                                  color={pressed ? colors.onPrimary : colors.primary}
+                                />
+                              ) : null}
                             </View>
                           )}
                         </Pressable>

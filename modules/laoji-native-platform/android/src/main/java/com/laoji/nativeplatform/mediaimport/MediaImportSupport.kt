@@ -103,6 +103,14 @@ internal fun preferredMediaExtension(fileName: String, mimeType: String): String
   }
 }
 
+/** Display name used after a video has been reduced to its audio track. */
+internal fun audioOutputFileName(fileName: String, extension: String): String {
+  val normalizedExtension = extension.trim().lowercase(Locale.ROOT).ifBlank { "m4a" }
+  val sanitized = sanitizeMediaDisplayName(fileName)
+  val base = sanitized.substringBeforeLast('.', sanitized).trim().ifBlank { "会议录音" }
+  return "$base.$normalizedExtension"
+}
+
 internal fun sanitizeMediaDisplayName(value: String?): String {
   val normalized = value
     ?.replace(Regex("[\\/\\u0000-\\u001f\\u007f]"), "_")

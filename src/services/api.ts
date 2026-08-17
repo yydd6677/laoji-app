@@ -3,8 +3,10 @@ import { getApiConfig } from './config';
 import { readResponseData, readResponseError, stringifyErrorDetail } from './errors';
 import {
   classifyScheduleParseRoute,
+  classifyScheduleParseIntent,
   normalizeScheduleParseResult,
   parseLocalScheduleText,
+  scheduleTimePeriodFromText,
 } from './localScheduleParser';
 import type { EventCategory } from '../utils/eventColors';
 import type { EventRecurrenceScope, MeetingSummary, TranscriptLine } from '../types';
@@ -17,6 +19,7 @@ import {
 import { fetchWithTimeout as fetch, readJsonWithTimeout } from './http';
 import {
   clarifyScheduleRemotely,
+  DeviceApiError,
   parseScheduleAudioRemotely,
   parseScheduleRemotely,
 } from './deviceApi';
@@ -96,6 +99,8 @@ export interface ParseResult {
   spanning?: boolean | null;
   start_time: string | null; // HH:MM
   end_time: string | null;   // HH:MM
+  /** Spoken day period retained when the user did not provide an exact clock. */
+  time_period?: 'early_morning' | 'morning' | 'noon' | 'afternoon' | 'evening' | 'night' | null;
   is_all_day: boolean;
   description: string | null;
   location?: string | null;
@@ -271,6 +276,37 @@ const SCHEDULE_ERROR_MESSAGES: Record<ScheduleParseErrorCode, string> = {
   parser_unavailable: '日程解析服务暂时不可用，请稍后重试',
 };
 
+function scheduleParseErrorFromRemote(error: unknown): ScheduleParseError {
+  if (error instanceof ScheduleParseError) return error;
+  if (!(error instanceof DeviceApiError)) {
+    return new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+  }
+
+  const providerCode = error.code?.toUpperCase() ?? '';
+  if (error.status >= 500 || providerCode.includes('UNAVAILABLE')) {
+    return new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable, error.status);
+  }
+  if (providerCode === 'NOT_SCHEDULE') {
+    return new ScheduleParseError('not_schedule', SCHEDULE_ERROR_MESSAGES.not_schedule, error.status);
+  }
+  if (providerCode === 'MISSING_DATE') {
+    return new ScheduleParseError('missing_date', SCHEDULE_ERROR_MESSAGES.missing_date, error.status);
+  }
+  if (providerCode === 'MISSING_EDIT_TARGET') {
+    return new ScheduleParseError('missing_edit_target', SCHEDULE_ERROR_MESSAGES.missing_edit_target, error.status);
+  }
+  if (providerCode === 'AMBIGUOUS_RANGE') {
+    return new ScheduleParseError('ambiguous_range', SCHEDULE_ERROR_MESSAGES.ambiguous_range, error.status);
+  }
+  if (providerCode === 'CONFLICTING_TIME') {
+    return new ScheduleParseError('conflicting_time', SCHEDULE_ERROR_MESSAGES.conflicting_time, error.status);
+  }
+  if (providerCode === 'SCHEDULE_MODEL_NO_RESULT') {
+    return new ScheduleParseError('invalid_schedule', '未识别到具体安排，请修改后重试', error.status);
+  }
+  return new ScheduleParseError('invalid_schedule', SCHEDULE_ERROR_MESSAGES.invalid_schedule, error.status);
+}
+
 function currentScheduleParseContext(context: ScheduleParseContext = {}): Required<ScheduleParseContext> {
   const reference = context.reference_datetime?.trim();
   const parsedReference = reference ? new Date(reference) : new Date();
@@ -319,11 +355,15 @@ function normalizedParseResult(
   text: string,
   result: ParseResultWire,
   context: Required<ScheduleParseContext>,
+  options: { modelOnly?: boolean } = {},
 ): ParseResult {
   const normalizedWire: ParseResult = {
     ...result,
     start_date: typeof result.start_date === 'string' ? result.start_date : '',
   };
+  if (options.modelOnly) {
+    return normalizeModelOnlyParseResult(normalizedWire, context);
+  }
   return {
     ...normalizeScheduleParseResult(
       text,
@@ -331,6 +371,53 @@ function normalizedParseResult(
       new Date(context.reference_datetime),
       context.timezone,
     ),
+    reference_datetime: context.reference_datetime,
+    timezone: context.timezone,
+  };
+}
+
+/**
+ * A complex text miss has already been classified by the phone's shared
+ * parser. The server then asks Qwen to own the semantics. Keep only transport
+ * and schema safety here; do not infer category, dates, reminders, or
+ * clarification state from the original text a second time on the phone.
+ */
+function normalizeModelOnlyParseResult(
+  result: ParseResult,
+  context: Required<ScheduleParseContext>,
+): ParseResult {
+  const startDate = typeof result.start_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(result.start_date)
+    ? result.start_date
+    : '';
+  const endDate = typeof result.end_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(result.end_date)
+    ? result.end_date
+    : null;
+  const startTime = typeof result.start_time === 'string' && /^\d{2}:\d{2}$/.test(result.start_time)
+    ? result.start_time
+    : null;
+  const endTime = typeof result.end_time === 'string' && /^\d{2}:\d{2}$/.test(result.end_time)
+    ? result.end_time
+    : null;
+  const endDateSafe = endDate && startDate && endDate < startDate ? null : endDate;
+  const timePeriod = !startTime
+    ? scheduleTimePeriodFromText(result.raw_text)
+    : null;
+  const needsClarification = result.needs_clarification === true;
+  return {
+    ...result,
+    start_date: startDate,
+    end_date: endDateSafe,
+    spanning: Boolean(endDateSafe && endDateSafe !== startDate),
+    start_time: result.is_all_day ? null : startTime,
+    end_time: result.is_all_day ? null : endTime,
+    time_period: result.is_all_day ? null : timePeriod,
+    is_all_day: result.is_all_day === true,
+    needs_clarification: needsClarification,
+    clarification_question: needsClarification
+      ? (typeof result.clarification_question === 'string' && result.clarification_question.trim()
+        ? result.clarification_question.trim()
+        : '还有一项日程信息需要确认。')
+      : null,
     reference_datetime: context.reference_datetime,
     timezone: context.timezone,
   };
@@ -353,16 +440,21 @@ export async function parseText(
     return normalizedParseResult(text, decision.result, context);
   }
 
+  const remoteIntent = classifyScheduleParseIntent(text);
   try {
-    const response = await parseScheduleRemotely(text, context.reference_datetime, context.timezone);
-    const parsed = (response?.result ?? response) as ParseResultWire;
-    return normalizedParseResult(text, parsed, context);
-  } catch (err) {
-    if (err instanceof ScheduleParseError) throw err;
-    throw new ScheduleParseError(
-      'parser_unavailable',
-      SCHEDULE_ERROR_MESSAGES.parser_unavailable,
+    const response = await parseScheduleRemotely(
+      text,
+      context.reference_datetime,
+      context.timezone,
+      {
+        clientRuleMiss: true,
+        clientIntent: remoteIntent,
+      },
     );
+    const parsed = (response?.result ?? response) as ParseResultWire;
+    return normalizedParseResult(text, parsed, context, { modelOnly: remoteIntent === 'create' });
+  } catch (err) {
+    throw scheduleParseErrorFromRemote(err);
   }
 }
 
@@ -387,8 +479,7 @@ export async function clarifyText(
     );
     return normalizedParseResult(`${original}\n${supplement}`, parsed as ParseResultWire, context);
   } catch (err) {
-    if (err instanceof ScheduleParseError) throw err;
-    throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+    throw scheduleParseErrorFromRemote(err);
   }
 }
 
@@ -461,8 +552,7 @@ export async function parseAudio(
     );
     return { ...parseAudioResult(result, context), ...context };
   } catch (err) {
-    if (err instanceof ScheduleParseError) throw err;
-    throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+    throw scheduleParseErrorFromRemote(err);
   }
 }
 
@@ -577,6 +667,7 @@ export interface ApiMeetingTaskStatus {
   status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | string;
   result?: unknown;
   long_poll_supported?: boolean;
+  stage?: 'queued' | 'preparing' | 'generating' | 'verifying' | 'persisting' | 'success' | 'failure' | string;
 }
 
 function summaryCarryForwardPayload(

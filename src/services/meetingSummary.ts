@@ -26,11 +26,19 @@ import {
 } from './meetingSummaryTrace';
 import {
   createDeviceSummary,
+  createDeviceSummaryV3,
   getDeviceSummary,
+  getDeviceSummaryV3,
   getDeviceTask,
+  loadDeviceServiceCapabilities,
   DeviceApiError,
 } from './deviceApi';
 import { loadGenerationRetentionPreference } from './generationPrivacy';
+import * as Crypto from 'expo-crypto';
+import {
+  meetingFactsV3ToSummary,
+  parseMeetingFactsResultV3,
+} from './meetingSummaryV3';
 
 export {
   meetingSummaryTextToPlainText,
@@ -61,7 +69,7 @@ export interface MeetingSummaryProgress {
   attempt: number;
   status: string;
   elapsedMs: number;
-  stage: 'queued' | 'generating' | 'reconnecting' | 'resubmitting';
+  stage: 'queued' | 'preparing' | 'generating' | 'verifying' | 'persisting' | 'reconnecting' | 'resubmitting';
 }
 
 type MeetingSummaryProgressListener = (
@@ -80,17 +88,19 @@ export function summaryPollDelayMs(elapsedMs: number, lastStatus = ''): number {
 }
 
 export function meetingSummaryProgressLabel(progress: MeetingSummaryProgress): string {
-  const seconds = Math.max(0, Math.round(progress.elapsedMs / 1_000));
   if (progress.stage === 'queued') {
-    return seconds > 0 ? `总结任务排队中 · ${seconds} 秒` : '总结任务正在排队';
+    return '整理任务正在排队';
   }
   if (progress.stage === 'reconnecting') {
-    return seconds > 0 ? `网络波动，正在重连 · ${seconds} 秒` : '网络波动，正在重连';
+    return '网络波动，正在重连';
   }
   if (progress.stage === 'resubmitting') {
-    return '原总结任务已失效，正在重新提交';
+    return '原整理任务已失效，正在重新提交';
   }
-  return seconds > 0 ? `正在生成总结 · ${seconds} 秒` : '正在生成总结';
+  if (progress.stage === 'preparing') return '正在准备整理';
+  if (progress.stage === 'verifying') return '正在核对整理结果';
+  if (progress.stage === 'persisting') return '正在保存整理结果';
+  return '正在整理会议记录';
 }
 
 export class MeetingSummaryTaskFailureError extends Error {
@@ -107,6 +117,18 @@ export class MeetingSummaryTaskPendingError extends Error {
   }
 }
 
+/**
+ * The accountless/device API deliberately does not migrate legacy local-only
+ * meetings.  Keep this as a distinct error so the pending-task registry can
+ * discard an orphaned task instead of reviving it on every detail open.
+ */
+export class DeviceMeetingUnavailableError extends Error {
+  constructor() {
+    super('本机会议尚未建立设备服务记录');
+    this.name = 'DeviceMeetingUnavailableError';
+  }
+}
+
 function isTerminalPollError(error: unknown): boolean {
   return (error instanceof HttpResponseError || error instanceof DeviceApiError)
     && [400, 401, 403, 404].includes(error.status);
@@ -117,8 +139,19 @@ function isMissingTaskError(error: unknown): boolean {
 }
 
 export function shouldDiscardPendingMeetingSummaryTask(error: unknown): boolean {
-  if (error instanceof MeetingSummaryTaskFailureError) return true;
-  return error instanceof HttpResponseError && [400, 401, 403].includes(error.status);
+  if (error instanceof MeetingSummaryTaskFailureError || error instanceof DeviceMeetingUnavailableError) {
+    return true;
+  }
+  // Device-primary meetings use a separate API error class.  A missing
+  // device binding (404) is terminal for this local task: retaining its
+  // pending registry entry makes every detail open resubmit the same stale
+  // task and leaves the UI on "正在提交整理任务" forever.  Authentication,
+  // validation, and access failures are terminal for the same reason; the
+  // user-visible stage is moved to the retryable error state below.
+  if (error instanceof DeviceApiError) {
+    return [400, 401, 403, 404].includes(error.status);
+  }
+  return error instanceof HttpResponseError && [400, 401, 403, 404].includes(error.status);
 }
 
 function abortError(): Error {
@@ -283,7 +316,11 @@ async function waitForTask(
       attempt: attempt + 1,
       status: status.status,
       elapsedMs,
-      stage: status.status === 'PENDING' ? 'queued' : 'generating',
+      stage: status.status === 'PENDING'
+        ? 'queued'
+        : status.stage === 'preparing' || status.stage === 'verifying' || status.stage === 'persisting'
+          ? status.stage
+          : 'generating',
     });
     if (status.status === 'SUCCESS') return status;
     if (status.status === 'FAILURE') {
@@ -294,13 +331,6 @@ async function waitForTask(
   throw new MeetingSummaryTaskPendingError();
 }
 
-class DeviceMeetingUnavailableError extends Error {
-  constructor() {
-    super('本机会议尚未建立设备服务记录');
-    this.name = 'DeviceMeetingUnavailableError';
-  }
-}
-
 function deviceTaskStatus(value: any): ApiMeetingTaskStatus {
   const raw = value && typeof value === 'object' ? value : {};
   const status = String(raw.status ?? '').trim().toUpperCase();
@@ -309,6 +339,7 @@ function deviceTaskStatus(value: any): ApiMeetingTaskStatus {
     status: status || 'PENDING',
     result: raw.result,
     long_poll_supported: true,
+    stage: typeof raw.stage === 'string' ? raw.stage : undefined,
   };
 }
 
@@ -335,46 +366,74 @@ function normalizeDeviceSummaryPayload(
   }, template, null, null);
 }
 
-async function generateDeviceMeetingSummary(options: {
+async function generateDeviceMeetingSummaryV2(options: {
   meetingId: string;
   transcriptLines: TranscriptLine[];
   template: Pick<MeetingTemplate, 'id' | 'revision'>;
   force: boolean;
+  resumeTaskId?: string;
   inputFingerprint?: string;
   signal?: AbortSignal;
   onProgress?: MeetingSummaryProgressListener;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
-  const requestId = `device-summary:${options.meetingId}:${options.template.id}:${options.template.revision}:${options.force ? `force-${Date.now()}` : options.inputFingerprint ?? 'current'}`
-    .replace(/[^A-Za-z0-9._:-]/g, '_')
-    .slice(0, 480);
-  let task: any;
+  let taskId = options.resumeTaskId?.trim() || '';
   const retainGeneratedResult = await loadGenerationRetentionPreference();
+
+  const submit = async (): Promise<string> => {
+    const requestId = `device-summary:${options.meetingId}:${options.template.id}:${options.template.revision}:${options.force ? `force-${Date.now()}` : options.inputFingerprint ?? 'current'}`
+      .replace(/[^A-Za-z0-9._:-]/g, '_')
+      .slice(0, 480);
+    let task: any;
+    try {
+      task = await createDeviceSummary(
+        options.meetingId,
+        {
+          template_id: options.template.id,
+          template_revision: options.template.revision,
+          force: options.force,
+          retain_generated_result: retainGeneratedResult,
+        },
+        requestId,
+        options.signal,
+      );
+    } catch (error) {
+      if (error instanceof DeviceApiError && error.status === 404) {
+        throw new DeviceMeetingUnavailableError();
+      }
+      throw error;
+    }
+    const submittedId = typeof task?.task_id === 'string' ? task.task_id.trim() : '';
+    if (!submittedId) throw new Error('设备整理服务未返回任务标识');
+    await options.onTaskSubmitted?.(submittedId);
+    return submittedId;
+  };
+
+  // A detail page may be unmounted while a device task is still running.  A
+  // saved task ID is a durable resume pointer, not a reason to submit another
+  // task.  Poll it first so the next page observes the same completion and
+  // creates one corresponding local summary version.
+  if (!taskId) taskId = await submit();
+  let status: ApiMeetingTaskStatus;
   try {
-    task = await createDeviceSummary(
-      options.meetingId,
-      {
-        template_id: options.template.id,
-        template_revision: options.template.revision,
-        force: options.force,
-        retain_generated_result: retainGeneratedResult,
-      },
-      requestId,
-      options.signal,
+    status = await waitForTask(
+      waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
+      { signal: options.signal, onProgress: options.onProgress },
     );
   } catch (error) {
-    if (error instanceof DeviceApiError && error.status === 404) {
-      throw new DeviceMeetingUnavailableError();
-    }
-    throw error;
+    if (!(error instanceof DeviceApiError) || error.status !== 404 || options.force) throw error;
+    // The task row can expire while its result remains readable. Prefer the
+    // durable result before creating a replacement task.
+    const recovered = await getDeviceSummary(options.meetingId, options.signal)
+      .then(value => normalizeDeviceSummaryPayload(options.meetingId, value, options.template))
+      .catch(() => null);
+    if (recovered) return recovered;
+    taskId = await submit();
+    status = await waitForTask(
+      waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
+      { signal: options.signal, onProgress: options.onProgress },
+    );
   }
-  const taskId = typeof task?.task_id === 'string' ? task.task_id.trim() : '';
-  if (!taskId) throw new Error('设备整理服务未返回任务标识');
-  await options.onTaskSubmitted?.(taskId);
-  const status = await waitForTask(
-    waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
-    { signal: options.signal, onProgress: options.onProgress },
-  );
   if (status.status === 'SUCCESS') {
     const remote = await getDeviceSummary(options.meetingId, options.signal);
     const normalized = normalizeDeviceSummaryPayload(options.meetingId, remote, options.template)
@@ -384,11 +443,122 @@ async function generateDeviceMeetingSummary(options: {
   throw new Error('设备整理服务返回的结果格式无效');
 }
 
+async function sha256Text(value: string): Promise<string> {
+  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, value);
+  return `sha256:${digest.toLowerCase()}`;
+}
+
+async function generateDeviceMeetingSummaryV3(options: {
+  meetingId: string;
+  transcriptLines: TranscriptLine[];
+  template: MeetingTemplate;
+  manualNote: { content: string; revision: number };
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
+  force: boolean;
+  resumeTaskId?: string;
+  inputFingerprint?: string;
+  signal?: AbortSignal;
+  onProgress?: MeetingSummaryProgressListener;
+  onTaskSubmitted?: (taskId: string) => void | Promise<void>;
+}): Promise<MeetingSummary> {
+  const attachments = (options.attachmentAuthorization?.items ?? []).map(item => {
+    if (item.kind !== 'text') {
+      throw new Error('所选照片暂时无法用于新版整理，请仅选择文字附件。');
+    }
+    return {
+      attachment_id: item.attachmentId,
+      revision: item.updatedAtMs,
+      position_ms: item.positionMs,
+      content_sha256: item.contentSha256,
+      content: item.content,
+    };
+  });
+  let taskId = options.resumeTaskId?.trim() || '';
+  const submit = async (): Promise<string> => {
+    const requestId = `device-summary-v3:${options.meetingId}:${options.inputFingerprint ?? 'current'}`
+      .replace(/[^A-Za-z0-9._:-]/g, '_')
+      .slice(0, 480);
+    let task: any;
+    try {
+      task = await createDeviceSummaryV3(
+        options.meetingId,
+        {
+          transcript_revision: options.inputFingerprint ?? `local:${options.transcriptLines.length}`,
+          manual_note: {
+            revision: options.manualNote.revision,
+            content_sha256: await sha256Text(options.manualNote.content),
+            content: options.manualNote.content,
+          },
+          attachments,
+          force: options.force,
+        },
+        requestId,
+        options.signal,
+      );
+    } catch (error) {
+      if (error instanceof DeviceApiError && error.status === 404) {
+        throw new DeviceMeetingUnavailableError();
+      }
+      throw error;
+    }
+    const submittedId = typeof task?.task_id === 'string' ? task.task_id.trim() : '';
+    if (!submittedId) throw new Error('设备整理服务未返回任务标识');
+    await options.onTaskSubmitted?.(submittedId);
+    return submittedId;
+  };
+
+  if (!taskId) taskId = await submit();
+  let status: ApiMeetingTaskStatus;
+  try {
+    status = await waitForTask(
+      waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
+      { signal: options.signal, onProgress: options.onProgress },
+    );
+  } catch (error) {
+    if (!(error instanceof DeviceApiError) || error.status !== 404) throw error;
+    const recovered = await getDeviceSummaryV3(options.meetingId, options.signal)
+      .then(parseMeetingFactsResultV3)
+      .catch(() => null);
+    if (recovered) {
+      return meetingFactsV3ToSummary(recovered, DEFAULT_MEETING_TEMPLATE, options.manualNote.revision);
+    }
+    taskId = await submit();
+    status = await waitForTask(
+      waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
+      { signal: options.signal, onProgress: options.onProgress },
+    );
+  }
+  if (status.status !== 'SUCCESS') throw new Error('设备整理服务未完成本次任务');
+  const remote = await getDeviceSummaryV3(options.meetingId, options.signal).catch(() => null);
+  const result = parseMeetingFactsResultV3(remote) ?? parseMeetingFactsResultV3(status.result);
+  if (!result) throw new Error('设备整理服务返回的新版结果格式无效');
+  return meetingFactsV3ToSummary(result, DEFAULT_MEETING_TEMPLATE, options.manualNote.revision);
+}
+
+async function generateDeviceMeetingSummary(options: {
+  meetingId: string;
+  transcriptLines: TranscriptLine[];
+  template: MeetingTemplate;
+  manualNote: { content: string; revision: number };
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
+  force: boolean;
+  resumeTaskId?: string;
+  inputFingerprint?: string;
+  signal?: AbortSignal;
+  onProgress?: MeetingSummaryProgressListener;
+  onTaskSubmitted?: (taskId: string) => void | Promise<void>;
+}): Promise<MeetingSummary> {
+  const capabilities = await loadDeviceServiceCapabilities().catch(() => null);
+  if (capabilities?.summaryContractV3) return generateDeviceMeetingSummaryV3(options);
+  if (options.attachmentAuthorization) throw new DeviceMeetingUnavailableError();
+  return generateDeviceMeetingSummaryV2(options);
+}
+
 export function summaryTaskFailureMessage(result: unknown): string {
   let raw = typeof result === 'string' ? result.trim() : '';
   if (result && typeof result === 'object') {
     const value = result as Record<string, unknown>;
-    for (const key of ['message', 'detail', 'error', 'reason']) {
+    for (const key of ['message', 'detail', 'error', 'reason', 'error_code']) {
       const nested = value[key];
       if (typeof nested === 'string' && nested.trim()) {
         raw = nested.trim();
@@ -396,10 +566,19 @@ export function summaryTaskFailureMessage(result: unknown): string {
       }
     }
   }
+  if (/SUMMARY_EVIDENCE_INCOMPLETE|evidence.*incomplete/i.test(raw)) {
+    return '会议内容过长，暂未完整整理。';
+  }
+  if (/SUMMARY_V3_NO_VERIFIED_FACTS|NO_VERIFIED_FACTS/i.test(raw)) {
+    return '整理结果缺少可核对的依据，请重试。';
+  }
+  if (/SUMMARY_V3.*(?:JSON|SCHEMA|FORMAT)|validation/i.test(raw)) {
+    return '整理结果格式异常，可重试。';
+  }
   if (/照片|image/i.test(raw)) return '所选照片暂时无法用于整理，请重新选择后重试。';
   if (/timeout|timed out|超时/i.test(raw)) return '会议整理超时，请稍后重试。';
   if (raw && !/[A-Za-z]{2,}/.test(raw)) return raw;
-  return '会议总结任务执行失败';
+  return '会议整理任务执行失败';
 }
 
 function summaryTraceErrorCode(error: unknown): string {
@@ -419,7 +598,8 @@ export async function generateSummaryForMeeting(options: {
   title?: string;
   meetingDate?: string;
   transcriptLines: TranscriptLine[];
-  template?: Pick<MeetingTemplate, 'id' | 'revision'>;
+  template?: MeetingTemplate;
+  manualNote?: { content: string; revision: number };
   carryForward?: MeetingSummaryCarryForwardAuthorization | null;
   attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
   isGuest: boolean;
@@ -439,6 +619,7 @@ export async function generateSummaryForMeeting(options: {
     meetingDate,
     transcriptLines,
     template = DEFAULT_MEETING_TEMPLATE,
+    manualNote = { content: '', revision: 0 },
     carryForward = null,
     attachmentAuthorization = null,
     isGuest,
@@ -473,13 +654,28 @@ export async function generateSummaryForMeeting(options: {
 
   let traceTaskId = resumeTaskId ?? null;
   const bindSummaryToLocalMeeting = (summary: MeetingSummary): MeetingSummary => {
+    // A response returned from this generation call is terminal for the input
+    // represented by `trace`. Some durable endpoints can still project an old
+    // `stale` bit while a resumed task is settling. Carrying that bit into the
+    // local cache falsely renders “整理结果可更新” immediately after success.
+    const completedSummary = summary.structured_document?.status === 'stale'
+      ? {
+        ...summary,
+        structured_document: {
+          ...summary.structured_document,
+          status: 'ready' as const,
+        },
+      }
+      : summary;
     const localId = localMeetingId?.trim();
-    if (isGuest || !localId || localId === meetingId) return summary;
-    const rebound = normalizeRemoteMeetingSummaryResult(localId, meetingId, summary);
+    if (isGuest || !localId || localId === meetingId) return completedSummary;
+    const rebound = normalizeRemoteMeetingSummaryResult(localId, meetingId, completedSummary);
     if (!rebound) {
       throw new Error('云端整理结果与本机会议身份不一致，未保存本次结果。');
     }
-    return rebound;
+    return completedSummary.facts_document_v3
+      ? { ...rebound, facts_document_v3: completedSummary.facts_document_v3 }
+      : rebound;
   };
   try {
     const reportResubmission = () => onProgress?.({
@@ -498,21 +694,24 @@ export async function generateSummaryForMeeting(options: {
     // the device/epoch boundary. Historical local-only meetings and
     // carry-forward/attachment requests are not migrated by the accountless
     // product and remain unavailable until a device-bound recording exists.
-    if (carryForward || attachmentAuthorization) {
+    if (carryForward) {
       throw new DeviceMeetingUnavailableError();
     }
     const generated = await generateDeviceMeetingSummary({
         meetingId,
         transcriptLines,
         template,
+        manualNote,
+        attachmentAuthorization,
         force: forceRegenerate,
+        resumeTaskId,
         inputFingerprint,
         signal,
         onProgress,
         onTaskSubmitted,
       });
     void persistMeetingSummaryTrace(trace, { phase: 'completed', taskId: traceTaskId });
-    return generated;
+    return bindSummaryToLocalMeeting(generated);
   }
 
   if (!accessToken) throw new Error('not authenticated');

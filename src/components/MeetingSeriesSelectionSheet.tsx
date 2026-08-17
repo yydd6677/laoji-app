@@ -37,7 +37,6 @@ export function MeetingSeriesSelectionSheet<Result>({
   memory,
   title,
   cancelAccessibilityLabel,
-  skipLabel,
   submitLabel,
   submitAccessibilityLabel,
   onClose,
@@ -50,7 +49,6 @@ export function MeetingSeriesSelectionSheet<Result>({
   memory: MeetingSeriesMemoryProjection | null;
   title: string;
   cancelAccessibilityLabel: string;
-  skipLabel?: string;
   submitLabel: (selectedCount: number) => string;
   submitAccessibilityLabel: (selectedCount: number) => string;
   onClose: () => void;
@@ -98,8 +96,11 @@ export function MeetingSeriesSelectionSheet<Result>({
       closingRef.current = false;
       setMounted(false);
       setClosing(false);
-      if (notify) closeRef.current();
-      afterExit?.();
+      // A completed selection is a transition, not a cancellation. Calling
+      // both callbacks made the parent tear down the preparation state and
+      // then immediately recreate it, leaving stale locks on re-entry.
+      if (afterExit) afterExit();
+      else if (notify) closeRef.current();
     });
   }, [progress]);
 
@@ -138,7 +139,12 @@ export function MeetingSeriesSelectionSheet<Result>({
     .map(item => item.id);
   const selectedCount = selectedDecisionIds.length + selectedActionIds.length;
   const hasSelection = selectedCount > 0;
-  const canSubmit = hasSelection && !saving && !closing;
+  // An empty selection is a valid decision: it means continue without
+  // carrying anything forward.  The old sheet made the primary action
+  // impossible until one row was selected, which looked like a deadlock
+  // after choosing a summary template.  Keep one clear bottom action and let
+  // it take the same path as the old "不引用" shortcut.
+  const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
   };
@@ -158,6 +164,16 @@ export function MeetingSeriesSelectionSheet<Result>({
   };
   const submit = async () => {
     if (!canSubmit) return;
+    if (!hasSelection) {
+      const skip = skipRef.current;
+      if (skip) {
+        finishClose(true, skip);
+        return;
+      }
+      // Callers that do not expose a skip shortcut (for example the notes
+      // carry-forward sheet) still need an explicit empty-selection submit.
+      // Do not turn the primary action into a no-op.
+    }
     setSaving(true);
     setError('');
     try {
@@ -260,23 +276,7 @@ export function MeetingSeriesSelectionSheet<Result>({
               <Text style={[styles.titleActionText, { color: saving ? colors.textDisabled : colors.textTitle }]}>取消</Text>
             </Pressable>
             <Text style={[styles.title, { color: colors.textTitle }]}>{title}</Text>
-            {skipLabel && onSkip ? (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.titleAction,
-                  pressed && !saving && { backgroundColor: colors.pressedFill },
-                ]}
-                onPress={requestSkip}
-                disabled={saving}
-                accessibilityRole="button"
-                accessibilityLabel={skipLabel}
-                accessibilityState={{ disabled: saving }}
-              >
-                <Text style={[styles.titleActionText, { color: saving ? colors.textDisabled : colors.primary }]}>
-                  {skipLabel}
-                </Text>
-              </Pressable>
-            ) : <View style={styles.titleAction} />}
+            <View style={styles.titleAction} />
           </View>
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false}>
@@ -304,22 +304,20 @@ export function MeetingSeriesSelectionSheet<Result>({
               style={({ pressed }) => [
                 styles.submit,
                 {
-                  backgroundColor: canSubmit
-                    ? pressed ? colors.primaryPressed : colors.primary
-                    : hasSelection ? colors.primary : colors.backgroundBase,
+                    backgroundColor: pressed ? colors.primaryPressed : colors.primary,
                 },
               ]}
               onPress={() => { void submit(); }}
               disabled={!canSubmit}
               accessibilityRole="button"
-              accessibilityLabel={submitAccessibilityLabel(selectedCount)}
+              accessibilityLabel={hasSelection ? submitAccessibilityLabel(selectedCount) : '继续整理'}
               accessibilityState={{ disabled: !canSubmit, busy: saving }}
             >
               {saving ? (
                 <ActivityIndicator size="small" color={colors.onPrimary} />
               ) : (
-                <Text style={[styles.submitText, { color: canSubmit ? colors.onPrimary : colors.textDisabled }]}>
-                  {submitLabel(selectedCount)}
+                <Text style={[styles.submitText, { color: colors.onPrimary }]}>
+                  {hasSelection ? submitLabel(selectedCount) : '继续整理'}
                 </Text>
               )}
             </Pressable>

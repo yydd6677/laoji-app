@@ -76,6 +76,11 @@ object MediaImportIntentInbox {
   private const val MAX_PENDING = 8
   private const val MAX_RECENT = 16
   private const val DUPLICATE_WINDOW_MS = 30_000L
+  // Invalid share intents only need to survive long enough for the first
+  // launch to present a useful warning. Keeping them indefinitely makes an
+  // interrupted launch (and an app upgrade) replay the warning on every
+  // subsequent normal open.
+  private const val INVALID_INTENT_TTL_MS = 5 * 60 * 1_000L
   private val listeners = CopyOnWriteArraySet<(Map<String, Any?>) -> Unit>()
 
   private data class RecentFingerprint(
@@ -103,7 +108,9 @@ object MediaImportIntentInbox {
     val item = parseIntent(appContext, intent, nowMs)
     val accepted = runCatching {
       synchronized(this) {
-        val queue = readQueue(appContext).toMutableList()
+        val queue = readQueue(appContext)
+          .filterNot { isExpiredInvalidIntent(it, nowMs) }
+          .toMutableList()
         val recent = readRecentFingerprints(appContext)
           .filter { nowMs - it.receivedAtMs in 0..DUPLICATE_WINDOW_MS }
           .toMutableList()
@@ -126,7 +133,14 @@ object MediaImportIntentInbox {
   }
 
   @Synchronized
-  fun peek(context: Context): PendingMediaImportIntent? = readQueue(context.applicationContext).firstOrNull()
+  fun peek(context: Context): PendingMediaImportIntent? {
+    val appContext = context.applicationContext
+    val queue = readQueue(appContext)
+    val nowMs = System.currentTimeMillis().coerceAtLeast(0L)
+    val retained = queue.filterNot { isExpiredInvalidIntent(it, nowMs) }
+    if (retained.size != queue.size) writeQueue(appContext, retained)
+    return retained.firstOrNull()
+  }
 
   @Synchronized
   fun acknowledge(context: Context, token: String): Boolean {
@@ -145,6 +159,15 @@ object MediaImportIntentInbox {
 
   fun removeListener(listener: (Map<String, Any?>) -> Unit) {
     listeners -= listener
+  }
+
+  private fun isExpiredInvalidIntent(
+    intent: PendingMediaImportIntent,
+    nowMs: Long,
+  ): Boolean {
+    if (intent.errorCode == null && intent.uri != null) return false
+    val ageMs = nowMs - intent.receivedAtMs
+    return ageMs > INVALID_INTENT_TTL_MS
   }
 
   private fun parseIntent(context: Context, intent: Intent, nowMs: Long): PendingMediaImportIntent {

@@ -128,6 +128,12 @@ class LaojiMinutesView(
   }
 
   private fun handleAction(action: Map<String, Any?>) {
+    if (action["type"] == "search" && surfaceView is MinutesDetailSurface) {
+      val transcriptPage = (surfaceView as MinutesDetailSurface).pageFor(MinutesDetailTab.TRANSCRIPT)
+        as MinutesTranscriptPage
+      transcriptPage.setSearchVisible(true)
+      return
+    }
     when (action["type"]) {
       "selectDetailTab" -> {
         val tab = MinutesDetailTab.fromWireName(action["tab"] as? String)

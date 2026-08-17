@@ -248,13 +248,14 @@ internal object CalendarEditValidator {
 
     val hasStart = draft.startTime != null
     val hasEnd = draft.endTime != null
-    if (hasStart != hasEnd) return CalendarEditValidation(false, "开始时间和结束时间需要同时填写")
+    if (hasEnd && !hasStart) return CalendarEditValidation(false, "请先填写开始时间")
     if (!hasStart) {
       return if (draft.reminderMinutes == null) CalendarEditValidation(true)
       else CalendarEditValidation(false, "没有具体时间的日程不能设置提前提醒")
     }
     val startTime = parseTime(draft.startTime)
       ?: return CalendarEditValidation(false, "开始时间格式不正确")
+    if (!hasEnd) return CalendarEditValidation(true)
     val endTime = parseTime(draft.endTime)
       ?: return CalendarEditValidation(false, "结束时间格式不正确")
     if (!LocalDateTime.of(endDate, endTime).isAfter(LocalDateTime.of(startDate, startTime))) {

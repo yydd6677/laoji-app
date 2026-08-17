@@ -16,6 +16,10 @@ export function useMeetingRecycleCapability(): MeetingRecycleCapabilityState {
 
   const refresh = useCallback(async () => {
     if (isGuest) {
+      if (!getFeatureFlags().localMeetingDbCanonicalWriteV1) {
+        setRetentionDays(null);
+        return null;
+      }
       setRetentionDays(30);
       return 30;
     }
@@ -38,7 +42,7 @@ export function useMeetingRecycleCapability(): MeetingRecycleCapabilityState {
 
   useEffect(() => {
     let alive = true;
-    if (isGuest) {
+    if (isGuest && getFeatureFlags().localMeetingDbCanonicalWriteV1) {
       setRetentionDays(30);
       setLoading(false);
       return () => { alive = false; };

@@ -8,7 +8,10 @@ export function buildNativeProfileEntrySnapshot(
   void isGuest; // retained for the compatibility call sites during cutover
   const nickname = profile.nickname.trim();
   return {
-    avatarUri: profile.avatarUrl?.trim() || profile.avatarLocalUri?.trim() || null,
+    // The product is accountless: this leading control opens Settings, so an
+    // old profile/avatar projection must not bring the former “我” identity
+    // entry back into the title bar.
+    avatarUri: null,
     accessibilityLabel: nickname
       ? `打开设置，${nickname}`
       : '打开设置',

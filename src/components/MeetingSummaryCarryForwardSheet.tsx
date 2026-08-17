@@ -41,7 +41,6 @@ export function MeetingSummaryCarryForwardSheet({
       memory={memory}
       title="引用上次会议内容"
       cancelAccessibilityLabel="取消生成整理结果"
-      skipLabel="不引用"
       submitLabel={count => count > 0 ? `引用（${count}）` : '引用'}
       submitAccessibilityLabel={count => count > 0 ? `引用所选 ${count} 项` : '引用所选内容'}
       onClose={onClose}

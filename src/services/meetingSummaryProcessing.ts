@@ -104,13 +104,51 @@ export function meetingSummaryProcessingTransition(
   }
   if (signal.type === 'aborted') {
     const taskId = signal.taskId?.trim() || null;
-    if (taskId) {
+    // Abort means that this page stopped waiting; it is not a service
+    // failure.  Preserve the durable stage for both a known task and the
+    // short window before onTaskSubmitted has persisted its task ID.  A later
+    // foreground poll/recovery pass is responsible for observing the real
+    // terminal state.
+    if (
+      (current.status === 'queued' || current.status === 'generating')
+      && (taskId || current.jobId)
+    ) {
       return {
         stage: 'summary',
-        status: current.status === 'queued' ? 'queued' : 'generating',
-        progress: null,
-        jobId: taskId,
-        inputFingerprint: normalizedRequired(signal.inputFingerprint, 'summary input fingerprint'),
+        status: current.status,
+        progress: current.progress,
+        jobId: taskId ?? current.jobId,
+        inputFingerprint: current.inputFingerprint,
+      };
+    }
+    // No task ID means the page stopped during preparation/submission, before
+    // the service accepted a durable job. Keeping a queued stage here would
+    // disable every future generation after re-entry even though there is
+    // nothing to resume. Return to the real terminal projection instead.
+    if (current.status === 'queued') {
+      return hasCurrentSummary
+        ? {
+          stage: 'summary',
+          status: 'ready',
+          progress: 1,
+          jobId: null,
+          inputFingerprint: current.inputFingerprint,
+        }
+        : {
+          stage: 'summary',
+          status: 'none',
+          progress: null,
+          jobId: null,
+          inputFingerprint: null,
+        };
+    }
+    if (current.status === 'ready' || current.status === 'stale' || current.status === 'none') {
+      return {
+        stage: 'summary',
+        status: current.status,
+        progress: current.progress,
+        jobId: current.jobId,
+        inputFingerprint: current.inputFingerprint,
       };
     }
     return {
@@ -238,6 +276,7 @@ export function meetingSummaryProcessingFailureCode(reason: unknown): string {
   }
   const name = reason instanceof Error ? reason.name : '';
   const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  if (name === 'DeviceMeetingUnavailableError') return 'summary_device_meeting_unavailable';
   if (name === 'MeetingSummaryTaskFailureError') return 'summary_worker_failed';
   if (/timed out|timeout/.test(message)) return 'summary_task_timeout';
   if (/network|failed to fetch|connection refused/.test(message)) return 'summary_network_unavailable';

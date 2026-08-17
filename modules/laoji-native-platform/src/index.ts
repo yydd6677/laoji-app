@@ -24,6 +24,9 @@ interface LaojiNativePlatformModule {
   getThemePreference?(): string;
   setThemePreference?(themeId: string): void;
   restartActivity?(): void;
+  installApk?(fileUri: string, expectedVersionCode: number): boolean;
+  canInstallApk?(): boolean;
+  openApkInstallSettings?(): boolean;
 }
 
 const nativeModule = requireOptionalNativeModule<LaojiNativePlatformModule>(
@@ -62,4 +65,18 @@ export async function getNativePlatformCapabilities(): Promise<NativePlatformCap
     };
   }
   return nativeModule.getCapabilities();
+}
+
+export function installVerifiedApk(fileUri: string, expectedVersionCode: number): boolean {
+  if (!nativeModule?.installApk) throw new Error('当前设备不支持应用内安装更新。');
+  return nativeModule.installApk(fileUri, expectedVersionCode);
+}
+
+export function canInstallApk(): boolean {
+  return nativeModule?.canInstallApk?.() ?? false;
+}
+
+export function openApkInstallSettings(): boolean {
+  if (!nativeModule?.openApkInstallSettings) throw new Error('当前设备无法打开安装权限设置。');
+  return nativeModule.openApkInstallSettings();
 }

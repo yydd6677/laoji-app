@@ -14,6 +14,7 @@ object AudioRuntimeContract {
   const val BYTES_PER_SAMPLE = 2
   const val BYTES_PER_SECOND = SAMPLE_RATE_HZ * CHANNEL_COUNT * BYTES_PER_SAMPLE
   const val FRAME_BYTES = 3_200
+  const val SCHEDULE_FRAME_BYTES = 1_600
   const val WAV_HEADER_BYTES = 44
   const val MAX_PCM_BYTES = 1_000_000_000L
   const val JOURNAL_SCHEMA_VERSION = 1
@@ -390,6 +391,24 @@ data class RecorderLevelFrame(
   val capturedAtElapsedMs: Long,
 )
 
+data class RecorderTranscriptSegment(
+  val segmentId: String,
+  val text: String,
+  val startMs: Long?,
+  val endMs: Long?,
+  val receivedAtMs: Long,
+  val source: String?,
+) {
+  fun toMap(): Map<String, Any?> = mapOf(
+    "segmentId" to segmentId,
+    "text" to text,
+    "startMs" to startMs?.toDouble(),
+    "endMs" to endMs?.toDouble(),
+    "receivedAtMs" to receivedAtMs.toDouble(),
+    "source" to source,
+  )
+}
+
 interface RecorderLevelSource {
   fun observe(sessionId: String): StateFlow<RecorderLevelFrame?>
   fun latest(sessionId: String): RecorderLevelFrame?
@@ -402,6 +421,7 @@ data class RecorderStopResult(
   val errorCode: RecorderErrorCode?,
   val errorMessage: String?,
   val audioBars: List<Float> = emptyList(),
+  val transcriptSegments: List<RecorderTranscriptSegment> = emptyList(),
 ) {
   fun toMap(): Map<String, Any?> = mapOf(
     "status" to if (
@@ -413,6 +433,7 @@ data class RecorderStopResult(
     "errorCode" to errorCode?.wireValue,
     "errorMessage" to errorMessage,
     "audioBars" to audioBars.map(Float::toDouble),
+    "transcriptSegments" to transcriptSegments.map(RecorderTranscriptSegment::toMap),
     "snapshot" to snapshot.toMap(),
   )
 }

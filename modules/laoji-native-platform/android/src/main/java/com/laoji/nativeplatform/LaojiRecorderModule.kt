@@ -119,6 +119,23 @@ class LaojiRecorderModule : Module() {
       }
     }
 
+    AsyncFunction("prewarmRealtime") { options: RecorderStartOptions, promise: Promise ->
+      try {
+        settle(
+          com.laoji.nativeplatform.audio.RealtimeAsrWarmPool.prewarm(options.toConfig()),
+          promise,
+        ) { true }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("discardRealtimePrewarm") { sessionId: String ->
+      com.laoji.nativeplatform.audio.RealtimeAsrWarmPool.discard(
+        RecorderStartConfig.validateSessionId(sessionId),
+      )
+    }
+
     AsyncFunction("startLocal") { sessionId: String, levelIntervalMs: Double?, promise: Promise ->
       try {
         settle(

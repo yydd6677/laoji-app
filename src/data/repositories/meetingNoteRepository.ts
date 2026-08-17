@@ -1748,7 +1748,11 @@ export interface MeetingNoteRepository {
   /** Keeps local corrections readable when a fresh server contract explicitly disables sync. */
   projectSpeakerCorrectionSyncDisabled(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
   /** Physically removes one local-only guest tombstone after all owned files were deleted. */
-  purgeDeletedGuestMeeting(meetingId: string, purgedAtMs: number): Promise<boolean>;
+  purgeDeletedGuestMeeting(
+    meetingId: string,
+    purgedAtMs: number,
+    options?: { allowRecoverable?: boolean },
+  ): Promise<boolean>;
   /** Physically removes only remotely-confirmed tombstones and leaves durable file-cleanup jobs. */
   queueExpiredMeetingRetentionCleanup(
     input: QueueExpiredMeetingRetentionCleanupInput,

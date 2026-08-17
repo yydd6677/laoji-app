@@ -61,8 +61,12 @@ export function MeetingTemplateSheet({
       closingRef.current = false;
       setMounted(false);
       setClosing(false);
-      if (notify) closeRef.current();
-      afterExit?.();
+      // A successful selection owns its completion callback. Calling the
+      // generic close callback as well briefly resets the parent operation
+      // state, which made the next sheet look locked and produced a visible
+      // idle/loading flicker. Cancellation alone calls onClose.
+      if (afterExit) afterExit();
+      else if (notify) closeRef.current();
     });
   }, [progress]);
 

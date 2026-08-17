@@ -74,36 +74,40 @@ export function MeetingListScreen({ navigation }: Props) {
       });
       return;
     }
+    const performDelete = async (recoverable: boolean, retentionDays: number | null) => {
+      try {
+        await deleteMeeting(id, {
+          recoverable,
+          expectedRetentionDays: retentionDays,
+        });
+      } catch (deleteError) {
+        if (deleteError instanceof MeetingDeletionCleanupError) {
+          showDialog({
+            title: '会议已删除，清理未完成',
+            message: deleteError.message,
+            tone: 'warning',
+          });
+        } else {
+          showDialog({
+            title: '删除失败',
+            message: readableErrorMessage(deleteError, '请检查网络后重试。'),
+            tone: 'error',
+          });
+        }
+      }
+    };
+    const canRecycle = presentation.recoverable && presentation.retentionDays !== null;
     showDialog({
-      title: presentation.title,
-      message: presentation.message,
+      title: canRecycle ? '删除会议记录？' : presentation.title,
+      message: canRecycle
+        ? `删除后会移到回收站，可在${presentation.retentionDays}天内恢复。`
+        : presentation.message,
       tone: 'danger',
       actions: [
         {
-          text: presentation.confirmText,
+          text: '删除',
           role: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteMeeting(id, {
-                recoverable: presentation.recoverable,
-                expectedRetentionDays: presentation.retentionDays,
-              });
-            } catch (deleteError) {
-              if (deleteError instanceof MeetingDeletionCleanupError) {
-                showDialog({
-                  title: '会议已删除，清理未完成',
-                  message: deleteError.message,
-                  tone: 'warning',
-                });
-              } else {
-                showDialog({
-                  title: '删除失败',
-                  message: readableErrorMessage(deleteError, '请检查网络后重试。'),
-                  tone: 'error',
-                });
-              }
-            }
-          },
+          onPress: () => performDelete(canRecycle, canRecycle ? presentation.retentionDays : null),
         },
         { text: '取消', role: 'cancel' },
       ],

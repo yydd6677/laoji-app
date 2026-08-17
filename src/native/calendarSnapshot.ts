@@ -10,6 +10,7 @@ import { eventEffectiveEndDate, eventEndsAtExclusiveMidnight } from '../utils/ev
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { isValidEventDate } from '../utils/eventDraftValidation';
 import { normalizeEventCategory } from '../utils/eventColors';
+import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
 
 const DAY_MS = 86_400_000;
 
@@ -72,6 +73,9 @@ export function nativeCalendarEventSnapshot(
   const parsedEndMinutes = event.isAllDay ? null : timeToMinutes(event.endTime);
   const endEpochDay = calendarEpochDay(eventEffectiveEndDate(event));
   const allDay = event.isAllDay === true || startMinutes === null;
+  const timePeriodLabel = !event.isAllDay && startMinutes === null
+    ? scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''))
+    : null;
   return {
     sourceEventId: ref.sourceEventId,
     occurrenceDate: ref.occurrenceDate,
@@ -82,6 +86,7 @@ export function nativeCalendarEventSnapshot(
     endEpochDayExclusive: allDay ? endEpochDay + 1 : null,
     startMinutes,
     endMinutes: exclusiveMidnight ? 24 * 60 : parsedEndMinutes,
+    timePeriodLabel,
     timeZoneId,
     allDay,
     editable: true,

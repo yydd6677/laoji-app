@@ -19,7 +19,7 @@ export interface MeetingTemplate {
 export const MEETING_TEMPLATES: readonly MeetingTemplate[] = [
   {
     id: 'general',
-    revision: 2,
+    revision: 3,
     title: '通用',
     sectionSchema: [
       { stableKey: 'overview', title: '概述', kind: 'paragraph' },
@@ -29,7 +29,7 @@ export const MEETING_TEMPLATES: readonly MeetingTemplate[] = [
   },
   {
     id: 'one_on_one',
-    revision: 2,
+    revision: 3,
     title: '1:1',
     sectionSchema: [
       { stableKey: 'topics', title: '讨论主题', kind: 'topics' },
@@ -40,7 +40,7 @@ export const MEETING_TEMPLATES: readonly MeetingTemplate[] = [
   },
   {
     id: 'project_sync',
-    revision: 2,
+    revision: 3,
     title: '项目同步',
     sectionSchema: [
       { stableKey: 'progress', title: '进展', kind: 'bullets' },
@@ -51,7 +51,7 @@ export const MEETING_TEMPLATES: readonly MeetingTemplate[] = [
   },
   {
     id: 'interview',
-    revision: 2,
+    revision: 3,
     title: '访谈',
     sectionSchema: [
       { stableKey: 'topics', title: '主题', kind: 'topics' },

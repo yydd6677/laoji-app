@@ -48,7 +48,10 @@ import {
   MEETING_PRESENTATION_LABELS,
   isScopeKey,
   secureClientIdFactory,
+  transitionProcessingStage,
   type MeetingEntryPoint,
+  type MeetingProcessingStatuses,
+  type MeetingSummaryDocument,
   type ProcessingStageTransition,
   type ScopeKey,
   scopeTelemetry,
@@ -304,6 +307,7 @@ function formatDateTime(value: string | undefined): { date: string; time?: strin
 }
 
 function statusTag(status: string): { label: string; color: string } {
+  if (status === 'preparing') return { label: '正在准备录音', color: C.blue };
   if (status === 'recording') return { label: '录音中', color: C.red };
   if (status === 'paused') return { label: '录音已暂停', color: C.orange };
   if (status === 'processing') return { label: '处理中', color: C.orange };
@@ -313,6 +317,7 @@ function statusTag(status: string): { label: string; color: string } {
 }
 
 const STATUS_TAG_LABELS = new Set([
+  '正在准备录音',
   '录音中',
   '录音已暂停',
   '处理中',
@@ -403,6 +408,9 @@ function captureTransitionForLegacyMeeting(
       progress: null,
     };
   }
+  if (status === 'preparing') {
+    return { stage: 'capture', status: 'preparing', progress: null };
+  }
   if (status === 'paused') return { stage: 'capture', status: 'paused', progress: null };
   if (status === 'processing') {
     return { stage: 'capture', status: hasAudio ? 'local_ready' : 'finalizing' };
@@ -448,7 +456,8 @@ function recordingAssetPatchForLegacyMeeting(
     'audioDurationSec',
     'audioBars',
   ].some(key => Object.prototype.hasOwnProperty.call(patch, key));
-  const needsCaptureIdentity = status === 'recording'
+  const needsCaptureIdentity = status === 'preparing'
+    || status === 'recording'
     || status === 'paused'
     || status === 'failed'
     || status === 'created';
@@ -543,6 +552,8 @@ function serverToCanonicalSnapshot(m: ApiMeeting): AccountMeetingRemoteSnapshot 
 }
 
 export interface CreateMeetingOptions {
+  /** Optional stable local ID, used by optimistic local-first creation. */
+  id?: string;
   description?: string | null;
   participants?: string[];
   mode?: ApiMeeting['mode'];
@@ -552,6 +563,10 @@ export interface CreateMeetingOptions {
   calendarContext?: CalendarMeetingContext;
   entryPoint?: MeetingEntryPoint;
   supersededRemoteMeetingId?: string | null;
+  /** Initial local processing state for a shell created before media ingest. */
+  initialProcessingStatuses?: Partial<MeetingProcessingStatuses>;
+  /** Return a local shell without waiting for the full compatibility mirror. */
+  fastLocalResult?: boolean;
 }
 
 export interface ImportMeetingMediaOptions {
@@ -620,6 +635,7 @@ interface MeetingsContextType {
   importMeetingMedia: (media: IngestedMeetingMedia, options: ImportMeetingMediaOptions) => Promise<Meeting>;
   deleteMeeting: (id: string, options?: DeleteMeetingOptions) => Promise<void>;
   restoreDeletedMeeting: (canonicalMeetingId: string, expectedRetentionDays: number) => Promise<void>;
+  permanentlyDeleteDeletedMeeting: (canonicalMeetingId: string, expectedRetentionDays: number) => Promise<void>;
   updateMeetingTitle: (id: string, title: string) => Promise<void>;
   updateMeetingDetails: (
     id: string,
@@ -642,6 +658,11 @@ interface MeetingsContextType {
   ) => Promise<void>;
   getCachedSummary: (id: string) => MeetingSummary | null;
   saveCachedSummary: (id: string, summary: MeetingSummary | null) => Promise<SaveCachedSummaryResult>;
+  confirmCachedSummaryCurrent: (
+    id: string,
+    expected: Pick<MeetingSummaryDocument,
+      'templateId' | 'templateRevision' | 'manualNoteRevision' | 'completedAtMs'>,
+  ) => Promise<boolean>;
 }
 
 interface MeetingStatusUpdateOptions {
@@ -662,6 +683,7 @@ export interface SaveCachedTranscriptOptions {
 export interface SaveCachedSummaryResult {
   projection: 'updated' | 'preserved';
   mirrorStatus: string;
+  localVersionId?: string | null;
 }
 
 interface CanonicalOwnedScopeProjection {
@@ -888,6 +910,117 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [persistMeetingRoots, scope]);
 
+  /**
+   * The roots cache is intentionally rendered before SQLite finishes opening
+   * and importing the legacy cache.  A destructive action can therefore race
+   * the first canonical read (or the short invalidation window after a local
+   * mutation).  Never fall back to deleting only the compatibility JSON in
+   * that window: a later canonical projection would resurrect the meeting.
+   * Wait for/repair canonical ownership instead, then let the caller mutate
+   * the same source of truth used by the rest of the device-primary flow.
+   */
+  const ensureCanonicalProjectionReady = useCallback(async (
+    operationGeneration: number,
+  ): Promise<MeetingReadProjection> => {
+    if (
+      !isScopeKey(scope)
+      || activeScopeRef.current !== scope
+      || generationRef.current !== operationGeneration
+    ) throw new Error('会议数据作用域已变化，请重试。');
+    const flags = getFeatureFlags();
+    if (!flags.localMeetingDbCanonicalReadV1) {
+      throw new Error('会议数据暂时无法使用，请稍后重试。');
+    }
+
+    const retryDelaysMs = [0, 50, 100, 200, 400, 800, 1_200, 1_600, 2_000];
+    let lastError: unknown = null;
+    for (const delayMs of retryDelaysMs) {
+      if (delayMs > 0) await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+      if (
+        activeScopeRef.current !== scope
+        || generationRef.current !== operationGeneration
+      ) throw new Error('会议数据作用域已变化，请重试。');
+
+      const existing = canonicalReadProjectionRef.current;
+      if (existing) return existing;
+
+      try {
+        const owned = await loadCanonicalOwnedScope();
+        if (owned) {
+          if (!adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+            throw new Error('会议数据作用域已变化，请重试。');
+          }
+          diagnosticAudit('meeting_db_operation_projection_wait', {
+            operation: 'mutation',
+            scope: scope === 'guest' ? 'guest' : 'account',
+            status: 'recovered',
+            mirror_status: owned.mirrorStatus,
+            canonical_revision: owned.canonicalRevision,
+          });
+          return owned.projection;
+        }
+
+        // A fresh guest install can still be in the legacy-shadow phase.  Do
+        // the same import the startup path performs, using the latest in-memory
+        // roots and content, then promote ownership atomically.  This keeps a
+        // delete pressed during cold start safe and idempotent.
+        if (scope === 'guest') {
+          const [pendingAudioUploads, pendingSummaryTasks] = await Promise.all([
+            listPendingMeetingAudioUploads(scope),
+            listPendingMeetingSummaryTasks(scope),
+          ]);
+          await runLegacyMeetingShadowImport({
+            scopeKey: scope,
+            meetings: meetingsRef.current,
+            transcripts: transcriptCacheRef.current,
+            summaries: summaryCacheRef.current,
+            pendingAudioUploads,
+            pendingSummaryTasks,
+          });
+          const state = await sqliteMeetingNoteRepository.getScopeWriteState(scope);
+          if (state.writeOwner !== 'canonical') {
+            canonicalStoreMutationDepthRef.current += 1;
+            try {
+              await sqliteMeetingNoteRepository.transaction(transaction => (
+                transaction.advanceCanonicalWrite(scope, Date.now())
+              ));
+            } finally {
+              canonicalStoreMutationDepthRef.current = Math.max(
+                0,
+                canonicalStoreMutationDepthRef.current - 1,
+              );
+            }
+          }
+          const recovered = await loadCanonicalOwnedScope(true);
+          if (recovered) {
+            if (!adoptCanonicalOwnedProjection(recovered, operationGeneration)) {
+              throw new Error('会议数据作用域已变化，请重试。');
+            }
+            diagnosticAudit('meeting_db_operation_projection_wait', {
+              operation: 'mutation',
+              scope: 'guest',
+              status: 'repaired',
+              mirror_status: recovered.mirrorStatus,
+              canonical_revision: recovered.canonicalRevision,
+            });
+            return recovered.projection;
+          }
+        }
+      } catch (error) {
+        lastError = error;
+        diagnosticWarn('[meeting-db] canonical projection not ready for mutation', error);
+      }
+    }
+
+    diagnosticAudit('meeting_db_operation_projection_wait', {
+      operation: 'mutation',
+      scope: scope === 'guest' ? 'guest' : 'account',
+      status: 'failed',
+      error_code: lastError instanceof Error ? lastError.name : 'ProjectionUnavailable',
+    });
+    throw new Error('会议数据正在准备，请稍后重试。');
+  }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, scope]);
+
   const reorderMeetings = useCallback((orderedLegacyIds: readonly string[]): Promise<void> => (
     enqueueGuestMutation(async () => {
       const operationGeneration = generationRef.current;
@@ -954,11 +1087,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       || generationRef.current !== operationGeneration
       || activeScopeRef.current !== scope
     ) return;
-    const canonicalMeetingId = canonicalReadProjectionRef.current
-      ?.canonicalIdByLegacyId[legacyMeetingId]
-      ?.trim();
+    const projection = await ensureCanonicalProjectionReady(operationGeneration);
+    const canonicalMeetingId = projection.canonicalIdByLegacyId[legacyMeetingId]?.trim();
     if (!canonicalMeetingId) {
-      throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
+      throw new Error('会议记录的本机索引暂时不可用，请稍后重试。');
     }
     canonicalStoreMutationDepthRef.current += 1;
     try {
@@ -982,7 +1114,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
     }
-  }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, scope]);
+  }, [
+    adoptCanonicalOwnedProjection,
+    ensureCanonicalProjectionReady,
+    loadCanonicalOwnedScope,
+    scope,
+  ]);
 
   const createCanonicalGuestMeeting = useCallback(async (
     title: string,
@@ -1008,7 +1145,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     canonicalStoreMutationDepthRef.current += 1;
     try {
       const created = await createCanonicalMeetingNote.execute({
-        id: secureClientIdFactory.create(),
+        id: options.id ?? secureClientIdFactory.create(),
         scopeKey: 'guest',
         origin: calendarContext ? 'calendar' : 'ad_hoc',
         entryPoint: options.entryPoint ?? (calendarContext ? 'calendar_detail' : 'meeting_tab'),
@@ -1027,13 +1164,74 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         recurrenceSegmentId: calendarContext?.recurrenceSegmentId ?? null,
         seriesKey: calendarContext?.seriesKey ?? null,
         supersededRemoteMeetingId: options.supersededRemoteMeetingId ?? null,
+        initialStageStatuses: options.initialProcessingStatuses,
         canonicalWrite: true,
       });
       if (created.created && created.canonicalRevision === null) {
         throw new Error('会议记录未能写入本机数据版本，请重试。');
       }
+      if (options.fastLocalResult) {
+        // The import shell has no transcript, summary, or recording yet. Its
+        // stable ID and committed aggregate are sufficient for the first
+        // detail frame; scanning and sorting every meeting here made a single
+        // import feel like a full refresh. Merge only this shell into the
+        // already-owned projection and let the normal post-ingest read hydrate
+        // the complete canonical state.
+        const shellRecordedAt = new Date(
+          created.aggregate.note.recordedAtMs ?? created.aggregate.note.createdAtMs,
+        );
+        const shell: Meeting = {
+          id: created.aggregate.note.id,
+          remoteId: null,
+          title: created.aggregate.note.title,
+          date: `${shellRecordedAt.getFullYear()}年${shellRecordedAt.getMonth() + 1}月${shellRecordedAt.getDate()}日`,
+          time: `${String(shellRecordedAt.getHours()).padStart(2, '0')}:${String(shellRecordedAt.getMinutes()).padStart(2, '0')}`,
+          duration: '—',
+          tags: [statusTag('preparing'), { label: '本机', color: C.teal }],
+          participants: [...created.aggregate.note.participants],
+          hasTranscript: false,
+          hasSummary: false,
+          status: 'processing',
+          statusSyncPending: false,
+          mode: created.aggregate.note.mode ?? 'offline',
+          description: created.aggregate.note.description,
+          location: created.aggregate.note.location,
+          createdAt: shellRecordedAt.toISOString(),
+          updatedAt: new Date(created.aggregate.note.updatedAtMs).toISOString(),
+          audioAvailable: false,
+          audioSyncPending: false,
+          audioSyncBlocked: false,
+          audioLocalUri: null,
+          clientRequestId: created.aggregate.note.clientRequestId ?? undefined,
+          source: 'guest',
+        };
+        const currentProjection = canonicalReadProjectionRef.current;
+        if (currentProjection && adoptCanonicalOwnedProjection({
+          projection: {
+            meetings: [shell, ...currentProjection.meetings.filter(meeting => meeting.id !== shell.id)],
+            transcripts: currentProjection.transcripts,
+            summaries: currentProjection.summaries,
+            canonicalIdByLegacyId: {
+              ...currentProjection.canonicalIdByLegacyId,
+              [shell.id]: created.aggregate.note.id,
+            },
+          },
+          mirrorStatus: 'unchanged',
+          canonicalRevision: created.canonicalRevision ?? 0,
+        }, operationGeneration)) {
+          return shell;
+        }
+      }
       const owned = await loadCanonicalOwnedScope();
       if (!owned) throw new Error('会议本机数据状态异常，请刷新后重试。');
+      if (options.fastLocalResult) {
+        const fastProjected = owned.projection.meetings.find(meeting => (
+          owned.projection.canonicalIdByLegacyId[meeting.id] === created.aggregate.note.id
+        ));
+        if (fastProjected && adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+          return fastProjected;
+        }
+      }
       const projected = owned.projection.meetings.find(meeting => (
         owned.projection.canonicalIdByLegacyId[meeting.id] === created.aggregate.note.id
       ));
@@ -1107,11 +1305,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       || generationRef.current !== operationGeneration
       || activeScopeRef.current !== scope
     ) return;
-    const canonicalMeetingId = canonicalReadProjectionRef.current
-      ?.canonicalIdByLegacyId[legacyMeetingId]
-      ?.trim();
+    const projection = await ensureCanonicalProjectionReady(operationGeneration);
+    const canonicalMeetingId = projection.canonicalIdByLegacyId[legacyMeetingId]?.trim();
     if (!canonicalMeetingId) {
-      throw new Error('会议数据尚未完成本机升级，请刷新后重试。');
+      throw new Error('会议记录的本机索引暂时不可用，请稍后重试。');
     }
 
     let deleted = false;
@@ -1197,7 +1394,13 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     } finally {
       canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
     }
-  }, [adoptCanonicalOwnedProjection, enqueueDeviceMeetingDeletion, loadCanonicalOwnedScope, scope]);
+  }, [
+    adoptCanonicalOwnedProjection,
+    enqueueDeviceMeetingDeletion,
+    ensureCanonicalProjectionReady,
+    loadCanonicalOwnedScope,
+    scope,
+  ]);
 
   const saveCanonicalMeetingTranscript = useCallback(async (
     legacyMeetingId: string,
@@ -1309,7 +1512,8 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         throwOnFailure: true,
       });
       const existingSummaryConfirmed = result.status === 'unchanged'
-        || result.status === 'preserved_existing_candidate';
+        || result.status === 'preserved_existing_candidate'
+        || result.status === 'activated_existing';
       if (summary && result.canonicalRevision === null && !existingSummaryConfirmed) {
         throw new Error('会议整理结果未能写入本机数据版本，请重试。');
       }
@@ -1327,6 +1531,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       return {
         projection: result.replaceLegacyProjection ? 'updated' : 'preserved',
         mirrorStatus: result.status,
+        localVersionId: result.localVersionId ?? null,
       };
     } finally {
       canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
@@ -1377,6 +1582,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         recurrenceSegmentId: calendarContext?.recurrenceSegmentId ?? null,
         seriesKey: calendarContext?.seriesKey ?? null,
         supersededRemoteMeetingId: options.supersededRemoteMeetingId ?? null,
+        initialStageStatuses: options.initialProcessingStatuses,
         canonicalWrite: true,
       });
       if (created.created && created.canonicalRevision === null) {
@@ -1752,6 +1958,86 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
     }
   }), [accessToken, adoptCanonicalOwnedProjection, enqueueGuestMutation, loadCanonicalOwnedScope, scope]);
+
+  const permanentlyDeleteDeletedMeeting = useCallback(async (
+    canonicalMeetingId: string,
+    expectedRetentionDays: number,
+  ): Promise<void> => enqueueGuestMutation(async () => {
+    const operationGeneration = generationRef.current;
+    const normalizedCanonicalId = canonicalMeetingId.trim();
+    if (
+      scope !== 'guest'
+      || !normalizedCanonicalId
+      || expectedRetentionDays !== 30
+      || activeScopeRef.current !== scope
+      || !getFeatureFlags().localMeetingDbCanonicalWriteV1
+    ) throw new Error('当前回收站记录不能永久删除');
+
+    // A deleted meeting is intentionally absent from the active projection;
+    // verify canonical ownership separately, then inspect the tombstone. Keep
+    // the canonical mutation guard held until the mirror has been rebuilt so
+    // the list observer cannot re-project a half-purged record.
+    canonicalStoreMutationDepthRef.current += 1;
+    try {
+      await ensureCanonicalProjectionReady(operationGeneration);
+      const aggregate = await sqliteMeetingNoteRepository.get(normalizedCanonicalId, 'guest');
+      if (
+        !aggregate
+        || aggregate.note.lifecycle !== 'deleted'
+        || aggregate.note.syncState !== 'deleted'
+        || aggregate.note.deletedAtMs === null
+        || aggregate.note.deletedFromLifecycle === null
+        || aggregate.note.remoteId !== null
+        || aggregate.note.remoteRevision !== null
+      ) throw new Error('回收站记录已变化，请刷新后重试。');
+
+      const legacyMeetingId = aggregate.note.legacySourceId?.trim() || aggregate.note.id;
+      const cleanupResults = await Promise.allSettled([
+        deletePendingMeetingAudioUpload(scope, legacyMeetingId),
+        clearPendingMeetingTranscriptCompletion(scope, legacyMeetingId),
+        clearPendingMeetingSummaryTask(scope, legacyMeetingId),
+        deleteNativeMeetingArtifacts(scope, legacyMeetingId),
+        deleteMeetingPlaybackCache(legacyMeetingId),
+        deleteMeetingAttachmentFiles(legacyMeetingId),
+        cancelMeetingActionNotificationsForMeeting(scope, legacyMeetingId),
+        ...aggregate.recordingAssets
+          .map(asset => asset.localUri?.trim())
+          .filter((uri): uri is string => Boolean(uri))
+          .map(uri => FileSystem.deleteAsync(uri, { idempotent: true })),
+      ]);
+      const failures = cleanupResults.filter(result => result.status === 'rejected').length;
+      if (failures > 0) throw new MeetingDeletionCleanupError(failures);
+
+      // Keep the device-service binding cleanup durable even if the service is
+      // offline. The queue also clears the polling hint for this meeting.
+      void enqueueDeviceMeetingDeletion(legacyMeetingId).catch(error => {
+        diagnosticWarn('[device-delete] could not persist cleanup hint', error);
+      });
+      const purged = await sqliteMeetingNoteRepository.purgeDeletedGuestMeeting(
+        normalizedCanonicalId,
+        Date.now(),
+        { allowRecoverable: true },
+      );
+      if (!purged) throw new Error('会议记录未能永久删除，请重试。');
+      const owned = await loadCanonicalOwnedScope(true);
+      if (!owned || !adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+        throw new Error('永久删除后的本机数据不完整，请刷新后重试。');
+      }
+      if (
+        owned.projection.canonicalIdByLegacyId[legacyMeetingId]
+        || owned.projection.meetings.some(meeting => meeting.id === legacyMeetingId)
+      ) throw new Error('会议记录仍在本机索引中，请刷新后重试。');
+    } finally {
+      canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
+    }
+  }), [
+    adoptCanonicalOwnedProjection,
+    enqueueDeviceMeetingDeletion,
+    enqueueGuestMutation,
+    ensureCanonicalProjectionReady,
+    loadCanonicalOwnedScope,
+    scope,
+  ]);
 
   const applyMeetingReadCutover = useCallback(async (
     legacyMeetings: readonly Meeting[],
@@ -3023,7 +3309,38 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         await clearPendingMeetingSummaryTask(scope, targetLegacyMeetingId).catch(error => {
           diagnosticWarn('[meeting-import] stale summary task cleanup failed', error);
         });
-        if (scope !== 'guest') {
+        if (scope === 'guest') {
+          const attachedAsset = result.aggregate.recordingAssets.find(asset => asset.id === media.assetId);
+          if (!attachedAsset?.localUri || attachedAsset.localState !== 'local_ready') {
+            throw new Error('会议录音已加入，但本机文件状态不完整。');
+          }
+          // Import shells reach this existing-meeting branch after the media
+          // copy/extraction finishes. Guest uploads have no account queue
+          // hydrator, so register the attached asset explicitly just as the
+          // direct-create path does; otherwise the fast navigation would leave
+          // a playable local file that never reaches transcription.
+          await upsertPendingMeetingAudioUpload(scope, {
+            meetingId: targetLegacyMeetingId,
+            canonicalMeetingId: canonicalTargetMeetingId,
+            recordingAssetId: attachedAsset.id,
+            role: attachedAsset.role,
+            origin: attachedAsset.origin,
+            nativeSessionId: attachedAsset.nativeSessionId ?? undefined,
+            audioUri: attachedAsset.localUri,
+            fileName: attachedAsset.fileName ?? media.fileName,
+            mimeType: attachedAsset.mimeType?.trim() || media.mimeType,
+            byteSize: attachedAsset.byteSize ?? media.byteSize,
+            durationMs: attachedAsset.durationMs ?? media.durationMs,
+            checksumSha256: attachedAsset.checksumSha256 ?? media.checksumSha256,
+            createdAt: new Date(attachedAsset.createdAtMs).toISOString(),
+            lastAttemptAt: new Date(0).toISOString(),
+            attemptCount: 0,
+            uploadState: 'pending',
+          });
+          void resumePendingAudioUploads(true).catch(error => {
+            diagnosticWarn('[meeting-import] device upload resume failed', error);
+          });
+        } else {
           requestImportedMeetingTranscriptDiscovery(scope);
           void resumePendingAudioUploads(true).catch(error => {
             diagnosticWarn('[meeting-import] upload resume failed', error);
@@ -3734,6 +4051,130 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     return { projection: 'updated' as const, mirrorStatus };
   }, [deactivateCanonicalRead, enqueueGuestMutation, mode, persistMeetings, persistSummaries, saveCanonicalMeetingSummary, scope]);
 
+  const confirmCachedSummaryCurrent = useCallback(async (
+    id: string,
+    expected: Pick<MeetingSummaryDocument,
+      'templateId' | 'templateRevision' | 'manualNoteRevision' | 'completedAtMs'>,
+  ): Promise<boolean> => {
+    const operationGeneration = generationRef.current;
+    if (!isScopeKey(scope) || activeScopeRef.current !== scope) return false;
+    const projectedCanonicalId = canonicalReadProjectionRef.current
+      ?.canonicalIdByLegacyId[id]
+      ?.trim();
+    const aggregate = projectedCanonicalId
+      ? await sqliteMeetingNoteRepository.get(projectedCanonicalId, scope)
+      : await sqliteMeetingNoteRepository.findByNativeSessionId(id, scope);
+    if (aggregate && aggregate.note.lifecycle !== 'deleted') {
+      let confirmed = false;
+      canonicalStoreMutationDepthRef.current += 1;
+      try {
+        await sqliteMeetingNoteRepository.transaction(async transaction => {
+          const [current, activeTranscript, manualNote, stage, note] = await Promise.all([
+            transaction.getCurrentSummaryVersion(aggregate.note.id, scope),
+            transaction.getActiveTranscriptRevision(aggregate.note.id, scope),
+            transaction.getManualNote(aggregate.note.id, scope),
+            transaction.getStage(aggregate.note.id, scope, 'summary'),
+            transaction.getMeeting(aggregate.note.id, scope),
+          ]);
+          if (
+            !current
+            || !activeTranscript
+            || !manualNote
+            || !stage
+            || !note
+            || note.lifecycle === 'deleted'
+            || current.templateId !== expected.templateId
+            || current.templateRevision !== expected.templateRevision
+            || current.manualNoteRevision !== expected.manualNoteRevision
+            || manualNote.revision !== expected.manualNoteRevision
+            || current.completedAtMs !== expected.completedAtMs
+            || current.transcriptRevisionId !== activeTranscript.id
+          ) return;
+          if (current.status === 'stale') {
+            const restored = await transaction.restoreCurrentSummaryReady(
+              aggregate.note.id,
+              scope,
+              current.id,
+            );
+            if (!restored) return;
+          } else if (current.status !== 'ready') {
+            return;
+          }
+          const updatedAtMs = Math.max(Date.now(), note.updatedAtMs, stage.updatedAtMs);
+          await transaction.upsertStage(transitionProcessingStage(stage, {
+            stage: 'summary',
+            status: 'ready',
+            progress: 1,
+            jobId: null,
+            inputFingerprint: current.inputFingerprint,
+          }, updatedAtMs), scope);
+          await transaction.updateMeeting(note.id, scope, { updatedAtMs });
+          await transaction.advanceCanonicalWrite(scope, updatedAtMs);
+          confirmed = true;
+        });
+        if (!confirmed || generationRef.current !== operationGeneration) return confirmed;
+        const owned = await loadCanonicalOwnedScope(true);
+        if (owned) adoptCanonicalOwnedProjection(owned, operationGeneration);
+        return true;
+      } finally {
+        canonicalStoreMutationDepthRef.current = Math.max(0, canonicalStoreMutationDepthRef.current - 1);
+      }
+    }
+
+    // Some pre-accountless records can remain readable only through the old
+    // compatibility cache. Repair that projection only after the caller has
+    // verified a completed trace for the exact current input; do not invent a
+    // canonical identity or revive a deleted aggregate here.
+    const cached = summaryCacheRef.current[id];
+    const document = cached?.structured_document;
+    if (
+      !cached
+      || !document
+      || document.status !== 'stale'
+      || document.templateId !== expected.templateId
+      || document.templateRevision !== expected.templateRevision
+      || document.manualNoteRevision !== expected.manualNoteRevision
+      || document.completedAtMs !== expected.completedAtMs
+    ) return false;
+    const nextSummary: MeetingSummary = {
+      ...cached,
+      structured_document: { ...document, status: 'ready' },
+    };
+    const previousSummaries = summaryCacheRef.current;
+    const nextSummaries = { ...previousSummaries, [id]: nextSummary };
+    const previousMeetings = meetingsRef.current;
+    const nextMeetings = previousMeetings.map(meeting => {
+      if (meeting.id !== id) return meeting;
+      const terminal = meeting.hasTranscript
+        && meeting.hasSummary
+        && !meeting.audioSyncPending
+        && !meeting.audioSyncBlocked;
+      const status = terminal && meeting.status === 'processing'
+        ? 'completed'
+        : meeting.status ?? 'created';
+      return { ...meeting, status, tags: tagsForStatus(meeting, status) };
+    });
+    try {
+      await Promise.all([
+        writeAppStorageJson(summaryKey, nextSummaries, { removeIfEmpty: true }),
+        persistMeetingsStrict(nextMeetings),
+      ]);
+    } catch (error) {
+      summaryCacheRef.current = previousSummaries;
+      meetingsRef.current = previousMeetings;
+      throw error;
+    }
+    if (
+      generationRef.current !== operationGeneration
+      || activeScopeRef.current !== scope
+    ) return false;
+    summaryCacheRef.current = nextSummaries;
+    meetingsRef.current = nextMeetings;
+    setMeetings(nextMeetings);
+    void persistMeetingRoots(nextMeetings);
+    return true;
+  }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, persistMeetingRoots, persistMeetingsStrict, scope, summaryKey]);
+
   return (
     <MeetingsContext.Provider
       value={{
@@ -3746,6 +4187,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         importMeetingMedia,
         deleteMeeting,
         restoreDeletedMeeting,
+        permanentlyDeleteDeletedMeeting,
         updateMeetingTitle,
         updateMeetingDetails,
         updateMeetingStatus,
@@ -3756,6 +4198,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         saveCachedTranscript,
         getCachedSummary,
         saveCachedSummary,
+        confirmCachedSummaryCurrent,
       }}
     >
       {children}

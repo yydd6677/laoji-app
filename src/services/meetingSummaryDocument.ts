@@ -2,6 +2,9 @@ import type {
   MeetingSummaryActionCandidate,
   MeetingSummaryCitation,
   MeetingSummaryDocument,
+  MeetingSummaryRichBlock,
+  MeetingSummaryRichEdge,
+  MeetingSummaryRichItem,
   MeetingSummarySection,
   MeetingSummarySectionKind,
 } from '../domain/meeting';
@@ -15,6 +18,13 @@ const MAX_ACTIONS = 100;
 const MAX_CONTENT_LENGTH = 200_000;
 const SECTION_KINDS = new Set<MeetingSummarySectionKind>([
   'paragraph',
+  'bullet_group',
+  'quote',
+  'timeline',
+  'flow',
+  'comparison',
+  'risk_card',
+  'stat',
   'bullets',
   'numbered',
   'decisions',
@@ -22,6 +32,12 @@ const SECTION_KINDS = new Set<MeetingSummarySectionKind>([
   'risks',
   'action_items',
   'legacy',
+]);
+const RICH_BLOCK_KINDS = new Set<MeetingSummaryRichBlock['kind']>([
+  'paragraph', 'bullet_group', 'quote', 'timeline', 'flow', 'comparison', 'risk_card', 'stat',
+]);
+const RICH_ICON_KEYS = new Set<MeetingSummaryRichBlock['iconKey']>([
+  'overview', 'topic', 'quote', 'time', 'flow', 'compare', 'risk', 'stat', 'action',
 ]);
 
 export interface LegacyMeetingSummaryLike {
@@ -198,9 +214,69 @@ function citations(
       startMs,
       endMs,
       quoteHash: text(firstValue(record, 'quoteHash', 'quote_hash'), 200) || null,
+      sourceType: ['transcript', 'manual_note', 'attachment'].includes(
+        text(firstValue(record, 'sourceType', 'source_type'), 30),
+      )
+        ? text(firstValue(record, 'sourceType', 'source_type'), 30) as MeetingSummaryCitation['sourceType']
+        : undefined,
+      sourceLabel: text(firstValue(record, 'sourceLabel', 'source_label'), 120) || null,
     });
   });
   return result;
+}
+
+function richBlock(value: unknown): MeetingSummaryRichBlock | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const kind = text(record.kind, 40) as MeetingSummaryRichBlock['kind'];
+  const iconKey = text(firstValue(record, 'iconKey', 'icon_key'), 40) as MeetingSummaryRichBlock['iconKey'];
+  if (!RICH_BLOCK_KINDS.has(kind) || !RICH_ICON_KEYS.has(iconKey) || !Array.isArray(record.items)) {
+    return undefined;
+  }
+  const items: MeetingSummaryRichItem[] = [];
+  const itemIds = new Set<string>();
+  for (const [index, candidate] of record.items.slice(0, 12).entries()) {
+    const item = asRecord(candidate);
+    if (!item) return undefined;
+    const itemText = text(item.text, 2_000);
+    if (!itemText) continue;
+    let id = text(item.id, 120) || `rich-item:${index}`;
+    if (itemIds.has(id)) id = `${id}:${index}`;
+    itemIds.add(id);
+    items.push({
+      id,
+      title: text(item.title, 200) || null,
+      text: itemText,
+      meta: text(item.meta, 200) || null,
+      sourceId: text(firstValue(item, 'sourceId', 'source_id'), 240) || null,
+      startMs: optionalNonNegativeInteger(firstValue(item, 'startMs', 'start_ms')),
+    });
+  }
+  if (items.length === 0) return undefined;
+  const edges: MeetingSummaryRichEdge[] = [];
+  if (record.edges !== undefined) {
+    if (!Array.isArray(record.edges)) return undefined;
+    const validIds = new Set(items.map(item => item.id));
+    for (const candidate of record.edges.slice(0, 10)) {
+      const edge = asRecord(candidate);
+      if (!edge) return undefined;
+      const from = text(edge.from, 120);
+      const to = text(edge.to, 120);
+      if (!from || !to || from === to || !validIds.has(from) || !validIds.has(to)) continue;
+      edges.push({ from, to, label: text(edge.label, 80) || null });
+    }
+  }
+  return {
+    kind,
+    iconKey,
+    items,
+    ...(edges.length > 0 ? { edges } : {}),
+    edited: boolean(record.edited),
+    originalSourceLabel: text(
+      firstValue(record, 'originalSourceLabel', 'original_source_label'),
+      120,
+    ) || null,
+  };
 }
 
 function parseSections(value: unknown): MeetingSummarySection[] | null {
@@ -230,6 +306,7 @@ function parseSections(value: unknown): MeetingSummarySection[] | null {
       userEdited: boolean(firstValue(record, 'userEdited', 'user_edited')),
       userEditedAtMs: optionalNonNegativeInteger(firstValue(record, 'userEditedAtMs', 'user_edited_at_ms')),
       citations: citations(record.citations, id),
+      richBlock: richBlock(firstValue(record, 'richBlock', 'rich_block')),
     });
   }
   return result;
@@ -255,11 +332,20 @@ function parseActions(value: unknown): MeetingSummaryActionCandidate[] {
       content,
       assignee: contentText(firstValue(record ?? {}, 'assignee', 'owner', 'responsible_person')).slice(0, 200) || null,
       dueAtMs,
+      dueText: text(firstValue(record ?? {}, 'dueText', 'due_text'), 200) || null,
       reminderAtMs: null,
       reminderNotificationId: null,
       followupEventSourceId: null,
       status: actionStatus(record?.status),
       citations: citations(record?.citations, id),
+      scheduleFit: ['high', 'medium', 'low'].includes(
+        text(firstValue(record ?? {}, 'scheduleFit', 'schedule_fit'), 20),
+      )
+        ? text(firstValue(record ?? {}, 'scheduleFit', 'schedule_fit'), 20) as MeetingSummaryActionCandidate['scheduleFit']
+        : undefined,
+      evidenceScore: typeof firstValue(record ?? {}, 'evidenceScore', 'evidence_score') === 'number'
+        ? Math.min(1, Math.max(0, Number(firstValue(record ?? {}, 'evidenceScore', 'evidence_score'))))
+        : undefined,
     });
   });
   return result;
@@ -342,6 +428,9 @@ export function dedupeMeetingSummaryActions(
       sourceSegmentId: previous.sourceSegmentId ?? action.sourceSegmentId,
       sourceStartMs: previous.sourceStartMs ?? action.sourceStartMs,
       updatedAtMs: Math.max(previous.updatedAtMs ?? 0, action.updatedAtMs ?? 0) || null,
+      dueText: previous.dueText ?? action.dueText ?? null,
+      scheduleFit: previous.scheduleFit ?? action.scheduleFit,
+      evidenceScore: Math.max(previous.evidenceScore ?? 0, action.evidenceScore ?? 0) || undefined,
     });
   });
   return [...byKey.values()];
@@ -488,7 +577,7 @@ export function meetingSummaryDocumentToText(document: MeetingSummaryDocument): 
       keptFallbackActionSection = true;
     }
     const heading = section.title ? `## ${toSimplifiedChinese(section.title)}\n` : '';
-    const body = ['bullets', 'decisions', 'topics', 'risks', 'action_items'].includes(section.kind)
+    const body = ['bullet_group', 'timeline', 'flow', 'comparison', 'risk_card', 'stat', 'bullets', 'decisions', 'topics', 'risks', 'action_items'].includes(section.kind)
       ? contentText(section.content).split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => `- ${item}`).join('\n')
       : contentText(section.content);
     return `${heading}${body}`.trim();

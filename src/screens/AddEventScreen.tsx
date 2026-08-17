@@ -64,6 +64,7 @@ type EventEditorSnapshot = {
   endDate: string;
   startTime: string;
   endTime: string;
+  hasEndTime: boolean;
   isAllDay: boolean;
   repeat: typeof REPEAT_OPTIONS[number];
   recurrenceUntilDate?: string;
@@ -103,6 +104,7 @@ function snapshotFromEvent(event: CalEvent): EventEditorSnapshot {
     endDate: event.endDate ?? date,
     startTime: event.startTime ?? '10:00',
     endTime: event.endTime ?? '11:00',
+    hasEndTime: Boolean(event.endTime),
     isAllDay: event.isAllDay ?? false,
     repeat: repeatToOption(event.repeat),
     recurrenceUntilDate: event.recurrenceUntilDate,
@@ -186,6 +188,11 @@ export function AddEventScreen({ navigation, route }: Props) {
     ?? initDate;
   const initStartTime = editingEvent?.startTime ?? routeDraft?.startTime ?? route.params?.startTime ?? '10:00';
   const initEndTime = editingEvent?.endTime ?? routeDraft?.endTime ?? route.params?.endTime ?? '11:00';
+  const initHasEndTime = editingEvent
+    ? Boolean(editingEvent.endTime)
+    : routeDraft
+      ? Boolean(routeDraft.endTime)
+      : true;
   const [saving, setSaving] = React.useState(false);
   const createRequestRef = React.useRef(followup
     ? { id: followup.clientRequestId, fingerprint: '' }
@@ -201,6 +208,7 @@ export function AddEventScreen({ navigation, route }: Props) {
   const [endDateObj, setEndDateObj] = useState<Date>(() => parseDateStr(initEndDate));
   const [startObj, setStartObj] = useState<Date>(() => parseTimeStr(initStartTime));
   const [endObj, setEndObj]     = useState<Date>(() => parseTimeStr(initEndTime));
+  const [hasEndTime, setHasEndTime] = useState(initHasEndTime);
   const [isAllDay, setAllDay]   = useState(editingEvent?.isAllDay ?? routeDraft?.isAllDay ?? false);
   const [repeat, setRepeat]     = useState<typeof REPEAT_OPTIONS[number]>(repeatToOption(editingEvent?.repeat ?? routeDraft?.repeat));
   const [recurrenceUntilDate, setRecurrenceUntilDate] = useState(
@@ -263,6 +271,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     endDate,
     startTime,
     endTime,
+    hasEndTime,
     isAllDay,
     repeat,
     recurrenceUntilDate,
@@ -300,6 +309,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     setEndDateObj(parseDateStr(snapshot.endDate));
     setStartObj(parseTimeStr(snapshot.startTime));
     setEndObj(parseTimeStr(snapshot.endTime));
+    setHasEndTime(snapshot.hasEndTime);
     setAllDay(snapshot.isAllDay);
     setRepeat(snapshot.repeat);
     setRecurrenceUntilDate(snapshot.recurrenceUntilDate);
@@ -384,7 +394,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     endDate: endDate !== date ? endDate : undefined,
     spanning: endDate !== date,
     startTime: isAllDay ? undefined : startTime,
-    endTime: isAllDay ? undefined : endTime,
+    endTime: isAllDay || !hasEndTime ? undefined : endTime,
     isAllDay,
     repeat: REPEAT_MAP[repeat],
     recurrenceUntilDate: repeat === '不重复' ? undefined : recurrenceUntilDate,
@@ -578,6 +588,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     setEndDateObj(value.endDate);
     setStartObj(value.startTime);
     setEndObj(value.endTime);
+    setHasEndTime(value.hasEndTime);
     setAllDay(value.isAllDay);
     if (allDayChanged) {
       setReminderMinutes(defaultReminderForEvent(
@@ -671,7 +682,7 @@ export function AddEventScreen({ navigation, route }: Props) {
                 accessibilityLabel={`结束日期 ${endDate}`}
               >
                 <Text style={s.timeMain} numberOfLines={1}>{formatEditorDate(endDateObj)}</Text>
-                {!isAllDay ? <Text style={s.timeMinor} numberOfLines={1}>{endTime}</Text> : null}
+                {!isAllDay ? <Text style={s.timeMinor} numberOfLines={1}>{hasEndTime ? endTime : '未设置'}</Text> : null}
               </TouchableOpacity>
               <View style={s.timeRangeArrow}>
                 <EventTimeRangeArrow testID="event-main-time-range-arrow" />
@@ -804,7 +815,7 @@ export function AddEventScreen({ navigation, route }: Props) {
 
       <EventTimeEditor
         visible={showTimeEditor}
-        value={{ startDate: dateObj, endDate: endDateObj, startTime: startObj, endTime: endObj, isAllDay }}
+        value={{ startDate: dateObj, endDate: endDateObj, startTime: startObj, endTime: endObj, hasEndTime, isAllDay }}
         initialTarget={timeEditorTarget}
         onCancel={() => setShowTimeEditor(false)}
         onDone={applyTimeEditorValue}

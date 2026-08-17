@@ -1,5 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
-import type { MeetingEntryPoint, MeetingSummaryDocument } from '../domain/meeting';
+import type { MeetingEntryPoint, MeetingFactsResultV3, MeetingSummaryDocument } from '../domain/meeting';
 import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
@@ -129,6 +129,8 @@ export interface MeetingSummary {
   generated_at?: string | null;
   /** Schema-v2 document retained while legacy consumers are incrementally removed. */
   structured_document?: MeetingSummaryDocument;
+  /** Raw v3 facts retained locally; templates are deterministic projections of this object. */
+  facts_document_v3?: MeetingFactsResultV3;
 }
 
 export interface EventDraftParams {

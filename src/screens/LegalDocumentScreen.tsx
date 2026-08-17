@@ -10,6 +10,14 @@ import { RootStackParamList } from '../types';
 import { getApiConfig } from '../services/config';
 import { useAppDialog } from '../components/AppDialog';
 import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+import {
+  checkForAppUpdate,
+  appUpdateUserMessage,
+  currentVersionCode,
+  downloadAndInstallAppUpdate,
+  useAppUpdate,
+} from '../services/appUpdate';
+import { openApkInstallSettings } from 'laoji-native-platform';
 
 const { colors: F } = getFeishuTokens();
 
@@ -29,47 +37,52 @@ const DOCS: Record<RootStackParamList['Legal']['kind'], {
 }> = {
   terms: {
     title: '用户协议',
-    updated: '2026-07-11',
+    updated: '2026-08-16',
     sections: [
-      { heading: '服务范围', body: '老记提供日程管理、自然语言创建日程、会议记录查看、转写展示和总结展示等功能。语音识别、会议总结和会议资料存储可能由外部服务提供，老记 App 负责调用、展示、错误处理和本机交互。' },
-      { heading: '本机使用', body: '老记不要求注册或登录账号。日程、会议索引、原始录音和本机资料归当前设备所有，卸载应用或清除本机数据后可能无法恢复。' },
-      { heading: '用户责任', body: '你应保证输入内容和会议资料不侵犯他人权益，不包含违法、侵权或超出工作授权范围的信息。' },
-      { heading: '服务可用性', body: '老记会尽力保持服务稳定，但外部语音识别、会议总结、网络连接或服务器维护可能导致部分功能暂时不可用。App 会提供手动文字输入、错误提示和重试入口。' },
-      { heading: '数据删除', body: '你可以逐项删除日程或会议，也可以在设置中清除本机数据。清除本机数据会删除当前设备上的日程、会议文件、缓存和设备服务数据。' },
+      { heading: '服务范围', body: '老记提供本机日程管理、文字或语音创建日程、会议录音与文件导入、文字记录、整理、会议问答、讲话人和标签等功能。需要识别或生成的任务会连接老记服务完成。' },
+      { heading: '本机使用', body: '当前版本不要求注册或登录。日程、会议索引、原始录音、笔记和主要结果以当前设备为准；卸载应用、清除应用存储或设备损坏可能使这些资料无法恢复。' },
+      { heading: '录音责任', body: '录制、导入或分享会议前，你应取得必要授权，并保证相关内容不侵犯他人隐私、知识产权或工作权限。' },
+      { heading: '结果使用', body: '语音识别、整理和问答可能存在遗漏或误差。涉及重要日期、金额、责任人或决定时，应结合文字记录和原始录音核对后使用。' },
+      { heading: '服务可用性', body: '网络、设备状态、服务器维护或第三方基础设施可能使在线处理暂时不可用。本机已有日程和已保存的会议内容仍可查看，未完成任务可在服务恢复后继续。' },
+      { heading: '删除与更新', body: '会议删除后进入回收站，只有在回收站中才会永久删除；日程可直接删除。设置中的清除本机数据会删除当前设备资料，并尝试清理对应的设备服务数据。' },
     ],
   },
   privacy: {
     title: '隐私政策',
-    updated: '2026-07-16',
+    updated: '2026-08-16',
     sections: [
-      { heading: '我们处理的数据', body: '老记只在本机保存日程、提醒、会议索引、原始录音、转写缓存、整理结果和本机资料。为完成转写、整理、问答和日程解析，必要的音频或生成式输入会按设备数据域临时发送到老记服务。' },
-      { heading: '语音与会议服务', body: '日程语音和会议录音会发送到老记服务器上的语音识别服务并转换为文字；整理和问答会发送转写内容到生成服务。原始音频处理完成后会从服务端删除，生成式结果可短期保留以便当前设备恢复续跑。' },
+      { heading: '本机资料', body: '日程、提醒、会议索引、原始录音、我的笔记、文字记录、整理结果、问答记录、标签和讲话人名称主要保存在当前设备。老记不以账号云盘方式长期保存这些资料。' },
+      { heading: '在线处理', body: '日程语音和会议音频会在需要识别时发送到老记服务；整理会使用当前文字记录和我的笔记，会议问答也会将它们作为可引用来源。导入视频时，手机先提取音频，再上传用于转写。' },
+      { heading: '临时音频', body: '待处理音频可能通过受控对象存储直接传输，并按临时对象清理规则删除。它只用于完成转写和任务恢复，不作为长期会议资料库。手机中的原始录音不会因此被覆盖。' },
+      { heading: '生成结果保留', body: '转写和生成结果会回到本机保存。关闭“帮助改进生成质量”时，问答等生成任务默认按临时方式处理；开启后，服务可在设备隔离的数据域内保留匿名结果，用于恢复任务和质量评估。' },
       { heading: '讲话人声纹', body: '你可以主动创建讲话人并录制一段朗读音频，用于在会议转写中辅助区分讲话人。只有在录入页单独勾选同意并点击保存后，讲话人名称和本次 WAV 录音才会上传到声纹服务。你可以重新录制、放弃上传，或在讲话人管理中删除已保存的讲话人资料。' },
-      { heading: '本机权限', body: '麦克风用于语音输入日程；照片权限用于选择头像；通知权限用于日程提醒；系统验证权限用于启动时保护 App。拒绝权限不会影响手动文字创建日程。' },
+      { heading: '本机权限', body: '麦克风用于语音日程和会议录音；文件访问用于选择导入资料；通知用于日程提醒和录音状态；位置用于填写地址；系统验证用于启动保护；安装权限仅在你确认应用更新时使用。未授权的能力不会在后台自行启用。' },
       { heading: '存储与同步', body: '日程和会议操作直接写入本机数据库，不通过云端同步。通知提醒由当前设备本机调度；跨设备同步和账号迁移不在当前版本提供。' },
-      { heading: '你的控制权', body: '你可以编辑或删除日程、会议和讲话人资料，也可以在设置中关闭通知、清除本机数据。分享文件时由你在系统分享面板选择接收方。' },
-      { heading: '保留与安全', body: '生产通信要求 HTTPS/WSS。设备服务使用独立设备凭据和可轮换的数据域；清除本机数据时会请求删除对应的服务端生成数据。' },
+      { heading: '你的控制权', body: '你可以编辑或删除日程、会议、笔记、标签和讲话人资料，选择是否保留匿名生成结果，也可以清除本机数据。分享内容和接收方由你在分享前确认。' },
+      { heading: '安全边界', body: '在线通信使用 HTTPS 或 WSS。每台设备使用独立凭据和数据域；日志不记录会议正文、笔记正文、原始坐标或访问密钥。' },
     ],
   },
   help: {
     title: '帮助中心',
-    updated: '2026-07-08',
+    updated: '2026-08-16',
     sections: [
-      { heading: '创建日程', body: '在日程页点击右下角新建按钮，可以选择语音输入或手动新建。语音识别失败时，可以直接使用文字输入。' },
-      { heading: '提醒设置', body: '新建有具体开始时间的日程默认提前 15 分钟提醒。你可以在新建/编辑日程页调整为不提醒、开始时提醒或其他提前时间。' },
-      { heading: '会议记录', body: '会议页可以直接录音并实时显示转写。结束录音后可查看转写、生成总结、播放本机或云端录音，并按你选择的内容生成分享文件。' },
-      { heading: '数据存储', body: '日程和会议主体保存在本机数据库。需要转写、整理、问答或语音解析时，服务只接收完成当前任务所需的临时输入；原始录音处理完成后会删除。' },
-      { heading: '录音与文件分享', body: '会议录音先保存在本机，再按需发送到转写服务。分享前可选择基本信息、整理结果、行动项、文字记录、标记、附件、录音或我的笔记，确认后会打开系统分享面板。' },
-      { heading: '常见问题', body: '服务暂时不可用时请稍后重试；语音识别不准确时请靠近麦克风并保持语句完整；通知没有弹出时请确认系统通知权限已开启。' },
+      { heading: '日程', body: '在日程页长按右下角新建按钮可选择语音或手动新建。日期是日程保存的必要信息，标题和具体钟点可以留空；解析不完整时只需补充缺少的内容。' },
+      { heading: '录音与导入', body: '会议可来自实时录音，也可导入 WAV、M4A、MP3、MP4、WebM 等常见音视频。详情页会区分准备、上传、转写和整理状态，处理期间可以离开页面。' },
+      { heading: '文字与整理', body: '转写处理中会逐步出现可读文字，完成后再确定讲话人与最终段落。整理会同时参考文字记录和当前我的笔记；切换整理模板不会重新上传或生成。' },
+      { heading: '会议问答', body: '会议问答使用当前文字记录、已有整理结果和我的笔记。回答下方的引用可展开并跳回对应来源；会议内容发生变化后会自动开始一份新的问答记录。' },
+      { heading: '标签与查找', body: '可从会议页的分类查看进入标签页，并在右上角管理标签。搜索可以查找标题、标签、我的笔记、文字记录、整理结果和事项。' },
+      { heading: '删除与恢复', body: '长按会议记录可以删除，删除后的记录在回收站中保留一段时间；只有回收站提供永久删除。' },
+      { heading: '更新应用', body: '在版本信息中可以检查并下载新版本。安装前系统会再次要求确认；首次使用时可能需要允许老记安装更新。' },
     ],
   },
   guide: {
     title: '使用指南',
-    updated: '2026-07-08',
+    updated: '2026-08-16',
     sections: [
-      { heading: '推荐流程', body: '先用文字或语音创建日程，再在详情页补充地点、备注和提醒。重要安排建议保留明确开始时间，方便系统提醒。' },
-      { heading: '设备资料', body: '老记以当前设备为唯一使用主体。更换设备不会自动带来旧日程和会议记录；在同一设备上，服务任务会按设备数据域恢复续跑。' },
-      { heading: '会议资料', body: '会议主体和原始录音保存在本机；使用语音转写、整理或问答时，必要输入会发送到对应服务。服务不可用时，已缓存内容仍可查看，页面会提供明确错误和重试入口。' },
+      { heading: '安排一天', body: '用语音或文字建立日程后，可在月视图快速浏览日期，在日视图查看时间顺序，并按需补充地点、备注和提醒。' },
+      { heading: '记录会议', body: '需要现场记录时直接开始录音；已有音视频则使用导入。转写过程中可以先阅读已完成片段，最终结果完成后再生成整理和进行问答。' },
+      { heading: '核对结果', body: '整理、行动候选和问答都应结合引用核对。我的笔记会作为补充来源，但与文字记录冲突时不会自动替你作出最终判断。' },
+      { heading: '管理资料', body: '使用标签整理会议，使用搜索定位内容；不再需要的会议先移到回收站。当前版本以本机为主，不提供跨设备同步。' },
     ],
   },
   version: {
@@ -79,7 +92,7 @@ const DOCS: Record<RootStackParamList['Legal']['kind'], {
   },
   contact: {
     title: '联系我们',
-    updated: '2026-07-08',
+    updated: '2026-08-16',
     sections: [
       {
         heading: '反馈渠道',
@@ -95,6 +108,7 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
   const doc = DOCS[route.params.kind];
   const config = getApiConfig();
   const { showDialog } = useAppDialog();
+  const update = useAppUpdate();
   const openExternalLink = async (url: string) => {
     try {
       if (!(await Linking.canOpenURL(url))) throw new Error('unsupported URL');
@@ -113,6 +127,41 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
       ? [{ label: '打开公开用户协议', url: config.termsOfServiceUrl, icon: 'open-outline' as const }]
       : [];
   if (route.params.kind === 'version') {
+    const checkUpdate = async () => {
+      await checkForAppUpdate({ manual: true });
+    };
+    const installUpdate = async () => {
+      try {
+        await downloadAndInstallAppUpdate();
+      } catch (error) {
+        showDialog({
+          title: '更新失败',
+          message: appUpdateUserMessage(error),
+          tone: 'error',
+          actions: appUpdateUserMessage(error).includes('允许老记安装')
+            ? [
+              { text: '去设置', role: 'primary', onPress: () => { openApkInstallSettings(); } },
+              { text: '取消', role: 'cancel' },
+            ]
+            : undefined,
+        });
+      }
+    };
+    const updateLabel = update.status === 'checking'
+      ? '正在检查'
+      : update.status === 'downloading'
+        ? '正在下载'
+        : update.status === 'ready_to_install'
+          ? '安装更新'
+          : '检查更新';
+    const updateAction = update.status === 'available' || update.status === 'ready_to_install'
+      ? installUpdate
+      : checkUpdate;
+    const updateValue = update.status === 'up_to_date'
+      ? '已是最新版本'
+      : update.status === 'downloading' && update.progress !== null
+        ? `${Math.round(update.progress * 100)}%`
+        : update.manifest?.version_name ?? undefined;
     return (
       <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
         <SettingsTitleBar title="版本信息" onBack={() => navigation.goBack()} />
@@ -129,8 +178,37 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
 
           <SettingsGroup testID="legal-about-group">
             <SettingsRow label="当前版本" value={APP_VERSION} />
-            <SettingsRow label="构建编号" value={String(Constants.expoConfig?.android?.versionCode ?? '未知')} last />
+            <SettingsRow label="构建编号" value={String(currentVersionCode() || '未知')} />
+            <SettingsRow
+              label={updateLabel}
+              value={updateValue}
+              onPress={update.status === 'checking' || update.status === 'downloading' ? undefined : updateAction}
+              disabled={update.status === 'checking' || update.status === 'downloading'}
+              last
+              testID="legal-check-update"
+            />
           </SettingsGroup>
+
+          {update.status === 'available' && update.manifest ? (
+            <View style={s.updateNotice} testID="legal-update-available">
+              <Text style={s.updateTitle}>发现新版本 {update.manifest.version_name}</Text>
+              {update.manifest.release_notes.length ? (
+                <Text style={s.updateNotes}>{update.manifest.release_notes.join('；')}</Text>
+              ) : null}
+              <TouchableOpacity
+                style={s.updateButton}
+                onPress={installUpdate}
+                accessibilityRole="button"
+                accessibilityLabel="下载并安装更新"
+              >
+                <Ionicons name="download-outline" size={18} color={F.onPrimary} />
+                <Text style={s.updateButtonText}>下载并安装</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {update.message && ['failed', 'downloading', 'ready_to_install'].includes(update.status) ? (
+            <Text style={s.updateMessage} testID="legal-update-message">{update.message}</Text>
+          ) : null}
 
         </ScrollView>
       </ScreenContainer>
@@ -205,4 +283,10 @@ const s = StyleSheet.create({
   aboutVersionLine: { minHeight: 44, marginTop: 2, marginBottom: 9, paddingVertical: 8, flexDirection: 'row', alignItems: 'center' },
   aboutName: { minHeight: 28, fontSize: 20, lineHeight: 28, fontWeight: '600', color: F.textTitle },
   aboutVersion: { minHeight: 24, marginLeft: 7, fontSize: 18, lineHeight: 24, color: F.textCaption },
+  updateNotice: { marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 8, backgroundColor: F.primarySoft },
+  updateTitle: { fontSize: 16, lineHeight: 22, fontWeight: '600', color: F.textTitle },
+  updateNotes: { marginTop: 6, fontSize: 14, lineHeight: 21, color: F.textCaption },
+  updateButton: { minHeight: 40, marginTop: 14, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: F.primary },
+  updateButtonText: { fontSize: 15, lineHeight: 20, fontWeight: '600', color: F.onPrimary },
+  updateMessage: { marginHorizontal: 16, marginTop: 14, fontSize: 13, lineHeight: 19, color: F.textCaption },
 });

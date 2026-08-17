@@ -3,7 +3,7 @@ package com.laoji.nativeplatform.minutes
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
-const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 18
+const val MINUTES_SNAPSHOT_SCHEMA_VERSION = 19
 
 enum class MinutesSurface(val wireName: String) {
   LIST("list"),
@@ -238,6 +238,30 @@ data class MinutesSummaryCitation(
   val label: String = "",
 )
 
+data class MinutesSummaryRichItem(
+  val id: String,
+  val title: String = "",
+  val text: String,
+  val meta: String = "",
+  val sourceId: String = "",
+  val startMs: Long? = null,
+)
+
+data class MinutesSummaryRichEdge(
+  val from: String,
+  val to: String,
+  val label: String = "",
+)
+
+data class MinutesSummaryRichBlock(
+  val kind: String,
+  val iconKey: String,
+  val items: List<MinutesSummaryRichItem>,
+  val edges: List<MinutesSummaryRichEdge> = emptyList(),
+  val edited: Boolean = false,
+  val originalSourceLabel: String = "",
+)
+
 data class MinutesSummarySection(
   val id: String,
   val stableKey: String,
@@ -247,6 +271,7 @@ data class MinutesSummarySection(
   val editable: Boolean = false,
   val userEdited: Boolean = false,
   val citations: List<MinutesSummaryCitation> = emptyList(),
+  val richBlock: MinutesSummaryRichBlock? = null,
 )
 
 data class MinutesActionItem(
@@ -357,6 +382,8 @@ data class MinutesDetailState(
   val canShare: Boolean = false,
   val canManageSpeakers: Boolean = false,
   val canGenerateSummary: Boolean = false,
+  val canSelectSummaryTemplate: Boolean = false,
+  val summaryTemplateLabel: String = "",
   val canCreateAction: Boolean = false,
   val canCreateClip: Boolean = false,
   val summaryGenerating: Boolean = false,
@@ -565,6 +592,8 @@ object MinutesStateReducer {
         } else {
           currentDetail.canGenerateSummary
         },
+        canSelectSummaryTemplate = if (summaryFresh) nextDetail.canSelectSummaryTemplate else currentDetail.canSelectSummaryTemplate,
+        summaryTemplateLabel = if (summaryFresh) nextDetail.summaryTemplateLabel else currentDetail.summaryTemplateLabel,
         summaryGenerating = if (summaryFresh) nextDetail.summaryGenerating else currentDetail.summaryGenerating,
         summaryActionLabel = if (summaryFresh) nextDetail.summaryActionLabel else currentDetail.summaryActionLabel,
         summarySyncConflict = if (summaryFresh) nextDetail.summarySyncConflict else currentDetail.summarySyncConflict,

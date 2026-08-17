@@ -1,0 +1,56 @@
+{
+  "contract_revision": "vnext-1",
+  "schema_source": "services/laoji-api/app/schemas",
+  "schemas": [
+    {
+      "name": "entity_revision",
+      "path": "schemas/entity_revision.schema.json",
+      "sha256": "be6fded007548196ba2910995dcac5408a4047bc9f25cd484d94bbf9909c9a82"
+    },
+    {
+      "name": "meeting_facts_document_v3",
+      "path": "schemas/meeting_facts_document_v3.schema.json",
+      "sha256": "2aea8012f31fd788b8f8e71dc5ab4269723c4e22de82db2613a312b4b1c44a54"
+    },
+    {
+      "name": "meeting_facts_model_response_v3",
+      "path": "schemas/meeting_facts_model_response_v3.schema.json",
+      "sha256": "7934069f7a2e86985ae849b2eb12d8ee56aede2334d506c519ec772f48b25cb2"
+    },
+    {
+      "name": "projection_envelope",
+      "path": "schemas/projection_envelope.schema.json",
+      "sha256": "7f26a502338d151c268b736256ee5e068cbc140f40e61f0b6d7404987588dedb"
+    },
+    {
+      "name": "schedule_draft",
+      "path": "schemas/schedule_draft.schema.json",
+      "sha256": "9cbcc2b051a5797bdc7ff976f0364113cd5eb59c6ecb9cea4380261a3df00f96"
+    },
+    {
+      "name": "schedule_mention_graph",
+      "path": "schemas/schedule_mention_graph.schema.json",
+      "sha256": "084734c9341b75ed2d3dfa91d16cdaa430fc524548d98046cbc87985f9345da4"
+    },
+    {
+      "name": "schedule_parse_request_legacy_projection",
+      "path": "schemas/schedule_parse_request_legacy_projection.schema.json",
+      "sha256": "35cc3c14a24370dd4c3c48da341c0e40cf25ef8a11f329c4af1b36432d50f84e"
+    },
+    {
+      "name": "schedule_parse_response_legacy_projection",
+      "path": "schemas/schedule_parse_response_legacy_projection.schema.json",
+      "sha256": "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc"
+    },
+    {
+      "name": "source_ref",
+      "path": "schemas/source_ref.schema.json",
+      "sha256": "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712"
+    },
+    {
+      "name": "task_attempt",
+      "path": "schemas/task_attempt.schema.json",
+      "sha256": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36"
+    }
+  ]
+}

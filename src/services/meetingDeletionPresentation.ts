@@ -29,14 +29,28 @@ export function isMeetingDeletionBlocked(meeting: Meeting): boolean {
 }
 
 function isLocalOnlyMeeting(meeting: Meeting): boolean {
+  // Device-primary guest meetings are backed by the local canonical note
+  // repository and its tombstone/restore flow.  They do not need a cloud
+  // remoteId in order to use the device recycle bin.  Only account-scoped
+  // rows without a remote identity (or with a still-pending identity) are
+  // truly permanent local-only records.
+  if (meeting.source === 'guest') return false;
   if (meeting.source !== 'cloud') return true;
   const clientRequestId = meeting.clientRequestId?.trim();
   return Boolean(meeting.statusSyncPending && clientRequestId && clientRequestId === meeting.id);
 }
 
 export function isMeetingEligibleForRecycleBin(meeting: Meeting): boolean {
-  return !isMeetingDeletionBlocked(meeting)
-    && !isLocalOnlyMeeting(meeting)
+  if (isMeetingDeletionBlocked(meeting)) return false;
+
+  // The accountless product owns guest meetings in the device canonical
+  // database. They intentionally have no cloud identity, so requiring a
+  // remoteId here makes the recycle-bin UI unreachable for the normal path.
+  // The guest tombstone/restore implementation is local and can preserve a
+  // pending upload just as safely as a completed recording.
+  if (meeting.source === 'guest') return true;
+
+  return !isLocalOnlyMeeting(meeting)
     && Boolean(meeting.remoteId?.trim())
     && !meeting.statusSyncPending
     && !meeting.audioSyncPending

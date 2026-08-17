@@ -41,6 +41,10 @@ internal class CalendarEditTimePageView(
     contentDescription = "具体时间"
   }
   private val timeSwitchRow = toggleRow("具体时间", timeSwitch)
+  private val endTimeSwitch = CalendarSourceSwitch(context).apply {
+    contentDescription = "结束时间"
+  }
+  private val endTimeSwitchRow = toggleRow("结束时间", endTimeSwitch)
   private val startDateText = endpointText(15f, Typeface.BOLD)
   private val startTimeText = endpointText(14f, Typeface.NORMAL, CalendarPagePalette.secondary)
   private val endDateText = endpointText(15f, Typeface.BOLD)
@@ -101,6 +105,7 @@ internal class CalendarEditTimePageView(
       addView(toggleRow("全天", allDaySwitch))
       addView(context.pageDivider(16))
       addView(timeSwitchRow)
+      addView(endTimeSwitchRow)
       addView(endpointRow())
       addView(wheelContainer())
       addView(context.pageDivider(16), LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(0.5f).coerceAtLeast(1)).apply {
@@ -117,6 +122,9 @@ internal class CalendarEditTimePageView(
     }
     timeSwitch.setOnCheckedChangeListener { _, checked ->
       if (!applyingState) applyState(state.setTimedEnabled(checked))
+    }
+    endTimeSwitch.setOnCheckedChangeListener { _, checked ->
+      if (!applyingState) applyState(state.setEndTimedEnabled(checked))
     }
     syncUi()
   }
@@ -261,7 +269,9 @@ internal class CalendarEditTimePageView(
     applyingState = true
     allDaySwitch.isChecked = state.allDay
     timeSwitch.isChecked = state.timedEnabled
+    endTimeSwitch.isChecked = state.endTimedEnabled
     timeSwitchRow.visibility = if (state.allDay) GONE else VISIBLE
+    endTimeSwitchRow.visibility = if (!state.allDay && state.timedEnabled) VISIBLE else GONE
 
     startDateText.text = CalendarEditTimeFormatter.dateLabel(state.startDate)
     endDateText.text = CalendarEditTimeFormatter.dateLabel(state.endDate)
@@ -272,9 +282,10 @@ internal class CalendarEditTimePageView(
 
     allDayPanel.visibility = if (state.allDay) VISIBLE else INVISIBLE
     timedPanel.visibility = if (state.allDay) INVISIBLE else VISIBLE
-    periodWheel.visibility = if (!state.allDay && state.timedEnabled && !is24Hour) VISIBLE else GONE
-    hourWheel.visibility = if (!state.allDay && state.timedEnabled) VISIBLE else GONE
-    minuteWheel.visibility = if (!state.allDay && state.timedEnabled) VISIBLE else GONE
+    val selectedTimeEnabled = state.timeEnabled(state.selectedEndpoint)
+    periodWheel.visibility = if (selectedTimeEnabled && !is24Hour) VISIBLE else GONE
+    hourWheel.visibility = if (selectedTimeEnabled) VISIBLE else GONE
+    minuteWheel.visibility = if (selectedTimeEnabled) VISIBLE else GONE
 
     configureAllDayDateWheel()
     val date = state.selectedDate()
@@ -304,7 +315,7 @@ internal class CalendarEditTimePageView(
 
   private fun endpointTimeLabel(endpoint: CalendarEditEndpoint): String = when {
     state.allDay -> "全天"
-    !state.timedEnabled -> "未设置"
+    !state.timeEnabled(endpoint) -> "未设置"
     else -> CalendarEditTimeFormatter.timeLabel(state.timeFor(endpoint), is24Hour)
   }
 

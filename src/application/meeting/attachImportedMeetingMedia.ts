@@ -137,7 +137,13 @@ export class AttachImportedMeetingMediaUseCase {
           'target meeting processing state is incomplete',
         );
       }
-      if (ACTIVE_CAPTURE_STATUSES.has(capture.status)) {
+      // A newly-created import shell uses `preparing` while the picker URI is
+      // being copied or a video is reduced to audio.  It has no recorder asset
+      // and is not an active microphone session, so attaching the durable
+      // imported asset must be allowed.  Real recorder preparation/finalizing
+      // states, and every recording/paused state, remain protected.
+      const importShellPreparing = capture.status === 'preparing' && !primary;
+      if (ACTIVE_CAPTURE_STATUSES.has(capture.status) && !importShellPreparing) {
         throw new AttachImportedMeetingMediaError(
           'ERR_MEDIA_IMPORT_TARGET_BUSY',
           'target meeting is recording',

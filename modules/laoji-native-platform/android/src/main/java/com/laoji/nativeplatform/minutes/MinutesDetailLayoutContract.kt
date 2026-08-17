@@ -6,7 +6,6 @@ internal object MinutesDetailLayoutContract {
   const val TITLE_BAR_HEIGHT_DP = 44
   const val TAB_BAR_HEIGHT_DP = 41
   const val RECORDING_SELECTOR_HEIGHT_DP = 44
-  const val STATUS_SLOT_HEIGHT_DP = 44
   const val TAB_MIN_WIDTH_DP = 60
   const val TAB_HORIZONTAL_PADDING_DP = 10
   const val TAB_INDICATOR_HEIGHT_DP = 2
@@ -47,7 +46,6 @@ internal object MinutesDetailLayoutContract {
   fun pagerHeightPx(
     stickyHeightPx: Int,
     tabHeightPx: Int,
-    statusHeightPx: Int = 0,
     selectionHeightPx: Int = 0,
   ): Int {
     // The page keeps its fully-collapsed viewport height throughout a gesture.
@@ -56,7 +54,6 @@ internal object MinutesDetailLayoutContract {
     return (
       stickyHeightPx -
         tabHeightPx.coerceAtLeast(0) -
-        statusHeightPx.coerceAtLeast(0) -
         selectionHeightPx.coerceAtLeast(0)
     ).coerceAtLeast(0)
   }

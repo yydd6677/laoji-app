@@ -49,6 +49,7 @@ export function legacyMeetingProcessingStatuses(
   const uploadPending = Boolean(meeting.audioSyncPending) || hasTag(meeting, '待上传');
   const transcriptReady = Boolean(meeting.hasTranscript);
   const summaryReady = Boolean(meeting.hasSummary);
+  const hasAudio = Boolean(meeting.audioAvailable || meeting.audioLocalUri);
   return {
     capture,
     upload: uploadBlocked
@@ -64,9 +65,11 @@ export function legacyMeetingProcessingStatuses(
         ? 'finalizing'
         : status === 'failed' && capture === 'local_ready'
           ? 'failed_retryable'
-          : ['completed', 'ended', 'done', 'processed'].includes(status)
-            ? 'unavailable'
-            : 'none',
+          : hasAudio && ['completed', 'ended', 'done', 'processed'].includes(status)
+            ? 'queued'
+            : ['completed', 'ended', 'done', 'processed'].includes(status)
+              ? 'unavailable'
+              : 'none',
     summary: summaryReady
       ? 'ready'
       : status === 'processing' && transcriptReady
@@ -87,7 +90,11 @@ export function deriveLegacyMeetingPresentationState(
   meeting: Meeting,
   options: LegacyMeetingPresentationOptions = {},
 ): MeetingPresentationState {
-  if (!options.captureOverride) {
+  const uploadProjectionIsDynamic = Boolean(meeting.audioSyncPending)
+    || Boolean(meeting.audioSyncBlocked)
+    || hasTag(meeting, '待上传')
+    || hasTag(meeting, '上传受阻');
+  if (!options.captureOverride && !uploadProjectionIsDynamic) {
     const canonicalProjection = meetingPresentationStateFromLabel(meeting.tags[0]?.label ?? '');
     if (canonicalProjection) return canonicalProjection;
   }

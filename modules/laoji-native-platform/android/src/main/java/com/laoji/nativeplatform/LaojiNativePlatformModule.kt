@@ -5,7 +5,11 @@ package com.laoji.nativeplatform
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -74,6 +78,69 @@ class LaojiNativePlatformModule : Module() {
         "checksumSha256" to "sha256:${digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }}",
         "byteSize" to byteSize,
       )
+    }
+
+    // Android keeps the final installation confirmation in the system
+    // installer. LaoJi only exposes the verified cache file through a
+    // FileProvider; it never performs a silent install.
+    Function("canInstallApk") {
+      val context = appContext.reactContext?.applicationContext
+        ?: throw IllegalStateException("应用环境不可用")
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+        || context.packageManager.canRequestPackageInstalls()
+    }
+
+    Function("openApkInstallSettings") {
+      val context = appContext.reactContext?.applicationContext
+        ?: throw IllegalStateException("应用环境不可用")
+      val activity = appContext.currentActivity
+        ?: throw IllegalStateException("当前页面不可用")
+      val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+          data = Uri.parse("package:${context.packageName}")
+        }
+      } else {
+        Intent(Settings.ACTION_SECURITY_SETTINGS)
+      }
+      activity.startActivity(intent)
+      true
+    }
+
+    Function("installApk") { fileUri: String, expectedVersionCode: Long ->
+      val context = appContext.reactContext?.applicationContext
+        ?: throw IllegalStateException("应用环境不可用")
+      val activity = appContext.currentActivity
+        ?: throw IllegalStateException("当前页面不可用")
+      require(Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()) {
+        "请先允许老记安装应用更新。"
+      }
+      val sourceUri = Uri.parse(fileUri)
+      require(sourceUri.scheme == "file") { "安装文件路径无效" }
+      val source = File(requireNotNull(sourceUri.path) { "安装文件路径无效" }).canonicalFile
+      require(source.isFile) { "安装文件不存在" }
+      val archive = context.packageManager.getPackageArchiveInfo(source.path, 0)
+        ?: throw IllegalArgumentException("安装文件无法识别")
+      val archiveVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        archive.longVersionCode
+      } else {
+        @Suppress("DEPRECATION")
+        archive.versionCode.toLong()
+      }
+      require(archive.packageName == context.packageName && archiveVersionCode == expectedVersionCode) {
+        "安装文件版本不匹配，已取消安装。"
+      }
+      val contentUri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.laoji.fileprovider",
+        source,
+      )
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(contentUri, "application/vnd.android.package-archive")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      activity.startActivity(intent)
+      true
     }
 
     AsyncFunction("getCapabilities") {

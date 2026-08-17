@@ -22,6 +22,7 @@ export interface MeetingManualNoteDraft {
   flush(): Promise<void>;
   reload(): Promise<void>;
   retry(): Promise<void>;
+  snapshot(): { content: string; revision: number };
 }
 
 export function useMeetingManualNote(
@@ -170,5 +171,6 @@ export function useMeetingManualNote(
     flush,
     reload: load,
     retry,
+    snapshot: () => ({ content: draftRef.current, revision: revisionRef.current }),
   };
 }

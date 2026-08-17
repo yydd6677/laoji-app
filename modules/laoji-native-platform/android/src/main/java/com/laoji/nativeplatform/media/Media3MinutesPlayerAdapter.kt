@@ -143,8 +143,9 @@ internal class Media3MinutesPlayerAdapter(
     configureRequestHeaders(nextSource)
     player.setMediaItem(mediaItem(nextSource), preservedPositionMs)
     player.playWhenReady = preservePlaying
-    player.prepare()
-    if (!preservePlaying) player.pause()
+    // A bound or restored source remains idle until playback is explicitly
+    // requested. MediaSessionService can then suppress phantom notifications.
+    if (preservePlaying) player.prepare()
     persist(force = true, positionOverrideMs = preservedPositionMs)
     publish(force = true)
     return true
@@ -239,8 +240,6 @@ internal class Media3MinutesPlayerAdapter(
       player.setMediaItem(mediaItem(record.source), record.positionMs.coerceAtLeast(0L))
       player.setPlaybackSpeed(resolveMinutesPlaybackRate(record.rate))
       player.playWhenReady = false
-      player.prepare()
-      player.pause()
       progressThrottle.markPersisted(elapsedRealtimeMs(), record.positionMs)
       lastPublished = snapshot()
     } catch (_: Exception) {

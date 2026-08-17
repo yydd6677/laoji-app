@@ -107,6 +107,7 @@ function cleanMetadata(meta: EventMetadata): EventMetadata {
 
 function metadataFromEvent(ev: Omit<CalEvent, 'id'>): EventMetadata {
   return cleanMetadata({
+    color: ev.color,
     location: ev.location,
     category: ev.category,
     detail: ev.detail,
@@ -203,6 +204,47 @@ function metadataKeyForEvent(event: CalEvent): string {
 
 function metadataForEvent(map: EventMetadataMap, event: CalEvent): EventMetadata | undefined {
   return map[metadataKeyForEvent(event)] ?? map[event.id] ?? map[stableSourceEventId(event)];
+}
+
+/**
+ * Keep the display classification beside the stable occurrence identity.
+ *
+ * A calendar refresh can legitimately return a different client occurrence
+ * id (for example after expanding a recurrence or while a delete command is
+ * being acknowledged).  The old refresh path only persisted reminder fields
+ * for incoming events and removed metadata for every event missing from that
+ * response.  When the id changed, the next projection therefore lost the
+ * category and fell back to "其他" (the grey-purple bucket).  Display metadata
+ * is durable user-facing state, not a refresh bookkeeping detail, so every
+ * successful projection refreshes it under the stable source/occurrence key.
+ */
+function mergeEventDisplayMetadata(
+  map: EventMetadataMap,
+  event: CalEvent,
+): EventMetadataMap {
+  return mergeMetadata(map, metadataKeyForEvent(event), {
+    color: event.color,
+    location: event.location,
+    category: event.category,
+    detail: event.detail,
+    reminderMinutes: event.reminderMinutes,
+    notificationId: event.notificationId,
+  });
+}
+
+/**
+ * Guest/device-primary schedule rows may predate the category field.  Their
+ * inferred category is kept in the metadata map, while the SQLite row itself
+ * can still be the older shape.  Any local projection (including the one
+ * performed immediately after a delete) must apply that metadata before it
+ * reaches the calendar surface; otherwise every unaffected row falls back to
+ * the grey "其他" bucket.
+ */
+function projectGuestEvents(
+  events: CalEvent[],
+  metadata: EventMetadataMap,
+): CalEvent[] {
+  return events.map(event => applyEventMetadata(event, metadataForEvent(metadata, event)));
 }
 
 function removeEventMetadata(map: EventMetadataMap, event: CalEvent): void {
@@ -752,16 +794,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
 
       const incomingIds = new Set(expanded.map(event => event.id));
       let nextMetadata = { ...eventMetadataRef.current };
-      for (const event of previous) {
-        if (eventOverlapsDateRange(event, window.start, window.end) && !incomingIds.has(event.id)) {
-          removeEventMetadata(nextMetadata, event);
-        }
-      }
       for (const event of withNotifications) {
-        nextMetadata = mergeMetadata(nextMetadata, metadataKeyForEvent(event), {
-          reminderMinutes: event.reminderMinutes,
-          notificationId: event.notificationId,
-        });
+        nextMetadata = mergeEventDisplayMetadata(nextMetadata, event);
       }
       eventMetadataRef.current = nextMetadata;
       await persistMetadata(nextMetadata);
@@ -819,16 +853,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentRequest()) return result;
 
       let nextMetadata = { ...eventMetadataRef.current };
-      for (const event of previous) {
-        if (eventOverlapsDateRange(event, window.start, window.end) && !incomingIds.has(event.id)) {
-          removeEventMetadata(nextMetadata, event);
-        }
-      }
       for (const event of withNotifications.filter(event => incomingIds.has(event.id))) {
-        nextMetadata = mergeMetadata(nextMetadata, metadataKeyForEvent(event), {
-          reminderMinutes: event.reminderMinutes,
-          notificationId: event.notificationId,
-        });
+        nextMetadata = mergeEventDisplayMetadata(nextMetadata, event);
       }
       eventMetadataRef.current = nextMetadata;
       await persistMetadata(nextMetadata);
@@ -1377,7 +1403,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       if (activeScopeRef.current !== transaction.scopeKey) return;
       guestBaseEventsRef.current = nextGuestEvents;
       searchableEventsRef.current = nextGuestEvents;
-      const expanded = expandEventsForMonths(nextGuestEvents, loadedGuestMonthsRef.current);
+      const expanded = projectGuestEvents(
+        expandEventsForMonths(nextGuestEvents, loadedGuestMonthsRef.current),
+        eventMetadataRef.current,
+      );
       eventsRef.current = expanded;
       setSearchableEvents(nextGuestEvents);
       setEvents(expanded);
@@ -1414,7 +1443,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       if (activeScopeRef.current !== transaction.scopeKey) return;
       guestBaseEventsRef.current = nextGuestEvents;
       searchableEventsRef.current = nextGuestEvents;
-      const expanded = expandEventsForMonths(nextGuestEvents, loadedGuestMonthsRef.current);
+      const expanded = projectGuestEvents(
+        expandEventsForMonths(nextGuestEvents, loadedGuestMonthsRef.current),
+        eventMetadataRef.current,
+      );
       eventsRef.current = expanded;
       setSearchableEvents(nextGuestEvents);
       setEvents(expanded);

@@ -191,7 +191,8 @@ const DATE_TOKEN =
   '(?:[0-9]{4}年)?[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)' +
   '|(?:[0-9]{4}年)?[0-9一二两三四五六七八九十]{1,2}月(?:底|末)' +
   '|(?:下个月|下月|本月|这个月)[0-9一二两三四五六七八九十]{1,3}(?:号|日)' +
-  '|下个月底|下个月末|下月底|下月末|月底|月末|大后天|后天|明天|今天|今日' +
+  '|下个月底|下个月末|下月底|下月末|月底|月末|周末|下下周末|下个周末|下一个周末|下周末|本周末|这周末|这个周末|' +
+  '明早|明晨|明晚|明夜|今早|今晨|今夜|今晚|大后天|后天|明天|今天|今日' +
   '|(?:(?:下下|下|本|这)?(?:周|星期|礼拜))[一二三四五六日天1-7]' +
   '|[0-9一二两三四五六七八九十]{1,3}(?:号|日)';
 
@@ -207,7 +208,7 @@ const CONSECUTIVE_RELATIVE_PAIR_TOKEN =
 
 const TIME_TOKEN =
   '(?:[01]?\\d|2[0-3])[:：][0-5]\\d' +
-  '|(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?';
+  '|(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?';
 
 const LAOJI_WAKE_WORD = '(?:老记|老纪|老计|老季|牢记|小记)';
 const IMPLICIT_CROSS_YEAR_CONFIRM_DAYS = 183;
@@ -284,7 +285,7 @@ const LOCATION_TOKEN_PATTERN =
   '码头|港口|校区|现场|路|街|巷|室|厅|楼|层|馆|院|门|站|店|家))';
 const LOCATION_LOCALIZER_PATTERN = '(?:里面|里|内|外|附近|门口|旁边|楼上|楼下|前台|大厅|现场|口)?';
 const LOCATION_ACTION_PATTERN =
-  '(?:安排|开会|召开|举行|进行|参加|处理|完成|提交|整理|跟进|准备|复盘|讨论|沟通|' +
+  '(?:安排|开[^，,。.!！?？；;]{1,12}会|开会|召开|举行|进行|参加|处理|完成|提交|整理|跟进|准备|复盘|讨论|沟通|' +
   '确认|评审|汇报|学习|复习|上课|考试|培训|阅读|跑步|健身|运动|体检|看病|' +
   '服药|聚餐|约会|吃饭|购物|购买|买|取|领取|寄|打印|缴|交|支付|还款|报销|' +
   '拜访|会见|维护|检查|测试|发布|更新|制作|编写|练习|集合|出发|接待|签字|' +
@@ -514,6 +515,13 @@ function parseExplicitOrRelativeDate(text: string, today: LocalDate): LocalDate 
   if (text.includes('月底') || text.includes('月末')) {
     return { ...today, day: daysInMonth(today.year, today.month) };
   }
+  if (/(?:下下|下个|下一个|下)周末/.test(text)) {
+    return weekdayInWeek(5, text.includes('下下周末') ? 2 : 1, today);
+  }
+  if (/(?:本|这|这个)周末/.test(text)) return nextWeekday(5, today, true);
+  if (text.includes('周末')) return nextWeekday(5, today, true);
+  if (/(?:明早|明晨|明晚|明夜|明天)/.test(text)) return addDays(today, 1);
+  if (/(?:今早|今晨|今夜|今晚|今天|今日)/.test(text)) return today;
   if (text.includes('大后天')) return addDays(today, 3);
   if (text.includes('后天')) return addDays(today, 2);
   if (text.includes('明天')) return addDays(today, 1);
@@ -696,9 +704,58 @@ function parseConsecutiveRelativeDateRanges(
   return ranges;
 }
 
+function namedCalendarRanges(
+  text: string,
+  today: LocalDate,
+): Array<{ index: number; range: [LocalDate, LocalDate] }> {
+  const ranges: Array<{ index: number; range: [LocalDate, LocalDate] }> = [];
+  const weekdayOccurrence = (prefix: string, weekday: number): LocalDate => {
+    if (prefix === '下下') return weekdayInWeek(weekday, 2, today);
+    if (['下', '下个', '下一个'].includes(prefix)) return weekdayInWeek(weekday, 1, today);
+    if (['本', '这', '这个'].includes(prefix)) return nextWeekday(weekday, today, true);
+    // Bare weekday names mean the next occurrence. Use “这周六/这周日”
+    // when the current week is intended; this mirrors the server contract.
+    return nextWeekday(weekday, today);
+  };
+
+  const weekendPattern = /(下下|下个|下一个|下|本|这|这个)?周末(?:两|二|2)?天?/g;
+  let match: RegExpExecArray | null;
+  while ((match = weekendPattern.exec(text))) {
+    const prefix = match[1] ?? '';
+    const start = prefix === '下下'
+      ? weekdayInWeek(5, 2, today)
+      : ['下', '下个', '下一个'].includes(prefix)
+        ? weekdayInWeek(5, 1, today)
+        : nextWeekday(5, today, true);
+    ranges.push({ index: match.index, range: [start, addDays(start, 1)] });
+  }
+
+  const weekday = '[一二三四五六日天1-7]';
+  const patterns = [
+    new RegExp(`(下下|下个|下一个|下|本|这|这个)?(?:周|星期|礼拜)(${weekday})(${weekday})`, 'g'),
+    new RegExp(`(下下|下个|下一个|下|本|这|这个)?(?:周|星期|礼拜)(${weekday})(?:[、,，和及跟\\s]+)(?:周|星期|礼拜)?(${weekday})`, 'g'),
+  ];
+  const seen = new Set<string>();
+  for (const pattern of patterns) {
+    while ((match = pattern.exec(text))) {
+      const startToken = match[2] ?? '';
+      const endToken = match[3] ?? '';
+      const key = `${match.index}:${startToken}:${endToken}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const startWeekday = WEEKDAY_MAP[startToken];
+      const endWeekday = WEEKDAY_MAP[endToken];
+      const start = weekdayOccurrence(match[1] ?? '', startWeekday);
+      const delta = (endWeekday - startWeekday + 7) % 7;
+      if (delta > 0) ranges.push({ index: match.index, range: [start, addDays(start, delta)] });
+    }
+  }
+  return ranges;
+}
+
 function parseDateRange(text: string, today: LocalDate): [LocalDate, LocalDate] | null {
   const pattern = new RegExp(`(${DATE_TOKEN})(?:开始)?(?:到|至|直到|[-—~～])(${DATE_TOKEN})`, 'g');
-  const ranges = parseConsecutiveRelativeDateRanges(text, today);
+  const ranges = [...parseConsecutiveRelativeDateRanges(text, today), ...namedCalendarRanges(text, today)];
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text))) {
     const start = parseDateToken(match[1], today);
@@ -719,7 +776,9 @@ function hasDateRangeSyntax(text: string): boolean {
   // date tokens. A sentence can contain two dates and an unrelated time range
   // (for example, a correction from one weekday to another followed by
   // "两点到四点").
-  return new RegExp(`(${DATE_TOKEN})(?:开始)?(?:到|至|直到|[-—~～])(${DATE_TOKEN})`).test(text);
+  return /(?:下下|下个|下一个|下|本|这|这个)?周末(?:两|二|2)?天?/.test(text)
+    || /(?:(?:下下|下个|下一个|下|本|这|这个)?(?:周|星期|礼拜)[一二三四五六日天1-7](?:[、,，和及跟\s]+(?:周|星期|礼拜)?[一二三四五六日天1-7]|[一二三四五六日天]))/.test(text)
+    || new RegExp(`(${DATE_TOKEN})(?:开始)?(?:到|至|直到|[-—~～])(${DATE_TOKEN})`).test(text);
 }
 
 function implicitLongCrossYearRangeNeedsConfirmation(
@@ -754,7 +813,10 @@ function parseAuthoritativeDate(text: string, today: LocalDate): LocalDate | nul
 }
 
 function extractTimePeriod(token: string): string {
-  return token.trim().match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)/)?.[1] ?? '';
+  const value = token.trim().match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)/)?.[1] ?? '';
+  if (['明早', '明晨', '今早', '今晨'].includes(value)) return '早上';
+  if (['明晚', '明夜', '今夜', '今晚'].includes(value)) return '晚上';
+  return value;
 }
 
 function inferTimePeriod(text: string, index: number): string {
@@ -764,6 +826,34 @@ function inferTimePeriod(text: string, index: number): string {
   if (/(中午饭|午饭|午餐)/.test(prefix)) return '中午';
   if (/(傍晚|晚饭|晚餐|晚间)/.test(prefix)) return '晚上';
   return '';
+}
+
+const SCHEDULE_TIME_PERIOD_LABELS: Record<NonNullable<ParseResult['time_period']>, string> = {
+  early_morning: '凌晨',
+  morning: '上午',
+  noon: '中午',
+  afternoon: '下午',
+  evening: '傍晚',
+  night: '晚上',
+};
+
+/** Preserve a spoken period when no exact HH:mm value exists. */
+export function scheduleTimePeriodFromText(text: string): ParseResult['time_period'] {
+  const normalized = normalizeScheduleText(text)
+    .replace(/下午茶|早茶|中午饭|午饭|午餐|晚饭|晚餐/g, '');
+  const matches = [...normalized.matchAll(/凌晨|早上|上午|中午|下午|午后|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今晚|今夜/g)];
+  const spoken = matches.at(-1)?.[0] ?? '';
+  if (spoken === '凌晨') return 'early_morning';
+  if (spoken === '早上' || spoken === '上午' || ['明早', '明晨', '今早', '今晨'].includes(spoken)) return 'morning';
+  if (spoken === '中午') return 'noon';
+  if (spoken === '下午' || spoken === '午后') return 'afternoon';
+  if (spoken === '傍晚') return 'evening';
+  if (spoken === '晚上' || spoken === '晚间' || ['明晚', '明夜', '今晚', '今夜'].includes(spoken)) return 'night';
+  return null;
+}
+
+export function scheduleTimePeriodLabel(period: ParseResult['time_period']): string | null {
+  return period ? SCHEDULE_TIME_PERIOD_LABELS[period] : null;
 }
 
 function formatTimeParts(period: string, rawHour: number, minute: number): string | null {
@@ -778,9 +868,11 @@ function parseTimeToken(token: string, defaultPeriod = ''): string | null {
   const clean = token.trim();
   const digital = clean.match(/^([01]?\d|2[0-3])[:：]([0-5]\d)$/);
   if (digital) return `${String(Number(digital[1])).padStart(2, '0')}:${digital[2]}`;
-  const match = clean.match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?$/);
+  const match = clean.match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?$/);
   if (!match) return null;
-  const period = match[1] ?? defaultPeriod;
+  let period = match[1] ?? defaultPeriod;
+  if (['明早', '明晨', '今早', '今晨'].includes(period)) period = '早上';
+  if (['明晚', '明夜', '今夜', '今晚'].includes(period)) period = '晚上';
   const minute = match[3] ? 30 : (match[4] ? cnToInt(match[4]) : 0);
   return formatTimeParts(period, cnToInt(match[2]), minute);
 }
@@ -794,6 +886,19 @@ function parseTimeRange(text: string): [string, string] | null {
     const end = parseTimeToken(match[2], extractTimePeriod(match[1]) || startPeriod);
     if (start && end) return [start, end];
   }
+  // Natural speech often places the subject between the bounds:
+  // “下午三点半开会到五点”. Keep this separate from correction wording such
+  // as “三点开会改到五点”, which denotes replacement rather than a range.
+  const splitPattern = new RegExp(`(${TIME_TOKEN})([^，,。.!！?？；;]{1,30}?)(?:到|至|直到)(${TIME_TOKEN})`, 'g');
+  while ((match = splitPattern.exec(text))) {
+    const middle = match[2].trim();
+    if (!middle || /(?:改|换|调整|更正|不是|不对|说错)/.test(middle)) continue;
+    if (new RegExp(TIME_TOKEN).test(middle)) continue;
+    const startPeriod = extractTimePeriod(match[1]) || inferTimePeriod(text, match.index);
+    const start = parseTimeToken(match[1], startPeriod);
+    const end = parseTimeToken(match[3], extractTimePeriod(match[1]) || startPeriod);
+    if (start && end) return [start, end];
+  }
   return null;
 }
 
@@ -802,10 +907,10 @@ function parseTime(text: string): string | null {
   if (digital) return `${String(Number(digital[1])).padStart(2, '0')}:${digital[2]}`;
   // “中午” without a numeric clock is a concrete spoken time-of-day. Keep
   // “中午十二点” on the more specific numeric branch below.
-  if (text.includes('中午') && !/(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?[0-9一二两三四五六七八九十]{1,3}点/.test(text)) {
+  if (text.includes('中午') && !/(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点/.test(text)) {
     return '12:00';
   }
-  const match = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?/);
+  const match = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?/);
   if (!match) return null;
   const minute = match[3] ? 30 : (match[4] ? cnToInt(match[4]) : 0);
   return formatTimeParts(match[1] ?? inferTimePeriod(text, match.index ?? 0), cnToInt(match[2]), minute);
@@ -936,6 +1041,13 @@ function recurrenceUntilDate(text: string, today: LocalDate): LocalDate | null {
 function parseRecurrenceRule(text: string, today: LocalDate): LocalRecurrenceRule {
   const normalized = normalizeRecurrenceExpression(text);
   const empty: LocalRecurrenceRule = { eventType: 'once', interval: 1, weekdays: null, untilDate: null, unsupported: false };
+  // A named one-off weekend is a date range, not a recurrence rule. Without
+  // this guard the broad “周末” marker below turns “下个周末去爬山” into an
+  // unsupported recurring draft even though the server resolves it as once.
+  if (
+    /(?:下下|下个|下一个|下|本|这|这个)?周末(?:两|二|2)?天?/.test(normalized)
+    && !/(?:每|重复|循环)/.test(normalized)
+  ) return empty;
   if (!/(?:每(?:天|日|周|星期|礼拜|月|年|隔|个工作日|逢)|每(?:隔)?[一二两三四五六七八九十0-9]+个月|每(?:隔)?[一二两三四五六七八九十0-9]+年|隔周|工作日|周末|重复|循环)/.test(normalized)) return empty;
   if (/(?:节假日除外|法定节假日除外|节假日不算|跳过节假日|工作日调整|重复[0-9一二两三四五六七八九十两]+次)/.test(normalized)
     || /每(?:个)?月[^，,。.!！?？；;]{0,20}(?:最后|末|第[一二三四五六七八九十0-9]+周|周[一二三四五六日天])/.test(normalized)) {
@@ -989,7 +1101,7 @@ function stripScheduleMarkers(text: string): string {
     '每(?:隔)?[一二两三四五六七八九十0-9]+年[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)?',
     '每月[0-9一二两三四五六七八九十]{1,3}(?:号|日)?',
     '每年[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)?',
-    '(大后天|后天|明天|今天|今日)',
+    '(下下周末|下个周末|下一个周末|下周末|本周末|这周末|这个周末|周末|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚|大后天|后天|明天|今天|今日)',
     '(?:[0-9]{4}年)?[0-9一二两三四五六七八九十]{1,2}月(?:底|末)前?',
     '(?:下个月底|下个月末|下月底|下月末|月底|月末)前?',
     '[0-9]{4}年[0-9一二两三四五六七八九十]{1,2}月[0-9一二两三四五六七八九十]{1,3}(?:号|日)',
@@ -997,7 +1109,7 @@ function stripScheduleMarkers(text: string): string {
     '(?:下个月|下月|本月|这个月)[0-9一二两三四五六七八九十]{1,3}(?:号|日)',
     '(?:下个月|下月|本月|这个月)',
     '(?:(?:下下|下|本|这)?(?:周|星期|礼拜))[一二三四五六日天1-7]',
-    '(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?',
+    '(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?',
     '([01]?\\d|2[0-3])[:：]([0-5]\\d)',
     '^(?:凌晨|早上|上午|中午|下午(?!茶)|傍晚|晚上|晚间)(?=[^，,。.!！?？]{1,})',
     '(提醒我|记一下|安排|日程|待办|需要|完成)',
@@ -1019,6 +1131,9 @@ function normalizeTitle(title: string): string {
     .replace(/^(我要处理|我处理)/, '')
     .replace(/^(前)?(必须|得|需要)/, '');
 
+  // “去爬山/去体检”里的“去”是口语动作壳，不是标题的一部分。
+  normalized = normalized.replace(/^去(?=.{2,})/, '');
+
   normalized = normalized.replace(/^每周(?:的)?/, '');
   if (normalized === '预约提醒') return normalized;
 
@@ -1031,7 +1146,7 @@ function normalizeTitle(title: string): string {
     .split(/[，,。.!！?？]|(?:地点|(?:地点)?在|用(?=[^，,。.!！?？；;]{0,40}(?:会议室|办公室|图书馆|健身房|咖啡馆|咖啡店|实验室|教室|报告厅|写字楼|大厦|商场|超市|机场|车站|公司|学校|医院|公园|餐厅|饭店|酒店|园区|小区|广场|中心|工作室|体育馆|体育场|球场|码头|港口|校区|现场|路|街|巷|室|厅|楼|馆|院|门|站|店|家)))[^，,。.!！?？]{0,40}$|需要通知|和[^，,。.!！?？]{1,16}一起|重点是|主要确认|这件事和|带上/, 1)[0]
     .replace(/(持续处理|处理|完成|提交|整理|跟进|准备)?完$/, '')
     .replace(/^在[^，,。.!！?？]{1,30}(?=开会|会议|见面|上课|办事)/, '')
-    .replace(/^(开|召开|举行|进行)(?=.{2,})/, '')
+    .replace(/^(开(?!会)|召开|举行|进行)(?=.{2,})/, '')
     .replace(/^(?:和|跟(?!进)|与)(?=.{2,})/, '')
     .replace(/^[，,。.!！?？的]+|[，,。.!！?？的]+$/g, '');
 }
@@ -1209,6 +1324,7 @@ export function parseLocalScheduleText(
 
   const parsedTimeRange = parseTimeRange(normalized);
   const parsedTime = parsedTimeRange ? parsedTimeRange[0] : relativeStart?.time ?? parseAuthoritativeTime(normalized);
+  const timePeriod = parsedTime ? null : scheduleTimePeriodFromText(normalized);
   const hasDate = parsedDate !== null;
   const hasTime = parsedTime !== null;
   // A recurring request without its first occurrence is still a recurring
@@ -1216,7 +1332,8 @@ export function parseLocalScheduleText(
   const recurrenceMissingAnchor = eventType !== 'once' && (!hasDate || !hasTime);
   if (!hasDate && !hasTime && eventType === 'once') return parseLowInformationNote(normalized, text, today);
 
-  const [title, description] = extractTitleAndDescription(recurrenceText);
+  let [title, description] = extractTitleAndDescription(recurrenceText);
+  if (parsedTimeRange) title = title.replace(/(?:到|至|直到)$/u, '').trim();
 
   const startTime = parsedTime;
   // Do not invent a duration for a spoken start time. The server contract
@@ -1250,6 +1367,7 @@ export function parseLocalScheduleText(
     spanning: Boolean(effectiveEndDate),
     start_time: startTime,
     end_time: resolvedEndTime,
+    time_period: timePeriod,
     is_all_day: startTime === null && /(?:全天|整天|一整天|整日)/.test(normalized),
     description: description ? description.slice(0, 500) : null,
     location,
@@ -1345,7 +1463,11 @@ export function normalizeScheduleParseResult(
         ...safeResult,
         start_time: null,
         end_time: null,
-        is_all_day: true,
+        time_period: safeResult.is_all_day
+          ? null
+          : safeResult.time_period ?? scheduleTimePeriodFromText(text),
+        is_all_day: safeResult.is_all_day === true
+          || !(safeResult.time_period ?? scheduleTimePeriodFromText(text)),
         reminder_minutes: null,
       };
 

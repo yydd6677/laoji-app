@@ -1,0 +1,14 @@
+{
+  "platform": "android",
+  "version_name": "1.1.10",
+  "version_code": 118,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.10-118.apk",
+  "sha256": "sha256:b5ce1ce8e3f5dc42043d0ed2e4cf90094f43ee887322701328cec4cbc67fc04f",
+  "size_bytes": 82278571,
+  "release_notes": [
+    "上传录音转写时持续显示已完成的文字片段，并缩短整体处理时间。",
+    "会议整理和会议问答会参考当前我的笔记，问答引用可跳回原始笔记。",
+    "管理标签入口移至分类查看的标签页，设置文书同步更新。"
+  ],
+  "minimum_supported_version_code": 106
+}

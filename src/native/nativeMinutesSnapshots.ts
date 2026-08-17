@@ -110,6 +110,8 @@ export interface BuildNativeDetailSnapshotInput {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
+  canSelectSummaryTemplate?: boolean;
+  summaryTemplateLabel?: string;
   canEditSummary?: boolean;
   canCreateAction?: boolean;
   canShareActions?: boolean;
@@ -431,6 +433,27 @@ function structuredSummarySections(
     text: toSimplifiedChinese(section.content),
     editable,
     userEdited: section.userEdited === true,
+    richBlock: section.richBlock ? {
+      kind: section.richBlock.kind,
+      iconKey: section.richBlock.iconKey,
+      items: section.richBlock.items.slice(0, 12).map(item => ({
+        id: item.id,
+        title: item.title ? toSimplifiedChinese(item.title) : null,
+        text: toSimplifiedChinese(item.text),
+        meta: item.meta ? toSimplifiedChinese(item.meta) : null,
+        sourceId: item.sourceId,
+        startMs: item.startMs,
+      })),
+      edges: section.richBlock.edges?.slice(0, 10).map(edge => ({
+        from: edge.from,
+        to: edge.to,
+        label: edge.label ? toSimplifiedChinese(edge.label) : null,
+      })),
+      edited: section.richBlock.edited === true,
+      originalSourceLabel: section.richBlock.originalSourceLabel
+        ? toSimplifiedChinese(section.richBlock.originalSourceLabel)
+        : null,
+    } : undefined,
     citations: section.citations.map(citation => ({
       id: citation.id,
       segmentId: citation.segmentId,
@@ -461,7 +484,7 @@ function structuredSummaryActions(
       assigneeLabel: action.assignee ?? undefined,
       dueLabel: due && !Number.isNaN(due.getTime())
         ? `${due.getFullYear()}年${due.getMonth() + 1}月${due.getDate()}日`
-        : undefined,
+        : action.dueText?.trim() || undefined,
       reminderLabel: reminder && !Number.isNaN(reminder.getTime())
         ? reminder.getTime() <= Date.now()
           ? '已提醒'
@@ -737,10 +760,12 @@ export function buildNativeMinutesDetailSnapshot(
     canShare: input.canShare ?? false,
     canManageSpeakers: input.canManageSpeakers ?? false,
     canGenerateSummary: input.canGenerateSummary ?? false,
+    canSelectSummaryTemplate: input.canSelectSummaryTemplate ?? false,
+    summaryTemplateLabel: input.summaryTemplateLabel ?? '',
     canCreateAction: input.canCreateAction ?? false,
     canCreateClip: input.canCreateClip ?? false,
     summaryGenerating: input.summaryGenerating ?? false,
-    summaryActionLabel: summary.length > 0 ? '重新生成' : '生成整理结果',
+    summaryActionLabel: summary.length > 0 ? '重新整理' : '生成整理结果',
     titleEditRequestId: Math.max(0, input.titleEditRequestId ?? 0),
     focusActionId: input.focusActionId,
     focusActionRequestId: Math.max(0, input.focusActionRequestId ?? 0),

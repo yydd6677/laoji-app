@@ -2,6 +2,7 @@ import { getApiConfig } from './config';
 import { fetchWithTimeout, readJsonWithTimeout } from './http';
 import { getOrCreateDeviceIdentity, type DeviceIdentity } from './deviceIdentity';
 import { waitForBackgroundNetworkTurn } from './deviceNetworkPriority';
+import { diagnosticAudit } from './diagnostics';
 import * as FileSystem from 'expo-file-system/legacy';
 
 export interface DeviceApiErrorShape {
@@ -38,8 +39,11 @@ export interface DeviceServiceCapabilities {
   meetingBindings: boolean;
   resumableUploads: boolean;
   chunkBytes: number;
+  r2Upload: boolean;
+  r2PartSize: number | null;
   maxAssetBytes: number;
   mediaImport: DeviceMediaImportCapabilities | null;
+  summaryContractV3: boolean;
 }
 
 let identityPromise: Promise<DeviceIdentity> | null = null;
@@ -162,7 +166,19 @@ export async function ensureDeviceReady(): Promise<DeviceIdentity> {
   if (deviceReadyKey === key && deviceReadyUntil > Date.now()) return current;
 
   const proof = (async () => {
-    await registerDevice();
+    try {
+      await registerDevice();
+    } catch (error) {
+      // A device that was registered by an earlier build already has a
+      // durable device secret and epoch.  Capability discovery must remain
+      // usable on that device even when the one-time bootstrap key is not
+      // embedded in a later APK; the authenticated capabilities request below
+      // still verifies the device secret and epoch.  Other registration
+      // failures (invalid identity, network, server error) remain fatal.
+      if (!(error instanceof DeviceApiError) || error.code !== 'DEVICE_BOOTSTRAP_INVALID') {
+        throw error;
+      }
+    }
     const capabilities = normalizeDeviceCapabilities(
       await request('/capabilities', {}, '读取设备服务能力失败'),
     );
@@ -194,6 +210,7 @@ function normalizeDeviceCapabilities(value: any): DeviceServiceCapabilities {
   const maxBytes = Number(media?.max_bytes ?? 0);
   const schemaVersion = Number(value?.schema_version ?? 0);
   const chunkBytes = Number(value?.chunk_bytes ?? 0);
+  const r2PartSize = Number(value?.r2_part_size ?? 0);
   const maxAssetBytes = Number(value?.max_asset_bytes ?? 0);
   if (
     !Number.isSafeInteger(schemaVersion) || schemaVersion < 1
@@ -212,10 +229,19 @@ function normalizeDeviceCapabilities(value: any): DeviceServiceCapabilities {
     meetingBindings: value?.meeting_bindings === true,
     resumableUploads: value?.resumable_uploads === true,
     chunkBytes,
+    r2Upload: value?.r2_upload === true
+      && Number.isSafeInteger(r2PartSize)
+      && r2PartSize >= 5 * 1024 * 1024,
+    r2PartSize: value?.r2_upload === true
+      && Number.isSafeInteger(r2PartSize)
+      && r2PartSize >= 5 * 1024 * 1024
+      ? r2PartSize
+      : null,
     maxAssetBytes,
     mediaImport: media && Number.isSafeInteger(maxBytes) && maxBytes > 0 && mimeTypes.length > 0
       ? { mimeTypes, maxBytes }
       : null,
+    summaryContractV3: value?.summary_contract_v3 === true,
   };
 }
 
@@ -265,6 +291,21 @@ export async function getDeviceRealtimeAuth(): Promise<DeviceRealtimeAuth> {
   };
 }
 
+/**
+ * Build the realtime credential from the durable on-device identity without a
+ * network readiness round trip. DeviceServiceCoordinator registers the same
+ * identity in the background; realtime recording can therefore start local
+ * capture immediately and let WebSocket authentication finish off the audio
+ * critical path.
+ */
+export async function getLocalDeviceRealtimeAuth(): Promise<DeviceRealtimeAuth> {
+  const current = await identity();
+  return {
+    deviceToken: `dv1.${current.deviceId}.${current.deviceSecret}`,
+    dataEpoch: current.epochId,
+  };
+}
+
 export async function createMeetingBinding(bindingId: string): Promise<any> {
   return request(`/meetings/${encodeURIComponent(bindingId)}`, {
     method: 'PUT',
@@ -297,6 +338,10 @@ export async function parseScheduleRemotely(
   text: string,
   referenceDatetime?: string,
   timezone?: string,
+  options: {
+    clientRuleMiss?: boolean;
+    clientIntent?: 'create' | 'clarify' | 'query' | 'delete' | 'reject';
+  } = {},
 ): Promise<any> {
   return request('/schedule/parse', {
     method: 'POST',
@@ -305,6 +350,8 @@ export async function parseScheduleRemotely(
       text,
       reference_datetime: referenceDatetime ?? null,
       timezone: timezone ?? null,
+      client_rule_status: options.clientRuleMiss ? 'unresolved' : 'not_run',
+      client_intent: options.clientIntent ?? 'create',
     }),
   }, '日程解析服务暂时不可用');
 }
@@ -368,6 +415,226 @@ export async function registerDeviceAsset(meetingId: string, registration: any, 
     headers: { 'Idempotency-Key': requestId, 'X-Laoji-Data-Epoch': current.epochId },
     body: JSON.stringify({ schema_version: 1, ...registration }),
   }, '建立录音资产失败');
+}
+
+interface DeviceR2UploadPart {
+  part_number: number;
+  url?: string;
+  etag?: string;
+}
+
+interface DeviceR2UploadSession {
+  upload_id: string;
+  status: string;
+  part_size: number;
+  total_bytes: number;
+  total_parts: number;
+  uploaded_parts?: Array<{ part_number: number; etag: string }>;
+  parts?: DeviceR2UploadPart[];
+}
+
+async function createDeviceR2Upload(
+  assetId: string,
+  input: { totalBytes: number; checksumSha256?: string | null; requestId: string },
+): Promise<DeviceR2UploadSession> {
+  return request(`/assets/${encodeURIComponent(assetId)}/r2-upload`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.requestId },
+    body: JSON.stringify({
+      schema_version: 1,
+      client_upload_id: input.requestId,
+      total_bytes: input.totalBytes,
+      checksum_sha256: input.checksumSha256 ?? null,
+    }),
+  }, '建立直传任务失败');
+}
+
+async function getDeviceR2Upload(assetId: string, uploadId: string): Promise<DeviceR2UploadSession> {
+  return request(
+    `/assets/${encodeURIComponent(assetId)}/r2-upload?upload_id=${encodeURIComponent(uploadId)}`,
+    {},
+    '读取直传进度失败',
+  );
+}
+
+async function completeDeviceR2Upload(
+  assetId: string,
+  session: DeviceR2UploadSession,
+  parts: Array<{ part_number: number; etag: string }>,
+  checksumSha256?: string | null,
+): Promise<any> {
+  return request(`/assets/${encodeURIComponent(assetId)}/r2-upload/complete`, {
+    method: 'POST',
+    body: JSON.stringify({
+      schema_version: 1,
+      upload_id: session.upload_id,
+      total_bytes: session.total_bytes,
+      parts,
+      checksum_sha256: checksumSha256 ?? null,
+    }),
+  }, '完成直传任务失败');
+}
+
+async function cancelDeviceR2Upload(assetId: string, uploadId: string): Promise<void> {
+  await request(
+    `/assets/${encodeURIComponent(assetId)}/r2-upload?upload_id=${encodeURIComponent(uploadId)}`,
+    { method: 'DELETE' },
+    '取消直传任务失败',
+  ).catch(() => undefined);
+}
+
+function headerValue(headers: any, name: string): string | null {
+  if (!headers || typeof headers !== 'object') return null;
+  const target = name.toLowerCase();
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === target);
+  const value = entry?.[1];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+async function uploadDeviceAssetContentR2(input: {
+  assetId: string;
+  audioUri: string;
+  requestId: string;
+  totalBytes: number;
+  partSize: number;
+  checksumSha256?: string | null;
+}): Promise<any> {
+  const session = await createDeviceR2Upload(input.assetId, {
+    totalBytes: input.totalBytes,
+    checksumSha256: input.checksumSha256,
+    requestId: input.requestId,
+  });
+  if (!session?.upload_id || !Number.isSafeInteger(session.part_size) || !Number.isSafeInteger(session.total_parts)) {
+    throw new DeviceApiError('直传任务响应无效', 502, 'R2_SESSION_INVALID');
+  }
+  if (session.part_size !== input.partSize || session.total_bytes !== input.totalBytes) {
+    throw new DeviceApiError('直传任务分片布局不一致', 502, 'R2_LAYOUT_INVALID');
+  }
+  const root = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  if (!root) throw new DeviceApiError('本机临时空间不可用', 507, 'UPLOAD_CACHE_UNAVAILABLE');
+  const staging = `${root}r2-upload/${encodeURIComponent(input.requestId)}/`;
+  await FileSystem.makeDirectoryAsync(staging, { intermediates: true });
+  const uploaded = new Map<number, string>(
+    (session.uploaded_parts ?? [])
+      .filter(item => Number.isSafeInteger(Number(item.part_number)) && typeof item.etag === 'string' && item.etag.trim())
+      .map(item => [Number(item.part_number), item.etag.trim()]),
+  );
+  const urls = new Map<number, string>(
+    (session.parts ?? [])
+      .filter(item => Number.isSafeInteger(Number(item.part_number)) && typeof item.url === 'string' && item.url.trim())
+      .map(item => [Number(item.part_number), item.url!.trim()]),
+  );
+  const missingParts = Array.from({ length: session.total_parts }, (_, index) => index + 1)
+    .filter(partNumber => !uploaded.has(partNumber));
+  const directSmallPut = input.totalBytes <= 16 * 1024 * 1024 && session.total_parts === 1;
+  const maxConcurrentParts = directSmallPut
+    ? 1
+    : Math.min(2, Math.max(1, missingParts.length));
+
+  const retryablePartStatus = (status: number): boolean => (
+    status === 408 || status === 425 || status === 429 || status >= 500
+  );
+
+  const uploadPart = async (partNumber: number): Promise<void> => {
+    const partUrl = urls.get(partNumber);
+    if (!partUrl) throw new DeviceApiError('直传分片地址缺失', 502, 'R2_PART_URL_MISSING');
+    const offset = (partNumber - 1) * session.part_size;
+    const length = Math.min(session.part_size, input.totalBytes - offset);
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const startedAt = Date.now();
+      let partUri: string | null = null;
+      try {
+        // A single small PUT can stream the original URI directly through the
+        // native uploader.  This avoids the Base64 + temporary-file roundtrip
+        // that previously dominated short recordings.
+        if (!directSmallPut) {
+          const base64 = await FileSystem.readAsStringAsync(input.audioUri, {
+            encoding: FileSystem.EncodingType.Base64,
+            position: offset,
+            length,
+          });
+          if (!base64) throw new DeviceApiError('录音分片读取失败', 422, 'R2_PART_READ_FAILED');
+          partUri = `${staging}${partNumber}.${attempt}.part`;
+          await FileSystem.writeAsStringAsync(partUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        await waitForBackgroundNetworkTurn();
+        const result = await FileSystem.uploadAsync(partUrl, partUri ?? input.audioUri, {
+          httpMethod: 'PUT',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: { 'Content-Type': 'application/octet-stream' },
+        });
+        const status = Number(result?.status) || 0;
+        if (status < 200 || status >= 300) {
+          throw new DeviceApiError('录音分片上传失败', status, 'R2_PART_UPLOAD_FAILED');
+        }
+        const etag = headerValue(result?.headers, 'etag');
+        if (etag) uploaded.set(partNumber, etag);
+        diagnosticAudit('device_r2_part_upload', {
+          part_number: partNumber,
+          bytes: length,
+          elapsed_ms: Math.max(0, Date.now() - startedAt),
+          attempt,
+          direct: directSmallPut,
+          status,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        const status = error instanceof DeviceApiError ? error.status : 0;
+        if (attempt >= 2 || (status !== 0 && !retryablePartStatus(status))) throw error;
+        await new Promise<void>(resolve => setTimeout(resolve, 600 * (2 ** attempt)));
+      } finally {
+        if (partUri) await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => undefined);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new DeviceApiError('录音分片上传失败', 0, 'R2_PART_UPLOAD_FAILED');
+  };
+
+  try {
+    let cursor = 0;
+    const workers = Array.from({ length: maxConcurrentParts }, async () => {
+      while (cursor < missingParts.length) {
+        const partNumber = missingParts[cursor];
+        cursor += 1;
+        await uploadPart(partNumber);
+      }
+    });
+    await Promise.all(workers);
+    diagnosticAudit('device_r2_upload_parts_complete', {
+      total_parts: session.total_parts,
+      uploaded_parts: uploaded.size,
+      concurrency: maxConcurrentParts,
+      direct_small_put: directSmallPut,
+      total_bytes: input.totalBytes,
+    });
+    // Some Android networking stacks omit response headers from uploadAsync.
+    // The authenticated API can list the R2 parts and supplies authoritative
+    // ETags before completion.
+    if (uploaded.size !== session.total_parts) {
+      const refreshed = await getDeviceR2Upload(input.assetId, session.upload_id);
+      for (const part of refreshed.uploaded_parts ?? []) {
+        if (part.etag?.trim()) uploaded.set(Number(part.part_number), part.etag.trim());
+      }
+    }
+    const completeParts = Array.from({ length: session.total_parts }, (_, index) => {
+      const partNumber = index + 1;
+      const etag = uploaded.get(partNumber);
+      if (!etag) throw new DeviceApiError('录音仍有分片未上传', 409, 'R2_PARTS_INCOMPLETE');
+      return { part_number: partNumber, etag };
+    });
+    return await completeDeviceR2Upload(input.assetId, session, completeParts, input.checksumSha256);
+  } catch (error) {
+    // An init failure is handled by the caller. Once a session has received
+    // parts, do not silently send a second copy through the tunnel: completion
+    // is idempotent and a retry can continue from the R2 part listing.
+    if (error instanceof DeviceApiError && error.code === 'R2_UPLOAD_UNAVAILABLE') {
+      await cancelDeviceR2Upload(input.assetId, session.upload_id);
+    }
+    throw error;
+  } finally {
+    await FileSystem.deleteAsync(staging, { idempotent: true }).catch(() => undefined);
+  }
 }
 
 // The service accepts chunks up to 4 MiB, but the emulator/tunnel path has a
@@ -508,6 +775,33 @@ export async function uploadDeviceAssetContent(
     }
     uploadUri = probeCopyUri;
   }
+  // R2 capability discovery is intentionally best-effort. A server that has
+  // not yet received its bucket credentials keeps the existing authenticated
+  // device upload path, so an app update can be installed before the storage
+  // cutover.
+  const capabilities = await loadDeviceServiceCapabilities().catch(() => null);
+  if (capabilities?.r2Upload && capabilities.r2PartSize) {
+    try {
+      const result = await uploadDeviceAssetContentR2({
+        assetId,
+        audioUri: uploadUri,
+        requestId,
+        totalBytes: resolvedTotalBytes,
+        partSize: capabilities.r2PartSize,
+        checksumSha256,
+      });
+      if (probeCopyUri) await FileSystem.deleteAsync(probeCopyUri, { idempotent: true }).catch(() => undefined);
+      return result;
+    } catch (error) {
+      // Only an explicit server-side disabled response is safe to fall back
+      // from. A partial R2 transfer must be resumed, not duplicated through
+      // the tunnel and potentially committed twice.
+      if (!(error instanceof DeviceApiError) || error.code !== 'R2_UPLOAD_UNAVAILABLE') {
+        if (probeCopyUri) await FileSystem.deleteAsync(probeCopyUri, { idempotent: true }).catch(() => undefined);
+        throw error;
+      }
+    }
+  }
   if (resolvedTotalBytes > DEVICE_CHUNKED_UPLOAD_THRESHOLD) {
     try {
       return await uploadDeviceAssetContentChunked({
@@ -599,6 +893,40 @@ export async function createDeviceSummary(meetingId: string, input: any, request
 
 export async function getDeviceSummary(meetingId: string, signal?: AbortSignal): Promise<any> {
   return request(`/meetings/${encodeURIComponent(meetingId)}/summary`, { signal }, '读取整理结果失败');
+}
+
+export async function createDeviceSummaryV3(
+  meetingId: string,
+  input: {
+    transcript_revision: string;
+    manual_note: { revision: number; content_sha256: string; content: string };
+    attachments: readonly {
+      attachment_id: string;
+      revision: number;
+      position_ms: number | null;
+      content_sha256: string;
+      content: string;
+    }[];
+    force?: boolean;
+  },
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<any> {
+  const current = await identity();
+  return request(`/meetings/${encodeURIComponent(meetingId)}/summary-v3`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': requestId, 'X-Laoji-Data-Epoch': current.epochId },
+    body: JSON.stringify({
+      schema_version: 3,
+      ...input,
+      idempotency_key: requestId,
+    }),
+    signal,
+  }, '整理服务暂时不可用');
+}
+
+export async function getDeviceSummaryV3(meetingId: string, signal?: AbortSignal): Promise<any> {
+  return request(`/meetings/${encodeURIComponent(meetingId)}/summary-v3`, { signal }, '读取整理结果失败');
 }
 
 export async function askDeviceQuestion(meetingId: string, input: any, signal?: AbortSignal): Promise<any> {

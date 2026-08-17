@@ -1,0 +1,276 @@
+{
+  "$defs": {
+    "FactRelationV3": {
+      "additionalProperties": false,
+      "properties": {
+        "from_fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "From Fact Id",
+          "type": "string"
+        },
+        "relation_type": {
+          "enum": [
+            "supports",
+            "contradicts",
+            "precedes",
+            "depends_on",
+            "alternative"
+          ],
+          "title": "Relation Type",
+          "type": "string"
+        },
+        "to_fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "To Fact Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation_type",
+        "from_fact_id",
+        "to_fact_id"
+      ],
+      "title": "FactRelationV3",
+      "type": "object"
+    },
+    "ModelActionCandidateV3": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "due_text": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due Text"
+        },
+        "fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "schedule_fit": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Schedule Fit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_id",
+        "fact_id",
+        "content",
+        "schedule_fit"
+      ],
+      "title": "ModelActionCandidateV3",
+      "type": "object"
+    },
+    "ModelFactV3": {
+      "additionalProperties": false,
+      "properties": {
+        "certainty": {
+          "enum": [
+            "confirmed",
+            "proposed",
+            "uncertain",
+            "negated",
+            "completed"
+          ],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "fact_type": {
+          "enum": [
+            "topic",
+            "context",
+            "conclusion",
+            "action",
+            "risk",
+            "question",
+            "quote",
+            "timeline"
+          ],
+          "title": "Fact Type",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ModelSourceReferenceV3"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fact_id",
+        "fact_type",
+        "certainty",
+        "content",
+        "sources"
+      ],
+      "title": "ModelFactV3",
+      "type": "object"
+    },
+    "ModelSourceReferenceV3": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "quote": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_id": {
+          "pattern": "^(?:transcript|manual_note|attachment):[A-Za-z0-9._:-]{1,180}$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "transcript",
+            "manual_note",
+            "attachment"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "source_type",
+        "quote"
+      ],
+      "title": "ModelSourceReferenceV3",
+      "type": "object"
+    },
+    "OverviewV3": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "fact_ids"
+      ],
+      "title": "OverviewV3",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The exact object generated by the model before deterministic verification.",
+  "properties": {
+    "action_candidates": {
+      "items": {
+        "$ref": "#/$defs/ModelActionCandidateV3"
+      },
+      "maxItems": 10,
+      "title": "Action Candidates",
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/ModelFactV3"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Facts",
+      "type": "array"
+    },
+    "overview": {
+      "$ref": "#/$defs/OverviewV3"
+    },
+    "relations": {
+      "items": {
+        "$ref": "#/$defs/FactRelationV3"
+      },
+      "maxItems": 48,
+      "title": "Relations",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 3,
+      "default": 3,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "overview",
+    "facts"
+  ],
+  "title": "MeetingFactsModelResponseV3",
+  "type": "object"
+}

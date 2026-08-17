@@ -168,9 +168,14 @@ internal class MediaIngestor(context: Context) {
     if (!directory.isDirectory) {
       throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
     }
-    val extension = preferredMediaExtension(metadata.fileName, mimeType)
-    val finalFile = File(directory, "$normalizedAssetId.$extension")
-    val tempFile = File(directory, "$normalizedAssetId.$extension.part")
+    val videoSource = mimeType.startsWith("video/")
+    val extension = if (videoSource) "m4a" else preferredMediaExtension(metadata.fileName, mimeType)
+    var finalFile = File(directory, "$normalizedAssetId.$extension")
+    val tempFile = if (videoSource) {
+      File(directory, "$normalizedAssetId.audio.part")
+    } else {
+      File(directory, "$normalizedAssetId.$extension.part")
+    }
     val journalFile = File(directory, JOURNAL_FILE)
     val current = readJournal(journalFile)
     if (current != null && (
@@ -184,7 +189,11 @@ internal class MediaIngestor(context: Context) {
     current?.readyResult(directory)?.takeIf {
       it.meetingId == normalizedMeetingId && it.assetId == normalizedAssetId
     }?.let { return@synchronized it }
-    if (finalFile.exists() || tempFile.exists()) {
+    val staleVideoFile = videoSource && (
+      File(directory, "$normalizedAssetId.m4a").exists()
+        || File(directory, "$normalizedAssetId.wav").exists()
+    )
+    if (finalFile.exists() || tempFile.exists() || staleVideoFile) {
       throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
     }
     val createdAtMs = System.currentTimeMillis().coerceAtLeast(0L)
@@ -196,7 +205,7 @@ internal class MediaIngestor(context: Context) {
       metadata.lastModifiedMs,
       metadata.fileName,
       mimeType,
-      "copying",
+      if (videoSource) "extracting" else "copying",
       tempFile.name,
       finalFile.name,
       null,
@@ -206,42 +215,71 @@ internal class MediaIngestor(context: Context) {
     )
     writeJournal(directory, journalFile, journal)
     try {
-      val digest = MessageDigest.getInstance("SHA-256")
-      var copied = 0L
-      openSource(uri).use { input ->
-        FileOutputStream(tempFile, false).use { output ->
-          val buffer = ByteArray(COPY_BUFFER_BYTES)
-          while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            if (count == 0) continue
-            copied += count
-            if (copied > maximumBytes) {
-              throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "录音文件超过大小限制")
+      if (videoSource) {
+        val extracted = MediaAudioExtractor.extract(appContext, uri, tempFile, maximumBytes)
+        val outputBytes = tempFile.length()
+        if (outputBytes <= 0L) {
+          throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "视频中没有可用的音频内容")
+        }
+        if (extracted.durationMs <= 0L) {
+          throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "无法读取视频音频时长")
+        }
+        if (outputBytes > maximumBytes) {
+          throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "提取后的音频超过当前允许的大小")
+        }
+        val outputExtension = extracted.extension
+        finalFile = File(directory, "$normalizedAssetId.$outputExtension")
+        if (finalFile.exists()) {
+          throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
+        }
+        val checksum = sha256File(tempFile, maximumBytes)
+        journal = journal.copy(
+          fileName = audioOutputFileName(metadata.fileName, outputExtension),
+          mimeType = extracted.mimeType,
+          state = "prepared",
+          finalFileName = finalFile.name,
+          byteSize = outputBytes,
+          durationMs = extracted.durationMs,
+          checksumSha256 = checksum,
+        )
+      } else {
+        val digest = MessageDigest.getInstance("SHA-256")
+        var copied = 0L
+        openSource(uri).use { input ->
+          FileOutputStream(tempFile, false).use { output ->
+            val buffer = ByteArray(COPY_BUFFER_BYTES)
+            while (true) {
+              val count = input.read(buffer)
+              if (count < 0) break
+              if (count == 0) continue
+              copied += count
+              if (copied > maximumBytes) {
+                throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "录音文件超过大小限制")
+              }
+              output.write(buffer, 0, count)
+              digest.update(buffer, 0, count)
             }
-            output.write(buffer, 0, count)
-            digest.update(buffer, 0, count)
+            output.flush()
+            output.fd.sync()
           }
-          output.flush()
-          output.fd.sync()
         }
-      }
-      if (copied <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
-      metadata.byteSize?.let { expected ->
-        if (expected != copied) {
-          throw MediaImportException("ERR_MEDIA_IMPORT_CHANGED", "录音文件在导入过程中发生变化")
+        if (copied <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
+        metadata.byteSize?.let { expected ->
+          if (expected != copied) {
+            throw MediaImportException("ERR_MEDIA_IMPORT_CHANGED", "录音文件在导入过程中发生变化")
+          }
         }
+        val durationMs = inspectAudio(tempFile)
+        val checksum = digest.digest().joinToString("") { byte ->
+          "%02x".format(byte.toInt() and 0xff)
+        }
+        journal = journal.copy(
+          state = "prepared",
+          byteSize = copied,
+          durationMs = durationMs,
+          checksumSha256 = checksum,
+        )
       }
-      val durationMs = inspectAudio(tempFile)
-      val checksum = digest.digest().joinToString("") { byte ->
-        "%02x".format(byte.toInt() and 0xff)
-      }
-      journal = journal.copy(
-        state = "prepared",
-        byteSize = copied,
-        durationMs = durationMs,
-        checksumSha256 = checksum,
-      )
       writeJournal(directory, journalFile, journal)
       Os.rename(tempFile.absolutePath, finalFile.absolutePath)
       syncDirectory(directory)
@@ -357,6 +395,28 @@ internal class MediaIngestor(context: Context) {
     "file" -> uri.path?.let(::File)?.let(::FileInputStream)
     else -> null
   } ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法打开所选录音")
+
+  private fun sha256File(file: File, maximumBytes: Long): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    var total = 0L
+    FileInputStream(file).use { input ->
+      val buffer = ByteArray(COPY_BUFFER_BYTES)
+      while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        if (count == 0) continue
+        total += count
+        if (total > maximumBytes) {
+          throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "提取后的音频超过当前允许的大小")
+        }
+        digest.update(buffer, 0, count)
+      }
+    }
+    if (total <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "音频文件为空")
+    return digest.digest().joinToString("") { byte ->
+      "%02x".format(byte.toInt() and 0xff)
+    }
+  }
 
   private fun inspectAudio(file: File): Long {
     val retriever = MediaMetadataRetriever()

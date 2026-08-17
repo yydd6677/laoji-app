@@ -323,7 +323,7 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
         addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline, "更多会议记录操作", action = "more")
       }
       if (showSearch) {
-        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline, "搜索会议记录", action = "search")
+        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline, "搜索文字记录", action = "search")
       }
       if (showShare) {
         addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline, "分享会议资料", shareEnabled, "share")
@@ -482,7 +482,7 @@ internal fun statusToneColor(tone: String): Int = when (tone) {
   "warning" -> MinutesPalette.warning
   "success" -> MinutesPalette.success
   "primary" -> MinutesPalette.primary
-  else -> MinutesPalette.faint
+  else -> MinutesPalette.secondary
 }
 
 internal fun formatClock(durationMs: Long): String {

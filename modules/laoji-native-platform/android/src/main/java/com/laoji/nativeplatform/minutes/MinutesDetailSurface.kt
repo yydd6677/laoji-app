@@ -53,7 +53,7 @@ internal class MinutesDetailSurface(
   private val playerOwner = playerOwnerFactory(context, ::handlePlaybackState)
   internal val player: View = playerOwner.view
   internal val recordingSelector = HorizontalScrollView(context)
-  internal val processingNotice = LinearLayout(context)
+  internal val processingNotice = MinutesOperationStatusView(context)
 
   private val titleContainer = FrameLayout(context)
   private val title = context.textView(textSizeSp = 24, weight = Typeface.BOLD)
@@ -61,7 +61,7 @@ internal class MinutesDetailSurface(
   private val subtitleRow = LinearLayout(context)
   private val dateTimeIcon = ImageView(context)
   private val dateTime = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-  private val processingNoticeText = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  private val processingNoticeHost = FrameLayout(context)
   private val processingRetry = context.textView("重试", textSizeSp = 14, color = MinutesPalette.primary, weight = Typeface.BOLD)
   private val recordingSelectorItems = LinearLayout(context)
   private val tabBar = MinutesDetailTabBar(context, ::requestUserTab)
@@ -149,10 +149,25 @@ internal class MinutesDetailSurface(
     dateTimeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
     dateTimeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     subtitleRow.addView(dateTimeIcon, LayoutParams(context.dpRounded(12), context.dpRounded(12)))
+    dateTime.maxLines = 1
+    dateTime.ellipsize = android.text.TextUtils.TruncateAt.END
     subtitleRow.addView(
       dateTime,
       LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dpRounded(22)).apply {
         leftMargin = context.dpRounded(4)
+      },
+    )
+    processingNotice.useCompactHeaderMode()
+    processingNoticeHost.addView(
+      processingNotice,
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dpRounded(28)).apply {
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+      },
+    )
+    subtitleRow.addView(
+      processingNoticeHost,
+      LayoutParams(0, context.dpRounded(28), 1f).apply {
+        leftMargin = context.dpRounded(8)
       },
     )
     audioHeader.addView(
@@ -184,7 +199,7 @@ internal class MinutesDetailSurface(
         }
       }
     })
-    stickyLayout.setOwners(audioHeader, recordingSelector, tabBar, processingNotice, detailPager)
+    stickyLayout.setOwners(audioHeader, recordingSelector, tabBar, detailPager)
     stickyLayout.setListener(object : MinutesDetailStickyListener {
       override fun onCollapseOffsetChanged(offsetPx: Int) = schedulePersistViewState()
     })
@@ -202,26 +217,31 @@ internal class MinutesDetailSurface(
     )
     // The source selector is owned by the sticky header. Keep its row stable so
     // multiple local/cloud sources cannot move the page selector while loading.
-    recordingSelector.visibility = View.INVISIBLE
+    recordingSelector.visibility = View.GONE
 
-    // [INFERENCE] LaoJi's independent processing stages use the existing
-    // Minutes cached/error banner family. The 44dp slot and text action keep
-    // retry visible without turning a background task into a blocking dialog.
-    processingNotice.orientation = HORIZONTAL
-    processingNotice.gravity = Gravity.CENTER_VERTICAL
-    processingNotice.setPadding(context.dp(16), 0, context.dp(4), 0)
-    processingNotice.visibility = View.INVISIBLE
-    processingNotice.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-    processingNoticeText.maxLines = 2
-    processingNotice.addView(
-      processingNoticeText,
-      LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-    )
+    // Current-meeting processing, warning, and error state shares the existing
+    // title metadata row. It never inserts another vertical row around tabs.
     processingRetry.gravity = Gravity.CENTER
+    processingRetry.setTextSize(12f)
     processingRetry.isClickable = true
     processingRetry.isFocusable = true
     processingRetry.setOnClickListener {
       if (!processingRetry.isEnabled) return@setOnClickListener
+      if (
+        renderedState.activeTab == MinutesDetailTab.NOTES
+        && renderedState.manualNoteConflict
+      ) {
+        onAction(mapOf("type" to "openManualNoteConflict", "meetingId" to renderedState.meetingId))
+        return@setOnClickListener
+      }
+      if (
+        renderedState.activeTab == MinutesDetailTab.NOTES
+        && renderedState.manualNoteError.isNotBlank()
+        && renderedState.manualNoteRetryable
+      ) {
+        onAction(mapOf("type" to "retryManualNote", "meetingId" to renderedState.meetingId))
+        return@setOnClickListener
+      }
       if (renderedState.rootSyncConflict) {
         onAction(
           mapOf(
@@ -271,7 +291,7 @@ internal class MinutesDetailSurface(
         ),
       )
     }
-    processingNotice.addView(processingRetry, LayoutParams(context.dp(76), context.dp(44)))
+    processingNotice.attachAction(processingRetry)
     // Feishu owns the audio toolbar outside the sticky container. WRAP_CONTENT lets the player
     // measure its real controls and system inset instead of imposing the old 100dp surface slot.
     addView(player, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -314,13 +334,14 @@ internal class MinutesDetailSurface(
     localTabGeneration = maxOf(localTabGeneration, acceptedGeneration)
     renderedState = state.selectTab(acceptedTab, acceptedGeneration)
     if (editingTitle && (!state.available || meetingChanged)) finishTitleEdit(save = false)
+    val transcriptPage = pagerAdapter.pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage
+    if (acceptedTab != MinutesDetailTab.TRANSCRIPT) transcriptPage.setSearchVisible(false)
     configureTitleBar()
     if (!editingTitle) title.text = renderedState.title.ifBlank { "未命名会议" }
     title.isClickable = renderedState.available
     title.isFocusable = renderedState.available
     title.contentDescription = if (renderedState.available) "编辑会议标题" else null
     dateTime.text = renderedState.dateTimeLabel
-    subtitleRow.visibility = if (renderedState.dateTimeLabel.isBlank()) View.GONE else View.VISIBLE
     pagerAdapter.render(renderedState)
     renderProcessingState(renderedState)
     renderAudioState(renderedState)
@@ -408,6 +429,9 @@ internal class MinutesDetailSurface(
     renderedState = renderedState.selectTab(tab, generation)
     localTabGeneration = maxOf(localTabGeneration, generation)
     tabBar.select(tab)
+    val transcriptPage = pagerAdapter.pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage
+    if (tab != MinutesDetailTab.TRANSCRIPT) transcriptPage.setSearchVisible(false)
+    configureTitleBar()
     // Summary generation/error belongs to the summary page. Update the fixed
     // notice slot in the same frame as the native pager selection instead of
     // waiting for the React snapshot round-trip.
@@ -460,7 +484,7 @@ internal class MinutesDetailSurface(
       .distinctBy { it.sourceId }
     recordingSelectorItems.removeAllViews()
     if (sources.size <= 1) {
-      recordingSelector.visibility = View.INVISIBLE
+      recordingSelector.visibility = View.GONE
       return
     }
     val selectedId = state.playerSource?.sourceId
@@ -536,14 +560,14 @@ internal class MinutesDetailSurface(
 
   private fun renderProcessingState(state: MinutesDetailState) {
     val activePageState = state.pageState(state.activeTab)
-    val cachedPageLabel = if (activePageState.cached) {
-      when (activePageState.phase) {
-        MinutesContentPhase.LOADING -> activePageState.message.ifBlank { "正在同步，当前显示本机缓存" }
-        MinutesContentPhase.ERROR -> activePageState.message.ifBlank { "同步失败，正在显示本机缓存" }
-        else -> ""
+    val pageStatusLabel = when (activePageState.phase) {
+      MinutesContentPhase.LOADING -> activePageState.message.ifBlank {
+        if (activePageState.cached) "正在同步，当前显示本机内容" else "正在读取${state.activeTab.label}"
       }
-    } else {
-      ""
+      MinutesContentPhase.ERROR -> activePageState.message.ifBlank {
+        if (activePageState.cached) "同步失败，当前显示本机内容" else "${state.activeTab.label}暂时不可用"
+      }
+      else -> ""
     }
     val mergeLabel = state.recordingMergeStatusLabel.trim()
     val audioLabel = state.audioErrorMessage.trim().ifBlank {
@@ -551,64 +575,82 @@ internal class MinutesDetailSurface(
         "暂无可播放的录音".takeIf { playableSource(state) == null }.orEmpty()
       }
     }
+    val noteLabel = if (state.activeTab == MinutesDetailTab.NOTES) {
+      when {
+        state.manualNoteConflict -> "笔记同步冲突"
+        state.manualNoteError.isNotBlank() -> state.manualNoteError
+        state.manualNoteLoading -> "正在读取我的笔记"
+        state.manualNoteSaving -> "正在保存笔记"
+        else -> ""
+      }
+    } else {
+      ""
+    }
     val rawProcessingLabel = state.processingStatusLabel.trim()
     val summaryScopedProcessing = state.processingRetryStage == MinutesProcessingStage.SUMMARY ||
-      rawProcessingLabel.contains("整理")
-    val showScopedProcessing = !summaryScopedProcessing || state.activeTab == MinutesDetailTab.SUMMARY
+      rawProcessingLabel.contains("整理") || rawProcessingLabel.contains("总结")
+    val speakerScopedProcessing = state.processingRetryStage == MinutesProcessingStage.SPEAKER ||
+      rawProcessingLabel.contains("讲话人")
+    val showScopedProcessing = when {
+      summaryScopedProcessing -> state.activeTab == MinutesDetailTab.SUMMARY
+      speakerScopedProcessing -> state.activeTab == MinutesDetailTab.SPEAKERS
+      else -> true
+    }
     val processingLabel = rawProcessingLabel.takeIf { showScopedProcessing }.orEmpty()
     val retryStage = state.processingRetryStage.takeIf { showScopedProcessing }
+    val summaryConflictVisible = state.summarySyncConflict && state.activeTab == MinutesDetailTab.SUMMARY
     val label = when {
       state.rootSyncConflict -> "会议同步冲突"
-      state.summarySyncConflict -> "整理结果同步冲突"
+      summaryConflictVisible -> "整理结果同步冲突"
+      noteLabel.isNotBlank() -> noteLabel
       mergeLabel.isNotBlank() -> mergeLabel
       state.audioErrorMessage.isNotBlank() -> audioLabel
       state.audioStatusMessage.isNotBlank() -> audioLabel
       processingLabel.isNotBlank() -> processingLabel
-      else -> cachedPageLabel
+      else -> pageStatusLabel
     }
-    val showsCachedPageStatus = label.isNotBlank()
+    val showsPageStatus = label.isNotBlank()
       && !state.rootSyncConflict
-      && !state.summarySyncConflict
+      && !summaryConflictVisible
+      && noteLabel.isBlank()
       && mergeLabel.isBlank()
       && state.audioErrorMessage.isBlank()
       && state.audioStatusMessage.isBlank()
       && processingLabel.isBlank()
     val tone = when {
       state.rootSyncConflict -> "danger"
-      state.summarySyncConflict -> "danger"
+      summaryConflictVisible -> "danger"
+      noteLabel.isNotBlank() && (state.manualNoteConflict || state.manualNoteError.isNotBlank()) -> "danger"
       mergeLabel.isNotBlank() -> "warning"
       state.audioErrorMessage.isNotBlank() -> "danger"
-      showsCachedPageStatus && activePageState.phase == MinutesContentPhase.ERROR -> "danger"
-      showsCachedPageStatus -> "primary"
+      showsPageStatus && activePageState.phase == MinutesContentPhase.ERROR -> "danger"
+      showsPageStatus -> "primary"
       else -> state.processingStatusTone
     }
     val actionColor = if (tone == "danger") MinutesPalette.danger else MinutesPalette.primary
-    processingNoticeText.text = label
-    processingNoticeText.setTextColor(statusToneColor(tone))
-    processingNotice.backgroundShape(
-      when (tone) {
-        "danger" -> MinutesPalette.dangerSoft
-        "primary" -> MinutesPalette.primarySoft
-        else -> MinutesPalette.page
-      },
-      radiusDp = 6,
-    )
     val hasMergeAction = mergeLabel.isNotBlank() && state.recordingMergeActionLabel.isNotBlank()
+    val hasNoteAction = noteLabel.isNotBlank() && (
+      state.manualNoteConflict || (state.manualNoteError.isNotBlank() && state.manualNoteRetryable)
+    )
     val hasPageRetry = processingLabel.isBlank()
-      && cachedPageLabel.isNotBlank()
+      && pageStatusLabel.isNotBlank()
       && activePageState.phase == MinutesContentPhase.ERROR
-    val hasAction = state.rootSyncConflict || state.summarySyncConflict || hasMergeAction || retryStage != null || hasPageRetry
-    processingRetry.visibility = if (hasAction) View.VISIBLE else View.INVISIBLE
+    val hasAction = state.rootSyncConflict || summaryConflictVisible || hasNoteAction ||
+      hasMergeAction || retryStage != null || hasPageRetry
+    processingNotice.render(label, "", tone, hasAction)
+    processingRetry.visibility = if (hasAction) View.VISIBLE else View.GONE
     processingRetry.isEnabled = when {
+      hasNoteAction -> true
       state.rootSyncConflict -> true
-      state.summarySyncConflict -> true
+      summaryConflictVisible -> true
       hasMergeAction -> state.recordingMergeActionEnabled
       hasPageRetry -> true
       else -> retryStage != null && !state.processingRetrying
     }
     processingRetry.text = when {
+      hasNoteAction && state.manualNoteConflict -> "处理"
       state.rootSyncConflict -> "处理"
-      state.summarySyncConflict -> "处理"
+      summaryConflictVisible -> "处理"
       hasMergeAction -> state.recordingMergeActionLabel
       state.processingRetrying -> "重试中"
       else -> "重试"
@@ -624,17 +666,19 @@ internal class MinutesDetailSurface(
       statefulIconTint(actionColor, actionColor, MinutesPalette.disabled),
     )
     processingRetry.contentDescription = if (!hasAction) null else {
-      if (state.rootSyncConflict || state.summarySyncConflict) "$label，处理"
+      if ((hasNoteAction && state.manualNoteConflict) || state.rootSyncConflict || summaryConflictVisible) "$label，处理"
       else if (hasMergeAction) "$label，${state.recordingMergeActionLabel}"
       else if (state.processingRetrying) "$label，正在重试" else "$label，重试"
     }
-    processingNotice.contentDescription = label.takeIf { it.isNotBlank() }
-    processingNotice.importantForAccessibility = if (label.isBlank()) {
-      View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-    } else {
-      View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-    }
-    processingNotice.visibility = if (label.isBlank()) View.INVISIBLE else View.VISIBLE
+    updateSubtitleRowVisibility()
+  }
+
+  private fun updateSubtitleRowVisibility() {
+    val hasDateTime = dateTime.text?.isNotBlank() == true
+    val hasProcessingNotice = processingNotice.visibility == View.VISIBLE
+    dateTimeIcon.visibility = if (hasDateTime) View.VISIBLE else View.GONE
+    dateTime.visibility = if (hasDateTime) View.VISIBLE else View.GONE
+    subtitleRow.visibility = if (hasDateTime || hasProcessingNotice) View.VISIBLE else View.GONE
   }
 
   private fun playableSource(state: MinutesDetailState): MinutesPlayerSource? =
@@ -712,6 +756,9 @@ internal class MinutesDetailSurface(
     titleBar.configure(
       title = if (editingTitle) renderedState.title else "",
       showBack = !editingTitle,
+      showSearch = !editingTitle
+        && renderedState.available
+        && renderedState.activeTab == MinutesDetailTab.TRANSCRIPT,
       showShare = !editingTitle && renderedState.available && renderedState.canShare,
       showMore = !editingTitle && renderedState.available,
       shareEnabled = renderedState.available && renderedState.canShare,

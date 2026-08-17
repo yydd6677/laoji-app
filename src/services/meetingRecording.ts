@@ -137,6 +137,28 @@ export interface PendingMeetingAudioRetryOptions {
 let pendingStorageMutation: Promise<void> = Promise.resolve();
 const pendingAudioUploadsInFlight = new Map<string, Promise<PendingMeetingAudioUpload | null>>();
 const deletedMeetingAudio = new Set<string>();
+type PendingMeetingAudioUploadListener = (meetingId: string) => void;
+const pendingMeetingAudioUploadListeners = new Set<PendingMeetingAudioUploadListener>();
+
+export function subscribePendingMeetingAudioUploadChanged(
+  listener: PendingMeetingAudioUploadListener,
+): () => void {
+  pendingMeetingAudioUploadListeners.add(listener);
+  return () => pendingMeetingAudioUploadListeners.delete(listener);
+}
+
+function notifyPendingMeetingAudioUploadsChanged(meetingIds: readonly string[]): void {
+  const uniqueMeetingIds = [...new Set(meetingIds.map(value => value.trim()).filter(Boolean))];
+  uniqueMeetingIds.forEach(meetingId => {
+    pendingMeetingAudioUploadListeners.forEach(listener => {
+      try {
+        listener(meetingId);
+      } catch {
+        // A detached status presenter cannot invalidate a durable upload write.
+      }
+    });
+  });
+}
 
 function meetingAudioOperationKey(storageScope: string, recordingAssetId: string): string {
   return `${storageScope}\u001f${recordingAssetId}`;
@@ -910,6 +932,10 @@ function mutatePendingUploads(storageScope: string, mutator: (records: PendingUp
     .catch(() => {})
     .then(async () => {
       const records = await readPendingUploads(storageScope);
+      const previousByAssetId = new Map(Object.entries(records).map(([assetId, record]) => [
+        assetId,
+        { meetingId: record.meetingId, serialized: JSON.stringify(record) },
+      ]));
       mutator(records);
       if (Object.keys(records).length === 0) {
         await removeAppStorageItem(storageKey);
@@ -918,6 +944,16 @@ function mutatePendingUploads(storageScope: string, mutator: (records: PendingUp
       }
       await removeAppStorageItem(previousPendingUploadsKey(storageScope)).catch(() => {});
       await removeAppStorageItem(LEGACY_PENDING_AUDIO_UPLOADS_KEY).catch(() => {});
+      const changedMeetingIds = new Set<string>();
+      const assetIds = new Set([...previousByAssetId.keys(), ...Object.keys(records)]);
+      assetIds.forEach(assetId => {
+        const previous = previousByAssetId.get(assetId);
+        const current = records[assetId];
+        if (previous?.serialized === JSON.stringify(current)) return;
+        if (previous?.meetingId) changedMeetingIds.add(previous.meetingId);
+        if (current?.meetingId) changedMeetingIds.add(current.meetingId);
+      });
+      notifyPendingMeetingAudioUploadsChanged([...changedMeetingIds]);
     });
   pendingStorageMutation = operation;
   return operation;

@@ -66,6 +66,7 @@ type ImportSource = {
   origin: MeetingMediaImportOrigin;
   mimeType?: string | null;
   maximumBytes?: number;
+  maximumBytesPromise?: Promise<number>;
   intentToken?: string;
   meetingId?: string;
   assetId?: string;
@@ -74,6 +75,11 @@ type ImportSource = {
 
 type ImportRequest = ImportSource & {
   draft: MeetingMediaImportDraft;
+};
+
+type PreparedImportRequest = Omit<ImportRequest, 'meetingId' | 'assetId'> & {
+  meetingId: string;
+  assetId: string;
 };
 
 type ImportConfirmation = {
@@ -96,7 +102,12 @@ function navigateToMeeting(meetingId: string): void {
 export function MeetingMediaImportProvider({ children }: { children: React.ReactNode }) {
   const { initializing, mode, session } = useAuth();
   const { searchableEvents } = useEvents();
-  const { importMeetingMedia, meetings } = useMeetings();
+  const {
+    createMeeting,
+    importMeetingMedia,
+    meetings,
+    updateMeetingStatus,
+  } = useMeetings();
   const { showDialog } = useAppDialog();
   const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<ImportConfirmation | null>(null);
@@ -164,7 +175,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     if (busyRef.current) {
       return;
     }
-    const request = {
+    const request: PreparedImportRequest = {
       ...source,
       meetingId: source.meetingId ?? secureClientIdFactory.create(),
       assetId: source.assetId ?? secureClientIdFactory.create(),
@@ -173,8 +184,62 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     setImportBusy(true);
     let copied = Boolean(source.readyMedia);
     let ingestedMedia = source.readyMedia ?? null;
+    let navigatedMeetingId: string | null = request.draft.targetMeetingId ?? null;
+    let placeholderCreated = false;
+    let activeDraft = request.draft;
     try {
-      await saveMeetingMediaImportDraft(request.meetingId, request.draft);
+      /*
+       * A file import is a local-first operation.  Create the lightweight
+       * meeting shell and enter its detail page before copying/extracting the
+       * media.  The old order made the user wait for the whole ingest + SQLite
+       * write + upload kick-off chain while the list upload button spun.
+       *
+       * The shell is deliberately only used when the canonical local meeting
+       * store can attach an imported asset.  Legacy fallback builds retain the
+       * previous all-or-nothing path rather than creating a shell that the
+       * compatibility importer cannot reconcile.
+       */
+      const canOpenImportShell = mode === 'guest'
+        && getFeatureFlags().meetingMediaImportExistingV1
+        && getFeatureFlags().localMeetingDbCanonicalWriteV1;
+      if (!navigatedMeetingId && canOpenImportShell) {
+        const placeholder = await createMeeting(activeDraft.title, {
+          id: request.meetingId,
+          mode: 'offline',
+          recordedAt: new Date(activeDraft.recordedAtMs).toISOString(),
+          ...(activeDraft.calendarContext ? { calendarContext: activeDraft.calendarContext } : {}),
+          clientRequestId: request.meetingId,
+          entryPoint: request.origin === 'share_intent' ? 'share_intent' : 'meeting_tab',
+          fastLocalResult: true,
+          initialProcessingStatuses: {
+            capture: 'preparing',
+            upload: 'not_required',
+            transcript: 'none',
+            summary: 'none',
+            speaker: 'none',
+          },
+        });
+        navigatedMeetingId = placeholder.id;
+        placeholderCreated = true;
+        activeDraft = { ...activeDraft, targetMeetingId: placeholder.id };
+        // The shell and native ingest journal intentionally share one stable
+        // identity. Recovery can therefore attach the prepared asset to the
+        // same record without another mapping lookup or a duplicate shell.
+      }
+
+      if (navigatedMeetingId) {
+        if (request.intentToken) {
+          // Keep the share intent pending until the media is durable; only the
+          // visual navigation happens early so a process death remains
+          // recoverable.
+        }
+        navigateToMeeting(navigatedMeetingId);
+      }
+
+      await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
+      const serviceMaximumBytes = source.maximumBytesPromise
+        ? await source.maximumBytesPromise
+        : source.maximumBytes;
       const media = source.readyMedia ?? await ingestMeetingMedia({
         sourceUri: request.uri,
         meetingId: request.meetingId,
@@ -182,15 +247,15 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         origin: request.origin,
         maximumBytes: Math.min(
           LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
-          request.maximumBytes ?? LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+          serviceMaximumBytes ?? LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
         ),
       });
       ingestedMedia = media;
       copied = true;
-      const meeting = await persistIngestedMedia(media, request.draft);
+      const meeting = await persistIngestedMedia(media, activeDraft);
       if (request.intentToken) await finishIntent(request.intentToken);
       else releasePrompt();
-      navigateToMeeting(meeting.id);
+      if (!navigatedMeetingId) navigateToMeeting(meeting.id);
     } catch (reason) {
       promptActiveRef.current = true;
       const code = reason && typeof reason === 'object'
@@ -203,6 +268,22 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
           else releasePrompt();
         })();
       };
+      if (placeholderCreated && navigatedMeetingId) {
+        // Do not leave a shell permanently looking idle after an ingest error.
+        // The durable local asset (when one exists) is retained for the retry
+        // or alternate-target flow below.
+        void updateMeetingStatus(
+          navigatedMeetingId,
+          'failed',
+          ingestedMedia
+            ? {
+              audioAvailable: true,
+              audioLocalUri: ingestedMedia.localUri,
+              audioDurationSec: ingestedMedia.durationMs / 1000,
+            }
+            : {},
+        ).catch(() => false);
+      }
       const chooseAnotherTarget = () => {
         if (!ingestedMedia) {
           closeFailure();
@@ -219,6 +300,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
             origin: request.origin,
             mimeType: ingestedMedia.mimeType,
             maximumBytes: request.maximumBytes,
+            maximumBytesPromise: request.maximumBytesPromise,
             intentToken: request.intentToken,
             meetingId: ingestedMedia.meetingId,
             assetId: ingestedMedia.assetId,
@@ -255,7 +337,17 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       setImportBusy(false);
       drainIntentInboxRef.current();
     }
-  }, [finishIntent, persistIngestedMedia, releasePrompt, setImportBusy, showDialog]);
+  }, [
+    createMeeting,
+    finishIntent,
+    meetings,
+    mode,
+    persistIngestedMedia,
+    releasePrompt,
+    setImportBusy,
+    showDialog,
+    updateMeetingStatus,
+  ]);
   runImportRef.current = runImport;
 
   const presentImportConfirmation = useCallback((source: ImportSource) => {
@@ -343,6 +435,11 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     const message = meetingMediaIntentErrorMessage(intent);
     if (message || !intent.uri) {
       promptActiveRef.current = true;
+      // An invalid share cannot be recovered by a later launch. Acknowledge it
+      // before presenting the warning so a process death or upgrade cannot
+      // replay the same stale dialog. finishIntent below remains as a retry
+      // path if the native acknowledgement is temporarily unavailable.
+      void acknowledgeMeetingMediaImportIntent(intent.token).catch(() => false);
       const closeInvalidIntent = () => { void finishIntent(intent.token); };
       showDialog({
         title: '无法导入',
@@ -544,13 +641,25 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     }
     promptActiveRef.current = true;
     try {
-      const capability = await loadDeviceServiceCapabilities().catch(() => null);
-      const mediaImport = capability?.mediaImport ?? null;
-      const includeVideo = mediaImport?.mimeTypes.some(
-        mimeType => mimeType.toLowerCase().startsWith('video/'),
-      ) === true;
-      const selectedUri = await pickMeetingMedia(includeVideo);
+      /*
+       * Do not put device registration/capability discovery in front of the
+       * system picker.  It is a remote operation and was the source of the
+       * first-open ~3s pause.  The native picker already owns the complete,
+       * bounded audio/video MIME list; capability discovery remains an
+       * optional background concern for the ingest/upload stages.
+       */
+      // Resolve failures here so cancelling the picker cannot leave an
+      // unhandled capability request behind. A failed probe only affects the
+      // later size fence; the local safety ceiling remains in force.
+      const capabilityPromise = loadDeviceServiceCapabilities().catch(() => null);
+      const selectedUri = await pickMeetingMedia(true);
       const sourceInfo = await inspectMeetingMediaSource(selectedUri);
+      const maximumBytesPromise = capabilityPromise.then(
+        capability => Math.min(
+          LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+          capability?.mediaImport?.maxBytes ?? LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        ),
+      );
       presentImportConfirmation({
         uri: selectedUri,
         fileName: sourceInfo.fileName,
@@ -559,9 +668,8 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         receivedAtMs: Date.now(),
         origin: 'file_import',
         mimeType: sourceInfo.mimeType,
-        maximumBytes: mediaImport
-          ? Math.min(LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES, mediaImport.maxBytes)
-          : LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        maximumBytes: LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        maximumBytesPromise,
       });
     } catch (reason) {
       if (isMeetingMediaPickerCancellation(reason)) {

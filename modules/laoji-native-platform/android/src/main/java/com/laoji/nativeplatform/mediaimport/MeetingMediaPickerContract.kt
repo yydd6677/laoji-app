@@ -17,6 +17,27 @@ internal sealed class MeetingMediaPickerResult {
   data object Cancelled : MeetingMediaPickerResult()
 }
 
+// Keep the chooser filter in sync with MediaImportSupport and the server
+// capability contract.  A broad `audio/*`/`*/*` filter can make DocumentsUI
+// show providers and files that the ingest/ffmpeg path will reject later.
+private val supportedAudioPickerMimeTypes = arrayOf(
+  "audio/wav",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg",
+  "audio/webm",
+  "audio/flac",
+)
+
+private val supportedMeetingPickerMimeTypes = arrayOf(
+  *supportedAudioPickerMimeTypes,
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
+)
+
 internal class MeetingMediaPickerContract(
   private val appContextProvider: AppContextProvider,
 ) : AppContextActivityResultContract<MeetingMediaPickerOptions, MeetingMediaPickerResult> {
@@ -24,18 +45,10 @@ internal class MeetingMediaPickerContract(
     Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
       addCategory(Intent.CATEGORY_OPENABLE)
       type = if (input.includeVideo) "*/*" else "audio/*"
-      if (input.includeVideo) {
-        putExtra(
-          Intent.EXTRA_MIME_TYPES,
-          arrayOf(
-            "audio/*",
-            "video/mp4",
-            "video/webm",
-            "video/quicktime",
-            "video/x-matroska",
-          ),
-        )
-      }
+      putExtra(
+        Intent.EXTRA_MIME_TYPES,
+        if (input.includeVideo) supportedMeetingPickerMimeTypes else supportedAudioPickerMimeTypes,
+      )
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
     }
 

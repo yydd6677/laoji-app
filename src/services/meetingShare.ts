@@ -7,6 +7,8 @@ import type {
   MeetingContentShareSnapshot,
   MeetingSummaryActionCandidate,
   MeetingSummaryDocument,
+  MeetingFactsResultV3,
+  MeetingTemplate,
 } from '../domain/meeting';
 import type { MarkerRecord, MeetingAttachmentRecord } from '../data/repositories';
 import { Meeting, TranscriptLine } from '../types';
@@ -23,6 +25,7 @@ import { meetingRemoteIdentity } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { isStoredMeetingAttachmentUri } from './meetingAttachmentStorage';
 import { toSimplifiedChinese } from '../utils/simplifiedChinese';
+import { meetingFactsV3Markdown, meetingSummaryV3DocumentMarkdown } from './meetingSummaryV3';
 
 export type MeetingShareContentKey =
   | 'info'
@@ -60,6 +63,8 @@ export interface MeetingShareInput {
   transcriptLines: TranscriptLine[];
   summaryText?: string | null;
   summaryDocument?: MeetingSummaryDocument | null;
+  summaryFactsV3?: MeetingFactsResultV3 | null;
+  summaryTemplate?: MeetingTemplate | null;
   actionItems?: readonly MeetingSummaryActionCandidate[];
   manualNoteText?: string | null;
   markers?: readonly MarkerRecord[];
@@ -210,6 +215,16 @@ function withoutMarkdownActionSections(value: string): string {
 }
 
 function selectedSummaryText(input: MeetingShareInput): string {
+  if (input.summaryFactsV3 && input.summaryTemplate) {
+    return input.summaryDocument?.templateRevision === 3
+      && input.summaryDocument.templateId === input.summaryTemplate.id
+      ? meetingSummaryV3DocumentMarkdown(input.summaryDocument)
+      : meetingFactsV3Markdown(
+        input.summaryFactsV3,
+        input.summaryTemplate,
+        input.summaryDocument?.manualNoteRevision ?? 0,
+      );
+  }
   const structured = structuredSummaryText(input.summaryDocument);
   if (structured) return meetingSummaryTextToPlainText(structured);
   return meetingSummaryTextToPlainText(withoutMarkdownActionSections(input.summaryText?.trim() ?? ''));
@@ -234,7 +249,7 @@ export function buildMeetingActionsText(
       const due = formatActionDate(action.dueAtMs);
       const details = [
         action.assignee?.trim() ? `负责人：${action.assignee.trim()}` : '',
-        due ? `截止：${due}` : '',
+        due ? `截止：${due}` : action.dueText?.trim() ? `截止：${action.dueText.trim()}` : '',
       ].filter(Boolean);
       return `- [${status}] ${toSimplifiedChinese(action.content.trim())}${details.length ? `（${toSimplifiedChinese(details.join('，'))}）` : ''}`;
     })

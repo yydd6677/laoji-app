@@ -45,28 +45,15 @@ internal class MinutesNotesPage(
   onAction: (Map<String, Any?>) -> Unit,
 ) : MinutesDetailPage(context, MinutesDetailTab.NOTES, onAction) {
   private val root = LinearLayout(context)
-  private val status = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
   private val scroll = NestedScrollView(context)
   private val editor = EditText(context)
   private var applyingSnapshot = false
-  private var manualNoteConflict = false
 
   override val scrollingChild: View
     get() = scroll
 
   init {
     root.orientation = LinearLayout.VERTICAL
-    status.gravity = Gravity.CENTER_VERTICAL
-    status.setPadding(context.dp(20), 0, context.dp(20), 0)
-    status.visibility = View.INVISIBLE
-    status.isClickable = true
-    status.isFocusable = true
-    status.setOnClickListener {
-      if (status.isEnabled) {
-        onAction(mapOf("type" to if (manualNoteConflict) "openManualNoteConflict" else "retryManualNote"))
-      }
-    }
-    root.addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(32)))
     editor.apply {
       setTextSize(16f)
       setTextColor(MinutesPalette.text)
@@ -114,7 +101,6 @@ internal class MinutesNotesPage(
   }
 
   fun render(state: MinutesDetailState) {
-    manualNoteConflict = state.manualNoteConflict
     if (editor.text.toString() != state.manualNote) {
       val selection = editor.selectionStart.coerceAtLeast(0)
       applyingSnapshot = true
@@ -126,23 +112,6 @@ internal class MinutesNotesPage(
     editor.isEnabled = enabled
     editor.isFocusableInTouchMode = enabled
     editor.alpha = if (enabled) 1f else 0.72f
-    val statusText = when {
-      state.manualNoteConflict -> "笔记同步冲突，点击处理"
-      state.manualNoteError.isNotBlank() -> state.manualNoteError +
-        if (state.manualNoteRetryable) " 点击重试" else ""
-      state.manualNoteLoading -> "正在读取我的笔记"
-      state.manualNoteSaving -> "正在保存"
-      else -> ""
-    }
-    status.text = statusText
-    status.visibility = if (statusText.isBlank()) View.INVISIBLE else View.VISIBLE
-    status.isEnabled = state.manualNoteConflict ||
-      (state.manualNoteError.isNotBlank() && state.manualNoteRetryable)
-    status.setTextColor(
-      if (state.manualNoteConflict || state.manualNoteError.isNotBlank()) MinutesPalette.danger
-      else MinutesPalette.secondary,
-    )
-    status.contentDescription = statusText.takeIf(String::isNotBlank)
     renderPageChrome(
       pageState = MinutesDetailPageState(
         phase = MinutesContentPhase.READY,
@@ -236,12 +205,15 @@ internal abstract class MinutesDetailPage(
     contentHost.addView(view, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     contentHost.addView(
       stateOverlay,
-      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-        // Summary owns a fixed 44dp operation row even before content exists.
-        // Keep the empty/loading surface below that row so its action remains
-        // discoverable and the page does not reflow when generation starts.
-        if (tab == MinutesDetailTab.SUMMARY) topMargin = context.dp(44)
-      },
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+    )
+  }
+
+  protected fun installCollapsibleHeader(view: View, heightPx: Int) {
+    check(!::content.isInitialized) { "Detail page header must be installed before its content" }
+    body.addView(
+      view,
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPx),
     )
   }
 
@@ -255,20 +227,21 @@ internal abstract class MinutesDetailPage(
   ) {
     renderedPageState = pageState.normalized()
     val phase = renderedPageState.phase
-    val showBlockingState = !hasContent
+    // Loading and errors belong to the single detail-title presenter. The
+    // content pages own only usable content and true empty states, preventing
+    // duplicate spinners, warnings, and retry actions.
+    val operationOwnsState = phase == MinutesContentPhase.LOADING || phase == MinutesContentPhase.ERROR
+    val showBlockingState = !hasContent && !operationOwnsState
     stateOverlay.visibility = if (showBlockingState) View.VISIBLE else View.GONE
     content.visibility = if (
       !hasContent && showBlockingState && tab != MinutesDetailTab.SUMMARY
     ) View.INVISIBLE else View.VISIBLE
-    progress.visibility = if (phase == MinutesContentPhase.LOADING) View.VISIBLE else View.GONE
+    progress.visibility = View.GONE
     emptyImage.visibility = if (
       phase == MinutesContentPhase.READY || phase == MinutesContentPhase.EMPTY
     ) View.VISIBLE else View.GONE
-    retry.visibility = if (phase == MinutesContentPhase.ERROR) View.VISIBLE else View.GONE
-    // SummaryPage owns one fixed action slot; do not alternate with a
-    // centered overlay button as content changes phase.
-    val showSummaryAction = tab != MinutesDetailTab.SUMMARY
-      && canGenerateSummary
+    retry.visibility = View.GONE
+    val showSummaryAction = canGenerateSummary
       && !summaryGenerating
       && phase != MinutesContentPhase.LOADING
     summaryAction.visibility = if (showSummaryAction) View.VISIBLE else View.GONE
@@ -277,7 +250,7 @@ internal abstract class MinutesDetailPage(
     summaryAction.text = summaryActionLabel.ifBlank { "生成整理结果" }
     stateMessage.text = renderedPageState.message.ifBlank {
       when (phase) {
-        MinutesContentPhase.LOADING -> "正在同步${tab.label}"
+        MinutesContentPhase.LOADING -> ""
         MinutesContentPhase.ERROR -> "${tab.label}暂时不可用"
         else -> emptyMessage
       }
@@ -307,6 +280,10 @@ internal class MinutesTranscriptPage(
     com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_down_outline,
     "下一处匹配",
   )
+  private val closeSearch = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_close,
+    "关闭文字搜索",
+  )
   private val markerStrip = HorizontalScrollView(context)
   private val markerItems = LinearLayout(context)
   internal val list = RecyclerView(context)
@@ -324,6 +301,7 @@ internal class MinutesTranscriptPage(
   private var playbackSourceId: String? = null
   private var playbackPositionMs = 0L
   private var applyingQuery = false
+  private var searchVisible = false
   private val defaultListBottomPadding = context.dp(32)
 
   init {
@@ -337,6 +315,7 @@ internal class MinutesTranscriptPage(
     searchBar.gravity = Gravity.CENTER_VERTICAL
     searchBar.setPadding(context.dp(20), context.dp(6), context.dp(8), context.dp(6))
     searchBar.setBackgroundColor(MinutesPalette.surface)
+    searchBar.visibility = View.GONE
 
     searchField.orientation = LinearLayout.HORIZONTAL
     searchField.gravity = Gravity.CENTER_VERTICAL
@@ -399,7 +378,9 @@ internal class MinutesTranscriptPage(
     }
     searchBar.addView(previousMatch, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
     searchBar.addView(nextMatch, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
-    root.addView(searchBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(48)))
+    closeSearch.setOnClickListener { setSearchVisible(false) }
+    searchBar.addView(closeSearch, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
+    installCollapsibleHeader(searchBar, context.dp(48))
 
     markerStrip.isHorizontalScrollBarEnabled = false
     markerStrip.overScrollMode = View.OVER_SCROLL_NEVER
@@ -453,6 +434,7 @@ internal class MinutesTranscriptPage(
   fun render(state: MinutesDetailState) {
     if (renderedMeetingId.isNotBlank() && renderedMeetingId != state.meetingId) {
       clearQuery()
+      setSearchVisible(false)
       resetRevealTailSpace()
     }
     renderedMeetingId = state.meetingId
@@ -470,6 +452,27 @@ internal class MinutesTranscriptPage(
       hasContent = state.transcript.isNotEmpty() || state.markers.isNotEmpty(),
       emptyMessage = "暂无文字记录",
     )
+  }
+
+  fun setSearchVisible(visible: Boolean) {
+    if (searchVisible == visible && searchBar.visibility == if (visible) View.VISIBLE else View.GONE) return
+    searchVisible = visible
+    searchBar.visibility = if (visible) View.VISIBLE else View.GONE
+    if (visible) {
+      searchInput.post {
+        if (!searchVisible || !isAttachedToWindow) return@post
+        searchInput.requestFocus()
+        searchInput.setSelection(searchInput.text.length)
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+          ?.showSoftInput(searchInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+      }
+    } else {
+      clearQuery()
+      searchInput.clearFocus()
+      (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+        ?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+    }
+    renderSearch(scrollToSelected = false)
   }
 
   fun onPlaybackState(state: MinutesPlaybackState) {
@@ -681,7 +684,8 @@ internal class MinutesSummaryPage(
 ) : MinutesDetailPage(context, MinutesDetailTab.SUMMARY, emitAction) {
   private val root = LinearLayout(context)
   private val summaryActionBar = LinearLayout(context)
-  private val regenerateAction = context.textView("重新生成", 16, MinutesPalette.primary)
+  private val templateAction = context.textView("切换模板", 15, MinutesPalette.secondary)
+  private val regenerateAction = context.textView("重新整理", 15, MinutesPalette.primary)
   internal val scroll = NestedScrollView(context)
   private val rows = LinearLayout(context)
   private var renderedSections: List<MinutesSummarySection> = emptyList()
@@ -702,11 +706,25 @@ internal class MinutesSummaryPage(
     summaryActionBar.orientation = LinearLayout.HORIZONTAL
     summaryActionBar.gravity = Gravity.CENTER_VERTICAL or Gravity.END
     summaryActionBar.setPadding(context.dp(12), 0, context.dp(8), 0)
+    templateAction.apply {
+      gravity = Gravity.CENTER
+      isClickable = true
+      isFocusable = true
+      contentDescription = "切换整理模板"
+      setTextColor(statefulIconTint(MinutesPalette.secondary, MinutesPalette.primary, MinutesPalette.disabled))
+      background = context.roundedStateBackground(
+        defaultColor = MinutesPalette.surface,
+        pressedColor = MinutesPalette.primarySoft,
+        disabledColor = MinutesPalette.surface,
+        radiusDp = 6,
+      )
+      setOnClickListener { emitAction(mapOf("type" to "selectSummaryTemplate")) }
+    }
     regenerateAction.apply {
       gravity = Gravity.CENTER
       isClickable = true
       isFocusable = true
-      contentDescription = "重新生成整理结果"
+      contentDescription = "重新整理会议记录"
       setTextColor(
         statefulIconTint(
           MinutesPalette.primary,
@@ -722,6 +740,12 @@ internal class MinutesSummaryPage(
       )
       setOnClickListener { emitAction(mapOf("type" to "generateSummary")) }
     }
+    summaryActionBar.addView(
+      templateAction,
+      LinearLayout.LayoutParams(context.dp(104), context.dp(44)).apply {
+        rightMargin = context.dp(4)
+      },
+    )
     summaryActionBar.addView(
       regenerateAction,
       LinearLayout.LayoutParams(context.dp(104), context.dp(44)),
@@ -755,24 +779,26 @@ internal class MinutesSummaryPage(
   }
 
   fun render(state: MinutesDetailState) {
-    // Reserve the same slot before and after generation. Only the label and
-    // enabled state change, so the body does not jump when content arrives.
-    // Keep the operation row mounted. The text action itself becomes
-    // INVISIBLE when there is no transcript, preserving the measured height
-    // while cached/remote page snapshots settle.
-    summaryActionBar.visibility = View.VISIBLE
-    regenerateAction.visibility = if (state.canGenerateSummary) View.VISIBLE else View.INVISIBLE
+    val hasContent = state.summary.isNotEmpty() || state.actions.isNotEmpty()
+    // Existing content keeps one stable regenerate lane. Before the first
+    // result exists, the action belongs to the centered empty state instead of
+    // reserving a blank row above the page.
+    summaryActionBar.visibility = if (
+      hasContent && (state.canGenerateSummary || state.canSelectSummaryTemplate)
+    ) View.VISIBLE else View.GONE
+    templateAction.visibility = if (hasContent && state.canSelectSummaryTemplate) View.VISIBLE else View.GONE
+    templateAction.isEnabled = !state.summaryGenerating
+    templateAction.text = state.summaryTemplateLabel.ifBlank { "切换模板" }
+    templateAction.contentDescription = "切换整理模板，当前${templateAction.text}"
+    regenerateAction.visibility = if (hasContent && state.canGenerateSummary) View.VISIBLE else View.GONE
     regenerateAction.isEnabled = !state.summaryGenerating
-    val idleActionLabel = state.summaryActionLabel.ifBlank { "重新生成" }
-    regenerateAction.text = if (state.summaryGenerating) {
-      "正在生成"
-    } else {
-      idleActionLabel
-    }
-    regenerateAction.contentDescription = if (state.summaryGenerating) {
-      "正在生成整理结果"
-    } else if (idleActionLabel.startsWith("重新")) {
-      "重新生成整理结果"
+    val idleActionLabel = state.summaryActionLabel.ifBlank { "重新整理" }
+    // Keep the action lane stable while the fixed status presenter explains
+    // the running operation. Alternating to a second "正在生成" label here
+    // caused the page to flash and duplicated the same state.
+    regenerateAction.text = idleActionLabel
+    regenerateAction.contentDescription = if (idleActionLabel.startsWith("重新")) {
+      "重新整理会议记录"
     } else {
       "生成整理结果"
     }
@@ -786,7 +812,7 @@ internal class MinutesSummaryPage(
     focusAction(state.focusActionId, state.focusActionRequestId)
     renderPageChrome(
       pageState = state.pageState(tab),
-      hasContent = state.summary.isNotEmpty() || state.actions.isNotEmpty(),
+      hasContent = hasContent,
       emptyMessage = "该会议暂未生成整理结果",
       canGenerateSummary = state.canGenerateSummary,
       summaryGenerating = state.summaryGenerating,
@@ -1121,6 +1147,249 @@ internal class MinutesSummaryPage(
     return row
   }
 
+  private fun summaryIconResource(iconKey: String): Int = when (iconKey) {
+    "quote" -> com.laoji.nativeplatform.R.drawable.laoji_ic_quote_filled
+    "time" -> com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline
+    "risk" -> com.laoji.nativeplatform.R.drawable.laoji_ud_icon_flag_outlined
+    "topic", "compare", "stat" -> com.laoji.nativeplatform.R.drawable.laoji_ic_list_outline
+    else -> com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book
+  }
+
+  private fun richItemBody(
+    item: MinutesSummaryRichItem,
+    textColor: Int = MinutesPalette.text,
+    horizontalPaddingDp: Int = 0,
+  ): LinearLayout = LinearLayout(context).apply {
+    orientation = LinearLayout.VERTICAL
+    setPadding(context.dp(horizontalPaddingDp), context.dp(7), context.dp(horizontalPaddingDp), context.dp(7))
+    if (item.title.isNotBlank()) {
+      addView(
+        context.textView(item.title, 13, MinutesPalette.secondary, Typeface.BOLD),
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+          bottomMargin = context.dp(2)
+        },
+      )
+    }
+    addView(
+      context.textView(item.text, 16, textColor).apply {
+        setLineSpacing(0f, 1.24f)
+        setTextIsSelectable(true)
+      },
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+    )
+    val metadata = buildList {
+      if (item.meta.isNotBlank()) add(item.meta)
+      item.startMs?.let { add(formatClock(it)) }
+    }.distinct().joinToString(" · ")
+    if (metadata.isNotBlank()) {
+      addView(
+        context.textView(metadata, 12, MinutesPalette.faint).apply { setPadding(0, context.dp(3), 0, 0) },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+      )
+    }
+  }
+
+  private fun richSourceTarget(item: MinutesSummaryRichItem, content: View): View {
+    val startMs = item.startMs
+    val segmentId = item.sourceId.removePrefix("transcript:")
+    if (startMs == null || !item.sourceId.startsWith("transcript:") || segmentId.isBlank()) return content
+    return FrameLayout(context).apply {
+      isClickable = true
+      isFocusable = true
+      contentDescription = "跳转到文字记录 ${formatClock(startMs)}"
+      background = context.roundedStateBackground(
+        defaultColor = Color.TRANSPARENT,
+        pressedColor = MinutesPalette.primarySoft,
+        disabledColor = Color.TRANSPARENT,
+        radiusDp = 6,
+      )
+      setOnClickListener {
+        emitAction(
+          mapOf(
+            "type" to "seekSummaryCitation",
+            "segmentId" to segmentId,
+            "positionMs" to startMs,
+          ),
+        )
+      }
+      addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+  }
+
+  private fun addRichBullet(container: LinearLayout, item: MinutesSummaryRichItem, marker: String = "•") {
+    val row = LinearLayout(context).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.TOP
+    }
+    row.addView(
+      context.textView(marker, 15, MinutesPalette.primary).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL },
+      LinearLayout.LayoutParams(context.dp(24), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(7) },
+    )
+    row.addView(
+      richSourceTarget(item, richItemBody(item)),
+      LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+    )
+    container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+  }
+
+  private fun orderedLinearFlow(block: MinutesSummaryRichBlock): List<MinutesSummaryRichItem>? {
+    if (block.items.size < 2 || block.edges.size != block.items.size - 1) return null
+    val byId = block.items.associateBy { it.id }
+    val outgoing = block.edges.groupBy { it.from }
+    val incoming = block.edges.groupBy { it.to }
+    if (outgoing.values.any { it.size > 1 } || incoming.values.any { it.size > 1 }) return null
+    val start = block.items.singleOrNull { incoming[it.id].isNullOrEmpty() } ?: return null
+    val ordered = mutableListOf<MinutesSummaryRichItem>()
+    val seen = mutableSetOf<String>()
+    var current: MinutesSummaryRichItem? = start
+    while (current != null && seen.add(current.id)) {
+      ordered += current
+      current = outgoing[current.id]?.singleOrNull()?.to?.let(byId::get)
+    }
+    return ordered.takeIf { it.size == block.items.size }
+  }
+
+  private fun renderSummaryRichBlock(container: LinearLayout, block: MinutesSummaryRichBlock) {
+    when (block.kind) {
+      "paragraph" -> {
+        val text = block.items.joinToString("\n") { it.text }
+        container.addView(
+          context.textView(text, 16, MinutesPalette.text).apply {
+            setLineSpacing(0f, 1.25f)
+            setTextIsSelectable(true)
+          },
+          LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+      }
+      "bullet_group" -> block.items.forEach { addRichBullet(container, it) }
+      "quote" -> block.items.forEach { item ->
+        val row = LinearLayout(context).apply {
+          orientation = LinearLayout.HORIZONTAL
+          setPadding(0, context.dp(4), 0, context.dp(4))
+        }
+        row.addView(
+          View(context).apply { setBackgroundColor(MinutesPalette.primary) },
+          LinearLayout.LayoutParams(context.dp(3), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            rightMargin = context.dp(12)
+          },
+        )
+        row.addView(
+          richSourceTarget(item, richItemBody(item, MinutesPalette.secondary)),
+          LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      }
+      "timeline" -> block.items.forEach { item ->
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        val rail = LinearLayout(context).apply {
+          orientation = LinearLayout.VERTICAL
+          gravity = Gravity.CENTER_HORIZONTAL
+          addView(
+            context.textView("•", 20, MinutesPalette.primary).apply { gravity = Gravity.CENTER },
+            LinearLayout.LayoutParams(context.dp(24), context.dp(28)),
+          )
+          addView(
+            View(context).apply { setBackgroundColor(MinutesPalette.divider) },
+            LinearLayout.LayoutParams(1, 0, 1f),
+          )
+        }
+        row.addView(rail, LinearLayout.LayoutParams(context.dp(28), ViewGroup.LayoutParams.MATCH_PARENT))
+        row.addView(
+          richSourceTarget(item, richItemBody(item)),
+          LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      }
+      "flow" -> {
+        val widthDp = context.resources.displayMetrics.widthPixels / context.resources.displayMetrics.density
+        val ordered = if (widthDp >= 420f) orderedLinearFlow(block) else null
+        if (ordered == null) {
+          block.items.forEachIndexed { index, item -> addRichBullet(container, item, "${index + 1}.") }
+        } else {
+          val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, context.dp(4), 0, context.dp(4))
+          }
+          ordered.forEachIndexed { index, item ->
+            val node = richItemBody(item, horizontalPaddingDp = 10).apply {
+              minimumWidth = context.dp(132)
+              backgroundShape(MinutesPalette.primarySoft, radiusDp = 6, strokeColor = MinutesPalette.divider, strokeWidthDp = 1)
+            }
+            row.addView(
+              richSourceTarget(item, node),
+              LinearLayout.LayoutParams(context.dp(152), ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+            if (index < ordered.lastIndex) {
+              row.addView(
+                context.textView("→", 18, MinutesPalette.secondary).apply { gravity = Gravity.CENTER },
+                LinearLayout.LayoutParams(context.dp(32), context.dp(44)),
+              )
+            }
+          }
+          container.addView(
+            HorizontalScrollView(context).apply {
+              isHorizontalScrollBarEnabled = false
+              overScrollMode = View.OVER_SCROLL_NEVER
+              addView(row, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+          )
+        }
+      }
+      "comparison" -> {
+        val wide = context.resources.displayMetrics.widthPixels / context.resources.displayMetrics.density >= 420f
+        val host = LinearLayout(context).apply { orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
+        block.items.take(3).forEachIndexed { index, item ->
+          val option = richItemBody(item, horizontalPaddingDp = 10).apply {
+            backgroundShape(MinutesPalette.filler, radiusDp = 6, strokeColor = MinutesPalette.divider, strokeWidthDp = 1)
+          }
+          host.addView(
+            richSourceTarget(item, option),
+            if (wide) LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+              if (index > 0) leftMargin = context.dp(8)
+            } else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+              if (index > 0) topMargin = context.dp(8)
+            },
+          )
+        }
+        container.addView(host, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      }
+      "risk_card" -> block.items.forEach { item ->
+        val risk = richItemBody(item, horizontalPaddingDp = 12).apply {
+          backgroundShape(withAlpha(MinutesPalette.warning, 20), radiusDp = 6, strokeColor = withAlpha(MinutesPalette.warning, 90), strokeWidthDp = 1)
+        }
+        container.addView(
+          richSourceTarget(item, risk),
+          LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = context.dp(8)
+          },
+        )
+      }
+      "stat" -> block.items.chunked(2).forEach { pair ->
+        val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        pair.forEachIndexed { index, item ->
+          val stat = richItemBody(item, horizontalPaddingDp = 10).apply {
+            backgroundShape(MinutesPalette.filler, radiusDp = 6)
+          }
+          row.addView(
+            richSourceTarget(item, stat),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+              if (index > 0) leftMargin = context.dp(8)
+            },
+          )
+        }
+        if (pair.size == 1) row.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f).apply { leftMargin = context.dp(8) })
+        container.addView(
+          row,
+          LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = context.dp(8)
+          },
+        )
+      }
+    }
+  }
+
   private fun summarySection(section: MinutesSummarySection): View {
     val container = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
@@ -1136,6 +1405,18 @@ internal class MinutesSummaryPage(
         minimumHeight = context.dp(44)
       }
       if (heading.isNotBlank()) {
+        section.richBlock?.let { block ->
+          headingRow.addView(
+            ImageView(context).apply {
+              setImageResource(summaryIconResource(block.iconKey))
+              imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+              contentDescription = null
+            },
+            LinearLayout.LayoutParams(context.dp(20), context.dp(20)).apply {
+              rightMargin = context.dp(8)
+            },
+          )
+        }
         headingRow.addView(
           context.textView(heading, 17, MinutesPalette.text, Typeface.BOLD).apply {
             setLineSpacing(0f, 1.2f)
@@ -1145,6 +1426,18 @@ internal class MinutesSummaryPage(
         )
       } else {
         headingRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+      }
+      if (section.userEdited) {
+        headingRow.addView(
+          context.textView("已编辑", 12, MinutesPalette.secondary).apply {
+            gravity = Gravity.CENTER
+            setPadding(context.dp(8), 0, context.dp(8), 0)
+            backgroundShape(MinutesPalette.filler, radiusDp = 4)
+          },
+          LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(28)).apply {
+            rightMargin = context.dp(4)
+          },
+        )
       }
       if (section.editable) {
         headingRow.addView(
@@ -1172,8 +1465,11 @@ internal class MinutesSummaryPage(
         },
       )
     }
-    if (section.text.isNotBlank() && section.kind != "heading") {
+    if (section.richBlock != null) {
+      renderSummaryRichBlock(container, section.richBlock)
+    } else if (section.text.isNotBlank() && section.kind != "heading") {
       val listKind = section.kind in setOf(
+        "bullet_group", "timeline", "flow", "comparison", "risk_card", "stat",
         "bullets", "bullet", "numbered", "ordered", "decisions", "topics", "risks", "action_items",
       )
       if (listKind) {
@@ -1211,6 +1507,16 @@ internal class MinutesSummaryPage(
       }
     }
     if (section.citations.isNotEmpty()) {
+      if (section.richBlock?.edited == true) {
+        container.addView(
+          context.textView(
+            section.richBlock.originalSourceLabel.ifBlank { "原始依据" },
+            12,
+            MinutesPalette.faint,
+          ).apply { setPadding(0, context.dp(6), 0, 0) },
+          LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+      }
       val citationRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -1562,24 +1868,48 @@ private class MinutesTranscriptPageAdapter(
       root.addView(metaRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, parent.context.dp(44)))
       body.setLineSpacing(0f, 1.35f)
       body.setTextIsSelectable(true)
+      // Keep the platform text-selection gesture active.  Some Android 15
+      // builds otherwise treat a selectable TextView with a custom action
+      // callback as non-long-clickable until it receives focus once.
+      body.isLongClickable = true
       body.customSelectionActionModeCallback = object : ActionMode.Callback {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
           menu.removeItem(android.R.id.shareText)
-          menu.add(Menu.NONE, MENU_SHARE_SELECTION, Menu.NONE, "分享")
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+          menu.add(Menu.NONE, MENU_SHARE_SELECTION, 0, "分享")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
           val line = boundLine
           if (
             boundCanCreateClip
             && line?.isFinal == true
             && line.revisionKind != MinutesTranscriptRevisionKind.REALTIME_DRAFT
           ) {
-            menu.add(Menu.NONE, MENU_CREATE_CLIP, Menu.NONE, "生成音频片段")
-              .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+            // This is the primary LaoJi action for a selected transcript
+            // range.  Keep it in the visible selection toolbar; putting it
+            // only in Android's overflow was the reason users could long
+            // press text yet see no LaoJi action.
+            menu.add(Menu.NONE, MENU_CREATE_CLIP, 1, "生成音频片段")
+              .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
           }
           return true
         }
 
-        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
+          // A holder can receive a clip-capability update while the selection
+          // toolbar is open.  Rebuild only our item instead of leaving the
+          // toolbar with a stale hidden/visible action.
+          menu.removeItem(MENU_CREATE_CLIP)
+          val line = boundLine
+          if (
+            boundCanCreateClip
+            && line?.isFinal == true
+            && line.revisionKind != MinutesTranscriptRevisionKind.REALTIME_DRAFT
+          ) {
+            menu.add(Menu.NONE, MENU_CREATE_CLIP, 1, "生成音频片段")
+              .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+          }
+          menu.findItem(MENU_SHARE_SELECTION)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+          return true
+        }
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
           return when (item.itemId) {

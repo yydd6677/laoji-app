@@ -28,6 +28,9 @@ class LaojiMinutesPlaybackService : MediaSessionService() {
 
   override fun onCreate() {
     super.onCreate()
+    // Connecting the app or restoring a saved position must not publish a
+    // system media notification before the user starts playback.
+    setShowNotificationForIdlePlayer(MediaSessionService.SHOW_NOTIFICATION_FOR_IDLE_PLAYER_NEVER)
     scopeStore = MinutesPlaybackScopeStore(this)
     val adapter = Media3MinutesPlayerAdapter(
       context = this,

@@ -95,6 +95,43 @@ export async function loadMeetingSummaryTraceRecords(): Promise<MeetingSummaryTr
   }
 }
 
+/**
+ * A completed trace is durable evidence that the summary service accepted and
+ * finished the exact input currently shown by the client. This is deliberately
+ * stricter than checking line counts: title, date, template, speakers, segment
+ * identities and transcript content are all included in `inputFingerprint`.
+ */
+export async function hasCompletedMeetingSummaryTrace(input: {
+  meetingId: string;
+  inputFingerprint: string;
+  templateId: string;
+  templateRevision: number;
+  summaryCompletedAtMs: number;
+}): Promise<boolean> {
+  const meetingId = safeHeaderValue(input.meetingId, 120);
+  const inputFingerprint = safeHeaderValue(input.inputFingerprint, 180);
+  const templateId = safeHeaderValue(input.templateId, 80);
+  if (!meetingId || !inputFingerprint || !templateId) return false;
+  const records = await loadMeetingSummaryTraceRecords();
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    if (
+      record.phase !== 'completed'
+      || record.meetingId !== meetingId
+      || record.inputFingerprint !== inputFingerprint
+      || record.templateId !== templateId
+      || record.templateRevision !== input.templateRevision
+    ) continue;
+    const recordedAtMs = Date.parse(record.recordedAt);
+    // The provider timestamp and the phone clock can differ slightly. A trace
+    // written after the response (with a small skew allowance) still proves
+    // that this immutable result completed for the matching input.
+    return Number.isFinite(recordedAtMs)
+      && recordedAtMs + 5 * 60 * 1000 >= input.summaryCompletedAtMs;
+  }
+  return false;
+}
+
 function safeHeaderValue(value: unknown, maxLength = 180): string {
   return String(value ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, '')

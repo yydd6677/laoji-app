@@ -924,6 +924,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
   }
 
   private fun eventTimeLabel(epochDay: Int, event: CalendarEvent): String {
+    event.timePeriodLabel?.takeIf(String::isNotBlank)?.let { return it }
     if (event.allDay) return "全天"
     val bounds = MonthExpandedLayoutContract.eventTimeBounds(epochDay, event)
     return timeFormatter.range(bounds.startMinute, bounds.endMinute)

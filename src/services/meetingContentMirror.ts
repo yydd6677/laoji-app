@@ -88,6 +88,12 @@ export interface MirrorLegacySummaryOptions {
   expectedCanonicalMeetingId?: string;
   canonicalWrite?: boolean;
   throwOnFailure?: boolean;
+  /**
+   * A catalog pull replays immutable versions that are not necessarily the
+   * task currently being watched by the detail page.  Such replay must not
+   * close a live task; a directly completed generation keeps the default.
+   */
+  settleProcessingStage?: boolean;
 }
 
 function isLegacyProvider(value: string | null): boolean {
@@ -615,6 +621,58 @@ export function mirrorLegacySummaryContent(
         const currentProtected = current
           ? await transaction.hasUserProtectedSummaryState(current.id, scopeKey)
           : false;
+        let canonicalChanged = false;
+
+        // A summary task can finish after the detail page has been unmounted.
+        // Its immutable version may already exist (for example, a repeated
+        // regeneration with the same input), so there is no INSERT to trigger
+        // the usual terminal-stage write below.  Always close the durable
+        // processing stage from the version/pointer that is actually readable;
+        // otherwise the list keeps saying "正在整理" while the detail page
+        // displays a completed result, or the next open starts a duplicate
+        // recovery run.
+        const reconcileSummaryStage = async (
+          targetStatus: 'none' | 'ready' | 'stale',
+          inputFingerprint: string | null,
+          updatedAtHint: number,
+        ) => {
+          const stage = await transaction.getStage(note.id, scopeKey, 'summary');
+          if (!stage) throw new Error('meeting summary processing stage is missing');
+          if (options.settleProcessingStage === false) return;
+          const nowMs = Math.max(
+            Date.now(),
+            updatedAtHint,
+            stage.updatedAtMs,
+            note.updatedAtMs,
+          );
+          const next = transitionProcessingStage(stage, {
+            stage: 'summary',
+            status: targetStatus,
+            progress: targetStatus === 'ready' ? 1 : null,
+            jobId: null,
+            inputFingerprint,
+          }, nowMs);
+          const changed = next.status !== stage.status
+            || next.progress !== stage.progress
+            || next.jobId !== stage.jobId
+            || next.inputFingerprint !== stage.inputFingerprint
+            || next.errorCode !== stage.errorCode
+            || next.userMessageKey !== stage.userMessageKey
+            || next.retryable !== stage.retryable
+            || next.nextRetryAtMs !== stage.nextRetryAtMs;
+          if (!changed) return;
+          await transaction.upsertStage(next, scopeKey);
+          await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+          canonicalChanged = true;
+        };
+
+        const currentSummaryStatus = (): 'none' | 'ready' | 'stale' => (
+          current?.status === 'stale'
+            ? 'stale'
+            : current?.status === 'ready'
+              ? 'ready'
+              : 'none'
+        );
         let currentMatchesUndeclaredSource = false;
         if (current && !declaredTranscriptRevisionId) {
           const currentSourceFingerprint = await sha256({
@@ -633,11 +691,13 @@ export function mirrorLegacySummaryContent(
             && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
             && current.manualNoteRevision === summaryPayload.manualNoteRevision
           ) {
-            const restored = await transaction.restoreCurrentSummaryReady(
-              note.id,
-              scopeKey,
-              current.id,
-            );
+              const restored = options.settleProcessingStage === false
+                ? false
+                : await transaction.restoreCurrentSummaryReady(
+                  note.id,
+                  scopeKey,
+                  current.id,
+                );
             if (restored) {
               const stage = await transaction.getStage(note.id, scopeKey, 'summary');
               if (!stage) throw new Error('meeting summary processing stage is missing');
@@ -653,16 +713,63 @@ export function mirrorLegacySummaryContent(
               if (options.canonicalWrite) {
                 canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
               }
+              canonicalChanged = true;
               mirrorStatus = 'restored_ready';
               return;
             }
+          }
+          if (options.settleProcessingStage !== false) {
+            await reconcileSummaryStage(
+              currentSummaryStatus(),
+              current.inputFingerprint,
+              current.completedAtMs ?? current.createdAtMs,
+            );
+          }
+          if (options.canonicalWrite && canonicalChanged) {
+            canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, Math.max(
+              Date.now(),
+              current.completedAtMs ?? current.createdAtMs,
+            ));
           }
           mirrorStatus = 'unchanged';
           return;
         }
         if (existingVersion) {
           const remainsCurrent = current?.id === versionId;
-          replaceLegacyProjection = remainsCurrent && !currentProtected;
+          const existingProtected = await transaction.hasUserProtectedSummaryState(
+            existingVersion.id,
+            scopeKey,
+          );
+          // A structured result that was materialized by an earlier attempt
+          // must still be allowed to replace an unprotected legacy pointer.
+          // The old branch treated every existing version as a candidate and
+          // therefore left the app permanently pointing at "旧版整理" after
+          // a retry or a page re-entry.  Do not override an explicit current
+          // structured choice; the remote catalog/current merge owns that
+          // decision.
+          const activateExisting = sourceTranscriptStillActive
+            && !currentProtected
+            && !existingProtected
+            && (
+              !current
+              || remainsCurrent
+              || (
+                document.templateId !== 'legacy'
+                && (current.templateId === 'legacy' || isLegacyProvider(current.generatedBy))
+              )
+            );
+          if (activateExisting && !remainsCurrent) {
+            await transaction.updateMeeting(note.id, scopeKey, {
+              currentSummaryVersionId: versionId,
+              updatedAtMs: Math.max(
+                Date.now(),
+                existingVersion.completedAtMs ?? existingVersion.createdAtMs,
+                note.updatedAtMs,
+              ),
+            });
+            canonicalChanged = true;
+          }
+          replaceLegacyProjection = (remainsCurrent || activateExisting) && !currentProtected;
           if (
             remainsCurrent
             && current?.status === 'stale'
@@ -671,11 +778,13 @@ export function mirrorLegacySummaryContent(
             && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
             && current.manualNoteRevision === summaryPayload.manualNoteRevision
           ) {
-            const restored = await transaction.restoreCurrentSummaryReady(
-              note.id,
-              scopeKey,
-              current.id,
-            );
+            const restored = options.settleProcessingStage === false
+              ? false
+              : await transaction.restoreCurrentSummaryReady(
+                note.id,
+                scopeKey,
+                current.id,
+              );
             if (restored) {
               const stage = await transaction.getStage(note.id, scopeKey, 'summary');
               if (!stage) throw new Error('meeting summary processing stage is missing');
@@ -691,11 +800,32 @@ export function mirrorLegacySummaryContent(
               if (options.canonicalWrite) {
                 canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
               }
+              canonicalChanged = true;
               mirrorStatus = 'restored_ready';
               return;
             }
           }
-          mirrorStatus = remainsCurrent ? 'unchanged' : 'preserved_existing_candidate';
+          const activeVersion = activateExisting
+            ? existingVersion
+            : current;
+          if (activeVersion && options.settleProcessingStage !== false) {
+            await reconcileSummaryStage(
+              activeVersion.status === 'stale' ? 'stale' : 'ready',
+              activateExisting ? existingVersion.inputFingerprint : activeVersion.inputFingerprint,
+              activeVersion.completedAtMs ?? activeVersion.createdAtMs,
+            );
+          }
+          if (options.canonicalWrite && canonicalChanged) {
+            canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, Math.max(
+              Date.now(),
+              activeVersion?.completedAtMs ?? activeVersion?.createdAtMs ?? 0,
+            ));
+          }
+          mirrorStatus = activateExisting && !remainsCurrent
+            ? 'activated_existing'
+            : remainsCurrent
+              ? 'unchanged'
+              : 'preserved_existing_candidate';
           return;
         }
         const incomingLegacyCanReplace = document.templateId !== 'legacy'
@@ -733,22 +863,24 @@ export function mirrorLegacySummaryContent(
           completedAtMs: generatedAtMs,
         };
         await transaction.saveSummaryVersion(newVersion, sections, actions, scopeKey, { activate, citations });
-        const stage = await transaction.getStage(note.id, scopeKey, 'summary');
-        if (!stage) throw new Error('meeting summary processing stage is missing');
-        const nowMs = Math.max(Date.now(), generatedAtMs, stage.updatedAtMs, note.updatedAtMs);
-        const retainedStatus = current?.status === 'stale'
-          ? 'stale'
-          : current
-            ? 'ready'
-            : 'none';
-        await transaction.upsertStage(transitionProcessingStage(stage, {
-          stage: 'summary',
-          status: activate ? document.status : retainedStatus,
-          progress: activate || current ? 1 : null,
-          inputFingerprint: activate ? `sha256:${fingerprint}` : stage.inputFingerprint,
-        }, nowMs), scopeKey);
+        if (options.settleProcessingStage !== false) {
+          const stage = await transaction.getStage(note.id, scopeKey, 'summary');
+          if (!stage) throw new Error('meeting summary processing stage is missing');
+          const nowMs = Math.max(Date.now(), generatedAtMs, stage.updatedAtMs, note.updatedAtMs);
+          const retainedStatus = current?.status === 'stale'
+            ? 'stale'
+            : current
+              ? 'ready'
+              : 'none';
+          await transaction.upsertStage(transitionProcessingStage(stage, {
+            stage: 'summary',
+            status: activate ? document.status : retainedStatus,
+            progress: activate || current ? 1 : null,
+            inputFingerprint: activate ? `sha256:${fingerprint}` : stage.inputFingerprint,
+          }, nowMs), scopeKey);
+        }
         if (options.canonicalWrite) {
-          canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+          canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, Math.max(Date.now(), generatedAtMs, note.updatedAtMs));
         }
       });
       diagnosticAudit('meeting_summary_shadow_write', {

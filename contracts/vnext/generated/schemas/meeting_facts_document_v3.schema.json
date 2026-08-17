@@ -1,0 +1,337 @@
+{
+  "$defs": {
+    "ActionCandidateV3": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "due_text": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due Text"
+        },
+        "evidence_score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Evidence Score",
+          "type": "number"
+        },
+        "fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "schedule_fit": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "title": "Schedule Fit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_id",
+        "fact_id",
+        "content",
+        "schedule_fit",
+        "evidence_score"
+      ],
+      "title": "ActionCandidateV3",
+      "type": "object"
+    },
+    "FactRelationV3": {
+      "additionalProperties": false,
+      "properties": {
+        "from_fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "From Fact Id",
+          "type": "string"
+        },
+        "relation_type": {
+          "enum": [
+            "supports",
+            "contradicts",
+            "precedes",
+            "depends_on",
+            "alternative"
+          ],
+          "title": "Relation Type",
+          "type": "string"
+        },
+        "to_fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "To Fact Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation_type",
+        "from_fact_id",
+        "to_fact_id"
+      ],
+      "title": "FactRelationV3",
+      "type": "object"
+    },
+    "MeetingFactV3": {
+      "additionalProperties": false,
+      "properties": {
+        "certainty": {
+          "enum": [
+            "confirmed",
+            "proposed",
+            "uncertain",
+            "negated",
+            "completed"
+          ],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "conflict_group_id": {
+          "anyOf": [
+            {
+              "pattern": "^conflict:[0-9a-f]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conflict Group Id"
+        },
+        "content": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "evidence_score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Evidence Score",
+          "type": "number"
+        },
+        "fact_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "fact_type": {
+          "enum": [
+            "topic",
+            "context",
+            "conclusion",
+            "action",
+            "risk",
+            "question",
+            "quote",
+            "timeline"
+          ],
+          "title": "Fact Type",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceReferenceV3"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fact_id",
+        "fact_type",
+        "certainty",
+        "content",
+        "sources",
+        "evidence_score"
+      ],
+      "title": "MeetingFactV3",
+      "type": "object"
+    },
+    "OverviewV3": {
+      "additionalProperties": false,
+      "properties": {
+        "fact_ids": {
+          "items": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Fact Ids",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "fact_ids"
+      ],
+      "title": "OverviewV3",
+      "type": "object"
+    },
+    "SourceReferenceV3": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "maximum": 604800000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "quote": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_id": {
+          "pattern": "^(?:transcript|manual_note|attachment):[A-Za-z0-9._:-]{1,180}$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "transcript",
+            "manual_note",
+            "attachment"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "maximum": 604800000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        }
+      },
+      "required": [
+        "source_id",
+        "source_type",
+        "quote",
+        "content_hash"
+      ],
+      "title": "SourceReferenceV3",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Verified, immutable fact document returned to LaoJi clients.",
+  "properties": {
+    "action_candidates": {
+      "items": {
+        "$ref": "#/$defs/ActionCandidateV3"
+      },
+      "maxItems": 10,
+      "title": "Action Candidates",
+      "type": "array"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/MeetingFactV3"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Facts",
+      "type": "array"
+    },
+    "overview": {
+      "$ref": "#/$defs/OverviewV3"
+    },
+    "relations": {
+      "items": {
+        "$ref": "#/$defs/FactRelationV3"
+      },
+      "maxItems": 48,
+      "title": "Relations",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 3,
+      "default": 3,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "overview",
+    "facts"
+  ],
+  "title": "MeetingFactsDocumentV3",
+  "type": "object"
+}

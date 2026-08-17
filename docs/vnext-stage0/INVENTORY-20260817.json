@@ -1,0 +1,21 @@
+{
+  "baseline": {
+    "version_name": "1.1.10",
+    "version_code": 118,
+    "source_head": "48e3b36",
+    "worktree": "vnext/implementation",
+    "production_mutation": false
+  },
+  "services": [
+    {"name": "laoji-api", "source": "services/laoji-api", "production_cwd": "/home/zhong/laoji-service-platform/compact-production/backend", "listen": "127.0.0.1:18020"},
+    {"name": "laoji-asr", "source": "services/laoji-asr", "production_cwd": "/home/zhong/laoji-service-platform/compact-production/backend/qwen_asr_service", "listen": "127.0.0.1:8030"},
+    {"name": "ollama", "source": "external runtime", "listen": "127.0.0.1:21434"}
+  ],
+  "databases": [
+    {"name": "local.db", "owner": "production snapshot", "target": "mobile canonical migration input", "integrity": "ok"},
+    {"name": "schedule.db", "owner": "production snapshot", "target": "mobile canonical migration input", "integrity": "ok"},
+    {"name": "speaker_voiceprints.db", "owner": "production snapshot", "target": "speaker/profile migration input", "integrity": "ok"}
+  ],
+  "excluded_from_source_import": [".env*", "*.db", "*.db-wal", "*.db-shm", "audio_files", "summaries", "logs", "models", "backups", "__pycache__", ".pytest_cache", ".ruff_cache"],
+  "next_stage": "isolated backend build/import check and generated contracts"
+}

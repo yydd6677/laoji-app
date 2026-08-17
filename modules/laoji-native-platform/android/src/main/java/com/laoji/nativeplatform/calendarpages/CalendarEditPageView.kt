@@ -770,6 +770,7 @@ private fun CalendarEditTimeState.toStateBundle(): Bundle = Bundle().apply {
   putString("endTime", endTime.format(eventTimeFormatter))
   putBoolean("allDay", allDay)
   putBoolean("timedEnabled", timedEnabled)
+  putBoolean("endTimedEnabled", endTimedEnabled)
   putString("selectedEndpoint", selectedEndpoint.name)
 }
 
@@ -806,6 +807,11 @@ private fun Bundle.toTimeState(): CalendarEditTimeState? = runCatching {
     endTime = requireNotNull(parseTime(getString("endTime"))),
     allDay = getBoolean("allDay"),
     timedEnabled = getBoolean("timedEnabled"),
+    endTimedEnabled = if (containsKey("endTimedEnabled")) {
+      getBoolean("endTimedEnabled")
+    } else {
+      fallback.endTimedEnabled
+    },
     selectedEndpoint = endpoint,
   )
 }.getOrNull()

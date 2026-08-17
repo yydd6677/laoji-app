@@ -8,12 +8,15 @@ import {
   clearDeviceTranscriptTask,
   getDeviceTranscriptTask,
   markDeviceTranscriptTaskFailed,
+  markDeviceTranscriptTaskProgress,
+  subscribeDeviceTranscriptTaskChanged,
 } from '../services/deviceTranscriptTasks';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import type { TranscriptLine } from '../types';
 
-const POLL_MS = 15_000;
+const POLL_MS = 8_000;
+const PARTIAL_POLL_MS = 750;
 const MAX_RETRY_BACKOFF_MS = 5 * 60_000;
 
 type RetryState = { attempts: number; nextAt: number };
@@ -62,14 +65,19 @@ export function DeviceMeetingCompletionProvider(): null {
     if (mode !== 'guest' || loading) return undefined;
     let active = true;
     let running = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const run = async () => {
       if (!active || running) return;
       running = true;
+      let hasActivePartialTask = false;
       try {
+        // The durable task registry is authoritative. Import finalization can
+        // clear audioSyncPending before the meeting projection adopts its
+        // processing state, so filtering by visible meeting flags can suppress
+        // every draft pull until the user re-enters the page.
         const candidatePool = meetingsRef.current.filter(meeting => (
-          (meeting.audioAvailable || meeting.audioSyncPending || meeting.status === 'processing')
-          && (retryRef.current[meeting.id]?.nextAt ?? 0) <= Date.now()
-        )).slice(0, 12);
+          (retryRef.current[meeting.id]?.nextAt ?? 0) <= Date.now()
+        )).slice(0, 64);
         const pendingChecks = await Promise.all(candidatePool.map(async meeting => (
           [meeting, await needsDeviceTranscriptCompletion(meeting)] as const
         )));
@@ -97,7 +105,6 @@ export function DeviceMeetingCompletionProvider(): null {
               }
             }
             const taskState = String(taskStatus?.status ?? '').trim().toLowerCase();
-            if (taskState === 'queued' || taskState === 'running') continue;
             if (taskState === 'failed' || taskState === 'failure') {
               await markDeviceTranscriptTaskFailed(
                 meeting.id,
@@ -107,8 +114,20 @@ export function DeviceMeetingCompletionProvider(): null {
             }
             const payload = await getDeviceTranscript(meeting.id);
             delete retryRef.current[meeting.id];
+            const payloadComplete = payload?.complete !== false
+              && payload?.source_kind !== 'provisional';
+            const taskStillRunning = taskState === 'queued' || taskState === 'running';
+            if (taskStillRunning || payloadComplete === false) {
+              hasActivePartialTask = true;
+              if (task?.state === 'pending') {
+                await markDeviceTranscriptTaskProgress(
+                  meeting.id,
+                  taskState === 'running' ? 'running' : 'queued',
+                ).catch(() => undefined);
+              }
+            }
             if (!Array.isArray(payload?.items) || payload.items.length === 0) {
-              if (task?.state === 'pending' && taskState === 'completed') {
+              if (task?.state === 'pending' && taskState === 'completed' && payloadComplete) {
                 await markDeviceTranscriptTaskFailed(meeting.id, 'no_speech').catch(() => undefined);
               }
               continue;
@@ -125,20 +144,35 @@ export function DeviceMeetingCompletionProvider(): null {
               start_time: Number(item.start_ms || 0) / 1000,
               end_time: Number(item.end_ms || 0) / 1000,
               confidence: Number(item.confidence || 0),
-              isFinal: true,
-              revisionKind: 'final',
+              isFinal: payloadComplete,
+              revisionKind: payloadComplete ? 'final' : 'realtimeDraft',
               script: 'zh-Hans',
             }))).then(items => items.filter((line: TranscriptLine) => line.text.trim()));
             if (lines.length === 0) continue;
             const existing = getCachedTranscript(meeting.id);
-            if (existing.length >= lines.length && existing.every((line, index) => line.text === lines[index]?.text)) continue;
+            const sameVisibleLines = existing.length === lines.length
+              && existing.every((line, index) => (
+                line.id === lines[index]?.id
+                && line.text === lines[index]?.text
+                && line.end_time === lines[index]?.end_time
+                && line.isFinal === lines[index]?.isFinal
+              ));
+            if (sameVisibleLines) {
+              if (payloadComplete) {
+                await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true }, { remoteSync: 'background' });
+              }
+              continue;
+            }
             await saveCachedTranscript(meeting.id, lines, {
-              candidateKind: 'final',
-              serverCompleteness: 'complete',
+              candidateKind: payloadComplete ? 'final' : 'realtime_draft',
+              serverCompleteness: payloadComplete ? 'complete' : 'incomplete',
               remoteRevisionId: typeof payload.revision_id === 'string' ? payload.revision_id : null,
             });
-            await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
-            await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true }, { remoteSync: 'background' });
+            if (payloadComplete) {
+              await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+              await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true }, { remoteSync: 'background' });
+            }
           } catch (error) {
             const previous = retryRef.current[meeting.id] ?? { attempts: 0, nextAt: 0 };
             const attempts = previous.attempts + 1;
@@ -147,7 +181,7 @@ export function DeviceMeetingCompletionProvider(): null {
             // later foreground runs still retry and can recover a late task.
             const delay = error instanceof DeviceApiError && error.status === 404
               ? MAX_RETRY_BACKOFF_MS
-              : Math.min(MAX_RETRY_BACKOFF_MS, POLL_MS * (2 ** Math.min(attempts - 1, 5)));
+              : Math.min(MAX_RETRY_BACKOFF_MS, PARTIAL_POLL_MS * (2 ** Math.min(attempts - 1, 5)));
             retryRef.current[meeting.id] = { attempts, nextAt: Date.now() + delay };
             if (active) diagnosticWarn('[device-transcript] pull deferred', {
               meeting_id_suffix: meeting.id.slice(-8),
@@ -158,16 +192,36 @@ export function DeviceMeetingCompletionProvider(): null {
         }
       } finally {
         running = false;
+        if (active) {
+          timer = setTimeout(() => {
+            timer = null;
+            void run();
+          }, hasActivePartialTask ? PARTIAL_POLL_MS : POLL_MS);
+        }
       }
     };
     void run();
-    const timer = setInterval(() => { void run(); }, POLL_MS);
+    const unsubscribeTask = subscribeDeviceTranscriptTaskChanged(meetingId => {
+      if (!active) return;
+      // A pre-binding probe may have backed this meeting off after a 404.
+      // Registering a real task is new evidence and must wake it immediately.
+      delete retryRef.current[meetingId];
+      if (timer) clearTimeout(timer);
+      timer = null;
+      void run();
+    });
     const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active') void run();
+      if (state === 'active') {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        void run();
+      }
     });
     return () => {
       active = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      timer = null;
+      unsubscribeTask();
       subscription.remove();
     };
   }, [getCachedTranscript, loading, mode, saveCachedTranscript, updateMeetingStatus]);

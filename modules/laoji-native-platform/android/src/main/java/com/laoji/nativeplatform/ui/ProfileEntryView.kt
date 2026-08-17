@@ -58,7 +58,7 @@ class ProfileEntryView(
     )
 
     placeholder.apply {
-      setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_personal_info_outline)
+      setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_settings_outline)
       imageTintList = ColorStateList.valueOf(palette.textTertiary)
       scaleType = ImageView.ScaleType.CENTER_INSIDE
       setPadding(dp(7f), dp(7f), dp(7f), dp(7f))

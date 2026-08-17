@@ -94,7 +94,10 @@ internal class MinutesItemContextMenu(
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     val actions = if (meeting.action == MinutesMeetingAction.RESTORE) {
-      listOf(MenuAction(label = "恢复", type = "restoreMeeting"))
+      listOf(
+        MenuAction(label = "恢复", type = "restoreMeeting"),
+        MenuAction(label = "删除", type = "permanentlyDeleteMeeting"),
+      )
     } else {
       listOf(
         MenuAction(

@@ -154,7 +154,6 @@ internal class MinutesListSurface(
         rightMargin = context.dp(12)
       },
     )
-
     operationHost.orientation = HORIZONTAL
     operationHost.gravity = Gravity.CENTER
     operationHost.setPadding(context.dp(10), 0, context.dp(10), 0)
@@ -333,7 +332,10 @@ internal class MinutesListSurface(
     }
     cachedMessage.text = state.message.ifBlank { "同步失败，正在显示本机缓存" }
     applyListPadding(
-      topPadding = if (cachedError.visibility == View.VISIBLE) context.dp(56) else context.dp(12),
+      topPadding = when {
+        cachedError.visibility == View.VISIBLE -> context.dp(56)
+        else -> context.dp(12)
+      },
     )
     operationHost.visibility = if (state.searching || recycleBin) View.GONE else View.VISIBLE
     uploadButton.isEnabled = !state.mediaImporting

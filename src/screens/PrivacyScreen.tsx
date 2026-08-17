@@ -27,6 +27,7 @@ import {
   loadGenerationRetentionPreference,
   saveGenerationRetentionPreference,
 } from '../services/generationPrivacy';
+import { useAppUpdate } from '../services/appUpdate';
 
 const { colors: F } = getFeishuTokens();
 
@@ -92,6 +93,7 @@ function Toggle({
 }
 
 export function PrivacyScreen({ navigation }: Props) {
+  const appUpdate = useAppUpdate();
   const [faceId, setFaceId] = useState(false);
   const [appLock, setAppLock] = useState(false);
   const [hideWidgetTitles, setHideWidgetTitles] = useState(true);
@@ -329,7 +331,13 @@ export function PrivacyScreen({ navigation }: Props) {
           <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} />
           <SettingsRow label="帮助中心" onPress={() => navigation.navigate('Legal', { kind: 'help' })} />
           <SettingsRow label="使用指南" onPress={() => navigation.navigate('Legal', { kind: 'guide' })} />
-          <SettingsRow label="版本信息" value={APP_VERSION} onPress={() => navigation.navigate('Legal', { kind: 'version' })} />
+          <SettingsRow
+            label="版本信息"
+            value={appUpdate.status === 'available' && appUpdate.manifest
+              ? `新版本 ${appUpdate.manifest.version_name}`
+              : APP_VERSION}
+            onPress={() => navigation.navigate('Legal', { kind: 'version' })}
+          />
           <SettingsRow label="联系我们" onPress={() => navigation.navigate('Legal', { kind: 'contact' })} last />
         </SettingsGroup>
       </ScrollView>
