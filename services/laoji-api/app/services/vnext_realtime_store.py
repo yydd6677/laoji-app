@@ -115,6 +115,8 @@ def ensure_vnext_realtime_schema() -> None:
                 state TEXT NOT NULL CHECK(state IN (
                     'open','reconnecting','finalizing','succeeded','cancelled','expired'
                 )),
+                worker_generation TEXT,
+                payload_released_at TEXT,
                 opened_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 expires_at_epoch INTEGER NOT NULL,
@@ -159,6 +161,20 @@ def ensure_vnext_realtime_schema() -> None:
                 );
             """
         )
+        columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(vnext_realtime_asr_sessions)"
+            ).fetchall()
+        }
+        if "worker_generation" not in columns:
+            connection.execute(
+                "ALTER TABLE vnext_realtime_asr_sessions ADD COLUMN worker_generation TEXT"
+            )
+        if "payload_released_at" not in columns:
+            connection.execute(
+                "ALTER TABLE vnext_realtime_asr_sessions ADD COLUMN payload_released_at TEXT"
+            )
         connection.commit()
 
 
@@ -175,6 +191,8 @@ def _decode_session(row: Any) -> dict[str, Any] | None:
         return None
     result = dict(row)
     result.pop("device_id", None)
+    result.pop("worker_generation", None)
+    result.pop("payload_released_at", None)
     result["schema_version"] = 2
     return result
 
@@ -194,6 +212,18 @@ def _assert_binding(connection: Any, context: RealtimeOwnerContext, session: Any
         or int(binding["cancel_revision"]) != int(session["cancel_revision"])
     ):
         raise VNextRealtimeError("BINDING_REVISION_CHANGED", "会议服务连接版本已变化", 409)
+
+
+def _assert_worker(session: Any, worker_generation: str) -> str:
+    normalized = _generation(worker_generation, "worker_generation")
+    if session["worker_generation"] != normalized:
+        raise VNextRealtimeError("REALTIME_WORKER_FENCED", "实时转写连接已被新的连接接替", 409)
+    return normalized
+
+
+def _assert_not_expired(session: Any) -> None:
+    if int(session["expires_at_epoch"]) <= int(time.time()):
+        raise VNextRealtimeError("REALTIME_SESSION_EXPIRED", "实时转写会话已过期", 410)
 
 
 def open_realtime_session(
@@ -223,7 +253,8 @@ def open_realtime_session(
     asset_generation = _generation(asset_generation, "asset_generation")
     codec_revision = _safe(codec_revision, "codec_revision", 120)
     expires_at_epoch = _positive(expires_at_epoch, "expires_at_epoch")
-    if expires_at_epoch <= int(time.time()):
+    now_epoch = int(time.time())
+    if expires_at_epoch <= now_epoch or expires_at_epoch > now_epoch + 24 * 60 * 60:
         raise VNextRealtimeError("SESSION_EXPIRY_INVALID", "实时转写会话已过期", 422)
     request_sha256 = _request_sha256({
         "session_id": session_id,
@@ -236,8 +267,14 @@ def open_realtime_session(
         "asset_id": asset_id,
         "asset_generation": asset_generation,
         "codec_revision": codec_revision,
-        "expires_at_epoch": expires_at_epoch,
     })
+    task_input_sha256 = _request_sha256({
+        "contract_revision": "realtime.transcript.v2",
+        "asset_id": asset_id,
+        "asset_generation": asset_generation,
+        "codec_revision": codec_revision,
+    })
+    task_generation_id = f"realtime:{asset_generation}"
     now = utc_now()
     created = False
     with control_connection() as connection:
@@ -253,6 +290,9 @@ def open_realtime_session(
             if existing["request_sha256"] != request_sha256:
                 connection.rollback()
                 raise VNextRealtimeError("REALTIME_SESSION_CONFLICT", "实时转写标识已用于其他输入", 409)
+            if int(existing["expires_at_epoch"]) <= now_epoch:
+                connection.rollback()
+                raise VNextRealtimeError("REALTIME_SESSION_EXPIRED", "实时转写会话已过期", 410)
             connection.commit()
             decoded = _decode_session(existing)
             assert decoded is not None
@@ -270,11 +310,6 @@ def open_realtime_session(
         if active_device >= MAX_ACTIVE_DEVICE_SESSIONS or active_global >= MAX_ACTIVE_GLOBAL_SESSIONS:
             connection.rollback()
             raise VNextRealtimeError("REALTIME_CAPACITY_BUSY", "实时转写会话较多，请稍后重试", 429)
-        task = connection.execute(
-            """SELECT * FROM vnext_tasks
-               WHERE task_id = ? AND device_id = ? AND epoch_id = ?""",
-            (task_id, context.device_id, context.epoch_id),
-        ).fetchone()
         synthetic = {
             "binding_id": binding_id,
             "binding_generation": binding_generation,
@@ -282,16 +317,25 @@ def open_realtime_session(
             "cancel_revision": cancel_revision,
         }
         _assert_binding(connection, context, synthetic)
-        if (
-            task is None
-            or task["state"] != "active"
-            or task["capability"] != "transcript"
-            or task["binding_id"] != binding_id
-            or task["binding_generation"] != binding_generation
-            or task["entity_id"] != asset_id
-        ):
+        try:
+            task, _task_reused = vnext_task_store.create_task_in_transaction(
+                connection,
+                context,
+                task_id=task_id,
+                binding_id=binding_id,
+                binding_generation=binding_generation,
+                capability="transcript",
+                entity_id=asset_id,
+                entity_revision=1,
+                input_sha256=task_input_sha256,
+                generation_id=task_generation_id,
+            )
+        except vnext_task_store.VNextTaskError as error:
             connection.rollback()
-            raise VNextRealtimeError("TRANSCRIPT_TASK_REQUIRED", "实时转写任务尚未登记", 428)
+            raise VNextRealtimeError(error.code, error.message, error.status_code) from error
+        if task["state"] != "active":
+            connection.rollback()
+            raise VNextRealtimeError("TRANSCRIPT_TASK_TERMINAL", "实时转写任务已结束", 409)
         connection.execute(
             """INSERT INTO vnext_realtime_asr_sessions(
                  session_id, task_id, client_operation_id, device_id, epoch_id,
@@ -324,6 +368,7 @@ def append_chunk_checkpoint(
     byte_size: int,
     content_sha256: str,
     encrypted_spool_locator: str,
+    worker_generation: str,
 ) -> dict[str, Any]:
     ensure_vnext_realtime_schema()
     session_id = _safe(session_id, "session_id", 180)
@@ -331,7 +376,12 @@ def append_chunk_checkpoint(
     start_ms = _nonnegative(start_ms, "start_ms")
     end_ms = _nonnegative(end_ms, "end_ms")
     byte_size = _positive(byte_size, "byte_size")
-    if end_ms < start_ms or byte_size > MAX_CHUNK_BYTES:
+    expected_bytes = (end_ms - start_ms) * 32
+    if (
+        end_ms <= start_ms
+        or byte_size > MAX_CHUNK_BYTES
+        or abs(byte_size - expected_bytes) > 31
+    ):
         raise VNextRealtimeError("CHUNK_RANGE_INVALID", "实时音频分块无效", 422)
     content_sha256 = _sha256(content_sha256)
     encrypted_spool_locator = _safe(encrypted_spool_locator, "encrypted_spool_locator", 2048)
@@ -343,6 +393,8 @@ def append_chunk_checkpoint(
             connection.rollback()
             raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
         _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        _assert_worker(session, worker_generation)
         if session["state"] not in {"open", "reconnecting"}:
             connection.rollback()
             raise VNextRealtimeError("REALTIME_SESSION_NOT_OPEN", "实时转写会话已结束", 409)
@@ -373,6 +425,18 @@ def append_chunk_checkpoint(
         if chunk_seq != expected:
             connection.rollback()
             raise VNextRealtimeError("CHUNK_SEQUENCE_GAP", "实时音频分块序号不连续", 409)
+        if chunk_seq == 0:
+            expected_start_ms = 0
+        else:
+            previous = connection.execute(
+                """SELECT end_ms FROM vnext_realtime_chunk_checkpoints
+                     WHERE session_id = ? AND chunk_seq = ?""",
+                (session_id, chunk_seq - 1),
+            ).fetchone()
+            expected_start_ms = int(previous["end_ms"]) if previous is not None else -1
+        if start_ms != expected_start_ms:
+            connection.rollback()
+            raise VNextRealtimeError("CHUNK_TIMELINE_GAP", "实时音频时间轴不连续", 409)
         session_bytes = int(connection.execute(
             """SELECT COALESCE(SUM(byte_size), 0)
                FROM vnext_realtime_chunk_checkpoints
@@ -415,6 +479,81 @@ def append_chunk_checkpoint(
     }
 
 
+def claim_realtime_worker(
+    context: RealtimeOwnerContext,
+    session_id: str,
+    worker_generation: str,
+) -> dict[str, Any]:
+    """Fence any older socket/pipeline before this connection processes audio."""
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    worker_generation = _generation(worker_generation, "worker_generation")
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        if session["state"] in {"succeeded", "cancelled", "expired"}:
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SESSION_TERMINAL", "实时转写会话已结束", 409)
+        next_state = session["state"]
+        if next_state != "finalizing":
+            next_state = "reconnecting" if int(session["last_contiguous_chunk_seq"]) >= 0 else "open"
+        connection.execute(
+            """UPDATE vnext_realtime_asr_sessions
+                  SET worker_generation = ?, state = ?, last_seen_at = ?
+                WHERE session_id = ?""",
+            (worker_generation, next_state, now, session_id),
+        )
+        row = _session_row(connection, context, session_id)
+        connection.commit()
+    decoded = _decode_session(row)
+    assert decoded is not None
+    return decoded
+
+
+def advance_chunk_consumption(
+    context: RealtimeOwnerContext,
+    session_id: str,
+    *,
+    through_chunk_seq: int,
+    worker_generation: str,
+) -> list[str]:
+    """Advance the audio cursor only after VAD reaches a replayable boundary."""
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    through_chunk_seq = _nonnegative(through_chunk_seq, "through_chunk_seq")
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        _assert_worker(session, worker_generation)
+        if through_chunk_seq > int(session["last_contiguous_chunk_seq"]):
+            connection.rollback()
+            raise VNextRealtimeError("CHUNK_CONSUME_AHEAD", "转写消费游标超出音频游标", 409)
+        rows = connection.execute(
+            """SELECT encrypted_spool_locator
+                 FROM vnext_realtime_chunk_checkpoints
+                WHERE session_id = ? AND chunk_seq <= ? AND state = 'spooled'""",
+            (session_id, through_chunk_seq),
+        ).fetchall()
+        connection.execute(
+            """UPDATE vnext_realtime_chunk_checkpoints SET state = 'consumed'
+                 WHERE session_id = ? AND chunk_seq <= ? AND state = 'spooled'""",
+            (session_id, through_chunk_seq),
+        )
+        connection.commit()
+    return [str(row["encrypted_spool_locator"]) for row in rows]
+
+
 def append_durable_event(
     context: RealtimeOwnerContext,
     session_id: str,
@@ -428,6 +567,7 @@ def append_durable_event(
     source_end_ms: int,
     payload_sha256: str,
     encrypted_payload: bytes,
+    worker_generation: str,
     consume_through_chunk_seq: int | None = None,
 ) -> dict[str, Any]:
     ensure_vnext_realtime_schema()
@@ -435,6 +575,11 @@ def append_durable_event(
     event_seq = _positive(event_seq, "event_seq")
     if event_kind not in {"stable", "final", "error"}:
         raise VNextRealtimeError("EVENT_KIND_INVALID", "转写事件类型无效", 422)
+    if event_kind == "final":
+        raise VNextRealtimeError(
+            "FINAL_REQUIRES_TASK_COMMIT", "最终转写必须与任务终态一并提交", 409,
+        )
+    worker_generation = _generation(worker_generation, "worker_generation")
     stable_segment_key = (
         _safe(stable_segment_key, "stable_segment_key", 180)
         if stable_segment_key is not None else None
@@ -465,6 +610,8 @@ def append_durable_event(
             connection.rollback()
             raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
         _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        _assert_worker(session, worker_generation)
         existing = connection.execute(
             """SELECT * FROM vnext_realtime_event_ledger
                WHERE session_id = ? AND event_seq = ?""",
@@ -536,6 +683,219 @@ def append_durable_event(
     return {"schema_version": 2, "event_seq": event_seq, "reused": False}
 
 
+def append_terminal_event_and_complete_task(
+    context: RealtimeOwnerContext,
+    session_id: str,
+    *,
+    event_seq: int,
+    outcome: Literal["text", "no_speech"],
+    source_start_ms: int,
+    source_end_ms: int,
+    payload_sha256: str,
+    encrypted_payload: bytes,
+    consume_through_chunk_seq: int | None,
+    worker_generation: str,
+    attempt_id: str,
+    lease_owner: str,
+) -> dict[str, Any]:
+    """Commit final event, audio cursor and generic Task terminal atomically."""
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    event_seq = _positive(event_seq, "event_seq")
+    if outcome not in {"text", "no_speech"}:
+        raise VNextRealtimeError("CONTENT_OUTCOME_INVALID", "转写内容结果无效", 422)
+    source_start_ms = _nonnegative(source_start_ms, "source_start_ms")
+    source_end_ms = _nonnegative(source_end_ms, "source_end_ms")
+    if source_end_ms < source_start_ms:
+        raise VNextRealtimeError("EVENT_RANGE_INVALID", "转写事件时间范围无效", 422)
+    payload_sha256 = _sha256(payload_sha256, "payload_sha256")
+    if not isinstance(encrypted_payload, bytes) or not 1 <= len(encrypted_payload) <= MAX_EVENT_BYTES:
+        raise VNextRealtimeError("EVENT_PAYLOAD_INVALID", "转写事件载荷无效", 422)
+    if consume_through_chunk_seq is not None:
+        consume_through_chunk_seq = _nonnegative(
+            consume_through_chunk_seq, "consume_through_chunk_seq",
+        )
+    worker_generation = _generation(worker_generation, "worker_generation")
+    attempt_id = _safe(attempt_id, "attempt_id", 512)
+    lease_owner = _safe(lease_owner, "lease_owner", 200)
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        _assert_worker(session, worker_generation)
+        if (
+            consume_through_chunk_seq is not None
+            and consume_through_chunk_seq > int(session["last_contiguous_chunk_seq"])
+        ):
+            connection.rollback()
+            raise VNextRealtimeError("CHUNK_CONSUME_AHEAD", "转写消费游标超出音频游标", 409)
+        existing = connection.execute(
+            """SELECT * FROM vnext_realtime_event_ledger
+                 WHERE session_id = ? AND event_seq = ?""",
+            (session_id, event_seq),
+        ).fetchone()
+        if existing is not None:
+            same = (
+                existing["event_kind"] == "final"
+                and existing["stable_segment_key"] is None
+                and int(existing["segment_revision"]) == 1
+                and existing["outcome"] == outcome
+                and int(existing["source_start_ms"]) == source_start_ms
+                and int(existing["source_end_ms"]) == source_end_ms
+                and existing["payload_sha256"] == payload_sha256
+                and bytes(existing["encrypted_payload"]) == encrypted_payload
+            )
+            if not same:
+                connection.rollback()
+                raise VNextRealtimeError("EVENT_REPLAY_CONFLICT", "转写事件重放不一致", 409)
+        else:
+            if session["state"] in {"succeeded", "cancelled", "expired"}:
+                connection.rollback()
+                raise VNextRealtimeError("REALTIME_SESSION_TERMINAL", "实时转写会话已结束", 409)
+            if event_seq != int(session["last_durable_event_seq"]) + 1:
+                connection.rollback()
+                raise VNextRealtimeError("EVENT_SEQUENCE_GAP", "转写事件序号不连续", 409)
+            connection.execute(
+                """INSERT INTO vnext_realtime_event_ledger(
+                     session_id, event_seq, event_kind, stable_segment_key,
+                     segment_revision, outcome, source_start_ms, source_end_ms,
+                     payload_sha256, encrypted_payload, created_at
+                   ) VALUES (?, ?, 'final', NULL, 1, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id, event_seq, outcome, source_start_ms, source_end_ms,
+                    payload_sha256, encrypted_payload, now,
+                ),
+            )
+        if consume_through_chunk_seq is not None:
+            connection.execute(
+                """UPDATE vnext_realtime_chunk_checkpoints SET state = 'consumed'
+                     WHERE session_id = ? AND chunk_seq <= ? AND state = 'spooled'""",
+                (session_id, consume_through_chunk_seq),
+            )
+        task = connection.execute(
+            """SELECT * FROM vnext_tasks
+                 WHERE task_id = ? AND device_id = ? AND epoch_id = ?""",
+            (session["task_id"], context.device_id, context.epoch_id),
+        ).fetchone()
+        if task is None:
+            connection.rollback()
+            raise VNextRealtimeError("TRANSCRIPT_TASK_REQUIRED", "实时转写任务不存在", 409)
+        result = {
+            "contract_revision": "transcript.stream.v2",
+            "session_id": session_id,
+            "final_event_sequence": event_seq,
+        }
+        result_kind: Literal["artifact", "content_outcome"] = "artifact"
+        if outcome == "no_speech":
+            result_kind = "content_outcome"
+            result["code"] = "NO_SPEECH"
+        if task["state"] == "active":
+            try:
+                completed = vnext_task_store.mark_success_in_transaction(
+                    connection,
+                    context,
+                    task_id=str(session["task_id"]),
+                    attempt_id=attempt_id,
+                    result=result,
+                    result_kind=result_kind,
+                    lease_owner=lease_owner,
+                )
+            except vnext_task_store.VNextTaskError as error:
+                connection.rollback()
+                raise VNextRealtimeError(error.code, error.message, error.status_code) from error
+            if not completed:
+                connection.rollback()
+                raise VNextRealtimeError("TASK_ATTEMPT_FENCED", "实时转写任务已被其他执行接替", 409)
+        elif task["state"] == "success":
+            decoded_task = vnext_task_store.decode_task_row(task)
+            if (
+                decoded_task is None
+                or decoded_task["result_kind"] != result_kind
+                or decoded_task["result"] != result
+            ):
+                connection.rollback()
+                raise VNextRealtimeError(
+                    "TRANSCRIPT_TASK_RESULT_CONFLICT", "实时转写任务终态不一致", 409,
+                )
+        else:
+            connection.rollback()
+            raise VNextRealtimeError("TRANSCRIPT_TASK_TERMINAL", "实时转写任务已结束", 409)
+        connection.execute(
+            """UPDATE vnext_realtime_asr_sessions
+                  SET last_durable_event_seq = ?, last_seen_at = ?, state = 'succeeded'
+                WHERE session_id = ?""",
+            (event_seq, now, session_id),
+        )
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "event_seq": event_seq,
+        "reused": existing is not None,
+        "task_state": "success",
+        "result_kind": result_kind,
+    }
+
+
+def mark_realtime_attempt_failure(
+    context: RealtimeOwnerContext,
+    session_id: str,
+    *,
+    worker_generation: str,
+    attempt_id: str,
+    lease_owner: str,
+    error_code: str,
+) -> bool:
+    """Fail only the attempt still fenced by this socket worker generation."""
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    worker_generation = _generation(worker_generation, "worker_generation")
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            connection.rollback()
+            return False
+        try:
+            _assert_binding(connection, context, session)
+            _assert_worker(session, worker_generation)
+        except VNextRealtimeError:
+            connection.rollback()
+            return False
+        try:
+            marked = vnext_task_store.mark_failure_in_transaction(
+                connection,
+                context,
+                task_id=str(session["task_id"]),
+                attempt_id=attempt_id,
+                error_code=error_code,
+                retryable=True,
+                lease_owner=lease_owner,
+            )
+        except vnext_task_store.VNextTaskError:
+            connection.rollback()
+            return False
+        if not marked:
+            connection.rollback()
+            return False
+        task = connection.execute(
+            "SELECT state FROM vnext_tasks WHERE task_id = ?",
+            (session["task_id"],),
+        ).fetchone()
+        next_state = "reconnecting" if task is not None and task["state"] == "active" else "cancelled"
+        connection.execute(
+            """UPDATE vnext_realtime_asr_sessions SET state = ?, last_seen_at = ?
+                 WHERE session_id = ?""",
+            (next_state, utc_now(), session_id),
+        )
+        connection.commit()
+    return True
+
+
 def acknowledge_events(
     context: RealtimeOwnerContext,
     session_id: str,
@@ -545,6 +905,7 @@ def acknowledge_events(
     session_id = _safe(session_id, "session_id", 180)
     through_event_seq = _nonnegative(through_event_seq, "through_event_seq")
     now = utc_now()
+    cleanup_locators: list[str] = []
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         session = _session_row(connection, context, session_id)
@@ -560,18 +921,75 @@ def acknowledge_events(
                WHERE session_id = ? AND event_seq <= ?""",
             (now, session_id, through_event_seq),
         )
+        if (
+            session["state"] == "succeeded"
+            and through_event_seq == int(session["last_durable_event_seq"])
+        ):
+            cleanup_locators = [
+                str(row["encrypted_spool_locator"])
+                for row in connection.execute(
+                    """SELECT encrypted_spool_locator
+                         FROM vnext_realtime_chunk_checkpoints WHERE session_id = ?""",
+                    (session_id,),
+                ).fetchall()
+            ]
         connection.commit()
+    released = False
+    if cleanup_locators or (
+        session["state"] == "succeeded"
+        and through_event_seq == int(session["last_durable_event_seq"])
+    ):
+        from app.services import vnext_realtime_crypto
+
+        try:
+            for locator in cleanup_locators:
+                vnext_realtime_crypto.delete_chunk(locator)
+        except (OSError, ValueError):
+            released = False
+        else:
+            with control_connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = _session_row(connection, context, session_id)
+                if (
+                    current is not None
+                    and current["state"] == "succeeded"
+                    and through_event_seq == int(current["last_durable_event_seq"])
+                ):
+                    unacked = int(connection.execute(
+                        """SELECT COUNT(*) FROM vnext_realtime_event_ledger
+                             WHERE session_id = ? AND device_acked_at IS NULL""",
+                        (session_id,),
+                    ).fetchone()[0])
+                    if unacked == 0:
+                        connection.execute(
+                            "DELETE FROM vnext_realtime_chunk_checkpoints WHERE session_id = ?",
+                            (session_id,),
+                        )
+                        connection.execute(
+                            "DELETE FROM vnext_realtime_event_ledger WHERE session_id = ?",
+                            (session_id,),
+                        )
+                        connection.execute(
+                            """UPDATE vnext_realtime_asr_sessions
+                                  SET payload_released_at = COALESCE(payload_released_at, ?)
+                                WHERE session_id = ?""",
+                            (utc_now(), session_id),
+                        )
+                        released = True
+                connection.commit()
     return {
         "schema_version": 2,
         "session_id": session_id,
         "acked_through": through_event_seq,
         "last_durable_event_seq": int(session["last_durable_event_seq"]),
+        "server_payload_released": released,
     }
 
 
 def mark_session_finalizing(
     context: RealtimeOwnerContext,
     session_id: str,
+    worker_generation: str,
 ) -> dict[str, Any]:
     ensure_vnext_realtime_schema()
     session_id = _safe(session_id, "session_id", 180)
@@ -582,6 +1000,8 @@ def mark_session_finalizing(
             connection.rollback()
             raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
         _assert_binding(connection, context, session)
+        _assert_not_expired(session)
+        _assert_worker(session, worker_generation)
         if session["state"] in {"open", "reconnecting"}:
             connection.execute(
                 """UPDATE vnext_realtime_asr_sessions
@@ -610,6 +1030,8 @@ def get_realtime_snapshot(
         session = _session_row(connection, context, session_id)
         if session is None:
             return None
+        if after_event_seq > int(session["last_durable_event_seq"]):
+            raise VNextRealtimeError("EVENT_CURSOR_AHEAD", "转写事件游标超出服务端进度", 409)
         events = connection.execute(
             """SELECT * FROM vnext_realtime_event_ledger
                WHERE session_id = ? AND event_seq > ?
@@ -620,6 +1042,39 @@ def get_realtime_snapshot(
         "schema_version": 2,
         "session": _decode_session(session),
         "events": [dict(row) for row in events],
+    }
+
+
+def get_realtime_pipeline_resume(
+    context: RealtimeOwnerContext,
+    session_id: str,
+) -> dict[str, Any]:
+    """Return complete lightweight state needed to deterministically replay VAD."""
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    with control_connection() as connection:
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        stable_rows = connection.execute(
+            """SELECT stable_segment_key, outcome, source_end_ms
+                 FROM vnext_realtime_event_ledger
+                WHERE session_id = ? AND event_kind = 'stable'
+                ORDER BY event_seq""",
+            (session_id,),
+        ).fetchall()
+        last_stable = connection.execute(
+            """SELECT event_seq, encrypted_payload
+                 FROM vnext_realtime_event_ledger
+                WHERE session_id = ? AND event_kind = 'stable'
+                ORDER BY event_seq DESC LIMIT 1""",
+            (session_id,),
+        ).fetchone()
+    return {
+        "session": _decode_session(session),
+        "stable_segments": [dict(row) for row in stable_rows],
+        "last_stable": dict(last_stable) if last_stable is not None else None,
     }
 
 
@@ -643,3 +1098,121 @@ def get_unconsumed_chunks(
             (session_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def is_spool_locator_referenced(locator: str) -> bool:
+    ensure_vnext_realtime_schema()
+    locator = _safe(locator, "encrypted_spool_locator", 2048)
+    with control_connection() as connection:
+        row = connection.execute(
+            """SELECT 1 FROM vnext_realtime_chunk_checkpoints
+                 WHERE encrypted_spool_locator = ? LIMIT 1""",
+            (locator,),
+        ).fetchone()
+    return row is not None
+
+
+def cleanup_realtime_payloads(
+    *,
+    now_epoch: int | None = None,
+    orphan_grace_seconds: int = 3600,
+) -> dict[str, int]:
+    """Expire stale sessions and bound encrypted spool/ledger retention."""
+    ensure_vnext_realtime_schema()
+    effective_now = int(time.time()) if now_epoch is None else int(now_epoch)
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        expired = connection.execute(
+            """SELECT session_id, task_id FROM vnext_realtime_asr_sessions
+                 WHERE expires_at_epoch <= ? AND payload_released_at IS NULL""",
+            (effective_now,),
+        ).fetchall()
+        expired_session_ids = [str(row["session_id"]) for row in expired]
+        expired_task_ids = [str(row["task_id"]) for row in expired]
+        if expired_session_ids:
+            connection.executemany(
+                """UPDATE vnext_realtime_asr_sessions
+                      SET state = CASE WHEN state = 'succeeded' THEN state ELSE 'expired' END,
+                          last_seen_at = ?
+                    WHERE session_id = ?""",
+                [(now, session_id) for session_id in expired_session_ids],
+            )
+            connection.executemany(
+                """UPDATE vnext_tasks
+                      SET state = 'failure', error_code = 'REALTIME_SESSION_EXPIRED',
+                          updated_at = ?, terminal_at = ?
+                    WHERE task_id = ? AND state = 'active'""",
+                [(now, now, task_id) for task_id in expired_task_ids],
+            )
+            connection.executemany(
+                """UPDATE vnext_task_attempts
+                      SET state = 'terminal_failure', phase = 'committing',
+                          error_code = 'REALTIME_SESSION_EXPIRED', updated_at = ?, terminal_at = ?
+                    WHERE task_id = ? AND state IN (
+                        'queued','running','retryable_failure','lease_expired'
+                    )""",
+                [(now, now, task_id) for task_id in expired_task_ids],
+            )
+        cleanup_rows = connection.execute(
+            """SELECT checkpoint.session_id, checkpoint.encrypted_spool_locator
+                 FROM vnext_realtime_chunk_checkpoints checkpoint
+                 JOIN vnext_realtime_asr_sessions session
+                   ON session.session_id = checkpoint.session_id
+                WHERE checkpoint.state = 'consumed'
+                   OR (session.expires_at_epoch <= ? AND session.payload_released_at IS NULL)""",
+            (effective_now,),
+        ).fetchall()
+        connection.commit()
+
+    from app.services import vnext_realtime_crypto
+
+    deleted_locators: list[str] = []
+    failed_session_ids: set[str] = set()
+    for row in cleanup_rows:
+        locator = str(row["encrypted_spool_locator"])
+        try:
+            vnext_realtime_crypto.delete_chunk(locator)
+        except (OSError, ValueError):
+            failed_session_ids.add(str(row["session_id"]))
+            continue
+        deleted_locators.append(locator)
+    releasable_session_ids = [
+        session_id for session_id in expired_session_ids
+        if session_id not in failed_session_ids
+    ]
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        if deleted_locators:
+            connection.executemany(
+                """DELETE FROM vnext_realtime_chunk_checkpoints
+                     WHERE encrypted_spool_locator = ?""",
+                [(locator,) for locator in deleted_locators],
+            )
+        if releasable_session_ids:
+            connection.executemany(
+                "DELETE FROM vnext_realtime_event_ledger WHERE session_id = ?",
+                [(session_id,) for session_id in releasable_session_ids],
+            )
+            connection.executemany(
+                """UPDATE vnext_realtime_asr_sessions SET payload_released_at = ?
+                     WHERE session_id = ?""",
+                [(now, session_id) for session_id in releasable_session_ids],
+            )
+        referenced = {
+            str(row["encrypted_spool_locator"])
+            for row in connection.execute(
+                "SELECT encrypted_spool_locator FROM vnext_realtime_chunk_checkpoints"
+            ).fetchall()
+        }
+        connection.commit()
+    orphaned = vnext_realtime_crypto.delete_orphan_chunks(
+        referenced,
+        older_than_epoch=effective_now - max(60, int(orphan_grace_seconds)),
+    )
+    return {
+        "expired_sessions": len(expired_session_ids),
+        "released_checkpoints": len(deleted_locators),
+        "orphan_files": int(orphaned["files"]),
+        "orphan_bytes": int(orphaned["bytes"]),
+    }

@@ -55,10 +55,11 @@ async def test_realtime_pipeline_persists_before_publish(
 
     monkeypatch.setattr(
         vnext_realtime_pipeline.vnext_realtime_store,
-        "get_realtime_snapshot",
+        "get_realtime_pipeline_resume",
         lambda *_args, **_kwargs: {
             "session": {"last_durable_event_seq": 0},
-            "events": [],
+            "stable_segments": [],
+            "last_stable": None,
         },
     )
 
@@ -95,6 +96,16 @@ async def test_realtime_pipeline_persists_before_publish(
         "append_durable_event",
         append_event,
     )
+    monkeypatch.setattr(
+        vnext_realtime_pipeline.vnext_realtime_store,
+        "append_terminal_event_and_complete_task",
+        append_event,
+    )
+    monkeypatch.setattr(
+        vnext_realtime_pipeline.vnext_realtime_store,
+        "advance_chunk_consumption",
+        lambda *_args, **_kwargs: ["chunk:one"],
+    )
 
     async def vad_factory():
         return OneSegmentVad(emit_segment)
@@ -124,6 +135,10 @@ async def test_realtime_pipeline_persists_before_publish(
         context,
         "realtime-session-1",
         "a" * 32,
+        "transcription-task-1",
+        "b" * 32,
+        "transcription-attempt-1",
+        "realtime:realtime-session-1",
         send_event,
         vad_factory=vad_factory,
         asr_call=asr_call,

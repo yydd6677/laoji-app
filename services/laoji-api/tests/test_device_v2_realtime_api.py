@@ -7,6 +7,7 @@ import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api import device_v2_realtime
 from app.services.device_v2_identity import DeviceV2Context
@@ -41,6 +42,61 @@ def test_chunk_frame_requires_exact_pcm_hash() -> None:
     else:
         raise AssertionError("mismatched realtime PCM hash was accepted")
 
+    malformed = bytearray(frame(0, pcm))
+    prefix_size = struct.calcsize(">4sBH")
+    _, _, header_size = struct.unpack_from(">4sBH", malformed)
+    header_payload = json.loads(
+        bytes(malformed[prefix_size:prefix_size + header_size]).decode()
+    )
+    header_payload["end_ms"] = 200
+    encoded = json.dumps(header_payload, separators=(",", ":")).encode()
+    malformed = bytearray(struct.pack(">4sBH", b"LJPC", 2, len(encoded)) + encoded + pcm)
+    try:
+        device_v2_realtime._decode_chunk_frame(bytes(malformed))
+    except ValueError as error:
+        assert str(error) == "realtime_pcm_timeline_mismatch"
+    else:
+        raise AssertionError("PCM duration mismatch was accepted")
+
+
+@pytest.mark.asyncio
+async def test_realtime_replay_pages_to_fixed_durable_cursor(monkeypatch) -> None:
+    context = DeviceV2Context("device-1", "epoch-1", 1, 1)
+    events = [
+        {"event_seq": index, "encrypted_payload": str(index).encode()}
+        for index in range(1, 301)
+    ]
+
+    def snapshot(_context, _session_id, *, after_event_seq, limit):
+        page = [event for event in events if event["event_seq"] > after_event_seq][:limit]
+        return {"session": {"session_id": "session-1"}, "events": page}
+
+    monkeypatch.setattr(
+        device_v2_realtime.vnext_realtime_store, "get_realtime_snapshot", snapshot,
+    )
+    monkeypatch.setattr(
+        device_v2_realtime.vnext_realtime_crypto,
+        "open_event",
+        lambda _identity, payload: json.dumps({"event_seq": int(payload)}).encode(),
+    )
+
+    class Socket:
+        def __init__(self):
+            self.events = []
+
+        async def send_json(self, payload):
+            self.events.append(payload)
+
+    socket = Socket()
+    await device_v2_realtime._replay_events(
+        socket,
+        context,
+        "session-1",
+        after_event_seq=0,
+        through_event_seq=300,
+    )
+    assert [event["event_seq"] for event in socket.events] == list(range(1, 301))
+
 
 def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
     context = DeviceV2Context("device-1", "epoch-1", 1, 1)
@@ -55,6 +111,9 @@ def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
 
         def notify_chunk(self):
             calls.append("pipeline-notify")
+
+        def ensure_available(self):
+            return None
 
         async def finalize(self):
             calls.append("pipeline-finalize")
@@ -73,6 +132,11 @@ def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
         "authenticate_bearer",
         lambda *_args: context,
     )
+    monkeypatch.setattr(
+        device_v2_realtime.vnext_task_store,
+        "claim_attempt",
+        lambda *_args, **_kwargs: {"attempt_id": "transcription-attempt-1"},
+    )
 
     def open_session(_context, **kwargs):
         calls.append("open")
@@ -88,8 +152,22 @@ def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
         device_v2_realtime.vnext_realtime_store,
         "get_realtime_snapshot",
         lambda *_args, **_kwargs: {
-            "session": {"session_id": "realtime-session-1"},
+            "session": {
+                "session_id": "realtime-session-1",
+                "last_durable_event_seq": 0,
+            },
             "events": [],
+        },
+    )
+    monkeypatch.setattr(
+        device_v2_realtime.vnext_realtime_store,
+        "claim_realtime_worker",
+        lambda *_args, **_kwargs: {
+            "session_id": "realtime-session-1",
+            "task_id": "transcription-task-1",
+            "last_contiguous_chunk_seq": -1,
+            "last_durable_event_seq": 0,
+            "state": "open",
         },
     )
 
@@ -113,6 +191,17 @@ def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
         lambda *_args, **_kwargs: {
             "last_contiguous_chunk_seq": 0,
             "last_durable_event_seq": 0,
+        },
+    )
+    monkeypatch.setattr(
+        device_v2_realtime.vnext_realtime_store,
+        "acknowledge_events",
+        lambda *_args, **_kwargs: {
+            "schema_version": 2,
+            "session_id": "realtime-session-1",
+            "acked_through": 0,
+            "last_durable_event_seq": 0,
+            "server_payload_released": True,
         },
     )
 
@@ -158,3 +247,9 @@ def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
         websocket.send_json({"schema_version": 2, "type": "session.finalize"})
         assert websocket.receive_json()["type"] == "session.finalizing"
         assert websocket.receive_json()["type"] == "session.complete"
+        websocket.send_json({
+            "schema_version": 2,
+            "type": "events.ack",
+            "through_event_seq": 0,
+        })
+        assert websocket.receive_json()["type"] == "events.acked"

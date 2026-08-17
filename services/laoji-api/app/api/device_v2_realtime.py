@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 import struct
 from typing import Literal
 
@@ -17,6 +18,7 @@ from app.services import (
     vnext_realtime_crypto,
     vnext_realtime_pipeline,
     vnext_realtime_store,
+    vnext_task_store,
 )
 
 
@@ -78,6 +80,9 @@ def _decode_chunk_frame(frame: bytes) -> tuple[RealtimeChunkHeaderV2, bytes]:
     actual_sha256 = "sha256:" + hashlib.sha256(pcm).hexdigest()
     if header.content_sha256 != actual_sha256:
         raise ValueError("realtime_pcm_hash_mismatch")
+    expected_bytes = (header.end_ms - header.start_ms) * 32
+    if header.end_ms <= header.start_ms or abs(len(pcm) - expected_bytes) > 31:
+        raise ValueError("realtime_pcm_timeline_mismatch")
     return header, pcm
 
 
@@ -111,20 +116,85 @@ async def _send_store_error(websocket: WebSocket, error: Exception) -> None:
 
 async def _replay_events(
     websocket: WebSocket,
-    snapshot: dict,
+    context: device_v2_identity.DeviceV2Context,
+    session_id: str,
+    *,
+    after_event_seq: int,
+    through_event_seq: int,
 ) -> None:
-    session_id = str(snapshot["session"]["session_id"])
-    for event in snapshot["events"]:
-        event_seq = int(event["event_seq"])
-        identity = f"{session_id}:event:{event_seq}"
-        payload = vnext_realtime_crypto.open_event(identity, bytes(event["encrypted_payload"]))
-        await websocket.send_json(json.loads(payload.decode("utf-8")))
+    if after_event_seq > through_event_seq:
+        raise vnext_realtime_store.VNextRealtimeError(
+            "EVENT_CURSOR_AHEAD", "转写事件游标超出服务端进度", 409,
+        )
+    cursor = after_event_seq
+    while cursor < through_event_seq:
+        snapshot = await asyncio.to_thread(
+            vnext_realtime_store.get_realtime_snapshot,
+            context,
+            session_id,
+            after_event_seq=cursor,
+            limit=256,
+        )
+        if snapshot is None or not snapshot["events"]:
+            raise vnext_realtime_store.VNextRealtimeError(
+                "EVENT_REPLAY_UNAVAILABLE", "转写事件已由设备确认并释放", 409,
+            )
+        for event in snapshot["events"]:
+            event_seq = int(event["event_seq"])
+            if event_seq > through_event_seq:
+                return
+            identity = f"{session_id}:event:{event_seq}"
+            payload = vnext_realtime_crypto.open_event(
+                identity, bytes(event["encrypted_payload"]),
+            )
+            await websocket.send_json(json.loads(payload.decode("utf-8")))
+            cursor = event_seq
+
+
+async def _await_terminal_ack(
+    websocket: WebSocket,
+    context: device_v2_identity.DeviceV2Context,
+    bearer: tuple[str, str, str],
+    session_id: str,
+    final_event_seq: int,
+) -> None:
+    while True:
+        try:
+            message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+        except TimeoutError:
+            return
+        if message["type"] == "websocket.disconnect":
+            return
+        await asyncio.to_thread(device_v2_identity.authenticate_bearer, *bearer)
+        raw = message.get("text")
+        if raw is None:
+            raise ValueError("realtime_terminal_ack_invalid")
+        control = RealtimeControlV2.model_validate_json(raw)
+        if control.type != "events.ack" or control.through_event_seq is None:
+            raise ValueError("realtime_terminal_ack_invalid")
+        ack = await asyncio.to_thread(
+            vnext_realtime_store.acknowledge_events,
+            context,
+            session_id,
+            control.through_event_seq,
+        )
+        await websocket.send_json({
+            "schema_version": 2,
+            "type": "events.acked",
+            **{key: value for key, value in ack.items() if key != "schema_version"},
+        })
+        if control.through_event_seq >= final_event_seq:
+            return
 
 
 @router.websocket("/realtime/{session_id}")
 async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
     pipeline = None
+    attempt = None
+    worker_generation = None
+    lease_owner = None
+    context = None
     try:
         context, bearer = await _authenticate(websocket)
         raw_open = await websocket.receive_text()
@@ -144,16 +214,49 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
             codec_revision=opened.codec_revision,
             expires_at_epoch=opened.expires_at_epoch,
         )
-        snapshot = await asyncio.to_thread(
-            vnext_realtime_store.get_realtime_snapshot,
+        if session["state"] == "succeeded":
+            await websocket.send_json({
+                "schema_version": 2,
+                "type": "session.ready",
+                "reused": reused,
+                "last_contiguous_chunk_seq": int(session["last_contiguous_chunk_seq"]),
+                "last_durable_event_seq": int(session["last_durable_event_seq"]),
+                "state": session["state"],
+            })
+            await _replay_events(
+                websocket,
+                context,
+                session_id,
+                after_event_seq=opened.after_event_seq,
+                through_event_seq=int(session["last_durable_event_seq"]),
+            )
+            await websocket.send_json({"schema_version": 2, "type": "session.complete"})
+            await _await_terminal_ack(
+                websocket,
+                context,
+                bearer,
+                session_id,
+                int(session["last_durable_event_seq"]),
+            )
+            return
+        worker_generation = secrets.token_hex(16)
+        lease_owner = f"realtime:{session_id}"
+        attempt = await asyncio.to_thread(
+            vnext_task_store.claim_attempt,
+            context,
+            opened.task_id,
+            lease_owner=lease_owner,
+        )
+        if attempt is None:
+            raise vnext_realtime_store.VNextRealtimeError(
+                "TRANSCRIPT_TASK_BUSY", "实时转写任务正在由其他执行处理", 409,
+            )
+        session = await asyncio.to_thread(
+            vnext_realtime_store.claim_realtime_worker,
             context,
             session_id,
-            after_event_seq=opened.after_event_seq,
+            worker_generation,
         )
-        if snapshot is None:
-            raise vnext_realtime_store.VNextRealtimeError(
-                "REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404,
-            )
         await websocket.send_json({
             "schema_version": 2,
             "type": "session.ready",
@@ -162,11 +265,21 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
             "last_durable_event_seq": int(session["last_durable_event_seq"]),
             "state": session["state"],
         })
-        await _replay_events(websocket, snapshot)
+        await _replay_events(
+            websocket,
+            context,
+            session_id,
+            after_event_seq=opened.after_event_seq,
+            through_event_seq=int(session["last_durable_event_seq"]),
+        )
         pipeline = vnext_realtime_pipeline.VNextRealtimeTextPipeline(
             context,
             session_id,
             opened.asset_generation,
+            opened.task_id,
+            worker_generation,
+            str(attempt["attempt_id"]),
+            lease_owner,
             websocket.send_json,
         )
         pipeline.start()
@@ -175,6 +288,7 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
+            pipeline.ensure_available()
             # Re-check the short bearer on every durable mutation. A client
             # reconnects with a refreshed token and resumes from both cursors.
             await asyncio.to_thread(device_v2_identity.authenticate_bearer, *bearer)
@@ -191,17 +305,26 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
                     content_sha256=content_sha256,
                     pcm_bytes=pcm,
                 )
-                ack = await asyncio.to_thread(
-                    vnext_realtime_store.append_chunk_checkpoint,
-                    context,
-                    session_id,
-                    chunk_seq=header.chunk_seq,
-                    start_ms=header.start_ms,
-                    end_ms=header.end_ms,
-                    byte_size=len(pcm),
-                    content_sha256=content_sha256,
-                    encrypted_spool_locator=locator,
-                )
+                try:
+                    ack = await asyncio.to_thread(
+                        vnext_realtime_store.append_chunk_checkpoint,
+                        context,
+                        session_id,
+                        chunk_seq=header.chunk_seq,
+                        start_ms=header.start_ms,
+                        end_ms=header.end_ms,
+                        byte_size=len(pcm),
+                        content_sha256=content_sha256,
+                        encrypted_spool_locator=locator,
+                        worker_generation=worker_generation,
+                    )
+                except Exception:
+                    referenced = await asyncio.to_thread(
+                        vnext_realtime_store.is_spool_locator_referenced, locator,
+                    )
+                    if not referenced:
+                        await asyncio.to_thread(vnext_realtime_crypto.delete_chunk, locator)
+                    raise
                 await websocket.send_json({
                     "schema_version": 2,
                     "type": "audio.ack",
@@ -234,6 +357,7 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
                     vnext_realtime_store.mark_session_finalizing,
                     context,
                     session_id,
+                    worker_generation,
                 )
                 await websocket.send_json({
                     "schema_version": 2,
@@ -246,12 +370,57 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
                     "schema_version": 2,
                     "type": "session.complete",
                 })
+                terminal = await asyncio.to_thread(
+                    vnext_realtime_store.get_realtime_snapshot,
+                    context,
+                    session_id,
+                )
+                if terminal is None:
+                    raise vnext_realtime_store.VNextRealtimeError(
+                        "REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404,
+                    )
+                await _await_terminal_ack(
+                    websocket,
+                    context,
+                    bearer,
+                    session_id,
+                    int(terminal["session"]["last_durable_event_seq"]),
+                )
                 return
     except WebSocketDisconnect:
         return
     except device_v2_identity.DeviceV2IdentityError as error:
         await _send_store_error(websocket, error)
         await websocket.close(code=4401)
+    except vnext_realtime_pipeline.VNextRealtimePipelineFailure as error:
+        cause = error.cause
+        fenced = (
+            isinstance(cause, vnext_realtime_store.VNextRealtimeError)
+            and cause.code == "REALTIME_WORKER_FENCED"
+        )
+        if (
+            not fenced
+            and context is not None
+            and worker_generation is not None
+            and attempt is not None
+            and lease_owner is not None
+        ):
+            await asyncio.to_thread(
+                vnext_realtime_store.mark_realtime_attempt_failure,
+                context,
+                session_id,
+                worker_generation=worker_generation,
+                attempt_id=str(attempt["attempt_id"]),
+                lease_owner=lease_owner,
+                error_code="REALTIME_PIPELINE_UNAVAILABLE",
+            )
+        await websocket.send_json({
+            "schema_version": 2,
+            "type": "error",
+            "code": "REALTIME_WORKER_FENCED" if fenced else "REALTIME_PIPELINE_UNAVAILABLE",
+            "message": "实时转写已由新的连接接替" if fenced else "实时转写暂时不可用，音频已安全保存",
+        })
+        await websocket.close(code=4409 if fenced else 1011)
     except (ValidationError, ValueError, vnext_realtime_store.VNextRealtimeError) as error:
         await _send_store_error(websocket, error)
         await websocket.close(code=4400)

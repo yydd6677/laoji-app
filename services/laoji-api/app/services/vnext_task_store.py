@@ -443,58 +443,98 @@ def create_task(
         raise VNextTaskError("REVISION_INVALID", "实体 revision 无效", 422)
     if creation_reason not in {"original", "retry", "regenerate"}:
         raise VNextTaskError("CREATION_REASON_INVALID", "任务生成原因无效", 422)
-    now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        binding = _binding_row(connection, context, binding_id)
-        if binding is None or str(binding["binding_generation"]) != binding_generation:
-            connection.rollback()
-            raise VNextTaskError("BINDING_REQUIRED", "会议服务连接未登记", 428)
-        if binding["state"] != "active":
-            connection.rollback()
-            raise VNextTaskError("BINDING_PURGING", "会议服务连接正在清理", 409)
-        existing = connection.execute(
-            "SELECT * FROM vnext_tasks WHERE task_id = ?",
-            (task_id,),
-        ).fetchone()
-        if existing is not None:
-            same = (
-                existing["device_id"] == context.device_id
-                and existing["epoch_id"] == context.epoch_id
-                and existing["binding_id"] == binding_id
-                and existing["binding_generation"] == binding_generation
-                and existing["capability"] == capability
-                and existing["entity_id"] == entity_id
-                and int(existing["entity_revision"]) == entity_revision
-                and existing["input_sha256"] == input_sha256
-                and existing["generation_id"] == generation_id
-            )
-            if not same:
-                connection.rollback()
-                raise VNextTaskError("TASK_ID_CONFLICT", "任务 ID 已绑定其他输入", 409)
-            connection.commit()
-            decoded = _decode_task(existing)
-            assert decoded is not None
-            return decoded, True
-        connection.execute(
-            """INSERT INTO vnext_tasks(
-                 task_id, device_id, epoch_id, binding_id, binding_generation,
-                 capability, entity_id, entity_revision, input_sha256, generation_id,
-                 predecessor_task_id, creation_reason, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                task_id, context.device_id, context.epoch_id, binding_id,
-                binding_generation, capability, entity_id, entity_revision,
-                input_sha256, generation_id, predecessor_task_id, creation_reason,
-                now, now,
-            ),
+        row, reused = create_task_in_transaction(
+            connection,
+            context,
+            task_id=task_id,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            capability=capability,
+            entity_id=entity_id,
+            entity_revision=entity_revision,
+            input_sha256=input_sha256,
+            generation_id=generation_id,
+            predecessor_task_id=predecessor_task_id,
+            creation_reason=creation_reason,
         )
-        row = connection.execute("SELECT * FROM vnext_tasks WHERE task_id = ?", (task_id,)).fetchone()
         connection.commit()
-    assert row is not None
     decoded = _decode_task(row)
     assert decoded is not None
-    return decoded, False
+    return decoded, reused
+
+
+def create_task_in_transaction(
+    connection: Any,
+    context: TaskOwnerContext,
+    *,
+    task_id: str,
+    binding_id: str,
+    binding_generation: str,
+    capability: str,
+    entity_id: str,
+    entity_revision: int,
+    input_sha256: str,
+    generation_id: str,
+    predecessor_task_id: str | None = None,
+    creation_reason: DeviceOperationReason = "original",
+) -> tuple[Any, bool]:
+    """Create or replay a Task inside a domain owner's existing transaction."""
+    task_id = _safe(task_id, "task_id")
+    binding_id = _safe(binding_id, "binding_id")
+    binding_generation = _safe(binding_generation, "binding_generation", 256)
+    capability = _safe(capability, "capability", 120)
+    entity_id = _safe(entity_id, "entity_id")
+    generation_id = _safe(generation_id, "generation_id")
+    input_sha256 = _sha256(input_sha256)
+    if not isinstance(entity_revision, int) or entity_revision < 1:
+        raise VNextTaskError("REVISION_INVALID", "实体 revision 无效", 422)
+    if creation_reason not in {"original", "retry", "regenerate"}:
+        raise VNextTaskError("CREATION_REASON_INVALID", "任务生成原因无效", 422)
+    binding = _binding_row(connection, context, binding_id)
+    if binding is None or str(binding["binding_generation"]) != binding_generation:
+        raise VNextTaskError("BINDING_REQUIRED", "会议服务连接未登记", 428)
+    if binding["state"] != "active":
+        raise VNextTaskError("BINDING_PURGING", "会议服务连接正在清理", 409)
+    existing = connection.execute(
+        "SELECT * FROM vnext_tasks WHERE task_id = ?",
+        (task_id,),
+    ).fetchone()
+    if existing is not None:
+        same = (
+            existing["device_id"] == context.device_id
+            and existing["epoch_id"] == context.epoch_id
+            and existing["binding_id"] == binding_id
+            and existing["binding_generation"] == binding_generation
+            and existing["capability"] == capability
+            and existing["entity_id"] == entity_id
+            and int(existing["entity_revision"]) == entity_revision
+            and existing["input_sha256"] == input_sha256
+            and existing["generation_id"] == generation_id
+        )
+        if not same:
+            raise VNextTaskError("TASK_ID_CONFLICT", "任务 ID 已绑定其他输入", 409)
+        return existing, True
+    now = utc_now()
+    connection.execute(
+        """INSERT INTO vnext_tasks(
+             task_id, device_id, epoch_id, binding_id, binding_generation,
+             capability, entity_id, entity_revision, input_sha256, generation_id,
+             predecessor_task_id, creation_reason, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            task_id, context.device_id, context.epoch_id, binding_id,
+            binding_generation, capability, entity_id, entity_revision,
+            input_sha256, generation_id, predecessor_task_id, creation_reason,
+            now, now,
+        ),
+    )
+    row = connection.execute(
+        "SELECT * FROM vnext_tasks WHERE task_id = ?", (task_id,),
+    ).fetchone()
+    assert row is not None
+    return row, False
 
 
 def get_task(context: TaskOwnerContext, task_id: str) -> dict[str, Any] | None:
@@ -548,6 +588,24 @@ def claim_attempt(
             connection.commit()
             assert row is not None
             return dict(row)
+        if (
+            current is not None
+            and current["state"] == "running"
+            and current["lease_owner"] == owner
+        ):
+            connection.execute(
+                """UPDATE vnext_task_attempts
+                      SET lease_expires_at_epoch = ?, updated_at = ?
+                    WHERE attempt_id = ?""",
+                (expires, now, current["attempt_id"]),
+            )
+            row = connection.execute(
+                "SELECT * FROM vnext_task_attempts WHERE attempt_id = ?",
+                (current["attempt_id"],),
+            ).fetchone()
+            connection.commit()
+            assert row is not None
+            return dict(row)
         if current is not None and current["state"] == "running" and current["lease_expires_at_epoch"] > now_epoch:
             connection.rollback()
             return None
@@ -595,31 +653,63 @@ def mark_success(
     task_id = _safe(task_id, "task_id")
     attempt_id = _safe(attempt_id, "attempt_id")
     owner = _safe(lease_owner or f"{socket.gethostname()}:{os.getpid()}", "lease_owner", 200)
-    now = utc_now()
-    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        attempt = connection.execute(
-            """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
-               WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
-            (attempt_id, task_id, context.device_id, context.epoch_id),
-        ).fetchone()
-        if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
+        completed = mark_success_in_transaction(
+            connection,
+            context,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            result=result,
+            result_kind=result_kind,
+            lease_owner=owner,
+        )
+        if completed:
+            connection.commit()
+        else:
             connection.rollback()
-            return False
-        connection.execute(
-            "UPDATE vnext_task_attempts SET state = 'succeeded', phase = 'committing', updated_at = ?, terminal_at = ? WHERE attempt_id = ?",
-            (now, now, attempt_id),
-        )
-        cursor = connection.execute(
-            """UPDATE vnext_tasks
-                  SET state = 'success', result_kind = ?, result_json = ?, error_code = NULL,
-                      updated_at = ?, terminal_at = ?
-                WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
-            (result_kind, encoded, now, now, task_id, attempt_id),
-        )
-        connection.commit()
-        return cursor.rowcount == 1
+        return completed
+
+
+def mark_success_in_transaction(
+    connection: Any,
+    context: TaskOwnerContext,
+    *,
+    task_id: str,
+    attempt_id: str,
+    result: Any,
+    result_kind: Literal["artifact", "content_outcome"] = "artifact",
+    lease_owner: str,
+) -> bool:
+    """Commit an attempt terminal inside the domain artifact transaction."""
+    task_id = _safe(task_id, "task_id")
+    attempt_id = _safe(attempt_id, "attempt_id")
+    owner = _safe(lease_owner, "lease_owner", 200)
+    if result_kind not in {"artifact", "content_outcome"}:
+        raise VNextTaskError("RESULT_KIND_INVALID", "任务结果类型无效", 422)
+    now = utc_now()
+    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    attempt = connection.execute(
+        """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
+           WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
+        (attempt_id, task_id, context.device_id, context.epoch_id),
+    ).fetchone()
+    if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
+        return False
+    connection.execute(
+        """UPDATE vnext_task_attempts
+              SET state = 'succeeded', phase = 'committing', updated_at = ?, terminal_at = ?
+            WHERE attempt_id = ?""",
+        (now, now, attempt_id),
+    )
+    cursor = connection.execute(
+        """UPDATE vnext_tasks
+              SET state = 'success', result_kind = ?, result_json = ?, error_code = NULL,
+                  updated_at = ?, terminal_at = ?
+            WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
+        (result_kind, encoded, now, now, task_id, attempt_id),
+    )
+    return cursor.rowcount == 1
 
 
 def mark_failure(
@@ -635,32 +725,63 @@ def mark_failure(
     task_id = _safe(task_id, "task_id")
     attempt_id = _safe(attempt_id, "attempt_id")
     owner = _safe(lease_owner or f"{socket.gethostname()}:{os.getpid()}", "lease_owner", 200)
-    code = _safe(error_code, "error_code", 160)
-    now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        attempt = connection.execute(
-            """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
-               WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
-            (attempt_id, task_id, context.device_id, context.epoch_id),
-        ).fetchone()
-        if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
+        marked = mark_failure_in_transaction(
+            connection,
+            context,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            error_code=error_code,
+            retryable=retryable,
+            lease_owner=owner,
+        )
+        if marked:
+            connection.commit()
+        else:
             connection.rollback()
-            return False
-        next_state: AttemptState = "retryable_failure" if retryable else "terminal_failure"
-        connection.execute(
-            "UPDATE vnext_task_attempts SET state = ?, phase = 'committing', error_code = ?, updated_at = ?, terminal_at = ? WHERE attempt_id = ?",
-            (next_state, code, now, now, attempt_id),
-        )
-        task_state: TaskState = "active" if retryable and int(attempt["attempt_number"]) < MAX_ATTEMPTS else "failure"
-        cursor = connection.execute(
-            """UPDATE vnext_tasks SET state = ?, error_code = ?, updated_at = ?,
-                      terminal_at = CASE WHEN ? = 'failure' THEN ? ELSE NULL END
-               WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
-            (task_state, code, now, task_state, now, task_id, attempt_id),
-        )
-        connection.commit()
-        return cursor.rowcount == 1
+        return marked
+
+
+def mark_failure_in_transaction(
+    connection: Any,
+    context: TaskOwnerContext,
+    *,
+    task_id: str,
+    attempt_id: str,
+    error_code: str,
+    retryable: bool,
+    lease_owner: str,
+) -> bool:
+    task_id = _safe(task_id, "task_id")
+    attempt_id = _safe(attempt_id, "attempt_id")
+    owner = _safe(lease_owner, "lease_owner", 200)
+    code = _safe(error_code, "error_code", 160)
+    now = utc_now()
+    attempt = connection.execute(
+        """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
+           WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
+        (attempt_id, task_id, context.device_id, context.epoch_id),
+    ).fetchone()
+    if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
+        return False
+    next_state: AttemptState = "retryable_failure" if retryable else "terminal_failure"
+    connection.execute(
+        """UPDATE vnext_task_attempts
+              SET state = ?, phase = 'committing', error_code = ?, updated_at = ?, terminal_at = ?
+            WHERE attempt_id = ?""",
+        (next_state, code, now, now, attempt_id),
+    )
+    task_state: TaskState = (
+        "active" if retryable and int(attempt["attempt_number"]) < MAX_ATTEMPTS else "failure"
+    )
+    cursor = connection.execute(
+        """UPDATE vnext_tasks SET state = ?, error_code = ?, updated_at = ?,
+                  terminal_at = CASE WHEN ? = 'failure' THEN ? ELSE NULL END
+           WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
+        (task_state, code, now, task_state, now, task_id, attempt_id),
+    )
+    return cursor.rowcount == 1
 
 
 def cancel_task(context: TaskOwnerContext, task_id: str) -> bool:

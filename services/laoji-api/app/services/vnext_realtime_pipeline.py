@@ -21,6 +21,12 @@ SendEvent = Callable[[dict[str, Any]], Awaitable[None]]
 AsrCall = Callable[..., dict[str, Any]]
 
 
+class VNextRealtimePipelineFailure(RuntimeError):
+    def __init__(self, cause: Exception):
+        super().__init__("vnext_realtime_pipeline_failed")
+        self.cause = cause
+
+
 async def _create_vad():
     from app.asr.model_manager import get_model_manager
     from app.asr.streaming_vad import StreamingVAD
@@ -59,6 +65,10 @@ class VNextRealtimeTextPipeline:
         context,
         session_id: str,
         asset_generation: str,
+        task_id: str,
+        worker_generation: str,
+        attempt_id: str,
+        lease_owner: str,
         send_event: SendEvent,
         *,
         vad_factory: Callable[[], Awaitable[Any]] = _create_vad,
@@ -67,6 +77,10 @@ class VNextRealtimeTextPipeline:
         self.context = context
         self.session_id = session_id
         self.asset_generation = asset_generation
+        self.task_id = task_id
+        self.worker_generation = worker_generation
+        self.attempt_id = attempt_id
+        self.lease_owner = lease_owner
         self.send_event = send_event
         self.vad_factory = vad_factory
         self.asr_call = asr_call
@@ -81,6 +95,8 @@ class VNextRealtimeTextPipeline:
         self._last_source_end_ms = 0
         self._last_model_revision = "no-asr-inference"
         self._vad = None
+        self._known_segment_keys: set[str] = set()
+        self._checkpoint_ready = False
 
     def start(self) -> None:
         if self._task is None:
@@ -95,8 +111,11 @@ class VNextRealtimeTextPipeline:
         self._wake.set()
         if self._task is not None:
             await self._task
+        self.ensure_available()
+
+    def ensure_available(self) -> None:
         if self._failure is not None:
-            raise self._failure
+            raise VNextRealtimePipelineFailure(self._failure) from self._failure
 
     async def close(self) -> None:
         if self._task is None or self._task.done():
@@ -109,18 +128,35 @@ class VNextRealtimeTextPipeline:
 
     async def _run(self) -> None:
         try:
-            snapshot = await asyncio.to_thread(
-                vnext_realtime_store.get_realtime_snapshot,
+            resume = await asyncio.to_thread(
+                vnext_realtime_store.get_realtime_pipeline_resume,
                 self.context,
                 self.session_id,
             )
-            if snapshot is None:
-                raise RuntimeError("vnext_realtime_session_missing")
-            self._last_event_seq = int(snapshot["session"]["last_durable_event_seq"])
+            self._last_event_seq = int(resume["session"]["last_durable_event_seq"])
             self._text_event_count = sum(
-                1 for event in snapshot["events"]
-                if event["event_kind"] == "stable" and event["outcome"] == "text"
+                1 for event in resume["stable_segments"]
+                if event["outcome"] == "text"
             )
+            self._known_segment_keys = {
+                str(event["stable_segment_key"])
+                for event in resume["stable_segments"]
+                if event["stable_segment_key"]
+            }
+            if resume["stable_segments"]:
+                self._last_source_end_ms = max(
+                    int(event["source_end_ms"]) for event in resume["stable_segments"]
+                )
+                persisted = resume["last_stable"]
+                if persisted is not None:
+                    identity = f"{self.session_id}:event:{int(persisted['event_seq'])}"
+                    plaintext = vnext_realtime_crypto.open_event(
+                        identity, bytes(persisted["encrypted_payload"]),
+                    )
+                    decoded = json.loads(plaintext.decode("utf-8"))
+                    self._last_model_revision = str(
+                        decoded.get("model_revision") or self._last_model_revision
+                    )
             self._vad = await self.vad_factory()
             while True:
                 await self._wake.wait()
@@ -152,12 +188,28 @@ class VNextRealtimeTextPipeline:
                 self._timeline_offset_ms = int(chunk["start_ms"])
             self._last_source_end_ms = max(self._last_source_end_ms, int(chunk["end_ms"]))
             audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-            segment = await asyncio.to_thread(self._vad.feed, audio)
+            segments = []
+            for offset in range(0, len(audio), 512):
+                segment = await asyncio.to_thread(self._vad.feed, audio[offset:offset + 512])
+                if segment is not None:
+                    segments.append(segment)
             self._last_fed_chunk_seq = chunk_seq
-            if segment is not None:
-                await self._publish_segment(segment, chunk_seq, chunks)
+            for segment in segments:
+                self._checkpoint_ready = True
+                await self._publish_segment(segment)
+            if self._checkpoint_ready and getattr(self._vad, "state", "idle") == "idle":
+                locators = await asyncio.to_thread(
+                    vnext_realtime_store.advance_chunk_consumption,
+                    self.context,
+                    self.session_id,
+                    through_chunk_seq=chunk_seq,
+                    worker_generation=self.worker_generation,
+                )
+                for locator in locators:
+                    await asyncio.to_thread(vnext_realtime_crypto.delete_chunk, locator)
+                self._checkpoint_ready = False
 
-    async def _publish_segment(self, segment, consume_through: int, chunks: list[dict]) -> None:
+    async def _publish_segment(self, segment) -> None:
         offset = self._timeline_offset_ms or 0
         source_start_ms = offset + int(segment.start_ms)
         source_end_ms = offset + int(segment.end_ms)
@@ -165,6 +217,8 @@ class VNextRealtimeTextPipeline:
             f"{self.asset_generation}\0{source_start_ms}\0{source_end_ms}"
         ).encode("utf-8")
         stable_key = "segment:" + hashlib.sha256(identity_seed).hexdigest()[:40]
+        if stable_key in self._known_segment_keys:
+            return
         pcm16 = (np.clip(segment.audio_data, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
         result = await asyncio.to_thread(
             self.asr_call,
@@ -207,16 +261,11 @@ class VNextRealtimeTextPipeline:
             source_end_ms=source_end_ms,
             payload_sha256="sha256:" + hashlib.sha256(payload).hexdigest(),
             encrypted_payload=envelope,
-            consume_through_chunk_seq=consume_through,
+            worker_generation=self.worker_generation,
         )
+        self._known_segment_keys.add(stable_key)
         if result["outcome"] == "text":
             self._text_event_count += 1
-        for chunk in chunks:
-            if int(chunk["chunk_seq"]) <= consume_through:
-                await asyncio.to_thread(
-                    vnext_realtime_crypto.delete_chunk,
-                    str(chunk["encrypted_spool_locator"]),
-                )
         await self.send_event(event)
 
     async def _finish(self) -> None:
@@ -226,8 +275,7 @@ class VNextRealtimeTextPipeline:
             self.session_id,
         )
         for segment in await asyncio.to_thread(_flush_vad, self._vad):
-            consume_through = self._last_fed_chunk_seq
-            await self._publish_segment(segment, consume_through, remaining)
+            await self._publish_segment(segment)
         self._last_event_seq += 1
         outcome = "text" if self._text_event_count else "no_speech"
         event = TranscriptStreamEventV2(
@@ -241,7 +289,7 @@ class VNextRealtimeTextPipeline:
             text_state="final",
             outcome=outcome,
             text="",
-            source_start_ms=self._timeline_offset_ms or 0,
+            source_start_ms=0,
             source_end_ms=max(
                 [self._last_source_end_ms]
                 + [int(chunk["end_ms"]) for chunk in remaining]
@@ -253,13 +301,10 @@ class VNextRealtimeTextPipeline:
             f"{self.session_id}:event:{self._last_event_seq}", payload,
         )
         await asyncio.to_thread(
-            vnext_realtime_store.append_durable_event,
+            vnext_realtime_store.append_terminal_event_and_complete_task,
             self.context,
             self.session_id,
             event_seq=self._last_event_seq,
-            event_kind="final",
-            stable_segment_key=None,
-            segment_revision=1,
             outcome=outcome,
             source_start_ms=event["source_start_ms"],
             source_end_ms=event["source_end_ms"],
@@ -268,6 +313,9 @@ class VNextRealtimeTextPipeline:
             consume_through_chunk_seq=(
                 self._last_fed_chunk_seq if self._last_fed_chunk_seq >= 0 else None
             ),
+            worker_generation=self.worker_generation,
+            attempt_id=self.attempt_id,
+            lease_owner=self.lease_owner,
         )
         for chunk in remaining:
             await asyncio.to_thread(

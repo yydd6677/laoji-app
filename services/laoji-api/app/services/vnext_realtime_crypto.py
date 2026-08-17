@@ -7,6 +7,7 @@ import hmac
 import os
 from pathlib import Path
 import secrets
+import time
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -129,3 +130,46 @@ def seal_event(event_identity: str, payload: bytes) -> bytes:
 def open_event(event_identity: str, envelope: bytes) -> bytes:
     normalized = str(event_identity or "").strip()
     return _open(envelope, normalized.encode("utf-8"), MAX_EVENT_BYTES)
+
+
+def delete_orphan_chunks(
+    referenced_locators: set[str],
+    *,
+    older_than_epoch: float | None = None,
+) -> dict[str, int]:
+    """Delete only well-formed spool files absent from the canonical ledger."""
+    root = Path(settings.vnext_realtime_spool_abs_path).resolve()
+    if not root.is_dir():
+        return {"files": 0, "bytes": 0}
+    cutoff = time.time() - 3600 if older_than_epoch is None else float(older_than_epoch)
+    deleted_files = 0
+    deleted_bytes = 0
+    for shard in root.iterdir():
+        if not shard.is_dir() or len(shard.name) != 2:
+            continue
+        try:
+            int(shard.name, 16)
+        except ValueError:
+            continue
+        for path in shard.iterdir():
+            if not path.is_file() or path.suffix != ".bin" or len(path.stem) != 64:
+                continue
+            try:
+                int(path.stem, 16)
+                stat = path.stat()
+            except (OSError, ValueError):
+                continue
+            locator = f"chunk:{path.stem}"
+            if locator in referenced_locators or stat.st_mtime > cutoff:
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            deleted_files += 1
+            deleted_bytes += int(stat.st_size)
+        try:
+            shard.rmdir()
+        except OSError:
+            pass
+    return {"files": deleted_files, "bytes": deleted_bytes}

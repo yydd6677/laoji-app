@@ -388,6 +388,20 @@ async def run_meeting_retention_cleanup_once() -> tuple[int, int, int]:
 
     expired_device_rows = await asyncio.to_thread(purge_expired_device_data)
     expired_summary_rows = await asyncio.to_thread(purge_expired_results)
+    try:
+        from app.services.vnext_realtime_store import cleanup_realtime_payloads
+
+        realtime_cleanup = await asyncio.to_thread(cleanup_realtime_payloads)
+        if any(realtime_cleanup.values()):
+            _logger.info(
+                "vnext realtime retention: expired=%s checkpoints=%s orphans=%s bytes=%s",
+                realtime_cleanup["expired_sessions"],
+                realtime_cleanup["released_checkpoints"],
+                realtime_cleanup["orphan_files"],
+                realtime_cleanup["orphan_bytes"],
+            )
+    except Exception as error:
+        _logger.warning("vnext realtime retention cleanup failed: %s", type(error).__name__)
     if expired_device_rows or expired_summary_rows:
         _logger.info(
             "device transient retention cleanup: quality_rows=%s summary_rows=%s",
