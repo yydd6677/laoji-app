@@ -267,6 +267,20 @@ def ensure_vnext_task_schema() -> None:
             connection.execute(
                 "ALTER TABLE vnext_tasks ADD COLUMN retry_not_before_epoch REAL"
             )
+        additive_columns = {
+            "source_stream_id": "TEXT",
+            "source_manifest_sha256": "TEXT",
+            "current_checkpoint_slot": "INTEGER",
+            "checkpoint_through_chapter": "INTEGER",
+            "checkpoint_reservation_id": "TEXT",
+            "result_artifact_id": "TEXT",
+        }
+        task_columns = _table_columns(connection, "vnext_tasks")
+        for column, declaration in additive_columns.items():
+            if column not in task_columns:
+                connection.execute(
+                    f"ALTER TABLE vnext_tasks ADD COLUMN {column} {declaration}"
+                )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_vnext_tasks_retry_ready "
             "ON vnext_tasks(state, retry_not_before_epoch, created_at, task_id)"
@@ -821,19 +835,38 @@ def cancel_task(context: TaskOwnerContext, task_id: str) -> bool:
     now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        cursor = connection.execute(
-            """UPDATE vnext_tasks SET state = 'cancelled', cancel_revision = cancel_revision + 1,
-                      updated_at = ?, terminal_at = ?
-               WHERE task_id = ? AND device_id = ? AND epoch_id = ? AND state = 'active'""",
-            (now, now, task_id, context.device_id, context.epoch_id),
-        )
-        connection.execute(
-            """UPDATE vnext_task_attempts SET state = 'cancelled', updated_at = ?, terminal_at = ?
-               WHERE task_id = ? AND state IN ('queued','running')""",
-            (now, now, task_id),
+        cancelled = cancel_task_in_transaction(
+            connection,
+            context,
+            task_id=task_id,
+            now=now,
         )
         connection.commit()
-        return cursor.rowcount == 1
+        return cancelled
+
+
+def cancel_task_in_transaction(
+    connection: Any,
+    context: TaskOwnerContext,
+    *,
+    task_id: str,
+    now: str | None = None,
+) -> bool:
+    """Fence a Task from a domain owner's existing cancellation transaction."""
+    task_id = _safe(task_id, "task_id")
+    cancelled_at = now or utc_now()
+    cursor = connection.execute(
+        """UPDATE vnext_tasks SET state = 'cancelled', cancel_revision = cancel_revision + 1,
+                  updated_at = ?, terminal_at = ?
+           WHERE task_id = ? AND device_id = ? AND epoch_id = ? AND state = 'active'""",
+        (cancelled_at, cancelled_at, task_id, context.device_id, context.epoch_id),
+    )
+    connection.execute(
+        """UPDATE vnext_task_attempts SET state = 'cancelled', updated_at = ?, terminal_at = ?
+           WHERE task_id = ? AND state IN ('queued','running')""",
+        (cancelled_at, cancelled_at, task_id),
+    )
+    return cursor.rowcount == 1
 
 
 def cancel_binding_tasks(context: TaskOwnerContext, binding_id: str) -> int:

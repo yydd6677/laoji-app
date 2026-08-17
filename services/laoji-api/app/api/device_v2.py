@@ -21,6 +21,7 @@ from app.services import (
     vnext_purge_store,
     vnext_import_transcript_store,
     vnext_import_transcription_pipeline,
+    vnext_source_stream_store,
     vnext_task_store,
     vnext_upload_store,
 )
@@ -29,6 +30,9 @@ from app.schemas.vnext_contracts import (
     ScheduleGraphClarificationRequestV1,
     ScheduleGraphRequestV1,
     ScheduleMentionGraph,
+    SourceBundleItemV2,
+    SourceManifestDescriptorV2,
+    SourceStreamSnapshotV2,
 )
 
 
@@ -166,6 +170,62 @@ class V2TranscriptEventAck(BaseModel):
     projection_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
+class V2SourceStreamCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
+    stream_id: str = Field(min_length=8, max_length=180)
+    task_id: str = Field(min_length=8, max_length=512)
+    binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    binding_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    cancel_revision: int = Field(ge=0, le=9_007_199_254_740_991)
+    client_operation_id: str = Field(min_length=8, max_length=180)
+    generation_id: str = Field(min_length=8, max_length=512)
+    request_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    capability: Literal["summary", "question"]
+    entity_id: str = Field(min_length=1, max_length=512)
+    entity_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    task_input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class V2SourceManifestPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
+    page_seq: int = Field(ge=0, le=9_007_199_254_740_991)
+    first_chapter_ordinal: int = Field(ge=0, le=9_007_199_254_740_991)
+    descriptors: list[SourceManifestDescriptorV2] = Field(min_length=1, max_length=10_000)
+    page_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    final_page: bool = False
+
+
+class V2SourceBundleGroupCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
+    group_id: str = Field(min_length=8, max_length=180)
+    chapter_ordinal: int = Field(ge=0, le=9_007_199_254_740_991)
+    declared_bundle_count: int = Field(ge=1, le=8)
+    declared_item_count: int = Field(ge=1, le=50_000)
+    declared_uncompressed_bytes: int = Field(ge=1, le=128 * 1024 * 1024)
+    chapter_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    request_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class V2SourceBundleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
+    bundle_id: str = Field(min_length=8, max_length=180)
+    ordinal: int = Field(ge=0, le=7)
+    bundle_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    items: list[SourceBundleItemV2] = Field(min_length=1, max_length=50_000)
+
+
 def _error(error: device_v2_identity.DeviceV2IdentityError) -> HTTPException:
     return HTTPException(
         status_code=error.status_code,
@@ -186,6 +246,10 @@ def _upload_error(error: vnext_upload_store.VNextUploadError) -> HTTPException:
 
 
 def _transcript_error(error: vnext_import_transcript_store.VNextImportTranscriptError) -> HTTPException:
+    return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
+
+
+def _source_error(error: vnext_source_stream_store.VNextSourceStreamError) -> HTTPException:
     return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
 
 
@@ -310,6 +374,7 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "import_transcript_events_v2": media_upload_v2,
         "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
         "schedule_graph_v2": vnext_capability_cutover.schedule_graph_v2_enabled(),
+        "source_stream_v2": vnext_capability_cutover.source_stream_v2_enabled(),
     }
 
 
@@ -323,6 +388,14 @@ def _require_schedule_graph_v2() -> None:
         raise HTTPException(status_code=404, detail={
             "code": "SCHEDULE_GRAPH_V2_DISABLED",
             "message": "日程图候选接口尚未启用",
+        })
+
+
+def _require_source_stream_v2() -> None:
+    if not vnext_capability_cutover.source_stream_v2_enabled():
+        raise HTTPException(status_code=404, detail={
+            "code": "SOURCE_STREAM_V2_DISABLED",
+            "message": "会议来源流候选接口尚未启用",
         })
 
 
@@ -439,6 +512,174 @@ async def get_binding(
     if binding is None:
         raise HTTPException(status_code=404, detail={"code": "BINDING_NOT_FOUND", "message": "会议服务连接不存在"})
     return {"schema_version": 2, "binding": binding}
+
+
+@router.post(
+    "/meetings/{binding_id}/source-streams",
+    status_code=202,
+    response_model=SourceStreamSnapshotV2,
+)
+async def create_source_stream(
+    binding_id: str,
+    payload: V2SourceStreamCreate,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        stream, _reused = await asyncio.to_thread(
+            vnext_source_stream_store.create_source_stream,
+            context,
+            stream_id=payload.stream_id,
+            task_id=payload.task_id,
+            binding_id=binding_id,
+            binding_generation=payload.binding_generation,
+            binding_revision=payload.binding_revision,
+            cancel_revision=payload.cancel_revision,
+            client_operation_id=payload.client_operation_id,
+            generation_id=payload.generation_id,
+            request_sha256=payload.request_sha256,
+            capability=payload.capability,
+            entity_id=payload.entity_id,
+            entity_revision=payload.entity_revision,
+            task_input_sha256=payload.task_input_sha256,
+        )
+        return stream
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+
+
+@router.get("/source-streams/{stream_id}", response_model=SourceStreamSnapshotV2)
+async def get_source_stream(
+    stream_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        stream = await asyncio.to_thread(
+            vnext_source_stream_store.get_source_stream,
+            context,
+            stream_id,
+        )
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+    if stream is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "SOURCE_STREAM_NOT_FOUND",
+            "message": "来源流不存在",
+        })
+    return stream
+
+
+@router.post(
+    "/source-streams/{stream_id}/manifest-pages",
+    status_code=202,
+    response_model=SourceStreamSnapshotV2,
+)
+async def append_source_manifest_page(
+    stream_id: str,
+    payload: V2SourceManifestPage,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        return await asyncio.to_thread(
+            vnext_source_stream_store.append_manifest_page,
+            context,
+            stream_id,
+            page_seq=payload.page_seq,
+            first_chapter_ordinal=payload.first_chapter_ordinal,
+            descriptors=[item.model_dump() for item in payload.descriptors],
+            page_sha256=payload.page_sha256,
+            final_page=payload.final_page,
+        )
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+
+
+@router.post("/source-streams/{stream_id}/groups", status_code=202)
+async def create_source_bundle_group(
+    stream_id: str,
+    payload: V2SourceBundleGroupCreate,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        group, reused = await asyncio.to_thread(
+            vnext_source_stream_store.create_bundle_group,
+            context,
+            stream_id,
+            group_id=payload.group_id,
+            chapter_ordinal=payload.chapter_ordinal,
+            declared_bundle_count=payload.declared_bundle_count,
+            declared_item_count=payload.declared_item_count,
+            declared_uncompressed_bytes=payload.declared_uncompressed_bytes,
+            chapter_hash=payload.chapter_sha256,
+            request_sha256=payload.request_sha256,
+        )
+        return {"schema_version": 2, "reused": reused, "group": group}
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+
+
+@router.post("/source-bundle-groups/{group_id}/bundles", status_code=202)
+async def append_source_bundle(
+    group_id: str,
+    payload: V2SourceBundleCreate,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        group = await asyncio.to_thread(
+            vnext_source_stream_store.append_bundle,
+            context,
+            group_id,
+            bundle_id=payload.bundle_id,
+            ordinal=payload.ordinal,
+            items=[item.model_dump() for item in payload.items],
+            supplied_bundle_sha256=payload.bundle_sha256,
+        )
+        return {"schema_version": 2, "group": group}
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+
+
+@router.post("/source-bundle-groups/{group_id}/commit", status_code=202)
+async def commit_source_bundle_group(
+    group_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        group = await asyncio.to_thread(
+            vnext_source_stream_store.commit_bundle_group,
+            context,
+            group_id,
+        )
+        return {"schema_version": 2, "group": group}
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+
+
+@router.delete("/source-streams/{stream_id}", status_code=202)
+async def delete_source_stream(
+    stream_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    _require_source_stream_v2()
+    try:
+        cancelled = await asyncio.to_thread(
+            vnext_source_stream_store.cancel_source_stream,
+            context,
+            stream_id,
+        )
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+    if not cancelled:
+        raise HTTPException(status_code=409, detail={
+            "code": "SOURCE_STREAM_NOT_CANCELLABLE",
+            "message": "来源流已完成或不存在",
+        })
+    return {"schema_version": 2, "cancelled": True}
 
 
 @router.post("/uploads")
@@ -634,9 +875,19 @@ async def cancel_task(
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
     try:
-        cancelled = await asyncio.to_thread(vnext_task_store.cancel_task, context, task_id)
+        task = await asyncio.to_thread(vnext_task_store.get_task, context, task_id)
+        if task is not None and task.get("source_stream_id"):
+            cancelled = await asyncio.to_thread(
+                vnext_source_stream_store.cancel_source_stream,
+                context,
+                str(task["source_stream_id"]),
+            )
+        else:
+            cancelled = await asyncio.to_thread(vnext_task_store.cancel_task, context, task_id)
     except vnext_task_store.VNextTaskError as error:
         raise _task_error(error) from error
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
     if not cancelled:
         raise HTTPException(status_code=409, detail={"code": "TASK_NOT_ACTIVE", "message": "任务已结束或不存在"})
     return {"schema_version": 2, "cancelled": True}

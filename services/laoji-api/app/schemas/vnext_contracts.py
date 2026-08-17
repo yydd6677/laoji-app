@@ -46,6 +46,60 @@ class SourceRef(VNextModel):
         return self
 
 
+class SourceManifestDescriptorV2(VNextModel):
+    chapter_ordinal: int = Field(ge=0, le=9_007_199_254_740_991)
+    declared_bundle_count: int = Field(ge=1, le=8)
+    declared_item_count: int = Field(ge=1, le=50_000)
+    declared_uncompressed_bytes: int = Field(ge=1, le=128 * 1024 * 1024)
+    chapter_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class SourceBundleItemV2(VNextModel):
+    item_id: str = Field(min_length=8, max_length=180)
+    source_type: Literal["transcript", "manual_note", "attachment"]
+    source_id: str = Field(min_length=1, max_length=180)
+    source_revision_id: str = Field(min_length=1, max_length=180)
+    source_start_utf8: int = Field(ge=0, le=9_007_199_254_740_991)
+    source_end_utf8: int = Field(ge=0, le=9_007_199_254_740_991)
+    content_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    content: str = Field(min_length=1, max_length=16 * 1024 * 1024)
+    start_ms: int | None = Field(default=None, ge=0, le=604_800_000)
+    end_ms: int | None = Field(default=None, ge=0, le=604_800_000)
+    speaker: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_source_range(self) -> "SourceBundleItemV2":
+        if self.source_end_utf8 < self.source_start_utf8:
+            raise ValueError("source_utf8_range_invalid")
+        if self.start_ms is not None and self.end_ms is not None and self.end_ms < self.start_ms:
+            raise ValueError("source_time_range_invalid")
+        return self
+
+
+class SourceStreamSnapshotV2(VNextModel):
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
+    stream_id: str = Field(min_length=8, max_length=180)
+    task_id: str = Field(min_length=8, max_length=512)
+    binding_id: str = Field(min_length=8, max_length=180)
+    binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    binding_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    cancel_revision: int = Field(ge=0, le=9_007_199_254_740_991)
+    client_operation_id: str = Field(min_length=8, max_length=180)
+    generation_id: str = Field(min_length=8, max_length=512)
+    state: Literal["open", "consuming", "complete", "cancelled", "expired"]
+    next_manifest_page: int = Field(ge=0)
+    next_manifest_chapter: int = Field(ge=0)
+    next_consumable_chapter: int = Field(ge=0)
+    final_chapter_count: int | None = Field(default=None, ge=1)
+    source_manifest_sha256: Sha256 | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    checkpoint_through_chapter: int | None = Field(default=None, ge=0)
+    expires_at: int = Field(ge=0)
+
+
 class TaskAttempt(VNextModel):
     task_id: str = Field(min_length=1, max_length=180)
     attempt_id: str = Field(min_length=1, max_length=180)

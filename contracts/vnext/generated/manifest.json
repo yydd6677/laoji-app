@@ -45,7 +45,7 @@
     {
       "name": "schedule_mention_graph",
       "path": "schemas/schedule_mention_graph.schema.json",
-      "sha256": "084734c9341b75ed2d3dfa91d16cdaa430fc524548d98046cbc87985f9345da4"
+      "sha256": "a78a504fb661cd4c8e485fa21adbc1ad651033bf1466fdab1fcf0f65643d4386"
     },
     {
       "name": "schedule_parse_request_legacy_projection",
@@ -58,9 +58,24 @@
       "sha256": "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc"
     },
     {
+      "name": "source_bundle_item_v2",
+      "path": "schemas/source_bundle_item_v2.schema.json",
+      "sha256": "c82a5aac8f1e531a6dc8aca1daf8e471611216260d08b1b05ee0c7d582fc01b7"
+    },
+    {
+      "name": "source_manifest_descriptor_v2",
+      "path": "schemas/source_manifest_descriptor_v2.schema.json",
+      "sha256": "5c86a8337c5767060c587a0a390f4e76ed7edd8c697e256a86422168b2c2f1f9"
+    },
+    {
       "name": "source_ref",
       "path": "schemas/source_ref.schema.json",
       "sha256": "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712"
+    },
+    {
+      "name": "source_stream_snapshot_v2",
+      "path": "schemas/source_stream_snapshot_v2.schema.json",
+      "sha256": "16cbbc635180bbf74d737c450cf46db4c6bb015b55a3dd2323cbc1894ff04278"
     },
     {
       "name": "speaker_overlay_snapshot_v2",

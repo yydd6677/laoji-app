@@ -1,0 +1,108 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "maxLength": 16777216,
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    },
+    "content_sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "end_ms": {
+      "anyOf": [
+        {
+          "maximum": 604800000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ms"
+    },
+    "item_id": {
+      "maxLength": 180,
+      "minLength": 8,
+      "title": "Item Id",
+      "type": "string"
+    },
+    "source_end_utf8": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "title": "Source End Utf8",
+      "type": "integer"
+    },
+    "source_id": {
+      "maxLength": 180,
+      "minLength": 1,
+      "title": "Source Id",
+      "type": "string"
+    },
+    "source_revision_id": {
+      "maxLength": 180,
+      "minLength": 1,
+      "title": "Source Revision Id",
+      "type": "string"
+    },
+    "source_start_utf8": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "title": "Source Start Utf8",
+      "type": "integer"
+    },
+    "source_type": {
+      "enum": [
+        "transcript",
+        "manual_note",
+        "attachment"
+      ],
+      "title": "Source Type",
+      "type": "string"
+    },
+    "speaker": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Speaker"
+    },
+    "start_ms": {
+      "anyOf": [
+        {
+          "maximum": 604800000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ms"
+    }
+  },
+  "required": [
+    "item_id",
+    "source_type",
+    "source_id",
+    "source_revision_id",
+    "source_start_utf8",
+    "source_end_utf8",
+    "content_sha256",
+    "content"
+  ],
+  "title": "SourceBundleItemV2",
+  "type": "object"
+}

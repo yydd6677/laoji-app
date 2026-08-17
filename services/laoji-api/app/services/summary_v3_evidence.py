@@ -512,18 +512,25 @@ def _select_auxiliary(
     return selected
 
 
-def build_evidence_package(
-    transcript_lines: list[dict[str, Any]],
-    manual_note: dict[str, Any] | None,
-    attachments: list[dict[str, Any]] | None,
+def build_evidence_package_from_sources(
+    sources: list[EvidenceSource],
     *,
+    source_fingerprint_value: str,
+    transcript_revision: str,
     input_token_budget: int = INPUT_TOKEN_BUDGET,
 ) -> EvidencePackage:
-    sources, fingerprint, transcript_revision = normalize_sources(
-        transcript_lines,
-        manual_note,
-        attachments,
-    )
+    """Build a bounded package from already normalized immutable sources."""
+    if not sources:
+        raise SummaryEvidenceIncomplete("source_empty")
+    fingerprint = source_fingerprint_value
+    if not fingerprint.startswith("sha256:") or len(fingerprint) != 71:
+        raise SummaryEvidenceIncomplete("source_fingerprint_invalid")
+    if not transcript_revision.startswith("sha256:") or len(transcript_revision) != 71:
+        raise SummaryEvidenceIncomplete("transcript_revision_invalid")
+    if len({source.source_id for source in sources}) != len(sources):
+        raise SummaryEvidenceIncomplete("source_id_duplicate")
+    if any(source.ordinal != index for index, source in enumerate(sources)):
+        raise SummaryEvidenceIncomplete("source_ordinal_invalid")
     source_token_budget = max(1, input_token_budget - PACKAGE_METADATA_RESERVE)
     total_cost = sum(source.token_cost for source in sources)
     transcript_indexes = [index for index, source in enumerate(sources) if source.source_type == "transcript"]
@@ -623,6 +630,26 @@ def build_evidence_package(
         transcript_revision=transcript_revision,
         coverage=coverage,
         estimated_tokens=estimated_tokens,
+    )
+
+
+def build_evidence_package(
+    transcript_lines: list[dict[str, Any]],
+    manual_note: dict[str, Any] | None,
+    attachments: list[dict[str, Any]] | None,
+    *,
+    input_token_budget: int = INPUT_TOKEN_BUDGET,
+) -> EvidencePackage:
+    sources, fingerprint, transcript_revision = normalize_sources(
+        transcript_lines,
+        manual_note,
+        attachments,
+    )
+    return build_evidence_package_from_sources(
+        sources,
+        source_fingerprint_value=fingerprint,
+        transcript_revision=transcript_revision,
+        input_token_budget=input_token_budget,
     )
 
 

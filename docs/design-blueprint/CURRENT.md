@@ -9,7 +9,7 @@
 - implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 frozen at `1.1.10 (118)`
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 summary-v3 lineage and Stage 4 schedule provenance slices implemented in isolation`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation`
 
 ## 权威文件
 
@@ -104,3 +104,12 @@ Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机
 Graph 来源/revision 已贯穿确认、详细编辑和本机 CRUD；ProjectionEnvelope 仍未包裹 native 页面
 快照/动作，且未跨 capability barrier，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。
+
+Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
+Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
+临时加密存储；章节只能按 ordinal 消费，恢复点固定为两个交替槽，每槽最多 4 MiB。已验证的 Facts
+V3 章节经过确定性 reducer 合并到 40 条事实、48 条关系和 10 条行动候选上限，最终结果与 Task
+成功状态在同一事务写入加密 artifact，失败恢复不会再次调用已经完成的章节 provider。该切片已有
+SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据，但尚未
+接入手机 source repository、Q2、真实模型/样本或 capability barrier，因此不能称为 Stage 3 退出，
+也没有改变当前稳定版服务流量。

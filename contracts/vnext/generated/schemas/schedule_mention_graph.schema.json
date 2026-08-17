@@ -190,6 +190,11 @@
     "ScheduleGraphSource": {
       "additionalProperties": false,
       "properties": {
+        "content_sha256": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
         "mode": {
           "enum": [
             "text",
@@ -218,6 +223,7 @@
       },
       "required": [
         "text",
+        "content_sha256",
         "mode",
         "reference_datetime",
         "timezone"

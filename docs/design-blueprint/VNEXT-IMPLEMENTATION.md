@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate; Stage 3 summary-v3 lineage and Stage 4 schedule provenance slices implemented, not adopted`
+- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -126,6 +126,9 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `app/services/r2_upload_service.py` / `r2_storage_service.py` | UploadSession/CleanupService | staging generation、完整性校验、独立 cleanup obligation |
 | `app/services/schedule_parser_service.py` | ScheduleGraphProvider | 删除 quick/fallback 和模型后 full-text normalizer |
 | `app/services/summary_v3_*` | FactsV3Service | 修血缘/原子提交，增加 deterministic chapter builder/merger |
+| `app/services/vnext_source_stream_store.py` | source stream + bounded checkpoint owner | 加密章节来源、manifest/group 配额、双槽恢复点和 artifact 原子提交；默认关闭 |
+| `app/services/summary_v3_chapter_merge.py` | deterministic Facts V3 reducer | 事实/关系/行动有界合并；不调用模型、不使用样本专用规则 |
+| `app/services/vnext_summary_chapter_pipeline.py` | generic Task/Attempt summary adapter | 每次最多处理一章；provider 适配、checkpoint 提升和最终 artifact 提交 |
 | `app/services/app_meeting_question.py` | MeetingQuestionQ2 | 由 5,826 行多轮链替换为 snapshot/provider/grounding/owner 四层 |
 | `app/models/meeting_*sync.py` | none after v1 drain | 账号/跨设备同步模型按 Stage 5 删除 |
 | `app/api/location.py` | LocationProxy | 保留缓存/限流/日志脱敏 |

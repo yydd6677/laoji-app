@@ -154,3 +154,65 @@ def test_upload_wire_routes_keep_binding_fence_and_task_identity(tmp_path, monke
     assert captured["cancel_revision"] == 2
     assert captured["asset_generation"] == "b" * 32
     assert response.json()["session"]["put_url"] == "https://r2.invalid/put"
+
+
+def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+    binding_id = str(uuid.uuid4())
+    binding_generation = uuid.uuid4().hex
+    payload = {
+        "schema_version": 2,
+        "contract_revision": "source.stream.v2",
+        "stream_id": "stream-wire-source-1",
+        "task_id": "task-wire-source-1",
+        "binding_generation": binding_generation,
+        "binding_revision": 1,
+        "cancel_revision": 0,
+        "client_operation_id": "operation-wire-source-1",
+        "generation_id": "generation-wire-source-1",
+        "request_sha256": "sha256:" + "a" * 64,
+        "capability": "summary",
+        "entity_id": "meeting-wire-source-1",
+        "entity_revision": 1,
+        "task_input_sha256": "sha256:" + "b" * 64,
+    }
+    disabled = client.post(
+        f"/api/device/v2/meetings/{binding_id}/source-streams",
+        json=payload,
+    )
+    assert disabled.status_code == 404
+    assert disabled.json()["detail"]["code"] == "SOURCE_STREAM_V2_DISABLED"
+
+    monkeypatch.setenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "1")
+    secret = "source-wire-purge-secret"
+    registered = client.put(
+        f"/api/device/v2/meetings/{binding_id}",
+        json={
+            "schema_version": 2,
+            "binding_generation": binding_generation,
+            "binding_epoch_seq": 1,
+            "binding_revision": 1,
+            "cancel_revision": 0,
+            "purge_capability": {
+                "capability_id": str(uuid.uuid4()),
+                "secret_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+                "registration_request_id": "source-wire-binding-request",
+            },
+        },
+    )
+    assert registered.status_code == 200
+    created = client.post(
+        f"/api/device/v2/meetings/{binding_id}/source-streams",
+        json=payload,
+    )
+    assert created.status_code == 202
+    assert created.json()["state"] == "open"
+    assert created.json()["checkpoint_through_chapter"] is None
+    assert client.get(
+        "/api/device/v2/source-streams/stream-wire-source-1"
+    ).status_code == 200
+    cancelled = client.delete(
+        "/api/device/v2/source-streams/stream-wire-source-1"
+    )
+    assert cancelled.status_code == 202
+    assert cancelled.json()["cancelled"] is True

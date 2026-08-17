@@ -191,3 +191,8 @@ def realtime_asr_v2_enabled() -> bool:
 def schedule_graph_v2_enabled() -> bool:
     """Expose the MentionGraph producer only as an explicit candidate."""
     return os.getenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "").strip() == "1"
+
+
+def source_stream_v2_enabled() -> bool:
+    """Expose the Stage 3 encrypted source owner only for candidate traffic."""
+    return os.getenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "").strip() == "1"

@@ -1,0 +1,151 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "binding_generation": {
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Binding Generation",
+      "type": "string"
+    },
+    "binding_id": {
+      "maxLength": 180,
+      "minLength": 8,
+      "title": "Binding Id",
+      "type": "string"
+    },
+    "binding_revision": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "title": "Binding Revision",
+      "type": "integer"
+    },
+    "cancel_revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "title": "Cancel Revision",
+      "type": "integer"
+    },
+    "checkpoint_through_chapter": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Checkpoint Through Chapter"
+    },
+    "client_operation_id": {
+      "maxLength": 180,
+      "minLength": 8,
+      "title": "Client Operation Id",
+      "type": "string"
+    },
+    "contract_revision": {
+      "const": "source.stream.v2",
+      "default": "source.stream.v2",
+      "title": "Contract Revision",
+      "type": "string"
+    },
+    "expires_at": {
+      "minimum": 0,
+      "title": "Expires At",
+      "type": "integer"
+    },
+    "final_chapter_count": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Final Chapter Count"
+    },
+    "generation_id": {
+      "maxLength": 512,
+      "minLength": 8,
+      "title": "Generation Id",
+      "type": "string"
+    },
+    "next_consumable_chapter": {
+      "minimum": 0,
+      "title": "Next Consumable Chapter",
+      "type": "integer"
+    },
+    "next_manifest_chapter": {
+      "minimum": 0,
+      "title": "Next Manifest Chapter",
+      "type": "integer"
+    },
+    "next_manifest_page": {
+      "minimum": 0,
+      "title": "Next Manifest Page",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": 2,
+      "default": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "source_manifest_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Manifest Sha256"
+    },
+    "state": {
+      "enum": [
+        "open",
+        "consuming",
+        "complete",
+        "cancelled",
+        "expired"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "stream_id": {
+      "maxLength": 180,
+      "minLength": 8,
+      "title": "Stream Id",
+      "type": "string"
+    },
+    "task_id": {
+      "maxLength": 512,
+      "minLength": 8,
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream_id",
+    "task_id",
+    "binding_id",
+    "binding_generation",
+    "binding_revision",
+    "cancel_revision",
+    "client_operation_id",
+    "generation_id",
+    "state",
+    "next_manifest_page",
+    "next_manifest_chapter",
+    "next_consumable_chapter",
+    "expires_at"
+  ],
+  "title": "SourceStreamSnapshotV2",
+  "type": "object"
+}
