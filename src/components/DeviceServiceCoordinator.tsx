@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { ensureDeviceReady } from '../services/deviceApi';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
 import { drainDeviceSpeakerDeletionOutbox } from '../services/speakers';
+import { resumePendingRemotePurge } from '../services/localDataEraseCoordinator';
 
 /**
  * Device service registration is deliberately best-effort and never gates the
@@ -12,6 +13,14 @@ import { drainDeviceSpeakerDeletionOutbox } from '../services/speakers';
 export function DeviceServiceCoordinator(): null {
   useEffect(() => {
     let active = true;
+    void resumePendingRemotePurge()
+      .then(result => {
+        if (!active || result === 'none') return;
+        diagnosticAudit('device_remote_purge_resume', { result });
+      })
+      .catch(error => {
+        if (active) diagnosticWarn('[device-service] purge resume deferred', error);
+      });
     void ensureDeviceReady()
       .then(identity => {
         if (!active) return;

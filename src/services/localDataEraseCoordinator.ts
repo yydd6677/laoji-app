@@ -6,6 +6,8 @@ import { clearThemePreference } from './themePreferences';
 import { deleteMeetingDatabase } from '../data/db/openDatabase';
 import { clearNativeTransferLease } from '../native/nativeTransferCoordinator';
 import { clearNativeUpcomingEventsProjection } from 'laoji-native-platform';
+import { getOrCreateDeviceIdentity } from './deviceIdentity';
+import { clearPurgeJournal, readPurgeJournal, writePurgeJournal } from './purgeJournal';
 
 export interface LocalDataEraseResult {
   localCleared: boolean;
@@ -23,15 +25,23 @@ type EraseStep = { name: string; run: () => Promise<void> };
  */
 export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult> {
   let remoteCleanup: LocalDataEraseResult['remoteCleanup'] = 'confirmed';
+  let epochId: string | null = null;
   try {
+    const identity = await getOrCreateDeviceIdentity();
+    epochId = identity.epochId;
+    await writePurgeJournal(epochId, 'registering');
     await Promise.race([
       closeDeviceDataEpoch(),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('remote cleanup timeout')), 5_000);
       }),
     ]);
+    await writePurgeJournal(epochId, 'confirmed');
   } catch {
     remoteCleanup = 'pending';
+    // Keep the opaque journal and identity so a later run can retry the
+    // server-side purge.  Local business data is still erased below.
+    if (epochId) await writePurgeJournal(epochId, 'pending').catch(() => undefined);
   }
 
   const preDatabaseSteps: EraseStep[] = [
@@ -56,6 +66,7 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
   if (remoteCleanup === 'confirmed') {
     try {
       await clearDeviceIdentity();
+      await clearPurgeJournal();
     } catch {
       failedSteps.push('device-identity');
     }
@@ -65,4 +76,23 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
     remoteCleanup,
     failedSteps,
   };
+}
+
+/**
+ * Resume a previously interrupted remote purge without touching local
+ * business data.  This is safe to call at app startup or when the privacy
+ * screen is opened; a missing journal is a no-op.
+ */
+export async function resumePendingRemotePurge(): Promise<'none' | 'confirmed' | 'pending'> {
+  const journal = await readPurgeJournal();
+  if (!journal || journal.state === 'confirmed') return 'none';
+  try {
+    await closeDeviceDataEpoch();
+    await clearDeviceIdentity();
+    await clearPurgeJournal();
+    return 'confirmed';
+  } catch {
+    await writePurgeJournal(journal.epochId, 'pending').catch(() => undefined);
+    return 'pending';
+  }
 }
