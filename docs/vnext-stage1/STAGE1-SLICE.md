@@ -14,14 +14,17 @@
 - 本机日程 repository 的单行 upsert/delete 改为同一 SQLite 事务内的行级操作，避免旧的“读全表再替换”
   在快速连续编辑时互相覆盖；现有批量替换仅用于一次性迁移/恢复。
 - 服务端新增隔离的 `/api/device/v1/vnext/*` binding/task/attempt 合同和 SQLite durable task/attempt owner；旧 v1 路由未切换。
+- binding/epoch 删除会在 generic task store 内原子取消活跃 task/attempt，迟到 worker 只能得到终态拒绝，
+  不会在本机清除后继续提交 artifact。
 
 ## 证据
 
 - `npm exec -- tsc --noEmit --pretty false`：通过。
 - `python3 tools/vnext/verify_stage1_migrations.py`：通过，包含 DDL 重放、来源指针和外键检查。
-- `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py`：9 passed。
+- `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py`：10 passed。
 - `python3 -m compileall -q services/laoji-api/app services/laoji-api/tests`：通过。
 - 两个后续切片提交：`52e79fe`（purge journal）、`0a471c5`（日程行级写入）。
+- 绑定清除 fence 提交：`3111a84`（本机 operation）、`d2d2177`（服务端 generic task）。
 
 ## 尚未满足的 Stage 1 退出门
 
