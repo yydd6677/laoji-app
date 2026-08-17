@@ -20,7 +20,6 @@ ATTACHMENT_MAX_BUDGET = 1_536
 MMR_LAMBDA = 0.7
 MMR_ADDITIONAL_MIN_SCORE = 0.45
 PACKAGE_METADATA_RESERVE = 256
-FORCED_SIGNAL_BUDGET_RATIO = 0.55
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9._:-]{24,}")
 _FORCED_SIGNAL = re.compile(
@@ -367,33 +366,20 @@ def _fit_forced_signals(
     sources: list[EvidenceSource],
     budget: int,
 ) -> set[int]:
-    """Keep forced evidence across the full timeline without exhausting the package.
+    """Keep every required signal or fail closed when the budget cannot hold it.
 
-    A short ASR fragment can contain a date or responsibility marker without being
-    a complete fact. Treating every such fragment as mandatory made fragmentation,
-    rather than meeting content, decide whether a summary could be generated.
+    Dates, corrections, negations, responsibility and cross-topic connectors are
+    the evidence most likely to change a conclusion. Dropping an arbitrary
+    subset would make the summary depend on segmentation order, so the v3
+    contract treats the full set as mandatory and reports incomplete evidence
+    instead of silently producing a partial package.
     """
     if not sources:
         return set()
     endpoints = {0, len(sources) - 1}
-    selected = endpoints.intersection(range(len(sources)))
-    signal_budget = max(
-        sum(sources[index].token_cost for index in selected),
-        int(budget * FORCED_SIGNAL_BUDGET_RATIO),
-    )
-    remaining = set(candidates) - selected
-    while remaining:
-        candidate = max(
-            remaining,
-            key=lambda index: (
-                min((abs(index - chosen) for chosen in selected), default=len(sources)),
-                -index,
-            ),
-        )
-        cost = sum(sources[index].token_cost for index in selected)
-        if cost + sources[candidate].token_cost <= signal_budget:
-            selected.add(candidate)
-        remaining.remove(candidate)
+    selected = endpoints.intersection(range(len(sources))) | set(candidates)
+    if sum(sources[index].token_cost for index in selected) > budget:
+        raise SummaryEvidenceIncomplete("forced_evidence_exceeds_budget")
     return selected
 
 

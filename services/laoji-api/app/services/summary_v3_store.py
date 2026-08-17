@@ -398,6 +398,134 @@ def persist_document(
     return decoded
 
 
+def persist_document_and_mark_task_success(
+    *,
+    task_id: str,
+    task_scope: str,
+    meeting_id: str,
+    source_fingerprint: str,
+    transcript_revision: str,
+    model_revision: str,
+    prompt_revision: str,
+    document: dict[str, Any],
+    coverage: dict[str, Any],
+    task_result: dict[str, Any],
+    lease_owner: str,
+) -> dict[str, Any]:
+    """Publish a v3 document and its task terminal result atomically.
+
+    The task table remains owned by ``summary_task_store``; this function only
+    borrows its connection-level update primitive. No second task owner or
+    business payload is introduced.
+    """
+    from app.services.summary_task_store import mark_success_on_connection
+
+    encoded_document = json.dumps(
+        document,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    encoded_coverage = json.dumps(
+        coverage,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    generated_at = _iso(_now())
+    document_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "\0".join(
+                (
+                    "laoji-summary-v3",
+                    task_scope,
+                    meeting_id,
+                    source_fingerprint,
+                    model_revision,
+                    prompt_revision,
+                )
+            ),
+        )
+    )
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            """
+            SELECT * FROM summary_v3_documents
+            WHERE task_scope = ? AND meeting_id = ? AND source_fingerprint = ?
+              AND model_revision = ? AND prompt_revision = ?
+            LIMIT 1
+            """,
+            (
+                task_scope,
+                meeting_id,
+                source_fingerprint,
+                model_revision,
+                prompt_revision,
+            ),
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                "UPDATE summary_v3_documents SET active = 0 WHERE task_scope = ? AND meeting_id = ?",
+                (task_scope, meeting_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO summary_v3_documents (
+                    id, task_id, task_scope, meeting_id, source_fingerprint,
+                    transcript_revision, model_revision, prompt_revision,
+                    document_json, coverage_json, generated_at, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    document_id,
+                    task_id,
+                    task_scope,
+                    meeting_id,
+                    source_fingerprint,
+                    transcript_revision,
+                    model_revision,
+                    prompt_revision,
+                    encoded_document,
+                    encoded_coverage,
+                    generated_at,
+                ),
+            )
+        else:
+            document_id = str(existing["id"])
+            connection.execute(
+                "UPDATE summary_v3_documents SET active = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE task_scope = ? AND meeting_id = ?",
+                (document_id, task_scope, meeting_id),
+            )
+        row = connection.execute(
+            "SELECT * FROM summary_v3_documents WHERE id = ?",
+            (document_id,),
+        ).fetchone()
+        if row is None:
+            raise SummaryV3StoreError("summary_v3_document_persist_failed")
+        committed_result = dict(task_result)
+        committed_result.update(
+            {
+                "document_id": document_id,
+                "generated_at": str(row["generated_at"]),
+                "facts_document": document,
+            }
+        )
+        if not mark_success_on_connection(
+            connection,
+            task_id,
+            committed_result,
+            lease_owner=lease_owner,
+        ):
+            raise SummaryV3StoreError("summary_task_lease_lost")
+        connection.commit()
+    decoded = _decode_document(row)
+    if decoded is None:
+        raise SummaryV3StoreError("summary_v3_document_persist_failed")
+    return decoded
+
+
 def source_fingerprint(payload: dict[str, Any]) -> str:
     encoded = json.dumps(
         payload,

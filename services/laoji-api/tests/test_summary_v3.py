@@ -19,6 +19,7 @@ from app.services import (
     summary_v3_generator,
     summary_v3_store,
 )
+from app.workers.summary_tasks import get_submitted_summary_status
 from app.services.summary_v3_evidence import (
     SummaryEvidenceIncomplete,
     build_evidence_package,
@@ -891,7 +892,7 @@ def test_long_evidence_budget_counts_serialized_source_metadata(monkeypatch):
             "start_ms": index * 8_000,
             "end_ms": index * 8_000 + 7_000,
         }
-        for index in range(130)
+        for index in range(180)
     ]
     monkeypatch.setattr(
         summary_v3_evidence,
@@ -919,7 +920,7 @@ def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatc
             "start_ms": index * 8_000,
             "end_ms": index * 8_000 + 7_000,
         }
-        for index in range(120)
+        for index in range(160)
     ]
     monkeypatch.setattr(
         summary_v3_evidence,
@@ -993,6 +994,77 @@ def test_document_identity_is_immutable_and_idempotent(tmp_path, monkeypatch):
     with sqlite3.connect(database) as connection:
         count = connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0]
     assert count == 1
+
+
+def test_document_and_task_success_commit_together(tmp_path, monkeypatch):
+    database = tmp_path / "summary-atomic.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    summary_task_store.reset_store_for_tests()
+    summary_v3_store.reset_store_for_tests()
+    active_package = package()
+    document = summary_v3_generator.verify_model_response(
+        MeetingFactsModelResponseV3.model_validate(valid_response(active_package)),
+        active_package,
+    ).model_dump(mode="json")
+    summary_task_store.create_task(
+        task_id="task-v3-atomic",
+        task_kind="device-summary-v3",
+        task_scope="device:1:epoch",
+        meeting_id="meeting-a",
+        dedupe_key="atomic-a",
+        request={"worker_args": ["meeting-a", "device:1:epoch", "payload-a", active_package.source_fingerprint, "ollama:test"]},
+        force=False,
+        retain_generated_result=True,
+    )
+    assert summary_task_store.claim_task("task-v3-atomic", "worker:atomic")
+    persisted = summary_v3_store.persist_document_and_mark_task_success(
+        task_id="task-v3-atomic",
+        task_scope="device:1:epoch",
+        meeting_id="meeting-a",
+        source_fingerprint=active_package.source_fingerprint,
+        transcript_revision=active_package.transcript_revision,
+        model_revision="ollama:test",
+        prompt_revision="facts-v3-r5",
+        document=document,
+        coverage=active_package.coverage,
+        task_result={"schema_version": 3, "meeting_id": "meeting-a", "facts_document": document},
+        lease_owner="worker:atomic",
+    )
+    task = summary_task_store.get_task("task-v3-atomic")
+    assert persisted["id"]
+    assert task is not None and task["status"] == "success"
+    assert task["result"]["document_id"] == persisted["id"]
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0] == 1
+
+    summary_task_store.create_task(
+        task_id="task-v3-atomic-rollback",
+        task_kind="device-summary-v3",
+        task_scope="device:1:epoch",
+        meeting_id="meeting-b",
+        dedupe_key="atomic-b",
+        request={"worker_args": ["meeting-b", "device:1:epoch", "payload-b", active_package.source_fingerprint, "ollama:test"]},
+        force=False,
+        retain_generated_result=True,
+    )
+    assert summary_task_store.claim_task("task-v3-atomic-rollback", "worker:rollback")
+    with pytest.raises(summary_v3_store.SummaryV3StoreError, match="summary_task_lease_lost"):
+        summary_v3_store.persist_document_and_mark_task_success(
+            task_id="task-v3-atomic-rollback",
+            task_scope="device:1:epoch",
+            meeting_id="meeting-b",
+            source_fingerprint=active_package.source_fingerprint,
+            transcript_revision=active_package.transcript_revision,
+            model_revision="ollama:test",
+            prompt_revision="facts-v3-r5",
+            document=document,
+            coverage=active_package.coverage,
+            task_result={"schema_version": 3},
+            lease_owner="wrong-owner",
+        )
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents WHERE meeting_id = 'meeting-b'").fetchone()[0] == 0
+    assert summary_task_store.get_task("task-v3-atomic-rollback")["status"] == "running"
 
 
 def test_closing_device_epoch_removes_v3_payloads_documents_and_tasks(tmp_path, monkeypatch):
@@ -1148,3 +1220,38 @@ def test_persistent_task_stage_is_monotonic(tmp_path, monkeypatch):
         lease_owner="host:1:worker",
     )
     assert summary_task_store.get_task("task-v3")["stage"] == "success"
+
+
+def test_v3_task_status_exposes_matching_identity(tmp_path, monkeypatch):
+    database = tmp_path / "task-identity.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    summary_task_store.reset_store_for_tests()
+    source_fingerprint = "sha256:" + "a" * 64
+    record, reused = summary_task_store.create_task(
+        task_id="task-v3-identity",
+        task_kind="device-summary-v3",
+        task_scope="device:1:epoch",
+        meeting_id="meeting-a",
+        dedupe_key="identity-a",
+        request={
+            "worker_args": [
+                "meeting-a",
+                "device:1:epoch",
+                "payload-a",
+                source_fingerprint,
+                "ollama:qwen3.5:9b",
+            ],
+        },
+        force=False,
+        retain_generated_result=True,
+    )
+    assert not reused and record["status"] == "queued"
+    status = get_submitted_summary_status(
+        "task-v3-identity",
+        expected_scope="device:1:epoch",
+        expected_meeting_id="meeting-a",
+    )
+    assert status is not None
+    assert status["source_fingerprint"] == source_fingerprint
+    assert status["model_revision"] == "ollama:qwen3.5:9b"
+    assert status["prompt_revision"].startswith("facts-v3-")

@@ -485,6 +485,7 @@ export function normalizeMeetingSummaryDocument(
     templateId: text(firstValue(root, 'templateId', 'template_id'), 120) || 'general',
     templateRevision: nonNegativeInteger(firstValue(root, 'templateRevision', 'template_revision'), 1),
     transcriptRevisionId: text(firstValue(root, 'transcriptRevisionId', 'transcript_revision_id'), 240) || null,
+    remoteTranscriptRevisionId: text(firstValue(root, 'remoteTranscriptRevisionId', 'remote_transcript_revision_id'), 240) || null,
     manualNoteRevision: nonNegativeInteger(firstValue(root, 'manualNoteRevision', 'manual_note_revision')),
     scheduleSnapshotHash: text(firstValue(root, 'scheduleSnapshotHash', 'schedule_snapshot_hash'), 200) || null,
     status: text(root.status, 30).toLowerCase() === 'stale' ? 'stale' : 'ready',

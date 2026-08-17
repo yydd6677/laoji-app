@@ -668,6 +668,10 @@ export interface ApiMeetingTaskStatus {
   result?: unknown;
   long_poll_supported?: boolean;
   stage?: 'queued' | 'preparing' | 'generating' | 'verifying' | 'persisting' | 'success' | 'failure' | string;
+  /** Identity echoed by durable device summary-v3 tasks for recovery matching. */
+  source_fingerprint?: string;
+  model_revision?: string;
+  prompt_revision?: string;
 }
 
 function summaryCarryForwardPayload(

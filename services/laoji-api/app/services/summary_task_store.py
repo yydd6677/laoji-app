@@ -283,23 +283,45 @@ def update_stage(task_id: str, stage: str, *, lease_owner: str) -> bool:
         return cursor.rowcount == 1
 
 
-def mark_success(task_id: str, result: Any, *, lease_owner: str) -> bool:
+def mark_success_on_connection(
+    connection: sqlite3.Connection,
+    task_id: str,
+    result: Any,
+    *,
+    lease_owner: str,
+) -> bool:
+    """Update a task terminal result without committing the caller's transaction.
+
+    v3 uses this primitive while publishing its immutable document so the
+    artifact pointer and task success are committed (or rolled back) together.
+    Other callers should continue to use :func:`mark_success`.
+    """
     now = _now()
     encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    cursor = connection.execute(
+        """
+        UPDATE summary_tasks_v2
+        SET status = 'success', stage = 'success', result_json = ?, error_code = NULL,
+            lease_owner = NULL, lease_expires_at_epoch = NULL,
+            heartbeat_at_epoch = NULL, checkpoint_json = NULL,
+            updated_at = ?, completed_at = ?
+        WHERE id = ? AND status = 'running' AND lease_owner = ?
+        """,
+        (encoded, now, now, task_id, lease_owner),
+    )
+    return cursor.rowcount == 1
+
+
+def mark_success(task_id: str, result: Any, *, lease_owner: str) -> bool:
     with _connect() as connection:
-        cursor = connection.execute(
-            """
-            UPDATE summary_tasks_v2
-            SET status = 'success', stage = 'success', result_json = ?, error_code = NULL,
-                lease_owner = NULL, lease_expires_at_epoch = NULL,
-                heartbeat_at_epoch = NULL, checkpoint_json = NULL,
-                updated_at = ?, completed_at = ?
-            WHERE id = ? AND status = 'running' AND lease_owner = ?
-            """,
-            (encoded, now, now, task_id, lease_owner),
+        cursor_ok = mark_success_on_connection(
+            connection,
+            task_id,
+            result,
+            lease_owner=lease_owner,
         )
         connection.commit()
-        return cursor.rowcount == 1
+        return cursor_ok
 
 
 def mark_failure(

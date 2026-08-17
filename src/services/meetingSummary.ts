@@ -340,6 +340,9 @@ function deviceTaskStatus(value: any): ApiMeetingTaskStatus {
     result: raw.result,
     long_poll_supported: true,
     stage: typeof raw.stage === 'string' ? raw.stage : undefined,
+    source_fingerprint: typeof raw.source_fingerprint === 'string' ? raw.source_fingerprint : undefined,
+    model_revision: typeof raw.model_revision === 'string' ? raw.model_revision : undefined,
+    prompt_revision: typeof raw.prompt_revision === 'string' ? raw.prompt_revision : undefined,
   };
 }
 
@@ -474,6 +477,9 @@ async function generateDeviceMeetingSummaryV3(options: {
     };
   });
   let taskId = options.resumeTaskId?.trim() || '';
+  let expectedSourceFingerprint: string | null = null;
+  let expectedModelRevision: string | null = null;
+  let expectedPromptRevision: string | null = null;
   const submit = async (): Promise<string> => {
     const requestId = `device-summary-v3:${options.meetingId}:${options.inputFingerprint ?? 'current'}`
       .replace(/[^A-Za-z0-9._:-]/g, '_')
@@ -503,6 +509,15 @@ async function generateDeviceMeetingSummaryV3(options: {
     }
     const submittedId = typeof task?.task_id === 'string' ? task.task_id.trim() : '';
     if (!submittedId) throw new Error('设备整理服务未返回任务标识');
+    expectedSourceFingerprint = typeof task?.source_fingerprint === 'string'
+      ? task.source_fingerprint.trim() || null
+      : null;
+    expectedModelRevision = typeof task?.model_revision === 'string'
+      ? task.model_revision.trim() || null
+      : null;
+    expectedPromptRevision = typeof task?.prompt_revision === 'string'
+      ? task.prompt_revision.trim() || null
+      : null;
     await options.onTaskSubmitted?.(submittedId);
     return submittedId;
   };
@@ -514,25 +529,54 @@ async function generateDeviceMeetingSummaryV3(options: {
       waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
       { signal: options.signal, onProgress: options.onProgress },
     );
+    expectedSourceFingerprint = status.source_fingerprint ?? expectedSourceFingerprint;
+    expectedModelRevision = status.model_revision ?? expectedModelRevision;
+    expectedPromptRevision = status.prompt_revision ?? expectedPromptRevision;
   } catch (error) {
     if (!(error instanceof DeviceApiError) || error.status !== 404) throw error;
     const recovered = await getDeviceSummaryV3(options.meetingId, options.signal)
       .then(parseMeetingFactsResultV3)
       .catch(() => null);
-    if (recovered) {
-      return meetingFactsV3ToSummary(recovered, DEFAULT_MEETING_TEMPLATE, options.manualNote.revision);
+    // A missing task is not proof that the meeting's latest result belongs to
+    // this request. Only reconcile a durable result when the task identity was
+    // observed and all available revisions match. Otherwise resubmit the same
+    // logical request and let server-side dedupe decide.
+    if (recovered && expectedSourceFingerprint
+      && recovered.sourceFingerprint === expectedSourceFingerprint
+      && (!expectedModelRevision || recovered.modelRevision === expectedModelRevision)
+      && (!expectedPromptRevision || recovered.promptRevision === expectedPromptRevision)) {
+      return meetingFactsV3ToSummary(recovered, options.template, options.manualNote.revision);
     }
     taskId = await submit();
     status = await waitForTask(
       waitMs => getDeviceTask(taskId, waitMs, options.signal).then(deviceTaskStatus),
       { signal: options.signal, onProgress: options.onProgress },
     );
+    expectedSourceFingerprint = status.source_fingerprint ?? expectedSourceFingerprint;
+    expectedModelRevision = status.model_revision ?? expectedModelRevision;
+    expectedPromptRevision = status.prompt_revision ?? expectedPromptRevision;
   }
   if (status.status !== 'SUCCESS') throw new Error('设备整理服务未完成本次任务');
   const remote = await getDeviceSummaryV3(options.meetingId, options.signal).catch(() => null);
-  const result = parseMeetingFactsResultV3(remote) ?? parseMeetingFactsResultV3(status.result);
+  const remoteResult = parseMeetingFactsResultV3(remote);
+  const statusResult = parseMeetingFactsResultV3(status.result);
+  // Older task responses may omit the explicit identity fields, but a valid
+  // v3 terminal result carries the same identity. Seed the matcher from that
+  // result before considering the meeting-level latest endpoint.
+  if (!expectedSourceFingerprint && statusResult) expectedSourceFingerprint = statusResult.sourceFingerprint;
+  if (!expectedModelRevision && statusResult) expectedModelRevision = statusResult.modelRevision;
+  if (!expectedPromptRevision && statusResult) expectedPromptRevision = statusResult.promptRevision;
+  const matchesExpected = (candidate: ReturnType<typeof parseMeetingFactsResultV3>): candidate is NonNullable<ReturnType<typeof parseMeetingFactsResultV3>> => {
+    if (!candidate) return false;
+    return Boolean(expectedSourceFingerprint)
+      && candidate.sourceFingerprint === expectedSourceFingerprint
+      && (!expectedModelRevision || candidate.modelRevision === expectedModelRevision)
+      && (!expectedPromptRevision || candidate.promptRevision === expectedPromptRevision);
+  };
+  const result = (matchesExpected(remoteResult) ? remoteResult : null)
+    ?? (matchesExpected(statusResult) ? statusResult : null);
   if (!result) throw new Error('设备整理服务返回的新版结果格式无效');
-  return meetingFactsV3ToSummary(result, DEFAULT_MEETING_TEMPLATE, options.manualNote.revision);
+  return meetingFactsV3ToSummary(result, options.template, options.manualNote.revision);
 }
 
 async function generateDeviceMeetingSummary(options: {

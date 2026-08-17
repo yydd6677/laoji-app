@@ -659,10 +659,19 @@ def _run_after_previous_summary(
                 )
             result = worker(*worker_args)
             if persistent:
-                if lease_lost.is_set() or not mark_persistent_summary_success(
-                    active_task_id,
-                    result,
-                    lease_owner=_SUMMARY_WORKER_ID,
+                # v3 can commit its immutable artifact and task terminal result
+                # from inside the worker. That closes the old callback window;
+                # other persistent workers retain the shared outer commit.
+                committed_by_worker = (
+                    isinstance(result, dict)
+                    and bool(result.pop("_task_success_committed", False))
+                )
+                if not committed_by_worker and (
+                    lease_lost.is_set() or not mark_persistent_summary_success(
+                        active_task_id,
+                        result,
+                        lease_owner=_SUMMARY_WORKER_ID,
+                    )
                 ):
                     raise SummaryTaskLeaseUnavailable("summary_task_lease_lost")
             terminal = True
@@ -1020,6 +1029,17 @@ def get_submitted_summary_status(
             "FAILURE": "failure",
         }[status])
         error_code = str(persistent.get("error_code") or "")
+        identity: dict[str, str] = {}
+        if persistent.get("task_kind") == "device-summary-v3":
+            request = persistent.get("request")
+            worker_args = request.get("worker_args") if isinstance(request, dict) else None
+            if isinstance(worker_args, list):
+                if len(worker_args) > 3 and isinstance(worker_args[3], str):
+                    identity["source_fingerprint"] = worker_args[3]
+                if len(worker_args) > 4 and isinstance(worker_args[4], str):
+                    identity["model_revision"] = worker_args[4]
+            from app.schemas.meeting_facts_v3 import PROMPT_REVISION
+            identity["prompt_revision"] = PROMPT_REVISION
         failure_messages = {
             "SUMMARY_EVIDENCE_INCOMPLETE": "会议内容过长，暂未完整整理",
             "SUMMARY_V3_FORMAT_INVALID": "整理结果格式异常，可重试",
@@ -1038,6 +1058,7 @@ def get_submitted_summary_status(
                 else None
             ),
             "long_poll_supported": True,
+            **identity,
         }
     with _summary_task_lock:
         _purge_expired_tasks_locked(time.monotonic())
@@ -4130,8 +4151,9 @@ def _do_device_summary_v3(
     from app.services.summary_v3_store import (
         SummaryV3StoreError,
         delete_source_payload,
+        find_document_by_identity,
         load_source_payload,
-        persist_document,
+        persist_document_and_mark_task_success,
     )
 
     task_id = _ACTIVE_SUMMARY_TASK_ID.get()
@@ -4156,6 +4178,41 @@ def _do_device_summary_v3(
         active_model_revision = model_revision()
         if active_model_revision != expected_model_revision:
             raise SummaryV3GenerationError("SUMMARY_MODEL_CHANGED")
+        existing = find_document_by_identity(
+            task_scope=task_scope,
+            meeting_id=meeting_id,
+            source_fingerprint=package.source_fingerprint,
+            model_revision=active_model_revision,
+            prompt_revision=PROMPT_REVISION,
+        )
+        if existing is not None:
+            # A process can die after artifact publication but before the old
+            # outer task acknowledgement. Replaying the immutable identity is
+            # enough to finish the task without another provider call.
+            _set_active_summary_stage("persisting")
+            replayed = {
+                "schema_version": 3,
+                "document_id": existing["id"],
+                "meeting_id": meeting_id,
+                "source_fingerprint": package.source_fingerprint,
+                "transcript_revision": existing["transcript_revision"],
+                "model_revision": active_model_revision,
+                "prompt_revision": PROMPT_REVISION,
+                "generated_at": existing["generated_at"],
+                "coverage": existing["coverage"],
+                "facts_document": existing["document"],
+                "model_calls": 0,
+                "timings_ms": {"preparing": 0, "generating": 0, "verifying": 0, "persisting": 0, "total": 0},
+            }
+            lease_owner = _ACTIVE_SUMMARY_LEASE_OWNER.get()
+            if not lease_owner or not mark_persistent_summary_success(
+                task_id,
+                replayed,
+                lease_owner=lease_owner,
+            ):
+                raise SummaryTaskLeaseUnavailable("summary_task_lease_lost")
+            replayed["_task_success_committed"] = True
+            return replayed
         save_persistent_summary_checkpoint(
             task_id,
             _SUMMARY_WORKER_ID,
@@ -4177,7 +4234,21 @@ def _do_device_summary_v3(
         verification_finished = time.perf_counter()
 
         _set_active_summary_stage("persisting")
-        persisted = persist_document(
+        result = {
+            "schema_version": 3,
+            "document_id": None,
+            "meeting_id": meeting_id,
+            "source_fingerprint": package.source_fingerprint,
+            "transcript_revision": package.transcript_revision,
+            "model_revision": active_model_revision,
+            "prompt_revision": PROMPT_REVISION,
+            "generated_at": None,
+            "coverage": package.coverage,
+            "facts_document": document.model_dump(mode="json"),
+            "model_calls": model_calls,
+            "timings_ms": {},
+        }
+        persisted = persist_document_and_mark_task_success(
             task_id=task_id,
             task_scope=task_scope,
             meeting_id=meeting_id,
@@ -4187,20 +4258,14 @@ def _do_device_summary_v3(
             prompt_revision=PROMPT_REVISION,
             document=document.model_dump(mode="json"),
             coverage=package.coverage,
+            task_result=result,
+            lease_owner=_ACTIVE_SUMMARY_LEASE_OWNER.get() or "",
         )
         persisted_finished = time.perf_counter()
-        return {
-            "schema_version": 3,
+        result.update({
             "document_id": persisted["id"],
-            "meeting_id": meeting_id,
-            "source_fingerprint": package.source_fingerprint,
-            "transcript_revision": package.transcript_revision,
-            "model_revision": active_model_revision,
-            "prompt_revision": PROMPT_REVISION,
             "generated_at": persisted["generated_at"],
-            "coverage": package.coverage,
             "facts_document": persisted["document"],
-            "model_calls": model_calls,
             "timings_ms": {
                 "preparing": round((generation_started - started) * 1000, 3),
                 "generating": round((generation_finished - generation_started) * 1000, 3),
@@ -4208,13 +4273,20 @@ def _do_device_summary_v3(
                 "persisting": round((persisted_finished - verification_finished) * 1000, 3),
                 "total": round((persisted_finished - started) * 1000, 3),
             },
-        }
+        })
+        result["_task_success_committed"] = True
+        return result
     except SummaryEvidenceIncomplete as error:
         raise SummaryV3GenerationError(error.code) from error
     except SummaryTaskLeaseUnavailable:
         preserve_payload = True
         raise
-    except (SummaryV3GenerationError, SummaryV3StoreError):
+    except SummaryV3StoreError as error:
+        if str(error) == "summary_task_lease_lost":
+            preserve_payload = True
+            raise SummaryTaskLeaseUnavailable("summary_task_lease_lost") from error
+        raise
+    except SummaryV3GenerationError:
         raise
     finally:
         if not preserve_payload:

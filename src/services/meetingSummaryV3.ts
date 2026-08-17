@@ -603,6 +603,7 @@ export function projectMeetingFactsV3(
     templateId: template.id,
     templateRevision: 3,
     transcriptRevisionId: null,
+    remoteTranscriptRevisionId: result.transcriptRevision,
     manualNoteRevision,
     scheduleSnapshotHash: result.sourceFingerprint,
     status: 'ready',

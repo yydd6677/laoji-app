@@ -224,6 +224,8 @@ export interface MeetingSummaryDocument {
   templateId: string;
   templateRevision: number;
   transcriptRevisionId: string | null;
+  /** Server-owned transcript revision used for generation; distinct from the local SQLite revision ID. */
+  remoteTranscriptRevisionId?: string | null;
   manualNoteRevision: number;
   scheduleSnapshotHash: string | null;
   status: MeetingSummaryVersionStatus;
