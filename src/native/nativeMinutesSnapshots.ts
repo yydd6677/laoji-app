@@ -13,6 +13,7 @@ import {
   type MinutesStatusTone,
   type MinutesSummarySectionSnapshot,
   type MinutesViewSnapshot,
+  type NativeProjectionEnvelope,
 } from 'laoji-native-platform';
 import type { MeetingSummaryActionCandidate, MeetingSummaryDocument } from '../domain/meeting';
 import type { TranscriptLine } from '../types';
@@ -74,6 +75,7 @@ export interface BuildNativeRecordingSnapshotInput {
   manualNoteRetryable?: boolean;
   manualNoteConflict?: boolean;
   transcript: readonly NativeMinutesTranscriptLine[];
+  projection?: NativeProjectionEnvelope | null;
 }
 
 export interface NativeMinutesMarkerInput {
@@ -118,6 +120,7 @@ export interface BuildNativeDetailSnapshotInput {
   canCreateClip?: boolean;
   summaryGenerating?: boolean;
   updatingActionId?: string | null;
+  projection?: NativeProjectionEnvelope | null;
   focusActionId?: string;
   focusActionRequestId?: number;
   focusTranscriptSegmentId?: string;
@@ -706,6 +709,7 @@ export function buildNativeMinutesRecordingSnapshot(
       manualNoteConflict: input.manualNoteConflict ?? false,
       transcript: toNativeMinutesTranscript(input.transcript),
     },
+    projection: input.projection ?? null,
   };
 }
 
@@ -842,5 +846,6 @@ export function buildNativeMinutesDetailSnapshot(
     schemaVersion: MINUTES_SNAPSHOT_SCHEMA_VERSION,
     surface: 'detail',
     detail,
+    projection: input.projection ?? null,
   };
 }

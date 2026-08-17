@@ -12,6 +12,7 @@ import {
   requireOptionalNativeModule,
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
+import type { NativeProjectionEnvelope } from './contracts';
 
 export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 19 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
@@ -296,9 +297,10 @@ export interface MinutesViewSnapshot {
   list?: MinutesListSnapshot;
   recording?: MinutesRecordingSnapshot;
   detail?: MinutesDetailSnapshot;
+  projection?: NativeProjectionEnvelope | null;
 }
 
-export type MinutesSemanticAction =
+export type MinutesSemanticAction = (
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
   | { type: 'openSpeakers' | 'openSettings' | 'openMeetingTags' | 'openMeetingOrganization' | 'openRecycleBin' | 'closeRecycleBin'; surface: 'list' }
   | { type: 'importMedia'; surface: 'list' }
@@ -374,7 +376,8 @@ export type MinutesSemanticAction =
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
   | { type: 'selectSummaryTemplate'; surface: 'detail'; meetingId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }
-  | { type: 'updateSearchQuery'; surface: 'list'; query: string };
+  | { type: 'updateSearchQuery'; surface: 'list'; query: string }
+) & { projection?: NativeProjectionEnvelope | null };
 
 export interface MinutesPlaybackState {
   sourceId: string | null;

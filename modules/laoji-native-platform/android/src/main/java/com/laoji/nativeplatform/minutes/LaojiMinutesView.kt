@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.media.MinutesPlaybackRegistry
 import com.laoji.nativeplatform.media.MinutesPlaybackState
 import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
@@ -128,6 +129,16 @@ class LaojiMinutesView(
   }
 
   private fun handleAction(action: Map<String, Any?>) {
+    val currentProjection = store.state.projection
+    val actionProjection = (action["projection"] as? Map<*, *>)
+      ?.entries
+      ?.mapNotNull { (key, value) -> (key as? String)?.let { it to value } }
+      ?.toMap()
+      ?.let(ProjectionEnvelope::fromMap)
+    if (currentProjection != null && action.containsKey("projection")
+      && action["projection"] != null && actionProjection == null) return
+    if (currentProjection != null && actionProjection != null
+      && !currentProjection.sameIdentity(actionProjection)) return
     if (action["type"] == "search" && surfaceView is MinutesDetailSurface) {
       val transcriptPage = (surfaceView as MinutesDetailSurface).pageFor(MinutesDetailTab.TRANSCRIPT)
         as MinutesTranscriptPage
@@ -144,7 +155,20 @@ class LaojiMinutesView(
         store.dispatch(MinutesStateMutation.SetFollowLatest(action["followLatest"] as? Boolean ?: true))
       }
     }
-    onMinutesAction(action + mapOf("surface" to store.state.surface.wireName))
+    val projectionPayload = currentProjection?.let {
+      mapOf(
+        "deviceEpoch" to it.deviceEpoch,
+        "entityId" to it.entityId,
+        "entityRevision" to it.entityRevision,
+        "viewRevision" to it.viewRevision,
+        "surfaceInstanceId" to it.surfaceInstanceId,
+        "payloadSha256" to it.payloadSha256,
+      )
+    }
+    onMinutesAction(action + buildMap {
+      put("surface", store.state.surface.wireName)
+      if (projectionPayload != null) put("projection", projectionPayload)
+    })
   }
 
   private fun handlePlaybackState(state: MinutesPlaybackState) {

@@ -41,6 +41,11 @@ schedule capability barrier，也不改变稳定版或生产服务。
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
   仅作为回滚期间的只读资产。
+- Native Calendar/Minutes 快照现在可携带 `ProjectionEnvelope`；CalendarHost 对无效、缺失、乱序或
+  跨 entity/surface 的投影直接拒绝，拖拽 mutation 会回传当前 projection fence。Minutes parser/reducer
+  使用同一 revision/hash fence，native action 会回显当前 envelope；旧版无 envelope 快照仍兼容。
+- 新增 `src/native/projectionEnvelope.ts`，以 `expo-crypto` 对规范化 payload 生成真实 SHA-256；Calendar
+  和 Minutes snapshot builder 接受预先生成的 envelope，不在 native 侧重新计算正文哈希。
 
 ## 验证
 
@@ -54,7 +59,8 @@ schedule capability barrier，也不改变稳定版或生产服务。
 
 ## 未完成
 
-这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭，
-ProjectionEnvelope 尚未包裹 native 页面快照/动作，服务端 capability barrier、自然语料 holdout 和真实 Expo SQLite/Android
-迁移回放和搜索性能门也尚未通过。
+这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭；
+ProjectionEnvelope 目前只完成 native Calendar/Minutes 的隔离接线，尚未由稳定页面统一生成并启用
+device/surface identity，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
+Expo SQLite/Android 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。

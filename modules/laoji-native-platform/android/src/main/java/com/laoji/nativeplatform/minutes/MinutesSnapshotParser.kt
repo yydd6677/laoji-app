@@ -4,16 +4,21 @@ package com.laoji.nativeplatform.minutes
 // defensive structured snapshot parsing drives native state.
 
 import com.laoji.nativeplatform.ui.NativeUserMessages
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 
 object MinutesSnapshotParser {
   fun parse(raw: Map<String, Any?>, surfaceOverride: String? = null): MinutesUiState {
     val surface = MinutesSurface.fromWireName(surfaceOverride ?: raw.string("surface"))
+    val projectionRaw = raw.mapOrNull("projection")
+    val projection = ProjectionEnvelope.fromMap(projectionRaw)
     val state = MinutesUiState(
       schemaVersion = raw.int("schemaVersion", MINUTES_SNAPSHOT_SCHEMA_VERSION),
       surface = surface,
       list = parseList(raw.map("list")),
       recording = parseRecording(raw.map("recording")),
       detail = parseDetail(raw.map("detail")),
+      projection = projection,
+      projectionInvalid = raw.containsKey("projection") && projectionRaw != null && projection == null,
     )
     return MinutesStateReducer.normalize(state)
   }

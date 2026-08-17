@@ -1,5 +1,7 @@
 package com.laoji.nativeplatform.minutes
 
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
+
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
@@ -449,6 +451,8 @@ data class MinutesUiState(
   val list: MinutesListState = MinutesListState(),
   val recording: MinutesRecordingState = MinutesRecordingState(),
   val detail: MinutesDetailState = MinutesDetailState(),
+  val projection: ProjectionEnvelope? = null,
+  val projectionInvalid: Boolean = false,
 )
 
 sealed interface MinutesStateMutation {
@@ -461,7 +465,11 @@ sealed interface MinutesStateMutation {
 object MinutesStateReducer {
   fun reduce(current: MinutesUiState, mutation: MinutesStateMutation): MinutesUiState {
     val next = when (mutation) {
-      is MinutesStateMutation.Replace -> mergeReplace(current, mutation.state)
+      is MinutesStateMutation.Replace -> if (acceptProjection(current, mutation.state)) {
+        mergeReplace(current, mutation.state)
+      } else {
+        current
+      }
       is MinutesStateMutation.SelectSurface -> current.copy(surface = mutation.surface)
       is MinutesStateMutation.SelectDetailTab -> if (
         mutation.generation < current.detail.tabGeneration ||
@@ -515,6 +523,12 @@ object MinutesStateReducer {
         pageStates = pageStates,
       ),
     )
+  }
+
+  private fun acceptProjection(current: MinutesUiState, incoming: MinutesUiState): Boolean {
+    if (incoming.projectionInvalid) return false
+    if (current.projection == null) return true
+    return incoming.projection?.isAcceptableReplacement(current.projection) == true
   }
 
   /** MIN-DETAIL-PAGER-001: stale page responses cannot replace newer page data. */

@@ -1,5 +1,7 @@
 package com.laoji.nativeplatform.calendar
 
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
+
 // CAL-ROOT-001: Bridge snapshots remain independent from Android rendering classes.
 
 enum class CalendarMode(val bridgeValue: String) {
@@ -147,7 +149,9 @@ data class CalendarSnapshot(
   val selectedEpochDay: Int,
   val todayEpochDay: Int,
   val settings: CalendarSettings = CalendarSettings(),
-  val events: List<CalendarEvent> = emptyList()
+  val events: List<CalendarEvent> = emptyList(),
+  val projection: ProjectionEnvelope? = null,
+  val projectionInvalid: Boolean = false,
 ) {
   fun normalized(): CalendarSnapshot {
     val safeRangeEnd = maxOf(rangeStartEpochDay + 1, rangeEndEpochDayExclusive)

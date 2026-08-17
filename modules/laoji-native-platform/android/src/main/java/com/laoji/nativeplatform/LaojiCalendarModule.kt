@@ -8,6 +8,7 @@ import com.laoji.nativeplatform.calendar.CalendarHostView
 import com.laoji.nativeplatform.calendar.CalendarMutationResolution
 import com.laoji.nativeplatform.calendar.CalendarSettings
 import com.laoji.nativeplatform.calendar.CalendarSnapshot
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -147,16 +148,24 @@ class CalendarSnapshotRecord : Record {
   @Field
   var events: List<CalendarEventRecord> = emptyList()
 
-  fun toModel(): CalendarSnapshot = CalendarSnapshot(
-    schemaVersion = schemaVersion,
-    generation = generation,
-    rangeStartEpochDay = rangeStartEpochDay,
-    rangeEndEpochDayExclusive = rangeEndEpochDayExclusive,
-    selectedEpochDay = selectedEpochDay,
-    todayEpochDay = todayEpochDay,
-    settings = settings.toModel(),
-    events = events.map(CalendarEventRecord::toModel)
-  )
+  @Field
+  var projection: Map<String, Any?>? = null
+
+  fun toModel(): CalendarSnapshot {
+    val parsedProjection = ProjectionEnvelope.fromMap(projection)
+    return CalendarSnapshot(
+      schemaVersion = schemaVersion,
+      generation = generation,
+      rangeStartEpochDay = rangeStartEpochDay,
+      rangeEndEpochDayExclusive = rangeEndEpochDayExclusive,
+      selectedEpochDay = selectedEpochDay,
+      todayEpochDay = todayEpochDay,
+      settings = settings.toModel(),
+      events = events.map(CalendarEventRecord::toModel),
+      projection = parsedProjection,
+      projectionInvalid = projection != null && parsedProjection == null,
+    )
+  }
 }
 
 class CalendarMutationResolutionRecord : Record {

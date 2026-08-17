@@ -13,6 +13,7 @@ import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
 import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -67,6 +68,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private var mode = CalendarMode.MONTH
   private var baseSnapshot: CalendarSnapshot? = null
   private var renderedSnapshot: CalendarSnapshot? = null
+  private var currentProjection: ProjectionEnvelope? = null
   private var selectedEpochDay = currentEpochDay()
   private var pickerState = CalendarPickerState.closed(selectedEpochDay)
   private var pendingPickerCloseReason: String? = null
@@ -145,6 +147,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     if (snapshot == null) {
       baseSnapshot = null
       renderedSnapshot = null
+      currentProjection = null
       monthPager.setSnapshot(null)
       dayView.setSnapshot(null)
       pickerPanel.setDateData(CalendarQuickChooseDateData.EMPTY)
@@ -152,6 +155,19 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     }
     if (snapshot.schemaVersion != 1) {
       emitSemantic("snapshot-rejected", mapOf("reason" to "unsupported-schema", "schemaVersion" to snapshot.schemaVersion))
+      return
+    }
+    if (snapshot.projectionInvalid) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "invalid-projection"))
+      return
+    }
+    val incomingProjection = snapshot.projection
+    if (currentProjection != null && incomingProjection == null) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "missing-projection"))
+      return
+    }
+    if (incomingProjection != null && !incomingProjection.isAcceptableReplacement(currentProjection)) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "stale-projection"))
       return
     }
     val currentGeneration = baseSnapshot?.generation
@@ -174,6 +190,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
           normalized.events.none { it.identity == acknowledged.identity }
         }
     )
+    currentProjection = normalized.projection
     selectedEpochDay = normalized.selectedEpochDay
     if (!visibleMonthInitialized) {
       monthPager.jumpToMonth(selectedEpochDay)
@@ -591,7 +608,17 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     mutation.optimistic.startMinutes?.let { put("startMinutes", it) }
     mutation.optimistic.endMinutes?.let { put("endMinutes", it) }
     put("baseRevision", mutation.original.revision)
+    baseSnapshot?.projection?.let { projection -> put("projection", projectionPayload(projection)) }
   }
+
+  private fun projectionPayload(projection: ProjectionEnvelope): Map<String, Any> = mapOf(
+    "deviceEpoch" to projection.deviceEpoch,
+    "entityId" to projection.entityId,
+    "entityRevision" to projection.entityRevision,
+    "viewRevision" to projection.viewRevision,
+    "surfaceInstanceId" to projection.surfaceInstanceId,
+    "payloadSha256" to projection.payloadSha256,
+  )
 
   private fun emitSemantic(type: String, details: Map<String, Any>) {
     onSemanticEvent(buildMap {

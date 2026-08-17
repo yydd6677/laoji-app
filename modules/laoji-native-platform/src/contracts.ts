@@ -67,6 +67,16 @@ export interface NativeCalendarRangeSnapshot {
   todayEpochDay: number;
   settings: NativeCalendarSettings;
   events: NativeCalendarEventSnapshot[];
+  projection?: NativeProjectionEnvelope | null;
+}
+
+export interface NativeProjectionEnvelope {
+  deviceEpoch: string;
+  entityId: string;
+  entityRevision: number;
+  viewRevision: number;
+  surfaceInstanceId: string;
+  payloadSha256: string;
 }
 
 export type NativeCalendarMutationKind = 'move' | 'resize-start' | 'resize-end';
@@ -81,6 +91,7 @@ export interface NativeCalendarMutationRequest {
   startMinutes: number | null;
   endMinutes: number | null;
   baseRevision: number;
+  projection?: NativeProjectionEnvelope | null;
 }
 
 export interface NativeCalendarMutationResolution {
