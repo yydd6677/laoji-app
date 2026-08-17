@@ -74,12 +74,43 @@ export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): P
 }
 
 export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
-  const existing = await loadLocalScheduleEvents();
-  const next = [...existing.filter(item => item.id !== event.id), normalize(event)];
-  await replaceLocalScheduleEvents(next);
+  const normalized = normalize(event);
+  await withMeetingDatabaseTransaction(async database => {
+    await ensureTable(database);
+    const now = Date.now();
+    await database.runAsync(
+      `INSERT INTO local_schedule_events (
+        id, source_event_id, start_date, end_date, start_time, end_time,
+        title, event_json, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        source_event_id = excluded.source_event_id,
+        start_date = excluded.start_date,
+        end_date = excluded.end_date,
+        start_time = excluded.start_time,
+        end_time = excluded.end_time,
+        title = excluded.title,
+        event_json = excluded.event_json,
+        updated_at_ms = excluded.updated_at_ms`,
+      normalized.id,
+      normalized.sourceEventId ?? normalized.id,
+      normalized.startDate,
+      normalized.endDate ?? null,
+      normalized.startTime ?? null,
+      normalized.endTime ?? null,
+      normalized.title,
+      JSON.stringify(normalized),
+      now,
+      now,
+    );
+  });
 }
 
 export async function deleteLocalScheduleEvent(eventId: string): Promise<void> {
-  const existing = await loadLocalScheduleEvents();
-  await replaceLocalScheduleEvents(existing.filter(item => item.id !== eventId));
+  const normalizedId = String(eventId).trim();
+  if (!normalizedId) throw new Error('日程标识不能为空');
+  await withMeetingDatabaseTransaction(async database => {
+    await ensureTable(database);
+    await database.runAsync('DELETE FROM local_schedule_events WHERE id = ?', normalizedId);
+  });
 }
