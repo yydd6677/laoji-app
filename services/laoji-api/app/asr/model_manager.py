@@ -102,6 +102,7 @@ class ModelManager:
     _instance: Optional["ModelManager"] = None
     def __init__(self):
         self._lock = asyncio.Lock()
+        self._vad_init_lock = asyncio.Lock()
         self.camp_model = None
         self.vad_model = None
         self._vad_jit_file = None
@@ -140,6 +141,18 @@ class ModelManager:
                     self._initialization_task = None
             raise
 
+    async def initialize_vad(self) -> None:
+        """Make text segmentation ready without waiting for CAM++ weights."""
+        if self.vad_model is not None:
+            return
+        async with self._vad_init_lock:
+            if self.vad_model is not None:
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._load_vad)
+            if self.vad_model is None:
+                raise RuntimeError("Silero VAD 未能加载")
+
     async def _initialize_models(self) -> None:
         """Load the required Chinese support models exactly once."""
 
@@ -153,7 +166,7 @@ class ModelManager:
         print("[ModelManager] [1/2] Silero VAD (语音活动检测)...", flush=True)
         _vad_ok = False
         try:
-            await loop.run_in_executor(None, self._load_vad)
+            await self.initialize_vad()
             if self.vad_model is not None:
                 print("[ModelManager]       [PASS] Silero VAD 加载成功", flush=True)
                 _vad_ok = True

@@ -130,8 +130,12 @@ def test_realtime_session_chunk_and_event_cursors_survive_replay(realtime_contex
         source_end_ms=100,
         payload_sha256=digest(stable_payload),
         encrypted_payload=stable_payload,
+        consume_through_chunk_seq=0,
     )
     assert stable["reused"] is False
+    assert vnext_realtime_store.get_unconsumed_chunks(
+        realtime_context, session["session_id"],
+    ) == []
     stable_replay = vnext_realtime_store.append_durable_event(
         realtime_context,
         session["session_id"],
@@ -144,6 +148,7 @@ def test_realtime_session_chunk_and_event_cursors_survive_replay(realtime_contex
         source_end_ms=100,
         payload_sha256=digest(stable_payload),
         encrypted_payload=stable_payload,
+        consume_through_chunk_seq=0,
     )
     assert stable_replay["reused"] is True
 

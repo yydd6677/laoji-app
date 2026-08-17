@@ -1,0 +1,277 @@
+"""Text-first realtime pipeline over durable chunk and event cursors."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from typing import Any, Awaitable, Callable
+
+import numpy as np
+
+from app.schemas.vnext_contracts import TranscriptStreamEventV2
+from app.services import (
+    vnext_asr_client,
+    vnext_realtime_crypto,
+    vnext_realtime_store,
+)
+
+
+SendEvent = Callable[[dict[str, Any]], Awaitable[None]]
+AsrCall = Callable[..., dict[str, Any]]
+
+
+async def _create_vad():
+    from app.asr.model_manager import get_model_manager
+    from app.asr.streaming_vad import StreamingVAD
+
+    manager = get_model_manager()
+    initialize_vad = getattr(manager, "initialize_vad", None)
+    if initialize_vad is not None:
+        await initialize_vad()
+    elif not manager.is_initialized():
+        await manager.initialize()
+    model = await asyncio.to_thread(manager.create_vad_model)
+    if model is None:
+        raise RuntimeError("vnext_vad_not_ready")
+    vad = StreamingVAD(model)
+    vad.set_max_speech_duration(4500.0)
+    vad.set_min_energy_threshold(0.0002)
+    vad.set_min_silence_duration(650.0)
+    vad.set_pre_roll_duration(400.0, initial_duration_ms=200.0)
+    return vad
+
+
+def _flush_vad(vad) -> list:
+    segments = []
+    for _ in range(40):
+        segment = vad.feed(np.zeros(512, dtype=np.float32))
+        if segment is not None:
+            segments.append(segment)
+        if getattr(vad, "state", "idle") == "idle":
+            break
+    return segments
+
+
+class VNextRealtimeTextPipeline:
+    def __init__(
+        self,
+        context,
+        session_id: str,
+        asset_generation: str,
+        send_event: SendEvent,
+        *,
+        vad_factory: Callable[[], Awaitable[Any]] = _create_vad,
+        asr_call: AsrCall = vnext_asr_client.transcribe_realtime_segment,
+    ) -> None:
+        self.context = context
+        self.session_id = session_id
+        self.asset_generation = asset_generation
+        self.send_event = send_event
+        self.vad_factory = vad_factory
+        self.asr_call = asr_call
+        self._wake = asyncio.Event()
+        self._finalize = False
+        self._task: asyncio.Task | None = None
+        self._failure: Exception | None = None
+        self._last_fed_chunk_seq = -1
+        self._last_event_seq = 0
+        self._timeline_offset_ms: int | None = None
+        self._text_event_count = 0
+        self._last_source_end_ms = 0
+        self._last_model_revision = "no-asr-inference"
+        self._vad = None
+
+    def start(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._run())
+            self._wake.set()
+
+    def notify_chunk(self) -> None:
+        self._wake.set()
+
+    async def finalize(self) -> None:
+        self._finalize = True
+        self._wake.set()
+        if self._task is not None:
+            await self._task
+        if self._failure is not None:
+            raise self._failure
+
+    async def close(self) -> None:
+        if self._task is None or self._task.done():
+            return
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+
+    async def _run(self) -> None:
+        try:
+            snapshot = await asyncio.to_thread(
+                vnext_realtime_store.get_realtime_snapshot,
+                self.context,
+                self.session_id,
+            )
+            if snapshot is None:
+                raise RuntimeError("vnext_realtime_session_missing")
+            self._last_event_seq = int(snapshot["session"]["last_durable_event_seq"])
+            self._text_event_count = sum(
+                1 for event in snapshot["events"]
+                if event["event_kind"] == "stable" and event["outcome"] == "text"
+            )
+            self._vad = await self.vad_factory()
+            while True:
+                await self._wake.wait()
+                self._wake.clear()
+                await self._drain_chunks()
+                if self._finalize:
+                    await self._finish()
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._failure = error
+
+    async def _drain_chunks(self) -> None:
+        chunks = await asyncio.to_thread(
+            vnext_realtime_store.get_unconsumed_chunks,
+            self.context,
+            self.session_id,
+        )
+        for chunk in chunks:
+            chunk_seq = int(chunk["chunk_seq"])
+            if chunk_seq <= self._last_fed_chunk_seq:
+                continue
+            pcm = await asyncio.to_thread(
+                vnext_realtime_crypto.read_chunk,
+                str(chunk["encrypted_spool_locator"]),
+            )
+            if self._timeline_offset_ms is None:
+                self._timeline_offset_ms = int(chunk["start_ms"])
+            self._last_source_end_ms = max(self._last_source_end_ms, int(chunk["end_ms"]))
+            audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+            segment = await asyncio.to_thread(self._vad.feed, audio)
+            self._last_fed_chunk_seq = chunk_seq
+            if segment is not None:
+                await self._publish_segment(segment, chunk_seq, chunks)
+
+    async def _publish_segment(self, segment, consume_through: int, chunks: list[dict]) -> None:
+        offset = self._timeline_offset_ms or 0
+        source_start_ms = offset + int(segment.start_ms)
+        source_end_ms = offset + int(segment.end_ms)
+        identity_seed = (
+            f"{self.asset_generation}\0{source_start_ms}\0{source_end_ms}"
+        ).encode("utf-8")
+        stable_key = "segment:" + hashlib.sha256(identity_seed).hexdigest()[:40]
+        pcm16 = (np.clip(segment.audio_data, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        result = await asyncio.to_thread(
+            self.asr_call,
+            item_id=stable_key,
+            pcm_int16=pcm16,
+            source_start_ms=source_start_ms,
+            source_end_ms=source_end_ms,
+        )
+        self._last_model_revision = str(result["model_revision"])
+        self._last_event_seq += 1
+        event = TranscriptStreamEventV2(
+            schema_version=2,
+            contract_revision="transcript.stream.v2",
+            session_id=self.session_id,
+            event_sequence=self._last_event_seq,
+            event_kind="stable",
+            stable_segment_key=stable_key,
+            segment_revision=int(result["segment_revision"]),
+            text_state="stable",
+            outcome=result["outcome"],
+            text=result["text"],
+            source_start_ms=source_start_ms,
+            source_end_ms=source_end_ms,
+            model_revision=result["model_revision"],
+        ).model_dump()
+        payload = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        envelope = vnext_realtime_crypto.seal_event(
+            f"{self.session_id}:event:{self._last_event_seq}", payload,
+        )
+        await asyncio.to_thread(
+            vnext_realtime_store.append_durable_event,
+            self.context,
+            self.session_id,
+            event_seq=self._last_event_seq,
+            event_kind="stable",
+            stable_segment_key=stable_key,
+            segment_revision=int(result["segment_revision"]),
+            outcome=result["outcome"],
+            source_start_ms=source_start_ms,
+            source_end_ms=source_end_ms,
+            payload_sha256="sha256:" + hashlib.sha256(payload).hexdigest(),
+            encrypted_payload=envelope,
+            consume_through_chunk_seq=consume_through,
+        )
+        if result["outcome"] == "text":
+            self._text_event_count += 1
+        for chunk in chunks:
+            if int(chunk["chunk_seq"]) <= consume_through:
+                await asyncio.to_thread(
+                    vnext_realtime_crypto.delete_chunk,
+                    str(chunk["encrypted_spool_locator"]),
+                )
+        await self.send_event(event)
+
+    async def _finish(self) -> None:
+        remaining = await asyncio.to_thread(
+            vnext_realtime_store.get_unconsumed_chunks,
+            self.context,
+            self.session_id,
+        )
+        for segment in await asyncio.to_thread(_flush_vad, self._vad):
+            consume_through = self._last_fed_chunk_seq
+            await self._publish_segment(segment, consume_through, remaining)
+        self._last_event_seq += 1
+        outcome = "text" if self._text_event_count else "no_speech"
+        event = TranscriptStreamEventV2(
+            schema_version=2,
+            contract_revision="transcript.stream.v2",
+            session_id=self.session_id,
+            event_sequence=self._last_event_seq,
+            event_kind="final",
+            stable_segment_key=None,
+            segment_revision=1,
+            text_state="final",
+            outcome=outcome,
+            text="",
+            source_start_ms=self._timeline_offset_ms or 0,
+            source_end_ms=max(
+                [self._last_source_end_ms]
+                + [int(chunk["end_ms"]) for chunk in remaining]
+            ),
+            model_revision=self._last_model_revision,
+        ).model_dump()
+        payload = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        envelope = vnext_realtime_crypto.seal_event(
+            f"{self.session_id}:event:{self._last_event_seq}", payload,
+        )
+        await asyncio.to_thread(
+            vnext_realtime_store.append_durable_event,
+            self.context,
+            self.session_id,
+            event_seq=self._last_event_seq,
+            event_kind="final",
+            stable_segment_key=None,
+            segment_revision=1,
+            outcome=outcome,
+            source_start_ms=event["source_start_ms"],
+            source_end_ms=event["source_end_ms"],
+            payload_sha256="sha256:" + hashlib.sha256(payload).hexdigest(),
+            encrypted_payload=envelope,
+            consume_through_chunk_seq=(
+                self._last_fed_chunk_seq if self._last_fed_chunk_seq >= 0 else None
+            ),
+        )
+        for chunk in remaining:
+            await asyncio.to_thread(
+                vnext_realtime_crypto.delete_chunk,
+                str(chunk["encrypted_spool_locator"]),
+            )
+        await self.send_event(event)

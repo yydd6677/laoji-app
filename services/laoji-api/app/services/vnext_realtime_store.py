@@ -21,6 +21,8 @@ MAX_CHUNK_BYTES = 1024 * 1024
 MAX_EVENT_BYTES = 256 * 1024
 MAX_ACTIVE_DEVICE_SESSIONS = 2
 MAX_ACTIVE_GLOBAL_SESSIONS = 4
+MAX_SESSION_SPOOL_BYTES = 512 * 1024 * 1024
+MAX_GLOBAL_SPOOL_BYTES = 4 * 1024 * 1024 * 1024
 
 
 class RealtimeOwnerContext(Protocol):
@@ -371,6 +373,22 @@ def append_chunk_checkpoint(
         if chunk_seq != expected:
             connection.rollback()
             raise VNextRealtimeError("CHUNK_SEQUENCE_GAP", "实时音频分块序号不连续", 409)
+        session_bytes = int(connection.execute(
+            """SELECT COALESCE(SUM(byte_size), 0)
+               FROM vnext_realtime_chunk_checkpoints
+               WHERE session_id = ? AND state = 'spooled'""",
+            (session_id,),
+        ).fetchone()[0])
+        global_bytes = int(connection.execute(
+            """SELECT COALESCE(SUM(byte_size), 0)
+               FROM vnext_realtime_chunk_checkpoints WHERE state = 'spooled'"""
+        ).fetchone()[0])
+        if (
+            session_bytes + byte_size > MAX_SESSION_SPOOL_BYTES
+            or global_bytes + byte_size > MAX_GLOBAL_SPOOL_BYTES
+        ):
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SPOOL_CAPACITY", "实时音频暂存空间不足", 429)
         connection.execute(
             """INSERT INTO vnext_realtime_chunk_checkpoints(
                  session_id, chunk_seq, start_ms, end_ms, byte_size,
@@ -410,6 +428,7 @@ def append_durable_event(
     source_end_ms: int,
     payload_sha256: str,
     encrypted_payload: bytes,
+    consume_through_chunk_seq: int | None = None,
 ) -> dict[str, Any]:
     ensure_vnext_realtime_schema()
     session_id = _safe(session_id, "session_id", 180)
@@ -434,6 +453,10 @@ def append_durable_event(
     payload_sha256 = _sha256(payload_sha256, "payload_sha256")
     if not isinstance(encrypted_payload, bytes) or not 1 <= len(encrypted_payload) <= MAX_EVENT_BYTES:
         raise VNextRealtimeError("EVENT_PAYLOAD_INVALID", "转写事件载荷无效", 422)
+    if consume_through_chunk_seq is not None:
+        consume_through_chunk_seq = _nonnegative(
+            consume_through_chunk_seq, "consume_through_chunk_seq",
+        )
     now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -468,6 +491,12 @@ def append_durable_event(
         if event_seq != int(session["last_durable_event_seq"]) + 1:
             connection.rollback()
             raise VNextRealtimeError("EVENT_SEQUENCE_GAP", "转写事件序号不连续", 409)
+        if (
+            consume_through_chunk_seq is not None
+            and consume_through_chunk_seq > int(session["last_contiguous_chunk_seq"])
+        ):
+            connection.rollback()
+            raise VNextRealtimeError("CHUNK_CONSUME_AHEAD", "转写消费游标超出音频游标", 409)
         if stable_segment_key is not None:
             previous = connection.execute(
                 """SELECT segment_revision FROM vnext_realtime_event_ledger
@@ -490,6 +519,12 @@ def append_durable_event(
                 payload_sha256, encrypted_payload, now,
             ),
         )
+        if consume_through_chunk_seq is not None:
+            connection.execute(
+                """UPDATE vnext_realtime_chunk_checkpoints SET state = 'consumed'
+                   WHERE session_id = ? AND chunk_seq <= ? AND state = 'spooled'""",
+                (session_id, consume_through_chunk_seq),
+            )
         next_state = "succeeded" if event_kind == "final" else session["state"]
         connection.execute(
             """UPDATE vnext_realtime_asr_sessions
@@ -534,6 +569,32 @@ def acknowledge_events(
     }
 
 
+def mark_session_finalizing(
+    context: RealtimeOwnerContext,
+    session_id: str,
+) -> dict[str, Any]:
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            connection.rollback()
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        if session["state"] in {"open", "reconnecting"}:
+            connection.execute(
+                """UPDATE vnext_realtime_asr_sessions
+                   SET state = 'finalizing', last_seen_at = ? WHERE session_id = ?""",
+                (utc_now(), session_id),
+            )
+            session = _session_row(connection, context, session_id)
+        connection.commit()
+    decoded = _decode_session(session)
+    assert decoded is not None
+    return decoded
+
+
 def get_realtime_snapshot(
     context: RealtimeOwnerContext,
     session_id: str,
@@ -560,3 +621,25 @@ def get_realtime_snapshot(
         "session": _decode_session(session),
         "events": [dict(row) for row in events],
     }
+
+
+def get_unconsumed_chunks(
+    context: RealtimeOwnerContext,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    ensure_vnext_realtime_schema()
+    session_id = _safe(session_id, "session_id", 180)
+    with control_connection() as connection:
+        session = _session_row(connection, context, session_id)
+        if session is None:
+            raise VNextRealtimeError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
+        _assert_binding(connection, context, session)
+        rows = connection.execute(
+            """SELECT chunk_seq, start_ms, end_ms, byte_size, content_sha256,
+                      encrypted_spool_locator, state
+               FROM vnext_realtime_chunk_checkpoints
+               WHERE session_id = ? AND state = 'spooled'
+               ORDER BY chunk_seq""",
+            (session_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]

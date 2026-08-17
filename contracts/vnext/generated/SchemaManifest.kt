@@ -10,6 +10,7 @@ object VNextSchemaManifest {
         "meeting_facts_document_v3" to "2aea8012f31fd788b8f8e71dc5ab4269723c4e22de82db2613a312b4b1c44a54",
         "meeting_facts_model_response_v3" to "7934069f7a2e86985ae849b2eb12d8ee56aede2334d506c519ec772f48b25cb2",
         "projection_envelope" to "7f26a502338d151c268b736256ee5e068cbc140f40e61f0b6d7404987588dedb",
+        "realtime_chunk_header_v2" to "a1418e2421ed907294bb7d21000dd7a493cc93a02f5660ce1af0ed3260d0ebb8",
         "schedule_draft" to "9cbcc2b051a5797bdc7ff976f0364113cd5eb59c6ecb9cea4380261a3df00f96",
         "schedule_mention_graph" to "084734c9341b75ed2d3dfa91d16cdaa430fc524548d98046cbc87985f9345da4",
         "schedule_parse_request_legacy_projection" to "35cc3c14a24370dd4c3c48da341c0e40cf25ef8a11f329c4af1b36432d50f84e",

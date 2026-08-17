@@ -33,6 +33,11 @@
       "sha256": "7f26a502338d151c268b736256ee5e068cbc140f40e61f0b6d7404987588dedb"
     },
     {
+      "name": "realtime_chunk_header_v2",
+      "path": "schemas/realtime_chunk_header_v2.schema.json",
+      "sha256": "a1418e2421ed907294bb7d21000dd7a493cc93a02f5660ce1af0ed3260d0ebb8"
+    },
+    {
       "name": "schedule_draft",
       "path": "schemas/schedule_draft.schema.json",
       "sha256": "9cbcc2b051a5797bdc7ff976f0364113cd5eb59c6ecb9cea4380261a3df00f96"

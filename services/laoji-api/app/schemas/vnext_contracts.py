@@ -194,8 +194,32 @@ class TranscriptStreamEventV2(VNextModel):
             raise ValueError("transcript_partial_not_durable")
         if self.event_kind != "partial" and self.event_sequence < 1:
             raise ValueError("transcript_durable_sequence_required")
-        if (self.outcome == "no_speech") != (not self.text.strip()):
+        if self.event_kind == "partial" and (
+            self.outcome != "text" or not self.text.strip()
+        ):
+            raise ValueError("transcript_partial_content_required")
+        if self.event_kind == "stable" and (
+            (self.outcome == "no_speech") != (not self.text.strip())
+        ):
             raise ValueError("transcript_outcome_text_mismatch")
+        if self.event_kind == "final" and self.outcome == "no_speech" and self.text.strip():
+            raise ValueError("transcript_no_speech_text_mismatch")
+        return self
+
+
+class RealtimeChunkHeaderV2(VNextModel):
+    schema_version: Literal[2]
+    contract_revision: Literal["realtime.chunk.v2"]
+    type: Literal["audio.chunk"]
+    chunk_seq: int = Field(ge=0)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    content_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_chunk_range(self) -> "RealtimeChunkHeaderV2":
+        if self.end_ms < self.start_ms:
+            raise ValueError("realtime_chunk_range_invalid")
         return self
 
 
