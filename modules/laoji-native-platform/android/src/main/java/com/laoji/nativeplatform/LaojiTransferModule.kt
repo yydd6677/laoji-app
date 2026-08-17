@@ -147,10 +147,11 @@ class LaojiTransferModule : Module() {
       // KEEP may retain an older request. Returning the newly-built UUID here
       // strands JS on a permanent `missing` state, even though the old work is
       // still running. Resolve the actual unique work after enqueue instead.
-      val actual = workManager
+      val uniqueInfos = workManager
         .getWorkInfosForUniqueWork(uniqueWorkName)
         .get(5, TimeUnit.SECONDS)
-        .firstOrNull()
+      val actual = uniqueInfos.firstOrNull { !it.state.isFinished }
+        ?: uniqueInfos.firstOrNull()
         ?: throw IllegalStateException("unique upload work was not persisted")
       actual.id.toString()
     }
