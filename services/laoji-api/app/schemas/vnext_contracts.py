@@ -307,6 +307,22 @@ class ScheduleMentionGraph(VNextModel):
     provenance: ScheduleGraphProvenance
 
 
+class ScheduleGraphRequestV1(VNextModel):
+    schema_version: Literal[1] = 1
+    text: str = Field(min_length=1, max_length=2000)
+    reference_datetime: datetime
+    timezone: str = Field(min_length=1, max_length=64)
+    source_id: str | None = Field(default=None, min_length=8, max_length=180)
+    client_request_id: str = Field(min_length=8, max_length=180)
+
+
+class ScheduleGraphClarificationRequestV1(VNextModel):
+    schema_version: Literal[1] = 1
+    graph: ScheduleMentionGraph
+    answer: str = Field(min_length=1, max_length=1000)
+    client_request_id: str = Field(min_length=8, max_length=180)
+
+
 class ScheduleDraft(VNextModel):
     schema_version: Literal[1] = 1
     draft_id: str = Field(min_length=8, max_length=180)

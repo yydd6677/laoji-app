@@ -47,7 +47,13 @@ from app.schemas.schedule import (
     ScheduleParseRequest,
     ScheduleParseResponse,
 )
+from app.schemas.vnext_contracts import (
+    ScheduleGraphClarificationRequestV1,
+    ScheduleGraphRequestV1,
+    ScheduleMentionGraph,
+)
 from app.services import schedule_db_service as db
+from app.services import schedule_graph_service
 from app.services import schedule_parser_service as parser_service
 from app.services.llm_provider import configured_provider, provider_state
 from app.services.schedule_parser_service import (
@@ -157,6 +163,19 @@ def _parse_response_headers(request_id: str, trace_id: str, latency_ms: float) -
         "X-Trace-ID": trace_id,
         "Server-Timing": f"schedule-parse;dur={latency_ms:.3f}",
     }
+
+
+def _schedule_graph_v2_enabled() -> bool:
+    """The candidate route is opt-in and never changes the v1 default."""
+    return os.getenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "").strip() == "1"
+
+
+def _require_schedule_graph_v2() -> None:
+    if not _schedule_graph_v2_enabled():
+        raise HTTPException(status_code=404, detail={
+            "code": "SCHEDULE_GRAPH_V2_DISABLED",
+            "message": "日程图候选接口尚未启用",
+        })
 
 
 def _schedule_model_health() -> dict[str, Any]:
@@ -269,6 +288,48 @@ def _to_parse_response(parsed: dict, raw_text: str = "") -> ScheduleParseRespons
 async def schedule_model_health() -> dict[str, Any]:
     """只读检查日程解析实际使用的本机模型是否已加载。"""
     return _schedule_model_health()
+
+
+@router.post("/v2/schedule/graph", response_model=ScheduleMentionGraph)
+async def parse_schedule_graph_v2(request: ScheduleGraphRequestV1) -> ScheduleMentionGraph:
+    """Opt-in vNext graph producer; v1 ``/parse`` remains the default owner."""
+    _require_schedule_graph_v2()
+    try:
+        parsed = await parse_schedule_text(
+            request.text,
+            reference_datetime=request.reference_datetime.isoformat(),
+            timezone_name=request.timezone,
+        )
+        return schedule_graph_service.produce_schedule_graph(
+            request.text,
+            request.reference_datetime,
+            request.timezone,
+            source_id=request.source_id,
+            parsed=parsed or {},
+        )
+    except ScheduleParserUnavailable as error:
+        raise HTTPException(status_code=503, detail={
+            "code": "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE",
+            "message": "日程图生成服务暂时不可用",
+        }) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "SCHEDULE_GRAPH_INVALID",
+            "message": "日程图内容无效",
+        }) from error
+
+
+@router.post("/v2/schedule/graph/clarify", response_model=ScheduleMentionGraph)
+async def clarify_schedule_graph_v2(request: ScheduleGraphClarificationRequestV1) -> ScheduleMentionGraph:
+    """Merge an answer into the existing graph instead of parsing it alone."""
+    _require_schedule_graph_v2()
+    try:
+        return schedule_graph_service.merge_schedule_clarification(request.graph, request.answer)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "SCHEDULE_GRAPH_CLARIFICATION_INVALID",
+            "message": "没有理解这次日程补充",
+        }) from error
 
 
 def _parse_error(code: str, message: str, status_code: int = 422) -> JSONResponse:
