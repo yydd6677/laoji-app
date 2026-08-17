@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
+from pathlib import Path
+import sys
 import threading
 import time
 
 import numpy as np
 import pytest
 
-from qwen_asr_service import server
+from app.schemas.vnext_contracts import AsrBatchResponseV2, TranscriptStreamEventV2
+
+SERVER_PATH = Path(__file__).resolve().parents[2] / "laoji-asr" / "server.py"
+SPEC = importlib.util.spec_from_file_location("laoji_asr_server", SERVER_PATH)
+assert SPEC is not None and SPEC.loader is not None
+server = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = server
+SPEC.loader.exec_module(server)
 
 
 def _pcm(value: int, samples: int = 1600) -> bytes:
@@ -146,3 +156,123 @@ def test_empty_pcm_is_a_valid_no_speech_result(monkeypatch):
 
     assert response["items"][0]["text"] == ""
     assert response["items"][0]["infer_ms"] == 0
+
+
+def test_v2_batch_marks_stable_text_and_no_speech(monkeypatch):
+    request = {
+        "schema_version": 2,
+        "contract_revision": "asr.batch.v2",
+        "priority": "offline",
+        "items": [
+            {
+                "id": "asset-a:segment-1",
+                "pcm_base64": base64.b64encode(_pcm(1)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 200,
+                "source_end_ms": 300,
+            },
+            {
+                "id": "asset-a:segment-2",
+                "pcm_base64": base64.b64encode(_pcm(0)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 300,
+                "source_end_ms": 300,
+            },
+        ],
+    }
+    priority, items = server._parse_v2_batch_request(json.dumps(request).encode())
+    assert priority == "offline"
+    batch = {
+        "schema_version": 1,
+        "model": "Qwen/Qwen3-ASR-1.7B",
+        "model_revision": "revision-a",
+        "priority": priority,
+        "queue_ms": 4,
+        "infer_ms": 8,
+        "items": [
+            {
+                "id": items[0].item_id,
+                "text": " 项目进度正常 ",
+                "language": "Chinese",
+                "source_start_ms": 200,
+                "source_end_ms": 300,
+                "audio_ms": 100,
+                "model_revision": "revision-a",
+                "queue_ms": 4,
+                "infer_ms": 8,
+            },
+            {
+                "id": items[1].item_id,
+                "text": "",
+                "language": None,
+                "source_start_ms": 300,
+                "source_end_ms": 300,
+                "audio_ms": 100,
+                "model_revision": "revision-a",
+                "queue_ms": 4,
+                "infer_ms": 8,
+            },
+        ],
+    }
+    response = server._v2_batch_response(batch)
+    validated = AsrBatchResponseV2.model_validate(response)
+
+    assert validated.schema_version == 2
+    assert validated.contract_revision == "asr.batch.v2"
+    assert validated.items[0].stable_segment_key == "asset-a:segment-1"
+    assert validated.items[0].text == "项目进度正常"
+    assert validated.items[0].outcome == "text"
+    assert validated.items[1].outcome == "no_speech"
+    assert validated.items[1].text_state == "stable"
+
+
+def test_v2_batch_requires_explicit_contract_revision():
+    request = {
+        "schema_version": 2,
+        "priority": "offline",
+        "items": [{"id": "item-1", "pcm_base64": base64.b64encode(_pcm(1)).decode("ascii")}],
+    }
+    with pytest.raises(server.AsrServiceError, match="contract_revision_invalid"):
+        server._parse_v2_batch_request(json.dumps(request).encode())
+
+    request["contract_revision"] = "asr.batch.v2"
+    request["items"][0]["source_start_ms"] = 0
+    request["items"][0]["source_end_ms"] = 100
+    request["unexpected"] = True
+    with pytest.raises(server.AsrServiceError, match="request_fields_invalid"):
+        server._parse_v2_batch_request(json.dumps(request).encode())
+
+
+def test_stream_contract_separates_transient_partial_from_durable_final():
+    partial = TranscriptStreamEventV2.model_validate({
+        "schema_version": 2,
+        "contract_revision": "transcript.stream.v2",
+        "session_id": "realtime-session-1",
+        "event_sequence": 0,
+        "event_kind": "partial",
+        "stable_segment_key": "segment-1",
+        "segment_revision": 1,
+        "text_state": "partial",
+        "outcome": "text",
+        "text": "项目进",
+        "source_start_ms": 0,
+        "source_end_ms": 500,
+        "model_revision": "revision-a",
+    })
+    final = TranscriptStreamEventV2.model_validate({
+        "schema_version": 2,
+        "contract_revision": "transcript.stream.v2",
+        "session_id": "realtime-session-1",
+        "event_sequence": 2,
+        "event_kind": "final",
+        "stable_segment_key": None,
+        "segment_revision": 1,
+        "text_state": "final",
+        "outcome": "no_speech",
+        "text": "",
+        "source_start_ms": 0,
+        "source_end_ms": 500,
+        "model_revision": "revision-a",
+    })
+    assert partial.event_sequence == 0
+    assert final.outcome == "no_speech"

@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "AsrBatchResultItemV2": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_ms": {
+          "minimum": 0,
+          "title": "Audio Ms",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "infer_ms": {
+          "minimum": 0,
+          "title": "Infer Ms",
+          "type": "integer"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "model_revision": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Model Revision",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "text",
+            "no_speech"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "queue_ms": {
+          "minimum": 0,
+          "title": "Queue Ms",
+          "type": "integer"
+        },
+        "segment_revision": {
+          "minimum": 1,
+          "title": "Segment Revision",
+          "type": "integer"
+        },
+        "source_end_ms": {
+          "minimum": 0,
+          "title": "Source End Ms",
+          "type": "integer"
+        },
+        "source_start_ms": {
+          "minimum": 0,
+          "title": "Source Start Ms",
+          "type": "integer"
+        },
+        "stable_segment_key": {
+          "maxLength": 180,
+          "minLength": 1,
+          "title": "Stable Segment Key",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 20000,
+          "title": "Text",
+          "type": "string"
+        },
+        "text_state": {
+          "const": "stable",
+          "default": "stable",
+          "title": "Text State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "stable_segment_key",
+        "segment_revision",
+        "outcome",
+        "text",
+        "source_start_ms",
+        "source_end_ms",
+        "audio_ms",
+        "model_revision",
+        "queue_ms",
+        "infer_ms"
+      ],
+      "title": "AsrBatchResultItemV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "asr.batch.v2",
+      "default": "asr.batch.v2",
+      "title": "Contract Revision",
+      "type": "string"
+    },
+    "infer_ms": {
+      "minimum": 0,
+      "title": "Infer Ms",
+      "type": "integer"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/AsrBatchResultItemV2"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+    },
+    "model": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "model_revision": {
+      "maxLength": 180,
+      "minLength": 1,
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "priority": {
+      "enum": [
+        "realtime",
+        "schedule",
+        "offline"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "queue_ms": {
+      "minimum": 0,
+      "title": "Queue Ms",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": 2,
+      "default": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "model",
+    "model_revision",
+    "priority",
+    "queue_ms",
+    "infer_ms",
+    "items"
+  ],
+  "title": "AsrBatchResponseV2",
+  "type": "object"
+}

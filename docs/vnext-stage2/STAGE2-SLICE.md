@@ -27,11 +27,19 @@
   不依赖 JS 进程仍在运行。
 - `ensureRemoteMeetingServiceBinding` 在上传前登记本机 binding 和 binding-scoped purge capability；只有
   服务端确认相同 generation/revision/cancel fence 后才将原生 purge capability 标记为 armed。
+- 8030 保留 `/asr` 和 `/v1/asr/batch`，新增隔离 `/v2/asr/batch`。v2 请求严格拒绝未知/缺失字段，
+  输出 stable segment key/revision、源时间、模型 revision、排队/推理耗时和明确的 `text/no_speech`
+  内容结果；同一 shared schema 生成 TypeScript/Kotlin 哈希清单。
+- 新 `vnext_realtime_asr_sessions`、`vnext_realtime_chunk_checkpoints` 和
+  `vnext_realtime_event_ledger` 保存 task/binding/asset generation fence、连续 chunk cursor、稳定/final
+  event cursor 与加密载荷。partial 只走瞬时 stream，event sequence 为 0；stable/final 才进入 durable
+  ledger，重放必须内容一致，片段 revision 只能单调推进。
 
 ## 证据
 
 - `python3 tools/vnext/verify_stage2_migrations.py`：通过。
-- device-v2/task/purge/upload 聚焦后端测试：21 个通过，包含 remote multipart merge 后恢复。
+- device-v2/task/purge/upload/ASR/realtime 聚焦后端测试：30 个通过，包含 remote multipart merge、
+  chunk/event replay、binding fence 和 NO_SPEECH contract。
 - 共享 contract 生成检查与 `npx tsc --noEmit`：通过。
 - 隔离 `expo prebuild` 后 `:laoji-native-platform:compileDebugKotlin` 和 `:app:compileDebugKotlin`：通过。
 
@@ -40,9 +48,11 @@
 
 ## 下一入口
 
-1. 8030 stable batch/stream DTO 与统一的 realtime/schedule/import 优先级队列。
-2. VAD segment 同时投递 ASR 和 CAM++；先发布 partial/stable/final 文字，讲话人作为异步 overlay。
-3. 实现 NO_SPEECH success/no_content、restart、双上传+实时会议、延迟和内存退出门。
+1. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
+   Transcript owner，断线和 token refresh 从游标续接。
+2. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。
+3. 在 worker attempt 提交中把 NO_SPEECH 原子完成为 success/no_content，并闭合 restart、双上传+实时
+   会议、延迟和内存退出门。
 4. 上述门通过后才构建 v2 candidate 并统计旧 submit；barrier 前继续保留显式旧完整协议。
 
 生产服务、公网、APK、设备和 GPU 均未修改。

@@ -3,6 +3,7 @@
 Public contracts:
   * ``POST /asr`` keeps the legacy 16 kHz signed-int16 PCM contract.
   * ``POST /v1/asr/batch`` accepts one to eight base64 PCM items.
+  * ``POST /v2/asr/batch`` adds stable segment revisions and NO_SPEECH outcomes.
   * ``GET /health`` and ``GET /ready`` expose non-sensitive runtime state.
 
 All inference is serialized by one priority coordinator.  The queue priority is
@@ -212,6 +213,56 @@ def _parse_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
             )
         )
     return priority, items
+
+
+def _parse_v2_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AsrServiceError("json_invalid", "批量转写请求不是有效 JSON", 400) from exc
+    if not isinstance(payload, dict):
+        raise AsrServiceError("request_invalid", "批量转写请求格式无效", 400)
+    if payload.get("schema_version") != 2 or payload.get("contract_revision") != "asr.batch.v2":
+        raise AsrServiceError("contract_revision_invalid", "批量转写合同版本无效", 422)
+    if set(payload) != {"schema_version", "contract_revision", "priority", "items"}:
+        raise AsrServiceError("request_fields_invalid", "批量转写请求字段无效", 422)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise AsrServiceError("batch_size_invalid", "批量转写项目无效", 422)
+    allowed_item_fields = {
+        "id", "pcm_base64", "sample_rate", "language",
+        "source_start_ms", "source_end_ms",
+    }
+    for item in raw_items:
+        if (
+            not isinstance(item, dict)
+            or not {"id", "pcm_base64", "source_start_ms", "source_end_ms"}.issubset(item)
+            or not set(item).issubset(allowed_item_fields)
+        ):
+            raise AsrServiceError("item_fields_invalid", "批量转写项目字段无效", 422)
+    return _parse_batch_request(raw)
+
+
+def _v2_batch_response(batch: dict) -> dict:
+    items = []
+    for raw in batch["items"]:
+        text = str(raw.get("text") or "").strip()
+        items.append(
+            {
+                **raw,
+                "stable_segment_key": raw["id"],
+                "segment_revision": 1,
+                "text_state": "stable",
+                "outcome": "text" if text else "no_speech",
+                "text": text,
+            }
+        )
+    return {
+        **batch,
+        "schema_version": 2,
+        "contract_revision": "asr.batch.v2",
+        "items": items,
+    }
 
 
 class InferenceCoordinator:
@@ -502,17 +553,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/asr", "/v1/asr/batch"}:
+        if parsed.path not in {"/asr", "/v1/asr/batch", "/v2/asr/batch"}:
             self.send_error(404)
             return
         if MODEL is None or COORDINATOR is None:
             self._error(AsrServiceError("model_not_ready", "转写模型尚未就绪", 503))
             return
         try:
-            if parsed.path == "/v1/asr/batch":
+            if parsed.path in {"/v1/asr/batch", "/v2/asr/batch"}:
                 length = self._content_length(MAX_BATCH_REQUEST_BYTES)
-                priority, items = _parse_batch_request(self.rfile.read(length))
-                self._json(COORDINATOR.submit(priority, items))
+                raw = self.rfile.read(length)
+                if parsed.path == "/v2/asr/batch":
+                    priority, items = _parse_v2_batch_request(raw)
+                    self._json(_v2_batch_response(COORDINATOR.submit(priority, items)))
+                else:
+                    priority, items = _parse_batch_request(raw)
+                    self._json(COORDINATOR.submit(priority, items))
                 return
 
             length = self._content_length(MAX_AUDIO_BYTES)

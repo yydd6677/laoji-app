@@ -3,6 +3,16 @@
   "schema_source": "services/laoji-api/app/schemas",
   "schemas": [
     {
+      "name": "asr_batch_request_v2",
+      "path": "schemas/asr_batch_request_v2.schema.json",
+      "sha256": "e463b27bc45ac7d070ada98dbe5f9782cc93c651f634e67f0c173ff0ac11cc1c"
+    },
+    {
+      "name": "asr_batch_response_v2",
+      "path": "schemas/asr_batch_response_v2.schema.json",
+      "sha256": "7a2f0c78baaa77a8fc89a141b1f12cd4db6ab556ef4d79a40b5590f339b0b6a0"
+    },
+    {
       "name": "entity_revision",
       "path": "schemas/entity_revision.schema.json",
       "sha256": "be6fded007548196ba2910995dcac5408a4047bc9f25cd484d94bbf9909c9a82"
@@ -51,6 +61,11 @@
       "name": "task_attempt",
       "path": "schemas/task_attempt.schema.json",
       "sha256": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36"
+    },
+    {
+      "name": "transcript_stream_event_v2",
+      "path": "schemas/transcript_stream_event_v2.schema.json",
+      "sha256": "af174ee12fbb7d4ac7e76830213006bef672ae3d4177e3a78d1fed9f22dede6a"
     },
     {
       "name": "upload_session",

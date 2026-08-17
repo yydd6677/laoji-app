@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "AsrBatchItemV2": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "Chinese",
+          "title": "Language"
+        },
+        "pcm_base64": {
+          "maxLength": 12582912,
+          "minLength": 1,
+          "title": "Pcm Base64",
+          "type": "string"
+        },
+        "sample_rate": {
+          "const": 16000,
+          "default": 16000,
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "source_end_ms": {
+          "minimum": 0,
+          "title": "Source End Ms",
+          "type": "integer"
+        },
+        "source_start_ms": {
+          "minimum": 0,
+          "title": "Source Start Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "pcm_base64",
+        "source_start_ms",
+        "source_end_ms"
+      ],
+      "title": "AsrBatchItemV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "asr.batch.v2",
+      "title": "Contract Revision",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/AsrBatchItemV2"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+    },
+    "priority": {
+      "enum": [
+        "realtime",
+        "schedule",
+        "offline"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_revision",
+    "priority",
+    "items"
+  ],
+  "title": "AsrBatchRequestV2",
+  "type": "object"
+}

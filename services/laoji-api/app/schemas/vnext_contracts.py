@@ -110,6 +110,95 @@ class UploadSession(VNextModel):
     uploaded_parts: list[UploadPartReceipt] = Field(default_factory=list, max_length=10_000)
 
 
+class AsrBatchItemV2(VNextModel):
+    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    pcm_base64: str = Field(min_length=1, max_length=12 * 1024 * 1024)
+    sample_rate: Literal[16000] = 16000
+    language: str | None = Field(default="Chinese", max_length=64)
+    source_start_ms: int = Field(ge=0)
+    source_end_ms: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_source_range(self) -> "AsrBatchItemV2":
+        if self.source_end_ms < self.source_start_ms:
+            raise ValueError("asr_source_range_invalid")
+        return self
+
+
+class AsrBatchRequestV2(VNextModel):
+    schema_version: Literal[2]
+    contract_revision: Literal["asr.batch.v2"]
+    priority: Literal["realtime", "schedule", "offline"]
+    items: list[AsrBatchItemV2] = Field(min_length=1, max_length=8)
+
+
+class AsrBatchResultItemV2(VNextModel):
+    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    stable_segment_key: str = Field(min_length=1, max_length=180)
+    segment_revision: int = Field(ge=1)
+    text_state: Literal["stable"] = "stable"
+    outcome: Literal["text", "no_speech"]
+    text: str = Field(max_length=20_000)
+    language: str | None = Field(default=None, max_length=64)
+    source_start_ms: int = Field(ge=0)
+    source_end_ms: int = Field(ge=0)
+    audio_ms: int = Field(ge=0)
+    model_revision: str = Field(min_length=1, max_length=180)
+    queue_ms: int = Field(ge=0)
+    infer_ms: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "AsrBatchResultItemV2":
+        if self.source_end_ms < self.source_start_ms:
+            raise ValueError("asr_source_range_invalid")
+        if (self.outcome == "no_speech") != (not self.text.strip()):
+            raise ValueError("asr_outcome_text_mismatch")
+        return self
+
+
+class AsrBatchResponseV2(VNextModel):
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["asr.batch.v2"] = "asr.batch.v2"
+    model: str = Field(min_length=1, max_length=240)
+    model_revision: str = Field(min_length=1, max_length=180)
+    priority: Literal["realtime", "schedule", "offline"]
+    queue_ms: int = Field(ge=0)
+    infer_ms: int = Field(ge=0)
+    items: list[AsrBatchResultItemV2] = Field(min_length=1, max_length=8)
+
+
+class TranscriptStreamEventV2(VNextModel):
+    schema_version: Literal[2] = 2
+    contract_revision: Literal["transcript.stream.v2"] = "transcript.stream.v2"
+    session_id: str = Field(min_length=8, max_length=180)
+    event_sequence: int = Field(ge=0)
+    event_kind: Literal["partial", "stable", "final"]
+    stable_segment_key: str | None = Field(default=None, max_length=180)
+    segment_revision: int = Field(ge=1)
+    text_state: Literal["partial", "stable", "final"]
+    outcome: Literal["text", "no_speech"]
+    text: str = Field(max_length=20_000)
+    source_start_ms: int = Field(ge=0)
+    source_end_ms: int = Field(ge=0)
+    model_revision: str = Field(min_length=1, max_length=180)
+
+    @model_validator(mode="after")
+    def validate_event(self) -> "TranscriptStreamEventV2":
+        if self.text_state != self.event_kind:
+            raise ValueError("transcript_event_state_mismatch")
+        if self.source_end_ms < self.source_start_ms:
+            raise ValueError("transcript_event_range_invalid")
+        if self.event_kind != "final" and not self.stable_segment_key:
+            raise ValueError("transcript_segment_key_required")
+        if self.event_kind == "partial" and self.event_sequence != 0:
+            raise ValueError("transcript_partial_not_durable")
+        if self.event_kind != "partial" and self.event_sequence < 1:
+            raise ValueError("transcript_durable_sequence_required")
+        if (self.outcome == "no_speech") != (not self.text.strip()):
+            raise ValueError("transcript_outcome_text_mismatch")
+        return self
+
+
 class ScheduleGraphSource(VNextModel):
     text: str = Field(min_length=1, max_length=2000)
     mode: Literal["text", "audio_transcript"]

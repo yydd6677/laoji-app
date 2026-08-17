@@ -20,12 +20,15 @@ from app.schemas.meeting_facts_v3 import (  # noqa: E402
 )
 from app.schemas.schedule import ScheduleParseRequest, ScheduleParseResponse  # noqa: E402
 from app.schemas.vnext_contracts import (  # noqa: E402
+    AsrBatchRequestV2,
+    AsrBatchResponseV2,
     EntityRevision,
     ProjectionEnvelope,
     ScheduleDraft,
     ScheduleMentionGraph,
     SourceRef,
     TaskAttempt,
+    TranscriptStreamEventV2,
     UploadSession,
 )
 
@@ -34,6 +37,9 @@ SCHEMA_MODELS = {
     "entity_revision": EntityRevision,
     "source_ref": SourceRef,
     "task_attempt": TaskAttempt,
+    "asr_batch_request_v2": AsrBatchRequestV2,
+    "asr_batch_response_v2": AsrBatchResponseV2,
+    "transcript_stream_event_v2": TranscriptStreamEventV2,
     "upload_session": UploadSession,
     "projection_envelope": ProjectionEnvelope,
     "schedule_mention_graph": ScheduleMentionGraph,
