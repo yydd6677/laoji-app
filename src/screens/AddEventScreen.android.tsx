@@ -246,6 +246,12 @@ export function AddEventScreen({ navigation, route }: Props) {
     detail: route.params?.draft?.detail,
     status: route.params?.draft?.status,
     reminderMinutes: value.isAllDay || !value.startTime ? null : value.reminderMinutes,
+    ...(route.params?.draft?.draftSourceSha256 ? {
+      eventRevision: route.params.draft.eventRevision,
+      draftSourceSha256: route.params.draft.draftSourceSha256,
+      producerRevision: route.params.draft.producerRevision,
+      graphSchemaRevision: route.params.draft.graphSchemaRevision,
+    } : {}),
   }), [route.params?.draft]);
 
   const activeSave = (runId: number) => mountedRef.current

@@ -131,6 +131,12 @@ function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<Cal
     spanning: source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
     reminderMinutes: hasStartTime ? source.reminder_minutes ?? null : null,
     color: colorForEvent({ category }),
+    ...(source.schedule_graph ? {
+      eventRevision: source.schedule_graph.provenance.draft_revision,
+      draftSourceSha256: source.schedule_graph.source.content_sha256,
+      producerRevision: source.schedule_graph.provenance.producer_revision,
+      graphSchemaRevision: 'mention-graph-v1',
+    } : {}),
   };
 }
 
@@ -154,6 +160,10 @@ function detailedDraft(source: ParseResult, inputText: string): EventDraftParams
     detail: payload.detail,
     status: payload.status,
     reminderMinutes: payload.reminderMinutes,
+    eventRevision: payload.eventRevision,
+    draftSourceSha256: payload.draftSourceSha256,
+    producerRevision: payload.producerRevision,
+    graphSchemaRevision: payload.graphSchemaRevision,
   };
 }
 

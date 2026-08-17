@@ -1014,6 +1014,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           seriesStartDate: ev.startDate,
           seriesEndDate: ev.endDate,
           color: colorForEvent({ category }),
+          eventRevision: Math.max(1, ev.eventRevision ?? 1),
+          draftSourceSha256: ev.draftSourceSha256 ?? null,
+          producerRevision: ev.producerRevision ?? 'legacy-v1',
+          graphSchemaRevision: ev.graphSchemaRevision ?? 'mention-graph-v1',
         };
         const nextGuestEvents = [...guestBaseEventsRef.current, baseEvent];
         await persistGuestEvents(nextGuestEvents);
@@ -1640,7 +1644,18 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           target: guestPrevious,
           ref,
           scope: effectiveScope,
-          validated,
+          validated: {
+            ...validated,
+            eventRevision: Math.max(
+              guestPrevious.eventRevision ?? guestPrevious.revision ?? 1,
+              validated.eventRevision ?? 1,
+            ) + 1,
+            draftSourceSha256: validated.draftSourceSha256 ?? guestPrevious.draftSourceSha256 ?? null,
+            producerRevision: validated.producerRevision ?? guestPrevious.producerRevision ?? 'legacy-v1',
+            graphSchemaRevision: validated.graphSchemaRevision
+              ?? guestPrevious.graphSchemaRevision
+              ?? 'mention-graph-v1',
+          },
           segmentId: createGuestId(),
         });
         await persistGuestEvents(nextGuestEvents);

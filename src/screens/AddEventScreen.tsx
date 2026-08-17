@@ -406,6 +406,12 @@ export function AddEventScreen({ navigation, route }: Props) {
     detail: routeDraft?.detail,
     status: routeDraft?.status,
     reminderMinutes: isAllDay ? null : reminderMinutes,
+    ...(routeDraft?.draftSourceSha256 ? {
+      eventRevision: routeDraft.eventRevision,
+      draftSourceSha256: routeDraft.draftSourceSha256,
+      producerRevision: routeDraft.producerRevision,
+      graphSchemaRevision: routeDraft.graphSchemaRevision,
+    } : {}),
   });
 
   const isSaveRunActive = (runId: number) => (

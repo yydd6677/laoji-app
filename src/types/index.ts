@@ -157,6 +157,10 @@ export interface EventDraftParams {
   detail?: string;
   status?: string;
   reminderMinutes?: number | null;
+  eventRevision?: number;
+  draftSourceSha256?: string | null;
+  producerRevision?: string;
+  graphSchemaRevision?: string;
 }
 
 export interface MeetingActionFollowupParams {

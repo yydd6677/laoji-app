@@ -34,6 +34,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
   独立输入。
 - device-v2 增加 `/schedule/graph`、`/schedule/graph/clarify` 和 `schedule_graph_v2` capability；服务端
   未显式设置 `LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED=1` 时路由与能力均 fail-closed。
+- Graph 的 `content_sha256`、producer revision、schema revision 和 draft revision 已贯穿两套语音确认页
+  与两套详细编辑页并写入本机日程；用户后续编辑在 guest/device-primary CRUD 中单调递增
+  `eventRevision`，不会因进入详细编辑而退化成 `legacy-v1` 来源。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
@@ -52,6 +55,6 @@ schedule capability barrier，也不改变稳定版或生产服务。
 ## 未完成
 
 这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭，
-ProjectionEnvelope 尚未接入页面保存动作，服务端 capability barrier、自然语料 holdout 和真实 Expo SQLite/Android
+ProjectionEnvelope 尚未包裹 native 页面快照/动作，服务端 capability barrier、自然语料 holdout 和真实 Expo SQLite/Android
 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
