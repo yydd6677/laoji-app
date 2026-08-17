@@ -12692,9 +12692,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     while (this.indexedSearchScopes.get(scopeKey) !== this.searchIndexGeneration) {
       const generationAtStart = this.searchIndexGeneration;
       await withMeetingDatabaseTransaction(async database => {
-        await database.runAsync('DELETE FROM meeting_search_fts WHERE scope_key = ?', scopeKey);
+        await database.runAsync(
+          'DELETE FROM meeting_search_documents_v45 WHERE scope_key = ?',
+          scopeKey,
+        );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'title', meeting.id, '-1',
@@ -12704,7 +12707,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'manual_note', note.meeting_id, '-1',
@@ -12716,7 +12719,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'transcript',
@@ -12730,7 +12733,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'summary', section.id, '-1',
@@ -12747,7 +12750,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'action', action.id,
@@ -12761,7 +12764,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         scopeKey,
       );
       await database.runAsync(
-        `INSERT INTO meeting_search_fts (
+        `INSERT INTO meeting_search_documents_v45 (
            scope_key, meeting_id, source_kind, source_id, start_ms, title, content
          )
          SELECT meeting.scope_key, meeting.id, 'tag', tag.id, '-1', meeting.title, tag.name
@@ -12784,7 +12787,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     const database = await openMeetingDatabase();
     const filter = meetingSearchFilterSql(predicate.filters);
     const predicateSql = predicate.kind === 'match'
-      ? 'meeting_search_fts MATCH ?'
+      ? 'meeting_search_fts_v45 MATCH ?'
       : predicate.kind === 'like'
         ? predicate.patterns.map(() => "search.content LIKE ? ESCAPE '\\'").join(' AND ')
         : '1 = 1';
@@ -12793,7 +12796,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       : predicate.kind === 'like' ? [...predicate.patterns] : [];
     const firstTerm = predicate.terms[0];
     const snippetSql = predicate.kind === 'match'
-      ? "snippet(meeting_search_fts, 6, '', '', '…', 24)"
+      ? "snippet(meeting_search_fts_v45, 1, '', '', '…', 24)"
       : predicate.kind === 'like'
         ? `CASE
            WHEN instr(lower(search.content), lower(?)) > 81 THEN
@@ -12806,7 +12809,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
          END`
         : 'substr(search.content, 1, 240)';
     const rankSql = predicate.kind === 'match'
-      ? 'bm25(meeting_search_fts, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)'
+      ? 'bm25(meeting_search_fts_v45, 0.0, 1.0)'
       : '0.0';
     const snippetArguments = predicate.kind === 'like' ? [firstTerm, firstTerm] : [];
     const rows = await database.getAllAsync<MeetingSearchRow>(
@@ -12817,7 +12820,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
              AS recorded_at_ms,
            ${snippetSql} AS snippet,
            ${rankSql} AS rank
-         FROM meeting_search_fts search
+         FROM meeting_search_fts_v45 search_fts
+         INNER JOIN meeting_search_documents_v45 search
+           ON search.document_id = search_fts.rowid
          INNER JOIN meeting_notes meeting ON meeting.id = search.meeting_id
          WHERE ${predicateSql} AND ${filter.sql}
            AND search.scope_key = ?
@@ -14035,7 +14040,7 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         meetingId,
       );
       await database.runAsync(
-        `DELETE FROM meeting_search_fts
+        `DELETE FROM meeting_search_documents_v45
          WHERE scope_key = 'guest' AND meeting_id = ?`,
         meetingId,
       );

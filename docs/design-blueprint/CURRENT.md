@@ -94,6 +94,6 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
 
 Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
-revision 纳入本机 `local_schedule_events`；该切片只证明本机存储边界，Graph producer/validator、FTS、
-ProjectionEnvelope 和 schedule barrier 仍未采用，证据见
+revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；该切片只证明
+本机存储和搜索索引边界，Graph producer/validator、ProjectionEnvelope 和 schedule barrier 仍未采用，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。

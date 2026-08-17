@@ -17,17 +17,22 @@ capability barrier，也不改变稳定版或生产服务。
 - 增加 revision/source/deleted 查询索引，为后续 Graph validator、软删除和 stale action fence
   提供可查询边界。
 - `CalEvent` 暴露可选的来源元数据，未接入 Graph producer 时保持兼容默认值。
+- 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
+  保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
+- 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
+  仅作为回滚期间的只读资产。
 
 ## 验证
 
 - `npx tsc --noEmit`：通过。
 - `git diff --check`：通过。
 - `python3 -m compileall -q services/laoji-api/app`：通过。
+- SQLite FTS5 外部内容增删探针：通过，新增内容可检索，删除后无残留命中。
 - 迁移仅新增 0045，不改变 0040-0044 顺序；未安装到 APK、模拟器或服务器。
 
 ## 未完成
 
-这不是 Stage 4 退出证据。MentionGraph recognizers/producer/validator/executor、FTS5 与查询仓储、
-ProjectionEnvelope、服务端 v2 schedule route、自然语料 holdout 和 capability barrier 仍未采用。
+这不是 Stage 4 退出证据。MentionGraph recognizers/producer/validator/executor、ProjectionEnvelope、
+服务端 v2 schedule route、自然语料 holdout 和 capability barrier 仍未采用；真实 Expo SQLite/Android
+迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
-

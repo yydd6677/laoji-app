@@ -6,6 +6,49 @@ import type { MeetingDatabaseMigration } from './types';
  * and allow a future MentionGraph producer to replace a draft atomically.
  */
 export const SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL = `
+CREATE TABLE IF NOT EXISTS meeting_search_documents_v45 (
+  document_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope_key TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  start_ms INTEGER NOT NULL DEFAULT -1,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  UNIQUE(scope_key, meeting_id, source_kind, source_id, start_ms)
+);
+
+CREATE INDEX IF NOT EXISTS idx_meeting_search_documents_scope_v45
+  ON meeting_search_documents_v45(scope_key, meeting_id, source_kind, source_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search_fts_v45 USING fts5(
+  title,
+  content,
+  content='meeting_search_documents_v45',
+  content_rowid='document_id',
+  tokenize = 'trigram case_sensitive 0'
+);
+
+CREATE TRIGGER IF NOT EXISTS meeting_search_documents_v45_ai
+AFTER INSERT ON meeting_search_documents_v45 BEGIN
+  INSERT INTO meeting_search_fts_v45(rowid, title, content)
+  VALUES (new.document_id, new.title, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS meeting_search_documents_v45_ad
+AFTER DELETE ON meeting_search_documents_v45 BEGIN
+  INSERT INTO meeting_search_fts_v45(meeting_search_fts_v45, rowid, title, content)
+  VALUES ('delete', old.document_id, old.title, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS meeting_search_documents_v45_au
+AFTER UPDATE OF title, content ON meeting_search_documents_v45 BEGIN
+  INSERT INTO meeting_search_fts_v45(meeting_search_fts_v45, rowid, title, content)
+  VALUES ('delete', old.document_id, old.title, old.content);
+  INSERT INTO meeting_search_fts_v45(rowid, title, content)
+  VALUES (new.document_id, new.title, new.content);
+END;
+
 CREATE INDEX IF NOT EXISTS idx_local_schedule_event_revision
   ON local_schedule_events(id, event_revision);
 
@@ -58,4 +101,3 @@ export const scheduleMentionGraphVNext: MeetingDatabaseMigration = {
     await database.execAsync(SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL);
   },
 };
-
