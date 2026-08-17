@@ -314,6 +314,82 @@ export async function createMeetingBinding(bindingId: string): Promise<any> {
   }, '建立会议服务连接失败');
 }
 
+export interface VNextTaskProjection {
+  task_id: string;
+  epoch_id: string;
+  binding_id: string;
+  binding_generation: string;
+  capability: string;
+  entity_id: string;
+  entity_revision: number;
+  input_sha256: string;
+  generation_id: string;
+  state: 'active' | 'success' | 'failure' | 'cancelled';
+  cancel_revision: number;
+  current_attempt_id: string | null;
+  result_kind: 'artifact' | 'content_outcome' | null;
+  result: unknown;
+  error_code: string | null;
+}
+
+export async function registerVNextMeetingBinding(input: {
+  bindingId: string;
+  bindingGeneration: string;
+}): Promise<any> {
+  return request(`/vnext/bindings/${encodeURIComponent(input.bindingId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      schema_version: 1,
+      binding_generation: input.bindingGeneration,
+    }),
+  }, '建立新版会议服务连接失败');
+}
+
+export async function createVNextTask(input: {
+  taskId: string;
+  bindingId: string;
+  bindingGeneration: string;
+  capability: string;
+  entityId: string;
+  entityRevision: number;
+  inputSha256: string;
+  generationId: string;
+  predecessorTaskId?: string | null;
+  creationReason?: 'original' | 'retry' | 'regenerate';
+}): Promise<{ schema_version: 1; reused: boolean; task: VNextTaskProjection }> {
+  return request('/vnext/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      schema_version: 1,
+      task_id: input.taskId,
+      binding_id: input.bindingId,
+      binding_generation: input.bindingGeneration,
+      capability: input.capability,
+      entity_id: input.entityId,
+      entity_revision: input.entityRevision,
+      input_sha256: input.inputSha256,
+      generation_id: input.generationId,
+      predecessor_task_id: input.predecessorTaskId ?? null,
+      creation_reason: input.creationReason ?? 'original',
+    }),
+  }, '提交新版任务失败');
+}
+
+export async function getVNextTask(taskId: string): Promise<VNextTaskProjection> {
+  const response = await request<{ task: VNextTaskProjection }>(
+    `/vnext/tasks/${encodeURIComponent(taskId)}`,
+    {},
+    '读取新版任务失败',
+  );
+  return response.task;
+}
+
+export async function cancelVNextTask(taskId: string): Promise<void> {
+  await request(`/vnext/tasks/${encodeURIComponent(taskId)}/cancel`, {
+    method: 'POST',
+  }, '取消新版任务失败');
+}
+
 export async function deleteMeetingBinding(bindingId: string): Promise<any> {
   return request(`/meetings/${encodeURIComponent(bindingId)}`, {
     method: 'DELETE',
