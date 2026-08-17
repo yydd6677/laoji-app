@@ -81,7 +81,8 @@ remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 arm
 候选路由默认 fail-closed。
 8030 已新增不破坏 v1 的严格 v2 batch contract；realtime chunk/stable/final event ledger 已落库，
 Android stable 事件已先持久化本机 Transcript 再确认 durable event；guest device-v2-r2 WorkManager
-接入和 ASR/CAM++ 异步 lane 已在隔离工作树接通，
+接入和 ASR/CAM++ 异步 lane 已在隔离工作树接通。Android 会议录制也已接入默认关闭的本地构建标志
+与远端 `realtime_asr_v2` 双门，
 但 capability 默认关闭，线上 8030 当前仍只有 `/v1/asr/batch`，尚未提供候选 `/v2/asr/batch`。
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。

@@ -38,7 +38,10 @@ import { useAppDialog } from '../components/AppDialog';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import { createMeetingBinding, getDeviceRealtimeAuth } from '../services/deviceApi';
+import { loadDeviceV2Capabilities } from '../services/deviceV2Api';
+import { startDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
 import { getApiConfig } from '../services/config';
+import { getFeatureFlags } from '../config/featureFlags';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import {
   createMeetingRecordingFinalizer,
@@ -667,7 +670,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     setError('');
     nativeAudioBarsRef.current = [];
     let startedMeetingId = '';
-    let deviceAuth: Awaited<ReturnType<typeof getDeviceRealtimeAuth>> | null = null;
     let nativeCaptureStarted = false;
     let startedSession: ActiveNativeRecording | null = null;
     try {
@@ -708,9 +710,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         savedAtMs: Date.now(),
       };
       await updateMeetingStatus(readyMeeting.id, 'recording');
-      deviceAuth = await getDeviceRealtimeAuth();
-      await createMeetingBinding(readyMeeting.id);
-
       const config = getApiConfig();
       const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
       const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(
@@ -718,21 +717,35 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const websocketUrl = buildRealtimeAsrUrl({
-        meetingId: readyMeeting.id,
-        provider: config.realtimeAsrProvider,
-        purpose: 'meeting',
-        realtimeAsrBase: config.realtimeAsrBase,
-      });
-      const snapshot = await startNativeRecorder({
-        sessionId: readyMeeting.id,
-        purpose: 'meeting',
-        storageScope: recordingStorageScope,
-        websocketUrl,
-        allowInsecureDevelopment,
-        deviceToken: deviceAuth.deviceToken,
-        dataEpoch: deviceAuth.dataEpoch,
-      });
+      const realtimeV2 = getFeatureFlags().realtimeAsrV2Candidate
+        ? await loadDeviceV2Capabilities().catch(() => null)
+        : null;
+      const snapshot = realtimeV2?.realtimeAsrV2
+        ? await startDeviceV2RealtimeRecording({
+          meetingId: readyMeeting.id,
+          sessionId: readyMeeting.id,
+          storageScope: recordingStorageScope,
+          allowInsecureDevelopment,
+        })
+        : await (async () => {
+          const deviceAuth = await getDeviceRealtimeAuth();
+          await createMeetingBinding(readyMeeting.id);
+          const websocketUrl = buildRealtimeAsrUrl({
+            meetingId: readyMeeting.id,
+            provider: config.realtimeAsrProvider,
+            purpose: 'meeting',
+            realtimeAsrBase: config.realtimeAsrBase,
+          });
+          return startNativeRecorder({
+            sessionId: readyMeeting.id,
+            purpose: 'meeting',
+            storageScope: recordingStorageScope,
+            websocketUrl,
+            allowInsecureDevelopment,
+            deviceToken: deviceAuth.deviceToken,
+            dataEpoch: deviceAuth.dataEpoch,
+          });
+        })();
       nativeCaptureStarted = true;
       applyRecorderSnapshot(snapshot);
       const active = createActiveRecording(readyMeeting.id, remoteMeetingId);

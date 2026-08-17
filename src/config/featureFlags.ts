@@ -19,6 +19,7 @@ export interface LaoJiFeatureFlags {
   meetingContentShareLinksV1: boolean;
   meetingCrossMeetingSearchV1: boolean;
   scheduleGraphV2Candidate: boolean;
+  realtimeAsrV2Candidate: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -103,5 +104,6 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // MentionGraph changes the parse/clarification owner.  A remote
     // capability alone must not opt a stable APK into the candidate path.
     scheduleGraphV2Candidate: extra.featureFlags?.scheduleGraphV2Candidate === true,
+    realtimeAsrV2Candidate: extra.featureFlags?.realtimeAsrV2Candidate === true,
   };
 }

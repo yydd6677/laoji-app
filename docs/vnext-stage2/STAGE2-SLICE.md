@@ -56,6 +56,10 @@
   `LAOJI_VNEXT_REALTIME_V2_ENABLED=1` 时宣告并接受，候选服务默认 fail-closed。
 - Android 会议录制页对带 durable event sequence 的 stable 文字使用串行本机提交：先把累计文字记录
   写入 SQLite，再确认原生 v2 event；保存或确认失败时不推进本机游标，原生加密事件仍可重放。
+- Android 会议录制入口已接入双重门控：候选 APK 必须设置
+  `EXPO_PUBLIC_REALTIME_ASR_V2_CANDIDATE=1`，且服务端必须实时宣告 `realtime_asr_v2=true`，才会使用
+  device-v2 durable WSS；任一侧关闭都走完整 v1 录制链路，不在一次请求中途切换。v2 的 task、operation、
+  asset generation 默认从本机 opaque binding 稳定派生，页面重进不会生成冲突身份。
 
 ## 证据
 
@@ -92,8 +96,8 @@
 ## 下一入口
 
 1. 继续在隔离候选完成 Android 网络/进程死亡恢复证据；1 GiB 媒体和上传内存门已关闭，不得覆盖线上 v1。
-2. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
-   Transcript owner，断线和 token refresh 从游标续接。
+2. 在专属 Android 设备上启用双重候选门，验证 durable chunk/event cursor、断线、token refresh、
+   页面重进和 stable/final Transcript owner；代码接入不等于设备证据。
 3. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。
 4. 在 worker attempt 提交中把 NO_SPEECH 原子完成为 success/no_content，并闭合 restart、双上传+实时
    会议、延迟和内存退出门。

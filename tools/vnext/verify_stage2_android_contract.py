@@ -26,6 +26,8 @@ def main() -> None:
     worker = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/MeetingUploadWorker.kt"
     uploader = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/DeviceV2R2Uploader.kt"
     erase = ROOT / "src/services/localDataEraseCoordinator.ts"
+    live_screen = ROOT / "src/screens/MeetingLiveScreen.android.tsx"
+    feature_flags = ROOT / "src/config/featureFlags.ts"
 
     require(
         transfer,
@@ -44,11 +46,23 @@ def main() -> None:
         "actual != input.sourceSha256.lowercase()",
         "validateMultipartLayout(totalParts, partSize, input.byteSize)",
         "number !in 1..totalParts",
+        "suspendCancellableCoroutine",
+        "invokeOnCancellation { call.cancel() }",
     )
     require(erase, "clearNativeTransferLease(`device-v2:${epochId}`)")
+    require(
+        feature_flags,
+        "realtimeAsrV2Candidate: extra.featureFlags?.realtimeAsrV2Candidate === true",
+    )
+    require(
+        live_screen,
+        "getFeatureFlags().realtimeAsrV2Candidate",
+        "realtimeV2?.realtimeAsrV2",
+        "startDeviceV2RealtimeRecording",
+        "acknowledgeNativeDeviceV2Transcript",
+    )
     print("stage2_android_contract=passed")
 
 
 if __name__ == "__main__":
     main()
-
