@@ -21,6 +21,7 @@ export interface LaoJiFeatureFlags {
   meetingCrossMeetingSearchV1: boolean;
   scheduleGraphV2Candidate: boolean;
   realtimeAsrV2Candidate: boolean;
+  nativeProjectionEnvelopeCandidate: boolean;
 }
 
 type ExtraWithFeatureFlags = {
@@ -110,5 +111,8 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // capability alone must not opt a stable APK into the candidate path.
     scheduleGraphV2Candidate: extra.featureFlags?.scheduleGraphV2Candidate === true,
     realtimeAsrV2Candidate: extra.featureFlags?.realtimeAsrV2Candidate === true,
+    // Native snapshot fencing is opt-in until recreate/乱序 replay has passed
+    // on the target Android build.  The coordinator is inert in stable APKs.
+    nativeProjectionEnvelopeCandidate: extra.featureFlags?.nativeProjectionEnvelopeCandidate === true,
   };
 }

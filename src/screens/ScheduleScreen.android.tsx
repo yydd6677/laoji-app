@@ -37,6 +37,8 @@ import { useCurrentDate } from '../hooks/useCurrentDate';
 import { useAuth } from '../store/AuthStore';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
 import { Colors as C } from '../theme/colors';
+import { getFeatureFlags } from '../config/featureFlags';
+import { useNativeProjection } from '../native/useNativeProjection';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
@@ -118,7 +120,7 @@ export function ScheduleScreen({
     return () => { active = false; };
   }, [refreshEvents, visibleRange.endExclusive, visibleRange.start]);
 
-  const snapshot = useMemo(() => {
+  const snapshotBody = useMemo(() => {
     generationRef.current += 1;
     return buildNativeCalendarRangeSnapshot({
       generation: generationRef.current,
@@ -129,6 +131,10 @@ export function ScheduleScreen({
       events,
     });
   }, [events, selectedEpochDay, today, visibleRange.endExclusive, visibleRange.start]);
+  const snapshot = useNativeProjection(snapshotBody, {
+    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    entityId: 'calendar',
+  });
 
   const chooseEditScope = useCallback((event: CalEvent): Promise<EventRecurrenceScope | null> => {
     if (!event.repeat || event.repeat === 'once') return Promise.resolve('series');

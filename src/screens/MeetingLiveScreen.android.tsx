@@ -42,6 +42,7 @@ import { loadDeviceV2Capabilities } from '../services/deviceV2Api';
 import { startDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
 import { getApiConfig } from '../services/config';
 import { getFeatureFlags } from '../config/featureFlags';
+import { useNativeProjection } from '../native/useNativeProjection';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import {
   createMeetingRecordingFinalizer,
@@ -1077,7 +1078,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     && !requestedMeetingMissing
     && ['idle', 'failed'].includes(phase)
     && (!existing || canResumeMeetingRecording(existing));
-  const snapshot = useMemo(() => buildNativeMinutesRecordingSnapshot({
+  const snapshotBody = useMemo(() => buildNativeMinutesRecordingSnapshot({
     meetingId: meetingId || requestedMeetingId || '',
     title,
     startedAtLabel: existing
@@ -1105,6 +1106,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     manualNoteConflict: manualNoteConflict !== null,
     transcript,
   }), [activeContent, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, manualNoteConflict, meetingId, phase, requestedMeetingId, title, transcript]);
+  const snapshot = useNativeProjection(snapshotBody, {
+    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    entityId: meetingId || requestedMeetingId || 'recording',
+  });
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={C.body}>

@@ -283,6 +283,7 @@ import {
 } from '../services/notifications';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { getFeatureFlags } from '../config/featureFlags';
+import { useNativeProjection } from '../native/useNativeProjection';
 import {
   createMeetingActionShare,
   loadMeetingActionShares,
@@ -5622,7 +5623,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         ? '加入'
         : '';
 
-  const snapshot = useMemo(() => buildNativeMinutesDetailSnapshot({
+  const snapshotBody = useMemo(() => buildNativeMinutesDetailSnapshot({
     meetingId: meeting?.id ?? route.params.meetingId,
     available: Boolean(meeting),
     title: meeting ? meeting.title : '会议记录不存在',
@@ -5718,6 +5719,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
   }), [accessToken, activeMeetingFactsV3, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, detailProcessingPresentation.label, detailProcessingPresentation.retryStage, detailProcessingPresentation.tone, deviceTranscriptFailed, deviceTranscriptPending, deviceTranscriptTask?.phase, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, playerSource, playerSourceError, playerSources, processingRetrying, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryOperationActive, summaryProgress, summaryStageError, summaryStageLoading, summarySyncConflicts, summaryConfirmedCurrent, summaryTemplate.title, summaryV3UpgradeRunning, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  const snapshot = useNativeProjection(snapshotBody, {
+    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    entityId: meeting?.id ?? route.params.meetingId,
+  });
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];

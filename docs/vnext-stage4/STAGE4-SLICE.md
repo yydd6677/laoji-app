@@ -46,6 +46,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
   使用同一 revision/hash fence，native action 会回显当前 envelope；旧版无 envelope 快照仍兼容。
 - 新增 `src/native/projectionEnvelope.ts`，以 `expo-crypto` 对规范化 payload 生成真实 SHA-256；Calendar
   和 Minutes snapshot builder 接受预先生成的 envelope，不在 native 侧重新计算正文哈希。
+- 新增默认关闭的 `nativeProjectionEnvelopeCandidate` 旗标和 `useNativeProjection` 协调器；日历、会议
+  详情、实时录音三个页面在候选开启时从本机 epoch、页面实例和快照内容生成 envelope，哈希尚未完成时
+  暂不让 native 混用新正文和旧 fence。
 
 ## 验证
 
@@ -60,7 +63,7 @@ schedule capability barrier，也不改变稳定版或生产服务。
 ## 未完成
 
 这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭；
-ProjectionEnvelope 目前只完成 native Calendar/Minutes 的隔离接线，尚未由稳定页面统一生成并启用
-device/surface identity，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
+ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线及三个页面的默认关闭生成器，尚未启用
+device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
 Expo SQLite/Android 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。

@@ -102,8 +102,8 @@ Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision
 revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；隔离的
 Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机解析/澄清 owner；
 Graph 来源/revision 已贯穿确认、详细编辑和本机 CRUD；ProjectionEnvelope 已在隔离 worktree 接入
-Calendar/Minutes native snapshot parser、stale reducer 和 mutation/action 回显，但稳定页面尚未统一
-生成并启用 device/surface identity，且未跨 capability barrier，证据见
+Calendar/Minutes native snapshot parser、stale reducer 和 mutation/action 回显，并提供默认关闭的
+三个页面生成协调器，但候选流量尚未启用且未跨 capability barrier，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
