@@ -13,6 +13,12 @@ export interface CalEvent {
   seriesStartDate?: string;
   seriesEndDate?: string;
   revision?: number;
+  /** Stable local MentionGraph/draft revision metadata. */
+  eventRevision?: number;
+  draftSourceSha256?: string | null;
+  producerRevision?: string;
+  graphSchemaRevision?: string;
+  deletedAtMs?: number | null;
   recurrenceSegmentId?: number | string;
   recurrenceInterval?: number;
   /** ISO weekdays: 1 = Monday ... 7 = Sunday. */

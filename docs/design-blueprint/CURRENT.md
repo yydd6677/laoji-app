@@ -9,7 +9,7 @@
 - implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 frozen at `1.1.10 (118)`
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress (local media/transcript owner and server upload slice implemented)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 summary-v3 lineage and Stage 4 schedule provenance slices implemented in isolation`
 
 ## 权威文件
 
@@ -92,3 +92,8 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
+
+Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
+revision 纳入本机 `local_schedule_events`；该切片只证明本机存储边界，Graph producer/validator、FTS、
+ProjectionEnvelope 和 schedule barrier 仍未采用，证据见
+[Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。

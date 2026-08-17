@@ -22,6 +22,11 @@ async function ensureTable(database: SQLiteDatabase): Promise<void> {
       end_time TEXT,
       title TEXT NOT NULL DEFAULT '',
       event_json TEXT NOT NULL,
+      event_revision INTEGER NOT NULL DEFAULT 1,
+      draft_source_sha256 TEXT,
+      producer_revision TEXT NOT NULL DEFAULT 'legacy-v1',
+      graph_schema_revision TEXT NOT NULL DEFAULT 'mention-graph-v1',
+      deleted_at_ms INTEGER,
       created_at_ms INTEGER NOT NULL,
       updated_at_ms INTEGER NOT NULL
     );
@@ -56,8 +61,10 @@ export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): P
       await database.runAsync(
         `INSERT INTO local_schedule_events (
           id, source_event_id, start_date, end_date, start_time, end_time,
-          title, event_json, created_at_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          title, event_json, event_revision, draft_source_sha256,
+          producer_revision, graph_schema_revision, deleted_at_ms,
+          created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         event.sourceEventId ?? event.id,
         event.startDate,
@@ -66,6 +73,11 @@ export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): P
         event.endTime ?? null,
         event.title,
         JSON.stringify(event),
+        event.eventRevision ?? event.revision ?? 1,
+        event.draftSourceSha256 ?? null,
+        event.producerRevision ?? 'legacy-v1',
+        event.graphSchemaRevision ?? 'mention-graph-v1',
+        event.deletedAtMs ?? null,
         now,
         now,
       );
@@ -81,8 +93,10 @@ export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
     await database.runAsync(
       `INSERT INTO local_schedule_events (
         id, source_event_id, start_date, end_date, start_time, end_time,
-        title, event_json, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        title, event_json, event_revision, draft_source_sha256,
+        producer_revision, graph_schema_revision, deleted_at_ms,
+        created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         source_event_id = excluded.source_event_id,
         start_date = excluded.start_date,
@@ -91,6 +105,11 @@ export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
         end_time = excluded.end_time,
         title = excluded.title,
         event_json = excluded.event_json,
+        event_revision = excluded.event_revision,
+        draft_source_sha256 = excluded.draft_source_sha256,
+        producer_revision = excluded.producer_revision,
+        graph_schema_revision = excluded.graph_schema_revision,
+        deleted_at_ms = excluded.deleted_at_ms,
         updated_at_ms = excluded.updated_at_ms`,
       normalized.id,
       normalized.sourceEventId ?? normalized.id,
@@ -100,6 +119,11 @@ export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
       normalized.endTime ?? null,
       normalized.title,
       JSON.stringify(normalized),
+      normalized.eventRevision ?? normalized.revision ?? 1,
+      normalized.draftSourceSha256 ?? null,
+      normalized.producerRevision ?? 'legacy-v1',
+      normalized.graphSchemaRevision ?? 'mention-graph-v1',
+      normalized.deletedAtMs ?? null,
       now,
       now,
     );
