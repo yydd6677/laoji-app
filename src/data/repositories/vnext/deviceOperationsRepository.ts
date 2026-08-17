@@ -5,6 +5,14 @@ import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../../db/op
 export type DeviceOperationReason = 'original' | 'retry' | 'regenerate';
 export type DeviceOperationState = 'queued' | 'running' | 'success' | 'failure' | 'cancelled';
 
+const ALLOWED_STATE_TRANSITIONS: Record<DeviceOperationState, readonly DeviceOperationState[]> = {
+  queued: ['queued', 'running', 'failure', 'cancelled'],
+  running: ['running', 'success', 'failure', 'cancelled'],
+  success: ['success'],
+  failure: ['failure'],
+  cancelled: ['cancelled'],
+};
+
 export interface DeviceOperationRecord {
   operationId: string;
   deviceEpochId: string;
@@ -201,6 +209,10 @@ export async function updateDeviceOperation(input: UpdateDeviceOperationInput): 
     const existing = await readById(database, operationId);
     if (!existing || existing.operationRevision !== input.expectedRevision) return null;
     const state = input.state ?? existing.remoteState;
+    const currentState = existing.remoteState;
+    if (!currentState || !state || !ALLOWED_STATE_TRANSITIONS[currentState].includes(state)) {
+      return null;
+    }
     const terminal = state === 'success' || state === 'failure' || state === 'cancelled';
     const result = await database.runAsync(
       `UPDATE device_operations
