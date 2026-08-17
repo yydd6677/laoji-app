@@ -48,7 +48,7 @@
 ## 证据
 
 - `python3 tools/vnext/verify_stage2_migrations.py`：通过。
-- device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：55 个通过，包含 remote multipart merge、
+- device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：58 个通过，包含 remote multipart merge、
   chunk/event replay、binding fence 和 NO_SPEECH contract。
 - 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
 - 线上只读参考回放（样本 `39799065_da2-1-16.mp4`，360.133 秒，现有 `/v1/asr/batch`）：首个稳定批次
