@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,6 +57,16 @@ class AuthTokenRequest(BaseModel):
     request_id: str = Field(min_length=8, max_length=160)
 
 
+class RotateKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    request_id: str = Field(min_length=8, max_length=160)
+    new_public_key: str = Field(min_length=1, max_length=1_400)
+    old_signature: str = Field(min_length=1, max_length=400)
+    new_signature: str = Field(min_length=1, max_length=400)
+
+
 def _error(error: device_v2_identity.DeviceV2IdentityError) -> HTTPException:
     return HTTPException(
         status_code=error.status_code,
@@ -78,13 +88,15 @@ async def require_device_v2(
 
 
 @router.post("/bootstrap/challenges")
-async def bootstrap_challenge(payload: BootstrapChallengeRequest) -> dict[str, Any]:
+async def bootstrap_challenge(request: Request, payload: BootstrapChallengeRequest) -> dict[str, Any]:
     try:
+        rate_key = request.client.host if request.client else "unknown"
         return device_v2_identity.create_bootstrap_challenge(
             device_id=payload.device_id,
             epoch_id=payload.epoch_id,
             public_key_der=payload.public_key,
             request_id=payload.request_id,
+            rate_key=rate_key,
         )
     except device_v2_identity.DeviceV2IdentityError as error:
         raise _error(error) from error
@@ -129,6 +141,23 @@ async def auth_token(payload: AuthTokenRequest) -> dict[str, Any]:
             nonce=payload.nonce,
             signature=payload.signature,
             request_id=payload.request_id,
+        )
+    except device_v2_identity.DeviceV2IdentityError as error:
+        raise _error(error) from error
+
+
+@router.post("/auth/keys/rotate")
+async def rotate_key(
+    payload: RotateKeyRequest,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        return device_v2_identity.rotate_key(
+            context=context,
+            request_id=payload.request_id,
+            new_public_key_der=payload.new_public_key,
+            old_signature=payload.old_signature,
+            new_signature=payload.new_signature,
         )
     except device_v2_identity.DeviceV2IdentityError as error:
         raise _error(error) from error

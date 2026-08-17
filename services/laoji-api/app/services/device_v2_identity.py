@@ -179,13 +179,39 @@ def ensure_v2_schema() -> None:
                 expires_at INTEGER NOT NULL,
                 revoked_at INTEGER
             );
+            CREATE TABLE IF NOT EXISTS v2_rate_buckets (
+                bucket_key TEXT PRIMARY KEY,
+                window_started_at INTEGER NOT NULL,
+                request_count INTEGER NOT NULL
+            );
             """
         )
         connection.commit()
 
 
+def _consume_rate(connection: sqlite3.Connection, bucket_key: str, *, limit: int, window_seconds: int, now: int) -> None:
+    row = connection.execute(
+        "SELECT window_started_at, request_count FROM v2_rate_buckets WHERE bucket_key = ?",
+        (bucket_key,),
+    ).fetchone()
+    if row is None or now - int(row["window_started_at"]) >= window_seconds:
+        connection.execute(
+            "INSERT INTO v2_rate_buckets(bucket_key, window_started_at, request_count) VALUES (?, ?, 1) "
+            "ON CONFLICT(bucket_key) DO UPDATE SET window_started_at = excluded.window_started_at, request_count = 1",
+            (bucket_key, now),
+        )
+        return
+    count = int(row["request_count"])
+    if count >= limit:
+        raise DeviceV2IdentityError("RATE_LIMITED", "设备认证请求过于频繁，请稍后重试", 429)
+    connection.execute(
+        "UPDATE v2_rate_buckets SET request_count = request_count + 1 WHERE bucket_key = ?",
+        (bucket_key,),
+    )
+
+
 def create_bootstrap_challenge(
-    *, device_id: str, epoch_id: str, public_key_der: str, request_id: str,
+    *, device_id: str, epoch_id: str, public_key_der: str, request_id: str, rate_key: str = "direct",
 ) -> dict[str, Any]:
     ensure_v2_schema()
     device_id = _identifier(device_id, "device_id")
@@ -199,6 +225,8 @@ def create_bootstrap_challenge(
     challenge_id = _challenge_id()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        _consume_rate(connection, f"bootstrap:ip:{_identifier(rate_key, 'rate_key', 160)}", limit=3, window_seconds=86_400, now=now)
+        _consume_rate(connection, "bootstrap:global", limit=20, window_seconds=86_400, now=now)
         existing = connection.execute(
             "SELECT challenge_id, nonce_hash, expires_at FROM v2_auth_challenges WHERE kind = 'bootstrap' AND request_id = ?",
             (request_id,),
@@ -315,6 +343,8 @@ def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, pu
     nonce = secrets.token_bytes(32)
     challenge_id = _challenge_id()
     with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _consume_rate(connection, f"auth:{device_id}:{epoch_id}", limit=30, window_seconds=60, now=now)
         device = connection.execute("SELECT * FROM v2_devices WHERE device_id = ? AND revoked_at IS NULL", (device_id,)).fetchone()
         key = connection.execute(
             "SELECT public_key_hash FROM v2_device_keys WHERE device_id = ? AND key_version = ? AND retired_at IS NULL",
@@ -325,6 +355,7 @@ def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, pu
             (device_id, epoch_id),
         ).fetchone()
         if device is None or key is None or key["public_key_hash"] != public_key_hash or epoch is None or epoch["status"] != "active":
+            connection.rollback()
             raise DeviceV2IdentityError("DEVICE_NOT_REGISTERED", "设备密钥或数据域不可用", 401)
         connection.execute(
             """INSERT INTO v2_auth_challenges(
@@ -344,6 +375,68 @@ def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, pu
         "nonce": _b64encode(nonce),
         "expires_at": now + CHALLENGE_TTL_SECONDS,
         "key_version": key_version,
+    }
+
+
+def rotate_key(
+    *, context: DeviceV2Context, request_id: str, new_public_key_der: str,
+    old_signature: str, new_signature: str,
+) -> dict[str, Any]:
+    """Atomically add a new P-256 key and revoke all prior bearer tokens."""
+    ensure_v2_schema()
+    request_id = _identifier(request_id, "request_id", 160)
+    new_der, new_hash = _public_key(new_public_key_der)
+    old_sig = _signature(old_signature)
+    new_sig = _signature(new_signature)
+    now = _now()
+    message = _message(
+        "rotate",
+        hashlib.sha256(f"{context.device_id}\n{context.epoch_id}\n{request_id}\n{new_hash}".encode()).digest(),
+        context.device_id,
+        context.epoch_id,
+        request_id,
+        context.key_version,
+    )
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        device = connection.execute(
+            "SELECT current_key_version, token_revision, revoked_at FROM v2_devices WHERE device_id = ?",
+            (context.device_id,),
+        ).fetchone()
+        old = connection.execute(
+            "SELECT public_key_der FROM v2_device_keys WHERE device_id = ? AND key_version = ? AND retired_at IS NULL",
+            (context.device_id, context.key_version),
+        ).fetchone()
+        if device is None or device["revoked_at"] is not None or old is None or int(device["current_key_version"]) != context.key_version:
+            connection.rollback()
+            raise DeviceV2IdentityError("KEY_ROTATION_STALE", "设备密钥版本已变化", 409)
+        _verify_signature(bytes(old["public_key_der"]), old_sig, message)
+        _verify_signature(new_der, new_sig, message)
+        next_version = int(device["current_key_version"]) + 1
+        connection.execute(
+            "UPDATE v2_device_keys SET retired_at = ? WHERE device_id = ? AND key_version = ?",
+            (now, context.device_id, context.key_version),
+        )
+        connection.execute(
+            "INSERT INTO v2_device_keys(device_id, key_version, public_key_der, public_key_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (context.device_id, next_version, new_der, new_hash, now),
+        )
+        next_revision = int(device["token_revision"]) + 1
+        connection.execute(
+            "UPDATE v2_devices SET current_key_version = ?, token_revision = ? WHERE device_id = ?",
+            (next_version, next_revision, context.device_id),
+        )
+        connection.execute(
+            "UPDATE v2_tokens SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL",
+            (now, context.device_id),
+        )
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "device_id": context.device_id,
+        "epoch_id": context.epoch_id,
+        "key_version": next_version,
+        "token_revision": next_revision,
     }
 
 

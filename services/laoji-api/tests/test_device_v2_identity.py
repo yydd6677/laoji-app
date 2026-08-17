@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import sqlite3
 import uuid
 
@@ -99,6 +100,29 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
     context = device_v2_identity.authenticate_bearer(device_id, epoch_id, token["access_token"])
     assert context.device_id == device_id
     assert context.epoch_id == epoch_id
+
+    new_private, new_public = _public_key_and_private()
+    new_public_wire = _b64(new_public)
+    new_hash = hashlib.sha256(new_public).hexdigest()
+    rotate_message = device_v2_identity._message(
+        "rotate",
+        hashlib.sha256(f"{device_id}\n{epoch_id}\nrotate-request-1\n{new_hash}".encode()).digest(),
+        device_id,
+        epoch_id,
+        "rotate-request-1",
+        context.key_version,
+    )
+    rotated = device_v2_identity.rotate_key(
+        context=context,
+        request_id="rotate-request-1",
+        new_public_key_der=new_public_wire,
+        old_signature=_b64(private.sign(rotate_message, ec.ECDSA(hashes.SHA256()))),
+        new_signature=_b64(new_private.sign(rotate_message, ec.ECDSA(hashes.SHA256()))),
+    )
+    assert rotated["key_version"] == 2
+    with pytest.raises(device_v2_identity.DeviceV2IdentityError) as revoked:
+        device_v2_identity.authenticate_bearer(device_id, epoch_id, token["access_token"])
+    assert revoked.value.code == "BEARER_INVALID"
 
     with pytest.raises(device_v2_identity.DeviceV2IdentityError) as replay:
         device_v2_identity.exchange_auth_token(
