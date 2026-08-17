@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from http.client import HTTPConnection
 
 import numpy as np
 import pytest
@@ -241,6 +242,58 @@ def test_v2_batch_requires_explicit_contract_revision():
     request["unexpected"] = True
     with pytest.raises(server.AsrServiceError, match="request_fields_invalid"):
         server._parse_v2_batch_request(json.dumps(request).encode())
+
+
+def test_v2_batch_http_handler_returns_contract(monkeypatch):
+    class Result:
+        text = ""
+        language = None
+
+    class Model:
+        def transcribe(self, *, audio, language):
+            del language
+            return [Result() for _ in audio]
+
+    monkeypatch.setattr(server, "MODEL", Model())
+    monkeypatch.setattr(server, "MODEL_ID", "test-model")
+    monkeypatch.setattr(server, "MODEL_REVISION", "revision-http")
+    coordinator = server.InferenceCoordinator(lambda: server.MODEL)
+    monkeypatch.setattr(server, "COORDINATOR", coordinator)
+    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        payload = {
+            "schema_version": 2,
+            "contract_revision": "asr.batch.v2",
+            "priority": "offline",
+            "items": [{
+                "id": "http-item-1",
+                "pcm_base64": base64.b64encode(_pcm(0, samples=1)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 100,
+                "source_end_ms": 100,
+            }],
+        }
+        connection = HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/v2/asr/batch",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        body = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        assert response.status == 200
+        validated = AsrBatchResponseV2.model_validate(body)
+        assert validated.items[0].stable_segment_key == "http-item-1"
+        assert validated.items[0].outcome == "no_speech"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+        coordinator.close()
 
 
 def test_stream_contract_separates_transient_partial_from_durable_final():
