@@ -23,7 +23,7 @@
 
 - `npm exec -- tsc --noEmit --pretty false`：通过。
 - `python3 tools/vnext/verify_stage1_migrations.py`：通过，包含 DDL 重放、来源指针和外键检查。
-- `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py`：10 passed。
+- `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py tests/test_device_v2_identity.py`：11 passed。
 - `python3 -m compileall -q services/laoji-api/app services/laoji-api/tests`：通过。
 - 两个后续切片提交：`52e79fe`（purge journal）、`0a471c5`（日程行级写入）。
 - 绑定清除 fence 提交：`3111a84`（本机 operation）、`d2d2177`（服务端 generic task）。
