@@ -134,6 +134,7 @@ def _upgrade_legacy_owner_schema(connection: Any) -> None:
                 result_kind TEXT CHECK(result_kind IS NULL OR result_kind IN ('artifact','content_outcome')),
                 result_json TEXT,
                 error_code TEXT,
+                retry_not_before_epoch REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 terminal_at TEXT,
@@ -145,7 +146,7 @@ def _upgrade_legacy_owner_schema(connection: Any) -> None:
                    task.entity_revision, task.input_sha256, task.generation_id,
                    task.predecessor_task_id, task.creation_reason, task.state,
                    task.cancel_revision, task.current_attempt_id, task.result_kind,
-                   task.result_json, task.error_code, task.created_at, task.updated_at,
+                   task.result_json, task.error_code, NULL, task.created_at, task.updated_at,
                    task.terminal_at
               FROM vnext_tasks task
               JOIN device_principals principal ON principal.id = task.principal_id;
@@ -234,6 +235,7 @@ def ensure_vnext_task_schema() -> None:
                 result_kind TEXT CHECK(result_kind IS NULL OR result_kind IN ('artifact','content_outcome')),
                 result_json TEXT,
                 error_code TEXT,
+                retry_not_before_epoch REAL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 terminal_at TEXT,
@@ -259,6 +261,15 @@ def ensure_vnext_task_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_vnext_attempts_recovery
                 ON vnext_task_attempts(state, lease_expires_at_epoch, created_at, attempt_id);
             """
+        )
+        task_columns = _table_columns(connection, "vnext_tasks")
+        if "retry_not_before_epoch" not in task_columns:
+            connection.execute(
+                "ALTER TABLE vnext_tasks ADD COLUMN retry_not_before_epoch REAL"
+            )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vnext_tasks_retry_ready "
+            "ON vnext_tasks(state, retry_not_before_epoch, created_at, task_id)"
         )
         connection.commit()
     vnext_purge_store.ensure_purge_schema()
@@ -569,6 +580,12 @@ def claim_attempt(
         if task is None or task["state"] != "active":
             connection.rollback()
             return None
+        if (
+            task["retry_not_before_epoch"] is not None
+            and float(task["retry_not_before_epoch"]) > now_epoch
+        ):
+            connection.rollback()
+            return None
         current = connection.execute(
             """SELECT * FROM vnext_task_attempts
                WHERE task_id = ? AND state IN ('queued','running','retryable_failure','lease_expired')
@@ -581,7 +598,8 @@ def claim_attempt(
                 (owner, expires, now, current["attempt_id"]),
             )
             connection.execute(
-                "UPDATE vnext_tasks SET current_attempt_id = ?, updated_at = ? WHERE task_id = ?",
+                "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, "
+                "updated_at = ? WHERE task_id = ?",
                 (current["attempt_id"], now, task_id),
             )
             row = connection.execute("SELECT * FROM vnext_task_attempts WHERE attempt_id = ?", (current["attempt_id"],)).fetchone()
@@ -631,7 +649,8 @@ def claim_attempt(
             (attempt_id, task_id, attempt_number, owner, expires, now, now),
         )
         connection.execute(
-            "UPDATE vnext_tasks SET current_attempt_id = ?, updated_at = ? WHERE task_id = ?",
+            "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, "
+            "updated_at = ? WHERE task_id = ?",
             (attempt_id, now, task_id),
         )
         row = connection.execute("SELECT * FROM vnext_task_attempts WHERE attempt_id = ?", (attempt_id,)).fetchone()
@@ -705,7 +724,7 @@ def mark_success_in_transaction(
     cursor = connection.execute(
         """UPDATE vnext_tasks
               SET state = 'success', result_kind = ?, result_json = ?, error_code = NULL,
-                  updated_at = ?, terminal_at = ?
+                  retry_not_before_epoch = NULL, updated_at = ?, terminal_at = ?
             WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
         (result_kind, encoded, now, now, task_id, attempt_id),
     )
@@ -719,6 +738,7 @@ def mark_failure(
     error_code: str,
     *,
     retryable: bool,
+    retry_after_seconds: float = 0,
     lease_owner: str | None = None,
 ) -> bool:
     ensure_vnext_task_schema()
@@ -734,6 +754,7 @@ def mark_failure(
             attempt_id=attempt_id,
             error_code=error_code,
             retryable=retryable,
+            retry_after_seconds=retry_after_seconds,
             lease_owner=owner,
         )
         if marked:
@@ -751,6 +772,7 @@ def mark_failure_in_transaction(
     attempt_id: str,
     error_code: str,
     retryable: bool,
+    retry_after_seconds: float = 0,
     lease_owner: str,
 ) -> bool:
     task_id = _safe(task_id, "task_id")
@@ -775,11 +797,20 @@ def mark_failure_in_transaction(
     task_state: TaskState = (
         "active" if retryable and int(attempt["attempt_number"]) < MAX_ATTEMPTS else "failure"
     )
+    bounded_retry_seconds = max(0.0, min(3600.0, float(retry_after_seconds)))
+    retry_not_before_epoch = (
+        _now_epoch() + bounded_retry_seconds
+        if task_state == "active" and bounded_retry_seconds > 0
+        else None
+    )
     cursor = connection.execute(
-        """UPDATE vnext_tasks SET state = ?, error_code = ?, updated_at = ?,
+        """UPDATE vnext_tasks SET state = ?, error_code = ?, retry_not_before_epoch = ?, updated_at = ?,
                   terminal_at = CASE WHEN ? = 'failure' THEN ? ELSE NULL END
            WHERE task_id = ? AND state = 'active' AND current_attempt_id = ?""",
-        (task_state, code, now, task_state, now, task_id, attempt_id),
+        (
+            task_state, code, retry_not_before_epoch, now,
+            task_state, now, task_id, attempt_id,
+        ),
     )
     return cursor.rowcount == 1
 

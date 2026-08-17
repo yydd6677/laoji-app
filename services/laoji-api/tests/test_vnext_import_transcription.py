@@ -125,6 +125,63 @@ def test_r2_media_is_piped_through_ffmpeg_without_whole_file_copy(monkeypatch) -
     assert observed_duration[-1] == 500
 
 
+def test_seekable_r2_input_decodes_media_with_tail_index(tmp_path, monkeypatch) -> None:
+    media = tmp_path / "seekable.wav"
+    with wave.open(str(media), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16_000)
+        output.writeframes((np.full(8_000, 400, dtype="<i2")).tobytes())
+
+    class Segment:
+        start_ms = 0
+        end_ms = 500
+
+        def __init__(self, audio_data):
+            self.audio_data = audio_data
+
+    class FakeVad:
+        def __init__(self, _model, sample_rate: int):
+            assert sample_rate == 16_000
+            self.state = "idle"
+            self.emitted = False
+
+        def set_min_silence_duration(self, _value):
+            return None
+
+        def set_pre_roll_duration(self, _value, *, initial_duration_ms):
+            del initial_duration_ms
+
+        def set_max_speech_duration(self, _value):
+            return None
+
+        def set_min_energy_threshold(self, _value):
+            return None
+
+        def feed(self, audio):
+            if self.emitted or audio.size == 0 or not np.any(audio):
+                return None
+            self.emitted = True
+            return Segment(audio.copy())
+
+    monkeypatch.setattr(vnext_import_transcription_pipeline, "StreamingVAD", FakeVad)
+    requested: list[str] = []
+
+    def presign(*, object_key: str) -> str:
+        requested.append(object_key)
+        return media.as_uri()
+
+    segments = list(vnext_import_transcription_pipeline.stream_r2_speech_segments(
+        object_key="private-seekable-object",
+        source_sha256="d" * 64,
+        vad_model=object(),
+        input_url_provider=presign,
+    ))
+    assert requested == ["private-seekable-object"]
+    assert len(segments) == 1
+    assert segments[0].start_ms == 0 and segments[0].end_ms == 500
+
+
 @pytest.fixture
 def import_context(tmp_path, monkeypatch):
     database = tmp_path / "vnext-import.db"
@@ -691,6 +748,7 @@ async def test_checkpoint_replay_republishes_stable_text_without_second_asr_call
         lease_owner="recover-owner",
         error_code="TRANSCRIPT_INTERRUPTED",
         retryable=True,
+        retry_after_seconds=0,
     )
     second = vnext_task_store.claim_attempt(
         context,

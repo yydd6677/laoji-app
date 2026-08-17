@@ -11,6 +11,7 @@ WorkingDirectory=/opt/laoji-vnext/services/laoji-api
 EnvironmentFile=/etc/laoji-vnext/api.env
 Environment=PYTHONUNBUFFERED=1
 Environment=LAOJI_INTERNAL_ASR_PORT=8031
+Environment=QWEN_ASR_READY_URL=http://127.0.0.1:8031/ready
 Environment=QWEN_ASR_V2_BATCH_URL=http://127.0.0.1:8031/v2/asr/batch
 Environment=LAOJI_VNEXT_IMPORT_TRANSCRIPTION_ENABLED=1
 Environment=LAOJI_VNEXT_MEDIA_UPLOAD_BARRIER_ENABLED=0

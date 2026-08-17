@@ -1292,9 +1292,10 @@ def list_pending_transcription_sources(limit: int = 32) -> list[dict[str, Any]]:
                  JOIN vnext_verified_assets asset
                    ON asset.asset_revision_id = session.verified_asset_id
                 WHERE task.capability = 'transcript' AND task.state = 'active'
+                  AND COALESCE(task.retry_not_before_epoch, 0) <= ?
                   AND session.state = 'verified' AND asset.state = 'sealed'
                 ORDER BY task.created_at, task.task_id LIMIT ?""",
-            (bounded,),
+            (time.time(), bounded),
         ).fetchall()
     return [dict(row) for row in rows]
 

@@ -1,0 +1,15 @@
+{
+  "media": "/tmp/laoji-vnext-restart-30s-20260818.m4a",
+  "source_sha256": "sha256:9480357355b016802a475aec12f584e1f32e26f9012fbe062deeda019b85b2ac",
+  "source_bytes": 250093,
+  "upload_mode": "single",
+  "upload_parts": 1,
+  "task_state": "no_content",
+  "event_count": 1,
+  "stable_event_count": 0,
+  "final_event_sequence": 1,
+  "model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+  "acked": true,
+  "purge_state": "running",
+  "wall_ms": 4655
+}

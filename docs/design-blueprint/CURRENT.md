@@ -82,8 +82,13 @@ remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 arm
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
 
-下一入口是使用 `deploy/linux/` 模板运行隔离候选 `/v2/asr/batch`、v2 realtime WSS、手机连续文字事件、ASR/CAM++ 并行队列和
-NO_SPEECH/恢复/性能门；不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
+隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
+事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
+[Stage 2 真实候选证据](../vnext-stage2/REAL-CANDIDATE-20260818.md)。ASR revision 现在要求固定值，
+否则服务 fail-closed。
+双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
+生产延迟。下一入口是 Android 网络/进程恢复、手机连续文字投影和 NO_SPEECH/性能门；
+不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。

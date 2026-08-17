@@ -467,11 +467,22 @@ def mark_failure(
     lease_owner: str,
     error_code: str,
     retryable: bool,
+    retry_after_seconds: float | None = None,
 ) -> bool:
     ensure_vnext_import_transcript_schema()
     code = _safe(error_code, "error_code", 160)
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        attempt = connection.execute(
+            "SELECT attempt_number FROM vnext_task_attempts WHERE attempt_id = ? AND task_id = ?",
+            (attempt_id, task_id),
+        ).fetchone()
+        attempt_number = int(attempt["attempt_number"]) if attempt is not None else 1
+        retry_delay = (
+            float(retry_after_seconds)
+            if retry_after_seconds is not None
+            else (5.0 if attempt_number <= 1 else 30.0)
+        )
         marked = vnext_task_store.mark_failure_in_transaction(
             connection,
             context,
@@ -479,6 +490,7 @@ def mark_failure(
             attempt_id=attempt_id,
             error_code=code,
             retryable=retryable,
+            retry_after_seconds=retry_delay,
             lease_owner=lease_owner,
         )
         if not marked:

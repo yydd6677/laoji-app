@@ -123,6 +123,60 @@ def test_retry_is_new_attempt_and_cancel_is_terminal(tmp_path, monkeypatch) -> N
     assert vnext_task_store.claim_attempt(context, "task-1", lease_owner="worker-c") is None
 
 
+def test_retry_not_before_survives_store_polling(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, monkeypatch)
+    vnext_task_store.register_binding(
+        context,
+        binding_id="binding-retry-delay",
+        binding_generation="generation-retry-delay",
+    )
+    vnext_task_store.create_task(
+        context,
+        task_id="task-retry-delay",
+        binding_id="binding-retry-delay",
+        binding_generation="generation-retry-delay",
+        capability="transcript",
+        entity_id="asset-retry-delay",
+        entity_revision=1,
+        input_sha256=_hash("d"),
+        generation_id="generation-task-retry-delay",
+    )
+    first = vnext_task_store.claim_attempt(
+        context,
+        "task-retry-delay",
+        lease_owner="worker-delay-a",
+    )
+    assert first is not None
+    assert vnext_task_store.mark_failure(
+        context,
+        "task-retry-delay",
+        first["attempt_id"],
+        "ASR_UNAVAILABLE",
+        retryable=True,
+        retry_after_seconds=30,
+        lease_owner="worker-delay-a",
+    )
+    task = vnext_task_store.get_task(context, "task-retry-delay")
+    assert task is not None and task["retry_not_before_epoch"] is not None
+    assert vnext_task_store.claim_attempt(
+        context,
+        "task-retry-delay",
+        lease_owner="worker-delay-b",
+    ) is None
+    with device_identity.control_connection() as connection:
+        connection.execute(
+            "UPDATE vnext_tasks SET retry_not_before_epoch = 0 WHERE task_id = ?",
+            ("task-retry-delay",),
+        )
+        connection.commit()
+    second = vnext_task_store.claim_attempt(
+        context,
+        "task-retry-delay",
+        lease_owner="worker-delay-b",
+    )
+    assert second is not None and second["attempt_number"] == 2
+
+
 def test_binding_generation_cannot_be_reused(tmp_path, monkeypatch) -> None:
     context = _context(tmp_path, monkeypatch)
     vnext_task_store.register_binding(context, binding_id="binding-1", binding_generation="generation-1")

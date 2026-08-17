@@ -186,6 +186,25 @@ def presign_put_object(*, object_key: str, mime_type: str | None = None) -> str:
     )
 
 
+def presign_get_object(*, object_key: str) -> str:
+    """Return a short-lived private URL suitable for ffmpeg range reads.
+
+    MP4/M4A files commonly place their seek index at the end of the object.
+    Feeding those containers through a non-seekable stdin can yield an empty
+    decode even though the media is valid.  The URL remains process-local and
+    stderr is never logged by the transcription pipeline.
+    """
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.R2_BUCKET.strip(),
+            "Key": object_key,
+        },
+        ExpiresIn=int(settings.R2_PRESIGN_TTL_SECONDS),
+        HttpMethod="GET",
+    )
+
+
 def list_uploaded_parts(*, object_key: str, upload_id: str) -> list[R2Part]:
     client = _client()
     parts: list[R2Part] = []

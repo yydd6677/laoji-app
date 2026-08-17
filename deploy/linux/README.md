@@ -9,6 +9,8 @@
 
 ASR 默认使用 CPU，避免与线上 GPU0 的 8030/Qwen 模型争抢显存；这适合合同、恢复和 R2
 链路验收，不代表生产延迟。只有在明确安排资源窗口后，才可以把候选 ASR 迁移到 GPU。
+`asr.env` 中的 `QWEN_ASR_MODEL_REVISION` 必须替换为实际固定 revision；缺少该值时 ASR
+会拒绝启动/报告 not-ready，防止重启后用未版本化结果污染幂等任务。
 
 安装前必须把候选源码、Python 环境、模型和数据库副本放入 `/opt/laoji-vnext`，并把真实
 凭据写入 root 可读的 `/etc/laoji-vnext/*.env`，不能把生产密钥填入本目录。`api.env.example`

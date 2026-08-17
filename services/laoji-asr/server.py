@@ -506,12 +506,20 @@ def _ready_payload() -> dict:
         "active_priority": None,
         "last_inference": None,
     }
-    ready = MODEL is not None and COORDINATOR is not None
+    revision = _resolve_model_revision(MODEL_ID)
+    # The API uses the revision as part of the transcript idempotency fence.
+    # A loaded model without a pinned revision must never advertise ready.
+    ready = (
+        MODEL is not None
+        and COORDINATOR is not None
+        and revision
+        and revision != "unresolved"
+    )
     return {
         "status": "ready" if ready else "not_ready",
         "ready": ready,
         "model": MODEL_ID,
-        "model_revision": _resolve_model_revision(MODEL_ID),
+        "model_revision": revision,
         "device": DEVICE,
         "max_batch_size": MAX_BATCH_SIZE,
         "queue": queue_state,
@@ -612,6 +620,11 @@ def main() -> None:
     global COORDINATOR
     port = int(os.getenv("QWEN_ASR_PORT", "8030"))
     load_model()
+    revision = _resolve_model_revision(MODEL_ID)
+    if not revision or revision == "unresolved":
+        raise RuntimeError(
+            "QWEN_ASR_MODEL_REVISION must be pinned; refusing to start an unversioned ASR service"
+        )
     COORDINATOR = InferenceCoordinator(lambda: MODEL)
     server = Server(("127.0.0.1", port), Handler)
     print(f"[Qwen3-ASR] listening on 127.0.0.1:{port}", flush=True)

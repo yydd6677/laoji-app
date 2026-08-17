@@ -31,6 +31,9 @@ def main() -> int:
     recording_reconciliation = (root / "src/services/meetingRecordingReconciliation.ts").read_text(encoding="utf-8")
     native_finalize = (root / "src/application/meeting/finalizeNativeMeetingRecording.ts").read_text(encoding="utf-8")
     native_finalize_hook = (root / "src/hooks/useNativeMeetingRecordingFinalizer.ts").read_text(encoding="utf-8")
+    transfer_module = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiTransferModule.kt").read_text(encoding="utf-8")
+    upload_worker = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/MeetingUploadWorker.kt").read_text(encoding="utf-8")
+    device_v2_uploader = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/DeviceV2R2Uploader.kt").read_text(encoding="utf-8")
     navigation = (root / "src/navigation/index.tsx").read_text(encoding="utf-8")
     failures: list[str] = []
 
@@ -55,7 +58,7 @@ def main() -> int:
         failures.append("讲话人显示名称没有本机映射存储")
     if "name: name.trim()" in device_api or "name: name" in device_api:
         failures.append("设备讲话人请求仍可能上传用户姓名")
-    if "parseScheduleRemotely(text" not in schedule_client:
+    if "parseScheduleRemotely(" not in schedule_client:
         failures.append("复杂日程解析没有走设备服务接口")
     if "clarifyScheduleRemotely(" not in schedule_client:
         failures.append("日程补充解析没有走设备服务接口")
@@ -112,6 +115,31 @@ def main() -> int:
         failures.append("设备模式仍可能暴露只能登录使用的共享待办入口")
     if "fetchDeviceSpeakerProfiles, fetchSpeakers" not in transcription_android:
         failures.append("设备讲话人修改面板没有加载本机讲话人资料")
+
+    # WorkManager is the owner of device-v2 recovery. These checks keep the
+    # durable path from silently regressing to a foreground-only upload or
+    # placing a bearer token in persisted WorkManager input data.
+    for marker in (
+        "NetworkType.CONNECTED",
+        "BackoffPolicy.EXPONENTIAL",
+        "ExistingWorkPolicy.KEEP",
+        "laoji-device-v2-r2:",
+        "MeetingUploadWorker.KEY_FILE_URI",
+        "MeetingUploadWorker.KEY_DEVICE_EPOCH_ID",
+    ):
+        if marker not in transfer_module:
+            failures.append(f"device-v2 WorkManager 合同缺失: {marker}")
+    if "MeetingUploadWorker.KEY_ACCESS_TOKEN" in transfer_module:
+        failures.append("WorkManager 输入仍可能持久化 bearer token")
+    for marker in (
+        "PROTOCOL_DEVICE_V2_R2",
+        "DeviceV2R2Uploader",
+        "Result.retry()",
+    ):
+        if marker not in upload_worker:
+            failures.append(f"device-v2 worker 恢复路径缺失: {marker}")
+    if "DeviceV2LeaseRefresher" not in device_v2_uploader:
+        failures.append("device-v2 worker 缺少设备令牌续期路径")
     assignment_use_case = (root / "src/application/meeting/updateMeetingSpeakerAssignment.ts").read_text(encoding="utf-8")
     assignment_repository = (root / "src/data/repositories/sqliteMeetingNoteRepository.ts").read_text(encoding="utf-8")
     if "input.scope === 'future_profile'\n      && (!speakerProfileId || !consentToProfileUpdate)" not in assignment_use_case:

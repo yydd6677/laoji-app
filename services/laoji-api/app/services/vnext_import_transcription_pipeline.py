@@ -102,13 +102,21 @@ def stream_r2_speech_segments(
     object_key: str,
     source_sha256: str,
     vad_model: object,
-    chunk_source: Callable[..., Iterable[bytes]] = r2_storage_service.iter_object_chunks,
+    chunk_source: Callable[..., Iterable[bytes]] | None = None,
+    input_url_provider: Callable[..., str] = r2_storage_service.presign_get_object,
     on_decoded_duration_ms: Callable[[int], None] | None = None,
 ) -> Iterator[SpeechAudio]:
-    """Pipe the private R2 object through ffmpeg without a whole-file copy."""
+    """Decode private R2 media without creating a whole-file temporary copy.
+
+    Production uses a short-lived range-readable URL so MP4/M4A files with a
+    tail ``moov`` atom remain seekable.  Tests can inject ``chunk_source`` to
+    exercise the bounded stdin path without object-storage credentials.
+    """
     ffmpeg = os.getenv("FFMPEG_BIN", "").strip() or shutil.which("ffmpeg")
     if not ffmpeg:
         raise CompactTranscriptionError("ffmpeg_unavailable")
+    pipe_input = chunk_source is not None
+    input_locator = "pipe:0" if pipe_input else input_url_provider(object_key=object_key)
     process = subprocess.Popen(
         [
             ffmpeg,
@@ -117,7 +125,7 @@ def stream_r2_speech_segments(
             "-loglevel",
             "error",
             "-i",
-            "pipe:0",
+            input_locator,
             "-map",
             "0:a:0",
             "-vn",
@@ -129,17 +137,19 @@ def stream_r2_speech_segments(
             "s16le",
             "pipe:1",
         ],
-        stdin=subprocess.PIPE,
+        stdin=subprocess.PIPE if pipe_input else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         creationflags=_subprocess_creation_flags(),
     )
-    if process.stdin is None or process.stdout is None:
+    if process.stdout is None or (pipe_input and process.stdin is None):
         process.kill()
         raise CompactTranscriptionError("audio_decode_failed")
     writer_error: list[Exception] = []
 
     def write_source() -> None:
+        assert chunk_source is not None
+        assert process.stdin is not None
         try:
             for chunk in chunk_source(object_key=object_key):
                 process.stdin.write(chunk)
@@ -155,12 +165,14 @@ def stream_r2_speech_segments(
             except OSError:
                 pass
 
-    writer = threading.Thread(
-        target=write_source,
-        name="laoji-r2-ffmpeg-feed",
-        daemon=True,
-    )
-    writer.start()
+    writer: threading.Thread | None = None
+    if pipe_input:
+        writer = threading.Thread(
+            target=write_source,
+            name="laoji-r2-ffmpeg-feed",
+            daemon=True,
+        )
+        writer.start()
     vad = StreamingVAD(vad_model, sample_rate=16_000)
     vad.set_min_silence_duration(600)
     vad.set_pre_roll_duration(250, initial_duration_ms=250)
@@ -210,10 +222,11 @@ def stream_r2_speech_segments(
                 yield segment
             if getattr(vad, "state", "idle") == "idle" and not yielded:
                 break
-        writer.join(timeout=30)
+        if writer is not None:
+            writer.join(timeout=30)
         stderr = process.stderr.read() if process.stderr is not None else b""
         return_code = process.wait(timeout=30)
-        if writer.is_alive():
+        if writer is not None and writer.is_alive():
             raise CompactTranscriptionError("r2_stream_timeout")
         if writer_error:
             raise CompactTranscriptionError("r2_stream_failed") from writer_error[0]
@@ -228,7 +241,8 @@ def stream_r2_speech_segments(
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             pass
-        writer.join(timeout=5)
+        if writer is not None:
+            writer.join(timeout=5)
         raise
 
 

@@ -296,6 +296,28 @@ def test_v2_batch_http_handler_returns_contract(monkeypatch):
         coordinator.close()
 
 
+def test_ready_is_false_when_model_revision_is_not_pinned(monkeypatch):
+    class Coordinator:
+        def snapshot(self):
+            return {
+                "depth": 0,
+                "by_priority": {name: 0 for name in server.PRIORITY_ORDER},
+                "active_priority": None,
+                "last_inference": None,
+            }
+
+    monkeypatch.setattr(server, "MODEL", object())
+    monkeypatch.setattr(server, "COORDINATOR", Coordinator())
+    monkeypatch.setattr(server, "MODEL_ID", "/tmp/qwen3-asr")
+    monkeypatch.setattr(server, "MODEL_REVISION", "")
+
+    payload = server._ready_payload()
+
+    assert payload["model_revision"] == "unresolved"
+    assert payload["ready"] is False
+    assert payload["status"] == "not_ready"
+
+
 def test_stream_contract_separates_transient_partial_from_durable_final():
     partial = TranscriptStreamEventV2.model_validate({
         "schema_version": 2,
