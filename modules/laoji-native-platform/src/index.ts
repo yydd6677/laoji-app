@@ -14,6 +14,7 @@ export * from './mediaImport';
 export * from './mediaClip';
 export * from './systemEntries';
 export * from './ui';
+export * from './deviceAuth';
 
 interface LaojiNativePlatformModule {
   evidenceSchemaVersion: number;
