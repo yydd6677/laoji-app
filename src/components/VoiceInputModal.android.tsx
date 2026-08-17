@@ -636,7 +636,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setPhase('parsing');
     setError('');
     try {
-      const result = await clarifyText(text, answer, draft);
+      const result = await clarifyText(draft.raw_text?.trim() || text, answer, draft);
       if (runRef.current !== runId) return;
       setDraft(result);
       setClarificationAnswer('');

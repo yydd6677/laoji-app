@@ -1111,8 +1111,11 @@ def test_quick_path_does_not_treat_conversation_context_as_location(monkeypatch,
 def test_compact_prompt_only_requires_model_owned_fields():
     prompt = parser._SYSTEM_PROMPT_TEMPLATE
 
-    assert len(prompt) < 1800
-    assert "JSON 必须包含：title、event_type、start_date、category、needs_clarification" in prompt
+    # vNext keeps calendar dates/times as evidence phrases and resolves them
+    # deterministically after generation; the old start_date-only contract is
+    # intentionally no longer part of the model-owned prompt.
+    assert len(prompt) < 2600
+    assert "JSON 必须包含：title、event_type、category、needs_clarification、date_phrase、time_phrase、recurrence_phrase" in prompt
     assert "color" not in prompt
     assert "confidence" not in prompt
     assert "reminder_minutes" not in prompt

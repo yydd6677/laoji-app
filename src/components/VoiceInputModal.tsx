@@ -780,10 +780,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('parsing'); setError('');
     try {
       const answer = clarifyAnswer.trim();
-      const result = await clarifyText(text, answer, draft);
+      const result = await clarifyText(draft.raw_text?.trim() || text, answer, draft);
       if (operationRunRef.current !== runId) return;
       setDraft(result);
-      setText(prev => prev ? `${prev}\n${answer}` : answer);
+      const mergedText = result.raw_text?.trim();
+      if (mergedText) setText(mergedText);
+      else setText(prev => prev ? `${prev}\n${answer}` : answer);
       setClarifyAnswer('');
       setStep('confirm');
     } catch {

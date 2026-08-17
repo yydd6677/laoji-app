@@ -477,7 +477,11 @@ export async function clarifyText(
       context.reference_datetime,
       context.timezone,
     );
-    return normalizedParseResult(`${original}\n${supplement}`, parsed as ParseResultWire, context);
+    // The server has already applied this answer to the existing draft. Do
+    // not run the combined text through the local parser again: that turns a
+    // clarification such as “下午” into a second independent request and can
+    // overwrite the server's date/time/title merge.
+    return normalizeModelOnlyParseResult(parsed as ParseResultWire as ParseResult, context);
   } catch (err) {
     throw scheduleParseErrorFromRemote(err);
   }

@@ -10,6 +10,7 @@
 """
 
 import calendar
+from collections import Counter
 import hashlib
 import json
 import os
@@ -390,7 +391,7 @@ _RECURRENCE_MARKER_RE = re.compile(
     r"(?:每(?:一)?(?:天|日)|每(?:周|星期|礼拜|(?:个)?月|(?:个)?年|隔|个工作日|逢)|"
     r"每(?:隔)?[一二两三四五六七八九十0-9]+个月|"
     r"每(?:隔)?[一二两三四五六七八九十0-9]+年|"
-    r"隔周|工作日|每(?:个)?周末|重复|循环|"
+    r"隔周|每(?:个)?工作日|每(?:个)?周末|重复|循环|"
     r"从现在开始(?:每)?(?:周|星期|礼拜))"
 )
 _RECURRENCE_EXCLUSION_RE = re.compile(
@@ -1535,13 +1536,24 @@ def _normalize_llm_result(result: object, raw_text: str) -> Optional[dict]:
     ):
         category = None
     surface_title, _ = _extract_title_and_description(normalized_raw)
+    relative_intent = _parse_relative_offset_datetime(normalized_raw) is not None
+    # For relative reminders, a leading action can be the user's actual task
+    # ("十五分钟后做某事"). The generic surface-title pass intentionally
+    # removes command verbs for dated schedules, so do not let that pass erase
+    # this short but meaningful action here.
+    preserve_relative_action = bool(
+        relative_intent
+        and title.startswith("做")
+        and surface_title
+        and title[1:] == surface_title
+    )
     pre_correction_subject = _extract_pre_correction_subject(raw_text)
     if pre_correction_subject:
         # A conditional replacement tail is temporal instruction, not the
         # event subject. Prefer the subject spoken before the first marker.
         surface_title = pre_correction_subject
         title = pre_correction_subject
-    elif _prefer_surface_title(title, surface_title):
+    elif _prefer_surface_title(title, surface_title) and not preserve_relative_action:
         title = surface_title
     elif _prefer_correction_surface_title(title, normalized_raw):
         correction_tail = _select_correction_tail(normalized_raw)
@@ -1639,8 +1651,26 @@ def _normalize_llm_result(result: object, raw_text: str) -> Optional[dict]:
         location = None
 
     weekday_selection_range = event_type == "weekly" and bool(recurrence_weekdays and len(recurrence_weekdays) > 1)
-    has_range_signal = _has_date_range_signal(normalized_raw) and not weekday_selection_range
-    spoken_range = None if invalid_explicit_date or weekday_selection_range else _parse_date_range_unchecked(normalized_raw)
+    correction_tail = _select_correction_tail(normalized_raw)
+    single_correction = (
+        correction_tail != normalized_raw
+        and not re.search(r"(?:到|至|直到|从.+?开始)", correction_tail)
+    )
+    explicit_range_connector = _has_date_range_signal(normalized_raw)
+    has_range_signal = (
+        _has_date_range_signal(normalized_raw)
+        and explicit_range_connector
+        and not weekday_selection_range
+        and not single_correction
+    )
+    spoken_range = (
+        None
+        if invalid_explicit_date
+        or weekday_selection_range
+        or single_correction
+        or not has_range_signal
+        else _parse_date_range_unchecked(normalized_raw)
+    )
     range_ambiguous = has_range_signal and spoken_range is None
     range_conflict = False
     time_conflict = False
@@ -2002,7 +2032,9 @@ _DATE_TOKEN_PATTERN = (
 
 def _has_date_range_signal(text: str) -> bool:
     """Return true only when a range connector actually joins two date tokens."""
-    if re.search(r"(?:下下|下个|下一个|下|本|这|这个)?周末(?:两|二|2)?天?", text):
+    # A bare ``周末`` is frequently lexical title text (``周末酒店``). It is
+    # a spanning range only when the utterance explicitly says two days.
+    if re.search(r"(?:下下|下个|下一个|下|本|这|这个)?周末(?:两|二|2)天", text):
         return True
     if re.search(
         r"(?:(?:下下|下个|下一个|下|本|这|这个)?(?:周|星期|礼拜)"
@@ -2016,7 +2048,14 @@ def _has_date_range_signal(text: str) -> bool:
         if _is_likely_location_number(text, left) or _is_likely_location_number(text, right):
             continue
         between = text[left.end():right.start()]
-        if re.search(r"(?:到|至|直到|[-—~～])", between):
+        # ``放到/排到/安排到/改到`` are scheduling instructions, not a
+        # range connector. Without this guard a title such as “周末酒店”
+        # followed by “放到 2 月 21 日” is parsed as a spanning event.
+        is_assignment_to = re.search(
+            r"(?:放|排|安排|定|改|换|调整|加|写|记|挪|移|落|推|拖)到",
+            between,
+        )
+        if re.search(r"(?:到|至|直到|[-—~～])", between) and not is_assignment_to:
             return True
         suffix = text[right.end():]
         if re.search(r"(?:和|跟|与|及|、)[，,\s]*$", between) and re.match(r"[，,\s]*之间", suffix):
@@ -3341,6 +3380,12 @@ def _parse_authoritative_date(text: str) -> Optional[date]:
     if _DATE_CORRECTION_RE.search(text):
         correction_tail = _select_correction_tail(text)
         if correction_tail != text:
+            current_weekday = re.search(r"(?:本|这)周([一二三四五六日天1-7])", correction_tail)
+            if current_weekday:
+                weekday = _WEEKDAY_MAP[current_weekday.group(1)]
+                today = _current_date()
+                monday = today - timedelta(days=today.weekday())
+                return monday + timedelta(days=weekday)
             corrected = _parse_explicit_or_relative_date(correction_tail)
             if corrected:
                 return corrected
@@ -3405,6 +3450,17 @@ def _parse_explicit_or_relative_date(text: str) -> Optional[date]:
         return date(year, month, calendar.monthrange(year, month)[1])
     if "月底" in text or "月末" in text:
         return date(today.year, today.month, calendar.monthrange(today.year, today.month)[1])
+    # Explicit relative-day words outrank lexical title words such as
+    # “周末酒店”。 Otherwise a correction like “改成后天上午九点做周末酒店确认”
+    # is resolved to the weekend from the title instead of the spoken date.
+    if "大后天" in text:
+        return today + timedelta(days=3)
+    if "后天" in text:
+        return today + timedelta(days=2)
+    if re.search(r"(?:明早|明晨|明晚|明夜|明天)", text):
+        return today + timedelta(days=1)
+    if re.search(r"(?:今早|今晨|今夜|今晚|今天|今日)", text):
+        return today
     if re.search(r"(?:下下|下个|下一个|下)周末", text):
         weeks = 2 if "下下周末" in text else 1
         return _weekday_in_week(5, weeks)
@@ -3412,19 +3468,6 @@ def _parse_explicit_or_relative_date(text: str) -> Optional[date]:
         return _next_weekday(5, include_today=True)
     if "周末" in text:
         return _next_weekday(5, include_today=True)
-    if re.search(r"(?:明早|明晨|明晚|明夜|明天)", text):
-        return today + timedelta(days=1)
-    if re.search(r"(?:今早|今晨|今夜|今晚|今天|今日)", text):
-        return today
-    if "大后天" in text:
-        return today + timedelta(days=3)
-    if "后天" in text:
-        return today + timedelta(days=2)
-    if "明天" in text:
-        return today + timedelta(days=1)
-    if "今天" in text or "今日" in text or "今晚" in text:
-        return today
-
     if match := re.search(
         r"(下个月|下月|本月|这个月)([0-9一二两三四五六七八九十]{1,3})(?:号|日)",
         text,
@@ -3897,7 +3940,9 @@ def _prefer_surface_title(model_title: str, surface_title: str) -> bool:
         return False
     if not model or re.fullmatch(r"(?:嗯+|呃+|额+|那个|看看|你|我)", model):
         return True
-    if model in surface and len(surface) > len(model):
+    if model in surface or surface in model:
+        return True
+    if Counter(model) == Counter(surface) and model != surface:
         return True
     return len(surface) - len(model) >= 2
 
@@ -3946,9 +3991,19 @@ def _extract_pre_correction_subject(raw_text: str) -> Optional[str]:
     prefix = normalized[: marker.start()].strip("，,。.!！?？；; ")
     if not prefix or re.fullmatch(r"(?:日期|时间|时间点|安排|日程|事项|活动)", prefix):
         return None
+    if re.fullmatch(
+        r"(?:不是|不对|说错)(?:今天|明天|后天|大后天|本周末|这周末|月底|月初|月末|"
+        r"[0-9一二两三四五六七八九十]{1,4}(?:月|号|日|点|时).*)?",
+        prefix,
+    ) or re.fullmatch(
+        r"(?:原来|原先)(?:想排|想定|安排|计划|定在|排在)?"
+        r"(?:这周|本周|下周|周末|月底|月初|月末|今天|明天|后天)?[^，,。.!！?？；;]*",
+        prefix,
+    ):
+        return None
     candidate, _ = _extract_title_and_description(prefix)
     candidate = _repair_title_text(candidate, normalized)
-    if not candidate or candidate in {"待办", "会议", "开会", "日程", "事项", "安排", "活动"}:
+    if not candidate or candidate in {"不", "不对", "说错", "想排", "想定", "待办", "会议", "开会", "日程", "事项", "安排", "活动"}:
         return None
     if re.search(_DATE_TOKEN_PATTERN, candidate) or re.search(_TIME_TOKEN_PATTERN, candidate):
         return None
