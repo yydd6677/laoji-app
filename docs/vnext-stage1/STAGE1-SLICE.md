@@ -16,6 +16,8 @@
 - 服务端新增隔离的 `/api/device/v1/vnext/*` binding/task/attempt 合同和 SQLite durable task/attempt owner；旧 v1 路由未切换。
 - binding/epoch 删除会在 generic task store 内原子取消活跃 task/attempt，迟到 worker 只能得到终态拒绝，
   不会在本机清除后继续提交 artifact。
+- 普通整理恢复 intent 已落到 SQLite `device_summary_task_intents`；AsyncStorage 的旧注册表只做逐条
+  promotion，不能再产生新任务 owner。模板、指纹、任务 ID 和明确授权来源元数据可在进程重启后恢复。
 
 ## 证据
 
@@ -25,13 +27,17 @@
 - `python3 -m compileall -q services/laoji-api/app services/laoji-api/tests`：通过。
 - 两个后续切片提交：`52e79fe`（purge journal）、`0a471c5`（日程行级写入）。
 - 绑定清除 fence 提交：`3111a84`（本机 operation）、`d2d2177`（服务端 generic task）。
+- 整理恢复 owner 提交：`c2ad18d`。
 
 ## 尚未满足的 Stage 1 退出门
 
-- meeting/schedule/action/note 写入尚未全部收敛到 canonical repository transaction。
-- 旧同步 outbox 尚未停止新写，仍处于兼容 drain 前。
+- 当前 accountless `guest` 运行路径的 meeting/schedule/action/note 写入已走本机 repository transaction；
+  仍需完成静态审计和旧 account 类型路径的彻底移除，才能把 owner 唯一性从运行时保证提升为代码边界。
+- guest scope 的旧 `sync_outbox` 新写已在 repository 入口硬阻断；account 兼容代码和历史 outbox 仍保留到
+  Stage 5 删除门，尚未完成全量 drain 计数与删除审计。
 - 本机清除已覆盖录音、通知、更新文件和 native projection；仍缺少独立 Keystore purge-only capability
   的原生实现和清除 journal 的端到端回放测试。
 - 新 vNext task API 尚未激活 capability barrier，也未接管生产业务调用。
+- 设备 v2 P-256 Keystore/challenge/token 合同尚未接入，当前 API 仍保留 v1 静态设备凭据兼容层。
 
 生产 API、生产数据库、公网入口、真机、GPU 和同机其他服务均未修改。
