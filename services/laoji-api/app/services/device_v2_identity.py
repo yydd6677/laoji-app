@@ -1,0 +1,427 @@
+"""Isolated v2 device identity and short-lived bearer implementation.
+
+The existing v1 device secret remains untouched until the mobile keystore
+client and the v2 route set pass their own cutover gate.  This module owns
+only challenge, key, epoch and token state; it never stores meeting content.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import secrets
+import sqlite3
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.exceptions import InvalidSignature
+
+from app.services.device_identity import control_connection, ensure_device_schema, valid_uuid
+
+
+BOOTSTRAP_DIFFICULTY_BITS = 18
+CHALLENGE_TTL_SECONDS = 60
+TOKEN_TTL_SECONDS = 15 * 60
+MAX_PUBLIC_KEY_BYTES = 512
+MAX_SIGNATURE_BYTES = 256
+
+
+class DeviceV2IdentityError(RuntimeError):
+    def __init__(self, code: str, message: str, status_code: int = 401):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class DeviceV2Context:
+    device_id: str
+    epoch_id: str
+    key_version: int
+    token_revision: int
+
+
+def _now() -> int:
+    return int(time.time())
+
+
+def _b64decode(value: str, field: str, maximum: int) -> bytes:
+    raw = str(value or "").strip()
+    if not raw or len(raw) > maximum * 2:
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", f"{field}无效", 422)
+    try:
+        decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    except (ValueError, TypeError) as error:
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", f"{field}无效", 422) from error
+    if not decoded or len(decoded) > maximum:
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", f"{field}无效", 422)
+    return decoded
+
+
+def _b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _identifier(value: str, field: str, maximum: int = 180) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized or len(normalized) > maximum or any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", f"{field}无效", 422)
+    return normalized
+
+
+def _public_key(value: str) -> tuple[bytes, str]:
+    der = _b64decode(value, "public_key", MAX_PUBLIC_KEY_BYTES)
+    try:
+        key = serialization.load_der_public_key(der)
+    except ValueError as error:
+        raise DeviceV2IdentityError("PUBLIC_KEY_INVALID", "设备公钥无效", 422) from error
+    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
+        raise DeviceV2IdentityError("PUBLIC_KEY_INVALID", "仅支持 P-256 设备公钥", 422)
+    canonical = key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    return canonical, hashlib.sha256(canonical).hexdigest()
+
+
+def _signature(value: str) -> bytes:
+    return _b64decode(value, "signature", MAX_SIGNATURE_BYTES)
+
+
+def _nonce(value: str) -> bytes:
+    return _b64decode(value, "nonce", 64)
+
+
+def _message(kind: str, nonce: bytes, device_id: str, epoch_id: str, request_id: str, proof_nonce: int | None = None) -> bytes:
+    suffix = "" if proof_nonce is None else f"\nproof:{proof_nonce}"
+    return f"laoji-device-v2\n{kind}\n{_b64encode(nonce)}\n{device_id}\n{epoch_id}\n{request_id}{suffix}".encode("utf-8")
+
+
+def _verify_signature(public_key_der: bytes, signature: bytes, message: bytes) -> None:
+    try:
+        key = serialization.load_der_public_key(public_key_der)
+        if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(key.curve, ec.SECP256R1):
+            raise ValueError("curve")
+        key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
+    except (InvalidSignature, ValueError, TypeError) as error:
+        raise DeviceV2IdentityError("SIGNATURE_INVALID", "设备签名校验失败", 401) from error
+
+
+def _pow_valid(nonce: bytes, proof_nonce: int, difficulty_bits: int) -> bool:
+    if not isinstance(proof_nonce, int) or proof_nonce < 0 or proof_nonce > 2**63 - 1:
+        return False
+    digest = hashlib.sha256(nonce + proof_nonce.to_bytes(8, "big", signed=False)).digest()
+    return int.from_bytes(digest, "big") >> (256 - difficulty_bits) == 0
+
+
+def _challenge_id() -> str:
+    return f"ch_{uuid.uuid4().hex}"
+
+
+def ensure_v2_schema() -> None:
+    ensure_device_schema()
+    with control_connection() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS v2_devices (
+                device_id TEXT PRIMARY KEY,
+                current_epoch_id TEXT,
+                current_key_version INTEGER NOT NULL DEFAULT 1,
+                token_revision INTEGER NOT NULL DEFAULT 1,
+                revoked_at INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS v2_device_keys (
+                device_id TEXT NOT NULL,
+                key_version INTEGER NOT NULL,
+                public_key_der BLOB NOT NULL,
+                public_key_hash TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                retired_at INTEGER,
+                PRIMARY KEY(device_id, key_version),
+                UNIQUE(device_id, public_key_hash)
+            );
+            CREATE TABLE IF NOT EXISTS v2_device_epochs (
+                device_id TEXT NOT NULL,
+                epoch_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active','closed')),
+                last_authenticated_at INTEGER,
+                created_at INTEGER NOT NULL,
+                closed_at INTEGER,
+                PRIMARY KEY(device_id, epoch_id)
+            );
+            CREATE TABLE IF NOT EXISTS v2_auth_challenges (
+                challenge_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK(kind IN ('bootstrap','auth')),
+                device_id TEXT NOT NULL,
+                epoch_id TEXT NOT NULL,
+                key_version INTEGER,
+                public_key_hash TEXT NOT NULL,
+                nonce_hash TEXT NOT NULL,
+                proof_difficulty_bits INTEGER NOT NULL DEFAULT 0,
+                request_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                consumed_at INTEGER,
+                UNIQUE(kind, request_id)
+            );
+            CREATE TABLE IF NOT EXISTS v2_tokens (
+                token_hash TEXT PRIMARY KEY,
+                device_id TEXT NOT NULL,
+                epoch_id TEXT NOT NULL,
+                key_version INTEGER NOT NULL,
+                token_revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked_at INTEGER
+            );
+            """
+        )
+        connection.commit()
+
+
+def create_bootstrap_challenge(
+    *, device_id: str, epoch_id: str, public_key_der: str, request_id: str,
+) -> dict[str, Any]:
+    ensure_v2_schema()
+    device_id = _identifier(device_id, "device_id")
+    epoch_id = _identifier(epoch_id, "epoch_id")
+    if not valid_uuid(device_id) or not valid_uuid(epoch_id):
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", "设备或 epoch 标识无效", 422)
+    key_der, key_hash = _public_key(public_key_der)
+    request_id = _identifier(request_id, "request_id", 160)
+    now = _now()
+    nonce = secrets.token_bytes(32)
+    challenge_id = _challenge_id()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            "SELECT challenge_id, nonce_hash, expires_at FROM v2_auth_challenges WHERE kind = 'bootstrap' AND request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if existing is not None and int(existing["expires_at"]) > now:
+            # The nonce is intentionally not recoverable from the hash.  A
+            # client retry must use the original response, so do not issue a
+            # second challenge under the same request id.
+            raise DeviceV2IdentityError("CHALLENGE_ALREADY_ISSUED", "注册挑战已签发，请使用原响应", 409)
+        connection.execute(
+            """INSERT INTO v2_auth_challenges(
+               challenge_id, kind, device_id, epoch_id, key_version,
+               public_key_hash, nonce_hash, proof_difficulty_bits, request_id,
+               created_at, expires_at
+            ) VALUES (?, 'bootstrap', ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+            (
+                challenge_id, device_id, epoch_id, key_hash,
+                hashlib.sha256(nonce).hexdigest(), BOOTSTRAP_DIFFICULTY_BITS,
+                request_id, now, now + CHALLENGE_TTL_SECONDS,
+            ),
+        )
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "challenge_id": challenge_id,
+        "nonce": _b64encode(nonce),
+        "expires_at": now + CHALLENGE_TTL_SECONDS,
+        "proof_difficulty_bits": BOOTSTRAP_DIFFICULTY_BITS,
+        "public_key_hash": key_hash,
+    }
+
+
+def complete_bootstrap(
+    *, challenge_id: str, nonce: str, device_id: str, epoch_id: str,
+    public_key_der: str, signature: str, proof_nonce: int, request_id: str,
+) -> dict[str, Any]:
+    ensure_v2_schema()
+    challenge_id = _identifier(challenge_id, "challenge_id")
+    device_id = _identifier(device_id, "device_id")
+    epoch_id = _identifier(epoch_id, "epoch_id")
+    request_id = _identifier(request_id, "request_id", 160)
+    nonce_bytes = _nonce(nonce)
+    key_der, key_hash = _public_key(public_key_der)
+    signature_bytes = _signature(signature)
+    now = _now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT * FROM v2_auth_challenges WHERE challenge_id = ? AND kind = 'bootstrap'",
+            (challenge_id,),
+        ).fetchone()
+        if row is None or row["consumed_at"] is not None or int(row["expires_at"]) <= now:
+            connection.rollback()
+            raise DeviceV2IdentityError("CHALLENGE_EXPIRED", "注册挑战已过期", 410)
+        if (
+            row["device_id"] != device_id or row["epoch_id"] != epoch_id
+            or row["public_key_hash"] != key_hash
+            or row["request_id"] != request_id
+            or not secrets.compare_digest(str(row["nonce_hash"]), hashlib.sha256(nonce_bytes).hexdigest())
+        ):
+            connection.rollback()
+            raise DeviceV2IdentityError("CHALLENGE_MISMATCH", "注册挑战与设备身份不匹配", 409)
+        if not _pow_valid(nonce_bytes, proof_nonce, int(row["proof_difficulty_bits"])):
+            connection.rollback()
+            raise DeviceV2IdentityError("PROOF_OF_WORK_INVALID", "注册工作量证明无效", 429)
+        _verify_signature(key_der, signature_bytes, _message("bootstrap", nonce_bytes, device_id, epoch_id, request_id, proof_nonce))
+        existing = connection.execute("SELECT * FROM v2_devices WHERE device_id = ?", (device_id,)).fetchone()
+        if existing is not None:
+            current = connection.execute(
+                "SELECT public_key_hash FROM v2_device_keys WHERE device_id = ? AND key_version = ?",
+                (device_id, int(existing["current_key_version"])),
+            ).fetchone()
+            if current is not None and current["public_key_hash"] != key_hash:
+                connection.rollback()
+                raise DeviceV2IdentityError("DEVICE_ALREADY_REGISTERED", "设备已登记其他密钥", 409)
+        else:
+            connection.execute(
+                "INSERT INTO v2_devices(device_id, current_epoch_id, created_at) VALUES (?, ?, ?)",
+                (device_id, epoch_id, now),
+            )
+            connection.execute(
+                "INSERT INTO v2_device_keys(device_id, key_version, public_key_der, public_key_hash, created_at) VALUES (?, 1, ?, ?, ?)",
+                (device_id, key_der, key_hash, now),
+            )
+        connection.execute(
+            "INSERT OR IGNORE INTO v2_device_epochs(device_id, epoch_id, status, created_at) VALUES (?, ?, 'active', ?)",
+            (device_id, epoch_id, now),
+        )
+        connection.execute(
+            "UPDATE v2_devices SET current_epoch_id = ?, current_key_version = 1, token_revision = 1 WHERE device_id = ?",
+            (epoch_id, device_id),
+        )
+        connection.execute("UPDATE v2_auth_challenges SET consumed_at = ? WHERE challenge_id = ?", (now, challenge_id))
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "device_id": device_id,
+        "epoch_id": epoch_id,
+        "key_version": 1,
+        "token_revision": 1,
+        "registered": True,
+    }
+
+
+def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, public_key_hash: str, request_id: str) -> dict[str, Any]:
+    ensure_v2_schema()
+    device_id = _identifier(device_id, "device_id")
+    epoch_id = _identifier(epoch_id, "epoch_id")
+    request_id = _identifier(request_id, "request_id", 160)
+    if not valid_uuid(device_id) or not valid_uuid(epoch_id) or not isinstance(key_version, int) or key_version < 1:
+        raise DeviceV2IdentityError("V2_INPUT_INVALID", "设备身份参数无效", 422)
+    public_key_hash = _identifier(public_key_hash, "public_key_hash", 128)
+    now = _now()
+    nonce = secrets.token_bytes(32)
+    challenge_id = _challenge_id()
+    with control_connection() as connection:
+        device = connection.execute("SELECT * FROM v2_devices WHERE device_id = ? AND revoked_at IS NULL", (device_id,)).fetchone()
+        key = connection.execute(
+            "SELECT public_key_hash FROM v2_device_keys WHERE device_id = ? AND key_version = ? AND retired_at IS NULL",
+            (device_id, key_version),
+        ).fetchone()
+        epoch = connection.execute(
+            "SELECT status FROM v2_device_epochs WHERE device_id = ? AND epoch_id = ?",
+            (device_id, epoch_id),
+        ).fetchone()
+        if device is None or key is None or key["public_key_hash"] != public_key_hash or epoch is None or epoch["status"] != "active":
+            raise DeviceV2IdentityError("DEVICE_NOT_REGISTERED", "设备密钥或数据域不可用", 401)
+        connection.execute(
+            """INSERT INTO v2_auth_challenges(
+               challenge_id, kind, device_id, epoch_id, key_version,
+               public_key_hash, nonce_hash, proof_difficulty_bits, request_id,
+               created_at, expires_at
+            ) VALUES (?, 'auth', ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+            (
+                challenge_id, device_id, epoch_id, key_version, public_key_hash,
+                hashlib.sha256(nonce).hexdigest(), request_id, now, now + CHALLENGE_TTL_SECONDS,
+            ),
+        )
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "challenge_id": challenge_id,
+        "nonce": _b64encode(nonce),
+        "expires_at": now + CHALLENGE_TTL_SECONDS,
+        "key_version": key_version,
+    }
+
+
+def exchange_auth_token(*, challenge_id: str, nonce: str, signature: str, request_id: str) -> dict[str, Any]:
+    ensure_v2_schema()
+    challenge_id = _identifier(challenge_id, "challenge_id")
+    request_id = _identifier(request_id, "request_id", 160)
+    nonce_bytes = _nonce(nonce)
+    signature_bytes = _signature(signature)
+    now = _now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT * FROM v2_auth_challenges WHERE challenge_id = ? AND kind = 'auth'",
+            (challenge_id,),
+        ).fetchone()
+        if row is None or row["consumed_at"] is not None or int(row["expires_at"]) <= now:
+            connection.rollback()
+            raise DeviceV2IdentityError("CHALLENGE_EXPIRED", "认证挑战已过期", 410)
+        if row["request_id"] != request_id or not secrets.compare_digest(str(row["nonce_hash"]), hashlib.sha256(nonce_bytes).hexdigest()):
+            connection.rollback()
+            raise DeviceV2IdentityError("CHALLENGE_MISMATCH", "认证挑战不匹配", 409)
+        key = connection.execute(
+            "SELECT public_key_der FROM v2_device_keys WHERE device_id = ? AND key_version = ? AND public_key_hash = ? AND retired_at IS NULL",
+            (row["device_id"], int(row["key_version"]), row["public_key_hash"]),
+        ).fetchone()
+        device = connection.execute("SELECT token_revision FROM v2_devices WHERE device_id = ? AND revoked_at IS NULL", (row["device_id"],)).fetchone()
+        if key is None or device is None:
+            connection.rollback()
+            raise DeviceV2IdentityError("DEVICE_NOT_REGISTERED", "设备密钥不可用", 401)
+        _verify_signature(bytes(key["public_key_der"]), signature_bytes, _message("auth", nonce_bytes, row["device_id"], row["epoch_id"], request_id))
+        token = f"dv2.{_b64encode(secrets.token_bytes(32))}"
+        expires_at = now + TOKEN_TTL_SECONDS
+        connection.execute(
+            "INSERT INTO v2_tokens(token_hash, device_id, epoch_id, key_version, token_revision, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                hashlib.sha256(token.encode("ascii")).hexdigest(), row["device_id"], row["epoch_id"],
+                int(row["key_version"]), int(device["token_revision"]), now, expires_at,
+            ),
+        )
+        connection.execute("UPDATE v2_auth_challenges SET consumed_at = ? WHERE challenge_id = ?", (now, challenge_id))
+        connection.execute(
+            "UPDATE v2_device_epochs SET last_authenticated_at = ? WHERE device_id = ? AND epoch_id = ?",
+            (now, row["device_id"], row["epoch_id"]),
+        )
+        connection.commit()
+    return {
+        "schema_version": 2,
+        "access_token": token,
+        "token_type": "Bearer",
+        "expires_at": expires_at,
+        "device_id": row["device_id"],
+        "epoch_id": row["epoch_id"],
+        "key_version": int(row["key_version"]),
+        "token_revision": int(device["token_revision"]),
+    }
+
+
+def authenticate_bearer(device_id: str, epoch_id: str, token: str) -> DeviceV2Context:
+    ensure_v2_schema()
+    device_id = _identifier(device_id, "device_id")
+    epoch_id = _identifier(epoch_id, "epoch_id")
+    token = str(token or "").strip()
+    if not token.startswith("dv2.") or len(token) > 256:
+        raise DeviceV2IdentityError("BEARER_INVALID", "设备令牌无效", 401)
+    now = _now()
+    with control_connection() as connection:
+        row = connection.execute(
+            """SELECT token.key_version, token.token_revision, token.expires_at,
+                      device.token_revision AS current_token_revision,
+                      epoch.status
+                 FROM v2_tokens token
+                 INNER JOIN v2_devices device ON device.device_id = token.device_id
+                 INNER JOIN v2_device_epochs epoch ON epoch.device_id = token.device_id AND epoch.epoch_id = token.epoch_id
+                WHERE token.token_hash = ? AND token.device_id = ? AND token.epoch_id = ?
+                  AND device.revoked_at IS NULL""",
+            (hashlib.sha256(token.encode("ascii", "ignore")).hexdigest(), device_id, epoch_id),
+        ).fetchone()
+    if row is None or row["status"] != "active" or int(row["expires_at"]) <= now or int(row["token_revision"]) != int(row["current_token_revision"]):
+        raise DeviceV2IdentityError("BEARER_INVALID", "设备令牌已失效", 401)
+    return DeviceV2Context(device_id, epoch_id, int(row["key_version"]), int(row["token_revision"]))

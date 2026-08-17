@@ -1,12 +1,13 @@
 from fastapi import APIRouter
 
-from app.api import app_attachment_v1, app_marker_v1, app_meeting_v2, app_meetings, app_recording_v2, app_speakers, app_summary_v1, device_v1, location
+from app.api import app_attachment_v1, app_marker_v1, app_meeting_v2, app_meetings, app_recording_v2, app_speakers, app_summary_v1, device_v1, device_v2, location
 from app.laoji.auth_router import router as auth_router
 from app.laoji.router import router as laoji_router
 
 api_router = APIRouter()
 
 api_router.include_router(device_v1.router, tags=["device-v1"])
+api_router.include_router(device_v2.router, tags=["device-v2"])
 
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(location.router, prefix="/location", tags=["location"])
