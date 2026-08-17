@@ -40,6 +40,8 @@ import { summaryFactsV3 } from './0039SummaryFactsV3';
 import { vnextAuthorityAndOperations } from './0040VNextAuthorityAndOperations';
 import { vnextCutoverTombstones } from './0041VNextCutoverTombstones';
 import { immutableSourcesAndQuestionQ2 } from './0042ImmutableSourcesAndQuestionQ2';
+import { transcriptOverlayAndSearchVNext } from './0043TranscriptOverlayAndSearchVNext';
+import { mediaGenerationAndTrashVNext } from './0044MediaGenerationAndTrashVNext';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -85,6 +87,8 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   vnextAuthorityAndOperations,
   vnextCutoverTombstones,
   immutableSourcesAndQuestionQ2,
+  transcriptOverlayAndSearchVNext,
+  mediaGenerationAndTrashVNext,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -129,4 +133,6 @@ export { SUMMARY_FACTS_V3_SQL } from './0039SummaryFactsV3';
 export { VNEXT_AUTHORITY_AND_OPERATIONS_V40_SQL } from './0040VNextAuthorityAndOperations';
 export { VNEXT_CUTOVER_TOMBSTONES_V41_SQL } from './0041VNextCutoverTombstones';
 export { IMMUTABLE_SOURCES_AND_Q2_V42_SQL } from './0042ImmutableSourcesAndQuestionQ2';
+export { TRANSCRIPT_OVERLAY_AND_SEARCH_VNEXT_V43_SQL } from './0043TranscriptOverlayAndSearchVNext';
+export { MEDIA_GENERATION_AND_TRASH_VNEXT_V44_SQL } from './0044MediaGenerationAndTrashVNext';
 export type { MeetingDatabaseMigration } from './types';
