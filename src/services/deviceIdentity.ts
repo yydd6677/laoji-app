@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { deleteDeviceKey, hasDeviceKey } from 'laoji-native-platform';
 
 const DEVICE_ID_KEY = 'laoji.device.v1.id';
 const DEVICE_SECRET_KEY = 'laoji.device.v1.secret';
@@ -60,6 +61,18 @@ export async function replaceDataEpoch(epochId = uuid()): Promise<DeviceIdentity
 }
 
 export async function clearDeviceIdentity(): Promise<void> {
+  // SecureStore does not own the Android Keystore aliases used by the v2
+  // device-auth bridge. Remove every supported revision so a local erase
+  // cannot leave a signing identity behind. Non-Android platforms expose a
+  // no-op/false capability and continue with the portable stores.
+  for (let keyVersion = 1; keyVersion <= 100; keyVersion += 1) {
+    try {
+      if (hasDeviceKey(keyVersion)) deleteDeviceKey(keyVersion);
+    } catch {
+      // Keystore cleanup is best-effort; the coordinator reports the owner
+      // failure if the surrounding SecureStore/database steps also fail.
+    }
+  }
   await Promise.all([
     SecureStore.deleteItemAsync(DEVICE_ID_KEY),
     SecureStore.deleteItemAsync(DEVICE_SECRET_KEY),
