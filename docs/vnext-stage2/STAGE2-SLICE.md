@@ -48,6 +48,9 @@
 - `deploy/linux/` 已提供隔离候选的 ASR/API systemd 模板和脱敏环境模板：默认仅监听
   `127.0.0.1:8031/18021`、CPU 运行 ASR、关闭 R2 和 capability barrier；`tools/vnext/verify_deployment_templates.py`
   对端口、路径、GPU 和密钥占位进行静态检查。
+- Android native transfer 已修复三个恢复边界：`KEEP` 重入返回真实 unique WorkInfo ID；本机擦除在
+  删除媒体前同时清理 `guest` 与 `device-v2:<epoch>` lease/tag；WorkManager/Uploader 不再吞掉
+  `CancellationException`。v2 源在 PUT 前严格校验精确字节数、SHA-256 和 multipart part layout。
 
 ## 证据
 
@@ -56,6 +59,7 @@
   chunk/event replay、binding fence 和 NO_SPEECH contract。
 - 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
 - `python3 tools/vnext/verify_deployment_templates.py`：通过；模板未安装到服务器。
+- `python3 tools/vnext/verify_stage2_android_contract.py`：通过；该探针是源码合同检查，不是设备运行证据。
 - 隔离服务器候选 8031/18021 已真实启动并保持 loopback；`/api/ready` 对 ASR revision、R2、VAD、
   CAM++、SQLite 和 worker 报告 ready。完整 360 秒设备 v2/R2/转写链路产生 115 stable + 1 final，
   ACK 和到期清理通过；API 在任务运行中终止后由第二 attempt 恢复且业务 Task 唯一。详见

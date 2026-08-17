@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -97,6 +98,10 @@ internal class MeetingUploadWorker(
         )
         else -> failure("invalid-input", operationId)
       }
+    } catch (error: CancellationException) {
+      // WorkManager cancellation is terminal for this attempt. Never turn a
+      // user delete/stop into a new retry that can resurrect the upload.
+      throw error
     } catch (_: Exception) {
       Result.retry()
     }

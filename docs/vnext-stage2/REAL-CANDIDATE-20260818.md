@@ -125,7 +125,7 @@ WAV 只作为失败形态和内存上界的对照记录。
 
 ## 尚未通过
 
-1. Android WorkManager 网络中断和进程死亡恢复。
+1. Android WorkManager 网络中断和进程死亡恢复（源码合同已加强，但仍缺专属设备运行回放）。
 2. GPU 候选首段/RTF、讲话人真实命名/未知拒识、真机/模拟器和 APK；CPU realtime 延迟不达标。
 3. 旧 upload/ASR submit 连续一个完整公开周期为零，以及随后人工激活 capability barrier。
 

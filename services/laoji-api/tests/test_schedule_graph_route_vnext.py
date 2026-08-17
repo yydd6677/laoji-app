@@ -5,6 +5,10 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import settings
+
+settings.DATABASE_URL = os.environ["DATABASE_URL"]
+
 from app.laoji import router as laoji_router
 
 

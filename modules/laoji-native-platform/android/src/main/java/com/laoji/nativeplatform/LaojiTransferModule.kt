@@ -138,12 +138,21 @@ class LaojiTransferModule : Module() {
       } else {
         "laoji-meeting-upload:$scope:$operationId"
       }
-      WorkManager.getInstance(requireContext()).enqueueUniqueWork(
+      val workManager = WorkManager.getInstance(requireContext())
+      workManager.enqueueUniqueWork(
         uniqueWorkName,
         ExistingWorkPolicy.KEEP,
         request
       )
-      request.id.toString()
+      // KEEP may retain an older request. Returning the newly-built UUID here
+      // strands JS on a permanent `missing` state, even though the old work is
+      // still running. Resolve the actual unique work after enqueue instead.
+      val actual = workManager
+        .getWorkInfosForUniqueWork(uniqueWorkName)
+        .get(5, TimeUnit.SECONDS)
+        .firstOrNull()
+        ?: throw IllegalStateException("unique upload work was not persisted")
+      actual.id.toString()
     }
 
     AsyncFunction("getUploadState") { workId: String ->

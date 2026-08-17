@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -134,9 +135,10 @@ internal class DeviceV2R2Uploader(
         // Create replays do not probe R2. GET is the authoritative recovery
         // point and returns both part numbers and their exact ETags.
         session = probe
-        val receipts = uploadedReceipts(session)
         val totalParts = session.getInt("total_parts")
         val partSize = session.getLong("part_size")
+        validateMultipartLayout(totalParts, partSize, input.byteSize)
+        val receipts = uploadedReceipts(session, totalParts)
         val missing = (1..totalParts).filterNot(receipts::containsKey)
         for (batch in missing.chunked(MAX_PARALLEL_PARTS)) {
           val request = JSONObject()
@@ -188,6 +190,8 @@ internal class DeviceV2R2Uploader(
       DeviceV2R2UploadOutcome.Failure("invalid-response")
     } catch (_: IllegalArgumentException) {
       DeviceV2R2UploadOutcome.Failure("invalid-input")
+    } catch (error: CancellationException) {
+      throw error
     } catch (_: Exception) {
       DeviceV2R2UploadOutcome.Retry
     }
@@ -253,14 +257,14 @@ internal class DeviceV2R2Uploader(
     return root.getJSONObject("session")
   }
 
-  private fun uploadedReceipts(session: JSONObject): MutableMap<Int, String> {
+  private fun uploadedReceipts(session: JSONObject, totalParts: Int): MutableMap<Int, String> {
     val result = linkedMapOf<Int, String>()
     val parts = session.optJSONArray("uploaded_parts") ?: JSONArray()
     for (index in 0 until parts.length()) {
       val item = parts.getJSONObject(index)
       val number = item.getInt("part_number")
       val etag = item.getString("etag").trim()
-      if (number < 1 || etag.isEmpty() || result.put(number, etag) != null) {
+      if (number !in 1..totalParts || etag.isEmpty() || result.put(number, etag) != null) {
         throw TerminalUploadException("invalid-response")
       }
     }
@@ -289,11 +293,24 @@ internal class DeviceV2R2Uploader(
       val descriptor = applicationContext.contentResolver.openAssetFileDescriptor(input.uri, "r")
         ?: throw TerminalUploadException("file-missing")
       descriptor.use { asset ->
-        if (asset.length >= 0 && asset.length < input.byteSize) {
+        if (asset.length >= 0 && asset.length != input.byteSize) {
           throw TerminalUploadException("file-changed")
         }
         FileInputStream(asset.fileDescriptor).use { stream ->
           stream.channel.position(asset.startOffset)
+          val digest = MessageDigest.getInstance("SHA-256")
+          val buffer = ByteArray(1024 * 1024)
+          var total = 0L
+          while (true) {
+            val read = stream.read(buffer)
+            if (read <= 0) break
+            total += read
+            if (total > input.byteSize) throw TerminalUploadException("file-changed")
+            digest.update(buffer, 0, read)
+          }
+          if (total != input.byteSize) throw TerminalUploadException("file-changed")
+          val actual = "sha256:" + digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+          if (actual != input.sourceSha256.lowercase()) throw TerminalUploadException("file-changed")
         }
       }
     } catch (error: TerminalUploadException) {
@@ -303,6 +320,14 @@ internal class DeviceV2R2Uploader(
     } catch (_: Exception) {
       throw TerminalUploadException("file-missing")
     }
+  }
+
+  private fun validateMultipartLayout(totalParts: Int, partSize: Long, byteSize: Long) {
+    if (totalParts !in 1..10_000 || partSize < 5L * 1024L * 1024L || byteSize < 1L) {
+      throw TerminalUploadException("invalid-response")
+    }
+    val expectedParts = (byteSize + partSize - 1L) / partSize
+    if (expectedParts != totalParts.toLong()) throw TerminalUploadException("invalid-response")
   }
 
   private companion object {

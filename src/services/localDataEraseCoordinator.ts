@@ -83,7 +83,16 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
   }
 
   const preDatabaseSteps: EraseStep[] = [
-    { name: 'native-transfer', run: () => clearNativeTransferLease('guest') },
+    {
+      name: 'native-transfer',
+      run: async () => {
+        // v2 credentials are scoped by epoch, not by the legacy guest label.
+        // Clear both before local media deletion so no queued worker can wake
+        // after the files have been erased.
+        await clearNativeTransferLease('guest');
+        if (epochId) await clearNativeTransferLease(`device-v2:${epochId}`);
+      },
+    },
     { name: 'native-calendar-projection', run: clearNativeUpcomingEventsProjection },
     { name: 'notifications', run: clearScheduledAppNotifications },
     { name: 'files', run: clearLocalAppFiles },
