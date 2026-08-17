@@ -1,5 +1,5 @@
 import { clearAppStorage } from './appStorage';
-import { closeDeviceDataEpoch } from './deviceApi';
+import { closeDeviceDataEpoch, DeviceApiError } from './deviceApi';
 import { clearDeviceIdentity } from './deviceIdentity';
 import { clearLocalAppFiles, clearScheduledAppNotifications } from './localData';
 import { clearThemePreference } from './themePreferences';
@@ -16,6 +16,11 @@ export interface LocalDataEraseResult {
 }
 
 type EraseStep = { name: string; run: () => Promise<void> };
+
+function remotePurgeAlreadyConfirmed(error: unknown): boolean {
+  return error instanceof DeviceApiError
+    && (error.code === 'EPOCH_UNKNOWN' || error.code === 'EPOCH_CLOSED');
+}
 
 /**
  * The only coordinator allowed to erase the installation's business data.
@@ -37,11 +42,13 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
       }),
     ]);
     await writePurgeJournal(epochId, 'confirmed');
-  } catch {
-    remoteCleanup = 'pending';
+  } catch (error) {
+    if (!remotePurgeAlreadyConfirmed(error)) remoteCleanup = 'pending';
     // Keep the opaque journal and identity so a later run can retry the
     // server-side purge.  Local business data is still erased below.
-    if (epochId) await writePurgeJournal(epochId, 'pending').catch(() => undefined);
+    if (epochId && remoteCleanup === 'pending') {
+      await writePurgeJournal(epochId, 'pending').catch(() => undefined);
+    }
   }
 
   const preDatabaseSteps: EraseStep[] = [
@@ -91,7 +98,12 @@ export async function resumePendingRemotePurge(): Promise<'none' | 'confirmed' |
     await clearDeviceIdentity();
     await clearPurgeJournal();
     return 'confirmed';
-  } catch {
+  } catch (error) {
+    if (remotePurgeAlreadyConfirmed(error)) {
+      await clearDeviceIdentity();
+      await clearPurgeJournal();
+      return 'confirmed';
+    }
     await writePurgeJournal(journal.epochId, 'pending').catch(() => undefined);
     return 'pending';
   }
