@@ -121,13 +121,36 @@ export async function saveManualNoteRevision(
   const format = text(input.format ?? 'plain', 'format') || 'plain';
   const nowMs = input.nowMs ?? Date.now();
   return withMeetingDatabaseTransaction(async database => {
-    const current = await database.getFirstAsync<{ revision: number }>(
-      'SELECT revision FROM manual_note_revisions WHERE meeting_id = ? ORDER BY revision DESC LIMIT 1',
+    const contentSha256 = await sha256Text(content);
+    const current = await database.getFirstAsync<{
+      revision: number;
+      revision_id: string;
+      meeting_id: string;
+      content: string;
+      format: string;
+      content_sha256: string;
+      migrated_current: number;
+      created_at_ms: number;
+    }>(
+      `SELECT revision, revision_id, meeting_id, content, format, content_sha256,
+              migrated_current, created_at_ms
+         FROM manual_note_revisions WHERE meeting_id = ? ORDER BY revision DESC LIMIT 1`,
       meetingId,
     );
+    if (current && current.content_sha256 === contentSha256 && current.format === format) {
+      await database.runAsync(
+        'UPDATE manual_notes SET active_revision_id = ?, content = ?, format = ?, revision = ?, last_saved_at_ms = ? WHERE meeting_id = ?',
+        current.revision_id,
+        content,
+        format,
+        current.revision,
+        nowMs,
+        meetingId,
+      );
+      return noteFromRow(current as NoteRow)!;
+    }
     const revision = Math.max(1, Number(current?.revision ?? 0) + 1);
     const revisionId = `manual_note:${meetingId}:${revision}`;
-    const contentSha256 = await sha256Text(content);
     await database.runAsync(
       `INSERT INTO manual_note_revisions (
         revision_id, meeting_id, revision, content, format, content_sha256,
@@ -142,7 +165,7 @@ export async function saveManualNoteRevision(
       input.migratedCurrent === false ? 0 : 1,
       nowMs,
     );
-    await database.runAsync(
+    const updated = await database.runAsync(
       'UPDATE manual_notes SET active_revision_id = ?, content = ?, format = ?, revision = ?, last_saved_at_ms = ? WHERE meeting_id = ?',
       revisionId,
       content,
@@ -151,6 +174,23 @@ export async function saveManualNoteRevision(
       nowMs,
       meetingId,
     );
+    if (Number(updated.changes) === 0) {
+      await database.runAsync(
+        `INSERT INTO manual_notes (
+          meeting_id, content, format, revision, last_saved_at_ms
+        ) VALUES (?, ?, ?, ?, ?)`,
+        meetingId,
+        content,
+        format,
+        revision,
+        nowMs,
+      );
+      await database.runAsync(
+        'UPDATE manual_notes SET active_revision_id = ? WHERE meeting_id = ?',
+        revisionId,
+        meetingId,
+      );
+    }
     return noteFromRow(await database.getFirstAsync<NoteRow>(
       `SELECT revision_id, meeting_id, revision, content, format, content_sha256,
               migrated_current, created_at_ms
@@ -179,10 +219,28 @@ export async function saveAttachmentTextRevision(
   const content = text(input.content, 'content');
   const nowMs = input.nowMs ?? Date.now();
   return withMeetingDatabaseTransaction(async database => {
-    const current = await database.getFirstAsync<{ revision: number }>(
-      'SELECT revision FROM meeting_attachment_text_revisions WHERE attachment_id = ? ORDER BY revision DESC LIMIT 1',
+    const contentSha256 = await sha256Text(content);
+    const current = await database.getFirstAsync<AttachmentRow>(
+      `SELECT revision_id, attachment_id, meeting_id, revision, content_kind, content,
+              content_sha256, source_asset_sha256, extractor_revision, migrated_current, created_at_ms
+         FROM meeting_attachment_text_revisions
+        WHERE attachment_id = ? ORDER BY revision DESC LIMIT 1`,
       attachmentId,
     );
+    if (current && current.content_sha256 === contentSha256
+      && current.content_kind === (input.contentKind ?? 'text')
+      && current.source_asset_sha256 === (input.sourceAssetSha256 ?? null)
+      && current.extractor_revision === (input.extractorRevision ?? null)) {
+      await database.runAsync(
+        'UPDATE meeting_attachments SET active_text_revision_id = ?, text_content = ?, updated_at_ms = ? WHERE id = ? AND meeting_id = ?',
+        current.revision_id,
+        content,
+        nowMs,
+        attachmentId,
+        meetingId,
+      );
+      return attachmentFromRow(current)!;
+    }
     const revision = Math.max(1, Number(current?.revision ?? 0) + 1);
     const revisionId = `attachment_text:${attachmentId}:${revision}`;
     await database.runAsync(
@@ -196,7 +254,7 @@ export async function saveAttachmentTextRevision(
       revision,
       input.contentKind ?? 'text',
       content,
-      await sha256Text(content),
+      contentSha256,
       input.sourceAssetSha256 ?? null,
       input.extractorRevision ?? null,
       input.migratedCurrent === false ? 0 : 1,
