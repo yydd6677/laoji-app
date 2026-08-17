@@ -1,0 +1,29 @@
+[Unit]
+Description=LaoJi vNext isolated API service
+After=network-online.target laoji-asr-vnext.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=laoji-vnext
+Group=laoji-vnext
+WorkingDirectory=/opt/laoji-vnext/services/laoji-api
+EnvironmentFile=/etc/laoji-vnext/api.env
+Environment=PYTHONUNBUFFERED=1
+Environment=LAOJI_INTERNAL_ASR_PORT=8031
+Environment=QWEN_ASR_V2_BATCH_URL=http://127.0.0.1:8031/v2/asr/batch
+Environment=LAOJI_VNEXT_IMPORT_TRANSCRIPTION_ENABLED=1
+Environment=LAOJI_VNEXT_MEDIA_UPLOAD_BARRIER_ENABLED=0
+ExecStart=/opt/laoji-vnext/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18021 --workers 1 --ws-ping-interval 25 --ws-ping-timeout 300
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=60
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
