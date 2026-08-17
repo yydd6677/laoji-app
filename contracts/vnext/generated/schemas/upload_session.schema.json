@@ -1,4 +1,29 @@
 {
+  "$defs": {
+    "UploadPartReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "etag": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Etag",
+          "type": "string"
+        },
+        "part_number": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Part Number",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "part_number",
+        "etag"
+      ],
+      "title": "UploadPartReceipt",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "asset_generation": {
@@ -133,7 +158,7 @@
     },
     "uploaded_parts": {
       "items": {
-        "type": "integer"
+        "$ref": "#/$defs/UploadPartReceipt"
       },
       "maxItems": 10000,
       "title": "Uploaded Parts",

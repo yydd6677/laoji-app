@@ -148,6 +148,7 @@ def test_single_upload_verification_and_task_commit_are_atomic(upload_context) -
     )
     assert completed["reused"] is False
     assert completed["verified_asset"]["source_sha256"] == digest
+    assert completed["verified_asset"]["object_revision"] == 1
     assert completed["task"]["capability"] == "transcript"
     with device_identity.control_connection() as connection:
         session_row = connection.execute(
@@ -282,6 +283,15 @@ def test_multipart_create_replay_does_not_open_second_remote_upload(upload_conte
     second, reused = vnext_upload_store.create_upload_session(context, **kwargs)
     assert reused is True and second["session_id"] == first["session_id"]
     assert fake.create_count == 1
+
+    upload_id = next(iter(fake.multipart))
+    _, uploaded = fake.multipart[upload_id]
+    uploaded[1] = b"first-part"
+    recovered = vnext_upload_store.get_upload_session(context, first["session_id"])
+    assert recovered is not None
+    assert recovered["uploaded_parts"] == [
+        {"part_number": 1, "etag": '"etag-1"'},
+    ]
 
 
 def test_binding_purge_confirms_only_after_verified_object_is_absent(upload_context) -> None:

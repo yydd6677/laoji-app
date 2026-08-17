@@ -196,6 +196,7 @@ def ensure_vnext_upload_schema() -> None:
                 byte_size INTEGER NOT NULL,
                 source_sha256 TEXT NOT NULL,
                 sealed_locator TEXT NOT NULL,
+                object_revision INTEGER NOT NULL DEFAULT 1 CHECK(object_revision >= 1),
                 reservation_id TEXT NOT NULL REFERENCES vnext_capacity_reservations(reservation_id),
                 state TEXT NOT NULL CHECK(state IN ('sealed','consumed','cleanup_pending')),
                 activated_at TEXT NOT NULL,
@@ -228,6 +229,13 @@ def ensure_vnext_upload_schema() -> None:
                 ON vnext_object_cleanup_obligations(state, not_before_epoch, obligation_id);
             """
         )
+        verified_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(vnext_verified_assets)").fetchall()
+        }
+        if "object_revision" not in verified_columns:
+            connection.execute(
+                "ALTER TABLE vnext_verified_assets ADD COLUMN object_revision INTEGER NOT NULL DEFAULT 1"
+            )
         connection.commit()
 
 
@@ -266,12 +274,20 @@ def _session_row(connection: Any, context: UploadOwnerContext, session_id: str) 
     ).fetchone()
 
 
-def _session_payload(row: Any, *, put_url: str | None = None, uploaded_parts: Iterable[int] = ()) -> dict[str, Any]:
+def _session_payload(
+    row: Any,
+    *,
+    put_url: str | None = None,
+    uploaded_parts: Iterable[r2_storage_service.R2Part] = (),
+) -> dict[str, Any]:
     decoded = _decode_session(row)
     assert decoded is not None
     decoded["schema_version"] = 2
     decoded["put_url"] = put_url
-    decoded["uploaded_parts"] = list(uploaded_parts)
+    decoded["uploaded_parts"] = [
+        {"part_number": part.part_number, "etag": part.etag}
+        for part in uploaded_parts
+    ]
     return decoded
 
 
@@ -477,14 +493,14 @@ def get_upload_session(context: UploadOwnerContext, session_id: str, *, probe: b
         row = _session_row(connection, context, session_id)
     if row is None:
         return None
-    uploaded_parts: list[int] = []
+    uploaded_parts: list[r2_storage_service.R2Part] = []
     if probe and row["mode"] == "multipart" and row["state"] in {"active", "completing"} and row["multipart_upload_id"]:
         object_key = _object_key(str(row["object_key_hmac"]))
         try:
-            uploaded_parts = [part.part_number for part in r2_storage_service.list_uploaded_parts(
+            uploaded_parts = r2_storage_service.list_uploaded_parts(
                 object_key=object_key,
                 upload_id=str(row["multipart_upload_id"]),
-            )]
+            )
         except Exception as error:
             raise VNextUploadError(
                 "UPLOAD_STORAGE_UNAVAILABLE", "录音上传状态暂时无法查询", 503,

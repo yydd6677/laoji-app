@@ -77,6 +77,11 @@ class ProjectionEnvelope(VNextModel):
     payload: dict[str, Any]
 
 
+class UploadPartReceipt(VNextModel):
+    part_number: int = Field(ge=1, le=10_000)
+    etag: str = Field(min_length=1, max_length=512)
+
+
 class UploadSession(VNextModel):
     schema_version: Literal[2] = 2
     session_id: str = Field(min_length=8, max_length=180)
@@ -101,7 +106,7 @@ class UploadSession(VNextModel):
     verified_asset_id: str | None = Field(default=None, max_length=180)
     transcription_task_id: str | None = Field(default=None, max_length=180)
     put_url: str | None = Field(default=None, max_length=4096)
-    uploaded_parts: list[int] = Field(default_factory=list, max_length=10_000)
+    uploaded_parts: list[UploadPartReceipt] = Field(default_factory=list, max_length=10_000)
 
 
 class ScheduleGraphSource(VNextModel):
