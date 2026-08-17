@@ -1,7 +1,7 @@
 import { DeviceApiError, deleteMeetingBinding } from './deviceApi';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
-import { clearDeviceTranscriptTask } from './deviceTranscriptTasks';
+import { cancelDeviceTranscriptTask } from './deviceTranscriptTasks';
 
 /**
  * The phone owns meeting deletion.  This small registry is only a durable
@@ -105,7 +105,7 @@ function mutate(mutator: (records: Registry) => void): Promise<void> {
 
 export async function enqueueDeviceMeetingDeletion(meetingId: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  await clearDeviceTranscriptTask(normalized).catch(() => undefined);
+  await cancelDeviceTranscriptTask(normalized).catch(() => undefined);
   const now = new Date().toISOString();
   await mutate(records => {
     const existing = records[normalized];

@@ -88,6 +88,7 @@ from app.services.summary_v3_store import (
     latest_document as latest_summary_v3_document,
     save_source_payload,
 )
+from app.services import vnext_task_store
 from app.config import settings
 
 
@@ -300,6 +301,49 @@ class DeviceQuestionRequest(BaseModel):
     retain_generated_result: bool = False
 
 
+class DeviceVNextBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    binding_generation: str = Field(min_length=1, max_length=256)
+
+
+class DeviceVNextTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    task_id: str = Field(min_length=1, max_length=512)
+    binding_id: str = Field(min_length=1, max_length=512)
+    binding_generation: str = Field(min_length=1, max_length=256)
+    capability: str = Field(min_length=1, max_length=120)
+    entity_id: str = Field(min_length=1, max_length=512)
+    entity_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    generation_id: str = Field(min_length=1, max_length=512)
+    predecessor_task_id: str | None = Field(default=None, max_length=512)
+    creation_reason: Literal["original", "retry", "regenerate"] = "original"
+
+
+class DeviceVNextTaskResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    attempt_id: str = Field(min_length=1, max_length=512)
+    lease_owner: str = Field(min_length=1, max_length=200)
+    result_kind: Literal["artifact", "content_outcome"] = "artifact"
+    result: Any
+
+
+class DeviceVNextTaskFailureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    attempt_id: str = Field(min_length=1, max_length=512)
+    lease_owner: str = Field(min_length=1, max_length=200)
+    error_code: str = Field(min_length=1, max_length=160)
+    retryable: bool = False
+
+
 def _device_question_candidate_is_current(
     value: object,
     *,
@@ -467,6 +511,144 @@ async def device_capabilities(context: DeviceContext = Depends(require_device)) 
         "cross_device": False,
         "summary_contract_v3": True,
     }
+
+
+def _vnext_error(error: vnext_task_store.VNextTaskError) -> HTTPException:
+    return HTTPException(
+        status_code=error.status_code,
+        detail={"code": error.code, "message": error.message},
+    )
+
+
+@router.put("/vnext/bindings/{binding_id}", status_code=201)
+async def register_vnext_binding(
+    binding_id: str,
+    payload: DeviceVNextBindingRequest,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        binding = await asyncio.to_thread(
+            vnext_task_store.register_binding,
+            context,
+            binding_id=binding_id,
+            binding_generation=payload.binding_generation,
+        )
+        return {"schema_version": 1, "binding": binding}
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+
+
+@router.post("/vnext/tasks", status_code=201)
+async def create_vnext_task(
+    payload: DeviceVNextTaskRequest,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        task, reused = await asyncio.to_thread(
+            vnext_task_store.create_task,
+            context,
+            task_id=payload.task_id,
+            binding_id=payload.binding_id,
+            binding_generation=payload.binding_generation,
+            capability=payload.capability,
+            entity_id=payload.entity_id,
+            entity_revision=payload.entity_revision,
+            input_sha256=payload.input_sha256,
+            generation_id=payload.generation_id,
+            predecessor_task_id=payload.predecessor_task_id,
+            creation_reason=payload.creation_reason,
+        )
+        return {"schema_version": 1, "reused": reused, "task": task}
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+
+
+@router.get("/vnext/tasks/{task_id}")
+async def get_vnext_task(
+    task_id: str,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        task = await asyncio.to_thread(vnext_task_store.get_task, context, task_id)
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+    if task is None:
+        raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
+    return {"schema_version": 1, "task": task}
+
+
+@router.post("/vnext/tasks/{task_id}/attempts/claim")
+async def claim_vnext_task_attempt(
+    task_id: str,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        attempt = await asyncio.to_thread(vnext_task_store.claim_attempt, context, task_id)
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+    if attempt is None:
+        raise HTTPException(status_code=409, detail={"code": "TASK_NOT_ADMITTED", "message": "任务当前不可执行"})
+    return {"schema_version": 1, "attempt": attempt}
+
+
+@router.post("/vnext/tasks/{task_id}/attempts/success")
+async def finish_vnext_task_success(
+    task_id: str,
+    payload: DeviceVNextTaskResultRequest,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        committed = await asyncio.to_thread(
+            vnext_task_store.mark_success,
+            context,
+            task_id,
+            payload.attempt_id,
+            payload.result,
+            result_kind=payload.result_kind,
+            lease_owner=payload.lease_owner,
+        )
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+    if not committed:
+        raise HTTPException(status_code=409, detail={"code": "TASK_COMMIT_REJECTED", "message": "任务结果已过期"})
+    return {"schema_version": 1, "committed": True}
+
+
+@router.post("/vnext/tasks/{task_id}/attempts/failure")
+async def finish_vnext_task_failure(
+    task_id: str,
+    payload: DeviceVNextTaskFailureRequest,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        committed = await asyncio.to_thread(
+            vnext_task_store.mark_failure,
+            context,
+            task_id,
+            payload.attempt_id,
+            payload.error_code,
+            retryable=payload.retryable,
+            lease_owner=payload.lease_owner,
+        )
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+    if not committed:
+        raise HTTPException(status_code=409, detail={"code": "TASK_COMMIT_REJECTED", "message": "任务结果已过期"})
+    return {"schema_version": 1, "committed": True}
+
+
+@router.post("/vnext/tasks/{task_id}/cancel")
+async def cancel_vnext_task(
+    task_id: str,
+    context: DeviceContext = Depends(require_device),
+) -> dict[str, Any]:
+    try:
+        cancelled = await asyncio.to_thread(vnext_task_store.cancel_task, context, task_id)
+    except vnext_task_store.VNextTaskError as error:
+        raise _vnext_error(error) from error
+    if not cancelled:
+        raise HTTPException(status_code=409, detail={"code": "TASK_NOT_ACTIVE", "message": "任务已结束或不存在"})
+    return {"schema_version": 1, "cancelled": True}
 
 
 @router.put("/epochs/{epoch_id}")

@@ -1,7 +1,21 @@
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
+import { getOrCreateDeviceIdentity } from './deviceIdentity';
+import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
+import {
+  createDeviceOperation,
+  getLatestDeviceOperation,
+  updateDeviceOperation,
+  type DeviceOperationRecord,
+} from '../data/repositories/vnext/deviceOperationsRepository';
 
-const STORAGE_KEY = '@laoji:deviceTranscriptTasks:v1';
-const MAX_RECORD_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Compatibility facade for the old transcript-task callers.
+ *
+ * The durable owner is now SQLite `device_operations`. AsyncStorage is read
+ * once only to promote records created by the previous build; it is never
+ * written again and can therefore not become a second task owner.
+ */
+const LEGACY_STORAGE_KEY = '@laoji:deviceTranscriptTasks:v1';
 
 export type DeviceTranscriptTaskState = 'pending' | 'failed';
 export type DeviceTranscriptTaskPhase = 'queued' | 'running';
@@ -15,7 +29,22 @@ export interface DeviceTranscriptTaskRecord {
   updatedAt: string;
 }
 
-type Registry = Record<string, DeviceTranscriptTaskRecord>;
+type LegacyRecord = DeviceTranscriptTaskRecord;
+type LegacyRegistry = Record<string, LegacyRecord>;
+const listeners = new Set<(meetingId: string) => void>();
+
+function notifyChanged(meetingId: string): void {
+  listeners.forEach(listener => {
+    try { listener(meetingId); } catch { /* observers cannot break the durable write */ }
+  });
+}
+
+export function subscribeDeviceTranscriptTaskChanged(
+  listener: (meetingId: string) => void,
+): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 function validId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -35,158 +64,176 @@ function normalizedTaskId(value: string): string {
   return result;
 }
 
-async function readRegistry(): Promise<Registry> {
-  const raw = await getAppStorageItem(STORAGE_KEY);
+function operationId(meetingId: string, taskId: string): string {
+  return `transcript:${meetingId}:${taskId}`;
+}
+
+function toRecord(operation: DeviceOperationRecord): DeviceTranscriptTaskRecord | null {
+  if (operation.remoteState === 'success' || operation.remoteState === 'cancelled') return null;
+  const state: DeviceTranscriptTaskState = operation.remoteState === 'failure' ? 'failed' : 'pending';
+  return {
+    meetingId: operation.entityId,
+    taskId: operation.generationId,
+    state,
+    phase: state === 'pending' && operation.remoteState === 'running' ? 'running' : state === 'pending' ? 'queued' : undefined,
+    errorCode: state === 'failed' ? operation.errorCode ?? undefined : undefined,
+    updatedAt: new Date(operation.updatedAtMs).toISOString(),
+  };
+}
+
+async function readLegacyRegistry(): Promise<LegacyRegistry> {
+  const raw = await getAppStorageItem(LEGACY_STORAGE_KEY);
   if (!raw) return {};
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const registry: LegacyRegistry = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      const item = value as Partial<LegacyRecord>;
+      try {
+        const meetingId = normalizedMeetingId(typeof item.meetingId === 'string' ? item.meetingId : key);
+        const taskId = normalizedTaskId(typeof item.taskId === 'string' ? item.taskId : '');
+        const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
+        if (!Number.isFinite(Date.parse(updatedAt))) return;
+        registry[meetingId] = {
+          meetingId,
+          taskId,
+          state: item.state === 'failed' ? 'failed' : 'pending',
+          phase: item.phase === 'running' ? 'running' : 'queued',
+          errorCode: typeof item.errorCode === 'string' ? item.errorCode.slice(0, 80) : undefined,
+          updatedAt,
+        };
+      } catch {
+        // Malformed compatibility data must never block the local meeting UI.
+      }
+    });
+    return registry;
   } catch {
     return {};
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-  const now = Date.now();
-  const records: Registry = {};
-  Object.entries(parsed).forEach(([key, value]) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-    const item = value as Partial<DeviceTranscriptTaskRecord>;
-    try {
-      const meetingId = normalizedMeetingId(typeof item.meetingId === 'string' ? item.meetingId : key);
-      const taskId = normalizedTaskId(typeof item.taskId === 'string' ? item.taskId : '');
-      const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
-      const updatedAtMs = Date.parse(updatedAt);
-      if (!Number.isFinite(updatedAtMs) || now - updatedAtMs > MAX_RECORD_AGE_MS) return;
-      const state = item.state === 'failed' ? 'failed' : item.state === 'pending' ? 'pending' : null;
-      if (!state) return;
-      records[meetingId] = {
-        meetingId,
-        taskId,
-        state,
-        phase: state === 'pending' && item.phase === 'running' ? 'running' : state === 'pending' ? 'queued' : undefined,
-        errorCode: typeof item.errorCode === 'string' ? item.errorCode.slice(0, 80) : undefined,
-        updatedAt,
-      };
-    } catch {
-      // A stale task hint must never block the local meeting list.
-    }
-  });
-  return records;
 }
 
-async function writeRegistry(records: Registry): Promise<void> {
-  if (Object.keys(records).length === 0) {
-    await removeAppStorageItem(STORAGE_KEY);
+async function removeLegacyRecord(meetingId: string): Promise<void> {
+  const registry = await readLegacyRegistry();
+  if (!registry[meetingId]) return;
+  delete registry[meetingId];
+  if (Object.keys(registry).length === 0) {
+    await removeAppStorageItem(LEGACY_STORAGE_KEY);
     return;
   }
-  await setAppStorageItem(STORAGE_KEY, JSON.stringify(records));
+  await setAppStorageItem(LEGACY_STORAGE_KEY, JSON.stringify(registry));
 }
 
-let mutation: Promise<void> = Promise.resolve();
-const listeners = new Set<(meetingId: string) => void>();
-
-function notifyChanged(meetingId: string): void {
-  listeners.forEach(listener => {
-    try {
-      listener(meetingId);
-    } catch {
-      // A presentation listener must never break the durable registry write.
-    }
-  });
-}
-
-function mutate(
-  meetingId: string,
-  mutator: (records: Registry) => boolean,
-): Promise<void> {
-  const operation = mutation
-    .catch(() => undefined)
-    .then(async () => {
-      const records = await readRegistry();
-      if (!mutator(records)) return;
-      await writeRegistry(records);
-      notifyChanged(meetingId);
+async function promoteLegacy(meetingId: string): Promise<DeviceTranscriptTaskRecord | null> {
+  const registry = await readLegacyRegistry();
+  const legacy = registry[meetingId];
+  if (!legacy) return null;
+  await rememberDeviceTranscriptTask(legacy.meetingId, legacy.taskId);
+  const current = await getLatestDeviceOperation('transcript', meetingId);
+  if (legacy.state === 'failed' && current && current.remoteState !== 'failure') {
+    await updateDeviceOperation({
+      operationId: current.operationId,
+      expectedRevision: current.operationRevision,
+      state: 'failure',
+      errorCode: legacy.errorCode ?? null,
+      nowMs: Date.parse(legacy.updatedAt) || Date.now(),
     });
-  mutation = operation.then(() => undefined, () => undefined);
-  return operation;
-}
-
-export function subscribeDeviceTranscriptTaskChanged(
-  listener: (meetingId: string) => void,
-): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  } else if (legacy.state === 'pending' && legacy.phase === 'running' && current && current.remoteState === 'queued') {
+    await updateDeviceOperation({
+      operationId: current.operationId,
+      expectedRevision: current.operationRevision,
+      state: 'running',
+      nowMs: Date.parse(legacy.updatedAt) || Date.now(),
+    });
+  }
+  await removeLegacyRecord(meetingId).catch(() => undefined);
+  const promoted = await getLatestDeviceOperation('transcript', meetingId);
+  return promoted ? toRecord(promoted) : null;
 }
 
 export async function getDeviceTranscriptTask(meetingId: string): Promise<DeviceTranscriptTaskRecord | null> {
   const normalized = normalizedMeetingId(meetingId);
-  await mutation.catch(() => undefined);
-  const record = (await readRegistry())[normalized];
-  return record ? { ...record } : null;
+  const operation = await getLatestDeviceOperation('transcript', normalized);
+  if (operation) return toRecord(operation);
+  return promoteLegacy(normalized);
 }
 
-export function rememberDeviceTranscriptTask(meetingId: string, taskId: string): Promise<void> {
+export async function rememberDeviceTranscriptTask(meetingId: string, taskId: string): Promise<void> {
   const normalizedMeetingIdValue = normalizedMeetingId(meetingId);
   const normalizedTaskIdValue = normalizedTaskId(taskId);
-  const updatedAt = new Date().toISOString();
-  return mutate(normalizedMeetingIdValue, records => {
-    const current = records[normalizedMeetingIdValue];
-    if (
-      current?.taskId === normalizedTaskIdValue
-      && current.state === 'pending'
-    ) return false;
-    records[normalizedMeetingIdValue] = {
-      meetingId: normalizedMeetingIdValue,
-      taskId: normalizedTaskIdValue,
-      state: 'pending',
-      phase: 'queued',
-      updatedAt,
-    };
-    return true;
+  const identity = await getOrCreateDeviceIdentity();
+  await ensureDeviceEpoch(identity.epochId);
+  const current = await getLatestDeviceOperation('transcript', normalizedMeetingIdValue);
+  if (current?.generationId === normalizedTaskIdValue) return;
+  await createDeviceOperation({
+    operationId: operationId(normalizedMeetingIdValue, normalizedTaskIdValue),
+    deviceEpochId: identity.epochId,
+    capability: 'transcript',
+    entityId: normalizedMeetingIdValue,
+    entityRevision: 1,
+    input: normalizedTaskIdValue,
+    generationId: normalizedTaskIdValue,
+    predecessorOperationId: current?.operationId ?? null,
+    creationReason: current ? 'retry' : 'original',
   });
+  notifyChanged(normalizedMeetingIdValue);
 }
 
-export function markDeviceTranscriptTaskProgress(
+export async function markDeviceTranscriptTaskProgress(
   meetingId: string,
   phase: DeviceTranscriptTaskPhase,
 ): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const updatedAt = new Date().toISOString();
-  return mutate(normalized, records => {
-    const existing = records[normalized];
-    if (!existing || existing.state !== 'pending' || existing.phase === phase) return false;
-    records[normalized] = {
-      ...existing,
-      phase,
-      updatedAt,
-    };
-    return true;
+  const existing = await getLatestDeviceOperation('transcript', normalized);
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
+  if ((phase === 'running' && existing.remoteState === 'running')
+    || (phase === 'queued' && existing.remoteState === 'queued')) return;
+  const updated = await updateDeviceOperation({
+    operationId: existing.operationId,
+    expectedRevision: existing.operationRevision,
+    state: phase === 'running' ? 'running' : 'queued',
   });
+  if (updated) notifyChanged(normalized);
 }
 
-export function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<void> {
+export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const updatedAt = new Date().toISOString();
-  return mutate(normalized, records => {
-    const existing = records[normalized];
-    if (!existing) return false;
-    const nextErrorCode = errorCode?.trim().slice(0, 80) || undefined;
-    if (existing.state === 'failed' && existing.errorCode === nextErrorCode) return false;
-    records[normalized] = {
-      ...existing,
-      state: 'failed',
-      phase: undefined,
-      errorCode: nextErrorCode,
-      updatedAt,
-    };
-    return true;
+  const existing = await getLatestDeviceOperation('transcript', normalized);
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
+  const updated = await updateDeviceOperation({
+    operationId: existing.operationId,
+    expectedRevision: existing.operationRevision,
+    state: 'failure',
+    errorCode: errorCode?.trim().slice(0, 80) || null,
   });
+  if (updated) notifyChanged(normalized);
 }
 
-export function clearDeviceTranscriptTask(meetingId: string): Promise<void> {
+export async function cancelDeviceTranscriptTask(meetingId: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  return mutate(normalized, records => {
-    if (!records[normalized]) return false;
-    delete records[normalized];
-    return true;
+  const existing = await getLatestDeviceOperation('transcript', normalized);
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
+  const updated = await updateDeviceOperation({
+    operationId: existing.operationId,
+    expectedRevision: existing.operationRevision,
+    state: 'cancelled',
   });
+  if (updated) notifyChanged(normalized);
+}
+
+/** Marks the durable operation successful; it is retained for idempotent replay. */
+export async function clearDeviceTranscriptTask(meetingId: string): Promise<void> {
+  const normalized = normalizedMeetingId(meetingId);
+  const existing = await getLatestDeviceOperation('transcript', normalized);
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') {
+    await removeLegacyRecord(normalized).catch(() => undefined);
+    return;
+  }
+  const updated = await updateDeviceOperation({
+    operationId: existing.operationId,
+    expectedRevision: existing.operationRevision,
+    state: 'success',
+  });
+  if (updated) notifyChanged(normalized);
 }

@@ -9,3 +9,4 @@ export * from './meetingMarkerSyncRepository';
 export * from './meetingSummarySyncRepository';
 export * from './meetingSummaryV3Repository';
 export * from './sqliteMeetingNoteRepository';
+export * from './vnext';

@@ -37,6 +37,9 @@ import { summaryCitationUserOverridesV36 } from './0036SummaryCitationUserOverri
 import { summaryVersionSyncV37 } from './0037SummaryVersionSync';
 import { localScheduleEventsV38 } from './0038LocalScheduleEvents';
 import { summaryFactsV3 } from './0039SummaryFactsV3';
+import { vnextAuthorityAndOperations } from './0040VNextAuthorityAndOperations';
+import { vnextCutoverTombstones } from './0041VNextCutoverTombstones';
+import { immutableSourcesAndQuestionQ2 } from './0042ImmutableSourcesAndQuestionQ2';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -79,6 +82,9 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   summaryVersionSyncV37,
   localScheduleEventsV38,
   summaryFactsV3,
+  vnextAuthorityAndOperations,
+  vnextCutoverTombstones,
+  immutableSourcesAndQuestionQ2,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -120,4 +126,7 @@ export { SUMMARY_CITATION_USER_OVERRIDES_V36_SQL } from './0036SummaryCitationUs
 export { SUMMARY_VERSION_SYNC_V37_SQL } from './0037SummaryVersionSync';
 export { LOCAL_SCHEDULE_EVENTS_V38_SQL } from './0038LocalScheduleEvents';
 export { SUMMARY_FACTS_V3_SQL } from './0039SummaryFactsV3';
+export { VNEXT_AUTHORITY_AND_OPERATIONS_V40_SQL } from './0040VNextAuthorityAndOperations';
+export { VNEXT_CUTOVER_TOMBSTONES_V41_SQL } from './0041VNextCutoverTombstones';
+export { IMMUTABLE_SOURCES_AND_Q2_V42_SQL } from './0042ImmutableSourcesAndQuestionQ2';
 export type { MeetingDatabaseMigration } from './types';
