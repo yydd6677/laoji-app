@@ -14,15 +14,10 @@ import {
   loadPrivacyPrefs,
   savePrivacyPrefs,
 } from '../services/privacy';
-import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
-import { clearAppStorage } from '../services/appStorage';
 import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
-import { deleteMeetingDatabase } from '../data/db/openDatabase';
 import { useTheme } from '../theme/ThemeProvider';
 import { THEME_LABELS, type ThemeId } from '../theme/themeIds';
-import { clearThemePreference } from '../services/themePreferences';
-import { closeDeviceDataEpoch } from '../services/deviceApi';
-import { clearDeviceIdentity } from '../services/deviceIdentity';
+import { eraseLocalInstallationData } from '../services/localDataEraseCoordinator';
 import {
   loadGenerationRetentionPreference,
   saveGenerationRetentionPreference,
@@ -228,28 +223,12 @@ export function PrivacyScreen({ navigation }: Props) {
           text: '清除',
           role: 'destructive',
           onPress: async () => {
-            let deviceCleanupFailed = false;
-            try {
-              await closeDeviceDataEpoch();
-              await clearDeviceIdentity();
-            } catch {
-              // Keep the identity when the service is unreachable so a later
-              // foreground run can retry deleting the generated device data.
-              deviceCleanupFailed = true;
-            }
-            const cleanupResults = await Promise.allSettled([
-              clearLocalAppFiles(),
-              clearScheduledAppNotifications(),
-              clearAppStorage(),
-              deleteMeetingDatabase(),
-              clearThemePreference(),
-            ]);
-            const failures = cleanupResults.filter(result => result.status === 'rejected').length
-              + (deviceCleanupFailed ? 1 : 0);
+            const result = await eraseLocalInstallationData();
+            const failures = result.failedSteps.length + (result.remoteCleanup === 'pending' ? 1 : 0);
             showDialog(failures > 0
               ? {
                 title: '已退出，清理未完成',
-                message: deviceCleanupFailed
+                message: result.remoteCleanup === 'pending'
                   ? '本机文件已清除，但服务端设备数据尚未删除；联网后请再次执行清除本机数据。'
                   : `有 ${failures} 项本机数据未能清除。请在系统设置中清除老记的应用存储后再使用。`,
                 tone: 'error',
