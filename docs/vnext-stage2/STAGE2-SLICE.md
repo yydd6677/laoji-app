@@ -44,6 +44,9 @@
   生产入口。
 - ModelManager 在 compact 环境优先读取标准 Torch Hub 缓存的 Silero JIT，并用现有 `soundfile/scipy`
   提供文件读取，流式 VAD 初始化不再强制依赖不匹配的 torchaudio。
+- `deploy/linux/` 已提供隔离候选的 ASR/API systemd 模板和脱敏环境模板：默认仅监听
+  `127.0.0.1:8031/18021`、CPU 运行 ASR、关闭 R2 和 capability barrier；`tools/vnext/verify_deployment_templates.py`
+  对端口、路径、GPU 和密钥占位进行静态检查。
 
 ## 证据
 
@@ -51,6 +54,7 @@
 - device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：58 个通过，包含 remote multipart merge、
   chunk/event replay、binding fence 和 NO_SPEECH contract。
 - 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
+- `python3 tools/vnext/verify_deployment_templates.py`：通过；模板未安装到服务器。
 - 线上只读参考回放（样本 `39799065_da2-1-16.mp4`，360.133 秒，现有 `/v1/asr/batch`）：首个稳定批次
   1.993 秒，RTF 0.1008，115 段/36 批，模型推理耗时合计 82.756 秒，进程峰值 RSS 约 1180 MiB。
   该数据只证明当前 v1 模型/硬件参考性能，不证明 v2 合同。
@@ -61,8 +65,8 @@
 
 ## 下一入口
 
-1. 在隔离服务部署候选 8030 `/v2/asr/batch`（不覆盖线上 v1），再重复真实样本回放；同时完成真实 R2、
-   kill/restart 和双上传+实时并发证据。
+1. 按 `deploy/linux/` 模板在独立工作目录运行候选 ASR/API（不覆盖线上 v1），再重复真实样本回放；
+   同时完成真实 R2、kill/restart 和双上传+实时并发证据。
 2. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
    Transcript owner，断线和 token refresh 从游标续接。
 3. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。

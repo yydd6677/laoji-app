@@ -82,7 +82,7 @@ remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 arm
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
 
-下一入口是隔离部署候选 `/v2/asr/batch`、v2 realtime WSS、手机连续文字事件、ASR/CAM++ 并行队列和
+下一入口是使用 `deploy/linux/` 模板运行隔离候选 `/v2/asr/batch`、v2 realtime WSS、手机连续文字事件、ASR/CAM++ 并行队列和
 NO_SPEECH/恢复/性能门；不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
