@@ -17,6 +17,7 @@ import {
   transitionProcessingStage,
 } from '../../domain/meeting';
 import { withMeetingDatabaseTransaction, openMeetingDatabase } from '../db/openDatabase';
+import { sha256Text } from './vnext/immutableSourceRepository';
 import {
   parseMeetingSearchQuery,
   type MeetingSearchFilters,
@@ -3877,25 +3878,60 @@ class SqliteMeetingTransaction implements MeetingTransaction {
   async saveManualNote(note: ManualNoteRecord, scopeKey: ScopeKey): Promise<void> {
     assertScopeKey(scopeKey);
     await this.assertMeetingInScope(note.meetingId, scopeKey);
+    const contentSha256 = await sha256Text(note.content);
+    const current = await this.database.getFirstAsync<{
+      revision_id: string;
+      revision: number;
+      content_sha256: string;
+      format: string;
+    }>(
+      `SELECT revision_id, revision, content_sha256, format
+         FROM manual_note_revisions
+        WHERE meeting_id = ? ORDER BY revision DESC LIMIT 1`,
+      note.meetingId,
+    );
+    const revision = current?.content_sha256 === contentSha256 && current.format === 'plain'
+      ? current.revision
+      : Math.max(1, current ? current.revision + 1 : note.revision);
+    const revisionId = current?.content_sha256 === contentSha256 && current.format === 'plain'
+      ? current.revision_id
+      : `manual_note:${note.meetingId}:${revision}`;
+    if (!current || current.revision_id !== revisionId) {
+      await this.database.runAsync(
+        `INSERT INTO manual_note_revisions (
+           revision_id, meeting_id, revision, content, format, content_sha256,
+           migrated_current, created_at_ms
+         ) VALUES (?, ?, ?, ?, 'plain', ?, 0, ?)`,
+        revisionId,
+        note.meetingId,
+        revision,
+        note.content,
+        contentSha256,
+        note.lastSavedAtMs,
+      );
+    }
     await this.database.runAsync(
       `INSERT INTO manual_notes (
          meeting_id, content, format, revision, base_remote_revision,
-         dirty, last_saved_at_ms, user_edited_at_ms
-       ) VALUES (?, ?, 'plain', ?, ?, ?, ?, ?)
+         dirty, last_saved_at_ms, user_edited_at_ms, active_revision_id
+       ) VALUES (?, ?, 'plain', ?, ?, ?, ?, ?, ?)
        ON CONFLICT(meeting_id) DO UPDATE SET
          content = excluded.content,
+         format = excluded.format,
          revision = excluded.revision,
          base_remote_revision = excluded.base_remote_revision,
          dirty = excluded.dirty,
          last_saved_at_ms = excluded.last_saved_at_ms,
-         user_edited_at_ms = excluded.user_edited_at_ms`,
+         user_edited_at_ms = excluded.user_edited_at_ms,
+         active_revision_id = excluded.active_revision_id`,
       note.meetingId,
       note.content,
-      note.revision,
+      revision,
       note.baseRemoteRevision,
       note.dirty ? 1 : 0,
       note.lastSavedAtMs,
       note.userEditedAtMs,
+      revisionId,
     );
     this.touchedMeetingIds.add(note.meetingId);
   }
@@ -11066,6 +11102,28 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         attachment.createdAtMs,
         attachment.updatedAtMs,
       );
+      if (attachment.kind === 'text') {
+        const content = attachment.textContent ?? '';
+        const revisionId = `attachment_text:${attachment.id}:1`;
+        await database.runAsync(
+          `INSERT INTO meeting_attachment_text_revisions (
+             revision_id, attachment_id, meeting_id, revision, content_kind,
+             content, content_sha256, migrated_current, created_at_ms
+           ) VALUES (?, ?, ?, 1, 'text', ?, ?, 0, ?)`,
+          revisionId,
+          attachment.id,
+          attachment.meetingId,
+          content,
+          await sha256Text(content),
+          attachment.createdAtMs,
+        );
+        await database.runAsync(
+          'UPDATE meeting_attachments SET active_text_revision_id = ? WHERE id = ? AND meeting_id = ?',
+          revisionId,
+          attachment.id,
+          attachment.meetingId,
+        );
+      }
       const row = await database.getFirstAsync<MeetingAttachmentRow>(
         'SELECT * FROM meeting_attachments WHERE id = ? AND meeting_id = ? AND scope_key = ?',
         attachment.id,
