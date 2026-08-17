@@ -162,6 +162,7 @@ def ensure_v2_schema() -> None:
                 key_version INTEGER,
                 public_key_hash TEXT NOT NULL,
                 nonce_hash TEXT NOT NULL,
+                nonce_b64 TEXT,
                 proof_difficulty_bits INTEGER NOT NULL DEFAULT 0,
                 request_id TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
@@ -184,9 +185,23 @@ def ensure_v2_schema() -> None:
                 window_started_at INTEGER NOT NULL,
                 request_count INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS v2_bootstrap_receipts (
+                request_id TEXT PRIMARY KEY,
+                request_sha256 TEXT NOT NULL CHECK(length(request_sha256) = 64),
+                response_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
             """
         )
+        challenge_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(v2_auth_challenges)").fetchall()
+        }
+        if "nonce_b64" not in challenge_columns:
+            connection.execute("ALTER TABLE v2_auth_challenges ADD COLUMN nonce_b64 TEXT")
         connection.commit()
+    from app.services.vnext_purge_store import ensure_purge_schema
+
+    ensure_purge_schema()
 
 
 def _consume_rate(connection: sqlite3.Connection, bucket_key: str, *, limit: int, window_seconds: int, now: int) -> None:
@@ -225,26 +240,41 @@ def create_bootstrap_challenge(
     challenge_id = _challenge_id()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        _consume_rate(connection, f"bootstrap:ip:{_identifier(rate_key, 'rate_key', 160)}", limit=3, window_seconds=86_400, now=now)
-        _consume_rate(connection, "bootstrap:global", limit=20, window_seconds=86_400, now=now)
         existing = connection.execute(
-            "SELECT challenge_id, nonce_hash, expires_at FROM v2_auth_challenges WHERE kind = 'bootstrap' AND request_id = ?",
+            "SELECT * FROM v2_auth_challenges WHERE kind = 'bootstrap' AND request_id = ?",
             (request_id,),
         ).fetchone()
-        if existing is not None and int(existing["expires_at"]) > now:
-            # The nonce is intentionally not recoverable from the hash.  A
-            # client retry must use the original response, so do not issue a
-            # second challenge under the same request id.
-            raise DeviceV2IdentityError("CHALLENGE_ALREADY_ISSUED", "注册挑战已签发，请使用原响应", 409)
+        if existing is not None:
+            if (
+                existing["device_id"] != device_id
+                or existing["epoch_id"] != epoch_id
+                or existing["public_key_hash"] != key_hash
+            ):
+                connection.rollback()
+                raise DeviceV2IdentityError("REQUEST_ID_CONFLICT", "注册请求标识已绑定其他内容", 409)
+            if int(existing["expires_at"]) <= now or not existing["nonce_b64"]:
+                connection.rollback()
+                raise DeviceV2IdentityError("CHALLENGE_EXPIRED", "注册挑战已过期，请使用新的请求标识", 410)
+            connection.commit()
+            return {
+                "schema_version": 2,
+                "challenge_id": str(existing["challenge_id"]),
+                "nonce": str(existing["nonce_b64"]),
+                "expires_at": int(existing["expires_at"]),
+                "proof_difficulty_bits": int(existing["proof_difficulty_bits"]),
+                "public_key_hash": key_hash,
+            }
+        _consume_rate(connection, f"bootstrap:ip:{_identifier(rate_key, 'rate_key', 160)}", limit=3, window_seconds=86_400, now=now)
+        _consume_rate(connection, "bootstrap:global", limit=20, window_seconds=86_400, now=now)
         connection.execute(
             """INSERT INTO v2_auth_challenges(
                challenge_id, kind, device_id, epoch_id, key_version,
-               public_key_hash, nonce_hash, proof_difficulty_bits, request_id,
+               public_key_hash, nonce_hash, nonce_b64, proof_difficulty_bits, request_id,
                created_at, expires_at
-            ) VALUES (?, 'bootstrap', ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, 'bootstrap', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 challenge_id, device_id, epoch_id, key_hash,
-                hashlib.sha256(nonce).hexdigest(), BOOTSTRAP_DIFFICULTY_BITS,
+                hashlib.sha256(nonce).hexdigest(), _b64encode(nonce), BOOTSTRAP_DIFFICULTY_BITS,
                 request_id, now, now + CHALLENGE_TTL_SECONDS,
             ),
         )
@@ -262,6 +292,8 @@ def create_bootstrap_challenge(
 def complete_bootstrap(
     *, challenge_id: str, nonce: str, device_id: str, epoch_id: str,
     public_key_der: str, signature: str, proof_nonce: int, request_id: str,
+    purge_capability_id: str, purge_secret_sha256: str,
+    purge_registration_request_id: str,
 ) -> dict[str, Any]:
     ensure_v2_schema()
     challenge_id = _identifier(challenge_id, "challenge_id")
@@ -272,8 +304,23 @@ def complete_bootstrap(
     key_der, key_hash = _public_key(public_key_der)
     signature_bytes = _signature(signature)
     now = _now()
+    request_sha256 = hashlib.sha256("\n".join([
+        "laoji-bootstrap-complete-v2", challenge_id, device_id, epoch_id,
+        key_hash, request_id, nonce, signature, str(proof_nonce), purge_capability_id,
+        purge_secret_sha256, purge_registration_request_id,
+    ]).encode("utf-8")).hexdigest()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        receipt = connection.execute(
+            "SELECT request_sha256, response_json FROM v2_bootstrap_receipts WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if receipt is not None:
+            if not secrets.compare_digest(str(receipt["request_sha256"]), request_sha256):
+                connection.rollback()
+                raise DeviceV2IdentityError("REQUEST_ID_CONFLICT", "注册完成请求标识已绑定其他内容", 409)
+            connection.commit()
+            return json.loads(str(receipt["response_json"]))
         row = connection.execute(
             "SELECT * FROM v2_auth_challenges WHERE challenge_id = ? AND kind = 'bootstrap'",
             (challenge_id,),
@@ -302,6 +349,15 @@ def complete_bootstrap(
             if current is not None and current["public_key_hash"] != key_hash:
                 connection.rollback()
                 raise DeviceV2IdentityError("DEVICE_ALREADY_REGISTERED", "设备已登记其他密钥", 409)
+            current_epoch_id = str(existing["current_epoch_id"] or "")
+            if current_epoch_id and current_epoch_id != epoch_id:
+                current_epoch = connection.execute(
+                    "SELECT status FROM v2_device_epochs WHERE device_id = ? AND epoch_id = ?",
+                    (device_id, current_epoch_id),
+                ).fetchone()
+                if current_epoch is not None and current_epoch["status"] == "active":
+                    connection.rollback()
+                    raise DeviceV2IdentityError("EPOCH_ROTATION_REQUIRED", "请先清理当前数据域再创建新数据域", 409)
         else:
             connection.execute(
                 "INSERT INTO v2_devices(device_id, current_epoch_id, created_at) VALUES (?, ?, ?)",
@@ -311,24 +367,56 @@ def complete_bootstrap(
                 "INSERT INTO v2_device_keys(device_id, key_version, public_key_der, public_key_hash, created_at) VALUES (?, 1, ?, ?, ?)",
                 (device_id, key_der, key_hash, now),
             )
-        connection.execute(
-            "INSERT OR IGNORE INTO v2_device_epochs(device_id, epoch_id, status, created_at) VALUES (?, ?, 'active', ?)",
-            (device_id, epoch_id, now),
-        )
+        epoch = connection.execute(
+            "SELECT status FROM v2_device_epochs WHERE device_id = ? AND epoch_id = ?",
+            (device_id, epoch_id),
+        ).fetchone()
+        if epoch is not None and epoch["status"] != "active":
+            connection.rollback()
+            raise DeviceV2IdentityError("EPOCH_CLOSED", "数据域已清理且不能复用", 410)
+        if epoch is None:
+            connection.execute(
+                "INSERT INTO v2_device_epochs(device_id, epoch_id, status, created_at) VALUES (?, ?, 'active', ?)",
+                (device_id, epoch_id, now),
+            )
+        from app.services import vnext_purge_store
+
+        try:
+            purge_capability = vnext_purge_store.register_capability(
+                connection,
+                scope_kind="epoch",
+                capability_id=purge_capability_id,
+                device_id=device_id,
+                epoch_id=epoch_id,
+                secret_sha256=purge_secret_sha256,
+                registration_request_id=purge_registration_request_id,
+            )
+        except vnext_purge_store.VNextPurgeError as error:
+            connection.rollback()
+            raise DeviceV2IdentityError(error.code, error.message, error.status_code) from error
         connection.execute(
             "UPDATE v2_devices SET current_epoch_id = ?, current_key_version = 1, token_revision = 1 WHERE device_id = ?",
             (epoch_id, device_id),
         )
-        connection.execute("UPDATE v2_auth_challenges SET consumed_at = ? WHERE challenge_id = ?", (now, challenge_id))
+        connection.execute(
+            "UPDATE v2_auth_challenges SET consumed_at = ?, nonce_b64 = NULL WHERE challenge_id = ?",
+            (now, challenge_id),
+        )
+        response = {
+            "schema_version": 2,
+            "device_id": device_id,
+            "epoch_id": epoch_id,
+            "key_version": 1,
+            "token_revision": 1,
+            "registered": True,
+            "purge_capability": purge_capability,
+        }
+        connection.execute(
+            "INSERT INTO v2_bootstrap_receipts(request_id, request_sha256, response_json, created_at) VALUES (?, ?, ?, ?)",
+            (request_id, request_sha256, json.dumps(response, sort_keys=True, separators=(",", ":")), now),
+        )
         connection.commit()
-    return {
-        "schema_version": 2,
-        "device_id": device_id,
-        "epoch_id": epoch_id,
-        "key_version": 1,
-        "token_revision": 1,
-        "registered": True,
-    }
+    return response
 
 
 def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, public_key_hash: str, request_id: str) -> dict[str, Any]:
@@ -344,6 +432,30 @@ def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, pu
     challenge_id = _challenge_id()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            "SELECT * FROM v2_auth_challenges WHERE kind = 'auth' AND request_id = ?",
+            (request_id,),
+        ).fetchone()
+        if existing is not None:
+            if (
+                existing["device_id"] != device_id
+                or existing["epoch_id"] != epoch_id
+                or int(existing["key_version"]) != key_version
+                or existing["public_key_hash"] != public_key_hash
+            ):
+                connection.rollback()
+                raise DeviceV2IdentityError("REQUEST_ID_CONFLICT", "认证请求标识已绑定其他内容", 409)
+            if int(existing["expires_at"]) <= now or not existing["nonce_b64"]:
+                connection.rollback()
+                raise DeviceV2IdentityError("CHALLENGE_EXPIRED", "认证挑战已过期，请使用新的请求标识", 410)
+            connection.commit()
+            return {
+                "schema_version": 2,
+                "challenge_id": str(existing["challenge_id"]),
+                "nonce": str(existing["nonce_b64"]),
+                "expires_at": int(existing["expires_at"]),
+                "key_version": key_version,
+            }
         _consume_rate(connection, f"auth:{device_id}:{epoch_id}", limit=30, window_seconds=60, now=now)
         device = connection.execute("SELECT * FROM v2_devices WHERE device_id = ? AND revoked_at IS NULL", (device_id,)).fetchone()
         key = connection.execute(
@@ -360,12 +472,12 @@ def create_auth_challenge(*, device_id: str, epoch_id: str, key_version: int, pu
         connection.execute(
             """INSERT INTO v2_auth_challenges(
                challenge_id, kind, device_id, epoch_id, key_version,
-               public_key_hash, nonce_hash, proof_difficulty_bits, request_id,
+               public_key_hash, nonce_hash, nonce_b64, proof_difficulty_bits, request_id,
                created_at, expires_at
-            ) VALUES (?, 'auth', ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+            ) VALUES (?, 'auth', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)""",
             (
                 challenge_id, device_id, epoch_id, key_version, public_key_hash,
-                hashlib.sha256(nonce).hexdigest(), request_id, now, now + CHALLENGE_TTL_SECONDS,
+                hashlib.sha256(nonce).hexdigest(), _b64encode(nonce), request_id, now, now + CHALLENGE_TTL_SECONDS,
             ),
         )
         connection.commit()
@@ -464,7 +576,11 @@ def exchange_auth_token(*, challenge_id: str, nonce: str, signature: str, reques
             (row["device_id"], int(row["key_version"]), row["public_key_hash"]),
         ).fetchone()
         device = connection.execute("SELECT token_revision FROM v2_devices WHERE device_id = ? AND revoked_at IS NULL", (row["device_id"],)).fetchone()
-        if key is None or device is None:
+        epoch = connection.execute(
+            "SELECT status FROM v2_device_epochs WHERE device_id = ? AND epoch_id = ?",
+            (row["device_id"], row["epoch_id"]),
+        ).fetchone()
+        if key is None or device is None or epoch is None or epoch["status"] != "active":
             connection.rollback()
             raise DeviceV2IdentityError("DEVICE_NOT_REGISTERED", "设备密钥不可用", 401)
         _verify_signature(bytes(key["public_key_der"]), signature_bytes, _message("auth", nonce_bytes, row["device_id"], row["epoch_id"], request_id))
@@ -477,7 +593,10 @@ def exchange_auth_token(*, challenge_id: str, nonce: str, signature: str, reques
                 int(row["key_version"]), int(device["token_revision"]), now, expires_at,
             ),
         )
-        connection.execute("UPDATE v2_auth_challenges SET consumed_at = ? WHERE challenge_id = ?", (now, challenge_id))
+        connection.execute(
+            "UPDATE v2_auth_challenges SET consumed_at = ?, nonce_b64 = NULL WHERE challenge_id = ?",
+            (now, challenge_id),
+        )
         connection.execute(
             "UPDATE v2_device_epochs SET last_authenticated_at = ? WHERE device_id = ? AND epoch_id = ?",
             (now, row["device_id"], row["epoch_id"]),
@@ -508,11 +627,11 @@ def authenticate_bearer(device_id: str, epoch_id: str, token: str) -> DeviceV2Co
             """SELECT token.key_version, token.token_revision, token.expires_at,
                       device.token_revision AS current_token_revision,
                       epoch.status
-                 FROM v2_tokens token
+                FROM v2_tokens token
                  INNER JOIN v2_devices device ON device.device_id = token.device_id
                  INNER JOIN v2_device_epochs epoch ON epoch.device_id = token.device_id AND epoch.epoch_id = token.epoch_id
                 WHERE token.token_hash = ? AND token.device_id = ? AND token.epoch_id = ?
-                  AND device.revoked_at IS NULL""",
+                  AND token.revoked_at IS NULL AND device.revoked_at IS NULL""",
             (hashlib.sha256(token.encode("ascii", "ignore")).hexdigest(), device_id, epoch_id),
         ).fetchone()
     if row is None or row["status"] != "active" or int(row["expires_at"]) <= now or int(row["token_revision"]) != int(row["current_token_revision"]):

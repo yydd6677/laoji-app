@@ -6,7 +6,12 @@ import { getOrCreateDeviceIdentity } from './deviceIdentity';
 import {
   findDeviceProofOfWork,
   getOrCreateDeviceKey,
+  markPurgeCapabilityArmed,
+  preparePurgeCapability,
+  beginPurgeOnlyErase,
+  resumePurgeOnlyJournal,
   signWithDeviceKey,
+  type PurgeOnlyJournalStatus,
   type DeviceKeyInfo,
 } from 'laoji-native-platform';
 
@@ -113,6 +118,11 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
   if (stored) return stored;
 
   const bootstrapRequestId = randomRequestId('bootstrap');
+  const purgeCapability = await preparePurgeCapability(
+    'epoch',
+    identity.epochId,
+    randomRequestId('purge-register'),
+  );
   const challenge = await jsonRequest<{
     challenge_id: string;
     nonce: string;
@@ -146,8 +156,14 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
       nonce: challenge.nonce,
       signature: bootstrapSignature,
       proof_nonce: proofNonce,
+      purge_capability: {
+        capability_id: purgeCapability.capabilityId,
+        secret_sha256: purgeCapability.secretSha256,
+        registration_request_id: purgeCapability.registrationRequestId,
+      },
     }),
   }, '设备注册失败');
+  markPurgeCapabilityArmed(purgeCapability.capabilityId);
 
   const authRequestId = randomRequestId('auth');
   const authChallenge = await jsonRequest<{ challenge_id: string; nonce: string; key_version: number }>(
@@ -222,6 +238,14 @@ export async function deviceV2Request<T>(path: string, init: RequestInit = {}, f
     }
     throw error;
   }
+}
+
+export function beginDeviceV2PurgeOnlyErase(): PurgeOnlyJournalStatus {
+  return beginPurgeOnlyErase();
+}
+
+export function resumeDeviceV2PurgeOnlyErase(): Promise<PurgeOnlyJournalStatus> {
+  return resumePurgeOnlyJournal(getApiConfig().apiBase);
 }
 
 export const deviceV2StorageKeys = {

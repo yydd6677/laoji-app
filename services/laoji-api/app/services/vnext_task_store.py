@@ -13,10 +13,11 @@ import json
 import os
 import socket
 import time
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 import uuid
 
-from app.services.device_identity import DeviceContext, control_connection, ensure_device_schema, utc_now
+from app.services.device_identity import control_connection, ensure_device_schema, utc_now
+from app.services import vnext_purge_store
 
 
 TaskState = Literal["active", "success", "failure", "cancelled"]
@@ -29,6 +30,11 @@ DeviceOperationReason = Literal["original", "retry", "regenerate"]
 
 MAX_ATTEMPTS = 3
 LEASE_SECONDS = 180
+
+
+class TaskOwnerContext(Protocol):
+    device_id: str
+    epoch_id: str
 
 
 class VNextTaskError(RuntimeError):
@@ -61,30 +67,155 @@ def _sha256(value: str, field: str = "input_sha256") -> str:
     return normalized
 
 
-def ensure_vnext_task_schema() -> None:
-    ensure_device_schema()
-    with control_connection() as connection:
+def _table_columns(connection: Any, table: str) -> set[str]:
+    return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _upgrade_legacy_owner_schema(connection: Any) -> None:
+    """Rebuild the early probe tables from principal_id to canonical device_id."""
+    columns = _table_columns(connection, "vnext_bindings")
+    if not columns or "device_id" in columns:
+        return
+    if "principal_id" not in columns:
+        raise RuntimeError("vnext_binding_owner_schema_unknown")
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
         connection.executescript(
             """
-            CREATE TABLE IF NOT EXISTS vnext_bindings (
-                principal_id INTEGER NOT NULL,
+            BEGIN IMMEDIATE;
+            CREATE TABLE vnext_bindings_owner_upgrade (
+                device_id TEXT NOT NULL,
                 epoch_id TEXT NOT NULL,
                 binding_id TEXT NOT NULL,
                 binding_generation TEXT NOT NULL,
+                binding_epoch_seq INTEGER NOT NULL CHECK(binding_epoch_seq >= 1),
+                binding_revision INTEGER NOT NULL DEFAULT 1,
+                cancel_revision INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','purging','purged')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                purged_at INTEGER,
+                PRIMARY KEY(device_id, epoch_id, binding_id),
+                UNIQUE(device_id, epoch_id, binding_generation),
+                UNIQUE(device_id, epoch_id, binding_epoch_seq)
+            );
+            INSERT INTO vnext_bindings_owner_upgrade(
+                device_id, epoch_id, binding_id, binding_generation,
+                binding_epoch_seq, binding_revision, cancel_revision, state,
+                created_at, updated_at
+            )
+            SELECT principal.device_id, binding.epoch_id, binding.binding_id,
+                   binding.binding_generation,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY binding.principal_id, binding.epoch_id
+                       ORDER BY binding.created_at, binding.binding_id
+                   ),
+                   binding.binding_revision, binding.cancel_revision, binding.state,
+                   binding.created_at, binding.updated_at
+              FROM vnext_bindings binding
+              JOIN device_principals principal ON principal.id = binding.principal_id;
+
+            CREATE TABLE vnext_tasks_owner_upgrade (
+                task_id TEXT PRIMARY KEY,
+                device_id TEXT NOT NULL,
+                epoch_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL,
+                binding_generation TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                entity_revision INTEGER NOT NULL CHECK(entity_revision >= 1),
+                input_sha256 TEXT NOT NULL CHECK(length(input_sha256) = 71),
+                generation_id TEXT NOT NULL,
+                predecessor_task_id TEXT,
+                creation_reason TEXT NOT NULL CHECK(creation_reason IN ('original','retry','regenerate')),
+                state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','success','failure','cancelled')),
+                cancel_revision INTEGER NOT NULL DEFAULT 0,
+                current_attempt_id TEXT,
+                result_kind TEXT CHECK(result_kind IS NULL OR result_kind IN ('artifact','content_outcome')),
+                result_json TEXT,
+                error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                terminal_at TEXT,
+                UNIQUE(device_id, epoch_id, capability, entity_id, entity_revision, input_sha256, generation_id)
+            );
+            INSERT INTO vnext_tasks_owner_upgrade
+            SELECT task.task_id, principal.device_id, task.epoch_id, task.binding_id,
+                   task.binding_generation, task.capability, task.entity_id,
+                   task.entity_revision, task.input_sha256, task.generation_id,
+                   task.predecessor_task_id, task.creation_reason, task.state,
+                   task.cancel_revision, task.current_attempt_id, task.result_kind,
+                   task.result_json, task.error_code, task.created_at, task.updated_at,
+                   task.terminal_at
+              FROM vnext_tasks task
+              JOIN device_principals principal ON principal.id = task.principal_id;
+
+            CREATE TABLE vnext_task_attempts_owner_upgrade (
+                attempt_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL REFERENCES vnext_tasks_owner_upgrade(task_id) ON DELETE CASCADE,
+                attempt_number INTEGER NOT NULL CHECK(attempt_number >= 1 AND attempt_number <= 3),
+                state TEXT NOT NULL CHECK(state IN ('queued','running','succeeded','retryable_failure','terminal_failure','cancelled','lease_expired')),
+                phase TEXT NOT NULL CHECK(phase IN ('queued','admitted','running','committing')),
+                lease_owner TEXT,
+                lease_expires_at_epoch REAL,
+                error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                terminal_at TEXT,
+                UNIQUE(task_id, attempt_number)
+            );
+            INSERT INTO vnext_task_attempts_owner_upgrade
+            SELECT attempt.* FROM vnext_task_attempts attempt
+             WHERE EXISTS (
+                 SELECT 1 FROM vnext_tasks_owner_upgrade task
+                  WHERE task.task_id = attempt.task_id
+             );
+
+            DROP TABLE vnext_task_attempts;
+            DROP TABLE vnext_tasks;
+            DROP TABLE vnext_bindings;
+            ALTER TABLE vnext_bindings_owner_upgrade RENAME TO vnext_bindings;
+            ALTER TABLE vnext_tasks_owner_upgrade RENAME TO vnext_tasks;
+            ALTER TABLE vnext_task_attempts_owner_upgrade RENAME TO vnext_task_attempts;
+            COMMIT;
+            """
+        )
+    except Exception:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
+def ensure_vnext_task_schema() -> None:
+    ensure_device_schema()
+    with control_connection() as connection:
+        _upgrade_legacy_owner_schema(connection)
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS vnext_bindings (
+                device_id TEXT NOT NULL,
+                epoch_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL,
+                binding_generation TEXT NOT NULL,
+                binding_epoch_seq INTEGER NOT NULL CHECK(binding_epoch_seq >= 1),
                 binding_revision INTEGER NOT NULL DEFAULT 1,
                 cancel_revision INTEGER NOT NULL DEFAULT 0,
                 state TEXT NOT NULL DEFAULT 'active'
                     CHECK(state IN ('active','purging','purged')),
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY(principal_id, epoch_id, binding_id),
-                UNIQUE(principal_id, epoch_id, binding_generation)
+                purged_at INTEGER,
+                PRIMARY KEY(device_id, epoch_id, binding_id),
+                UNIQUE(device_id, epoch_id, binding_generation),
+                UNIQUE(device_id, epoch_id, binding_epoch_seq)
             );
             CREATE INDEX IF NOT EXISTS idx_vnext_bindings_state
-                ON vnext_bindings(principal_id, epoch_id, state, updated_at);
+                ON vnext_bindings(device_id, epoch_id, state, updated_at);
             CREATE TABLE IF NOT EXISTS vnext_tasks (
                 task_id TEXT PRIMARY KEY,
-                principal_id INTEGER NOT NULL,
+                device_id TEXT NOT NULL,
                 epoch_id TEXT NOT NULL,
                 binding_id TEXT NOT NULL,
                 binding_generation TEXT NOT NULL,
@@ -106,10 +237,10 @@ def ensure_vnext_task_schema() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 terminal_at TEXT,
-                UNIQUE(principal_id, epoch_id, capability, entity_id, entity_revision, input_sha256, generation_id)
+                UNIQUE(device_id, epoch_id, capability, entity_id, entity_revision, input_sha256, generation_id)
             );
             CREATE INDEX IF NOT EXISTS idx_vnext_tasks_recovery
-                ON vnext_tasks(principal_id, epoch_id, state, updated_at, task_id);
+                ON vnext_tasks(device_id, epoch_id, state, updated_at, task_id);
             CREATE TABLE IF NOT EXISTS vnext_task_attempts (
                 attempt_id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL REFERENCES vnext_tasks(task_id) ON DELETE CASCADE,
@@ -130,15 +261,15 @@ def ensure_vnext_task_schema() -> None:
             """
         )
         connection.commit()
+    vnext_purge_store.ensure_purge_schema()
 
 
 def _decode_task(row: Any) -> dict[str, Any] | None:
     if row is None:
         return None
     result = dict(row)
-    # Principal IDs are internal control-store keys and are never part of the
-    # device contract. Epoch/binding identifiers remain opaque client values.
-    result.pop("principal_id", None)
+    # Owner IDs are authorization inputs and are never echoed in task bodies.
+    result.pop("device_id", None)
     raw = result.pop("result_json", None)
     if raw is None:
         result["result"] = None
@@ -150,53 +281,139 @@ def _decode_task(row: Any) -> dict[str, Any] | None:
     return result
 
 
-def _binding_row(connection: Any, context: DeviceContext, binding_id: str) -> Any:
+def _binding_row(connection: Any, context: TaskOwnerContext, binding_id: str) -> Any:
     return connection.execute(
         """SELECT * FROM vnext_bindings
-           WHERE principal_id = ? AND epoch_id = ? AND binding_id = ?""",
-        (context.principal_id, context.epoch_id, binding_id),
+           WHERE device_id = ? AND epoch_id = ? AND binding_id = ?""",
+        (context.device_id, context.epoch_id, binding_id),
     ).fetchone()
 
 
 def register_binding(
-    context: DeviceContext,
+    context: TaskOwnerContext,
     *,
     binding_id: str,
     binding_generation: str,
+    binding_epoch_seq: int | None = None,
+    binding_revision: int = 1,
+    cancel_revision: int = 0,
+    purge_capability: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     ensure_vnext_task_schema()
     binding_id = _safe(binding_id, "binding_id")
     binding_generation = _safe(binding_generation, "binding_generation", 256)
+    if not isinstance(binding_revision, int) or binding_revision < 1:
+        raise VNextTaskError("REVISION_INVALID", "binding revision 无效", 422)
+    if not isinstance(cancel_revision, int) or cancel_revision < 0:
+        raise VNextTaskError("REVISION_INVALID", "cancel revision 无效", 422)
     now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         existing = _binding_row(connection, context, binding_id)
         if existing is not None:
-            if str(existing["binding_generation"]) != binding_generation:
+            if binding_epoch_seq is None:
+                binding_epoch_seq = int(existing["binding_epoch_seq"])
+        else:
+            sequence_row = connection.execute(
+                "SELECT COALESCE(MAX(binding_epoch_seq), 0) + 1 AS next_seq FROM vnext_bindings WHERE device_id = ? AND epoch_id = ?",
+                (context.device_id, context.epoch_id),
+            ).fetchone()
+            next_sequence = int(sequence_row["next_seq"])
+            if binding_epoch_seq is None:
+                # v1 probe compatibility only. Device-v2 callers provide the
+                # client-owned monotonic sequence explicitly.
+                binding_epoch_seq = int(sequence_row["next_seq"])
+            elif binding_epoch_seq != next_sequence:
+                connection.rollback()
+                raise VNextTaskError("BINDING_SEQUENCE_GAP", "binding sequence 必须连续登记", 409)
+        if not isinstance(binding_epoch_seq, int) or binding_epoch_seq < 1:
+            connection.rollback()
+            raise VNextTaskError("BINDING_SEQUENCE_INVALID", "binding sequence 无效", 422)
+        if existing is not None:
+            if (
+                str(existing["binding_generation"]) != binding_generation
+                or int(existing["binding_epoch_seq"]) != binding_epoch_seq
+                or int(existing["binding_revision"]) != binding_revision
+                or int(existing["cancel_revision"]) != cancel_revision
+            ):
+                connection.rollback()
                 raise VNextTaskError("BINDING_CONFLICT", "会议服务标识已绑定其他 generation", 409)
             if existing["state"] != "active":
+                connection.rollback()
                 raise VNextTaskError("BINDING_PURGING", "会议服务连接正在清理", 409)
+            if purge_capability is not None:
+                try:
+                    vnext_purge_store.register_capability(
+                        connection,
+                        scope_kind="binding",
+                        capability_id=purge_capability["capability_id"],
+                        device_id=context.device_id,
+                        epoch_id=context.epoch_id,
+                        binding_id=binding_id,
+                        binding_generation=binding_generation,
+                        secret_sha256=purge_capability["secret_sha256"],
+                        registration_request_id=purge_capability["registration_request_id"],
+                    )
+                except vnext_purge_store.VNextPurgeError as error:
+                    connection.rollback()
+                    raise VNextTaskError(error.code, error.message, error.status_code) from error
             connection.commit()
-            return {key: value for key, value in dict(existing).items() if key != "principal_id"}
+            return {
+                **{key: value for key, value in dict(existing).items() if key != "device_id"},
+                "created": False,
+            }
         try:
             connection.execute(
                 """INSERT INTO vnext_bindings(
-                     principal_id, epoch_id, binding_id, binding_generation,
+                     device_id, epoch_id, binding_id, binding_generation,
+                     binding_epoch_seq, binding_revision, cancel_revision,
                      created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?)""",
-                (context.principal_id, context.epoch_id, binding_id, binding_generation, now, now),
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    context.device_id, context.epoch_id, binding_id, binding_generation,
+                    binding_epoch_seq, binding_revision, cancel_revision, now, now,
+                ),
             )
+            if purge_capability is not None:
+                vnext_purge_store.register_capability(
+                    connection,
+                    scope_kind="binding",
+                    capability_id=purge_capability["capability_id"],
+                    device_id=context.device_id,
+                    epoch_id=context.epoch_id,
+                    binding_id=binding_id,
+                    binding_generation=binding_generation,
+                    secret_sha256=purge_capability["secret_sha256"],
+                    registration_request_id=purge_capability["registration_request_id"],
+                )
         except Exception as error:
             connection.rollback()
+            if isinstance(error, VNextTaskError):
+                raise
+            if isinstance(error, vnext_purge_store.VNextPurgeError):
+                raise VNextTaskError(error.code, error.message, error.status_code) from error
             raise VNextTaskError("BINDING_CONFLICT", "会议服务 generation 已被占用", 409) from error
         row = _binding_row(connection, context, binding_id)
         connection.commit()
     assert row is not None
-    return {key: value for key, value in dict(row).items() if key != "principal_id"}
+    return {
+        **{key: value for key, value in dict(row).items() if key != "device_id"},
+        "created": True,
+    }
+
+
+def get_binding(context: TaskOwnerContext, binding_id: str) -> dict[str, Any] | None:
+    ensure_vnext_task_schema()
+    binding_id = _safe(binding_id, "binding_id")
+    with control_connection() as connection:
+        row = _binding_row(connection, context, binding_id)
+    if row is None:
+        return None
+    return {key: value for key, value in dict(row).items() if key != "device_id"}
 
 
 def create_task(
-    context: DeviceContext,
+    context: TaskOwnerContext,
     *,
     task_id: str,
     binding_id: str,
@@ -237,7 +454,7 @@ def create_task(
         ).fetchone()
         if existing is not None:
             same = (
-                existing["principal_id"] == context.principal_id
+                existing["device_id"] == context.device_id
                 and existing["epoch_id"] == context.epoch_id
                 and existing["binding_id"] == binding_id
                 and existing["binding_generation"] == binding_generation
@@ -256,12 +473,12 @@ def create_task(
             return decoded, True
         connection.execute(
             """INSERT INTO vnext_tasks(
-                 task_id, principal_id, epoch_id, binding_id, binding_generation,
+                 task_id, device_id, epoch_id, binding_id, binding_generation,
                  capability, entity_id, entity_revision, input_sha256, generation_id,
                  predecessor_task_id, creation_reason, created_at, updated_at
                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                task_id, context.principal_id, context.epoch_id, binding_id,
+                task_id, context.device_id, context.epoch_id, binding_id,
                 binding_generation, capability, entity_id, entity_revision,
                 input_sha256, generation_id, predecessor_task_id, creation_reason,
                 now, now,
@@ -275,18 +492,18 @@ def create_task(
     return decoded, False
 
 
-def get_task(context: DeviceContext, task_id: str) -> dict[str, Any] | None:
+def get_task(context: TaskOwnerContext, task_id: str) -> dict[str, Any] | None:
     ensure_vnext_task_schema()
     task_id = _safe(task_id, "task_id")
     with control_connection() as connection:
         return _decode_task(connection.execute(
-            "SELECT * FROM vnext_tasks WHERE task_id = ? AND principal_id = ? AND epoch_id = ?",
-            (task_id, context.principal_id, context.epoch_id),
+            "SELECT * FROM vnext_tasks WHERE task_id = ? AND device_id = ? AND epoch_id = ?",
+            (task_id, context.device_id, context.epoch_id),
         ).fetchone())
 
 
 def claim_attempt(
-    context: DeviceContext,
+    context: TaskOwnerContext,
     task_id: str,
     *,
     lease_owner: str | None = None,
@@ -301,8 +518,8 @@ def claim_attempt(
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         task = connection.execute(
-            "SELECT * FROM vnext_tasks WHERE task_id = ? AND principal_id = ? AND epoch_id = ?",
-            (task_id, context.principal_id, context.epoch_id),
+            "SELECT * FROM vnext_tasks WHERE task_id = ? AND device_id = ? AND epoch_id = ?",
+            (task_id, context.device_id, context.epoch_id),
         ).fetchone()
         if task is None or task["state"] != "active":
             connection.rollback()
@@ -361,7 +578,7 @@ def claim_attempt(
 
 
 def mark_success(
-    context: DeviceContext,
+    context: TaskOwnerContext,
     task_id: str,
     attempt_id: str,
     result: Any,
@@ -379,8 +596,8 @@ def mark_success(
         connection.execute("BEGIN IMMEDIATE")
         attempt = connection.execute(
             """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
-               WHERE a.attempt_id = ? AND a.task_id = ? AND t.principal_id = ? AND t.epoch_id = ?""",
-            (attempt_id, task_id, context.principal_id, context.epoch_id),
+               WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
+            (attempt_id, task_id, context.device_id, context.epoch_id),
         ).fetchone()
         if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
             connection.rollback()
@@ -401,7 +618,7 @@ def mark_success(
 
 
 def mark_failure(
-    context: DeviceContext,
+    context: TaskOwnerContext,
     task_id: str,
     attempt_id: str,
     error_code: str,
@@ -419,8 +636,8 @@ def mark_failure(
         connection.execute("BEGIN IMMEDIATE")
         attempt = connection.execute(
             """SELECT a.* FROM vnext_task_attempts a JOIN vnext_tasks t ON t.task_id = a.task_id
-               WHERE a.attempt_id = ? AND a.task_id = ? AND t.principal_id = ? AND t.epoch_id = ?""",
-            (attempt_id, task_id, context.principal_id, context.epoch_id),
+               WHERE a.attempt_id = ? AND a.task_id = ? AND t.device_id = ? AND t.epoch_id = ?""",
+            (attempt_id, task_id, context.device_id, context.epoch_id),
         ).fetchone()
         if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
             connection.rollback()
@@ -441,7 +658,7 @@ def mark_failure(
         return cursor.rowcount == 1
 
 
-def cancel_task(context: DeviceContext, task_id: str) -> bool:
+def cancel_task(context: TaskOwnerContext, task_id: str) -> bool:
     ensure_vnext_task_schema()
     task_id = _safe(task_id, "task_id")
     now = utc_now()
@@ -450,8 +667,8 @@ def cancel_task(context: DeviceContext, task_id: str) -> bool:
         cursor = connection.execute(
             """UPDATE vnext_tasks SET state = 'cancelled', cancel_revision = cancel_revision + 1,
                       updated_at = ?, terminal_at = ?
-               WHERE task_id = ? AND principal_id = ? AND epoch_id = ? AND state = 'active'""",
-            (now, now, task_id, context.principal_id, context.epoch_id),
+               WHERE task_id = ? AND device_id = ? AND epoch_id = ? AND state = 'active'""",
+            (now, now, task_id, context.device_id, context.epoch_id),
         )
         connection.execute(
             """UPDATE vnext_task_attempts SET state = 'cancelled', updated_at = ?, terminal_at = ?
@@ -462,7 +679,7 @@ def cancel_task(context: DeviceContext, task_id: str) -> bool:
         return cursor.rowcount == 1
 
 
-def cancel_binding_tasks(context: DeviceContext, binding_id: str) -> int:
+def cancel_binding_tasks(context: TaskOwnerContext, binding_id: str) -> int:
     """Cancel every non-terminal task fenced by a purging binding.
 
     Binding deletion is a domain-level operation; it must also advance the
@@ -476,8 +693,8 @@ def cancel_binding_tasks(context: DeviceContext, binding_id: str) -> int:
         connection.execute("BEGIN IMMEDIATE")
         rows = connection.execute(
             """SELECT task_id FROM vnext_tasks
-               WHERE principal_id = ? AND epoch_id = ? AND binding_id = ? AND state = 'active'""",
-            (context.principal_id, context.epoch_id, binding_id),
+               WHERE device_id = ? AND epoch_id = ? AND binding_id = ? AND state = 'active'""",
+            (context.device_id, context.epoch_id, binding_id),
         ).fetchall()
         if not rows:
             connection.commit()
@@ -500,7 +717,7 @@ def cancel_binding_tasks(context: DeviceContext, binding_id: str) -> int:
         return len(task_ids)
 
 
-def cancel_epoch_tasks(context: DeviceContext) -> int:
+def cancel_epoch_tasks(context: TaskOwnerContext) -> int:
     """Cancel all active generic tasks before an epoch is physically closed."""
     ensure_vnext_task_schema()
     now = utc_now()
@@ -508,8 +725,8 @@ def cancel_epoch_tasks(context: DeviceContext) -> int:
         connection.execute("BEGIN IMMEDIATE")
         rows = connection.execute(
             """SELECT task_id FROM vnext_tasks
-               WHERE principal_id = ? AND epoch_id = ? AND state = 'active'""",
-            (context.principal_id, context.epoch_id),
+               WHERE device_id = ? AND epoch_id = ? AND state = 'active'""",
+            (context.device_id, context.epoch_id),
         ).fetchall()
         task_ids = [str(row["task_id"]) for row in rows]
         if task_ids:
@@ -530,15 +747,15 @@ def cancel_epoch_tasks(context: DeviceContext) -> int:
         return len(task_ids)
 
 
-def recoverable_tasks(context: DeviceContext) -> list[dict[str, Any]]:
+def recoverable_tasks(context: TaskOwnerContext) -> list[dict[str, Any]]:
     ensure_vnext_task_schema()
     now = _now_epoch()
     with control_connection() as connection:
         rows = connection.execute(
             """SELECT * FROM vnext_tasks
-               WHERE principal_id = ? AND epoch_id = ? AND state = 'active'
+               WHERE device_id = ? AND epoch_id = ? AND state = 'active'
                ORDER BY created_at, task_id""",
-            (context.principal_id, context.epoch_id),
+            (context.device_id, context.epoch_id),
         ).fetchall()
         for row in connection.execute(
             """SELECT attempt_id FROM vnext_task_attempts

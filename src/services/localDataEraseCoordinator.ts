@@ -7,7 +7,16 @@ import { deleteMeetingDatabase } from '../data/db/openDatabase';
 import { clearNativeTransferLease } from '../native/nativeTransferCoordinator';
 import { clearNativeUpcomingEventsProjection } from 'laoji-native-platform';
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
-import { clearPurgeJournal, readPurgeJournal, writePurgeJournal } from './purgeJournal';
+import {
+  clearLegacyEpochCleanupJournal,
+  readLegacyEpochCleanupJournal,
+  writeLegacyEpochCleanupJournal,
+} from './legacyEpochCleanupJournal';
+import {
+  beginDeviceV2PurgeOnlyErase,
+  resumeDeviceV2PurgeOnlyErase,
+} from './deviceV2Api';
+import { supportsPurgeOnlyJournal } from 'laoji-native-platform';
 
 export interface LocalDataEraseResult {
   localCleared: boolean;
@@ -30,24 +39,46 @@ function remotePurgeAlreadyConfirmed(error: unknown): boolean {
  */
 export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult> {
   let remoteCleanup: LocalDataEraseResult['remoteCleanup'] = 'confirmed';
+  let legacyRemotePending = false;
+  if (supportsPurgeOnlyJournal()) {
+    try {
+      const prepared = beginDeviceV2PurgeOnlyErase();
+      if (prepared.rowCount > 0) {
+        const resumed = await Promise.race([
+          resumeDeviceV2PurgeOnlyErase(),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('v2 purge timeout')), 5_000);
+          }),
+        ]);
+        if (resumed.rowCount > 0) remoteCleanup = 'pending';
+      }
+    } catch {
+      // The native journal remains encrypted and retryable after ordinary
+      // identity/SecureStore cleanup; local erasure must still continue.
+      remoteCleanup = 'pending';
+    }
+  }
   let epochId: string | null = null;
   try {
     const identity = await getOrCreateDeviceIdentity();
     epochId = identity.epochId;
-    await writePurgeJournal(epochId, 'registering');
+    await writeLegacyEpochCleanupJournal(epochId, 'registering');
     await Promise.race([
       closeDeviceDataEpoch(),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('remote cleanup timeout')), 5_000);
       }),
     ]);
-    await writePurgeJournal(epochId, 'confirmed');
+    await writeLegacyEpochCleanupJournal(epochId, 'confirmed');
   } catch (error) {
-    if (!remotePurgeAlreadyConfirmed(error)) remoteCleanup = 'pending';
+    if (!remotePurgeAlreadyConfirmed(error)) {
+      remoteCleanup = 'pending';
+      legacyRemotePending = true;
+    }
     // Keep the opaque journal and identity so a later run can retry the
     // server-side purge.  Local business data is still erased below.
     if (epochId && remoteCleanup === 'pending') {
-      await writePurgeJournal(epochId, 'pending').catch(() => undefined);
+      await writeLegacyEpochCleanupJournal(epochId, 'pending').catch(() => undefined);
     }
   }
 
@@ -70,10 +101,10 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
     ...preDatabaseSteps.filter((_, index) => preResults[index]?.status === 'rejected').map(step => step.name),
     ...ownerSteps.filter((_, index) => ownerResults[index]?.status === 'rejected').map(step => step.name),
   ];
-  if (remoteCleanup === 'confirmed') {
+  if (!legacyRemotePending) {
     try {
       await clearDeviceIdentity();
-      await clearPurgeJournal();
+      await clearLegacyEpochCleanupJournal();
     } catch {
       failedSteps.push('device-identity');
     }
@@ -91,20 +122,29 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
  * screen is opened; a missing journal is a no-op.
  */
 export async function resumePendingRemotePurge(): Promise<'none' | 'confirmed' | 'pending'> {
-  const journal = await readPurgeJournal();
-  if (!journal || journal.state === 'confirmed') return 'none';
+  let v2Pending = false;
+  if (supportsPurgeOnlyJournal()) {
+    try {
+      const v2 = await resumeDeviceV2PurgeOnlyErase();
+      v2Pending = v2.rowCount > 0;
+    } catch {
+      v2Pending = true;
+    }
+  }
+  const journal = await readLegacyEpochCleanupJournal();
+  if (!journal || journal.state === 'confirmed') return v2Pending ? 'pending' : 'none';
   try {
     await closeDeviceDataEpoch();
     await clearDeviceIdentity();
-    await clearPurgeJournal();
-    return 'confirmed';
+    await clearLegacyEpochCleanupJournal();
+    return v2Pending ? 'pending' : 'confirmed';
   } catch (error) {
     if (remotePurgeAlreadyConfirmed(error)) {
       await clearDeviceIdentity();
-      await clearPurgeJournal();
-      return 'confirmed';
+      await clearLegacyEpochCleanupJournal();
+      return v2Pending ? 'pending' : 'confirmed';
     }
-    await writePurgeJournal(journal.epochId, 'pending').catch(() => undefined);
+    await writeLegacyEpochCleanupJournal(journal.epochId, 'pending').catch(() => undefined);
     return 'pending';
   }
 }

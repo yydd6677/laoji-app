@@ -31,6 +31,11 @@ def test_binding_and_task_create_are_idempotent(tmp_path, monkeypatch) -> None:
         context, binding_id="binding-1", binding_generation="generation-1"
     )
     assert binding["state"] == "active"
+    assert binding["created"] is True
+    replayed_binding = vnext_task_store.register_binding(
+        context, binding_id="binding-1", binding_generation="generation-1"
+    )
+    assert replayed_binding["created"] is False
     first, reused = vnext_task_store.create_task(
         context,
         task_id="task-1",
@@ -126,6 +131,18 @@ def test_binding_generation_cannot_be_reused(tmp_path, monkeypatch) -> None:
     assert error.value.code == "BINDING_CONFLICT"
 
 
+def test_client_binding_sequence_cannot_skip_high_water(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, monkeypatch)
+    with pytest.raises(vnext_task_store.VNextTaskError) as error:
+        vnext_task_store.register_binding(
+            context,
+            binding_id="binding-gap",
+            binding_generation="generation-gap",
+            binding_epoch_seq=2,
+        )
+    assert error.value.code == "BINDING_SEQUENCE_GAP"
+
+
 def test_binding_and_epoch_cancellation_fence_active_tasks(tmp_path, monkeypatch) -> None:
     context = _context(tmp_path, monkeypatch)
     vnext_task_store.register_binding(context, binding_id="binding-1", binding_generation="generation-1")
@@ -155,3 +172,67 @@ def test_binding_and_epoch_cancellation_fence_active_tasks(tmp_path, monkeypatch
     assert vnext_task_store.get_task(context, "task-binding")["state"] == "cancelled"
     assert vnext_task_store.get_task(context, "task-epoch")["state"] == "cancelled"
     assert vnext_task_store.cancel_epoch_tasks(context) == 0
+
+
+def test_legacy_principal_owner_rows_upgrade_to_single_device_owner(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "vnext-owner-upgrade.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    device_identity._SCHEMA_READY.clear()  # type: ignore[attr-defined]
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE meetings (id TEXT PRIMARY KEY, user_id INTEGER, updated_at TEXT, data_epoch_id TEXT)"
+        )
+    device_identity.ensure_device_schema()
+    device_id = str(uuid.uuid4())
+    epoch_id = str(uuid.uuid4())
+    with device_identity.control_connection() as connection:
+        connection.execute(
+            "INSERT INTO device_principals(id, device_id, credential_hash, created_at, last_seen_at) "
+            "VALUES (7, ?, 'hash', 'now', 'now')",
+            (device_id,),
+        )
+        connection.executescript(
+            """
+            CREATE TABLE vnext_bindings (
+                principal_id INTEGER NOT NULL, epoch_id TEXT NOT NULL, binding_id TEXT NOT NULL,
+                binding_generation TEXT NOT NULL, binding_revision INTEGER NOT NULL DEFAULT 1,
+                cancel_revision INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                PRIMARY KEY(principal_id, epoch_id, binding_id)
+            );
+            CREATE TABLE vnext_tasks (
+                task_id TEXT PRIMARY KEY, principal_id INTEGER NOT NULL, epoch_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL, binding_generation TEXT NOT NULL, capability TEXT NOT NULL,
+                entity_id TEXT NOT NULL, entity_revision INTEGER NOT NULL, input_sha256 TEXT NOT NULL,
+                generation_id TEXT NOT NULL, predecessor_task_id TEXT, creation_reason TEXT NOT NULL,
+                state TEXT NOT NULL, cancel_revision INTEGER NOT NULL DEFAULT 0, current_attempt_id TEXT,
+                result_kind TEXT, result_json TEXT, error_code TEXT, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, terminal_at TEXT
+            );
+            CREATE TABLE vnext_task_attempts (
+                attempt_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+                state TEXT NOT NULL, phase TEXT NOT NULL, lease_owner TEXT, lease_expires_at_epoch REAL,
+                error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, terminal_at TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO vnext_bindings VALUES (7, ?, 'legacy-binding', 'legacy-generation', 1, 0, 'active', 'now', 'now')",
+            (epoch_id,),
+        )
+        connection.execute(
+            "INSERT INTO vnext_tasks VALUES ('legacy-task', 7, ?, 'legacy-binding', 'legacy-generation', "
+            "'summary', 'entity', 1, ?, 'legacy-task-generation', NULL, 'original', 'active', 0, NULL, "
+            "NULL, NULL, NULL, 'now', 'now', NULL)",
+            (epoch_id, _hash("f")),
+        )
+        connection.commit()
+
+    vnext_task_store.ensure_vnext_task_schema()
+    context = DeviceContext(7, device_id, epoch_id)
+    assert vnext_task_store.get_binding(context, "legacy-binding")["binding_epoch_seq"] == 1
+    assert vnext_task_store.get_task(context, "legacy-task")["task_id"] == "legacy-task"
+    with device_identity.control_connection() as connection:
+        assert "principal_id" not in {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(vnext_tasks)").fetchall()
+        }

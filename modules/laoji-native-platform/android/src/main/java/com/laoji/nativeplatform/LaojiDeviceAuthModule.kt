@@ -92,7 +92,48 @@ class LaojiDeviceAuthModule : Module() {
     Function("hasKey") { keyVersion: Int ->
       keyVersion in 1..100 && keyStore().containsAlias(alias(keyVersion))
     }
+
+    AsyncFunction("preparePurgeCapability") {
+        scopeKind: String,
+        deviceEpochId: String,
+        bindingId: String?,
+        bindingGeneration: String?,
+        registrationRequestId: String,
+        promise: Promise,
+      ->
+      try {
+        promise.resolve(purgeStore().prepare(
+          scopeKind, deviceEpochId, bindingId, bindingGeneration, registrationRequestId,
+        ))
+      } catch (error: Throwable) {
+        promise.reject("PURGE_JOURNAL_ERROR", "无法准备清理凭据", error)
+      }
+    }
+
+    Function("markPurgeCapabilityArmed") { capabilityId: String ->
+      purgeStore().markArmed(capabilityId)
+    }
+
+    Function("beginPurgeOnlyErase") {
+      purgeStore().beginErase()
+    }
+
+    Function("getPurgeOnlyJournalStatus") {
+      purgeStore().status()
+    }
+
+    AsyncFunction("resumePurgeOnlyJournal") { apiBase: String, promise: Promise ->
+      try {
+        promise.resolve(purgeStore().resume(apiBase))
+      } catch (error: Throwable) {
+        promise.reject("PURGE_JOURNAL_ERROR", "远端清理暂未完成", error)
+      }
+    }
   }
+
+  private fun purgeStore(): PurgeOnlyJournalStore = PurgeOnlyJournalStore(
+    requireNotNull(appContext.reactContext) { "应用上下文不可用" },
+  )
 
   private fun keyInfo(keyVersion: Int): Map<String, Any> {
     if (keyVersion !in 1..100) throw IllegalArgumentException("密钥版本无效")

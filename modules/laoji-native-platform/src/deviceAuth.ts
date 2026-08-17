@@ -5,6 +5,23 @@ export interface DeviceKeyInfo {
   publicKeyDer: string;
 }
 
+export interface PurgeCapabilityRegistration {
+  capabilityId: string;
+  secretSha256: string;
+  registrationRequestId: string;
+  scopeKind: 'epoch' | 'binding';
+}
+
+export interface PurgeOnlyJournalStatus {
+  schemaVersion: 1;
+  rowCount: number;
+  registering: number;
+  armed: number;
+  pending: number;
+  confirmedNow?: number;
+  confirmedAbsentNow?: number;
+}
+
 interface DeviceAuthNativeModule {
   getOrCreateKey(keyVersion: number): Promise<DeviceKeyInfo>;
   sign(keyVersion: number, payloadBase64: string): string;
@@ -12,6 +29,17 @@ interface DeviceAuthNativeModule {
   rotateKey(nextKeyVersion: number): Promise<DeviceKeyInfo>;
   deleteKey(keyVersion: number): void;
   hasKey(keyVersion: number): boolean;
+  preparePurgeCapability(
+    scopeKind: 'epoch' | 'binding',
+    deviceEpochId: string,
+    bindingId: string | null,
+    bindingGeneration: string | null,
+    registrationRequestId: string,
+  ): Promise<PurgeCapabilityRegistration>;
+  markPurgeCapabilityArmed(capabilityId: string): void;
+  beginPurgeOnlyErase(): PurgeOnlyJournalStatus;
+  getPurgeOnlyJournalStatus(): PurgeOnlyJournalStatus;
+  resumePurgeOnlyJournal(apiBase: string): Promise<PurgeOnlyJournalStatus>;
 }
 
 const nativeModule = requireOptionalNativeModule<DeviceAuthNativeModule>('LaojiDeviceAuth');
@@ -28,6 +56,10 @@ function validVersion(value: number): number {
 
 export function hasDeviceKey(keyVersion: number): boolean {
   return Boolean(nativeModule?.hasKey(validVersion(keyVersion)));
+}
+
+export function supportsPurgeOnlyJournal(): boolean {
+  return nativeModule !== null;
 }
 
 export function getOrCreateDeviceKey(keyVersion: number): Promise<DeviceKeyInfo> {
@@ -54,4 +86,35 @@ export function rotateDeviceKey(nextKeyVersion: number): Promise<DeviceKeyInfo> 
 export function deleteDeviceKey(keyVersion: number): void {
   if (!nativeModule) return;
   nativeModule.deleteKey(validVersion(keyVersion));
+}
+
+export function preparePurgeCapability(
+  scopeKind: 'epoch' | 'binding',
+  deviceEpochId: string,
+  registrationRequestId: string,
+  binding?: { bindingId: string; bindingGeneration: string },
+): Promise<PurgeCapabilityRegistration> {
+  return requireModule().preparePurgeCapability(
+    scopeKind,
+    deviceEpochId,
+    binding?.bindingId ?? null,
+    binding?.bindingGeneration ?? null,
+    registrationRequestId,
+  );
+}
+
+export function markPurgeCapabilityArmed(capabilityId: string): void {
+  requireModule().markPurgeCapabilityArmed(capabilityId);
+}
+
+export function beginPurgeOnlyErase(): PurgeOnlyJournalStatus {
+  return requireModule().beginPurgeOnlyErase();
+}
+
+export function getPurgeOnlyJournalStatus(): PurgeOnlyJournalStatus {
+  return requireModule().getPurgeOnlyJournalStatus();
+}
+
+export function resumePurgeOnlyJournal(apiBase: string): Promise<PurgeOnlyJournalStatus> {
+  return requireModule().resumePurgeOnlyJournal(apiBase);
 }

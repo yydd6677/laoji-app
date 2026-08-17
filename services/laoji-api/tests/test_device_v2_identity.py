@@ -57,6 +57,12 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
         public_key_der=public_wire,
         request_id=request_id,
     )
+    assert device_v2_identity.create_bootstrap_challenge(
+        device_id=device_id,
+        epoch_id=epoch_id,
+        public_key_der=public_wire,
+        request_id=request_id,
+    ) == challenge
     nonce = base64.urlsafe_b64decode(challenge["nonce"] + "==")
     proof = _proof(nonce, challenge["proof_difficulty_bits"])
     signature = private.sign(
@@ -74,8 +80,25 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
         signature=_b64(signature),
         proof_nonce=proof,
         request_id=request_id,
+        purge_capability_id=str(uuid.uuid4()),
+        purge_secret_sha256=hashlib.sha256(b"epoch-purge-secret").hexdigest(),
+        purge_registration_request_id="epoch-purge-register-1",
     )
     assert registered["registered"] is True
+    replayed = device_v2_identity.complete_bootstrap(
+        challenge_id=challenge["challenge_id"],
+        nonce=challenge["nonce"],
+        device_id=device_id,
+        epoch_id=epoch_id,
+        public_key_der=public_wire,
+        signature=_b64(signature),
+        proof_nonce=proof,
+        request_id=request_id,
+        purge_capability_id=registered["purge_capability"]["capability_id"],
+        purge_secret_sha256=hashlib.sha256(b"epoch-purge-secret").hexdigest(),
+        purge_registration_request_id="epoch-purge-register-1",
+    )
+    assert replayed == registered
 
     public_hash = challenge["public_key_hash"]
     auth_request_id = "auth-request-1"
@@ -86,6 +109,13 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
         public_key_hash=public_hash,
         request_id=auth_request_id,
     )
+    assert device_v2_identity.create_auth_challenge(
+        device_id=device_id,
+        epoch_id=epoch_id,
+        key_version=1,
+        public_key_hash=public_hash,
+        request_id=auth_request_id,
+    ) == auth_challenge
     auth_nonce = base64.urlsafe_b64decode(auth_challenge["nonce"] + "==")
     auth_signature = private.sign(
         device_v2_identity._message("auth", auth_nonce, device_id, epoch_id, auth_request_id),
@@ -100,6 +130,15 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
     context = device_v2_identity.authenticate_bearer(device_id, epoch_id, token["access_token"])
     assert context.device_id == device_id
     assert context.epoch_id == epoch_id
+    with device_identity.control_connection() as connection:
+        connection.execute("UPDATE v2_tokens SET revoked_at = 1")
+        connection.commit()
+    with pytest.raises(device_v2_identity.DeviceV2IdentityError) as explicitly_revoked:
+        device_v2_identity.authenticate_bearer(device_id, epoch_id, token["access_token"])
+    assert explicitly_revoked.value.code == "BEARER_INVALID"
+    with device_identity.control_connection() as connection:
+        connection.execute("UPDATE v2_tokens SET revoked_at = NULL")
+        connection.commit()
 
     new_private, new_public = _public_key_and_private()
     new_public_wire = _b64(new_public)
@@ -132,3 +171,43 @@ def test_p256_bootstrap_auth_and_bearer_fence(tmp_path, monkeypatch) -> None:
             request_id=auth_request_id,
         )
     assert replay.value.code == "CHALLENGE_EXPIRED"
+
+
+def test_active_epoch_cannot_be_silently_replaced(tmp_path, monkeypatch) -> None:
+    _setup(tmp_path, monkeypatch)
+    private, public = _public_key_and_private()
+    public_wire = _b64(public)
+    device_id = str(uuid.uuid4())
+
+    def register(epoch_id: str, suffix: str) -> dict:
+        request_id = f"register-request-{suffix}"
+        challenge = device_v2_identity.create_bootstrap_challenge(
+            device_id=device_id,
+            epoch_id=epoch_id,
+            public_key_der=public_wire,
+            request_id=request_id,
+        )
+        nonce = base64.urlsafe_b64decode(challenge["nonce"] + "==")
+        proof = _proof(nonce, challenge["proof_difficulty_bits"])
+        signature = private.sign(
+            device_v2_identity._message("bootstrap", nonce, device_id, epoch_id, request_id, proof),
+            ec.ECDSA(hashes.SHA256()),
+        )
+        return device_v2_identity.complete_bootstrap(
+            challenge_id=challenge["challenge_id"],
+            nonce=challenge["nonce"],
+            device_id=device_id,
+            epoch_id=epoch_id,
+            public_key_der=public_wire,
+            signature=_b64(signature),
+            proof_nonce=proof,
+            request_id=request_id,
+            purge_capability_id=str(uuid.uuid4()),
+            purge_secret_sha256=hashlib.sha256(f"secret-{suffix}".encode()).hexdigest(),
+            purge_registration_request_id=f"purge-register-{suffix}",
+        )
+
+    register(str(uuid.uuid4()), "first")
+    with pytest.raises(device_v2_identity.DeviceV2IdentityError) as conflict:
+        register(str(uuid.uuid4()), "second")
+    assert conflict.value.code == "EPOCH_ROTATION_REQUIRED"

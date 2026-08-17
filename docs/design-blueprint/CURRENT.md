@@ -5,8 +5,11 @@
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
 - production/App/APK/device/GPU mutation: `none`
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-- observed source commit: `48e3b36` plus dirty release source; APK includes migration v39 while HEAD ends at v38
+- stable source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
+- implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
+- implementation branch: `vnext/implementation`
+- stable baseline: Stage 0 frozen at `1.1.10 (118)`
+- implementation status: `Stage 0 passed; Stage 1 passed in isolated worktree; Stage 2 not started`
 
 ## 权威文件
 
@@ -64,6 +67,11 @@ mobile SQLite + app-private media (business authority)
 
 ## 当前边界
 
-三份 vNext 文件已经冻结为全局开发基线，但不是生产采用证明。Q2 和部分 task owner 有独立组件证据，
-其余性能与质量数字仍是阶段验收目标；本轮没有把任何 vNext 路线接入服务或手机。后续开发从
-Stage 0 开始，不再恢复局部多路线竞争；只有 Stage 1-5 的实施、迁移和发布门通过后才可声明生产采用。
+三份 vNext 文件已经冻结为全局开发基线，但不是生产采用证明。Stage 0 已冻结稳定版本；Stage 1 已在
+隔离工作树完成 0040–0042、本机 owner、device v2、generic task owner 与原生 purge-only capability，
+退出记录见 [Stage 1 exit](../vnext-stage1/STAGE1-EXIT.md)。未部署服务、未切公开流量、未发布或安装 APK。
+
+下一实施入口是 Stage 2 的 `0043/0044` 与媒体/上传/转写切片，不得重放 Stage 0/1。更新后的 12 个会议
+视频和 10 份弱参考字幕已经冻结为验收来源之一，见
+[会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
+不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
