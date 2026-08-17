@@ -17,6 +17,11 @@ capability barrier，也不改变稳定版或生产服务。
 - 增加 revision/source/deleted 查询索引，为后续 Graph validator、软删除和 stale action fence
   提供可查询边界。
 - `CalEvent` 暴露可选的来源元数据，未接入 Graph producer 时保持兼容默认值。
+- 新增隔离的 `schedule_graph_service`：将单次解析观察投影为 `ScheduleMentionGraph`，记录
+  来源日期/时间/标题/地点片段、意图、路由和 producer revision；`validate_schedule_graph` 对所有
+  片段做原文边界校验，并拒绝无开始日期的 complete 图。
+- `graph_to_draft` 以规范 JSON 计算稳定哈希；`merge_schedule_clarification` 在原 Draft 上合并
+  补充答案，保留 source_id 并单调递增 `draft_revision`，不把补充当成新的独立日程输入。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
@@ -34,7 +39,7 @@ capability barrier，也不改变稳定版或生产服务。
 
 ## 未完成
 
-这不是 Stage 4 退出证据。MentionGraph recognizers/producer/validator/executor、ProjectionEnvelope、
+这不是 Stage 4 退出证据。MentionGraph 服务端 route/recognizer 采用、ProjectionEnvelope、
 服务端 v2 schedule route、自然语料 holdout 和 capability barrier 仍未采用；真实 Expo SQLite/Android
 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
