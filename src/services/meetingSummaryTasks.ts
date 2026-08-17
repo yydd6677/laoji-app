@@ -10,6 +10,7 @@ import {
   type MeetingTemplate,
 } from '../domain/meeting';
 import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
+import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../data/db/openDatabase';
 
 const PENDING_SUMMARY_TASKS_KEY = '@laoji:pendingMeetingSummaryTasks:v1';
 const GUEST_TASK_RETENTION_MS = 55 * 60 * 1000;
@@ -32,7 +33,42 @@ export interface PendingMeetingSummaryTask {
 
 type PendingSummaryTaskMap = Record<string, PendingMeetingSummaryTask>;
 
-let pendingStorageMutation: Promise<void> = Promise.resolve();
+type PendingSummaryTaskRow = {
+  meeting_id: string;
+  task_id: string;
+  mode: MeetingSummaryTaskMode;
+  template_id: string;
+  template_revision: number;
+  input_fingerprint: string;
+  carry_forward_json: string | null;
+  attachment_authorization_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+let legacyPromotion: Promise<void> = Promise.resolve();
+
+async function ensurePendingTaskTable(): Promise<void> {
+  const database = await openMeetingDatabase();
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS device_summary_task_intents (
+      storage_scope TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('guest','authenticated')),
+      template_id TEXT NOT NULL,
+      template_revision INTEGER NOT NULL,
+      input_fingerprint TEXT NOT NULL,
+      carry_forward_json TEXT,
+      attachment_authorization_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(storage_scope, meeting_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_summary_task_intents_ready
+      ON device_summary_task_intents(storage_scope, updated_at, meeting_id);
+  `);
+}
 
 function updateHash(hash: number, value: string): number {
   let next = hash >>> 0;
@@ -128,8 +164,7 @@ export async function getPendingMeetingSummaryTask(
   meetingId: string,
   nowMs = Date.now(),
 ): Promise<PendingMeetingSummaryTask | null> {
-  await pendingStorageMutation.catch(() => {});
-  const task = (await readPendingTasks(storageScope))[meetingId] ?? null;
+  const task = (await readPendingTasks(storageScope))[meetingId.trim()] ?? null;
   if (!task) return null;
   const createdAtMs = Date.parse(task.createdAt);
   const retentionMs = task.mode === 'guest' ? GUEST_TASK_RETENTION_MS : ACCOUNT_TASK_RETENTION_MS;
@@ -143,7 +178,6 @@ export async function getPendingMeetingSummaryTask(
 export async function listPendingMeetingSummaryTasks(
   storageScope: string,
 ): Promise<PendingMeetingSummaryTask[]> {
-  await pendingStorageMutation.catch(() => {});
   return Object.values(await readPendingTasks(storageScope)).sort((left, right) => (
     left.createdAt.localeCompare(right.createdAt)
     || left.meetingId.localeCompare(right.meetingId)
@@ -155,11 +189,47 @@ export async function savePendingMeetingSummaryTask(
   task: Omit<PendingMeetingSummaryTask, 'createdAt' | 'updatedAt'> & Partial<Pick<PendingMeetingSummaryTask, 'createdAt'>>,
 ): Promise<PendingMeetingSummaryTask> {
   const now = new Date().toISOString();
-  let saved: PendingMeetingSummaryTask | null = null;
-  await mutatePendingTasks(storageScope, records => {
-    const existing = records[task.meetingId];
-    saved = {
-      meetingId: task.meetingId,
+  const scope = normalizeStorageScope(storageScope);
+  const meeting = normalizeMeetingId(task.meetingId);
+  await ensurePendingTaskTable();
+  const saved = await withMeetingDatabaseTransaction(async database => {
+    const existing = await database.getFirstAsync<{ task_id: string; created_at: string }>(
+      `SELECT task_id, created_at FROM device_summary_task_intents
+        WHERE storage_scope = ? AND meeting_id = ?`,
+      scope,
+      meeting,
+    );
+    const createdAt = existing?.task_id === task.taskId ? existing.created_at : task.createdAt ?? now;
+    await database.runAsync(
+      `INSERT INTO device_summary_task_intents (
+         storage_scope, meeting_id, task_id, mode, template_id, template_revision,
+         input_fingerprint, carry_forward_json, attachment_authorization_json,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(storage_scope, meeting_id) DO UPDATE SET
+         task_id = excluded.task_id,
+         mode = excluded.mode,
+         template_id = excluded.template_id,
+         template_revision = excluded.template_revision,
+         input_fingerprint = excluded.input_fingerprint,
+         carry_forward_json = excluded.carry_forward_json,
+         attachment_authorization_json = excluded.attachment_authorization_json,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+      scope,
+      meeting,
+      task.taskId,
+      task.mode,
+      task.templateId,
+      task.templateRevision,
+      task.inputFingerprint,
+      task.carryForward ? JSON.stringify(task.carryForward) : null,
+      task.attachmentAuthorization ? JSON.stringify(task.attachmentAuthorization) : null,
+      createdAt,
+      now,
+    );
+    return {
+      meetingId: meeting,
       taskId: task.taskId,
       mode: task.mode,
       templateId: task.templateId,
@@ -167,55 +237,152 @@ export async function savePendingMeetingSummaryTask(
       inputFingerprint: task.inputFingerprint,
       carryForward: task.carryForward,
       attachmentAuthorization: task.attachmentAuthorization,
-      createdAt: existing?.taskId === task.taskId
-        ? existing.createdAt
-        : task.createdAt ?? now,
+      createdAt,
       updatedAt: now,
-    };
-    records[task.meetingId] = saved;
+    } satisfies PendingMeetingSummaryTask;
   });
-  if (!saved) throw new Error('pending meeting summary task was not saved');
+  await removeLegacyPendingRecord(scope, meeting).catch(() => undefined);
   return saved;
 }
 
 export async function clearPendingMeetingSummaryTask(storageScope: string, meetingId: string): Promise<void> {
-  await mutatePendingTasks(storageScope, records => {
-    delete records[meetingId];
-  });
-}
-
-function mutatePendingTasks(storageScope: string, mutator: (records: PendingSummaryTaskMap) => void): Promise<void> {
-  const storageKey = pendingTasksKey(storageScope);
-  const operation = pendingStorageMutation
-    .catch(() => {})
-    .then(async () => {
-      const records = await readPendingTasks(storageScope);
-      mutator(records);
-      if (Object.keys(records).length === 0) {
-        await removeAppStorageItem(storageKey);
-      } else {
-        await setAppStorageItem(storageKey, JSON.stringify(records));
-      }
-    });
-  pendingStorageMutation = operation;
-  return operation;
+  const scope = normalizeStorageScope(storageScope);
+  const meeting = normalizeMeetingId(meetingId);
+  await ensurePendingTaskTable();
+  await withMeetingDatabaseTransaction(database => database.runAsync(
+    `DELETE FROM device_summary_task_intents WHERE storage_scope = ? AND meeting_id = ?`,
+    scope,
+    meeting,
+  ));
+  await removeLegacyPendingRecord(scope, meeting).catch(() => undefined);
 }
 
 async function readPendingTasks(storageScope: string): Promise<PendingSummaryTaskMap> {
+  const scope = normalizeStorageScope(storageScope);
+  await ensurePendingTaskTable();
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<PendingSummaryTaskRow>(
+    `SELECT meeting_id, task_id, mode, template_id, template_revision,
+            input_fingerprint, carry_forward_json, attachment_authorization_json,
+            created_at, updated_at
+       FROM device_summary_task_intents
+      WHERE storage_scope = ? ORDER BY created_at, meeting_id`,
+    scope,
+  );
+  const records = rows.reduce<PendingSummaryTaskMap>((result, row) => {
+    const parsed = pendingTaskFromRow(row);
+    if (parsed) result[parsed.meetingId] = parsed;
+    return result;
+  }, {});
+  // One-time promotion of the old AsyncStorage registry.  It is deliberately
+  // read only as a compatibility source; canonical rows always win.
+  const legacy = await readLegacyPendingTasks(scope);
+  if (Object.keys(legacy).length === 0) return records;
+  const promotion = legacyPromotion
+    .catch(() => undefined)
+    .then(async () => {
+      for (const item of Object.values(legacy)) {
+        if (!records[item.meetingId]) await saveCanonicalPendingTask(scope, item);
+      }
+      await removeAppStorageItem(pendingTasksKey(scope));
+    });
+  legacyPromotion = promotion;
+  await promotion;
+  return readPendingTasks(scope);
+}
+
+function normalizeStorageScope(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 120 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('meeting summary storage scope is invalid');
+  }
+  return normalized;
+}
+
+function normalizeMeetingId(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('meeting summary meeting ID is invalid');
+  }
+  return normalized;
+}
+
+function pendingTaskFromRow(row: PendingSummaryTaskRow): PendingMeetingSummaryTask | null {
+  if (!row.task_id || (row.mode !== 'guest' && row.mode !== 'authenticated')
+    || !row.input_fingerprint) return null;
+  const template = meetingTemplateById(row.template_id, Number(row.template_revision))
+    ?? DEFAULT_MEETING_TEMPLATE;
+  let carryForward: MeetingSummaryCarryForwardAuthorization | null = null;
+  let attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null;
+  try {
+    if (row.carry_forward_json) {
+      carryForward = parseCarryForwardAuthorization(JSON.parse(row.carry_forward_json));
+      if (!carryForward) return null;
+    }
+    if (row.attachment_authorization_json) {
+      attachmentAuthorization = parseAttachmentAuthorization(JSON.parse(row.attachment_authorization_json));
+      if (!attachmentAuthorization) return null;
+    }
+  } catch {
+    return null;
+  }
+  return {
+    meetingId: row.meeting_id,
+    taskId: row.task_id,
+    mode: row.mode,
+    templateId: template.id,
+    templateRevision: template.revision,
+    inputFingerprint: row.input_fingerprint,
+    carryForward,
+    attachmentAuthorization,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function saveCanonicalPendingTask(
+  storageScope: string,
+  task: PendingMeetingSummaryTask,
+): Promise<void> {
+  const scope = normalizeStorageScope(storageScope);
+  const meeting = normalizeMeetingId(task.meetingId);
+  await ensurePendingTaskTable();
+  await withMeetingDatabaseTransaction(async database => {
+    await database.runAsync(
+      `INSERT OR IGNORE INTO device_summary_task_intents (
+         storage_scope, meeting_id, task_id, mode, template_id, template_revision,
+         input_fingerprint, carry_forward_json, attachment_authorization_json,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      scope,
+      meeting,
+      task.taskId,
+      task.mode,
+      task.templateId,
+      task.templateRevision,
+      task.inputFingerprint,
+      task.carryForward ? JSON.stringify(task.carryForward) : null,
+      task.attachmentAuthorization ? JSON.stringify(task.attachmentAuthorization) : null,
+      task.createdAt,
+      task.updatedAt,
+    );
+  });
+}
+
+async function readLegacyPendingTasks(storageScope: string): Promise<PendingSummaryTaskMap> {
   const raw = await getAppStorageItem(pendingTasksKey(storageScope));
   if (!raw) return {};
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('pending meeting summary task registry is invalid');
   }
-
   const records: PendingSummaryTaskMap = {};
   Object.entries(parsed).forEach(([meetingId, value]) => {
     if (!value || typeof value !== 'object') return;
     const item = value as Partial<PendingMeetingSummaryTask>;
-    if (typeof item.taskId !== 'string' || !item.taskId) return;
-    if (item.mode !== 'guest' && item.mode !== 'authenticated') return;
-    if (typeof item.inputFingerprint !== 'string' || !item.inputFingerprint) return;
+    if (typeof item.taskId !== 'string' || !item.taskId
+      || (item.mode !== 'guest' && item.mode !== 'authenticated')
+      || typeof item.inputFingerprint !== 'string' || !item.inputFingerprint) return;
     const template = meetingTemplateById(item.templateId, item.templateRevision)
       ?? DEFAULT_MEETING_TEMPLATE;
     const carryForward = parseCarryForwardAuthorization(item.carryForward);
@@ -236,6 +403,18 @@ async function readPendingTasks(storageScope: string): Promise<PendingSummaryTas
     };
   });
   return records;
+}
+
+async function removeLegacyPendingRecord(storageScope: string, meetingId: string): Promise<void> {
+  const key = pendingTasksKey(storageScope);
+  const legacy = await readLegacyPendingTasks(storageScope);
+  if (!legacy[meetingId]) return;
+  delete legacy[meetingId];
+  if (Object.keys(legacy).length === 0) {
+    await removeAppStorageItem(key);
+  } else {
+    await setAppStorageItem(key, JSON.stringify(legacy));
+  }
 }
 
 function pendingText(value: unknown, maximum: number, allowEmpty = false): string | null {
@@ -373,5 +552,5 @@ function pendingTasksKey(storageScope: string): string {
 }
 
 export function resetMeetingSummaryTaskStorageForTests(): void {
-  pendingStorageMutation = Promise.resolve();
+  legacyPromotion = Promise.resolve();
 }
