@@ -65,9 +65,9 @@
    kill/restart 和双上传+实时并发证据。
 2. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
    Transcript owner，断线和 token refresh 从游标续接。
-2. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。
-3. 在 worker attempt 提交中把 NO_SPEECH 原子完成为 success/no_content，并闭合 restart、双上传+实时
+3. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。
+4. 在 worker attempt 提交中把 NO_SPEECH 原子完成为 success/no_content，并闭合 restart、双上传+实时
    会议、延迟和内存退出门。
-4. 上述门通过后才构建 v2 candidate 并统计旧 submit；barrier 前继续保留显式旧完整协议。
+5. 上述门通过后才构建 v2 candidate 并统计旧 submit；barrier 前继续保留显式旧完整协议。
 
 生产服务、公网、APK、设备和 GPU 均未修改。
