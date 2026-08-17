@@ -89,12 +89,12 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 否则服务 fail-closed。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
 生产延迟。下一入口是 Android 网络/进程恢复、手机连续文字投影和 NO_SPEECH/性能门；
-不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
+不得重放 Stage 0/1，也不得激活生产 capability barrier。当前登记的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
-[会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
+[会议视频验收样本清单](../vnext-acceptance/MEETING-SAMPLE-INVENTORY-20260818.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
 
 Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
-revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；该切片只证明
-本机存储和搜索索引边界，Graph producer/validator、ProjectionEnvelope 和 schedule barrier 仍未采用，证据见
+revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；隔离的
+Graph producer/validator、ProjectionEnvelope 工具也已实现，但均未挂入 v2 route 或 capability barrier，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。
