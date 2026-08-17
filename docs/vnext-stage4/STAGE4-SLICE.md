@@ -22,6 +22,8 @@ capability barrier，也不改变稳定版或生产服务。
   片段做原文边界校验，并拒绝无开始日期的 complete 图。
 - `graph_to_draft` 以规范 JSON 计算稳定哈希；`merge_schedule_clarification` 在原 Draft 上合并
   补充答案，保留 source_id 并单调递增 `draft_revision`，不把补充当成新的独立日程输入。
+- 新增隔离的 `vnext_projection` 工具，统一 ProjectionEnvelope 的 canonical payload hash、同一
+  surface 的 entity/view revision 单调接收规则，以及 action 的 epoch/entity/surface 精确 fence。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，

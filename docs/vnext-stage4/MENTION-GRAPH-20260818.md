@@ -15,12 +15,15 @@
 4. `graph_to_draft` 以规范 JSON 生成 `ScheduleDraft.graph_sha256`，模板或 UI 不参与哈希。
 5. `merge_schedule_clarification` 在现有 source_id 和 Draft 上合并补充，revision 从 1 单调到 2，
    不重新创建第二个独立 Draft owner。
+6. `vnext_projection` 提供跨 native/JS 可复用的 ProjectionEnvelope 哈希、单调接收和 stale action
+   fence；相同 revision 的不同 payload 会失败关闭。
 
 ## 验证
 
 - `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_schedule_graph_vnext.py tests/test_schedule_parser_quality.py`
   ：`89 passed`。
 - `../../.venv-vnext/bin/python -m compileall -q app/services/schedule_graph_service.py`：通过。
+- `PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_vnext_projection.py tests/test_schedule_graph_vnext.py`：`12 passed`。
 - 测试使用自然短句，如“明天下午三点半开会”，没有生成笛卡尔积语料，也没有把测试元数据放入用户句子。
 
 ## 尚未闭合
