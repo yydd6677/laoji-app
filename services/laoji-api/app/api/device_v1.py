@@ -43,7 +43,7 @@ from app.api.app_meetings import (
     MeetingQuestionSummarySource,
     MeetingQuestionTranscriptSource,
 )
-from app.services import device_identity
+from app.services import device_identity, vnext_capability_cutover
 from app.services.device_identity import DeviceContext, DeviceIdentityError
 from app.services.meeting_recording_asset_service import (
     RecordingAssetConflict,
@@ -451,6 +451,16 @@ def _error(error: DeviceIdentityError) -> HTTPException:
         status_code=error.status_code,
         detail={"code": error.code, "message": error.message},
     )
+
+
+def _guard_legacy_media_submit() -> None:
+    try:
+        vnext_capability_cutover.guard_legacy_media_upload_submit()
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
 
 
 async def require_device(
@@ -1065,6 +1075,7 @@ async def register_device_asset(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     meeting = await _device_meeting(db, context, binding_id)
     key = _idempotency_key(idempotency_key, "录音资产请求标识")
     client_asset_id = _device_identifier(payload.client_asset_id, "本机录音资产标识")
@@ -1230,6 +1241,7 @@ async def initialize_device_r2_upload(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Create or resume a private R2 multipart upload for one device asset."""
+    _guard_legacy_media_submit()
     if not r2_storage_service.r2_enabled():
         raise HTTPException(status_code=503, detail={"code": "R2_UPLOAD_UNAVAILABLE", "message": "直传服务暂时不可用"})
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
@@ -1458,6 +1470,7 @@ async def complete_device_r2_upload(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     upload = await _find_device_r2_upload(db, context, normalized_asset_id, payload.upload_id)
     if upload is None:
@@ -1712,6 +1725,7 @@ async def upload_device_asset_chunk(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     if chunk_index < 0 or chunk_index > 4095:
         raise HTTPException(status_code=422, detail={"code": "CHUNK_INDEX_INVALID", "message": "录音分片序号无效"})
@@ -1757,6 +1771,7 @@ async def complete_device_asset_chunk_upload(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "录音上传完成请求标识")
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     upload_key = _device_identifier(payload.upload_id, "录音上传标识", 512)
@@ -1842,6 +1857,7 @@ async def upload_device_asset(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "录音上传请求标识")
     asset = await find_asset(db, user_id=context.principal_id, asset_id=_device_identifier(asset_id, "录音资产标识", 160))
     if asset is None or asset.data_epoch_id != context.epoch_id:
@@ -1910,6 +1926,7 @@ async def create_device_transcription(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "转写请求标识")
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     asset = await find_asset(db, user_id=context.principal_id, asset_id=normalized_asset_id)

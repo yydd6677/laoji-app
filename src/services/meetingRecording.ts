@@ -81,6 +81,10 @@ export interface PendingMeetingAudioUpload {
   byteSize?: number;
   durationMs?: number;
   checksumSha256?: string;
+  /** Immutable vNext asset generation used by the native R2 unique-work key. */
+  assetGeneration?: string;
+  /** Canonical source digest. Unlike legacy checksumSha256, this always includes the sha256 prefix. */
+  sourceSha256?: string;
   remoteAssetId?: string;
   remoteAssetRevision?: number;
   /** Device transcription job identity retained until completion is pulled. */
@@ -95,6 +99,7 @@ export interface PendingMeetingAudioUpload {
   nativeWorkId?: string;
   nativeOperationId?: string;
   nativeGeneration?: number;
+  nativeProtocol?: 'legacy' | 'recording-assets-v2' | 'device-v2-r2';
 }
 
 export type PendingMeetingAudioUploadPhase =
@@ -132,6 +137,8 @@ export interface PendingMeetingAudioUploadBatchResult {
 
 export interface PendingMeetingAudioRetryOptions {
   automatic?: boolean;
+  /** A v2 capability decision is request-scoped: never duplicate it through the legacy uploader. */
+  requireNativeTransport?: boolean;
 }
 
 let pendingStorageMutation: Promise<void> = Promise.resolve();
@@ -296,13 +303,21 @@ export function derivePendingMeetingAudioUploadInspection(
     && Number(nativeState?.remoteRevision) >= 1
     ? Number(nativeState?.remoteRevision)
     : null;
+  const nativeTaskId = nativeState?.state === 'succeeded'
+    && typeof nativeState.transcriptionTaskId === 'string'
+    && nativeState.transcriptionTaskId.trim()
+    ? nativeState.transcriptionTaskId.trim()
+    : null;
   const observedPending = nativeRemoteAssetId && nativeRemoteRevision !== null
     ? {
         ...pending,
         remoteAssetId: nativeRemoteAssetId,
         remoteAssetRevision: nativeRemoteRevision,
+        transcriptionTaskId: nativeTaskId ?? pending.transcriptionTaskId,
       }
-    : pending;
+    : nativeTaskId
+      ? { ...pending, transcriptionTaskId: nativeTaskId }
+      : pending;
   let phase: PendingMeetingAudioUploadPhase;
   let errorCode: string | null = pending.failureCode ?? null;
   if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
@@ -390,7 +405,11 @@ export async function retryPendingMeetingAudioUpload(
     if (!pending) return null;
     const deletedKey = deletedMeetingAudioKey(storageScope, pending.meetingId);
     if (deletedMeetingAudio.has(deletedKey)) return null;
-    if (pending.nativeWorkId && accessToken === 'device') {
+    if (
+      pending.nativeWorkId
+      && accessToken === 'device'
+      && pending.nativeProtocol !== 'device-v2-r2'
+    ) {
       // Guest/device uploads do not use the account WorkManager protocol.
       // An old handle may point at a removed native worker and can block while
       // crossing the Expo module boundary, so discard it in memory and go
@@ -400,6 +419,10 @@ export async function retryPendingMeetingAudioUpload(
       delete pending.nativeWorkId;
       delete pending.nativeOperationId;
       delete pending.nativeGeneration;
+      delete pending.nativeProtocol;
+      if (options.requireNativeTransport) {
+        await clearNativeUploadRegistration(storageScope, recordingAssetId);
+      }
     } else if (pending.nativeWorkId) {
       const nativeState = await readNativeUploadStateBounded(pending.nativeWorkId);
       if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
@@ -436,7 +459,13 @@ export async function retryPendingMeetingAudioUpload(
       delete pending.nativeWorkId;
       delete pending.nativeOperationId;
       delete pending.nativeGeneration;
+      delete pending.nativeProtocol;
+      if (options.requireNativeTransport) {
+        await deferPendingMeetingAudioUploadPoll(storageScope, recordingAssetId).catch(() => {});
+        return null;
+      }
     }
+    if (options.requireNativeTransport && !pending.nativeWorkId) return null;
     if (options.automatic && !canAutomaticallyRetryPendingMeetingAudioUpload(pending)) return null;
     try {
       if (deletedMeetingAudio.has(deletedKey)) return null;
@@ -470,6 +499,7 @@ export async function retryPendingMeetingAudioUploads(
   accessToken: string,
   uploadAudio: PendingAudioUploader,
   concurrency = 2,
+  options: PendingMeetingAudioRetryOptions = {},
 ): Promise<PendingMeetingAudioUploadBatchResult> {
   const pending = await listPendingMeetingAudioUploads(storageScope);
   const outcomes: Array<'uploaded' | 'failed' | 'skipped'> = new Array(pending.length);
@@ -494,7 +524,7 @@ export async function retryPendingMeetingAudioUploads(
           pending[index].recordingAssetId,
           accessToken,
           uploadAudio,
-          { automatic: true },
+          { ...options, automatic: true },
         );
         uploaded[index] = completed;
         outcomes[index] = completed ? 'uploaded' : 'skipped';
@@ -827,6 +857,9 @@ export async function upsertPendingMeetingAudioUpload(
       remoteMeetingId: pending.remoteMeetingId ?? existing?.remoteMeetingId,
       remoteAssetId: pending.remoteAssetId ?? existing?.remoteAssetId,
       remoteAssetRevision: pending.remoteAssetRevision ?? existing?.remoteAssetRevision,
+      assetGeneration: pending.assetGeneration ?? existing?.assetGeneration,
+      sourceSha256: pending.sourceSha256 ?? existing?.sourceSha256,
+      checksumSha256: pending.checksumSha256 ?? existing?.checksumSha256,
       createdAt: existing?.createdAt ?? pending.createdAt,
       lastAttemptAt: existing?.lastAttemptAt ?? pending.lastAttemptAt,
       attemptCount: existing?.attemptCount ?? pending.attemptCount,
@@ -837,6 +870,7 @@ export async function upsertPendingMeetingAudioUpload(
       nativeWorkId: existing?.nativeWorkId,
       nativeOperationId: existing?.nativeOperationId,
       nativeGeneration: existing?.nativeGeneration,
+      nativeProtocol: existing?.nativeProtocol,
     };
   });
   await Promise.all(cancelled.map(workId => cancelNativeUploadBounded(workId)));
@@ -905,6 +939,7 @@ export async function attachNativeUploadRegistration(
       nativeWorkId: registration.workId,
       nativeOperationId: registration.operationId,
       nativeGeneration: registration.generation,
+      nativeProtocol: registration.protocol,
     };
     attached = true;
   });
@@ -922,6 +957,7 @@ async function clearNativeUploadRegistration(
     delete next.nativeWorkId;
     delete next.nativeOperationId;
     delete next.nativeGeneration;
+    delete next.nativeProtocol;
     records[recordingAssetId] = next;
   });
 }
@@ -1007,8 +1043,16 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
         ? Number(item.durationMs)
         : undefined,
       checksumSha256: typeof item.checksumSha256 === 'string'
-        && /^sha256:[0-9a-f]{64}$/i.test(item.checksumSha256.trim())
+        && /^(?:sha256:)?[0-9a-f]{64}$/i.test(item.checksumSha256.trim())
         ? item.checksumSha256.trim().toLowerCase()
+        : undefined,
+      assetGeneration: typeof item.assetGeneration === 'string'
+        && /^[0-9a-f]{32}$/i.test(item.assetGeneration.trim())
+        ? item.assetGeneration.trim().toLowerCase()
+        : undefined,
+      sourceSha256: typeof item.sourceSha256 === 'string'
+        && /^sha256:[0-9a-f]{64}$/i.test(item.sourceSha256.trim())
+        ? item.sourceSha256.trim().toLowerCase()
         : undefined,
       remoteAssetId: typeof item.remoteAssetId === 'string' && item.remoteAssetId.trim()
         ? item.remoteAssetId.trim()
@@ -1035,6 +1079,11 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
       nativeWorkId: typeof item.nativeWorkId === 'string' ? item.nativeWorkId : undefined,
       nativeOperationId: typeof item.nativeOperationId === 'string' ? item.nativeOperationId : undefined,
       nativeGeneration: typeof item.nativeGeneration === 'number' ? item.nativeGeneration : undefined,
+      nativeProtocol: item.nativeProtocol === 'legacy'
+        || item.nativeProtocol === 'recording-assets-v2'
+        || item.nativeProtocol === 'device-v2-r2'
+        ? item.nativeProtocol
+        : undefined,
     };
   });
   return records;

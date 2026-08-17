@@ -19,6 +19,11 @@ const TOKEN_KEY = 'laoji.device.v2.token';
 const TOKEN_EXPIRES_KEY = 'laoji.device.v2.token.expires';
 const KEY_VERSION_KEY = 'laoji.device.v2.key.version';
 const PUBLIC_HASH_KEY = 'laoji.device.v2.key.hash';
+const CAPABILITY_CACHE_MS = 60_000;
+
+let capabilityValue: DeviceV2Capabilities | null = null;
+let capabilityPromise: Promise<DeviceV2Capabilities> | null = null;
+let capabilityUntil = 0;
 
 export class DeviceV2ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {
@@ -34,6 +39,12 @@ export interface DeviceV2Session {
   epochId: string;
   keyVersion: number;
   publicKeyHash: string;
+}
+
+export interface DeviceV2Capabilities {
+  schemaVersion: 2;
+  uploadSessionsV2: boolean;
+  importTranscriptEventsV2: boolean;
 }
 
 function endpoint(path: string): string {
@@ -240,6 +251,37 @@ export async function deviceV2Request<T>(path: string, init: RequestInit = {}, f
       ]);
     }
     throw error;
+  }
+}
+
+function normalizeCapabilities(value: any): DeviceV2Capabilities {
+  if (!value || Number(value.schema_version) !== 2 || value.device_api !== true) {
+    throw new DeviceV2ApiError('设备服务能力响应无效', 502, 'DEVICE_V2_CAPABILITIES_INVALID');
+  }
+  return {
+    schemaVersion: 2,
+    uploadSessionsV2: value.upload_sessions_v2 === true,
+    importTranscriptEventsV2: value.import_transcript_events_v2 === true,
+  };
+}
+
+export async function loadDeviceV2Capabilities(
+  options: { forceRefresh?: boolean } = {},
+): Promise<DeviceV2Capabilities> {
+  if (!options.forceRefresh && capabilityValue && capabilityUntil > Date.now()) {
+    return capabilityValue;
+  }
+  if (!options.forceRefresh && capabilityPromise) return capabilityPromise;
+  const request = deviceV2Request<any>('/capabilities', {}, '读取 v2 设备能力失败')
+    .then(normalizeCapabilities);
+  capabilityPromise = request;
+  try {
+    const value = await request;
+    capabilityValue = value;
+    capabilityUntil = Date.now() + CAPABILITY_CACHE_MS;
+    return value;
+  } finally {
+    if (capabilityPromise === request) capabilityPromise = null;
   }
 }
 

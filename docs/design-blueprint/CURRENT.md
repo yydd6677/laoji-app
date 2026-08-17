@@ -76,12 +76,13 @@ segment/text state、speaker/manual overlay 仓储，以及隔离的 device-v2 R
 流式 SHA-256 验证、verified asset + transcription Task 原子提交和 purge-aware cleanup obligation。
 未激活的 Android `device-v2-r2` WorkManager 已支持 single/multipart 源 URI 直传、两片并发、ETag 和
 remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 armed binding-scoped purge capability。
-8030 已新增不破坏 v1 的严格 v2 batch contract；realtime chunk/stable/final event ledger 已落库，但
-v2 WSS、手机事件投影和 ASR/CAM++ 并行执行尚未接入。
+8030 已新增不破坏 v1 的严格 v2 batch contract；realtime chunk/stable/final event ledger 已落库，
+手机事件投影、guest device-v2-r2 WorkManager 接入和 ASR/CAM++ 异步 lane 已在隔离工作树接通，
+但 capability 默认关闭，线上 8030 当前仍只有 `/v1/asr/batch`，尚未提供候选 `/v2/asr/batch`。
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
 
-下一入口是 v2 realtime WSS、手机连续文字事件、ASR/CAM++ 并行队列和
+下一入口是隔离部署候选 `/v2/asr/batch`、v2 realtime WSS、手机连续文字事件、ASR/CAM++ 并行队列和
 NO_SPEECH/恢复/性能门；不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且

@@ -253,6 +253,22 @@ def download_object(*, object_key: str, target: Path) -> None:
     _client().download_file(settings.R2_BUCKET.strip(), object_key, str(target))
 
 
+def iter_object_chunks(
+    *,
+    object_key: str,
+    chunk_size: int = 1024 * 1024,
+) -> Iterable[bytes]:
+    """Yield an object through bounded memory without creating a local copy."""
+    response = _client().get_object(Bucket=settings.R2_BUCKET.strip(), Key=object_key)
+    body = response["Body"]
+    bounded = max(64 * 1024, min(4 * 1024 * 1024, int(chunk_size)))
+    try:
+        while chunk := body.read(bounded):
+            yield bytes(chunk)
+    finally:
+        body.close()
+
+
 def object_exists(*, object_key: str) -> bool:
     """Return whether an object is still present without exposing its metadata."""
     try:

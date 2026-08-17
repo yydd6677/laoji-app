@@ -23,6 +23,7 @@ import {
   PendingMeetingAudioUpload,
   restoreDeletedMeetingAudio,
   type PendingMeetingAudioUploadInspection,
+  retryPendingMeetingAudioUpload,
   retryPendingMeetingAudioUploads,
   upsertPendingMeetingAudioUpload,
 } from '../services/meetingRecording';
@@ -32,6 +33,7 @@ import { meetingSummaryToText } from '../services/meetingSummary';
 import {
   cancelNativeMeetingUpload,
   deleteNativeMeetingArtifacts,
+  enqueueNativeDeviceV2MeetingUpload,
   enqueueNativeMeetingUpload,
 } from '../native/nativeTransferCoordinator';
 import { deleteMeetingPlaybackCache } from '../services/meetingPlaybackCache';
@@ -64,6 +66,7 @@ import {
 import { requireFreshMeetingRecycleCapability } from '../services/meetingRecycleCapability';
 import { getFeatureFlags } from '../config/featureFlags';
 import {
+  canonicalRecordingSourceSha256,
   MeetingRepositoryFacade,
   sqliteMeetingNoteRepository,
   type MeetingSearchResult,
@@ -143,7 +146,12 @@ import {
   enqueueDeviceMeetingDeletion,
 } from '../services/deviceMeetingDeletion';
 import { rememberDeviceTranscriptTask } from '../services/deviceTranscriptTasks';
-import type { IngestedMeetingMedia } from 'laoji-native-platform';
+import { loadDeviceV2Capabilities } from '../services/deviceV2Api';
+import {
+  recordVNextLegacySubmit,
+  selectClosedVNextCapability,
+} from '../services/vnextCapabilityBarrier';
+import { sha256NativeFile, type IngestedMeetingMedia } from 'laoji-native-platform';
 
 async function rememberDeviceTranscriptTaskBestEffort(
   meetingId: string,
@@ -388,6 +396,99 @@ function recordingUploadFileName(assetId: string, uri: string, mimeType: string 
             : mime.includes('flac') ? 'flac'
               : 'wav';
   return `${assetId}.${extension}`;
+}
+
+async function prepareGuestDeviceV2Upload(
+  pending: PendingMeetingAudioUpload,
+): Promise<PendingMeetingAudioUpload | null> {
+  let aggregate = await sqliteMeetingNoteRepository.get(
+    pending.canonicalMeetingId?.trim() || pending.meetingId,
+    'guest',
+  );
+  if (!aggregate) {
+    aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
+      pending.nativeSessionId?.trim() || pending.meetingId,
+      'guest',
+    );
+  }
+  if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
+  const asset = aggregate.recordingAssets.find(item => item.id === pending.recordingAssetId)
+    ?? aggregate.recordingAssets.find(item => item.localUri === pending.audioUri)
+    ?? (pending.role === 'primary'
+      ? aggregate.recordingAssets.find(item => item.role === 'primary')
+      : null);
+  if (!asset?.localUri || asset.localState !== 'local_ready') return null;
+  if (asset.localUri !== pending.audioUri) return null;
+
+  const knownSource = asset.sourceSha256
+    ?? pending.sourceSha256
+    ?? canonicalRecordingSourceSha256(asset.checksumSha256 ?? pending.checksumSha256);
+  const knownSize = asset.byteSize && asset.byteSize > 0
+    ? asset.byteSize
+    : pending.byteSize && pending.byteSize > 0
+      ? pending.byteSize
+      : null;
+  let sourceSha256 = knownSource;
+  let byteSize = knownSize;
+  if (!sourceSha256 || byteSize === null) {
+    const verified = await sha256NativeFile(asset.localUri);
+    if (knownSource && verified.checksumSha256 !== knownSource) {
+      throw new Error('本机录音内容与已保存校验值不一致');
+    }
+    if (knownSize !== null && verified.byteSize !== knownSize) {
+      throw new Error('本机录音大小与已保存记录不一致');
+    }
+    sourceSha256 = verified.checksumSha256;
+    byteSize = verified.byteSize;
+  }
+  if (!sourceSha256 || byteSize < 1) return null;
+
+  if (
+    asset.sourceSha256 !== sourceSha256
+    || asset.byteSize !== byteSize
+    || canonicalRecordingSourceSha256(asset.checksumSha256) !== sourceSha256
+  ) {
+    const updatedAtMs = Math.max(Date.now(), asset.updatedAtMs);
+    await sqliteMeetingNoteRepository.transaction(async transaction => {
+      const current = await transaction.getRecordingAsset(
+        aggregate!.note.id,
+        asset.id,
+        'guest',
+      );
+      if (!current || current.assetGeneration !== asset.assetGeneration) {
+        throw new Error('本机录音代际已变化');
+      }
+      if (current.sourceSha256 && current.sourceSha256 !== sourceSha256) {
+        throw new Error('本机录音校验值已变化');
+      }
+      await transaction.saveRecordingAsset({
+        ...current,
+        byteSize,
+        checksumSha256: sourceSha256,
+        sourceSha256,
+        updatedAtMs,
+        lastVerifiedAtMs: updatedAtMs,
+      }, 'guest');
+      await transaction.advanceCanonicalWrite('guest', updatedAtMs);
+    });
+  }
+
+  return {
+    ...pending,
+    canonicalMeetingId: aggregate.note.id,
+    recordingAssetId: asset.id,
+    role: asset.role,
+    origin: asset.origin,
+    nativeSessionId: asset.nativeSessionId ?? pending.nativeSessionId,
+    audioUri: asset.localUri,
+    fileName: asset.fileName ?? pending.fileName,
+    mimeType: asset.mimeType?.trim() || pending.mimeType,
+    byteSize,
+    durationMs: asset.durationMs ?? pending.durationMs,
+    checksumSha256: sourceSha256,
+    sourceSha256,
+    assetGeneration: asset.assetGeneration,
+  };
 }
 
 type CaptureTransition = Extract<ProcessingStageTransition, { stage: 'capture' }>;
@@ -2640,12 +2741,65 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       }
       if (remoteIdentityChanged) before = await listPendingMeetingAudioUploads(scope);
 
+      let deviceV2IngressReady = false;
       if (mode === 'guest') {
-        // The device contract uses the local meeting UUID as its temporary
-        // service binding.  It never sends title, location, participants, or
-        // the original filename; only the bounded audio processing input is
-        // uploaded. Do not mutate the legacy pending registry just to add a
-        // remote identity that this path does not need.
+        const remoteCapability = await loadDeviceV2Capabilities().catch(() => null);
+        deviceV2IngressReady = await selectClosedVNextCapability(
+          'media.upload',
+          Boolean(remoteCapability?.uploadSessionsV2 && remoteCapability.importTranscriptEventsV2),
+        );
+        if (deviceV2IngressReady) {
+          // A capability choice covers the whole request. Remove obsolete
+          // device-v1 native handles without submitting their payload, then
+          // bind every local source to its immutable SQLite asset generation.
+          for (const pending of before) {
+            if (!pending.nativeWorkId || pending.nativeProtocol === 'device-v2-r2') continue;
+            await retryPendingMeetingAudioUpload(
+              scope,
+              pending.recordingAssetId,
+              'device',
+              async () => { throw new Error('v2 原生上传不可回退到旧入口'); },
+              { automatic: true, requireNativeTransport: true },
+            ).catch(() => undefined);
+          }
+          before = await listPendingMeetingAudioUploads(scope);
+
+          for (let offset = 0; offset < before.length; offset += 2) {
+            await Promise.all(before.slice(offset, offset + 2).map(async pending => {
+              if (pending.nativeWorkId) return;
+              try {
+                const prepared = await prepareGuestDeviceV2Upload(pending);
+                if (!prepared?.assetGeneration || !prepared.sourceSha256 || !prepared.byteSize) return;
+                await upsertPendingMeetingAudioUpload(scope, prepared);
+                const registration = await enqueueNativeDeviceV2MeetingUpload({
+                  scope,
+                  meetingId: prepared.meetingId,
+                  operationId: `media-upload:${prepared.recordingAssetId}:${prepared.assetGeneration}`,
+                  fileUri: prepared.audioUri,
+                  mimeType: prepared.mimeType,
+                  fileName: prepared.fileName,
+                  recordingAssetId: prepared.recordingAssetId,
+                  assetGeneration: prepared.assetGeneration,
+                  expectedBytes: prepared.byteSize,
+                  checksumSha256: prepared.sourceSha256,
+                  recordingRole: prepared.role,
+                  recordingOrigin: prepared.origin,
+                  durationMs: prepared.durationMs ?? null,
+                });
+                if (!registration) return;
+                const attached = await attachNativeUploadRegistration(
+                  scope,
+                  prepared.recordingAssetId,
+                  registration,
+                );
+                if (!attached) await cancelNativeMeetingUpload(registration.workId).catch(() => {});
+              } catch (error) {
+                diagnosticWarn('[device-v2-upload] native enqueue deferred', error);
+              }
+            }));
+          }
+          before = await listPendingMeetingAudioUploads(scope);
+        }
       }
 
       if (mode === 'authenticated' && flags.localMeetingDbAccountUploadWriteV1) {
@@ -2702,7 +2856,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         before = await listPendingMeetingAudioUploads(scope);
       }
 
-      const beforeInspections = mode === 'guest'
+      const beforeInspections = mode === 'guest' && !deviceV2IngressReady
         ? before.map(item => derivePendingMeetingAudioUploadInspection(item, null))
         : await inspectPendingMeetingAudioUploads(before);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
@@ -2718,7 +2872,10 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         scope,
         accessToken ?? 'device',
         (pending, token) => mode === 'guest'
-          ? uploadMeetingRecordingToDeviceService(pending)
+          ? deviceV2IngressReady
+            ? Promise.reject(new Error('v2 原生上传不可回退到旧入口'))
+            : recordVNextLegacySubmit('media.upload')
+              .then(() => uploadMeetingRecordingToDeviceService(pending))
           : flags.localMeetingDbAccountUploadWriteV1
           ? uploadRecordingAssetV2({
               accessToken: token,
@@ -2745,6 +2902,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               { fileName: pending.fileName, mimeType: pending.mimeType },
             ),
         2,
+        deviceV2IngressReady ? { requireNativeTransport: true } : {},
       );
       diagnosticAudit('meeting_audio_upload_queue_processed', {
         scope: scope === 'guest' ? 'guest' : 'account',
@@ -2764,7 +2922,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         Boolean(item.nativeWorkId) || !item.remoteMeetingId
       ));
       if (!shouldPollPendingUploads) audioResumePollCountsRef.current.delete(operationKey);
-      const afterInspections = mode === 'guest'
+      const afterInspections = mode === 'guest' && !deviceV2IngressReady
         ? after.map(item => derivePendingMeetingAudioUploadInspection(item, null))
         : await inspectPendingMeetingAudioUploads(after);
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;

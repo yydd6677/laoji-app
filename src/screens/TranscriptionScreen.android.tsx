@@ -2334,6 +2334,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               taskId: uploaded.transcriptionTaskId,
               state: 'pending',
               phase: 'queued',
+              eventCursor: 0,
+              eventTotal: null,
               updatedAt: new Date().toISOString(),
             };
             if (mountedRef.current && routeMeetingIdRef.current === uploaded.meetingId) {

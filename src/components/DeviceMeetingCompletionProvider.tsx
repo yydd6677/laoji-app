@@ -5,12 +5,20 @@ import { diagnosticWarn } from '../services/diagnostics';
 import { getLocalDeviceSpeakerName } from '../services/speakers';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import {
+  advanceDeviceTranscriptEventCursor,
   clearDeviceTranscriptTask,
   getDeviceTranscriptTask,
   markDeviceTranscriptTaskFailed,
   markDeviceTranscriptTaskProgress,
   subscribeDeviceTranscriptTaskChanged,
 } from '../services/deviceTranscriptTasks';
+import { loadDeviceV2Capabilities } from '../services/deviceV2Api';
+import {
+  ackDeviceV2ImportTranscriptEvents,
+  getDeviceV2ImportTranscriptEvents,
+  transcriptProjectionSha256,
+} from '../services/deviceV2ImportTranscript';
+import { applyDeviceV2ImportSpeakerOverlay } from '../services/deviceV2SpeakerOverlay';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import type { TranscriptLine } from '../types';
@@ -89,6 +97,179 @@ export function DeviceMeetingCompletionProvider(): null {
           if (!active) return;
           try {
             const task = await getDeviceTranscriptTask(meeting.id).catch(() => null);
+            if (task?.taskId.startsWith('v2-transcript-')) {
+              const v2Capabilities = await loadDeviceV2Capabilities().catch(() => null);
+              if (v2Capabilities?.importTranscriptEventsV2) {
+                const snapshot = await getDeviceV2ImportTranscriptEvents(
+                  task.taskId,
+                  task.eventCursor,
+                );
+                if (snapshot.last_acked_event_seq > task.eventCursor) {
+                  throw new Error('本机文字记录游标落后于已确认服务端事件');
+                }
+                if (snapshot.payload_expired && task.eventCursor < snapshot.last_event_seq) {
+                  await markDeviceTranscriptTaskFailed(
+                    meeting.id,
+                    'transcript_events_expired',
+                  ).catch(() => undefined);
+                  continue;
+                }
+                if (snapshot.state === 'failed' || snapshot.state === 'cancelled') {
+                  await markDeviceTranscriptTaskFailed(
+                    meeting.id,
+                    snapshot.error_code ?? 'transcription_failed',
+                  ).catch(() => undefined);
+                  continue;
+                }
+                if (snapshot.last_acked_event_seq < task.eventCursor) {
+                  const canonicalId = await sqliteMeetingNoteRepository
+                    .resolveCanonicalMeetingId(meeting.id, 'guest');
+                  const activeProjection = canonicalId
+                    ? await sqliteMeetingNoteRepository.getActiveTranscriptContent(canonicalId, 'guest')
+                    : null;
+                  const hasTaskSegments = activeProjection?.segments.some(
+                    segment => segment.sourceTranscriptionJobId === task.taskId,
+                  ) ?? false;
+                  const ackOutcome = snapshot.state === 'no_content'
+                    && task.eventCursor === snapshot.last_event_seq
+                    ? 'no_speech'
+                    : 'text';
+                  if (ackOutcome === 'text' && !hasTaskSegments) {
+                    throw new Error('待确认文字记录已不在本机权威版本中');
+                  }
+                  const replayProjectionSha256 = await transcriptProjectionSha256({
+                    taskId: task.taskId,
+                    meetingId: meeting.id,
+                    throughEventSeq: task.eventCursor,
+                    outcome: ackOutcome,
+                    transcriptRevisionId: hasTaskSegments ? activeProjection?.revision.id ?? null : null,
+                  });
+                  await ackDeviceV2ImportTranscriptEvents(
+                    task.taskId,
+                    task.eventCursor,
+                    replayProjectionSha256,
+                  );
+                }
+                const newEvents = snapshot.events.filter(event => event.event_sequence > task.eventCursor);
+                if (newEvents.length > 0) {
+                  let expectedSequence = task.eventCursor + 1;
+                  newEvents.forEach(event => {
+                    if (event.event_sequence !== expectedSequence) {
+                      throw new Error('文字记录事件序号不连续');
+                    }
+                    expectedSequence += 1;
+                  });
+                  const finalEvent = newEvents.find(event => event.event_kind === 'final') ?? null;
+                  const stableEvents = newEvents.filter(event => event.event_kind === 'stable' && event.outcome === 'text');
+                  const previous = getCachedTranscript(meeting.id).filter(line => (
+                    (line.transcription_job_id ?? line.transcriptionJobId) === task.taskId
+                  ));
+                  const byStableKey = new Map(previous.map(line => [line.id, line]));
+                  stableEvents.forEach(event => {
+                    const stableKey = String(event.stable_segment_key);
+                    byStableKey.set(stableKey, {
+                      id: stableKey,
+                      meeting_id: meeting.id,
+                      recording_asset_id: null,
+                      transcription_job_id: task.taskId,
+                      speaker_label: '未知讲话人',
+                      text: event.text,
+                      start_time: event.source_start_ms / 1000,
+                      end_time: event.source_end_ms / 1000,
+                      confidence: 0,
+                      isFinal: finalEvent?.outcome === 'text',
+                      revisionKind: finalEvent?.outcome === 'text' ? 'final' : 'realtimeDraft',
+                      script: 'zh-Hans',
+                    });
+                  });
+                  const lines = [...byStableKey.values()].sort((left, right) => (
+                    Number(left.start_time ?? 0) - Number(right.start_time ?? 0)
+                    || left.id.localeCompare(right.id)
+                  )).map(line => finalEvent?.outcome === 'text'
+                    ? { ...line, isFinal: true, revisionKind: 'final' as const }
+                    : line);
+                  let transcriptRevisionId: string | null = null;
+                  if (lines.length > 0) {
+                    await saveCachedTranscript(meeting.id, lines, {
+                      candidateKind: finalEvent ? 'final' : 'realtime_draft',
+                      serverCompleteness: finalEvent ? 'complete' : 'incomplete',
+                      remoteRevisionId: finalEvent ? `${task.taskId}:final` : `${task.taskId}:live`,
+                    });
+                    const canonicalId = await sqliteMeetingNoteRepository
+                      .resolveCanonicalMeetingId(meeting.id, 'guest');
+                    const activeProjection = canonicalId
+                      ? await sqliteMeetingNoteRepository.getActiveTranscriptContent(canonicalId, 'guest')
+                      : null;
+                    const storedKeys = new Set(
+                      activeProjection?.segments
+                        .filter(segment => segment.sourceTranscriptionJobId === task.taskId)
+                        .map(segment => segment.stableSegmentKey) ?? [],
+                    );
+                    if (stableEvents.some(event => !storedKeys.has(String(event.stable_segment_key)))) {
+                      throw new Error('稳定文字记录尚未写入本机权威版本');
+                    }
+                    transcriptRevisionId = activeProjection?.revision.id ?? null;
+                  }
+                  if (finalEvent?.outcome === 'text' && (!transcriptRevisionId || lines.length === 0)) {
+                    throw new Error('最终文字记录没有形成可读本机版本');
+                  }
+                  const nextCursor = newEvents.at(-1)!.event_sequence;
+                  const advanced = await advanceDeviceTranscriptEventCursor(
+                    meeting.id,
+                    task.taskId,
+                    task.eventCursor,
+                    nextCursor,
+                    snapshot.last_event_seq,
+                  );
+                  if (!advanced) throw new Error('文字记录事件游标已由其他进程修改');
+                  const projectionSha256 = await transcriptProjectionSha256({
+                    taskId: task.taskId,
+                    meetingId: meeting.id,
+                    throughEventSeq: nextCursor,
+                    outcome: finalEvent?.outcome ?? 'text',
+                    transcriptRevisionId,
+                  });
+                  await ackDeviceV2ImportTranscriptEvents(
+                    task.taskId,
+                    nextCursor,
+                    projectionSha256,
+                  );
+                  if (finalEvent) {
+                    await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
+                    await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                    await updateMeetingStatus(
+                      meeting.id,
+                      'ended',
+                      { hasTranscript: finalEvent.outcome === 'text' || Boolean(meeting.hasTranscript) },
+                      { remoteSync: 'background' },
+                    );
+                    if (transcriptRevisionId) {
+                      void applyDeviceV2ImportSpeakerOverlay({
+                        taskId: task.taskId,
+                        meetingId: meeting.id,
+                        transcriptRevisionId,
+                      }).catch(() => undefined);
+                    }
+                  } else {
+                    hasActivePartialTask = true;
+                  }
+                } else if (snapshot.state === 'queued' || snapshot.state === 'running') {
+                  hasActivePartialTask = true;
+                  await markDeviceTranscriptTaskProgress(
+                    meeting.id,
+                    snapshot.state,
+                  ).catch(() => undefined);
+                } else if (
+                  snapshot.last_event_seq === task.eventCursor
+                  && ['succeeded', 'no_content'].includes(snapshot.state)
+                ) {
+                  await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
+                  await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                }
+                delete retryRef.current[meeting.id];
+                continue;
+              }
+            }
             let taskStatus: any = null;
             if (task?.state === 'pending') {
               try {

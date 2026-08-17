@@ -89,6 +89,13 @@ def _overlay_identity(session_id: str, overlay_revision: int) -> str:
     return f"speaker-overlay:{session_id}:{overlay_revision}"
 
 
+def import_speaker_run_id(task_id: str) -> str:
+    normalized = _safe(task_id, "source_task_id", 512)
+    if len(normalized) <= 173:
+        return f"import:{normalized}"
+    return "import:sha256:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def ensure_vnext_speaker_schema() -> None:
     vnext_task_store.ensure_vnext_task_schema()
     with control_connection() as connection:
@@ -117,6 +124,7 @@ def ensure_vnext_speaker_schema() -> None:
             CREATE TABLE IF NOT EXISTS vnext_speaker_runs (
                 session_id TEXT PRIMARY KEY,
                 task_id TEXT UNIQUE REFERENCES vnext_tasks(task_id) ON DELETE SET NULL,
+                source_task_id TEXT REFERENCES vnext_tasks(task_id) ON DELETE CASCADE,
                 device_id TEXT NOT NULL,
                 epoch_id TEXT NOT NULL,
                 binding_id TEXT NOT NULL,
@@ -170,6 +178,14 @@ def ensure_vnext_speaker_schema() -> None:
                 ON vnext_speaker_overlay_revisions(session_id) WHERE status = 'active';
             """
         )
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(vnext_speaker_runs)").fetchall()
+        }
+        if "source_task_id" not in columns:
+            connection.execute(
+                "ALTER TABLE vnext_speaker_runs ADD COLUMN source_task_id TEXT REFERENCES vnext_tasks(task_id)"
+            )
         connection.commit()
 
 
@@ -494,12 +510,13 @@ def collect_speaker_segment(
         if run is None:
             connection.execute(
                 """INSERT INTO vnext_speaker_runs(
-                     session_id, device_id, epoch_id, binding_id, binding_generation,
+                     session_id, source_task_id, device_id, epoch_id, binding_id, binding_generation,
                      binding_revision, cancel_revision, asset_generation,
                      state, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'collecting', ?, ?)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'collecting', ?, ?)""",
                 (
                     session_id,
+                    session["task_id"],
                     context.device_id,
                     context.epoch_id,
                     session["binding_id"],
@@ -560,6 +577,162 @@ def collect_speaker_segment(
         )
         connection.commit()
     return {"session_id": session_id, "stable_segment_key": stable_segment_key, "reused": False}
+
+
+def create_import_speaker_run(
+    context: SpeakerOwnerContext,
+    *,
+    speaker_run_id: str,
+    source_task_id: str,
+    asset_generation: str,
+) -> dict[str, Any]:
+    ensure_vnext_speaker_schema()
+    speaker_run_id = _safe(speaker_run_id, "speaker_run_id", 180)
+    source_task_id = _safe(source_task_id, "source_task_id", 512)
+    asset_generation = _safe(asset_generation, "asset_generation", 180)
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        task = connection.execute(
+            """SELECT task.*, binding.binding_revision, binding.cancel_revision,
+                      binding.state AS binding_state
+                 FROM vnext_tasks task
+                 JOIN vnext_bindings binding
+                   ON binding.device_id = task.device_id AND binding.epoch_id = task.epoch_id
+                  AND binding.binding_id = task.binding_id
+                WHERE task.task_id = ? AND task.device_id = ? AND task.epoch_id = ?""",
+            (source_task_id, context.device_id, context.epoch_id),
+        ).fetchone()
+        if task is None or task["capability"] != "transcript":
+            connection.rollback()
+            raise VNextSpeakerError("TRANSCRIPT_TASK_NOT_FOUND", "转写任务不存在", 404)
+        if task["binding_state"] != "active":
+            connection.rollback()
+            raise VNextSpeakerError("BINDING_PURGING", "会议服务连接正在清理", 409)
+        existing = connection.execute(
+            "SELECT * FROM vnext_speaker_runs WHERE session_id = ?",
+            (speaker_run_id,),
+        ).fetchone()
+        if existing is not None:
+            same = (
+                existing["device_id"] == context.device_id
+                and existing["epoch_id"] == context.epoch_id
+                and existing["source_task_id"] == source_task_id
+                and existing["asset_generation"] == asset_generation
+            )
+            connection.commit()
+            if not same:
+                raise VNextSpeakerError("SPEAKER_RUN_CONFLICT", "讲话人任务标识已被使用", 409)
+            return dict(existing)
+        connection.execute(
+            """INSERT INTO vnext_speaker_runs(
+                 session_id, source_task_id, device_id, epoch_id, binding_id,
+                 binding_generation, binding_revision, cancel_revision,
+                 asset_generation, state, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'collecting', ?, ?)""",
+            (
+                speaker_run_id,
+                source_task_id,
+                context.device_id,
+                context.epoch_id,
+                task["binding_id"],
+                task["binding_generation"],
+                int(task["binding_revision"]),
+                int(task["cancel_revision"]),
+                asset_generation,
+                now,
+                now,
+            ),
+        )
+        row = connection.execute(
+            "SELECT * FROM vnext_speaker_runs WHERE session_id = ?",
+            (speaker_run_id,),
+        ).fetchone()
+        connection.commit()
+    assert row is not None
+    return dict(row)
+
+
+def collect_import_speaker_segment(
+    context: SpeakerOwnerContext,
+    speaker_run_id: str,
+    *,
+    stable_segment_key: str,
+    source_start_ms: int,
+    source_end_ms: int,
+    pcm_bytes: bytes,
+) -> dict[str, Any]:
+    ensure_vnext_speaker_schema()
+    speaker_run_id = _safe(speaker_run_id, "speaker_run_id", 180)
+    stable_segment_key = _safe(stable_segment_key, "stable_segment_key", 180)
+    if not isinstance(pcm_bytes, bytes) or not 1 <= len(pcm_bytes) <= MAX_SEGMENT_BYTES:
+        raise VNextSpeakerError("SPEAKER_AUDIO_INVALID", "讲话人音频片段无效", 422)
+    content_sha256 = "sha256:" + hashlib.sha256(pcm_bytes).hexdigest()
+    locator = vnext_speaker_crypto.seal_segment(
+        device_id=context.device_id,
+        epoch_id=context.epoch_id,
+        session_id=speaker_run_id,
+        stable_segment_key=stable_segment_key,
+        content_sha256=content_sha256,
+        pcm_bytes=pcm_bytes,
+    )
+    now = utc_now()
+    try:
+        with control_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = connection.execute(
+                """SELECT * FROM vnext_speaker_runs
+                     WHERE session_id = ? AND device_id = ? AND epoch_id = ?""",
+                (speaker_run_id, context.device_id, context.epoch_id),
+            ).fetchone()
+            if run is None:
+                connection.rollback()
+                raise VNextSpeakerError("SPEAKER_RUN_NOT_FOUND", "讲话人处理不存在", 404)
+            if run["state"] != "collecting":
+                connection.rollback()
+                raise VNextSpeakerError("SPEAKER_RUN_TERMINAL", "讲话人处理已结束", 409)
+            existing = connection.execute(
+                """SELECT * FROM vnext_speaker_inputs
+                     WHERE session_id = ? AND stable_segment_key = ?""",
+                (speaker_run_id, stable_segment_key),
+            ).fetchone()
+            if existing is not None:
+                same = (
+                    int(existing["source_start_ms"]) == int(source_start_ms)
+                    and int(existing["source_end_ms"]) == int(source_end_ms)
+                    and existing["content_sha256"] == content_sha256
+                    and existing["encrypted_spool_locator"] == locator
+                )
+                connection.commit()
+                if not same:
+                    raise VNextSpeakerError("SPEAKER_SEGMENT_REPLAY_CONFLICT", "讲话人片段重放不一致", 409)
+                return {"stable_segment_key": stable_segment_key, "reused": True}
+            connection.execute(
+                """INSERT INTO vnext_speaker_inputs(
+                     session_id, stable_segment_key, source_start_ms, source_end_ms,
+                     byte_size, content_sha256, encrypted_spool_locator, created_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    speaker_run_id,
+                    stable_segment_key,
+                    int(source_start_ms),
+                    int(source_end_ms),
+                    len(pcm_bytes),
+                    content_sha256,
+                    locator,
+                    now,
+                ),
+            )
+            connection.execute(
+                "UPDATE vnext_speaker_runs SET updated_at = ? WHERE session_id = ?",
+                (now, speaker_run_id),
+            )
+            connection.commit()
+    except Exception:
+        if not is_spool_locator_referenced(locator):
+            vnext_speaker_crypto.delete_segment(locator)
+        raise
+    return {"stable_segment_key": stable_segment_key, "reused": False}
 
 
 def _source_segments_in_transaction(connection: Any, session_id: str) -> list[dict[str, Any]]:
@@ -647,45 +820,30 @@ def finalize_speaker_run(
     cleanup_locators: list[str] = []
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
-        session = connection.execute(
-            """SELECT * FROM vnext_realtime_asr_sessions
+        run = connection.execute(
+            """SELECT * FROM vnext_speaker_runs
                  WHERE session_id = ? AND device_id = ? AND epoch_id = ?""",
             (session_id, context.device_id, context.epoch_id),
         ).fetchone()
-        if session is None:
-            connection.rollback()
-            raise VNextSpeakerError("REALTIME_SESSION_NOT_FOUND", "实时转写会话不存在", 404)
-        if session["state"] != "succeeded":
-            connection.rollback()
-            raise VNextSpeakerError("TRANSCRIPT_NOT_FINAL", "文字记录尚未完成", 409)
-        binding = connection.execute(
-            """SELECT * FROM vnext_bindings
-                 WHERE device_id = ? AND epoch_id = ? AND binding_id = ?""",
-            (context.device_id, context.epoch_id, session["binding_id"]),
-        ).fetchone()
-        if (
-            binding is None
-            or binding["state"] != "active"
-            or binding["binding_generation"] != session["binding_generation"]
-            or int(binding["binding_revision"]) != int(session["binding_revision"])
-            or int(binding["cancel_revision"]) != int(session["cancel_revision"])
-        ):
-            connection.rollback()
-            raise VNextSpeakerError("BINDING_REVISION_CHANGED", "会议服务连接版本已变化", 409)
-        run = connection.execute(
-            "SELECT * FROM vnext_speaker_runs WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
         now = utc_now()
         if run is None:
+            session = connection.execute(
+                """SELECT * FROM vnext_realtime_asr_sessions
+                     WHERE session_id = ? AND device_id = ? AND epoch_id = ?""",
+                (session_id, context.device_id, context.epoch_id),
+            ).fetchone()
+            if session is None:
+                connection.rollback()
+                raise VNextSpeakerError("SPEAKER_RUN_NOT_FOUND", "讲话人处理不存在", 404)
             connection.execute(
                 """INSERT INTO vnext_speaker_runs(
-                     session_id, device_id, epoch_id, binding_id, binding_generation,
+                     session_id, source_task_id, device_id, epoch_id, binding_id, binding_generation,
                      binding_revision, cancel_revision, asset_generation,
                      state, created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'collecting', ?, ?)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'collecting', ?, ?)""",
                 (
                     session_id,
+                    session["task_id"],
                     context.device_id,
                     context.epoch_id,
                     session["binding_id"],
@@ -702,6 +860,28 @@ def finalize_speaker_run(
                 (session_id,),
             ).fetchone()
         assert run is not None
+        source_task = connection.execute(
+            """SELECT state FROM vnext_tasks
+                 WHERE task_id = ? AND device_id = ? AND epoch_id = ?""",
+            (run["source_task_id"], context.device_id, context.epoch_id),
+        ).fetchone()
+        if source_task is None or source_task["state"] != "success":
+            connection.rollback()
+            raise VNextSpeakerError("TRANSCRIPT_NOT_FINAL", "文字记录尚未完成", 409)
+        binding = connection.execute(
+            """SELECT * FROM vnext_bindings
+                 WHERE device_id = ? AND epoch_id = ? AND binding_id = ?""",
+            (context.device_id, context.epoch_id, run["binding_id"]),
+        ).fetchone()
+        if (
+            binding is None
+            or binding["state"] != "active"
+            or binding["binding_generation"] != run["binding_generation"]
+            or int(binding["binding_revision"]) != int(run["binding_revision"])
+            or int(binding["cancel_revision"]) != int(run["cancel_revision"])
+        ):
+            connection.rollback()
+            raise VNextSpeakerError("BINDING_REVISION_CHANGED", "会议服务连接版本已变化", 409)
         if run["state"] in {"succeeded", "no_content"}:
             connection.commit()
             return {

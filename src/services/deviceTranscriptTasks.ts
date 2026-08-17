@@ -27,6 +27,8 @@ export interface DeviceTranscriptTaskRecord {
   state: DeviceTranscriptTaskState;
   phase?: DeviceTranscriptTaskPhase;
   errorCode?: string;
+  eventCursor: number;
+  eventTotal: number | null;
   updatedAt: string;
 }
 
@@ -78,6 +80,8 @@ function toRecord(operation: DeviceOperationRecord): DeviceTranscriptTaskRecord 
     state,
     phase: state === 'pending' && operation.remoteState === 'running' ? 'running' : state === 'pending' ? 'queued' : undefined,
     errorCode: state === 'failed' ? operation.errorCode ?? undefined : undefined,
+    eventCursor: operation.progressDone ?? 0,
+    eventTotal: operation.progressTotal,
     updatedAt: new Date(operation.updatedAtMs).toISOString(),
   };
 }
@@ -103,6 +107,12 @@ async function readLegacyRegistry(): Promise<LegacyRegistry> {
           state: item.state === 'failed' ? 'failed' : 'pending',
           phase: item.phase === 'running' ? 'running' : 'queued',
           errorCode: typeof item.errorCode === 'string' ? item.errorCode.slice(0, 80) : undefined,
+          eventCursor: Number.isSafeInteger(item.eventCursor) && Number(item.eventCursor) >= 0
+            ? Number(item.eventCursor)
+            : 0,
+          eventTotal: Number.isSafeInteger(item.eventTotal) && Number(item.eventTotal) >= 0
+            ? Number(item.eventTotal)
+            : null,
           updatedAt,
         };
       } catch {
@@ -197,6 +207,38 @@ export async function markDeviceTranscriptTaskProgress(
     state: phase === 'running' ? 'running' : 'queued',
   });
   if (updated) notifyChanged(normalized);
+}
+
+export async function advanceDeviceTranscriptEventCursor(
+  meetingId: string,
+  taskId: string,
+  expectedCursor: number,
+  nextCursor: number,
+  eventTotal: number,
+): Promise<boolean> {
+  const normalized = normalizedMeetingId(meetingId);
+  const normalizedTask = normalizedTaskId(taskId);
+  if (
+    !Number.isSafeInteger(expectedCursor) || expectedCursor < 0
+    || !Number.isSafeInteger(nextCursor) || nextCursor < expectedCursor
+    || !Number.isSafeInteger(eventTotal) || eventTotal < nextCursor
+  ) throw new Error('设备转写事件游标无效');
+  const existing = await getLatestDeviceOperation('transcript', normalized);
+  if (!existing || existing.generationId !== normalizedTask) return false;
+  const current = existing.progressDone ?? 0;
+  if (current >= nextCursor) return true;
+  if (current !== expectedCursor || ['success', 'failure', 'cancelled'].includes(existing.remoteState ?? '')) {
+    return false;
+  }
+  const updated = await updateDeviceOperation({
+    operationId: existing.operationId,
+    expectedRevision: existing.operationRevision,
+    state: 'running',
+    progressDone: nextCursor,
+    progressTotal: Math.max(eventTotal, existing.progressTotal ?? 0),
+  });
+  if (updated) notifyChanged(normalized);
+  return updated !== null;
 }
 
 export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<void> {

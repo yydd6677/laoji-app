@@ -1,6 +1,7 @@
 # vNext Stage 2 纵向切片
 
-状态：`in progress`。媒体上传纵向切片已实现但未激活；ASR capability barrier 未切换。
+状态：`in progress`。媒体上传、文字优先转写和 capability barrier 候选已实现但未激活；线上 8030
+仍只发布 v1 ASR 入口，因此候选 v2 全链路尚不能切换。
 
 ## 已实现
 
@@ -34,21 +35,35 @@
   `vnext_realtime_event_ledger` 保存 task/binding/asset generation fence、连续 chunk cursor、稳定/final
   event cursor 与加密载荷。partial 只走瞬时 stream，event sequence 为 0；stable/final 才进入 durable
   ledger，重放必须内容一致，片段 revision 只能单调推进。
+- guest/device 上传在服务端同时宣布 `upload_sessions_v2` 与 `import_transcript_events_v2` 后，移动端从
+  本机 immutable RecordingAsset 读取 `asset_generation`、源 SHA-256、大小和 MIME，接入
+  `device-v2-r2` WorkManager；v2 native handle 成功后携带 transcription task ID，旧 native handle
+  会被隔离清除，不会在同一次请求中静默回退 v1。
+- `vnextCapabilityBarrier` 与服务端 `vnext_capability_cutover` 增加持久单调 `media.upload` barrier、
+  旧提交计数和 `426 UPGRADE_REQUIRED` 门；默认环境变量关闭，未经完整公开周期和人工切换不改变当前
+  生产入口。
+- ModelManager 在 compact 环境优先读取标准 Torch Hub 缓存的 Silero JIT，并用现有 `soundfile/scipy`
+  提供文件读取，流式 VAD 初始化不再强制依赖不匹配的 torchaudio。
 
 ## 证据
 
 - `python3 tools/vnext/verify_stage2_migrations.py`：通过。
-- device-v2/task/purge/upload/ASR/realtime 聚焦后端测试：30 个通过，包含 remote multipart merge、
+- device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：55 个通过，包含 remote multipart merge、
   chunk/event replay、binding fence 和 NO_SPEECH contract。
-- 共享 contract 生成检查与 `npx tsc --noEmit`：通过。
-- 隔离 `expo prebuild` 后 `:laoji-native-platform:compileDebugKotlin` 和 `:app:compileDebugKotlin`：通过。
+- 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
+- 线上只读参考回放（样本 `39799065_da2-1-16.mp4`，360.133 秒，现有 `/v1/asr/batch`）：首个稳定批次
+  1.993 秒，RTF 0.1008，115 段/36 批，模型推理耗时合计 82.756 秒，进程峰值 RSS 约 1180 MiB。
+  该数据只证明当前 v1 模型/硬件参考性能，不证明 v2 合同。
 
 尚未验证：真实 R2、进程 kill/restart、1 GiB 内存门、设备网络、APK 安装、真机/模拟器、旧 submit
-连续为零和 capability barrier。因此本切片不能声称 Stage 2 完成或生产采用。
+连续为零和 capability barrier。服务器当前 8030 `/ready` 正常但 `/v2/asr/batch` 返回 404；因此 v2
+真实导入回放和 Stage 2 capability barrier 不能声称完成或生产采用。
 
 ## 下一入口
 
-1. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
+1. 在隔离服务部署候选 8030 `/v2/asr/batch`（不覆盖线上 v1），再重复真实样本回放；同时完成真实 R2、
+   kill/restart 和双上传+实时并发证据。
+2. 将 v2 realtime WSS 的 durable chunk ack/event cursor 接到上述 store；partial/stable/final 落到手机
    Transcript owner，断线和 token refresh 从游标续接。
 2. VAD segment 同时投递 ASR 和 CAM++；文字稳定立即发布，讲话人作为低优先异步 overlay。
 3. 在 worker attempt 提交中把 NO_SPEECH 原子完成为 success/no_content，并闭合 restart、双上传+实时

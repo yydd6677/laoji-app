@@ -293,6 +293,8 @@ class ModelManager:
             )
             local_v1 = os.path.join(local_master_dir, "files", "silero-vad", "silero_vad.jit")
             local_v2 = os.path.join(local_master_dir, "src", "silero_vad", "data", "silero_vad.jit")
+            hub_master_dir = os.path.join(torch.hub.get_dir(), "snakers4_silero-vad_master")
+            hub_v2 = os.path.join(hub_master_dir, "src", "silero_vad", "data", "silero_vad.jit")
 
             model, utils = None, None
 
@@ -304,6 +306,16 @@ class ModelManager:
                 print(f"[ModelManager] 发现项目本地 Silero VAD: {local_v2}", flush=True)
                 self._vad_jit_file = local_v2
                 model, utils = self._load_silero_from_local(os.path.join(local_master_dir, "src", "silero_vad"))
+            elif os.path.exists(hub_v2):
+                # The streaming path only needs the JIT model. Loading the
+                # cached hub package imports optional torchaudio before the
+                # model is created, which makes the compact environment fail
+                # even though soundfile/scipy already provide the file helper.
+                print(f"[ModelManager] 发现 Torch Hub Silero VAD: {hub_v2}", flush=True)
+                self._vad_jit_file = hub_v2
+                model, utils = self._load_silero_from_local(
+                    os.path.join(hub_master_dir, "src", "silero_vad")
+                )
             else:
                 print(f"[ModelManager] 未找到本地 Silero VAD，尝试联网下载...", flush=True)
                 torch_hub_dir = os.path.join(_get_local_model_dir(), "silero-vad")
@@ -369,11 +381,16 @@ class ModelManager:
         model.eval()
 
         def read_audio(path):
-            import torchaudio
-            waveform, sr = torchaudio.load(path)
+            import math
+            import soundfile
+            from scipy import signal
+
+            waveform, sr = soundfile.read(path, dtype="float32", always_2d=True)
+            waveform = waveform.mean(axis=1)
             if sr != 16000:
-                waveform = torchaudio.functional.resample(waveform, sr, 16000)
-            return waveform.squeeze(0).numpy()
+                divisor = math.gcd(int(sr), 16000)
+                waveform = signal.resample_poly(waveform, 16000 // divisor, int(sr) // divisor)
+            return np.asarray(waveform, dtype=np.float32)
 
         utils = (lambda *a, **kw: [], lambda: None, read_audio, lambda: None, lambda: None)
         return model, utils

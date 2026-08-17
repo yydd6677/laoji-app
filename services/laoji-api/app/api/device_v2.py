@@ -9,14 +9,17 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services import (
     device_v2_identity,
+    vnext_capability_cutover,
     vnext_purge_store,
+    vnext_import_transcript_store,
+    vnext_import_transcription_pipeline,
     vnext_task_store,
     vnext_upload_store,
 )
@@ -148,6 +151,14 @@ class V2UploadComplete(V2UploadFence):
     transcription_input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
+class V2TranscriptEventAck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    through_event_seq: int = Field(ge=1, le=9_007_199_254_740_991)
+    projection_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
 def _error(error: device_v2_identity.DeviceV2IdentityError) -> HTTPException:
     return HTTPException(
         status_code=error.status_code,
@@ -164,6 +175,10 @@ def _purge_error(error: vnext_purge_store.VNextPurgeError) -> HTTPException:
 
 
 def _upload_error(error: vnext_upload_store.VNextUploadError) -> HTTPException:
+    return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
+
+
+def _transcript_error(error: vnext_import_transcript_store.VNextImportTranscriptError) -> HTTPException:
     return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
 
 
@@ -268,6 +283,12 @@ async def rotate_key(
 
 @router.get("/capabilities")
 async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(require_device_v2)) -> dict[str, Any]:
+    media_upload_v2 = vnext_capability_cutover.media_upload_cutover_enabled(
+        prerequisites_ready=(
+            vnext_upload_store.upload_enabled()
+            and vnext_import_transcription_pipeline.import_transcription_enabled()
+        ),
+    )
     return {
         "schema_version": 2,
         "device_api": True,
@@ -278,7 +299,8 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "auth": {"p256": True, "bearer_ttl_seconds": device_v2_identity.TOKEN_TTL_SECONDS},
         "domain_routes": True,
         "purge_only_capability": True,
-        "upload_sessions_v2": vnext_upload_store.upload_enabled(),
+        "upload_sessions_v2": media_upload_v2,
+        "import_transcript_events_v2": media_upload_v2,
     }
 
 
@@ -498,6 +520,49 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
     return {"schema_version": 2, "task": task}
+
+
+@router.get("/tasks/{task_id}/transcript-events")
+async def get_transcript_events(
+    task_id: str,
+    after_event_seq: int = Query(default=0, ge=0, le=9_007_199_254_740_991),
+    limit: int = Query(default=256, ge=1, le=1024),
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            vnext_import_transcript_store.get_event_snapshot,
+            context,
+            task_id,
+            after_event_seq=after_event_seq,
+            limit=limit,
+        )
+    except vnext_import_transcript_store.VNextImportTranscriptError as error:
+        raise _transcript_error(error) from error
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TRANSCRIPT_RUN_NOT_FOUND", "message": "转写任务尚未开始"},
+        )
+    return snapshot
+
+
+@router.post("/tasks/{task_id}/transcript-events/ack")
+async def ack_transcript_events(
+    task_id: str,
+    payload: V2TranscriptEventAck,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            vnext_import_transcript_store.ack_events,
+            context,
+            task_id,
+            through_event_seq=payload.through_event_seq,
+            projection_sha256=payload.projection_sha256,
+        )
+    except vnext_import_transcript_store.VNextImportTranscriptError as error:
+        raise _transcript_error(error) from error
 
 
 @router.post("/tasks/{task_id}/cancel")

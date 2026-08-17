@@ -165,3 +165,24 @@ async def get_realtime_speaker_overlay(
             detail={"code": "SPEAKER_RUN_NOT_FOUND", "message": "讲话人处理不存在"},
         )
     return SpeakerOverlaySnapshotV2.model_validate(snapshot).model_dump()
+
+
+@router.get("/tasks/{task_id}/speaker-overlay")
+async def get_import_speaker_overlay(
+    task_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        snapshot = await asyncio.to_thread(
+            vnext_speaker_store.get_overlay_snapshot,
+            context,
+            vnext_speaker_store.import_speaker_run_id(task_id),
+        )
+    except vnext_speaker_store.VNextSpeakerError as error:
+        raise _error(error) from error
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "SPEAKER_RUN_NOT_FOUND", "message": "讲话人处理尚未开始"},
+        )
+    return SpeakerOverlaySnapshotV2.model_validate(snapshot).model_dump()

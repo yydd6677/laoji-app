@@ -166,7 +166,7 @@ def _normalized_source_sha256(value: str) -> str:
     return match.group(1)
 
 
-def _pipeline_fingerprint(*, model_revision: str) -> str:
+def _pipeline_fingerprint(*, model_revision: str, speaker_enabled: bool = True) -> str:
     contract = {
         "schema_version": PIPELINE_SCHEMA_VERSION,
         "model_revision": model_revision,
@@ -182,6 +182,7 @@ def _pipeline_fingerprint(*, model_revision: str) -> str:
             "max_audio_ms": ASR_OFFLINE_BATCH_MAX_AUDIO_MS,
         },
         "speaker": {
+            "enabled": speaker_enabled,
             "model": "campplus-zh-cn",
             "cosine": SPEAKER_COSINE_THRESHOLD,
             "gap": SPEAKER_GAP_THRESHOLD,
@@ -204,6 +205,7 @@ class CheckpointStore:
         source_sha256: str,
         source_size: int,
         model_revision: str,
+        speaker_enabled: bool = True,
     ) -> None:
         safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", job_id)[:160]
         if not safe_job_id:
@@ -217,7 +219,10 @@ class CheckpointStore:
         )
         self.segments = self.root / "segments"
         self.segments.mkdir(parents=True, exist_ok=True)
-        fingerprint = _pipeline_fingerprint(model_revision=model_revision)
+        fingerprint = _pipeline_fingerprint(
+            model_revision=model_revision,
+            speaker_enabled=speaker_enabled,
+        )
         expected = {
             "schema_version": PIPELINE_SCHEMA_VERSION,
             "job_id": job_id,
@@ -725,9 +730,21 @@ def transcribe_recording_asset(
     segment_iterator: Callable[[], Iterable[SpeechAudio]] | None = None,
     progress: Callable[[float], None] | None = None,
     partial: Callable[[list[dict], float, int], None] | None = None,
+    on_speech_segment: Callable[[SpeechAudio], None] | None = None,
+    on_stable_segment: Callable[[SpeechAudio, dict], None] | None = None,
+    speaker_enabled: bool = True,
+    source_size_override: int | None = None,
+    source_duration_ms_override: int | None = None,
 ) -> CompactTranscriptionResult:
     source = Path(source_path)
-    if not source.is_file() or source.stat().st_size < 1:
+    if segment_iterator is None and (not source.is_file() or source.stat().st_size < 1):
+        raise CompactTranscriptionError("recording_content_missing")
+    source_size = (
+        int(source_size_override)
+        if source_size_override is not None
+        else int(source.stat().st_size)
+    )
+    if source_size < 1:
         raise CompactTranscriptionError("recording_content_missing")
     source_digest = _normalized_source_sha256(source_sha256)
     asr = client or BatchAsrClient()
@@ -737,21 +754,26 @@ def transcribe_recording_asset(
         job_id=job_id,
         source_path=source,
         source_sha256=source_digest,
-        source_size=source.stat().st_size,
+        source_size=source_size,
         model_revision=model_revision,
+        speaker_enabled=speaker_enabled,
     )
-    duration_ms = _probe_duration_ms(source)
+    duration_ms = (
+        max(1, int(source_duration_ms_override))
+        if source_duration_ms_override is not None
+        else _probe_duration_ms(source)
+    )
     manager = model_manager or ModelManager.get_instance()
     vad_model = manager.create_vad_model()
     if vad_model is None and segment_iterator is None:
         raise CompactTranscriptionError("vad_not_ready")
-    camp_model = manager.get_camp_model()
+    camp_model = manager.get_camp_model() if speaker_enabled else None
     extractor = (
         SpeakerEmbeddingExtractor(camp_model, device=manager.device)
         if camp_model is not None
         else None
     )
-    profiles = _load_registered_profiles(owner_user_id)
+    profiles = _load_registered_profiles(owner_user_id) if speaker_enabled else []
     records: list[TranscriptRecord] = []
     pending: list[tuple[SpeechAudio, Future[np.ndarray | None] | None]] = []
     speaker_tasks: list[
@@ -794,8 +816,11 @@ def transcribe_recording_asset(
         segments = [item[0] for item in pending]
         results = asr.transcribe(segments, language)
         published: list[dict] = []
+        stable_callbacks: list[tuple[SpeechAudio, dict]] = []
         for segment, embedding_future in pending:
             checkpoint = store.save(segment, results[segment.segment_id])
+            if on_stable_segment is not None:
+                stable_callbacks.append((segment, checkpoint))
             record = TranscriptRecord(
                 ordinal=segment.ordinal,
                 segment_id=segment.segment_id,
@@ -828,6 +853,11 @@ def transcribe_recording_asset(
                 min(1.0, max(0.0, 0.05 + 0.80 * processed_end_ms / max(1, duration_ms))),
                 processed_end_ms,
             )
+        # Stable text is the user-facing critical path. Speaker spool work is
+        # deliberately invoked only after the durable text callback returned.
+        if on_stable_segment is not None:
+            for segment, checkpoint in stable_callbacks:
+                on_stable_segment(segment, checkpoint)
         settle_speaker_tasks()
         while len(speaker_tasks) > SPEAKER_PIPELINE_MAX_PENDING:
             settle_speaker_tasks(wait_for_one=True)
@@ -846,6 +876,8 @@ def transcribe_recording_asset(
             if not _ITEM_ID_RE.fullmatch(segment.segment_id):
                 raise CompactTranscriptionError("segment_id_invalid")
             observed_end_ms = max(observed_end_ms, segment.end_ms)
+            if on_speech_segment is not None:
+                on_speech_segment(segment)
             segment_audio_ms = max(
                 1,
                 round(segment.audio.size * 1000 / SAMPLE_RATE),
@@ -868,6 +900,23 @@ def transcribe_recording_asset(
                     embedding=None,
                 )
                 records.append(record)
+                if partial is not None and record.text.strip():
+                    partial(
+                        [{
+                            "ordinal": record.ordinal,
+                            "segment_id": record.segment_id,
+                            "text": record.text,
+                            "language": record.language,
+                            "model_revision": model_revision,
+                            "start_ms": record.start_ms,
+                            "end_ms": record.end_ms,
+                            "confidence": 0.0,
+                        }],
+                        min(1.0, max(0.0, 0.05 + 0.80 * record.end_ms / max(1, duration_ms))),
+                        record.end_ms,
+                    )
+                if on_stable_segment is not None:
+                    on_stable_segment(segment, checkpoint)
                 if embedding_future is not None:
                     speaker_tasks.append((record, embedding_future))
             else:
@@ -891,7 +940,8 @@ def transcribe_recording_asset(
     records = _deduplicate_overlaps(records)
     if not records:
         raise CompactTranscriptionError("no_speech")
-    _assign_speakers(records, profiles)
+    if speaker_enabled:
+        _assign_speakers(records, profiles)
     turns = [
         {
             "segment_id": record.segment_id,
@@ -907,7 +957,7 @@ def transcribe_recording_asset(
     result = CompactTranscriptionResult(
         model=asr.model,
         model_revision=model_revision,
-        source_duration_ms=duration_ms,
+        source_duration_ms=max(duration_ms, observed_end_ms),
         turns=turns,
         checkpoint_dir=str(store.root),
     )

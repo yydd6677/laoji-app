@@ -54,6 +54,17 @@ export async function getDeviceV2SpeakerOverlay(
   );
 }
 
+export async function getDeviceV2ImportSpeakerOverlay(
+  taskId: string,
+): Promise<DeviceV2SpeakerOverlaySnapshot> {
+  const id = identifier(taskId, '导入转写任务');
+  return deviceV2Request<DeviceV2SpeakerOverlaySnapshot>(
+    `/tasks/${encodeURIComponent(id)}/speaker-overlay`,
+    {},
+    '讲话人结果暂时不可用',
+  );
+}
+
 export interface ApplyDeviceV2SpeakerOverlayInput {
   sessionId: string;
   meetingId: string;
@@ -69,6 +80,32 @@ export async function applyDeviceV2SpeakerOverlay(
   input: ApplyDeviceV2SpeakerOverlayInput,
 ): Promise<SpeakerOverlayRevision | null> {
   const snapshot = await getDeviceV2SpeakerOverlay(input.sessionId);
+  const overlay = snapshot.overlay;
+  if (!overlay || !['succeeded', 'no_content'].includes(snapshot.state)) return null;
+  const createdAtMs = timestamp(overlay.activated_at);
+  return activateSpeakerOverlay({
+    revisionId: `device-v2-speaker:${snapshot.session_id}:${overlay.overlay_revision}:${overlay.output_sha256.slice(7, 23)}`,
+    meetingId: identifier(input.meetingId, '会议'),
+    transcriptRevisionId: identifier(input.transcriptRevisionId, '文字记录版本'),
+    overlayRevision: overlay.overlay_revision,
+    sourceManifestSha256: overlay.source_manifest_sha256,
+    modelRevision: overlay.model_revision,
+    assignments: overlay.assignments.map(item => ({
+      stableSegmentKey: item.stable_segment_key,
+      automaticLabel: item.automatic_label,
+      speakerClusterId: item.speaker_cluster_id,
+      speakerProfileId: item.speaker_profile_id,
+      confidence: item.confidence,
+    })),
+    createdAtMs,
+    activatedAtMs: createdAtMs,
+  });
+}
+
+export async function applyDeviceV2ImportSpeakerOverlay(
+  input: Omit<ApplyDeviceV2SpeakerOverlayInput, 'sessionId'> & { taskId: string },
+): Promise<SpeakerOverlayRevision | null> {
+  const snapshot = await getDeviceV2ImportSpeakerOverlay(input.taskId);
   const overlay = snapshot.overlay;
   if (!overlay || !['succeeded', 'no_content'].includes(snapshot.state)) return null;
   const createdAtMs = timestamp(overlay.activated_at);

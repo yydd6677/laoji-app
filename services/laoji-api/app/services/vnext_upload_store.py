@@ -109,7 +109,7 @@ def _decode_session(row: Any) -> dict[str, Any] | None:
         "mode": row["mode"],
         "part_size": int(row["part_size"]),
         "total_parts": int(row["total_parts"]),
-        "state": row["state"],
+        "state": "consumed" if row["consumed_at"] is not None else row["state"],
         "expires_at": int(row["expires_at"]),
         "verified_asset_id": row["verified_asset_id"],
         "transcription_task_id": row["transcription_task_id"],
@@ -170,6 +170,7 @@ def ensure_vnext_upload_schema() -> None:
                 created_at_epoch INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 completed_at TEXT,
+                consumed_at TEXT,
                 UNIQUE(device_id, epoch_id, client_operation_id),
                 UNIQUE(device_id, epoch_id, asset_id, asset_generation)
             );
@@ -223,6 +224,8 @@ def ensure_vnext_upload_schema() -> None:
                 last_error_code TEXT,
                 created_at TEXT NOT NULL,
                 confirmed_at TEXT,
+                cleanup_reason TEXT NOT NULL DEFAULT 'cancelled'
+                    CHECK(cleanup_reason IN ('cancelled','expired','consumed')),
                 UNIQUE(session_id)
             );
             CREATE INDEX IF NOT EXISTS idx_vnext_cleanup_ready
@@ -235,6 +238,22 @@ def ensure_vnext_upload_schema() -> None:
         if "object_revision" not in verified_columns:
             connection.execute(
                 "ALTER TABLE vnext_verified_assets ADD COLUMN object_revision INTEGER NOT NULL DEFAULT 1"
+            )
+        upload_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(vnext_upload_sessions)").fetchall()
+        }
+        if "consumed_at" not in upload_columns:
+            connection.execute("ALTER TABLE vnext_upload_sessions ADD COLUMN consumed_at TEXT")
+        cleanup_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(vnext_object_cleanup_obligations)"
+            ).fetchall()
+        }
+        if "cleanup_reason" not in cleanup_columns:
+            connection.execute(
+                "ALTER TABLE vnext_object_cleanup_obligations "
+                "ADD COLUMN cleanup_reason TEXT NOT NULL DEFAULT 'cancelled'"
             )
         connection.commit()
 
@@ -859,6 +878,128 @@ def _queue_cleanup(
     return obligation_id
 
 
+def queue_verified_asset_cleanup_in_transaction(
+    connection: Any,
+    *,
+    task_id: str,
+    not_before_epoch: int,
+) -> str:
+    """Queue one verified object after its transcript is durable on the phone.
+
+    The existing cleanup table predates the logical ``consumed`` upload state.
+    Keep its physical terminal state compatible while recording the reason in a
+    separate column; the public session projection reports ``consumed`` only
+    after HEAD confirms that the staging object is absent.
+    """
+    task_id = _safe(task_id, "task_id", 512)
+    not_before_epoch = _nonnegative(not_before_epoch, "not_before_epoch")
+    session = connection.execute(
+        """SELECT * FROM vnext_upload_sessions
+             WHERE transcription_task_id = ? AND state IN ('verified','cleanup_pending')""",
+        (task_id,),
+    ).fetchone()
+    if session is None:
+        raise VNextUploadError("VERIFIED_ASSET_NOT_FOUND", "已校验录音不存在", 404)
+    effective_not_before = max(
+        not_before_epoch,
+        int(session["last_presign_expires_at_epoch"] or 0)
+        if session["mode"] == "single" else 0,
+    )
+    obligation_id = f"cleanup:{session['session_id']}"
+    now = utc_now()
+    existing = connection.execute(
+        "SELECT * FROM vnext_object_cleanup_obligations WHERE obligation_id = ?",
+        (obligation_id,),
+    ).fetchone()
+    if existing is None:
+        connection.execute(
+            """INSERT INTO vnext_object_cleanup_obligations(
+                 obligation_id, device_id, epoch_id, binding_id, binding_generation,
+                 binding_revision, cancel_revision, session_id, opaque_object_ref,
+                 multipart_upload_id, reservation_id, terminal_session_state,
+                 not_before_epoch, state, created_at, cleanup_reason
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'expired', ?, 'pending', ?, 'consumed')""",
+            (
+                obligation_id,
+                session["device_id"],
+                session["epoch_id"],
+                session["binding_id"],
+                session["binding_generation"],
+                session["binding_revision"],
+                session["cancel_revision"],
+                session["session_id"],
+                session["object_key_hmac"],
+                session["multipart_upload_id"],
+                session["reservation_id"],
+                effective_not_before,
+                now,
+            ),
+        )
+    elif existing["state"] != "confirmed" and existing["cleanup_reason"] == "consumed":
+        connection.execute(
+            """UPDATE vnext_object_cleanup_obligations
+                  SET not_before_epoch = MIN(not_before_epoch, ?), state = 'pending',
+                      claim_until_epoch = NULL, last_error_code = NULL
+                WHERE obligation_id = ?""",
+            (effective_not_before, obligation_id),
+        )
+    connection.execute(
+        """UPDATE vnext_verified_assets SET state = 'cleanup_pending'
+             WHERE asset_revision_id = ? AND state = 'sealed'""",
+        (session["verified_asset_id"],),
+    )
+    connection.execute(
+        """UPDATE vnext_capacity_reservations SET state = 'releasing'
+             WHERE reservation_id = ? AND state = 'active'""",
+        (session["reservation_id"],),
+    )
+    connection.execute(
+        """UPDATE vnext_upload_sessions SET state = 'cleanup_pending', updated_at = ?
+             WHERE session_id = ? AND state = 'verified'""",
+        (now, session["session_id"]),
+    )
+    return obligation_id
+
+
+def queue_terminal_task_source_cleanup(*, limit: int = 32) -> int:
+    """Recover cleanup for tasks terminalized outside the domain handler."""
+    ensure_vnext_upload_schema()
+    bounded = max(1, min(128, int(limit)))
+    with control_connection() as connection:
+        rows = connection.execute(
+            """SELECT task.task_id
+                 FROM vnext_tasks task
+                 JOIN vnext_upload_sessions session
+                   ON session.transcription_task_id = task.task_id
+                 JOIN vnext_verified_assets asset
+                   ON asset.asset_revision_id = session.verified_asset_id
+                WHERE task.capability = 'transcript'
+                  AND task.state IN ('failure','cancelled')
+                  AND session.state = 'verified' AND session.consumed_at IS NULL
+                  AND asset.state = 'sealed'
+                ORDER BY task.updated_at, task.task_id LIMIT ?""",
+            (bounded,),
+        ).fetchall()
+    queued = 0
+    for row in rows:
+        with control_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                queue_verified_asset_cleanup_in_transaction(
+                    connection,
+                    task_id=str(row["task_id"]),
+                    not_before_epoch=int(time.time()),
+                )
+            except VNextUploadError as error:
+                connection.rollback()
+                if error.code != "VERIFIED_ASSET_NOT_FOUND":
+                    raise
+            else:
+                connection.commit()
+                queued += 1
+    return queued
+
+
 def cancel_upload_session(
     context: UploadOwnerContext,
     session_id: str,
@@ -945,11 +1086,24 @@ def process_cleanup_obligations(*, limit: int = 32, now_epoch: int | None = None
                        WHERE reservation_id = ? AND state <> 'released'""",
                     (now_epoch, row["reservation_id"]),
                 )
-                connection.execute(
-                    """UPDATE vnext_upload_sessions SET state = ?, updated_at = ?
-                       WHERE session_id = ? AND state = 'cleanup_pending'""",
-                    (row["terminal_session_state"], now, row["session_id"]),
-                )
+                if row["cleanup_reason"] == "consumed":
+                    connection.execute(
+                        """UPDATE vnext_verified_assets SET state = 'consumed'
+                             WHERE reservation_id = ? AND state = 'cleanup_pending'""",
+                        (row["reservation_id"],),
+                    )
+                    connection.execute(
+                        """UPDATE vnext_upload_sessions
+                              SET state = 'verified', consumed_at = ?, updated_at = ?
+                            WHERE session_id = ? AND state = 'cleanup_pending'""",
+                        (now, now, row["session_id"]),
+                    )
+                else:
+                    connection.execute(
+                        """UPDATE vnext_upload_sessions SET state = ?, updated_at = ?
+                           WHERE session_id = ? AND state = 'cleanup_pending'""",
+                        (row["terminal_session_state"], now, row["session_id"]),
+                    )
                 connection.commit()
             confirmed += 1
         except Exception as error:
@@ -1020,7 +1174,7 @@ def queue_scope_cleanup_in_transaction(
             if session["mode"] == "single" else 0,
         )
         before = connection.execute(
-            "SELECT state FROM vnext_object_cleanup_obligations WHERE obligation_id = ?",
+            "SELECT state, cleanup_reason FROM vnext_object_cleanup_obligations WHERE obligation_id = ?",
             (obligation_id,),
         ).fetchone()
         connection.execute(
@@ -1038,6 +1192,14 @@ def queue_scope_cleanup_in_transaction(
                 session["reservation_id"], effective_not_before, now,
             ),
         )
+        if before is not None and before["state"] == "pending":
+            connection.execute(
+                """UPDATE vnext_object_cleanup_obligations
+                      SET terminal_session_state = 'cancelled', cleanup_reason = 'cancelled',
+                          not_before_epoch = MIN(not_before_epoch, ?), last_error_code = NULL
+                    WHERE obligation_id = ? AND state = 'pending'""",
+                (effective_not_before, obligation_id),
+            )
         connection.execute(
             """UPDATE vnext_capacity_reservations SET state = 'releasing'
                WHERE reservation_id = ? AND state = 'active'""",
@@ -1110,3 +1272,64 @@ class _StoredContext:
     def __init__(self, device_id: str, epoch_id: str):
         self.device_id = device_id
         self.epoch_id = epoch_id
+
+
+def list_pending_transcription_sources(limit: int = 32) -> list[dict[str, Any]]:
+    """Return opaque internal source descriptors for active generic transcript tasks."""
+    ensure_vnext_upload_schema()
+    bounded = max(1, min(128, int(limit)))
+    with control_connection() as connection:
+        rows = connection.execute(
+            """SELECT task.task_id, task.device_id, task.epoch_id,
+                      session.session_id AS upload_session_id,
+                      asset.asset_revision_id, asset.asset_id,
+                      asset.generation AS asset_generation, asset.byte_size,
+                      asset.source_sha256, asset.sealed_locator,
+                      session.mime_type, task.created_at
+                 FROM vnext_tasks task
+                 JOIN vnext_upload_sessions session
+                   ON session.transcription_task_id = task.task_id
+                 JOIN vnext_verified_assets asset
+                   ON asset.asset_revision_id = session.verified_asset_id
+                WHERE task.capability = 'transcript' AND task.state = 'active'
+                  AND session.state = 'verified' AND asset.state = 'sealed'
+                ORDER BY task.created_at, task.task_id LIMIT ?""",
+            (bounded,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_verified_transcription_source(
+    context: UploadOwnerContext,
+    task_id: str,
+) -> dict[str, Any]:
+    ensure_vnext_upload_schema()
+    task_id = _safe(task_id, "task_id", 512)
+    with control_connection() as connection:
+        row = connection.execute(
+            """SELECT task.task_id, task.binding_id, task.binding_generation,
+                      session.session_id AS upload_session_id, session.mime_type,
+                      asset.asset_revision_id, asset.asset_id,
+                      asset.generation AS asset_generation, asset.byte_size,
+                      asset.source_sha256, asset.sealed_locator, asset.state AS asset_state,
+                      binding.binding_revision, binding.cancel_revision,
+                      binding.state AS binding_state
+                 FROM vnext_tasks task
+                 JOIN vnext_upload_sessions session
+                   ON session.transcription_task_id = task.task_id
+                 JOIN vnext_verified_assets asset
+                   ON asset.asset_revision_id = session.verified_asset_id
+                 JOIN vnext_bindings binding
+                   ON binding.device_id = task.device_id AND binding.epoch_id = task.epoch_id
+                  AND binding.binding_id = task.binding_id
+                WHERE task.task_id = ? AND task.device_id = ? AND task.epoch_id = ?""",
+            (task_id, context.device_id, context.epoch_id),
+        ).fetchone()
+    if row is None:
+        raise VNextUploadError("VERIFIED_ASSET_NOT_FOUND", "已校验录音不存在", 404)
+    if row["binding_state"] != "active" or row["asset_state"] != "sealed":
+        raise VNextUploadError("VERIFIED_ASSET_UNAVAILABLE", "录音当前不能进入转写", 409)
+    result = dict(row)
+    result["object_key"] = _object_key(str(row["sealed_locator"]))
+    result.pop("sealed_locator", None)
+    return result

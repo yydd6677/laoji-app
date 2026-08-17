@@ -33,6 +33,7 @@ export interface NativeMeetingUploadRequest {
 export interface NativeMeetingUploadRegistration extends NativeTransferLease {
   workId: string;
   operationId: string;
+  protocol: 'legacy' | 'recording-assets-v2' | 'device-v2-r2';
 }
 
 interface LeaseRecord extends NativeTransferLease {
@@ -52,6 +53,8 @@ export interface NativeDeviceV2MeetingUploadRequest {
   assetGeneration: string;
   expectedBytes: number;
   checksumSha256: string;
+  recordingRole: 'primary' | 'secondary';
+  recordingOrigin: 'captured' | 'imported' | 'recovered';
   durationMs?: number | null;
 }
 
@@ -192,7 +195,12 @@ export async function enqueueNativeMeetingUpload(
     durationMs: request.durationMs ?? -1,
     checksumSha256: request.checksumSha256?.trim() ?? '',
   });
-  return { ...lease, workId, operationId: request.operationId };
+  return {
+    ...lease,
+    workId,
+    operationId: request.operationId,
+    protocol: request.protocol ?? 'legacy',
+  };
 }
 
 /**
@@ -222,8 +230,8 @@ export async function enqueueNativeDeviceV2MeetingUpload(
     fileName: request.fileName,
     protocol: 'device-v2-r2',
     recordingAssetId: request.recordingAssetId,
-    recordingRole: 'primary',
-    recordingOrigin: 'captured',
+    recordingRole: request.recordingRole,
+    recordingOrigin: request.recordingOrigin,
     expectedBytes: request.expectedBytes,
     durationMs: request.durationMs ?? -1,
     checksumSha256: request.checksumSha256,
@@ -235,7 +243,12 @@ export async function enqueueNativeDeviceV2MeetingUpload(
     cancelRevision: binding.cancelRevision,
     assetGeneration: request.assetGeneration,
   });
-  return { ...lease, workId, operationId: request.operationId };
+  return {
+    ...lease,
+    workId,
+    operationId: request.operationId,
+    protocol: 'device-v2-r2',
+  };
 }
 
 export async function getNativeMeetingUploadState(workId: string): Promise<NativeUploadState | null> {
