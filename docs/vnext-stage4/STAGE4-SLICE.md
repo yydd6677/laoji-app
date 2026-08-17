@@ -28,6 +28,8 @@ capability barrier，也不改变稳定版或生产服务。
 - `git diff --check`：通过。
 - `python3 -m compileall -q services/laoji-api/app`：通过。
 - SQLite FTS5 外部内容增删探针：通过，新增内容可检索，删除后无残留命中。
+- `python3 tools/vnext/verify_stage4_migration.py`：通过；工具只依赖 Python 标准库，Linux/Windows
+  均可运行。
 - 迁移仅新增 0045，不改变 0040-0044 顺序；未安装到 APK、模拟器或服务器。
 
 ## 未完成
