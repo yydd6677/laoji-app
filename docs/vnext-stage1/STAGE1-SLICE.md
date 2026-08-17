@@ -28,6 +28,9 @@
 - 两个后续切片提交：`52e79fe`（purge journal）、`0a471c5`（日程行级写入）。
 - 绑定清除 fence 提交：`3111a84`（本机 operation）、`d2d2177`（服务端 generic task）。
 - 整理恢复 owner 提交：`c2ad18d`。
+- v2 auth 隔离提交：`9765edb`、`81bcb4d`；服务端已具备 P-256 bootstrap/auth challenge、18-bit PoW、
+  15 分钟 bearer、challenge 单次消费、bootstrap/auth 限流和旧/新密钥双签名轮换测试，但尚未接入
+  Android Keystore、purge capability，不能切换生产。
 
 ## 尚未满足的 Stage 1 退出门
 
@@ -38,6 +41,7 @@
 - 本机清除已覆盖录音、通知、更新文件和 native projection；仍缺少独立 Keystore purge-only capability
   的原生实现和清除 journal 的端到端回放测试。
 - 新 vNext task API 尚未激活 capability barrier，也未接管生产业务调用。
-- 设备 v2 P-256 Keystore/challenge/token 合同尚未接入，当前 API 仍保留 v1 静态设备凭据兼容层。
+- 设备 v2 仍未完成客户端 Keystore、purge capability 和 v1 业务路由迁移；当前业务 API 仍保留 v1
+  静态设备凭据兼容层。
 
 生产 API、生产数据库、公网入口、真机、GPU 和同机其他服务均未修改。
