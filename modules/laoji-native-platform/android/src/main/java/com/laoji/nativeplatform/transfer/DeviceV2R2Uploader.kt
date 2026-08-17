@@ -9,8 +9,11 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Callback
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -21,6 +24,9 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.Signature
 import java.util.UUID
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 internal data class DeviceV2R2UploadInput(
   val deviceId: String,
@@ -74,11 +80,11 @@ internal class DeviceV2R2Uploader(
 
     suspend fun apiJson(path: String, method: String, body: JSONObject? = null): JSONObject {
       val requestBody = body?.toString()?.toRequestBody(JSON_MEDIA_TYPE)
-      var response = client.newCall(apiRequest(lease, path, method, requestBody)).execute()
+      var response = executeCancellable(apiRequest(lease, path, method, requestBody))
       if (response.code == 401 && lease.deviceId != null) {
         response.close()
         lease = DeviceV2LeaseRefresher(client, credentialStore).refresh(lease)
-        response = client.newCall(apiRequest(lease, path, method, requestBody)).execute()
+        response = executeCancellable(apiRequest(lease, path, method, requestBody))
       }
       response.use { value ->
         if (value.code == 408 || value.code == 429 || value.code >= 500) throw RetryableUploadException()
@@ -271,15 +277,40 @@ internal class DeviceV2R2Uploader(
     return result
   }
 
-  private fun putObject(url: String, body: RequestBody, requireEtag: Boolean = false): String {
+  private suspend fun putObject(url: String, body: RequestBody, requireEtag: Boolean = false): String {
     val request = Request.Builder().url(url).put(body).build()
-    client.newCall(request).execute().use { response ->
+    executeCancellable(request).use { response ->
       if (!response.isSuccessful) throw RetryableUploadException()
       val etag = response.header("ETag")?.trim()?.takeIf { it.isNotEmpty() }
       if (requireEtag && etag == null) throw RetryableUploadException()
       return etag ?: "single"
     }
   }
+
+  /**
+   * OkHttp's blocking execute() does not observe coroutine cancellation.  A
+   * WorkManager stop can therefore leave a socket writing after the JS/native
+   * owner has deleted the meeting.  Keep the request off the caller thread,
+   * but cancel the actual Call when the suspending owner is cancelled.
+   */
+  private suspend fun executeCancellable(request: Request): Response =
+    suspendCancellableCoroutine { continuation ->
+      val call = client.newCall(request)
+      continuation.invokeOnCancellation { call.cancel() }
+      call.enqueue(object : Callback {
+        override fun onFailure(call: Call, error: java.io.IOException) {
+          if (continuation.isActive) continuation.resumeWithException(error)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+          if (!continuation.isActive) {
+            response.close()
+            return
+          }
+          continuation.resume(response)
+        }
+      })
+    }
 
   private fun stableIdentity(input: DeviceV2R2UploadInput): String {
     val value = "${input.deviceEpochId}\u0000${input.assetId}\u0000${input.assetGeneration}"

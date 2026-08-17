@@ -11,6 +11,8 @@ from app.services.device_identity import control_connection, utc_now
 
 MEDIA_UPLOAD_CAPABILITY = "media.upload"
 MEDIA_UPLOAD_CONTRACT_REVISION = "device-v2-r2+import-transcript-events-v2"
+REALTIME_ASR_CAPABILITY = "transcript.realtime"
+REALTIME_ASR_CONTRACT_REVISION = "device-v2-realtime-v2"
 
 
 class VNextCapabilityCutoverError(RuntimeError):
@@ -173,3 +175,14 @@ def media_upload_cutover_enabled(*, prerequisites_ready: bool) -> bool:
 
 def guard_legacy_media_upload_submit() -> None:
     guard_legacy_submit(MEDIA_UPLOAD_CAPABILITY, MEDIA_UPLOAD_CONTRACT_REVISION)
+
+
+def realtime_asr_v2_enabled() -> bool:
+    """Return the explicit opt-in for the durable realtime v2 transport.
+
+    The route is shipped in the candidate service for protocol testing, but a
+    missing flag must keep it unavailable.  This prevents a newer client from
+    silently selecting a transport whose mobile projection/latency gates have
+    not been accepted yet.
+    """
+    return os.getenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", "").strip() == "1"

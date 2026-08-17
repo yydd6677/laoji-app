@@ -301,6 +301,7 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "purge_only_capability": True,
         "upload_sessions_v2": media_upload_v2,
         "import_transcript_events_v2": media_upload_v2,
+        "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
     }
 
 

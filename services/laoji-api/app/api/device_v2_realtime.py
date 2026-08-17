@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.schemas.vnext_contracts import RealtimeChunkHeaderV2
 from app.services import (
     device_v2_identity,
+    vnext_capability_cutover,
     vnext_realtime_crypto,
     vnext_realtime_pipeline,
     vnext_realtime_store,
@@ -190,6 +191,15 @@ async def _await_terminal_ack(
 @router.websocket("/realtime/{session_id}")
 async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
+    if not vnext_capability_cutover.realtime_asr_v2_enabled():
+        await websocket.send_json({
+            "schema_version": 2,
+            "type": "error",
+            "code": "REALTIME_V2_DISABLED",
+            "message": "实时转写候选链路尚未启用",
+        })
+        await websocket.close(code=4404)
+        return
     pipeline = None
     attempt = None
     worker_generation = None
