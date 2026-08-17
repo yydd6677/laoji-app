@@ -6,6 +6,7 @@ import type {
 import {
   assertProcessingStage,
   assertScopeKey,
+  createSecureAssetGeneration,
   transitionProcessingStage,
 } from '../../domain/meeting';
 import type {
@@ -13,6 +14,7 @@ import type {
   MeetingNoteRepository,
   RecordingAssetRecord,
 } from '../../data/repositories';
+import { canonicalRecordingSourceSha256 } from '../../data/repositories';
 
 export interface MeetingAudioUploadEvidence {
   status: UploadStatus;
@@ -88,6 +90,7 @@ function assetMatches(left: RecordingAssetRecord | null, right: RecordingAssetRe
   if (!left) return false;
   return left.id === right.id
     && left.meetingId === right.meetingId
+    && left.assetGeneration === right.assetGeneration
     && left.role === right.role
     && left.origin === right.origin
     && left.nativeSessionId === right.nativeSessionId
@@ -98,8 +101,11 @@ function assetMatches(left: RecordingAssetRecord | null, right: RecordingAssetRe
     && left.byteSize === right.byteSize
     && left.durationMs === right.durationMs
     && left.checksumSha256 === right.checksumSha256
+    && left.sourceSha256 === right.sourceSha256
     && left.waveformJson === right.waveformJson
     && left.localState === right.localState
+    && left.uploadOperationId === right.uploadOperationId
+    && left.remoteObjectRevision === right.remoteObjectRevision
     && left.lastVerifiedAtMs === right.lastVerifiedAtMs;
 }
 
@@ -171,7 +177,10 @@ export class ReconcileMeetingAudioUploadUseCase {
       512,
       'recording remote asset ID',
     );
-    optionalTimestamp(input.evidence.remoteAssetRevision, 'recording remote asset revision');
+    const remoteAssetRevision = optionalTimestamp(
+      input.evidence.remoteAssetRevision,
+      'recording remote asset revision',
+    );
     const errorCode = optionalText(input.evidence.errorCode, 512, 'meeting upload error code');
     const nextRetryAtMs = optionalTimestamp(
       input.evidence.nextRetryAtMs,
@@ -275,6 +284,7 @@ export class ReconcileMeetingAudioUploadUseCase {
       const nextAsset: RecordingAssetRecord = {
         id: existingAsset?.id ?? recordingAssetId,
         meetingId,
+        assetGeneration: existingAsset?.assetGeneration ?? createSecureAssetGeneration(),
         role: existingAsset?.role ?? input.evidence.role ?? 'primary',
         origin: existingAsset?.origin ?? input.evidence.origin ?? 'captured',
         nativeSessionId: nativeSessionId ?? existingAsset?.nativeSessionId ?? null,
@@ -285,6 +295,10 @@ export class ReconcileMeetingAudioUploadUseCase {
         byteSize: byteSize ?? existingAsset?.byteSize ?? null,
         durationMs: durationMs ?? existingAsset?.durationMs ?? null,
         checksumSha256: checksumSha256?.toLowerCase() ?? existingAsset?.checksumSha256 ?? null,
+        sourceSha256: checksumSha256
+          ? canonicalRecordingSourceSha256(checksumSha256)
+          : existingAsset?.sourceSha256
+            ?? canonicalRecordingSourceSha256(existingAsset?.checksumSha256),
         waveformJson: existingAsset?.waveformJson ?? null,
         localState: localFileMissing
           ? 'missing'
@@ -293,6 +307,11 @@ export class ReconcileMeetingAudioUploadUseCase {
             : remoteAssetId || existingAsset?.remoteAssetId
               ? 'remote_only'
               : existingAsset?.localState ?? 'missing',
+        // Legacy upload job IDs are UI/runtime evidence, not vNext device_operations.
+        uploadOperationId: existingAsset?.uploadOperationId ?? null,
+        remoteObjectRevision: remoteAssetRevision
+          ?? existingAsset?.remoteObjectRevision
+          ?? null,
         createdAtMs: existingAsset?.createdAtMs ?? updatedAtMs,
         updatedAtMs,
         lastVerifiedAtMs: localFileMissing

@@ -1,6 +1,7 @@
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   transitionProcessingStage,
   type ScopeKey,
 } from '../../domain/meeting';
@@ -9,6 +10,7 @@ import type {
   MeetingNoteRepository,
   RecordingAssetRecord,
 } from '../../data/repositories';
+import { canonicalRecordingSourceSha256 } from '../../data/repositories';
 
 export type AttachImportedMeetingMediaErrorCode =
   | 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE'
@@ -172,6 +174,7 @@ export class AttachImportedMeetingMediaUseCase {
         await transaction.saveRecordingAsset({
           id: assetId,
           meetingId: targetMeetingId,
+          assetGeneration: createSecureAssetGeneration(),
           role: primary ? 'secondary' : 'primary',
           origin: 'imported',
           nativeSessionId: null,
@@ -182,8 +185,11 @@ export class AttachImportedMeetingMediaUseCase {
           byteSize,
           durationMs,
           checksumSha256,
+          sourceSha256: canonicalRecordingSourceSha256(checksumSha256),
           waveformJson: null,
           localState: 'local_ready',
+          uploadOperationId: null,
+          remoteObjectRevision: null,
           createdAtMs: updatedAtMs,
           updatedAtMs,
           lastVerifiedAtMs: updatedAtMs,

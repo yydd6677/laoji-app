@@ -133,9 +133,18 @@ export type RecordingAssetLocalState =
   | 'remote_only'
   | 'missing';
 
+export function canonicalRecordingSourceSha256(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  if (!normalized) return null;
+  if (/^[0-9a-f]{64}$/.test(normalized)) return `sha256:${normalized}`;
+  if (/^sha256:[0-9a-f]{64}$/.test(normalized)) return normalized;
+  throw new Error('recording asset source hash is invalid');
+}
+
 export interface RecordingAssetRecord {
   id: string;
   meetingId: string;
+  assetGeneration: string;
   role: 'primary' | 'secondary';
   origin: RecordingAssetOrigin;
   nativeSessionId: string | null;
@@ -146,8 +155,11 @@ export interface RecordingAssetRecord {
   byteSize: number | null;
   durationMs: number | null;
   checksumSha256: string | null;
+  sourceSha256: string | null;
   waveformJson: string | null;
   localState: RecordingAssetLocalState;
+  uploadOperationId: string | null;
+  remoteObjectRevision: number | null;
   createdAtMs: number;
   updatedAtMs: number;
   lastVerifiedAtMs: number | null;
@@ -375,6 +387,7 @@ export interface MeetingRecordingMergePlan {
   taskId: string;
   sourceRecordingAssetId: string;
   targetRecordingAssetId: string;
+  targetAssetGeneration: string;
 }
 
 export type MeetingRecordingMergeTaskStatus = 'pending' | 'failed' | 'completed';
@@ -387,6 +400,7 @@ export interface MeetingRecordingMergeTaskRecord {
   sourceRecordingAssetId: string;
   targetMeetingId: string;
   targetRecordingAssetId: string;
+  targetAssetGeneration: string;
   sourceAssetSnapshotJson: string;
   status: MeetingRecordingMergeTaskStatus;
   attemptCount: number;
@@ -436,6 +450,11 @@ export interface TranscriptSegmentRecord {
   sourceRecordingAssetRemoteId: string | null;
   /** Server job that produced this segment; immutable once known. */
   sourceTranscriptionJobId: string | null;
+  /** Stable identity across partial, stable and final text events. */
+  stableSegmentKey: string;
+  /** Monotonic text revision for this stable segment identity. */
+  segmentRevision: number;
+  textState: 'partial' | 'stable' | 'final';
   ordinal: number;
   startMs: number;
   endMs: number;
@@ -463,9 +482,11 @@ export interface TranscriptRevisionRecord {
   status: 'realtime_draft' | 'finalizing' | 'ready' | 'failed' | 'archived';
   sourceProvider: string | null;
   sourceModel: string | null;
+  sourceManifestSha256: string | null;
   isActive: boolean;
   createdAtMs: number;
   finalizedAtMs: number | null;
+  textFinalAtMs: number | null;
 }
 
 export type SpeakerCorrectionScope = 'segment' | 'cluster' | 'future_profile';

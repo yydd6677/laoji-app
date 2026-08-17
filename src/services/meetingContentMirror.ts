@@ -8,6 +8,7 @@ import type {
   TranscriptRevisionRecord,
   TranscriptSegmentRecord,
 } from '../data/repositories';
+import { projectLegacyTranscriptSegmentRevisions } from './transcriptSegmentRevision';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import type { ScopeKey } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting/processing';
@@ -264,6 +265,9 @@ export function mirrorLegacyTranscriptContent(
         sourceRecordingAssetId: line.sourceRecordingAssetId,
         sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
         sourceTranscriptionJobId: line.sourceTranscriptionJobId,
+        stableSegmentKey: line.sourceId || `${revisionId}:stable:${ordinal}`,
+        segmentRevision: 1,
+        textState: realtimeDraft ? 'partial' : 'final',
         ordinal,
         startMs: line.startMs,
         endMs: line.endMs,
@@ -286,10 +290,13 @@ export function mirrorLegacyTranscriptContent(
         if (!note || note.lifecycle === 'deleted') return;
         const currentContent = await transaction.getActiveTranscriptContent(note.id, scopeKey);
         const current = currentContent?.revision ?? null;
+        const versionedSegments = current?.id === revisionId && realtimeDraft
+          ? projectLegacyTranscriptSegmentRevisions(currentContent?.segments ?? [], segments)
+          : segments;
         const preservedCanonical = Boolean(current && !isLegacyProvider(current.sourceProvider));
         const activationDecision = evaluateTranscriptCandidate(
           currentContent?.segments ?? [],
-          segments,
+          versionedSegments,
           {
             candidateKind: revisionKind,
             serverCompleteness: options.serverCompleteness,
@@ -305,15 +312,17 @@ export function mirrorLegacyTranscriptContent(
           status: realtimeDraft ? 'realtime_draft' : 'ready',
           sourceProvider: 'legacy-cache',
           sourceModel: null,
+          sourceManifestSha256: null,
           isActive: activate,
           createdAtMs,
           finalizedAtMs,
+          textFinalAtMs: finalizedAtMs,
         };
         const replacingActiveDraftWithShorterCandidate = Boolean(
           current?.id === revisionId && realtimeDraft && !activationDecision.useCandidate,
         );
         if (!replacingActiveDraftWithShorterCandidate) {
-          await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
+          await transaction.saveTranscriptRevision(revision, versionedSegments, scopeKey, {
             activate,
             replaceSegments: realtimeDraft,
           });

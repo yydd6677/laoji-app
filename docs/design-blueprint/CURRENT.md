@@ -9,7 +9,7 @@
 - implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 frozen at `1.1.10 (118)`
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress (0043/0044 migration unit implemented)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress (local media/transcript owner and server upload slice implemented)`
 
 ## 权威文件
 
@@ -71,8 +71,14 @@ mobile SQLite + app-private media (business authority)
 隔离工作树完成 0040–0042、本机 owner、device v2、generic task owner 与原生 purge-only capability，
 退出记录见 [Stage 1 exit](../vnext-stage1/STAGE1-EXIT.md)。未部署服务、未切公开流量、未发布或安装 APK。
 
-Stage 2 的 0043/0044 首个 migration unit 已实现，下一入口是 repository 与媒体/上传/转写切片，不得
-重放 Stage 0/1。更新后的 12 个会议
+Stage 2 已实现 0043/0044、RecordingAsset generation/source/operation 不变量、Transcript stable
+segment/text state、speaker/manual overlay 仓储，以及隔离的 device-v2 R2 upload session、容量预留、
+流式 SHA-256 验证、verified asset + transcription Task 原子提交和 purge-aware cleanup obligation。
+v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据为 TypeScript、迁移重放、共享合同生成
+和 device-v2/upload/purge 测试；这些只证明隔离切片，不代表 Stage 2 退出。
+
+下一入口是 Android `MeetingUploadWorker` v2 客户端、8030 stable batch/stream、连续文字事件和
+NO_SPEECH/恢复/性能门；不得重放 Stage 0/1，也不得激活生产 capability barrier。更新后的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。

@@ -5,7 +5,11 @@ import type {
   OccurrenceReference,
   ScopeKey,
 } from '../../domain/meeting';
-import { assertScopeKey, secureClientIdFactory } from '../../domain/meeting';
+import {
+  assertScopeKey,
+  createSecureAssetGeneration,
+  secureClientIdFactory,
+} from '../../domain/meeting';
 import { loadMeetingOccurrenceSyncConflict } from '../../services/meetingOccurrenceConflicts';
 
 export class MeetingOccurrenceSyncConflictChangedError extends Error {
@@ -77,6 +81,7 @@ export class ResolveMeetingOccurrenceSyncConflictUseCase {
         taskId: this.idFactory.create(),
         sourceRecordingAssetId: asset.id,
         targetRecordingAssetId: this.idFactory.create(),
+        targetAssetGeneration: createSecureAssetGeneration(),
       }));
     const applied = await this.repository.resolveMeetingOccurrenceSyncConflict({
       conflictId,

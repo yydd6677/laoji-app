@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, Iterable
@@ -106,6 +107,37 @@ def create_multipart_upload(*, object_key: str, mime_type: str) -> str:
     if not upload_id:
         raise R2StorageUnavailable("r2_upload_id_missing")
     return upload_id
+
+
+def find_multipart_uploads(*, object_key: str) -> list[str]:
+    """Find recoverable multipart IDs for one deterministic staging key."""
+    client = _client()
+    upload_ids: list[str] = []
+    key_marker: str | None = None
+    upload_marker: str | None = None
+    while True:
+        params: dict[str, Any] = {
+            "Bucket": settings.R2_BUCKET.strip(),
+            "Prefix": object_key,
+        }
+        if key_marker:
+            params["KeyMarker"] = key_marker
+        if upload_marker:
+            params["UploadIdMarker"] = upload_marker
+        response = client.list_multipart_uploads(**params)
+        upload_ids.extend(
+            str(item.get("UploadId") or "").strip()
+            for item in response.get("Uploads") or []
+            if str(item.get("Key") or "") == object_key
+            and str(item.get("UploadId") or "").strip()
+        )
+        if not response.get("IsTruncated"):
+            break
+        key_marker = str(response.get("NextKeyMarker") or "").strip() or None
+        upload_marker = str(response.get("NextUploadIdMarker") or "").strip() or None
+        if not key_marker:
+            break
+    return sorted(set(upload_ids))
 
 
 def presign_upload_parts(
@@ -249,6 +281,19 @@ def object_head(*, object_key: str) -> dict[str, Any] | None:
         "content_length": int(response.get("ContentLength") or 0),
         "etag": str(response.get("ETag") or "").strip(),
     }
+
+
+def stream_object_sha256(*, object_key: str, chunk_size: int = 4 * 1024 * 1024) -> str:
+    """Verify an R2 object without materializing a second whole-file copy."""
+    response = _client().get_object(Bucket=settings.R2_BUCKET.strip(), Key=object_key)
+    body = response["Body"]
+    digest = hashlib.sha256()
+    try:
+        while chunk := body.read(max(64 * 1024, min(16 * 1024 * 1024, int(chunk_size)))):
+            digest.update(chunk)
+    finally:
+        body.close()
+    return f"sha256:{digest.hexdigest()}"
 
 
 def delete_object(*, object_key: str) -> None:

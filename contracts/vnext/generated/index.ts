@@ -10,6 +10,7 @@ export const VNEXT_SCHEMA_SHA256 = {
   "schedule_parse_request_legacy_projection": "35cc3c14a24370dd4c3c48da341c0e40cf25ef8a11f329c4af1b36432d50f84e",
   "schedule_parse_response_legacy_projection": "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc",
   "source_ref": "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712",
-  "task_attempt": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36"
+  "task_attempt": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36",
+  "upload_session": "4aa3c744648c9357f43ae07c7ec5972104912ed94a9e66ab5ea8602f32af7873"
 } as const;
 export type VNextSchemaName = keyof typeof VNEXT_SCHEMA_SHA256;

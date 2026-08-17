@@ -10,10 +10,16 @@ import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.services import device_v2_identity, vnext_purge_store, vnext_task_store
+from app.services import (
+    device_v2_identity,
+    vnext_purge_store,
+    vnext_task_store,
+    vnext_upload_store,
+)
 
 
 router = APIRouter(prefix="/device/v2", tags=["device-v2"])
@@ -104,6 +110,44 @@ class V2TaskRequest(BaseModel):
     creation_reason: Literal["original", "retry", "regenerate"] = "original"
 
 
+class V2UploadFence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    binding_revision: int = Field(ge=1, le=9_007_199_254_740_991)
+    cancel_revision: int = Field(ge=0, le=9_007_199_254_740_991)
+
+
+class V2UploadCreate(V2UploadFence):
+    session_id: str = Field(min_length=8, max_length=180)
+    binding_id: str = Field(min_length=8, max_length=180)
+    client_operation_id: str = Field(min_length=8, max_length=180)
+    asset_id: str = Field(min_length=1, max_length=180)
+    asset_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    expected_size: int = Field(ge=1, le=1024 * 1024 * 1024)
+    expected_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    mime_type: str = Field(min_length=1, max_length=160)
+
+
+class V2UploadParts(V2UploadFence):
+    part_numbers: list[int] = Field(min_length=1, max_length=256)
+
+
+class V2UploadedPart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    part_number: int = Field(ge=1, le=10_000)
+    etag: str = Field(min_length=1, max_length=512)
+
+
+class V2UploadComplete(V2UploadFence):
+    parts: list[V2UploadedPart] = Field(default_factory=list, max_length=10_000)
+    transcription_task_id: str = Field(min_length=8, max_length=180)
+    transcription_generation_id: str = Field(min_length=8, max_length=180)
+    transcription_input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
 def _error(error: device_v2_identity.DeviceV2IdentityError) -> HTTPException:
     return HTTPException(
         status_code=error.status_code,
@@ -116,6 +160,10 @@ def _task_error(error: vnext_task_store.VNextTaskError) -> HTTPException:
 
 
 def _purge_error(error: vnext_purge_store.VNextPurgeError) -> HTTPException:
+    return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
+
+
+def _upload_error(error: vnext_upload_store.VNextUploadError) -> HTTPException:
     return HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message})
 
 
@@ -230,6 +278,7 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "auth": {"p256": True, "bearer_ttl_seconds": device_v2_identity.TOKEN_TTL_SECONDS},
         "domain_routes": True,
         "purge_only_capability": True,
+        "upload_sessions_v2": vnext_upload_store.upload_enabled(),
     }
 
 
@@ -305,6 +354,112 @@ async def get_binding(
     if binding is None:
         raise HTTPException(status_code=404, detail={"code": "BINDING_NOT_FOUND", "message": "会议服务连接不存在"})
     return {"schema_version": 2, "binding": binding}
+
+
+@router.post("/uploads")
+async def create_upload(
+    payload: V2UploadCreate,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> JSONResponse:
+    try:
+        session, reused = await asyncio.to_thread(
+            vnext_upload_store.create_upload_session,
+            context,
+            session_id=payload.session_id,
+            binding_id=payload.binding_id,
+            binding_generation=payload.binding_generation,
+            binding_revision=payload.binding_revision,
+            cancel_revision=payload.cancel_revision,
+            client_operation_id=payload.client_operation_id,
+            asset_id=payload.asset_id,
+            asset_generation=payload.asset_generation,
+            expected_size=payload.expected_size,
+            expected_sha256=payload.expected_sha256,
+            mime_type=payload.mime_type,
+        )
+        return JSONResponse(
+            status_code=200 if reused else 201,
+            content={"schema_version": 2, "reused": reused, "session": session},
+        )
+    except vnext_upload_store.VNextUploadError as error:
+        raise _upload_error(error) from error
+
+
+@router.get("/uploads/{session_id}")
+async def get_upload(
+    session_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        session = await asyncio.to_thread(vnext_upload_store.get_upload_session, context, session_id)
+    except vnext_upload_store.VNextUploadError as error:
+        raise _upload_error(error) from error
+    if session is None:
+        raise HTTPException(status_code=404, detail={"code": "UPLOAD_SESSION_NOT_FOUND", "message": "上传任务不存在"})
+    return {"schema_version": 2, "session": session}
+
+
+@router.post("/uploads/{session_id}/parts")
+async def upload_parts(
+    session_id: str,
+    payload: V2UploadParts,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            vnext_upload_store.presign_upload_parts,
+            context,
+            session_id,
+            binding_generation=payload.binding_generation,
+            binding_revision=payload.binding_revision,
+            cancel_revision=payload.cancel_revision,
+            part_numbers=payload.part_numbers,
+        )
+    except vnext_upload_store.VNextUploadError as error:
+        raise _upload_error(error) from error
+
+
+@router.post("/uploads/{session_id}/complete")
+async def complete_upload(
+    session_id: str,
+    payload: V2UploadComplete,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            vnext_upload_store.complete_upload_session,
+            context,
+            session_id,
+            binding_generation=payload.binding_generation,
+            binding_revision=payload.binding_revision,
+            cancel_revision=payload.cancel_revision,
+            parts=[part.model_dump() for part in payload.parts],
+            transcription_task_id=payload.transcription_task_id,
+            transcription_generation_id=payload.transcription_generation_id,
+            transcription_input_sha256=payload.transcription_input_sha256,
+        )
+    except vnext_upload_store.VNextUploadError as error:
+        raise _upload_error(error) from error
+
+
+@router.delete("/uploads/{session_id}")
+async def delete_upload(
+    session_id: str,
+    payload: V2UploadFence,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> JSONResponse:
+    try:
+        result = await asyncio.to_thread(
+            vnext_upload_store.cancel_upload_session,
+            context,
+            session_id,
+            binding_generation=payload.binding_generation,
+            binding_revision=payload.binding_revision,
+            cancel_revision=payload.cancel_revision,
+        )
+        return JSONResponse(status_code=202 if result["state"] == "cleanup_pending" else 200, content=result)
+    except vnext_upload_store.VNextUploadError as error:
+        raise _upload_error(error) from error
 
 
 @router.post("/tasks")

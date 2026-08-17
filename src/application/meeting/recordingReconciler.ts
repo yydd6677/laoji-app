@@ -1,6 +1,7 @@
 import type { ClientIdFactory, ScopeKey } from '../../domain/meeting';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   secureClientIdFactory,
   transitionProcessingStage,
 } from '../../domain/meeting';
@@ -8,6 +9,7 @@ import type {
   MeetingNoteRepository,
   RecordingAssetRecord,
 } from '../../data/repositories';
+import { canonicalRecordingSourceSha256 } from '../../data/repositories';
 import { CreateMeetingNoteUseCase } from './createMeetingNote';
 
 export interface RecoveredMeetingRecording {
@@ -190,6 +192,7 @@ export class RecordingReconciler {
       const asset: RecordingAssetRecord = {
         id: existing?.id ?? this.idFactory.create(),
         meetingId,
+        assetGeneration: existing?.assetGeneration ?? createSecureAssetGeneration(),
         role: 'primary',
         origin: existing?.origin ?? (recording.recovered ? 'recovered' : 'captured'),
         nativeSessionId: sessionId,
@@ -200,8 +203,12 @@ export class RecordingReconciler {
         byteSize,
         durationMs,
         checksumSha256: existing?.checksumSha256 ?? null,
+        sourceSha256: existing?.sourceSha256
+          ?? canonicalRecordingSourceSha256(existing?.checksumSha256),
         waveformJson: existing?.waveformJson ?? null,
         localState: 'local_ready',
+        uploadOperationId: existing?.uploadOperationId ?? null,
+        remoteObjectRevision: existing?.remoteObjectRevision ?? null,
         createdAtMs: existing?.createdAtMs ?? nowMs,
         updatedAtMs: nowMs,
         lastVerifiedAtMs: nowMs,

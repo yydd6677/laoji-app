@@ -26,6 +26,7 @@ from app.schemas.vnext_contracts import (  # noqa: E402
     ScheduleMentionGraph,
     SourceRef,
     TaskAttempt,
+    UploadSession,
 )
 
 
@@ -33,6 +34,7 @@ SCHEMA_MODELS = {
     "entity_revision": EntityRevision,
     "source_ref": SourceRef,
     "task_attempt": TaskAttempt,
+    "upload_session": UploadSession,
     "projection_envelope": ProjectionEnvelope,
     "schedule_mention_graph": ScheduleMentionGraph,
     "schedule_draft": ScheduleDraft,

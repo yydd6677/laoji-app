@@ -5,6 +5,7 @@ import type {
   TranscriptRevisionRecord,
   TranscriptSegmentRecord,
 } from '../../data/repositories';
+import { projectLegacyTranscriptSegmentRevisions } from '../../services/transcriptSegmentRevision';
 import {
   transitionProcessingStage,
   type ProcessingStage,
@@ -390,27 +391,41 @@ export class SaveGuestMeetingTranscriptUseCase {
         ? `${meetingId}:transcript:canonical-reprocessed:${reprocessedIdentity}`
         : `${meetingId}:transcript:canonical-final:${fingerprint}`);
     const segmentFingerprints = await Promise.all(lines.map(line => this.digest(stableJson(line))));
-    const segments: TranscriptSegmentRecord[] = lines.map((line, ordinal) => ({
-      id: matchingRemoteRevision?.segments[ordinal]?.id
-        ?? `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
-      meetingId,
-      sourceId: line.sourceId || null,
-      sourceRecordingAssetId: line.sourceRecordingAssetId,
-      sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
-      sourceTranscriptionJobId: line.sourceTranscriptionJobId,
-      ordinal,
-      startMs: line.startMs,
-      endMs: line.endMs,
-      speakerClusterId: line.speakerId,
-      speakerProfileId: matchingRemoteRevision?.segments[ordinal]?.speakerProfileId ?? null,
-      speakerLabel: line.speakerLabel,
-      speakerLabelOverride: matchingRemoteRevision?.segments[ordinal]?.speakerLabelOverride ?? null,
-      text: line.text,
-      normalizedText: normalizeText(line.text),
-      confidence: line.confidence,
-      isFinal: matchingRemoteRevision?.segments[ordinal]?.isFinal ?? !realtimeDraft,
-      createdAtMs: line.createdAtMs,
-    }));
+    const segments: TranscriptSegmentRecord[] = lines.map((line, ordinal) => {
+      const previous = matchingRemoteRevision?.segments[ordinal] ?? null;
+      const isFinal = previous?.isFinal ?? !realtimeDraft;
+      const textState: TranscriptSegmentRecord['textState'] = isFinal ? 'final' : 'partial';
+      const unchanged = previous
+        && previous.text === line.text
+        && previous.startMs === line.startMs
+        && previous.endMs === line.endMs
+        && previous.textState === textState;
+      return {
+        id: previous?.id ?? `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
+        meetingId,
+        sourceId: line.sourceId || null,
+        sourceRecordingAssetId: line.sourceRecordingAssetId,
+        sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
+        sourceTranscriptionJobId: line.sourceTranscriptionJobId,
+        stableSegmentKey: previous?.stableSegmentKey
+          ?? line.sourceId
+          ?? `${revisionId}:stable:${ordinal}`,
+        segmentRevision: previous ? previous.segmentRevision + (unchanged ? 0 : 1) : 1,
+        textState,
+        ordinal,
+        startMs: line.startMs,
+        endMs: line.endMs,
+        speakerClusterId: line.speakerId,
+        speakerProfileId: previous?.speakerProfileId ?? null,
+        speakerLabel: line.speakerLabel,
+        speakerLabelOverride: previous?.speakerLabelOverride ?? null,
+        text: line.text,
+        normalizedText: normalizeText(line.text),
+        confidence: line.confidence,
+        isFinal,
+        createdAtMs: line.createdAtMs,
+      };
+    });
     const createdAtMs = matchingRemoteRevision?.revision.createdAtMs ?? lines.reduce(
       (minimum, line) => Math.min(minimum, line.createdAtMs),
       aggregate.note.createdAtMs,
@@ -441,7 +456,10 @@ export class SaveGuestMeetingTranscriptUseCase {
       let updatedAtMs = Math.max(clockMs, meeting.updatedAtMs, stage.updatedAtMs);
       const currentContent = await transaction.getActiveTranscriptContent(meetingId, scopeKey);
       const current = currentContent?.revision ?? null;
-      decision = evaluateTranscriptCandidate(currentContent?.segments ?? [], segments, {
+      const versionedSegments = current?.id === revisionId && realtimeDraft
+        ? projectLegacyTranscriptSegmentRevisions(currentContent?.segments ?? [], segments)
+        : segments;
+      decision = evaluateTranscriptCandidate(currentContent?.segments ?? [], versionedSegments, {
         candidateKind,
         serverCompleteness,
       });
@@ -463,9 +481,11 @@ export class SaveGuestMeetingTranscriptUseCase {
         sourceProvider: matchingRemoteRevision?.revision.sourceProvider
           ?? (scopeKey === 'guest' ? 'canonical-guest' : 'canonical-account'),
         sourceModel: matchingRemoteRevision?.revision.sourceModel ?? null,
+        sourceManifestSha256: matchingRemoteRevision?.revision.sourceManifestSha256 ?? null,
         isActive: activate,
         createdAtMs,
         finalizedAtMs,
+        textFinalAtMs: matchingRemoteRevision?.revision.textFinalAtMs ?? finalizedAtMs,
       } : null;
       activeContentChanged = activate && !sameSemanticContent(currentContent, lines);
       const revisionNeedsWrite = Boolean(
@@ -498,7 +518,7 @@ export class SaveGuestMeetingTranscriptUseCase {
       if (!revisionNeedsWrite && !stageChanged && !meetingSyncStateChanged) return;
 
       if (revisionNeedsWrite && revision) {
-        await transaction.saveTranscriptRevision(revision, segments, scopeKey, {
+        await transaction.saveTranscriptRevision(revision, versionedSegments, scopeKey, {
           activate,
           replaceSegments: realtimeDraft,
         });

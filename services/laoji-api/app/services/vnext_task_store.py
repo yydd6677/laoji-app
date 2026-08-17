@@ -281,6 +281,11 @@ def _decode_task(row: Any) -> dict[str, Any] | None:
     return result
 
 
+def decode_task_row(row: Any) -> dict[str, Any] | None:
+    """Decode a task selected inside another canonical-store transaction."""
+    return _decode_task(row)
+
+
 def _binding_row(connection: Any, context: TaskOwnerContext, binding_id: str) -> Any:
     return connection.execute(
         """SELECT * FROM vnext_bindings

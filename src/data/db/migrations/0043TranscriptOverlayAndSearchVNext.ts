@@ -46,63 +46,6 @@ CREATE TABLE IF NOT EXISTS speaker_manual_overrides (
 CREATE INDEX IF NOT EXISTS idx_speaker_manual_override_revision
   ON speaker_manual_overrides(meeting_id, expected_transcript_revision, needs_review, stable_segment_key);
 
-CREATE TABLE IF NOT EXISTS meeting_search_documents (
-  rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-  meeting_id TEXT NOT NULL UNIQUE REFERENCES meeting_notes(id) ON DELETE CASCADE,
-  title TEXT NOT NULL DEFAULT '',
-  transcript_text TEXT NOT NULL DEFAULT '',
-  manual_note_text TEXT NOT NULL DEFAULT '',
-  updated_at_ms INTEGER NOT NULL
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search_fts USING fts5(
-  title,
-  transcript_text,
-  manual_note_text,
-  content='meeting_search_documents',
-  content_rowid='rowid',
-  tokenize='trigram'
-);
-
-CREATE TRIGGER IF NOT EXISTS meeting_search_documents_ai AFTER INSERT ON meeting_search_documents BEGIN
-  INSERT INTO meeting_search_fts(rowid, title, transcript_text, manual_note_text)
-  VALUES (new.rowid, new.title, new.transcript_text, new.manual_note_text);
-END;
-
-CREATE TRIGGER IF NOT EXISTS meeting_search_documents_ad AFTER DELETE ON meeting_search_documents BEGIN
-  INSERT INTO meeting_search_fts(meeting_search_fts, rowid, title, transcript_text, manual_note_text)
-  VALUES ('delete', old.rowid, old.title, old.transcript_text, old.manual_note_text);
-END;
-
-CREATE TRIGGER IF NOT EXISTS meeting_search_documents_au AFTER UPDATE ON meeting_search_documents BEGIN
-  INSERT INTO meeting_search_fts(meeting_search_fts, rowid, title, transcript_text, manual_note_text)
-  VALUES ('delete', old.rowid, old.title, old.transcript_text, old.manual_note_text);
-  INSERT INTO meeting_search_fts(rowid, title, transcript_text, manual_note_text)
-  VALUES (new.rowid, new.title, new.transcript_text, new.manual_note_text);
-END;
-
-INSERT OR IGNORE INTO meeting_search_documents(meeting_id, title, transcript_text, manual_note_text, updated_at_ms)
-SELECT meeting.id, meeting.title, '', COALESCE(note.content, ''), meeting.updated_at_ms
-FROM meeting_notes meeting
-LEFT JOIN manual_notes note ON note.meeting_id = meeting.id;
-
-UPDATE meeting_search_documents AS search
-SET title = COALESCE((SELECT meeting.title FROM meeting_notes meeting WHERE meeting.id = search.meeting_id), ''),
-    manual_note_text = COALESCE((SELECT note.content FROM manual_notes note WHERE note.meeting_id = search.meeting_id), ''),
-    transcript_text = COALESCE((
-      SELECT group_concat(ordered.text, char(10)) FROM (
-        SELECT segment.text
-        FROM transcript_segments segment
-        INNER JOIN transcript_revisions revision ON revision.id = segment.revision_id
-        WHERE revision.meeting_id = search.meeting_id AND revision.is_active = 1
-        ORDER BY segment.ordinal
-      ) AS ordered
-    ), ''),
-    updated_at_ms = MAX(updated_at_ms, COALESCE((
-      SELECT meeting.updated_at_ms FROM meeting_notes meeting WHERE meeting.id = search.meeting_id
-    ), updated_at_ms));
-
-INSERT INTO meeting_search_fts(meeting_search_fts) VALUES ('rebuild');
 `;
 
 export const transcriptOverlayAndSearchVNext: MeetingDatabaseMigration = {

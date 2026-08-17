@@ -2,11 +2,15 @@ import type { Meeting } from '../types';
 import type { CaptureStatus, MeetingEntryPoint, ScopeKey } from '../domain/meeting';
 import {
   createInitialProcessingStages,
+  createSecureAssetGeneration,
   secureClientIdFactory,
   transitionProcessingStage,
 } from '../domain/meeting';
 import { getFeatureFlags } from '../config/featureFlags';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import {
+  canonicalRecordingSourceSha256,
+  sqliteMeetingNoteRepository,
+} from '../data/repositories';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 import type { CalendarMeetingContext } from './occurrenceMeeting';
 
@@ -154,6 +158,7 @@ export async function mirrorLegacyMeetingStageState(
         primary = {
           id: primary?.id ?? secureClientIdFactory.create(),
           meetingId: note.id,
+          assetGeneration: primary?.assetGeneration ?? createSecureAssetGeneration(),
           role: 'primary',
           origin: primary?.origin ?? 'captured',
           nativeSessionId: primary?.nativeSessionId ?? legacyMeeting.id,
@@ -164,10 +169,14 @@ export async function mirrorLegacyMeetingStageState(
           byteSize: primary?.byteSize ?? null,
           durationMs,
           checksumSha256: primary?.checksumSha256 ?? null,
+          sourceSha256: primary?.sourceSha256
+            ?? canonicalRecordingSourceSha256(primary?.checksumSha256),
           waveformJson: legacyMeeting.audioBars?.length
             ? JSON.stringify(legacyMeeting.audioBars)
             : primary?.waveformJson ?? null,
           localState: legacyMeeting.audioLocalUri ? 'local_ready' : 'remote_only',
+          uploadOperationId: primary?.uploadOperationId ?? null,
+          remoteObjectRevision: primary?.remoteObjectRevision ?? null,
           createdAtMs: primary?.createdAtMs ?? nowMs,
           updatedAtMs: nowMs,
           lastVerifiedAtMs: legacyMeeting.audioLocalUri ? nowMs : primary?.lastVerifiedAtMs ?? null,

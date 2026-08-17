@@ -51,6 +51,11 @@
       "name": "task_attempt",
       "path": "schemas/task_attempt.schema.json",
       "sha256": "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36"
+    },
+    {
+      "name": "upload_session",
+      "path": "schemas/upload_session.schema.json",
+      "sha256": "4aa3c744648c9357f43ae07c7ec5972104912ed94a9e66ab5ea8602f32af7873"
     }
   ]
 }

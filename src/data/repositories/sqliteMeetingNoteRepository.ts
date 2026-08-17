@@ -163,6 +163,7 @@ type MeetingRow = {
 type RecordingAssetRow = {
   id: string;
   meeting_id: string;
+  asset_generation: string;
   role: 'primary' | 'secondary';
   origin: RecordingAssetRecord['origin'];
   native_session_id: string | null;
@@ -173,8 +174,11 @@ type RecordingAssetRow = {
   byte_size: number | null;
   duration_ms: number | null;
   checksum_sha256: string | null;
+  source_sha256: string | null;
   waveform_json: string | null;
   local_state: RecordingAssetRecord['localState'];
+  upload_operation_id: string | null;
+  remote_object_revision: number | null;
   created_at_ms: number;
   updated_at_ms: number;
   last_verified_at_ms: number | null;
@@ -200,6 +204,7 @@ type MeetingRecordingMergeTaskRow = {
   source_recording_asset_id: string;
   target_meeting_id: string;
   target_recording_asset_id: string;
+  target_asset_generation: string;
   source_asset_snapshot_json: string;
   status: MeetingRecordingMergeTaskRecord['status'];
   attempt_count: number;
@@ -413,9 +418,11 @@ type TranscriptRevisionRow = {
   status: TranscriptRevisionRecord['status'];
   source_provider: string | null;
   source_model: string | null;
+  source_manifest_sha256: string | null;
   is_active: number;
   created_at_ms: number;
   finalized_at_ms: number | null;
+  text_final_at_ms: number | null;
 };
 
 type TranscriptSegmentRow = {
@@ -426,6 +433,9 @@ type TranscriptSegmentRow = {
   source_recording_asset_id: string | null;
   source_recording_asset_remote_id: string | null;
   source_transcription_job_id: string | null;
+  stable_segment_key: string;
+  segment_revision: number;
+  text_state: TranscriptSegmentRecord['textState'];
   ordinal: number;
   start_ms: number;
   end_ms: number;
@@ -1057,6 +1067,7 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
   return {
     id: row.id,
     meetingId: row.meeting_id,
+    assetGeneration: row.asset_generation,
     role: row.role,
     origin: row.origin,
     nativeSessionId: row.native_session_id,
@@ -1067,8 +1078,11 @@ function recordingAssetFromRow(row: RecordingAssetRow): RecordingAssetRecord {
     byteSize: row.byte_size,
     durationMs: row.duration_ms,
     checksumSha256: row.checksum_sha256,
+    sourceSha256: row.source_sha256,
     waveformJson: row.waveform_json,
     localState: row.local_state,
+    uploadOperationId: row.upload_operation_id,
+    remoteObjectRevision: row.remote_object_revision,
     createdAtMs: row.created_at_ms,
     updatedAtMs: row.updated_at_ms,
     lastVerifiedAtMs: row.last_verified_at_ms,
@@ -1130,6 +1144,7 @@ function recordingMergeTaskFromRow(row: MeetingRecordingMergeTaskRow): MeetingRe
     sourceRecordingAssetId: row.source_recording_asset_id,
     targetMeetingId: row.target_meeting_id,
     targetRecordingAssetId: row.target_recording_asset_id,
+    targetAssetGeneration: row.target_asset_generation,
     sourceAssetSnapshotJson: row.source_asset_snapshot_json,
     status: row.status,
     attemptCount: row.attempt_count,
@@ -1360,9 +1375,11 @@ function transcriptRevisionFromRow(row: TranscriptRevisionRow): TranscriptRevisi
     status: row.status,
     sourceProvider: row.source_provider,
     sourceModel: row.source_model,
+    sourceManifestSha256: row.source_manifest_sha256,
     isActive: row.is_active === 1,
     createdAtMs: row.created_at_ms,
     finalizedAtMs: row.finalized_at_ms,
+    textFinalAtMs: row.text_final_at_ms,
   };
 }
 
@@ -1394,6 +1411,9 @@ function transcriptSegmentFromRow(row: TranscriptSegmentRow): TranscriptSegmentR
     sourceRecordingAssetId: row.source_recording_asset_id,
     sourceRecordingAssetRemoteId: row.source_recording_asset_remote_id,
     sourceTranscriptionJobId: row.source_transcription_job_id,
+    stableSegmentKey: row.stable_segment_key,
+    segmentRevision: row.segment_revision,
+    textState: row.text_state,
     ordinal: row.ordinal,
     startMs: row.start_ms,
     endMs: row.end_ms,
@@ -3986,6 +4006,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     assertScopeKey(scopeKey);
     await this.assertMeetingInScope(asset.meetingId, scopeKey);
     if (!asset.id.trim() || !asset.meetingId.trim()) throw new Error('recording asset identity is invalid');
+    if (!/^[0-9a-f]{32}$/.test(asset.assetGeneration)) {
+      throw new Error('recording asset generation is invalid');
+    }
     if (asset.role !== 'primary' && asset.role !== 'secondary') throw new Error('recording asset role is invalid');
     if (!RECORDING_LOCAL_STATES.has(asset.localState)) throw new Error('recording asset state is invalid');
     if (!Number.isSafeInteger(asset.createdAtMs) || !Number.isSafeInteger(asset.updatedAtMs)) {
@@ -3997,36 +4020,86 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     if (asset.byteSize !== null && (!Number.isSafeInteger(asset.byteSize) || asset.byteSize < 0)) {
       throw new Error('recording asset size is invalid');
     }
-    const existingOwner = await this.database.getFirstAsync<{ meeting_id: string }>(
-      'SELECT meeting_id FROM recording_assets WHERE id = ?',
+    if (asset.sourceSha256 !== null && !/^sha256:[0-9a-f]{64}$/.test(asset.sourceSha256)) {
+      throw new Error('recording asset source hash is invalid');
+    }
+    if (asset.remoteObjectRevision !== null && (
+      !Number.isSafeInteger(asset.remoteObjectRevision) || asset.remoteObjectRevision < 1
+    )) throw new Error('recording remote object revision is invalid');
+    const existingOwner = await this.database.getFirstAsync<RecordingAssetRow>(
+      'SELECT * FROM recording_assets WHERE id = ?',
       asset.id,
     );
     if (existingOwner && existingOwner.meeting_id !== asset.meetingId) {
       throw new Error('recording asset belongs to a different meeting');
     }
+    if (existingOwner && existingOwner.asset_generation !== asset.assetGeneration) {
+      throw new Error('recording asset generation cannot be changed');
+    }
+    if (
+      existingOwner?.source_sha256
+      && asset.sourceSha256
+      && existingOwner.source_sha256 !== asset.sourceSha256
+    ) throw new Error('recording asset source hash cannot be changed');
+    if (
+      existingOwner?.remote_asset_id
+      && asset.remoteAssetId
+      && existingOwner.remote_asset_id !== asset.remoteAssetId
+    ) throw new Error('recording remote asset identity cannot be changed');
+    if (
+      existingOwner?.remote_object_revision !== null
+      && existingOwner?.remote_object_revision !== undefined
+      && asset.remoteObjectRevision !== null
+      && asset.remoteObjectRevision < existingOwner.remote_object_revision
+    ) throw new Error('recording remote object revision cannot move backwards');
+    if (asset.remoteObjectRevision !== null && !asset.remoteAssetId && !existingOwner?.remote_asset_id) {
+      throw new Error('recording remote object revision requires a remote asset');
+    }
+    if (asset.uploadOperationId) {
+      const operation = await this.database.getFirstAsync<{
+        entity_id: string;
+        capability: string;
+        generation_id: string;
+      }>(
+        `SELECT entity_id, capability, generation_id FROM device_operations
+         WHERE operation_id = ?`,
+        asset.uploadOperationId,
+      );
+      if (
+        !operation
+        || operation.entity_id !== asset.meetingId
+        || operation.capability !== 'media.upload'
+        || operation.generation_id !== asset.assetGeneration
+      ) throw new Error('recording upload operation does not own this asset generation');
+    }
     await this.database.runAsync(
       `INSERT INTO recording_assets (
-         id, meeting_id, role, origin, native_session_id, local_uri, remote_asset_id,
+         id, meeting_id, asset_generation, role, origin, native_session_id, local_uri, remote_asset_id,
          mime_type, file_name, byte_size, duration_ms, checksum_sha256, waveform_json,
-         local_state, created_at_ms, updated_at_ms, last_verified_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         source_sha256, local_state, upload_operation_id, remote_object_revision,
+         created_at_ms, updated_at_ms, last_verified_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          role = excluded.role,
          origin = excluded.origin,
          native_session_id = excluded.native_session_id,
          local_uri = excluded.local_uri,
-         remote_asset_id = excluded.remote_asset_id,
+         remote_asset_id = COALESCE(recording_assets.remote_asset_id, excluded.remote_asset_id),
          mime_type = excluded.mime_type,
          file_name = excluded.file_name,
          byte_size = excluded.byte_size,
          duration_ms = excluded.duration_ms,
          checksum_sha256 = excluded.checksum_sha256,
          waveform_json = excluded.waveform_json,
+         source_sha256 = COALESCE(recording_assets.source_sha256, excluded.source_sha256),
          local_state = excluded.local_state,
+         upload_operation_id = COALESCE(excluded.upload_operation_id, recording_assets.upload_operation_id),
+         remote_object_revision = COALESCE(excluded.remote_object_revision, recording_assets.remote_object_revision),
          updated_at_ms = excluded.updated_at_ms,
          last_verified_at_ms = excluded.last_verified_at_ms`,
       asset.id,
       asset.meetingId,
+      asset.assetGeneration,
       asset.role,
       asset.origin,
       asset.nativeSessionId,
@@ -4038,7 +4111,10 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       asset.durationMs,
       asset.checksumSha256,
       asset.waveformJson,
+      asset.sourceSha256,
       asset.localState,
+      asset.uploadOperationId,
+      asset.remoteObjectRevision,
       asset.createdAtMs,
       asset.updatedAtMs,
       asset.lastVerifiedAtMs,
@@ -4123,8 +4199,16 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     }
     assertNonNegativeInteger(revision.createdAtMs, 'transcript revision creation time');
     assertOptionalNonNegativeInteger(revision.finalizedAtMs, 'transcript revision finalization time');
+    assertOptionalNonNegativeInteger(revision.textFinalAtMs, 'transcript text finalization time');
+    if (
+      revision.sourceManifestSha256 !== null
+      && !/^sha256:[0-9a-f]{64}$/.test(revision.sourceManifestSha256)
+    ) throw new Error('transcript source manifest hash is invalid');
     if (revision.finalizedAtMs !== null && revision.finalizedAtMs < revision.createdAtMs) {
       throw new Error('transcript revision finalization precedes creation');
+    }
+    if (revision.textFinalAtMs !== null && revision.textFinalAtMs < revision.createdAtMs) {
+      throw new Error('transcript text finalization precedes creation');
     }
     if (revision.isActive !== options.activate) {
       throw new Error('transcript revision activation contract is inconsistent');
@@ -4141,6 +4225,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     }
     const segmentIds = new Set<string>();
     const sourceSegmentIds = new Set<string>();
+    const stableSegmentKeys = new Set<string>();
     const ordinals = new Set<number>();
     const sourceRecordingAssets = new Map<string, RecordingAssetRecord | null>();
     for (const segment of segments) {
@@ -4152,13 +4237,27 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       assertNonNegativeInteger(segment.startMs, 'transcript segment start');
       assertNonNegativeInteger(segment.endMs, 'transcript segment end');
       assertNonNegativeInteger(segment.createdAtMs, 'transcript segment creation time');
+      assertRecordId(segment.stableSegmentKey, 'stable transcript segment key');
+      if (!Number.isSafeInteger(segment.segmentRevision) || segment.segmentRevision < 1) {
+        throw new Error('transcript segment revision is invalid');
+      }
+      if (!['partial', 'stable', 'final'].includes(segment.textState)) {
+        throw new Error('transcript segment text state is invalid');
+      }
+      if (segment.isFinal !== (segment.textState === 'final')) {
+        throw new Error('transcript segment final state is inconsistent');
+      }
       if (segment.endMs < segment.startMs) throw new Error('transcript segment end precedes start');
       if (segment.confidence !== null && (
         !Number.isFinite(segment.confidence) || segment.confidence < 0 || segment.confidence > 1
       )) {
         throw new Error('transcript segment confidence is invalid');
       }
-      if (segmentIds.has(segment.id) || ordinals.has(segment.ordinal)) {
+      if (
+        segmentIds.has(segment.id)
+        || ordinals.has(segment.ordinal)
+        || stableSegmentKeys.has(segment.stableSegmentKey)
+      ) {
         throw new Error('transcript revision contains duplicate segment identity');
       }
       if (segment.sourceId && sourceSegmentIds.has(segment.sourceId)) {
@@ -4197,6 +4296,7 @@ class SqliteMeetingTransaction implements MeetingTransaction {
         ) throw new Error('transcript recording asset remote identity is inconsistent');
       }
       segmentIds.add(segment.id);
+      stableSegmentKeys.add(segment.stableSegmentKey);
       if (segment.sourceId) sourceSegmentIds.add(segment.sourceId);
       ordinals.add(segment.ordinal);
     }
@@ -4217,6 +4317,17 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     if (existingRow?.remote_id && revision.remoteId && existingRow.remote_id !== revision.remoteId) {
       throw new Error('transcript remote revision identity cannot be changed');
     }
+    if (
+      existingRow?.source_manifest_sha256
+      && revision.sourceManifestSha256
+      && existingRow.source_manifest_sha256 !== revision.sourceManifestSha256
+    ) throw new Error('transcript source manifest cannot be changed');
+    if (
+      existingRow?.text_final_at_ms !== null
+      && existingRow?.text_final_at_ms !== undefined
+      && revision.textFinalAtMs !== null
+      && existingRow.text_final_at_ms !== revision.textFinalAtMs
+    ) throw new Error('transcript text finalization time cannot be changed');
     if (existingRow && revision.kind !== 'realtime_draft') {
       const existing = transcriptRevisionFromRow(existingRow);
       if (
@@ -4224,8 +4335,11 @@ class SqliteMeetingTransaction implements MeetingTransaction {
         existing.status !== revision.status ||
         existing.sourceProvider !== revision.sourceProvider ||
         existing.sourceModel !== revision.sourceModel ||
+        (existing.sourceManifestSha256 !== null
+          && existing.sourceManifestSha256 !== revision.sourceManifestSha256) ||
         existing.createdAtMs !== revision.createdAtMs ||
-        existing.finalizedAtMs !== revision.finalizedAtMs
+        existing.finalizedAtMs !== revision.finalizedAtMs ||
+        (existing.textFinalAtMs !== null && existing.textFinalAtMs !== revision.textFinalAtMs)
       ) {
         throw new Error('immutable transcript revision cannot be replaced');
       }
@@ -4241,6 +4355,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           && row.speaker_profile_id === segment.speakerProfileId
           && row.speaker_label === segment.speakerLabel && row.text === segment.text
           && row.normalized_text === segment.normalizedText && row.confidence === segment.confidence
+          && row.stable_segment_key === segment.stableSegmentKey
+          && row.segment_revision === segment.segmentRevision
+          && row.text_state === segment.textState
           && row.is_final === (segment.isFinal ? 1 : 0) && row.created_at_ms === segment.createdAtMs;
       });
       if (!matches) throw new Error('immutable transcript segments cannot be replaced');
@@ -4297,6 +4414,20 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           revision.id,
         );
       }
+      if (!existingRow.source_manifest_sha256 && revision.sourceManifestSha256) {
+        await this.database.runAsync(
+          'UPDATE transcript_revisions SET source_manifest_sha256 = ? WHERE id = ?',
+          revision.sourceManifestSha256,
+          revision.id,
+        );
+      }
+      if (existingRow.text_final_at_ms === null && revision.textFinalAtMs !== null) {
+        await this.database.runAsync(
+          'UPDATE transcript_revisions SET text_final_at_ms = ? WHERE id = ?',
+          revision.textFinalAtMs,
+          revision.id,
+        );
+      }
     }
 
     if (options.activate) {
@@ -4310,8 +4441,8 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       await this.database.runAsync(
         `INSERT INTO transcript_revisions (
            id, meeting_id, remote_id, kind, status, source_provider, source_model,
-           is_active, created_at_ms, finalized_at_ms
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           source_manifest_sha256, is_active, created_at_ms, finalized_at_ms, text_final_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         revision.id,
         revision.meetingId,
         revision.remoteId,
@@ -4319,13 +4450,59 @@ class SqliteMeetingTransaction implements MeetingTransaction {
         revision.status,
         revision.sourceProvider,
         revision.sourceModel,
+        revision.sourceManifestSha256,
         options.activate ? 1 : 0,
         revision.createdAtMs,
         revision.finalizedAtMs,
+        revision.textFinalAtMs,
       );
     } else if (revision.kind === 'realtime_draft') {
       if (!options.replaceSegments) {
         throw new Error('mutable transcript revision requires an explicit segment replacement');
+      }
+      const previousSegments = await this.database.getAllAsync<TranscriptSegmentRow>(
+        'SELECT * FROM transcript_segments WHERE revision_id = ? ORDER BY ordinal',
+        revision.id,
+      );
+      const nextByStableKey = new Map(segments.map(segment => [segment.stableSegmentKey, segment]));
+      const stateRank: Record<TranscriptSegmentRecord['textState'], number> = {
+        partial: 0,
+        stable: 1,
+        final: 2,
+      };
+      for (const previous of previousSegments) {
+        const next = nextByStableKey.get(previous.stable_segment_key);
+        if (!next) {
+          if (previous.text_state !== 'partial') {
+            throw new Error('stable transcript segment cannot disappear');
+          }
+          continue;
+        }
+        if (next.segmentRevision < previous.segment_revision) {
+          throw new Error('transcript segment revision cannot move backwards');
+        }
+        if (stateRank[next.textState] < stateRank[previous.text_state]) {
+          throw new Error('transcript segment text state cannot move backwards');
+        }
+        const changed = previous.id !== next.id
+          || previous.source_segment_id !== next.sourceId
+          || previous.source_recording_asset_id !== next.sourceRecordingAssetId
+          || previous.source_recording_asset_remote_id !== next.sourceRecordingAssetRemoteId
+          || previous.source_transcription_job_id !== next.sourceTranscriptionJobId
+          || previous.ordinal !== next.ordinal
+          || previous.start_ms !== next.startMs
+          || previous.end_ms !== next.endMs
+          || previous.text !== next.text
+          || previous.normalized_text !== next.normalizedText
+          || previous.confidence !== next.confidence
+          || previous.text_state !== next.textState
+          || previous.is_final !== (next.isFinal ? 1 : 0);
+        if (changed && next.segmentRevision <= previous.segment_revision) {
+          throw new Error('changed transcript segment did not advance its revision');
+        }
+        if (previous.text_state === 'final' && changed) {
+          throw new Error('final transcript segment cannot be changed');
+        }
       }
       const citationCount = Number((await this.database.getFirstAsync<{ count: number }>(
         `SELECT (
@@ -4344,14 +4521,17 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       await this.database.runAsync(
         `UPDATE transcript_revisions SET
            remote_id = COALESCE(remote_id, ?), status = ?, source_provider = ?,
-           source_model = ?, is_active = ?, finalized_at_ms = ?
+           source_model = ?, source_manifest_sha256 = COALESCE(source_manifest_sha256, ?),
+           is_active = ?, finalized_at_ms = ?, text_final_at_ms = COALESCE(text_final_at_ms, ?)
          WHERE id = ?`,
         revision.remoteId,
         revision.status,
         revision.sourceProvider,
         revision.sourceModel,
+        revision.sourceManifestSha256,
         options.activate ? 1 : 0,
         revision.finalizedAtMs,
+        revision.textFinalAtMs,
         revision.id,
       );
     } else if (existingRow.is_active !== (options.activate ? 1 : 0)) {
@@ -4366,13 +4546,14 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       for (const segment of segments) {
         await this.database.runAsync(
           `INSERT INTO transcript_segments (
-             id, revision_id, meeting_id, source_segment_id,
+           id, revision_id, meeting_id, source_segment_id,
              source_recording_asset_id, source_recording_asset_remote_id,
-             source_transcription_job_id, ordinal, start_ms, end_ms,
+             source_transcription_job_id, stable_segment_key, segment_revision, text_state,
+             ordinal, start_ms, end_ms,
              speaker_cluster_id, speaker_profile_id, speaker_label,
              speaker_label_override, text, normalized_text, confidence,
              is_final, created_at_ms
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           segment.id,
           revision.id,
           segment.meetingId,
@@ -4380,6 +4561,9 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           segment.sourceRecordingAssetId,
           segment.sourceRecordingAssetRemoteId,
           segment.sourceTranscriptionJobId,
+          segment.stableSegmentKey,
+          segment.segmentRevision,
+          segment.textState,
           segment.ordinal,
           segment.startMs,
           segment.endMs,
@@ -7632,16 +7816,22 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
     }
     const mergePlanBySourceAssetId = new Map<string, ResolveMeetingOccurrenceSyncConflictInput['recordingMergePlans'][number]>();
     const targetAssetIds = new Set<string>();
+    const targetAssetGenerations = new Set<string>();
     input.recordingMergePlans.forEach(plan => {
       assertRecordId(plan.taskId, 'recording merge task ID');
       assertRecordId(plan.sourceRecordingAssetId, 'recording merge source asset ID');
       assertRecordId(plan.targetRecordingAssetId, 'recording merge target asset ID');
+      if (!/^[0-9a-f]{32}$/.test(plan.targetAssetGeneration)) {
+        throw new Error('recording merge target asset generation is invalid');
+      }
       if (
         mergePlanBySourceAssetId.has(plan.sourceRecordingAssetId)
         || targetAssetIds.has(plan.targetRecordingAssetId)
+        || targetAssetGenerations.has(plan.targetAssetGeneration)
       ) throw new Error('occurrence recording merge plan is duplicated');
       mergePlanBySourceAssetId.set(plan.sourceRecordingAssetId, plan);
       targetAssetIds.add(plan.targetRecordingAssetId);
+      targetAssetGenerations.add(plan.targetAssetGeneration);
     });
 
     let touchedMeetingIds: readonly string[] = [];
@@ -7793,10 +7983,10 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
           `INSERT INTO meeting_recording_merge_tasks (
              id, scope_key, detached_history_id,
              source_meeting_id, source_recording_asset_id,
-             target_meeting_id, target_recording_asset_id,
+             target_meeting_id, target_recording_asset_id, target_asset_generation,
              source_asset_snapshot_json, status, attempt_count,
              last_error_code, retryable, created_at_ms, updated_at_ms, completed_at_ms
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, 1, ?, ?, NULL)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, 1, ?, ?, NULL)`,
           plan.taskId,
           input.scopeKey,
           input.detachedHistoryId,
@@ -7804,10 +7994,12 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
           source.id,
           input.targetMeetingId,
           plan.targetRecordingAssetId,
+          plan.targetAssetGeneration,
           JSON.stringify({
-            schema_version: 1,
+            schema_version: 2,
             id: source.id,
             meeting_id: source.meeting_id,
+            asset_generation: source.asset_generation,
             role: source.role,
             origin: source.origin,
             native_session_id: source.native_session_id,
@@ -7818,8 +8010,11 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
             byte_size: source.byte_size,
             duration_ms: source.duration_ms,
             checksum_sha256: source.checksum_sha256,
+            source_sha256: source.source_sha256,
             waveform_json: source.waveform_json,
             local_state: source.local_state,
+            upload_operation_id: source.upload_operation_id,
+            remote_object_revision: source.remote_object_revision,
             created_at_ms: source.created_at_ms,
             updated_at_ms: source.updated_at_ms,
             last_verified_at_ms: source.last_verified_at_ms,
@@ -7970,6 +8165,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
       if (task.target_recording_asset_id !== input.recordingAsset.id) {
         throw new Error('recording merge target asset changed');
       }
+      if (task.target_asset_generation !== input.recordingAsset.assetGeneration) {
+        throw new Error('recording merge target asset generation changed');
+      }
       if (task.status === 'completed') {
         const existing = await database.getFirstAsync<RecordingAssetRow>(
           'SELECT * FROM recording_assets WHERE id = ? AND meeting_id = ?',
@@ -8030,13 +8228,15 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         : 'primary';
       await database.runAsync(
         `INSERT INTO recording_assets (
-           id, meeting_id, role, origin, native_session_id, local_uri, remote_asset_id,
+           id, meeting_id, asset_generation, role, origin, native_session_id, local_uri, remote_asset_id,
            mime_type, file_name, byte_size, duration_ms, checksum_sha256, waveform_json,
-           local_state, created_at_ms, updated_at_ms, last_verified_at_ms
-         ) VALUES (?, ?, ?, 'recovered', NULL, ?, NULL, ?, ?, ?, ?, ?, ?,
-           'local_ready', ?, ?, ?)`,
+           source_sha256, local_state, upload_operation_id, remote_object_revision,
+           created_at_ms, updated_at_ms, last_verified_at_ms
+         ) VALUES (?, ?, ?, ?, 'recovered', NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?,
+           'local_ready', ?, ?, ?, ?, ?)`,
         task.target_recording_asset_id,
         task.target_meeting_id,
+        task.target_asset_generation,
         role,
         input.recordingAsset.localUri,
         input.recordingAsset.mimeType,
@@ -8045,6 +8245,9 @@ export class SqliteMeetingNoteRepository implements MeetingNoteRepository {
         input.recordingAsset.durationMs,
         input.recordingAsset.checksumSha256,
         input.recordingAsset.waveformJson,
+        input.recordingAsset.sourceSha256,
+        input.recordingAsset.uploadOperationId,
+        input.recordingAsset.remoteObjectRevision,
         input.completedAtMs,
         input.completedAtMs,
         input.completedAtMs,

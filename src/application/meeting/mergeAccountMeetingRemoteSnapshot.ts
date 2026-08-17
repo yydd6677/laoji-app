@@ -10,6 +10,7 @@ import type {
 } from '../../domain/meeting';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   createInitialProcessingStages,
   secureClientIdFactory,
   transitionProcessingStage,
@@ -403,6 +404,7 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
             await transaction.saveRecordingAsset({
               id: this.idFactory.create(),
               meetingId,
+              assetGeneration: createSecureAssetGeneration(),
               role: 'primary',
               origin: 'recovered',
               nativeSessionId: null,
@@ -413,8 +415,11 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
               byteSize: null,
               durationMs: null,
               checksumSha256: null,
+              sourceSha256: null,
               waveformJson: null,
               localState: 'remote_only',
+              uploadOperationId: null,
+              remoteObjectRevision: null,
               createdAtMs: snapshot.createdAtMs,
               updatedAtMs: snapshot.updatedAtMs,
               lastVerifiedAtMs: null,
@@ -499,6 +504,7 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
           await transaction.saveRecordingAsset({
             id: this.idFactory.create(),
             meetingId: current.id,
+            assetGeneration: createSecureAssetGeneration(),
             role: 'primary',
             origin: 'recovered',
             nativeSessionId: null,
@@ -509,8 +515,11 @@ export class MergeAccountMeetingRemoteSnapshotUseCase {
             byteSize: null,
             durationMs: null,
             checksumSha256: null,
+            sourceSha256: null,
             waveformJson: null,
             localState: 'remote_only',
+            uploadOperationId: null,
+            remoteObjectRevision: null,
             createdAtMs: snapshot.createdAtMs,
             updatedAtMs,
             lastVerifiedAtMs: null,

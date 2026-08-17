@@ -12,6 +12,7 @@ import type {
 import {
   assertScopeKey,
   calendarMeetingSeriesKey,
+  createSecureAssetGeneration,
   createInitialProcessingStages,
   secureClientIdFactory,
 } from '../../domain/meeting';
@@ -21,9 +22,11 @@ import type {
   RecordingAssetLocalState,
   RecordingAssetOrigin,
 } from '../../data/repositories';
+import { canonicalRecordingSourceSha256 } from '../../data/repositories';
 
 export interface InitialRecordingAssetInput {
   id?: string;
+  assetGeneration?: string;
   origin: RecordingAssetOrigin;
   nativeSessionId?: string | null;
   localUri?: string | null;
@@ -36,6 +39,8 @@ export interface InitialRecordingAssetInput {
   waveformJson?: string | null;
   localState: RecordingAssetLocalState;
   lastVerifiedAtMs?: number | null;
+  uploadOperationId?: string | null;
+  remoteObjectRevision?: number | null;
 }
 
 export interface CreateMeetingNoteInput {
@@ -330,6 +335,8 @@ export class CreateMeetingNoteUseCase {
         await transaction.saveRecordingAsset({
           id: assetId,
           meetingId: requestedId,
+          assetGeneration: input.recordingAsset.assetGeneration?.trim().toLowerCase()
+            || createSecureAssetGeneration(),
           role: 'primary',
           origin: input.recordingAsset.origin,
           nativeSessionId: input.recordingAsset.nativeSessionId?.trim() || null,
@@ -340,8 +347,11 @@ export class CreateMeetingNoteUseCase {
           byteSize,
           durationMs,
           checksumSha256: input.recordingAsset.checksumSha256?.trim() || null,
+          sourceSha256: canonicalRecordingSourceSha256(input.recordingAsset.checksumSha256),
           waveformJson: input.recordingAsset.waveformJson ?? null,
           localState: input.recordingAsset.localState,
+          uploadOperationId: input.recordingAsset.uploadOperationId?.trim() || null,
+          remoteObjectRevision: input.recordingAsset.remoteObjectRevision ?? null,
           createdAtMs: nowMs,
           updatedAtMs: nowMs,
           lastVerifiedAtMs,

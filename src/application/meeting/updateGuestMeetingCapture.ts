@@ -6,6 +6,7 @@ import type {
 } from '../../domain/meeting';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   secureClientIdFactory,
   transitionProcessingStage,
   type ClientIdFactory,
@@ -16,6 +17,7 @@ import type {
   RecordingAssetLocalState,
   RecordingAssetRecord,
 } from '../../data/repositories';
+import { canonicalRecordingSourceSha256 } from '../../data/repositories';
 import type { MeetingRootSyncOperation } from './updateMeetingNote';
 
 type CaptureTransition = Extract<ProcessingStageTransition, { stage: 'capture' }>;
@@ -282,6 +284,7 @@ export class UpdateGuestMeetingCaptureUseCase {
         const recordingAsset: RecordingAssetRecord = {
           id: existing?.id ?? this.idFactory.create(),
           meetingId,
+          assetGeneration: existing?.assetGeneration ?? createSecureAssetGeneration(),
           role: 'primary',
           origin: existing?.origin ?? 'captured',
           nativeSessionId,
@@ -298,10 +301,15 @@ export class UpdateGuestMeetingCaptureUseCase {
           checksumSha256: hasOwn(patch, 'checksumSha256')
             ? optionalText(patch.checksumSha256, 512, 'recording checksum')
             : existing?.checksumSha256 ?? null,
+          sourceSha256: hasOwn(patch, 'checksumSha256')
+            ? canonicalRecordingSourceSha256(patch.checksumSha256)
+            : existing?.sourceSha256 ?? canonicalRecordingSourceSha256(existing?.checksumSha256),
           waveformJson: hasOwn(patch, 'waveformJson')
             ? patch.waveformJson ?? null
             : existing?.waveformJson ?? null,
           localState: patch.localState,
+          uploadOperationId: existing?.uploadOperationId ?? null,
+          remoteObjectRevision: existing?.remoteObjectRevision ?? null,
           createdAtMs: existing?.createdAtMs ?? updatedAtMs,
           updatedAtMs,
           lastVerifiedAtMs,

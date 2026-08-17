@@ -99,3 +99,58 @@ def test_worker_attempt_routes_are_not_device_bearer_surface(tmp_path, monkeypat
     client, _ = _client(tmp_path, monkeypatch)
     paths = {route.path for route in client.app.routes}
     assert not any("attempts" in path for path in paths if path.startswith("/api/device/v2"))
+
+
+def test_upload_wire_routes_keep_binding_fence_and_task_identity(tmp_path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+    captured: dict[str, object] = {}
+
+    def fake_create(_context, **kwargs):
+        captured.update(kwargs)
+        return {
+            "schema_version": 2,
+            "session_id": kwargs["session_id"],
+            "binding_id": kwargs["binding_id"],
+            "binding_generation": kwargs["binding_generation"],
+            "binding_revision": kwargs["binding_revision"],
+            "cancel_revision": kwargs["cancel_revision"],
+            "client_operation_id": kwargs["client_operation_id"],
+            "asset_id": kwargs["asset_id"],
+            "asset_generation": kwargs["asset_generation"],
+            "expected_size": kwargs["expected_size"],
+            "expected_sha256": kwargs["expected_sha256"],
+            "mime_type": kwargs["mime_type"],
+            "mode": "single",
+            "part_size": 5 * 1024 * 1024,
+            "total_parts": 1,
+            "state": "active",
+            "expires_at": 1000,
+            "verified_asset_id": None,
+            "transcription_task_id": None,
+            "put_url": "https://r2.invalid/put",
+            "uploaded_parts": [],
+        }, False
+
+    monkeypatch.setattr(device_v2.vnext_upload_store, "create_upload_session", fake_create)
+    response = client.post(
+        "/api/device/v2/uploads",
+        json={
+            "schema_version": 2,
+            "session_id": "upload-wire-session",
+            "binding_id": "binding-wire-upload",
+            "binding_generation": "a" * 32,
+            "binding_revision": 3,
+            "cancel_revision": 2,
+            "client_operation_id": "upload-wire-operation",
+            "asset_id": "asset-wire",
+            "asset_generation": "b" * 32,
+            "expected_size": 123,
+            "expected_sha256": "sha256:" + "c" * 64,
+            "mime_type": "audio/m4a",
+        },
+    )
+    assert response.status_code == 201
+    assert captured["binding_revision"] == 3
+    assert captured["cancel_revision"] == 2
+    assert captured["asset_generation"] == "b" * 32
+    assert response.json()["session"]["put_url"] == "https://r2.invalid/put"

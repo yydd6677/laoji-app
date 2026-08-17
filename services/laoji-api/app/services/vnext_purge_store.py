@@ -250,7 +250,9 @@ def _cancel_task_rows(connection: sqlite3.Connection, where_sql: str, parameters
     connection.executemany("DELETE FROM vnext_tasks WHERE task_id = ?", [(task_id,) for task_id in task_ids])
 
 
-def _purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
+def _begin_purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
+    from app.services import vnext_upload_store
+
     where = "device_id = ? AND epoch_id = ? AND binding_id = ? AND binding_generation = ?"
     parameters = (
         capability["device_id"], capability["epoch_id"],
@@ -261,13 +263,18 @@ def _purge_binding(connection: sqlite3.Connection, capability: sqlite3.Row) -> N
         parameters,
     )
     _cancel_task_rows(connection, where, parameters)
-    connection.execute(
-        f"UPDATE vnext_bindings SET state = 'purged', purged_at = ?, updated_at = ? WHERE {where}",
-        (_now(), _now(), *parameters),
+    vnext_upload_store.queue_scope_cleanup_in_transaction(
+        connection,
+        device_id=str(capability["device_id"]),
+        epoch_id=str(capability["epoch_id"]),
+        binding_id=str(capability["binding_id"]),
+        binding_generation=str(capability["binding_generation"]),
     )
 
 
-def _purge_epoch(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
+def _begin_purge_epoch(connection: sqlite3.Connection, capability: sqlite3.Row) -> None:
+    from app.services import vnext_upload_store
+
     device_id = str(capability["device_id"])
     epoch_id = str(capability["epoch_id"])
     now = _now()
@@ -289,15 +296,85 @@ def _purge_epoch(connection: sqlite3.Connection, capability: sqlite3.Row) -> Non
         (device_id, epoch_id),
     )
     _cancel_task_rows(connection, "device_id = ? AND epoch_id = ?", (device_id, epoch_id))
-    connection.execute(
-        "UPDATE vnext_bindings SET state = 'purged', purged_at = ?, updated_at = ? "
-        "WHERE device_id = ? AND epoch_id = ?",
-        (now, now, device_id, epoch_id),
+    vnext_upload_store.queue_scope_cleanup_in_transaction(
+        connection,
+        device_id=device_id,
+        epoch_id=epoch_id,
     )
+
+
+def _finish_purge_scope(connection: sqlite3.Connection, capability: sqlite3.Row) -> bool:
+    from app.services import vnext_upload_store
+
+    device_id = str(capability["device_id"])
+    epoch_id = str(capability["epoch_id"])
+    binding_id = str(capability["binding_id"]) if capability["scope_kind"] == "binding" else None
+    binding_generation = (
+        str(capability["binding_generation"])
+        if capability["scope_kind"] == "binding"
+        else None
+    )
+    if vnext_upload_store.scope_cleanup_pending(
+        connection,
+        device_id=device_id,
+        epoch_id=epoch_id,
+        binding_id=binding_id,
+        binding_generation=binding_generation,
+    ):
+        return False
+    vnext_upload_store.finalize_scope_cleanup_in_transaction(
+        connection,
+        device_id=device_id,
+        epoch_id=epoch_id,
+        binding_id=binding_id,
+        binding_generation=binding_generation,
+    )
+    now = _now()
+    if capability["scope_kind"] == "binding":
+        connection.execute(
+            """UPDATE vnext_bindings SET state = 'purged', purged_at = ?, updated_at = ?
+               WHERE device_id = ? AND epoch_id = ?
+                 AND binding_id = ? AND binding_generation = ?""",
+            (now, now, device_id, epoch_id, binding_id, binding_generation),
+        )
+    else:
+        connection.execute(
+            """UPDATE vnext_bindings SET state = 'purged', purged_at = ?, updated_at = ?
+               WHERE device_id = ? AND epoch_id = ?""",
+            (now, now, device_id, epoch_id),
+        )
+    return True
+
+
+def _finish_purge_record(
+    connection: sqlite3.Connection,
+    capability: sqlite3.Row,
+    purge: sqlite3.Row,
+) -> bool:
+    if not _finish_purge_scope(connection, capability):
+        connection.execute(
+            "UPDATE v2_purges SET state = 'running', updated_at = ? WHERE purge_id = ?",
+            (_now(), purge["purge_id"]),
+        )
+        return False
+    now = _now()
+    connection.execute(
+        """UPDATE v2_purges SET state = 'confirmed', last_error_code = NULL,
+                  updated_at = ?, confirmed_at = ? WHERE purge_id = ?""",
+        (now, now, purge["purge_id"]),
+    )
+    connection.execute(
+        "UPDATE v2_purge_capabilities SET state = 'consumed', consumed_at = ? WHERE capability_id = ?",
+        (now, capability["capability_id"]),
+    )
+    return True
 
 
 def execute_purge(*, capability_id: str, secret: str, request_id: str) -> dict[str, Any]:
     ensure_purge_schema()
+    from app.services import vnext_upload_store
+
+    vnext_upload_store.ensure_vnext_upload_schema()
     request_id = _identifier(request_id, "purge_request_id", 180)
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -333,18 +410,21 @@ def execute_purge(*, capability_id: str, secret: str, request_id: str) -> dict[s
                 (_now(), purge["purge_id"]),
             )
             if capability["scope_kind"] == "epoch":
-                _purge_epoch(connection, capability)
+                _begin_purge_epoch(connection, capability)
             else:
-                _purge_binding(connection, capability)
-            now = _now()
-            connection.execute(
-                "UPDATE v2_purges SET state = 'confirmed', last_error_code = NULL, updated_at = ?, confirmed_at = ? WHERE purge_id = ?",
-                (now, now, purge["purge_id"]),
-            )
-            connection.execute(
-                "UPDATE v2_purge_capabilities SET state = 'consumed', consumed_at = ? WHERE capability_id = ?",
-                (now, capability["capability_id"]),
-            )
+                _begin_purge_binding(connection, capability)
+            connection.commit()
+
+        vnext_upload_store.process_cleanup_obligations(limit=128)
+        with control_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            capability = _authorized_capability(connection, capability_id, secret)
+            purge = connection.execute(
+                "SELECT * FROM v2_purges WHERE capability_id = ?",
+                (capability["capability_id"],),
+            ).fetchone()
+            assert purge is not None
+            _finish_purge_record(connection, capability, purge)
             connection.commit()
             return _public_status(connection, capability)
     except VNextPurgeError:

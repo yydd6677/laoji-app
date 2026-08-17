@@ -77,6 +77,33 @@ class ProjectionEnvelope(VNextModel):
     payload: dict[str, Any]
 
 
+class UploadSession(VNextModel):
+    schema_version: Literal[2] = 2
+    session_id: str = Field(min_length=8, max_length=180)
+    binding_id: str = Field(min_length=8, max_length=180)
+    binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    binding_revision: int = Field(ge=1)
+    cancel_revision: int = Field(ge=0)
+    client_operation_id: str = Field(min_length=8, max_length=180)
+    asset_id: str = Field(min_length=1, max_length=180)
+    asset_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    expected_size: int = Field(ge=1, le=1024 * 1024 * 1024)
+    expected_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    mime_type: str = Field(min_length=1, max_length=160)
+    mode: Literal["single", "multipart"]
+    part_size: int = Field(ge=5 * 1024 * 1024)
+    total_parts: int = Field(ge=1, le=10_000)
+    state: Literal[
+        "provisioning", "active", "completing", "verified",
+        "cleanup_pending", "cancelled", "expired",
+    ]
+    expires_at: int = Field(ge=0)
+    verified_asset_id: str | None = Field(default=None, max_length=180)
+    transcription_task_id: str | None = Field(default=None, max_length=180)
+    put_url: str | None = Field(default=None, max_length=4096)
+    uploaded_parts: list[int] = Field(default_factory=list, max_length=10_000)
+
+
 class ScheduleGraphSource(VNextModel):
     text: str = Field(min_length=1, max_length=2000)
     mode: Literal["text", "audio_transcript"]

@@ -244,11 +244,11 @@ transcript_segments: add stable_segment_key, segment_revision, text_state
 speaker_overlay_revisions(revision_id PK, meeting_id, transcript_revision_id, ...)
 speaker_overlay_assignments(revision_id, stable_segment_key, automatic_label, confidence, ...)
 speaker_manual_overrides(meeting_id, stable_segment_key, expected_transcript_revision, label, ...)
-meeting_search_fts (FTS5 external-content index)
 ```
 
 旧 `speaker_assignments/corrections` 只读迁移到 overlay；无法稳定映射的修正标记 `needs_review`，
-不静默删除或强配到新片段。
+不静默删除或强配到新片段。v20 已存在、且当前查询仓储仍在使用的 `meeting_search_fts` 在 Stage 2
+保持原结构；外部内容 FTS 与查询仓储一起在 0045/Stage 4 原子切换，禁止 0043 复用同名表但改变列结构。
 
 ### 0044 `MediaGenerationAndTrashVNext`
 

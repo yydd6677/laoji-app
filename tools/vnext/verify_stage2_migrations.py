@@ -33,14 +33,24 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
         """
         PRAGMA foreign_keys=ON;
         CREATE TABLE meeting_notes (
-          id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at_ms INTEGER NOT NULL,
+          id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, title TEXT NOT NULL,
+          lifecycle TEXT NOT NULL, updated_at_ms INTEGER NOT NULL,
           deleted_at_ms INTEGER
         );
         CREATE TABLE manual_notes (
           meeting_id TEXT PRIMARY KEY REFERENCES meeting_notes(id) ON DELETE CASCADE,
           content TEXT NOT NULL
         );
-        CREATE TABLE device_operations(operation_id TEXT PRIMARY KEY);
+        CREATE TABLE device_operations(
+          operation_id TEXT PRIMARY KEY,
+          entity_id TEXT NOT NULL,
+          capability TEXT NOT NULL,
+          generation_id TEXT NOT NULL
+        );
+        CREATE TABLE meeting_recording_merge_tasks (
+          id TEXT PRIMARY KEY,
+          created_at_ms INTEGER NOT NULL
+        );
         CREATE TABLE recording_assets (
           id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meeting_notes(id) ON DELETE CASCADE,
           checksum_sha256 TEXT, local_state TEXT NOT NULL, created_at_ms INTEGER NOT NULL
@@ -66,12 +76,19 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
           speaker_profile_id TEXT, display_name TEXT NOT NULL,
           assignment_revision INTEGER NOT NULL, created_at_ms INTEGER NOT NULL
         );
-        INSERT INTO meeting_notes VALUES ('meeting-1', '项目周会', 1000, 2000);
+        INSERT INTO meeting_notes VALUES (
+          'meeting-1', 'guest', '项目周会', 'deleted', 1000, 2000
+        );
         INSERT INTO manual_notes VALUES ('meeting-1', '跟进接口联调');
         INSERT INTO recording_assets VALUES (
           'asset-1', 'meeting-1',
           'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           'local_ready', 1000
+        );
+        INSERT INTO meeting_recording_merge_tasks VALUES ('merge-1', 1000);
+        INSERT INTO device_operations VALUES (
+          'operation-1', 'meeting-1', 'media.upload',
+          '11111111111111111111111111111111'
         );
         INSERT INTO transcript_revisions VALUES (
           'revision-1', 'meeting-1', 'ready', 'asr-r1', 1, 1000, 1500
@@ -86,6 +103,19 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
           NULL, '小王', 2, 1600
         );
         """
+    )
+    connection.executescript(sql_constant(
+        ROOT / "src/data/db/migrations/0020MeetingOrganizationSearch.ts",
+        "MEETING_ORGANIZATION_SEARCH_V20_SQL",
+    ))
+    connection.execute(
+        """INSERT INTO meeting_search_fts(
+             scope_key, meeting_id, source_kind, source_id, start_ms, title, content
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "guest", "meeting-1", "transcript", "stable-1", "0",
+            "项目周会", "确认上传方案",
+        ),
     )
 
 
@@ -139,6 +169,7 @@ def apply_stage2(connection: sqlite3.Connection) -> None:
         ("recording_assets", "upload_operation_id", "TEXT REFERENCES device_operations(operation_id)"),
         ("recording_assets", "remote_object_revision", "INTEGER"),
         ("meeting_notes", "purge_after_ms", "INTEGER"),
+        ("meeting_recording_merge_tasks", "target_asset_generation", "TEXT"),
     ):
         if name not in columns(connection, table):
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
@@ -150,6 +181,9 @@ def apply_stage2(connection: sqlite3.Connection) -> None:
          WHERE source_sha256 IS NULL AND length(checksum_sha256) = 71;
         UPDATE meeting_notes SET purge_after_ms = deleted_at_ms + 2592000000
          WHERE deleted_at_ms IS NOT NULL AND purge_after_ms IS NULL;
+        UPDATE meeting_recording_merge_tasks
+           SET target_asset_generation = '22222222222222222222222222222222'
+         WHERE target_asset_generation IS NULL;
         """
     )
     connection.executescript(sql_constant(
@@ -174,13 +208,20 @@ def main() -> None:
                 raise AssertionError("automatic speaker overlay missing")
             if connection.execute("SELECT label FROM speaker_manual_overrides").fetchone()[0] != "小王":
                 raise AssertionError("manual speaker override missing")
+            fts_columns = columns(connection, "meeting_search_fts")
+            expected_fts_columns = {
+                "scope_key", "meeting_id", "source_kind", "source_id",
+                "start_ms", "title", "content",
+            }
+            if fts_columns != expected_fts_columns:
+                raise AssertionError(f"v20 FTS schema changed during Stage 2: {fts_columns}")
             search = connection.execute(
                 "SELECT rowid FROM meeting_search_fts WHERE meeting_search_fts MATCH '上传方'"
             ).fetchall()
             if len(search) != 1:
-                raise AssertionError("meeting FTS projection missing transcript")
+                raise AssertionError("existing meeting FTS transcript search regressed")
             short_search = connection.execute(
-                "SELECT rowid FROM meeting_search_fts WHERE transcript_text LIKE '%上传%'"
+                "SELECT rowid FROM meeting_search_fts WHERE content LIKE '%上传%'"
             ).fetchall()
             if len(short_search) != 1:
                 raise AssertionError("meeting FTS short Chinese search failed")
@@ -189,13 +230,34 @@ def main() -> None:
             ).fetchone()
             if len(asset[0]) != 32 or not str(asset[1]).startswith("sha256:"):
                 raise AssertionError("recording generation/hash migration failed")
+            merge_generation = connection.execute(
+                "SELECT target_asset_generation FROM meeting_recording_merge_tasks"
+            ).fetchone()[0]
+            if merge_generation != "22222222222222222222222222222222":
+                raise AssertionError("recording merge generation migration failed")
             if connection.execute("SELECT purge_after_ms FROM meeting_notes").fetchone()[0] != 2592002000:
                 raise AssertionError("trash purge deadline migration failed")
+            connection.execute(
+                "UPDATE recording_assets SET upload_operation_id = 'operation-1' WHERE id = 'asset-1'"
+            )
+            if connection.execute(
+                "SELECT upload_operation_id FROM recording_assets WHERE id = 'asset-1'"
+            ).fetchone()[0] != "operation-1":
+                raise AssertionError("valid upload operation ownership was rejected")
             apply_stage2(connection)
             if connection.execute("SELECT COUNT(*) FROM speaker_overlay_revisions").fetchone()[0] != 1:
                 raise AssertionError("migration replay duplicated overlay")
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise AssertionError("foreign key check failed")
+            try:
+                connection.execute(
+                    "UPDATE recording_assets SET asset_generation = ? WHERE id = 'asset-1'",
+                    ("33333333333333333333333333333333",),
+                )
+            except sqlite3.IntegrityError:
+                connection.rollback()
+            else:
+                raise AssertionError("recording asset generation mutation was accepted")
             print("stage2_migration_probe=passed")
         finally:
             connection.close()
