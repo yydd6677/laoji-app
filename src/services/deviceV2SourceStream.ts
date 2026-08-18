@@ -111,6 +111,8 @@ export interface DeviceV2TaskSnapshot {
   task: {
     task_id: string;
     capability: string;
+    input_sha256: string;
+    source_stream_id: string | null;
     state: 'active' | 'success' | 'failure' | 'cancelled';
     result?: unknown;
     error_code?: string | null;
@@ -406,6 +408,10 @@ export async function getDeviceV2Task(taskId: string): Promise<DeviceV2TaskSnaps
     task: {
       task_id: taskId,
       capability: id(String(task.capability ?? ''), 'capability', 120),
+      input_sha256: sha256(String(task.input_sha256 ?? ''), 'task_input_sha256'),
+      source_stream_id: task.source_stream_id == null
+        ? null
+        : id(String(task.source_stream_id), 'source_stream_id', 180),
       state: task.state,
       result: task.result,
       error_code: task.error_code == null ? null : id(String(task.error_code), 'error_code', 160),

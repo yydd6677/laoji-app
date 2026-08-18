@@ -107,7 +107,7 @@ async function uploadSourceChapterWithBackpressure(input: {
     if (input.signal?.aborted) throw new Error('meeting summary cancelled');
     await waitForSourceChapterSlot(input.streamId, input.ordinal, input.signal);
     try {
-      await createDeviceV2SourceBundleGroup({
+      const group = await createDeviceV2SourceBundleGroup({
         streamId: input.streamId,
         group: {
           groupId,
@@ -119,6 +119,8 @@ async function uploadSourceChapterWithBackpressure(input: {
           requestSha256: await digest(`${input.requestSha}:${input.ordinal}`),
         },
       });
+      if (group.state === 'consumed' || group.state === 'committed') return;
+      if (group.state === 'cancelled') throw new Error('新版整理来源章节已取消');
       await appendDeviceV2SourceBundle({
         groupId,
         bundle: {
@@ -271,29 +273,30 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   if ((options.attachmentAuthorization?.items ?? []).some(item => item.kind !== 'text')) {
     throw new Error('所选照片暂时无法用于新版整理，请仅选择文字附件。');
   }
+  const items = await buildSummarySourceItems({
+    meetingId: options.meetingId,
+    transcriptRevision: options.transcriptRevision,
+    transcriptLines: options.transcriptLines,
+    manualNote: options.manualNote,
+    attachmentAuthorization: options.attachmentAuthorization,
+  });
+  const chapterItems = chapters(items);
+  const bundleHashes = await Promise.all(chapterItems.map(bundleHash));
+  const requestSha = await digest(canonical({
+    meeting_id: options.meetingId,
+    transcript_revision: options.transcriptRevision,
+    manual_note_revision: options.manualNote.revision,
+    bundles: bundleHashes,
+  }));
   let taskId = options.resumeTaskId?.trim() || '';
+  let stream: Awaited<ReturnType<typeof getDeviceV2SourceStream>> | null = null;
   if (!taskId) {
     const binding = await ensureRemoteMeetingServiceBinding(options.meetingId);
-    const items = await buildSummarySourceItems({
-      meetingId: options.meetingId,
-      transcriptRevision: options.transcriptRevision,
-      transcriptLines: options.transcriptLines,
-      manualNote: options.manualNote,
-      attachmentAuthorization: options.attachmentAuthorization,
-    });
-    const chapterItems = chapters(items);
-    const bundleHashes = await Promise.all(chapterItems.map(bundleHash));
-    const requestSha = await digest(canonical({
-      meeting_id: options.meetingId,
-      transcript_revision: options.transcriptRevision,
-      manual_note_revision: options.manualNote.revision,
-      bundles: bundleHashes,
-    }));
     const generationId = options.force
       ? hex(await digest(`${requestSha}:${Date.now()}:${Crypto.randomUUID()}`))
       : hex(requestSha);
     taskId = `vnext-summary:${options.meetingId}:${generationId}`.slice(0, 480);
-    const stream = await createDeviceV2SourceStream({
+    stream = await createDeviceV2SourceStream({
       bindingId: binding.bindingId,
       bindingGeneration: binding.bindingGeneration,
       bindingRevision: binding.bindingRevision,
@@ -309,15 +312,29 @@ export async function generateMeetingSummaryViaSourceStream(options: {
     });
     await options.onTaskSubmitted?.(taskId);
     options.onProgress?.('preparing');
-    if (stream.state === 'open') {
-      const descriptors = await Promise.all(chapterItems.map(async (chapter, ordinal) => ({
-        chapter_ordinal: ordinal,
-        declared_bundle_count: 1,
-        declared_item_count: chapter.length,
-        declared_uncompressed_bytes: chapter.reduce((sum, item) => sum + utf8Length(item.content), 0),
-        chapter_sha256: await chapterHash([bundleHashes[ordinal]]),
-      })));
-      await appendDeviceV2SourceManifestPage({
+  } else {
+    const resumedTask = await getDeviceV2Task(taskId);
+    if (resumedTask.task.input_sha256 !== requestSha) {
+      throw new Error('新版整理任务来源已变化，请重新整理。');
+    }
+    if (resumedTask.task.state === 'active') {
+      const sourceStreamId = resumedTask.task.source_stream_id;
+      if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
+      stream = await getDeviceV2SourceStream(sourceStreamId);
+      if (stream.task_id !== taskId) throw new Error('新版整理任务与来源流不一致。');
+    }
+  }
+  if (stream && (stream.state === 'open' || stream.state === 'consuming')) {
+    options.onProgress?.('preparing');
+    const descriptors = await Promise.all(chapterItems.map(async (chapter, ordinal) => ({
+      chapter_ordinal: ordinal,
+      declared_bundle_count: 1,
+      declared_item_count: chapter.length,
+      declared_uncompressed_bytes: chapter.reduce((sum, item) => sum + utf8Length(item.content), 0),
+      chapter_sha256: await chapterHash([bundleHashes[ordinal]]),
+    })));
+    if (stream.next_manifest_page === 0) {
+      stream = await appendDeviceV2SourceManifestPage({
         streamId: stream.stream_id,
         pageSeq: 0,
         firstChapterOrdinal: 0,
@@ -325,18 +342,20 @@ export async function generateMeetingSummaryViaSourceStream(options: {
         pageSha256: await digest(canonical(descriptors)),
         finalPage: true,
       });
-      for (const [ordinal, chapter] of chapterItems.entries()) {
-        await uploadSourceChapterWithBackpressure({
-          streamId: stream.stream_id,
-          taskId,
-          requestSha,
-          ordinal,
-          chapter,
-          bundleHash: bundleHashes[ordinal],
-          chapterSha: descriptors[ordinal].chapter_sha256,
-          signal: options.signal,
-        });
-      }
+    } else if (stream.final_chapter_count !== chapterItems.length) {
+      throw new Error('新版整理任务来源清单与当前内容不一致。');
+    }
+    for (const [ordinal, chapter] of chapterItems.entries()) {
+      await uploadSourceChapterWithBackpressure({
+        streamId: stream.stream_id,
+        taskId,
+        requestSha,
+        ordinal,
+        chapter,
+        bundleHash: bundleHashes[ordinal],
+        chapterSha: descriptors[ordinal].chapter_sha256,
+        signal: options.signal,
+      });
     }
   }
   const started = Date.now();
