@@ -143,11 +143,25 @@ WAV 只作为失败形态和内存上界的对照记录。
 
 ## 晚间只读复核（2026-08-18）
 
-再次通过 SSH 只读检查隔离端口：`8031` 与 `18021` 仍监听 loopback，两个 `/ready` 均为 `ready=true`。
-8031 固定 revision、CPU、队列为空；18021 的 ASR、Ollama 9B/embedding、VAD、CAM++、任务 worker、三库
-WAL/完整性、R2 和磁盘余量均为 ready，候选磁盘余量约 `467.17 GiB`。生产 `8030/18020`、GPU1、PCB
-和 Smart Meeting 未重启或修改。
+此前通过 SSH 只读检查隔离端口：`8031` 与 `18021` 监听 loopback，旧候选两个 `/ready` 均为
+`ready=true`。8031 固定 revision、CPU、队列为空；旧 18021 的模型列表、VAD、CAM++、任务 worker、
+三库 WAL/完整性、R2 和磁盘余量均报告 ready，候选磁盘余量约 `467.17 GiB`。生产 `8030/18020`、
+GPU1、PCB 和 Smart Meeting 未重启或修改。随后 readiness 修复候选按本节结果将 embedding 真实
+推理失败正确报告为 not ready。
 
 为取得 GPU 性能证据，临时在 GPU0 端口 `8032` 启动同 revision 的 ASR 进程并完成真实 1/2/4/8 秒
 `/v2/asr/batch` 请求；随后停止该进程，端口关闭且 GPU0 显存恢复。结果与资源边界见
 [GPU ASR candidate](GPU-ASR-CANDIDATE-20260818.md)。这不是常驻部署，也没有改变 8030 的公开入口。
+
+## readiness 修复候选部署（2026-08-18）
+
+- 将服务端候选包 `49b1acf` 解压到隔离版本目录，并只重启候选 API `127.0.0.1:18021`；旧
+  `api-root` 保留为回滚目录，未重启生产 `18020`、ASR `8030/8031`、Ollama 或任何 GPU1/PCB
+  进程。
+- 新候选启动后真实 `/api/ready` 返回：`ready=false`、`generation_ready=true`、
+  `embedding_ready=false`、`embedding_probe_error=embedding_probe_timeout`，探针耗时约 5 秒；
+  任务队列 `queued=0/running=0`。
+- 这证明 ready 现在检查真实 embedding 推理，而不是只检查 `/api/tags` 中的模型名字。候选没有
+  接受业务流量，也没有激活任何 vNext capability barrier。
+- 若需要回滚，停止 `49b1acf` 并从保留的旧 `api-root` 使用同一运行环境启动即可；本次切换未修改
+  候选数据库和音频目录。
