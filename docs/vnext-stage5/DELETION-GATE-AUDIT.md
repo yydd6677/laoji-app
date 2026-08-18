@@ -8,6 +8,8 @@
 
 ## 当前候选快照
 
+最新隔离候选复核见 [2026-08-19 candidate audit](DELETION-GATE-CANDIDATE-20260819.md)。
+
 报告：`docs/vnext-stage5-deletion-audit-current-20260818.json`
 
 - `production_mutation=false`
