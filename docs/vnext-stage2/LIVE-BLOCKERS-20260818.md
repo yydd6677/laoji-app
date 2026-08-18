@@ -4,12 +4,17 @@
 
 ## GPU
 
-- GPU0：32,607 MiB 总量，约 2,042 MiB 空闲；线上 ASR/Ollama 等进程已经占用大部分显存。
+- 晚间最新只读快照：GPU0 约 31,123 MiB 已用、989 MiB 空闲；此前 2,042/7,850 MiB 等数值均为
+  不同模型驻留时刻的历史快照，不能代表当前切换余量。
+- 当前 GPU0 中老记 9B runner 约 8,842 MiB、embedding runner 约 574 MiB、生产 ASR 约
+  6,010 MiB、候选 API/CAM++ 约 498 MiB；其余显存属于 PCB 和其他进程，按边界不触碰。
 - GPU1：32,607 MiB 总量，约 6,163 MiB 空闲；PCB、Smart Meeting 和其他进程均在使用，按边界不触碰。
 - Qwen3-ASR-1.7B 候选临时加载到 GPU0 后占用约 4.99 GiB，短片段真实 RTF 为 0.188--0.358；
   但与现有服务并存时 GPU0 只剩约 2.7 GiB，低于最终约 8 GiB 余量门。
 - 因此 GPU 短片段延迟证据已取得，但常驻资源/替换切换仍未验收；候选 8031 已恢复固定 CPU，
   不能与线上 8030 并存加载第二份模型。
+- 9B 与 embedding 同时常驻后，GPU0 余量远低于约 8 GiB 门；不能在当前资源状态激活 Stage 2/3
+  capability。新版候选 ready 会用真实 embedding 推理失败关闭，旧运行进程尚未部署该修复。
 
 ## Android
 
