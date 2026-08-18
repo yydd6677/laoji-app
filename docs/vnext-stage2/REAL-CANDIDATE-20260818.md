@@ -129,4 +129,14 @@ WAV 只作为失败形态和内存上界的对照记录。
 2. GPU 候选首段/RTF、讲话人真实命名/未知拒识、真机/模拟器和 APK；CPU realtime 延迟不达标。
 3. 旧 upload/ASR submit 连续一个完整公开周期为零，以及随后人工激活 capability barrier。
 
+## 候选健康复核（2026-08-18）
+
+- 隔离 API `18021` 曾在重启后因手工环境遗漏 `DATABASE_URL`、`LAOJI_INTERNAL_ASR_PORT=8031` 和
+  CAM++ 路径而退出或报告未就绪；这些只影响候选启动，不影响生产 `18020/8030`。
+- 已使用候选自身 SQLite/音频目录、固定 ASR revision、只读 CAM++ 权重和 `8031` 探针配置重新启动。
+  当前 `/health` 返回 200，`/api/ready` 返回 `ready=true`；ASR、Qwen 9B、embedding、Silero VAD、
+  CAM++、任务 worker、三库 WAL/完整性、R2 配置和磁盘余量均报告 ready。
+- 该复核只证明隔离进程可恢复，不改变公开流量、systemd、APK 或生产服务；候选启动模板仍是下一次
+  部署的唯一配置来源，手工命令不作为生产发布合同。
+
 因此 Stage 2 保持 `in progress`，不得切生产入口或开始 Stage 3 默认采用。
