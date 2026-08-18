@@ -36,7 +36,10 @@ def test_device_schedule_graph_is_closed_by_default(monkeypatch) -> None:
 def test_device_schedule_graph_returns_source_bound_revision(monkeypatch) -> None:
     monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
 
-    async def parse(*_args, **_kwargs):
+    observed: dict[str, object] = {}
+
+    async def parse(*_args, **kwargs):
+        observed.update(kwargs)
         return {
             "title": "开会",
             "event_type": "once",
@@ -54,3 +57,4 @@ def test_device_schedule_graph_returns_source_bound_revision(monkeypatch) -> Non
     assert graph["source"]["content_sha256"].startswith("sha256:")
     assert graph["slots"]["start_time"] == "15:30"
     assert graph["provenance"]["draft_revision"] == 1
+    assert observed["model_only"] is True

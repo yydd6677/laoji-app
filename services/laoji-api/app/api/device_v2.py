@@ -452,6 +452,10 @@ async def create_schedule_graph(
             payload.text,
             reference_datetime=payload.reference_datetime.isoformat(),
             timezone_name=payload.timezone,
+            # v2 Graph owns one structured model producer.  The legacy quick
+            # parser remains behind the compatibility route and must not run
+            # as a second server-side decision owner here.
+            model_only=True,
         )
         return schedule_graph_service.produce_schedule_graph(
             payload.text,
