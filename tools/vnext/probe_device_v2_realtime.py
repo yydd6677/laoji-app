@@ -264,6 +264,12 @@ def main() -> int:
     pcm = parsed.pcm.read_bytes()
     if not pcm or len(pcm) % 2:
         raise SystemExit("PCM file must be non-empty signed-int16 mono 16k")
+    # The wire timeline is millisecond based (32 bytes per millisecond).  A
+    # media decoder may leave a sub-millisecond tail; it cannot form a valid
+    # realtime chunk and must not be sent as a zero-duration frame.
+    pcm = pcm[: len(pcm) - (len(pcm) % 32)]
+    if not pcm:
+        raise SystemExit("PCM file is shorter than one millisecond")
     report = asyncio.run(run_probe(pcm, parsed.api, parsed.chunk_ms))
     parsed.output.parent.mkdir(parents=True, exist_ok=True)
     parsed.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
