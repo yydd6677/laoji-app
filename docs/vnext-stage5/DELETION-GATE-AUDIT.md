@@ -24,7 +24,7 @@
 ## 必须全部满足的删除前证据
 
 1. `media.upload`、`transcript.realtime`、`summary`、`question`、`schedule` 五个 capability
-   都有持久 activation、legacy submit closed 和 reader removal 记录。
+   都有持久 activation、legacy submit closed、reader removal marker 和证据哈希记录。
 2. 每个 legacy capability 的完整公开周期由外部运行记录证明；数据库中的累计 submit count
    不能替代该周期证明。
 3. 活动源码引用归零，或已明确移入版本化 compatibility handler；历史文档和测试夹具不计入活动引用。

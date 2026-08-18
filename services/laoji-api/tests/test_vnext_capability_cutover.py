@@ -123,3 +123,46 @@ def test_candidate_reader_does_not_materialize_memory_database(
 
     assert vnext_capability_cutover.realtime_asr_v2_enabled() is False
     assert not Path(":memory:").exists()
+
+
+def test_reader_removal_requires_closed_capability_and_is_immutable(cutover_database) -> None:
+    capability = vnext_capability_cutover.MEDIA_UPLOAD_CAPABILITY
+    revision = vnext_capability_cutover.MEDIA_UPLOAD_CONTRACT_REVISION
+    evidence = "sha256:" + ("a" * 64)
+
+    with pytest.raises(vnext_capability_cutover.VNextCapabilityCutoverError) as missing:
+        vnext_capability_cutover.mark_legacy_reader_removed(
+            capability,
+            revision,
+            removal_revision="reader-audit-r1",
+            evidence_sha256=evidence,
+        )
+    assert missing.value.code == "CAPABILITY_NOT_ACTIVATED"
+
+    vnext_capability_cutover.activate_cutover(capability, revision, barrier_id="media-reader-test")
+    recorded = vnext_capability_cutover.mark_legacy_reader_removed(
+        capability,
+        revision,
+        removal_revision="reader-audit-r1",
+        evidence_sha256=evidence,
+    )
+    assert recorded["legacy_reader_removed_at"]
+    assert recorded["legacy_reader_removal_revision"] == "reader-audit-r1"
+    assert recorded["legacy_reader_removal_evidence_sha256"] == evidence
+
+    replay = vnext_capability_cutover.mark_legacy_reader_removed(
+        capability,
+        revision,
+        removal_revision="reader-audit-r1",
+        evidence_sha256=evidence,
+    )
+    assert replay["legacy_reader_removed_at"] == recorded["legacy_reader_removed_at"]
+
+    with pytest.raises(vnext_capability_cutover.VNextCapabilityCutoverError) as conflict:
+        vnext_capability_cutover.mark_legacy_reader_removed(
+            capability,
+            revision,
+            removal_revision="reader-audit-r2",
+            evidence_sha256="sha256:" + ("b" * 64),
+        )
+    assert conflict.value.code == "CAPABILITY_READER_PROOF_CONFLICT"

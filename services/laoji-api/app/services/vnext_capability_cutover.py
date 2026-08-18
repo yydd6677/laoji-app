@@ -37,6 +37,17 @@ def _safe(value: str, field: str, maximum: int = 160) -> str:
     return normalized
 
 
+def _sha256(value: str, field: str = "evidence_sha256") -> str:
+    normalized = _safe(value, field, 71)
+    if len(normalized) != 71 or not normalized.startswith("sha256:"):
+        raise VNextCapabilityCutoverError("CAPABILITY_EVIDENCE_INVALID", f"{field}无效", 422)
+    try:
+        int(normalized[7:], 16)
+    except ValueError as error:
+        raise VNextCapabilityCutoverError("CAPABILITY_EVIDENCE_INVALID", f"{field}无效", 422) from error
+    return normalized
+
+
 def ensure_schema() -> None:
     with control_connection() as connection:
         connection.executescript(
@@ -48,12 +59,25 @@ def ensure_schema() -> None:
                 activated_at TEXT,
                 legacy_submit_closed_at TEXT,
                 legacy_reader_removed_at TEXT,
+                legacy_reader_removal_revision TEXT,
+                legacy_reader_removal_evidence_sha256 TEXT,
                 legacy_submit_count INTEGER NOT NULL DEFAULT 0 CHECK(legacy_submit_count >= 0),
                 last_legacy_submit_at TEXT,
                 updated_at TEXT NOT NULL
             );
             """
         )
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(capability_cutovers)")}
+        additive_columns = {
+            "legacy_reader_removal_revision": "TEXT",
+            "legacy_reader_removal_evidence_sha256": "TEXT",
+        }
+        for column, declaration in additive_columns.items():
+            if column not in columns:
+                connection.execute(
+                    f"ALTER TABLE capability_cutovers ADD COLUMN {column} {declaration}"
+                )
+        connection.commit()
 
 
 def _payload(row: Any) -> dict[str, Any] | None:
@@ -66,6 +90,8 @@ def _payload(row: Any) -> dict[str, Any] | None:
         "activated_at": row["activated_at"],
         "legacy_submit_closed_at": row["legacy_submit_closed_at"],
         "legacy_reader_removed_at": row["legacy_reader_removed_at"],
+        "legacy_reader_removal_revision": row["legacy_reader_removal_revision"],
+        "legacy_reader_removal_evidence_sha256": row["legacy_reader_removal_evidence_sha256"],
         "legacy_submit_count": int(row["legacy_submit_count"]),
         "last_legacy_submit_at": row["last_legacy_submit_at"],
         "closed": row["legacy_submit_closed_at"] is not None,
@@ -182,6 +208,67 @@ def media_upload_cutover_enabled(*, prerequisites_ready: bool) -> bool:
 
 def guard_legacy_media_upload_submit() -> None:
     guard_legacy_submit(MEDIA_UPLOAD_CAPABILITY, MEDIA_UPLOAD_CONTRACT_REVISION)
+
+
+def mark_legacy_reader_removed(
+    capability: str,
+    contract_revision: str,
+    *,
+    removal_revision: str,
+    evidence_sha256: str,
+) -> dict[str, Any]:
+    """Persist a reader-removal proof after a barrier has been closed.
+
+    This function records an externally produced source/reference audit; it
+    does not run that audit and it cannot activate a capability.  Repeating
+    the exact proof is idempotent.  A different proof for the same capability
+    is rejected so the deletion gate never silently replaces history.
+    """
+    ensure_schema()
+    normalized = _safe(capability, "capability", 120)
+    revision = _safe(contract_revision, "contract_revision", 160)
+    removal = _safe(removal_revision, "removal_revision", 160)
+    evidence = _sha256(evidence_sha256)
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT * FROM capability_cutovers WHERE capability = ?",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            raise VNextCapabilityCutoverError("CAPABILITY_NOT_ACTIVATED", "能力尚未激活", 409)
+        if row["contract_revision"] != revision:
+            raise VNextCapabilityCutoverError("CAPABILITY_REVISION_CONFLICT", "能力切换协议版本冲突")
+        if row["activated_at"] is None or row["legacy_submit_closed_at"] is None:
+            raise VNextCapabilityCutoverError("CAPABILITY_NOT_CLOSED", "旧提交尚未关闭", 409)
+        existing_evidence = row["legacy_reader_removal_evidence_sha256"]
+        existing_revision = row["legacy_reader_removal_revision"]
+        if row["legacy_reader_removed_at"] is not None:
+            if existing_evidence == evidence and existing_revision == removal:
+                return _payload(row)
+            raise VNextCapabilityCutoverError(
+                "CAPABILITY_READER_PROOF_CONFLICT",
+                "旧读取器移除证据已登记且不能替换",
+                409,
+            )
+        connection.execute(
+            """UPDATE capability_cutovers
+                  SET legacy_reader_removed_at = ?,
+                      legacy_reader_removal_revision = ?,
+                      legacy_reader_removal_evidence_sha256 = ?,
+                      updated_at = ?
+                WHERE capability = ? AND legacy_reader_removed_at IS NULL""",
+            (now, removal, evidence, now, normalized),
+        )
+        updated = connection.execute(
+            "SELECT * FROM capability_cutovers WHERE capability = ?",
+            (normalized,),
+        ).fetchone()
+        payload = _payload(updated)
+        if payload is None or payload["legacy_reader_removed_at"] is None:
+            raise RuntimeError("capability_reader_removal_record_failed")
+        return payload
 
 
 def _candidate_or_persisted_enabled(capability: str, environment_name: str) -> bool:

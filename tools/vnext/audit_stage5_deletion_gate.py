@@ -228,12 +228,27 @@ def _database_state(path: Path | None) -> dict[str, Any]:
                     "drain": drain,
                 }
             cutovers: dict[str, Any] = {}
+            capability_columns = _table_columns(connection, "capability_cutovers")
             for row in connection.execute("SELECT * FROM capability_cutovers"):
                 cutovers[str(row["capability"])] = {
                     "contract_revision": str(row["contract_revision"]),
                     "activated_at": row["activated_at"],
                     "legacy_submit_closed_at": row["legacy_submit_closed_at"],
-                    "legacy_reader_removed_at": row["legacy_reader_removed_at"],
+                    "legacy_reader_removed_at": (
+                        row["legacy_reader_removed_at"]
+                        if "legacy_reader_removed_at" in capability_columns
+                        else None
+                    ),
+                    "legacy_reader_removal_revision": (
+                        row["legacy_reader_removal_revision"]
+                        if "legacy_reader_removal_revision" in capability_columns
+                        else None
+                    ),
+                    "legacy_reader_removal_evidence_sha256": (
+                        row["legacy_reader_removal_evidence_sha256"]
+                        if "legacy_reader_removal_evidence_sha256" in capability_columns
+                        else None
+                    ),
                     "legacy_submit_count": int(row["legacy_submit_count"]),
                     "last_legacy_submit_at": row["last_legacy_submit_at"],
                 }
@@ -330,9 +345,18 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
             "activated": bool(row and row.get("activated_at")),
             "legacy_closed": bool(row and row.get("legacy_submit_closed_at")),
             "reader_removed": bool(row and row.get("legacy_reader_removed_at")),
+            "reader_removal_proof": bool(
+                row
+                and row.get("legacy_reader_removal_revision")
+                and row.get("legacy_reader_removal_evidence_sha256")
+            ),
         }
     barriers_ready = all(
-        state["present"] and state["activated"] and state["legacy_closed"] and state["reader_removed"]
+        state["present"]
+        and state["activated"]
+        and state["legacy_closed"]
+        and state["reader_removed"]
+        and state["reader_removal_proof"]
         for state in barrier_state.values()
     )
     report = {
