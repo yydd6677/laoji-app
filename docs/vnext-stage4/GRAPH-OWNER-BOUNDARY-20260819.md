@@ -9,13 +9,13 @@
 - 请求携带 `client_intent`。Graph producer 只消费这个 admission decision 或测试注入的 observation，
   不再调用旧 `classify_schedule_intent`。
 - `produce_schedule_graph` 缺少 observation 直接拒绝，消除了旧 `parse_schedule_text_sync` 的隐式同步
-  fallback。澄清仍只在已有 Graph 上递增 revision，并通过现有显式 `apply_schedule_clarification`
-  adapter 生成下一份 observation。
+  fallback。澄清请求把原 Graph 来源和补充合并成一次 model-only 输入；Graph 只接收该 observation，
+  复用 source_id 并递增 revision，不再调用旧 `apply_schedule_clarification`。
 
 ## 证据
 
 - `tests/test_schedule_graph_vnext.py`、`tests/test_schedule_graph_route_vnext.py`、
-  `tests/test_device_v2_schedule_graph_api.py`：`15 passed`。
+  `tests/test_device_v2_schedule_graph_api.py`：`16 passed`。
 - `npx tsc --noEmit --pretty false`：通过。
 - Python compileall、`git diff --check`：通过。
 

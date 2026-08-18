@@ -486,7 +486,25 @@ async def clarify_schedule_graph(
 ) -> ScheduleMentionGraph:
     _require_schedule_graph_v2()
     try:
-        return schedule_graph_service.merge_schedule_clarification(payload.graph, payload.answer)
+        combined_text = f"{payload.graph.source.text}；补充：{payload.answer.strip()}"
+        parsed = await parse_schedule_text(
+            combined_text,
+            reference_datetime=payload.graph.source.reference_datetime.isoformat(),
+            timezone_name=payload.graph.source.timezone,
+            model_only=True,
+        )
+        if not parsed:
+            raise ScheduleParserUnavailable("模型未返回澄清观察")
+        return schedule_graph_service.merge_schedule_clarification(
+            payload.graph,
+            payload.answer,
+            parsed=parsed,
+        )
+    except ScheduleParserUnavailable as error:
+        raise HTTPException(status_code=503, detail={
+            "code": "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE",
+            "message": "日程图补充服务暂时不可用",
+        }) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail={
             "code": "SCHEDULE_GRAPH_CLARIFICATION_INVALID",

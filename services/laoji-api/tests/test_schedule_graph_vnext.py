@@ -124,7 +124,11 @@ def test_clarification_uses_existing_draft_when_parser_is_not_injected():
         "Asia/Shanghai",
         parsed=_parsed(start_time=None, end_time=None, needs_clarification=True),
     )
-    merged = merge_schedule_clarification(graph, "下午三点半")
+    merged = merge_schedule_clarification(
+        graph,
+        "下午三点半",
+        parsed=_parsed(start_time="15:30", end_time="17:00"),
+    )
     assert merged.provenance.draft_revision == 2
     assert merged.slots.start_date == "2026-08-19"
     assert merged.slots.start_time == "15:30"

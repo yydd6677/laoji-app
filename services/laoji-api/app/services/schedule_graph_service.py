@@ -23,7 +23,6 @@ from app.schemas.vnext_contracts import (
     ScheduleMentionGraph,
     ScheduleMentionSpan,
 )
-from app.services.schedule_parser_service import apply_schedule_clarification
 
 
 GRAPH_PRODUCER_REVISION = "mention-graph-vnext-r1"
@@ -273,21 +272,9 @@ def merge_schedule_clarification(
     answer = str(answer).strip()
     if not answer:
         raise ValueError("schedule_clarification_empty")
-    current = graph.slots.model_dump(mode="json")
-    missing_questions = {
-        "start_date": "没有听到具体日期，需要补充日期。",
-        "start_time": "时间还没有确定，需要补充具体时间。",
-        "location": "地点还不确定，需要确认最终地点。",
-    }
-    current.update({
-        "raw_text": graph.source.text,
-        "clarification_question": "；".join(
-            missing_questions.get(item, item) for item in graph.missing
-        ),
-    })
-    merged = dict(parsed) if parsed is not None else apply_schedule_clarification(current, answer)
-    if not merged:
-        raise ValueError("schedule_clarification_unresolved")
+    if parsed is None:
+        raise ValueError("schedule_clarification_observation_required")
+    merged = dict(parsed)
     combined_text = f"{graph.source.text}；补充：{answer}"
     return produce_schedule_graph(
         combined_text,

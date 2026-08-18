@@ -101,7 +101,11 @@ def test_graph_route_fails_closed_when_model_returns_no_observation(monkeypatch)
 
 def test_graph_clarify_route_increments_existing_revision(monkeypatch):
     monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
-    async def fake_parse(*_args, **_kwargs):
+    parse_calls = []
+    async def fake_parse(*args, **_kwargs):
+        parse_calls.append((args, _kwargs))
+        if args and "补充：" in args[0]:
+            return _parsed(start_time="15:30", end_time="17:00", needs_clarification=False)
         return _parsed(start_time=None, end_time=None, needs_clarification=True)
 
     monkeypatch.setattr(laoji_router, "parse_schedule_text", fake_parse)
@@ -132,3 +136,43 @@ def test_graph_clarify_route_increments_existing_revision(monkeypatch):
     assert body["source_id"] == graph["source_id"]
     assert body["provenance"]["draft_revision"] == 2
     assert body["slots"]["start_time"] == "15:30"
+    assert len(parse_calls) == 2
+    assert parse_calls[1][1]["model_only"] is True
+    assert parse_calls[1][0][0].endswith("；补充：下午三点半")
+
+
+def test_graph_clarify_fails_closed_when_model_returns_no_observation(monkeypatch):
+    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
+
+    async def create_parse(*_args, **_kwargs):
+        return _parsed(start_time=None, end_time=None, needs_clarification=True)
+
+    monkeypatch.setattr(laoji_router, "parse_schedule_text", create_parse)
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/laoji/v2/schedule/graph",
+        json={
+            "schema_version": 1,
+            "text": "明天开会",
+            "reference_datetime": "2026-08-18T09:00:00",
+            "timezone": "Asia/Shanghai",
+            "client_request_id": "graph-clarify-empty-create",
+        },
+    )
+    assert created.status_code == 200
+
+    async def empty_parse(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(laoji_router, "parse_schedule_text", empty_parse)
+    response = client.post(
+        "/api/laoji/v2/schedule/graph/clarify",
+        json={
+            "schema_version": 1,
+            "graph": created.json(),
+            "answer": "下午三点半",
+            "client_request_id": "graph-clarify-empty-answer",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE"
