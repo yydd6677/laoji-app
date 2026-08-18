@@ -140,3 +140,14 @@ WAV 只作为失败形态和内存上界的对照记录。
   部署的唯一配置来源，手工命令不作为生产发布合同。
 
 因此 Stage 2 保持 `in progress`，不得切生产入口或开始 Stage 3 默认采用。
+
+## 晚间只读复核（2026-08-18）
+
+再次通过 SSH 只读检查隔离端口：`8031` 与 `18021` 仍监听 loopback，两个 `/ready` 均为 `ready=true`。
+8031 固定 revision、CPU、队列为空；18021 的 ASR、Ollama 9B/embedding、VAD、CAM++、任务 worker、三库
+WAL/完整性、R2 和磁盘余量均为 ready，候选磁盘余量约 `467.17 GiB`。生产 `8030/18020`、GPU1、PCB
+和 Smart Meeting 未重启或修改。
+
+为取得 GPU 性能证据，临时在 GPU0 端口 `8032` 启动同 revision 的 ASR 进程并完成真实 1/2/4/8 秒
+`/v2/asr/batch` 请求；随后停止该进程，端口关闭且 GPU0 显存恢复。结果与资源边界见
+[GPU ASR candidate](GPU-ASR-CANDIDATE-20260818.md)。这不是常驻部署，也没有改变 8030 的公开入口。
