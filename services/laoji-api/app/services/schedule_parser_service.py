@@ -218,7 +218,7 @@ JSON 必须包含：title、event_type、category、needs_clarification、date_p
 - title：20 字以内的事项名，不含日期、钟点、口语填充、操作指令。
 - event_type：once、daily、weekly、monthly、yearly 之一。
 - date_phrase/end_date_phrase：只复制原文中对应的日期短语，不含钟点；没有则为 null。日期范围要拆成起点和终点。
-- time_phrase/end_time_phrase：只复制原文中对应的钟点或模糊时段；没有则为 null。禁止把“上午”等模糊时段改写成 09:00。
+- time_phrase/end_time_phrase：只复制原文中对应的连续证据短语；时间范围中间若夹有事项文字，time_phrase 必须复制从起始钟点到结束钟点之间的完整原文（例如“下午三点半开会到五点”），不得压缩成原文不存在的短语。没有则为 null。禁止把“上午”等模糊时段改写成 09:00。
 - recurrence_phrase：只复制原文中完整的重复短语；一次性日程为 null。
 - recurrence_interval：重复间隔，默认 1；例如“每隔两周”是 2。
 - recurrence_weekdays：每周重复的 ISO 星期数组，周一到周日为 1 到 7；没有明确星期时省略。
