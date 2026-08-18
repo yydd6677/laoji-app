@@ -41,14 +41,17 @@ SECRET_KEY=test-secret-key-012345678901234567890123 \
 ENV=development PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q tests
 ```
 
-结果：`486 passed, 16 failed, 237 warnings`。
+最新结果：`493 passed, 10 failed, 246 warnings`。
 
-16 个失败不能被报告为通过。当前失败集中在：
+10 个失败不能被报告为通过。当前失败集中在：
 
-- 旧 `app_meeting_question` 多轮/旧路由调用次数和旧引用兜底断言；
+- 旧 `app_meeting_question` 多轮/旧路由调用次数、旧 prompt budget 和旧分组断言；
 - 旧模板 revision=1 断言，而当前模板合同已升为 revision=2；
-- 旧 summary 生成分支、旧 compact 拓扑静态规则、账号迁移和旧 recording-assets 兼容断言；
-- 一项旧实时 VAD 策略和一项旧访谈模板 fallback 断言。
+- 旧 summary 两轮生成分支、账号迁移和旧访谈模板 fallback 断言。
+
+已处理的测试合同漂移包括：当前候选部署路径、实时 VAD 参数、录音资产单测的容量隔离，
+以及未知会议引用的 fail-closed 回归。剩余失败属于旧兼容路径，需在对应 capability barrier
+和 legacy drain 完成后逐项更新或删除，不能通过恢复旧 owner、第二轮模板调用或引用兜底来消除。
 
 这些失败尚未作为 Stage 2 退出证据，也没有通过放宽验证或恢复第三个业务 owner 来处理。需要在
 后续兼容审计中逐项判断是更新过时测试合同，还是修复真实的稳定版兼容回归。
