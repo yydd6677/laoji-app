@@ -16,7 +16,7 @@
 - `backend/tests/test_guest_transcript_api.py`
 - `backend/tests/test_qwen_realtime_ws.py`
 - `backend/docs/collaboration/laoji-backend-review.md`
-- `/home/zhong/laoji-service-platform/docs/workspace-review.md`
+- `$SERVER_DEPLOYMENT_ROOT/docs/workspace-review.md`
 
 ### Verification
 - Focused guest-session, endpoint, Qwen routing, WebSocket auth, and existing guest database-boundary tests pass: `19 passed in 1.50s`.
@@ -24,7 +24,7 @@
 - A real Qwen meeting probe returned two final lines over WebSocket and the new endpoint returned the same two lines with stable IDs before cleanup; `ready_to_stop` arrived 28 ms after the stop frame and session revoke returned HTTP 204.
 
 ### Rollback
-- Restore the pre-change copies from `/home/zhong/laoji-service-platform/backups/20260716-guest-transcript-recovery` and restart only the owned `18020` backend after checking active WebSocket connections.
+- Restore the pre-change copies from `$SERVER_DEPLOYMENT_ROOT/backups/20260716-guest-transcript-recovery` and restart only the owned `18020` backend after checking active WebSocket connections.
 - No database rollback is required because guest transcript recovery is process-local and does not add a table or write account meeting rows.
 
 ## 2026-07-11 Production HTTPS/WSS Proxy Template
@@ -68,7 +68,7 @@
 - Live post-check retained the original processes (18020 PID 3112724 and 18035
   PID 2918785), both health endpoints returned `status=ok`, port 443 remained
   closed, and the enabled system site still resolved to the collaborator-owned
-  `/home/zhong/SMART-MEETING/.../smart-meeting-ai.conf`.
+  `$OTHER_SERVICE_ROOT/.../smart-meeting-ai.conf`.
 - Runtime activation is intentionally out of scope until a real DNS name and
   public-CA certificate are provided.
 
@@ -514,7 +514,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
 
 ### Scope And Ownership
 - All changes are confined to the canonical LaoJi workspace at
-  `/home/zhong/laoji-service-platform`; no collaborator workspace or system
+  `$SERVER_DEPLOYMENT_ROOT`; no collaborator workspace or system
   Nginx configuration was modified.
 - Shared Ollama configuration and model processes were not changed.
 - Ports `18020` and `18035` were still running the previous loaded code when
@@ -883,7 +883,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
 - Before restart, active recording/processing meetings and established 18020/
   18035 connections were all 0. Canonical 18035 restarted from PID `3799667` to
   `268705`; canonical 18020 restarted from PID `3802354` to `268706`. Both run
-  from `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`; all five
+  from `$SERVER_DEPLOYMENT_ROOT/smart-meeting-ai/backend`; all five
   meeting model health flags returned true.
 - Live negative smoke produced 401 for login attempts 1-8 and 429 for attempt 9
   with `Retry-After=899`. The limited response, a generic unknown-account reset
@@ -937,7 +937,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
   meetings were both zero and `local.db` passed `PRAGMA quick_check=ok`.
   Canonical 18020 restarted from PID `268706` to PID `1760246`; canonical 18035
   remained PID `268705`. Both processes run from
-  `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`.
+  `$SERVER_DEPLOYMENT_ROOT/smart-meeting-ai/backend`.
 - Live smoke verified a matching token receives config with
   `purpose=schedule`, an empty end frame receives `ready_to_stop`, and a wrong
   token closes with code 1008. Direct file streaming recognized both
@@ -1034,7 +1034,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
 
 ### Schedule Parsing Accuracy Guards - 2026-07-12
 - Live inspection confirmed canonical ports 18035 and 18020 still run from
-  `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`; the App
+  `$SERVER_DEPLOYMENT_ROOT/smart-meeting-ai/backend`; the App
   endpoints do not use the collaborator-owned 8035 process.
 - `schedule_parser_service.py` now treats a final corrected date/time as
   authoritative, removes date/time leakage from model titles, clears an
@@ -1480,10 +1480,10 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
   deleted, and a guest FunASR socket completed with log evidence
   `scope=guest, registered voiceprints=0`.
 - Canonical 18020 is PID `242710`, canonical 18035 is PID `264019`, both run
-  from `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`. The 18020
+  from `$SERVER_DEPLOYMENT_ROOT/smart-meeting-ai/backend`. The 18020
   detailed health endpoint reports all five realtime models present and ready;
   18035 reports healthy. The workspace symlink still resolves to
-  `/home/zhong/laoji-service-platform`.
+  `$SERVER_DEPLOYMENT_ROOT`.
 - Core SHA-256 values are
   `b565d4eedd99da1d8121290ff17dbded0f8cce9454326242806fee95e706d870`
   for `app_speakers.py`,
@@ -1529,7 +1529,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
   an explicit location field, and both non-location conversation-context
   negatives.
 - Canonical 18035 was restarted as PID `723272`, runs from
-  `/home/zhong/laoji-service-platform/smart-meeting-ai/backend`, and reports
+  `$SERVER_DEPLOYMENT_ROOT/smart-meeting-ai/backend`, and reports
   `status=ok`, `service=laoji`. Final SHA-256 is
   `8f0fcd7c14ef36649a6f053a81ab87a7f12f2368c2a43a7bc5041f886f891430`
   for `schedule_parser_service.py` and
@@ -1586,7 +1586,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
   `7a9869e5212a27dd926de1dd7f5bfd79d243ffb260b2575bd757f7dd854ea561`
   for `scripts/health-check.sh`.
 - Pre-change source copies are under
-  `/home/zhong/laoji-service-platform/backups/20260713-summary-task-recovery-security`.
+  `$SERVER_DEPLOYMENT_ROOT/backups/20260713-summary-task-recovery-security`.
   Restore the two source `.before` files and `health-check.sh.before`, remove
   the lifecycle test if rolling back the feature, rerun the backend suite, and
   restart only port 18020 after
@@ -1687,7 +1687,7 @@ app/services/schedule_parser_service.py.bak-20260709-review-v2-reminder
   recorded after the controlled port-18020 restart.
 - Pre-change source, review documents and `local.db` are retained with
   owner-only permissions under
-  `/home/zhong/laoji-service-platform/backups/20260721-guest-migration-location-summary`.
+  `$SERVER_DEPLOYMENT_ROOT/backups/20260721-guest-migration-location-summary`.
   Rollback restores the four `.before` runtime files, confirms no established
   18020 connections, and restarts only the owned meeting backend. Restoring
   `local.db.before` is only required for a full data rollback and would discard
