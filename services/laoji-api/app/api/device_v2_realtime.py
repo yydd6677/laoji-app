@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import secrets
 import struct
 from typing import Literal
@@ -107,11 +108,17 @@ async def _authenticate(websocket: WebSocket) -> tuple[device_v2_identity.Device
 
 
 async def _send_store_error(websocket: WebSocket, error: Exception) -> None:
+    raw_reason = str(error).strip()
+    reason_code = (
+        raw_reason[:80]
+        if raw_reason and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", raw_reason)
+        else getattr(error, "code", None)
+    )
     privacy_log(
         "realtime_protocol_error",
         capability="transcript.realtime",
         error_type=type(error).__name__,
-        reason_code=getattr(error, "code", None),
+        reason_code=reason_code,
         status="failure",
     )
     if isinstance(error, vnext_realtime_store.VNextRealtimeError):
