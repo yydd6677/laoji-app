@@ -72,6 +72,9 @@
 - 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
 - `python3 tools/vnext/verify_deployment_templates.py`：通过；模板未安装到服务器。
 - `python3 tools/vnext/verify_stage2_android_contract.py`：通过；该探针是源码合同检查，不是设备运行证据。
+- `python3 tools/vnext/verify_stage2_exit_preflight.py` 已成为 Stage 2 barrier 前的聚合 fail-closed 预检；
+  缺少 Android、性能、资源、清理或旧公开零流量 envelope 时保持非零退出，不把单项回放当作退出。
+  当前预检结果见 [Stage 2 exit preflight](STAGE2-EXIT-PREFLIGHT-20260819.md)。
 - 聚焦测试命令与全量回归边界见 [focused test evidence](FOCUSED-TEST-EVIDENCE-20260818.md)。
 - GPU 短片段候选测量见 [GPU ASR candidate](GPU-ASR-CANDIDATE-20260818.md)；该测量不等于生产常驻资源门通过。
 - 隔离服务器候选 8031/18021 已真实启动并保持 loopback；`/api/ready` 对 ASR revision、R2、VAD、

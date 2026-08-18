@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Fail-closed Stage 2 exit preflight for the isolated vNext candidate.
+
+The probe deliberately separates implementation evidence from adoption:
+missing runtime evidence is ``blocked`` rather than inferred from source
+tests, and this command never activates a capability barrier, stops a process,
+or changes a database.  The input JSON is an externally produced evidence
+envelope, not a fixture that this tool generates.
+
+Example envelope shape::
+
+    {
+      "device_runtime": {
+        "candidate_apk": true,
+        "process_death_recovered": true,
+        "network_switch_recovered": true,
+        "projection_no_duplicate": true,
+        "no_speech_success": true
+      },
+      "performance": {
+        "realtime_p95_ms": 1900,
+        "import_rtf_p95": 0.48,
+        "first_segment_p95_ms": 7600,
+        "api_rss_peak_kib": 1200000,
+        "api_rss_delta_mib": 64,
+        "total_rss_gib": 7.5,
+        "gpu0_free_gib": 1.2,
+        "cpu_p95_cores": 12,
+        "temp_peak_gib": 2.0
+      },
+      "cleanup": {"pending_tasks": 0, "pending_cleanup": 0},
+      "public_cycle": {"complete": true, "legacy_submit_count": 0},
+      "service_ready": {"api": true, "asr": true}
+    }
+
+All numerical values are measured values. The tool does not manufacture
+percentiles from a single sample.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+from typing import Any, Mapping
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parents[2]
+API_RSS_LIMIT_KIB = 1_200 * 1024
+API_UPLOAD_DELTA_LIMIT_MIB = 128
+TOTAL_RSS_LIMIT_GIB = 8.0
+GPU0_FREE_LIMIT_GIB = 1.0
+CPU_P95_LIMIT = 16.0
+TEMP_LIMIT_GIB = 4.0
+REALTIME_P95_LIMIT_MS = 2_000
+IMPORT_RTF_LIMIT = 0.5
+FIRST_SEGMENT_P95_LIMIT_MS = 8_000
+
+
+def _mapping(value: object) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _gate(
+    gates: list[dict[str, Any]],
+    name: str,
+    passed: bool | None,
+    *,
+    evidence: object = None,
+    reason: str | None = None,
+) -> None:
+    status = "passed" if passed is True else "blocked"
+    gates.append({
+        "name": name,
+        "status": status,
+        "evidence": evidence,
+        **({"reason": reason} if reason else {}),
+    })
+
+
+def _static_contract(root: Path) -> tuple[bool, str]:
+    command = [sys.executable, str(root / "tools/vnext/verify_stage2_android_contract.py")]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return False, f"static_contract_probe_{type(error).__name__}"
+    output = f"{result.stdout}\n{result.stderr}"
+    passed = result.returncode == 0 and "stage2_android_contract=passed" in output
+    return passed, "stage2_android_contract=passed" if passed else "stage2_android_contract_failed"
+
+
+def _probe_loopback(url: str, timeout_seconds: float = 3.0) -> tuple[bool, object]:
+    parsed = urlsplit(url)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return False, "health_url_must_be_loopback_http"
+    try:
+        with urlopen(Request(url, method="GET"), timeout=timeout_seconds) as response:
+            payload = json.load(response)
+        return bool(isinstance(payload, Mapping) and payload.get("ready") is True), payload
+    except Exception as error:  # pragma: no cover - platform/network dependent
+        return False, f"health_probe_{type(error).__name__}"
+
+
+def _database_state(path: Path) -> tuple[bool, dict[str, Any]]:
+    if not path.is_file():
+        return False, {"status": "missing", "path": str(path)}
+    try:
+        with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+            tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            required = {"vnext_tasks", "vnext_object_cleanup_obligations"}
+            if not required <= tables:
+                return False, {
+                    "status": "schema_incomplete",
+                    "missing_tables": sorted(required - tables),
+                }
+            task_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(vnext_tasks)")}
+            cleanup_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(vnext_object_cleanup_obligations)")
+            }
+            state_column = "state" if "state" in task_columns else None
+            cleanup_state_column = "state" if "state" in cleanup_columns else None
+            active_tasks = int(connection.execute(
+                "SELECT COUNT(*) FROM vnext_tasks WHERE state IN ('active','running','queued')"
+            ).fetchone()[0]) if state_column else -1
+            pending_cleanup = int(connection.execute(
+                "SELECT COUNT(*) FROM vnext_object_cleanup_obligations WHERE state IN ('pending','running')"
+            ).fetchone()[0]) if cleanup_state_column else -1
+            integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
+            foreign_keys = int(connection.execute(
+                "SELECT COUNT(*) FROM pragma_foreign_key_check"
+            ).fetchone()[0])
+            details = {
+                "status": "ok" if integrity == "ok" and foreign_keys == 0 else "integrity_failed",
+                "active_tasks": active_tasks,
+                "pending_cleanup": pending_cleanup,
+                "integrity": integrity,
+                "foreign_key_violations": foreign_keys,
+            }
+            return details["status"] == "ok" and active_tasks == 0 and pending_cleanup == 0, details
+    except (OSError, sqlite3.Error) as error:
+        return False, {"status": f"database_probe_{type(error).__name__}"}
+
+
+def inspect(
+    root: Path,
+    envelope: Mapping[str, Any] | None,
+    *,
+    candidate_database: Path | None = None,
+    api_ready_url: str | None = None,
+    asr_ready_url: str | None = None,
+) -> dict[str, Any]:
+    data = _mapping(envelope)
+    gates: list[dict[str, Any]] = []
+
+    static_passed, static_reason = _static_contract(root)
+    _gate(gates, "android_static_contract", static_passed, evidence=static_reason)
+
+    service = _mapping(data.get("service_ready"))
+    if api_ready_url:
+        api_ok, api_evidence = _probe_loopback(api_ready_url)
+    else:
+        api_ok, api_evidence = _bool(service.get("api")), service.get("api")
+    if asr_ready_url:
+        asr_ok, asr_evidence = _probe_loopback(asr_ready_url)
+    else:
+        asr_ok, asr_evidence = _bool(service.get("asr")), service.get("asr")
+    _gate(gates, "candidate_api_ready", api_ok, evidence=api_evidence, reason="missing_or_not_ready")
+    _gate(gates, "candidate_asr_ready", asr_ok, evidence=asr_evidence, reason="missing_or_not_ready")
+
+    device = _mapping(data.get("device_runtime"))
+    for field in (
+        "candidate_apk",
+        "process_death_recovered",
+        "network_switch_recovered",
+        "projection_no_duplicate",
+        "no_speech_success",
+    ):
+        value = _bool(device.get(field))
+        _gate(gates, f"android_{field}", value, evidence=value, reason="android_runtime_evidence_required")
+
+    performance = _mapping(data.get("performance"))
+    performance_checks = (
+        ("realtime_p95_ms", REALTIME_P95_LIMIT_MS, "realtime_p95_ms"),
+        ("import_rtf_p95", IMPORT_RTF_LIMIT, "import_rtf_p95"),
+        ("first_segment_p95_ms", FIRST_SEGMENT_P95_LIMIT_MS, "first_segment_p95_ms"),
+        ("api_rss_peak_kib", API_RSS_LIMIT_KIB, "api_rss_peak_kib"),
+        ("api_rss_delta_mib", API_UPLOAD_DELTA_LIMIT_MIB, "api_rss_delta_mib"),
+        ("total_rss_gib", TOTAL_RSS_LIMIT_GIB, "total_rss_gib"),
+        ("cpu_p95_cores", CPU_P95_LIMIT, "cpu_p95_cores"),
+        ("temp_peak_gib", TEMP_LIMIT_GIB, "temp_peak_gib"),
+    )
+    for field, limit, gate_name in performance_checks:
+        value = _number(performance.get(field))
+        _gate(
+            gates,
+            f"performance_{gate_name}",
+            value is not None and value <= limit,
+            evidence={"value": value, "limit": limit},
+            reason="measured_p95_or_peak_required",
+        )
+    gpu_free = _number(performance.get("gpu0_free_gib"))
+    _gate(
+        gates,
+        "resource_gpu0_safety_margin",
+        gpu_free is not None and gpu_free >= GPU0_FREE_LIMIT_GIB,
+        evidence={"value": gpu_free, "minimum": GPU0_FREE_LIMIT_GIB},
+        reason="measured_gpu_snapshot_required",
+    )
+
+    cleanup = _mapping(data.get("cleanup"))
+    pending_tasks = _number(cleanup.get("pending_tasks"))
+    pending_cleanup = _number(cleanup.get("pending_cleanup"))
+    _gate(
+        gates,
+        "candidate_task_and_cleanup_drained",
+        pending_tasks is not None and pending_tasks == 0 and pending_cleanup == 0,
+        evidence={"pending_tasks": pending_tasks, "pending_cleanup": pending_cleanup},
+        reason="candidate_database_or_replay_evidence_required",
+    )
+    if candidate_database:
+        database_ok, database_evidence = _database_state(candidate_database)
+        _gate(gates, "candidate_database_read_only_audit", database_ok, evidence=database_evidence)
+
+    cycle = _mapping(data.get("public_cycle"))
+    cycle_complete = _bool(cycle.get("complete"))
+    legacy_count = _number(cycle.get("legacy_submit_count"))
+    _gate(
+        gates,
+        "legacy_submit_zero_public_cycle",
+        cycle_complete is True and legacy_count == 0,
+        evidence={"complete": cycle_complete, "legacy_submit_count": legacy_count},
+        reason="external_public_cycle_record_required",
+    )
+
+    passed = bool(gates) and all(item["status"] == "passed" for item in gates)
+    return {
+        "schema_version": 1,
+        "candidate_only": True,
+        "production_mutation": False,
+        "passed": passed,
+        "gates": gates,
+        "blocking_gates": [item["name"] for item in gates if item["status"] != "passed"],
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--evidence", type=Path, help="Externally produced JSON evidence envelope")
+    parser.add_argument("--candidate-database", type=Path)
+    parser.add_argument("--api-ready-url")
+    parser.add_argument("--asr-ready-url")
+    parser.add_argument("root", nargs="?", type=Path, default=ROOT)
+    args = parser.parse_args()
+    envelope: Mapping[str, Any] | None = None
+    if args.evidence:
+        envelope = json.loads(args.evidence.read_text(encoding="utf-8"))
+    report = inspect(
+        args.root.resolve(),
+        envelope,
+        candidate_database=args.candidate_database.resolve() if args.candidate_database else None,
+        api_ready_url=args.api_ready_url,
+        asr_ready_url=args.asr_ready_url,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
