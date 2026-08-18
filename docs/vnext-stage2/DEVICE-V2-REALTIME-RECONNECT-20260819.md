@@ -36,7 +36,8 @@
 
 - `tools/vnext/probe_device_v2_realtime.py`：正式协议回放器，包含设备注册、分片时间轴校验、主动断线、游标重连、事件 ACK 和 purge。
 - `services/laoji-api/app/api/device_v2_realtime.py`：为协议错误增加只记录错误类型/受限错误码的隐私安全诊断，不写入正文或原始标识。
-- 不足 1ms 的媒体尾部不再单独发送，避免形成零时长 wire frame；该边界有单元测试覆盖。
+- `DeviceV2RealtimeAsrSocket.kt`：Android 端把不足 1ms 的 PCM 尾部留在内存，下一帧合并；录音结束不发送无效零时长 wire frame，且不影响本机完整 WAV。
+- 回放工具同样裁剪不足 1ms 的媒体尾部；该边界有单元测试覆盖。Android 工程 `:app:compileDebugKotlin` 通过。
 
 ## 仍未闭合
 

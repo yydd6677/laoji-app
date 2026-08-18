@@ -56,6 +56,10 @@ internal class DeviceV2RealtimeAsrSocket(
   private var socket: WebSocket? = null
   private var socketGeneration = 0L
   private var reconnectAttempts = 0
+  // AudioRecord may return a frame whose byte count is not a whole wire
+  // millisecond (32 bytes at 16 kHz mono PCM16). Keep that tail until the next
+  // read instead of emitting a zero-duration realtime frame.
+  private var pendingPcmTail = ByteArray(0)
 
   init {
     val pending = durable.chunksAfter(cursor.lastChunkAck)
@@ -97,29 +101,44 @@ internal class DeviceV2RealtimeAsrSocket(
   override fun sendPcm(buffer: ByteArray, count: Int): Boolean {
     val byteCount = count.coerceIn(0, buffer.size) and -2
     if (!accepting.get() || finalRequested.get() || byteCount <= 0) return false
-    val payload = buffer.copyOf(byteCount)
-    val reserved = synchronized(stateLock) {
-      val sequence = cursor.nextChunkSequence
-      val offset = cursor.nextSourceByteOffset
-      cursor = cursor.copy(
-        nextChunkSequence = sequence + 1L,
-        nextSourceByteOffset = offset + byteCount,
-      )
-      sequence to offset
+    val reservation = synchronized(stateLock) {
+      val incoming = buffer.copyOf(byteCount)
+      val combined = ByteArray(pendingPcmTail.size + incoming.size)
+      pendingPcmTail.copyInto(combined, destinationOffset = 0)
+      incoming.copyInto(combined, destinationOffset = pendingPcmTail.size)
+      val alignedBytes = combined.size - (combined.size % DeviceV2RealtimeFrameCodec.BYTES_PER_MILLISECOND.toInt())
+      pendingPcmTail = combined.copyOfRange(alignedBytes, combined.size)
+      if (alignedBytes <= 0) {
+        null
+      } else {
+        val sequence = cursor.nextChunkSequence
+        val offset = cursor.nextSourceByteOffset
+        cursor = cursor.copy(
+          nextChunkSequence = sequence + 1L,
+          nextSourceByteOffset = offset + alignedBytes,
+        )
+        sequence to (offset to combined.copyOf(alignedBytes))
+      }
     }
+    // A sub-millisecond tail is retained for the next read. Returning true
+    // means the recorder kept the audio locally; no wire frame was needed yet.
+    if (reservation == null) return true
+    val sequence = reservation.first
+    val offset = reservation.second.first
+    val payload = reservation.second.second
     return try {
       io.execute {
         try {
           val frame = DeviceV2RealtimeFrameCodec.encode(
-            reserved.first,
-            reserved.second,
+            sequence,
+            offset,
             payload,
             payload.size,
           )
-          durable.writeChunk(reserved.first, frame)
+          durable.writeChunk(sequence, frame)
           synchronized(stateLock) {
-            durableNextChunkSequence = reserved.first + 1L
-            durableNextSourceByteOffset = reserved.second + payload.size
+            durableNextChunkSequence = sequence + 1L
+            durableNextSourceByteOffset = offset + payload.size
           }
           saveCursor()
           if (networkReady.get() && socket?.send(frame.toByteString()) != true) {
@@ -137,6 +156,7 @@ internal class DeviceV2RealtimeAsrSocket(
 
   override fun sendEndFrame(): Boolean {
     if (!finalRequested.compareAndSet(false, true) || !accepting.get()) return finalRequested.get()
+    synchronized(stateLock) { pendingPcmTail = ByteArray(0) }
     return try {
       io.execute {
         if (networkReady.get()) {
@@ -187,6 +207,7 @@ internal class DeviceV2RealtimeAsrSocket(
     if (!clientClosing.compareAndSet(false, true)) return
     accepting.set(false)
     networkReady.set(false)
+    synchronized(stateLock) { pendingPcmTail = ByteArray(0) }
     socket?.close(1000, "recording complete")
     terminal.countDown()
     io.shutdown()
@@ -196,6 +217,7 @@ internal class DeviceV2RealtimeAsrSocket(
     if (!clientClosing.compareAndSet(false, true)) return
     accepting.set(false)
     networkReady.set(false)
+    synchronized(stateLock) { pendingPcmTail = ByteArray(0) }
     socket?.cancel()
     terminal.countDown()
     io.shutdownNow()
