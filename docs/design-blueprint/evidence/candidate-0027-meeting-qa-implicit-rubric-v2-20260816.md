@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-evidence-qa-0012/eval_contract_v2.py`
+- candidate: `$CANDIDATE_ROOT/meeting-evidence-qa-0012/eval_contract_v2.py`
 - result: `contract self-tested; semantic review incomplete`
 - adoption: **not adopted**
 - production mutation: `none`

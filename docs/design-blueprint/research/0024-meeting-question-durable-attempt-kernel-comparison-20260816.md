@@ -7,7 +7,7 @@
 - production/service/database/App/device/GPU mutation: `none`
 - source snapshots:
   - mobile worktree HEAD observed: `48e3b36`
-  - service source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3`
+  - service source: `$SERVICE_REPO`
 - question: Q2-C 应继续同步请求、新建问答专用 attempt，还是把已有
   `summary_tasks_v2` 收敛为可同时承担整理和问答的 generation task kernel？
 

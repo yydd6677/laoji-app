@@ -3,8 +3,8 @@
 ## 状态与边界
 
 - status: `observed; source and production-hash audit; not adopted`
-- mobile source: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-- service source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3`
+- mobile source: `$MOBILE_REPO`
+- service source: `$SERVICE_REPO`
 - production mutation/model invocation/private audio access: `none`
 
 本审计区分“服务端已计算文字”“某 API 能读取 draft”“手机当前源码会拉取”和“已发布

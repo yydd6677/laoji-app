@@ -2,7 +2,7 @@
 
 ## Evidence boundary
 
-- candidate path: `/home/yydd/LaoJi-candidates/summary-v3-recovery-0008`
+- candidate path: `$CANDIDATE_ROOT/summary-v3-recovery-0008`
 - implementation: isolated Node standard-library contract only
 - production client, server, device, model and database: untouched
 

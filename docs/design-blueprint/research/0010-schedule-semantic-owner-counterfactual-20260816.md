@@ -5,9 +5,9 @@
 - status: `independent research; candidate narrowed; not adopted`
 - observed: `2026-08-16 Asia/Shanghai`
 - production mutation: none
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
+- source worktree: `$MOBILE_REPO`
 - service source inspected read-only:
-  `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+  `$SERVICE_REPO/backend`
 - 本文不修改 `CURRENT.md`、revision、生产 parser、API、APK、数据库、服务或模型，也不授权
   训练、部署或下载服务器模型。
 - candidate 0011--0014、MASSIVE 和论文指标只证明各自明确写出的实验边界，均不等于老记

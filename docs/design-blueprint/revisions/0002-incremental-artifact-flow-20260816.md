@@ -5,7 +5,7 @@
 - status: `candidate + prototype-selected`; **not adopted**
 - parent: `0001-baseline-20260816`
 - observed at: `2026-08-16 Asia/Shanghai`
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
+- source worktree: `$MOBILE_REPO`
 - source commit observed: `48e3b36dff2cfc6b9b89c9a2f870ed88c802ebdf`
 - evidence mode: source/document inspection and public research only; no production, server, device, data, deployment, GPU or API mutation
 
@@ -221,17 +221,17 @@ MediaAsset -> segment artifacts
 ## 9. 当前原型进展
 
 候选 0003 已在隔离仓库实现最小 SQLite Artifact/Operation/Projection 合同：
-`/home/yydd/LaoJi-candidates/incremental-artifact-flow-0003`，commit `3f6a633`。
+`$CANDIDATE_ROOT/incremental-artifact-flow-0003`，commit `3f6a633`。
 15 项标准库测试通过，证明了 partial/stable/final 替换、来源失效、跨连接取消、重启去重、用户编辑保留、完整 operation 输入 CAS 和无来源结果拒绝等合同；这些仍是合成回放证据。它尚未接现有 summary ledger、真实 Provider、RN/Android 或 Windows，因此不改变本修订的 `candidate; not adopted` 状态。详见 [candidate 0003 evidence](../evidence/candidate-0003-artifact-flow-20260816.md)。
 
 服务器只读对照确认 `summary_tasks_v2` 是当前更完整的持久 task owner，候选 0003 不得再增设第二套生产 claim/lease/retry 表。下一轮应在隔离复制数据库中测试“现有 task owner + Artifact/result 表”的单一事务切片；若无法删除至少一组旧 worker 内存 owner，则不进入 adopted。详见 [summary-v3 ledger comparison](../research/0002-summary-ledger-comparison-20260816.md)。
 
-候选 0004 已完成该单一 owner 的缩减合同原型：`/home/yydd/LaoJi-candidates/summary-artifact-owner-0004`，commit `8faa61c`，9/9 测试通过。它只复刻核心 task schema，尚未证明真实 worker、加密载荷、checkpoint 或内存 owner 可以删除，因此仍不改变本修订的候选状态。详见 [candidate 0004 evidence](../evidence/candidate-0004-summary-artifact-owner-20260816.md)。
+候选 0004 已完成该单一 owner 的缩减合同原型：`$CANDIDATE_ROOT/summary-artifact-owner-0004`，commit `8faa61c`，9/9 测试通过。它只复刻核心 task schema，尚未证明真实 worker、加密载荷、checkpoint 或内存 owner 可以删除，因此仍不改变本修订的候选状态。详见 [candidate 0004 evidence](../evidence/candidate-0004-summary-artifact-owner-20260816.md)。
 
 移动端独立审计确认候选 0002 尚未接入真实 RN/Android，且生产 serializer 仍允许 shared bearer route。下一 UI 原型应改为单详情 `projectionRevision + surfaceInstanceId`，不再增加 envelope 维度；审计和门禁见 [mobile projection audit](../research/0003-mobile-projection-review-20260816.md)。
 
-候选 0005 已完成该窄合同原型：`/home/yydd/LaoJi-candidates/detail-projection-v2-0005`，commit `2a14696`，10/10 测试通过；它尚未接入 RN/Android，故不改变 `candidate; not adopted` 状态。详见 [candidate 0005 evidence](../evidence/candidate-0005-detail-projection-20260816.md)。
+候选 0005 已完成该窄合同原型：`$CANDIDATE_ROOT/detail-projection-v2-0005`，commit `2a14696`，10/10 测试通过；它尚未接入 RN/Android，故不改变 `candidate; not adopted` 状态。详见 [candidate 0005 evidence](../evidence/candidate-0005-detail-projection-20260816.md)。
 
 三候选比较后，下一项被限定为 `Summary Artifact Projection r1`：复用现有 `summary_tasks_v2` 唯一 task owner，先验证 final facts artifact 与 Detail Projection reducer 的事务/血缘闭环；不把 0003 的第二 operations owner 带入生产。比较与 100 次故障门禁见 [candidate comparison](../research/0004-candidate-comparison-20260816.md)。
 
-候选 0006 已完成该隔离集成：`/home/yydd/LaoJi-candidates/summary-artifact-projection-r1-0006`，commit `6f2140a`，100 轮（50 轮注入回滚）通过。依赖 commit 已锁定，但尚未接生产 task store/worker 或真实页面，因此仍不改变 `candidate; not adopted` 状态。详见 [candidate 0006 evidence](../evidence/candidate-0006-summary-artifact-projection-20260816.md)。
+候选 0006 已完成该隔离集成：`$CANDIDATE_ROOT/summary-artifact-projection-r1-0006`，commit `6f2140a`，100 轮（50 轮注入回滚）通过。依赖 commit 已锁定，但尚未接生产 task store/worker 或真实页面，因此仍不改变 `candidate; not adopted` 状态。详见 [candidate 0006 evidence](../evidence/candidate-0006-summary-artifact-projection-20260816.md)。

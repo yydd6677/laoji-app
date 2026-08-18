@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/upload-u2-server-domain-0003`
+- candidate: `$CANDIDATE_ROOT/upload-u2-server-domain-0003`
 - implementer/root self-test: `9/9`
 - independent audit: `BLOCK` (candidate 0036)
 - R2 evidence: `none`
@@ -16,7 +16,7 @@
 ## 自测
 
 ```sh
-cd /home/yydd/LaoJi-candidates/upload-u2-server-domain-0003
+cd $CANDIDATE_ROOT/upload-u2-server-domain-0003
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
@@ -31,7 +31,7 @@ bcf54f99b6a07fc005dad2e6183478d5825f3a205044d84a98ff532fb81092fc  u2_server_doma
 74a56b66efdfdacd9835efe585ce34d8387ae331455113d0d1f33217817aca07  tests/test_u2_server_domain.py
 ```
 
-测试使用 `TemporaryDirectory`；结束后 `/tmp/laoji-u2-server-*` 残留为 `0`。
+测试使用 `TemporaryDirectory`；结束后 `$TEMP_ROOT/laoji-u2-server-*` 残留为 `0`。
 
 ## 当前只证明的边界
 

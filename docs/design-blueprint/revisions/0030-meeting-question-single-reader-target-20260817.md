@@ -98,7 +98,7 @@ one release and is then deleted; it is not a permanent fallback.
 ## First vertical slice
 
 The first candidate is
-`/home/yydd/LaoJi-candidates/meeting-question-single-reader-0025`.
+`$CANDIDATE_ROOT/meeting-question-single-reader-0025`.
 Before any real reader call it may implement only the framework-neutral
 snapshot, one-call provider, clause-citation and typed failure contracts with a
 deterministic fake provider.

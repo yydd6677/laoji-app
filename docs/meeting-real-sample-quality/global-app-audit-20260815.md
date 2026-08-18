@@ -4,11 +4,11 @@
 
 本轮将范围从日程解析、会议整理和会议问答扩展到应用全局功能。测评以当前工作区构建产物和 `emulator-5562` 上的真实点击、输入、返回、长按、断网、权限拒绝和外部分享为证据；没有修改源码、没有提交或推送，也没有操作 KataCR 所属的 `emulator-5560`。
 
-- APK：`/home/yydd/LaoJi-stable-builds/current/laoji-1.1.4-112.apk`
+- APK：`$RELEASE_ARTIFACTS/current/laoji-1.1.4-112.apk`
 - 包名：`com.laoji.app`
 - 运行版本：`1.1.4-source-preview`，`versionCode=112`
 - 测试模拟器：`emulator-5562`（LaoJi_API_35）
-- 证据归档：服务器 `/home/zhong/laoji-workspace-archives/2026-08-15-local-consolidation/light-plan-laoji-history.tar.zst` 内的 `tmp/laoji-audit-20260815/`
+- 证据归档：服务器 `$SERVER_ARCHIVE_ROOT/2026-08-15-local-consolidation/light-plan-laoji-history.tar.zst` 内的 `tmp/laoji-audit-20260815/`
 - 后续服务质量补充：`../meeting-real-sample-quality-followup-20260815.md`；更早的服务评测已随整理前源码快照归档，不再作为当前入口
 
 “通过”仅表示本轮所执行的路径通过；没有执行的路径统一列为未覆盖，不外推为整机或真机通过。

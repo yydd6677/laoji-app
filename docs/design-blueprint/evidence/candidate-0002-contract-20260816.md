@@ -1,6 +1,6 @@
 # 候选 0002 投影合同证据
 
-- candidate repo: `/home/yydd/LaoJi-candidates/revisioned-projection-0002`
+- candidate repo: `$CANDIDATE_ROOT/revisioned-projection-0002`
 - branch: `candidate/revisioned-projection-0002`
 - commit: `922e990`
 - runtime: Node standard library

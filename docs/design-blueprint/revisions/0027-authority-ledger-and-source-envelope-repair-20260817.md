@@ -2,7 +2,7 @@
 
 - status: `superseded by revision 0028; repaired hashes independently passed; not adopted`
 - parent: `0026-stable-payload-and-attempt-claim-composition-20260817`
-- candidate: `/home/yydd/LaoJi-candidates/generation-authority-resolver-0023`
+- candidate: `$CANDIDATE_ROOT/generation-authority-resolver-0023`
 - production mutation: `none`
 
 ## Why 0026 was blocked

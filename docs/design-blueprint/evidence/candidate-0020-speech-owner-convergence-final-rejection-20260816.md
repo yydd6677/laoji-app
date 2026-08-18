@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/speech-owner-convergence-0004`
+- candidate: `$CANDIDATE_ROOT/speech-owner-convergence-0004`
 - decision: `rejected`; **not adopted**
 - review: 全新非 Fast、未参与候选实现的独立蓝图代理
 - production mutation: none

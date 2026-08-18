@@ -2,8 +2,8 @@
 
 ## 状态
 
-- implementation: `/home/yydd/LaoJi-candidates/speech-projection-atomic-seam-0010`
-- root audit: `/home/yydd/LaoJi-candidates/speech-projection-atomic-seam-0010-root-audit`
+- implementation: `$CANDIDATE_ROOT/speech-projection-atomic-seam-0010`
+- root audit: `$CANDIDATE_ROOT/speech-projection-atomic-seam-0010-root-audit`
 - implementation self-test: TypeScript `21/21`, Python fixture `2/2`, strict typecheck passed
 - root adversarial reproductions: `5/5`
 - verdict: **BLOCK integration; rejected-current-shape**

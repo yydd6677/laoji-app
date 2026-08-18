@@ -1,6 +1,6 @@
 # Candidate 0050: question atomicity audit and repair
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
+- candidate: `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
 - status: `second independent audit BLOCK; second repairs 89/89 self-tested; re-audit pending`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 

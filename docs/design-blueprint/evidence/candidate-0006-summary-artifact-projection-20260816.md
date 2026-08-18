@@ -2,7 +2,7 @@
 
 ## 身份与边界
 
-- candidate repository: `/home/yydd/LaoJi-candidates/summary-artifact-projection-r1-0006`
+- candidate repository: `$CANDIDATE_ROOT/summary-artifact-projection-r1-0006`
 - branch: `candidate/summary-artifact-projection-r1-0006`
 - commit: `6f2140a`
 - pinned owner candidate: `summary-artifact-owner-0004@8faa61cca69058f71c6bc5582fecb6e8a6826f55`

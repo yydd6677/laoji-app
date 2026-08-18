@@ -5,7 +5,7 @@
 - status: `candidate; architecture-only; not adopted`
 - parent revision: `0006-schedule-mention-graph-boundary-20260816`
 - observed: 2026-08-16 Asia/Shanghai
-- 隔离合同：`/home/yydd/LaoJi-candidates/speech-artifact-flow-0002`
+- 隔离合同：`$CANDIDATE_ROOT/speech-artifact-flow-0002`
 - 目标：先删除文字等待讲话人、重复 CAM++ 和片段身份漂移，再用同一合同比较
   Qwen completed、Qwen streaming 与 Paraformer；不预设新 provider 胜出。
 

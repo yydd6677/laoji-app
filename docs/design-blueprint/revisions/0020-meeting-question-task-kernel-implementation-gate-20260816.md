@@ -59,7 +59,7 @@ root 检查。当前汇总为 `42 ACCEPT / 11 REVISE / 1 REJECT`；这不是 rea
 
 ## 下一步，不再重新规划
 
-1. 按 `/home/yydd/LaoJi-candidates/meeting-question-task-kernel-0018/ADAPTER_MAP.md` 实现
+1. 按 `$CANDIDATE_ROOT/meeting-question-task-kernel-0018/ADAPTER_MAP.md` 实现
    Slice A：generic server owner + legacy summary migration fixture；
 2. 对 Slice A 做一次独立代码审计，只有阻塞级缺陷允许修一轮；
 3. 再实现 durable question API 和 mobile migration 0040；

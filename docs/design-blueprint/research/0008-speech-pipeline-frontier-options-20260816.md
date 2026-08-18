@@ -3,8 +3,8 @@
 状态：`research`，隔离研究，**未采用**。
 
 观察日期：2026-08-16（Asia/Shanghai）
-源码工作树：`/home/yydd/LaoJi-worktrees/feishu-source-driven`（移动端）
-服务工作树：`/home/yydd/LaoJi-service-worktrees/compact-production-v3`（后端/ASR）
+源码工作树：`$MOBILE_REPO`（移动端）
+服务工作树：`$SERVICE_REPO`（后端/ASR）
 
 本记录回答一个窄问题：在不先增加新的生产任务 owner 或常驻模型的前提下，老记的实时与导入语音应继续维护当前 Qwen3-ASR 路径、做最小重构，还是替换为 Qwen3-ASR 原生流式或 FunASR/Paraformer 流水线。它不是质量报告，也不是部署批准。所有性能和质量门槛都必须用老记的脱敏真实样本和同一硬件实测，README 数字、合成回放时间和服务健康检查不能代替实测。
 
@@ -26,13 +26,13 @@
 
 | 观察 | 证据 | 不能推出的结论 |
 |---|---|---|
-| 实时 WebSocket 只在 VAD 产生 segment 后发起一次 `_qwen_transcribe`，随后发 `transcript.completed` | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/qwen_ws.py:407-525` `[S]` | 不能称为 token/partial streaming；未测真实延迟 |
-| 会议 VAD 配置为 `max_speech_ms=4500`、`silence_ms=650`；日程为 `12000`、`900` | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/qwen_ws.py:92-110` `[S]` | 这是闭段配置，不是首 token 实测；未包含队列和推理时间 |
-| 8030 的推理协调器是一个优先级队列和一个 worker；请求阻塞到 `finished`，只在调用结束后返回整段文字 | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/qwen_asr_service/server.py:8-10,217-259,320-420` `[S]` | `realtime` 优先只改善排队顺序，不能中断已执行的 GPU 调用或产生 token |
-| 8030 当前配置模型为 `Qwen/Qwen3-ASR-1.7B`；现场记录为 `127.0.0.1:8030` 的 Qwen3-ASR 服务 | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/qwen_asr_service/server.py:38-76`、`docs/design-blueprint/evidence/live-server-20260816.md:9-16` `[S][L]` | `/api/ready` 为 ready 不等于质量或延迟达标 |
+| 实时 WebSocket 只在 VAD 产生 segment 后发起一次 `_qwen_transcribe`，随后发 `transcript.completed` | `$SERVICE_REPO/backend/app/api/qwen_ws.py:407-525` `[S]` | 不能称为 token/partial streaming；未测真实延迟 |
+| 会议 VAD 配置为 `max_speech_ms=4500`、`silence_ms=650`；日程为 `12000`、`900` | `$SERVICE_REPO/backend/app/api/qwen_ws.py:92-110` `[S]` | 这是闭段配置，不是首 token 实测；未包含队列和推理时间 |
+| 8030 的推理协调器是一个优先级队列和一个 worker；请求阻塞到 `finished`，只在调用结束后返回整段文字 | `$SERVICE_REPO/backend/qwen_asr_service/server.py:8-10,217-259,320-420` `[S]` | `realtime` 优先只改善排队顺序，不能中断已执行的 GPU 调用或产生 token |
+| 8030 当前配置模型为 `Qwen/Qwen3-ASR-1.7B`；现场记录为 `127.0.0.1:8030` 的 Qwen3-ASR 服务 | `$SERVICE_REPO/backend/qwen_asr_service/server.py:38-76`、`docs/design-blueprint/evidence/live-server-20260816.md:9-16` `[S][L]` | `/api/ready` 为 ready 不等于质量或延迟达标 |
 | Native parser 已接受 `transcript.completed`、`transcript.partial`、`transcript.delta`，并保留 `isFinal`、时间区间和 speaker 字段 | `modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/audio/AudioProtocol.kt:254-291` `[S]` | 服务端尚未提供稳定水位、segment revision 或 partial 的去重合同 |
-| 离线路径按 VAD segment 批量（最多 8 项）调用 8030；ASR 文字可通过 `partial` callback 发布，讲话人 embedding 在单线程池中补齐，最终 speaker 分配仍在全部记录收集后进行 | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/services/compact_transcription_service.py:344-402,716-834,891-915` `[S]` | 已有有限重叠不等于独立、可取消的两个流水线；未测重叠收益 |
-| CAM++ inference 有进程级锁；离线 speaker executor `max_workers=1` | `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/asr/model_manager.py:24,414-420`、`/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/services/compact_transcription_service.py:762-775` `[S]` | 任意增加线程不会自动增加吞吐，可能只增加等待 |
+| 离线路径按 VAD segment 批量（最多 8 项）调用 8030；ASR 文字可通过 `partial` callback 发布，讲话人 embedding 在单线程池中补齐，最终 speaker 分配仍在全部记录收集后进行 | `$SERVICE_REPO/backend/app/services/compact_transcription_service.py:344-402,716-834,891-915` `[S]` | 已有有限重叠不等于独立、可取消的两个流水线；未测重叠收益 |
+| CAM++ inference 有进程级锁；离线 speaker executor `max_workers=1` | `$SERVICE_REPO/backend/app/asr/model_manager.py:24,414-420`、`$SERVICE_REPO/backend/app/services/compact_transcription_service.py:762-775` `[S]` | 任意增加线程不会自动增加吞吐，可能只增加等待 |
 | 当前资源有竞争风险：GPU0/GPU1 同时被老记、其他 ASR/Ollama/服务占用 | `docs/design-blueprint/evidence/live-server-20260816.md:18-31` `[L]` | 不能据此批准第二个常驻 ASR 或提高并行度 |
 
 当前没有可发布的老记 ASR 首 token p50/p95、稳定文字回滚率、最终 CER/WER、讲话人 DER、Windows 运行结果或同输入 provider 对照。以下所有门槛都是待执行的验收合同。

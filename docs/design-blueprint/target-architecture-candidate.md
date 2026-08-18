@@ -213,7 +213,7 @@ POST 只接 capability、EvidenceBundle、contract revision、priority 和幂等
 
 ## 当前证据
 
-- 合同原型：`/home/yydd/LaoJi-candidates/cognitive-runtime-0001`，commit `92d27de`；
+- 合同原型：`$CANDIDATE_ROOT/cognitive-runtime-0001`，commit `92d27de`；
 - 11 项标准库合同测试通过；
 - 未运行真实模型、未接生产、未证明质量或性能收益；
 - 源码级血缘、状态边、消费者注册和 projection ownership 缺口已由主代理独立复核。

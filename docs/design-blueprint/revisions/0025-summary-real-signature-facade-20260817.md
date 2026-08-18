@@ -2,7 +2,7 @@
 
 - status: `candidate; not adopted`
 - parent: `0024-question-atomicity-and-real-bridge-handoff-20260817`
-- candidate: `/home/yydd/LaoJi-candidates/summary-store-facade-0020`
+- candidate: `$CANDIDATE_ROOT/summary-store-facade-0020`
 - production mutation: `none`
 
 ## Decision

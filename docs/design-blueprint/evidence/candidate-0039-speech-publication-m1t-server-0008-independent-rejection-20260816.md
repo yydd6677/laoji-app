@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/speech-publication-m1t-server-0008`
+- candidate: `$CANDIDATE_ROOT/speech-publication-m1t-server-0008`
 - audited implementation snapshot:
   - `m1t_server.py`: `4e37505ffb7571a1f7dab89bf8c8521cafac001bccf68f0909e56efa6ba672ab`
   - `tests/test_m1t_server.py`: `cd9ec9a16ad5b3cea57bf742ebaf45e9eef41e3db63bea540d1e0e23d5eff24d`

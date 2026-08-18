@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/mobile-speech-projection-0005`
+- candidate: `$CANDIDATE_ROOT/mobile-speech-projection-0005`
 - status: `BLOCK integration; rejected-current-shape`; **not adopted**
 - production/App mutation: none
 - related blueprint: [revision 0009](../revisions/0009-durable-speech-execution-owner-20260816.md)

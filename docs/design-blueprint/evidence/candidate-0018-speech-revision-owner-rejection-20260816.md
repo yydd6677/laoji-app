@@ -2,7 +2,7 @@
 
 ## 范围
 
-- 候选目录：`/home/yydd/LaoJi-candidates/speech-revision-ledger-0003`
+- 候选目录：`$CANDIDATE_ROOT/speech-revision-ledger-0003`
 - 状态：`rejected as integration candidate`; **not adopted**
 - 生产修改：无；没有修改数据库、服务、模型、设备或 APK。
 - 目的：验证现有 job、draft 和 canonical 角色能否用一个孤立 SQLite 草图证明

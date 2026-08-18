@@ -1,7 +1,7 @@
 # Candidate 0051: summary store real-signature facade
 
-- candidate: `/home/yydd/LaoJi-candidates/summary-store-facade-0020`
-- dependency: `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
+- candidate: `$CANDIDATE_ROOT/summary-store-facade-0020`
+- dependency: `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
 - status: `independent audit BLOCK; repairs 13/13 self-tested; composition re-audit pending; not adopted`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 
@@ -46,7 +46,7 @@ deletion when it is absent.
 ## Verification
 
 ```text
-PYTHONPATH=/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019:. \
+PYTHONPATH=$CANDIDATE_ROOT/meeting-question-slice-b-0019:. \
 PYTHONDONTWRITEBYTECODE=1 python3 -W error::ResourceWarning \
   -m unittest discover -s tests -v
 Ran 13 tests: OK

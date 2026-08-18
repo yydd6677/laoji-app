@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-evidence-qa-0012`
+- candidate: `$CANDIDATE_ROOT/meeting-evidence-qa-0012`
 - result: `contract self-tested; short synthetic core independently reviewed`
 - adoption: **not adopted**
 - production mutation: `none`

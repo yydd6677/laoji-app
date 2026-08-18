@@ -6,16 +6,16 @@
 - observed: 2026-08-16 Asia/Shanghai
 - package: `@microsoft/recognizers-text-suite@1.3.1`
 - license shown by package metadata: MIT
-- installation location: `/tmp/laoji-recognizers-20260816` only
+- installation location: `$TEMP_ROOT/laoji-recognizers-20260816` only
 - no private audio, transcript, notes, database, production service or APK was touched
 
 ## Reproduction
 
 ```bash
-npm install --prefix /tmp/laoji-recognizers-20260816 --no-audit --no-fund \
+npm install --prefix $TEMP_ROOT/laoji-recognizers-20260816 --no-audit --no-fund \
   @microsoft/recognizers-text-suite@1.3.1
-NODE_PATH=/tmp/laoji-recognizers-20260816/node_modules \
-  node /home/yydd/LaoJi-candidates/schedule-semantic-draft-0001/recognizers_replay.mjs
+NODE_PATH=$TEMP_ROOT/laoji-recognizers-20260816/node_modules \
+  node $CANDIDATE_ROOT/schedule-semantic-draft-0001/recognizers_replay.mjs
 ```
 
 The installed `node_modules` occupied about 43 MiB; the suite package itself

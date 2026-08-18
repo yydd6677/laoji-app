@@ -1,6 +1,6 @@
 # Candidate 0049: durable question Slice B self-test
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
+- candidate: `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
 - status: `self-tested; independent audit pending; production NO-GO`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 

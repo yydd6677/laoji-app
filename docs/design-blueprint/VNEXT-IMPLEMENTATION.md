@@ -13,7 +13,7 @@
 2026-08-17 只读现场核对：
 
 - `laoji-api.service` active，cwd 为
-  `/home/zhong/laoji-service-platform/compact-production/backend`，监听 `127.0.0.1:18020`；
+  `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`，监听 `127.0.0.1:18020`；
 - `laoji-asr.service` active，使用同一 cwd 下 `qwen_asr_service/server.py`；
 - `laoji-ollama.service` active，监听 `21434`；Cloudflare Tunnel 直连 `18020`；
 - OpenAPI 同时存在 account、`/api/laoji`、device v1、laoji v1/v2 和 guest route，证明兼容面需要
@@ -33,9 +33,9 @@
 
 当前权威移动端工作树：
 
-`/home/yydd/LaoJi-worktrees/feishu-source-driven`
+`$MOBILE_REPO`
 
-Stage 0 已将生产机 `/home/zhong/laoji-service-platform/compact-production/backend` 冻结并导入同一
+Stage 0 已将生产机 `$SERVER_DEPLOYMENT_ROOT/compact-production/backend` 冻结并导入同一
 版本控制边界，当前布局：
 
 ```text

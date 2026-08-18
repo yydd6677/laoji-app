@@ -1,6 +1,6 @@
 # Research 0026: summary adapter owner duplication audit
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-task-kernel-0018`
+- candidate: `$CANDIDATE_ROOT/meeting-question-task-kernel-0018`
 - production mutation: `none`
 - result: first production-shaped adapter is `rejected-current-shape`
 

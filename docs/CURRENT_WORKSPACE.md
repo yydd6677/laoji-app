@@ -4,20 +4,20 @@
 
 ## 唯一入口
 
-- 活跃移动端源码：`/home/yydd/LaoJi-worktrees/feishu-source-driven`
+- 活跃移动端源码：`$MOBILE_REPO`
 - Git 分支：`rebuild/feishu-7.71.8-source-driven`
-- Git 元数据锚点：`/home/yydd/LaoJi/mobile/.git`
-- 生产后端：服务器 `/home/zhong/laoji-service-platform/compact-production/backend`
-- 会议整理 v3 开发副本：`/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+- Git 元数据锚点：`$GIT_COMMON_ROOT/.git`
+- 生产后端：服务器 `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`
+- 会议整理 v3 开发副本：`$SERVICE_REPO/backend`
 - 公网入口：`https://laoji.cloud` 与同域 `wss://`
 
-`/home/yydd/LaoJi/mobile` 是旧版本工作树，但其 `.git` 同时管理当前活跃 worktree。它已设置为只展开根文件的 sparse checkout；需要查看旧分支源码时可在该目录执行 `git sparse-checkout disable`。它不是当前开发入口，也不能整体移动或删除。当前业务实现只从活跃移动端源码和服务器真实运行目录判断，不能从旧 APK、候选 overlay、评测快照或历史工程指示反推。
+`$GIT_COMMON_ROOT` 是旧版本工作树，但其 `.git` 同时管理当前活跃 worktree。它已设置为只展开根文件的 sparse checkout；需要查看旧分支源码时可在该目录执行 `git sparse-checkout disable`。它不是当前开发入口，也不能整体移动或删除。当前业务实现只从活跃移动端源码和服务器真实运行目录判断，不能从旧 APK、候选 overlay、评测快照或历史工程指示反推。
 
 ## 当前发布
 
 - Android 版本：`1.1.7`，versionCode `115`
-- 本地稳定包：`/home/yydd/LaoJi-stable-builds/current/laoji-1.1.7-115.apk`
-- 本地更新清单：`/home/yydd/LaoJi-stable-builds/current/latest.json`
+- 本地稳定包：`$RELEASE_ARTIFACTS/current/laoji-1.1.7-115.apk`
+- 本地更新清单：`$RELEASE_ARTIFACTS/current/latest.json`
 - 公网更新清单：`https://laoji.cloud/downloads/android/latest.json`
 - APK SHA-256：`ec40176cb6ca067e108bbf9cf711d56c7fa903a5726a03b2b3eb7dc36446d824`
 
@@ -42,12 +42,12 @@
 
 本次整理的重资产位于服务器：
 
-`/home/zhong/laoji-workspace-archives/2026-08-15-local-consolidation`
+`$SERVER_ARCHIVE_ROOT/2026-08-15-local-consolidation`
 
 归档包含整理前 dirty 源码快照、完整 Git bundle、旧设计与构建、`light_plan` 中的服务候选/评测/演示资料，以及历史会话修复备份。详细文件、哈希和恢复方式见 [归档索引](WORKSPACE_ARCHIVE_20260815.md)；恢复时解压到新目录，不覆盖当前工作树或生产服务。
 
 ## 不属于老记
 
-- `/home/yydd/桌面/light_plan/captures` 是其他项目素材，本次未处理。
+- `$WORKSPACE_ARCHIVE/captures` 是其他项目素材，本次未处理。
 - `emulator-5560` 属于 KataCR；老记只使用 `emulator-5562`。
 - 服务器上的 Smart Meeting、PCB、GPU1 和其他用户服务不属于老记归档范围。

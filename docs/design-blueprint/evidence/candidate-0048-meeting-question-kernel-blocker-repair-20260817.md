@@ -1,6 +1,6 @@
 # Candidate 0048: durable question kernel blocker repair
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-task-kernel-0018`
+- candidate: `$CANDIDATE_ROOT/meeting-question-task-kernel-0018`
 - status: `independently audited; Slice A candidate; production NO-GO`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 

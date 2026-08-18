@@ -1,6 +1,6 @@
 # 2026-08-15 工作区归档索引
 
-远端目录：`/home/zhong/laoji-workspace-archives/2026-08-15-local-consolidation`
+远端目录：`$SERVER_ARCHIVE_ROOT/2026-08-15-local-consolidation`
 
 归档创建期间没有停止或重启本机模拟器、老记生产服务、Cloudflare Tunnel、Smart Meeting、PCB、GPU1 或其他用户服务。所有压缩包均已通过 `zstd -t` 和 `tar -t`；代表性源码、Markdown 和 APK 已从远端归档解出并与本地 SHA-256 一致。
 
@@ -23,9 +23,9 @@
 
 ## 本地保留
 
-- `/home/yydd/LaoJi-worktrees/feishu-source-driven`：唯一活跃移动端源码
-- `/home/yydd/LaoJi/mobile/.git`：当前 worktree 依赖的 Git 元数据；旧主工作树仅展开根文件的 sparse checkout
-- `/home/yydd/LaoJi-stable-builds/current`：唯一当前稳定 APK 与更新清单
+- `$MOBILE_REPO`：唯一活跃移动端源码
+- `$GIT_COMMON_ROOT/.git`：当前 worktree 依赖的 Git 元数据；旧主工作树仅展开根文件的 sparse checkout
+- `$RELEASE_ARTIFACTS/current`：唯一当前稳定 APK 与更新清单
 - 当前 `node_modules`、`.env.local`、签名配置和 Android 生成源码
 - 当前全局审查报告及本文件
 
@@ -38,7 +38,7 @@
 - 旧稳定 APK、mapping/debug symbols、测试虚拟环境、ASR 0.6B 本机缓存和重复格式夹具
 - Android/Gradle/CMake/Python 可再生构建缓存
 
-`/home/yydd/LaoJi/auth.json` 是与当前 Codex 配置不同的 7 月遗留凭据文件。为避免继续扩散旧令牌，它只从本机移除，不进入归档。
+`$LOCAL_PROJECT_ROOT/auth.json` 是与当前 Codex 配置不同的 7 月遗留凭据文件。为避免继续扩散旧令牌，它只从本机移除，不进入归档。
 
 ## 恢复
 
@@ -51,7 +51,7 @@ git clone git-all-refs.bundle /path/to/restore/git-history
 sha256sum -c SHA256SUMS
 ```
 
-`historical-local-roots.tar.zst` 保存的是相对 `/home/yydd` 的路径；`light-plan-laoji-history.tar.zst` 同时含相对 `light_plan` 的历史目录与 `tmp/laoji-audit-20260815`。恢复前先用 `tar --zstd -tf` 查看成员，不要直接解到 `/home`。
+`historical-local-roots.tar.zst` 保存的是相对 `$DEVELOPER_HOME` 的路径；`light-plan-laoji-history.tar.zst` 同时含相对 `light_plan` 的历史目录与 `tmp/laoji-audit-20260815`。恢复前先用 `tar --zstd -tf` 查看成员，不要直接解到 `/home`。
 
 ## 清理后验证
 

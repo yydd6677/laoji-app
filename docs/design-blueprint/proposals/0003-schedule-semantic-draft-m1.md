@@ -79,7 +79,7 @@ v2 合同已补齐上列 operation、route、recurrence/reminder 和 source iden
 
 ### 1. 两个只读 adapter
 
-在 `/home/yydd/LaoJi-candidates/schedule-semantic-draft-0001` 继续维护：
+在 `$CANDIDATE_ROOT/schedule-semantic-draft-0001` 继续维护：
 
 - `mobile-local adapter`：把当前 `ParseResult + classifyScheduleParseRoute` 映射
   到 Draft，保留原始 route 和 `parse_source`；不重新解释日期。

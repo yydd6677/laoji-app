@@ -1,5 +1,5 @@
 {
-  "media": "/tmp/laoji-vnext-restart-60s-20260818.mp4",
+  "media": "$TEMP_ROOT/laoji-vnext-restart-60s-20260818.mp4",
   "source_sha256": "sha256:56b6ae775b5d64e4038dc59d97f3317540adc6b3c43af8217469c6b6b076709f",
   "source_bytes": 3174969,
   "upload_mode": "single",

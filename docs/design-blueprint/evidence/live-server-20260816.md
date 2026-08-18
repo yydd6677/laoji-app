@@ -8,7 +8,7 @@
 
 | 入口 | 现场状态 | 观察 |
 |---|---|---|
-| `127.0.0.1:18020` | 监听 | `laoji-api.service`，cwd 为 `/home/zhong/laoji-service-platform/compact-production/backend` |
+| `127.0.0.1:18020` | 监听 | `laoji-api.service`，cwd 为 `$SERVER_DEPLOYMENT_ROOT/compact-production/backend` |
 | `127.0.0.1:8030` | 监听 | `laoji-asr.service`，Qwen3-ASR-1.7B |
 | `127.0.0.1:21434` | 监听 | `laoji-ollama.service`，`qwen3.5:9b` 和 `qwen3-embedding:0.6b` |
 | `cloudflared.service` | 运行 | systemd 配置指向 `127.0.0.1:18020` |

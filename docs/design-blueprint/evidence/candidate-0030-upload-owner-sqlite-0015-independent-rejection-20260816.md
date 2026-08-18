@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/upload-owner-sqlite-0015`
+- candidate: `$CANDIDATE_ROOT/upload-owner-sqlite-0015`
 - result: `rejected-current-shape`
 - adoption: **not adopted**
 - production mutation: `none`

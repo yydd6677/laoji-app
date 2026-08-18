@@ -2,7 +2,7 @@
 
 ## Boundary
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-qa-inspect-microprobe-0017`
+- candidate: `$CANDIDATE_ROOT/meeting-qa-inspect-microprobe-0017`
 - verdict: `BLOCK; fixture-only; rejected for Q2-E proof`
 - production/private meeting/real model/device/GPU mutation or access: `none`
 - audit method: clean rerun plus adversarial temporary copies; candidate logs were

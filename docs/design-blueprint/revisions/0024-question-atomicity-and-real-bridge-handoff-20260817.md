@@ -2,7 +2,7 @@
 
 - status: `candidate; not adopted`
 - parent: `0023-durable-question-slice-b-contract-20260817`
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
+- candidate: `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
 - production mutation: `none`
 
 ## Decision

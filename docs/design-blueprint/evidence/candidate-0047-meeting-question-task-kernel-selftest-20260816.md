@@ -2,7 +2,7 @@
 
 ## 边界
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-task-kernel-0018`
+- candidate: `$CANDIDATE_ROOT/meeting-question-task-kernel-0018`
 - status: `self-tested; GO for isolated adapter implementation; NO-GO for production`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 - model/private meeting/network call: `none`
@@ -86,7 +86,7 @@ PRAGMA foreign_key_check
 
 ## 实施决定
 
-采用 [adapter map](/home/yydd/LaoJi-candidates/meeting-question-task-kernel-0018/ADAPTER_MAP.md)
+采用 [adapter map]($CANDIDATE_ROOT/meeting-question-task-kernel-0018/ADAPTER_MAP.md)
 的顺序：
 
 1. Slice A 只让 summary 使用 generic owner；

@@ -5,7 +5,7 @@
 - status: `candidate; design-only; not adopted`
 - observed: 2026-08-16 Asia/Shanghai
 - blueprint baseline: `0002-incremental-artifact-flow-20260816`（`candidate + prototype-selected`，未采用）
-- implementation fact source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+- implementation fact source: `$SERVICE_REPO/backend`
 - 本笔记只提出隔离切片合同；不改生产代码、数据库、服务、模型、设备或部署。
 
 ## 结论
@@ -278,7 +278,7 @@ task/audit 行，并在同一终态事务删除 payload（若进程在清理前�
 
 ## 隔离原型结果（0007）
 
-`/home/yydd/LaoJi-candidates/summary-v3-lineage-0007` 以标准库 SQLite 复刻了
+`$CANDIDATE_ROOT/summary-v3-lineage-0007` 以标准库 SQLite 复刻了
 上述提交边界，包含 7 个合同测试：正常原子提交、artifact 写入后的崩溃回滚、
 错误 transcript revision、过期 lease、重复身份和“无第二 operations 表”。
 在本机 Python 3.13.5 上结果为 `7/7 passed`。这只是候选合同证据；尚未在项目

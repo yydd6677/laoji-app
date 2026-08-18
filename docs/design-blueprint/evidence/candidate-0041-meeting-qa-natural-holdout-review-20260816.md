@@ -6,7 +6,7 @@
 
 ## Boundary
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-qa-natural-holdout-0014`
+- candidate: `$CANDIDATE_ROOT/meeting-qa-natural-holdout-0014`
 - production prompt/model/private meeting/service/device/GPU access: `none`
 - corpus: four pinned AISHELL-4 TextGrid transcripts, 2,441 segments
 - corpus SHA-256: `585c742177ce31ed8d6cd8d558c8dc37bcbe6994672e0c2503437e091a95c218`

@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-answer-provider-0013`
+- candidate: `$CANDIDATE_ROOT/meeting-answer-provider-0013`
 - result: `self-tested; independent code audit pending`
 - adoption: **not adopted**
 - production mutation: `none`

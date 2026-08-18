@@ -3,8 +3,8 @@
 ## 证据边界
 
 - status: `observed; isolated service worktree; not production approval`
-- source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
-- runtime: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/.venv/bin/python`
+- source: `$SERVICE_REPO/backend`
+- runtime: `$SERVICE_REPO/.venv/bin/python`
 - 未启动、重启或修改服务器，也未修改服务源码。
 
 ## 执行

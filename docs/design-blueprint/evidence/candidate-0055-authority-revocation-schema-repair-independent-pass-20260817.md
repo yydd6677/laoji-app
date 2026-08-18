@@ -2,10 +2,10 @@
 
 - status: `independently audited PASS; isolated only; not adopted`
 - candidate roots:
-  - `/home/yydd/LaoJi-candidates/generation-authority-resolver-0023`
-  - `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
-  - `/home/yydd/LaoJi-candidates/generation-payload-store-0021`
-  - `/home/yydd/LaoJi-candidates/summary-payload-composition-0022`
+  - `$CANDIDATE_ROOT/generation-authority-resolver-0023`
+  - `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
+  - `$CANDIDATE_ROOT/generation-payload-store-0021`
+  - `$CANDIDATE_ROOT/summary-payload-composition-0022`
 - production/service/App/APK/device/GPU/model mutation: `none`
 
 ## Why the previous hashes were blocked

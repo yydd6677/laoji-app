@@ -5,7 +5,7 @@
 - result: `observed adapter map; not an implementation`
 - date: `2026-08-16 Asia/Shanghai`
 - production mutation: `none`
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
+- source worktree: `$MOBILE_REPO`
 
 本文件由源码只读核对产生，不表示 U2-A 已接入或任何旧入口已经删除。它的目的只有一个：
 在下一隔离原型中逐条证明“一个旧写入口有且只有一个替代”。

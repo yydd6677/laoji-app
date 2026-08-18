@@ -1,7 +1,7 @@
 # Candidate 0056: device summary-v3 owner independent pass
 
 - status: `independently audited PASS; isolated only; not adopted`
-- candidate: `/home/yydd/LaoJi-candidates/device-summary-v3-owner-0024`
+- candidate: `$CANDIDATE_ROOT/device-summary-v3-owner-0024`
 - blueprint parent: revision 0028
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 

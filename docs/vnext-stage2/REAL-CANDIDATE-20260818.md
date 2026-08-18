@@ -5,7 +5,7 @@ PCB 和其他服务均未修改。
 
 ## 候选拓扑
 
-- 服务器独立目录：`/home/zhong/laoji-vnext-candidate`。
+- 服务器独立目录：`$SERVER_HOME/laoji-vnext-candidate`。
 - ASR：`127.0.0.1:8031`，Qwen3-ASR-1.7B，revision
   `7278e1e70fe206f11671096ffdd38061171dd6e5`，强制 CPU。
 - API：`127.0.0.1:18021`，独立 SQLite、音频目录和日志；R2、Silero VAD、中文 CAM++、任务 worker

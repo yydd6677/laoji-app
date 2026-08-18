@@ -1,6 +1,6 @@
 # Candidate 0054: authority ledger/source envelope repair
 
-- candidate: `/home/yydd/LaoJi-candidates/generation-authority-resolver-0023`
+- candidate: `$CANDIDATE_ROOT/generation-authority-resolver-0023`
 - status: `superseded; these hashes were blocked and repaired in candidate 0055; not adopted`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 
@@ -38,8 +38,8 @@ The candidate now:
 ## Verification command
 
 ```sh
-cd /home/yydd/LaoJi-candidates/generation-authority-resolver-0023
-PYTHONPATH=/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019:/home/yydd/LaoJi-candidates/generation-payload-store-0021:. \
+cd $CANDIDATE_ROOT/generation-authority-resolver-0023
+PYTHONPATH=$CANDIDATE_ROOT/meeting-question-slice-b-0019:$CANDIDATE_ROOT/generation-payload-store-0021:. \
 PYTHONDONTWRITEBYTECODE=1 python3 -W error::ResourceWarning \
   -m unittest discover -s tests -v
 ```

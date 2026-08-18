@@ -2,7 +2,7 @@
 
 ## 状态与边界
 
-- 候选目录：`/home/yydd/LaoJi-candidates/speech-owner-convergence-0004`
+- 候选目录：`$CANDIDATE_ROOT/speech-owner-convergence-0004`
 - 状态：`candidate self-tested`; **independent review pending; not adopted**
 - 生产修改：无；没有修改真实服务源码/数据库、进程、模型、设备或 APK。
 - 父证据：[candidate 0018 rejection](candidate-0018-speech-revision-owner-rejection-20260816.md)
@@ -46,7 +46,7 @@
 ## 自测结果
 
 ```bash
-cd /home/yydd/LaoJi-candidates/speech-owner-convergence-0004
+cd $CANDIDATE_ROOT/speech-owner-convergence-0004
 python3 -m unittest discover -s tests -v
 ```
 

@@ -1,7 +1,7 @@
 # Research 0027: durable meeting-question Slice B boundary
 
 - status: `candidate; not implemented`
-- source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3`
+- source: `$SERVICE_REPO`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 - prerequisite: candidate 0048 must pass a fresh independent audit
 

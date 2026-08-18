@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/speech-durable-owner-restate-0007`
+- candidate: `$CANDIDATE_ROOT/speech-durable-owner-restate-0007`
 - runtime: Restate Server `1.7.2` + Python SDK `1.0.4` + Hypercorn `0.17.3`
 - result: `self-tested`; independent runtime contract audit `BLOCK`
 - adoption: **not adopted**
@@ -125,7 +125,7 @@ DBOS 0006 仍需独立审计；mobile 0005 仍需真实 repository transaction�
 ## 复现
 
 ```bash
-cd /home/yydd/LaoJi-candidates/speech-durable-owner-restate-0007
+cd $CANDIDATE_ROOT/speech-durable-owner-restate-0007
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tests/integration_restate.py
 ```

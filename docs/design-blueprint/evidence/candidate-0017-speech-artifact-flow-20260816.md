@@ -2,7 +2,7 @@
 
 ## 范围
 
-- 候选目录：`/home/yydd/LaoJi-candidates/speech-artifact-flow-0002`
+- 候选目录：`$CANDIDATE_ROOT/speech-artifact-flow-0002`
 - 状态：`candidate contract validated in isolation`; **not adopted**
 - 未修改或重启生产服务，未读取录音、笔记或转写正文，未安装模型或依赖。
 - 本证据只验证事件身份、状态单调性、乱序恢复、独立讲话人补丁和等待边的
@@ -22,9 +22,9 @@
 
 源码边界：
 
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/qwen_ws.py:445-529`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/qwen_ws.py:545-553`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/asr/enhanced_engine.py:352-367`
+- `$SERVICE_REPO/backend/app/api/qwen_ws.py:445-529`
+- `$SERVICE_REPO/backend/app/api/qwen_ws.py:545-553`
+- `$SERVICE_REPO/backend/app/asr/enhanced_engine.py:352-367`
 
 因此当前实时等待图不是“ASR 与 CAM++ 并行”，而是：
 
@@ -99,7 +99,7 @@ immutable segment artifact
 命令：
 
 ```bash
-cd /home/yydd/LaoJi-candidates/speech-artifact-flow-0002
+cd $CANDIDATE_ROOT/speech-artifact-flow-0002
 python3 -m unittest discover -s tests -v
 ```
 

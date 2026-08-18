@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/speech-publication-mobile-adapter-0009`
+- candidate: `$CANDIDATE_ROOT/speech-publication-mobile-adapter-0009`
 - implementation snapshot:
   - `projection_contract.ts`: `268d586febb6ff942e858b0618bad8544bc3c7c796379bf49f96e9201612c9e6`
   - `sqlite_schema.sql`: `f48cdf03ff13be93cfe6494e54d8e4326482bf01ab02dd08ef70700348b58cce`

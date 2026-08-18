@@ -5,7 +5,7 @@
 - status: `observed; production read-only metadata audit`
 - observed at: `2026-08-16 18:11 CST`
 - service: `laoji-api.service`, active PID `366740`
-- cwd: `/home/zhong/laoji-service-platform/compact-production/backend`
+- cwd: `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`
 - database: SQLite `local.db` opened with `mode=ro`
 - logs: systemd journal，只读取 endpoint、状态、耗时和空客户端元数据标记
 

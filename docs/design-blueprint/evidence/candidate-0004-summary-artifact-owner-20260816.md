@@ -2,7 +2,7 @@
 
 ## 身份与边界
 
-- candidate repository: `/home/yydd/LaoJi-candidates/summary-artifact-owner-0004`
+- candidate repository: `$CANDIDATE_ROOT/summary-artifact-owner-0004`
 - branch: `candidate/summary-artifact-owner-0004`
 - commit: `8faa61c`
 - runtime observed: Linux Python `3.13.5`

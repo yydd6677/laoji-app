@@ -20,15 +20,15 @@ PID、队列、活动 prompt/model revision、发布包和真实设备结果必�
 
 服务端开发副本：
 
-`/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+`$SERVICE_REPO/backend`
 
 生产部署：
 
-`/home/zhong/laoji-service-platform/compact-production/backend`
+`$SERVER_DEPLOYMENT_ROOT/compact-production/backend`
 
 移动端：
 
-`/home/yydd/LaoJi-worktrees/feishu-source-driven`
+`$MOBILE_REPO`
 
 关键所有者：
 
@@ -127,7 +127,7 @@ v2 API 和正式实现必须至少保留一个公开发布周期。模板第二�
 
 生产切换前冻结包：
 
-`/home/zhong/laoji-service-platform/backups/summary-v3-precutover-20260815-215118`
+`$SERVER_DEPLOYMENT_ROOT/backups/summary-v3-precutover-20260815-215118`
 
 数据库快照完整性均为 `ok`，冻结的 `backend-source.tgz` SHA-256 为 `c613ae94da08fed3fdf2f5ca708b36c4e331758271db85f266c63d9b81e10cbe`。
 
