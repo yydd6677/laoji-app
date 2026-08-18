@@ -16,6 +16,10 @@ notRequired -> connecting -> connected -> completed
 `recoveryRequired` 不表示麦克风失败；本机 WAV/journal 仍是权威恢复输入。`completed` 只在
 本地文件已保存、服务端 ready-to-stop 已确认、且没有待恢复错误时出现。
 
+快照还携带两个不含正文的单调时钟指标：`asrConnectLatencyMs`（首个 PCM 到连接完成）和
+`firstTranscriptLatencyMs`（首个 PCM 到首个转写事件）。它们只在事件已经发生后出现，用于真实
+设备回放的 p50/p95 统计，不作为业务成功条件。
+
 ## 兼容与边界
 
 - Kotlin 快照和 `toMap()` 输出固定 wire 值；TypeScript 对旧 native 二进制保留回退推导。

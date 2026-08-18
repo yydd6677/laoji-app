@@ -110,6 +110,9 @@ export interface NativeRecorderSnapshot {
   asrConnected: boolean;
   /** Optional for one release so an older native binary remains readable. */
   asrPhase?: NativeRecorderAsrPhase;
+  /** Monotonic diagnostics emitted by the vNext native recorder. */
+  asrConnectLatencyMs?: number | null;
+  firstTranscriptLatencyMs?: number | null;
   asrRequired?: boolean;
   readyToStop: boolean;
   transcriptRecoveryRequired: boolean;

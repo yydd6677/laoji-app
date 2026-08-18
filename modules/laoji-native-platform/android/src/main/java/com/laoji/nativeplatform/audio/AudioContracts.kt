@@ -464,6 +464,9 @@ data class RecorderSnapshot(
   val localUri: String?,
   val asrConnected: Boolean,
   val asrPhase: RecorderAsrPhase,
+  /** Monotonic diagnostics; null until the corresponding event is observed. */
+  val asrConnectLatencyMs: Long?,
+  val firstTranscriptLatencyMs: Long?,
   val readyToStop: Boolean,
   val transcriptRecoveryRequired: Boolean,
   val errorCode: RecorderErrorCode?,
@@ -490,6 +493,8 @@ data class RecorderSnapshot(
     "localUri" to localUri,
     "asrConnected" to asrConnected,
     "asrPhase" to asrPhase.wireValue,
+    "asrConnectLatencyMs" to asrConnectLatencyMs?.toDouble(),
+    "firstTranscriptLatencyMs" to firstTranscriptLatencyMs?.toDouble(),
     "asrRequired" to asrRequired,
     "readyToStop" to readyToStop,
     "transcriptRecoveryRequired" to transcriptRecoveryRequired,

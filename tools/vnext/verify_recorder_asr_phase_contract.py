@@ -35,10 +35,15 @@ def main() -> int:
     for needle in (
         "val asrPhase: RecorderAsrPhase",
         '"asrPhase" to asrPhase.wireValue',
+        '"asrConnectLatencyMs" to asrConnectLatencyMs?.toDouble()',
+        '"firstTranscriptLatencyMs" to firstTranscriptLatencyMs?.toDouble()',
         "asrPhase = currentAsrPhase()",
         "private fun currentAsrPhase(): RecorderAsrPhase",
         "state == RecorderState.LOCAL_SAVED && readyToStop && !transcriptRecoveryRequired",
         "transcriptRecoveryRequired || errorCode != null -> RecorderAsrPhase.RECOVERY_REQUIRED",
+        "if (firstPcmElapsedMs == null) firstPcmElapsedMs = SystemClock.elapsedRealtime()",
+        "if (asrConnectedElapsedMs == null) asrConnectedElapsedMs = SystemClock.elapsedRealtime()",
+        "if (firstTranscriptElapsedMs == null) firstTranscriptElapsedMs = SystemClock.elapsedRealtime()",
     ):
         if needle not in contracts + engine:
             raise SystemExit(f"recorder_asr_phase=failed missing={needle}")

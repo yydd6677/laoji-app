@@ -77,6 +77,9 @@ class RecorderEngine(
   private var errorMessage: String? = null
   private var providerErrorCode: String? = null
   private var providerErrorRetryable: Boolean? = null
+  private var firstPcmElapsedMs: Long? = null
+  private var asrConnectedElapsedMs: Long? = null
+  private var firstTranscriptElapsedMs: Long? = null
   private var audioRecord: AudioRecord? = null
   private var recordingThread: Thread? = null
   private var fileSession: RecordingFileSession? = null
@@ -200,6 +203,16 @@ class RecorderEngine(
       localUri = localUri,
       asrConnected = asrConnected,
       asrPhase = currentAsrPhase(),
+      asrConnectLatencyMs = if (firstPcmElapsedMs != null && asrConnectedElapsedMs != null) {
+        (asrConnectedElapsedMs!! - firstPcmElapsedMs!!).coerceAtLeast(0L)
+      } else {
+        null
+      },
+      firstTranscriptLatencyMs = if (firstPcmElapsedMs != null && firstTranscriptElapsedMs != null) {
+        (firstTranscriptElapsedMs!! - firstPcmElapsedMs!!).coerceAtLeast(0L)
+      } else {
+        null
+      },
       readyToStop = readyToStop,
       transcriptRecoveryRequired = transcriptRecoveryRequired,
       errorCode = errorCode,
@@ -266,6 +279,9 @@ class RecorderEngine(
     if (currentState == RecorderState.IDLE || currentState == RecorderState.FAILED) return
     val segmentId = AsrProtocol.transcriptIdentity(config.sessionId, transcript)
     val receivedAtMs = System.currentTimeMillis()
+    synchronized(stateLock) {
+      if (firstTranscriptElapsedMs == null) firstTranscriptElapsedMs = SystemClock.elapsedRealtime()
+    }
     if (config.purpose == AudioPurpose.SCHEDULE && transcript.isFinal) {
       synchronized(transcriptLock) {
         finalTranscriptSegments[segmentId] = RecorderTranscriptSegment(
@@ -448,6 +464,9 @@ class RecorderEngine(
       return
     }
     asrConnected = true
+    synchronized(stateLock) {
+      if (asrConnectedElapsedMs == null) asrConnectedElapsedMs = SystemClock.elapsedRealtime()
+    }
     try {
       fileSession?.updateAsrState(JournalAsrState.CONNECTED)
     } catch (_: Exception) {
@@ -542,6 +561,9 @@ class RecorderEngine(
         break
       }
       if (append.bytesWritten > 0 && config.mode == RecorderMode.REALTIME) {
+        synchronized(stateLock) {
+          if (firstPcmElapsedMs == null) firstPcmElapsedMs = SystemClock.elapsedRealtime()
+        }
         sendOrQueueAsrFrame(buffer.copyOf(append.bytesWritten))
       }
 
