@@ -61,7 +61,6 @@ LEGACY_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "stage3_legacy_summary_q0": (
         "summary_tasks_v2",
-        "Q0",
         "summarySections",
     ),
     "stage4_legacy_schedule": (
@@ -87,6 +86,10 @@ class MarkerHit:
 def _active_files(root: Path) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in ACTIVE_SUFFIXES:
+            continue
+        # Dependency lockfiles contain arbitrary package metadata (including
+        # strings such as Q0) and are not executable LaoJi capability owners.
+        if path.name in {"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}:
             continue
         if any(part in IGNORED_PARTS for part in path.relative_to(root).parts):
             continue
@@ -122,6 +125,85 @@ def _sqlite_read_only(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    """Return columns for a fixed, internally supplied table name.
+
+    The audit is deliberately read-only.  Table names below are constants, so
+    this interpolation cannot be influenced by a database row or CLI input.
+    """
+    return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def _state_counts(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+) -> dict[str, Any]:
+    """Aggregate lifecycle states without returning task/entity identifiers."""
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if table not in tables:
+        return {"status": "missing", "counts": {}, "pending_count": None}
+    if column not in _table_columns(connection, table):
+        return {"status": "column_missing", "counts": {}, "pending_count": None}
+    rows = connection.execute(
+        f"SELECT {column} AS state, COUNT(*) AS count FROM {table} GROUP BY {column}"
+    ).fetchall()
+    counts = {
+        str(row["state"] if row["state"] is not None else "<null>"): int(row["count"])
+        for row in rows
+    }
+    # These are terminal states used by the vNext stores.  Unknown states are
+    # intentionally treated as pending so a schema/status addition cannot make
+    # the deletion gate optimistic by accident.
+    terminal = {
+        "success", "succeeded", "failure", "failed", "cancelled", "canceled",
+        "confirmed", "consumed", "expired", "purged", "revoked", "completed", "verified",
+        "terminal_failure", "terminal",
+    }
+    pending_count = sum(count for state, count in counts.items() if state not in terminal)
+    return {"status": "ok", "counts": counts, "pending_count": pending_count}
+
+
+def _drain_state(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Read the lifecycle stores needed before any old asset can be removed.
+
+    Missing tables are reported as unknown, not empty.  This is important for
+    older candidate databases created before one of the recovery stores was
+    introduced.
+    """
+    checks = {
+        "tasks": _state_counts(connection, "vnext_tasks", "state"),
+        "attempts": _state_counts(connection, "vnext_task_attempts", "state"),
+        "uploads": _state_counts(connection, "vnext_upload_sessions", "state"),
+        "transcripts": _state_counts(connection, "vnext_import_transcript_runs", "state"),
+        "purges": _state_counts(connection, "v2_purges", "state"),
+        "cleanup_obligations": _state_counts(
+            connection, "vnext_object_cleanup_obligations", "state"
+        ),
+    }
+    missing = [name for name, value in checks.items() if value["status"] != "ok"]
+    pending = {
+        name: value["pending_count"]
+        for name, value in checks.items()
+        if value["pending_count"] not in (None, 0)
+    }
+    return {
+        "status": "unknown" if missing else ("drained" if not pending else "pending"),
+        "checks": checks,
+        "missing_checks": missing,
+        "pending": pending,
+        # There is no local table that proves old-client task-id query replay;
+        # retain an explicit evidence slot rather than inferring it from empty
+        # task rows.
+        "old_client_query_recovery": "unverified",
+    }
+
+
 def _database_state(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {"status": "not_provided", "cutovers": {}, "legacy_cycle_evidence": "unknown"}
@@ -135,12 +217,15 @@ def _database_state(path: Path | None) -> dict[str, Any]:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )
             }
+            drain = _drain_state(connection)
             if "capability_cutovers" not in tables:
                 return {
                     "status": "missing_capability_table",
                     "path": str(path),
+                    "tables": len(tables),
                     "cutovers": {},
                     "legacy_cycle_evidence": "unknown",
+                    "drain": drain,
                 }
             cutovers: dict[str, Any] = {}
             for row in connection.execute("SELECT * FROM capability_cutovers"):
@@ -165,6 +250,7 @@ def _database_state(path: Path | None) -> dict[str, Any]:
                 "tables": len(tables),
                 "cutovers": cutovers,
                 "legacy_cycle_evidence": cycle_evidence,
+                "drain": drain,
             }
     except (OSError, sqlite3.Error) as error:
         return {
@@ -173,6 +259,13 @@ def _database_state(path: Path | None) -> dict[str, Any]:
             "error_code": type(error).__name__,
             "cutovers": {},
             "legacy_cycle_evidence": "unknown",
+            "drain": {
+                "status": "unknown",
+                "checks": {},
+                "missing_checks": ["database"],
+                "pending": {},
+                "old_client_query_recovery": "unverified",
+            },
         }
 
 
@@ -224,6 +317,9 @@ def _runtime_state() -> dict[str, Any]:
 
 def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
     marker_hits = _scan_markers(root)
+    marker_counts: dict[str, int] = {}
+    for hit in marker_hits:
+        marker_counts[hit.item] = marker_counts.get(hit.item, 0) + 1
     db = _database_state(database)
     cutovers = db.get("cutovers", {})
     barrier_state: dict[str, Any] = {}
@@ -247,10 +343,18 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
         "database": db,
         "barriers": barrier_state,
         "legacy_reference_count": len(marker_hits),
+        "legacy_reference_counts": marker_counts,
         "legacy_references": [hit.__dict__ for hit in marker_hits[:200]],
         "runtime": _runtime_state(),
         "external_public_cycle_evidence": db.get("legacy_cycle_evidence", "unknown"),
-        "safe_to_delete": bool(barriers_ready and not marker_hits and db.get("legacy_cycle_evidence") == "verified"),
+        "lifecycle_drain": db.get("drain", {"status": "unknown"}),
+        "safe_to_delete": bool(
+            barriers_ready
+            and not marker_hits
+            and db.get("legacy_cycle_evidence") == "verified"
+            and db.get("drain", {}).get("status") == "drained"
+            and db.get("drain", {}).get("old_client_query_recovery") == "verified"
+        ),
         "deletion_performed": False,
         "blocking_reasons": [],
     }
@@ -262,6 +366,13 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
         report["blocking_reasons"].append("complete public-cycle evidence is external or missing")
     if db.get("status") != "ok":
         report["blocking_reasons"].append("candidate database state is unavailable or incomplete")
+    drain = db.get("drain", {})
+    if drain.get("status") != "drained":
+        report["blocking_reasons"].append(
+            "candidate task, lease, upload, transcript, purge, or R2 cleanup lifecycle is not drained"
+        )
+    if drain.get("old_client_query_recovery") != "verified":
+        report["blocking_reasons"].append("old-client task query recovery evidence is missing")
     return report
 
 

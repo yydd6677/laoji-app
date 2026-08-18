@@ -8,15 +8,16 @@
 
 ## 当前候选快照
 
-最新隔离候选复核见 [2026-08-19 candidate audit](DELETION-GATE-CANDIDATE-20260819.md)。
+最新隔离候选复核见 [2026-08-19 candidate audit](DELETION-GATE-CANDIDATE-20260819-R2.md)。
 
-报告：`docs/vnext-stage5-deletion-audit-current-20260818.json`
+报告：`docs/vnext-stage5-deletion-audit-20260819-r2.json`
 
 - `production_mutation=false`
 - `deletion_performed=false`
 - `safe_to_delete=false`
-- 未提供候选数据库，因此 capability cutover 和 legacy task 状态为未知
-- 活动源码引用：`304` 个命中（包含兼容 handler、旧协议和旧 owner；这不是删除授权）
+- 候选数据库已提供；五个 capability cutover 仍为空，不能证明任何能力已激活
+- 生命周期审计为 `pending`：6 个 retryable attempt、2 个 running purge；上传、转写和 R2 清理没有未完成状态
+- 活动源码引用：`291` 个命中（锁文件和通用 `Q0` 标记已排除；仍包含兼容 handler、旧协议和旧 owner；这不是删除授权）
 - 当前只读运行时扫描到一个 `cloudflared` 进程，位于工作区之外的 phone bridge 目录；未停止
 - 完整公开周期证据缺失，不能把“当前没有用户”推断为一个已验证公开周期
 
@@ -43,3 +44,11 @@ python3 tools/vnext/audit_stage5_deletion_gate.py \
 ```
 
 `--database` 必须是隔离候选副本；工具通过 SQLite read-only URI 打开，不接受生产数据库写入。
+
+旧媒体写入路由的静态合同可单独复核：
+
+```text
+python3 tools/vnext/verify_legacy_submit_guards.py
+```
+
+该探针只检查 `device_v1` 的 `/assets` 写入路由是否调用旧提交门，不会启用或关闭任何能力。
