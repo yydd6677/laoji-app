@@ -12,7 +12,10 @@ import {
 } from '../native/nativeTransferCoordinator';
 import type { NativeUploadState } from 'laoji-native-platform';
 import { getFeatureFlags } from '../config/featureFlags';
-import { listPendingDeviceUploadOperations } from '../data/repositories/vnext/deviceOperationsRepository';
+import {
+  listPendingDeviceUploadOperations,
+  listTerminalDeviceUploadAssetIds,
+} from '../data/repositories/vnext/deviceOperationsRepository';
 import { diagnosticAudit } from './diagnostics';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v3';
@@ -214,6 +217,7 @@ export async function listPendingMeetingAudioUploads(
   await pendingStorageMutation.catch(() => {});
   const legacy = Object.values(await readPendingUploads(storageScope));
   let canonical: PendingMeetingAudioUpload[] = [];
+  let terminalCanonicalAssetIds: ReadonlySet<string> = new Set();
   if (storageScope === 'guest' && getFeatureFlags().localMeetingDbCanonicalReadV1) {
     try {
       canonical = (await listPendingDeviceUploadOperations('guest')).map(snapshot => ({
@@ -248,16 +252,21 @@ export async function listPendingMeetingAudioUploads(
         nativeOperationId: snapshot.operation.operationId,
         nativeProtocol: 'device-v2-r2',
       } satisfies PendingMeetingAudioUpload));
+      terminalCanonicalAssetIds = await listTerminalDeviceUploadAssetIds('guest');
     } catch {
       // A migration/cold-open failure must not discard the one-time
       // compatibility registry; the next foreground pass retries SQLite.
       canonical = [];
+      terminalCanonicalAssetIds = new Set();
     }
   }
   const canonicalIds = new Set(canonical.map(item => item.recordingAssetId));
   const combined = [
     ...canonical,
-    ...legacy.filter(item => !canonicalIds.has(item.recordingAssetId)),
+    ...legacy.filter(item => (
+      !canonicalIds.has(item.recordingAssetId)
+      && !terminalCanonicalAssetIds.has(item.recordingAssetId)
+    )),
   ];
   return combined.sort((left, right) => (
     left.meetingId.localeCompare(right.meetingId)

@@ -16,6 +16,7 @@ import { formatDuration } from '../utils/meetingMedia';
 import {
   attachPendingMeetingAudioUploadRemoteIdentity,
   attachNativeUploadRegistration,
+  clearPendingMeetingAudioUpload,
   deletePendingMeetingAudioUpload,
   inspectPendingMeetingAudioUploads,
   derivePendingMeetingAudioUploadInspection,
@@ -493,6 +494,62 @@ async function prepareGuestDeviceV2Upload(
     sourceSha256,
     assetGeneration: asset.assetGeneration,
   };
+}
+
+/**
+ * Commits the remote identity returned by the device worker before the
+ * durable device operation is allowed to become terminal.  A native success
+ * result is only a transport observation; the local SQLite asset is the
+ * recovery authority and must contain the identity first.
+ */
+async function commitGuestNativeUploadSuccess(
+  inspection: PendingMeetingAudioUploadInspection,
+): Promise<boolean> {
+  const pending = inspection.pending;
+  const remoteAssetId = pending.remoteAssetId?.trim() || '';
+  const remoteRevision = pending.remoteAssetRevision;
+  if (
+    !remoteAssetId
+    || !Number.isSafeInteger(remoteRevision)
+    || Number(remoteRevision) < 1
+  ) {
+    diagnosticWarn('[device-v2-upload] success missing remote identity', {
+      meeting_id: pending.meetingId,
+      recording_asset_id: pending.recordingAssetId,
+    });
+    return false;
+  }
+  const meetingId = pending.canonicalMeetingId?.trim() || pending.meetingId;
+  const aggregate = await sqliteMeetingNoteRepository.get(meetingId, 'guest');
+  if (!aggregate || aggregate.note.lifecycle === 'deleted') return false;
+  const asset = aggregate.recordingAssets.find(item => item.id === pending.recordingAssetId);
+  if (!asset || asset.assetGeneration !== pending.assetGeneration) return false;
+  const updatedAtMs = Math.max(
+    Date.now(),
+    asset.updatedAtMs,
+    aggregate.note.updatedAtMs,
+  );
+  await sqliteMeetingNoteRepository.transaction(async transaction => {
+    const current = await transaction.getRecordingAsset(meetingId, asset.id, 'guest');
+    if (!current || current.assetGeneration !== asset.assetGeneration) {
+      throw new Error('录音资产代际在上传提交期间发生变化');
+    }
+    if (current.remoteAssetId && current.remoteAssetId !== remoteAssetId) {
+      throw new Error('录音资产云端身份发生变化');
+    }
+    await transaction.saveRecordingAsset({
+      ...current,
+      remoteAssetId,
+      remoteObjectRevision: Math.max(current.remoteObjectRevision ?? 0, Number(remoteRevision)),
+      localState: current.localUri ? 'local_ready' : 'remote_only',
+      updatedAtMs,
+      lastVerifiedAtMs: updatedAtMs,
+    }, 'guest');
+    await transaction.enrichTranscriptRecordingProvenance(meetingId, asset.id, 'guest');
+    await transaction.advanceCanonicalWrite('guest', updatedAtMs);
+  });
+  await clearPendingMeetingAudioUpload('guest', pending.recordingAssetId);
+  return true;
 }
 
 type CaptureTransition = Extract<ProcessingStageTransition, { stage: 'capture' }>;
@@ -2517,11 +2574,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       evidence: MeetingAudioUploadEvidence;
     }>();
     uploadedInspections.forEach(item => {
-      if (item.pending.nativeOperationId && (
-        item.phase === 'uploaded' || Boolean(item.pending.remoteAssetId)
-      )) {
-        void markDeviceUploadOperationSuccess(item.pending.nativeOperationId).catch(() => undefined);
-      }
       if (!inspectionById.has(item.pending.recordingAssetId)) {
         evidenceById.set(item.pending.recordingAssetId, {
           pending: item.pending,
@@ -2798,7 +2850,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
 
           for (let offset = 0; offset < before.length; offset += 2) {
             await Promise.all(before.slice(offset, offset + 2).map(async pending => {
-              if (pending.nativeWorkId) return;
+              // A worker may have committed the remote identity before the
+              // JS process lost its executor handle.  Do not enqueue a second
+              // request; the recovery pass below will finalize the existing
+              // operation from its canonical asset.
+              if (pending.nativeWorkId || (pending.nativeOperationId && pending.remoteAssetId)) return;
               try {
                 const prepared = await prepareGuestDeviceV2Upload(pending);
                 if (!prepared?.assetGeneration || !prepared.sourceSha256 || !prepared.byteSize) return;
@@ -2973,7 +3029,32 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           } else if (nativeState.state === 'cancelled') {
             await syncDeviceUploadOperationState(operationId, 'cancelled', 'native_upload_cancelled');
           } else if (nativeState.state === 'succeeded' && nativeState.result === 'uploaded') {
-            await markDeviceUploadOperationSuccess(operationId);
+            const committed = await commitGuestNativeUploadSuccess(inspection).catch(error => {
+              diagnosticWarn('[device-v2-upload] canonical success commit deferred', error);
+              return false;
+            });
+            if (committed) {
+              if (inspection.pending.transcriptionTaskId) {
+                await rememberDeviceTranscriptTaskBestEffort(
+                  inspection.pending.meetingId,
+                  inspection.pending.transcriptionTaskId,
+                );
+              }
+              await markDeviceUploadOperationSuccess(operationId);
+            }
+          } else if (
+            !nativeState
+            && inspection.pending.remoteAssetId
+            && inspection.pending.remoteAssetRevision
+          ) {
+            // The native executor handle can be lost across an APK/process
+            // restart.  A canonical remote identity is sufficient evidence to
+            // finish the operation without submitting another upload.
+            const committed = await commitGuestNativeUploadSuccess(inspection).catch(error => {
+              diagnosticWarn('[device-v2-upload] orphaned success commit deferred', error);
+              return false;
+            });
+            if (committed) await markDeviceUploadOperationSuccess(operationId);
           }
         }));
       }

@@ -207,8 +207,7 @@ function uploadOperationSelect(): string {
        AND operation.capability = 'media.upload'
        AND operation.remote_state IN ('queued', 'running', 'failure')
        AND asset.local_uri IS NOT NULL
-       AND length(trim(asset.local_uri)) > 0
-       AND asset.remote_asset_id IS NULL`;
+       AND length(trim(asset.local_uri)) > 0`;
 }
 
 export async function listPendingDeviceUploadOperations(
@@ -243,6 +242,33 @@ export async function listPendingDeviceUploadOperations(
       },
     } satisfies DeviceUploadOperationSnapshot;
   });
+}
+
+/**
+ * Returns asset generations whose durable vNext operation has already reached
+ * a terminal state.  The compatibility AsyncStorage queue is allowed to be
+ * read only as a migration supplement; it must not resurrect one of these
+ * generations after SQLite has recorded success or cancellation.
+ */
+export async function listTerminalDeviceUploadAssetIds(
+  scopeKey: ScopeKey,
+): Promise<ReadonlySet<string>> {
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<{ asset_id: string }>(
+    `SELECT asset.id AS asset_id
+       FROM recording_assets asset
+       INNER JOIN device_operations operation
+               ON operation.operation_id = asset.upload_operation_id
+       INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+      WHERE meeting.scope_key = ?
+        AND operation.capability = 'media.upload'
+        AND (
+          operation.remote_state IN ('success', 'cancelled')
+          OR asset.remote_asset_id IS NOT NULL
+        )`,
+    scopeKey,
+  );
+  return new Set(rows.map(row => row.asset_id));
 }
 
 export interface CreateDeviceOperationInput {

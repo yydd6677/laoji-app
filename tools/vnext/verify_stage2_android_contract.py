@@ -79,13 +79,24 @@ def main() -> None:
         operations,
         "executor_kind",
         "listPendingDeviceUploadOperations",
+        "listTerminalDeviceUploadAssetIds",
+        "asset.remote_asset_id IS NOT NULL",
     )
     require(upload_migration, "idx_device_upload_pending_asset", "version: 46")
     require(
         recording,
         "listPendingDeviceUploadOperations('guest')",
+        "listTerminalDeviceUploadAssetIds('guest')",
         "const canonicalIds = new Set",
         "nativeWorkId:",
+    )
+    meetings_store = ROOT / "src/store/MeetingsStore.tsx"
+    require(
+        meetings_store,
+        "commitGuestNativeUploadSuccess",
+        "success missing remote identity",
+        "await clearPendingMeetingAudioUpload('guest'",
+        "await markDeviceUploadOperationSuccess(operationId)",
     )
     require(
         live_screen,

@@ -55,7 +55,8 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
         );
         CREATE TABLE recording_assets (
           id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meeting_notes(id) ON DELETE CASCADE,
-          checksum_sha256 TEXT, local_state TEXT NOT NULL, created_at_ms INTEGER NOT NULL
+          checksum_sha256 TEXT, local_state TEXT NOT NULL, created_at_ms INTEGER NOT NULL,
+          remote_asset_id TEXT
         );
         CREATE TABLE transcript_revisions (
           id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meeting_notes(id) ON DELETE CASCADE,
@@ -84,8 +85,8 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
         INSERT INTO manual_notes VALUES ('meeting-1', '跟进接口联调');
         INSERT INTO recording_assets VALUES (
           'asset-1', 'meeting-1',
-          'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          'local_ready', 1000
+            'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          'local_ready', 1000, NULL
         );
         INSERT INTO meeting_recording_merge_tasks VALUES ('merge-1', 1000);
         INSERT INTO device_operations VALUES (
@@ -278,6 +279,40 @@ def main() -> None:
                 "SELECT executor_kind, executor_id FROM device_operations WHERE operation_id = 'operation-1'"
             ).fetchone() != ("workmanager", "work-1"):
                 raise AssertionError("upload executor handle was not persisted")
+            # Recovery ordering probe: a process may die after the canonical
+            # asset identity is written but before the operation reaches
+            # success.  The pending query must still discover that operation;
+            # only a terminal operation may suppress the compatibility queue.
+            connection.execute(
+                "UPDATE recording_assets SET remote_asset_id = 'remote-1' WHERE id = 'asset-1'"
+            )
+            pending_with_identity = connection.execute(
+                """SELECT COUNT(*) FROM device_operations operation
+                   INNER JOIN recording_assets asset
+                           ON asset.upload_operation_id = operation.operation_id
+                   INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+                  WHERE meeting.scope_key = 'guest'
+                    AND operation.capability = 'media.upload'
+                    AND operation.remote_state IN ('queued', 'running', 'failure')
+                    AND asset.local_state = 'local_ready'"""
+            ).fetchone()[0]
+            if pending_with_identity != 1:
+                raise AssertionError("in-flight upload with remote identity was hidden from recovery")
+            connection.execute(
+                "UPDATE device_operations SET remote_state = 'success' WHERE operation_id = 'operation-1'"
+            )
+            terminal_suppressed = connection.execute(
+                """SELECT COUNT(*) FROM recording_assets asset
+                   INNER JOIN device_operations operation
+                           ON operation.operation_id = asset.upload_operation_id
+                   INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+                  WHERE meeting.scope_key = 'guest'
+                    AND operation.capability = 'media.upload'
+                    AND (operation.remote_state IN ('success', 'cancelled')
+                         OR asset.remote_asset_id IS NOT NULL)"""
+            ).fetchone()[0]
+            if terminal_suppressed != 1:
+                raise AssertionError("terminal upload did not suppress legacy registry")
             if connection.execute("SELECT COUNT(*) FROM speaker_overlay_revisions").fetchone()[0] != 1:
                 raise AssertionError("migration replay duplicated overlay")
             apply_upload_executor(connection)

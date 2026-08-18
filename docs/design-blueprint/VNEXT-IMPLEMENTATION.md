@@ -1000,6 +1000,11 @@ Stage 1 停写/退出门：generic probe 的 restart/cancel/replay、epoch/bindi
 7. 对 realtime、导入、无语音、断网、kill、重启、删除/恢复做端到端回放；NO_SPEECH 必须提交
    success/no_content 和零 segment final revision，不进入失败或 retry。
 
+当前隔离实现还包含一个上传恢复顺序切片：设备 v2 原生成功必须先把远端资产身份写入
+canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncStorage registry 只作为
+兼容补集，遇到成功/取消代际会被抑制。该切片已通过 SQLite 回放和静态 Android 合同，但尚未
+激活 capability，也未替代真实设备回放。
+
 退出：1 GiB 上传内存与恢复门通过；双上传+实时会议无冲突；首段/RTF/讲话人预算通过；
 未知讲话人不命名；NO_SPEECH 中文结果正确。
 
