@@ -394,6 +394,9 @@ def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monk
     artifact = source_store.load_generated_artifact(context, stream["task_id"])
     assert artifact is not None
     assert artifact["output"]["facts_document"]["schema_version"] == 3
+    assert artifact["output"]["meeting_id"] == "meeting-source-artifact"
+    assert artifact["output"]["source_fingerprint"].startswith("sha256:")
+    assert artifact["output"]["coverage"]["input_token_budget"] == 10240
     assert artifact["output"]["facts_document"]["action_candidates"]
     with sqlite3.connect(database) as connection:
         row = connection.execute(
