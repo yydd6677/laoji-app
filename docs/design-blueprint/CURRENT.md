@@ -5,8 +5,8 @@
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
 - production/App/APK/device/GPU mutation: `none`
-- stable source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-- implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
+- stable source worktree: `$MOBILE_REPO`
+- implementation worktree: `$VNEXT_REPO`
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
 - implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation`
@@ -132,5 +132,6 @@ binding fence、单次本地 Provider 调用和 UTF-8 来源校验；移动端�
 Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现有问答页。来源仅包含当前转写和用户明确纳入的
 我的笔记，不把整理结果或历史答案提升为证据；失败重试会更换 device operation 并复用、重新绑定原未完成 turn，
 不会按新的 ordinal 留下重复问题。隔离候选已用真实 `qwen3.5:9b` 对 5 个弱参考样本问题完成 smoke，期间
-修复了 Qwen 紧凑引用结构和不可靠坐标的确定性归一化；这不等于完整语义 holdout。当前仍未
+修复了 Qwen 紧凑引用结构和不可靠坐标的确定性归一化；明确未提及问题的 3 题拒答 smoke 也已通过，
+但这不等于完整语义 holdout。当前仍未
 通过独立自然问题、拒答质量、LaoJi 专属设备回放和 capability barrier，不能称为 Stage 3 退出。
