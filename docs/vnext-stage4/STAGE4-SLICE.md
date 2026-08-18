@@ -45,6 +45,10 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - Graph 的 `content_sha256`、producer revision、schema revision 和 draft revision 已贯穿两套语音确认页
   与两套详细编辑页并写入本机日程；用户后续编辑在 guest/device-primary CRUD 中单调递增
   `eventRevision`，不会因进入详细编辑而退化成 `legacy-v1` 来源。
+- 客户端候选解析准入已单独收敛：只有复杂 `create/clarify` 路由在构建开关和 device-v2 Graph
+  能力同时成立时进入 Graph；查询、删除、拒绝意图不会被模型创建路径接管。候选能力缺失时复杂
+  请求失败关闭，不回退到旧 parser；带 Graph 的澄清草稿也必须经过同一能力检查，补充不会被
+  独立送入旧 `/clarify`。简单高置信输入继续留在本机快速路径。
 - 新增 `meeting_search_documents_v45` 外部内容表和 `meeting_search_fts_v45` FTS5 索引；触发器
   保证文档增删改与索引同事务维护，查询仓储不再向旧 `meeting_search_fts` 写入新内容。
 - 搜索重建、结果查询和 guest 回收站清理已统一切换到 v45 文档表 + FTS 索引；旧索引仍保留，
@@ -88,6 +92,8 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - 在临时 SQLite（不连接生产）上运行日程解析、ASR 代理、事件命令和 recurrence 回归：`102 passed`。
 - Graph owner 边界回归：`18 passed`（强制 model-only、澄清 model-only、操作零模型调用、空模型观察
   503、缺观察拒绝和调用方 intent 透传）；TypeScript 与 Python 编译继续通过。
+- `python3 tools/vnext/verify_schedule_graph_mobile_owner.py`：通过；覆盖候选准入顺序、能力缺失
+  fail-closed、旧 parser 不在候选分支竞争、Graph 草稿澄清能力 fence 和 query/delete 排除。
 - 强制 `SCHEDULE_FORCE_LLM=1` 对 MASSIVE natural 语域参考抽取 30 行做 route smoke：
   `model=10`、`model_null=20`、`model_success=10`、`model_failures=0`，模型路径 p95 约
   `1.72s`；`model_null` 是模型判定非创建/无可提取事项，不计为字段质量。报告为
@@ -99,7 +105,7 @@ schedule capability barrier，也不改变稳定版或生产服务。
 
 ## 未完成
 
-这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭；
+这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入复杂解析/澄清 owner，但默认关闭；
 ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线、三个页面的默认关闭生成器和本机 checkpoint
 owner，尚未启用 device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
 Expo SQLite/Android 全局迁移回放、真实页面重建和搜索性能门仍未通过；ProjectionEnvelope 的

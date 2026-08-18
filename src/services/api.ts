@@ -29,6 +29,10 @@ import {
   parseScheduleGraphV2,
   type ScheduleGraphV1,
 } from './scheduleGraphV2';
+import {
+  isScheduleGraphCandidateRequest,
+  shouldUseScheduleGraphCandidate,
+} from './scheduleGraphRouting';
 import { getFeatureFlags } from '../config/featureFlags';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { LocalMeetingAudioFileMissingError } from './meetingAudioUploadFailure';
@@ -521,16 +525,30 @@ export async function parseText(
     const code = decision.code ?? 'not_schedule';
     throw new ScheduleParseError(code, decision.message ?? SCHEDULE_ERROR_MESSAGES[code]);
   }
-  if ((decision.route === 'local_safe' || decision.route === 'clarify') && decision.result) {
-    return normalizedParseResult(text, decision.result, context);
-  }
-
   const remoteIntent = classifyScheduleParseIntent(text);
-  try {
-    const v2 = getFeatureFlags().scheduleGraphV2Candidate
-      ? await loadDeviceV2Capabilities().catch(() => null)
-      : null;
-    if (v2?.scheduleGraphV2) {
+
+  // Keep simple, high-confidence drafts local. Once a complex create or a
+  // clarification is admitted to the candidate Graph owner, do not let the
+  // legacy remote parser compete with it or reinterpret the source a second
+  // time. Query/delete intents are intentionally excluded from this candidate:
+  // they belong to the existing operation route, not model-created event
+  // drafts.
+  const candidateRequested = isScheduleGraphCandidateRequest({
+    featureEnabled: getFeatureFlags().scheduleGraphV2Candidate,
+    route: decision.route,
+    intent: remoteIntent,
+  });
+  if (candidateRequested) {
+    const v2 = await loadDeviceV2Capabilities().catch(() => null);
+    if (!shouldUseScheduleGraphCandidate({
+      featureEnabled: true,
+      capabilityEnabled: v2?.scheduleGraphV2 === true,
+      route: decision.route,
+      intent: remoteIntent,
+    })) {
+      throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+    }
+    try {
       const graph = await parseScheduleGraphV2({
         text,
         referenceDatetime: context.reference_datetime,
@@ -539,7 +557,16 @@ export async function parseText(
         clientRequestId: graphRequestId('parse'),
       });
       return graphParseResult(graph, context);
+    } catch (err) {
+      throw scheduleParseErrorFromRemote(err);
     }
+  }
+
+  if ((decision.route === 'local_safe' || decision.route === 'clarify') && decision.result) {
+    return normalizedParseResult(text, decision.result, context);
+  }
+
+  try {
     const response = await parseScheduleRemotely(
       text,
       context.reference_datetime,
@@ -570,6 +597,16 @@ export async function clarifyText(
   });
   try {
     if (draft.schedule_graph) {
+      // A Graph draft has no safe legacy interpretation. If the candidate
+      // capability disappears, fail closed instead of sending only the
+      // supplement to the old parser and silently breaking draft lineage.
+      const flags = getFeatureFlags();
+      const capabilities = flags.scheduleGraphV2Candidate
+        ? await loadDeviceV2Capabilities().catch(() => null)
+        : null;
+      if (!flags.scheduleGraphV2Candidate || !capabilities?.scheduleGraphV2) {
+        throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+      }
       const graph = await clarifyScheduleGraphV2({
         graph: draft.schedule_graph,
         answer: supplement,
@@ -577,6 +614,32 @@ export async function clarifyText(
       });
       return graphParseResult(graph, context);
     }
+
+    // Drafts created before the candidate was enabled may not carry a Graph.
+    // When the candidate is available, establish the original source first,
+    // then merge the answer through the Graph clarification endpoint. The
+    // supplement is never parsed as an independent new schedule.
+    const flags = getFeatureFlags();
+    if (flags.scheduleGraphV2Candidate) {
+      const capabilities = await loadDeviceV2Capabilities().catch(() => null);
+      if (!capabilities?.scheduleGraphV2) {
+        throw new ScheduleParseError('parser_unavailable', SCHEDULE_ERROR_MESSAGES.parser_unavailable);
+      }
+      const graph = await parseScheduleGraphV2({
+        text: draft.raw_text?.trim() || original,
+        referenceDatetime: context.reference_datetime,
+        timezone: context.timezone,
+        clientIntent: 'create',
+        clientRequestId: graphRequestId('parse'),
+      });
+      const clarified = await clarifyScheduleGraphV2({
+        graph,
+        answer: supplement,
+        clientRequestId: graphRequestId('clarify'),
+      });
+      return graphParseResult(clarified, context);
+    }
+
     const parsed = await clarifyScheduleRemotely(
       { ...draft, raw_text: draft.raw_text ?? original },
       supplement,

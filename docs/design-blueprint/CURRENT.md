@@ -145,6 +145,10 @@ Graph owner 边界已进一步收敛：候选 Graph 路由强制 `model_only`，
 producer 不再导入旧 intent classifier 或在缺少 observation 时隐式同步 fallback；空模型观察失败关闭。
 这只是一项候选静态/集成边界修复，不改变生产 `/parse`，证据见
 [Graph owner boundary](../vnext-stage4/GRAPH-OWNER-BOUNDARY-20260819.md)。
+随后客户端复杂解析/澄清准入也已收敛：本机只保留简单高置信快速路径，复杂 `create/clarify` 在
+构建开关与 device-v2 capability 同时成立时进入 Graph；能力缺失直接失败关闭，不回落旧解析，
+Graph 草稿澄清不会把补充拆成独立输入。查询/删除/拒绝不进入模型创建候选。该切片仍默认关闭，
+证据见 [移动端 Graph owner boundary](../vnext-stage4/MOBILE-OWNER-BOUNDARY-20260819.md)。
 自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
 [自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
 模型时间范围两种自然语序回放已通过，证据见
