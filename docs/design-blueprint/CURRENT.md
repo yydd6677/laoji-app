@@ -152,3 +152,6 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 修复了 Qwen 紧凑引用结构和不可靠坐标的确定性归一化；明确未提及问题的 3 题拒答 smoke 也已通过，
 但这不等于完整语义 holdout。当前仍未
 通过独立自然问题、拒答质量、LaoJi 专属设备回放和 capability barrier，不能称为 Stage 3 退出。
+2026-08-19 的隔离真实回放复核见
+[Stage 3 rerun](../vnext-stage3/REAL-HOLDOUT-RERUN-20260819.md)；该报告仍明确区分字幕窗口证据与
+完整视频、人工质量和设备门禁。

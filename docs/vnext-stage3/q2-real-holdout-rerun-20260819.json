@@ -1,0 +1,288 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "provider_revision": "q2-reader-v1",
+  "total": 27,
+  "passed": 27,
+  "failed": 0,
+  "citation_grounding_passed": 27,
+  "results": [
+    {
+      "case_id": "paper-topic",
+      "sample": "1300572695-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1722.3,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "paper-method",
+      "sample": "1300572695-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 5,
+      "latency_ms": 2737.4,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "report-three-parts",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1654.9,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "report-platform",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1326.4,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "un-areas",
+      "sample": "500001564053724-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1831.7,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "un-countries",
+      "sample": "500001564053724-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 4,
+      "latency_ms": 2373.2,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "finance-invoice",
+      "sample": "1437681208-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1395.0,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "finance-cost",
+      "sample": "1437681208-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1761.8,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "survey-deadline",
+      "sample": "35166292748-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1740.3,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "survey-threshold",
+      "sample": "35166292748-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1434.6,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "negotiation-opening",
+      "sample": "911595290-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1271.5,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "negotiation-highest",
+      "sample": "911595290-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 3,
+      "latency_ms": 2006.3,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "equity-split",
+      "sample": "1377173065-1-160.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1913.3,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "meeting-rule",
+      "sample": "870230340-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1408.1,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-outline-count",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1386.7,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-foundation-data",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 6,
+      "latency_ms": 3996.4,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-traditional-objective",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1534.9,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-ui-plan",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 5,
+      "latency_ms": 3172.9,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "science-question",
+      "sample": "30528111540-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 925.5,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "not-stated-budget",
+      "sample": "500001564053724-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 1634.1,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "not-stated-next-date",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 922.5,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "not-stated-phone",
+      "sample": "35166292748-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 888.5,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "not-stated-venue",
+      "sample": "1300572695-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 1056.6,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-not-stated-finish-date",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 879.0,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "partial-owner-phone",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 8,
+      "latency_ms": 3933.1,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "conflicting-date",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "cannot_confirm",
+      "actual_kind": "cannot_confirm",
+      "citation_count": 0,
+      "latency_ms": 1.4,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "conflicting-price",
+      "sample": "911595290-1-208.srt",
+      "expected_kind": "cannot_confirm",
+      "actual_kind": "cannot_confirm",
+      "citation_count": 0,
+      "latency_ms": 2.1,
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "full-transcript retrieval for long meetings",
+    "human citation relevance review",
+    "Android Q2 page and recovery replay",
+    "capability barrier"
+  ]
+}
