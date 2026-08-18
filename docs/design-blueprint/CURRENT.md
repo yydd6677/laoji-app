@@ -90,6 +90,8 @@ Android stable 事件已先持久化本机 Transcript 再确认 durable event；
 但 capability 默认关闭，线上 8030 当前仍只有 `/v1/asr/batch`，尚未提供候选 `/v2/asr/batch`。
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
+最新完整后端回归的精确结果与旧合同失败边界见
+[2026-08-19 回归复核](../vnext-stage2/RECHECK-20260819.md)，不要继续引用过期的 `488/17` 统计。
 
 隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
