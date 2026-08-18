@@ -100,6 +100,9 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
 
+兼容设备转写补全路径现已将“任务明确完成、响应完整但无文字”收敛为成功的 `no_speech` 内容结果，
+不再把明确的无语音录音标记为可重试失败；该修复仍属于隔离候选，尚未经过专属 Android 设备回放。
+
 Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
 revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；隔离的
 Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机解析/澄清 owner；
