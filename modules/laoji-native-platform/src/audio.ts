@@ -24,6 +24,13 @@ export type NativeRecorderState =
   | 'localSaved'
   | 'failed';
 
+export type NativeRecorderAsrPhase =
+  | 'notRequired'
+  | 'connecting'
+  | 'connected'
+  | 'recoveryRequired'
+  | 'completed';
+
 export type NativeRecorderErrorCode =
   | 'invalid_options'
   | 'session_busy'
@@ -101,6 +108,8 @@ export interface NativeRecorderSnapshot {
   durationMs: number;
   localUri: string | null;
   asrConnected: boolean;
+  /** Optional for one release so an older native binary remains readable. */
+  asrPhase?: NativeRecorderAsrPhase;
   asrRequired?: boolean;
   readyToStop: boolean;
   transcriptRecoveryRequired: boolean;
@@ -108,6 +117,18 @@ export interface NativeRecorderSnapshot {
   errorMessage: string | null;
   providerErrorCode?: string | null;
   providerErrorRetryable?: boolean | null;
+}
+
+/** Normalize snapshots from both the vNext native module and the prior binary. */
+export function nativeRecorderAsrPhase(snapshot: NativeRecorderSnapshot): NativeRecorderAsrPhase {
+  if (snapshot.asrPhase) return snapshot.asrPhase;
+  if (snapshot.asrRequired === false) return 'notRequired';
+  if (snapshot.readyToStop && !snapshot.transcriptRecoveryRequired && !snapshot.errorCode) {
+    return 'completed';
+  }
+  if (snapshot.asrConnected) return 'connected';
+  if (snapshot.transcriptRecoveryRequired || snapshot.errorCode) return 'recoveryRequired';
+  return 'connecting';
 }
 
 export interface NativeRealtimeRecorderSnapshot extends NativeRecorderSnapshot {

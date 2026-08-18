@@ -199,6 +199,7 @@ class RecorderEngine(
       bytesRecorded = fileSession?.pcmBytes ?: 0L,
       localUri = localUri,
       asrConnected = asrConnected,
+      asrPhase = currentAsrPhase(),
       readyToStop = readyToStop,
       transcriptRecoveryRequired = transcriptRecoveryRequired,
       errorCode = errorCode,
@@ -826,6 +827,17 @@ class RecorderEngine(
     asrConnected -> JournalAsrState.CONNECTED
     asrSocket != null -> JournalAsrState.CONNECTING
     else -> JournalAsrState.FAILED
+  }
+
+  private fun currentAsrPhase(): RecorderAsrPhase = when {
+    config.mode == RecorderMode.LOCAL_ONLY -> RecorderAsrPhase.NOT_REQUIRED
+    state == RecorderState.LOCAL_SAVED && readyToStop && !transcriptRecoveryRequired && errorCode == null ->
+      RecorderAsrPhase.COMPLETED
+    asrConnected -> RecorderAsrPhase.CONNECTED
+    transcriptRecoveryRequired || errorCode != null -> RecorderAsrPhase.RECOVERY_REQUIRED
+    state == RecorderState.PREPARING || state == RecorderState.RECORDING || asrSocket != null ->
+      RecorderAsrPhase.CONNECTING
+    else -> RecorderAsrPhase.RECOVERY_REQUIRED
   }
 
   private fun sendOrQueueAsrFrame(frame: ByteArray) {

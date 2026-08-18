@@ -58,6 +58,19 @@ enum class RecorderState(val wireValue: String) {
   FAILED("failed"),
 }
 
+/**
+ * ASR is a secondary lane of the recorder.  Keep its phase explicit so a
+ * caller can distinguish a slow handshake from a recoverable transcription
+ * outage without treating either as a microphone failure.
+ */
+enum class RecorderAsrPhase(val wireValue: String) {
+  NOT_REQUIRED("notRequired"),
+  CONNECTING("connecting"),
+  CONNECTED("connected"),
+  RECOVERY_REQUIRED("recoveryRequired"),
+  COMPLETED("completed"),
+}
+
 enum class RecorderErrorCode(val wireValue: String) {
   INVALID_OPTIONS("invalid_options"),
   SESSION_BUSY("session_busy"),
@@ -450,6 +463,7 @@ data class RecorderSnapshot(
   val bytesRecorded: Long,
   val localUri: String?,
   val asrConnected: Boolean,
+  val asrPhase: RecorderAsrPhase,
   val readyToStop: Boolean,
   val transcriptRecoveryRequired: Boolean,
   val errorCode: RecorderErrorCode?,
@@ -475,6 +489,7 @@ data class RecorderSnapshot(
     "durationMs" to durationMs.toDouble(),
     "localUri" to localUri,
     "asrConnected" to asrConnected,
+    "asrPhase" to asrPhase.wireValue,
     "asrRequired" to asrRequired,
     "readyToStop" to readyToStop,
     "transcriptRecoveryRequired" to transcriptRecoveryRequired,
