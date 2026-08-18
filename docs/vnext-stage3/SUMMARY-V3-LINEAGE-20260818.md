@@ -27,6 +27,10 @@
 - 客户端：`meetingSummary.ts` 的 v3 identity matcher、`meetingSummaryV3.ts` 和
   `meetingSummaryDocument.ts` 的 remote transcript revision 保留。
 - 没有切换 18020/8030、公网入口、systemd、GPU1、PCB、Smart Meeting 或发布 APK。
+- 移动端新增 `deviceV2SourceStream.ts`，通过现有 Device V2 会话调用 source-stream 的 manifest page、
+  chapter group、bundle/item、commit、读取和取消接口；所有请求先检查 `source_stream_v2` capability，
+  响应按 `source.stream.v2` 和 binding/task fence 严格校验。该 client 尚未被整理 UI 调用，默认不会产生
+  网络流量。
 
 ## 验证
 

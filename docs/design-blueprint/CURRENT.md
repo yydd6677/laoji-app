@@ -112,7 +112,8 @@ Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量�
 V3 章节经过确定性 reducer 合并到 40 条事实、48 条关系和 10 条行动候选上限，最终结果与 Task
 成功状态在同一事务写入加密 artifact，失败恢复不会再次调用已经完成的章节 provider。该切片已有
 SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据，但尚未
-接入手机 source repository、Q2、真实模型/样本或 capability barrier，因此不能称为 Stage 3 退出，
+移动端 source-stream client 已接入 Device V2 合同但尚未挂入整理 UI；仍缺 Q2、真实模型/样本或 capability barrier，
+因此不能称为 Stage 3 退出，
 也没有改变当前稳定版服务流量。
 
 Q2 已增加默认关闭的 `questionQ2Candidate` fake-transport adapter：它从当前 immutable evidence
