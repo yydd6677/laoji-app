@@ -21,6 +21,7 @@
 
 - `facts-v3-real-holdout-rerun-20260819.json`
 - `q2-real-holdout-rerun-20260819.json`
+- `facts-v3-real-holdout-rerun-20260819-token-refresh.json`（在 device-v2 令牌刷新候选变更后重新执行，仍为 `9/9`）
 
 Facts V3 的 9 条用例均使用 1 次模型调用，除 `negotiation` 触发一次允许的结构修复外没有第二次
 调用；该用例的总延迟约 44.03 秒。其余用例约 6.04--14.50 秒。Q2 暖态单题约 0.88--3.99 秒，
@@ -32,4 +33,3 @@ Facts V3 的 9 条用例均使用 1 次模型调用，除 `negotiation` 触发�
 - 尚无独立人工事实支持率、行动有效性和引用相关性盲审；`9/9`、`27/27` 不是人工质量通过率。
 - 尚无 LaoJi 专属 Android 设备页面、断网、token refresh、杀进程和连续 stable/final 回放。
 - capability barrier、旧任务排空、资源/privacy 门、生产切换和 Stage 5 删除审计仍关闭。
-
