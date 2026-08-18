@@ -18,6 +18,9 @@
   `tests/test_device_v2_schedule_graph_api.py`：`16 passed`。
 - `npx tsc --noEmit --pretty false`：通过。
 - Python compileall、`git diff --check`：通过。
+- `python3 tools/vnext/verify_schedule_graph_owner.py`：通过；四个候选路由均包含
+  `model_only=true`，Graph service 无旧 parser/intent/clarification 调用，schema 与移动端均透传
+  `client_intent`。
 
 ## 边界
 
