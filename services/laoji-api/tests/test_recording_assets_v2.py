@@ -101,6 +101,9 @@ async def test_recording_assets_v2_multi_asset_upload_replay_and_legacy_projecti
     monkeypatch,
     tmp_path,
 ):
+    # The admission policy has dedicated tests; keep this asset-contract test
+    # independent from the host filesystem's current free-space gate.
+    monkeypatch.setattr(app_recording_v2, "ensure_audio_upload_allowed", lambda _root=None: None)
     monkeypatch.setattr(app_recording_v2, "is_user_meeting_tombstoned", lambda _user_id: False)
     monkeypatch.setattr(app_recording_v2, "_probe_duration_sec", lambda _path: 1.0)
     monkeypatch.setattr(
@@ -221,6 +224,7 @@ async def test_recording_assets_v2_multi_asset_upload_replay_and_legacy_projecti
 
 @pytest.mark.asyncio
 async def test_recording_asset_v2_checksum_and_transcription_identity(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_recording_v2, "ensure_audio_upload_allowed", lambda _root=None: None)
     monkeypatch.setattr(app_recording_v2, "is_user_meeting_tombstoned", lambda _user_id: False)
     monkeypatch.setattr(app_recording_v2, "_probe_duration_sec", lambda _path: 1.0)
     monkeypatch.setattr(
