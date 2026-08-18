@@ -4294,6 +4294,13 @@ def _normalize_answer(value: object, payload: dict[str, Any]) -> dict[str, Any]:
             seen.add(identity)
             citations.append({"kind": "transcript", "source_id": canonical_id})
     if not citations:
+        # A non-empty citation list is an explicit grounding claim. If every
+        # claimed source is outside the current immutable snapshot, returning
+        # an excerpt from a different source would silently attach the answer
+        # to the wrong meeting evidence. Fail closed instead; only a genuinely
+        # empty citation list may use the legacy evidence fallback.
+        if raw_citations:
+            return _insufficient()
         return _fallback_answer(payload)
     return _clarify_ambiguous_pronoun({
         "answer_kind": "answer",
