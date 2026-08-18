@@ -122,7 +122,9 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
  或搜索性能验收，后者仍未通过。
 Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 AudioRecord/journal/录音线程先启动，
 再异步连接 realtime ASR；未连接期间的 PCM 使用既有有界队列，连接失败保留本地录音并进入恢复路径。
-顺序脚本和 Kotlin 编译通过，但尚未经过专属设备的首帧延迟、断网和进程死亡回放，候选默认仍关闭。
+快照现在增加向后兼容的 `asrPhase`（connecting/connected/recoveryRequired/completed/notRequired），
+让连接慢和 ASR 故障不会被 UI 当成麦克风失败；顺序/阶段合同脚本、TypeScript 和 Kotlin 编译均通过。
+这仍尚未经过专属设备的首帧延迟、断网和进程死亡回放，候选默认仍关闭。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM

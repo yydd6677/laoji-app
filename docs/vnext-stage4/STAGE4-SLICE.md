@@ -53,6 +53,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
   接受新 revision、幂等复用同 revision 同 hash，并拒绝旧 revision 或 revision/hash 冲突。三个页面会在
   生成 envelope 前恢复各自 `calendar/recording/transcript` surface 的 checkpoint，进程重启后不再从
   revision 1 重新开始。候选旗标仍默认关闭。
+- 语音日程 native 候选先启动本机 AudioRecord/journal，再异步建立 realtime ASR；`RecorderSnapshot`
+  增加 `asrPhase` 阶段合同，区分连接中、已连接、可恢复故障和完成。旧 native 二进制由 TypeScript
+  回退推导，未增加第二录音 owner 或网络请求。
 
 ## 验证
 
@@ -68,6 +71,10 @@ schedule capability barrier，也不改变稳定版或生产服务。
   和外部内容查询；本机暖态搜索 p95 约 `9ms`。工具只依赖 Python 标准库，Linux/Windows 均可运行。
 - `python3 tools/vnext/verify_projection_checkpoint.py`：通过；覆盖首次接受、同 revision 幂等、旧 revision
   拒绝、新 revision 提升及 SQLite 关闭重开后的恢复。
+- `python3 tools/vnext/verify_recorder_asr_phase_contract.py`：通过；覆盖五个 wire 阶段、快照字段、
+  故障优先级和旧 native 快照回退。
+- `android/gradlew :laoji-native-platform:compileDebugKotlin --no-daemon`：通过；`npx tsc --noEmit
+  --pretty false`：通过。
 - `natural-schedule-utterances` skill 的 MASSIVE zh-CN natural 基线测量通过（`n=2166`，0 条语域
   预算违规），register calibration 自检通过；这只是自然度/语域参考，不是 LaoJi 字段真值。
 - 在临时 SQLite（不连接生产）上运行日程解析、ASR 代理、事件命令和 recurrence 回归：`102 passed`。
