@@ -103,8 +103,8 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 [device-v2 R2 probe](../vnext-stage2/DEVICE-V2-R2-REAL-PROBE-20260819.md)。
 32 MiB multipart 四片上传、合并、转写事件、ACK 和 purge 也已在候选回放通过，见
 [multipart R2 replay](../vnext-stage2/MULTIPART-R2-REPLAY-20260819.md)。
-当前隔离 API 已部署 `71cf466`，并显式绑定候选 `8031`（部署记录见
-[candidate deployment](../vnext-stage2/CANDIDATE-DEPLOY-71CF466-20260819.md)；旧 `f6974e0`/`db8259a`/`d193dd2` 可回滚）；生产 `18020/8030`
+当前隔离 API 已部署 `6a80576`，并显式绑定候选 `8031`（部署记录见
+[candidate deployment](../vnext-stage2/CANDIDATE-DEPLOY-6A80576-20260819.md)；旧 `71cf466`/`f6974e0`/`db8259a` 可回滚）；生产 `18020/8030`
 仍未修改。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
 生产延迟。下一入口是 Android 网络/进程恢复、手机连续文字投影和 NO_SPEECH/性能门；
@@ -133,6 +133,8 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
  或搜索性能验收，后者仍未通过。
 自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
 [自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
+模型时间范围两种自然语序回放已通过，证据见
+[日程模型时间范围回放](../vnext-stage4/SCHEDULE-MODEL-RANGE-REPLAY-20260819.md)。
 Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 AudioRecord/journal/录音线程先启动，
 再异步连接 realtime ASR；未连接期间的 PCM 使用既有有界队列，连接失败保留本地录音并进入恢复路径。
 快照现在增加向后兼容的 `asrPhase`（connecting/connected/recoveryRequired/completed/notRequired），
