@@ -149,6 +149,10 @@ producer 不再导入旧 intent classifier 或在缺少 observation 时隐式同
 构建开关与 device-v2 capability 同时成立时进入 Graph；能力缺失直接失败关闭，不回落旧解析，
 Graph 草稿澄清不会把补充拆成独立输入。查询/删除/拒绝不进入模型创建候选。该切片仍默认关闭，
 证据见 [移动端 Graph owner boundary](../vnext-stage4/MOBILE-OWNER-BOUNDARY-20260819.md)。
+隔离候选的统一 `/api/ready` 又发现并修复了 embedding 探测阻塞健康请求的问题：现在使用单飞后台
+刷新和最近状态缓存，冷启动明确返回 `ready=false` 而不是长时间无响应。代码和候选验证见
+[readiness probe latency boundary](../vnext-stage5/READINESS-PROBE-20260819.md)；尚未部署远端，
+不代表生产 readiness 延迟已改善。
 自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
 [自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
 模型时间范围两种自然语序回放已通过，证据见
