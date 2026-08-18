@@ -463,6 +463,17 @@ def _guard_legacy_media_submit() -> None:
         ) from error
 
 
+def _guard_legacy_generation(capability: str, contract_revision: str) -> None:
+    """Fence device-v1 summary/question/schedule producers after cutover."""
+    try:
+        vnext_capability_cutover.guard_legacy_submit(capability, contract_revision)
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+
+
 async def require_device(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     header_epoch_id: str | None = Header(default=None, alias="X-Laoji-Data-Epoch"),
@@ -822,6 +833,10 @@ async def parse_device_schedule(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
+    _guard_legacy_generation(
+        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+    )
     result = await parse_schedule_text(
         payload.text,
         payload.reference_datetime,
@@ -850,6 +865,10 @@ async def parse_device_schedule_audio(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
+    _guard_legacy_generation(
+        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+    )
     try:
         raw = base64.b64decode(payload.audio_base64, validate=True)
     except Exception as error:
@@ -867,6 +886,10 @@ async def clarify_device_schedule(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
+    _guard_legacy_generation(
+        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+    )
     result = await asyncio.to_thread(
         apply_schedule_clarification,
         payload.current,
@@ -2428,6 +2451,10 @@ async def ask_device_question(
     )
     if not lines:
         raise HTTPException(status_code=400, detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"})
+    _guard_legacy_generation(
+        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
+        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
+    )
     client_thread_id = _device_identifier(request.client_thread_id, "问答记录标识")
     client_request_id = _device_identifier(request.client_request_id, "问答请求标识")
     manual_note: MeetingQuestionManualNoteSource | None = None

@@ -27,6 +27,14 @@ EXPECTED: dict[str, dict[str, tuple[str, ...]]] = {
             "/asr/transcribe",
         ),
     },
+    "device_v1.py": {
+        "_guard_legacy_generation": (
+            "/schedule/parse",
+            "/schedule/parse-audio",
+            "/schedule/clarify",
+            "/meetings/{binding_id}/questions",
+        ),
+    },
 }
 
 
@@ -47,7 +55,8 @@ def _path_for(node: ast.AsyncFunctionDef) -> str | None:
 def inspect(root: Path) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     for file_name, groups in EXPECTED.items():
-        path = root / ("services/laoji-api/app/api/" if file_name == "app_meetings.py" else "services/laoji-api/app/laoji/") / file_name
+        base = "services/laoji-api/app/laoji/" if file_name == "router.py" else "services/laoji-api/app/api/"
+        path = root / base / file_name
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for guard, paths in groups.items():
             for expected_path in paths:
