@@ -231,17 +231,40 @@ export async function askQ2MeetingQuestion(input: {
   ) throw new Q2EvidenceChangedError();
   const q2Thread = await getQ2Thread(input.session.thread.id);
   if (!q2Thread) throw new Error('Q2 问答记录不存在');
-  const ordinal = q2Thread.turns.length;
+  const pendingTurns = q2Thread.turns.filter(turn => turn.completedAtMs === null);
+  const pendingSameQuestion = [...pendingTurns].reverse().find(turn => turn.question === question);
+  const pendingOtherQuestion = pendingTurns.find(turn => turn.question !== question);
+  if (pendingOtherQuestion && !pendingSameQuestion) {
+    throw new Error('上一条会议问答仍在处理中，请等待或重试上一条问题。');
+  }
+  // A failed provider attempt leaves one immutable pending turn. Retry must
+  // reuse its identity and ordinal; deriving a new request from turns.length
+  // would create a duplicate question and make rebindPendingQ2Turn unreachable.
+  const ordinal = pendingSameQuestion?.ordinal
+    ?? q2Thread.turns.reduce((maximum, turn) => Math.max(maximum, turn.ordinal), -1) + 1;
   const digest = await sha256(question);
-  const requestId = `q2-question:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
-  const turnId = `q2-turn:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
-  const existingTurn = q2Thread.turns.find(turn => turn.requestId === requestId);
+  const requestId = pendingSameQuestion?.requestId
+    ?? `q2-question:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
+  const turnId = pendingSameQuestion?.turnId
+    ?? `q2-turn:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
+  const existingTurn = pendingSameQuestion;
   if (!existingTurn || existingTurn.completedAtMs === null) {
     const binding = await ensureRemoteMeetingServiceBinding(input.evidence.meetingId);
     const operationId = `q2-operation:${requestId}:${secureClientIdFactory.create()}`;
     const deviceSession = await ensureDeviceV2Session();
     if (binding.deviceEpochId !== deviceSession.epochId) {
       throw new Error('会议问答设备 epoch 与会议连接不一致');
+    }
+    if (existingTurn?.currentOperationId) {
+      const previousOperation = await getDeviceOperation(existingTurn.currentOperationId);
+      if (!previousOperation) {
+        throw new Error('上一条会议问答缺少可恢复的任务记录，请新建问答记录。');
+      }
+      if (previousOperation?.remoteState === 'queued' || previousOperation?.remoteState === 'running') {
+        throw new Error('上一条会议问答仍在处理中，请等待完成。');
+      }
+    } else if (existingTurn) {
+      throw new Error('上一条会议问答缺少可恢复的任务记录，请新建问答记录。');
     }
     const operation = await createDeviceOperation({
       operationId,
