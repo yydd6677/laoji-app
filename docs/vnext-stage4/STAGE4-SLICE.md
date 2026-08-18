@@ -72,7 +72,7 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - `python3 tools/vnext/verify_projection_checkpoint.py`：通过；覆盖首次接受、同 revision 幂等、旧 revision
   拒绝、新 revision 提升及 SQLite 关闭重开后的恢复。
 - `python3 tools/vnext/verify_recorder_asr_phase_contract.py`：通过；覆盖五个 wire 阶段、快照字段、
-  故障优先级和旧 native 快照回退。
+  故障优先级、旧 native 快照回退以及首帧延迟指标埋点。
 - `android/gradlew :laoji-native-platform:compileDebugKotlin --no-daemon`：通过；`npx tsc --noEmit
   --pretty false`：通过。
 - `natural-schedule-utterances` skill 的 MASSIVE zh-CN natural 基线测量通过（`n=2166`，0 条语域
