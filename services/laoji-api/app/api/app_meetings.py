@@ -985,16 +985,16 @@ async def get_guest_realtime_transcripts(
 
 @router.post('/guest-summary', status_code=202)
 async def generate_guest_meeting_summary(data: GuestSummaryRequest):
-    _guard_legacy_generation(
-        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
-        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
-    )
     template = _summary_template_or_422(data.template_id, data.template_revision)
     carry_forward = _summary_carry_forward_payload(data.carry_forward)
     attachment_authorization = _summary_attachment_payload(data.attachment_authorization)
     total_chars = sum(len(line.text.strip()) for line in data.transcript_lines)
     if total_chars <= 0:
         raise HTTPException(status_code=400, detail='会议暂无转写文本')
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     transcript_lines = [
         {
             'id': (line.id or '').strip() or f'guest:{data.meeting_id}:{index}',
@@ -1058,11 +1058,11 @@ async def get_guest_meeting_summary_task(
 
 @router.post('/guest-questions')
 async def answer_guest_meeting_question(data: MeetingQuestionRequest):
+    payload = _meeting_question_payload(data)
     _guard_legacy_generation(
         vnext_capability_cutover.QUESTION_READER_CAPABILITY,
         vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
     )
-    payload = _meeting_question_payload(data)
     created_at = datetime.utcnow()
     try:
         answer = await to_thread.run_sync(generate_meeting_question_answer, payload)
@@ -1088,14 +1088,14 @@ async def answer_app_meeting_question(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _guard_legacy_generation(
-        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
-        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
-    )
     payload = _meeting_question_payload(data)
     user_id = _user_id(current_user)
     _assert_user_meeting_writable(user_id)
     meeting = await _get_owned_meeting(meeting_id, user_id, db)
+    _guard_legacy_generation(
+        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
+        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
+    )
     owned_meeting_id = str(meeting.id)
 
     request_hash = meeting_question_request_hash(payload)
@@ -1711,14 +1711,14 @@ async def generate_app_meeting_summary(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    _guard_legacy_generation(
-        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
-        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
-    )
     template = _summary_template_or_422(template_id, template_revision)
     user_id = _user_id(current_user)
     _assert_user_meeting_writable(user_id)
     meeting = await _get_owned_meeting(meeting_id, user_id, db)
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     carry_forward = _summary_carry_forward_payload(request.carry_forward if request else None)
     attachment_authorization = _summary_attachment_payload(
         request.attachment_authorization if request else None
