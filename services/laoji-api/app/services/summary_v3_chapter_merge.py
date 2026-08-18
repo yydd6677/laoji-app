@@ -19,7 +19,7 @@ from app.schemas.meeting_facts_v3 import (
 )
 
 
-CHECKPOINT_CONTRACT_REVISION = "meeting.facts.chapter-checkpoint.v1"
+CHECKPOINT_CONTRACT_REVISION = "meeting.facts.chapter-checkpoint.v2"
 MAX_FACTS = 40
 MAX_RELATIONS = 48
 MAX_ACTIONS = 10
@@ -56,10 +56,19 @@ class FactsV3ChapterCheckpoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[3] = 3
-    contract_revision: Literal["meeting.facts.chapter-checkpoint.v1"] = CHECKPOINT_CONTRACT_REVISION
+    contract_revision: Literal["meeting.facts.chapter-checkpoint.v2"] = CHECKPOINT_CONTRACT_REVISION
     through_chapter_ordinal: int = Field(ge=0)
     facts_document: MeetingFactsDocumentV3
     fact_first_chapter: dict[str, int] = Field(default_factory=dict)
+    total_source_segments: int = Field(default=0, ge=0)
+    included_source_segments: int = Field(default=0, ge=0)
+    topic_groups: int = Field(default=0, ge=0)
+    covered_topic_groups: int = Field(default=0, ge=0)
+    source_types: list[Literal["transcript", "manual_note", "attachment"]] = Field(default_factory=list)
+    included_source_types: list[Literal["transcript", "manual_note", "attachment"]] = Field(default_factory=list)
+    used_embeddings: bool = False
+    input_token_budget: int = Field(default=0, ge=0)
+    estimated_input_tokens: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def validate_origins(self) -> "FactsV3ChapterCheckpoint":
@@ -68,6 +77,14 @@ class FactsV3ChapterCheckpoint(BaseModel):
             raise ValueError("checkpoint_fact_origins_invalid")
         if any(value < 0 or value > self.through_chapter_ordinal for value in self.fact_first_chapter.values()):
             raise ValueError("checkpoint_fact_origin_range_invalid")
+        if self.included_source_segments > self.total_source_segments:
+            raise ValueError("checkpoint_source_coverage_invalid")
+        if self.covered_topic_groups > self.topic_groups:
+            raise ValueError("checkpoint_topic_coverage_invalid")
+        if not set(self.included_source_types).issubset(set(self.source_types)):
+            raise ValueError("checkpoint_source_types_invalid")
+        if self.estimated_input_tokens > self.input_token_budget:
+            raise ValueError("checkpoint_token_budget_invalid")
         return self
 
 
@@ -223,6 +240,7 @@ def merge_verified_chapter(
     chapter: MeetingFactsDocumentV3 | dict[str, Any],
     *,
     chapter_ordinal: int,
+    chapter_coverage: dict[str, Any] | None = None,
 ) -> FactsV3ChapterCheckpoint:
     """Merge one verified chapter without another provider call.
 
@@ -238,6 +256,28 @@ def merge_verified_chapter(
         else None
     )
     chapter_document = MeetingFactsDocumentV3.model_validate(chapter)
+    fallback_sources = {
+        (source.source_type, source.source_id, source.content_hash)
+        for fact in chapter_document.facts
+        for source in fact.sources
+    }
+    coverage = chapter_coverage or {}
+    chapter_total_sources = max(len(fallback_sources), int(coverage.get("total_segments") or 0))
+    chapter_included_sources = max(len(fallback_sources), int(coverage.get("included_segments") or 0))
+    fallback_topic_groups = 1 if any(source_type == "transcript" for source_type, _id, _hash in fallback_sources) else 0
+    chapter_topics = max(fallback_topic_groups, int(coverage.get("topic_groups") or 0))
+    chapter_covered_topics = max(fallback_topic_groups, int(coverage.get("covered_topic_groups") or 0))
+    allowed_source_types = {"transcript", "manual_note", "attachment"}
+    chapter_source_types = {
+        str(value) for value in (coverage.get("source_types") or [])
+        if str(value) in allowed_source_types
+    } or {source_type for source_type, _source_id, _hash in fallback_sources}
+    chapter_included_types = {
+        str(value) for value in (coverage.get("included_source_types") or [])
+        if str(value) in allowed_source_types
+    } or {source_type for source_type, _source_id, _hash in fallback_sources}
+    chapter_input_budget = max(1, int(coverage.get("input_token_budget") or 10_240))
+    chapter_estimated_tokens = max(0, int(coverage.get("estimated_input_tokens") or 0))
     if previous is None:
         if chapter_ordinal != 0:
             raise ValueError("chapter_sequence_gap")
@@ -398,4 +438,17 @@ def merge_verified_chapter(
         through_chapter_ordinal=chapter_ordinal,
         facts_document=document,
         fact_first_chapter=origins,
+        total_source_segments=(previous.total_source_segments if previous else 0) + chapter_total_sources,
+        included_source_segments=(previous.included_source_segments if previous else 0) + chapter_included_sources,
+        topic_groups=(previous.topic_groups if previous else 0) + chapter_topics,
+        covered_topic_groups=(previous.covered_topic_groups if previous else 0) + chapter_covered_topics,
+        source_types=sorted(set(previous.source_types if previous else []) | chapter_source_types),
+        included_source_types=sorted(
+            set(previous.included_source_types if previous else []) | chapter_included_types
+        ),
+        used_embeddings=bool(previous.used_embeddings if previous else False)
+        or bool(coverage.get("used_embeddings")),
+        input_token_budget=(previous.input_token_budget if previous else 0) + chapter_input_budget,
+        estimated_input_tokens=(previous.estimated_input_tokens if previous else 0)
+        + chapter_estimated_tokens,
     )

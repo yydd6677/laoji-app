@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import re
@@ -32,6 +33,12 @@ class SummaryChapterOwnerContext(Protocol):
     epoch_id: str
 
 
+@dataclass(frozen=True)
+class VerifiedSummaryChapter:
+    document: MeetingFactsDocumentV3
+    coverage: dict[str, Any]
+
+
 def _artifact(
     checkpoint: FactsV3ChapterCheckpoint,
     *,
@@ -45,7 +52,14 @@ def _artifact(
         for fact in checkpoint.facts_document.facts
         for source in fact.sources
     })
-    fact_count = len(checkpoint.facts_document.facts)
+    source_coverage = round(
+        checkpoint.included_source_segments / max(1, checkpoint.total_source_segments),
+        6,
+    )
+    topic_coverage = round(
+        checkpoint.covered_topic_groups / max(1, checkpoint.topic_groups),
+        6,
+    )
     return {
         "schema_version": 3,
         "contract_revision": ARTIFACT_CONTRACT_REVISION,
@@ -57,17 +71,17 @@ def _artifact(
         "prompt_revision": handler_revision,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "coverage": {
-            "total_segments": fact_count,
-            "included_segments": fact_count,
-            "topic_groups": fact_count,
-            "covered_topic_groups": fact_count,
-            "topic_coverage": 1.0,
-            "source_types": source_types,
-            "included_source_types": source_types,
-            "source_coverage": 1.0,
-            "used_embeddings": False,
-            "input_token_budget": 10240,
-            "estimated_input_tokens": 0,
+            "total_segments": checkpoint.total_source_segments,
+            "included_segments": checkpoint.included_source_segments,
+            "topic_groups": checkpoint.topic_groups,
+            "covered_topic_groups": checkpoint.covered_topic_groups,
+            "topic_coverage": topic_coverage,
+            "source_types": checkpoint.source_types or source_types,
+            "included_source_types": checkpoint.included_source_types or source_types,
+            "source_coverage": source_coverage,
+            "used_embeddings": checkpoint.used_embeddings,
+            "input_token_budget": checkpoint.input_token_budget,
+            "estimated_input_tokens": checkpoint.estimated_input_tokens,
         },
         "through_chapter_ordinal": checkpoint.through_chapter_ordinal,
         "facts_document": checkpoint.facts_document.model_dump(mode="json"),
@@ -142,7 +156,7 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
     )
 
 
-def generate_verified_summary_chapter(chapter: dict[str, Any]) -> MeetingFactsDocumentV3:
+def generate_verified_summary_chapter(chapter: dict[str, Any]) -> VerifiedSummaryChapter:
     """Run the selected Facts V3 provider once and verify exact chapter citations."""
     from app.services.summary_v3_generator import (
         generate_model_response,
@@ -151,7 +165,35 @@ def generate_verified_summary_chapter(chapter: dict[str, Any]) -> MeetingFactsDo
 
     package = build_chapter_evidence_package(chapter)
     response, _model_calls = generate_model_response(package)
-    return verify_model_response(response, package)
+    return VerifiedSummaryChapter(
+        document=verify_model_response(response, package),
+        coverage=dict(package.coverage),
+    )
+
+
+def _fallback_chapter_coverage(chapter: dict[str, Any]) -> dict[str, Any]:
+    items = chapter.get("items") if isinstance(chapter.get("items"), list) else []
+    source_types = sorted({
+        str(item.get("source_type"))
+        for item in items
+        if isinstance(item, dict)
+        and str(item.get("source_type")) in {"transcript", "manual_note", "attachment"}
+    })
+    topic_groups = 1 if any(
+        isinstance(item, dict) and item.get("source_type") == "transcript"
+        for item in items
+    ) else 0
+    return {
+        "total_segments": len(items),
+        "included_segments": len(items),
+        "topic_groups": topic_groups,
+        "covered_topic_groups": topic_groups,
+        "source_types": source_types,
+        "included_source_types": source_types,
+        "used_embeddings": False,
+        "input_token_budget": 10_240,
+        "estimated_input_tokens": 0,
+    }
 
 
 def process_next_summary_chapter(
@@ -162,7 +204,10 @@ def process_next_summary_chapter(
     lease_owner: str,
     handler_revision: str,
     provider_revision: str,
-    generate_verified_chapter: Callable[[dict[str, Any]], MeetingFactsDocumentV3 | dict[str, Any]],
+    generate_verified_chapter: Callable[
+        [dict[str, Any]],
+        VerifiedSummaryChapter | MeetingFactsDocumentV3 | dict[str, Any],
+    ],
 ) -> dict[str, Any]:
     """Process at most one chapter, yielding naturally to higher-priority work.
 
@@ -223,11 +268,18 @@ def process_next_summary_chapter(
         if chapter["current_aggregate"] is not None
         else None
     )
-    generated = MeetingFactsDocumentV3.model_validate(generate_verified_chapter(chapter))
+    generated_value = generate_verified_chapter(chapter)
+    if isinstance(generated_value, VerifiedSummaryChapter):
+        generated = generated_value.document
+        chapter_coverage = generated_value.coverage
+    else:
+        generated = MeetingFactsDocumentV3.model_validate(generated_value)
+        chapter_coverage = _fallback_chapter_coverage(chapter)
     checkpoint = merge_verified_chapter(
         current,
         generated,
         chapter_ordinal=int(chapter["chapter_ordinal"]),
+        chapter_coverage=chapter_coverage,
     )
     promoted = vnext_source_stream_store.promote_checkpoint(
         context,
