@@ -14,6 +14,7 @@ import {
   type Q2CitationInput,
 } from '../data/repositories/vnext/questionQ2Repository';
 import { ensureDeviceV2Session, loadDeviceV2Capabilities } from './deviceV2Api';
+import { ensureRemoteMeetingServiceBinding } from './deviceAuthority';
 import {
   createDeviceOperation,
   getDeviceOperation,
@@ -236,8 +237,12 @@ export async function askQ2MeetingQuestion(input: {
   const turnId = `q2-turn:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
   const existingTurn = q2Thread.turns.find(turn => turn.requestId === requestId);
   if (!existingTurn || existingTurn.completedAtMs === null) {
+    const binding = await ensureRemoteMeetingServiceBinding(input.evidence.meetingId);
     const operationId = `q2-operation:${requestId}:${secureClientIdFactory.create()}`;
     const deviceSession = await ensureDeviceV2Session();
+    if (binding.deviceEpochId !== deviceSession.epochId) {
+      throw new Error('会议问答设备 epoch 与会议连接不一致');
+    }
     const operation = await createDeviceOperation({
       operationId,
       deviceEpochId: deviceSession.epochId,
