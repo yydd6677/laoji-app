@@ -106,3 +106,20 @@ export async function markDeviceUploadOperationSuccess(operationId: string): Pro
   });
   return Boolean(updated);
 }
+
+export async function syncDeviceUploadOperationState(
+  operationId: string,
+  state: 'running' | 'failure' | 'cancelled',
+  errorCode: string | null = null,
+): Promise<boolean> {
+  const existing = await getDeviceOperation(operationId);
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return false;
+  if (existing.remoteState === 'failure' && state !== 'failure') return false;
+  const updated = await updateDeviceOperation({
+    operationId,
+    expectedRevision: existing.operationRevision,
+    state,
+    errorCode: errorCode?.trim().slice(0, 160) || null,
+  });
+  return Boolean(updated);
+}

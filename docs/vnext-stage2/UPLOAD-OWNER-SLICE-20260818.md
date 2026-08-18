@@ -13,6 +13,9 @@
 3. 在同一本机数据库事务中将 operation 绑定到对应录音资产代际；
 4. WorkManager 入队；成功回放时将 operation 单调推进到 `success`。
 
+轮询原生执行投影时，`running/failed/cancelled` 也按 CAS 回写到同一 operation；成功、失败和取消都
+不会通过字符串状态重新打开终态任务。
+
 如果资产已经绑定其他 operation、epoch 或输入校验值不一致，入队直接失败关闭，不会静默覆盖。
 旧 legacy/recording-assets-v2 路径没有被切换；服务端 barrier、真机回放和失败终态同步仍未完成。
 

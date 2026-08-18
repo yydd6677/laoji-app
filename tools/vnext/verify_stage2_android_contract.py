@@ -63,6 +63,8 @@ def main() -> None:
         "ensureDeviceUploadOperation",
         "bindDeviceUploadOperationToAsset",
         "capability: 'media.upload'",
+        "syncDeviceUploadOperationState",
+        "state: 'running' | 'failure' | 'cancelled'",
     )
     require(
         coordinator,

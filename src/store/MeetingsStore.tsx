@@ -141,7 +141,10 @@ import {
   uploadRecordingAssetV2,
 } from '../data/api/v2';
 import { uploadMeetingRecordingToDeviceService } from '../services/deviceMeetingService';
-import { markDeviceUploadOperationSuccess } from '../services/deviceUploadOperations';
+import {
+  markDeviceUploadOperationSuccess,
+  syncDeviceUploadOperationState,
+} from '../services/deviceUploadOperations';
 import {
   drainDeviceMeetingDeletionOutbox,
   enqueueDeviceMeetingDeletion,
@@ -2954,6 +2957,26 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const afterInspections = mode === 'guest' && !deviceV2IngressReady
         ? after.map(item => derivePendingMeetingAudioUploadInspection(item, null))
         : await inspectPendingMeetingAudioUploads(after);
+      if (mode === 'guest' && deviceV2IngressReady) {
+        await Promise.all(afterInspections.map(async inspection => {
+          const operationId = inspection.pending.nativeOperationId?.trim();
+          const nativeState = inspection.nativeState;
+          if (!operationId || !nativeState) return;
+          if (nativeState.state === 'running') {
+            await syncDeviceUploadOperationState(operationId, 'running');
+          } else if (nativeState.state === 'failed') {
+            await syncDeviceUploadOperationState(
+              operationId,
+              'failure',
+              nativeState.reason?.trim() || 'native_upload_failed',
+            );
+          } else if (nativeState.state === 'cancelled') {
+            await syncDeviceUploadOperationState(operationId, 'cancelled', 'native_upload_cancelled');
+          } else if (nativeState.state === 'succeeded' && nativeState.result === 'uploaded') {
+            await markDeviceUploadOperationSuccess(operationId);
+          }
+        }));
+      }
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       if (
         mode !== 'guest'
