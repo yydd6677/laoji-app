@@ -70,6 +70,23 @@ def _sha256_text(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _source_fingerprint(sources: list[dict[str, str]]) -> str:
+    payload = {
+        "schema_version": 2,
+        "sources": [
+            {
+                "source_type": source["source_type"],
+                "source_id": source["source_id"],
+                "source_revision_id": source["source_revision_id"],
+                "content_sha256": source["content_sha256"],
+            }
+            for source in sources
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return _sha256_text(encoded)
+
+
 def _utf8_slice(value: str, start: int, end: int, field: str) -> str:
     if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
         raise Q2ReaderError("Q2_GROUNDING_INVALID", f"{field}范围无效")
@@ -186,6 +203,8 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     source_fingerprint = _hash(payload.get("source_fingerprint"), "source_fingerprint")
     question = _text(payload.get("question"), "question", MAX_QUESTION)
     sources = _source_payload(payload.get("sources"))
+    if _source_fingerprint(sources) != source_fingerprint:
+        raise Q2ReaderError("Q2_SOURCE_FINGERPRINT_MISMATCH", "Q2 来源整体标识校验失败", 409)
     model_input = {
         "schema_version": 2,
         "source_fingerprint": source_fingerprint,

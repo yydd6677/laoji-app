@@ -170,14 +170,25 @@ export async function loadQuestionEvidence(input: {
     manualNoteRevision,
     manualNote,
   };
+  const sourceFingerprintSources = [
+    ...(await Promise.all(transcriptItems.map(async segment => ({
+      source_type: 'transcript' as const,
+      source_id: segment.segmentId,
+      source_revision_id: transcript.revision.id,
+      content_sha256: `sha256:${await sha256(segment.text)}`,
+    })))),
+    ...(includeManualNote && manualNote !== null && manualNoteRevision !== null
+      ? [{
+        source_type: 'manual_note' as const,
+        source_id: `manual_note:${meetingId}`,
+        source_revision_id: String(manualNoteRevision),
+        content_sha256: `sha256:${await sha256(manualNote)}`,
+      }]
+      : []),
+  ];
   const sourceFingerprintPayload = {
-    schemaVersion: 2,
-    meetingId,
-    transcriptRevisionId: transcript.revision.id,
-    transcript: transcriptItems,
-    includeManualNote,
-    manualNoteRevision,
-    manualNote,
+    schema_version: 2,
+    sources: sourceFingerprintSources,
   };
   const inputFingerprint = `sha256:${await sha256(stableJson(fingerprintPayload))}`;
   const sourceFingerprint = `sha256:${await sha256(stableJson(sourceFingerprintPayload))}`;

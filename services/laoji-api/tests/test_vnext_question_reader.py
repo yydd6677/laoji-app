@@ -12,13 +12,26 @@ def _hash(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _source_fingerprint(text: str) -> str:
+    payload = {
+        "schema_version": 2,
+        "sources": [{
+            "source_type": "transcript",
+            "source_id": "line-1",
+            "source_revision_id": "revision-1",
+            "content_sha256": _hash(text),
+        }],
+    }
+    return _hash(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
 def _payload(text: str = "周五前由张敏提交接口文档。") -> dict:
     return {
         "schema_version": 2,
         "contract_revision": reader.CONTRACT_REVISION,
         "provider_revision": reader.PROVIDER_REVISION,
         "snapshot_id": "q2-snapshot-test",
-        "source_fingerprint": _hash(text),
+        "source_fingerprint": _source_fingerprint(text),
         "question": "谁负责提交接口文档？",
         "sources": [{
             "source_type": "transcript",
@@ -166,3 +179,12 @@ def test_reader_maps_provider_failure_to_retryable_service_error(monkeypatch):
         reader.read_q2(_payload())
     assert captured.value.code == "Q2_PROVIDER_UNAVAILABLE"
     assert captured.value.status_code == 503
+
+
+def test_reader_rejects_source_fingerprint_mismatch(monkeypatch):
+    payload = _payload()
+    payload["source_fingerprint"] = _hash("caller-supplied identity")
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(payload)
+    assert captured.value.code == "Q2_SOURCE_FINGERPRINT_MISMATCH"
+    assert captured.value.status_code == 409
