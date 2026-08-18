@@ -39,6 +39,11 @@ import {
   meetingFactsV3ToSummary,
   parseMeetingFactsResultV3,
 } from './meetingSummaryV3';
+import {
+  generateMeetingSummaryViaSourceStream,
+  summarySourceRevision,
+} from './meetingSummaryV3SourceStream';
+import { getFeatureFlags } from '../config/featureFlags';
 
 export {
   meetingSummaryTextToPlainText,
@@ -464,6 +469,40 @@ async function generateDeviceMeetingSummaryV3(options: {
   onProgress?: MeetingSummaryProgressListener;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
+  if (getFeatureFlags().meetingSummarySourceStreamCandidate) {
+    try {
+      const summary = await generateMeetingSummaryViaSourceStream({
+        meetingId: options.meetingId,
+        transcriptLines: options.transcriptLines,
+        transcriptRevision: await summarySourceRevision({
+          meetingId: options.meetingId,
+          transcriptLines: options.transcriptLines,
+          manualNote: options.manualNote,
+          attachmentAuthorization: options.attachmentAuthorization,
+        }),
+        manualNote: options.manualNote,
+        attachmentAuthorization: options.attachmentAuthorization,
+        template: options.template,
+        force: options.force,
+        resumeTaskId: options.resumeTaskId,
+        signal: options.signal,
+        onTaskSubmitted: options.onTaskSubmitted,
+        onProgress: stage => options.onProgress?.({
+          attempt: 0,
+          status: stage.toUpperCase(),
+          elapsedMs: 0,
+          stage,
+        }),
+      });
+      return summary;
+    } catch (error) {
+      // The candidate is opt-in and must fail closed. Never fall through to
+      // the stable v3 endpoint after a source-stream task has been created,
+      // because that would produce two independent owners for one request.
+      if (error instanceof Error && /来源流整理能力尚未启用/.test(error.message)) throw error;
+      throw error;
+    }
+  }
   const attachments = (options.attachmentAuthorization?.items ?? []).map(item => {
     if (item.kind !== 'text') {
       throw new Error('所选照片暂时无法用于新版整理，请仅选择文字附件。');

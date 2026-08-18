@@ -960,6 +960,37 @@ def recoverable_tasks(context: TaskOwnerContext) -> list[dict[str, Any]]:
     return [decoded for row in rows if (decoded := _decode_task(row)) is not None]
 
 
+def pending_source_stream_tasks(limit: int = 32) -> list[dict[str, str]]:
+    """Return active source-stream tasks for the generic vNext workers.
+
+    The query intentionally returns only opaque owner identity.  Domain
+    payloads remain in their stores and the worker must reconstruct a fresh
+    owner context before claiming a lease.  This also makes the scan safe to
+    run after a process restart without retaining an in-memory queue.
+    """
+    ensure_vnext_task_schema()
+    bounded = max(1, min(256, int(limit)))
+    with control_connection() as connection:
+        rows = connection.execute(
+            """SELECT device_id, epoch_id, task_id
+                 FROM vnext_tasks
+                WHERE state = 'active'
+                  AND source_stream_id IS NOT NULL
+                  AND capability = 'summary'
+                ORDER BY created_at, task_id
+                LIMIT ?""",
+            (bounded,),
+        ).fetchall()
+    return [
+        {
+            "device_id": str(row["device_id"]),
+            "epoch_id": str(row["epoch_id"]),
+            "task_id": str(row["task_id"]),
+        }
+        for row in rows
+    ]
+
+
 def reset_store_for_tests() -> None:
     """Clear only the vNext tables in the configured control database."""
     ensure_vnext_task_schema()

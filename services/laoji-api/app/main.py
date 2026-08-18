@@ -183,6 +183,14 @@ async def lifespan(app: FastAPI):
     except Exception as error:
         print(f"[启动] vNext 导入转写 worker 启动失败: {type(error).__name__}", flush=True)
 
+    try:
+        from app.services.vnext_summary_worker import start_summary_source_stream_worker
+
+        start_summary_source_stream_worker()
+        print("[启动] vNext 来源整理 worker 已按能力开关启动", flush=True)
+    except Exception as error:
+        print(f"[启动] vNext 来源整理 worker 启动失败: {type(error).__name__}", flush=True)
+
 
     try:
         from app.workers.summary_tasks import recover_persistent_summary_jobs
@@ -209,8 +217,10 @@ async def lifespan(app: FastAPI):
         from app.services.meeting_retention_service import stop_meeting_retention_cleanup
         from app.services.vnext_speaker_pipeline import stop_speaker_overlay_worker
         from app.services.vnext_import_transcription_pipeline import stop_import_transcription_worker
+        from app.services.vnext_summary_worker import stop_summary_source_stream_worker
         await stop_recording_worker()
         await stop_import_transcription_worker()
+        await stop_summary_source_stream_worker()
         await stop_speaker_overlay_worker()
         await stop_meeting_retention_cleanup()
 

@@ -826,6 +826,28 @@ async def get_task(
     return {"schema_version": 2, "task": task}
 
 
+@router.get("/tasks/{task_id}/artifact")
+async def get_task_artifact(
+    task_id: str,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    """Read a completed vNext artifact through the same device/epoch fence."""
+    try:
+        artifact = await asyncio.to_thread(
+            vnext_source_stream_store.load_generated_artifact,
+            context,
+            task_id,
+        )
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        raise _source_error(error) from error
+    if artifact is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "TASK_ARTIFACT_NOT_FOUND",
+            "message": "任务结果尚未生成",
+        })
+    return {"schema_version": 2, "artifact": artifact}
+
+
 @router.get("/tasks/{task_id}/transcript-events")
 async def get_transcript_events(
     task_id: str,

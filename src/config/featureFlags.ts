@@ -21,6 +21,7 @@ export interface LaoJiFeatureFlags {
   meetingCrossMeetingSearchV1: boolean;
   scheduleGraphV2Candidate: boolean;
   realtimeAsrV2Candidate: boolean;
+  meetingSummarySourceStreamCandidate: boolean;
   nativeProjectionEnvelopeCandidate: boolean;
 }
 
@@ -111,6 +112,10 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // capability alone must not opt a stable APK into the candidate path.
     scheduleGraphV2Candidate: extra.featureFlags?.scheduleGraphV2Candidate === true,
     realtimeAsrV2Candidate: extra.featureFlags?.realtimeAsrV2Candidate === true,
+    // Source-stream summary is a complete candidate transport, but it must
+    // not silently replace the stable summary endpoint before Android replay
+    // and provider holdouts have been accepted.
+    meetingSummarySourceStreamCandidate: extra.featureFlags?.meetingSummarySourceStreamCandidate === true,
     // Native snapshot fencing is opt-in until recreate/乱序 replay has passed
     // on the target Android build.  The coordinator is inert in stable APKs.
     nativeProjectionEnvelopeCandidate: extra.featureFlags?.nativeProjectionEnvelopeCandidate === true,

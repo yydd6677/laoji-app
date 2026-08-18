@@ -106,6 +106,28 @@ export interface DeviceV2SourceBundleGroup {
   item_count: number;
 }
 
+export interface DeviceV2TaskSnapshot {
+  schema_version: 2;
+  task: {
+    task_id: string;
+    capability: string;
+    state: 'active' | 'success' | 'failure' | 'cancelled';
+    result?: unknown;
+    error_code?: string | null;
+  };
+}
+
+export interface DeviceV2GeneratedArtifact {
+  artifact_id: string;
+  task_id: string;
+  source_manifest_sha256: string;
+  contract_revision: string;
+  provider_revision: string;
+  output_sha256: string;
+  created_at: string;
+  output: Record<string, unknown>;
+}
+
 export class DeviceV2SourceStreamUnavailableError extends Error {
   constructor() {
     super('来源流服务尚未启用');
@@ -364,4 +386,55 @@ export async function commitDeviceV2SourceBundleGroup(groupId: string): Promise<
 export async function cancelDeviceV2SourceStream(streamId: string): Promise<void> {
   await requireSourceStreamCapability();
   await deviceV2Request(`/source-streams/${encodeURIComponent(id(streamId, 'stream_id', 180))}`, { method: 'DELETE' }, '取消来源流失败');
+}
+
+export async function getDeviceV2Task(taskId: string): Promise<DeviceV2TaskSnapshot> {
+  const value = await deviceV2Request<any>(
+    `/tasks/${encodeURIComponent(id(taskId, 'task_id'))}`,
+    {},
+    '读取新版整理任务失败',
+  );
+  const task = value?.task;
+  if (!task || Number(value.schema_version) !== 2 || id(String(task.task_id ?? ''), 'task_id') !== taskId) {
+    throw new DeviceV2ApiError('新版整理任务响应格式无效', 502, 'VNEXT_TASK_RESPONSE_INVALID');
+  }
+  if (!['active', 'success', 'failure', 'cancelled'].includes(task.state)) {
+    throw new DeviceV2ApiError('新版整理任务状态无效', 502, 'VNEXT_TASK_STATE_INVALID');
+  }
+  return {
+    schema_version: 2,
+    task: {
+      task_id: taskId,
+      capability: id(String(task.capability ?? ''), 'capability', 120),
+      state: task.state,
+      result: task.result,
+      error_code: task.error_code == null ? null : id(String(task.error_code), 'error_code', 160),
+    },
+  };
+}
+
+export async function getDeviceV2TaskArtifact(taskId: string): Promise<DeviceV2GeneratedArtifact> {
+  const value = await deviceV2Request<any>(
+    `/tasks/${encodeURIComponent(id(taskId, 'task_id'))}/artifact`,
+    {},
+    '读取新版整理结果失败',
+  );
+  const artifact = value?.artifact;
+  if (!artifact || Number(value.schema_version) !== 2 || id(String(artifact.task_id ?? ''), 'task_id') !== taskId) {
+    throw new DeviceV2ApiError('新版整理结果响应格式无效', 502, 'VNEXT_ARTIFACT_RESPONSE_INVALID');
+  }
+  const output = artifact.output;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new DeviceV2ApiError('新版整理结果正文无效', 502, 'VNEXT_ARTIFACT_OUTPUT_INVALID');
+  }
+  return {
+    artifact_id: id(String(artifact.artifact_id ?? ''), 'artifact_id', 180),
+    task_id: taskId,
+    source_manifest_sha256: sha256(String(artifact.source_manifest_sha256 ?? ''), 'source_manifest_sha256'),
+    contract_revision: id(String(artifact.contract_revision ?? ''), 'contract_revision', 180),
+    provider_revision: id(String(artifact.provider_revision ?? ''), 'provider_revision', 180),
+    output_sha256: sha256(String(artifact.output_sha256 ?? ''), 'output_sha256'),
+    created_at: id(String(artifact.created_at ?? ''), 'created_at', 100),
+    output: output as Record<string, unknown>,
+  };
 }
