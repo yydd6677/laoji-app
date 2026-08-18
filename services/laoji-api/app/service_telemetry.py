@@ -12,6 +12,8 @@ import uuid
 from contextlib import contextmanager
 from typing import Any
 
+from app.privacy_logging import privacy_log
+
 @contextmanager
 def ollama_trace(_trace_id: str):
     """Compatibility span scope; model timings come from LlmProvider state."""
@@ -151,15 +153,13 @@ def telemetry_scope(
                 yield model_spans
             finally:
                 if emit_model_trace and model_spans:
-                    LOGGER.info(json.dumps({
-                        "event": "service_model_trace",
-                        "trace_id": trace_id,
-                        "service": service,
-                        "operation": operation,
-                        "task_id": task_id,
-                        "model_spans": model_spans,
-                        "client_metadata": client_metadata or {},
-                    }, ensure_ascii=False, separators=(",", ":")))
+                    privacy_log(
+                        "service_model_trace",
+                        capability=service,
+                        stage=operation,
+                        count=len(model_spans),
+                        status="completed",
+                    )
     finally:
         _TRACE_CONTEXT.reset(token)
 
@@ -184,12 +184,6 @@ def emit_stage(
     if context is None:
         return
     payload = {
-        "event": "service_stage",
-        "trace_id": context.get("trace_id"),
-        "service": context.get("service"),
-        "operation": operation or context.get("operation"),
-        "task_id": context.get("task_id"),
-        "client_metadata": context.get("client_metadata") or {},
         "stage": stage_name,
         "duration_ms": round(duration_ms, 3) if duration_ms is not None else None,
         "status": status,
@@ -197,7 +191,6 @@ def emit_stage(
         "purpose": purpose,
         "attempt": attempt,
     }
-    payload.update({key: _safe_optional(value) for key, value in fields.items()})
     stage_spans = context.get("stage_spans")
     if isinstance(stage_spans, list):
         stage_spans.append({
@@ -205,7 +198,21 @@ def emit_stage(
             "duration_ms": payload["duration_ms"],
             "applicable": applicable,
         })
-    LOGGER.info(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    safe_fields = {
+        key: _safe_optional(value)
+        for key, value in fields.items()
+        if key in {"bytes", "count", "queue_depth", "revision", "hash_prefix", "error_type"}
+    }
+    privacy_log(
+        "service_stage",
+        capability=operation or context.get("service") or "service",
+        stage=stage_name,
+        duration_ms=duration_ms,
+        status=status,
+        purpose=purpose,
+        attempt=attempt,
+        **safe_fields,
+    )
 
 
 @contextmanager
@@ -304,14 +311,11 @@ class ServiceTelemetryMiddleware:
                 await self.app(scope, receive, send_with_timing)
             finally:
                 if path not in _HEALTH_PATHS or _enabled("SERVICE_TELEMETRY_LOG_HEALTH", False):
-                    LOGGER.info(json.dumps({
-                        "event": "service_request_timing",
-                        "service": self.service_name,
-                        "trace_id": trace_id,
-                        "method": str(scope.get("method") or ""),
-                        "path": path,
-                        "status": status_code,
-                        "server_total_ms": round((time.perf_counter() - started) * 1000, 3),
-                        "model_spans": model_spans,
-                        "client_metadata": client_metadata,
-                    }, ensure_ascii=False, separators=(",", ":")))
+                    privacy_log(
+                        "service_request_timing",
+                        capability=self.service_name,
+                        stage=str(scope.get("method") or "request"),
+                        status=status_code,
+                        duration_ms=(time.perf_counter() - started) * 1000,
+                        count=len(model_spans),
+                    )

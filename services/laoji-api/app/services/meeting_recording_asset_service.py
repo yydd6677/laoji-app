@@ -25,6 +25,7 @@ from app.models.meeting_recording_asset import (
     MeetingRecordingTranscriptionJobV2,
 )
 from app.models.meeting_recording_transcript_draft import MeetingRecordingTranscriptDraftV1
+from app.privacy_logging import privacy_log
 
 
 MEDIA_CLIP_MINIMUM_DURATION_MS = 1_000
@@ -844,10 +845,11 @@ async def _run_transcription_job_async(job_id: str) -> None:
             try:
                 future.result(timeout=15)
             except Exception as error:
-                print(
-                    "[RecordingWorker] 增量文字暂存失败，继续完成最终转写 "
-                    f"job={job_id} error={type(error).__name__}",
-                    flush=True,
+                privacy_log(
+                    "transcription_draft_persist_failed",
+                    capability="media.upload",
+                    error_type=type(error).__name__,
+                    status="degraded",
                 )
 
         compact_result = await _transcribe_with_transient_retry(
@@ -989,9 +991,10 @@ async def _run_transcription_job_async(job_id: str) -> None:
             from app.services.compact_transcription_service import cleanup_checkpoint_dir
 
             if cleanup_checkpoint_dir(str(processing_result.get("checkpoint_dir") or "")):
-                print(
-                    "[RecordingWorker] 已清理已完成转写检查点 job=%s" % job_id,
-                    flush=True,
+                privacy_log(
+                    "transcription_checkpoint_cleaned",
+                    capability="media.upload",
+                    status="completed",
                 )
 
 

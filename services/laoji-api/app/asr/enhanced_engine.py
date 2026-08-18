@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from app.asr.model_manager import SpeakerEmbeddingExtractor
+from app.privacy_logging import privacy_log
 
 
 # ==================== 数据结构 ====================
@@ -296,7 +297,12 @@ class EnhancedRecognitionEngine:
         self.enrolled_speakers[speaker_id] = enrollment
         self._update_global_statistics()
 
-        print(f"[声纹-注册] 说话人 {speaker_id} 注册完成，样本数: {len(embeddings)}，质量: {quality:.3f}")
+        privacy_log(
+            "speaker_enrollment_completed",
+            capability="speaker",
+            count=len(embeddings),
+            status="ready",
+        )
         return True
 
     def _compute_enrollment_quality(self, embeddings: List[np.ndarray]) -> float:

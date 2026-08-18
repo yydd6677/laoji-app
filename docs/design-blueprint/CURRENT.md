@@ -65,7 +65,8 @@ mobile SQLite + app-private media (business authority)
 - Stage 3：Facts V3 长会闭合、行动候选、Q2 single reader。
 - Stage 4：Mention Graph 日程、FTS、ProjectionEnvelope 和全局本地功能（0045/FTS 与 MentionGraph
   隔离切片已实现，未采用）。
-- Stage 5：删除 account/sync、旧上传、summary v2、Q0、重复 parser、mirror/fallback 并发布。
+- Stage 5：删除 account/sync、旧上传、summary v2、Q0、重复 parser、mirror/fallback 并发布；当前候选已补齐
+  运行日志隐私静态门禁，删除门仍未通过。
 
 ## 当前边界
 

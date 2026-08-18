@@ -21,6 +21,7 @@ from app.models.transcript import TranscriptLine
 from app.schemas.meeting import MeetingCreate, MeetingUpdate, MeetingResponse, MeetingListResponse
 from app.workers.summary_tasks import submit_final_summary
 from app.services.storage_admission import ensure_audio_upload_allowed
+from app.privacy_logging import privacy_log
 
 router = APIRouter()
 
@@ -142,7 +143,12 @@ async def upload_audio(
         if file_size < 1:
             raise HTTPException(status_code=400, detail="会议文件为空")
         os.replace(temporary, file_path)
-        print(f"[API] 音频文件已保存: {file_path}, 大小: {file_size / 1024 / 1024:.2f} MB")
+        privacy_log(
+            "legacy_audio_saved",
+            capability="media.upload",
+            bytes=file_size,
+            status="stored",
+        )
         from app.api.app_meetings import _probe_duration_sec, _safe_audio_name
         from app.services.meeting_recording_asset_service import (
             project_compat_media_upload,
@@ -441,8 +447,13 @@ async def _ensure_final_summary(db: AsyncSession, meeting_id: str) -> FinalSumma
     try:
         submit_final_summary(meeting_id, transcript_lines, [])
     except Exception as exc:
-        print(f"[Summary] 生成最终总结失败: {exc}", flush=True)
-        raise HTTPException(status_code=500, detail=f"总结生成失败: {str(exc)[:240]}") from exc
+        privacy_log(
+            "legacy_summary_failed",
+            capability="summary",
+            error_type=type(exc).__name__,
+            status="failure",
+        )
+        raise HTTPException(status_code=500, detail="总结生成失败，请稍后重试") from exc
 
     refreshed_result = await db.execute(
         select(FinalSummary)

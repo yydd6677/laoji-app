@@ -24,6 +24,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.llm_provider import LlmConfig, call_llm as call_ollama
+from app.privacy_logging import privacy_log
 
 
 class ScheduleParserUnavailable(RuntimeError):
@@ -776,7 +777,12 @@ async def _parse_schedule_text_impl(text: str, *, model_only: bool = False) -> O
             _mark_parse_observation(route="fallback", fallback_used=True)
             return _deterministic_complex_fallback(text)
         except Exception as e:
-            print(f"[ScheduleParser] LLM 调用失败: {e}", flush=True)
+            privacy_log(
+                "schedule_model_call_failed",
+                capability="schedule",
+                error_type=type(e).__name__,
+                status="failure",
+            )
             if model_only:
                 _mark_parse_observation(route="model", model_success=False)
                 raise ScheduleParserUnavailable("模型解析服务暂时不可用") from e
@@ -900,7 +906,12 @@ def _parse_schedule_text_sync_impl(text: str, *, model_only: bool = False) -> Op
         _mark_parse_observation(route="fallback", fallback_used=True)
         return _deterministic_complex_fallback(text)
     except Exception as e:
-        print(f"[ScheduleParser] LLM 调用失败: {e}", flush=True)
+        privacy_log(
+            "schedule_model_call_failed",
+            capability="schedule",
+            error_type=type(e).__name__,
+            status="failure",
+        )
         if model_only:
             _mark_parse_observation(route="model", model_success=False)
             raise ScheduleParserUnavailable("模型解析服务暂时不可用") from e
@@ -1178,7 +1189,12 @@ def _parse_llm_response(
             except json.JSONDecodeError:
                 continue
 
-    print(f"[ScheduleParser] 无法从 LLM 输出解析 JSON: {raw[:200]}", flush=True)
+    privacy_log(
+        "schedule_model_output_invalid",
+        capability="schedule",
+        bytes=len(raw.encode("utf-8", "replace")),
+        error_type="invalid_json",
+    )
     return _deferred_detail_fallback(raw_text, allow_rule_fallback=allow_rule_fallback)
 
 
@@ -4520,12 +4536,19 @@ def _read_schedule_audio_bytes(audio_bytes: bytes, filename: str = "recording"):
             ]
             subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
             audio_data, sr = sf.read(output_path, dtype="float32")
-            print(f"[Schedule-Audio] ffmpeg decoded {filename}: {len(audio_bytes)} bytes", flush=True)
+            privacy_log(
+                "schedule_audio_decoded",
+                capability="schedule",
+                bytes=len(audio_bytes),
+                status="decoded",
+            )
             return _normalize(audio_data, sr)
         except Exception as ffmpeg_error:
-            print(
-                f"[Schedule-Audio] decode failed for {filename}: direct={direct_error}; ffmpeg={ffmpeg_error}",
-                flush=True,
+            privacy_log(
+                "schedule_audio_decode_failed",
+                capability="schedule",
+                error_type=type(ffmpeg_error).__name__,
+                status="failure",
             )
             raise direct_error
         finally:
@@ -4559,7 +4582,12 @@ async def parse_schedule_audio(
         return None
     transcript_text = normalize_laoji_transcript(transcript_text)
 
-    print(f"[ScheduleParser] ASR 结果: {transcript_text[:100]}", flush=True)
+    privacy_log(
+        "schedule_asr_completed",
+        capability="schedule",
+        bytes=len(transcript_text.encode("utf-8", "replace")),
+        status="completed",
+    )
     parsed = await parse_schedule_text(transcript_text, reference_datetime, timezone_name)
     if parsed:
         parsed["raw_text"] = transcript_text
@@ -4574,7 +4602,12 @@ async def transcribe_schedule_audio(audio_base64: str, filename: str = "recordin
     try:
         audio_bytes = _decode_schedule_audio_base64(audio_base64)
     except ValueError as exc:
-        print(f"[Schedule-ASR] 音频载荷无效: {exc}", flush=True)
+        privacy_log(
+            "schedule_audio_payload_invalid",
+            capability="schedule",
+            error_type=type(exc).__name__,
+            status="failure",
+        )
         return None
 
     from app.api.qwen_ws import _qwen_transcribe
@@ -4607,9 +4640,12 @@ async def transcribe_schedule_audio(audio_base64: str, filename: str = "recordin
             if not transcript_text:
                 return None
             transcript = normalize_laoji_transcript(transcript_text)
-            print(
-                f"[Schedule-ASR] {filename}: {len(audio_data) / 16000:.2f}s -> {transcript[:120]}",
-                flush=True,
+            privacy_log(
+                "schedule_asr_transcribed",
+                capability="schedule",
+                duration_sec=len(audio_data) / 16000,
+                bytes=len(audio_bytes),
+                status="completed",
             )
             if not transcript:
                 return None
@@ -4619,9 +4655,12 @@ async def transcribe_schedule_audio(audio_base64: str, filename: str = "recordin
                 "provider": "qwen3-asr",
             }
         except Exception as e:
-            print(f"[Schedule-ASR] 转写失败: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            privacy_log(
+                "schedule_asr_failed",
+                capability="schedule",
+                error_type=type(e).__name__,
+                status="failure",
+            )
             return None
 
     return await asyncio.to_thread(_call)

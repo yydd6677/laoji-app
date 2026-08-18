@@ -32,6 +32,7 @@ from app.asr.model_manager import ModelManager, SpeakerEmbeddingExtractor
 from app.asr.streaming_vad import StreamingVAD
 from app.config import settings
 from app.services.speaker_db_service import bytes_to_ndarray, get_speaker_db
+from app.privacy_logging import privacy_log
 
 
 SAMPLE_RATE = 16_000
@@ -963,9 +964,12 @@ def transcribe_recording_asset(
     )
     store.save_final(result)
     report(1.0)
-    print(
-        "[Compact-ASR] completed job=%s segments=%d duration_ms=%d model_revision=%s"
-        % (job_id, len(turns), duration_ms, model_revision),
-        flush=True,
+    privacy_log(
+        "transcription_completed",
+        capability="media.upload",
+        segments=len(turns),
+        duration_ms=duration_ms,
+        model_revision=model_revision,
+        status="completed",
     )
     return result

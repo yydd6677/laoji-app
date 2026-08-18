@@ -13,6 +13,10 @@
 
 报告：`docs/vnext-stage5-deletion-audit-20260819-bb38e64.json`
 
+最近候选已完成运行日志隐私静态审计，见
+[`PRIVACY-LOG-AUDIT-20260819.md`](PRIVACY-LOG-AUDIT-20260819.md)。扫描结果为
+`privacy_log_findings=0`；这是候选代码证据，不等于生产切换或删除授权。
+
 - `production_mutation=false`
 - `deletion_performed=false`
 - `safe_to_delete=false`

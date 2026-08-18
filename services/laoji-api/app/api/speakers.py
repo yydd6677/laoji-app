@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
 from app.services.speaker_db_service import get_speaker_db, bytes_to_ndarray
+from app.privacy_logging import privacy_log
 from app.schemas.speaker import (
     SpeakerProfile,
     SpeakerStats,
@@ -478,20 +479,25 @@ def _reload_speaker_to_engine(speaker_id: str) -> None:
     db = get_speaker_db()
     speaker = db.load_speaker(speaker_id)
     if speaker is None:
-        print(f"[声纹-补充] 说话人 {speaker_id} 加载失败（已删除？）", flush=True)
+        privacy_log("speaker_reload_failed", capability="speaker", reason_code="profile_missing")
         return
 
     emb_bytes = speaker.get("embedding")
     if emb_bytes is None:
-        print(f"[声纹-补充] 说话人 {speaker_id} 无声纹向量", flush=True)
+        privacy_log("speaker_reload_failed", capability="speaker", reason_code="embedding_missing")
         return
 
     emb = bytes_to_ndarray(emb_bytes)
     if emb is None:
-        print(f"[声纹-补充] 说话人 {speaker_id} 向量解析失败", flush=True)
+        privacy_log("speaker_reload_failed", capability="speaker", reason_code="embedding_invalid")
         return
 
-    print(f"[声纹-补充] 说话人 {speaker_id}（{speaker.get('name')}）已更新，累计样本: {speaker.get('embedding_count', '?')}", flush=True)
+    privacy_log(
+        "speaker_reload_completed",
+        capability="speaker",
+        count=speaker.get("embedding_count", 0),
+        status="ready",
+    )
 
 
 def _parse_audio_bytes(

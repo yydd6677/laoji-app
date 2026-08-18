@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.services.llm_provider import LlmConfig, call_llm as call_ollama
+from app.privacy_logging import privacy_log
 
 
 APP_SUMMARY_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "app_summary_compact_system.txt"
@@ -590,12 +591,22 @@ def _review_action_candidates(
                 raise CompactSummaryError("action review item is invalid")
             decisions.extend(items)
         except Exception as exc:
-            print(f"[CompactSummary] 单条行动候选复核失败，保留该候选: {exc}", flush=True)
+            privacy_log(
+                "summary_action_review_failed",
+                capability="summary",
+                error_type=type(exc).__name__,
+                status="degraded",
+            )
             return result
     try:
         return _apply_action_reviews(result, decisions, review_items)
     except Exception as exc:
-        print(f"[CompactSummary] 行动候选复核失败，保留主整理结果: {exc}", flush=True)
+        privacy_log(
+            "summary_action_review_failed",
+            capability="summary",
+            error_type=type(exc).__name__,
+            status="degraded",
+        )
         return result
 
 
@@ -1126,10 +1137,11 @@ def generate_compact_summary(
             if normalized_sections:
                 result["template_sections"] = normalized_sections
         except Exception as exc:
-            print(
-                f"[CompactSummary] 模板字段生成失败，字段保持缺失: "
-                f"template={template.get('id')}, error={exc}",
-                flush=True,
+            privacy_log(
+                "summary_template_generation_failed",
+                capability="summary",
+                error_type=type(exc).__name__,
+                status="degraded",
             )
     return _review_action_candidates(result, transcript_text, config)
 

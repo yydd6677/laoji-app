@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import numpy as np
+from app.privacy_logging import privacy_log
 
 
 # ==================== 默认路径配置 ====================
@@ -382,7 +383,12 @@ class SpeakerDatabase:
             ))
             conn.commit()
 
-        print(f"[声纹-补充] {speaker_id} 补充音频，已累计 {new_count} 条样本", flush=True)
+        privacy_log(
+            "speaker_samples_appended",
+            capability="speaker",
+            count=new_count,
+            status="stored",
+        )
         return True
 
     # ==================== 查 ====================
@@ -672,9 +678,10 @@ class SpeakerDatabase:
                 ),
             )
             conn.commit()
-        print(
-            f"[声纹-采集域迁移] {speaker_id} 已使用当前采集链路重新建立",
-            flush=True,
+        privacy_log(
+            "speaker_capture_domain_migrated",
+            capability="speaker",
+            status="ready",
         )
         return True
 

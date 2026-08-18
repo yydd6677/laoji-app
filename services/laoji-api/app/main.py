@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import text
         async with engine.connect() as conn:
             result = await conn.execute(
-                text("SELECT id, title FROM meetings WHERE status = 'processing'")
+                text("SELECT id FROM meetings WHERE status = 'processing'")
             )
             stuck_meetings = result.fetchall()
             if stuck_meetings:
@@ -124,10 +124,11 @@ async def lifespan(app: FastAPI):
                     text("UPDATE meetings SET status = 'ended' WHERE status = 'processing'")
                 )
                 await conn.commit()
-                for m in stuck_meetings:
-                    meeting_id, title = m[0], m[1]
-                    print(f"  - {meeting_id[:20]}... ({title})")
-                    print("    已标记为 ended；总结将在用户进入总结页或手动触发时生成", flush=True)
+                print(
+                    "[启动] processing 状态已批量标记为 ended；"
+                    "总结将在用户进入总结页或手动触发时生成",
+                    flush=True,
+                )
     except Exception as e:
         print(f"[启动] 清理残留状态失败: {e}")
 

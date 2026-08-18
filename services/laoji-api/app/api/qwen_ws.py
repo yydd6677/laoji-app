@@ -30,6 +30,7 @@ from app.models.meeting import Meeting
 from app.models.transcript import TranscriptLine
 from app.api.ws_auth import authorize_app_meeting_ws_context
 from app.services.guest_meeting_session_service import append_guest_transcript
+from app.privacy_logging import privacy_log
 
 router = APIRouter()
 
@@ -205,10 +206,11 @@ def _build_speaker_engine(model_manager, speaker_profiles):
             )
         return engine
     except Exception as exc:
-        print(
-            "[Qwen3-ASR] speaker engine unavailable; transcription continues: %s"
-            % exc,
-            flush=True,
+        privacy_log(
+            "asr_speaker_engine_unavailable",
+            capability="transcript.realtime",
+            error_type=type(exc).__name__,
+            status="degraded",
         )
         return None
 
@@ -230,7 +232,11 @@ def _identify(engine, audio_f32):
                 "gap": float(top.cosine_score) - second,
             }
     except Exception as exc:
-        print("[Qwen3-ASR] speaker identification failed: %s" % exc, flush=True)
+        privacy_log(
+            "asr_speaker_identification_failed",
+            capability="transcript.realtime",
+            error_type=type(exc).__name__,
+        )
     return None
 
 
@@ -388,20 +394,13 @@ async def _serve_qwen(
     vad = StreamingVAD(vad_model)
     vad_settings = _configure_vad(vad, purpose)
 
-    print(
-        "[Qwen3-ASR] session ready purpose=%s model=%s speaker=%s profiles=%d "
-        "silence=%.0fms pre-roll=%.0fms max-speech=%.0fms session=%s"
-        % (
-            purpose,
-            model_name,
-            bool(speaker_engine),
-            len(speaker_profiles),
-            vad_settings["silence_ms"],
-            vad_settings["pre_roll_ms"],
-            vad_settings["max_speech_ms"],
-            session_id,
-        ),
-        flush=True,
+    privacy_log(
+        "asr_session_ready",
+        capability="transcript.realtime",
+        purpose=purpose,
+        model_revision=model_name,
+        count=len(speaker_profiles),
+        status="ready",
     )
 
     segment_queue = asyncio.Queue(maxsize=QWEN_ASR_SEGMENT_QUEUE_SIZE)
@@ -421,7 +420,12 @@ async def _serve_qwen(
                 "realtime" if purpose == "meeting" else "schedule",
             )
         except Exception as exc:
-            print("[Qwen3-ASR] transcription failed: %s" % exc, flush=True)
+            privacy_log(
+                "asr_transcription_failed",
+                capability="transcript.realtime",
+                error_type=type(exc).__name__,
+                status="failure",
+            )
             with contextlib.suppress(Exception):
                 await websocket.send_json(
                     {
@@ -470,23 +474,15 @@ async def _serve_qwen(
                     vote["count"] += 1
                     vote["score_sum"] += float(identification["cos"])
                     vote["name"] = best_name
-                print(
-                    "[Qwen3-ASR] speaker score session=%s cluster=%s "
-                    "candidate=%s cos=%.4f gap=%.4f accepted=%s duration=%dms"
-                    % (
-                        session_id,
-                        speaker_label,
-                        identification["speaker_id"],
-                        identification["cos"],
-                        identification["gap"],
-                        bool(
-                            identification["cos"] >= _SPK_COS_THRESHOLD
-                            and identification["gap"] >= _SPK_GAP_MIN
-                            and segment_duration_ms >= _SPK_MIN_AUDIO_MS
-                        ),
-                        segment_duration_ms,
-                    ),
-                    flush=True,
+                privacy_log(
+                    "asr_speaker_score",
+                    capability="transcript.realtime",
+                    status=("accepted" if (
+                        identification["cos"] >= _SPK_COS_THRESHOLD
+                        and identification["gap"] >= _SPK_GAP_MIN
+                        and segment_duration_ms >= _SPK_MIN_AUDIO_MS
+                    ) else "rejected"),
+                    duration_ms=segment_duration_ms,
                 )
             votes = cluster_identity_votes.get(speaker_label)
             if votes:
@@ -575,14 +571,20 @@ async def _serve_qwen(
                 await segment_queue.put(segment)
     except WebSocketDisconnect:
         disconnected = True
-        print(
-            "[Qwen3-ASR] client disconnected purpose=%s session=%s"
-            % (purpose, session_id),
-            flush=True,
+        privacy_log(
+            "asr_client_disconnected",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="disconnected",
         )
     except Exception as exc:
-        print("[Qwen3-ASR] websocket loop failed: %s" % exc, flush=True)
-        traceback.print_exc()
+        privacy_log(
+            "asr_websocket_failed",
+            capability="transcript.realtime",
+            purpose=purpose,
+            error_type=type(exc).__name__,
+            status="failure",
+        )
     finally:
         await segment_queue.put(None)
         with contextlib.suppress(Exception):
@@ -590,8 +592,9 @@ async def _serve_qwen(
         if clean_stop and not disconnected:
             with contextlib.suppress(Exception):
                 await websocket.send_json({"type": "ready_to_stop"})
-        print(
-            "[Qwen3-ASR] session cleaned purpose=%s session=%s"
-            % (purpose, session_id),
-            flush=True,
+        privacy_log(
+            "asr_session_cleaned",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="closed",
         )

@@ -51,6 +51,7 @@ from app.service_telemetry import (
     emit_stage,
     telemetry_scope,
 )
+from app.privacy_logging import privacy_log
 
 try:
     from opencc import OpenCC
@@ -828,25 +829,20 @@ def _submit_summary_future(
     def _log_done(done: Future):
         try:
             done.result()
-            print(json.dumps({
-                "event": "summary_task_completed",
-                "task_id": task_id,
-                "trace_id": origin_trace_id,
-                "meeting_id": meeting_id,
-                "task_kind": task_kind,
-                "client_metadata": client_metadata,
-            }, ensure_ascii=False, separators=(",", ":")), flush=True)
+            privacy_log(
+                "summary_task_completed",
+                capability="summary",
+                kind=task_kind,
+                status="completed",
+            )
         except Exception as exc:
-            print(json.dumps({
-                "event": "summary_task_failed",
-                "task_id": task_id,
-                "trace_id": origin_trace_id,
-                "meeting_id": meeting_id,
-                "task_kind": task_kind,
-                "client_metadata": client_metadata,
-                "error_type": type(exc).__name__,
-            }, ensure_ascii=False, separators=(",", ":")), flush=True)
-            traceback.print_exc(file=sys.stdout)
+            privacy_log(
+                "summary_task_failed",
+                capability="summary",
+                kind=task_kind,
+                error_type=type(exc).__name__,
+                status="failure",
+            )
         finally:
             with _summary_task_lock:
                 _task_completed_at[task_id] = time.monotonic()
@@ -3927,10 +3923,12 @@ def _try_compact_summary(
         ),
     )
     elapsed = time.perf_counter() - started
-    print(
-        f"[SummaryTask] {label} 使用进程内分块整理，source_chars={len(transcript_text)}, "
-        f"elapsed={elapsed:.3f}s",
-        flush=True,
+    privacy_log(
+        "summary_progressive_completed",
+        capability="summary",
+        bytes=len(transcript_text.encode("utf-8", "replace")),
+        duration_ms=elapsed * 1000,
+        status="completed",
     )
     return data
 
@@ -4037,7 +4035,7 @@ def _stable_summary_id(kind: str, meeting_id: str) -> str:
 
 def _do_period_summary(meeting_id: str, transcript_lines: list[dict]) -> dict:
     """Generate a period summary through the in-process Provider pipeline."""
-    print(f"[SummaryTask] period 开始，meeting={meeting_id}", flush=True)
+    privacy_log("summary_period_started", capability="summary", stage="period")
     if is_meeting_tombstoned(meeting_id):
         raise RuntimeError("会议已删除，取消阶段总结")
 
@@ -4075,7 +4073,7 @@ def _do_period_summary(meeting_id: str, transcript_lines: list[dict]) -> dict:
         period_end=period_end,
         bullet_points=bullet_points,
     )
-    print(f"[SummaryTask] period DB 写入成功，summary_id={summary_id}", flush=True)
+    privacy_log("summary_period_persisted", capability="summary", stage="period", status="completed")
 
     return {
         "summary_id": summary_id,
@@ -4336,7 +4334,7 @@ def _do_final_summary(
     persist_files: bool = True,
 ) -> dict:
     """Generate and persist a final summary through the in-process Provider."""
-    print(f"[SummaryTask] final 开始，meeting={meeting_id}", flush=True)
+    privacy_log("summary_final_started", capability="summary", stage="final")
     if is_meeting_tombstoned(meeting_id):
         raise RuntimeError("会议已删除，取消最终总结")
 
@@ -4456,7 +4454,7 @@ def _do_final_summary(
             key_decisions=key_decisions,
             action_items=action_items,
         )
-        print(f"[SummaryTask] final DB 写入成功，summary_id={summary_id}", flush=True)
+        privacy_log("summary_final_persisted", capability="summary", stage="final", status="completed")
     else:
         print("[SummaryTask] device final result kept only in the expiring task row", flush=True)
     emit_stage(
