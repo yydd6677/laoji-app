@@ -252,11 +252,16 @@ export async function listPendingMeetingAudioUploads(
         nativeOperationId: snapshot.operation.operationId,
         nativeProtocol: 'device-v2-r2',
       } satisfies PendingMeetingAudioUpload));
-      terminalCanonicalAssetIds = await listTerminalDeviceUploadAssetIds('guest');
     } catch {
       // A migration/cold-open failure must not discard the one-time
       // compatibility registry; the next foreground pass retries SQLite.
       canonical = [];
+    }
+    try {
+      terminalCanonicalAssetIds = await listTerminalDeviceUploadAssetIds('guest');
+    } catch {
+      // A terminal-state probe is advisory.  Keep any canonical pending rows
+      // already read above; a later pass can retry the suppression query.
       terminalCanonicalAssetIds = new Set();
     }
   }
