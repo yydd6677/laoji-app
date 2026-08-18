@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -110,3 +111,15 @@ def test_candidate_readers_remain_on_after_persisted_barrier(
     assert reader() is False
     vnext_capability_cutover.activate_cutover(capability, revision, barrier_id=f"{capability}-barrier")
     assert reader() is True
+
+
+def test_candidate_reader_does_not_materialize_memory_database(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings, "DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    monkeypatch.delenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", raising=False)
+
+    assert vnext_capability_cutover.realtime_asr_v2_enabled() is False
+    assert not Path(":memory:").exists()

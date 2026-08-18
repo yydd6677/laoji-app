@@ -6,6 +6,7 @@ import os
 import uuid
 from typing import Any
 
+from app.config import settings
 from app.services.device_identity import control_connection, utc_now
 
 
@@ -194,6 +195,9 @@ def _candidate_or_persisted_enabled(capability: str, environment_name: str) -> b
     # disposable environments that intentionally have no control database.
     if os.getenv(environment_name, "").strip() == "1":
         return True
+    database_url = str(settings.DATABASE_URL or "").strip()
+    if not database_url or database_url.endswith("/:memory:"):
+        return False
     try:
         current = get_cutover(capability)
     except Exception:
