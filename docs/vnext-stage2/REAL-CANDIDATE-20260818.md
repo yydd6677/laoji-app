@@ -165,3 +165,8 @@ GPU1、PCB 和 Smart Meeting 未重启或修改。随后 readiness 修复候选�
   接受业务流量，也没有激活任何 vNext capability barrier。
 - 若需要回滚，停止 `49b1acf` 并从保留的旧 `api-root` 使用同一运行环境启动即可；本次切换未修改
   候选数据库和音频目录。
+
+随后将仅修正文案的 `471d94f` 部署到新的隔离版本目录，`18021` 当前 cwd 为
+`releases/471d94f/services/laoji-api`，旧 `49b1acf` 仍保留可回滚。真实 readiness 仍为
+`ready=false`、`embedding_ready=false`、`embedding_probe_timeout`；这次部署没有改变阻断状态，
+也没有接收业务流量。
