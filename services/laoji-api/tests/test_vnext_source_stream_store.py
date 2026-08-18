@@ -305,6 +305,55 @@ def test_three_chapters_keep_only_two_checkpoint_slots(tmp_path, monkeypatch) ->
     assert source_store.get_source_stream(context, stream["stream_id"])["state"] == "complete"
 
 
+def test_manifest_pages_resume_after_non_final_page(tmp_path, monkeypatch) -> None:
+    _, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(context, generation, suffix="manifest-pages")
+    chapters = [
+        _chapter(0, "第一页的来源。"),
+        _chapter(1, "第二页的来源。"),
+    ]
+    descriptors = [chapter[2] for chapter in chapters]
+    first_page = [descriptors[0]]
+    first_hash = source_store.manifest_page_sha256(first_page)
+    snapshot = source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=first_page,
+        page_sha256=first_hash,
+        final_page=False,
+        now_epoch=2_500,
+    )
+    assert snapshot["next_manifest_page"] == 1
+    assert snapshot["next_manifest_chapter"] == 1
+    replay = source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=first_page,
+        page_sha256=first_hash,
+        final_page=False,
+        now_epoch=2_501,
+    )
+    assert replay["next_manifest_page"] == 1
+    second_hash = source_store.manifest_page_sha256([descriptors[1]])
+    final = source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=1,
+        first_chapter_ordinal=1,
+        descriptors=[descriptors[1]],
+        page_sha256=second_hash,
+        final_page=True,
+        now_epoch=2_502,
+    )
+    assert final["next_manifest_page"] == 2
+    assert final["next_manifest_chapter"] == 2
+    assert final["final_chapter_count"] == 2
+
+
 def test_stale_worker_cannot_read_or_promote_source(tmp_path, monkeypatch) -> None:
     _, context, generation = _setup(tmp_path, monkeypatch)
     stream, _ = _create_stream(context, generation, suffix="stale")
