@@ -1148,6 +1148,32 @@ def test_compact_model_fields_are_overridden_by_spoken_schedule_facts(monkeypatc
     assert parsed["reminder_minutes"] == 10
 
 
+def test_model_only_range_evidence_supplies_both_clocks(monkeypatch):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 19)
+
+    monkeypatch.setattr(parser, "date", FixedDate)
+    parsed = parser._normalize_model_only_result(
+        {
+            "title": "开会",
+            "event_type": "once",
+            "category": "工作",
+            "needs_clarification": False,
+            "date_phrase": "明天",
+            "time_phrase": "下午三点半到五点",
+            "end_time_phrase": "五点",
+        },
+        "明天下午三点半到五点开会",
+    )
+
+    assert parsed is not None
+    assert parsed["start_date"] == "2026-08-20"
+    assert parsed["start_time"] == "15:30"
+    assert parsed["end_time"] == "17:00"
+
+
 def test_corrected_weekday_with_clock_range_is_not_a_date_range(monkeypatch):
     class FixedDate(date):
         @classmethod

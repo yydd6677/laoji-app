@@ -1296,9 +1296,16 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
         )
 
     if not relative_start:
+        model_time_range = _parse_time_range(time_phrase) if time_phrase else None
         model_time = _parse_authoritative_time(time_phrase) if time_phrase else None
         if spoken_clock:
             start_time = spoken_clock
+        elif model_time_range:
+            # The model may return one evidence phrase for a spoken range
+            # ("下午三点半到五点") instead of splitting the start clock into
+            # a separate field.  Parse only that verified phrase; do not scan
+            # the original request or invoke the legacy parser.
+            start_time = model_time_range[0]
         elif model_time:
             start_time = model_time
         elif not (spoken_day_period and start_time):
@@ -1307,13 +1314,14 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
     # model-only mode. Only explicit aliases such as “明早/明晚” carry a
     # relative period that should be preserved without a numeric clock.
     time_period = None if start_time else spoken_period
+    model_time_range = _parse_time_range(time_phrase) if time_phrase else None
     end_time = (
         _parse_time_token(
             end_time_phrase,
             default_period=_extract_time_period(time_phrase or ""),
         )
         if end_time_phrase
-        else None
+        else (model_time_range[1] if model_time_range else None)
     )
 
     # These are model fields, not values inferred from the original sentence.
