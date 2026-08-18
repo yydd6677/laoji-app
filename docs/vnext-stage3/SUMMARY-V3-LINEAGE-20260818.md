@@ -27,10 +27,14 @@
 - 客户端：`meetingSummary.ts` 的 v3 identity matcher、`meetingSummaryV3.ts` 和
   `meetingSummaryDocument.ts` 的 remote transcript revision 保留。
 - 没有切换 18020/8030、公网入口、systemd、GPU1、PCB、Smart Meeting 或发布 APK。
-- 移动端新增 `deviceV2SourceStream.ts`，通过现有 Device V2 会话调用 source-stream 的 manifest page、
-  chapter group、bundle/item、commit、读取和取消接口；所有请求先检查 `source_stream_v2` capability，
-  响应按 `source.stream.v2` 和 binding/task fence 严格校验。该 client 尚未被整理 UI 调用，默认不会产生
-  网络流量。
+- 移动端新增 `deviceV2SourceStream.ts` 和 `meetingSummaryV3SourceStream.ts`，通过现有 Device V2 会话调用
+  source-stream 的 manifest page、chapter group、bundle/item、commit、任务/ artifact 读取和取消接口；来源由
+  不可变转写、当前笔记和明确勾选的文字附件构造，按 UTF-8 范围、内容哈希和时间信息分章。所有请求先检查
+  `source_stream_v2` capability，整理入口还需 `meetingSummarySourceStreamCandidate` feature flag，响应按
+  `source.stream.v2` 和 binding/task fence 严格校验。候选已挂入整理编排但默认不会产生网络流量。
+- 服务端新增 `vnext_summary_worker`：SQLite 扫描 active source-stream summary task，单并发、每次一章、租约心跳，
+  进程重启后从 task/checkpoint 恢复；最终 artifact 输出同时带 Facts V3 document identity/coverage 元数据，设备
+  可通过受保护的 `/api/device/v2/tasks/{task_id}/artifact` 读取。
 
 ## 验证
 
