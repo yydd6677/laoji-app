@@ -23,7 +23,8 @@
   审计前不得删除或误认权威；
 - 当前 GPU0 上老记 ASR 约 6.0 GiB、9B runner 约 8.5 GiB、API 约 0.6 GiB；其他进程同时占用，
   因此 vNext 不增加 GPU 常驻模型，embedding 固定 CPU/按需；
-- 当前本地工作树没有后端源码副本，所以 Stage 0 导入并版本化真实后端是开发硬前置。
+- Stage 0 已将真实后端导入并版本化到 `services/laoji-api` 和 `services/laoji-asr`，并由本地
+  `vnext-stage0-1.1.10-118` tag 冻结；后续实现以该 tag 作为后端恢复边界。
 - Git `HEAD` 的移动 migration 只到 v38，但公开 1.1.10 APK bundle 已检出
   `summary_fact_documents/summary_v3_upgrade_tasks` v39 SQL；当前 dirty worktree 包含对应未跟踪源码。
   因此实现基线必须冻结 APK 对应的完整 dirty source，而不是把 `48e3b36` 当可重建发布快照。
@@ -34,8 +35,8 @@
 
 `/home/yydd/LaoJi-worktrees/feishu-source-driven`
 
-Stage 0 将生产机 `/home/zhong/laoji-service-platform/compact-production/backend` 冻结并导入同一
-版本控制边界，目标布局：
+Stage 0 已将生产机 `/home/zhong/laoji-service-platform/compact-production/backend` 冻结并导入同一
+版本控制边界，当前布局：
 
 ```text
 contracts/vnext/              JSON Schema, fixtures, compatibility matrix

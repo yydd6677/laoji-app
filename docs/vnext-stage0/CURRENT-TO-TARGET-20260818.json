@@ -1,0 +1,2001 @@
+{
+  "baseline": {
+    "apk_bytes": 82278571,
+    "apk_path": "artifacts/vnext-stage0/release/laoji-1.1.10-118.apk",
+    "apk_sha256": "b5ce1ce8e3f5dc42043d0ed2e4cf90094f43ee887322701328cec4cbc67fc04f",
+    "git_commit": "cdd44ec04394e17c0bba1c946eb38df3c5720690",
+    "git_tag": "vnext-stage0-1.1.10-118",
+    "manifest_path": "tools/app-update/latest.json",
+    "manifest_sha256": "66303c3a838f426dd710ce111bcade9ed30612dfd120c84cf3bfe0529b2726a7",
+    "production_mutation": false,
+    "version_code": 118,
+    "version_name": "1.1.10"
+  },
+  "contracts": {
+    "baseline_tag_check": "contract_artifacts=verified count=13",
+    "current_branch_check": "contract_artifacts=verified count=22",
+    "manifest": "contracts/vnext/generated/manifest.json",
+    "revision": "vnext-1"
+  },
+  "databases": [
+    {
+      "bytes": 7155712,
+      "integrity": "ok",
+      "name": "local.db",
+      "restore_order": [
+        "device_delete_outbox",
+        "device_epochs",
+        "device_idempotency",
+        "device_meeting_tombstones",
+        "device_principals",
+        "device_quality_candidates",
+        "device_speaker_cleanup_outbox",
+        "device_transient_inputs",
+        "final_summaries",
+        "laoji_meeting_deletion_tombstones",
+        "laoji_user_deletion_tombstones",
+        "legacy_orphan_final_summaries_v1",
+        "meeting_action_collaboration_events",
+        "meeting_action_collaboration_operations",
+        "meeting_action_items",
+        "meeting_action_operations",
+        "meeting_action_shares",
+        "meeting_attachment_operations_v1",
+        "meeting_attachments_v1",
+        "meeting_content_share_operations",
+        "meeting_content_shares",
+        "meeting_manual_note_operations",
+        "meeting_manual_notes",
+        "meeting_marker_operations_v1",
+        "meeting_markers_v1",
+        "meeting_media_clip_jobs_v1",
+        "meeting_note_root_operations_v2",
+        "meeting_note_roots_v2",
+        "meeting_occurrence_links_v2",
+        "meeting_occurrence_operations",
+        "meeting_question_citations",
+        "meeting_question_threads",
+        "meeting_question_turns",
+        "meeting_recording_asset_operations_v2",
+        "meeting_recording_assets_v2",
+        "meeting_recording_r2_uploads_v1",
+        "meeting_recording_transcript_drafts_v1",
+        "meeting_recording_transcription_jobs_v2",
+        "meeting_retention_cleanup_jobs_v2",
+        "meeting_schedule_snapshots_v2",
+        "meeting_segments",
+        "meeting_speaker_assignments_v2",
+        "meeting_speaker_corrections_v2",
+        "meeting_speaker_reprocess_jobs_v2",
+        "meeting_summary_current_v1",
+        "meeting_summary_operations_v1",
+        "meeting_summary_section_states_v1",
+        "meeting_summary_versions_v1",
+        "meeting_tag_catalog_operations_v1",
+        "meeting_tag_catalogs_v1",
+        "meetings",
+        "period_summaries",
+        "summary_tasks_v2",
+        "summary_v3_documents",
+        "summary_v3_source_payloads",
+        "transcript_lines"
+      ],
+      "sha256": "db01fb0c443199f37a8ace7caae2c99d16074cb54cd848ce3c62189ea1fada26",
+      "tables": [
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "device_delete_outbox",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 1,
+          "purge_scope": "device",
+          "rows": 106,
+          "table": "device_epochs",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "device_idempotency",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 104,
+          "table": "device_meeting_tombstones",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 106,
+          "table": "device_principals",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "device_quality_candidates",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "device_speaker_cleanup_outbox",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "device_transient_inputs",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 1,
+          "table": "final_summaries",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 77,
+          "table": "laoji_meeting_deletion_tombstones",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "retain-versioned-or-drain-legacy",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 68,
+          "table": "laoji_user_deletion_tombstones",
+          "target": "device-authority-and-purge"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 0,
+          "purge_scope": "unresolved_global",
+          "rows": 7,
+          "table": "legacy_orphan_final_summaries_v1",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_action_collaboration_events",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_action_collaboration_operations",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_action_items",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_action_operations",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_action_shares",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_attachment_operations_v1",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_attachments_v1",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_content_share_operations",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_content_shares",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_manual_note_operations",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_manual_notes",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_marker_operations_v1",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_markers_v1",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_media_clip_jobs_v1",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_note_root_operations_v2",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 74,
+          "table": "meeting_note_roots_v2",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_occurrence_links_v2",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_occurrence_operations",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "legacy-read-only-then-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_question_citations",
+          "target": "question-q2"
+        },
+        {
+          "action": "legacy-read-only-then-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_question_threads",
+          "target": "question-q2"
+        },
+        {
+          "action": "legacy-read-only-then-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_question_turns",
+          "target": "question-q2"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 94,
+          "table": "meeting_recording_asset_operations_v2",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 52,
+          "table": "meeting_recording_assets_v2",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 46,
+          "table": "meeting_recording_r2_uploads_v1",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 3,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_recording_transcript_drafts_v1",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 41,
+          "table": "meeting_recording_transcription_jobs_v2",
+          "target": "recording-asset-generation"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_retention_cleanup_jobs_v2",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_schedule_snapshots_v2",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_segments",
+          "target": "immutable-transcript-revision"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 4,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_speaker_assignments_v2",
+          "target": "speaker-overlay"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_speaker_corrections_v2",
+          "target": "speaker-overlay"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_speaker_reprocess_jobs_v2",
+          "target": "speaker-overlay"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_summary_current_v1",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_summary_operations_v1",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 2,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_summary_section_states_v1",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_summary_versions_v1",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "stop-new-write-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_tag_catalog_operations_v1",
+          "target": "legacy-operation-drain"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "meeting_tag_catalogs_v1",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "one-time-import-or-retain-history",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 74,
+          "table": "meetings",
+          "target": "mobile-meeting-canonical"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "period_summaries",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "bridge-drain-delete-stage5",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 67,
+          "table": "summary_tasks_v2",
+          "target": "legacy-summary-compatibility"
+        },
+        {
+          "action": "retain-versioned",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 4,
+          "table": "summary_v3_documents",
+          "target": "facts-v3-artifact"
+        },
+        {
+          "action": "retain-versioned",
+          "foreign_keys": 0,
+          "purge_scope": "meeting",
+          "rows": 0,
+          "table": "summary_v3_source_payloads",
+          "target": "facts-v3-artifact"
+        },
+        {
+          "action": "migrate-current-then-drain",
+          "foreign_keys": 3,
+          "purge_scope": "meeting",
+          "rows": 2844,
+          "table": "transcript_lines",
+          "target": "immutable-transcript-revision"
+        }
+      ]
+    },
+    {
+      "bytes": 221184,
+      "integrity": "ok",
+      "name": "schedule.db",
+      "restore_order": [
+        "laoji_account_deletion_requests",
+        "laoji_auth_rate_limits",
+        "laoji_file_deletion_queue",
+        "laoji_password_reset_requests",
+        "laoji_sessions",
+        "laoji_users",
+        "schedule_event_commands",
+        "schedule_event_exceptions",
+        "schedule_event_segments",
+        "schedule_events"
+      ],
+      "sha256": "681c3ebe2b000c15bbf17d2317122d474deaaed2a750bac3de571c697127e293",
+      "tables": [
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "account",
+          "rows": 0,
+          "table": "laoji_account_deletion_requests",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 0,
+          "purge_scope": "account",
+          "rows": 3,
+          "table": "laoji_auth_rate_limits",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 0,
+          "purge_scope": "account",
+          "rows": 0,
+          "table": "laoji_file_deletion_queue",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "account",
+          "rows": 0,
+          "table": "laoji_password_reset_requests",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 1,
+          "purge_scope": "account",
+          "rows": 0,
+          "table": "laoji_sessions",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "drain-export-delete-stage5",
+          "foreign_keys": 0,
+          "purge_scope": "account",
+          "rows": 0,
+          "table": "laoji_users",
+          "target": "retired-account-domain"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "schedule_event_commands",
+          "target": "mobile-schedule-canonical"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "schedule_event_exceptions",
+          "target": "mobile-schedule-canonical"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "schedule_event_segments",
+          "target": "mobile-schedule-canonical"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "schedule_events",
+          "target": "mobile-schedule-canonical"
+        }
+      ]
+    },
+    {
+      "bytes": 1310720,
+      "integrity": "ok",
+      "name": "speaker_voiceprints.db",
+      "restore_order": [
+        "speaker_embeddings",
+        "speaker_identification_log",
+        "speaker_profiles"
+      ],
+      "sha256": "4a0749364fd55c4b56e92666208802d6db4d38014ba3112e5424e622837686b5",
+      "tables": [
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "speaker_embeddings",
+          "target": "mobile-speaker-profile-or-encrypted-overlay"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "speaker_identification_log",
+          "target": "mobile-speaker-profile-or-encrypted-overlay"
+        },
+        {
+          "action": "one-time-import-then-retire",
+          "foreign_keys": 0,
+          "purge_scope": "device",
+          "rows": 0,
+          "table": "speaker_profiles",
+          "target": "mobile-speaker-profile-or-encrypted-overlay"
+        }
+      ]
+    }
+  ],
+  "restore": {
+    "platforms": [
+      "linux",
+      "windows"
+    ],
+    "smoke": "all snapshots restored with integrity_check=ok",
+    "tool": "tools/vnext/sqlite_snapshot.py"
+  },
+  "routes": [
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/api/transcript.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/",
+      "source": "services/laoji-api/app/api/audio.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "POST",
+      "path": "/account-deletion-requests",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "GET",
+      "path": "/account-deletion-requests/{request_id}",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/api/health",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/api/laoji/private",
+      "source": "services/laoji-api/tests/test_laoji_security.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/api/ready",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/asr/transcribe",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/avatars/{filename}",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/capabilities",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "POST",
+      "path": "/change-password",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/clarify",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/delete",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/device/v1/assets/{asset_id}/chunks/complete",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/device/v1/assets/{asset_id}/chunks/{chunk_index}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/device/v1/assets/{asset_id}/content",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "DELETE",
+      "path": "/device/v1/assets/{asset_id}/r2-upload",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/device/v1/assets/{asset_id}/r2-upload",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/assets/{asset_id}/r2-upload",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/assets/{asset_id}/r2-upload/complete",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/assets/{asset_id}/transcription",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/capabilities",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/device/v1/epochs/{epoch_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/device/v1/epochs/{epoch_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/meetings",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/device/v1/meetings/{binding_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/meetings/{binding_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/device/v1/meetings/{binding_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/device/v1/meetings/{binding_id}/assets",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/meetings/{binding_id}/questions",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "question-q2-handler"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/meetings/{binding_id}/status",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/device/v1/meetings/{binding_id}/summary",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/meetings/{binding_id}/summary",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/device/v1/meetings/{binding_id}/summary-v3",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/meetings/{binding_id}/summary-v3",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/device/v1/meetings/{binding_id}/transcript",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/device/v1/register",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-then-delete-legacy-parser-stage5",
+      "method": "POST",
+      "path": "/device/v1/schedule/clarify",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "schedule-mention-graph"
+    },
+    {
+      "action": "bridge-then-delete-legacy-parser-stage5",
+      "method": "POST",
+      "path": "/device/v1/schedule/parse",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "schedule-mention-graph"
+    },
+    {
+      "action": "bridge-then-delete-legacy-parser-stage5",
+      "method": "POST",
+      "path": "/device/v1/schedule/parse-audio",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "schedule-mention-graph"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/device/v1/speakers",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/speakers",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/speakers/audio",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "DELETE",
+      "path": "/device/v1/speakers/{speaker_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "PATCH",
+      "path": "/device/v1/speakers/{speaker_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/device/v1/speakers/{speaker_id}/samples",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/tasks/{task_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/device/v1/transient-inputs",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/device/v1/transient-inputs/{input_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/device/v1/transient-inputs/{input_id}",
+      "source": "services/laoji-api/app/api/device_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/diagnostics/audio-quality",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/diagnostics/parse-quality",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/downloads/android/latest.json",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/downloads/android/{file_name}",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/event-commands/{client_request_id}",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/events",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/events",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/events/{event_id}",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/events/{event_id}",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/events/{event_id}",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/events/{event_id}/commands",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/events/{event_id}/edit-commands",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/final",
+      "source": "services/laoji-api/app/api/summary.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/generate",
+      "source": "services/laoji-api/app/api/summary.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/guest-questions",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "question-q2-handler"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "POST",
+      "path": "/guest-sessions",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "DELETE",
+      "path": "/guest-sessions/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "GET",
+      "path": "/guest-sessions/{meeting_id}/transcripts",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/guest-summary",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/guest-summary/tasks/{task_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/health",
+      "source": "services/laoji-api/app/main.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/health",
+      "source": "services/laoji-api/tests/test_laoji_security.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/login",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/logout",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/me",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/me",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/me/avatar",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/me/avatar",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/me/profile",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PATCH",
+      "path": "/me/profile",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/model-health",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/parse",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/parse-audio",
+      "source": "services/laoji-api/app/laoji/router.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "POST",
+      "path": "/password-reset-requests",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/period",
+      "source": "services/laoji-api/app/api/summary.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/refresh",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/register",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/register",
+      "source": "services/laoji-api/app/laoji/auth_router.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/reverse",
+      "source": "services/laoji-api/app/api/location.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/search",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/stats",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/supplement",
+      "source": "services/laoji-api/app/api/speakers.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/task/{task_id}",
+      "source": "services/laoji-api/app/api/summary.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/v1/meeting-attachments/{attachment_id}",
+      "source": "services/laoji-api/app/api/app_attachment_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v1/meeting-attachments/{attachment_id}/content",
+      "source": "services/laoji-api/app/api/app_attachment_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/v1/meeting-attachments/{attachment_id}/content",
+      "source": "services/laoji-api/app/api/app_attachment_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/v1/meeting-markers/{marker_id}",
+      "source": "services/laoji-api/app/api/app_marker_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v1/meeting-notes/{meeting_id}/attachments",
+      "source": "services/laoji-api/app/api/app_attachment_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v1/meeting-notes/{meeting_id}/attachments",
+      "source": "services/laoji-api/app/api/app_attachment_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v1/meeting-notes/{meeting_id}/markers",
+      "source": "services/laoji-api/app/api/app_marker_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v1/meeting-notes/{meeting_id}/markers",
+      "source": "services/laoji-api/app/api/app_marker_v1.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "PUT",
+      "path": "/v1/meeting-notes/{meeting_id}/summary-current",
+      "source": "services/laoji-api/app/api/app_summary_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/v1/meeting-notes/{meeting_id}/summary-versions",
+      "source": "services/laoji-api/app/api/app_summary_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "PUT",
+      "path": "/v1/meeting-summary-versions/{version_id}/sections/{section_id}",
+      "source": "services/laoji-api/app/api/app_summary_v1.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v1/meeting-tags",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/v1/meeting-tags",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/v2/media-clip-jobs/{job_id}",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/media-clip-jobs/{job_id}",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/media-clip-jobs/{job_id}/content",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v2/media-clip-jobs/{job_id}/retry",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/meeting-notes",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v2/meeting-notes",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/v2/meeting-notes/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PATCH",
+      "path": "/v2/meeting-notes/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/action-items",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/v2/meeting-notes/{meeting_id}/action-items/{client_action_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/action-items/{client_action_id}/shares",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "DELETE",
+      "path": "/v2/meeting-notes/{meeting_id}/action-items/{client_action_id}/shares/{client_share_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/manual-note",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/v2/meeting-notes/{meeting_id}/manual-note",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/occurrence-link",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PUT",
+      "path": "/v2/meeting-notes/{meeting_id}/occurrence-link",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/recording-assets",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/recording-assets",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/restore",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/shares",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/shares",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "DELETE",
+      "path": "/v2/meeting-notes/{meeting_id}/shares/{client_share_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/speaker-corrections",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/v2/meeting-notes/{meeting_id}/speaker-corrections/{correction_id}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/v2/meeting-notes/{meeting_id}/speaker-corrections/{correction_id}/profile-sample/retry",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/occurrence-links/lookup",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/v2/processing-jobs/{job_id}",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/v2/processing-jobs/{job_id}/retry",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/v2/recording-assets/{asset_id}/content",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "PUT",
+      "path": "/v2/recording-assets/{asset_id}/content",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/v2/recording-assets/{asset_id}/media-clips",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/v2/recording-assets/{asset_id}/transcriptions",
+      "source": "services/laoji-api/app/api/app_recording_v2.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "GET",
+      "path": "/v2/shared-actions/{token}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "PUT",
+      "path": "/v2/shared-actions/{token}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "replace-account-share-stage5",
+      "method": "GET",
+      "path": "/v2/shared-meetings/{token}",
+      "source": "services/laoji-api/app/api/app_meeting_v2.py",
+      "target": "device-scoped-share-domain"
+    },
+    {
+      "action": "drain-then-delete-stage5",
+      "method": "WEBSOCKET",
+      "path": "/ws/laoji/schedule/{session_id}/qwen",
+      "source": "services/laoji-api/app/api/qwen_ws.py",
+      "target": "legacy-account-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "WEBSOCKET",
+      "path": "/ws/meeting/{meeting_id}/qwen",
+      "source": "services/laoji-api/app/api/qwen_ws.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "DELETE",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PATCH",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "PATCH",
+      "path": "/{meeting_id}",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/audio",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{meeting_id}/audio",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/audio/file",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/downloads/summary",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/downloads/transcript",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/{meeting_id}/imports/guest",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "POST",
+      "path": "/{meeting_id}/process",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{meeting_id}/questions",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "question-q2-handler"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/{meeting_id}/status",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "map-to-versioned-handler",
+      "method": "GET",
+      "path": "/{meeting_id}/status",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "meeting-device-compatibility"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/summaries/final",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/summaries/final",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{meeting_id}/summaries/generate",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/summaries/periods",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/summaries/task/{task_id}",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "facts-v3-task-handler"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/transcripts",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{meeting_id}/transcripts",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{meeting_id}/upload",
+      "source": "services/laoji-api/app/api/app_meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{meeting_id}/upload",
+      "source": "services/laoji-api/app/api/meetings.py",
+      "target": "media-transcript-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "DELETE",
+      "path": "/{speaker_id}",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "PATCH",
+      "path": "/{speaker_id}",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{speaker_id}/reprocess",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{speaker_id}/reprocess",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "GET",
+      "path": "/{speaker_id}/reprocess/{job_id}",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{speaker_id}/reprocess/{job_id}/retry",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    },
+    {
+      "action": "bridge-and-drain",
+      "method": "POST",
+      "path": "/{speaker_id}/samples",
+      "source": "services/laoji-api/app/api/app_speakers.py",
+      "target": "speaker-overlay-domain"
+    }
+  ],
+  "schema_version": 1,
+  "source_import": {
+    "build_import_check": {
+      "api_import": "api_import=ok",
+      "asr_import": "asr_import=ok",
+      "contracts": "contract_artifacts=verified count=13"
+    },
+    "credential_files_included": false,
+    "services": [
+      {
+        "aggregate_sha256": "03aa09af4b4b4b5bbfd996f6ca072931c6ad194a07640185fdf60d9ff29152f0",
+        "bytes": 2790227,
+        "file_count": 178,
+        "path": "services/laoji-api"
+      },
+      {
+        "aggregate_sha256": "87286c01cb186184fc600c6da0ffacebc9dc6f5a4375f9f33d40bac448d6a9d9",
+        "bytes": 22054,
+        "file_count": 1,
+        "path": "services/laoji-asr"
+      }
+    ]
+  },
+  "workers": [
+    {
+      "action": "drain-legacy-delete-stage5",
+      "source": "services/laoji-api/app/workers/summary_tasks.py",
+      "target": "versioned-generic-task-handler"
+    }
+  ]
+}

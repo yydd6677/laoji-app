@@ -8,7 +8,7 @@
 - stable source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
 - implementation worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
 - implementation branch: `vnext/implementation`
-- stable baseline: Stage 0 frozen at `1.1.10 (118)`
+- stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
 - implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation`
 
 ## 权威文件
@@ -68,7 +68,8 @@ mobile SQLite + app-private media (business authority)
 
 ## 当前边界
 
-三份 vNext 文件已经冻结为全局开发基线，但不是生产采用证明。Stage 0 已冻结稳定版本；Stage 1 已在
+三份 vNext 文件已经冻结为全局开发基线，但不是生产采用证明。Stage 0 已通过
+[Stage 0 exit](../vnext-stage0/EXIT-20260818.md) 并冻结稳定版本；Stage 1 已在
 隔离工作树完成 0040–0042、本机 owner、device v2、generic task owner 与原生 purge-only capability，
 退出记录见 [Stage 1 exit](../vnext-stage1/STAGE1-EXIT.md)。未部署服务、未切公开流量、未发布或安装 APK。
 
@@ -111,7 +112,7 @@ Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量�
 临时加密存储；章节只能按 ordinal 消费，恢复点固定为两个交替槽，每槽最多 4 MiB。已验证的 Facts
 V3 章节经过确定性 reducer 合并到 40 条事实、48 条关系和 10 条行动候选上限，最终结果与 Task
 成功状态在同一事务写入加密 artifact，失败恢复不会再次调用已经完成的章节 provider。该切片已有
-SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据，但尚未
+SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据。
 移动端 source-stream client 已接入 Device V2 合同，并已挂入整理服务的双开关候选编排（来源构造、分章上传、任务恢复和
 artifact 投影）；默认 capability/feature flag 关闭，稳定整理入口不会产生 source-stream 流量。服务端已有独立单 worker
 消费 active source-stream task，每次最多处理一章，租约心跳和重启扫描可恢复；仍缺 Q2 的真实语义 holdout、设备回放和
