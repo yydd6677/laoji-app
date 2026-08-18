@@ -73,6 +73,7 @@
 - `python3 tools/vnext/verify_deployment_templates.py`：通过；模板未安装到服务器。
 - `python3 tools/vnext/verify_stage2_android_contract.py`：通过；该探针是源码合同检查，不是设备运行证据。
 - 聚焦测试命令与全量回归边界见 [focused test evidence](FOCUSED-TEST-EVIDENCE-20260818.md)。
+- GPU 短片段候选测量见 [GPU ASR candidate](GPU-ASR-CANDIDATE-20260818.md)；该测量不等于生产常驻资源门通过。
 - 隔离服务器候选 8031/18021 已真实启动并保持 loopback；`/api/ready` 对 ASR revision、R2、VAD、
   CAM++、SQLite 和 worker 报告 ready。完整 360 秒设备 v2/R2/转写链路产生 115 stable + 1 final，
   ACK 和到期清理通过；API 在任务运行中终止后由第二 attempt 恢复且业务 Task 唯一。详见
