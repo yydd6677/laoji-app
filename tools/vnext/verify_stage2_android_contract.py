@@ -28,6 +28,8 @@ def main() -> None:
     erase = ROOT / "src/services/localDataEraseCoordinator.ts"
     live_screen = ROOT / "src/screens/MeetingLiveScreen.android.tsx"
     feature_flags = ROOT / "src/config/featureFlags.ts"
+    upload_owner = ROOT / "src/services/deviceUploadOperations.ts"
+    coordinator = ROOT / "src/native/nativeTransferCoordinator.ts"
 
     require(
         transfer,
@@ -55,6 +57,17 @@ def main() -> None:
     require(
         feature_flags,
         "realtimeAsrV2Candidate: extra.featureFlags?.realtimeAsrV2Candidate === true",
+    )
+    require(
+        upload_owner,
+        "ensureDeviceUploadOperation",
+        "bindDeviceUploadOperationToAsset",
+        "capability: 'media.upload'",
+    )
+    require(
+        coordinator,
+        "ensureDeviceUploadOperation({",
+        "bindDeviceUploadOperationToAsset(",
     )
     require(
         live_screen,

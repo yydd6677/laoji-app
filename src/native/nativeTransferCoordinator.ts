@@ -6,6 +6,10 @@ import {
 import { getApiConfig } from '../services/config';
 import { ensureRemoteMeetingServiceBinding } from '../services/deviceAuthority';
 import { ensureDeviceV2Session, type DeviceV2Session } from '../services/deviceV2Api';
+import {
+  bindDeviceUploadOperationToAsset,
+  ensureDeviceUploadOperation,
+} from '../services/deviceUploadOperations';
 
 export interface NativeTransferLease {
   scope: string;
@@ -218,13 +222,26 @@ export async function enqueueNativeDeviceV2MeetingUpload(
   }
   const lease = await ensureNativeDeviceV2TransferLease(session);
   if (!lease) return null;
+  const operation = await ensureDeviceUploadOperation({
+    meetingId: binding.meetingId,
+    operationId: request.operationId,
+    recordingAssetId: request.recordingAssetId,
+    assetGeneration: request.assetGeneration,
+    sourceSha256: request.checksumSha256,
+  });
+  const bound = await bindDeviceUploadOperationToAsset(
+    binding.meetingId,
+    request.recordingAssetId,
+    operation.operationId,
+  );
+  if (!bound) throw new Error('录音资产未能绑定上传 operation');
   const workId = await nativeTransfer.enqueueMeetingUpload({
     scope: request.scope,
     credentialScope: lease.scope,
     generation: lease.generation,
     meetingId: binding.meetingId,
     remoteMeetingId: binding.bindingId,
-    operationId: request.operationId,
+    operationId: operation.operationId,
     fileUri: request.fileUri,
     mimeType: request.mimeType,
     fileName: request.fileName,
@@ -246,7 +263,7 @@ export async function enqueueNativeDeviceV2MeetingUpload(
   return {
     ...lease,
     workId,
-    operationId: request.operationId,
+    operationId: operation.operationId,
     protocol: 'device-v2-r2',
   };
 }

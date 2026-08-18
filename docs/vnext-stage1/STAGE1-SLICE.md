@@ -43,6 +43,10 @@
 
 - 当前 accountless `guest` 运行路径的 meeting/schedule/action/note 写入已走本机 repository transaction，
   owner 写入硬门已通过；旧 account 类型声明和只读兼容模块的物理删除留在 Stage 5。
+- canonical SQLite 接管后，会议根、转写、整理的旧 AsyncStorage projection 默认只读：启动读取不会再将
+  SQLite projection 回写旧 JSON，写包装在 guest/device scope 直接短路。只有显式关闭 canonical read 时，
+  `EXPO_PUBLIC_LOCAL_MEETING_DB_LEGACY_PROJECTION_WRITE_V1=1` 才允许兼容写回；这是一条可审计的回滚边界，
+  不是新的业务 owner。静态门见 `tools/vnext/verify_device_local_owner.py`，其结果不替代 Android/网络回放。
 - guest scope 的旧 `sync_outbox` 新写已在 repository 入口硬阻断；account 兼容代码和历史 outbox 仍保留到
   Stage 5 删除门，尚未完成全量 drain 计数与删除审计。
 - 原生 journal 的进程中断/真实 HTTP 回放仍需在后续模拟器/候选服务验收中完成；当前已有 Kotlin 编译、

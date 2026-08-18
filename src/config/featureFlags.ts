@@ -4,6 +4,13 @@ export interface LaoJiFeatureFlags {
   localMeetingDbV1: boolean;
   localMeetingDbCanonicalReadV1: boolean;
   localMeetingDbCanonicalWriteV1: boolean;
+  /**
+   * Compatibility JSON is a read-through cache only once SQLite owns the
+   * device scope.  It stays available for an explicit rollback where the
+   * canonical reader is disabled, but must not be enabled implicitly in the
+   * device-primary build.
+   */
+  localMeetingDbLegacyProjectionWriteV1: boolean;
   localMeetingDbAccountRootWriteV1: boolean;
   localMeetingDbAccountUploadWriteV1: boolean;
   meetingQuestionsV1: boolean;
@@ -34,11 +41,15 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
   const localMeetingDbV1 = extra.featureFlags?.localMeetingDbV1 !== false;
   const localMeetingDbCanonicalReadV1 = localMeetingDbV1
     && extra.featureFlags?.localMeetingDbCanonicalReadV1 === true;
+  const localMeetingDbLegacyProjectionWriteV1 = localMeetingDbCanonicalReadV1
+    ? extra.featureFlags?.localMeetingDbLegacyProjectionWriteV1 === true
+    : extra.featureFlags?.localMeetingDbLegacyProjectionWriteV1 !== false;
   return {
     localMeetingDbV1,
     // Canonical reads are fail-closed and can never outlive the underlying
     // database flag. Release builds must opt in explicitly after preflight.
     localMeetingDbCanonicalReadV1,
+    localMeetingDbLegacyProjectionWriteV1,
     // Canonical writes require the canonical reader so a committed SQLite
     // mutation can remain visible while the downgrade mirror is repaired.
     localMeetingDbCanonicalWriteV1: localMeetingDbCanonicalReadV1

@@ -43,6 +43,16 @@ def main() -> int:
         require("services/laoji-api/app/api/device_v2.py", "/purge-capabilities/{capability_id}/execute", "v2_purge_surface"),
         require("services/laoji-api/app/services/device_v2_identity.py", "v2_bootstrap_receipts", "bootstrap_idempotent_receipt"),
         require("docs/vnext-stage1/STAGE1-EXIT.md", "不反写 legacy owner", "rollback_record"),
+        require(
+            "src/config/featureFlags.ts",
+            "localMeetingDbLegacyProjectionWriteV1",
+            "legacy_projection_write_gate",
+        ),
+        require(
+            "src/store/MeetingsStore.tsx",
+            "if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();",
+            "guest_compat_cache_read_only",
+        ),
     ]
     failures = [label for label, passed in checks if not passed]
     for label, passed in checks:

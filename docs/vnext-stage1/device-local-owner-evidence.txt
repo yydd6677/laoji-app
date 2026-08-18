@@ -1,0 +1,15 @@
+command: python3 tools/vnext/verify_device_local_owner.py
+scope: isolated worktree /home/yydd/LaoJi-worktrees/vnext-implementation
+result: device_local_owner_audit=passed_static
+verified:
+- AuthProvider exposes guest/device scope and no access token
+- canonical SQLite projection remains the active meeting read source
+- guest/device AsyncStorage meeting roots, transcript and summary writes are gated
+- legacy projection writeback has one explicit rollback switch
+- guest schedule CRUD remains on local SQLite repository path
+- device upload capability selection remains capability-gated
+not_verified:
+- Android WorkManager process-death/offline replay
+- real device or emulator network traffic
+- server capability barrier activation or legacy submission counter
+- physical removal of legacy compatibility files

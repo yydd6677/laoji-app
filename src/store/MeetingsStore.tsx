@@ -141,6 +141,7 @@ import {
   uploadRecordingAssetV2,
 } from '../data/api/v2';
 import { uploadMeetingRecordingToDeviceService } from '../services/deviceMeetingService';
+import { markDeviceUploadOperationSuccess } from '../services/deviceUploadOperations';
 import {
   drainDeviceMeetingDeletionOutbox,
   enqueueDeviceMeetingDeletion,
@@ -845,22 +846,38 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     recordingAssetCapabilityScopesRef.current.clear();
   }, [scope]);
 
-  const persistMeetings = useCallback((next: Meeting[]) => persistJson(meetingsKey, next), [meetingsKey]);
+  const legacyProjectionWritesEnabled = getFeatureFlags().localMeetingDbLegacyProjectionWriteV1;
+  const persistMeetings = useCallback((next: Meeting[]) => {
+    if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();
+    return persistJson(meetingsKey, next);
+  }, [legacyProjectionWritesEnabled, meetingsKey, scope]);
   const persistMeetingsStrict = useCallback(
-    (next: Meeting[]) => writeAppStorageJson(meetingsKey, next, { removeIfEmpty: true }),
-    [meetingsKey],
+    (next: Meeting[]) => {
+      if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();
+      return writeAppStorageJson(meetingsKey, next, { removeIfEmpty: true });
+    },
+    [legacyProjectionWritesEnabled, meetingsKey, scope],
   );
   const persistMeetingRoots = useCallback(
-    (next: Meeting[]) => writeAppStorageJson(meetingRootsKey, next, { removeIfEmpty: true, bestEffort: true }),
-    [meetingRootsKey],
+    (next: Meeting[]) => {
+      if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();
+      return writeAppStorageJson(meetingRootsKey, next, { removeIfEmpty: true, bestEffort: true });
+    },
+    [legacyProjectionWritesEnabled, meetingRootsKey, scope],
   );
   const persistTranscripts = useCallback(
-    () => writeAppStorageJson(transcriptKey, transcriptCacheRef.current, { removeIfEmpty: true }),
-    [transcriptKey],
+    () => {
+      if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();
+      return writeAppStorageJson(transcriptKey, transcriptCacheRef.current, { removeIfEmpty: true });
+    },
+    [legacyProjectionWritesEnabled, scope, transcriptKey],
   );
   const persistSummaries = useCallback(
-    () => writeAppStorageJson(summaryKey, summaryCacheRef.current, { removeIfEmpty: true }),
-    [summaryKey],
+    () => {
+      if (!legacyProjectionWritesEnabled && scope === 'guest') return Promise.resolve();
+      return writeAppStorageJson(summaryKey, summaryCacheRef.current, { removeIfEmpty: true });
+    },
+    [legacyProjectionWritesEnabled, scope, summaryKey],
   );
   const searchMeetingContent = useCallback(async (
     query: string,
@@ -944,28 +961,35 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     if (!isScopeKey(scope)) return null;
     const startedAtMs = Date.now();
     try {
-      const result = await mirrorCanonicalMeetingScopeToLegacy({
-        repository: sqliteMeetingNoteRepository,
-        writer: canonicalLegacyWriter,
-        scopeKey: scope,
-        force: forceLegacyMirror,
-      });
-      if (result.status === 'not_owned') return null;
-      const projection = result.projection
+      const flags = getFeatureFlags();
+      const state = await sqliteMeetingNoteRepository.getScopeWriteState(scope);
+      if (state.writeOwner !== 'canonical') return null;
+      // Once the device scope is canonical, AsyncStorage is deliberately not
+      // rewritten on reads.  It remains a stale, read-only compatibility cache
+      // until an explicitly configured rollback disables canonical reads.
+      const result = flags.localMeetingDbLegacyProjectionWriteV1
+        ? await mirrorCanonicalMeetingScopeToLegacy({
+          repository: sqliteMeetingNoteRepository,
+          writer: canonicalLegacyWriter,
+          scopeKey: scope,
+          force: forceLegacyMirror,
+        })
+        : null;
+      const projection = result?.projection
         ?? await buildCanonicalMeetingReadProjection(sqliteMeetingNoteRepository, scope);
       diagnosticAudit('meeting_canonical_legacy_mirror', {
-        status: result.status,
+        status: result?.status ?? 'read_only',
         ...scopeTelemetry(scope, 'none'),
         mirror_kind: 'local-sqlite-projection',
-        canonical_revision: result.state.canonicalRevision,
-        legacy_mirror_revision: result.state.legacyMirrorRevision,
+        canonical_revision: state.canonicalRevision,
+        legacy_mirror_revision: state.legacyMirrorRevision,
         elapsed_ms: Math.max(0, Date.now() - startedAtMs),
         meetings: projection.meetings.length,
       });
       return {
         projection,
-        mirrorStatus: result.status,
-        canonicalRevision: result.state.canonicalRevision,
+        mirrorStatus: state.legacyMirrorStatus === 'failed' ? 'failed' : 'unchanged',
+        canonicalRevision: state.canonicalRevision,
       };
     } catch (error) {
       const state = await sqliteMeetingNoteRepository.getScopeWriteState(scope);
@@ -2490,6 +2514,11 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       evidence: MeetingAudioUploadEvidence;
     }>();
     uploadedInspections.forEach(item => {
+      if (item.pending.nativeOperationId && (
+        item.phase === 'uploaded' || Boolean(item.pending.remoteAssetId)
+      )) {
+        void markDeviceUploadOperationSuccess(item.pending.nativeOperationId).catch(() => undefined);
+      }
       if (!inspectionById.has(item.pending.recordingAssetId)) {
         evidenceById.set(item.pending.recordingAssetId, {
           pending: item.pending,

@@ -177,6 +177,13 @@ module.exports = () => {
     && ['1', 'true', 'yes', 'on'].includes(
       String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_WRITE_V1 ?? 'true').trim().toLowerCase(),
     );
+  const localMeetingDbLegacyProjectionWriteV1 = localMeetingDbCanonicalReadV1
+    ? ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_LEGACY_PROJECTION_WRITE_V1 ?? 'false').trim().toLowerCase(),
+    )
+    : ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_LEGACY_PROJECTION_WRITE_V1 ?? 'true').trim().toLowerCase(),
+    );
   const localMeetingDbAccountRootWriteV1 = localMeetingDbCanonicalWriteV1
     && ['1', 'true', 'yes', 'on'].includes(
       String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_ROOT_WRITE_V1 ?? 'true').trim().toLowerCase(),
@@ -283,6 +290,7 @@ module.exports = () => {
         localMeetingDbV1,
         localMeetingDbCanonicalReadV1,
         localMeetingDbCanonicalWriteV1,
+        localMeetingDbLegacyProjectionWriteV1,
         localMeetingDbAccountRootWriteV1,
         localMeetingDbAccountUploadWriteV1,
         scheduleGraphV2Candidate,
