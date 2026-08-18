@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import time
 from typing import Any, Iterable, Literal, Protocol
 
@@ -88,7 +89,15 @@ def _object_digest(context: UploadOwnerContext, binding_id: str, session_id: str
 
 
 def _object_key(object_digest: str) -> str:
-    return f"vnext-staging/{object_digest[:2]}/{object_digest}"
+    prefix = str(getattr(settings, "R2_OBJECT_PREFIX", "vnext-staging") or "").strip().strip("/")
+    if (
+        not prefix
+        or len(prefix) > 120
+        or ".." in prefix.split("/")
+        or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", part) for part in prefix.split("/"))
+    ):
+        raise VNextUploadError("R2_PREFIX_INVALID", "R2 对象前缀无效", 500)
+    return f"{prefix}/{object_digest[:2]}/{object_digest}"
 
 
 def _decode_session(row: Any) -> dict[str, Any] | None:

@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
     R2_ENDPOINT_URL: str = ""
+    # Deployment-scoped prefix prevents isolated candidates from colliding
+    # with production staging objects when they share one R2 bucket.
+    R2_OBJECT_PREFIX: str = "vnext-staging"
     R2_PRESIGN_TTL_SECONDS: int = Field(default=3600, ge=60, le=604800)
     R2_PART_SIZE: int = Field(default=8 * 1024 * 1024, ge=5 * 1024 * 1024, le=128 * 1024 * 1024)
     R2_UPLOAD_SESSION_TTL_HOURS: int = Field(default=24, ge=1, le=168)

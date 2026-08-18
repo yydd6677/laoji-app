@@ -78,6 +78,7 @@ def upload_context(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
     monkeypatch.setattr(settings, "SECRET_KEY", "vnext-upload-test-secret-at-least-32-bytes")
     monkeypatch.setattr(settings, "R2_ENABLED", True)
+    monkeypatch.setattr(settings, "R2_OBJECT_PREFIX", "vnext-staging")
     monkeypatch.setattr(settings, "R2_UPLOAD_SESSION_TTL_HOURS", 24)
     monkeypatch.setattr(settings, "R2_PRESIGN_TTL_SECONDS", 60)
     monkeypatch.setattr(settings, "R2_PART_SIZE", 5 * 1024 * 1024)
@@ -103,6 +104,22 @@ def upload_context(tmp_path, monkeypatch):
     ):
         monkeypatch.setattr(vnext_upload_store.r2_storage_service, name, getattr(fake, name))
     return context, fake
+
+
+def test_upload_object_key_uses_deployment_scoped_prefix(upload_context, monkeypatch) -> None:
+    context, fake = upload_context
+    monkeypatch.setattr(settings, "R2_OBJECT_PREFIX", "candidate.staging/v2")
+    session, _, _ = create_small(context, b"scoped-audio", suffix="b")
+    assert fake.last_key is not None
+    assert fake.last_key.startswith("candidate.staging/v2/")
+    assert session["session_id"] == "upload-session-b"
+
+
+def test_upload_object_key_rejects_path_traversal_prefix(upload_context, monkeypatch) -> None:
+    context, _fake = upload_context
+    monkeypatch.setattr(settings, "R2_OBJECT_PREFIX", "candidate/../production")
+    with pytest.raises(vnext_upload_store.VNextUploadError, match="前缀无效"):
+        create_small(context, b"scoped-audio", suffix="c")
 
 
 def create_small(context, content: bytes, *, suffix: str = "1", now_epoch: int = 1000):
