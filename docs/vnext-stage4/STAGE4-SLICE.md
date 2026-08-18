@@ -54,6 +54,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
 
 - `npx tsc --noEmit`：通过。
 - `git diff --check`：通过。
+- `npx tsc --noEmit`：通过；隔离后端 vNext/Graph/Projection/Task/Upload/Realtime 聚焦测试：`40 passed`。
+- `android/gradlew :laoji-native-platform:compileDebugKotlin`：通过。新增 projection fence 的 Kotlin
+  编译已验证；未进行 Android 设备运行时验收。
 - `python3 -m compileall -q services/laoji-api/app`：通过。
 - SQLite FTS5 外部内容增删探针：通过，新增内容可检索，删除后无残留命中。
 - `python3 tools/vnext/verify_stage4_migration.py`：通过；工具只依赖 Python 标准库，Linux/Windows
