@@ -310,14 +310,20 @@ async def parse_schedule_graph_v2(request: ScheduleGraphRequestV1) -> ScheduleMe
     """Opt-in vNext graph producer; v1 ``/parse`` remains the default owner."""
     _require_schedule_graph_v2()
     try:
-        parsed = await parse_schedule_text(
-            request.text,
-            reference_datetime=request.reference_datetime.isoformat(),
-            timezone_name=request.timezone,
-            model_only=True,
-        )
-        if not parsed:
-            raise ScheduleParserUnavailable("模型未返回日程观察")
+        if request.client_intent in {"query", "delete", "reject"}:
+            # The caller already owns this operation admission decision. An
+            # operation graph has no event slots to infer and must not spend a
+            # model call that could turn a query into null.
+            parsed = {"intent": request.client_intent, "parse_source": "recognizers"}
+        else:
+            parsed = await parse_schedule_text(
+                request.text,
+                reference_datetime=request.reference_datetime.isoformat(),
+                timezone_name=request.timezone,
+                model_only=True,
+            )
+            if not parsed:
+                raise ScheduleParserUnavailable("模型未返回日程观察")
         return schedule_graph_service.produce_schedule_graph(
             request.text,
             request.reference_datetime,

@@ -448,17 +448,20 @@ async def create_schedule_graph(
 ) -> ScheduleMentionGraph:
     _require_schedule_graph_v2()
     try:
-        parsed = await parse_schedule_text(
-            payload.text,
-            reference_datetime=payload.reference_datetime.isoformat(),
-            timezone_name=payload.timezone,
-            # v2 Graph owns one structured model producer.  The legacy quick
-            # parser remains behind the compatibility route and must not run
-            # as a second server-side decision owner here.
-            model_only=True,
-        )
-        if not parsed:
-            raise ScheduleParserUnavailable("模型未返回日程观察")
+        if payload.client_intent in {"query", "delete", "reject"}:
+            parsed = {"intent": payload.client_intent, "parse_source": "recognizers"}
+        else:
+            parsed = await parse_schedule_text(
+                payload.text,
+                reference_datetime=payload.reference_datetime.isoformat(),
+                timezone_name=payload.timezone,
+                # v2 Graph owns one structured model producer. The legacy
+                # quick parser remains behind the compatibility route and
+                # must not run as a second server-side decision owner here.
+                model_only=True,
+            )
+            if not parsed:
+                raise ScheduleParserUnavailable("模型未返回日程观察")
         return schedule_graph_service.produce_schedule_graph(
             payload.text,
             payload.reference_datetime,

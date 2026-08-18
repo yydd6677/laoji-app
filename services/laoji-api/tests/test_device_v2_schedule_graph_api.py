@@ -58,3 +58,18 @@ def test_device_schedule_graph_returns_source_bound_revision(monkeypatch) -> Non
     assert graph["slots"]["start_time"] == "15:30"
     assert graph["provenance"]["draft_revision"] == 1
     assert observed["model_only"] is True
+
+
+def test_device_schedule_graph_operation_does_not_call_model(monkeypatch) -> None:
+    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
+
+    async def unexpected_model(*_args, **_kwargs):
+        raise AssertionError("operation graph must not call model")
+
+    monkeypatch.setattr(device_v2, "parse_schedule_text", unexpected_model)
+    payload = request_body("查一下明天的日程")
+    payload["client_intent"] = "query"
+    response = client().post("/api/device/v2/schedule/graph", json=payload)
+    assert response.status_code == 200
+    assert response.json()["state"] == "operation"
+    assert response.json()["intent"] == "query"

@@ -99,6 +99,33 @@ def test_graph_route_fails_closed_when_model_returns_no_observation(monkeypatch)
     assert response.json()["detail"]["code"] == "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE"
 
 
+def test_graph_operation_intent_does_not_call_model(monkeypatch):
+    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
+    calls = []
+
+    async def unexpected_model(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("operation graph must not call model")
+
+    monkeypatch.setattr(laoji_router, "parse_schedule_text", unexpected_model)
+    client = _client(monkeypatch)
+    response = client.post(
+        "/api/laoji/v2/schedule/graph",
+        json={
+            "schema_version": 1,
+            "text": "查一下明天的日程",
+            "reference_datetime": "2026-08-18T09:00:00",
+            "timezone": "Asia/Shanghai",
+            "client_intent": "query",
+            "client_request_id": "graph-route-operation-query",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "operation"
+    assert response.json()["intent"] == "query"
+    assert calls == []
+
+
 def test_graph_clarify_route_increments_existing_revision(monkeypatch):
     monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
     parse_calls = []

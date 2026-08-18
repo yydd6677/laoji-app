@@ -11,11 +11,13 @@
 - `produce_schedule_graph` 缺少 observation 直接拒绝，消除了旧 `parse_schedule_text_sync` 的隐式同步
   fallback。澄清请求把原 Graph 来源和补充合并成一次 model-only 输入；Graph 只接收该 observation，
   复用 source_id 并递增 revision，不再调用旧 `apply_schedule_clarification`。
+- `query/delete/reject` 由调用方 admission intent 直接形成 operation/reject 图，不调用模型；只有
+  `create/clarify` 进入 model-only producer。
 
 ## 证据
 
 - `tests/test_schedule_graph_vnext.py`、`tests/test_schedule_graph_route_vnext.py`、
-  `tests/test_device_v2_schedule_graph_api.py`：`16 passed`。
+  `tests/test_device_v2_schedule_graph_api.py`：`18 passed`。
 - `npx tsc --noEmit --pretty false`：通过。
 - Python compileall、`git diff --check`：通过。
 - `python3 tools/vnext/verify_schedule_graph_owner.py`：通过；四个候选路由均包含
