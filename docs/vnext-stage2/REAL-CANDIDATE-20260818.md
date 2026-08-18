@@ -170,3 +170,15 @@ GPU1、PCB 和 Smart Meeting 未重启或修改。随后 readiness 修复候选�
 `releases/471d94f/services/laoji-api`，旧 `49b1acf` 仍保留可回滚。真实 readiness 仍为
 `ready=false`、`embedding_ready=false`、`embedding_probe_timeout`；这次部署没有改变阻断状态，
 也没有接收业务流量。
+
+## 2026-08-19 ASR 静音候选与 API 同步部署
+
+- 真实重放发现旧 8031 对一秒全零 PCM 返回“嗯。”，因此 `0eae538` 在 ASR coordinator 增加
+  RMS/峰值双门，静音不进入 Qwen，v2 返回 `no_speech`。
+- `0eae538` 服务包已解压到隔离版本目录；8031 和 18021 均从该目录运行。API 使用候选 SQLite、
+  CPU VAD/CAM++ 以及显式现有 CAM++ 权重路径，`/api/ready` 与 `/ready` 均返回 ready，队列为空。
+- 相同全零 PCM 在 8031 返回 HTTP 200、`outcome=no_speech`、空文本、`text_state=stable`、
+  `segment_revision=1`、`infer_ms=0`。生产 18020/8030 未重启或改动，GPU1、PCB、Smart Meeting
+  和公网入口未触碰；旧 471d94f 目录保留用于隔离回滚。
+- 这只闭合候选 ASR 静音合同；专属 Android 无语音/断网/杀进程回放、资源门和 capability barrier
+  仍未通过，Stage 2 继续保持 `in progress`。
