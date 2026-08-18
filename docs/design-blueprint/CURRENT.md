@@ -188,3 +188,7 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 证据见 [无字幕视频回放](../vnext-stage3/ASR-TO-FACTS-1221445661-R8-20260819.md)。
 超预算长会证据包已在隔离候选真实调用 `qwen3-embedding:0.6b` 并完成一次 Facts 生成；MMR 选段比例
 不能替代人工事实支持率，详见 [长会 embedding 回放](../vnext-stage3/LONG-EMBEDDING-REPLAY-20260819.md)。
+随后对当前 78 分钟视频执行了完整音频 ASR→Facts V3 候选回放：336 个 ASR 分片、335 个文本段、
+一次 Facts 模型调用，结果合同通过；证据见
+[长会议完整视频回放](../vnext-stage3/ASR-TO-FACTS-1437681208-LONG-20260819.md)。这仍不等于
+人工事实质量、移动端 source-stream 恢复或 capability barrier 已通过。
