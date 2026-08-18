@@ -375,7 +375,6 @@ def ensure_vnext_source_stream_schema() -> None:
             END;
             """
         )
-        connection.commit()
         item_columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(vnext_source_bundle_items)").fetchall()
@@ -390,6 +389,64 @@ def ensure_vnext_source_stream_schema() -> None:
                     f"ALTER TABLE vnext_source_bundle_items ADD COLUMN {column} {declaration}"
                 )
         connection.commit()
+
+
+def purge_expired_source_streams(*, now_epoch: int | None = None, limit: int = 32) -> int:
+    """Public maintenance entry point for API/worker cleanup loops."""
+    ensure_vnext_source_stream_schema()
+    return _purge_expired_source_streams(now_epoch=now_epoch, limit=limit)
+
+
+def _purge_expired_source_streams(*, now_epoch: int | None = None, limit: int = 32) -> int:
+    """Remove expired encrypted source payloads without retaining plaintext.
+
+    Expiration is a storage/privacy boundary, not a retry path.  The generic
+    Task is moved to a terminal `failure` outcome before the source row is
+    deleted; callers can therefore distinguish expiry from an active task while
+    all child payloads and reservations are removed by foreign-key cascades.
+    """
+    bounded_limit = max(1, min(128, int(limit)))
+    now_epoch = int(time.time()) if now_epoch is None else _nonnegative(now_epoch, "now_epoch")
+    now = utc_now()
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        rows = connection.execute(
+            """SELECT stream_id, task_id FROM vnext_source_streams
+                 WHERE expires_at_epoch <= ? AND state NOT IN ('cancelled','expired')
+                 ORDER BY expires_at_epoch, stream_id LIMIT ?""",
+            (now_epoch, bounded_limit),
+        ).fetchall()
+        for row in rows:
+            task_id = str(row["task_id"])
+            connection.execute(
+                """UPDATE vnext_tasks
+                      SET state = CASE WHEN state = 'active' THEN 'failure' ELSE state END,
+                          error_code = CASE WHEN state = 'active' THEN 'SOURCE_STREAM_EXPIRED' ELSE error_code END,
+                          source_stream_id = NULL, checkpoint_reservation_id = NULL,
+                          updated_at = ?, terminal_at = CASE WHEN state = 'active' THEN ? ELSE terminal_at END
+                    WHERE task_id = ?""",
+                (now, now, task_id),
+            )
+            connection.execute(
+                """UPDATE vnext_task_attempts
+                      SET state = CASE WHEN state IN ('queued','running','retryable_failure','lease_expired')
+                                       THEN 'terminal_failure' ELSE state END,
+                          phase = CASE WHEN state IN ('queued','running','retryable_failure','lease_expired')
+                                       THEN 'committing' ELSE phase END,
+                          error_code = CASE WHEN state IN ('queued','running','retryable_failure','lease_expired')
+                                            THEN 'SOURCE_STREAM_EXPIRED' ELSE error_code END,
+                          updated_at = ?, terminal_at = CASE WHEN state IN ('queued','running','retryable_failure','lease_expired')
+                                                             THEN ? ELSE terminal_at END
+                    WHERE task_id = ?""",
+                (now, now, task_id),
+            )
+            connection.execute(
+                "UPDATE vnext_source_streams SET state = 'expired', updated_at = ?, expires_at_epoch = ? WHERE stream_id = ?",
+                (now, now_epoch, row["stream_id"]),
+            )
+            connection.execute("DELETE FROM vnext_source_streams WHERE stream_id = ?", (row["stream_id"],))
+        connection.commit()
+    return len(rows)
 
 
 def _assert_binding(

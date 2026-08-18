@@ -600,6 +600,7 @@ async def create_source_stream(
 ) -> dict[str, Any]:
     _require_source_stream_v2()
     try:
+        await asyncio.to_thread(vnext_source_stream_store.purge_expired_source_streams, limit=32)
         stream, _reused = await asyncio.to_thread(
             vnext_source_stream_store.create_source_stream,
             context,
@@ -899,6 +900,7 @@ async def read_question_v2(
     attempt_id: str | None = None
     lease_owner = f"q2-api:{uuid.uuid4().hex}"
     try:
+        await asyncio.to_thread(vnext_source_stream_store.purge_expired_source_streams, limit=32)
         binding = await asyncio.to_thread(vnext_task_store.get_binding, context, binding_id)
         if binding is None or binding.get("state") != "active":
             raise vnext_question_reader.Q2ReaderError(

@@ -58,7 +58,7 @@ def _setup(tmp_path, monkeypatch):
     return database, context, generation
 
 
-def _create_stream(context, generation, *, suffix="1", capability="summary"):
+def _create_stream(context, generation, *, suffix="1", capability="summary", now_epoch=None):
     return source_store.create_source_stream(
         context,
         stream_id=f"stream-source-{suffix}",
@@ -74,7 +74,7 @@ def _create_stream(context, generation, *, suffix="1", capability="summary"):
         entity_id=f"meeting-source-{suffix}",
         entity_revision=1,
         task_input_sha256=_fixed_hash("b"),
-        now_epoch=1_000,
+        now_epoch=1_000 if now_epoch is None else now_epoch,
     )
 
 
@@ -537,6 +537,22 @@ def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, 
         assert connection.execute(
             "SELECT COUNT(*) FROM vnext_source_reservations WHERE state = 'active'"
         ).fetchone()[0] == 0
+
+
+def test_expired_source_stream_cleanup_is_terminal_and_payload_free(tmp_path, monkeypatch) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(context, generation, suffix="expiry", now_epoch=1_000)
+    removed = source_store.purge_expired_source_streams(
+        now_epoch=1_000 + source_store.SOURCE_TTL_SECONDS + 1,
+    )
+    assert removed == 1
+    assert source_store.get_source_stream(context, stream["stream_id"]) is None
+    task = vnext_task_store.get_task(context, stream["task_id"])
+    assert task["state"] == "failure"
+    assert task["error_code"] == "SOURCE_STREAM_EXPIRED"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_reservations WHERE state = 'active'").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM vnext_encrypted_source_payloads").fetchone()[0] == 0
 
 
 def test_final_checkpoint_recovers_after_worker_lease_loss_without_regeneration(tmp_path, monkeypatch) -> None:

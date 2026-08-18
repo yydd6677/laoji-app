@@ -24,9 +24,14 @@ worker. The reader path then:
    active task on success.
 
 Provider or lease failures do not delete the source stream. The task remains
-   retryable and a request replay with the same task ID returns the committed
-   result after a successful transaction. No Q0 fallback, summary worker or
-   second model call is introduced.
+retryable and a request replay with the same task ID returns the committed
+result after a successful transaction. No Q0 fallback, summary worker or
+second model call is introduced.
+
+Expired streams are cleaned opportunistically at the device source/Q2 API
+boundary. Their task becomes terminal `SOURCE_STREAM_EXPIRED`, while the
+stream cascade removes encrypted payloads and reservations; cleanup never
+logs source text or identifiers beyond the opaque task boundary.
 
 ## Code boundary
 
