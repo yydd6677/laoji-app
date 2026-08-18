@@ -48,6 +48,8 @@ def main() -> None:
         "number !in 1..totalParts",
         "suspendCancellableCoroutine",
         "invokeOnCancellation { call.cancel() }",
+        "refreshCancellable(lease)",
+        "fun refreshCancellable(lease: CredentialLease): CredentialLease",
     )
     require(erase, "clearNativeTransferLease(`device-v2:${epochId}`)")
     require(

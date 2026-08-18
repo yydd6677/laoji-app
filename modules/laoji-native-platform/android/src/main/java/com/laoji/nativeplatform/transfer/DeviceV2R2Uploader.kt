@@ -8,6 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Callback
 import okhttp3.Call
@@ -83,7 +84,10 @@ internal class DeviceV2R2Uploader(
       var response = executeCancellable(apiRequest(lease, path, method, requestBody))
       if (response.code == 401 && lease.deviceId != null) {
         response.close()
-        lease = DeviceV2LeaseRefresher(client, credentialStore).refresh(lease)
+        // The WorkManager path must cancel token refresh together with the upload
+        // request.  The realtime socket keeps its executor-bound blocking entry
+        // point, while this worker uses the cancellable variant explicitly.
+        lease = DeviceV2LeaseRefresher(client, credentialStore).refreshCancellable(lease)
         response = executeCancellable(apiRequest(lease, path, method, requestBody))
       }
       response.use { value ->
@@ -371,7 +375,16 @@ internal class DeviceV2LeaseRefresher(
   private val client: OkHttpClient,
   private val store: CredentialLeaseStore,
 ) {
-  fun refresh(lease: CredentialLease): CredentialLease {
+  /**
+   * The realtime socket is executor-bound rather than coroutine-owned. Keep its
+   * public synchronous entry point, but run the same cancellable HTTP path so an
+   * interrupted executor cannot leave an auth request behind.
+   */
+  fun refresh(lease: CredentialLease): CredentialLease = runBlocking {
+    refreshCancellable(lease)
+  }
+
+  suspend fun refreshCancellable(lease: CredentialLease): CredentialLease {
     val deviceId = lease.deviceId ?: throw TerminalUploadException("invalid-credential")
     val epochId = lease.deviceEpochId ?: throw TerminalUploadException("invalid-credential")
     val keyVersion = lease.keyVersion ?: throw TerminalUploadException("invalid-credential")
@@ -389,7 +402,7 @@ internal class DeviceV2LeaseRefresher(
       .put("key_version", keyVersion)
       .put("public_key_hash", publicHash)
       .put("request_id", requestId)
-    val challenge = plainJson(lease, "/auth/challenges", challengeBody)
+    val challenge = plainJsonCancellable(lease, "/auth/challenges", challengeBody)
     val nonce = challenge.getString("nonce")
     val message = "laoji-device-v2\nauth\n$nonce\n$deviceId\n$epochId\n$requestId"
     val signer = Signature.getInstance("SHA256withECDSA")
@@ -399,7 +412,7 @@ internal class DeviceV2LeaseRefresher(
       signer.sign(),
       Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
     )
-    val token = plainJson(
+    val token = plainJsonCancellable(
       lease,
       "/auth/tokens",
       JSONObject()
@@ -418,16 +431,44 @@ internal class DeviceV2LeaseRefresher(
     return refreshed
   }
 
-  private fun plainJson(lease: CredentialLease, path: String, body: JSONObject): JSONObject {
+  private suspend fun plainJsonCancellable(
+    lease: CredentialLease,
+    path: String,
+    body: JSONObject,
+  ): JSONObject {
     val request = Request.Builder()
       .url("${lease.apiBaseUrl.trimEnd('/')}/api/device/v2$path")
       .header("Accept", "application/json")
       .post(body.toString().toRequestBody("application/json".toMediaType()))
       .build()
-    client.newCall(request).execute().use { response ->
-      if (response.code == 408 || response.code == 429 || response.code >= 500) throw RetryableUploadException()
-      if (!response.isSuccessful) throw TerminalUploadException("unauthorized")
-      return JSONObject(response.body?.string() ?: throw TerminalUploadException("invalid-response"))
+    return suspendCancellableCoroutine { continuation ->
+      val call = client.newCall(request)
+      continuation.invokeOnCancellation { call.cancel() }
+      call.enqueue(object : Callback {
+        override fun onFailure(call: Call, error: java.io.IOException) {
+          if (continuation.isActive) continuation.resumeWithException(error)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+          if (!continuation.isActive) {
+            response.close()
+            return
+          }
+          try {
+            response.use { value ->
+              if (value.code == 408 || value.code == 429 || value.code >= 500) {
+                throw RetryableUploadException()
+              }
+              if (!value.isSuccessful) throw TerminalUploadException("unauthorized")
+              continuation.resume(
+                JSONObject(value.body?.string() ?: throw TerminalUploadException("invalid-response"))
+              )
+            }
+          } catch (error: Throwable) {
+            if (continuation.isActive) continuation.resumeWithException(error)
+          }
+        }
+      })
     }
   }
 
