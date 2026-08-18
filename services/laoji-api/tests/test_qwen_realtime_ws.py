@@ -10,17 +10,17 @@ def test_qwen_vad_policy_matches_schedule_and_meeting_latency_contract():
     schedule = qwen_ws._vad_settings_for_purpose("schedule")
 
     assert meeting == {
-        "silence_ms": 400.0,
+        "silence_ms": 650.0,
         "pre_roll_ms": 400.0,
         "initial_pre_roll_ms": 200.0,
-        "max_speech_ms": 6000.0,
+        "max_speech_ms": 4500.0,
         "energy_threshold": 0.0002,
     }
     assert schedule == {
-        "silence_ms": 800.0,
+        "silence_ms": 900.0,
         "pre_roll_ms": 400.0,
         "initial_pre_roll_ms": 400.0,
-        "max_speech_ms": 6000.0,
+        "max_speech_ms": 12000.0,
         "energy_threshold": 0.0002,
     }
 
