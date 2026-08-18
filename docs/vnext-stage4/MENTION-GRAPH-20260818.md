@@ -35,6 +35,8 @@
 ## 尚未闭合
 
 候选 route 已接入 device v2 和手机解析/澄清 owner，但默认关闭；尚无 capability barrier、真实模型
-强制运行、自然语料 holdout、ProjectionEnvelope 保存动作、Expo SQLite 回放或设备验收证据。
+强制运行、自然语料 holdout、ProjectionEnvelope 保存动作、Expo SQLite/Android 设备回放或设备验收证据。
+本机 v45 SQLite/FTS 迁移与 12,000 条搜索工作负载回放已通过，但它不能替代 Expo SQLite 和真实页面
+启动/重建/搜索性能证据。
 旧日程 parser 仍是当前默认路径，不能把本切片称为
 Stage 4 生产采用。

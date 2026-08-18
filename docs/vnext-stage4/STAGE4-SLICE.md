@@ -59,8 +59,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
   编译已验证；未进行 Android 设备运行时验收。
 - `python3 -m compileall -q services/laoji-api/app`：通过。
 - SQLite FTS5 外部内容增删探针：通过，新增内容可检索，删除后无残留命中。
-- `python3 tools/vnext/verify_stage4_migration.py`：通过；工具只依赖 Python 标准库，Linux/Windows
-  均可运行。
+- `python3 tools/vnext/verify_stage4_migration.py`：通过；在临时 SQLite 文件上重复执行 v45 列升级和
+  SQL，保留旧 v20 FTS，写入 12,000 条搜索文档并验证插入/更新/删除触发器、生命周期过滤、完整性
+  和外部内容查询；本机暖态搜索 p95 约 `9ms`。工具只依赖 Python 标准库，Linux/Windows 均可运行。
 - 迁移仅新增 0045，不改变 0040-0044 顺序；未安装到 APK、模拟器或服务器。
 
 ## 未完成
