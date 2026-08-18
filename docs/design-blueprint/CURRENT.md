@@ -119,6 +119,6 @@ artifact 投影）；默认 capability/feature flag 关闭，稳定整理入口�
 也没有改变当前稳定版服务流量。
 
 Q2 已增加默认关闭的 `questionQ2Candidate` fake-transport adapter：它从当前 immutable evidence
-创建 snapshot/thread，provider 只接收脱离可变状态的来源视图，回答分句必须完整覆盖答案并逐字匹配
+创建 snapshot/thread，provider 只接收转写和当前笔记，不把派生整理结果提升为来源；回答分句必须完整覆盖答案并逐字匹配
 UTF-8 引用，随后才写入 Q2 clause/citation 表。该 adapter 仍没有接入实际 reader，也没有改变现有
 问答 UI；语义 holdout、真实 provider 和 capability barrier 仍是 Stage 3 未完成项。
