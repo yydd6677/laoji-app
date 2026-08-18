@@ -262,7 +262,7 @@ def _embedding_inference_state(base_url: str) -> dict[str, Any]:
                 },
                 timeout=max(
                     1.0,
-                    min(15.0, float(os.getenv("LAOJI_LLM_READINESS_EMBED_TIMEOUT", "5"))),
+                    min(15.0, float(os.getenv("LAOJI_LLM_READINESS_EMBED_TIMEOUT", "10"))),
                 ),
             )
             response.raise_for_status()
