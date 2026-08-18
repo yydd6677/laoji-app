@@ -21,6 +21,7 @@
 
 - `facts-v3-real-holdout-rerun-20260819.json`
 - `q2-real-holdout-rerun-20260819.json`
+- `q2-real-holdout-rerun-20260819-token-refresh.json`（在 device-v2 令牌刷新候选变更后重新执行，仍为 `27/27`）
 - `facts-v3-real-holdout-rerun-20260819-token-refresh.json`（在 device-v2 令牌刷新候选变更后重新执行，仍为 `9/9`）
 
 Facts V3 的 9 条用例均使用 1 次模型调用，除 `negotiation` 触发一次允许的结构修复外没有第二次
