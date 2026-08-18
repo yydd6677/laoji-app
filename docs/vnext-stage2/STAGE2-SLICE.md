@@ -67,11 +67,12 @@
 ## 证据
 
 - `python3 tools/vnext/verify_stage2_migrations.py`：通过。
-- device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：58 个通过，包含 remote multipart merge、
+- device-v2/task/purge/upload/ASR/realtime/import/cutover 聚焦后端测试：当前可复现集合 119 个通过，包含 remote multipart merge、
   chunk/event replay、binding fence 和 NO_SPEECH contract。
 - 共享 contract 生成检查、`npx tsc --noEmit` 和 Android 两个 Kotlin compile task：通过。
 - `python3 tools/vnext/verify_deployment_templates.py`：通过；模板未安装到服务器。
 - `python3 tools/vnext/verify_stage2_android_contract.py`：通过；该探针是源码合同检查，不是设备运行证据。
+- 聚焦测试命令与全量回归边界见 [focused test evidence](FOCUSED-TEST-EVIDENCE-20260818.md)。
 - 隔离服务器候选 8031/18021 已真实启动并保持 loopback；`/api/ready` 对 ASR revision、R2、VAD、
   CAM++、SQLite 和 worker 报告 ready。完整 360 秒设备 v2/R2/转写链路产生 115 stable + 1 final，
   ACK 和到期清理通过；API 在任务运行中终止后由第二 attempt 恢复且业务 Task 唯一。详见
