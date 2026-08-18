@@ -1,0 +1,14 @@
+{
+  "source_sha256": "sha256:cf4c333c7a40bf918359965f68a67dbaa2484d495b33dfea7bdaa8af613dc1a1",
+  "source_bytes": 256000,
+  "chunk_count": 8,
+  "event_count": 1,
+  "stable_event_count": 0,
+  "final_outcome": "no_speech",
+  "final_event_sequence": 1,
+  "model_revision": "no-asr-inference",
+  "purge_state": "confirmed",
+  "wall_ms": 1443,
+  "device_id_sha256": "45801af2283d",
+  "epoch_id_sha256": "a069999ef816"
+}

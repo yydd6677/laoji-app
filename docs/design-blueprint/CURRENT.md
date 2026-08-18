@@ -120,6 +120,11 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 保守 RMS/峰值双门在模型前收敛数字静音，并已在隔离 8031 对相同输入返回稳定 `no_speech`、
 空文本和 `infer_ms=0`。生产 8030 未改变，Stage 2 仍缺专属 Android 设备无语音/中断回放。
 
+随后在隔离候选完成了正式 device-v2 WebSocket 的真实短语音回放：一条真实会议语音在第 5 个分片后
+断线并从服务端游标恢复，得到 stable/final `text`；一条无语音输入得到 final `no_speech`，两次均完成
+binding purge。证据见 [device-v2 realtime reconnect](../vnext-stage2/DEVICE-V2-REALTIME-RECONNECT-20260819.md)。
+这只闭合服务器候选协议和服务端清理，不替代 Android 进程死亡、token refresh 和页面投影验收。
+
 Stage 4 已新增连续 0045 迁移，将日程来源哈希、生产者 revision、Graph schema revision 和事件
 revision 纳入本机 `local_schedule_events`，并将本机搜索切换到外部内容 FTS5 文档表；隔离的
 Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机解析/澄清 owner；

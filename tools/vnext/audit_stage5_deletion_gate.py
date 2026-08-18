@@ -21,6 +21,11 @@ import subprocess
 import sys
 from typing import Any, Iterable
 
+try:
+    from verify_privacy_logs import scan as scan_privacy_logs
+except ImportError:  # pragma: no cover - direct library use from another cwd
+    scan_privacy_logs = None
+
 
 REQUIRED_CUTOVERS = (
     "media.upload",
@@ -336,6 +341,19 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
     for hit in marker_hits:
         marker_counts[hit.item] = marker_counts.get(hit.item, 0) + 1
     db = _database_state(database)
+    privacy_root = root / "services" / "laoji-api" / "app"
+    if scan_privacy_logs is None or not privacy_root.is_dir():
+        privacy_audit: dict[str, Any] = {
+            "status": "unavailable",
+            "finding_count": None,
+        }
+    else:
+        findings = scan_privacy_logs(privacy_root)
+        privacy_audit = {
+            "status": "pass" if not findings else "fail",
+            "finding_count": len(findings),
+            "findings": findings[:100],
+        }
     cutovers = db.get("cutovers", {})
     barrier_state: dict[str, Any] = {}
     for capability in REQUIRED_CUTOVERS:
@@ -370,6 +388,7 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
         "legacy_reference_counts": marker_counts,
         "legacy_references": [hit.__dict__ for hit in marker_hits[:200]],
         "runtime": _runtime_state(),
+        "privacy_logs": privacy_audit,
         "external_public_cycle_evidence": db.get("legacy_cycle_evidence", "unknown"),
         "lifecycle_drain": db.get("drain", {"status": "unknown"}),
         "safe_to_delete": bool(
@@ -378,6 +397,7 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
             and db.get("legacy_cycle_evidence") == "verified"
             and db.get("drain", {}).get("status") == "drained"
             and db.get("drain", {}).get("old_client_query_recovery") == "verified"
+            and privacy_audit.get("status") == "pass"
         ),
         "deletion_performed": False,
         "blocking_reasons": [],
@@ -397,6 +417,8 @@ def audit(root: Path, database: Path | None = None) -> dict[str, Any]:
         )
     if drain.get("old_client_query_recovery") != "verified":
         report["blocking_reasons"].append("old-client task query recovery evidence is missing")
+    if privacy_audit.get("status") != "pass":
+        report["blocking_reasons"].append("runtime log privacy audit is unavailable or has findings")
     return report
 
 
