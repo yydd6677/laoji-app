@@ -17,6 +17,7 @@ from typing import Any
 from app.services.llm_provider import (
     GENERATION_MODEL,
     LlmConfig,
+    LlmProviderError,
     call_llm,
     canonical_ollama_base_url,
 )
@@ -201,17 +202,24 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     estimated = estimate_tokens(json.dumps(model_input, ensure_ascii=False, separators=(",", ":")))
     if estimated > MAX_INPUT_TOKENS:
         raise Q2ReaderError("Q2_EVIDENCE_TOO_LARGE", "当前会议来源超过问答输入上限", 413)
-    raw = call_llm(
-        LlmConfig(base_url=canonical_ollama_base_url(), model=GENERATION_MODEL),
-        _system_prompt(),
-        json.dumps(model_input, ensure_ascii=False, separators=(",", ":")),
-        timeout=120,
-        max_tokens=2048,
-        options={"temperature": 0, "num_ctx": 16_384, "num_predict": 2048},
-        response_format=_response_schema(),
-        priority="interactive",
-        telemetry_operation="question.q2.reader.v2",
-    )
+    try:
+        raw = call_llm(
+            LlmConfig(base_url=canonical_ollama_base_url(), model=GENERATION_MODEL),
+            _system_prompt(),
+            json.dumps(model_input, ensure_ascii=False, separators=(",", ":")),
+            timeout=120,
+            max_tokens=2048,
+            options={"temperature": 0, "num_ctx": 16_384, "num_predict": 2048},
+            response_format=_response_schema(),
+            priority="interactive",
+            telemetry_operation="question.q2.reader.v2",
+        )
+    except LlmProviderError as error:
+        # Provider failures are retryable service conditions, not malformed
+        # user evidence.  Keep the provider's internal error out of the API.
+        raise Q2ReaderError("Q2_PROVIDER_UNAVAILABLE", "会议问答服务暂时不可用", 503) from error
+    except Exception as error:
+        raise Q2ReaderError("Q2_PROVIDER_UNAVAILABLE", "会议问答服务暂时不可用", 503) from error
     response = _parse_json(raw)
     answer_kind = _text(response.get("answer_kind"), "answer_kind", 32)
     answer = _text(response.get("answer"), "answer", 20_000)

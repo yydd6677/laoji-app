@@ -153,3 +153,16 @@ def test_reader_rejects_utf8_boundary_and_unsupported_citation_for_refusal(monke
     with pytest.raises(reader.Q2ReaderError) as captured:
         reader.read_q2(_payload(text))
     assert captured.value.code == "Q2_GROUNDING_INVALID"
+
+
+def test_reader_maps_provider_failure_to_retryable_service_error(monkeypatch):
+    from app.services.llm_provider import LlmProviderError
+
+    def fail_provider(*args, **kwargs):
+        raise LlmProviderError("ollama_request_timeout")
+
+    monkeypatch.setattr(reader, "call_llm", fail_provider)
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload())
+    assert captured.value.code == "Q2_PROVIDER_UNAVAILABLE"
+    assert captured.value.status_code == 503
