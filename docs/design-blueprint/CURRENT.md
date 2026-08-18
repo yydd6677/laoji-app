@@ -157,3 +157,6 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 2026-08-19 的隔离真实回放复核见
 [Stage 3 rerun](../vnext-stage3/REAL-HOLDOUT-RERUN-20260819.md)；该报告仍明确区分字幕窗口证据与
 完整视频、人工质量和设备门禁。
+同日完成的真实视频 ASR→Facts V3 串联回放见
+[ASR to Facts](../vnext-stage3/ASR-TO-FACTS-20260819.md)；首次暴露的输出截断已在 `facts-v3-r6`
+提示词中修复并复验通过。
