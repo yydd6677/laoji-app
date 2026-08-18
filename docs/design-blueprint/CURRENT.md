@@ -97,6 +97,8 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
 [Stage 2 真实候选证据](../vnext-stage2/REAL-CANDIDATE-20260818.md)。ASR revision 现在要求固定值，
 否则服务 fail-closed。
+最新无字幕完整视频回放和严格返回合同校验见
+[ASR full replay](../vnext-stage2/ASR-FULL-REPLAY-20260819.md)；该证据仍只属于隔离 CPU 候选。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
 生产延迟。下一入口是 Android 网络/进程恢复、手机连续文字投影和 NO_SPEECH/性能门；
 不得重放 Stage 0/1，也不得激活生产 capability barrier。当前登记的 12 个会议

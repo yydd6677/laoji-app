@@ -105,6 +105,51 @@ def post_batch(endpoint: str, priority: str, chunks: list[Chunk]) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def validate_batch_response(
+    response: object,
+    chunks: list[Chunk],
+    expected_model_revision: str | None,
+) -> str:
+    if not isinstance(response, dict):
+        raise RuntimeError("ASR v2 response is not an object")
+    if response.get("schema_version") != 2 or response.get("contract_revision") != "asr.batch.v2":
+        raise RuntimeError("ASR v2 response contract revision is invalid")
+    revision = str(response.get("model_revision") or "").strip()
+    if not revision or revision == "unresolved":
+        raise RuntimeError("ASR v2 response has no pinned model revision")
+    if expected_model_revision is not None and revision != expected_model_revision:
+        raise RuntimeError("ASR v2 model revision changed during replay")
+    raw_items = response.get("items")
+    if not isinstance(raw_items, list) or len(raw_items) != len(chunks):
+        raise RuntimeError("ASR v2 response item count does not match the request")
+    by_id: dict[str, dict] = {}
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise RuntimeError("ASR v2 response contains a non-object item")
+        item_id = str(raw.get("id") or "").strip()
+        if not item_id or item_id in by_id:
+            raise RuntimeError("ASR v2 response item identity is missing or duplicated")
+        by_id[item_id] = raw
+    for chunk in chunks:
+        item_id = f"replay-{chunk.index:06d}"
+        item = by_id.get(item_id)
+        if item is None:
+            raise RuntimeError(f"ASR v2 response is missing {item_id}")
+        if item.get("stable_segment_key") != item_id:
+            raise RuntimeError(f"ASR v2 stable segment key mismatch for {item_id}")
+        if item.get("segment_revision") != 1 or item.get("text_state") != "stable":
+            raise RuntimeError(f"ASR v2 segment state is invalid for {item_id}")
+        if item.get("source_start_ms") != chunk.start_ms or item.get("source_end_ms") != chunk.end_ms:
+            raise RuntimeError(f"ASR v2 source range mismatch for {item_id}")
+        outcome = item.get("outcome")
+        text_value = str(item.get("text") or "").strip()
+        if outcome not in {"text", "no_speech"}:
+            raise RuntimeError(f"ASR v2 outcome is invalid for {item_id}")
+        if (outcome == "text") != bool(text_value):
+            raise RuntimeError(f"ASR v2 text/outcome mismatch for {item_id}")
+    return revision
+
+
 def main() -> int:
     args = parse_args()
     if not 1 <= args.batch_size <= 8:
@@ -115,10 +160,13 @@ def main() -> int:
         raise SystemExit("media produced no PCM")
     responses: list[dict] = []
     first_result_seconds: float | None = None
+    model_revision: str | None = None
     for offset in range(0, len(chunks), args.batch_size):
-        response = post_batch(args.endpoint, args.priority, chunks[offset: offset + args.batch_size])
+        batch = chunks[offset: offset + args.batch_size]
+        response = post_batch(args.endpoint, args.priority, batch)
         if "error" in response:
             raise RuntimeError(json.dumps(response, ensure_ascii=False))
+        model_revision = validate_batch_response(response, batch, model_revision)
         responses.append(response)
         if first_result_seconds is None:
             first_result_seconds = time.perf_counter() - started
@@ -138,7 +186,13 @@ def main() -> int:
         "infer_ms": infer_ms,
         "text_items": sum(bool(str(item.get("text") or "").strip()) for item in items),
         "no_speech_items": sum(item.get("outcome") == "no_speech" for item in items),
-        "model_revision": next((response.get("model_revision") for response in responses), None),
+        "model_revision": model_revision,
+        "contract_validated": True,
+        "unique_item_ids": len({str(item.get("id") or "") for item in items}),
+        "source_range_coverage_ms": sum(
+            int(item.get("source_end_ms", 0)) - int(item.get("source_start_ms", 0))
+            for item in items
+        ),
     }
     if args.include_items:
         output["items"] = items
@@ -147,6 +201,7 @@ def main() -> int:
     print(json.dumps({key: output[key] for key in (
         "chunks", "audio_ms", "first_result_ms", "wall_ms", "rtf", "infer_ms",
         "text_items", "no_speech_items", "model_revision",
+        "contract_validated", "unique_item_ids", "source_range_coverage_ms",
     )}, ensure_ascii=False))
     return 0
 
