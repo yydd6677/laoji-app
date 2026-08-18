@@ -227,6 +227,33 @@ def _utf8_slice(value: str, start: int, end: int, field: str) -> str:
         raise Q2ReaderError("Q2_GROUNDING_INVALID", f"{field}未落在 UTF-8 字符边界") from error
 
 
+def _support_terms(value: str) -> set[str]:
+    """Return short evidence terms for a conservative citation relevance gate.
+
+    This is not an answer generator or a semantic fallback. It only catches a
+    citation that is exact source text but has no lexical bridge to either the
+    answer clause or the question. Chinese bigrams preserve names, dates and
+    domain phrases better than whitespace tokenization; ASCII/digit runs are
+    retained as complete terms.
+    """
+    normalized = re.sub(r"\s+", "", str(value or "")).lower()
+    cjk = "".join(re.findall(r"[\u3400-\u9fff]", normalized))
+    terms = {cjk[index:index + 2] for index in range(max(0, len(cjk) - 1))}
+    terms.update(re.findall(r"[a-z0-9][a-z0-9._:/%-]{1,}", normalized))
+    if len(cjk) == 1:
+        terms.add(cjk)
+    return {term for term in terms if term}
+
+
+def _citation_supports_text(question: str, clause: str, quote: str) -> bool:
+    quote_terms = _support_terms(quote)
+    if not quote_terms:
+        return False
+    answer_terms = _support_terms(clause)
+    question_terms = _support_terms(question)
+    return bool(quote_terms & answer_terms or quote_terms & question_terms)
+
+
 def _source_payload(raw: Any, *, max_source_text: int = MAX_SOURCE_TEXT) -> list[dict[str, str]]:
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SOURCES:
         raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源数量无效")
@@ -498,6 +525,18 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 # inside a UTF-8 sequence. Citations remain authoritative;
                 # collapse the answer to one server-owned span below.
                 coordinate_valid = False
+        clause_text = answer
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(answer_bytes):
+            try:
+                clause_text = _utf8_slice(answer, start, end, "回答分句")
+            except Q2ReaderError:
+                clause_text = answer
+        # A malformed/character-offset clause can isolate one CJK glyph even
+        # though the answer is otherwise meaningful. Use the full answer as
+        # relevance context in that narrow case; citation byte grounding
+        # remains strict below.
+        if len(re.findall(r"[\u3400-\u9fff]", clause_text)) <= 1:
+            clause_text = answer
         citations_raw = clause.get("citations")
         if not isinstance(citations_raw, list):
             # Qwen3.5 9B commonly flattens the nested citation object even
@@ -541,6 +580,8 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             model_quote = citation.get("quote")
             if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
+            if not _citation_supports_text(question, clause_text, model_quote):
+                raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用与回答无关", 502)
             if model_quote not in source["text"]:
                 # A provider can choose an adjacent short-window alias while
                 # still returning an exact quote from the current immutable

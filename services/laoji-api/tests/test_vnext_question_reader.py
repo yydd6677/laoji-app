@@ -226,11 +226,42 @@ def test_reader_rejects_unmatched_quote(monkeypatch):
     assert captured.value.code == "Q2_GROUNDING_INVALID"
 
 
-def test_reader_canonicalizes_non_contiguous_answer_clauses(monkeypatch):
-    text = "项目按计划推进。"
+def test_reader_rejects_exact_but_unrelated_quote(monkeypatch):
+    text = "周一上午召开设计评审。"
+    answer = "张敏负责提交接口文档。"
+    payload = _payload("张敏负责提交接口文档。")
+    payload["question"] = "谁负责提交接口文档？"
+    payload["sources"][0]["text"] = text
+    payload["sources"][0]["content_sha256"] = _hash(text)
+    payload["source_fingerprint"] = _source_fingerprint(text)
     monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
         "answer_kind": "answer",
-        "answer": "甲乙",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": len(answer.encode("utf-8")),
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len(text.encode("utf-8")),
+                "quote": text,
+            }],
+        }],
+    }, ensure_ascii=False))
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(payload)
+    assert captured.value.code == "Q2_GROUNDING_INVALID"
+    assert "无关" in str(captured.value)
+
+
+def test_reader_canonicalizes_non_contiguous_answer_clauses(monkeypatch):
+    text = "项目按计划推进。"
+    answer = "项目按计划推进"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
         "clauses": [
             {
                 "clause_id": "c1",
@@ -257,7 +288,7 @@ def test_reader_canonicalizes_non_contiguous_answer_clauses(monkeypatch):
     result = reader.read_q2(_payload(text))
     assert len(result["clauses"]) == 1
     assert result["clauses"][0]["answer_start_utf8"] == 0
-    assert result["clauses"][0]["answer_end_utf8"] == len("甲乙".encode("utf-8"))
+    assert result["clauses"][0]["answer_end_utf8"] == len(answer.encode("utf-8"))
 
 
 def test_reader_rejects_unsupported_citation_and_repairs_utf8_boundary(monkeypatch):

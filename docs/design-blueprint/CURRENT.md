@@ -221,3 +221,6 @@ provider 失败保留可重试任务，重放可用 task ID 幂等读取。短�
 移动端 source-stream 清单提交随后补上了有界分页和恢复：清单不再假设所有章节必须在首个请求中
 一次提交，进程在中途退出后会从 `next_manifest_page/next_manifest_chapter` 继续，并对容量等待和
 响应丢失使用同页幂等重放；候选接口仍默认关闭，未改变稳定整理入口。
+Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须与回答分句或问题共享中文/数字短语，
+否则 fail-closed，避免“引用真实但与回答无关”。该修复只属于隔离候选，人工引用相关率和 Android
+回放仍未通过，证据见 [Q2 citation relevance gate](../vnext-stage3/Q2-CITATION-RELEVANCE-GATE-20260819.md)。
