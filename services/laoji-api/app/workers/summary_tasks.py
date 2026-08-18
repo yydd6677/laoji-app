@@ -1042,6 +1042,7 @@ def get_submitted_summary_status(
             identity["prompt_revision"] = PROMPT_REVISION
         failure_messages = {
             "SUMMARY_EVIDENCE_INCOMPLETE": "会议内容过长，暂未完整整理",
+            "SUMMARY_EMBEDDING_UNAVAILABLE": "整理服务暂时不可用，请稍后重试",
             "SUMMARY_V3_FORMAT_INVALID": "整理结果格式异常，可重试",
             "SUMMARY_V3_NO_VERIFIED_FACTS": "整理结果缺少可核对的依据，可重试",
             "SUMMARY_SOURCE_CHANGED": "文字记录已更新，正在等待重新整理",
@@ -4277,6 +4278,8 @@ def _do_device_summary_v3(
         result["_task_success_committed"] = True
         return result
     except SummaryEvidenceIncomplete as error:
+        if str(error) == "embedding_unavailable":
+            raise SummaryV3GenerationError("SUMMARY_EMBEDDING_UNAVAILABLE") from error
         raise SummaryV3GenerationError(error.code) from error
     except SummaryTaskLeaseUnavailable:
         preserve_payload = True
