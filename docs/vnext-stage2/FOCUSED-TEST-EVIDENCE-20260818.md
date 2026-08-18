@@ -25,7 +25,16 @@ PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q \
   tests/test_vnext_vad_initialization.py
 ```
 
-结果：`119 passed in 3.92s`。
+历史结果：`119 passed in 3.92s`。
+
+在加入当前候选的录音资产、存储准入、设备 v2 说话人接口、日程 Graph 路由和完整 Summary V3
+任务集合后，使用项目专用 `.venv-vnext`、临时 SQLite 和 `ENV=local` 重新执行，结果为：
+
+```text
+158 passed, 17 warnings in 3.92s
+```
+
+本次命令覆盖的文件集合见本文件下方“候选重检命令”，结果仍只证明隔离候选，不代表生产切换。
 
 该结果覆盖 device-v2 上传身份、R2 session、实时事件、来源流、Facts V3、Q2 reader、任务租约、
 讲话人 overlay、VAD 初始化和恢复存储；它仍然不替代 Android 进程死亡/断网运行回放、GPU 性能或
@@ -55,3 +64,29 @@ ENV=development PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q tests
 
 这些失败尚未作为 Stage 2 退出证据，也没有通过放宽验证或恢复第三个业务 owner 来处理。需要在
 后续兼容审计中逐项判断是更新过时测试合同，还是修复真实的稳定版兼容回归。
+
+## 候选重检命令
+
+```bash
+ENV=local DATABASE_URL='sqlite+aiosqlite:///:memory:' \
+../../.venv-vnext/bin/python -m pytest -q \
+  tests/test_vnext_*.py \
+  tests/test_summary_v3.py tests/test_persistent_summary_tasks.py \
+  tests/test_recording_assets_v2.py tests/test_storage_admission.py \
+  tests/test_device_v2_api.py tests/test_device_v2_realtime_api.py \
+  tests/test_device_v2_speaker_api.py tests/test_schedule_graph_vnext.py \
+  tests/test_schedule_graph_route_vnext.py --disable-warnings
+```
+
+该命令在 2026-08-18 的候选分支通过 `158` 项。直接从系统 Python 或不提供
+`DATABASE_URL` 会在收集阶段失败，不能与代码回归混为一谈。
+
+## 真实候选语义回放
+
+- Q2 reader：`docs/vnext-stage3/q2-real-holdout-resume-20260818.json`，真实
+  `qwen3.5:9b`，27 条问题全部通过；包括正常回答、未提及、部分字段、来源冲突和引用校验。
+- Facts V3：`docs/vnext-stage3/facts-v3-real-holdout-resume-20260818.json`，真实
+  `qwen3.5:9b`，9 个主题窗口全部通过；正常路径每条使用 1 次模型调用，报告不保存样本正文。
+
+两份报告均明确标记 `candidate_only=true`，字幕只是弱参考，不能作为生产 prompt、规则或
+样本专用补丁，也不能替代人工事实支持率、行动质量、长会议覆盖和 Android 回放门。
