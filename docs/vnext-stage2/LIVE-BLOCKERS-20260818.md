@@ -38,6 +38,9 @@
 - `./android/gradlew :laoji-native-platform:compileDebugKotlin` 通过（2026-08-18）。
 - 401 后的 device-v2 token refresh 不再使用阻塞式 `OkHttp.execute()`；WorkManager 和实时 socket
   都复用 `suspendCancellableCoroutine`，取消会调用实际 `Call.cancel()`。
+- 2026-08-19 候选回放又验证了同一设备 epoch 在主动断线后先刷新 bearer、再从 durable cursor
+  继续实时会话；报告见 `DEVICE-V2-REALTIME-RECONNECT-20260819.md`。这仍不替代 Android
+  原生线程的网络切换和进程死亡回放。
 - 以上只证明源码/编译合同，不能替代 Android 网络中断、进程死亡、文件删除和 APK 运行回放。
 
 ## 结论
