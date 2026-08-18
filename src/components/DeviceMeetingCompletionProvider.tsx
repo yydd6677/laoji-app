@@ -309,7 +309,17 @@ export function DeviceMeetingCompletionProvider(): null {
             }
             if (!Array.isArray(payload?.items) || payload.items.length === 0) {
               if (task?.state === 'pending' && taskState === 'completed' && payloadComplete) {
-                await markDeviceTranscriptTaskFailed(meeting.id, 'no_speech').catch(() => undefined);
+                // An explicitly completed, empty payload is a valid
+                // no-speech result.  Do not surface it as a transcription
+                // failure; transport/API failures are handled above and keep
+                // their retryable error state.
+                await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                await updateMeetingStatus(
+                  meeting.id,
+                  'ended',
+                  { hasTranscript: Boolean(meeting.hasTranscript) },
+                  { remoteSync: 'background' },
+                ).catch(() => undefined);
               }
               continue;
             }

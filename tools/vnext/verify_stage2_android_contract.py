@@ -32,6 +32,7 @@ def main() -> None:
     coordinator = ROOT / "src/native/nativeTransferCoordinator.ts"
     operations = ROOT / "src/data/repositories/vnext/deviceOperationsRepository.ts"
     recording = ROOT / "src/services/meetingRecording.ts"
+    completion = ROOT / "src/components/DeviceMeetingCompletionProvider.tsx"
     upload_migration = ROOT / "src/data/db/migrations/0046DeviceUploadExecutor.ts"
 
     require(
@@ -98,6 +99,12 @@ def main() -> None:
         "success missing remote identity",
         "await clearPendingMeetingAudioUpload('guest'",
         "await markDeviceUploadOperationSuccess(operationId)",
+    )
+    require(
+        completion,
+        "An explicitly completed, empty payload is a valid",
+        "await clearDeviceTranscriptTask(meeting.id)",
+        "{ hasTranscript: Boolean(meeting.hasTranscript) }",
     )
     require(
         live_screen,

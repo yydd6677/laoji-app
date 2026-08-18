@@ -56,6 +56,9 @@
   `LAOJI_VNEXT_REALTIME_V2_ENABLED=1` 时宣告并接受，候选服务默认 fail-closed。
 - Android 会议录制页对带 durable event sequence 的 stable 文字使用串行本机提交：先把累计文字记录
   写入 SQLite，再确认原生 v2 event；保存或确认失败时不推进本机游标，原生加密事件仍可重放。
+- 兼容的设备转写补全路径也将“任务已完成、响应完整但没有文字”视为成功的 `no_speech` 内容结果，
+  清除本机 pending task 并结束会议，不再把明确的无语音结果标成可重试失败；网络、服务端错误和
+  未完成响应仍保持原有失败/重试路径。
 - Android 会议录制入口已接入双重门控：候选 APK 必须设置
   `EXPO_PUBLIC_REALTIME_ASR_V2_CANDIDATE=1`，且服务端必须实时宣告 `realtime_asr_v2=true`，才会使用
   device-v2 durable WSS；任一侧关闭都走完整 v1 录制链路，不在一次请求中途切换。v2 的 task、operation、
