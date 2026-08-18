@@ -4,7 +4,13 @@ import type { NativeProjectionEnvelope } from 'laoji-native-platform';
 import { createNativeRandomUuid } from 'laoji-native-platform';
 import { getOrCreateDeviceIdentity } from '../services/deviceIdentity';
 import {
+  acceptNativeProjectionCheckpoint,
+  getNativeProjectionCheckpoint,
+  type NativeProjectionCheckpoint,
+} from '../data/repositories/vnext/nativeProjectionCheckpointRepository';
+import {
   createProjectionEnvelope,
+  projectionPayloadSha256,
   stableProjectionJson,
 } from './projectionEnvelope';
 
@@ -21,63 +27,99 @@ type ProjectionState = {
  */
 export function useNativeProjection<T extends object>(
   snapshot: T,
-  options: { enabled: boolean; entityId: string },
+  options: { enabled: boolean; entityId: string; surfaceKey: string },
 ): T & { projection?: NativeProjectionEnvelope | null } {
-  const { enabled, entityId } = options;
+  const { enabled, entityId, surfaceKey } = options;
   const surfaceInstanceId = useMemo(
     () => createNativeRandomUuid() ?? Crypto.randomUUID(),
     [],
   );
   const payloadKey = enabled ? stableProjectionJson(snapshot) : '';
-  const lastKeyRef = useRef('');
-  const revisionRef = useRef(0);
-  if (enabled && payloadKey !== lastKeyRef.current) {
-    lastKeyRef.current = payloadKey;
-    revisionRef.current += 1;
-  }
-  const revision = revisionRef.current;
   const [deviceEpoch, setDeviceEpoch] = useState<string | null>(null);
+  const [checkpointReady, setCheckpointReady] = useState(false);
   const [projection, setProjection] = useState<ProjectionState>(null);
+  const checkpointRef = useRef<NativeProjectionCheckpoint | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
 
   useEffect(() => {
     if (!enabled) {
       setDeviceEpoch(null);
+      setCheckpointReady(false);
+      checkpointRef.current = null;
       setProjection(null);
       return;
     }
     let active = true;
-    void getOrCreateDeviceIdentity()
-      .then(identity => {
-        if (active) setDeviceEpoch(identity.epochId);
-      })
-      .catch(() => {
-        if (active) setDeviceEpoch(null);
+    setCheckpointReady(false);
+    checkpointRef.current = null;
+    setProjection(null);
+    void getOrCreateDeviceIdentity().then(async identity => {
+      const checkpoint = await getNativeProjectionCheckpoint({
+        deviceEpochId: identity.epochId,
+        surfaceKey,
+        entityId,
       });
+      if (!active) return;
+      setDeviceEpoch(identity.epochId);
+      checkpointRef.current = checkpoint;
+      setCheckpointReady(true);
+    }).catch(() => {
+      if (!active) return;
+      setDeviceEpoch(null);
+      checkpointRef.current = null;
+      setCheckpointReady(true);
+    });
     return () => { active = false; };
-  }, [enabled]);
+  }, [enabled, entityId, surfaceKey]);
 
   useEffect(() => {
-    if (!enabled || !deviceEpoch || !payloadKey || revision < 1) {
+    if (!enabled || !deviceEpoch || !checkpointReady || !payloadKey) {
       setProjection(null);
       return;
     }
     let active = true;
-    void createProjectionEnvelope(
-      {
-        deviceEpoch,
-        entityId,
-        entityRevision: revision,
-        viewRevision: revision,
-        surfaceInstanceId,
-      },
-      snapshot,
-    ).then(envelope => {
-      if (active) setProjection({ key: payloadKey, envelope });
-    }).catch(() => {
+    void (async () => {
+      const payloadSha256 = await projectionPayloadSha256(snapshotRef.current);
+      if (!active) return;
+      // At most one retry is needed when a cancelled previous render committed
+      // between this render reading the checkpoint and accepting its hash.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const previous = checkpointRef.current;
+        const samePayload = previous?.payloadSha256 === payloadSha256;
+        const entityRevision = samePayload ? previous.entityRevision : (previous?.entityRevision ?? 0) + 1;
+        const viewRevision = samePayload ? previous.viewRevision : (previous?.viewRevision ?? 0) + 1;
+        const envelope = await createProjectionEnvelope(
+          {
+            deviceEpoch,
+            entityId,
+            entityRevision,
+            viewRevision,
+            surfaceInstanceId,
+          },
+          snapshotRef.current,
+        );
+        if (!active) return;
+        const accepted = await acceptNativeProjectionCheckpoint({
+          deviceEpochId: deviceEpoch,
+          surfaceKey,
+          entityId,
+          entityRevision,
+          viewRevision,
+          surfaceInstanceId,
+          payloadSha256,
+        });
+        if (!active) return;
+        checkpointRef.current = accepted.checkpoint;
+        if (accepted.status === 'stale') continue;
+        setProjection({ key: payloadKey, envelope });
+        return;
+      }
+    })().catch(() => {
       if (active) setProjection(null);
     });
     return () => { active = false; };
-  }, [deviceEpoch, enabled, entityId, payloadKey, revision, snapshot, surfaceInstanceId]);
+  }, [checkpointReady, deviceEpoch, enabled, entityId, payloadKey, surfaceKey, surfaceInstanceId]);
 
   return useMemo(() => ({
     ...snapshot,

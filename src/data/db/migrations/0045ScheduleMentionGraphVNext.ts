@@ -61,6 +61,31 @@ CREATE INDEX IF NOT EXISTS idx_local_schedule_deleted
   WHERE deleted_at_ms IS NOT NULL;
 `;
 
+/**
+ * Projection revisions share the Stage 4 migration but remain a separate SQL
+ * constant so their restart/fencing contract can be replayed independently.
+ */
+export const NATIVE_PROJECTION_CHECKPOINTS_V45_SQL = `
+CREATE TABLE IF NOT EXISTS native_projection_checkpoints (
+  device_epoch_id TEXT NOT NULL REFERENCES device_epochs(epoch_id) ON DELETE CASCADE,
+  surface_key TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  entity_revision INTEGER NOT NULL CHECK(entity_revision >= 1),
+  view_revision INTEGER NOT NULL CHECK(view_revision >= 1),
+  surface_instance_id TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL CHECK(
+    length(payload_sha256) = 71
+    AND substr(payload_sha256, 1, 7) = 'sha256:'
+    AND substr(payload_sha256, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  accepted_at_ms INTEGER NOT NULL,
+  PRIMARY KEY(device_epoch_id, surface_key, entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_native_projection_checkpoint_entity
+  ON native_projection_checkpoints(entity_id, surface_key, accepted_at_ms DESC);
+`;
+
 export const scheduleMentionGraphVNext: MeetingDatabaseMigration = {
   version: 45,
   name: 'schedule-mention-graph-vnext',
@@ -99,5 +124,6 @@ export const scheduleMentionGraphVNext: MeetingDatabaseMigration = {
     }
 
     await database.execAsync(SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL);
+    await database.execAsync(NATIVE_PROJECTION_CHECKPOINTS_V45_SQL);
   },
 };

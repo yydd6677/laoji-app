@@ -134,6 +134,7 @@ export function ScheduleScreen({
   const snapshot = useNativeProjection(snapshotBody, {
     enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
     entityId: 'calendar',
+    surfaceKey: 'calendar',
   });
 
   const chooseEditScope = useCallback((event: CalEvent): Promise<EventRecurrenceScope | null> => {

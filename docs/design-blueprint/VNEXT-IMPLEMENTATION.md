@@ -269,7 +269,9 @@ speaker_manual_overrides(meeting_id, stable_segment_key, expected_transcript_rev
 
 扩展 `local_schedule_events`：`event_revision`、`draft_source_sha256`、`producer_revision`、
 `graph_schema_revision`、`deleted_at_ms`。Graph 只在编辑会话和诊断中短期保存，不为每次解析建立
-永久业务表。
+永久业务表。新增 `native_projection_checkpoints`，只持久保存每个 device epoch / native surface /
+entity 已接受的 revision、surface instance 和 payload SHA-256，不复制页面正文；同 revision 同 hash
+幂等，旧 revision 或同 revision 不同 hash 拒绝。
 
 ## 4. 服务端 canonical schema
 
@@ -1041,7 +1043,8 @@ manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在
 
 实施：
 
-1. 执行 0045，拆 `localScheduleParser` 为 recognizers/producer/validator/executor。
+1. 执行 0045，拆 `localScheduleParser` 为 recognizers/producer/validator/executor，并启用唯一的本机
+   ProjectionEnvelope checkpoint owner。
 2. 服务端 graph producer 和 clarification 上线；先发布 v2 schedule client，v1 schedule submit 连续一个
    完整公开周期为零后激活 barrier 并返回 426；server rule pass/model post-normalizer 仅移入兼容模块。
 3. voice session 先录后连；统一 supplement graph revision。

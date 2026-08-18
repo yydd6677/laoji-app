@@ -1109,6 +1109,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const snapshot = useNativeProjection(snapshotBody, {
     enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
     entityId: meetingId || requestedMeetingId || 'recording',
+    surfaceKey: 'recording',
   });
 
   return (

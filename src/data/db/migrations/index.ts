@@ -137,5 +137,8 @@ export { VNEXT_CUTOVER_TOMBSTONES_V41_SQL } from './0041VNextCutoverTombstones';
 export { IMMUTABLE_SOURCES_AND_Q2_V42_SQL } from './0042ImmutableSourcesAndQuestionQ2';
 export { TRANSCRIPT_OVERLAY_AND_SEARCH_VNEXT_V43_SQL } from './0043TranscriptOverlayAndSearchVNext';
 export { MEDIA_GENERATION_AND_TRASH_VNEXT_V44_SQL } from './0044MediaGenerationAndTrashVNext';
-export { SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL } from './0045ScheduleMentionGraphVNext';
+export {
+  NATIVE_PROJECTION_CHECKPOINTS_V45_SQL,
+  SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL,
+} from './0045ScheduleMentionGraphVNext';
 export type { MeetingDatabaseMigration } from './types';

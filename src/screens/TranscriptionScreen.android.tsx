@@ -5723,6 +5723,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const snapshot = useNativeProjection(snapshotBody, {
     enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
     entityId: meeting?.id ?? route.params.meetingId,
+    surfaceKey: 'transcript',
   });
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {

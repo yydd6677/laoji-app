@@ -49,6 +49,10 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - 新增默认关闭的 `nativeProjectionEnvelopeCandidate` 旗标和 `useNativeProjection` 协调器；日历、会议
   详情、实时录音三个页面在候选开启时从本机 epoch、页面实例和快照内容生成 envelope，哈希尚未完成时
   暂不让 native 混用新正文和旧 fence。
+- `0045` 同阶段新增 `native_projection_checkpoints`，只保存 revision/hash fence；repository 在事务中
+  接受新 revision、幂等复用同 revision 同 hash，并拒绝旧 revision 或 revision/hash 冲突。三个页面会在
+  生成 envelope 前恢复各自 `calendar/recording/transcript` surface 的 checkpoint，进程重启后不再从
+  revision 1 重新开始。候选旗标仍默认关闭。
 
 ## 验证
 
@@ -62,12 +66,14 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - `python3 tools/vnext/verify_stage4_migration.py`：通过；在临时 SQLite 文件上重复执行 v45 列升级和
   SQL，保留旧 v20 FTS，写入 12,000 条搜索文档并验证插入/更新/删除触发器、生命周期过滤、完整性
   和外部内容查询；本机暖态搜索 p95 约 `9ms`。工具只依赖 Python 标准库，Linux/Windows 均可运行。
+- `python3 tools/vnext/verify_projection_checkpoint.py`：通过；覆盖首次接受、同 revision 幂等、旧 revision
+  拒绝、新 revision 提升及 SQLite 关闭重开后的恢复。
 - 迁移仅新增 0045，不改变 0040-0044 顺序；未安装到 APK、模拟器或服务器。
 
 ## 未完成
 
 这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭；
-ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线及三个页面的默认关闭生成器，尚未启用
-device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
+ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线、三个页面的默认关闭生成器和本机 checkpoint
+owner，尚未启用 device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
 Expo SQLite/Android 迁移回放和搜索性能门也尚未通过。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
