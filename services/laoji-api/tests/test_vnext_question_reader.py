@@ -33,12 +33,12 @@ def _payload(text: str = "周五前由张敏提交接口文档。") -> dict:
 def test_reader_grounding_returns_canonical_source(monkeypatch):
     text = "周五前由张敏提交接口文档。"
     answer = "张敏负责提交接口文档。"
+    calls = []
     monkeypatch.setattr(reader, "canonical_ollama_base_url", lambda: "http://127.0.0.1:21434")
     monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
-    monkeypatch.setattr(
-        reader,
-        "call_llm",
-        lambda *args, **kwargs: json.dumps({
+    def fake_call(*args, **kwargs):
+        calls.append((args, kwargs))
+        return json.dumps({
             "answer_kind": "answer",
             "answer": answer,
             "clauses": [{
@@ -53,10 +53,11 @@ def test_reader_grounding_returns_canonical_source(monkeypatch):
                     "quote": text,
                 }],
             }],
-        }, ensure_ascii=False),
-    )
+        }, ensure_ascii=False)
+    monkeypatch.setattr(reader, "call_llm", fake_call)
     result = reader.read_q2(_payload(text))
     assert result["answer_kind"] == "answer"
+    assert len(calls) == 1
     citation = result["clauses"][0]["citations"][0]
     assert citation["source_id"] == "line-1"
     assert citation["source_type"] == "transcript"
@@ -86,6 +87,69 @@ def test_reader_rejects_unmatched_quote(monkeypatch):
             }],
         }, ensure_ascii=False),
     )
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload(text))
+    assert captured.value.code == "Q2_GROUNDING_INVALID"
+
+
+def test_reader_rejects_non_contiguous_answer_clauses(monkeypatch):
+    text = "项目按计划推进。"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": "甲乙",
+        "clauses": [
+            {
+                "clause_id": "c1",
+                "answer_start_utf8": 0,
+                "answer_end_utf8": 3,
+                "citations": [{
+                    "citation_id": "cite-1", "source_id": "s0",
+                    "source_start_utf8": 0, "source_end_utf8": len(text.encode("utf-8")),
+                    "quote": text,
+                }],
+            },
+            {
+                "clause_id": "c2",
+                "answer_start_utf8": 4,
+                "answer_end_utf8": 6,
+                "citations": [{
+                    "citation_id": "cite-2", "source_id": "s0",
+                    "source_start_utf8": 0, "source_end_utf8": len(text.encode("utf-8")),
+                    "quote": text,
+                }],
+            },
+        ],
+    }, ensure_ascii=False))
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload(text))
+    assert captured.value.code == "Q2_GROUNDING_INVALID"
+
+
+def test_reader_rejects_utf8_boundary_and_unsupported_citation_for_refusal(monkeypatch):
+    text = "甲乙"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "not_stated",
+        "answer": "会议记录没有说明。",
+        "clauses": [{"clause_id": "c1"}],
+    }, ensure_ascii=False))
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload(text))
+    assert captured.value.code == "Q2_GROUNDING_INVALID"
+
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": "甲",
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": 3,
+            "citations": [{
+                "citation_id": "cite-1", "source_id": "s0",
+                "source_start_utf8": 1, "source_end_utf8": 3,
+                "quote": "甲",
+            }],
+        }],
+    }, ensure_ascii=False))
     with pytest.raises(reader.Q2ReaderError) as captured:
         reader.read_q2(_payload(text))
     assert captured.value.code == "Q2_GROUNDING_INVALID"

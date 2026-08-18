@@ -93,7 +93,7 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `speakers.ts` / speaker Kotlin surfaces | SpeakerOverlayRepository | 自动/人工 overlay 分表和 expected revision CAS |
 | `meetingSummaryV3.ts` | FactsV3 projection | 保留并扩展 deterministic chapter merge |
 | `meetingSummaryTasks.ts` / `meetingSummaryProcessing.ts` | remote summary operation | 删除内存/重复 task owner |
-| `meetingQuestions.ts` | Q2 request/projection | 删除 summary evidence、历史答案正文、legacy fallback |
+| `meetingQuestions.ts` | legacy adapter + Q2 dispatch | Q2 路径只读取 immutable transcript/note source；旧链路在 barrier 前兼容 |
 | `meetingQuestionRepository.ts` | QuestionRepository | 保存 immutable turn + exact SourceRef transaction |
 | `MeetingActionsSheet.tsx` / `MeetingActionEditorSheet.tsx` | ActionItemRepository | 保留手动创建、编辑、完成、删除、负责人、截止、提醒和后续日程；candidate 只提供 provenance |
 | `notifications.ts` meeting action/planned-end paths | NotificationProjection | 保留本场待办与预计结束提醒；从本机 revision 重建，不成为状态 owner |
@@ -131,7 +131,9 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `app/services/vnext_summary_chapter_pipeline.py` | generic Task/Attempt summary adapter | 每次最多处理一章；provider 适配、checkpoint 提升和最终 artifact 提交 |
 | `app/services/vnext_summary_worker.py` | source-stream summary worker | 单并发扫描 active generic task；租约心跳、重启恢复和一章一让出；默认关闭 |
 | `src/services/meetingSummaryV3SourceStream.ts` | mobile source-stream summary orchestrator | 由 immutable transcript/note/授权附件构造分章来源；幂等上传、task/artifact 恢复和本地模板投影；双开关候选 |
-| `src/services/questionQ2Candidate.ts` | Q2 single-reader candidate adapter | fake transport、快照/线程/分句引用原子落库；默认 feature flag 关闭，等待语义 holdout |
+| `src/services/questionQ2Candidate.ts` / `meetingQuestionsQ2.ts` | Q2 single-reader candidate | source snapshot、单次 reader、grounding、Q2 operation retry 和现有问答页只读投影；默认双开关关闭，等待语义 holdout |
+| `src/services/questionQ2DeviceProvider.ts` | Device Q2 Provider | capability/binding fence、严格 response normalization；不回退旧问答 |
+| `app/services/vnext_question_reader.py` | server Q2 reader candidate | 单次 Ollama reader、结构协议、UTF-8 引用完整性和来源 hash 校验；默认 capability 关闭 |
 | `app/services/app_meeting_question.py` | MeetingQuestionQ2 | 由 5,826 行多轮链替换为 snapshot/provider/grounding/owner 四层 |
 | `app/models/meeting_*sync.py` | none after v1 drain | 账号/跨设备同步模型按 Stage 5 删除 |
 | `app/api/location.py` | LocationProxy | 保留缓存/限流/日志脱敏 |

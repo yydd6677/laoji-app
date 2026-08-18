@@ -114,11 +114,13 @@ V3 章节经过确定性 reducer 合并到 40 条事实、48 条关系和 10 条
 SQLite、API、加密、取消、租约丢失、三章双槽、artifact 回放和旧 Summary V3 回归证据，但尚未
 移动端 source-stream client 已接入 Device V2 合同，并已挂入整理服务的双开关候选编排（来源构造、分章上传、任务恢复和
 artifact 投影）；默认 capability/feature flag 关闭，稳定整理入口不会产生 source-stream 流量。服务端已有独立单 worker
-消费 active source-stream task，每次最多处理一章，租约心跳和重启扫描可恢复；仍缺 Q2、真实模型/样本或 capability barrier，
+消费 active source-stream task，每次最多处理一章，租约心跳和重启扫描可恢复；仍缺 Q2 的真实语义 holdout、设备回放和
+capability barrier，
 因此不能称为 Stage 3 退出，
 也没有改变当前稳定版服务流量。
 
-Q2 已增加默认关闭的 `questionQ2Candidate` fake-transport adapter：它从当前 immutable evidence
-创建 snapshot/thread，provider 只接收转写和当前笔记，不把派生整理结果提升为来源；回答分句必须完整覆盖答案并逐字匹配
-UTF-8 引用，随后才写入 Q2 clause/citation 表。该 adapter 仍没有接入实际 reader，也没有改变现有
-问答 UI；语义 holdout、真实 provider 和 capability barrier 仍是 Stage 3 未完成项。
+Q2 已从 fake transport 推进为默认关闭的真实 reader 候选：服务端 `questions-v2` 使用严格请求模型、设备
+binding fence、单次本地 Provider 调用和 UTF-8 来源校验；移动端以 `questionQ2Candidate` 双开关接入
+Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现有问答页。来源仅包含当前转写和用户明确纳入的
+我的笔记，不把整理结果或历史答案提升为证据；失败重试会更换 device operation 并重新绑定未完成 turn。当前仍未
+通过真实模型语义 holdout、LaoJi 专属设备回放和 capability barrier，不能称为 Stage 3 退出。
