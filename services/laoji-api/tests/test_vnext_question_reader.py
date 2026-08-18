@@ -254,3 +254,26 @@ def test_reader_grounds_compact_qwen_clause_from_exact_quote(monkeypatch):
     with pytest.raises(reader.Q2ReaderError) as captured:
         reader.read_q2(_payload(text))
     assert captured.value.code == "Q2_GROUNDING_INVALID"
+
+
+def test_reader_joins_compact_clause_answers_when_top_level_answer_is_missing(monkeypatch):
+    text = "本文研究任务卸载算法，并使用模拟退火得到最优解。"
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "clauses": [
+            {
+                "answer": "本文研究任务卸载算法。",
+                "source_id": "s0",
+                "quote": "本文研究任务卸载算法",
+            },
+            {
+                "answer": "并使用模拟退火得到最优解。",
+                "source_id": "s0",
+                "quote": "使用模拟退火得到最优解",
+            },
+        ],
+    }, ensure_ascii=False))
+    result = reader.read_q2(_payload(text))
+    assert result["answer"] == "本文研究任务卸载算法。并使用模拟退火得到最优解。"
+    assert len(result["clauses"][0]["citations"]) == 2

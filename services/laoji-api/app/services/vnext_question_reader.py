@@ -207,9 +207,21 @@ def _model_identifier(value: Any, fallback: str) -> str:
     return fallback
 
 
-def _model_answer(answer_kind: str, value: Any) -> str:
+def _model_answer(answer_kind: str, value: Any, clauses: Any) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
+    if answer_kind == "answer" and isinstance(clauses, list) and clauses:
+        parts = [
+            item.get("answer").strip()
+            for item in clauses
+            if isinstance(item, dict)
+            and isinstance(item.get("answer"), str)
+            and item.get("answer").strip()
+        ]
+        if len(parts) == len(clauses):
+            combined = "".join(parts)
+            if len(combined) <= 20_000:
+                return combined
     if answer_kind in {"not_stated", "cannot_confirm"}:
         return "当前会议记录没有提供足够信息确认。"
     raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
@@ -270,10 +282,10 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     answer_kind = raw_answer_kind.strip()
     if answer_kind not in {"answer", "not_stated", "cannot_confirm"}:
         raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
-    answer = _model_answer(answer_kind, response.get("answer"))
     clauses_raw = response.get("clauses")
     if not isinstance(clauses_raw, list):
         raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
+    answer = _model_answer(answer_kind, response.get("answer"), clauses_raw)
     if answer_kind != "answer":
         if clauses_raw:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "无依据回答不应包含引用", 502)
