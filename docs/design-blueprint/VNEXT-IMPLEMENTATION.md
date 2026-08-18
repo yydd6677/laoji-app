@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted`
+- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -14,6 +14,11 @@ R2 上传 operation 已在本机 `device_operations` 创建并绑定录音资产
 `829384557-1-208.srt` 加入评测后，候选 Q2 `27/27`、Facts V3 `9/9` 通过；2026-08-18 晚间以同一
 候选 provider 重复执行仍为 `27/27` 与 `9/9`。上述均为隔离证据，
 不代表 Stage 2/3/4 退出、生产切换或 Stage 5 删除许可。
+
+2026-08-19 新增 Stage 5 候选基础设施：`capability_cutovers` 现在持久保存不可替换的
+`legacy_reader_removal_revision` 与证据 SHA-256；只允许在对应 capability 已激活且旧提交已关闭后登记，
+不会自动启用能力或删除代码。候选 `b4f84c9` 已在隔离 `18021` 启动并通过 `/api/ready`；五个能力仍未登记，
+因此删除门和生产切换继续保持关闭。
 
 ## 0. 已核对的实施基线
 
