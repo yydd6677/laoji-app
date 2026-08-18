@@ -516,13 +516,17 @@ def embed_texts(
     *,
     priority: str = "interactive",
     operation: str = "meeting.embedding",
+    timeout_seconds: float | None = None,
 ) -> list[tuple[float, ...]]:
     if not texts:
         return []
-    timeout_seconds = max(
-        1.0,
-        min(60.0, float(os.getenv("MEETING_QUESTION_EMBEDDING_TIMEOUT", "15"))),
-    )
+    if timeout_seconds is None:
+        timeout_seconds = max(
+            1.0,
+            min(60.0, float(os.getenv("MEETING_QUESTION_EMBEDDING_TIMEOUT", "15"))),
+        )
+    else:
+        timeout_seconds = max(1.0, min(60.0, float(timeout_seconds)))
     try:
         num_ctx = int(os.getenv("MEETING_QUESTION_EMBEDDING_NUM_CTX", "8192"))
     except ValueError:
@@ -530,27 +534,34 @@ def embed_texts(
     num_ctx = min(8192, max(2048, num_ctx))
 
     def invoke() -> list[tuple[float, ...]]:
-        response = _SESSION.post(
-            f"{canonical_ollama_base_url()}/api/embed",
-            json={
-                "model": EMBEDDING_MODEL,
-                "input": texts,
-                "dimensions": max(
-                    32,
-                    min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
-                ),
-                "truncate": True,
-                "keep_alive": KEEP_ALIVE,
-                "options": {"num_ctx": num_ctx},
-            },
-            headers={
-                "X-Laoji-Priority": priority,
-                "X-Laoji-Operation": operation,
-            },
-            timeout=timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response = _SESSION.post(
+                f"{canonical_ollama_base_url()}/api/embed",
+                json={
+                    "model": EMBEDDING_MODEL,
+                    "input": texts,
+                    "dimensions": max(
+                        32,
+                        min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
+                    ),
+                    "truncate": True,
+                    "keep_alive": KEEP_ALIVE,
+                    "options": {"num_ctx": num_ctx},
+                },
+                headers={
+                    "X-Laoji-Priority": priority,
+                    "X-Laoji-Operation": operation,
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.Timeout as exc:
+            raise LlmProviderError("ollama_embedding_timeout") from exc
+        except requests.RequestException as exc:
+            raise LlmProviderError("ollama_embedding_failed") from exc
+        except (TypeError, ValueError) as exc:
+            raise LlmProviderError("embedding_response_invalid") from exc
         embeddings = payload.get("embeddings")
         if not isinstance(embeddings, list) or len(embeddings) != len(texts):
             raise LlmProviderError("embedding_response_invalid")

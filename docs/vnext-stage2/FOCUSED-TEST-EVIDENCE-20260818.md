@@ -31,7 +31,7 @@ PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q \
 任务集合后，使用项目专用 `.venv-vnext`、临时 SQLite 和 `ENV=local` 重新执行，结果为：
 
 ```text
-158 passed, 17 warnings in 3.92s
+159 passed, 17 warnings in 3.88s
 ```
 
 本次命令覆盖的文件集合见本文件下方“候选重检命令”，结果仍只证明隔离候选，不代表生产切换。
@@ -78,8 +78,14 @@ ENV=local DATABASE_URL='sqlite+aiosqlite:///:memory:' \
   tests/test_schedule_graph_route_vnext.py --disable-warnings
 ```
 
-该命令在 2026-08-18 的候选分支通过 `158` 项。直接从系统 Python 或不提供
+该命令在 2026-08-18 的候选分支通过 `159` 项。直接从系统 Python 或不提供
 `DATABASE_URL` 会在收集阶段失败，不能与代码回归混为一谈。
+
+本次重检还覆盖 embedding provider 超时归一：长会议 evidence builder 将底层 HTTP 超时转换为
+`SUMMARY_EVIDENCE_INCOMPLETE/embedding_unavailable`，summary worker 可以按既有任务策略重试，
+不会向 API 泄漏 `requests.ReadTimeout`。长会议 embedding 默认批量为 16、单批超时 45 秒，均受
+代码内上下界约束；可通过 `SUMMARY_V3_EMBED_BATCH_SIZE` 调整，但不能绕过 provider 或启用词法
+静默降级。
 
 ## 真实候选语义回放
 

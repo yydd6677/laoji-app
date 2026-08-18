@@ -150,6 +150,15 @@ def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
     assert captured["json"]["options"] == {"num_ctx": 8192}
 
 
+def test_embedding_timeout_is_normalized_to_provider_error(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise llm_provider.requests.ReadTimeout("embedding timed out")
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", timeout)
+    with pytest.raises(llm_provider.LlmProviderError, match="ollama_embedding_timeout"):
+        llm_provider.embed_texts(["长会议内容"])
+
+
 def test_business_services_cannot_bypass_the_provider_or_old_ports():
     app_root = Path(__file__).resolve().parents[1] / "app"
     provider = app_root / "services" / "llm_provider.py"

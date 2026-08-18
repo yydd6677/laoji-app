@@ -886,6 +886,28 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     assert set(operations) == {"summary.v3.evidence.embedding"}
 
 
+def test_long_evidence_maps_embedding_provider_failure_to_stable_error(monkeypatch):
+    transcript = [
+        {
+            "id": f"timeout-{index}",
+            "text": "这是一段需要通过 embedding 选择代表片段的长会议内容。" * 60,
+            "start_ms": index * 10_000,
+            "end_ms": index * 10_000 + 8_000,
+        }
+        for index in range(18)
+    ]
+
+    def fail_embedding(*_args, **_kwargs):
+        from app.services.llm_provider import LlmProviderError
+
+        raise LlmProviderError("ollama_embedding_timeout")
+
+    monkeypatch.setattr(summary_v3_evidence, "embed_texts", fail_embedding)
+    with pytest.raises(SummaryEvidenceIncomplete) as captured:
+        build_evidence_package(transcript, None, None)
+    assert str(captured.value) == "embedding_unavailable"
+
+
 def test_long_evidence_fails_closed_when_required_segments_exceed_budget(monkeypatch):
     forced = "负责人需要核对这一段背景信息。" * 60
     transcript = [

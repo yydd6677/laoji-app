@@ -6,10 +6,11 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 import re
 from typing import Any, Iterable
 
-from app.services.llm_provider import embed_texts
+from app.services.llm_provider import LlmProviderError, embed_texts
 from app.services.summary_v3_store import source_fingerprint
 
 
@@ -358,15 +359,27 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
 
 def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
     vectors: list[tuple[float, ...]] = []
-    for offset in range(0, len(sources), 64):
-        batch = sources[offset : offset + 64]
-        vectors.extend(
-            embed_texts(
-                [source.text for source in batch],
-                priority="background",
-                operation="summary.v3.evidence.embedding",
+    try:
+        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "16"))
+    except (TypeError, ValueError):
+        configured_batch_size = 16
+    batch_size = max(4, min(64, configured_batch_size))
+    for offset in range(0, len(sources), batch_size):
+        batch = sources[offset : offset + batch_size]
+        try:
+            vectors.extend(
+                embed_texts(
+                    [source.text for source in batch],
+                    priority="background",
+                    operation="summary.v3.evidence.embedding",
+                    timeout_seconds=45,
+                )
             )
-        )
+        except LlmProviderError as error:
+            # Keep provider outages inside the stable evidence contract. The
+            # worker can then retry or expose SUMMARY_EVIDENCE_INCOMPLETE
+            # without leaking requests/urllib exceptions to the API surface.
+            raise SummaryEvidenceIncomplete("embedding_unavailable") from error
     if len(vectors) != len(sources):
         raise SummaryEvidenceIncomplete("embedding_count_mismatch")
     return vectors
