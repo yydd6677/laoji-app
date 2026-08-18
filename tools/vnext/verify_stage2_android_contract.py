@@ -25,6 +25,9 @@ def main() -> None:
     transfer = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiTransferModule.kt"
     worker = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/MeetingUploadWorker.kt"
     uploader = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/DeviceV2R2Uploader.kt"
+    lease_store = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/CredentialLeaseStore.kt"
+    realtime_socket = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/audio/DeviceV2RealtimeAsrSocket.kt"
+    device_api = ROOT / "src/services/deviceV2Api.ts"
     erase = ROOT / "src/services/localDataEraseCoordinator.ts"
     live_screen = ROOT / "src/screens/MeetingLiveScreen.android.tsx"
     feature_flags = ROOT / "src/config/featureFlags.ts"
@@ -56,6 +59,23 @@ def main() -> None:
         "invokeOnCancellation { call.cancel() }",
         "refreshCancellable(lease)",
         "fun refreshCancellable(lease: CredentialLease): CredentialLease",
+    )
+    require(
+        lease_store,
+        "A token refresh replaces the encrypted lease",
+        "it.generation >= generation",
+    )
+    require(
+        realtime_socket,
+        "DeviceV2LeaseRefresher(client, credentialStore).refresh(nextLease)",
+        "scheduleReconnect(refresh = true)",
+        "lastLocalEventAck",
+    )
+    require(
+        device_api,
+        "export async function refreshDeviceV2Session",
+        "let sessionPromise: Promise<DeviceV2Session> | null = null",
+        "session = await refreshDeviceV2Session(session)",
     )
     require(erase, "clearNativeTransferLease(`device-v2:${epochId}`)")
     require(

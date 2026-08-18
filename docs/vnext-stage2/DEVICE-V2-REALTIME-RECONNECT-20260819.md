@@ -21,6 +21,20 @@
 - 总耗时：5,835 ms。
 - binding purge：`confirmed`。
 
+### 令牌刷新 + 网络中断恢复
+
+报告：`realtime-probe-token-refresh-20260819.json`（仅哈希、字节数、事件计数、耗时和清理状态）。
+
+- 输入：256,000 bytes，8 个 1 秒分片；第 4 个分片后主动关闭连接。
+- 第二条连接使用同一设备 epoch、binding 和任务游标，但在重连前完成一次新的 P-256
+  challenge/token exchange；旧 bearer 未写入报告或持久日志。
+- 服务端从第 4 个分片继续，最终收到 2 个 stable 事件和 1 个 final 事件，结果为
+  `outcome=text`，无重复分片。
+- 总耗时：6,016 ms；binding purge：`confirmed`。
+
+这证明候选服务的令牌刷新合同和实时游标恢复可以串联工作，但仍不是 Android 原生
+录音线程的系统网络切换验收。
+
 ### 无语音成功结果
 
 报告：`realtime-probe-fdae675-trimmed.json`。

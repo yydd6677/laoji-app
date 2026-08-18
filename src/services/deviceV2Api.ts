@@ -24,6 +24,7 @@ const CAPABILITY_CACHE_MS = 60_000;
 let capabilityValue: DeviceV2Capabilities | null = null;
 let capabilityPromise: Promise<DeviceV2Capabilities> | null = null;
 let capabilityUntil = 0;
+let sessionPromise: Promise<DeviceV2Session> | null = null;
 
 export class DeviceV2ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {
@@ -104,7 +105,12 @@ async function jsonRequest<T>(path: string, init: RequestInit, fallback: string)
   return data as T;
 }
 
-async function readStoredSession(identity: { deviceId: string; epochId: string }, key: DeviceKeyInfo, hash: string): Promise<DeviceV2Session | null> {
+async function readStoredSession(
+  identity: { deviceId: string; epochId: string },
+  key: DeviceKeyInfo,
+  hash: string,
+  options: { allowExpired?: boolean } = {},
+): Promise<DeviceV2Session | null> {
   const [token, expiresRaw, versionRaw, storedHash] = await Promise.all([
     SecureStore.getItemAsync(TOKEN_KEY),
     SecureStore.getItemAsync(TOKEN_EXPIRES_KEY),
@@ -113,7 +119,8 @@ async function readStoredSession(identity: { deviceId: string; epochId: string }
   ]);
   const expiresAt = Number(expiresRaw);
   const keyVersion = Number(versionRaw);
-  if (!token || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() + 30_000
+  if (!token || !Number.isSafeInteger(expiresAt)
+    || (!options.allowExpired && expiresAt <= Date.now() + 30_000)
     || keyVersion !== key.keyVersion || storedHash !== hash) return null;
   return {
     token,
@@ -125,7 +132,91 @@ async function readStoredSession(identity: { deviceId: string; epochId: string }
   };
 }
 
-export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
+async function persistDeviceV2Token(
+  token: { access_token: string; expires_at: number; key_version: number },
+  hash: string,
+  identity: { deviceId: string; epochId: string },
+): Promise<DeviceV2Session> {
+  const expiresAt = token.expires_at < 1_000_000_000_000
+    ? token.expires_at * 1000
+    : token.expires_at;
+  if (!token.access_token || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
+    throw new DeviceV2ApiError('设备令牌响应无效', 502, 'DEVICE_V2_TOKEN_INVALID');
+  }
+  await Promise.all([
+    SecureStore.setItemAsync(TOKEN_KEY, token.access_token),
+    SecureStore.setItemAsync(TOKEN_EXPIRES_KEY, String(expiresAt)),
+    SecureStore.setItemAsync(KEY_VERSION_KEY, String(token.key_version)),
+    SecureStore.setItemAsync(PUBLIC_HASH_KEY, hash),
+  ]);
+  return {
+    token: token.access_token,
+    expiresAt,
+    deviceId: identity.deviceId,
+    epochId: identity.epochId,
+    keyVersion: token.key_version,
+    publicKeyHash: hash,
+  };
+}
+
+async function issueDeviceV2Token(
+  identity: { deviceId: string; epochId: string },
+  key: DeviceKeyInfo,
+  hash: string,
+): Promise<DeviceV2Session> {
+  const authRequestId = randomRequestId('auth');
+  const authChallenge = await jsonRequest<{ challenge_id: string; nonce: string; key_version: number }>(
+    '/auth/challenges',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema_version: 2,
+        device_id: identity.deviceId,
+        epoch_id: identity.epochId,
+        key_version: key.keyVersion,
+        public_key_hash: hash,
+        request_id: authRequestId,
+      }),
+    },
+    '设备认证挑战失败',
+  );
+  const authSignature = signWithDeviceKey(
+    key.keyVersion,
+    utf8Base64(message('auth', authChallenge.nonce, identity.deviceId, identity.epochId, authRequestId)),
+  );
+  const token = await jsonRequest<{
+    access_token: string;
+    expires_at: number;
+    key_version: number;
+  }>('/auth/tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schema_version: 2,
+      challenge_id: authChallenge.challenge_id,
+      nonce: authChallenge.nonce,
+      signature: authSignature,
+      request_id: authRequestId,
+    }),
+  }, '设备令牌获取失败');
+  return persistDeviceV2Token(token, hash, identity);
+}
+
+/** Refresh an existing epoch without re-registering the device or replacing its key. */
+export async function refreshDeviceV2Session(
+  previous?: DeviceV2Session,
+): Promise<DeviceV2Session> {
+  const identity = await getOrCreateDeviceIdentity();
+  const key = await getOrCreateDeviceKey(1);
+  const hash = await publicKeyHash(key.publicKeyDer);
+  if (previous && (previous.deviceId !== identity.deviceId || previous.epochId !== identity.epochId)) {
+    throw new DeviceV2ApiError('设备数据域已变化，请重新初始化', 409, 'DEVICE_V2_EPOCH_CHANGED');
+  }
+  return issueDeviceV2Token(identity, key, hash);
+}
+
+async function bootstrapDeviceV2Session(): Promise<DeviceV2Session> {
   const identity = await getOrCreateDeviceIdentity();
   const key = await getOrCreateDeviceKey(1);
   const hash = await publicKeyHash(key.publicKeyDer);
@@ -180,81 +271,49 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
   }, '设备注册失败');
   markPurgeCapabilityArmed(purgeCapability.capabilityId);
 
-  const authRequestId = randomRequestId('auth');
-  const authChallenge = await jsonRequest<{ challenge_id: string; nonce: string; key_version: number }>(
-    '/auth/challenges',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        schema_version: 2,
-        device_id: identity.deviceId,
-        epoch_id: identity.epochId,
-        key_version: key.keyVersion,
-        public_key_hash: hash,
-        request_id: authRequestId,
-      }),
-    },
-    '设备认证挑战失败',
-  );
-  const authSignature = signWithDeviceKey(
-    key.keyVersion,
-    utf8Base64(message('auth', authChallenge.nonce, identity.deviceId, identity.epochId, authRequestId)),
-  );
-  const token = await jsonRequest<{
-    access_token: string;
-    expires_at: number;
-    key_version: number;
-  }>('/auth/tokens', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      schema_version: 2,
-      challenge_id: authChallenge.challenge_id,
-      nonce: authChallenge.nonce,
-      signature: authSignature,
-      request_id: authRequestId,
-    }),
-  }, '设备令牌获取失败');
-  const expiresAt = token.expires_at < 1_000_000_000_000
-    ? token.expires_at * 1000
-    : token.expires_at;
-  await Promise.all([
-    SecureStore.setItemAsync(TOKEN_KEY, token.access_token),
-    SecureStore.setItemAsync(TOKEN_EXPIRES_KEY, String(expiresAt)),
-    SecureStore.setItemAsync(KEY_VERSION_KEY, String(token.key_version)),
-    SecureStore.setItemAsync(PUBLIC_HASH_KEY, hash),
-  ]);
-  return {
-    token: token.access_token,
-    expiresAt,
-    deviceId: identity.deviceId,
-    epochId: identity.epochId,
-    keyVersion: token.key_version,
-    publicKeyHash: hash,
-  };
+  return issueDeviceV2Token(identity, key, hash);
+}
+
+export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
+  if (sessionPromise) return sessionPromise;
+  const operation = (async () => {
+    const identity = await getOrCreateDeviceIdentity();
+    const key = await getOrCreateDeviceKey(1);
+    const hash = await publicKeyHash(key.publicKeyDer);
+    const stored = await readStoredSession(identity, key, hash, { allowExpired: true });
+    if (stored && stored.expiresAt > Date.now() + 30_000) return stored;
+    if (stored) {
+      return refreshDeviceV2Session(stored);
+    }
+    return bootstrapDeviceV2Session();
+  })();
+  sessionPromise = operation;
+  try {
+    return await operation;
+  } finally {
+    if (sessionPromise === operation) sessionPromise = null;
+  }
 }
 
 export async function deviceV2Request<T>(path: string, init: RequestInit = {}, fallback = '设备服务暂时不可用'): Promise<T> {
-  const session = await ensureDeviceV2Session();
-  try {
-    return await jsonRequest<T>(path, {
-      ...init,
-      headers: {
-        ...(init.headers ?? {}),
-        Authorization: `Bearer ${session.token}`,
-        'X-Laoji-Device-Id': session.deviceId,
-        'X-Laoji-Epoch-Id': session.epochId,
-      },
-    }, fallback);
-  } catch (error) {
-    if (error instanceof DeviceV2ApiError && error.status === 401) {
-      await Promise.all([
-        SecureStore.deleteItemAsync(TOKEN_KEY),
-        SecureStore.deleteItemAsync(TOKEN_EXPIRES_KEY),
-      ]);
+  let session = await ensureDeviceV2Session();
+  let refreshed = false;
+  while (true) {
+    try {
+      return await jsonRequest<T>(path, {
+        ...init,
+        headers: {
+          ...(init.headers ?? {}),
+          Authorization: `Bearer ${session.token}`,
+          'X-Laoji-Device-Id': session.deviceId,
+          'X-Laoji-Epoch-Id': session.epochId,
+        },
+      }, fallback);
+    } catch (error) {
+      if (!(error instanceof DeviceV2ApiError) || error.status !== 401 || refreshed) throw error;
+      refreshed = true;
+      session = await refreshDeviceV2Session(session);
     }
-    throw error;
   }
 }
 

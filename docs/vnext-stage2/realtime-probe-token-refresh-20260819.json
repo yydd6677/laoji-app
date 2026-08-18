@@ -1,0 +1,17 @@
+{
+  "source_sha256": "sha256:ac90108db7dd1d8bdebb4f77395a415966f6aa2168ac5443c211ebaa6507a9fb",
+  "source_bytes": 256000,
+  "chunk_count": 8,
+  "interrupted_after_chunk": 4,
+  "resumed_from_chunk": 4,
+  "event_count": 3,
+  "stable_event_count": 2,
+  "final_outcome": "text",
+  "final_event_sequence": 3,
+  "token_refresh_before_reconnect": true,
+  "model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+  "purge_state": "confirmed",
+  "wall_ms": 6016,
+  "device_id_sha256": "32fb24ad2e43",
+  "epoch_id_sha256": "b86cd2f06f40"
+}

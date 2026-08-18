@@ -20,6 +20,7 @@ import struct
 import time
 import uuid
 from urllib import request
+from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -35,6 +36,17 @@ from probe_device_v2_upload import (
 
 
 FRAME_PREFIX = struct.Struct(">4sBH")
+
+
+@dataclass(frozen=True)
+class BootstrapState:
+    auth: dict[str, str]
+    purge: dict[str, str]
+    device_id: str
+    epoch_id: str
+    private_key: ec.EllipticCurvePrivateKey
+    public_key_hash: str
+    key_version: int
 
 
 def args() -> argparse.Namespace:
@@ -66,7 +78,7 @@ def encode_chunk(seq: int, pcm: bytes, start_ms: int) -> bytes:
     return FRAME_PREFIX.pack(b"LJPC", 2, len(header)) + header + pcm
 
 
-def bootstrap(api: str) -> tuple[dict[str, str], dict[str, str], str, str]:
+def bootstrap(api: str) -> BootstrapState:
     private_key = ec.generate_private_key(ec.SECP256R1())
     public_der = private_key.public_key().public_bytes(
         serialization.Encoding.DER,
@@ -151,7 +163,54 @@ def bootstrap(api: str) -> tuple[dict[str, str], dict[str, str], str, str]:
         "X-Laoji-Device-Id": device_id,
         "X-Laoji-Epoch-Id": epoch_id,
     }
-    return auth, {"purge_id": purge_id, "purge_secret": purge_secret}, device_id, epoch_id
+    return BootstrapState(
+        auth=auth,
+        purge={"purge_id": purge_id, "purge_secret": purge_secret},
+        device_id=device_id,
+        epoch_id=epoch_id,
+        private_key=private_key,
+        public_key_hash=challenge["public_key_hash"],
+        key_version=1,
+    )
+
+
+def refresh_auth(api: str, state: BootstrapState) -> dict[str, str]:
+    """Issue a new short-lived bearer for the same device epoch and key."""
+    request_id = "refresh-auth-" + uuid.uuid4().hex
+    status, challenge = json_request(
+        f"{api}/auth/challenges",
+        method="POST",
+        payload={
+            "schema_version": 2,
+            "device_id": state.device_id,
+            "epoch_id": state.epoch_id,
+            "key_version": state.key_version,
+            "public_key_hash": state.public_key_hash,
+            "request_id": request_id,
+        },
+    )
+    challenge = require_success(status, challenge, "refresh auth challenge")
+    signature = state.private_key.sign(
+        signed_message("auth", challenge["nonce"], state.device_id, state.epoch_id, request_id),
+        ec.ECDSA(hashes.SHA256()),
+    )
+    status, token = json_request(
+        f"{api}/auth/tokens",
+        method="POST",
+        payload={
+            "schema_version": 2,
+            "challenge_id": challenge["challenge_id"],
+            "nonce": challenge["nonce"],
+            "signature": b64url(signature),
+            "request_id": request_id,
+        },
+    )
+    token = require_success(status, token, "refresh auth token")
+    return {
+        "Authorization": "Bearer " + token["access_token"],
+        "X-Laoji-Device-Id": state.device_id,
+        "X-Laoji-Epoch-Id": state.epoch_id,
+    }
 
 
 async def receive_until(ws, *, required: str, events: list[dict], timeout: float = 90.0) -> dict:
@@ -172,7 +231,8 @@ async def receive_until(ws, *, required: str, events: list[dict], timeout: float
 async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
     import websockets
 
-    auth, purge, device_id, epoch_id = bootstrap(api)
+    state = bootstrap(api)
+    auth, purge, device_id, epoch_id = state.auth, state.purge, state.device_id, state.epoch_id
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
     binding_purge_id = str(uuid.uuid4())
@@ -231,7 +291,12 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
         for seq, chunk in enumerate(chunks[:interrupted_after]):
             await ws.send(encode_chunk(seq, chunk, seq * chunk_ms))
             await receive_until(ws, required="audio.ack", events=events)
-    await asyncio.sleep(0.25)
+        await asyncio.sleep(0.25)
+    # Refresh the bearer before reconnecting. The session, binding and durable
+    # cursors remain unchanged; only the in-memory authorization headers move
+    # to the newly issued token.
+    auth = refresh_auth(api, state)
+    headers = [(key, value) for key, value in auth.items()]
     opened["after_event_seq"] = max(
         (int(event.get("event_sequence", 0)) for event in events),
         default=0,
@@ -270,6 +335,7 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
         "stable_event_count": sum(event.get("event_kind") == "stable" for event in events),
         "final_outcome": terminal.get("outcome"),
         "final_event_sequence": int(terminal.get("event_sequence", 0)),
+        "token_refresh_before_reconnect": True,
         "model_revision": terminal.get("model_revision"),
         "purge_state": purged.get("state"),
         "wall_ms": round((time.perf_counter() - started) * 1000),
