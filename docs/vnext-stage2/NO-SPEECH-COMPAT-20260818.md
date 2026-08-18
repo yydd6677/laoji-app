@@ -20,13 +20,20 @@
 
 新候选在统一 ASR coordinator 入队后、模型调用前增加保守的双门：RMS 不超过 `0.0005` 且峰值
 不超过 `0.002` 才视为无语音；两个阈值均通过部署环境显式配置。静音项目不进入 Qwen batch，
-v2 结果稳定投影为 `no_speech`，而超过门限的正常低音量仍进入同一个模型路径。当前只完成隔离
-源码和合同测试，尚未重启或替换 8031/8030，生产端口未触碰。
+v2 结果稳定投影为 `no_speech`，而超过门限的正常低音量仍进入同一个模型路径。
+
+`0eae538` 候选随后部署到版本目录
+`/home/zhong/laoji-vnext-candidate/releases/0eae538/services/laoji-asr`，只重启 loopback 8031。
+对完全相同的一秒全零 PCM 重放后返回 HTTP 200、`outcome=no_speech`、空文本、
+`text_state=stable`、`segment_revision=1` 和 `infer_ms=0`；18021 同时保持 `ready=true`。
+旧 8031 源码目录仍保留，可通过停止候选进程并从旧目录显式启动回滚。生产 8030 未重启、未改源码、
+未改端口，复核时仍以 `cuda:0` 和同一固定模型 revision 返回 ready。
 
 证据：
 
 - `python3 tools/vnext/verify_stage2_android_contract.py`：通过，包含无语音分支静态门；
 - `npm exec -- tsc --noEmit --pretty false`：通过；
 - `python3 -m compileall -q services/laoji-api/app services/laoji-asr tools/vnext`：通过。
+- Stage 2/3/4 候选聚焦集合加入 ASR 服务测试后：`179 passed, 17 warnings`。
 
 未验证：专属 Android 设备上的真实无语音录音、网络中断和进程死亡回放。
