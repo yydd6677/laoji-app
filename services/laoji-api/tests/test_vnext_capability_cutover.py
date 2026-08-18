@@ -67,3 +67,46 @@ def test_media_upload_activation_requires_explicit_ready_config(
     # reopen a closed ingress and send clients back to v1.
     monkeypatch.delenv("LAOJI_VNEXT_MEDIA_UPLOAD_BARRIER_ENABLED")
     assert vnext_capability_cutover.media_upload_cutover_enabled(prerequisites_ready=False) is True
+
+
+@pytest.mark.parametrize(
+    ("capability", "revision", "environment", "reader"),
+    (
+        (
+            vnext_capability_cutover.REALTIME_ASR_CAPABILITY,
+            vnext_capability_cutover.REALTIME_ASR_CONTRACT_REVISION,
+            "LAOJI_VNEXT_REALTIME_V2_ENABLED",
+            vnext_capability_cutover.realtime_asr_v2_enabled,
+        ),
+        (
+            vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+            vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+            "LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED",
+            vnext_capability_cutover.schedule_graph_v2_enabled,
+        ),
+        (
+            vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+            vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+            "LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED",
+            vnext_capability_cutover.source_stream_v2_enabled,
+        ),
+        (
+            vnext_capability_cutover.QUESTION_READER_CAPABILITY,
+            vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
+            "LAOJI_VNEXT_Q2_READER_ENABLED",
+            vnext_capability_cutover.question_reader_v2_enabled,
+        ),
+    ),
+)
+def test_candidate_readers_remain_on_after_persisted_barrier(
+    cutover_database,
+    monkeypatch,
+    capability,
+    revision,
+    environment,
+    reader,
+) -> None:
+    monkeypatch.delenv(environment, raising=False)
+    assert reader() is False
+    vnext_capability_cutover.activate_cutover(capability, revision, barrier_id=f"{capability}-barrier")
+    assert reader() is True

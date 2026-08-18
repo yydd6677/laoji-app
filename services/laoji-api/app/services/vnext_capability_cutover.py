@@ -13,6 +13,12 @@ MEDIA_UPLOAD_CAPABILITY = "media.upload"
 MEDIA_UPLOAD_CONTRACT_REVISION = "device-v2-r2+import-transcript-events-v2"
 REALTIME_ASR_CAPABILITY = "transcript.realtime"
 REALTIME_ASR_CONTRACT_REVISION = "device-v2-realtime-v2"
+SCHEDULE_GRAPH_CAPABILITY = "schedule"
+SCHEDULE_GRAPH_CONTRACT_REVISION = "schedule-mention-graph-v2"
+SOURCE_STREAM_CAPABILITY = "summary"
+SOURCE_STREAM_CONTRACT_REVISION = "facts-v3-source-stream-v2"
+QUESTION_READER_CAPABILITY = "question"
+QUESTION_READER_CONTRACT_REVISION = "question-reader-v2"
 
 
 class VNextCapabilityCutoverError(RuntimeError):
@@ -177,6 +183,26 @@ def guard_legacy_media_upload_submit() -> None:
     guard_legacy_submit(MEDIA_UPLOAD_CAPABILITY, MEDIA_UPLOAD_CONTRACT_REVISION)
 
 
+def _candidate_or_persisted_enabled(capability: str, environment_name: str) -> bool:
+    """Read a monotonic capability gate without making env the source of truth.
+
+    Environment flags are intentionally retained for isolated candidate runs.
+    Once a barrier is durably closed, a process restart must not silently turn
+    the capability off just because its transient environment was rebuilt.
+    """
+    # Explicit candidate runs must remain usable in isolated route tests and
+    # disposable environments that intentionally have no control database.
+    if os.getenv(environment_name, "").strip() == "1":
+        return True
+    try:
+        current = get_cutover(capability)
+    except Exception:
+        # A missing/unavailable control plane must never enable a production
+        # route implicitly; callers observe the existing fail-closed behavior.
+        return False
+    return bool(current and current["closed"])
+
+
 def realtime_asr_v2_enabled() -> bool:
     """Return the explicit opt-in for the durable realtime v2 transport.
 
@@ -185,19 +211,31 @@ def realtime_asr_v2_enabled() -> bool:
     silently selecting a transport whose mobile projection/latency gates have
     not been accepted yet.
     """
-    return os.getenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", "").strip() == "1"
+    return _candidate_or_persisted_enabled(
+        REALTIME_ASR_CAPABILITY,
+        "LAOJI_VNEXT_REALTIME_V2_ENABLED",
+    )
 
 
 def schedule_graph_v2_enabled() -> bool:
     """Expose the MentionGraph producer only as an explicit candidate."""
-    return os.getenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "").strip() == "1"
+    return _candidate_or_persisted_enabled(
+        SCHEDULE_GRAPH_CAPABILITY,
+        "LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED",
+    )
 
 
 def source_stream_v2_enabled() -> bool:
     """Expose the Stage 3 encrypted source owner only for candidate traffic."""
-    return os.getenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "").strip() == "1"
+    return _candidate_or_persisted_enabled(
+        SOURCE_STREAM_CAPABILITY,
+        "LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED",
+    )
 
 
 def question_reader_v2_enabled() -> bool:
     """Expose the real Q2 reader only as an explicit candidate capability."""
-    return os.getenv("LAOJI_VNEXT_Q2_READER_ENABLED", "").strip() == "1"
+    return _candidate_or_persisted_enabled(
+        QUESTION_READER_CAPABILITY,
+        "LAOJI_VNEXT_Q2_READER_ENABLED",
+    )
