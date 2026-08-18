@@ -131,6 +131,8 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
 工作负载、projection checkpoint 关闭重开回放已通过；`emulator-5562/LaoJi_API_35` 也已真实完成
 候选 APK 的 0045 迁移和 calendar fence 恢复，但这不等于全局 Expo SQLite/Android 迁移、真实页面重建
  或搜索性能验收，后者仍未通过。
+自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
+[自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
 Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 AudioRecord/journal/录音线程先启动，
 再异步连接 realtime ASR；未连接期间的 PCM 使用既有有界队列，连接失败保留本地录音并进入恢复路径。
 快照现在增加向后兼容的 `asrPhase`（connecting/connected/recoveryRequired/completed/notRequired），
@@ -167,3 +169,5 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 同日完成的真实视频 ASR→Facts V3 串联回放见
 [ASR to Facts](../vnext-stage3/ASR-TO-FACTS-20260819.md)；首次暴露的输出截断已在 `facts-v3-r6`
 提示词中修复并复验通过。
+超预算长会证据包已在隔离候选真实调用 `qwen3-embedding:0.6b` 并完成一次 Facts 生成；MMR 选段比例
+不能替代人工事实支持率，详见 [长会 embedding 回放](../vnext-stage3/LONG-EMBEDDING-REPLAY-20260819.md)。
