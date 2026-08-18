@@ -314,13 +314,17 @@ async def parse_schedule_graph_v2(request: ScheduleGraphRequestV1) -> ScheduleMe
             request.text,
             reference_datetime=request.reference_datetime.isoformat(),
             timezone_name=request.timezone,
+            model_only=True,
         )
+        if not parsed:
+            raise ScheduleParserUnavailable("模型未返回日程观察")
         return schedule_graph_service.produce_schedule_graph(
             request.text,
             request.reference_datetime,
             request.timezone,
             source_id=request.source_id,
-            parsed=parsed or {},
+            parsed=parsed,
+            intent=request.client_intent,
         )
     except ScheduleParserUnavailable as error:
         raise HTTPException(status_code=503, detail={

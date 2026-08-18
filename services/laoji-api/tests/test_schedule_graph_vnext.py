@@ -48,6 +48,28 @@ def test_graph_keeps_natural_source_spans_and_local_route():
     validate_schedule_graph(graph)
 
 
+def test_graph_requires_one_explicit_parser_observation():
+    with pytest.raises(ValueError, match="schedule_parser_observation_required"):
+        produce_schedule_graph(
+            "明天下午三点半开会",
+            REFERENCE,
+            "Asia/Shanghai",
+        )
+
+
+def test_graph_intent_comes_from_request_not_legacy_text_classifier():
+    graph = produce_schedule_graph(
+        "明天下午三点半开会",
+        REFERENCE,
+        "Asia/Shanghai",
+        parsed=_parsed(),
+        intent="reject",
+    )
+    assert graph.intent == "reject"
+    assert graph.route == "reject"
+    assert graph.state == "reject"
+
+
 def test_model_route_is_explicit_and_not_mislabeled_as_local():
     graph = produce_schedule_graph(
         "明天和供应商确认合同时间",

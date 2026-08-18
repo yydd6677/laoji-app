@@ -367,6 +367,10 @@ class ScheduleGraphRequestV1(VNextModel):
     reference_datetime: datetime
     timezone: str = Field(min_length=1, max_length=64)
     source_id: str | None = Field(default=None, min_length=8, max_length=180)
+    # Intent is decided by the caller's route owner before this request is
+    # admitted.  The Graph producer must not silently re-run the legacy
+    # parser's intent classifier on the same text.
+    client_intent: Literal["create", "query", "delete", "clarify", "reject"] = "create"
     client_request_id: str = Field(min_length=8, max_length=180)
 
 

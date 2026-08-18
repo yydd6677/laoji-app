@@ -20,6 +20,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - 新增隔离的 `schedule_graph_service`：将单次解析观察投影为 `ScheduleMentionGraph`，记录
   来源日期/时间/标题/地点片段、意图、路由和 producer revision；`validate_schedule_graph` 对所有
   片段做原文边界校验，并拒绝无开始日期的 complete 图。
+- Graph producer 只消费调用方传入的一份 parser/model observation 和 `client_intent`：不再导入旧
+  parser 的 intent classifier，也不在缺少 observation 时隐式执行同步 parser。两条候选 Graph 路由
+  均强制 `model_only=true`，模型无观察时以 `SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE` 失败关闭。
 - `graph_to_draft` 以规范 JSON 计算稳定哈希；`merge_schedule_clarification` 在原 Draft 上合并
   补充答案，保留 source_id 并单调递增 `draft_revision`，不把补充当成新的独立日程输入。
 - 新增隔离的 `vnext_projection` 工具，统一 ProjectionEnvelope 的 canonical payload hash、同一
@@ -78,6 +81,8 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - `natural-schedule-utterances` skill 的 MASSIVE zh-CN natural 基线测量通过（`n=2166`，0 条语域
   预算违规），register calibration 自检通过；这只是自然度/语域参考，不是 LaoJi 字段真值。
 - 在临时 SQLite（不连接生产）上运行日程解析、ASR 代理、事件命令和 recurrence 回归：`102 passed`。
+- Graph owner 边界回归：`15 passed`（强制 model-only、空模型观察 503、缺观察拒绝和调用方 intent
+  透传）；TypeScript 与 Python 编译继续通过。
 - 强制 `SCHEDULE_FORCE_LLM=1` 对 MASSIVE natural 语域参考抽取 30 行做 route smoke：
   `model=10`、`model_null=20`、`model_success=10`、`model_failures=0`，模型路径 p95 约
   `1.72s`；`model_null` 是模型判定非创建/无可提取事项，不计为字段质量。报告为

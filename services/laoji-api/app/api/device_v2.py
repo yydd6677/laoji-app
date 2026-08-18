@@ -457,12 +457,15 @@ async def create_schedule_graph(
             # as a second server-side decision owner here.
             model_only=True,
         )
+        if not parsed:
+            raise ScheduleParserUnavailable("模型未返回日程观察")
         return schedule_graph_service.produce_schedule_graph(
             payload.text,
             payload.reference_datetime,
             payload.timezone,
             source_id=payload.source_id,
-            parsed=parsed or {},
+            parsed=parsed,
+            intent=payload.client_intent,
         )
     except ScheduleParserUnavailable as error:
         raise HTTPException(status_code=503, detail={

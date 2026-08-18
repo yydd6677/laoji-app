@@ -23,11 +23,7 @@ from app.schemas.vnext_contracts import (
     ScheduleMentionGraph,
     ScheduleMentionSpan,
 )
-from app.services.schedule_parser_service import (
-    apply_schedule_clarification,
-    classify_schedule_intent,
-    parse_schedule_text_sync,
-)
+from app.services.schedule_parser_service import apply_schedule_clarification
 
 
 GRAPH_PRODUCER_REVISION = "mention-graph-vnext-r1"
@@ -150,8 +146,17 @@ def _slots_from_result(result: Mapping[str, Any] | None) -> ScheduleGraphSlots:
     )
 
 
-def _intent_and_route(text: str, result: Mapping[str, Any] | None) -> tuple[str, str, str]:
-    intent, _, _ = classify_schedule_intent(text)
+def _intent_and_route(
+    result: Mapping[str, Any] | None,
+    requested_intent: str | None,
+) -> tuple[str, str, str]:
+    # Intent is an admission decision, not a second parse of the source text.
+    # The mobile route supplies it; injected observations may carry it for
+    # isolated replay.  Unknown values fail closed instead of guessing from
+    # the legacy parser.
+    intent = str(requested_intent or (result or {}).get("intent") or "create").strip()
+    if intent not in {"create", "query", "delete", "clarify", "reject", "context_edit"}:
+        intent = "reject"
     result = result or {}
     if intent in {"query", "delete", "context_edit"}:
         return intent, "operation", "operation"
@@ -174,21 +179,24 @@ def produce_schedule_graph(
     *,
     source_id: str | None = None,
     parsed: Mapping[str, Any] | None = None,
+    intent: str | None = None,
     producer_revision: str = GRAPH_PRODUCER_REVISION,
     draft_revision: int = 1,
 ) -> ScheduleMentionGraph:
     """Produce one graph from one parser observation.
 
-    ``parsed`` is an injection seam for shadow evaluation and tests.  Omitting
-    it delegates to the existing parser, but does not alter its route or
-    persist anything.
+    ``parsed`` is an observation injection seam for shadow evaluation and
+    tests.  The Graph producer never invokes the legacy parser itself; callers
+    must provide exactly one parser/model observation.
     """
     text = str(text).strip()
     if not text:
         raise ValueError("schedule_source_empty")
     reference = _source_datetime(reference_datetime)
-    parsed_result = dict(parsed) if parsed is not None else (parse_schedule_text_sync(text, reference.isoformat(), timezone) or {})
-    intent, route, state = _intent_and_route(text, parsed_result)
+    if parsed is None:
+        raise ValueError("schedule_parser_observation_required")
+    parsed_result = dict(parsed)
+    intent_value, route, state = _intent_and_route(parsed_result, intent)
     source_key = source_id or source_id_for(text, reference, timezone)
     engine = "server-model" if route == "server_required" else "recognizers"
     graph = ScheduleMentionGraph(
@@ -200,7 +208,7 @@ def produce_schedule_graph(
             timezone=timezone,
         ),
         source_id=source_key,
-        intent=intent,
+        intent=intent_value,
         route=route,
         slots=_slots_from_result(parsed_result),
         state=state,

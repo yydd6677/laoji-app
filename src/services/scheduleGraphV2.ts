@@ -51,6 +51,7 @@ export interface ScheduleGraphV2Input {
   referenceDatetime: string;
   timezone: string;
   sourceId?: string;
+  clientIntent?: 'create' | 'clarify' | 'query' | 'delete' | 'reject';
   clientRequestId: string;
   signal?: AbortSignal;
 }
@@ -129,6 +130,7 @@ export async function parseScheduleGraphV2(input: ScheduleGraphV2Input): Promise
     reference_datetime: input.referenceDatetime,
     timezone: input.timezone,
     ...(input.sourceId ? { source_id: input.sourceId } : {}),
+    client_intent: input.clientIntent ?? 'create',
     client_request_id: input.clientRequestId,
   }, input.signal, '日程图服务暂时不可用');
   return normalizeGraph(value);

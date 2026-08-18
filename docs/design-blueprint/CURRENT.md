@@ -139,6 +139,10 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
 工作负载、projection checkpoint 关闭重开回放已通过；`emulator-5562/LaoJi_API_35` 也已真实完成
 候选 APK 的 0045 迁移和 calendar fence 恢复，但这不等于全局 Expo SQLite/Android 迁移、真实页面重建
  或搜索性能验收，后者仍未通过。
+Graph owner 边界已进一步收敛：候选 Graph 路由强制 `model_only`，请求透传调用方 `client_intent`，
+producer 不再导入旧 intent classifier 或在缺少 observation 时隐式同步 fallback；空模型观察失败关闭。
+这只是一项候选静态/集成边界修复，不改变生产 `/parse`，证据见
+[Graph owner boundary](../vnext-stage4/GRAPH-OWNER-BOUNDARY-20260819.md)。
 自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
 [自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
 模型时间范围两种自然语序回放已通过，证据见

@@ -535,6 +535,7 @@ export async function parseText(
         text,
         referenceDatetime: context.reference_datetime,
         timezone: context.timezone,
+        clientIntent: remoteIntent,
         clientRequestId: graphRequestId('parse'),
       });
       return graphParseResult(graph, context);

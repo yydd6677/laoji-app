@@ -51,7 +51,9 @@ def test_graph_route_is_closed_by_default(monkeypatch):
 
 def test_graph_route_returns_source_bound_graph(monkeypatch):
     monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
+    observed = {}
     async def fake_parse(*_args, **_kwargs):
+        observed.update(_kwargs)
         return _parsed()
 
     monkeypatch.setattr(laoji_router, "parse_schedule_text", fake_parse)
@@ -73,6 +75,28 @@ def test_graph_route_returns_source_bound_graph(monkeypatch):
     assert body["source"]["content_sha256"].startswith("sha256:")
     assert body["route"] == "local_safe"
     assert body["spans"]["time"][0]["text"] == "下午三点半"
+    assert observed["model_only"] is True
+
+
+def test_graph_route_fails_closed_when_model_returns_no_observation(monkeypatch):
+    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
+    async def empty_parse(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(laoji_router, "parse_schedule_text", empty_parse)
+    client = _client(monkeypatch)
+    response = client.post(
+        "/api/laoji/v2/schedule/graph",
+        json={
+            "schema_version": 1,
+            "text": "明天下午三点半开会",
+            "reference_datetime": "2026-08-18T09:00:00",
+            "timezone": "Asia/Shanghai",
+            "client_request_id": "graph-route-empty-model",
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE"
 
 
 def test_graph_clarify_route_increments_existing_revision(monkeypatch):
