@@ -95,6 +95,13 @@ _ADOPTION_SIGNAL = re.compile(
     r"同意(?:采用|执行|落地)?|采纳|批准|通过|敲定|落地(?:执行)?|"
     r"按.{0,24}执行|以.{0,24}为准|确定由|已安排|已经安排)",
 )
+_BROAD_ACTION_SIGNAL = re.compile(
+    r"(?:加强|强化|提升|完善|推动|促进|持续推进|共同研发|鼓励和支持|加大(?:对|在)?|"
+    r"建立[^。！？；]{0,24}(?:体系|网络|机制|平台)|形成[^。！？；]{0,24}(?:体系|网络|机制))"
+)
+_FINITE_ACTION_SIGNAL = re.compile(
+    r"(?:提交|发送|整理|修复|完成|确认|准备|安排|召开|测试|评估|发布|交付|申请|预约|提供|编写|补齐|跟进|处理)"
+)
 
 
 class SummaryV3GenerationError(RuntimeError):
@@ -199,7 +206,8 @@ def _call_model(
         repair_guidance: list[str] = []
         if "json_invalid" in error_types:
             repair_guidance.append(
-                "上次对象可能未闭合或被截断；减少重复背景事实，确保在输出预算内完整闭合 JSON。"
+                "上次对象可能未闭合或被截断；减少重复背景事实，事实最多 12 条、行动最多 6 条，"
+                "确保 facts 数组先用 ] 闭合后再输出 relations，并在输出预算内完整闭合 JSON。"
             )
         if "literal_error" in error_types:
             repair_guidance.append("存在枚举值错误；所有枚举必须逐字选自字段契约。")
@@ -980,6 +988,10 @@ def _verified_actions(
             continue
         fit = candidate.schedule_fit
         if fact.certainty in {"proposed", "uncertain"}:
+            fit = "low"
+        if _BROAD_ACTION_SIGNAL.search(candidate.content) and not _FINITE_ACTION_SIGNAL.search(candidate.content):
+            # Strategic directions can remain visible as candidates, but are
+            # never calendar-ready without a bounded deliverable verb.
             fit = "low"
         verified = ActionCandidateV3(
             action_id=candidate.action_id,

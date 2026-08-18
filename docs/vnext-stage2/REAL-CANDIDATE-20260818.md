@@ -131,11 +131,11 @@ WAV 只作为失败形态和内存上界的对照记录。
 
 ## 候选健康复核（2026-08-18）
 
-- 隔离 API `18021` 曾在重启后因手工环境遗漏 `DATABASE_URL`、`LAOJI_INTERNAL_ASR_PORT=8031` 和
-  CAM++ 路径而退出或报告未就绪；这些只影响候选启动，不影响生产 `18020/8030`。
-- 已使用候选自身 SQLite/音频目录、固定 ASR revision、只读 CAM++ 权重和 `8031` 探针配置重新启动。
-  当前 `/health` 返回 200，`/api/ready` 返回 `ready=true`；ASR、Qwen 9B、embedding、Silero VAD、
-  CAM++、任务 worker、三库 WAL/完整性、R2 配置和磁盘余量均报告 ready。
+- 隔离 API `18021` 曾出现端口监听但 HTTP 空回复，导入维护线程连续记录 `OperationalError`；这些只
+  影响候选进程，不影响生产 `18020/8030`。只重启该隔离进程后，`/api/ready` 恢复 `ready=true`。
+- 最新 ready 快照确认固定 ASR revision `7278e1e70fe206f11671096ffdd38061171dd6e5`、Qwen 9B、
+  0.6B embedding、Silero VAD、CAM++、任务队列/lease、三库 WAL/完整性、R2 配置和 `467.899 GiB`
+  磁盘余量均正常；ASR 8031 队列为空。生产服务、GPU1、PCB 和 Smart Meeting 未重启或修改。
 - 该复核只证明隔离进程可恢复，不改变公开流量、systemd、APK 或生产服务；候选启动模板仍是下一次
   部署的唯一配置来源，手工命令不作为生产发布合同。
 

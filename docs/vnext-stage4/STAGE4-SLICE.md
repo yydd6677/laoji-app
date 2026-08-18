@@ -68,6 +68,13 @@ schedule capability barrier，也不改变稳定版或生产服务。
   和外部内容查询；本机暖态搜索 p95 约 `9ms`。工具只依赖 Python 标准库，Linux/Windows 均可运行。
 - `python3 tools/vnext/verify_projection_checkpoint.py`：通过；覆盖首次接受、同 revision 幂等、旧 revision
   拒绝、新 revision 提升及 SQLite 关闭重开后的恢复。
+- `natural-schedule-utterances` skill 的 MASSIVE zh-CN natural 基线测量通过（`n=2166`，0 条语域
+  预算违规），register calibration 自检通过；这只是自然度/语域参考，不是 LaoJi 字段真值。
+- 在临时 SQLite（不连接生产）上运行日程解析、ASR 代理、事件命令和 recurrence 回归：`102 passed`。
+- 强制 `SCHEDULE_FORCE_LLM=1` 对 MASSIVE natural 语域参考抽取 30 行做 route smoke：
+  `model=10`、`model_null=20`、`model_success=10`、`model_failures=0`，模型路径 p95 约
+  `1.72s`；`model_null` 是模型判定非创建/无可提取事项，不计为字段质量。报告为
+  `schedule-model-route-smoke-20260818.json`，不把公共语料当 LaoJi 字段真值。
 - `PROJECTION-ANDROID-REPLAY-20260818.md`：在 `emulator-5562/LaoJi_API_35` 的旧数据库上安装候选
   APK，真实完成 0045 迁移、calendar checkpoint 写入和强停/重启恢复；修复页面早于本机 epoch 初始化
   的外键时序后，revision 从 3 单调到 6。此证据仍只覆盖 ProjectionEnvelope 候选，不是 Stage 4 退出。

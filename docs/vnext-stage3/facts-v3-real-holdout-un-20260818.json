@@ -1,0 +1,29 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "results": [
+    {
+      "case_id": "un",
+      "sample": "500001564053724-1-192.srt",
+      "source_sha256": "sha256:758a3467f3f21620430cea8c74e4c25871c958d8b0f2d2d3b355b2184eb1d78c",
+      "source_segments": 267,
+      "estimated_input_tokens": 10187,
+      "model_calls": 1,
+      "facts": 6,
+      "actions": 0,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 30749.7
+    }
+  ],
+  "remaining": [
+    "full long-meeting source-stream quality",
+    "human fact support and action usefulness review",
+    "Android summary page and recovery replay",
+    "Facts V3 capability barrier"
+  ]
+}

@@ -21,3 +21,4 @@
 - relation_type 只能是 supports/contradicts/precedes/depends_on/alternative；schedule_fit 只能是 high/medium/low。
 
 无论证据多长，输出都必须以 {"schema_version":3,"overview": 开始。禁止改用 summary、key_points、action_items、sentiment、confidence 或其他通用摘要字段。
+输出前逐项检查 JSON 括号：overview、facts、relations、action_candidates 四个根字段必须完整闭合，facts 数组必须在 relations 之前写出关闭符号 ]；不得因内容过多截断对象。优先保留少量有来源的关键事实，避免重复扩展。
