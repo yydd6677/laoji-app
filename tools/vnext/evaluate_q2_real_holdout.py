@@ -59,11 +59,16 @@ CASES = (
     Case("negotiation-highest", "911595290-1-208.srt", "后面一方提出的最高可接受价格是多少？", ("最高价格",), "answer", ("18",), ("18",)),
     Case("equity-split", "1377173065-1-160.srt", "管理公司最后讨论到的股权比例是多少？", ("65%", "35%"), "answer", ("65", "35"), ("65",)),
     Case("meeting-rule", "870230340-1-208.srt", "投标人代表在入场时需要出示什么？", ("48小时核酸",), "answer", ("核酸",), ("核酸",)),
+    Case("energy-outline-count", "829384557-1-208.srt", "这次汇报提纲分为几个部分？", ("分为五个部分",), "answer", ("五", "5"), ("五个部分",)),
+    Case("energy-foundation-data", "829384557-1-208.srt", "做园区规划前必须先获取哪些基础数据？", ("基础数据", "功率", "运行效率"), "answer", ("设备", "功率", "效率", "负荷"), ("基础数据", "功率")),
+    Case("energy-traditional-objective", "829384557-1-208.srt", "传统能源规划最常用的目标是什么？", ("规划运行成本",), "answer", ("成本", "最小"), ("规划运行成本",)),
+    Case("energy-ui-plan", "829384557-1-208.srt", "后续准备怎样改进输入输出界面？", ("ui界面", "提交一个整个文件", "输出excel"), "answer", ("文件", "excel"), ("提交一个整个文件", "输出excel")),
     Case("science-question", "30528111540-1-192.srt", "这场报告提到了哪些关键科学问题？", ("关键科学问题",), "not_stated"),
     Case("not-stated-budget", "500001564053724-1-192.srt", "这次会议的预算金额是多少？", ("核污染",), "not_stated"),
     Case("not-stated-next-date", "1436403866-1-192.srt", "下一次会议具体安排在哪一天？", ("工作计划",), "not_stated"),
     Case("not-stated-phone", "35166292748-1-192.srt", "主持人的手机号码是多少？", ("调查员",), "not_stated"),
     Case("not-stated-venue", "1300572695-1-192.srt", "这次汇报在哪个会议室举行？", ("任务卸载",), "not_stated"),
+    Case("energy-not-stated-finish-date", "829384557-1-208.srt", "这个课题具体哪一天完成？", ("后续研究计划",), "not_stated"),
     Case("partial-owner-phone", "1436403866-1-192.srt", "谁负责科技信息平台，联系电话是多少？", ("科技信息管理平台",), "answer", ("科技信息",), ("科技信息管理平台",)),
     Case("conflicting-date", "1436403866-1-192.srt", "最终汇报日期是哪一天？", ("工作计划",), "cannot_confirm", include_conflicting_note=True),
     Case("conflicting-price", "911595290-1-208.srt", "最终成交价格是多少？", ("愿意接受", "报价"), "cannot_confirm", include_conflicting_note=True),
@@ -96,7 +101,11 @@ def _window(blocks: list[dict[str, Any]], anchors: tuple[str, ...]) -> list[dict
         raise ValueError(f"anchors not found: {anchors}")
     selected: set[int] = {0, len(blocks) - 1}
     for hit in hits:
-        selected.update(range(max(0, hit - 3), min(len(blocks), hit + 4)))
+        # Keep enough adjacent turns for a question whose answer is split
+        # across a presentation sentence and its immediately following input/
+        # output detail. This remains a bounded evaluation window, not a
+        # production retrieval rule.
+        selected.update(range(max(0, hit - 8), min(len(blocks), hit + 9)))
     return [blocks[i] for i in sorted(selected)]
 
 

@@ -396,9 +396,14 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 }]
             else:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
-        if not 1 <= len(citations_raw) <= 8:
+        if not 1 <= len(citations_raw) <= 32:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
+        # Some small providers repeat the same citation object to satisfy the
+        # schema mechanically.  Validate a bounded prefix and deduplicate the
+        # canonical citations below; citation multiplicity is not evidence.
+        citations_raw = citations_raw[:8]
         citations: list[dict[str, Any]] = []
+        clause_citations: set[tuple[str, int, int, str]] = set()
         for citation_index, citation in enumerate(citations_raw):
             if not isinstance(citation, dict):
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用格式无效", 502)
@@ -415,6 +420,17 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             model_quote = citation.get("quote")
             if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
+            if model_quote not in source["text"]:
+                # A provider can choose an adjacent short-window alias while
+                # still returning an exact quote from the current immutable
+                # snapshot. Rebind only when the quote identifies exactly one
+                # current source; unknown, absent or ambiguous evidence still
+                # fails closed.
+                matching_sources = [candidate for candidate in sources if model_quote in candidate["text"]]
+                if len(matching_sources) == 1:
+                    source = matching_sources[0]
+                    source_start = None
+                    source_end = None
             # Qwen may return character offsets for a UTF-8 contract.  An exact
             # quote is still usable evidence, so repair only the coordinates by
             # locating that quote in the immutable source.  A quote that does
@@ -495,8 +511,10 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 "source_end_utf8": source_end,
                 "quote": quote,
             }
-            citations.append(normalized_citation)
             citation_key = (source["source_id"], source_start, source_end, quote)
+            if citation_key not in clause_citations:
+                clause_citations.add(citation_key)
+                citations.append(normalized_citation)
             if citation_key not in seen_citations:
                 seen_citations.add(citation_key)
                 canonical_citations.append(normalized_citation)

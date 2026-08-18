@@ -1,0 +1,35 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "results": [
+    {
+      "case_id": "energy-planning",
+      "sample": "829384557-1-208.srt",
+      "source_sha256": "sha256:07466321d4bcba0fde60355977aaa6a5afd8944ee1ffaa7188382ba3f86f3148",
+      "source_segments": 90,
+      "estimated_input_tokens": 2037,
+      "coverage": {
+        "total_segments": 15,
+        "included_segments": 15,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 3,
+      "actions": 1,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 11169.6
+    }
+  ],
+  "remaining": [
+    "full long-meeting source-stream quality",
+    "human fact support and action usefulness review",
+    "Android summary page and recovery replay",
+    "Facts V3 capability barrier"
+  ]
+}

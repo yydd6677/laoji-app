@@ -1,0 +1,68 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "provider_revision": "q2-reader-v1",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "citation_grounding_passed": 5,
+  "results": [
+    {
+      "case_id": "energy-outline-count",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1444.2,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-foundation-data",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 6,
+      "latency_ms": 4327.2,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-traditional-objective",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 1821.0,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-ui-plan",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 5,
+      "latency_ms": 3502.3,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-not-stated-finish-date",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 1127.5,
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "full-transcript retrieval for long meetings",
+    "human citation relevance review",
+    "Android Q2 page and recovery replay",
+    "capability barrier"
+  ]
+}

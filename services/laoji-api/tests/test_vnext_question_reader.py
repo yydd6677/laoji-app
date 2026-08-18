@@ -317,3 +317,69 @@ def test_reader_joins_compact_clause_answers_when_top_level_answer_is_missing(mo
     result = reader.read_q2(_payload(text))
     assert result["answer"] == "本文研究任务卸载算法。并使用模拟退火得到最优解。"
     assert len(result["clauses"][0]["citations"]) == 2
+
+
+def test_reader_deduplicates_bounded_repeated_citations(monkeypatch):
+    text = "园区规划需要设备功率和运行效率。"
+    answer = "需要设备功率和运行效率。"
+    citation = {
+        "citation_id": "duplicate",
+        "source_id": "s0",
+        "source_start_utf8": 0,
+        "source_end_utf8": len(text.encode("utf-8")),
+        "quote": text,
+    }
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": len(answer.encode("utf-8")),
+            "citations": [citation for _ in range(12)],
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(_payload(text))
+    assert len(result["clauses"][0]["citations"]) == 1
+    assert result["clauses"][0]["citations"][0]["source_id"] == "line-1"
+
+
+def test_reader_rebinds_exact_quote_to_unique_current_source(monkeypatch):
+    first = "这是相邻的上下文。"
+    second = "后续输入改为提交文件，输出改为Excel。"
+    payload = _payload(first)
+    payload["sources"].append({
+        "source_type": "transcript",
+        "source_id": "line-2",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(second),
+        "text": second,
+    })
+    payload["source_fingerprint"] = _hash(json.dumps({
+        "schema_version": 2,
+        "sources": [{
+            "source_type": source["source_type"],
+            "source_id": source["source_id"],
+            "source_revision_id": source["source_revision_id"],
+            "content_sha256": source["content_sha256"],
+        } for source in payload["sources"]],
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    answer = "后续输入输出改为文件形式。"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": len(answer.encode("utf-8")),
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len(second.encode("utf-8")),
+                "quote": second,
+            }],
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(payload)
+    assert result["clauses"][0]["citations"][0]["source_id"] == "line-2"
