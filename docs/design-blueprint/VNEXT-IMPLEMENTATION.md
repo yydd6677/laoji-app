@@ -34,6 +34,9 @@ barrier，生产入口未切换。
 候选 `958c9f2` 又补齐 device-v1 的 4 个旧 producer 路由，静态 guard 合同扩展到 12 个入口并通过；
 这只证明旧提交可被统一关闭，不代表 barrier 已激活或旧路径已物理删除。
 
+候选 `bb38e64` 补齐 App 音频/兼容 recording-assets 和 device-v1 旧 summary 路由；当前静态合同覆盖
+14 个整理/问答/日程入口及 6 个账号兼容媒体入口，候选仍未激活 capability。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：
