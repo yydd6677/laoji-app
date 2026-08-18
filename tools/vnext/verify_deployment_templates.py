@@ -38,6 +38,8 @@ def main() -> None:
         "QWEN_ASR_MODEL=",
         "QWEN_ASR_MODEL_REVISION=",
         "QWEN_ASR_MAX_BATCH_SIZE=8",
+        "QWEN_ASR_SILENCE_RMS_THRESHOLD=0.0005",
+        "QWEN_ASR_SILENCE_PEAK_THRESHOLD=0.002",
     ])
     require(api_env, [
         "R2_ENABLED=0",

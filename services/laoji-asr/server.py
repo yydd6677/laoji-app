@@ -70,6 +70,19 @@ MICROBATCH_MAX_AUDIO_MS = max(
     1_000,
     int(os.getenv("QWEN_ASR_MICROBATCH_MAX_AUDIO_MS", "14000")),
 )
+# VAD normally removes silence before this service is called, but imports and
+# short schedule recordings can still contain a complete low-energy window.
+# Keep the gate conservative so quiet speech is still sent to Qwen; callers
+# that need a different microphone floor can tune it without changing the
+# contract or the model path.
+SILENCE_RMS_THRESHOLD = max(
+    0.0,
+    min(0.05, float(os.getenv("QWEN_ASR_SILENCE_RMS_THRESHOLD", "0.0005"))),
+)
+SILENCE_PEAK_THRESHOLD = max(
+    0.0,
+    min(0.2, float(os.getenv("QWEN_ASR_SILENCE_PEAK_THRESHOLD", "0.002"))),
+)
 REQUEST_WAIT_SECONDS = max(
     10.0,
     float(os.getenv("QWEN_ASR_REQUEST_WAIT_SECONDS", "900")),
@@ -157,6 +170,23 @@ def _decode_pcm(raw: bytes) -> np.ndarray:
     if len(raw) % 2:
         raise AsrServiceError("pcm_invalid", "PCM 音频必须使用 int16 采样", 400)
     return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def _is_effectively_silent(pcm: np.ndarray) -> bool:
+    """Return true only for empty or uniformly low-energy PCM.
+
+    ASR models can hallucinate short interjections for digital silence. This
+    deterministic guard runs before batching and therefore applies equally to
+    legacy, v1 batch and v2 batch requests. Requiring both RMS and peak below
+    their floors avoids classifying a quiet but real speech transient as empty.
+    """
+    if pcm.size == 0:
+        return True
+    if not np.isfinite(pcm).all():
+        return False
+    rms = float(np.sqrt(np.mean(np.square(pcm, dtype=np.float64))))
+    peak = float(np.max(np.abs(pcm)))
+    return rms <= SILENCE_RMS_THRESHOLD and peak <= SILENCE_PEAK_THRESHOLD
 
 
 def _parse_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
@@ -388,22 +418,26 @@ class InferenceCoordinator:
                 if model is None:
                     raise RuntimeError("model_not_ready")
                 flat_items = [item for job in jobs for item in job.items]
-                non_empty = [item for item in flat_items if item.pcm.size]
+                infer_items = [
+                    item
+                    for item in flat_items
+                    if item.pcm.size and not _is_effectively_silent(item.pcm)
+                ]
                 results_by_item = {}
-                if non_empty:
+                if infer_items:
                     infer_started = time.perf_counter()
                     with torch.inference_mode():
                         results = model.transcribe(
-                            audio=[(item.pcm, 16_000) for item in non_empty],
-                            language=[item.language for item in non_empty],
+                            audio=[(item.pcm, 16_000) for item in infer_items],
+                            language=[item.language for item in infer_items],
                         )
                     infer_ms = max(0, round((time.perf_counter() - infer_started) * 1000))
-                    if len(results) != len(non_empty):
+                    if len(results) != len(infer_items):
                         raise RuntimeError("batch_result_size_mismatch")
                     # ``/asr`` intentionally uses the same item id (``legacy``)
                     # for every request.  Key by object identity so merging
                     # independent jobs never lets one response steal another.
-                    results_by_item = dict(zip((id(item) for item in non_empty), results))
+                    results_by_item = dict(zip((id(item) for item in infer_items), results))
                 revision = _resolve_model_revision(MODEL_ID)
                 for job in jobs:
                     job_queue_ms = max(0, round((started_at - job.enqueued_at) * 1000))

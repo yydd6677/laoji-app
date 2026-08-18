@@ -98,7 +98,7 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
         def transcribe(self, *, audio, language):
             value = round(float(audio[0][0][0]) * 32768)
             observed.append(value)
-            if value == 1:
+            if value == 320:
                 first_started.set()
                 assert release_first.wait(5)
             return [Result(round(float(item[0][0]) * 32768)) for item in audio]
@@ -110,11 +110,13 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
     def submit(name: str, priority: str, value: int) -> None:
         responses[name] = coordinator.submit(priority, [_item(name, value)])
 
-    first = threading.Thread(target=submit, args=("first", "offline", 1))
+    # Use a realistic non-silent amplitude; one int16 LSB is intentionally
+    # treated as silence by the ASR coordinator.
+    first = threading.Thread(target=submit, args=("first", "offline", 320))
     first.start()
     assert first_started.wait(5)
-    second = threading.Thread(target=submit, args=("second", "offline", 2))
-    realtime = threading.Thread(target=submit, args=("live", "realtime", 3))
+    second = threading.Thread(target=submit, args=("second", "offline", 640))
+    realtime = threading.Thread(target=submit, args=("live", "realtime", 960))
     second.start()
     realtime.start()
     deadline = time.monotonic() + 5
@@ -126,7 +128,7 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
         assert not thread.is_alive()
     coordinator.close()
 
-    assert observed == [1, 3, 2]
+    assert observed == [320, 960, 640]
     assert responses["live"]["priority"] == "realtime"
     assert responses["live"]["items"][0]["id"] == "live"
     assert responses["live"]["items"][0]["model_revision"] == "test-revision"
@@ -157,6 +159,58 @@ def test_empty_pcm_is_a_valid_no_speech_result(monkeypatch):
 
     assert response["items"][0]["text"] == ""
     assert response["items"][0]["infer_ms"] == 0
+
+
+def test_low_energy_pcm_is_a_valid_no_speech_result_without_model(monkeypatch):
+    class Model:
+        def transcribe(self, **_kwargs):
+            raise AssertionError("low-energy silence must not reach the model")
+
+    monkeypatch.setattr(server, "MODEL_REVISION", "test-revision")
+    coordinator = server.InferenceCoordinator(lambda: Model())
+    response = coordinator.submit(
+        "offline",
+        [server.InferenceItem(
+            item_id="quiet",
+            pcm=np.full(16_000, 1 / 32768, dtype=np.float32),
+            language="Chinese",
+            source_start_ms=0,
+            source_end_ms=1_000,
+        )],
+    )
+    coordinator.close()
+
+    assert response["items"][0]["text"] == ""
+    assert response["items"][0]["infer_ms"] == 0
+
+
+def test_quiet_non_silent_pcm_still_reaches_model(monkeypatch):
+    class Result:
+        text = "低声内容"
+        language = "Chinese"
+
+    class Model:
+        def transcribe(self, *, audio, language):
+            assert len(audio) == 1
+            assert language == ["Chinese"]
+            return [Result()]
+
+    monkeypatch.setattr(server, "MODEL_REVISION", "test-revision")
+    coordinator = server.InferenceCoordinator(lambda: Model())
+    response = coordinator.submit(
+        "offline",
+        [server.InferenceItem(
+            item_id="quiet-speech",
+            pcm=np.full(16_000, 160, dtype=np.float32) / 32768,
+            language="Chinese",
+            source_start_ms=0,
+            source_end_ms=1_000,
+        )],
+    )
+    coordinator.close()
+
+    assert response["items"][0]["text"] == "低声内容"
+    assert response["items"][0]["infer_ms"] >= 0
 
 
 def test_v2_batch_marks_stable_text_and_no_speech(monkeypatch):
