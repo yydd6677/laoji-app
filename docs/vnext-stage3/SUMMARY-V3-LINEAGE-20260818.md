@@ -31,7 +31,9 @@
   source-stream 的 manifest page、chapter group、bundle/item、commit、任务/ artifact 读取和取消接口；来源由
   不可变转写、当前笔记和明确勾选的文字附件构造，按 UTF-8 范围、内容哈希和时间信息分章。所有请求先检查
   `source_stream_v2` capability，整理入口还需 `meetingSummarySourceStreamCandidate` feature flag，响应按
-  `source.stream.v2` 和 binding/task fence 严格校验。候选已挂入整理编排但默认不会产生网络流量。
+  `source.stream.v2` 和 binding/task fence 严格校验。章节上传现在遵守服务端“最多预取下一章”和
+  设备两组未消费容量：通过 `next_consumable_chapter` 反压，遇到有界 409/429 以稳定 group/bundle ID
+  幂等重试，不会把整场长会议一次性推入远端队列。候选已挂入整理编排但默认不会产生网络流量。
 - 服务端新增 `vnext_summary_worker`：SQLite 扫描 active source-stream summary task，单并发、每次一章、租约心跳，
   进程重启后从 task/checkpoint 恢复；最终 artifact 输出同时带 Facts V3 document identity/coverage 元数据，设备
   可通过受保护的 `/api/device/v2/tasks/{task_id}/artifact` 读取。

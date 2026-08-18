@@ -8,17 +8,20 @@ import {
   commitDeviceV2SourceBundleGroup,
   createDeviceV2SourceBundleGroup,
   createDeviceV2SourceStream,
+  getDeviceV2SourceStream,
   getDeviceV2Task,
   getDeviceV2TaskArtifact,
   type SourceBundleItem,
 } from './deviceV2SourceStream';
-import { loadDeviceV2Capabilities } from './deviceV2Api';
+import { DeviceV2ApiError, loadDeviceV2Capabilities } from './deviceV2Api';
 import { parseMeetingFactsResultV3, meetingFactsV3ToSummary } from './meetingSummaryV3';
 import type { MeetingSummary } from '../types';
 import type { MeetingTemplate } from '../domain/meeting';
 
 const MAX_CHAPTER_BYTES = 48 * 1024;
 const POLL_LIMIT = 10 * 60 * 1_000;
+const SOURCE_ADMISSION_POLL_MS = 1_000;
+const SOURCE_ADMISSION_LIMIT = 10 * 60 * 1_000;
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -63,6 +66,83 @@ function chapterHash(bundleHashes: readonly string[]): Promise<string> {
 function textTime(value: number | undefined): number | null {
   if (value === undefined || !Number.isFinite(value)) return null;
   return Math.max(0, Math.round(value * 1_000));
+}
+
+async function waitForSourceChapterSlot(
+  streamId: string,
+  chapterOrdinal: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  // The server admits at most the next two chapter ordinals. Waiting for the
+  // consumer cursor before creating the next group keeps the client inside
+  // that contract instead of buffering an unbounded long meeting locally.
+  const requiredCursor = Math.max(0, chapterOrdinal - 1);
+  const deadline = Date.now() + SOURCE_ADMISSION_LIMIT;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error('meeting summary cancelled');
+    const snapshot = await getDeviceV2SourceStream(streamId);
+    if (snapshot.state === 'cancelled' || snapshot.state === 'expired') {
+      throw new Error('新版整理来源流已结束');
+    }
+    if (snapshot.next_consumable_chapter >= requiredCursor) return;
+    await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+  }
+  throw new Error('新版整理来源上传等待超时');
+}
+
+async function uploadSourceChapterWithBackpressure(input: {
+  streamId: string;
+  taskId: string;
+  requestSha: string;
+  ordinal: number;
+  chapter: readonly SourceBundleItem[];
+  bundleHash: string;
+  chapterSha: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const deadline = Date.now() + SOURCE_ADMISSION_LIMIT;
+  const groupId = `summary-source:${input.taskId}:chapter:${input.ordinal}`.slice(0, 180);
+  const declaredBytes = input.chapter.reduce((sum, item) => sum + utf8Length(item.content), 0);
+  while (Date.now() < deadline) {
+    if (input.signal?.aborted) throw new Error('meeting summary cancelled');
+    await waitForSourceChapterSlot(input.streamId, input.ordinal, input.signal);
+    try {
+      await createDeviceV2SourceBundleGroup({
+        streamId: input.streamId,
+        group: {
+          groupId,
+          chapterOrdinal: input.ordinal,
+          declaredBundleCount: 1,
+          declaredItemCount: input.chapter.length,
+          declaredUncompressedBytes: declaredBytes,
+          chapterSha256: input.chapterSha,
+          requestSha256: await digest(`${input.requestSha}:${input.ordinal}`),
+        },
+      });
+      await appendDeviceV2SourceBundle({
+        groupId,
+        bundle: {
+          bundleId: `${groupId}:bundle`,
+          ordinal: 0,
+          bundleSha256: input.bundleHash,
+          items: input.chapter,
+        },
+      });
+      await commitDeviceV2SourceBundleGroup(groupId);
+      return;
+    } catch (error) {
+      // Creation, append, and commit are idempotent by their stable IDs. A
+      // concurrent consumer may temporarily close the admission window;
+      // refresh the cursor and retry only bounded capacity/order responses.
+      if (!(error instanceof DeviceV2ApiError)
+        || (error.status !== 409 && error.status !== 429)
+        || (error.code && !['SOURCE_GROUP_ORDER', 'SOURCE_GROUP_CAPACITY', 'SOURCE_BYTES_CAPACITY'].includes(error.code))) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+    }
+  }
+  throw new Error('新版整理来源上传等待超时');
 }
 
 export async function buildSummarySourceItems(input: {
@@ -246,30 +326,16 @@ export async function generateMeetingSummaryViaSourceStream(options: {
         finalPage: true,
       });
       for (const [ordinal, chapter] of chapterItems.entries()) {
-        const groupId = `summary-source:${taskId}:chapter:${ordinal}`.slice(0, 180);
-        const chapterSha = descriptors[ordinal].chapter_sha256;
-        await createDeviceV2SourceBundleGroup({
+        await uploadSourceChapterWithBackpressure({
           streamId: stream.stream_id,
-          group: {
-            groupId,
-            chapterOrdinal: ordinal,
-            declaredBundleCount: 1,
-            declaredItemCount: chapter.length,
-            declaredUncompressedBytes: descriptors[ordinal].declared_uncompressed_bytes,
-            chapterSha256: chapterSha,
-            requestSha256: await digest(`${requestSha}:${ordinal}`),
-          },
+          taskId,
+          requestSha,
+          ordinal,
+          chapter,
+          bundleHash: bundleHashes[ordinal],
+          chapterSha: descriptors[ordinal].chapter_sha256,
+          signal: options.signal,
         });
-        await appendDeviceV2SourceBundle({
-          groupId,
-          bundle: {
-            bundleId: `${groupId}:bundle`,
-            ordinal: 0,
-            bundleSha256: bundleHashes[ordinal],
-            items: chapter,
-          },
-        });
-        await commitDeviceV2SourceBundleGroup(groupId);
       }
     }
   }
