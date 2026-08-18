@@ -40,6 +40,8 @@
 
 这次回放关闭了 Stage 2 的 R2 单对象上传、最终事件、ACK 和 purge 证据缺口；仍未关闭：
 
+multipart 四片真实候选回放另见 [multipart R2 回放](MULTIPART-R2-REPLAY-20260819.md)。
+
 - LaoJi 专属 Android 设备的断网、杀进程、token refresh 和本地连续文字投影回放；
 - multipart 多片真实设备回放；
 - GPU/生产延迟门、旧链路排空和 capability barrier。

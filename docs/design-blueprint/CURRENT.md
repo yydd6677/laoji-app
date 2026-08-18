@@ -101,6 +101,8 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 [ASR full replay](../vnext-stage2/ASR-FULL-REPLAY-20260819.md)；该证据仍只属于隔离 CPU 候选。
 真实 device-v2 R2 上传、稳定/最终事件、ACK、测试时钟清理和 R2 对象不存在见
 [device-v2 R2 probe](../vnext-stage2/DEVICE-V2-R2-REAL-PROBE-20260819.md)。
+32 MiB multipart 四片上传、合并、转写事件、ACK 和 purge 也已在候选回放通过，见
+[multipart R2 replay](../vnext-stage2/MULTIPART-R2-REPLAY-20260819.md)。
 当前隔离 API 已部署 `d193dd2`，并显式绑定候选 `8031`（部署记录见
 [candidate deployment](../vnext-stage2/CANDIDATE-DEPLOY-CCB65F0-20260819.md)）；生产 `18020/8030`
 仍未修改。
