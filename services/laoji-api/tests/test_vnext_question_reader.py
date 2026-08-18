@@ -223,3 +223,34 @@ def test_reader_normalizes_non_semantic_model_ids_and_empty_refusal(monkeypatch)
     refusal = reader.read_q2(_payload(text))
     assert refusal["answer_kind"] == "not_stated"
     assert refusal["answer"] == "当前会议记录没有提供足够信息确认。"
+
+
+def test_reader_grounds_compact_qwen_clause_from_exact_quote(monkeypatch):
+    text = "使用李亚普诺夫优化保证约束满足，并通过模拟退火得到最优解。"
+    answer = "文中使用李亚普诺夫优化和模拟退火。"
+    quote = "使用李亚普诺夫优化保证约束满足"
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause": answer,
+            "source_id": "s0",
+            "quote": quote,
+            "utf8_range": {"start": 999, "end": 1000},
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(_payload(text))
+    citation = result["clauses"][0]["citations"][0]
+    assert citation["quote"] == quote
+    assert citation["source_start_utf8"] == 0
+    assert citation["source_end_utf8"] == len(quote.encode("utf-8"))
+
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{"source_id": "s0", "quote": "来源中不存在的句子"}],
+    }, ensure_ascii=False))
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload(text))
+    assert captured.value.code == "Q2_GROUNDING_INVALID"

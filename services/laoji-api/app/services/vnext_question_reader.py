@@ -318,7 +318,25 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
         elif coordinate_valid:
             _utf8_slice(answer, start, end, "回答分句")
         citations_raw = clause.get("citations")
-        if not isinstance(citations_raw, list) or not 1 <= len(citations_raw) <= 8:
+        if not isinstance(citations_raw, list):
+            # Qwen3.5 9B commonly flattens the nested citation object even
+            # under Ollama JSON Schema. Accept only the explicit compact form;
+            # derive byte offsets from an exact quote instead of trusting the
+            # model's frequently character-based or fabricated utf8_range.
+            if (
+                isinstance(clause.get("source_id"), str)
+                and isinstance(clause.get("quote"), str)
+                and clause.get("quote").strip()
+            ):
+                citations_raw = [{
+                    "citation_id": None,
+                    "source_id": clause.get("source_id"),
+                    "quote": clause.get("quote"),
+                    "_derive_range_from_quote": True,
+                }]
+            else:
+                raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
+        if not 1 <= len(citations_raw) <= 8:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
         citations: list[dict[str, Any]] = []
         for citation_index, citation in enumerate(citations_raw):
@@ -334,7 +352,16 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用不属于当前来源", 502)
             source_start = citation.get("source_start_utf8")
             source_end = citation.get("source_end_utf8")
-            if not isinstance(source_start, int) or not isinstance(source_end, int):
+            if citation.get("_derive_range_from_quote") is True:
+                model_quote = citation.get("quote")
+                if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
+                    raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
+                character_start = source["text"].find(model_quote)
+                if character_start < 0:
+                    raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
+                source_start = len(source["text"][:character_start].encode("utf-8"))
+                source_end = source_start + len(model_quote.encode("utf-8"))
+            elif not isinstance(source_start, int) or not isinstance(source_end, int):
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用范围无效", 502)
             quote = _utf8_slice(source["text"], source_start, source_end, "来源引用")
             if quote != citation.get("quote"):
