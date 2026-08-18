@@ -52,6 +52,7 @@ from app.services.meeting_recording_asset_service import (
 )
 from app.services.meeting_summary_sync_service import get_effective_current_summary_document
 from app.services.storage_admission import ensure_audio_upload_allowed
+from app.services import vnext_capability_cutover
 from app.services.app_meeting_question import (
     INSUFFICIENT_ANSWER,
     generate_meeting_question_answer,
@@ -71,6 +72,17 @@ from app.workers.summary_tasks import (
 )
 
 router = APIRouter()
+
+
+def _guard_legacy_generation(capability: str, contract_revision: str) -> None:
+    """Fence v1 summary/question submissions once their barrier is closed."""
+    try:
+        vnext_capability_cutover.guard_legacy_submit(capability, contract_revision)
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
 
 
 def _default_summary_template_revision() -> int:
@@ -973,6 +985,10 @@ async def get_guest_realtime_transcripts(
 
 @router.post('/guest-summary', status_code=202)
 async def generate_guest_meeting_summary(data: GuestSummaryRequest):
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     template = _summary_template_or_422(data.template_id, data.template_revision)
     carry_forward = _summary_carry_forward_payload(data.carry_forward)
     attachment_authorization = _summary_attachment_payload(data.attachment_authorization)
@@ -1042,6 +1058,10 @@ async def get_guest_meeting_summary_task(
 
 @router.post('/guest-questions')
 async def answer_guest_meeting_question(data: MeetingQuestionRequest):
+    _guard_legacy_generation(
+        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
+        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
+    )
     payload = _meeting_question_payload(data)
     created_at = datetime.utcnow()
     try:
@@ -1068,6 +1088,10 @@ async def answer_app_meeting_question(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _guard_legacy_generation(
+        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
+        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
+    )
     payload = _meeting_question_payload(data)
     user_id = _user_id(current_user)
     _assert_user_meeting_writable(user_id)
@@ -1687,6 +1711,10 @@ async def generate_app_meeting_summary(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     template = _summary_template_or_422(template_id, template_revision)
     user_id = _user_id(current_user)
     _assert_user_meeting_writable(user_id)

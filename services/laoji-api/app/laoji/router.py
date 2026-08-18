@@ -53,6 +53,7 @@ from app.schemas.vnext_contracts import (
     ScheduleMentionGraph,
 )
 from app.services import schedule_db_service as db
+from app.services import vnext_capability_cutover
 from app.services import schedule_graph_service
 from app.services import schedule_parser_service as parser_service
 from app.services.llm_provider import configured_provider, provider_state
@@ -67,6 +68,20 @@ from app.services.schedule_parser_service import (
 
 
 router = APIRouter()
+
+
+def _guard_legacy_schedule_submit() -> None:
+    """Fence v1 schedule parsing once the Graph capability is closed."""
+    try:
+        vnext_capability_cutover.guard_legacy_submit(
+            vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+            vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+        )
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
 
 
 class _ParseCallState:
@@ -374,6 +389,7 @@ def _transcript_score(expected: str, actual: str) -> float:
 @router.post("/parse", response_model=ScheduleParseResponse)
 async def parse_text(request: ScheduleParseRequest, raw_request: Request):
     """将自然语言文本解析为老记日程草稿，并返回真实路径 telemetry。"""
+    _guard_legacy_schedule_submit()
     started = time.perf_counter()
     raw_body = await raw_request.body()
     request_sha256 = _request_sha256(raw_body)
@@ -569,6 +585,7 @@ async def diagnose_audio_quality(
 @router.post("/clarify", response_model=ScheduleParseResponse)
 async def clarify_text(request: ScheduleClarifyRequest):
     """把用户对追问的补充应用到当前日程草稿。"""
+    _guard_legacy_schedule_submit()
     try:
         parsed = apply_schedule_clarification(
             request.current.model_dump(),
@@ -586,6 +603,7 @@ async def clarify_text(request: ScheduleClarifyRequest):
 @router.post("/parse-audio", response_model=ScheduleParseResponse)
 async def parse_audio(request: ScheduleAudioParseRequest):
     """将语音音频直接解析为日程：ASR 转写 -> 结构化解析。"""
+    _guard_legacy_schedule_submit()
     parsed = await parse_schedule_audio(request.audio_base64, request.filename)
     if parsed is None:
         raise HTTPException(
@@ -598,6 +616,7 @@ async def parse_audio(request: ScheduleAudioParseRequest):
 @router.post("/asr/transcribe", response_model=ScheduleAsrTranscribeResponse)
 async def transcribe_audio(request: ScheduleAsrTranscribeRequest):
     """老记轻量 ASR：录音后一次性转写，只返回文字。"""
+    _guard_legacy_schedule_submit()
     result = await transcribe_schedule_audio(request.audio_base64, request.filename)
     if result is None:
         raise HTTPException(status_code=422, detail="没有识别到有效语音，请确认音量和录音内容")
