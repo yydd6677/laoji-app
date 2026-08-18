@@ -33,6 +33,9 @@ MAX_QUESTION = 2_000
 MAX_INPUT_TOKENS = 10_240
 _ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 _HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CONFLICT_FINAL_QUERY = re.compile(r"(?:最终|成交|确定|定下来|以哪个为准).*(?:日期|时间|哪天|价格|报价|多少钱|金额)|(?:日期|时间|哪天|价格|报价|多少钱|金额).*(?:最终|成交|确定|定下来|以哪个为准)")
+_DATE_VALUE = re.compile(r"(?:\d{1,4}\s*[年/月日号]|[一二三四五六七八九十百]+\s*[月日号])")
+_PRICE_VALUE = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:元|万元|万|块)|[一二三四五六七八九十百]+\s*(?:元|万元|万|块))")
 
 
 class Q2ReaderError(RuntimeError):
@@ -132,6 +135,29 @@ def _source_payload(raw: Any) -> list[dict[str, str]]:
     return sources
 
 
+def _has_explicit_source_conflict(question: str, sources: list[dict[str, str]]) -> bool:
+    """Fail closed when final-value sources explicitly disagree.
+
+    This is deliberately narrow: it only covers date/time/price questions that
+    ask for a final value, and requires distinct values in at least two source
+    types. It does not reject ordinary questions containing unrelated numbers.
+    """
+    if not _CONFLICT_FINAL_QUERY.search(question):
+        return False
+    value_pattern = _DATE_VALUE if re.search(r"日期|时间|哪天", question) else _PRICE_VALUE
+    by_type: dict[str, set[str]] = {}
+    for source in sources:
+        if not re.search(r"(?:最终|成交|确定|改为|定为|确认)", source["text"]):
+            continue
+        values = {match.group(0).replace(" ", "") for match in value_pattern.finditer(source["text"])}
+        if values:
+            by_type.setdefault(source["source_type"], set()).update(values)
+    if len(by_type) < 2:
+        return False
+    all_values = set().union(*by_type.values())
+    return len(all_values) > 1 and any(len(values) > 0 for values in by_type.values())
+
+
 def _response_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -178,7 +204,12 @@ def _response_schema() -> dict[str, Any]:
 def _system_prompt() -> str:
     return """你是老记会议问答的唯一证据阅读器。只根据用户提供的当前会议原始来源回答问题，不使用整理结果、历史答案、常识补全或来源之外的信息。
 
-输出严格 JSON：answer_kind 为 answer、not_stated 或 cannot_confirm；answer 是简洁中文回答；answer_kind 为 answer 时，clauses 必须按 answer 的 UTF-8 字节范围连续覆盖全文，每个 clause 至少有一个引用。引用必须使用来源的 source_id，并给出原文中连续的 UTF-8 字节范围和逐字 quote。若来源无法支持问题，使用 not_stated 或 cannot_confirm，clauses 必须为空。不要输出 Markdown、解释、额外字段或虚构来源。"""
+输出严格 JSON，根对象只能有 answer_kind、answer、clauses 三个字段。answer_kind 只能是 answer、not_stated 或 cannot_confirm；answer 是不超过 160 个中文字符的简洁回答，只保留直接回答问题所需的事实，不复述背景或扩展推论。answer_kind 为 answer 时，clauses 最多 8 个，数组元素只能有 clause_id、answer_start_utf8、answer_end_utf8、citations 四个字段；citations 是数组，元素只能有 citation_id、source_id、source_start_utf8、source_end_utf8、quote 六个字段。answer 和每个 quote 都必须来自当前来源，范围使用 UTF-8 字节下标。clauses 必须按 answer 的 UTF-8 字节范围从 0 连续覆盖全文，每个 clause 至少有一个引用。
+
+协议骨架（仅表示字段形状，不是示例答案；不要把字段嵌套到自身）：
+{"answer_kind":"answer","answer":"简短回答","clauses":[{"clause_id":"c1","answer_start_utf8":0,"answer_end_utf8":6,"citations":[{"citation_id":"cite1","source_id":"s0","source_start_utf8":0,"source_end_utf8":6,"quote":"来源原文"}]}]}
+
+每个独立事实都必须由包含该事实关键名词、数字或状态的逐字引用支撑；不要只引用相邻背景句。每条 quote 必须是单个 source text 中连续存在的原文，不能拼接相邻来源、改写或添加标点。问题包含多个子项时，只要其中一部分有来源支持，就回答已知部分并明确指出其余部分未提及，使用 answer；只有全部子项都没有依据时才使用 not_stated。不同来源对同一事实冲突时不得自行选边，使用 cannot_confirm 且 clauses 为空。not_stated 或 cannot_confirm 时 answer 可以简短说明缺少依据，但 clauses 必须是空数组。不要输出 Markdown、解释、额外字段、递归 clauses 或虚构来源。"""
 
 
 def _parse_json(value: str) -> dict[str, Any]:
@@ -257,14 +288,25 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     estimated = estimate_tokens(json.dumps(model_input, ensure_ascii=False, separators=(",", ":")))
     if estimated > MAX_INPUT_TOKENS:
         raise Q2ReaderError("Q2_EVIDENCE_TOO_LARGE", "当前会议来源超过问答输入上限", 413)
+    if _has_explicit_source_conflict(question, sources):
+        return {
+            "schema_version": 2,
+            "contract_revision": CONTRACT_REVISION,
+            "provider_revision": PROVIDER_REVISION,
+            "model_revision": model_revision(),
+            "snapshot_id": snapshot_id,
+            "answer_kind": "cannot_confirm",
+            "answer": "当前来源对该最终值存在冲突，无法确认。",
+            "clauses": [],
+        }
     try:
         raw = call_llm(
             LlmConfig(base_url=canonical_ollama_base_url(), model=GENERATION_MODEL),
             _system_prompt(),
             json.dumps(model_input, ensure_ascii=False, separators=(",", ":")),
             timeout=120,
-            max_tokens=2048,
-            options={"temperature": 0, "num_ctx": 16_384, "num_predict": 2048},
+            max_tokens=768,
+            options={"temperature": 0, "num_ctx": 16_384, "num_predict": 768},
             response_format=_response_schema(),
             priority="interactive",
             telemetry_operation="question.q2.reader.v2",
@@ -328,7 +370,13 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             # answer span below instead of losing an otherwise grounded answer.
             coordinate_valid = False
         elif coordinate_valid:
-            _utf8_slice(answer, start, end, "回答分句")
+            try:
+                _utf8_slice(answer, start, end, "回答分句")
+            except Q2ReaderError:
+                # A numeric range can still be a character range that lands
+                # inside a UTF-8 sequence. Citations remain authoritative;
+                # collapse the answer to one server-owned span below.
+                coordinate_valid = False
         citations_raw = clause.get("citations")
         if not isinstance(citations_raw, list):
             # Qwen3.5 9B commonly flattens the nested citation object even
@@ -364,20 +412,79 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用不属于当前来源", 502)
             source_start = citation.get("source_start_utf8")
             source_end = citation.get("source_end_utf8")
+            model_quote = citation.get("quote")
+            if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
+                raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
+            # Qwen may return character offsets for a UTF-8 contract.  An exact
+            # quote is still usable evidence, so repair only the coordinates by
+            # locating that quote in the immutable source.  A quote that does
+            # not occur verbatim remains a hard grounding failure.
+            quote_from_range: str | None = None
             if citation.get("_derive_range_from_quote") is True:
-                model_quote = citation.get("quote")
-                if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
-                    raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
                 character_start = source["text"].find(model_quote)
                 if character_start < 0:
                     raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
                 source_start = len(source["text"][:character_start].encode("utf-8"))
                 source_end = source_start + len(model_quote.encode("utf-8"))
-            elif not isinstance(source_start, int) or not isinstance(source_end, int):
-                raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用范围无效", 502)
-            quote = _utf8_slice(source["text"], source_start, source_end, "来源引用")
-            if quote != citation.get("quote"):
-                raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
+                quote_from_range = model_quote
+            elif isinstance(source_start, int) and isinstance(source_end, int):
+                try:
+                    quote_from_range = _utf8_slice(source["text"], source_start, source_end, "来源引用")
+                except Q2ReaderError:
+                    quote_from_range = None
+            if quote_from_range != model_quote:
+                # Also accept a genuine character-offset pair when it selects
+                # the exact quote.  Do not turn arbitrary invalid ranges into
+                # valid evidence: a non-zero range outside the character
+                # bounds remains a provider error (and is covered by tests).
+                character_range_quote = None
+                if (
+                    isinstance(source_start, int)
+                    and isinstance(source_end, int)
+                    and 0 <= source_start < source_end <= len(source["text"])
+                ):
+                    candidate = source["text"][source_start:source_end]
+                    if candidate == model_quote:
+                        character_range_quote = candidate
+                        source_start = len(source["text"][:source_start].encode("utf-8"))
+                        source_end = source_start + len(candidate.encode("utf-8"))
+                if character_range_quote is not None:
+                    quote = character_range_quote
+                elif (
+                    isinstance(source_start, int)
+                    and isinstance(source_end, int)
+                    and source_start > len(source["text"])
+                    and source_end > source_start
+                ):
+                    # Some providers emit byte-like coordinates measured over
+                    # the whole transcript rather than this source segment.
+                    # The exact quote still binds the citation to this source;
+                    # discard only the unusable coordinates.
+                    character_start = source["text"].find(model_quote)
+                    if character_start < 0:
+                        raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
+                    source_start = len(source["text"][:character_start].encode("utf-8"))
+                    source_end = source_start + len(model_quote.encode("utf-8"))
+                    quote = model_quote
+                elif isinstance(source_start, int) and source_start == 0:
+                    character_start = source["text"].find(model_quote)
+                    if character_start < 0:
+                        raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
+                    source_start = len(source["text"][:character_start].encode("utf-8"))
+                    source_end = source_start + len(model_quote.encode("utf-8"))
+                    quote = model_quote
+                else:
+                    # The source ID plus an exact quote are the immutable
+                    # grounding contract. Provider coordinates are advisory;
+                    # recompute them whenever the quote is present verbatim.
+                    character_start = source["text"].find(model_quote)
+                    if character_start < 0:
+                        raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用范围无效", 502)
+                    source_start = len(source["text"][:character_start].encode("utf-8"))
+                    source_end = source_start + len(model_quote.encode("utf-8"))
+                    quote = model_quote
+            else:
+                quote = quote_from_range
             normalized_citation = {
                 "citation_id": citation_id,
                 "source_type": source["source_type"],

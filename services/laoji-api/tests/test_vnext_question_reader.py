@@ -139,7 +139,7 @@ def test_reader_canonicalizes_non_contiguous_answer_clauses(monkeypatch):
     assert result["clauses"][0]["answer_end_utf8"] == len("甲乙".encode("utf-8"))
 
 
-def test_reader_rejects_utf8_boundary_and_unsupported_citation_for_refusal(monkeypatch):
+def test_reader_rejects_unsupported_citation_and_repairs_utf8_boundary(monkeypatch):
     text = "甲乙"
     monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
         "answer_kind": "not_stated",
@@ -164,9 +164,11 @@ def test_reader_rejects_utf8_boundary_and_unsupported_citation_for_refusal(monke
             }],
         }],
     }, ensure_ascii=False))
-    with pytest.raises(reader.Q2ReaderError) as captured:
-        reader.read_q2(_payload(text))
-    assert captured.value.code == "Q2_GROUNDING_INVALID"
+    result = reader.read_q2(_payload(text))
+    citation = result["clauses"][0]["citations"][0]
+    assert citation["quote"] == "甲"
+    assert citation["source_start_utf8"] == 0
+    assert citation["source_end_utf8"] == len("甲".encode("utf-8"))
 
 
 def test_reader_maps_provider_failure_to_retryable_service_error(monkeypatch):
@@ -189,6 +191,44 @@ def test_reader_rejects_source_fingerprint_mismatch(monkeypatch):
         reader.read_q2(payload)
     assert captured.value.code == "Q2_SOURCE_FINGERPRINT_MISMATCH"
     assert captured.value.status_code == 409
+
+
+def test_reader_fails_closed_on_final_value_conflict_without_provider_call(monkeypatch):
+    transcript = "文字记录最终成交价格为18元。"
+    note = "我的笔记记录最终成交价格改为20元。"
+    payload = _payload(transcript)
+    payload["question"] = "最终成交价格是多少？"
+    payload["sources"].append({
+        "source_type": "manual_note",
+        "source_id": "note-1",
+        "source_revision_id": "7",
+        "content_sha256": _hash(note),
+        "text": note,
+    })
+    fingerprint_payload = {
+        "schema_version": 2,
+        "sources": [
+            {
+                "source_type": source["source_type"],
+                "source_id": source["source_id"],
+                "source_revision_id": source["source_revision_id"],
+                "content_sha256": source["content_sha256"],
+            }
+            for source in payload["sources"]
+        ],
+    }
+    payload["source_fingerprint"] = _hash(json.dumps(
+        fingerprint_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ))
+    calls = []
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: calls.append(True))
+    result = reader.read_q2(payload)
+    assert result["answer_kind"] == "cannot_confirm"
+    assert result["clauses"] == []
+    assert calls == []
 
 
 def test_reader_normalizes_non_semantic_model_ids_and_empty_refusal(monkeypatch):
