@@ -188,3 +188,37 @@ def test_reader_rejects_source_fingerprint_mismatch(monkeypatch):
         reader.read_q2(payload)
     assert captured.value.code == "Q2_SOURCE_FINGERPRINT_MISMATCH"
     assert captured.value.status_code == 409
+
+
+def test_reader_normalizes_non_semantic_model_ids_and_empty_refusal(monkeypatch):
+    text = "项目按计划推进。"
+    answer = "项目按计划推进。"
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": len(answer.encode("utf-8")),
+            "citations": [{
+                "citation_id": 7,
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len(text.encode("utf-8")),
+                "quote": text,
+            }],
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(_payload(text))
+    assert result["clauses"][0]["clause_id"] == "c1"
+    assert result["clauses"][0]["citations"][0]["citation_id"] == "cite-1-1"
+
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "not_stated",
+        "answer": "",
+        "clauses": [],
+    }, ensure_ascii=False))
+    refusal = reader.read_q2(_payload(text))
+    assert refusal["answer_kind"] == "not_stated"
+    assert refusal["answer"] == "当前会议记录没有提供足够信息确认。"

@@ -191,6 +191,30 @@ def _parse_json(value: str) -> dict[str, Any]:
     return parsed
 
 
+def _model_identifier(value: Any, fallback: str) -> str:
+    """Normalize non-semantic model IDs without weakening source grounding.
+
+    Clause and citation IDs are only local handles inside one answer. Small
+    local models occasionally emit an empty value or a numeric handle even
+    when the surrounding answer and citations are valid. Source IDs remain
+    strict below because changing one would allow a citation to escape the
+    immutable source snapshot.
+    """
+    if isinstance(value, str):
+        candidate = value.strip()
+        if _ID.fullmatch(candidate):
+            return candidate
+    return fallback
+
+
+def _model_answer(answer_kind: str, value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if answer_kind in {"not_stated", "cannot_confirm"}:
+        return "当前会议记录没有提供足够信息确认。"
+    raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
+
+
 def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("schema_version") != 2:
         raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 请求版本无效")
@@ -240,10 +264,15 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         raise Q2ReaderError("Q2_PROVIDER_UNAVAILABLE", "会议问答服务暂时不可用", 503) from error
     response = _parse_json(raw)
-    answer_kind = _text(response.get("answer_kind"), "answer_kind", 32)
-    answer = _text(response.get("answer"), "answer", 20_000)
+    raw_answer_kind = response.get("answer_kind")
+    if not isinstance(raw_answer_kind, str):
+        raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
+    answer_kind = raw_answer_kind.strip()
+    if answer_kind not in {"answer", "not_stated", "cannot_confirm"}:
+        raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
+    answer = _model_answer(answer_kind, response.get("answer"))
     clauses_raw = response.get("clauses")
-    if answer_kind not in {"answer", "not_stated", "cannot_confirm"} or not isinstance(clauses_raw, list):
+    if not isinstance(clauses_raw, list):
         raise Q2ReaderError("Q2_READER_FORMAT_INVALID", "问答结果格式异常", 502)
     if answer_kind != "answer":
         if clauses_raw:
@@ -265,10 +294,10 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     answer_bytes = answer.encode("utf-8")
     previous_end = 0
     clauses: list[dict[str, Any]] = []
-    for clause in clauses_raw:
+    for clause_index, clause in enumerate(clauses_raw):
         if not isinstance(clause, dict):
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答分句格式无效", 502)
-        clause_id = _id(clause.get("clause_id"), "clause_id")
+        clause_id = _model_identifier(clause.get("clause_id"), f"c{clause_index + 1}")
         start = clause.get("answer_start_utf8")
         end = clause.get("answer_end_utf8")
         if not isinstance(start, int) or not isinstance(end, int) or start != previous_end or end <= start or end > len(answer_bytes):
@@ -278,10 +307,13 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(citations_raw, list) or not 1 <= len(citations_raw) <= 8:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
         citations: list[dict[str, Any]] = []
-        for citation in citations_raw:
+        for citation_index, citation in enumerate(citations_raw):
             if not isinstance(citation, dict):
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用格式无效", 502)
-            citation_id = _id(citation.get("citation_id"), "citation_id")
+            citation_id = _model_identifier(
+                citation.get("citation_id"),
+                f"cite-{clause_index + 1}-{citation_index + 1}",
+            )
             source_key = _id(citation.get("source_id"), "source_id")
             source = source_by_alias.get(source_key) or source_by_id.get(source_key)
             if source is None:
