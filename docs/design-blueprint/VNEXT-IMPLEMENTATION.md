@@ -24,6 +24,10 @@ R2 上传 operation 已在本机 `device_operations` 创建并绑定录音资产
 `retryable_failure`，过期 `running` purge 回到 `pending` 等待设备凭据重放。候选启动后实际修复了 6 个
 历史 Attempt 和 2 个 purge；这仍是候选恢复证据，不是 capability 或 Stage 5 退出证据。
 
+候选 `bd93690` 将旧整理、问答和日程解析提交入口统一接入持久 legacy guard：默认关闭时只累计提交计数，
+关闭后统一返回 `426`，不增加第二 owner 或隐式回退。静态探针覆盖 8 个入口并通过；候选仍未激活任何
+barrier，生产入口未切换。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：
