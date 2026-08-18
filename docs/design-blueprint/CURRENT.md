@@ -176,7 +176,7 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 截断保护和错位根字段清理；9 个当前样本 Facts 用例复跑为 `9/9`，见
 [Facts V3 r8](../vnext-stage3/FACTS-V3-R8-REPLAY-20260819.md)。Q2 当前样本 27 题复跑为 `27/27`，见
 [Q2 当前样本复跑](../vnext-stage3/Q2-CURRENT-SAMPLE-R2-20260819.md)；这仍不是人工引用相关性
-或 Android 验收。新增无字幕完整视频 `1221445661-1-192.mp4` 的 ASR→Facts r8 回放为 `PASS`，
+或 Android 验收；最终 r8 提交状态再次复跑仍为 `27/27`。新增无字幕完整视频 `1221445661-1-192.mp4` 的 ASR→Facts r8 回放为 `PASS`，
 证据见 [无字幕视频回放](../vnext-stage3/ASR-TO-FACTS-1221445661-R8-20260819.md)。
 超预算长会证据包已在隔离候选真实调用 `qwen3-embedding:0.6b` 并完成一次 Facts 生成；MMR 选段比例
 不能替代人工事实支持率，详见 [长会 embedding 回放](../vnext-stage3/LONG-EMBEDDING-REPLAY-20260819.md)。
