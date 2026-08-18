@@ -71,6 +71,10 @@
   prompt 或规则。长转写进入模型前按原时间连续片段确定性打包，详见
   `docs/vnext-stage3/FACTS-V3-HOLDOUT-RECHECK-20260818.md`；最新回放报告为
   `facts-v3-real-holdout-recheck-20260818.json`，当前 `8/8` 通过。
+
+  随后以同一 provider 和同一生产提示词重新执行完整候选集合，加入规划样本后为 `9/9`；
+  脱敏报告见 `facts-v3-real-holdout-resume-20260818.json`。这只是重复性证据，不改变人工
+  支持率和 capability barrier 的退出门。
 - 回放曾暴露高覆盖长窗口只产出过少事实、议题覆盖不足，以及模型偶尔把战略方向输出成中适配
   行动。连续片段打包解决了碎片化上下文问题；通用验证仍将无明确有限交付边界的“加强/建立体系/
   持续推进”等宏观候选降为 `schedule_fit=low`，不能直接进入日程，这不是样本关键词门禁。
