@@ -20,6 +20,7 @@ from app.services.llm_provider import (
     LlmProviderError,
     call_llm,
     canonical_ollama_base_url,
+    embed_texts,
 )
 from app.services.summary_v3_evidence import estimate_tokens
 from app.services.summary_v3_generator import model_revision
@@ -27,10 +28,18 @@ from app.services.summary_v3_generator import model_revision
 
 CONTRACT_REVISION = "question.reader.v2"
 PROVIDER_REVISION = "q2-reader-v1"
-MAX_SOURCES = 256
+MAX_SOURCES = 1_024
 MAX_SOURCE_TEXT = 8_000
 MAX_QUESTION = 2_000
 MAX_INPUT_TOKENS = 10_240
+RETRIEVAL_BATCH_SIZE = 32
+RETRIEVAL_LAMBDA = 0.7
+_RETRIEVAL_SIGNAL = re.compile(
+    r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|由.{0,12}(?:负责|跟进)|"
+    r"(?:今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|周[一二三四五六日天])|"
+    r"(?:截止|日期|时间|上午|下午|晚上|安排|定于|开会|提交|完成|交付|到期))",
+    re.IGNORECASE,
+)
 _ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 _HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONFLICT_FINAL_QUERY = re.compile(r"(?:最终|成交|确定|定下来|以哪个为准).*(?:日期|时间|哪天|价格|报价|多少钱|金额)|(?:日期|时间|哪天|价格|报价|多少钱|金额).*(?:最终|成交|确定|定下来|以哪个为准)")
@@ -88,6 +97,120 @@ def _source_fingerprint(sources: list[dict[str, str]]) -> str:
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return _sha256_text(encoded)
+
+
+def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    return sum(a * b for a, b in zip(left, right))
+
+
+def _model_payload(
+    question: str,
+    source_fingerprint: str,
+    sources: list[dict[str, str]],
+) -> dict[str, Any]:
+    # Preserve original aliases even after retrieval. Citations returned as
+    # s17 must resolve against the immutable full snapshot, not a renumbered
+    # subset that could point at another segment.
+    return {
+        "schema_version": 2,
+        "source_fingerprint": source_fingerprint,
+        "question": question,
+        "sources": [
+            {
+                "source_id": f"s{int(source.get('_original_index', index))}",
+                "source_type": source["source_type"],
+                "text": source["text"],
+            }
+            for index, source in enumerate(sources)
+        ],
+    }
+
+
+def _estimate_model_payload(question: str, source_fingerprint: str, sources: list[dict[str, str]]) -> int:
+    return estimate_tokens(json.dumps(
+        _model_payload(question, source_fingerprint, sources),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ))
+
+
+def _select_model_sources(
+    question: str,
+    source_fingerprint: str,
+    sources: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Select a bounded raw-source view without creating a derived summary.
+
+    The complete immutable source list remains the grounding authority. Only
+    the model input is narrowed when it exceeds the context budget. Exact
+    source IDs, hashes and quotes are still checked against the full list
+    after generation. Embedding failure is explicit; there is no lexical or
+    summary fallback that could silently answer from incomplete evidence.
+    """
+    if _estimate_model_payload(question, source_fingerprint, sources) <= MAX_INPUT_TOKENS:
+        return sources
+
+    query_vectors = embed_texts(
+        [question],
+        priority="interactive",
+        operation="question.q2.evidence.query",
+        timeout_seconds=30,
+    )
+    if len(query_vectors) != 1:
+        raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
+    source_vectors: list[tuple[float, ...]] = []
+    for offset in range(0, len(sources), RETRIEVAL_BATCH_SIZE):
+        batch = sources[offset:offset + RETRIEVAL_BATCH_SIZE]
+        vectors = embed_texts(
+            [source["text"] for source in batch],
+            priority="interactive",
+            operation="question.q2.evidence.sources",
+            timeout_seconds=45,
+        )
+        if len(vectors) != len(batch):
+            raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
+        source_vectors.extend(vectors)
+    query_vector = query_vectors[0]
+    scores = [_cosine(query_vector, vector) for vector in source_vectors]
+
+    # Preserve explicit corrections, dates, owners and boundary statements as
+    # evidence candidates, then rank the remaining raw segments by similarity.
+    forced = {
+        index for index, source in enumerate(sources)
+        if _RETRIEVAL_SIGNAL.search(source["text"])
+    }
+    ranked = sorted(range(len(sources)), key=lambda index: (-scores[index], index))
+    selected: list[int] = []
+    selected_set: set[int] = set()
+
+    def try_add(index: int) -> bool:
+        if index in selected_set:
+            return True
+        candidate = [sources[item] for item in selected + [index]]
+        if _estimate_model_payload(question, source_fingerprint, candidate) > MAX_INPUT_TOKENS:
+            return False
+        selected.append(index)
+        selected_set.add(index)
+        return True
+
+    # Critical signals get first chance, but still obey the same hard budget.
+    for index in sorted(forced, key=lambda item: (-scores[item], item)):
+        try_add(index)
+    for index in ranked:
+        if len(selected) >= len(sources):
+            break
+        # One adjacent raw segment keeps a split utterance/correction
+        # understandable without adding an unbounded context window.
+        for neighbor in (index - 1, index, index + 1):
+            if 0 <= neighbor < len(sources):
+                try_add(neighbor)
+
+    if not selected:
+        raise LlmProviderError("q2_retrieval_no_evidence")
+    return [
+        {**sources[index], "_original_index": index}
+        for index in sorted(selected)
+    ]
 
 
 def _utf8_slice(value: str, start: int, end: int, field: str) -> str:
@@ -272,22 +395,14 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     sources = _source_payload(payload.get("sources"))
     if _source_fingerprint(sources) != source_fingerprint:
         raise Q2ReaderError("Q2_SOURCE_FINGERPRINT_MISMATCH", "Q2 来源整体标识校验失败", 409)
-    model_input = {
-        "schema_version": 2,
-        "source_fingerprint": source_fingerprint,
-        "question": question,
-        "sources": [
-            {
-                "source_id": f"s{index}",
-                "source_type": source["source_type"],
-                "text": source["text"],
-            }
-            for index, source in enumerate(sources)
-        ],
-    }
+    try:
+        model_sources = _select_model_sources(question, source_fingerprint, sources)
+    except LlmProviderError as error:
+        raise Q2ReaderError("Q2_RETRIEVAL_UNAVAILABLE", "会议来源检索暂时不可用", 503) from error
+    model_input = _model_payload(question, source_fingerprint, model_sources)
     estimated = estimate_tokens(json.dumps(model_input, ensure_ascii=False, separators=(",", ":")))
     if estimated > MAX_INPUT_TOKENS:
-        raise Q2ReaderError("Q2_EVIDENCE_TOO_LARGE", "当前会议来源超过问答输入上限", 413)
+        raise Q2ReaderError("Q2_EVIDENCE_INCOMPLETE", "会议来源过长，暂时无法完整检索", 413)
     if _has_explicit_source_conflict(question, sources):
         return {
             "schema_version": 2,

@@ -154,7 +154,7 @@ class Q2ReaderRequest(BaseModel):
     binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
     binding_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     cancel_revision: int = Field(ge=0, le=9_223_372_036_854_775_807)
-    sources: list[Q2ReaderSource] = Field(min_length=1, max_length=256)
+    sources: list[Q2ReaderSource] = Field(min_length=1, max_length=1_024)
 
 
 class V2UploadFence(BaseModel):

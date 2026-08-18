@@ -194,6 +194,10 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 证据见 [无字幕视频回放](../vnext-stage3/ASR-TO-FACTS-1221445661-R8-20260819.md)。
 超预算长会证据包已在隔离候选真实调用 `qwen3-embedding:0.6b` 并完成一次 Facts 生成；MMR 选段比例
 不能替代人工事实支持率，详见 [长会 embedding 回放](../vnext-stage3/LONG-EMBEDDING-REPLAY-20260819.md)。
+Q2 reader 另已增加默认关闭的有界 raw-source retrieval：完整来源不超过预算时原样进入模型，超预算时由本地
+embedding 按问题、纠正/时间/负责人信号和相邻上下文选择，引用仍绑定完整 immutable snapshot；该切片不替代
+尚未闭合的 Q2 source-stream 消费链，证据见
+[Q2 bounded retrieval](../vnext-stage3/Q2-BOUNDED-RETRIEVAL-20260819.md)。
 随后对当前 78 分钟视频执行了完整音频 ASR→Facts V3 候选回放：336 个 ASR 分片、335 个文本段、
 一次 Facts 模型调用，结果合同通过；证据见
 [长会议完整视频回放](../vnext-stage3/ASR-TO-FACTS-1437681208-LONG-20260819.md)。这仍不等于

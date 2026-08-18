@@ -43,6 +43,49 @@ def _payload(text: str = "周五前由张敏提交接口文档。") -> dict:
     }
 
 
+def _large_payload(count: int = 320) -> dict:
+    sources = []
+    for index in range(count):
+        text = (
+            f"第{index}段讨论背景和上下文，会议参与者继续说明相关问题和当前进展。" * 3
+            if index != 217
+            else "第217段确认由林清在周五前提交接口文档，目标事项在这里。" * 3
+        )
+        sources.append({
+            "source_type": "transcript",
+            "source_id": f"line-{index}",
+            "source_revision_id": "revision-1",
+            "content_sha256": _hash(text),
+            "text": text,
+        })
+    fingerprint_payload = {
+        "schema_version": 2,
+        "sources": [
+            {
+                "source_type": source["source_type"],
+                "source_id": source["source_id"],
+                "source_revision_id": source["source_revision_id"],
+                "content_sha256": source["content_sha256"],
+            }
+            for source in sources
+        ],
+    }
+    return {
+        "schema_version": 2,
+        "contract_revision": reader.CONTRACT_REVISION,
+        "provider_revision": reader.PROVIDER_REVISION,
+        "snapshot_id": "q2-large-snapshot-test",
+        "source_fingerprint": _hash(json.dumps(
+            fingerprint_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )),
+        "question": "谁负责提交接口文档？",
+        "sources": sources,
+    }
+
+
 def test_reader_grounding_returns_canonical_source(monkeypatch):
     text = "周五前由张敏提交接口文档。"
     answer = "张敏负责提交接口文档。"
@@ -74,6 +117,66 @@ def test_reader_grounding_returns_canonical_source(monkeypatch):
     citation = result["clauses"][0]["citations"][0]
     assert citation["source_id"] == "line-1"
     assert citation["source_type"] == "transcript"
+
+
+def test_reader_retrieves_large_raw_source_set_without_relabeling_citations(monkeypatch):
+    payload = _large_payload()
+    source_vectors = []
+
+    def fake_embed(texts, **_kwargs):
+        if len(texts) == 1:
+            return [(1.0, 0.0)]
+        values = []
+        for text in texts:
+            values.append((1.0, 0.0) if "林清" in text else (0.0, 1.0))
+        source_vectors.extend(values)
+        return values
+
+    captured = {}
+
+    def fake_call(_config, _system, transcript, **_kwargs):
+        captured.update(json.loads(transcript))
+        selected = next(item for item in captured["sources"] if item["source_id"] == "s217")
+        answer = "林清负责提交接口文档。"
+        quote = selected["text"]
+        return json.dumps({
+            "answer_kind": "answer",
+            "answer": answer,
+            "clauses": [{
+                "clause_id": "c1",
+                "answer_start_utf8": 0,
+                "answer_end_utf8": len(answer.encode("utf-8")),
+                "citations": [{
+                    "citation_id": "cite-1",
+                    "source_id": "s217",
+                    "source_start_utf8": 0,
+                    "source_end_utf8": len(quote.encode("utf-8")),
+                    "quote": quote,
+                }],
+            }],
+        }, ensure_ascii=False)
+
+    monkeypatch.setattr(reader, "embed_texts", fake_embed)
+    monkeypatch.setattr(reader, "call_llm", fake_call)
+    result = reader.read_q2(payload)
+    assert len(captured["sources"]) < len(payload["sources"])
+    assert result["clauses"][0]["citations"][0]["source_id"] == "line-217"
+    assert source_vectors
+
+
+def test_reader_fails_closed_when_large_source_retrieval_is_unavailable(monkeypatch):
+    from app.services.llm_provider import LlmProviderError
+
+    payload = _large_payload()
+
+    def unavailable(*_args, **_kwargs):
+        raise LlmProviderError("ollama_embedding_timeout")
+
+    monkeypatch.setattr(reader, "embed_texts", unavailable)
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(payload)
+    assert captured.value.code == "Q2_RETRIEVAL_UNAVAILABLE"
+    assert captured.value.status_code == 503
 
 
 def test_reader_rejects_unmatched_quote(monkeypatch):

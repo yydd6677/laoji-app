@@ -144,7 +144,7 @@ export async function buildQ2CandidateSources(
     ...(await sourceForTranscript(evidence)),
     ...(await sourceForAuxiliary(evidence)),
   ];
-  if (sources.length < 1 || sources.length > 256) throw new Error('Q2 来源数量超出当前候选上限');
+  if (sources.length < 1 || sources.length > 1_024) throw new Error('Q2 来源数量超出当前候选上限');
   return sources;
 }
 
