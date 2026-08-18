@@ -12,7 +12,9 @@
 
 如果进程在第 2 步之后、第 4 步之前退出，下一次恢复仍会读取“资产已有远端身份但
 operation 尚未终态”的 operation，完成最后一步；不会重新上传或生成第二个 operation。
-如果 operation 已 `success` 或 `cancelled`，旧 registry 会被终态资产代际过滤，不能重新提交。
+如果 operation 已 `cancelled`，或已 `success` 且 canonical 资产已有远端身份，旧 registry 会被
+终态资产代际过滤，不能重新提交；旧版本遗留的“success 但无远端身份”记录不会被吞掉，仍保留
+兼容恢复入口。
 缺少远端身份时保持非终态并记录脱敏诊断，不伪造成功。
 
 证据：

@@ -263,8 +263,11 @@ export async function listTerminalDeviceUploadAssetIds(
       WHERE meeting.scope_key = ?
         AND operation.capability = 'media.upload'
         AND (
-          operation.remote_state IN ('success', 'cancelled')
-          OR asset.remote_asset_id IS NOT NULL
+          operation.remote_state = 'cancelled'
+          OR (
+            operation.remote_state = 'success'
+            AND asset.remote_asset_id IS NOT NULL
+          )
         )`,
     scopeKey,
   );

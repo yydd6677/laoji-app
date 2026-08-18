@@ -308,11 +308,31 @@ def main() -> None:
                    INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
                   WHERE meeting.scope_key = 'guest'
                     AND operation.capability = 'media.upload'
-                    AND (operation.remote_state IN ('success', 'cancelled')
-                         OR asset.remote_asset_id IS NOT NULL)"""
+                    AND (operation.remote_state = 'cancelled'
+                         OR (operation.remote_state = 'success'
+                             AND asset.remote_asset_id IS NOT NULL))"""
             ).fetchone()[0]
             if terminal_suppressed != 1:
                 raise AssertionError("terminal upload did not suppress legacy registry")
+            connection.execute(
+                "UPDATE recording_assets SET remote_asset_id = NULL WHERE id = 'asset-1'"
+            )
+            legacy_recovery_visible = connection.execute(
+                """SELECT COUNT(*) FROM recording_assets asset
+                   INNER JOIN device_operations operation
+                           ON operation.operation_id = asset.upload_operation_id
+                   INNER JOIN meeting_notes meeting ON meeting.id = asset.meeting_id
+                  WHERE meeting.scope_key = 'guest'
+                    AND operation.capability = 'media.upload'
+                    AND (operation.remote_state = 'cancelled'
+                         OR (operation.remote_state = 'success'
+                             AND asset.remote_asset_id IS NOT NULL))"""
+            ).fetchone()[0]
+            if legacy_recovery_visible != 0:
+                raise AssertionError("success without canonical identity was incorrectly suppressed")
+            connection.execute(
+                "UPDATE recording_assets SET remote_asset_id = 'remote-1' WHERE id = 'asset-1'"
+            )
             if connection.execute("SELECT COUNT(*) FROM speaker_overlay_revisions").fetchone()[0] != 1:
                 raise AssertionError("migration replay duplicated overlay")
             apply_upload_executor(connection)
