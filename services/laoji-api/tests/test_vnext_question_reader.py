@@ -105,7 +105,7 @@ def test_reader_rejects_unmatched_quote(monkeypatch):
     assert captured.value.code == "Q2_GROUNDING_INVALID"
 
 
-def test_reader_rejects_non_contiguous_answer_clauses(monkeypatch):
+def test_reader_canonicalizes_non_contiguous_answer_clauses(monkeypatch):
     text = "项目按计划推进。"
     monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
         "answer_kind": "answer",
@@ -133,9 +133,10 @@ def test_reader_rejects_non_contiguous_answer_clauses(monkeypatch):
             },
         ],
     }, ensure_ascii=False))
-    with pytest.raises(reader.Q2ReaderError) as captured:
-        reader.read_q2(_payload(text))
-    assert captured.value.code == "Q2_GROUNDING_INVALID"
+    result = reader.read_q2(_payload(text))
+    assert len(result["clauses"]) == 1
+    assert result["clauses"][0]["answer_start_utf8"] == 0
+    assert result["clauses"][0]["answer_end_utf8"] == len("甲乙".encode("utf-8"))
 
 
 def test_reader_rejects_utf8_boundary_and_unsupported_citation_for_refusal(monkeypatch):

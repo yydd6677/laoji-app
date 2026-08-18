@@ -294,15 +294,29 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     answer_bytes = answer.encode("utf-8")
     previous_end = 0
     clauses: list[dict[str, Any]] = []
+    canonical_citations: list[dict[str, Any]] = []
+    seen_citations: set[tuple[str, int, int, str]] = set()
+    coordinate_valid = True
     for clause_index, clause in enumerate(clauses_raw):
         if not isinstance(clause, dict):
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答分句格式无效", 502)
         clause_id = _model_identifier(clause.get("clause_id"), f"c{clause_index + 1}")
         start = clause.get("answer_start_utf8")
         end = clause.get("answer_end_utf8")
-        if not isinstance(start, int) or not isinstance(end, int) or start != previous_end or end <= start or end > len(answer_bytes):
-            raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答分句范围不连续", 502)
-        _utf8_slice(answer, start, end, "回答分句")
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or start != previous_end
+            or end <= start
+            or end > len(answer_bytes)
+        ):
+            # Clause coordinates are a presentation aid and some local
+            # models emit character offsets or leave gaps between clauses.
+            # Keep validating citations, then collapse to one server-owned
+            # answer span below instead of losing an otherwise grounded answer.
+            coordinate_valid = False
+        elif coordinate_valid:
+            _utf8_slice(answer, start, end, "回答分句")
         citations_raw = clause.get("citations")
         if not isinstance(citations_raw, list) or not 1 <= len(citations_raw) <= 8:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
@@ -325,7 +339,7 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             quote = _utf8_slice(source["text"], source_start, source_end, "来源引用")
             if quote != citation.get("quote"):
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文不匹配", 502)
-            citations.append({
+            normalized_citation = {
                 "citation_id": citation_id,
                 "source_type": source["source_type"],
                 "source_id": source["source_id"],
@@ -334,16 +348,34 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 "source_start_utf8": source_start,
                 "source_end_utf8": source_end,
                 "quote": quote,
+            }
+            citations.append(normalized_citation)
+            citation_key = (source["source_id"], source_start, source_end, quote)
+            if citation_key not in seen_citations:
+                seen_citations.add(citation_key)
+                canonical_citations.append(normalized_citation)
+        if coordinate_valid:
+            clauses.append({
+                "clause_id": clause_id,
+                "answer_start_utf8": start,
+                "answer_end_utf8": end,
+                "citations": citations,
             })
-        clauses.append({
-            "clause_id": clause_id,
-            "answer_start_utf8": start,
-            "answer_end_utf8": end,
-            "citations": citations,
-        })
-        previous_end = end
-    if previous_end != len(answer_bytes):
-        raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答存在未归因文字", 502)
+            previous_end = end
+    if coordinate_valid and previous_end != len(answer_bytes):
+        coordinate_valid = False
+    if not coordinate_valid:
+        if not canonical_citations:
+            raise Q2ReaderError("Q2_GROUNDING_INVALID", "回答没有可验证引用", 502)
+        # Keep the output contract contiguous and bounded. The first eight
+        # distinct, exact citations are deterministic and preserve the model's
+        # source ordering without trusting its unstable byte offsets.
+        clauses = [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": len(answer_bytes),
+            "citations": canonical_citations[:8],
+        }]
     return {
         "schema_version": 2,
         "contract_revision": CONTRACT_REVISION,
