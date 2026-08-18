@@ -104,7 +104,19 @@ export async function bindDeviceUploadOperationToAsset(
 /** Applies a terminal worker result without reopening a completed operation. */
 export async function markDeviceUploadOperationSuccess(operationId: string): Promise<boolean> {
   const existing = await getDeviceOperation(operationId);
-  if (!existing || existing.remoteState === 'success') return Boolean(existing);
+  if (!existing) return false;
+  if (existing.capability === 'media.upload' && existing.remoteState !== 'success') {
+    const aggregate = await sqliteMeetingNoteRepository.get(existing.entityId, 'guest');
+    const asset = aggregate?.recordingAssets.find(item => item.uploadOperationId === operationId);
+    // A native "uploaded" observation is not enough to close the durable
+    // operation.  The canonical asset identity must already be recoverable.
+    if (
+      !asset?.remoteAssetId
+      || !Number.isSafeInteger(asset.remoteObjectRevision)
+      || Number(asset.remoteObjectRevision) < 1
+    ) return false;
+  }
+  if (existing.remoteState === 'success') return true;
   if (existing.remoteState === 'cancelled' || existing.remoteState === 'failure') return false;
   const updated = await updateDeviceOperation({
     operationId,

@@ -66,6 +66,7 @@ def main() -> None:
         "ensureDeviceUploadOperation",
         "bindDeviceUploadOperationToAsset",
         "capability: 'media.upload'",
+        "canonical asset identity",
         "syncDeviceUploadOperationState",
         "state: 'running' | 'failure' | 'cancelled'",
     )
