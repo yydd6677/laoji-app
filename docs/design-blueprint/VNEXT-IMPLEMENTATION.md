@@ -1017,9 +1017,10 @@ Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开
    一个 hash/prefix 均有效的槽继续，最多重跑仍保留 payload 的当前 chapter，不创建 chapter 子 Task，
    也不把 checkpoint 暴露成部分整理结果。
 4. action candidates 只做来源/状态/重复验证；采用时创建 ActionItem，绝不覆盖已有 mutable item。
-5. 接入 Q2 snapshot、provider DTO、grounding 和 owner；先 shadow，再按 capability 默认。笔记/附件
-   修改、epoch/binding 变化和迟到 attempt 都必须使本机激活 CAS 失败。
-6. mobile summary/question repositories 原子保存版本、facts/turns、clauses 和 exact citations。
+5. Q2 snapshot、provider DTO、grounding、device operation retry 和 owner 已在隔离候选接入；先 shadow，
+   再按 capability 默认。笔记/附件修改、epoch/binding 变化和迟到 attempt 都必须使本机激活 CAS 失败。
+6. mobile summary/question repositories 原子保存版本、facts/turns、clauses 和 exact citations；Q2
+   thread/turn/citation 通过只读投影复用现有问答页，不写旧问答表。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
