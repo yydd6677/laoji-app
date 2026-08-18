@@ -5,8 +5,9 @@
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
 - production/App/APK/device/GPU mutation: `none`
-- stable source worktree: `$MOBILE_REPO`
-- implementation worktree: `$VNEXT_REPO`
+- stable source reference: `master` / `v1.1.10`
+- implementation reference: `vnext/implementation`
+- source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
 - implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation`
