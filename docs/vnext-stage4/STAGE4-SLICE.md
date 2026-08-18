@@ -68,6 +68,9 @@ schedule capability barrier，也不改变稳定版或生产服务。
   和外部内容查询；本机暖态搜索 p95 约 `9ms`。工具只依赖 Python 标准库，Linux/Windows 均可运行。
 - `python3 tools/vnext/verify_projection_checkpoint.py`：通过；覆盖首次接受、同 revision 幂等、旧 revision
   拒绝、新 revision 提升及 SQLite 关闭重开后的恢复。
+- `PROJECTION-ANDROID-REPLAY-20260818.md`：在 `emulator-5562/LaoJi_API_35` 的旧数据库上安装候选
+  APK，真实完成 0045 迁移、calendar checkpoint 写入和强停/重启恢复；修复页面早于本机 epoch 初始化
+  的外键时序后，revision 从 3 单调到 6。此证据仍只覆盖 ProjectionEnvelope 候选，不是 Stage 4 退出。
 - 迁移仅新增 0045，不改变 0040-0044 顺序；未安装到 APK、模拟器或服务器。
 
 ## 未完成
@@ -75,5 +78,6 @@ schedule capability barrier，也不改变稳定版或生产服务。
 这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入解析/澄清 owner，但默认关闭；
 ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线、三个页面的默认关闭生成器和本机 checkpoint
 owner，尚未启用 device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
-Expo SQLite/Android 迁移回放和搜索性能门也尚未通过。
+Expo SQLite/Android 全局迁移回放、真实页面重建和搜索性能门仍未通过；ProjectionEnvelope 的
+`emulator-5562` 回放仅证明候选切片的本机 owner 和重启 fence。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。

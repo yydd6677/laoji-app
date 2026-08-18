@@ -108,8 +108,9 @@ Calendar/Minutes native snapshot parser、stale reducer 和 mutation/action 回�
 device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收同版本同 hash 并拒绝旧版本；
 候选流量尚未启用且未跨 capability barrier，证据见
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。本机 v45 SQLite/FTS 迁移回放和 12,000 条搜索
-工作负载、projection checkpoint 关闭重开回放已通过；Expo SQLite/Android 迁移、真实页面重建和搜索
-性能仍未验收。
+工作负载、projection checkpoint 关闭重开回放已通过；`emulator-5562/LaoJi_API_35` 也已真实完成
+候选 APK 的 0045 迁移和 calendar fence 恢复，但这不等于全局 Expo SQLite/Android 迁移、真实页面重建
+或搜索性能验收，后者仍未通过。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
