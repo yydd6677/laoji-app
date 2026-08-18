@@ -335,11 +335,6 @@ class RecorderEngine(
     try {
       transition(RecorderState.PREPARING)
       ensureRecordPermission()
-      val asrConnection = if (config.mode == RecorderMode.REALTIME) {
-        startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
-      } else {
-        null
-      }
       fileSession = repository.createSession(config, startedAtMs)
 
       val recorder = createAudioRecord()
@@ -361,7 +356,6 @@ class RecorderEngine(
         )
       }
       paused = false
-      fileSession?.updateState(JournalState.RECORDING, currentJournalAsrState())
       if (stopRequested) {
         throw RecorderRuntimeException(
           RecorderErrorCode.SERVICE_UNAVAILABLE,
@@ -370,12 +364,23 @@ class RecorderEngine(
       }
       transition(RecorderState.RECORDING)
       startRecordingThread(recorder)
+
+      // Local capture is the critical path. Start it before opening the
+      // realtime socket so the first PCM frame is journaled even when DNS,
+      // TLS, or device authentication is slow. sendOrQueueAsrFrame() keeps a
+      // bounded in-memory prefix until the asynchronous connection is ready.
+      if (config.mode == RecorderMode.REALTIME) {
+        try {
+          startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
+        } catch (error: Exception) {
+          markAsrUnavailable(
+            RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
+            "实时语音服务连接失败",
+          )
+        }
+      }
+      fileSession?.updateState(JournalState.RECORDING, currentJournalAsrState())
       startFuture.complete(snapshot())
-      // Local capture and the realtime handshake start independently. PCM is
-      // journaled and queued until onOpen, so neither path waits for the other.
-      // Keeping this reference in scope also makes the parallel startup intent
-      // explicit even though completion is observed on its own daemon thread.
-      @Suppress("UNUSED_VARIABLE") val observedAsrConnection = asrConnection
     } catch (error: RecorderRuntimeException) {
       failStart(error)
     } catch (_: Exception) {

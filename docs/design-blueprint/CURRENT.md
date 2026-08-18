@@ -119,7 +119,10 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
 [Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。本机 v45 SQLite/FTS 迁移回放和 12,000 条搜索
 工作负载、projection checkpoint 关闭重开回放已通过；`emulator-5562/LaoJi_API_35` 也已真实完成
 候选 APK 的 0045 迁移和 calendar fence 恢复，但这不等于全局 Expo SQLite/Android 迁移、真实页面重建
-或搜索性能验收，后者仍未通过。
+ 或搜索性能验收，后者仍未通过。
+Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 AudioRecord/journal/录音线程先启动，
+再异步连接 realtime ASR；未连接期间的 PCM 使用既有有界队列，连接失败保留本地录音并进入恢复路径。
+顺序脚本和 Kotlin 编译通过，但尚未经过专属设备的首帧延迟、断网和进程死亡回放，候选默认仍关闭。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
