@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/upload-u2-r2-sandbox-0004`
+- candidate: `$CANDIDATE_ROOT/upload-u2-r2-sandbox-0004`
 - local guard self-test: `5/5`
 - real R2 execution: **not run**
 - R2 evidence: `0`
@@ -18,7 +18,7 @@ run ID，并在 `finally` 清理。
 ## 本地门禁
 
 ```sh
-cd /home/yydd/LaoJi-candidates/upload-u2-r2-sandbox-0004
+cd $CANDIDATE_ROOT/upload-u2-r2-sandbox-0004
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 

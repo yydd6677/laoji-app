@@ -62,7 +62,7 @@ workflow ID / recovery    ->   text generations + overlays  ->  asset/gen/run/re
 
 ### D1：embedded DBOS 0006
 
-`/home/yydd/LaoJi-candidates/speech-durable-owner-dbos-0006` 使用 DBOS 2.29：
+`$CANDIDATE_ROOT/speech-durable-owner-dbos-0006` 使用 DBOS 2.29：
 
 - workflow system DB 是唯一 execution owner；
 - datasource transaction 写 immutable domain history；

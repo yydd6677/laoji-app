@@ -44,7 +44,7 @@ native action、dismiss 和 mutation 必须回显同一信封。接收端只有�
 
 ## 当前原型
 
-独立仓库 `/home/yydd/LaoJi-candidates/revisioned-projection-0002` 已建立纯合同原型，commit `922e990`，11 项 Node 标准库测试通过。尚未接入 React Native 或 Android，因此不能升级为 `validated`。
+独立仓库 `$CANDIDATE_ROOT/revisioned-projection-0002` 已建立纯合同原型，commit `922e990`，11 项 Node 标准库测试通过。尚未接入 React Native 或 Android，因此不能升级为 `validated`。
 
 ## 明确不采用
 

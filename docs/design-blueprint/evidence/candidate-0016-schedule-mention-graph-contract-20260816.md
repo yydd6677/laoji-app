@@ -4,7 +4,7 @@
 
 - status: `isolated contract prototype; not adopted`
 - observed: `2026-08-16 Asia/Shanghai`
-- candidate root: `/home/yydd/LaoJi-candidates/schedule-joint-encoder-0001`
+- candidate root: `$CANDIDATE_ROOT/schedule-joint-encoder-0001`
 - model/training/ONNX: none
 - production mutation: none
 

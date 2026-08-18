@@ -2,9 +2,9 @@
 
 状态：`research + candidate recommendation`，**未采用**，生产冻结。
 
-观察时间：2026-08-16（Asia/Shanghai）  
-移动端工作树：`/home/yydd/LaoJi-worktrees/feishu-source-driven`，观察 commit `48e3b36dff2cfc6b9b89c9a2f870ed88c802ebdf`  
-服务端工作树：`/home/yydd/LaoJi-service-worktrees/compact-production-v3`  
+观察时间：2026-08-16（Asia/Shanghai）
+移动端工作树：`$MOBILE_REPO`，观察 commit `48e3b36dff2cfc6b9b89c9a2f870ed88c802ebdf`
+服务端工作树：`$SERVICE_REPO`
 
 本记录只研究一个问题：实时和导入语音的文字为什么仍会被讲话人处理、任务状态或轮询边拖住，以及最小改动能否建立稳定 revision/watermark。未改生产源码、服务、数据库、模型、APK 或部署。
 
@@ -131,7 +131,7 @@ Artifact + ArtifactRef + maturity + availability + sourceRefs + contentHash
 
 候选 0003 的真实合同只保证标签/数值不回退：
 
-- `/home/yydd/LaoJi-candidates/incremental-artifact-flow-0003/artifact_flow.py:577-592` 检查 maturity rank 和单个 `watermark_ms` 非递减，但不比较 stable prefix。
+- `$CANDIDATE_ROOT/incremental-artifact-flow-0003/artifact_flow.py:577-592` 检查 maturity rank 和单个 `watermark_ms` 非递减，但不比较 stable prefix。
 - `tests/test_artifact_flow.py:100-110` 明确接受 `stable="旧转写"` 后由 `final="新转写"` 完全替换；这与 0008 声称的“stable 前缀不能静默改写”冲突。
 - `tests/test_artifact_flow.py:255-273` 只测 `1000 -> 999` 被拒绝；没有证明 1000ms 之前的所有 segment 已封口，也没有阻止同 watermark 的迟到不同文本成为新 current revision。
 - revision 由 ledger 按**到达顺序**自动 `current.revision + 1`；没有 provider run id 或 provider event sequence。断线后迟到事件可能被本地赋予更大 revision。`[S]`

@@ -1,7 +1,7 @@
 # 持久运行时候选 0001 独立审阅
 
 审阅日期：2026-08-16（Asia/Shanghai）
-审阅对象：`/home/yydd/LaoJi-candidates/cognitive-runtime-0001`，commit `92d27de`
+审阅对象：`$CANDIDATE_ROOT/cognitive-runtime-0001`，commit `92d27de`
 审阅边界：源码、隔离原型、官方资料与服务器只读观测；未修改生产源码、服务、设备、模型、DNS、数据或 `CURRENT.md`
 结论状态：**否决当前实现作为生产架构；保留部分原则；下一版需重写运行时核心，而不是在本原型上继续包装。**
 
@@ -38,7 +38,7 @@ Android 源码还说明 WorkManager input 不保存 bearer token，credential le
 
 ### 3.2 服务端已存在接近 durable ledger 的实现
 
-本节源码根目录为 `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`。`[S]`
+本节源码根目录为 `$SERVICE_REPO/backend`。`[S]`
 
 | 已有能力 | 源码证据 | 审阅判断 |
 |---|---|---|
@@ -54,7 +54,7 @@ Android 源码还说明 WorkManager input 不保存 bearer token，credential le
 
 ### 3.3 服务器实时约束
 
-- `[L]` 2026-08-16 约 04:40，老记 API 监听 `127.0.0.1:18020`，cwd 为 `/home/zhong/laoji-service-platform/compact-production/backend`，Python `3.12.13`，单 worker，`CUDA_VISIBLE_DEVICES=0`。
+- `[L]` 2026-08-16 约 04:40，老记 API 监听 `127.0.0.1:18020`，cwd 为 `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`，Python `3.12.13`，单 worker，`CUDA_VISIBLE_DEVICES=0`。
 - `[L]` ASR `8030` 为 Qwen3-ASR 1.7B，`/api/ready` 返回 ready；老记 Ollama `21434` 当前 `qwen3.5:9b` 约占 9.2 GB VRAM。
 - `[L]` 同机还有 `11434` 的 `qwen3:32b`（约 22.6 GB VRAM）、Smart Meeting `8020` 及其他 GPU/Python 进程；两张 RTX 5090 各 32,607 MiB，不能据此盲目加载第二个常驻模型或提升并发。
 - `[L]` API `/api/ready` 的 summary task 累计为 `success=51`、`failure=16`、active=0；最近日志中 `summary.facts.v3` 约 20.7 秒，问答 embedding 约 6.5 秒。ready 不是质量或恢复验收。
@@ -64,7 +64,7 @@ Android 源码还说明 WorkManager input 不保存 bearer token，credential le
 
 ## 4. 对候选 commit `92d27de` 的复核
 
-本节源码根目录为 `/home/yydd/LaoJi-candidates/cognitive-runtime-0001`。`[S]`
+本节源码根目录为 `$CANDIDATE_ROOT/cognitive-runtime-0001`。`[S]`
 
 ### 4.1 已证明的部分
 

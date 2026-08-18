@@ -4,7 +4,7 @@
 
 - status: `candidate; isolated-contract-and-adapter; not adopted`
 - observed: `2026-08-16 Asia/Shanghai`
-- prototype: `/home/yydd/LaoJi-candidates/schedule-semantic-draft-0002`
+- prototype: `$CANDIDATE_ROOT/schedule-semantic-draft-0002`
 - input: candidate 0011 public localized route replay, 150 rows
 - production code, service, device, database and APK: unchanged
 
@@ -50,8 +50,8 @@ state: needs_clarification 110, operation 40
 
 完整报告：
 
-- `/home/yydd/LaoJi-candidates/schedule-semantic-draft-0002/natural-route-drafts-150-report-20260816.json`
-- `/home/yydd/LaoJi-candidates/schedule-semantic-draft-0002/natural-route-drafts-150-20260816.jsonl`
+- `$CANDIDATE_ROOT/schedule-semantic-draft-0002/natural-route-drafts-150-report-20260816.json`
+- `$CANDIDATE_ROOT/schedule-semantic-draft-0002/natural-route-drafts-150-20260816.jsonl`
 
 150 条全部能被合同无损表示，但这不是 150 条解析通过。当前 parser observation 没有
 source spans，MASSIVE 也没有逐行 reference datetime；因此 110 个 observed create 全部

@@ -4,7 +4,7 @@
 
 - status: `candidate data; mechanically validated; not LaoJi gold; not adopted`
 - observed: `2026-08-16 Asia/Shanghai`
-- candidate root: `/home/yydd/LaoJi-candidates/schedule-joint-encoder-data-0001`
+- candidate root: `$CANDIDATE_ROOT/schedule-joint-encoder-data-0001`
 - source: AmazonScience/MASSIVE `zh-CN` calendar, CC BY 4.0
 - production mutation: none
 

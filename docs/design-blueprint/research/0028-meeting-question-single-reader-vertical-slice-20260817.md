@@ -11,7 +11,7 @@
 
 Read-only SSH on 2026-08-17 found the deployed question module still at:
 
-`/home/zhong/laoji-service-platform/compact-production/backend/app/services/app_meeting_question.py`
+`$SERVER_DEPLOYMENT_ROOT/compact-production/backend/app/services/app_meeting_question.py`
 
 - 5,826 lines;
 - SHA-256 `e156702b3f380b8c568c35b7a265f50dc05f4294da7da85f72d8cd390d1c9fcb`;

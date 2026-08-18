@@ -5,11 +5,11 @@
 本报告来自服务器只读 SSH、服务源码读取和隔离候选回放；没有写数据库、重启服务、改配置或调用生产任务。
 
 - service: `laoji-api.service`
-- systemd executable: `/home/zhong/laoji-service-platform/.venvs/laoji-compact-py312/bin/python`
+- systemd executable: `$SERVER_DEPLOYMENT_ROOT/.venvs/laoji-compact-py312/bin/python`
 - command shell `/usr/bin/python3`: `3.10.12`（不能代表服务运行时）
 - service unit: uvicorn `app.main:app`, `127.0.0.1:18020`, one worker
 - observed service start: 2026-08-16 01:14:41 CST
-- source cwd: `/home/zhong/laoji-service-platform/compact-production/backend`
+- source cwd: `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`
 
 ## 现有 owner 的事实
 

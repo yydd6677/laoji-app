@@ -1,6 +1,6 @@
 # Research 0025: legacy summary binding and drain audit
 
-- observed source: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+- observed source: `$SERVICE_REPO/backend`
 - production mutation: `none`
 - conclusion: all-row lineage migration is not recoverable from current data
 

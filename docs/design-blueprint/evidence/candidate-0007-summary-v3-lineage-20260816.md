@@ -2,7 +2,7 @@
 
 ## Evidence boundary
 
-- candidate path: `/home/yydd/LaoJi-candidates/summary-v3-lineage-0007`
+- candidate path: `$CANDIDATE_ROOT/summary-v3-lineage-0007`
 - source: isolated standard-library SQLite prototype
 - production code, server process, database, device, model and APK: untouched
 - runtime: local Python 3.13.5 (Python 3.12 and Windows not yet run)

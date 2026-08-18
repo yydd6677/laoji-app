@@ -8,8 +8,8 @@
 
 ## 原型位置
 
-- 日程：`/home/yydd/LaoJi-candidates/schedule-semantic-draft-0001`
-- 语音：`/home/yydd/LaoJi-candidates/audio-watermark-0001`
+- 日程：`$CANDIDATE_ROOT/schedule-semantic-draft-0001`
+- 语音：`$CANDIDATE_ROOT/audio-watermark-0001`
 
 ## 执行结果
 
@@ -54,7 +54,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests -v
 
 在临时 `/tmp` 目录编译当前 `localScheduleParser.ts`，并用最小主题 stub
 避免加载 UI 运行时后，记录了 8 条固定 reference/timezone 输入到
-`/home/yydd/LaoJi-candidates/schedule-semantic-draft-0001/fixtures/`。
+`$CANDIDATE_ROOT/schedule-semantic-draft-0001/fixtures/`。
 其中“明天下午三点半到五点开会”和“明天下午三点半开会到五点”都产生
 `15:30 -> 17:00`，但路由仍为 `server_required`；“明天开会”产生只有开始日期的
 `local_safe` 草稿；“下午三点开会”进入 `clarify`；“明天有什么安排”虽被路由为查询，
@@ -82,6 +82,6 @@ reference/timezone 下得到以下字段级差异（两边均走规则/quick，�
 原型合同通过，候选仍保持 `not adopted`。下一步是用同一组脱敏输入分别适配当前本地结果、服务端结果和（仅隔离）外部时间/ASR候选，输出字段差异与延迟分解；未经该回放，不得修改生产路由或宣称速度/质量提升。
 
 本轮已完成一组 Recognizers-Text 1.3.1 的隔离时间实体回放，脚本和边界说明在
-`/home/yydd/LaoJi-candidates/schedule-semantic-draft-0001/RECOGNIZERS_REPLAY.md`。
+`$CANDIDATE_ROOT/schedule-semantic-draft-0001/RECOGNIZERS_REPLAY.md`。
 它能保留“明天三点”的双候选和未解析的重复集合，支持 M1 的“不静默猜测”方向；
 尚未把实体适配为可保存日程，也未测中文自然语料质量。

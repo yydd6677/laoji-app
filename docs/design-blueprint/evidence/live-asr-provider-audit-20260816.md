@@ -12,7 +12,7 @@
 | 项目 | 观察 |
 |---|---|
 | `laoji-asr.service` | active/running，`qwen_asr_service/server.py` |
-| 8030 health/ready | ready；模型 `/home/zhong/laoji-service-platform/models/qwen3-asr/Qwen3-ASR-1.7B` |
+| 8030 health/ready | ready；模型 `$SERVER_DEPLOYMENT_ROOT/models/qwen3-asr/Qwen3-ASR-1.7B` |
 | ASR revision | `7278e1e70fe206f11671096ffdd38061171dd6e5` |
 | ASR device | `cuda:0`；`max_batch_size=8` |
 | 最近一次推理记录 | priority `offline`、batch 3、queue 12ms、infer 587ms；这是历史单次观测，不是 p95 |
@@ -35,7 +35,7 @@
 
 ## FunASR / vLLM 判断
 
-- `/home/zhong` 下能找到 FunASR wheel、旧 Smart Meeting 的 FunASR 脚本和历史转写
+- `$SERVER_HOME` 下能找到 FunASR wheel、旧 Smart Meeting 的 FunASR 脚本和历史转写
   文件，但当前进程列表没有运行中的 `funasr` 或 `vllm` 服务。
 - `qwen3asr-venv` 中没有 `vllm`，因此不能仅通过改 8030 URL 或事件名启用 Qwen
   官方 streaming；需要额外运行时、显存和安装/回滚方案。
@@ -59,10 +59,10 @@
 - 三个服务实际是 system unit；`systemctl show` 均为 active/running。使用
   `systemctl --user show` 会得到 inactive/dead 的假阴性，不能据此判断停服。
 - API、ASR、Ollama 进程 cwd 与 systemd ExecStart 均指向
-  `/home/zhong/laoji-service-platform/compact-production` 对应目录。
+  `$SERVER_DEPLOYMENT_ROOT/compact-production` 对应目录。
 - 18020/8030 ready，ASR queue depth 为 0；GPU0 空闲约 2.5 GiB，GPU1 空闲约
   6.1 GiB。GPU1 仅观察，不作为候选部署资源。
 - 生产的 `qwen_ws.py`、`compact_transcription_service.py`、8030 `server.py` 与
-  `/home/yydd/LaoJi-service-worktrees/compact-production-v3` 中对应文件 SHA-256 一致。
+  `$SERVICE_REPO` 中对应文件 SHA-256 一致。
 
 该复核只证明现场与本地源码没有这三处漂移，不改变“无真实 ASR p95/CER/DER”结论。

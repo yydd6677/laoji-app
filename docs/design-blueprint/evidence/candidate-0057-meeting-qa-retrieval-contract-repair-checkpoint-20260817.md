@@ -2,7 +2,7 @@
 
 ## Status
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-qa-natural-holdout-0014`
+- candidate: `$CANDIDATE_ROOT/meeting-qa-natural-holdout-0014`
 - status: `root repaired; mechanically validated; independent semantic re-audit pending`
 - production/service/database/App/APK/device/GPU/model/private meeting mutation: `none`
 

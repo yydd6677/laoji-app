@@ -3,8 +3,8 @@
 ## 状态与范围
 
 - audited candidates:
-  - `/home/yydd/LaoJi-candidates/upload-u2-server-domain-0003`
-  - `/home/yydd/LaoJi-candidates/upload-u2-r2-sandbox-0004`
+  - `$CANDIDATE_ROOT/upload-u2-server-domain-0003`
+  - `$CANDIDATE_ROOT/upload-u2-r2-sandbox-0004`
 - server-domain verdict: **BLOCK**
 - guarded-probe verdict: **tool guard accepted; real R2 evidence remains 0**
 - adoption: **not adopted**

@@ -7,8 +7,8 @@
     "production_mutation": false
   },
   "services": [
-    {"name": "laoji-api", "source": "services/laoji-api", "production_cwd": "/home/zhong/laoji-service-platform/compact-production/backend", "listen": "127.0.0.1:18020"},
-    {"name": "laoji-asr", "source": "services/laoji-asr", "production_cwd": "/home/zhong/laoji-service-platform/compact-production/backend/qwen_asr_service", "listen": "127.0.0.1:8030"},
+    {"name": "laoji-api", "source": "services/laoji-api", "production_cwd": "$SERVER_DEPLOYMENT_ROOT/compact-production/backend", "listen": "127.0.0.1:18020"},
+    {"name": "laoji-asr", "source": "services/laoji-asr", "production_cwd": "$SERVER_DEPLOYMENT_ROOT/compact-production/backend/qwen_asr_service", "listen": "127.0.0.1:8030"},
     {"name": "ollama", "source": "external runtime", "listen": "127.0.0.1:21434"}
   ],
   "databases": [

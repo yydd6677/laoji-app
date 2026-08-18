@@ -2,7 +2,7 @@
 
 ## Boundary
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-qa-natural-holdout-0014`
+- candidate: `$CANDIDATE_ROOT/meeting-qa-natural-holdout-0014`
 - public source: four pinned AISHELL-4 TextGrid transcripts, 2,441 segments
 - production prompt/reader/private meeting/service/device/GPU access: `none`
 - source transcripts are natural meeting speech; authored questions are not

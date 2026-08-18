@@ -63,10 +63,10 @@ LaoJi 真值。
 
 可复现资产：
 
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span_probe.py`
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span-probe-output-30-r2-20260816.json`
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span-probe-output-30-r2-revalidated-20260816.json`
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span-probe-report-30-r2-revalidated-20260816.json`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span_probe.py`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span-probe-output-30-r2-20260816.json`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span-probe-output-30-r2-revalidated-20260816.json`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span-probe-report-30-r2-revalidated-20260816.json`
 
 ## 决策
 

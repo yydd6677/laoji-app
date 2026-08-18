@@ -4,8 +4,8 @@
 
 - observed at: `2026-08-16 Asia/Shanghai`
 - status: `research / candidate`; **not adopted**
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-- service source inspected read-only: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+- source worktree: `$MOBILE_REPO`
+- service source inspected read-only: `$SERVICE_REPO/backend`
 - 本文只新增研究文档；没有修改生产代码，没有启动或重启服务，没有操作服务器、设备、数据库或公网接口。
 - 源码行号来自观察时的 dirty worktree；发布 APK、公网进程和真机行为不由本文件静态读取自动推出。
 

@@ -3,10 +3,10 @@
 - status: `candidate; not adopted`
 - parent: `0025-summary-real-signature-facade-20260817`
 - candidates:
-  - `/home/yydd/LaoJi-candidates/meeting-question-slice-b-0019`
-  - `/home/yydd/LaoJi-candidates/summary-store-facade-0020`
-  - `/home/yydd/LaoJi-candidates/generation-payload-store-0021`
-  - `/home/yydd/LaoJi-candidates/summary-payload-composition-0022`
+  - `$CANDIDATE_ROOT/meeting-question-slice-b-0019`
+  - `$CANDIDATE_ROOT/summary-store-facade-0020`
+  - `$CANDIDATE_ROOT/generation-payload-store-0021`
+  - `$CANDIDATE_ROOT/summary-payload-composition-0022`
 - production mutation: `none`
 
 ## Revised decision

@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/upload-u2-android-executor-0002`
+- candidate: `$CANDIDATE_ROOT/upload-u2-android-executor-0002`
 - device: `emulator-5562`, Android 15 / API 35, x86_64
 - independent audit: `PASS`（仅限下列平台原语）
 - U2-A production verdict: `BLOCK`

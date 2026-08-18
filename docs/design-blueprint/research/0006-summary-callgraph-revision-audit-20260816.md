@@ -5,8 +5,8 @@
 - status: `observed; static-audit + isolated-tests; not adopted`
 - observed: 2026-08-16 Asia/Shanghai
 - source worktrees:
-  - Android/client: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-  - service: `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend`
+  - Android/client: `$MOBILE_REPO`
+  - service: `$SERVICE_REPO/backend`
 - 本报告只读取源码、测试和隔离临时 SQLite；没有修改生产代码、服务、设备、数据库、模型、部署或公网路由。
 - 没有做当前生产服务器、发布 APK 或真机实时验证；源码观察不能代替部署行为。
 
@@ -182,7 +182,7 @@ account 生成入口 `app/api/app_meetings.py:1679-1760` 只提交旧 `final` ta
 在 service worktree 使用项目虚拟环境和临时 SQLite（不触碰默认数据库）运行：
 
 ```text
-DATABASE_URL='sqlite+aiosqlite:////tmp/laoji-audit-test.db' \
+DATABASE_URL='sqlite+aiosqlite:///$TEMP_ROOT/laoji-audit-test.db' \
   ../.venv/bin/python -m pytest -q \
   tests/test_summary_v3.py \
   tests/test_persistent_summary_tasks.py \

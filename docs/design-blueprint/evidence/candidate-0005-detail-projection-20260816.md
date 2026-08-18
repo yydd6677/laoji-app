@@ -2,7 +2,7 @@
 
 ## 身份与边界
 
-- candidate repository: `/home/yydd/LaoJi-candidates/detail-projection-v2-0005`
+- candidate repository: `$CANDIDATE_ROOT/detail-projection-v2-0005`
 - branch: `candidate/detail-projection-v2-0005`
 - commit: `2a14696`
 - runtime observed: Node standard library on Linux

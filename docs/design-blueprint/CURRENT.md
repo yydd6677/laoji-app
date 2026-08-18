@@ -5,8 +5,9 @@
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
 - production/App/APK/device/GPU mutation: `none`
-- source worktree: `/home/yydd/LaoJi-worktrees/feishu-source-driven`
-- observed source commit: `48e3b36` plus dirty release source; APK includes migration v39 while HEAD ends at v38
+- stable source reference: `master` / `v1.1.10`
+- implementation reference: `vnext/implementation`
+- source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 
 ## 权威文件
 

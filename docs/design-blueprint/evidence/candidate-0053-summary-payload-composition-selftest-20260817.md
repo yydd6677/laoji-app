@@ -1,6 +1,6 @@
 # Candidate 0053: summary task and encrypted payload composition
 
-- candidate: `/home/yydd/LaoJi-candidates/summary-payload-composition-0022`
+- candidate: `$CANDIDATE_ROOT/summary-payload-composition-0022`
 - dependencies: candidates `0019`, `0020`, `0021`
 - status: `10/10 self-tested; independent audit pending; not adopted`
 - production/service/database/App/APK/device/GPU/model mutation: `none`

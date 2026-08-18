@@ -133,7 +133,7 @@ semantic pass，就不进入线上正常路径。
 
 隔离目录：
 
-`/home/yydd/LaoJi-candidates/meeting-qa-natural-holdout-0014`
+`$CANDIDATE_ROOT/meeting-qa-natural-holdout-0014`
 
 AISHELL-4 是 211 场、4--8 人、120 小时的真实普通话会议语料。OpenSLR 对数据标注
 CC BY-SA 4.0；GitHub baseline 的 Apache-2.0 只是代码许可，不能混用。本候选只下载官方 HF

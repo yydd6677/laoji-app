@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/speech-durable-owner-dbos-0006`
+- candidate: `$CANDIDATE_ROOT/speech-durable-owner-dbos-0006`
 - runtime: DBOS Python `2.29.0`, Python `3.13`, isolated venv
 - status: `candidate self-tested`; **independent review pending; not adopted**
 - production mutation: none

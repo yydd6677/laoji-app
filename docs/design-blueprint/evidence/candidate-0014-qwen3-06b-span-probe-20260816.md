@@ -42,8 +42,8 @@ producer 的能力。把它部署到生产 5090 可能改善速度，不会自�
 
 复现结果：
 
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span-probe-output-30-qwen3-06b-20260816.json`
-- `/home/yydd/LaoJi-candidates/schedule-span-producer-0001/span-probe-report-30-qwen3-06b-20260816.json`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span-probe-output-30-qwen3-06b-20260816.json`
+- `$CANDIDATE_ROOT/schedule-span-producer-0001/span-probe-report-30-qwen3-06b-20260816.json`
 
 ## 决策
 

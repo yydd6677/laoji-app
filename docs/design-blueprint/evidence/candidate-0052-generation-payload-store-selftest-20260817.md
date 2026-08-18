@@ -1,6 +1,6 @@
 # Candidate 0052: capability-aware encrypted generation payload store
 
-- candidate: `/home/yydd/LaoJi-candidates/generation-payload-store-0021`
+- candidate: `$CANDIDATE_ROOT/generation-payload-store-0021`
 - status: `18/18 self-tested; independent audit pending; not adopted`
 - production/service/database/App/APK/device/GPU/model mutation: `none`
 

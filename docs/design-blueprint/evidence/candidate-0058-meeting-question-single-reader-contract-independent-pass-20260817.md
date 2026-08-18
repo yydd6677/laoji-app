@@ -1,7 +1,7 @@
 # Candidate 0058: single-reader contract independent pass
 
 - status: `independently contract-validated; ready for real adapter development`
-- candidate: `/home/yydd/LaoJi-candidates/meeting-question-single-reader-0025`
+- candidate: `$CANDIDATE_ROOT/meeting-question-single-reader-0025`
 - reader execution: `not run`
 - production adoption: `not adopted`
 - semantic holdout: `pending`

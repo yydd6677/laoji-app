@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/upload-u2-native-executor-0001`
+- candidate: `$CANDIDATE_ROOT/upload-u2-native-executor-0001`
 - implementer self-test: `10/10`
 - independent root audit: `BLOCK`
 - adoption: **not adopted**
@@ -11,7 +11,7 @@
 该候选由独立实现代理创建，主代理随后逐行复核并重跑测试。测试命令：
 
 ```sh
-cd /home/yydd/LaoJi-candidates/upload-u2-native-executor-0001
+cd $CANDIDATE_ROOT/upload-u2-native-executor-0001
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
@@ -67,7 +67,7 @@ presigned URL 到期、credential lease、list/resume、abort、10,000 part 或 
 
 server record 是进程内 dict，不是真实数据库 CAS，也没有并发终态竞争。sealed 文件在成功
 后未交给转写 owner、未清理、无 TTL/reaper；测试每次 setUp 创建临时目录但不关闭，主代理
-重跑后发现并清理了 39 个 `/tmp/laoji-u2-seal-*` 目录。没有 meeting/epoch 删除或 R2 原对象
+重跑后发现并清理了 39 个 `$TEMP_ROOT/laoji-u2-seal-*` 目录。没有 meeting/epoch 删除或 R2 原对象
 清理闭环。
 
 ### 平台覆盖缺失

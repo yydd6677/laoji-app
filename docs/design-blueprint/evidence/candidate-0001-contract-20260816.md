@@ -1,6 +1,6 @@
 # 候选 0001 合同回放证据
 
-- candidate repo: `/home/yydd/LaoJi-candidates/cognitive-runtime-0001`
+- candidate repo: `$CANDIDATE_ROOT/cognitive-runtime-0001`
 - branch: `candidate/cognitive-runtime-0001`
 - commit: `92d27de`
 - runtime: Python 3.12 standard library only

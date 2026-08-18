@@ -5,7 +5,7 @@
 - status: `observed; isolated public-corpus replay; not adopted`
 - observed: `2026-08-16 Asia/Shanghai`
 - source: AmazonScience/MASSIVE `zh-CN`, calendar scenario, CC BY 4.0
-- adapter: `/home/yydd/LaoJi-candidates/natural-schedule-holdout-0001`
+- adapter: `$CANDIDATE_ROOT/natural-schedule-holdout-0001`
 - production code, service, device, database and APK: unchanged
 
 本证据回答的是“当前解析器先把一句话送到哪条路”，不是“模型或整套产品的自然语言
@@ -60,8 +60,8 @@ guard 而 fallback 到空结果。总计 `model_attempted=12`、`model_success=0
 
 完整候选与报告：
 
-- `/home/yydd/LaoJi-candidates/natural-schedule-holdout-0001/candidate-test-150-20260816.jsonl`
-- `/home/yydd/LaoJi-candidates/natural-schedule-holdout-0001/candidate-test-150-report-20260816.json`
+- `$CANDIDATE_ROOT/natural-schedule-holdout-0001/candidate-test-150-20260816.jsonl`
+- `$CANDIDATE_ROOT/natural-schedule-holdout-0001/candidate-test-150-report-20260816.json`
 
 150/150 均因来源未提供逐行锚点而标记 `oracle_unavailable`，所有相对日期得分被保留
 为空。`intent_match=90/150` 只能描述当前 source-intent 对 current classifier 的诊断

@@ -5,7 +5,7 @@
 
 ## Boundary
 
-- candidate: `/home/yydd/LaoJi-candidates/meeting-qa-inspect-microprobe-0017`
+- candidate: `$CANDIDATE_ROOT/meeting-qa-inspect-microprobe-0017`
 - status: `self-tested snapshot; superseded and independently rejected; not adopted`
 - production/private meeting/real model/device/GPU access: `none`
 - Inspect: PyPI `inspect-ai==0.3.258`, isolated Python 3.10 venv

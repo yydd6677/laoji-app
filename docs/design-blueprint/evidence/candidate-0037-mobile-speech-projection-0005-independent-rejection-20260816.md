@@ -2,7 +2,7 @@
 
 ## 状态
 
-- candidate: `/home/yydd/LaoJi-candidates/mobile-speech-projection-0005`
+- candidate: `$CANDIDATE_ROOT/mobile-speech-projection-0005`
 - original self-test: TypeScript `9/9`, SQLite `2/2`
 - independent verdict: **BLOCK integration; rejected-current-shape**
 - adoption: **not adopted**

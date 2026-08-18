@@ -3,8 +3,8 @@
 状态：`research`，隔离审计，**未采用、未批准 G1**。
 
 观察日期：2026-08-16（Asia/Shanghai）
-移动端工作树：`/home/yydd/LaoJi-worktrees/feishu-source-driven`
-服务工作树：`/home/yydd/LaoJi-service-worktrees/compact-production-v3`
+移动端工作树：`$MOBILE_REPO`
+服务工作树：`$SERVICE_REPO`
 
 本记录只回答两个问题：
 
@@ -328,11 +328,11 @@ Reducer 只接受更高 revision，stable watermark 只能前进；identity 不�
 
 ### 本地源码/现场
 
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/qwen_ws.py`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/asr/enhanced_engine.py`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/services/compact_transcription_service.py`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/services/meeting_recording_asset_service.py`
-- `/home/yydd/LaoJi-service-worktrees/compact-production-v3/backend/app/api/device_v1.py`
+- `$SERVICE_REPO/backend/app/api/qwen_ws.py`
+- `$SERVICE_REPO/backend/app/asr/enhanced_engine.py`
+- `$SERVICE_REPO/backend/app/services/compact_transcription_service.py`
+- `$SERVICE_REPO/backend/app/services/meeting_recording_asset_service.py`
+- `$SERVICE_REPO/backend/app/api/device_v1.py`
 - `modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/audio/AudioProtocol.kt`
 - `modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/audio/RecorderEngine.kt`
 - `src/components/DeviceMeetingCompletionProvider.tsx`

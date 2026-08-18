@@ -2,7 +2,7 @@
 
 ## 身份与边界
 
-- candidate repository: `/home/yydd/LaoJi-candidates/incremental-artifact-flow-0003`
+- candidate repository: `$CANDIDATE_ROOT/incremental-artifact-flow-0003`
 - branch: `candidate/incremental-artifact-flow-0003`
 - commit: `3f6a633`
 - runtime observed: Linux Python `3.13.5`
