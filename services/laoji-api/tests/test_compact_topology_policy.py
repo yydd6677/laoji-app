@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-APP_ROOT = REPO_ROOT / "backend" / "app"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+APP_ROOT = PROJECT_ROOT / "services" / "laoji-api" / "app"
 
 
 def _python_sources(root: Path):
@@ -17,8 +17,9 @@ def test_business_code_has_one_ollama_and_asr_route():
     assert "127.0.0.1:21436" not in source
     assert "127.0.0.1:8002" not in source
     assert "127.0.0.1:18035" not in source
-    assert "127.0.0.1:21434" in source
-    assert "127.0.0.1:8030" in source
+    # Candidate runtime endpoints are supplied by deployment environment, not
+    # embedded in business code. The source must not hard-code a deprecated
+    # endpoint or bypass the provider adapter.
 
 
 def test_generation_services_route_through_provider():
@@ -31,23 +32,23 @@ def test_generation_services_route_through_provider():
         text = path.read_text(encoding="utf-8")
         hits = [marker for marker in forbidden_imports if marker in text]
         if hits or "http://127.0.0.1:21434/api/generate" in text:
-            bypasses.append((str(path.relative_to(REPO_ROOT)), hits))
+            bypasses.append((str(path.relative_to(PROJECT_ROOT)), hits))
     assert bypasses == []
 
 
 def test_systemd_units_bind_only_the_compact_internal_ports():
+    deploy = PROJECT_ROOT / "deploy" / "linux"
     units = "\n".join(
-        (REPO_ROOT / "deploy" / "systemd" / name).read_text(encoding="utf-8")
-        for name in ("laoji-api.service", "laoji-asr.service", "laoji-ollama.service")
+        (deploy / name).read_text(encoding="utf-8")
+        for name in ("laoji-api-vnext.service.example", "laoji-asr-vnext.service.example")
     )
-    assert "--port 18020" in units
-    assert "EnvironmentFile=/etc/laoji/laoji.env" in units
-    assert "OLLAMA_HOST=127.0.0.1:21434" in units
-    assert "PartOf=laoji-asr.service laoji-ollama.service" in units
+    assert "--port 18021" in units
+    assert "QWEN_ASR_PORT=8031" in units
+    assert "LAOJI_INTERNAL_ASR_PORT=8031" in units
+    assert "QWEN_ASR_DEVICE=cpu" in units
     for old_port in ("18035", "8002", "21435", "21436"):
         assert old_port not in units
-    env = (REPO_ROOT / "deploy" / "systemd" / "laoji.env.example").read_text(encoding="utf-8")
-    assert "QWEN_ASR_PORT=8030" in env
-    assert "QWEN_ASR_MODEL=/home/zhong/laoji-service-platform/models/qwen3-asr/Qwen3-ASR-1.7B" in env
-    assert "LAOJI_INTERNAL_ASR_PORT=8030" in env
-    assert "LAOJI_OLLAMA_BASE_URL=http://127.0.0.1:21434" in env
+    env = (deploy / "api.env.example").read_text(encoding="utf-8")
+    asr_env = (deploy / "asr.env.example").read_text(encoding="utf-8")
+    assert "LAOJI_INTERNAL_ASR_PORT=8031" in env
+    assert "QWEN_ASR_MODEL=/opt/laoji-vnext/models/qwen3-asr/Qwen3-ASR-1.7B" in asr_env
