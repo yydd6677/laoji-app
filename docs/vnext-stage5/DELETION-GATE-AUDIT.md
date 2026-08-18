@@ -9,9 +9,9 @@
 ## 当前候选快照
 
 最新隔离候选复核见 [2026-08-19 candidate audit](DELETION-GATE-CANDIDATE-20260819-R2.md)，候选运行部署见
-[bd93690 deployment](CANDIDATE-DEPLOY-BD93690-20260819.md)。
+[fb268c8 deployment](CANDIDATE-DEPLOY-FB268C8-20260819.md)。
 
-报告：`docs/vnext-stage5-deletion-audit-20260819-bd93690.json`
+报告：`docs/vnext-stage5-deletion-audit-20260819-fb268c8.json`
 
 - `production_mutation=false`
 - `deletion_performed=false`
