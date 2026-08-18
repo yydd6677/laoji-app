@@ -159,6 +159,78 @@ def test_embedding_timeout_is_normalized_to_provider_error(monkeypatch):
         llm_provider.embed_texts(["长会议内容"])
 
 
+def test_provider_readiness_requires_real_embedding_inference(monkeypatch):
+    calls = {"get": 0, "post": 0}
+
+    class TagsResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": llm_provider.GENERATION_MODEL},
+                    {"name": llm_provider.EMBEDDING_MODEL},
+                ],
+            }
+
+    class EmbeddingResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[3.0, 4.0]]}
+
+    def get(*_args, **_kwargs):
+        calls["get"] += 1
+        return TagsResponse()
+
+    def post(*_args, **_kwargs):
+        calls["post"] += 1
+        return EmbeddingResponse()
+
+    monkeypatch.setenv("LAOJI_LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm_provider._SESSION, "get", get)
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    llm_provider._reset_provider_probe_cache_for_tests()
+    first = llm_provider.provider_state(probe=True)
+    second = llm_provider.provider_state(probe=True)
+    assert first["ready"] is True
+    assert first["embedding_ready"] is True
+    assert first["embedding_probe_error"] is None
+    assert second["embedding_ready"] is True
+    assert calls == {"get": 2, "post": 1}
+    llm_provider._reset_provider_probe_cache_for_tests()
+
+
+def test_provider_readiness_fails_when_embedding_inference_times_out(monkeypatch):
+    class TagsResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": llm_provider.GENERATION_MODEL},
+                    {"name": llm_provider.EMBEDDING_MODEL},
+                ],
+            }
+
+    monkeypatch.setenv("LAOJI_LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm_provider._SESSION, "get", lambda *_args, **_kwargs: TagsResponse())
+    def timeout(*_args, **_kwargs):
+        raise llm_provider.requests.ReadTimeout("embedding readiness timeout")
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", timeout)
+    llm_provider._reset_provider_probe_cache_for_tests()
+    state = llm_provider.provider_state(probe=True)
+    assert state["ready"] is False
+    assert state["generation_ready"] is True
+    assert state["embedding_ready"] is False
+    assert state["embedding_probe_error"] == "embedding_probe_timeout"
+    llm_provider._reset_provider_probe_cache_for_tests()
+
+
 def test_business_services_cannot_bypass_the_provider_or_old_ports():
     app_root = Path(__file__).resolve().parents[1] / "app"
     provider = app_root / "services" / "llm_provider.py"

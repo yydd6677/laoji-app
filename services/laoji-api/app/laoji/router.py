@@ -184,7 +184,7 @@ def _schedule_model_health() -> dict[str, Any]:
         try:
             state = provider_state(probe=True)
             generation_ready = state.get("generation_ready") is True
-            embedding_ready = state.get("embedding_model") in (state.get("models") or [])
+            embedding_ready = state.get("embedding_ready") is True
             ready = bool(generation_ready and embedding_ready)
             return {
                 "status": "ready" if ready else "unready",

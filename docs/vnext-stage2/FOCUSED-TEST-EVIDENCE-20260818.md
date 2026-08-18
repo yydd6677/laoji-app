@@ -31,7 +31,7 @@ PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q \
 任务集合后，使用项目专用 `.venv-vnext`、临时 SQLite 和 `ENV=local` 重新执行，结果为：
 
 ```text
-159 passed, 17 warnings in 3.88s
+168 passed, 17 warnings in 3.99s
 ```
 
 本次命令覆盖的文件集合见本文件下方“候选重检命令”，结果仍只证明隔离候选，不代表生产切换。
@@ -77,10 +77,11 @@ ENV=local DATABASE_URL='sqlite+aiosqlite:///:memory:' \
   tests/test_recording_assets_v2.py tests/test_storage_admission.py \
   tests/test_device_v2_api.py tests/test_device_v2_realtime_api.py \
   tests/test_device_v2_speaker_api.py tests/test_schedule_graph_vnext.py \
-  tests/test_schedule_graph_route_vnext.py --disable-warnings
+  tests/test_schedule_graph_route_vnext.py tests/test_llm_provider.py \
+  --disable-warnings
 ```
 
-该命令在 2026-08-18 的候选分支通过 `159` 项。直接从系统 Python 或不提供
+该命令在 2026-08-18 的候选分支通过 `168` 项。直接从系统 Python 或不提供
 `DATABASE_URL` 会在收集阶段失败，不能与代码回归混为一谈。
 
 本次重检还覆盖 embedding provider 超时归一：长会议 evidence builder 将底层 HTTP 超时转换为
@@ -88,6 +89,10 @@ ENV=local DATABASE_URL='sqlite+aiosqlite:///:memory:' \
 不会向 API 泄漏 `requests.ReadTimeout`。长会议 embedding 默认批量为 16、单批超时 45 秒，均受
 代码内上下界约束；可通过 `SUMMARY_V3_EMBED_BATCH_SIZE` 调整，但不能绕过 provider 或启用词法
 静默降级。
+
+统一 ready 也改为执行一个固定无隐私文本的真实 embedding 探针，并缓存 30 秒。模型文件出现在
+`/api/tags` 但推理超时时，状态现在是 `generation_ready=true`、`embedding_ready=false`，并只返回
+`embedding_probe_timeout` 脱敏错误码。本机同一环境实测约 5 秒后正确失败关闭，不再误报整体 ready。
 
 ## 真实候选语义回放
 

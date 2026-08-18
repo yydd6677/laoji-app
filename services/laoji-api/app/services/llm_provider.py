@@ -224,6 +224,74 @@ class _ProviderCoordinator:
 _COORDINATOR = _ProviderCoordinator()
 _SESSION = requests.Session()
 _SESSION.trust_env = False
+_PROBE_LOCK = threading.Lock()
+_EMBEDDING_PROBE_CACHE: dict[str, Any] = {}
+
+
+def _embedding_inference_state(base_url: str) -> dict[str, Any]:
+    """Probe a real, privacy-free embedding and cache the bounded result."""
+    try:
+        cache_seconds = max(
+            5.0,
+            min(300.0, float(os.getenv("LAOJI_LLM_READINESS_CACHE_SECONDS", "30"))),
+        )
+    except ValueError:
+        cache_seconds = 30.0
+    now = time.monotonic()
+    with _PROBE_LOCK:
+        cached_at = _EMBEDDING_PROBE_CACHE.get("cached_at")
+        if isinstance(cached_at, float) and now - cached_at < cache_seconds:
+            return dict(_EMBEDDING_PROBE_CACHE)
+        started = time.perf_counter()
+        ready = False
+        error_code: str | None = None
+        try:
+            response = _SESSION.post(
+                f"{base_url}/api/embed",
+                json={
+                    "model": EMBEDDING_MODEL,
+                    "input": ["LaoJi readiness probe"],
+                    "dimensions": 32,
+                    "truncate": True,
+                    "keep_alive": KEEP_ALIVE,
+                    "options": {"num_ctx": 2048},
+                },
+                headers={
+                    "X-Laoji-Priority": "interactive",
+                    "X-Laoji-Operation": "readiness.embedding",
+                },
+                timeout=max(
+                    1.0,
+                    min(15.0, float(os.getenv("LAOJI_LLM_READINESS_EMBED_TIMEOUT", "5"))),
+                ),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+            if not isinstance(embeddings, list) or len(embeddings) != 1:
+                raise LlmProviderError("embedding_response_invalid")
+            _normalized_embedding(embeddings[0])
+            ready = True
+        except requests.Timeout:
+            error_code = "embedding_probe_timeout"
+        except requests.RequestException:
+            error_code = "embedding_probe_failed"
+        except (LlmProviderError, TypeError, ValueError):
+            error_code = "embedding_probe_invalid"
+        result = {
+            "cached_at": now,
+            "ready": ready,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "error_code": error_code,
+        }
+        _EMBEDDING_PROBE_CACHE.clear()
+        _EMBEDDING_PROBE_CACHE.update(result)
+        return dict(result)
+
+
+def _reset_provider_probe_cache_for_tests() -> None:
+    with _PROBE_LOCK:
+        _EMBEDDING_PROBE_CACHE.clear()
 
 
 def _call_ollama_transport(
@@ -594,6 +662,9 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
         "embedding_provider": "ollama",
         "embedding_base_url": canonical_ollama_base_url(),
         "embedding_model": EMBEDDING_MODEL,
+        "embedding_ready": None,
+        "embedding_probe_latency_ms": None,
+        "embedding_probe_error": None,
         "queue": _COORDINATOR.snapshot(),
         "ready": None,
         "models": [],
@@ -615,7 +686,16 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
             if isinstance(item, dict) and item.get("name")
         )
         state["models"] = models
-        embedding_ready = EMBEDDING_MODEL in models
+        embedding_available = EMBEDDING_MODEL in models
+        embedding_probe = (
+            _embedding_inference_state(canonical_ollama_base_url())
+            if embedding_available
+            else {"ready": False, "latency_ms": 0.0, "error_code": "embedding_model_missing"}
+        )
+        embedding_ready = embedding_probe.get("ready") is True
+        state["embedding_ready"] = embedding_ready
+        state["embedding_probe_latency_ms"] = embedding_probe.get("latency_ms")
+        state["embedding_probe_error"] = embedding_probe.get("error_code")
 
         if provider == "dashscope":
             # The workspace-compatible endpoint may not expose /models.  A
@@ -647,6 +727,7 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
             state["ready"] = bool(state["generation_ready"] and embedding_ready)
     except Exception:
         state["generation_ready"] = False
+        state["embedding_ready"] = False
         state["ready"] = False
     state["probe_latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
     return state

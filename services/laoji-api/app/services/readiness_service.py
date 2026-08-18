@@ -102,6 +102,9 @@ async def readiness_snapshot() -> dict:
         "generation_ready": llm.get("generation_ready"),
         "embedding_provider": llm.get("embedding_provider"),
         "embedding_model": llm.get("embedding_model"),
+        "embedding_ready": llm.get("embedding_ready"),
+        "embedding_probe_latency_ms": llm.get("embedding_probe_latency_ms"),
+        "embedding_probe_error": llm.get("embedding_probe_error"),
         "queue": llm.get("queue"),
         "probe_latency_ms": llm.get("probe_latency_ms"),
     }
