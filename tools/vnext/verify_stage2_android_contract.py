@@ -30,6 +30,9 @@ def main() -> None:
     feature_flags = ROOT / "src/config/featureFlags.ts"
     upload_owner = ROOT / "src/services/deviceUploadOperations.ts"
     coordinator = ROOT / "src/native/nativeTransferCoordinator.ts"
+    operations = ROOT / "src/data/repositories/vnext/deviceOperationsRepository.ts"
+    recording = ROOT / "src/services/meetingRecording.ts"
+    upload_migration = ROOT / "src/data/db/migrations/0046DeviceUploadExecutor.ts"
 
     require(
         transfer,
@@ -70,6 +73,19 @@ def main() -> None:
         coordinator,
         "ensureDeviceUploadOperation({",
         "bindDeviceUploadOperationToAsset(",
+        "attachDeviceOperationExecutor(",
+    )
+    require(
+        operations,
+        "executor_kind",
+        "listPendingDeviceUploadOperations",
+    )
+    require(upload_migration, "idx_device_upload_pending_asset", "version: 46")
+    require(
+        recording,
+        "listPendingDeviceUploadOperations('guest')",
+        "const canonicalIds = new Set",
+        "nativeWorkId:",
     )
     require(
         live_screen,

@@ -151,7 +151,8 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 5 秒 busy timeout），在 `0039` 后增加迁移：
 
 迁移文件按发布阶段连续落库：Stage 1 包只新增 `0040-0042`，Stage 2 再新增 `0043-0044`，Stage 4
-新增 `0045`；不得提前放置高编号 placeholder，也不得让常规 migration runner 跳号或逆序执行。
+新增 `0045`；当前隔离切片追加 `0046` 仅保存上传执行句柄，不得提前放置高编号 placeholder，也不得让
+常规 migration runner 跳号或逆序执行。
 
 ### 0040 `VNextAuthorityAndOperations`
 

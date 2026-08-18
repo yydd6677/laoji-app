@@ -4,7 +4,8 @@
 
 本切片修复了设备 v2 R2 上传的一个 owner 缺口：原生 WorkManager 虽然使用稳定 operation ID，
 但此前只把 operation ID 放在 JS pending registry，没有在本机 `device_operations` 中创建并和
-`recording_assets.asset_generation` 建立外键式语义绑定。
+`recording_assets.asset_generation` 建立外键式语义绑定。后续的 0046 切片又将原生 WorkManager
+执行句柄持久化到同一 operation，待上传列表可以在 JS 进程重启后从 SQLite 重建。
 
 现在的顺序是：
 

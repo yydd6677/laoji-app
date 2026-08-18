@@ -43,6 +43,7 @@ import { immutableSourcesAndQuestionQ2 } from './0042ImmutableSourcesAndQuestion
 import { transcriptOverlayAndSearchVNext } from './0043TranscriptOverlayAndSearchVNext';
 import { mediaGenerationAndTrashVNext } from './0044MediaGenerationAndTrashVNext';
 import { scheduleMentionGraphVNext } from './0045ScheduleMentionGraphVNext';
+import { deviceUploadExecutorV46 } from './0046DeviceUploadExecutor';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -91,6 +92,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   transcriptOverlayAndSearchVNext,
   mediaGenerationAndTrashVNext,
   scheduleMentionGraphVNext,
+  deviceUploadExecutorV46,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -141,4 +143,5 @@ export {
   NATIVE_PROJECTION_CHECKPOINTS_V45_SQL,
   SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL,
 } from './0045ScheduleMentionGraphVNext';
+export { DEVICE_UPLOAD_EXECUTOR_V46_SQL } from './0046DeviceUploadExecutor';
 export type { MeetingDatabaseMigration } from './types';

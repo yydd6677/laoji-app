@@ -7,6 +7,7 @@ import { getApiConfig } from '../services/config';
 import { ensureRemoteMeetingServiceBinding } from '../services/deviceAuthority';
 import { ensureDeviceV2Session, type DeviceV2Session } from '../services/deviceV2Api';
 import {
+  attachDeviceOperationExecutor,
   bindDeviceUploadOperationToAsset,
   ensureDeviceUploadOperation,
 } from '../services/deviceUploadOperations';
@@ -260,6 +261,12 @@ export async function enqueueNativeDeviceV2MeetingUpload(
     cancelRevision: binding.cancelRevision,
     assetGeneration: request.assetGeneration,
   });
+  const attached = await attachDeviceOperationExecutor(
+    operation.operationId,
+    'workmanager',
+    workId,
+  );
+  if (!attached) throw new Error('上传 WorkManager 执行句柄未能持久化');
   return {
     ...lease,
     workId,

@@ -45,7 +45,9 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
           operation_id TEXT PRIMARY KEY,
           entity_id TEXT NOT NULL,
           capability TEXT NOT NULL,
-          generation_id TEXT NOT NULL
+          generation_id TEXT NOT NULL,
+          remote_state TEXT NOT NULL DEFAULT 'queued',
+          updated_at_ms INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE meeting_recording_merge_tasks (
           id TEXT PRIMARY KEY,
@@ -88,7 +90,7 @@ def bootstrap_fixture(connection: sqlite3.Connection) -> None:
         INSERT INTO meeting_recording_merge_tasks VALUES ('merge-1', 1000);
         INSERT INTO device_operations VALUES (
           'operation-1', 'meeting-1', 'media.upload',
-          '11111111111111111111111111111111'
+          '11111111111111111111111111111111', 'queued', 1000
         );
         INSERT INTO transcript_revisions VALUES (
           'revision-1', 'meeting-1', 'ready', 'asr-r1', 1, 1000, 1500
@@ -193,6 +195,28 @@ def apply_stage2(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
+def apply_upload_executor(connection: sqlite3.Connection) -> None:
+    existing = columns(connection, "device_operations")
+    if "executor_kind" not in existing:
+        connection.execute(
+            "ALTER TABLE device_operations ADD COLUMN executor_kind TEXT "
+            "CHECK(executor_kind IS NULL OR executor_kind IN ('workmanager'))"
+        )
+    if "executor_id" not in existing:
+        connection.execute("ALTER TABLE device_operations ADD COLUMN executor_id TEXT")
+    connection.executescript(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_device_operation_executor
+          ON device_operations(executor_kind, executor_id)
+          WHERE executor_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_device_upload_pending_asset
+          ON device_operations(capability, remote_state, updated_at_ms, operation_id)
+          WHERE capability = 'media.upload' AND remote_state IN ('queued', 'running', 'failure');
+        """
+    )
+    connection.commit()
+
+
 def main() -> None:
     with tempfile.NamedTemporaryFile(suffix=".db") as handle:
         connection = sqlite3.connect(handle.name)
@@ -245,8 +269,18 @@ def main() -> None:
             ).fetchone()[0] != "operation-1":
                 raise AssertionError("valid upload operation ownership was rejected")
             apply_stage2(connection)
+            apply_upload_executor(connection)
+            connection.execute(
+                "UPDATE device_operations SET executor_kind = 'workmanager', executor_id = 'work-1' "
+                "WHERE operation_id = 'operation-1'"
+            )
+            if connection.execute(
+                "SELECT executor_kind, executor_id FROM device_operations WHERE operation_id = 'operation-1'"
+            ).fetchone() != ("workmanager", "work-1"):
+                raise AssertionError("upload executor handle was not persisted")
             if connection.execute("SELECT COUNT(*) FROM speaker_overlay_revisions").fetchone()[0] != 1:
                 raise AssertionError("migration replay duplicated overlay")
+            apply_upload_executor(connection)
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise AssertionError("foreign key check failed")
             try:

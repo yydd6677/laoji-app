@@ -1,4 +1,5 @@
 import {
+  attachDeviceOperationExecutor as attachExecutor,
   createDeviceOperation,
   getDeviceOperation,
   updateDeviceOperation,
@@ -23,6 +24,14 @@ export interface EnsureDeviceUploadOperationInput {
   recordingAssetId: string;
   assetGeneration: string;
   sourceSha256: string;
+}
+
+export function attachDeviceOperationExecutor(
+  operationId: string,
+  executorKind: 'workmanager',
+  executorId: string,
+): Promise<DeviceOperationRecord | null> {
+  return attachExecutor(operationId, executorKind, executorId);
 }
 
 /** Creates the durable local upload intent before the native worker is queued. */

@@ -12,6 +12,7 @@ import {
 } from '../native/nativeTransferCoordinator';
 import type { NativeUploadState } from 'laoji-native-platform';
 import { getFeatureFlags } from '../config/featureFlags';
+import { listPendingDeviceUploadOperations } from '../data/repositories/vnext/deviceOperationsRepository';
 import { diagnosticAudit } from './diagnostics';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v3';
@@ -211,7 +212,54 @@ export async function listPendingMeetingAudioUploads(
   storageScope: string,
 ): Promise<PendingMeetingAudioUpload[]> {
   await pendingStorageMutation.catch(() => {});
-  return Object.values(await readPendingUploads(storageScope)).sort((left, right) => (
+  const legacy = Object.values(await readPendingUploads(storageScope));
+  let canonical: PendingMeetingAudioUpload[] = [];
+  if (storageScope === 'guest' && getFeatureFlags().localMeetingDbCanonicalReadV1) {
+    try {
+      canonical = (await listPendingDeviceUploadOperations('guest')).map(snapshot => ({
+        meetingId: snapshot.asset.meetingId,
+        canonicalMeetingId: snapshot.asset.meetingId,
+        recordingAssetId: snapshot.asset.id,
+        role: snapshot.asset.role,
+        origin: snapshot.asset.origin,
+        nativeSessionId: snapshot.asset.nativeSessionId ?? undefined,
+        audioUri: snapshot.asset.localUri,
+        fileName: snapshot.asset.fileName ?? `${snapshot.asset.id}.wav`,
+        mimeType: snapshot.asset.mimeType ?? 'audio/wav',
+        byteSize: snapshot.asset.byteSize ?? undefined,
+        durationMs: snapshot.asset.durationMs ?? undefined,
+        checksumSha256: snapshot.asset.checksumSha256 ?? snapshot.asset.sourceSha256 ?? undefined,
+        sourceSha256: snapshot.asset.sourceSha256 ?? undefined,
+        assetGeneration: snapshot.asset.assetGeneration,
+        remoteAssetId: snapshot.asset.remoteAssetId ?? undefined,
+        createdAt: new Date(snapshot.operation.createdAtMs).toISOString(),
+        lastAttemptAt: new Date(snapshot.operation.updatedAtMs).toISOString(),
+        attemptCount: Math.max(0, snapshot.operation.operationRevision - 1),
+        uploadState: 'pending',
+        failureCode: snapshot.operation.remoteState === 'failure'
+          ? snapshot.operation.errorCode as MeetingAudioUploadFailureCode | undefined
+          : undefined,
+        failureMessage: snapshot.operation.remoteState === 'failure'
+          ? snapshot.operation.errorCode ?? undefined
+          : undefined,
+        nativeWorkId: snapshot.operation.executorKind === 'workmanager'
+          ? snapshot.operation.executorId ?? undefined
+          : undefined,
+        nativeOperationId: snapshot.operation.operationId,
+        nativeProtocol: 'device-v2-r2',
+      } satisfies PendingMeetingAudioUpload));
+    } catch {
+      // A migration/cold-open failure must not discard the one-time
+      // compatibility registry; the next foreground pass retries SQLite.
+      canonical = [];
+    }
+  }
+  const canonicalIds = new Set(canonical.map(item => item.recordingAssetId));
+  const combined = [
+    ...canonical,
+    ...legacy.filter(item => !canonicalIds.has(item.recordingAssetId)),
+  ];
+  return combined.sort((left, right) => (
     left.meetingId.localeCompare(right.meetingId)
     || (left.role === 'primary' ? 0 : 1) - (right.role === 'primary' ? 0 : 1)
     || left.createdAt.localeCompare(right.createdAt)
