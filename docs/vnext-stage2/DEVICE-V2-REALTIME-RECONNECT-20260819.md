@@ -55,5 +55,7 @@
 
 ## 仍未闭合
 
-- 尚未在 LaoJi 专属 Android 设备上验证 WorkManager/录音线程的真实进程死亡、系统网络切换、token refresh、连续 stable/final 页面投影和本地 SQLite 恢复。
+- 尚未在 LaoJi 专属 Android 设备上验证 WorkManager/录音线程的真实进程死亡、系统网络切换、原生
+  token refresh、连续 stable/final 页面投影和本地 SQLite 恢复；服务端令牌刷新与游标恢复仅有上述
+  候选回放证据。
 - 因此 Stage 2 capability barrier 继续关闭，生产仍使用稳定路径，不能删除旧上传或旧实时入口。
