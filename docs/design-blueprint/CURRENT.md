@@ -131,5 +131,6 @@ Q2 已从 fake transport 推进为默认关闭的真实 reader 候选：服务�
 binding fence、单次本地 Provider 调用和 UTF-8 来源校验；移动端以 `questionQ2Candidate` 双开关接入
 Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现有问答页。来源仅包含当前转写和用户明确纳入的
 我的笔记，不把整理结果或历史答案提升为证据；失败重试会更换 device operation 并复用、重新绑定原未完成 turn，
-不会按新的 ordinal 留下重复问题。当前仍未
-通过真实模型语义 holdout、LaoJi 专属设备回放和 capability barrier，不能称为 Stage 3 退出。
+不会按新的 ordinal 留下重复问题。隔离候选已用真实 `qwen3.5:9b` 对 5 个弱参考样本问题完成 smoke，期间
+修复了 Qwen 紧凑引用结构和不可靠坐标的确定性归一化；这不等于完整语义 holdout。当前仍未
+通过独立自然问题、拒答质量、LaoJi 专属设备回放和 capability barrier，不能称为 Stage 3 退出。

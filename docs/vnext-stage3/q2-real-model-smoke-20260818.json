@@ -1,0 +1,69 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "model": "qwen3.5:9b",
+  "provider": "ollama",
+  "reader_revision": "q2-reader-v1",
+  "source_policy": "existing SRT used as weak reference only; not ground truth or production prompt material",
+  "cases": [
+    {
+      "sample": "1300572695-1-192.srt",
+      "question": "本文主要研究什么问题？",
+      "expected": "任务卸载算法/最小化成本",
+      "answer": "本文主要研究车辆边缘计算中基于最小化成本的任务卸载算法。",
+      "citation_count": 1,
+      "exact_source_match": true,
+      "latency_ms": 1384.6
+    },
+    {
+      "sample": "1300572695-1-192.srt",
+      "question": "文中使用了哪些方法来得到最终的卸载方案？",
+      "expected": "李亚普诺夫优化/路径构造/模拟退火",
+      "answer": "文中使用了李亚普诺夫优化来保证约束满足，使用路径构造算法形成初始点，并将该初始点作为模拟退火算法的输入，通过不断迭代得到全局最优解即最终卸载方案。",
+      "citation_count": 1,
+      "exact_source_match": true,
+      "latency_ms": 2314.4
+    },
+    {
+      "sample": "1436403866-1-192.srt",
+      "question": "这次汇报计划从哪三个方面展开？",
+      "expected": "工作总结/个人不足/工作计划",
+      "answer": "汇报计划从工作总结、个人不足和工作计划三个方面展开。",
+      "citation_count": 1,
+      "exact_source_match": true,
+      "latency_ms": 1837.5
+    },
+    {
+      "sample": "500001564053724-1-192.srt",
+      "question": "本次会议要探讨核污染影响哪些方面？",
+      "expected": "水循环/食物链",
+      "answer": "核污染影响本国水循环和食物链，具体包括对沿海地区水循环、海洋生态系统平衡、渔业产业、水源以及地表河流湖泊和地下水体的影响。",
+      "citation_count": 3,
+      "exact_source_match": true,
+      "latency_ms": 3715.3
+    },
+    {
+      "sample": "500001564053724-1-192.srt",
+      "question": "字幕中明确列出了哪些参会国家？",
+      "expected": "中国/美国/法国/俄罗斯/英国",
+      "answer": "字幕中明确列出的参会国家有中国、美国、法国、俄罗斯和英国。",
+      "citation_count": 1,
+      "exact_source_match": true,
+      "latency_ms": 1904.2
+    }
+  ],
+  "summary": {
+    "completed": 5,
+    "expected_answer_match": 5,
+    "exact_citation_match": 5,
+    "min_latency_ms": 1384.6,
+    "max_latency_ms": 3715.3
+  },
+  "remaining_gates": [
+    "independent natural-question holdout",
+    "not_stated and cannot_confirm refusal quality",
+    "full transcript rather than weak-reference excerpts",
+    "Android Q2 page and recovery replay",
+    "unified capability barrier"
+  ]
+}
