@@ -11,7 +11,7 @@ const base = {
   name: '老记',
   slug: 'laoji-app',
   scheme: 'laoji',
-  version: '1.1.12',
+  version: '1.1.13',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
@@ -39,7 +39,7 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 120,
+    versionCode: 121,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',

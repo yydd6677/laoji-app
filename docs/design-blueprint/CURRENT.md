@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation; 1.1.12 (120) candidate archived`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation; 1.1.13 (121) candidate archived`
 
 ## 权威文件
 
@@ -73,8 +73,8 @@ mobile SQLite + app-private media (business authority)
 [Stage 0 exit](../vnext-stage0/EXIT-20260818.md) 并冻结稳定版本；Stage 1 已在
 隔离工作树完成 0040–0042、本机 owner、device v2、generic task owner 与原生 purge-only capability，
 退出记录见 [Stage 1 exit](../vnext-stage1/STAGE1-EXIT.md)。未部署服务、未切公开流量、未发布生产 APK；
-`1.1.12 (120)` 仅作为隔离候选归档，构建证据见
-[candidate build](../vnext-candidates/1.1.12-120.md)；此前的 `1.1.11 (119)` 仍保留用于回溯。
+`1.1.13 (121)` 仅作为隔离候选归档，构建证据见
+[candidate build](../vnext-candidates/1.1.13-121.md)；`1.1.12 (120)` 和此前的 `1.1.11 (119)` 仍保留用于回溯。
 
 Stage 2 已实现 0043/0044、RecordingAsset generation/source/operation 不变量、Transcript stable
 segment/text state、speaker/manual overlay 仓储，以及隔离的 device-v2 R2 upload session、容量预留、
