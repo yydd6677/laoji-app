@@ -1,0 +1,33 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "full video decoded by isolated ASR v2; transcript retained in memory only",
+  "media_name": "1221445661-1-192.mp4",
+  "media_sha256": "sha256:7ec83475cda37792f0770b7caba77f5f639f28a08f097591333f93bf713e0b6b",
+  "audio_ms": 1029291,
+  "asr_chunks": 74,
+  "asr_text_segments": 74,
+  "asr_model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+  "asr_wall_ms": 244754,
+  "asr_contract_validated": true,
+  "transcript_sha256": "sha256:621f799ecae99acddc75102e038285e3a712d98b62ca4b8f599bd2f0361e32c6",
+  "evidence": {
+    "estimated_tokens": 4959,
+    "total_segments": 37,
+    "included_segments": 37,
+    "source_coverage": 1.0,
+    "used_embeddings": false
+  },
+  "facts_wall_ms": 10674,
+  "model_calls": 1,
+  "facts": 2,
+  "actions": 0,
+  "total_wall_ms": 256420,
+  "passed": true,
+  "remaining": [
+    "human fact support and action usefulness review",
+    "full long-meeting source-stream replay",
+    "Android summary page and recovery replay",
+    "Facts V3 capability barrier"
+  ]
+}
