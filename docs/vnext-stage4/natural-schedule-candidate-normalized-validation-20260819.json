@@ -1,0 +1,33 @@
+{
+  "candidate_only": true,
+  "normalized_in_memory": true,
+  "rows": 150,
+  "passed": true,
+  "error_count": 0,
+  "review_flag_count": 0,
+  "reject_ratio": 0.0,
+  "register": {
+    "measured": {
+      "total": 150,
+      "deferential_ratio": 0.0,
+      "polite_any_ratio": 0.1467,
+      "written_register_ratio": 0.0333,
+      "field_label_ratio": 0.0,
+      "hhmm_ratio": 0.0,
+      "digit_ratio": 0.0,
+      "bare_imperative_ratio": 0.4,
+      "slot_stack_ratio": 0.0,
+      "length_median": 11.5,
+      "length_p90": 17,
+      "length_max": 37,
+      "clauses_mean": 1.0,
+      "clauses_p90": 1,
+      "top_opener": "取消",
+      "top_opener_share": 0.0733,
+      "distinct_openers": 78
+    },
+    "violations": []
+  },
+  "oracle_error_count": 0,
+  "normalization": "source metadata lifted to validator fields; no utterance text rewritten"
+}

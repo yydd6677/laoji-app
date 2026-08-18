@@ -13,5 +13,9 @@
 或 source supervision，不能冒充自然字段 holdout。Stage 4 的准确率退出门保持关闭，直到完成
 至少两人独立标注、冲突裁决和按 speaker/semantic-event 隔离的冻结集。
 
+2026-08-19 的自动注册和 provenance 审计见
+[自然日程语料技术审计](NATURAL-SCHEDULE-VALIDATION-20260819.md)。它只证明现有 150 条队列的格式和
+注册分布，没有替代两名人工标注或字段金标。
+
 这不是代码失败，也不应通过把旧规则结果写回 `expected_fields` 来“补齐”证据；那会让被测
 解析器给自己造金标。
