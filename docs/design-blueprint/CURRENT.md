@@ -105,7 +105,8 @@ Graph producer/validator 已接入默认关闭的 device-v2 capability 和手机
 Graph 来源/revision 已贯穿确认、详细编辑和本机 CRUD；ProjectionEnvelope 已在隔离 worktree 接入
 Calendar/Minutes native snapshot parser、stale reducer 和 mutation/action 回显，并提供默认关闭的
 三个页面生成协调器，但候选流量尚未启用且未跨 capability barrier，证据见
-[Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。
+[Stage 4 日程切片](../vnext-stage4/STAGE4-SLICE.md)。本机 v45 SQLite/FTS 迁移回放和 12,000 条搜索
+工作负载已通过；Expo SQLite/Android 迁移、真实页面重建和搜索性能仍未验收。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
