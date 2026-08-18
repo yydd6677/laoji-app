@@ -43,7 +43,10 @@ def main() -> None:
         "SOURCE_ADMISSION_LIMIT",
         "resumedTask.task.source_stream_id",
         "resumedTask.task.input_sha256",
-        "next_manifest_page === 0",
+        "appendSummaryManifestPages",
+        "MANIFEST_PAGE_DESCRIPTORS",
+        "current.next_manifest_chapter",
+        "MANIFEST_CAPACITY",
     )
     require(server, "MAX_GROUPS_DEVICE = 2", '"received_bundle_count"', '"received_item_count"')
     print("stage3_source_stream_contract=passed")

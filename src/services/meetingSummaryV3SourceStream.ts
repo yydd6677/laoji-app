@@ -12,6 +12,7 @@ import {
   getDeviceV2Task,
   getDeviceV2TaskArtifact,
   type SourceBundleItem,
+  type DeviceV2SourceStreamSnapshot,
 } from './deviceV2SourceStream';
 import { DeviceV2ApiError, loadDeviceV2Capabilities } from './deviceV2Api';
 import { parseMeetingFactsResultV3, meetingFactsV3ToSummary } from './meetingSummaryV3';
@@ -22,6 +23,9 @@ const MAX_CHAPTER_BYTES = 48 * 1024;
 const POLL_LIMIT = 10 * 60 * 1_000;
 const SOURCE_ADMISSION_POLL_MS = 1_000;
 const SOURCE_ADMISSION_LIMIT = 10 * 60 * 1_000;
+// Keep manifest pages comfortably below the server's 4 MiB byte limit while
+// allowing long meetings to resume one page at a time.
+const MANIFEST_PAGE_DESCRIPTORS = 512;
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -145,6 +149,71 @@ async function uploadSourceChapterWithBackpressure(input: {
     }
   }
   throw new Error('新版整理来源上传等待超时');
+}
+
+async function appendSummaryManifestPages(
+  stream: DeviceV2SourceStreamSnapshot,
+  descriptors: readonly {
+    chapter_ordinal: number;
+    declared_bundle_count: number;
+    declared_item_count: number;
+    declared_uncompressed_bytes: number;
+    chapter_sha256: string;
+  }[],
+  signal?: AbortSignal,
+): Promise<DeviceV2SourceStreamSnapshot> {
+  if (stream.final_chapter_count !== null) {
+    if (stream.final_chapter_count !== descriptors.length) {
+      throw new Error('新版整理任务来源清单与当前内容不一致。');
+    }
+    return stream;
+  }
+  let current = stream;
+  while (current.next_manifest_chapter < descriptors.length) {
+    if (signal?.aborted) throw new Error('meeting summary cancelled');
+    const firstChapterOrdinal = current.next_manifest_chapter;
+    const pageDescriptors = descriptors.slice(
+      firstChapterOrdinal,
+      firstChapterOrdinal + MANIFEST_PAGE_DESCRIPTORS,
+    );
+    if (pageDescriptors.length === 0) {
+      throw new Error('新版整理任务来源清单游标无效。');
+    }
+    const finalPage = firstChapterOrdinal + pageDescriptors.length === descriptors.length;
+    const pageSha256 = await digest(canonical(pageDescriptors));
+    const deadline = Date.now() + SOURCE_ADMISSION_LIMIT;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw new Error('meeting summary cancelled');
+      try {
+        current = await appendDeviceV2SourceManifestPage({
+          streamId: current.stream_id,
+          pageSeq: current.next_manifest_page,
+          firstChapterOrdinal,
+          descriptors: pageDescriptors,
+          pageSha256,
+          finalPage,
+        });
+        break;
+      } catch (error) {
+        // A page may be accepted before its response is lost; repeating the
+        // same page is idempotent. Capacity/order responses are transient
+        // while the single source consumer releases an earlier page.
+        if (!(error instanceof DeviceV2ApiError)
+          || (error.status !== 409 && error.status !== 429)
+          || (error.code && !['MANIFEST_CAPACITY', 'MANIFEST_BYTES_CAPACITY'].includes(error.code))) {
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+      }
+    }
+    if (current.next_manifest_chapter <= firstChapterOrdinal) {
+      throw new Error('新版整理任务来源清单上传等待超时。');
+    }
+  }
+  if (current.final_chapter_count !== descriptors.length) {
+    throw new Error('新版整理任务来源清单未完成。');
+  }
+  return current;
 }
 
 export async function buildSummarySourceItems(input: {
@@ -333,18 +402,7 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       declared_uncompressed_bytes: chapter.reduce((sum, item) => sum + utf8Length(item.content), 0),
       chapter_sha256: await chapterHash([bundleHashes[ordinal]]),
     })));
-    if (stream.next_manifest_page === 0) {
-      stream = await appendDeviceV2SourceManifestPage({
-        streamId: stream.stream_id,
-        pageSeq: 0,
-        firstChapterOrdinal: 0,
-        descriptors,
-        pageSha256: await digest(canonical(descriptors)),
-        finalPage: true,
-      });
-    } else if (stream.final_chapter_count !== chapterItems.length) {
-      throw new Error('新版整理任务来源清单与当前内容不一致。');
-    }
+    stream = await appendSummaryManifestPages(stream, descriptors, options.signal);
     for (const [ordinal, chapter] of chapterItems.entries()) {
       await uploadSourceChapterWithBackpressure({
         streamId: stream.stream_id,
