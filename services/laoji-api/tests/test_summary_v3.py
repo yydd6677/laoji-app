@@ -750,6 +750,24 @@ def test_model_is_called_once_and_only_repairs_structural_failure(monkeypatch):
     assert operations == ["summary.facts.v3", "summary.facts.v3.repair"]
 
 
+def test_missing_root_facts_array_delimiter_is_repaired_without_second_call(monkeypatch):
+    active_package = package()
+    value = json.dumps(valid_response(active_package), ensure_ascii=False, separators=(",", ":"))
+    malformed = value.replace('],"relations"', ',"relations"', 1)
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return malformed
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert response.schema_version == 3
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+
+
 def test_failed_repair_exposes_only_sanitized_field_errors(monkeypatch):
     active_package = package()
     monkeypatch.setattr(summary_v3_generator, "call_llm", lambda *_args, **_kwargs: "not-json")
@@ -1172,6 +1190,42 @@ def test_speaker_correction_changes_source_and_transcript_fingerprints():
     _sources, after, after_transcript = normalize_sources(transcript, None, None)
     assert before != after
     assert before_transcript != after_transcript
+
+
+def test_long_transcript_packs_adjacent_rows_without_losing_time_bounds():
+    transcript = [
+        {
+            "id": f"line-{index}",
+            "speaker": "讲话人 1",
+            "text": f"第{index}句关于项目进展的连续发言。",
+            "start_ms": index * 1_000,
+            "end_ms": index * 1_000 + 800,
+        }
+        for index in range(40)
+    ]
+    sources, _fingerprint, _revision = normalize_sources(transcript, None, None)
+
+    assert len(sources) < len(transcript)
+    assert sources[0].source_id.startswith("transcript:line-0--line-")
+    assert sources[0].start_ms == 0
+    assert sources[0].end_ms > sources[0].start_ms
+    assert "第0句" in sources[0].text
+    assert "第1句" in sources[0].text
+    assert sources[0].content_hash == digest(sources[0].text)
+
+
+def test_short_transcript_keeps_line_level_source_identity():
+    transcript = [
+        {"id": "segment-a", "speaker": "讲话人 1", "text": "第一句。", "start_ms": 0, "end_ms": 1_000},
+        {"id": "segment-b", "speaker": "讲话人 1", "text": "第二句。", "start_ms": 1_000, "end_ms": 2_000},
+    ]
+    sources, _fingerprint, _revision = normalize_sources(transcript, None, None)
+
+    assert [source.source_id for source in sources] == [
+        "transcript:segment-a",
+        "transcript:segment-b",
+    ]
+    assert [source.text for source in sources] == ["第一句。", "第二句。"]
 
 
 @pytest.mark.parametrize(

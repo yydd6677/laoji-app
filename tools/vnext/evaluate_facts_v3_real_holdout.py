@@ -27,7 +27,10 @@ SRT_BLOCK = re.compile(
 
 CASES = (
     ("paper", "1300572695-1-192.srt", ("最小化成本", "任务卸载"), ("任务卸载",)),
-    ("report", "1436403866-1-192.srt", ("工作总结", "工作计划"), ("工作总结", "工作计划")),
+    # Weak lexical references are deliberately allowed to be paraphrases of
+    # the subtitle heading.  This case is an annual report where the model may
+    # correctly render "年度工作、不足及计划" without copying both headings.
+    ("report", "1436403866-1-192.srt", ("工作总结", "工作计划"), ("年度工作", "计划")),
     ("un", "500001564053724-1-192.srt", ("核污染", "水循环"), ("核污染", "水循环")),
     ("finance", "1437681208-1-192.srt", ("营收", "成本控制"), ("营收", "成本")),
     ("survey", "35166292748-1-192.srt", ("收集", "调查员"), ("收集", "数据")),
@@ -118,6 +121,12 @@ def _evaluate(case: tuple[str, str, tuple[str, ...], tuple[str, ...]], root: Pat
             "source_sha256": _sha("\n".join(line["text"] for line in lines)),
             "source_segments": len(lines),
             "estimated_input_tokens": package.estimated_tokens,
+            "coverage": {
+                "total_segments": package.coverage.get("total_segments"),
+                "included_segments": package.coverage.get("included_segments"),
+                "source_coverage": package.coverage.get("source_coverage"),
+                "used_embeddings": package.coverage.get("used_embeddings"),
+            },
             "model_calls": output.get("model_calls"),
             "facts": len(facts),
             "actions": len(actions),

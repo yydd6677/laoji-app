@@ -138,6 +138,30 @@ def _extract_object(raw: str) -> Any:
     return json.loads(value)
 
 
+def _repair_root_array_closures(raw: str) -> str:
+    """Repair only a missing root array delimiter in an otherwise JSON reply.
+
+    Qwen occasionally emits a complete ``facts`` item followed immediately by
+    the next root key, omitting the closing ``]``.  The function is deliberately
+    narrow: it only inserts the delimiter immediately before the known root
+    keys and never edits quoted text, field values, or arbitrary syntax.  The
+    normal JSON and Pydantic validators still decide whether the result is
+    acceptable.
+    """
+    value = raw.strip()
+    if not value.startswith("{"):
+        return raw
+    for key in ("relations", "action_candidates"):
+        marker = f',"{key}":'
+        position = value.find(marker)
+        if position < 0:
+            continue
+        prefix = value[:position].rstrip()
+        if prefix and not prefix.endswith("]"):
+            value = prefix + "]" + value[position:]
+    return value
+
+
 def _sanitize_model_value(value: Any) -> Any:
     """Apply harmless cardinality normalization before strict validation."""
     if not isinstance(value, dict):
@@ -246,6 +270,15 @@ def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModel
     try:
         return _validate_model_response(raw), 1
     except (ValueError, TypeError, ValidationError) as first_error:
+        # A delimiter-only repair is deterministic and does not spend the
+        # optional model repair attempt.  It remains fail-closed because the
+        # full schema validator runs immediately afterwards.
+        normalized = _repair_root_array_closures(raw)
+        if normalized != raw:
+            try:
+                return _validate_model_response(normalized), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
         repaired = _call_model(
             package,
             operation="summary.facts.v3.repair",

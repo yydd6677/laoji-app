@@ -34,6 +34,15 @@ _NO_NEW_INFORMATION_SIGNAL = re.compile(
     r"(?:决策|决定|行动项|负责人|截止(?:日期|时间))",
 )
 
+# Subtitle/ASR emitters commonly split one utterance into many short rows.
+# Feeding those rows as independent model items spends the context window on
+# repeated ids/timestamps and removes the local syntax needed to understand a
+# topic, correction, or commitment.  Long meetings use deterministic packing
+# below; short meetings retain their original line-level source identity.
+_TRANSCRIPT_PACK_THRESHOLD = 32
+_TRANSCRIPT_PACK_MAX_CHARS = 360
+_TRANSCRIPT_PACK_MAX_DURATION_MS = 30_000
+
 
 class SummaryEvidenceIncomplete(RuntimeError):
     code = "SUMMARY_EVIDENCE_INCOMPLETE"
@@ -159,17 +168,78 @@ def _split_text(value: str, *, max_chars: int = 800) -> list[str]:
 
 
 def _transcript_sources(lines: list[dict[str, Any]]) -> list[EvidenceSource]:
-    values: list[EvidenceSource] = []
+    """Normalize transcript rows into stable, citation-safe source chunks.
+
+    A long transcript is packed only along its original order and time range.
+    A packed source is still immutable and its quote is the exact normalized
+    concatenation sent to the model; the source timestamp spans all rows in the
+    chunk so UI citation jumps remain deterministic.  Keeping short meetings
+    line-level avoids changing existing source contracts unnecessarily.
+    """
+    normalized: list[dict[str, Any]] = []
     for ordinal, line in enumerate(lines):
         text = str(line.get("text") or "").strip()
         if not text:
             continue
-        raw_id = line.get("id") or f"line-{ordinal}"
+        normalized.append({
+            "ordinal": ordinal,
+            "raw_id": str(line.get("id") or f"line-{ordinal}"),
+            "text": text,
+            "start_ms": _milliseconds(line.get("start_ms"), line.get("start")),
+            "end_ms": _milliseconds(line.get("end_ms"), line.get("end")),
+            "speaker": str(line.get("speaker") or line.get("speaker_label") or "").strip() or None,
+        })
+
+    if len(normalized) <= _TRANSCRIPT_PACK_THRESHOLD:
+        chunks = [[item] for item in normalized]
+    else:
+        chunks: list[list[dict[str, Any]]] = []
+        current: list[dict[str, Any]] = []
+        current_chars = 0
+        for item in normalized:
+            next_chars = current_chars + (1 if current else 0) + len(item["text"])
+            current_start = current[0]["start_ms"] if current else None
+            current_end = item["end_ms"]
+            duration = (
+                current_end - current_start
+                if current_start is not None and current_end is not None
+                else 0
+            )
+            speaker_changed = bool(
+                current
+                and current[-1]["speaker"]
+                and item["speaker"]
+                and current[-1]["speaker"] != item["speaker"]
+            )
+            if current and (
+                speaker_changed
+                or next_chars > _TRANSCRIPT_PACK_MAX_CHARS
+                or duration > _TRANSCRIPT_PACK_MAX_DURATION_MS
+            ):
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append(item)
+            current_chars += (1 if len(current) > 1 else 0) + len(item["text"])
+        if current:
+            chunks.append(current)
+
+    values: list[EvidenceSource] = []
+    for chunk_ordinal, chunk in enumerate(chunks):
+        first = chunk[0]
+        last = chunk[-1]
+        raw_id = first["raw_id"] if len(chunk) == 1 else f"{first['raw_id']}--{last['raw_id']}"
         source_id = f"transcript:{_safe_part(raw_id)}"
-        start_ms = _milliseconds(line.get("start_ms"), line.get("start"))
-        end_ms = _milliseconds(line.get("end_ms"), line.get("end"))
+        start_ms = first["start_ms"]
+        end_ms = last["end_ms"]
         if start_ms is not None and end_ms is not None and end_ms < start_ms:
             end_ms = start_ms
+        speakers = {item["speaker"] for item in chunk}
+        # Do not attribute a packed chunk to a named speaker when any row in
+        # it is unknown; that would turn partial diarization into a false
+        # speaker claim in every citation using the chunk.
+        speaker = next(iter(speakers)) if len(speakers) == 1 and None not in speakers else None
+        text = " ".join(item["text"] for item in chunk)
         values.append(
             EvidenceSource(
                 source_id=source_id,
@@ -178,9 +248,10 @@ def _transcript_sources(lines: list[dict[str, Any]]) -> list[EvidenceSource]:
                 content_hash=_sha256(text),
                 start_ms=start_ms,
                 end_ms=end_ms,
-                ordinal=ordinal,
-                speaker=str(line.get("speaker") or line.get("speaker_label") or "").strip() or None,
-                model_source_id=f"transcript:t{ordinal:x}",
+                ordinal=chunk_ordinal,
+                speaker=speaker,
+                parent_id=(first["raw_id"] if len(chunk) > 1 else None),
+                model_source_id=f"transcript:t{chunk_ordinal:x}",
             )
         )
     return values

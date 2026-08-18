@@ -38,6 +38,27 @@ DATABASES = (
 DEFAULT_INVENTORY = Path("docs/vnext-stage0/CURRENT-TO-TARGET-20260818.json")
 
 
+def _python_executable(root: Path = ROOT) -> str:
+    """Use the reproducible vNext environment when it exists.
+
+    The verifier is often launched as plain ``python3`` on a host whose system
+    interpreter has none of the service dependencies. Keep the fallback for
+    clean CI and Windows, but do not let a missing global Pydantic package make
+    a valid isolated checkout look broken.
+    """
+    override = os.getenv("VNEXT_PYTHON", "").strip()
+    if override:
+        return override
+    candidates = (
+        root / ".venv-vnext" / "bin" / "python",
+        root / ".venv-vnext" / "Scripts" / "python.exe",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
 def _run(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> str:
     completed = subprocess.run(
         command,
@@ -305,19 +326,19 @@ def _verify_archived_build(archive_root: Path) -> dict[str, str]:
         "PYTHONPATH": str(archive_root / "services/laoji-api"),
     })
     api_output = _run(
-        [sys.executable, "-c", "import app.main; print('api_import=ok')"],
+        [_python_executable(), "-c", "import app.main; print('api_import=ok')"],
         cwd=archive_root,
         env=environment,
     )
     asr_environment = dict(os.environ)
     asr_environment["PYTHONPATH"] = str(archive_root / "services/laoji-asr")
     asr_output = _run(
-        [sys.executable, "-c", "import server; print('asr_import=ok')"],
+        [_python_executable(), "-c", "import server; print('asr_import=ok')"],
         cwd=archive_root,
         env=asr_environment,
     )
     contract_output = _run(
-        [sys.executable, str(archive_root / "contracts/vnext/generate.py"), "--check"],
+        [_python_executable(), str(archive_root / "contracts/vnext/generate.py"), "--check"],
         cwd=archive_root,
         env=environment,
     )
@@ -334,7 +355,7 @@ def _inventory(ref: str) -> dict[str, Any]:
     current_contract_environment = dict(os.environ)
     current_contract_environment["PYTHONPATH"] = str(ROOT / "services/laoji-api")
     current_contract_check = _run(
-        [sys.executable, str(ROOT / "contracts/vnext/generate.py"), "--check"],
+        [_python_executable(), str(ROOT / "contracts/vnext/generate.py"), "--check"],
         env=current_contract_environment,
     ).splitlines()[-1]
     with tempfile.TemporaryDirectory(prefix="laoji-stage0-") as raw_directory:

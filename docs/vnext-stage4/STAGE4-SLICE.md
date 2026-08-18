@@ -88,3 +88,7 @@ owner，尚未启用 device/surface identity 的真实候选流量，也未跨 c
 Expo SQLite/Android 全局迁移回放、真实页面重建和搜索性能门仍未通过；ProjectionEnvelope 的
 `emulator-5562` 回放仅证明候选切片的本机 owner 和重启 fence。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
+
+日程字段准确率的外部证据边界已单独记录在
+`docs/vnext-stage4/NATURAL-SCHEDULE-BLOCKER-20260818.md`：现有自然语料没有 LaoJi 字段金标，
+盲审队列仍等待两名独立人工标注和裁决，不能用旧规则输出或公共 slot projection 代替。
