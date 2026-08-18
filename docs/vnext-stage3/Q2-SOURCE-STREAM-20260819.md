@@ -50,9 +50,11 @@ logs source text or identifiers beyond the opaque task boundary.
 ## Verification
 
 - Source-store regression, including encrypted payload recovery, question
-  complete state, atomic result publication and cleanup: `9 passed`.
+  complete state, atomic result publication and TTL cleanup: `10 passed`.
 - Device-v2 API regression, including direct compatibility and stream replay by
-  task ID: `7 passed` in the focused file; combined source/API set: `16 passed`.
+  task ID: `7 passed` in the focused file; combined source/API set: `17 passed`.
+- Q2 reader regression, including the verified-stream larger-item path:
+  `15 passed`; combined Q2/source/API set: `32 passed`.
 - Contract artifacts regenerated and verified with
   `PYTHONPATH=services/laoji-api .venv-vnext/bin/python contracts/vnext/generate.py --check`.
 - `npx tsc --noEmit --pretty false`, Python `compileall`, and `git diff --check`
