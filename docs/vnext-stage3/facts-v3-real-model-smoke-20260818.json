@@ -1,0 +1,34 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "model": "qwen3.5:9b",
+  "provider": "ollama",
+  "sample": "1436403866-1-192.srt",
+  "source_policy": "existing SRT used as weak reference only; not ground truth or production prompt material",
+  "model_calls": 1,
+  "verified": true,
+  "timings_ms": {
+    "generating": 14567.228,
+    "verifying": 2.539,
+    "total": 14569.768
+  },
+  "verified_output_counts": {
+    "facts": 3,
+    "relations": 0,
+    "action_candidates": 2
+  },
+  "facts_with_sources": 3,
+  "actions_with_provenance": 2,
+  "notes": [
+    "The call used the current one-pass Facts V3 generator and deterministic verifier.",
+    "This is a structural/provider smoke, not an independent human quality score.",
+    "The sample transcript is a weak subtitle reference and may contain errors or omissions."
+  ],
+  "remaining_gates": [
+    "multi-sample human fact support review",
+    "action candidate usefulness and macro-goal rejection",
+    "long-meeting evidence package and source coverage",
+    "restart/recovery on the deployed candidate worker",
+    "device projection and capability barrier"
+  ]
+}

@@ -2,7 +2,7 @@
 
 - status: `isolated candidate; not production`
 - observed: 2026-08-18 Asia/Shanghai
-- worktree: `/home/yydd/LaoJi-worktrees/vnext-implementation`
+- worktree: `$VNEXT_REPO`
 - production mutation: `none`
 
 ## 本次闭合
@@ -56,6 +56,14 @@
 - `python3 -m compileall -q services/laoji-api/app`：通过。
 - `git diff --check`：通过。
 
+## 真实模型 smoke
+
+- 隔离候选通过临时 SSH 转发访问 Ollama `qwen3.5:9b`，对
+  `1436403866-1-192.srt` 的 80 个字幕片段执行当前 Facts V3 一次生成和确定性校验。
+- 模型调用数为 `1`，校验成功；输出 3 条带来源事实、2 条带血缘行动候选，生成耗时
+  `14.567s`，校验耗时 `2.539ms`。脱敏结果见 `facts-v3-real-model-smoke-20260818.json`。
+- 这只证明当前 provider 能完成一次结构化 Facts V3 交付，不代表事实支持率、行动有效性或长会议覆盖已达发布门。
+
 ## 尚未关闭的门
 
 - LaoJi 专属模拟器/真机 WorkManager 和 APK 运行验收；当前 `emulator-5560` 属于其他任务。
@@ -63,3 +71,4 @@
 - 旧 upload/ASR submit 的完整公开周期零调用。
 - Stage 2 capability barrier、迁移/回滚、资源预算和生产切换。
 - 真实部署端当前 prompt、worker、数据库和公网行为；本证据只证明隔离代码。
+- 多样本人工事实支持率、行动候选质量、长会议真实证据包和设备投影仍未通过。
