@@ -172,7 +172,9 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 [ASR to Facts](../vnext-stage3/ASR-TO-FACTS-20260819.md)；首次暴露的输出截断已在 `facts-v3-r6`
 提示词中修复并复验通过。随后 `facts-v3-r7` 增加了“结果/指标不是行动候选”的通用语义边界，
 聚焦回放见 [Facts V3 r7](../vnext-stage3/FACTS-V3-R7-FOCUSED-REPLAY-20260819.md)；该提示词仍未
-包含样本内容，且只属于隔离候选证据。Q2 当前样本 27 题复跑为 `27/27`，见
+包含样本内容，且只属于隔离候选证据。`facts-v3-r8` 已加入主要议题覆盖、单次输出条数上限、
+截断保护和错位根字段清理；9 个当前样本 Facts 用例复跑为 `9/9`，见
+[Facts V3 r8](../vnext-stage3/FACTS-V3-R8-REPLAY-20260819.md)。Q2 当前样本 27 题复跑为 `27/27`，见
 [Q2 当前样本复跑](../vnext-stage3/Q2-CURRENT-SAMPLE-R2-20260819.md)；这仍不是人工引用相关性
 或 Android 验收。
 超预算长会证据包已在隔离候选真实调用 `qwen3-embedding:0.6b` 并完成一次 Facts 生成；MMR 选段比例

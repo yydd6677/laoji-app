@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from difflib import SequenceMatcher
 import hashlib
 import json
@@ -36,6 +37,9 @@ from app.services.summary_v3_evidence import EvidencePackage, EvidenceSource
 
 
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "meeting_facts_v3_system.txt"
+_GENERATION_FACT_LIMIT = 12
+_GENERATION_RELATION_LIMIT = 16
+_GENERATION_ACTION_LIMIT = 6
 _NUMBER_OR_DATE = re.compile(
     r"(?:\d+(?:\.\d+)?(?:%|％|年|月|日|号|点|时|分|秒|万|亿|元|人|次|个)?)"
 )
@@ -131,11 +135,128 @@ def _system_prompt() -> str:
     return prompt
 
 
+def _generation_response_schema() -> dict[str, Any]:
+    """Use a bounded output contract so a long meeting cannot truncate JSON.
+
+    The persisted Facts V3 document supports 40 facts, 48 relations and 10
+    action candidates.  A single model call has a fixed output budget,
+    however, so asking the provider for those maxima encourages it to emit a
+    relation fan-out until the JSON is cut off.  Generation is deliberately
+    stricter; chapter merging and later generations still use the full
+    persisted limits.
+    """
+    schema = deepcopy(model_response_json_schema())
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
+    limits = {
+        "facts": _GENERATION_FACT_LIMIT,
+        "relations": _GENERATION_RELATION_LIMIT,
+        "action_candidates": _GENERATION_ACTION_LIMIT,
+    }
+    for field, limit in limits.items():
+        definition = properties.get(field)
+        if not isinstance(definition, dict):
+            raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
+        definition["maxItems"] = limit
+    return schema
+
+
 def _extract_object(raw: str) -> Any:
     value = raw.strip()
     if not value:
         raise ValueError("empty_response")
     return json.loads(value)
+
+
+def _repair_truncated_root_arrays(raw: str) -> str:
+    """Close a provider response cut inside a root array.
+
+    Ollama can stop exactly at ``num_predict`` after emitting several valid
+    relation objects.  A normal JSON parser cannot inspect the complete
+    prefix, but dropping only the unfinished last object and closing the
+    remaining optional root arrays is loss-bounded and still followed by the
+    complete Pydantic/source validator.  Strings and nested objects are
+    scanned structurally; no text replacement is performed.
+    """
+    value = raw.strip()
+    if not value or not value.startswith("{"):
+        return raw
+    try:
+        json.loads(value)
+        return raw
+    except (TypeError, ValueError):
+        pass
+
+    root_arrays = ("facts", "relations", "action_candidates")
+    root_array_limits = {"facts": 40, "relations": 48, "action_candidates": 10}
+    stack: list[tuple[str, str | None]] = []
+    item_ends: dict[str, list[int]] = {name: [] for name in root_arrays}
+    current_array: str | None = None
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            index += 1
+            continue
+        if character == "{":
+            parent_array = stack[-1][1] if stack and stack[-1][0] == "array" else None
+            stack.append(("object", parent_array))
+        elif character == "[":
+            array_name: str | None = None
+            if len(stack) == 1 and stack[0][0] == "object":
+                match = re.search(r'"([^"\\]+)"\s*:\s*$', value[:index])
+                candidate = match.group(1) if match else None
+                if candidate in root_arrays:
+                    array_name = candidate
+            stack.append(("array", array_name))
+            if array_name:
+                current_array = array_name
+        elif character == "}":
+            if not stack or stack[-1][0] != "object":
+                return raw
+            _kind, parent_array = stack.pop()
+            if parent_array:
+                item_ends[parent_array].append(index + 1)
+        elif character == "]":
+            if not stack or stack[-1][0] != "array":
+                return raw
+            _kind, array_name = stack.pop()
+            if array_name:
+                current_array = None
+        index += 1
+
+    if current_array is None:
+        current_array = next(
+            (entry[1] for entry in reversed(stack) if entry[0] == "array" and entry[1]),
+            None,
+        )
+    if current_array is None or not item_ends[current_array]:
+        return raw
+    valid_item_ends = item_ends[current_array][:root_array_limits[current_array]]
+    cut = valid_item_ends[-1]
+    repaired = value[:cut] + "]"
+    current_index = root_arrays.index(current_array)
+    for field in root_arrays[current_index + 1:]:
+        repaired += f',"{field}":[]'
+    repaired += "}"
+    try:
+        json.loads(repaired)
+    except (TypeError, ValueError):
+        return raw
+    return repaired
 
 
 def _repair_root_array_closures(raw: str) -> str:
@@ -169,7 +290,15 @@ def _sanitize_model_value(value: Any) -> Any:
     facts = value.get("facts")
     if isinstance(facts, list):
         for fact in facts:
-            if isinstance(fact, dict) and isinstance(fact.get("sources"), list):
+            if not isinstance(fact, dict):
+                continue
+            # Qwen occasionally repeats a root field immediately after the
+            # last source of a fact.  These misplaced containers carry no
+            # fact data and are removed before the strict schema validator;
+            # root-level fields remain authoritative.
+            for misplaced in ("facts", "relations", "action_candidates"):
+                fact.pop(misplaced, None)
+            if isinstance(fact.get("sources"), list):
                 # A fact may cite at most three sources.  Keep model order so
                 # the first evidence it selected remains stable; source and
                 # quote integrity is still checked after this normalization.
@@ -259,7 +388,7 @@ def _call_model(
         timeout=600,
         max_tokens=4096,
         options={"temperature": 0, "num_ctx": 16_384, "num_predict": 4096},
-        response_format=model_response_json_schema(),
+        response_format=_generation_response_schema(),
         priority="background",
         telemetry_operation=operation,
     )
@@ -277,6 +406,12 @@ def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModel
         if normalized != raw:
             try:
                 return _validate_model_response(normalized), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
+        truncated = _repair_truncated_root_arrays(raw)
+        if truncated != raw:
+            try:
+                return _validate_model_response(truncated), 1
             except (ValueError, TypeError, ValidationError):
                 pass
         repaired = _call_model(

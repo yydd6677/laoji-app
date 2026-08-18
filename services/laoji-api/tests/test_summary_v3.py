@@ -1205,6 +1205,44 @@ def test_ollama_schema_is_complete_and_has_no_unresolved_references():
     ]
 
 
+def test_generation_schema_caps_single_call_output_without_changing_document_contract():
+    schema = summary_v3_generator._generation_response_schema()
+    assert schema["properties"]["facts"]["maxItems"] == 12
+    assert schema["properties"]["relations"]["maxItems"] == 16
+    assert schema["properties"]["action_candidates"]["maxItems"] == 6
+    assert model_response_json_schema()["properties"]["facts"]["maxItems"] == 40
+
+
+def test_truncated_root_array_repair_discards_only_incomplete_relation():
+    raw = (
+        '{"schema_version":3,"overview":{"text":"概述","fact_ids":["f1"]},'
+        '"facts":[{"fact_id":"f1","fact_type":"context","certainty":"confirmed",'
+        '"content":"事实","sources":[{"source_id":"transcript:a","source_type":"transcript",'
+        '"quote":"事实"}]}],'
+        '"relations":[{"relation_type":"supports","from_fact_id":"f1","to_fact_id":"f1"},'
+        '{"relation_type":"supports","from_fact_id":"f1","to_fact_id":"f'
+    )
+    repaired = summary_v3_generator._repair_truncated_root_arrays(raw)
+    parsed = json.loads(repaired)
+    assert parsed["facts"][0]["fact_id"] == "f1"
+    assert parsed["relations"] == [
+        {"relation_type": "supports", "from_fact_id": "f1", "to_fact_id": "f1"},
+    ]
+    assert parsed["action_candidates"] == []
+
+
+def test_model_sanitizer_drops_misplaced_root_containers_inside_fact():
+    value = {
+        "facts": [{
+            "fact_id": "f1",
+            "sources": [],
+            "action_candidates": [],
+        }],
+    }
+    summary_v3_generator._sanitize_model_value(value)
+    assert "action_candidates" not in value["facts"][0]
+
+
 def test_speaker_correction_changes_source_and_transcript_fingerprints():
     transcript = [{"id": "same", "speaker": "讲话人 1", "text": "界面颜色需要调整。"}]
     _sources, before, before_transcript = normalize_sources(transcript, None, None)
