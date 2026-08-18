@@ -14,8 +14,15 @@ MINIMUM_UPLOAD_FREE_BYTES = 20 * 1024**3
 WARNING_FREE_BYTES = 40 * 1024**3
 
 
-def storage_state() -> dict:
-    root = Path(settings.audio_storage_abs_path)
+def storage_state(root: str | Path | None = None) -> dict:
+    """Return admission state for the filesystem that will hold the asset.
+
+    Uploads can be routed to a different mount in tests or deployments. The
+    default remains the configured audio root, while callers with a concrete
+    target directory must pass it so an unrelated full mount cannot reject a
+    valid upload (or vice versa).
+    """
+    root = Path(root) if root is not None else Path(settings.audio_storage_abs_path)
     root.mkdir(parents=True, exist_ok=True)
     usage = shutil.disk_usage(root)
     return {
@@ -25,8 +32,8 @@ def storage_state() -> dict:
     }
 
 
-def ensure_audio_upload_allowed() -> None:
-    if storage_state()["accepting_new_audio"]:
+def ensure_audio_upload_allowed(root: str | Path | None = None) -> None:
+    if storage_state(root)["accepting_new_audio"]:
         return
     raise HTTPException(
         status_code=507,

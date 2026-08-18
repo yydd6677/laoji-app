@@ -216,7 +216,6 @@ async def put_recording_asset_content_v2(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_audio_upload_allowed()
     user_id = int(current_user["id"])
     if is_user_meeting_tombstoned(user_id):
         raise HTTPException(status_code=409, detail="账号正在删除，不能上传录音资产")
@@ -259,6 +258,10 @@ async def put_recording_asset_content_v2(
         asset_id=asset.id,
         suffix=suffix,
     )
+    # Check the mount that will actually receive this asset. This matters when
+    # audio storage is split across volumes and keeps the admission decision
+    # aligned with the canonical target rather than the process cwd.
+    ensure_audio_upload_allowed(target.parent)
     operation_suffix = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:16]
     temporary = target.with_name(f".{target.name}.{operation_suffix}.part")
     total_bytes = 0
