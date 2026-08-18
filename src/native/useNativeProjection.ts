@@ -8,6 +8,7 @@ import {
   getNativeProjectionCheckpoint,
   type NativeProjectionCheckpoint,
 } from '../data/repositories/vnext/nativeProjectionCheckpointRepository';
+import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
 import {
   createProjectionEnvelope,
   projectionPayloadSha256,
@@ -55,6 +56,10 @@ export function useNativeProjection<T extends object>(
     checkpointRef.current = null;
     setProjection(null);
     void getOrCreateDeviceIdentity().then(async identity => {
+      // Projection checkpoints reference the local epoch owner. Device network
+      // registration is intentionally best-effort, so establish this local FK
+      // before a first-frame projection instead of waiting for remote startup.
+      await ensureDeviceEpoch(identity.epochId);
       const checkpoint = await getNativeProjectionCheckpoint({
         deviceEpochId: identity.epochId,
         surfaceKey,

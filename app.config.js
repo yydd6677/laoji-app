@@ -237,6 +237,15 @@ module.exports = () => {
   const realtimeAsrV2Candidate = ['1', 'true', 'yes', 'on'].includes(
     String(process.env.EXPO_PUBLIC_REALTIME_ASR_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
   );
+  const meetingQuestionsQ2Candidate = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_MEETING_QUESTIONS_Q2_CANDIDATE ?? 'false').trim().toLowerCase(),
+  );
+  const meetingSummarySourceStreamCandidate = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_MEETING_SUMMARY_SOURCE_STREAM_CANDIDATE ?? 'false').trim().toLowerCase(),
+  );
+  const nativeProjectionEnvelopeCandidate = ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.EXPO_PUBLIC_NATIVE_PROJECTION_ENVELOPE_CANDIDATE ?? 'false').trim().toLowerCase(),
+  );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (apiBase ? `${apiBase}/privacy` : ''),
   );
@@ -278,6 +287,9 @@ module.exports = () => {
         localMeetingDbAccountUploadWriteV1,
         scheduleGraphV2Candidate,
         realtimeAsrV2Candidate,
+        meetingQuestionsQ2Candidate,
+        meetingSummarySourceStreamCandidate,
+        nativeProjectionEnvelopeCandidate,
         meetingQuestionsV1,
         meetingAutomaticTopicsV1,
         meetingTagSyncV1,
