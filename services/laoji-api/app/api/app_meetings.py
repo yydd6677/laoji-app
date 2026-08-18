@@ -85,6 +85,17 @@ def _guard_legacy_generation(capability: str, contract_revision: str) -> None:
         ) from error
 
 
+def _guard_legacy_media_submit() -> None:
+    """Fence account-compatible media writes after the upload barrier."""
+    try:
+        vnext_capability_cutover.guard_legacy_media_upload_submit()
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+
+
 def _default_summary_template_revision() -> int:
     """Use the current template revision when old clients omit the field."""
     return int(get_summary_template("general")["revision"])
@@ -1518,6 +1529,7 @@ async def upload_app_meeting_audio(
     _assert_user_meeting_writable(_user_id(current_user))
     user_id = _user_id(current_user)
     meeting = await _get_owned_meeting(meeting_id, user_id, db)
+    _guard_legacy_media_submit()
     permanent = await _save_audio_file(meeting, user_id, file, db)
     uploaded_file_name = meeting.audio_file_name or permanent.name
     uploaded_mime_type = meeting.audio_mime_type or 'application/octet-stream'
@@ -1583,6 +1595,7 @@ async def upload_app_audio_for_processing(
     _assert_user_meeting_writable(_user_id(current_user))
     user_id = _user_id(current_user)
     meeting = await _get_owned_meeting(meeting_id, user_id, db)
+    _guard_legacy_media_submit()
     permanent = await _save_audio_file(meeting, user_id, file, db)
     uploaded_file_name = meeting.audio_file_name or permanent.name
     uploaded_mime_type = meeting.audio_mime_type or 'application/octet-stream'

@@ -2189,6 +2189,10 @@ async def create_device_summary(
     )
     if not lines:
         raise HTTPException(status_code=400, detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"})
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     transcript = [
         {
             "id": line.id,
@@ -2326,6 +2330,10 @@ async def create_device_summary_v3(
             status_code=400,
             detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"},
         )
+    _guard_legacy_generation(
+        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
+        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
+    )
     transcript = [
         {
             "id": line.id,

@@ -33,6 +33,8 @@ EXPECTED: dict[str, dict[str, tuple[str, ...]]] = {
             "/schedule/parse-audio",
             "/schedule/clarify",
             "/meetings/{binding_id}/questions",
+            "/meetings/{binding_id}/summary",
+            "/meetings/{binding_id}/summary-v3",
         ),
     },
 }

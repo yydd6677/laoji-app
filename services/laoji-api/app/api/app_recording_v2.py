@@ -43,9 +43,20 @@ from app.services.meeting_recording_asset_service import (
     submit_media_clip_job,
 )
 from app.services.storage_admission import ensure_audio_upload_allowed
+from app.services import vnext_capability_cutover
 
 
 router = APIRouter()
+
+
+def _guard_legacy_media_submit() -> None:
+    try:
+        vnext_capability_cutover.guard_legacy_media_upload_submit()
+    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": error.message},
+        ) from error
 
 _IDENTIFIER_RE = re.compile(r"^[^\x00-\x1f\x7f]+$")
 _CHECKSUM_RE = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
@@ -160,6 +171,7 @@ async def post_recording_asset_v2(
     mutation["client_asset_id"] = _identifier(data.client_asset_id, "本机录音资产标识")
     mutation["mime_type"] = _identifier(data.mime_type, "录音格式", 160).lower()
     mutation["file_name"] = _safe_file_name(data.file_name)
+    _guard_legacy_media_submit()
     try:
         mutation["checksum_sha256"] = normalize_checksum(data.checksum_sha256)
     except ValueError as error:
@@ -222,6 +234,7 @@ async def put_recording_asset_content_v2(
     asset_id = _identifier(asset_id, "录音资产标识", 160)
     expected_revision = _revision(if_match)
     idempotency_key = _identifier(idempotency_key, "录音资产请求标识")
+    _guard_legacy_media_submit()
     request_hash = recording_request_hash("content", asset_id, {})
     try:
         asset, replay = await prepare_content_upload(
@@ -484,6 +497,7 @@ async def post_recording_asset_transcription_v2(
     asset_id = _identifier(asset_id, "录音资产标识", 160)
     idempotency_key = _identifier(idempotency_key, "转写请求标识")
     client_request_id = _identifier(data.client_request_id, "本机转写请求标识")
+    _guard_legacy_media_submit()
     try:
         result = await create_transcription_job(
             db,
@@ -532,6 +546,7 @@ async def retry_recording_processing_job_v2(
 ):
     job_id = _identifier(job_id, "处理任务标识", 160)
     _identifier(idempotency_key, "处理任务重试标识")
+    _guard_legacy_media_submit()
     try:
         result = await queue_job_retry(
             db,
