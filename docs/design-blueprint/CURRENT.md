@@ -192,3 +192,6 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 一次 Facts 模型调用，结果合同通过；证据见
 [长会议完整视频回放](../vnext-stage3/ASR-TO-FACTS-1437681208-LONG-20260819.md)。这仍不等于
 人工事实质量、移动端 source-stream 恢复或 capability barrier 已通过。
+移动端 source-stream 清单提交随后补上了有界分页和恢复：清单不再假设所有章节必须在首个请求中
+一次提交，进程在中途退出后会从 `next_manifest_page/next_manifest_chapter` 继续，并对容量等待和
+响应丢失使用同页幂等重放；候选接口仍默认关闭，未改变稳定整理入口。
