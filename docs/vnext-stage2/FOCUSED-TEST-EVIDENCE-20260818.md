@@ -50,13 +50,15 @@ SECRET_KEY=test-secret-key-012345678901234567890123 \
 ENV=development PYTHONPATH=. ../../.venv-vnext/bin/python -m pytest -q tests
 ```
 
-最新结果：`493 passed, 10 failed, 246 warnings`。
+2026-08-18 晚间在项目 `.venv-vnext` 下重新执行，结果为：`488 passed, 17 failed, 246 warnings`。
 
-10 个失败不能被报告为通过。当前失败集中在：
+17 个失败不能被报告为通过。当前失败分为两类：
 
-- 旧 `app_meeting_question` 多轮/旧路由调用次数、旧 prompt budget 和旧分组断言；
-- 旧模板 revision=1 断言，而当前模板合同已升为 revision=2；
-- 旧 summary 两轮生成分支、账号迁移和旧访谈模板 fallback 断言。
+1. 12 个旧 `app_meeting_question` 兼容断言在本机 embedding endpoint 超时后进入既有熔断，
+   不是 vNext Q2 reader 的失败，也不能用词法静默降级来消除；需要在 embedding ready 的环境
+   单独复跑旧兼容合同。
+2. 5 个旧合同断言：模板 revision=1、旧 summary 两轮生成、账号迁移和旧访谈模板 fallback。
+   这些与当前选定的 vNext owner/模板 revision 不一致，不能恢复旧 owner 或第二轮模型调用。
 
 已处理的测试合同漂移包括：当前候选部署路径、实时 VAD 参数、录音资产单测的容量隔离，
 以及未知会议引用的 fail-closed 回归。剩余失败属于旧兼容路径，需在对应 capability barrier
