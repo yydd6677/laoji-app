@@ -48,6 +48,7 @@ export interface DeviceV2Capabilities {
   realtimeAsrV2: boolean;
   scheduleGraphV2: boolean;
   sourceStreamV2: boolean;
+  questionReaderV2: boolean;
 }
 
 function endpoint(path: string): string {
@@ -268,6 +269,7 @@ function normalizeCapabilities(value: any): DeviceV2Capabilities {
     realtimeAsrV2: value.realtime_asr_v2 === true,
     scheduleGraphV2: value.schedule_graph_v2 === true,
     sourceStreamV2: value.source_stream_v2 === true,
+    questionReaderV2: value.question_reader_v2 === true,
   };
 }
 

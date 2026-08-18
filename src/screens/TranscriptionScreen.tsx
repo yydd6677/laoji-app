@@ -230,7 +230,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     : session
       ? `user:${session.user.id}`
       : null;
-  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
+  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1
+    || getFeatureFlags().meetingQuestionsQ2Candidate;
   activeMeetingIdRef.current = m?.id ?? null;
   activeMeetingScopeRef.current = meetingScopeKey;
   const focusTitleInput = useCallback(() => {

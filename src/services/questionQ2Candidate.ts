@@ -26,6 +26,7 @@ export type Q2CandidateSource = Q2SnapshotSource & {
 
 export interface Q2CandidateProviderRequest {
   schemaVersion: 2;
+  meetingId: string;
   snapshotId: string;
   sourceFingerprint: string;
   providerRevision: string;
@@ -230,7 +231,7 @@ export async function executeQ2Candidate(input: {
   const snapshot = await createQ2Snapshot({
     snapshotId: input.snapshotId,
     meetingId,
-    sourceFingerprint: input.evidence.inputFingerprint,
+    sourceFingerprint: input.evidence.sourceFingerprint,
     transcriptRevisionId: input.evidence.transcriptRevisionId,
     sources,
     createdAtMs: input.nowMs,
@@ -243,6 +244,7 @@ export async function executeQ2Candidate(input: {
   });
   const request: Q2CandidateProviderRequest = {
     schemaVersion: 2,
+    meetingId,
     snapshotId: snapshot.snapshotId,
     sourceFingerprint: snapshot.sourceFingerprint,
     providerRevision: identifier(input.providerRevision, 'providerRevision', 180),

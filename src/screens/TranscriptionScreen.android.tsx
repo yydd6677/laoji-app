@@ -782,7 +782,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     () => transcriptDurationSec(transcript),
     [transcript],
   );
-  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1;
+  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1
+    || getFeatureFlags().meetingQuestionsQ2Candidate;
   const meetingMediaClipsEnabled = getFeatureFlags().meetingMediaClipsV1 && hasNativeMediaClip();
   const meetingTranscriptReprocessEnabled = getFeatureFlags().meetingTranscriptReprocessV1;
   // Device-primary meetings do not expose cross-device collaboration.  Keep

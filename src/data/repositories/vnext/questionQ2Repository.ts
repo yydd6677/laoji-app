@@ -41,6 +41,8 @@ export interface Q2ClauseInput {
   citations: readonly Q2CitationInput[];
 }
 
+export interface Q2ClauseRecord extends Q2ClauseInput {}
+
 export interface Q2TurnRecord {
   turnId: string;
   threadId: string;
@@ -53,6 +55,7 @@ export interface Q2TurnRecord {
   providerRevision: string;
   completedAtMs: number | null;
   createdAtMs: number;
+  clauses: readonly Q2ClauseRecord[];
 }
 
 type SnapshotRow = {
@@ -85,6 +88,23 @@ type TurnRow = {
   created_at_ms: number;
 };
 
+type ClauseRow = {
+  clause_id: string;
+  turn_id: string;
+  ordinal: number;
+  answer_start_utf8: number;
+  answer_end_utf8: number;
+  citation_id: string | null;
+  citation_ordinal: number | null;
+  source_type: Q2SourceType | null;
+  source_id: string | null;
+  source_revision_id: string | null;
+  content_sha256: string | null;
+  source_start_utf8: number | null;
+  source_end_utf8: number | null;
+  quote_sha256: string | null;
+};
+
 function identifier(value: string, field: string): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
@@ -104,7 +124,7 @@ function nonNegative(value: number, field: string): number {
   return value;
 }
 
-function turnFromRow(row: TurnRow | null): Q2TurnRecord | null {
+function turnFromRow(row: TurnRow | null, clauses: readonly Q2ClauseRecord[] = []): Q2TurnRecord | null {
   if (!row) return null;
   return {
     turnId: row.turn_id,
@@ -118,6 +138,7 @@ function turnFromRow(row: TurnRow | null): Q2TurnRecord | null {
     providerRevision: row.provider_revision,
     completedAtMs: row.completed_at_ms === null ? null : Number(row.completed_at_ms),
     createdAtMs: Number(row.created_at_ms),
+    clauses,
   };
 }
 
@@ -161,6 +182,105 @@ export async function getQ2Snapshot(snapshotId: string): Promise<Q2SnapshotRecor
   };
 }
 
+/** Read one immutable Q2 thread, including only its own completed/pending turns. */
+export async function getQ2Thread(threadId: string): Promise<Q2ThreadRecord & { turns: readonly Q2TurnRecord[] } | null> {
+  const normalized = identifier(threadId, 'threadId');
+  const database = await openMeetingDatabase();
+  const thread = await database.getFirstAsync<ThreadRow>(
+    `SELECT thread_id, meeting_id, snapshot_id, created_at_ms, updated_at_ms
+       FROM meeting_question_q2_threads WHERE thread_id = ?`,
+    normalized,
+  );
+  if (!thread) return null;
+  const turnRows = await database.getAllAsync<TurnRow>(
+    `SELECT turn_id, thread_id, request_id, current_operation_id, ordinal, question,
+            answer_kind, answer, provider_revision, completed_at_ms, created_at_ms
+       FROM meeting_question_q2_turns
+      WHERE thread_id = ? ORDER BY ordinal, turn_id`,
+    normalized,
+  );
+  const clauseRows = await database.getAllAsync<ClauseRow>(
+    `SELECT clause.clause_id, clause.turn_id, clause.ordinal,
+            clause.answer_start_utf8, clause.answer_end_utf8,
+            citation.citation_id, citation.ordinal AS citation_ordinal,
+            citation.source_type, citation.source_id, citation.source_revision_id,
+            citation.content_sha256, citation.source_start_utf8,
+            citation.source_end_utf8, citation.quote_sha256
+       FROM meeting_question_q2_clauses clause
+       LEFT JOIN meeting_question_q2_citations citation
+         ON citation.clause_id = clause.clause_id
+      WHERE clause.turn_id IN (
+        SELECT turn_id FROM meeting_question_q2_turns WHERE thread_id = ?
+      )
+      ORDER BY clause.ordinal, citation.ordinal`,
+    normalized,
+  );
+  const clausesByTurn = new Map<string, Q2ClauseRecord[]>();
+  const clauseByKey = new Map<string, Q2ClauseRecord>();
+  for (const row of clauseRows) {
+    const key = `${row.turn_id}:${row.clause_id}`;
+    let clause = clauseByKey.get(key);
+    if (!clause) {
+      clause = {
+        clauseId: row.clause_id,
+        answerStartUtf8: Number(row.answer_start_utf8),
+        answerEndUtf8: Number(row.answer_end_utf8),
+        citations: [],
+      };
+      clauseByKey.set(key, clause);
+      const turnClauses = clausesByTurn.get(row.turn_id) ?? [];
+      turnClauses.push(clause);
+      clausesByTurn.set(row.turn_id, turnClauses);
+    }
+    if (row.citation_id !== null) {
+      const citation: Q2CitationInput = {
+        citationId: row.citation_id,
+        sourceType: row.source_type!,
+        sourceId: row.source_id!,
+        sourceRevisionId: row.source_revision_id!,
+        contentSha256: row.content_sha256!,
+        sourceStartUtf8: Number(row.source_start_utf8),
+        sourceEndUtf8: Number(row.source_end_utf8),
+        quoteSha256: row.quote_sha256!,
+      };
+      clause.citations = [...clause.citations, citation];
+    }
+  }
+  const turns = turnRows.map(row => turnFromRow(row, clausesByTurn.get(row.turn_id) ?? [])!);
+  return {
+    threadId: thread.thread_id,
+    meetingId: thread.meeting_id,
+    snapshotId: thread.snapshot_id,
+    createdAtMs: Number(thread.created_at_ms),
+    updatedAtMs: Number(thread.updated_at_ms),
+    turns,
+  };
+}
+
+export async function findLatestQ2Thread(input: {
+  meetingId: string;
+  sourceFingerprint: string;
+}): Promise<(Q2ThreadRecord & { turns: readonly Q2TurnRecord[] }) | null> {
+  const meetingId = identifier(input.meetingId, 'meetingId');
+  const sourceFingerprint = sha256(input.sourceFingerprint, 'sourceFingerprint');
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<{ thread_id: string }>(
+    `SELECT thread.thread_id
+       FROM meeting_question_q2_threads thread
+       INNER JOIN meeting_question_q2_snapshots snapshot
+         ON snapshot.snapshot_id = thread.snapshot_id
+      WHERE thread.meeting_id = ? AND snapshot.source_fingerprint = ?
+      ORDER BY thread.updated_at_ms DESC, thread.thread_id DESC`,
+    meetingId,
+    sourceFingerprint,
+  );
+  for (const row of rows) {
+    const thread = await getQ2Thread(row.thread_id);
+    if (thread) return thread;
+  }
+  return null;
+}
+
 export async function createQ2Snapshot(input: {
   snapshotId: string;
   meetingId: string;
@@ -191,6 +311,26 @@ export async function createQ2Snapshot(input: {
       if (existing.meeting_id !== meetingId || existing.source_fingerprint !== sourceFingerprint
         || existing.transcript_revision_id !== transcriptRevisionId) {
         throw new Error('Q2 snapshot ID 已绑定其他来源');
+      }
+      const existingSources = await database.getAllAsync<{
+        source_type: Q2SourceType;
+        source_id: string;
+        source_revision_id: string;
+        content_sha256: string;
+      }>(
+        `SELECT source_type, source_id, source_revision_id, content_sha256
+           FROM meeting_question_q2_snapshot_sources
+          WHERE snapshot_id = ? ORDER BY ordinal`,
+        snapshotId,
+      );
+      if (existingSources.length !== sources.length || existingSources.some((source, index) => {
+        const expected = sources[index];
+        return source.source_type !== expected.sourceType
+          || source.source_id !== expected.sourceId
+          || source.source_revision_id !== expected.sourceRevisionId
+          || source.content_sha256 !== expected.contentSha256;
+      })) {
+        throw new Error('Q2 snapshot ID 已绑定不同来源');
       }
       return;
     }
@@ -314,6 +454,28 @@ export async function appendPendingQ2Turn(input: {
       threadId,
     );
     return turnFromRow(row)!;
+  });
+}
+
+/** Move an unfinished turn to a new device operation after a retry. */
+export async function rebindPendingQ2Turn(input: {
+  turnId: string;
+  expectedOperationId: string;
+  newOperationId: string;
+}): Promise<boolean> {
+  const turnId = identifier(input.turnId, 'turnId');
+  const expectedOperationId = identifier(input.expectedOperationId, 'expectedOperationId');
+  const newOperationId = identifier(input.newOperationId, 'newOperationId');
+  return withMeetingDatabaseTransaction(async database => {
+    const updated = await database.runAsync(
+      `UPDATE meeting_question_q2_turns
+          SET current_operation_id = ?
+        WHERE turn_id = ? AND current_operation_id = ? AND completed_at_ms IS NULL`,
+      newOperationId,
+      turnId,
+      expectedOperationId,
+    );
+    return Number(updated.changes) === 1;
   });
 }
 

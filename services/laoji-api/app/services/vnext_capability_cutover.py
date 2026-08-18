@@ -196,3 +196,8 @@ def schedule_graph_v2_enabled() -> bool:
 def source_stream_v2_enabled() -> bool:
     """Expose the Stage 3 encrypted source owner only for candidate traffic."""
     return os.getenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "").strip() == "1"
+
+
+def question_reader_v2_enabled() -> bool:
+    """Expose the real Q2 reader only as an explicit candidate capability."""
+    return os.getenv("LAOJI_VNEXT_Q2_READER_ENABLED", "").strip() == "1"

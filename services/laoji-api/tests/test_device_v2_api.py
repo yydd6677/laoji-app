@@ -216,3 +216,125 @@ def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monk
     )
     assert cancelled.status_code == 202
     assert cancelled.json()["cancelled"] is True
+
+
+def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+    binding_id = str(uuid.uuid4())
+    binding_generation = uuid.uuid4().hex
+    source_text = "周五前由张敏提交接口文档。"
+    source_hash = "sha256:" + hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    payload = {
+        "schema_version": 2,
+        "contract_revision": "question.reader.v2",
+        "provider_revision": "q2-reader-v1",
+        "snapshot_id": "q2-route-snapshot",
+        "source_fingerprint": "sha256:" + "a" * 64,
+        "question": "谁负责提交接口文档？",
+        "binding_generation": binding_generation,
+        "binding_revision": 1,
+        "cancel_revision": 0,
+        "sources": [{
+            "source_type": "transcript",
+            "source_id": "line-1",
+            "source_revision_id": "revision-1",
+            "content_sha256": source_hash,
+            "text": source_text,
+        }],
+    }
+    disabled = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert disabled.status_code == 404
+    assert disabled.json()["detail"]["code"] == "QUESTION_READER_V2_DISABLED"
+
+    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
+    secret = "question-reader-purge-secret"
+    registered = client.put(
+        f"/api/device/v2/meetings/{binding_id}",
+        json={
+            "schema_version": 2,
+            "binding_generation": binding_generation,
+            "binding_epoch_seq": 1,
+            "binding_revision": 1,
+            "cancel_revision": 0,
+            "purge_capability": {
+                "capability_id": str(uuid.uuid4()),
+                "secret_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+                "registration_request_id": "question-reader-binding-request",
+            },
+        },
+    )
+    assert registered.status_code == 200
+    calls: list[dict] = []
+
+    def fake_read(value: dict) -> dict:
+        calls.append(value)
+        return {
+            "schema_version": 2,
+            "contract_revision": "question.reader.v2",
+            "provider_revision": "q2-reader-v1",
+            "model_revision": "test:model",
+            "snapshot_id": value["snapshot_id"],
+            "answer_kind": "not_stated",
+            "answer": "会议记录没有说明。",
+            "clauses": [],
+        }
+
+    monkeypatch.setattr(device_v2.vnext_question_reader, "read_q2", fake_read)
+    response = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert response.status_code == 200
+    assert response.json()["answer_kind"] == "not_stated"
+    assert len(calls) == 1
+    assert calls[0]["sources"][0]["source_id"] == "line-1"
+
+    extra = {**payload, "unexpected": True}
+    invalid = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=extra)
+    assert invalid.status_code == 422
+
+
+def test_question_reader_route_rejects_binding_revision_and_source_hash(tmp_path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
+    binding_id = str(uuid.uuid4())
+    binding_generation = uuid.uuid4().hex
+    secret = "question-reader-fence-secret"
+    assert client.put(
+        f"/api/device/v2/meetings/{binding_id}",
+        json={
+            "schema_version": 2,
+            "binding_generation": binding_generation,
+            "binding_epoch_seq": 1,
+            "binding_revision": 2,
+            "cancel_revision": 3,
+            "purge_capability": {
+                "capability_id": str(uuid.uuid4()),
+                "secret_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+                "registration_request_id": "question-reader-fence-request",
+            },
+        },
+    ).status_code == 200
+    text = "周五开会。"
+    payload = {
+        "schema_version": 2,
+        "contract_revision": "question.reader.v2",
+        "provider_revision": "q2-reader-v1",
+        "snapshot_id": "q2-fence-snapshot",
+        "source_fingerprint": "sha256:" + "b" * 64,
+        "question": "什么时候开会？",
+        "binding_generation": binding_generation,
+        "binding_revision": 1,
+        "cancel_revision": 3,
+        "sources": [{
+            "source_type": "transcript",
+            "source_id": "line-1",
+            "source_revision_id": "revision-1",
+            "content_sha256": "sha256:" + "c" * 64,
+            "text": text,
+        }],
+    }
+    fence = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert fence.status_code == 409
+    assert fence.json()["detail"]["code"] == "BINDING_FENCE_INVALID"
+    payload["binding_revision"] = 2
+    hash_error = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert hash_error.status_code == 409
+    assert hash_error.json()["detail"]["code"] == "Q2_SOURCE_HASH_MISMATCH"

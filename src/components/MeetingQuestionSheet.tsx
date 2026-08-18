@@ -25,6 +25,7 @@ import {
   prepareMeetingQuestionSession,
   type MeetingQuestionSession,
 } from '../services/meetingQuestions';
+import { Q2EvidenceChangedError } from '../services/meetingQuestionsQ2';
 import { beginSummaryV3InteractiveWork } from '../services/meetingSummaryV3Upgrade';
 import { getFeishuTokens } from '../theme/feishuTokens';
 
@@ -344,7 +345,7 @@ export function MeetingQuestionSheet({
       if (!mountedRef.current || controller.signal.aborted) return;
       setPendingQuestion(null);
       setDraft(submittedDraft);
-      if (reason instanceof MeetingQuestionEvidenceChangedError) {
+      if (reason instanceof MeetingQuestionEvidenceChangedError || reason instanceof Q2EvidenceChangedError) {
         await loadSession(includeManualNote, true);
         if (mountedRef.current) setStatus('会议内容已更新，已切换到新的问答记录。');
       } else {

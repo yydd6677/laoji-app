@@ -23,6 +23,7 @@ import {
 import { getFeatureFlags } from '../config/featureFlags';
 import { askDeviceQuestion, DeviceApiError } from './deviceApi';
 import { loadGenerationRetentionPreference } from './generationPrivacy';
+import { askQ2MeetingQuestion, prepareQ2MeetingQuestionSession } from './meetingQuestionsQ2';
 
 const INSUFFICIENT_ANSWER = '当前会议记录中没有足够信息';
 const MAX_CONTEXT_TURNS = 12;
@@ -46,6 +47,8 @@ export interface MeetingQuestionEvidence {
   meetingId: string;
   remoteMeetingId: string | null;
   inputFingerprint: string;
+  /** Fingerprint of immutable question sources only; derived summaries are excluded. */
+  sourceFingerprint: string;
   transcriptRevisionId: string;
   summaryVersionId: string | null;
   manualNoteRevision: number | null;
@@ -108,7 +111,7 @@ function transcriptEvidence(segment: TranscriptSegmentRecord): QuestionTranscrip
   };
 }
 
-async function loadQuestionEvidence(input: {
+export async function loadQuestionEvidence(input: {
   scopeKey: ScopeKey;
   navigationMeetingId: string;
   includeManualNote: boolean;
@@ -167,11 +170,22 @@ async function loadQuestionEvidence(input: {
     manualNoteRevision,
     manualNote,
   };
+  const sourceFingerprintPayload = {
+    schemaVersion: 2,
+    meetingId,
+    transcriptRevisionId: transcript.revision.id,
+    transcript: transcriptItems,
+    includeManualNote,
+    manualNoteRevision,
+    manualNote,
+  };
   const inputFingerprint = `sha256:${await sha256(stableJson(fingerprintPayload))}`;
+  const sourceFingerprint = `sha256:${await sha256(stableJson(sourceFingerprintPayload))}`;
   return {
     meetingId,
     remoteMeetingId: aggregate.note.remoteId,
     inputFingerprint,
+    sourceFingerprint,
     transcriptRevisionId: transcript.revision.id,
     summaryVersionId,
     manualNoteRevision,
@@ -189,7 +203,8 @@ export async function prepareMeetingQuestionSession(input: {
   includeManualNote?: boolean;
   forceNew?: boolean;
 }): Promise<MeetingQuestionSession> {
-  if (!getFeatureFlags().meetingQuestionsV1) {
+  const flags = getFeatureFlags();
+  if (!flags.meetingQuestionsV1 && !flags.meetingQuestionsQ2Candidate) {
     throw new MeetingQuestionUnavailableError('当前版本未开启会议问答。');
   }
   const evidence = await loadQuestionEvidence({
@@ -197,6 +212,9 @@ export async function prepareMeetingQuestionSession(input: {
     navigationMeetingId: input.navigationMeetingId,
     includeManualNote: input.includeManualNote === true,
   });
+  if (flags.meetingQuestionsQ2Candidate) {
+    return prepareQ2MeetingQuestionSession({ evidence, forceNew: input.forceNew });
+  }
   const existing = input.forceNew ? null : await findLatestMeetingQuestionThread({
     meetingId: evidence.meetingId,
     scopeKey: input.scopeKey,
@@ -533,6 +551,13 @@ export async function askMeetingQuestion(input: {
     navigationMeetingId: input.navigationMeetingId,
     includeManualNote: input.session.thread.includeManualNote,
   });
+  if (getFeatureFlags().meetingQuestionsQ2Candidate) {
+    return askQ2MeetingQuestion({
+      session: input.session,
+      evidence: currentEvidence,
+      question,
+    });
+  }
   if (
     currentEvidence.meetingId !== input.session.evidence.meetingId
     || currentEvidence.inputFingerprint !== input.session.thread.inputFingerprint

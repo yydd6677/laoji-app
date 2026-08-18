@@ -24,6 +24,7 @@ from app.services import (
     vnext_source_stream_store,
     vnext_task_store,
     vnext_upload_store,
+    vnext_question_reader,
 )
 from app.services.schedule_parser_service import ScheduleParserUnavailable, parse_schedule_text
 from app.schemas.vnext_contracts import (
@@ -122,6 +123,38 @@ class V2TaskRequest(BaseModel):
     generation_id: str = Field(min_length=1, max_length=512)
     predecessor_task_id: str | None = Field(default=None, max_length=512)
     creation_reason: Literal["original", "retry", "regenerate"] = "original"
+
+
+class Q2ReaderSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_type: Literal["transcript", "manual_note", "attachment"]
+    source_id: str = Field(min_length=1, max_length=180)
+    source_revision_id: str = Field(min_length=1, max_length=180)
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    text: str = Field(min_length=1, max_length=8_000)
+
+
+class Q2ReaderRequest(BaseModel):
+    """Typed wire boundary for the candidate reader.
+
+    Keeping binding fences in the same request prevents a caller from
+    validating an immutable source snapshot against one binding and then
+    executing it against another revision.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    contract_revision: str = Field(min_length=1, max_length=80)
+    provider_revision: str = Field(min_length=1, max_length=80)
+    snapshot_id: str = Field(min_length=1, max_length=180)
+    source_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    question: str = Field(min_length=1, max_length=2_000)
+    binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
+    binding_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    cancel_revision: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    sources: list[Q2ReaderSource] = Field(min_length=1, max_length=256)
 
 
 class V2UploadFence(BaseModel):
@@ -375,6 +408,7 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
         "schedule_graph_v2": vnext_capability_cutover.schedule_graph_v2_enabled(),
         "source_stream_v2": vnext_capability_cutover.source_stream_v2_enabled(),
+        "question_reader_v2": vnext_capability_cutover.question_reader_v2_enabled(),
     }
 
 
@@ -396,6 +430,14 @@ def _require_source_stream_v2() -> None:
         raise HTTPException(status_code=404, detail={
             "code": "SOURCE_STREAM_V2_DISABLED",
             "message": "会议来源流候选接口尚未启用",
+        })
+
+
+def _require_question_reader_v2() -> None:
+    if not vnext_capability_cutover.question_reader_v2_enabled():
+        raise HTTPException(status_code=404, detail={
+            "code": "QUESTION_READER_V2_DISABLED",
+            "message": "新版会议问答候选接口尚未启用",
         })
 
 
@@ -810,6 +852,38 @@ async def create_task(
         return {"schema_version": 2, "reused": reused, "task": task}
     except vnext_task_store.VNextTaskError as error:
         raise _task_error(error) from error
+
+
+@router.post("/meetings/{binding_id}/questions-v2")
+async def read_question_v2(
+    binding_id: str,
+    payload: Q2ReaderRequest,
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    """Run one source-attributed Q2 reader call behind the device fence."""
+    _require_question_reader_v2()
+    try:
+        binding = await asyncio.to_thread(vnext_task_store.get_binding, context, binding_id)
+        if binding is None or binding.get("state") != "active":
+            raise vnext_question_reader.Q2ReaderError(
+                "BINDING_REQUIRED",
+                "会议服务连接未登记",
+                428,
+            )
+        if (
+            payload.binding_generation != binding.get("binding_generation")
+            or payload.binding_revision != int(binding.get("binding_revision", -2))
+            or payload.cancel_revision != int(binding.get("cancel_revision", -2))
+        ):
+            raise vnext_question_reader.Q2ReaderError(
+                "BINDING_FENCE_INVALID",
+                "会议服务连接版本已变化",
+                409,
+            )
+        result = await asyncio.to_thread(vnext_question_reader.read_q2, payload.model_dump())
+        return result
+    except vnext_question_reader.Q2ReaderError as error:
+        raise HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message}) from error
 
 
 @router.get("/tasks/{task_id}")
