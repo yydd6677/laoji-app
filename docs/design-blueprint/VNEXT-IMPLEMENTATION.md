@@ -20,6 +20,10 @@ R2 上传 operation 已在本机 `device_operations` 创建并绑定录音资产
 不会自动启用能力或删除代码。候选 `b4f84c9` 已在隔离 `18021` 启动并通过 `/api/ready`；五个能力仍未登记，
 因此删除门和生产切换继续保持关闭。
 
+随后候选 `c72472c` 增加了 Task/Attempt 终态规范化和中断 purge 恢复：父 Task 已终态时不再保留
+`retryable_failure`，过期 `running` purge 回到 `pending` 等待设备凭据重放。候选启动后实际修复了 6 个
+历史 Attempt 和 2 个 purge；这仍是候选恢复证据，不是 capability 或 Stage 5 退出证据。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：
