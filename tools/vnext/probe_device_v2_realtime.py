@@ -219,13 +219,30 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
         "after_event_seq": 0,
     }
     chunk_bytes = max(32, int(chunk_ms) * 32)
+    chunks = [pcm[offset:offset + chunk_bytes] for offset in range(0, len(pcm), chunk_bytes)]
     started = time.perf_counter()
+    # Deliberately drop the first socket after a prefix of chunks.  The second
+    # socket resumes from the server's durable chunk/event cursors, exercising
+    # the same boundary used by Android after a network interruption.
+    interrupted_after = max(1, len(chunks) // 2)
     async with websockets.connect(ws_url, extra_headers=headers, open_timeout=20, close_timeout=10) as ws:
         await ws.send(json.dumps(opened, separators=(",", ":")))
         await receive_until(ws, required="session.ready", events=events)
-        for seq, offset in enumerate(range(0, len(pcm), chunk_bytes)):
-            chunk = pcm[offset:offset + chunk_bytes]
-            await ws.send(encode_chunk(seq, chunk, offset // 32))
+        for seq, chunk in enumerate(chunks[:interrupted_after]):
+            await ws.send(encode_chunk(seq, chunk, seq * chunk_ms))
+            await receive_until(ws, required="audio.ack", events=events)
+    await asyncio.sleep(0.25)
+    opened["after_event_seq"] = max(
+        (int(event.get("event_sequence", 0)) for event in events),
+        default=0,
+    )
+    async with websockets.connect(ws_url, extra_headers=headers, open_timeout=20, close_timeout=10) as ws:
+        await ws.send(json.dumps(opened, separators=(",", ":")))
+        resumed = await receive_until(ws, required="session.ready", events=events)
+        resume_seq = max(0, int(resumed.get("last_contiguous_chunk_seq", -1)) + 1)
+        for seq in range(resume_seq, len(chunks)):
+            chunk = chunks[seq]
+            await ws.send(encode_chunk(seq, chunk, seq * chunk_ms))
             await receive_until(ws, required="audio.ack", events=events)
         await ws.send(json.dumps({"schema_version": 2, "type": "session.finalize"}, separators=(",", ":")))
         await receive_until(ws, required="session.complete", events=events, timeout=180)
@@ -247,6 +264,8 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
         "source_sha256": sha256_bytes(pcm),
         "source_bytes": len(pcm),
         "chunk_count": (len(pcm) + chunk_bytes - 1) // chunk_bytes,
+        "interrupted_after_chunk": interrupted_after,
+        "resumed_from_chunk": resume_seq,
         "event_count": len(events),
         "stable_event_count": sum(event.get("event_kind") == "stable" for event in events),
         "final_outcome": terminal.get("outcome"),
