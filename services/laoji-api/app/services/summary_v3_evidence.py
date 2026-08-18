@@ -30,6 +30,20 @@ _FORCED_SIGNAL = re.compile(
     r"首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
     re.IGNORECASE,
 )
+_FORCED_CRITICAL_SIGNAL = re.compile(
+    r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|"
+    r"由.{0,12}(?:负责|跟进)|今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|"
+    r"周[一二三四五六日天]|"
+    r"(?:截止|日期|时间|上午|下午|晚上|凌晨|安排|定于|预约|开会|会议|提交|完成|交付|到期|之前|之后)"
+    r".{0,20}\d{1,4}(?:年|月|日|号|点|时|分)|"
+    r"\d{1,4}(?:年|月|日|号|点|时|分).{0,20}"
+    r"(?:截止|日期|时间|上午|下午|晚上|安排|定于|开会|会议|提交|完成|交付|到期))",
+    re.IGNORECASE,
+)
+_FORCED_CONNECTOR_SIGNAL = re.compile(
+    r"(?:首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
+    re.IGNORECASE,
+)
 _NO_NEW_INFORMATION_SIGNAL = re.compile(
     r"(?:没有|无|未|尚未)[^。！？；]{0,18}(?:新增|形成|产生|指定)?[^。！？；]{0,8}"
     r"(?:决策|决定|行动项|负责人|截止(?:日期|时间))",
@@ -450,20 +464,33 @@ def _fit_forced_signals(
     sources: list[EvidenceSource],
     budget: int,
 ) -> set[int]:
-    """Keep every required signal or fail closed when the budget cannot hold it.
+    """Keep critical signals, then fill the bounded remainder deterministically.
 
-    Dates, corrections, negations, responsibility and cross-topic connectors are
-    the evidence most likely to change a conclusion. Dropping an arbitrary
-    subset would make the summary depend on segmentation order, so the v3
-    contract treats the full set as mandatory and reports incomplete evidence
-    instead of silently producing a partial package.
+    The signal regex intentionally includes weak numeric/connective hints for
+    coverage telemetry, but a long transcript can contain hundreds of routine
+    numbers. Corrections, negations, responsibility claims and explicit
+    temporal expressions are mandatory; weaker hints are admitted in source
+    order only while budget remains. If the critical layer itself cannot fit,
+    the package fails closed rather than emitting a partial summary.
     """
     if not sources:
         return set()
     endpoints = {0, len(sources) - 1}
-    selected = endpoints.intersection(range(len(sources))) | set(candidates)
+    selected = endpoints.intersection(range(len(sources)))
+    critical = {
+        index for index in candidates if _FORCED_CRITICAL_SIGNAL.search(sources[index].text)
+    }
+    selected.update(critical)
     if sum(sources[index].token_cost for index in selected) > budget:
         raise SummaryEvidenceIncomplete("forced_evidence_exceeds_budget")
+    remainder = sorted(
+        candidates - selected,
+        key=lambda index: (0 if _FORCED_CONNECTOR_SIGNAL.search(sources[index].text) else 1, index),
+    )
+    for index in remainder:
+        candidate_cost = sum(sources[item].token_cost for item in selected) + sources[index].token_cost
+        if candidate_cost <= budget:
+            selected.add(index)
     return selected
 
 

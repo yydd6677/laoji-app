@@ -85,12 +85,12 @@
 ## 尚未关闭的门
 
 - 对三份完整长字幕执行了 source-stream 证据包回放，分别包含 1,357、1,946 和 1,569 个原始段。
-  服务器当前运行的旧候选以 64 条/15 秒调用 embedding，首批全部超时；新的隔离包以 16 条/45 秒
-  运行时也在首批稳定失败关闭为 `SUMMARY_EVIDENCE_INCOMPLETE`，没有输出部分总结。临时字幕和
-  解压目录已从服务器 `/tmp` 删除，运行中的 18020/18021/8030/8031 未重启或切换。
-- 上述结果证明当前瓶颈是 embedding 真实推理不可用，而不是会议长度上限。统一 ready 已改用缓存的
-  真实 embedding 推理探针；后续只有 `embedding_ready=true` 才能继续长会议质量回放，本轮不能把
-  三份长会记为通过。
+  embedding 恢复后以真实 `qwen3-embedding:0.6b` 完成构建，证据包分别为 61、60、63 个来源，
+  估算输入为 10,206、10,185、10,198 tokens，主题覆盖均为 1.0；真实 embedding 耗时为
+  4.94s、7.57s、8.42s。此前的 `forced_evidence_exceeds_budget` 已由关键信号分层选择修复，
+  没有输出部分总结，也未切换 18020/8030/8031。
+- 该结果只证明长会议证据包和 embedding 依赖已恢复，不代表完整长会 Facts 模型生成、事实支持率、
+  行动候选质量或 Stage 3 capability barrier 已通过；这些仍需继续做真实生成和人工盲审。
 - LaoJi 专属模拟器/真机 WorkManager 和 APK 运行验收；当前 `emulator-5560` 属于其他任务。
 - GPU 候选首段/RTF、真实讲话人命名和未知人拒识。
 - 旧 upload/ASR submit 的完整公开周期零调用。

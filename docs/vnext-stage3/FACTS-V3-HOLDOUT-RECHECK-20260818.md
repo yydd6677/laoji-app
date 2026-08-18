@@ -29,11 +29,27 @@ model calls: each case 1 or 2 (no template/second-round call)
 paper/report/un/finance/survey/negotiation/equity/tender: all passed
 ```
 
+## 完整长会议证据包复核（同日）
+
+在 embedding readiness 恢复后，使用服务器真实 `qwen3-embedding:0.6b` 对三份完整字幕
+重新构建证据包；不使用 fake embedding，不调用整理模型，不保存正文：
+
+| 样本 | 原始段数 | 入模来源数 | 估算输入 tokens | 主题覆盖 | 结果 |
+|---|---:|---:|---:|---:|---|
+| `1377173065-1-160.srt` | 1,357 | 61 | 10,206 | 1.0 | pass |
+| `1437681208-1-192.srt` | 1,946 | 60 | 10,185 | 1.0 | pass |
+| `829384557-1-208.srt` | 1,569 | 63 | 10,198 | 1.0 | pass |
+
+真实 embedding 阶段耗时分别为 4.94s、7.57s、8.42s。`forced_evidence_exceeds_budget`
+不再出现；关键证据超预算的既有 fail-closed 测试仍通过。该结果只闭合证据包构建门，
+尚未证明三份完整长会议的 Facts 生成、引用支持率或行动候选质量。
+
 覆盖的门包括：事实非空、弱主题覆盖、引用可验证、重复行动为零、宏观长期目标不得作为
 高/中适配行动。报告只保存哈希、计数、覆盖和错误码，不保存样本正文，也不把样本内容写入
 生产提示词或规则。
 
 ## 边界
 
-这次回放关闭了此前的结构/证据包候选缺陷，但仍不是 Stage 3 capability barrier：事实支持率
+这次回放关闭了此前的结构/证据包候选缺陷，但仍不是 Stage 3 capability barrier：完整长会的
+模型生成、事实支持率
 和行动有效性尚需独立人工盲审，设备页面/任务恢复、旧链路排空、资源和生产切换仍未验收。
