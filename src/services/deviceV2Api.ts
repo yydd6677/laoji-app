@@ -25,6 +25,7 @@ let capabilityValue: DeviceV2Capabilities | null = null;
 let capabilityPromise: Promise<DeviceV2Capabilities> | null = null;
 let capabilityUntil = 0;
 let sessionPromise: Promise<DeviceV2Session> | null = null;
+let refreshPromise: Promise<DeviceV2Session> | null = null;
 
 export class DeviceV2ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {
@@ -136,12 +137,16 @@ async function persistDeviceV2Token(
   token: { access_token: string; expires_at: number; key_version: number },
   hash: string,
   identity: { deviceId: string; epochId: string },
+  expectedKeyVersion: number,
 ): Promise<DeviceV2Session> {
   const expiresAt = token.expires_at < 1_000_000_000_000
     ? token.expires_at * 1000
     : token.expires_at;
   if (!token.access_token || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
     throw new DeviceV2ApiError('设备令牌响应无效', 502, 'DEVICE_V2_TOKEN_INVALID');
+  }
+  if (token.key_version !== expectedKeyVersion) {
+    throw new DeviceV2ApiError('设备密钥版本不一致', 409, 'DEVICE_V2_KEY_VERSION_CHANGED');
   }
   await Promise.all([
     SecureStore.setItemAsync(TOKEN_KEY, token.access_token),
@@ -200,7 +205,7 @@ async function issueDeviceV2Token(
       request_id: authRequestId,
     }),
   }, '设备令牌获取失败');
-  return persistDeviceV2Token(token, hash, identity);
+  return persistDeviceV2Token(token, hash, identity, key.keyVersion);
 }
 
 /** Refresh an existing epoch without re-registering the device or replacing its key. */
@@ -214,6 +219,19 @@ export async function refreshDeviceV2Session(
     throw new DeviceV2ApiError('设备数据域已变化，请重新初始化', 409, 'DEVICE_V2_EPOCH_CHANGED');
   }
   return issueDeviceV2Token(identity, key, hash);
+}
+
+async function refreshDeviceV2SessionSingleFlight(
+  previous: DeviceV2Session,
+): Promise<DeviceV2Session> {
+  if (refreshPromise) return refreshPromise;
+  const operation = refreshDeviceV2Session(previous);
+  refreshPromise = operation;
+  try {
+    return await operation;
+  } finally {
+    if (refreshPromise === operation) refreshPromise = null;
+  }
 }
 
 async function bootstrapDeviceV2Session(): Promise<DeviceV2Session> {
@@ -312,7 +330,7 @@ export async function deviceV2Request<T>(path: string, init: RequestInit = {}, f
     } catch (error) {
       if (!(error instanceof DeviceV2ApiError) || error.status !== 401 || refreshed) throw error;
       refreshed = true;
-      session = await refreshDeviceV2Session(session);
+      session = await refreshDeviceV2SessionSingleFlight(session);
     }
   }
 }

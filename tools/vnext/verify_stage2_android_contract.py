@@ -75,7 +75,7 @@ def main() -> None:
         device_api,
         "export async function refreshDeviceV2Session",
         "let sessionPromise: Promise<DeviceV2Session> | null = null",
-        "session = await refreshDeviceV2Session(session)",
+        "session = await refreshDeviceV2SessionSingleFlight(session)",
     )
     require(erase, "clearNativeTransferLease(`device-v2:${epochId}`)")
     require(
