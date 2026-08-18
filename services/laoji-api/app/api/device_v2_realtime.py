@@ -21,6 +21,7 @@ from app.services import (
     vnext_realtime_store,
     vnext_task_store,
 )
+from app.privacy_logging import privacy_log
 
 
 router = APIRouter(prefix="/device/v2", tags=["device-v2-realtime"])
@@ -106,6 +107,13 @@ async def _authenticate(websocket: WebSocket) -> tuple[device_v2_identity.Device
 
 
 async def _send_store_error(websocket: WebSocket, error: Exception) -> None:
+    privacy_log(
+        "realtime_protocol_error",
+        capability="transcript.realtime",
+        error_type=type(error).__name__,
+        reason_code=getattr(error, "code", None),
+        status="failure",
+    )
     if isinstance(error, vnext_realtime_store.VNextRealtimeError):
         code, message = error.code, error.message
     elif isinstance(error, device_v2_identity.DeviceV2IdentityError):
@@ -434,7 +442,13 @@ async def realtime_websocket(websocket: WebSocket, session_id: str) -> None:
     except (ValidationError, ValueError, vnext_realtime_store.VNextRealtimeError) as error:
         await _send_store_error(websocket, error)
         await websocket.close(code=4400)
-    except Exception:
+    except Exception as error:
+        privacy_log(
+            "realtime_websocket_unhandled",
+            capability="transcript.realtime",
+            error_type=type(error).__name__,
+            status="failure",
+        )
         await websocket.send_json({
             "schema_version": 2,
             "type": "error",
