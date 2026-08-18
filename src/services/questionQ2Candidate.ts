@@ -119,18 +119,13 @@ async function sourceForTranscript(
 async function sourceForAuxiliary(
   evidence: MeetingQuestionEvidence,
 ): Promise<Q2CandidateSource[]> {
-  const summary = await Promise.all(evidence.summary.map(async section => ({
-    sourceType: 'attachment' as const,
-    sourceId: identifier(`summary:${section.sectionId}`, 'sourceId'),
-    sourceRevisionId: identifier(evidence.summaryVersionId ?? 'summary:none', 'sourceRevisionId'),
-    contentSha256: await sha256Text(section.text),
-    text: section.text,
-  })));
+  // Q2 is grounded in the current immutable meeting sources.  A generated
+  // summary is a derived projection and must never become a hidden second
+  // evidence owner or a citation fallback.
   if (!evidence.includeManualNote || evidence.manualNote === null || evidence.manualNoteRevision === null) {
-    return summary;
+    return [];
   }
   return [
-    ...summary,
     {
       sourceType: 'manual_note' as const,
       sourceId: `manual_note:${evidence.meetingId}`,
