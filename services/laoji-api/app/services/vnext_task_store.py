@@ -285,6 +285,23 @@ def ensure_vnext_task_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_vnext_tasks_retry_ready "
             "ON vnext_tasks(state, retry_not_before_epoch, created_at, task_id)"
         )
+        # A process can die after the task row is made terminal but before an
+        # attempt projection is normalized.  Repair only this impossible
+        # combination; active retryable attempts remain untouched and can be
+        # claimed normally.
+        now = utc_now()
+        connection.execute(
+            """UPDATE vnext_task_attempts
+                  SET state = 'terminal_failure', phase = 'committing',
+                      updated_at = ?, terminal_at = COALESCE(terminal_at, ?)
+                WHERE state = 'retryable_failure'
+                  AND EXISTS (
+                      SELECT 1 FROM vnext_tasks task
+                       WHERE task.task_id = vnext_task_attempts.task_id
+                         AND task.state IN ('failure', 'success', 'cancelled')
+                  )""",
+            (now, now),
+        )
         connection.commit()
     vnext_purge_store.ensure_purge_schema()
 
@@ -801,15 +818,18 @@ def mark_failure_in_transaction(
     ).fetchone()
     if attempt is None or attempt["state"] != "running" or attempt["lease_owner"] != owner:
         return False
-    next_state: AttemptState = "retryable_failure" if retryable else "terminal_failure"
+    task_state: TaskState = (
+        "active" if retryable and int(attempt["attempt_number"]) < MAX_ATTEMPTS else "failure"
+    )
+    # The attempt cannot remain retryable after the task reaches a terminal
+    # state.  Keeping the two rows monotonic prevents stale workers and the
+    # deletion gate from treating a finished task as runnable work.
+    next_state: AttemptState = "retryable_failure" if task_state == "active" else "terminal_failure"
     connection.execute(
         """UPDATE vnext_task_attempts
               SET state = ?, phase = 'committing', error_code = ?, updated_at = ?, terminal_at = ?
             WHERE attempt_id = ?""",
         (next_state, code, now, now, attempt_id),
-    )
-    task_state: TaskState = (
-        "active" if retryable and int(attempt["attempt_number"]) < MAX_ATTEMPTS else "failure"
     )
     bounded_retry_seconds = max(0.0, min(3600.0, float(retry_after_seconds)))
     retry_not_before_epoch = (

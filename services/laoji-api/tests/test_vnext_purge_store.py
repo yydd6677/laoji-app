@@ -161,3 +161,48 @@ def test_purge_secret_is_required_and_unknown_capability_is_redacted(tmp_path, m
     with pytest.raises(vnext_purge_store.VNextPurgeError) as unknown:
         vnext_purge_store.get_purge_status(capability_id=str(uuid.uuid4()), secret="anything")
     assert unknown.value.code == "CAPABILITY_NOT_REGISTERED"
+
+
+def test_stale_running_purge_returns_to_pending_without_touching_fresh_work(tmp_path, monkeypatch) -> None:
+    context = _setup(tmp_path, monkeypatch)
+    now = 10_000
+    old_capability = _registration("old-secret")
+    fresh_capability = _registration("fresh-secret")
+    old_binding = str(uuid.uuid4())
+    fresh_binding = str(uuid.uuid4())
+    with device_identity.control_connection() as connection:
+        for registration, binding_id in ((old_capability, old_binding), (fresh_capability, fresh_binding)):
+            vnext_purge_store.register_capability(
+                connection,
+                scope_kind="binding",
+                capability_id=registration["capability_id"],
+                device_id=context.device_id,
+                epoch_id=context.epoch_id,
+                secret_sha256=registration["secret_sha256"],
+                registration_request_id=registration["registration_request_id"],
+                binding_id=binding_id,
+                binding_generation=uuid.uuid4().hex,
+            )
+        connection.execute(
+            "INSERT INTO v2_purges(purge_id, capability_id, request_id, state, created_at, updated_at) "
+            "VALUES ('old-purge', ?, 'old-request', 'running', ?, ?)",
+            (old_capability["capability_id"], now - 3600, now - 3600),
+        )
+        connection.execute(
+            "INSERT INTO v2_purges(purge_id, capability_id, request_id, state, created_at, updated_at) "
+            "VALUES ('fresh-purge', ?, 'fresh-request', 'running', ?, ?)",
+            (fresh_capability["capability_id"], now, now),
+        )
+        connection.commit()
+
+    assert vnext_purge_store.recover_interrupted_purges(
+        stale_after_seconds=1800,
+        now_epoch=now,
+    ) == 1
+    with device_identity.control_connection() as connection:
+        states = dict(connection.execute("SELECT purge_id, state FROM v2_purges" ).fetchall())
+        error = connection.execute(
+            "SELECT last_error_code FROM v2_purges WHERE purge_id = 'old-purge'"
+        ).fetchone()[0]
+    assert states == {"old-purge": "pending", "fresh-purge": "running"}
+    assert error == "PURGE_PROCESS_RESTARTED"

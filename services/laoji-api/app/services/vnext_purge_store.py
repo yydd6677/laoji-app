@@ -101,6 +101,37 @@ def ensure_purge_schema(connection: sqlite3.Connection | None = None) -> None:
             current.close()
 
 
+def recover_interrupted_purges(
+    *,
+    stale_after_seconds: int = 1800,
+    now_epoch: int | None = None,
+) -> int:
+    """Return stale ``running`` purges to pending for credentialed replay.
+
+    A process may terminate after the purge row enters ``running`` and before
+    object cleanup is confirmed.  The secret is intentionally not stored, so
+    the server cannot finish such a purge autonomously; moving only stale rows
+    back to ``pending`` lets the device replay with its retained capability.
+    Fresh rows are left untouched because another worker may still own them.
+    """
+    ensure_purge_schema()
+    now = int(time.time()) if now_epoch is None else int(now_epoch)
+    threshold = max(60, int(stale_after_seconds))
+    cutoff = now - threshold
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            """UPDATE v2_purges
+                  SET state = 'pending',
+                      last_error_code = 'PURGE_PROCESS_RESTARTED',
+                      updated_at = ?
+                WHERE state = 'running' AND updated_at <= ?""",
+            (now, cutoff),
+        )
+        connection.commit()
+        return int(cursor.rowcount)
+
+
 def _registration_hash(
     *, scope_kind: ScopeKind, device_id: str, epoch_id: str,
     binding_id: str | None, binding_generation: str | None, secret_sha256: str,

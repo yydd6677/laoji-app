@@ -177,6 +177,87 @@ def test_retry_not_before_survives_store_polling(tmp_path, monkeypatch) -> None:
     assert second is not None and second["attempt_number"] == 2
 
 
+def test_terminal_task_closes_final_retryable_attempt(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, monkeypatch)
+    vnext_task_store.register_binding(context, binding_id="binding-limit", binding_generation="generation-limit")
+    vnext_task_store.create_task(
+        context,
+        task_id="task-limit",
+        binding_id="binding-limit",
+        binding_generation="generation-limit",
+        capability="transcript",
+        entity_id="asset-limit",
+        entity_revision=1,
+        input_sha256=_hash("e"),
+        generation_id="generation-limit",
+    )
+
+    for number in (1, 2):
+        attempt = vnext_task_store.claim_attempt(context, "task-limit", lease_owner=f"worker-{number}")
+        assert attempt is not None and attempt["attempt_number"] == number
+        assert vnext_task_store.mark_failure(
+            context,
+            "task-limit",
+            attempt["attempt_id"],
+            "PROVIDER_TIMEOUT",
+            retryable=True,
+            lease_owner=f"worker-{number}",
+        )
+
+    final = vnext_task_store.claim_attempt(context, "task-limit", lease_owner="worker-3")
+    assert final is not None and final["attempt_number"] == 3
+    assert vnext_task_store.mark_failure(
+        context,
+        "task-limit",
+        final["attempt_id"],
+        "PROVIDER_TIMEOUT",
+        retryable=True,
+        lease_owner="worker-3",
+    )
+    assert vnext_task_store.get_task(context, "task-limit")["state"] == "failure"
+    with device_identity.control_connection() as connection:
+        state = connection.execute(
+            "SELECT state FROM vnext_task_attempts WHERE attempt_id = ?",
+            (final["attempt_id"],),
+        ).fetchone()[0]
+    assert state == "terminal_failure"
+
+
+def test_schema_reconciles_retryable_attempt_under_terminal_task(tmp_path, monkeypatch) -> None:
+    context = _context(tmp_path, monkeypatch)
+    vnext_task_store.register_binding(context, binding_id="binding-reconcile", binding_generation="generation-reconcile")
+    vnext_task_store.create_task(
+        context,
+        task_id="task-reconcile",
+        binding_id="binding-reconcile",
+        binding_generation="generation-reconcile",
+        capability="summary",
+        entity_id="meeting-reconcile",
+        entity_revision=1,
+        input_sha256=_hash("f"),
+        generation_id="generation-reconcile",
+    )
+    attempt = vnext_task_store.claim_attempt(context, "task-reconcile", lease_owner="worker-reconcile")
+    assert attempt is not None
+    with device_identity.control_connection() as connection:
+        connection.execute(
+            "UPDATE vnext_tasks SET state = 'failure', terminal_at = ? WHERE task_id = ?",
+            ("2026-08-19T00:00:00+00:00", "task-reconcile"),
+        )
+        connection.execute(
+            "UPDATE vnext_task_attempts SET state = 'retryable_failure' WHERE attempt_id = ?",
+            (attempt["attempt_id"],),
+        )
+        connection.commit()
+    vnext_task_store.ensure_vnext_task_schema()
+    with device_identity.control_connection() as connection:
+        state = connection.execute(
+            "SELECT state FROM vnext_task_attempts WHERE attempt_id = ?",
+            (attempt["attempt_id"],),
+        ).fetchone()[0]
+    assert state == "terminal_failure"
+
+
 def test_binding_generation_cannot_be_reused(tmp_path, monkeypatch) -> None:
     context = _context(tmp_path, monkeypatch)
     vnext_task_store.register_binding(context, binding_id="binding-1", binding_generation="generation-1")

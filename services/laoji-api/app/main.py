@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     from app.services import schedule_db_service
     from app.services.device_identity import ensure_device_schema, purge_expired_device_data
     from app.services import vnext_capability_cutover
+    from app.services import vnext_purge_store, vnext_task_store
     from app.services.laoji_auth_service import init_auth_db
     from app.services.speaker_db_service import get_speaker_db
 
@@ -83,6 +84,13 @@ async def lifespan(app: FastAPI):
     # table at boot so audits can distinguish an empty barrier registry from
     # an unavailable schema, without activating any capability implicitly.
     await asyncio.to_thread(vnext_capability_cutover.ensure_schema)
+    await asyncio.to_thread(vnext_task_store.ensure_vnext_task_schema)
+    recovered_purges = await asyncio.to_thread(vnext_purge_store.recover_interrupted_purges)
+    if recovered_purges:
+        print(
+            f"[启动] 已将 {recovered_purges} 个中断清理任务恢复为待设备重放",
+            flush=True,
+        )
     await asyncio.to_thread(purge_expired_device_data)
     await asyncio.to_thread(get_speaker_db)
     from app.services.summary_v3_store import purge_expired_source_payloads
