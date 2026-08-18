@@ -9,7 +9,11 @@ from fastapi.testclient import TestClient
 
 from app.api import device_v2
 from app.config import settings
-from app.services import device_identity, device_v2_identity
+from app.services import (
+    device_identity,
+    device_v2_identity,
+    vnext_source_stream_store as source_store,
+)
 
 
 def _client(tmp_path, monkeypatch) -> tuple[TestClient, device_v2_identity.DeviceV2Context]:
@@ -338,3 +342,133 @@ def test_question_reader_route_rejects_binding_revision_and_source_hash(tmp_path
     hash_error = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
     assert hash_error.status_code == 409
     assert hash_error.json()["detail"]["code"] == "Q2_SOURCE_HASH_MISMATCH"
+
+
+def test_question_reader_source_stream_commits_result_and_replays_by_task(tmp_path, monkeypatch) -> None:
+    client, context = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
+    binding_id = str(uuid.uuid4())
+    binding_generation = uuid.uuid4().hex
+    secret = "question-stream-route-secret"
+    assert client.put(
+        f"/api/device/v2/meetings/{binding_id}",
+        json={
+            "schema_version": 2,
+            "binding_generation": binding_generation,
+            "binding_epoch_seq": 1,
+            "binding_revision": 1,
+            "cancel_revision": 0,
+            "purge_capability": {
+                "capability_id": str(uuid.uuid4()),
+                "secret_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+                "registration_request_id": "question-stream-route-binding",
+            },
+        },
+    ).status_code == 200
+    fingerprint = "sha256:" + "b" * 64
+    stream, _ = source_store.create_source_stream(
+        context,
+        stream_id="stream-question-route-1",
+        task_id="task-question-route-1",
+        binding_id=binding_id,
+        binding_generation=binding_generation,
+        binding_revision=1,
+        cancel_revision=0,
+        client_operation_id="question-stream-route-operation",
+        generation_id="question-stream-route-generation",
+        request_sha256=fingerprint,
+        capability="question",
+        entity_id="meeting-question-route-1",
+        entity_revision=1,
+        task_input_sha256=fingerprint,
+    )
+    text = "周五前由张敏提交接口文档。"
+    item = {
+        "item_id": "question-route-item-1",
+        "source_type": "transcript",
+        "source_id": "line-1",
+        "source_revision_id": "revision-1",
+        "source_start_utf8": 0,
+        "source_end_utf8": len(text.encode("utf-8")),
+        "content_sha256": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "content": text,
+    }
+    bundle_hash = source_store.bundle_sha256([item])
+    chapter_hash = source_store.chapter_sha256([bundle_hash])
+    descriptor = {
+        "chapter_ordinal": 0,
+        "declared_bundle_count": 1,
+        "declared_item_count": 1,
+        "declared_uncompressed_bytes": len(text.encode("utf-8")),
+        "chapter_sha256": chapter_hash,
+    }
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    source_store.create_bundle_group(
+        context,
+        stream["stream_id"],
+        group_id="question-route-group-1",
+        chapter_ordinal=0,
+        declared_bundle_count=1,
+        declared_item_count=1,
+        declared_uncompressed_bytes=len(text.encode("utf-8")),
+        chapter_hash=chapter_hash,
+        request_sha256="sha256:" + "c" * 64,
+    )
+    source_store.append_bundle(
+        context,
+        "question-route-group-1",
+        bundle_id="question-route-bundle-1",
+        ordinal=0,
+        items=[item],
+        supplied_bundle_sha256=bundle_hash,
+    )
+    assert source_store.commit_bundle_group(context, "question-route-group-1")["state"] == "complete"
+    calls: list[dict] = []
+
+    def fake_read(value: dict) -> dict:
+        calls.append(value)
+        return {
+            "schema_version": 2,
+            "contract_revision": "question.reader.v2",
+            "provider_revision": "q2-reader-v1",
+            "model_revision": "test:model",
+            "snapshot_id": value["snapshot_id"],
+            "answer_kind": "not_stated",
+            "answer": "会议记录没有说明。",
+            "clauses": [],
+        }
+
+    monkeypatch.setattr(device_v2.vnext_question_reader, "read_q2", fake_read)
+    payload = {
+        "schema_version": 2,
+        "contract_revision": "question.reader.v2",
+        "provider_revision": "q2-reader-v1",
+        "snapshot_id": "q2-stream-route-snapshot",
+        "source_fingerprint": fingerprint,
+        "question": "谁负责提交接口文档？",
+        "binding_generation": binding_generation,
+        "binding_revision": 1,
+        "cancel_revision": 0,
+        "task_id": "task-question-route-1",
+        "source_stream_id": "stream-question-route-1",
+        "sources": [],
+    }
+    response = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert response.status_code == 200
+    assert response.json()["answer_kind"] == "not_stated"
+    assert len(calls) == 1
+    assert calls[0]["sources"][0]["text"] == text
+    assert source_store.get_source_stream(context, stream["stream_id"]) is None
+
+    replay = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
+    assert replay.status_code == 200
+    assert replay.json()["snapshot_id"] == "q2-stream-route-snapshot"
+    assert len(calls) == 1

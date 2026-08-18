@@ -123,7 +123,7 @@ async function uploadSourceChapterWithBackpressure(input: {
           requestSha256: await digest(`${input.requestSha}:${input.ordinal}`),
         },
       });
-      if (group.state === 'consumed' || group.state === 'committed') return;
+      if (group.state === 'consumed' || group.state === 'committed' || group.state === 'complete') return;
       if (group.state === 'cancelled') throw new Error('新版整理来源章节已取消');
       await appendDeviceV2SourceBundle({
         groupId,

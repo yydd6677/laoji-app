@@ -58,7 +58,7 @@ def _setup(tmp_path, monkeypatch):
     return database, context, generation
 
 
-def _create_stream(context, generation, *, suffix="1"):
+def _create_stream(context, generation, *, suffix="1", capability="summary"):
     return source_store.create_source_stream(
         context,
         stream_id=f"stream-source-{suffix}",
@@ -70,7 +70,7 @@ def _create_stream(context, generation, *, suffix="1"):
         client_operation_id=f"operation-source-{suffix}",
         generation_id=f"generation-source-{suffix}",
         request_sha256=_fixed_hash("a"),
-        capability="summary",
+        capability=capability,
         entity_id=f"meeting-source-{suffix}",
         entity_revision=1,
         task_input_sha256=_fixed_hash("b"),
@@ -239,7 +239,7 @@ def test_source_stream_encrypts_payload_and_promotes_one_atomic_checkpoint(tmp_p
         states = dict(connection.execute(
             "SELECT resource_kind, state FROM vnext_source_reservations"
         ).fetchall())
-        assert states == {
+    assert states == {
             "task_checkpoint": "active",
             "source_manifest": "released",
             "source_payload": "released",
@@ -482,6 +482,61 @@ def test_chapter_evidence_restores_time_and_source_identity_without_global_trans
     assert package.sources[0].speaker == "张敏"
     assert package.sources[0].content_hash == chapter["items"][0]["content_sha256"]
     assert package.coverage["source_coverage"] == 1.0
+
+
+def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, monkeypatch) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(context, generation, suffix="question", capability="question")
+    item, bundle_hash, descriptor = _chapter(0, "周五前由张敏提交接口文档。")
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    uploaded = _upload_chapter(context, stream["stream_id"], descriptor, item, bundle_hash)
+    assert uploaded["state"] == "complete"
+    loaded = source_store.load_question_source_stream(context, stream["stream_id"])
+    assert loaded is not None
+    assert loaded["task_id"] == stream["task_id"]
+    assert loaded["sources"][0]["text"] == item["content"]
+    assert source_store.get_source_stream(context, stream["stream_id"])["state"] == "complete"
+
+    attempt = vnext_task_store.claim_attempt(context, stream["task_id"], lease_owner="q2-worker")
+    assert attempt is not None
+    result = {
+        "schema_version": 2,
+        "contract_revision": "question.reader.v2",
+        "provider_revision": "q2-reader-v1",
+        "model_revision": "test:model",
+        "snapshot_id": "q2-snapshot-question",
+        "answer_kind": "answer",
+        "answer": "张敏负责提交接口文档。",
+        "clauses": [],
+    }
+    committed = source_store.commit_question_result(
+        context,
+        stream["task_id"],
+        attempt_id=attempt["attempt_id"],
+        lease_owner="q2-worker",
+        source_stream_id=stream["stream_id"],
+        source_fingerprint=_fixed_hash("b"),
+        result=result,
+    )
+    assert committed["task_id"] == stream["task_id"]
+    assert vnext_task_store.get_task(context, stream["task_id"])["state"] == "success"
+    assert vnext_task_store.get_task(context, stream["task_id"])["result"]["answer"] == result["answer"]
+    assert source_store.get_source_stream(context, stream["stream_id"]) is None
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM vnext_encrypted_source_payloads").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_bundle_groups").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_manifest_pages").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM vnext_source_reservations WHERE state = 'active'"
+        ).fetchone()[0] == 0
 
 
 def test_final_checkpoint_recovers_after_worker_lease_loss_without_regeneration(tmp_path, monkeypatch) -> None:

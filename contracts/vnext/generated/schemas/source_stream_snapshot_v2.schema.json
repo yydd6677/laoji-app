@@ -24,6 +24,22 @@
       "title": "Cancel Revision",
       "type": "integer"
     },
+    "capability": {
+      "anyOf": [
+        {
+          "enum": [
+            "summary",
+            "question"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Capability"
+    },
     "checkpoint_through_chapter": {
       "anyOf": [
         {

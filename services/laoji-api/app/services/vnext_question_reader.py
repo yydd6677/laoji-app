@@ -227,7 +227,7 @@ def _utf8_slice(value: str, start: int, end: int, field: str) -> str:
         raise Q2ReaderError("Q2_GROUNDING_INVALID", f"{field}未落在 UTF-8 字符边界") from error
 
 
-def _source_payload(raw: Any) -> list[dict[str, str]]:
+def _source_payload(raw: Any, *, max_source_text: int = MAX_SOURCE_TEXT) -> list[dict[str, str]]:
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SOURCES:
         raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源数量无效")
     sources: list[dict[str, str]] = []
@@ -241,7 +241,7 @@ def _source_payload(raw: Any) -> list[dict[str, str]]:
         source_id = _id(item.get("source_id"), "source_id")
         revision = _id(item.get("source_revision_id"), "source_revision_id")
         content_hash = _hash(item.get("content_sha256"), "content_sha256")
-        content = _text(item.get("text"), "text", MAX_SOURCE_TEXT)
+        content = _text(item.get("text"), "text", max_source_text)
         if _sha256_text(content) != content_hash:
             raise Q2ReaderError("Q2_SOURCE_HASH_MISMATCH", "Q2 来源内容校验失败", 409)
         key = (source_type, source_id, revision, content_hash)
@@ -392,8 +392,14 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     snapshot_id = _id(payload.get("snapshot_id"), "snapshot_id")
     source_fingerprint = _hash(payload.get("source_fingerprint"), "source_fingerprint")
     question = _text(payload.get("question"), "question", MAX_QUESTION)
-    sources = _source_payload(payload.get("sources"))
-    if _source_fingerprint(sources) != source_fingerprint:
+    source_stream_verified = payload.get("source_stream_verified", False)
+    if not isinstance(source_stream_verified, bool):
+        raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源流标记无效")
+    sources = _source_payload(
+        payload.get("sources"),
+        max_source_text=16 * 1024 * 1024 if source_stream_verified else MAX_SOURCE_TEXT,
+    )
+    if not source_stream_verified and _source_fingerprint(sources) != source_fingerprint:
         raise Q2ReaderError("Q2_SOURCE_FINGERPRINT_MISMATCH", "Q2 来源整体标识校验失败", 409)
     try:
         model_sources = _select_model_sources(question, source_fingerprint, sources)

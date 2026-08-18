@@ -81,6 +81,7 @@ class SourceStreamSnapshotV2(VNextModel):
     contract_revision: Literal["source.stream.v2"] = "source.stream.v2"
     stream_id: str = Field(min_length=8, max_length=180)
     task_id: str = Field(min_length=8, max_length=512)
+    capability: Literal["summary", "question"] | None = None
     binding_id: str = Field(min_length=8, max_length=180)
     binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
     binding_revision: int = Field(ge=1, le=9_007_199_254_740_991)

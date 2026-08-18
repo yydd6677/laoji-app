@@ -23,6 +23,6 @@
 
 ## 未关闭边界
 
-该切片只解决 Q2 reader 的候选上下文预算，不等于 Stage 3 退出：Summary/Q2 source-stream 的完整问答
-消费链、专属 Android 回放、人工引用相关性、长会语义 holdout、公开零流量周期和 capability barrier
-仍未通过。生产 Q2、旧问答和公网流量均未改变。
+该切片只解决 Q2 reader 的候选上下文预算，不等于 Stage 3 退出。随后完成的 Q2 source-stream
+消费纵向切片见 [Q2 source-stream](Q2-SOURCE-STREAM-20260819.md)；专属 Android 回放、人工引用相关性、
+长会语义 holdout、公开零流量周期和 capability barrier 仍未通过。生产 Q2、旧问答和公网流量均未改变。

@@ -31,6 +31,7 @@ export interface Q2CandidateProviderRequest {
   sourceFingerprint: string;
   providerRevision: string;
   question: string;
+  operationId?: string;
   sources: readonly Q2CandidateSource[];
 }
 
@@ -249,6 +250,7 @@ export async function executeQ2Candidate(input: {
     sourceFingerprint: snapshot.sourceFingerprint,
     providerRevision: identifier(input.providerRevision, 'providerRevision', 180),
     question,
+    operationId: input.operationId,
     sources,
   };
   await appendPendingQ2Turn({

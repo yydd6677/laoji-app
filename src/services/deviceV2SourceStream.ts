@@ -17,6 +17,7 @@ export interface DeviceV2SourceStreamSnapshot {
   contract_revision: typeof CONTRACT_REVISION;
   stream_id: string;
   task_id: string;
+  capability: SourceStreamCapability | null;
   binding_id: string;
   binding_generation: string;
   binding_revision: number;
@@ -96,7 +97,7 @@ export interface DeviceV2SourceBundleGroup {
   group_id: string;
   stream_id: string;
   chapter_ordinal: number;
-  state: 'open' | 'committed' | 'consumed' | 'cancelled';
+  state: 'open' | 'complete' | 'committed' | 'consumed' | 'cancelled';
   next_bundle_ordinal: number;
   declared_bundle_count: number;
   declared_item_count: number;
@@ -209,6 +210,9 @@ function normalizeSnapshot(value: any): DeviceV2SourceStreamSnapshot {
     contract_revision: CONTRACT_REVISION,
     stream_id: id(String(value.stream_id ?? ''), 'stream_id', 180),
     task_id: id(String(value.task_id ?? ''), 'task_id'),
+    capability: value.capability === null || value.capability === undefined
+      ? null
+      : id(String(value.capability), 'capability', 32) as SourceStreamCapability,
     binding_id: id(String(value.binding_id ?? ''), 'binding_id', 180),
     binding_generation: id(String(value.binding_generation ?? ''), 'binding_generation', 64).toLowerCase(),
     binding_revision: positiveInteger(Number(value.binding_revision), 'binding_revision'),
@@ -230,6 +234,9 @@ function normalizeSnapshot(value: any): DeviceV2SourceStreamSnapshot {
   if (!['open', 'consuming', 'complete', 'cancelled', 'expired'].includes(result.state)) {
     throw new DeviceV2ApiError('来源流状态无效', 502, 'SOURCE_STREAM_STATE_INVALID');
   }
+  if (result.capability !== null && result.capability !== 'summary' && result.capability !== 'question') {
+    throw new DeviceV2ApiError('来源流能力无效', 502, 'SOURCE_STREAM_CAPABILITY_INVALID');
+  }
   if (!/^[0-9a-f]{32}$/.test(result.binding_generation)) {
     throw new DeviceV2ApiError('来源流 binding generation 无效', 502, 'SOURCE_STREAM_BINDING_INVALID');
   }
@@ -242,7 +249,7 @@ function normalizeGroup(value: any): DeviceV2SourceBundleGroup {
     throw new DeviceV2ApiError('来源章节响应格式无效', 502, 'SOURCE_GROUP_RESPONSE_INVALID');
   }
   const state = group.state;
-  if (!['open', 'committed', 'consumed', 'cancelled'].includes(state)) {
+  if (!['open', 'complete', 'committed', 'consumed', 'cancelled'].includes(state)) {
     throw new DeviceV2ApiError('来源章节状态无效', 502, 'SOURCE_GROUP_STATE_INVALID');
   }
   return {

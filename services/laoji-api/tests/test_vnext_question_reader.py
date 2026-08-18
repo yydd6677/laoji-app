@@ -164,6 +164,24 @@ def test_reader_retrieves_large_raw_source_set_without_relabeling_citations(monk
     assert source_vectors
 
 
+def test_reader_accepts_verified_stream_source_larger_than_direct_item_limit(monkeypatch):
+    text = "a" * 9_001
+    payload = _payload(text)
+    payload["source_fingerprint"] = _hash("stream-task-fingerprint")
+    payload["source_stream_verified"] = True
+    monkeypatch.setattr(
+        reader,
+        "call_llm",
+        lambda *args, **kwargs: json.dumps({
+            "answer_kind": "not_stated",
+            "answer": "当前会议记录没有提供足够信息确认。",
+            "clauses": [],
+        }, ensure_ascii=False),
+    )
+    result = reader.read_q2(payload)
+    assert result["answer_kind"] == "not_stated"
+
+
 def test_reader_fails_closed_when_large_source_retrieval_is_unavailable(monkeypatch):
     from app.services.llm_provider import LlmProviderError
 

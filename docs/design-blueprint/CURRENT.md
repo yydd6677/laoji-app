@@ -197,7 +197,12 @@ Q2 snapshot/thread/turn/clause/citation 仓储，并把只读结果投影到现�
 Q2 reader 另已增加默认关闭的有界 raw-source retrieval：完整来源不超过预算时原样进入模型，超预算时由本地
 embedding 按问题、纠正/时间/负责人信号和相邻上下文选择，引用仍绑定完整 immutable snapshot；该切片不替代
 尚未闭合的 Q2 source-stream 消费链，证据见
-[Q2 bounded retrieval](../vnext-stage3/Q2-BOUNDED-RETRIEVAL-20260819.md)。
+[Q2 bounded retrieval](../vnext-stage3/Q2-BOUNDED-RETRIEVAL-20260819.md)。随后补齐了候选 Q2 source-stream
+纵向切片：长来源可按最多 8 个 bundle 上传，最后一章提交后进入 `complete`，服务端以 generic Task lease
+读取完整加密来源并只调用一次 Q2 reader；成功结果、Task `content_outcome` 和来源/预约清理在同一事务提交，
+provider 失败保留可重试任务，重放可用 task ID 幂等读取。短来源仍使用原直接请求路径。该切片默认关闭，
+未改变稳定问答或生产流量，证据见
+[Q2 source-stream](../vnext-stage3/Q2-SOURCE-STREAM-20260819.md)。
 随后对当前 78 分钟视频执行了完整音频 ASR→Facts V3 候选回放：336 个 ASR 分片、335 个文本段、
 一次 Facts 模型调用，结果合同通过；证据见
 [长会议完整视频回放](../vnext-stage3/ASR-TO-FACTS-1437681208-LONG-20260819.md)。这仍不等于

@@ -7,6 +7,7 @@ on v1 until the mobile Keystore client and the v2 capability gate are ready.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -154,7 +155,10 @@ class Q2ReaderRequest(BaseModel):
     binding_generation: str = Field(pattern=r"^[0-9a-f]{32}$")
     binding_revision: int = Field(ge=1, le=9_223_372_036_854_775_807)
     cancel_revision: int = Field(ge=0, le=9_223_372_036_854_775_807)
-    sources: list[Q2ReaderSource] = Field(min_length=1, max_length=1_024)
+    task_id: str | None = Field(default=None, min_length=8, max_length=512)
+    source_stream_id: str | None = Field(default=None, min_length=8, max_length=180)
+    source_stream_verified: bool = False
+    sources: list[Q2ReaderSource] = Field(default_factory=list, max_length=1_024)
 
 
 class V2UploadFence(BaseModel):
@@ -890,6 +894,10 @@ async def read_question_v2(
 ) -> dict[str, Any]:
     """Run one source-attributed Q2 reader call behind the device fence."""
     _require_question_reader_v2()
+    stream_id = payload.source_stream_id
+    task_id: str | None = payload.task_id
+    attempt_id: str | None = None
+    lease_owner = f"q2-api:{uuid.uuid4().hex}"
     try:
         binding = await asyncio.to_thread(vnext_task_store.get_binding, context, binding_id)
         if binding is None or binding.get("state") != "active":
@@ -908,10 +916,136 @@ async def read_question_v2(
                 "会议服务连接版本已变化",
                 409,
             )
-        result = await asyncio.to_thread(vnext_question_reader.read_q2, payload.model_dump())
-        return result
+        if stream_id is None:
+            if payload.source_stream_verified:
+                raise vnext_question_reader.Q2ReaderError(
+                    "Q2_INPUT_INVALID",
+                    "来源流校验标记只能由服务端设置",
+                    422,
+                )
+            if not payload.sources:
+                raise vnext_question_reader.Q2ReaderError(
+                    "Q2_INPUT_INVALID",
+                    "Q2 来源不能为空",
+                    422,
+                )
+            return await asyncio.to_thread(vnext_question_reader.read_q2, payload.model_dump())
+
+        source_snapshot = await asyncio.to_thread(
+            vnext_source_stream_store.load_question_source_stream,
+            context,
+            stream_id,
+        )
+        if source_snapshot is None:
+            # A successful request deletes the source stream.  The task ID makes
+            # a replay idempotent without retaining plaintext or a tombstone.
+            if task_id:
+                existing = await asyncio.to_thread(vnext_task_store.get_task, context, task_id)
+                if (
+                    existing is not None
+                    and existing.get("capability") == "question"
+                    and existing.get("state") == "success"
+                    and existing.get("input_sha256") == payload.source_fingerprint
+                    and isinstance(existing.get("result"), dict)
+                ):
+                    return existing["result"]
+            raise vnext_question_reader.Q2ReaderError(
+                "SOURCE_STREAM_NOT_FOUND",
+                "会议来源流不存在或已过期",
+                404,
+            )
+        if source_snapshot["binding_id"] != binding_id:
+            raise vnext_question_reader.Q2ReaderError(
+                "SOURCE_STREAM_BINDING_INVALID",
+                "来源流会议连接不匹配",
+                409,
+            )
+        if (
+            source_snapshot["binding_generation"] != payload.binding_generation
+            or source_snapshot["binding_revision"] != payload.binding_revision
+            or source_snapshot["cancel_revision"] != payload.cancel_revision
+        ):
+            raise vnext_question_reader.Q2ReaderError(
+                "BINDING_FENCE_INVALID",
+                "会议服务连接版本已变化",
+                409,
+            )
+        if payload.source_fingerprint != source_snapshot["source_fingerprint"]:
+            raise vnext_question_reader.Q2ReaderError(
+                "Q2_SOURCE_FINGERPRINT_MISMATCH",
+                "Q2 来源整体标识校验失败",
+                409,
+            )
+        if task_id is not None and task_id != source_snapshot["task_id"]:
+            raise vnext_question_reader.Q2ReaderError(
+                "Q2_TASK_INVALID",
+                "Q2 任务与来源流不匹配",
+                409,
+            )
+        task_id = source_snapshot["task_id"]
+        attempt = await asyncio.to_thread(
+            vnext_task_store.claim_attempt,
+            context,
+            task_id,
+            lease_owner=lease_owner,
+            lease_seconds=180,
+        )
+        if attempt is None:
+            existing = await asyncio.to_thread(vnext_task_store.get_task, context, task_id)
+            if (
+                existing is not None
+                and existing.get("state") == "success"
+                and isinstance(existing.get("result"), dict)
+            ):
+                return existing["result"]
+            raise vnext_question_reader.Q2ReaderError(
+                "Q2_TASK_BUSY",
+                "上一条会议问答仍在处理中，请稍后重试",
+                409,
+            )
+        attempt_id = str(attempt["attempt_id"])
+        reader_payload = payload.model_dump()
+        reader_payload["sources"] = source_snapshot["sources"]
+        reader_payload["task_id"] = task_id
+        reader_payload["source_stream_verified"] = True
+        result = await asyncio.to_thread(vnext_question_reader.read_q2, reader_payload)
+        return await asyncio.to_thread(
+            vnext_source_stream_store.commit_question_result,
+            context,
+            task_id,
+            attempt_id=attempt_id,
+            lease_owner=lease_owner,
+            source_stream_id=stream_id,
+            source_fingerprint=payload.source_fingerprint,
+            result=result,
+        )
     except vnext_question_reader.Q2ReaderError as error:
+        if attempt_id is not None and task_id is not None:
+            retryable = error.status_code >= 500
+            await asyncio.to_thread(
+                vnext_task_store.mark_failure,
+                context,
+                task_id,
+                attempt_id,
+                error.code,
+                retryable=retryable,
+                retry_after_seconds=5 if retryable else 0,
+                lease_owner=lease_owner,
+            )
         raise HTTPException(status_code=error.status_code, detail={"code": error.code, "message": error.message}) from error
+    except vnext_source_stream_store.VNextSourceStreamError as error:
+        if attempt_id is not None and task_id is not None:
+            await asyncio.to_thread(
+                vnext_task_store.mark_failure,
+                context,
+                task_id,
+                attempt_id,
+                error.code,
+                retryable=error.status_code >= 500,
+                retry_after_seconds=5 if error.status_code >= 500 else 0,
+                lease_owner=lease_owner,
+            )
+        raise _source_error(error) from error
 
 
 @router.get("/tasks/{task_id}")

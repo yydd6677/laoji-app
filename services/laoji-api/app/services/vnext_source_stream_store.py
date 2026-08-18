@@ -434,11 +434,16 @@ def _task_checkpoint_ordinal(connection: Any, task_id: str) -> int | None:
 
 
 def _snapshot(connection: Any, row: Any) -> dict[str, Any]:
+    task_capability = connection.execute(
+        "SELECT capability FROM vnext_tasks WHERE task_id = ?",
+        (str(row["task_id"]),),
+    ).fetchone()
     return {
         "schema_version": 2,
         "contract_revision": CONTRACT_REVISION,
         "stream_id": row["stream_id"],
         "task_id": row["task_id"],
+        "capability": str(task_capability[0]) if task_capability is not None else None,
         "binding_id": row["binding_id"],
         "binding_generation": row["binding_generation"],
         "binding_revision": int(row["binding_revision"]),
@@ -1215,7 +1220,8 @@ def commit_bundle_group(context: SourceOwnerContext, group_id: str) -> dict[str,
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         group = connection.execute(
-            """SELECT group_row.*, stream.device_id, stream.epoch_id, stream.state AS stream_state,
+            """SELECT group_row.*, stream.device_id, stream.epoch_id, stream.task_id,
+                      stream.final_chapter_count, stream.state AS stream_state,
                       stream.binding_id, stream.binding_generation,
                       stream.binding_revision, stream.cancel_revision
                  FROM vnext_source_bundle_groups group_row
@@ -1259,13 +1265,34 @@ def commit_bundle_group(context: SourceOwnerContext, group_id: str) -> dict[str,
         if computed != str(group["chapter_sha256"]):
             connection.rollback()
             raise VNextSourceStreamError("SOURCE_CHAPTER_HASH_MISMATCH", "章节来源校验失败", 409)
+        task_capability = connection.execute(
+            "SELECT capability FROM vnext_tasks WHERE task_id = ?",
+            (str(group["task_id"]),),
+        ).fetchone()
+        is_question_stream = task_capability is not None and str(task_capability[0]) == "question"
         connection.execute(
             "UPDATE vnext_source_bundle_groups SET state = 'complete', updated_at = ?, expires_at_epoch = ? WHERE group_id = ?",
             (now, now_epoch + SOURCE_TTL_SECONDS, group_id),
         )
+        final_count = int(group["final_chapter_count"]) if group["final_chapter_count"] is not None else None
+        next_state = (
+            "complete"
+            if is_question_stream and final_count is not None and int(group["chapter_ordinal"]) + 1 == final_count
+            else "consuming"
+        )
         connection.execute(
-            "UPDATE vnext_source_streams SET state = 'consuming', expires_at_epoch = ?, updated_at = ? WHERE stream_id = ?",
-            (now_epoch + SOURCE_TTL_SECONDS, now, group["stream_id"]),
+            """UPDATE vnext_source_streams
+                  SET state = ?, next_consumable_chapter = CASE WHEN ? THEN ? ELSE next_consumable_chapter END,
+                      expires_at_epoch = ?, updated_at = ?
+                WHERE stream_id = ?""",
+            (
+                next_state,
+                1 if is_question_stream else 0,
+                int(group["chapter_ordinal"]) + 1,
+                now_epoch + SOURCE_TTL_SECONDS,
+                now,
+                group["stream_id"],
+            ),
         )
         row = connection.execute(
             "SELECT * FROM vnext_source_bundle_groups WHERE group_id = ?",
@@ -1762,6 +1789,163 @@ def commit_checkpoint_artifact(
         _release(connection, str(stream["checkpoint_reservation_id"]), now_epoch)
         connection.commit()
         return {**task_result, "task_id": task_id, "created_at": now}
+
+
+def load_question_source_stream(
+    context: SourceOwnerContext,
+    stream_id: str,
+) -> dict[str, Any] | None:
+    """Read a complete immutable question stream without creating a derived summary.
+
+    Question streams are deliberately not consumed chapter-by-chapter: the Q2
+    reader needs the complete source snapshot for grounding, and the stream is
+    removed only after the reader result and generic Task success are committed
+    together.  This function is read-only and therefore safe to repeat after a
+    provider timeout or process restart.
+    """
+    ensure_vnext_source_stream_schema()
+    stream_id = _safe(stream_id, "stream_id", 180)
+    with control_connection() as connection:
+        stream = _stream_row(connection, context, stream_id)
+        if stream is None:
+            return None
+        task = connection.execute(
+            "SELECT * FROM vnext_tasks WHERE task_id = ? AND device_id = ? AND epoch_id = ?",
+            (str(stream["task_id"]), context.device_id, context.epoch_id),
+        ).fetchone()
+        if task is None or str(task["capability"]) != "question":
+            raise VNextSourceStreamError("SOURCE_STREAM_CAPABILITY_INVALID", "来源流能力不匹配", 409)
+        if str(stream["binding_id"]) != str(task["binding_id"]):
+            raise VNextSourceStreamError("SOURCE_STREAM_BINDING_INVALID", "来源流会议连接不匹配", 409)
+        if stream["state"] != "complete" or stream["source_manifest_sha256"] is None:
+            raise VNextSourceStreamError("SOURCE_STREAM_INCOMPLETE", "会议来源尚未上传完整", 409)
+        final_count = stream["final_chapter_count"]
+        if final_count is None or int(final_count) < 1:
+            raise VNextSourceStreamError("SOURCE_MANIFEST_INCOMPLETE", "会议来源清单尚未完成", 409)
+        groups = connection.execute(
+            """SELECT * FROM vnext_source_bundle_groups
+               WHERE stream_id = ? AND state = 'complete'
+               ORDER BY chapter_ordinal""",
+            (stream_id,),
+        ).fetchall()
+        if [int(row["chapter_ordinal"]) for row in groups] != list(range(int(final_count))):
+            raise VNextSourceStreamError("SOURCE_GROUP_INCOMPLETE", "会议来源章节不完整", 409)
+        sources: list[dict[str, Any]] = []
+        for group in groups:
+            rows = connection.execute(
+                """SELECT item.*, payload.nonce, payload.ciphertext
+                     FROM vnext_source_bundle_items item
+                     JOIN vnext_source_bundles bundle ON bundle.bundle_id = item.bundle_id
+                     JOIN vnext_encrypted_source_payloads payload ON payload.item_id = item.item_id
+                    WHERE bundle.group_id = ?
+                    ORDER BY bundle.ordinal, item.ordinal""",
+                (group["group_id"],),
+            ).fetchall()
+            if len(rows) != int(group["declared_item_count"]):
+                raise VNextSourceStreamError("SOURCE_ITEM_COUNT_MISMATCH", "会议来源条目数量不一致", 409)
+            for row in rows:
+                plaintext = _decrypt(
+                    "item",
+                    str(row["item_id"]),
+                    str(row["content_sha256"]),
+                    bytes(row["nonce"]),
+                    bytes(row["ciphertext"]),
+                )
+                if _digest(plaintext) != str(row["content_sha256"]):
+                    raise VNextSourceStreamError("SOURCE_CONTENT_HASH_MISMATCH", "来源正文校验失败", 500)
+                try:
+                    content = plaintext.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise VNextSourceStreamError("SOURCE_CONTENT_INVALID", "来源正文编码无效", 500) from error
+                sources.append({
+                    "source_type": str(row["source_type"]),
+                    "source_id": str(row["source_id"]),
+                    "source_revision_id": str(row["source_revision_id"]),
+                    "source_start_utf8": int(row["source_start_utf8"]),
+                    "source_end_utf8": int(row["source_end_utf8"]),
+                    "content_sha256": str(row["content_sha256"]),
+                    "start_ms": row["start_ms"],
+                    "end_ms": row["end_ms"],
+                    "speaker": row["speaker"],
+                    "text": content,
+                })
+        if not sources:
+            raise VNextSourceStreamError("SOURCE_EMPTY", "会议来源为空", 409)
+        return {
+            "stream_id": stream_id,
+            "task_id": str(task["task_id"]),
+            "binding_id": str(stream["binding_id"]),
+            "binding_generation": str(stream["binding_generation"]),
+            "binding_revision": int(stream["binding_revision"]),
+            "cancel_revision": int(stream["cancel_revision"]),
+            "source_fingerprint": str(task["input_sha256"]),
+            "source_manifest_sha256": str(stream["source_manifest_sha256"]),
+            "sources": sources,
+        }
+
+
+def commit_question_result(
+    context: SourceOwnerContext,
+    task_id: str,
+    *,
+    attempt_id: str,
+    lease_owner: str,
+    source_stream_id: str,
+    source_fingerprint: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Publish a Q2 result and purge its immutable source stream atomically."""
+    ensure_vnext_source_stream_schema()
+    task_id = _safe(task_id, "task_id")
+    attempt_id = _safe(attempt_id, "attempt_id")
+    lease_owner = _safe(lease_owner, "lease_owner", 200)
+    source_stream_id = _safe(source_stream_id, "source_stream_id", 180)
+    source_fingerprint = _sha256(source_fingerprint, "source_fingerprint")
+    if not isinstance(result, dict):
+        raise VNextSourceStreamError("Q2_RESULT_INVALID", "问答结果必须是对象", 422)
+    with control_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        task, _attempt = _assert_attempt(
+            connection,
+            context,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            lease_owner=lease_owner,
+        )
+        if str(task["capability"]) != "question" or str(task["input_sha256"]) != source_fingerprint:
+            connection.rollback()
+            raise VNextSourceStreamError("Q2_SOURCE_FENCE_INVALID", "问答来源版本已变化", 409)
+        stream = _stream_row(connection, context, source_stream_id)
+        if (
+            stream is None
+            or str(stream["task_id"]) != task_id
+            or stream["state"] != "complete"
+        ):
+            connection.rollback()
+            raise VNextSourceStreamError("SOURCE_STREAM_INCOMPLETE", "会议来源尚未处理完整", 409)
+        if not vnext_task_store.mark_success_in_transaction(
+            connection,
+            context,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            result=result,
+            result_kind="content_outcome",
+            lease_owner=lease_owner,
+        ):
+            connection.rollback()
+            raise VNextSourceStreamError("TASK_LEASE_LOST", "任务执行权已失效", 409)
+        connection.execute(
+            """UPDATE vnext_tasks
+                  SET source_stream_id = NULL, checkpoint_reservation_id = NULL,
+                      updated_at = ?
+                WHERE task_id = ?""",
+            (utc_now(), task_id),
+        )
+        # Foreign-key cascades remove manifest, bundles and encrypted payloads;
+        # their triggers release all reservations, including the checkpoint.
+        connection.execute("DELETE FROM vnext_source_streams WHERE stream_id = ?", (source_stream_id,))
+        connection.commit()
+    return {"task_id": task_id, "source_stream_id": source_stream_id, **result}
 
 
 def load_generated_artifact(
