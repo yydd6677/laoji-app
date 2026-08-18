@@ -50,6 +50,8 @@
 - `test_summary_v3.py`、`test_persistent_summary_tasks.py`、
   `test_summary_versions_v1.py` 在隔离 SQLite 下合计：`52 passed`（13 个既有
   `datetime.utcnow()` 弃用警告）。
+- `tools/vnext/verify_stage3_source_stream_contract.py` 通过，锁定服务端
+  `received_bundle_count/received_item_count` 与移动端响应 normalizer，以及恢复/反压字段的对应关系。
 - `npx tsc --noEmit`：通过。
 - `python3 -m compileall -q services/laoji-api/app`：通过。
 - `git diff --check`：通过。

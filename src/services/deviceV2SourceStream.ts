@@ -102,8 +102,8 @@ export interface DeviceV2SourceBundleGroup {
   declared_item_count: number;
   declared_uncompressed_bytes: number;
   chapter_sha256: string;
-  bundle_count: number;
-  item_count: number;
+  received_bundle_count: number;
+  received_item_count: number;
 }
 
 export interface DeviceV2TaskSnapshot {
@@ -256,8 +256,8 @@ function normalizeGroup(value: any): DeviceV2SourceBundleGroup {
     declared_item_count: boundedInteger(Number(group.declared_item_count), 'declared_item_count', MAX_BUNDLE_ITEMS),
     declared_uncompressed_bytes: boundedInteger(Number(group.declared_uncompressed_bytes), 'declared_uncompressed_bytes', 128 * 1024 * 1024),
     chapter_sha256: sha256(String(group.chapter_sha256 ?? ''), 'chapter_sha256'),
-    bundle_count: nonNegativeInteger(Number(group.bundle_count), 'bundle_count'),
-    item_count: nonNegativeInteger(Number(group.item_count), 'item_count'),
+    received_bundle_count: nonNegativeInteger(Number(group.received_bundle_count), 'received_bundle_count'),
+    received_item_count: nonNegativeInteger(Number(group.received_item_count), 'received_item_count'),
   };
 }
 
