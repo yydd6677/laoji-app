@@ -90,19 +90,20 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
     sources: list[EvidenceSource] = []
     identity: list[dict[str, Any]] = []
     transcript_identity: list[dict[str, Any]] = []
+    source_id_counts: dict[str, int] = {}
     for ordinal, item in enumerate(raw_items):
         source_type = str(item.get("source_type") or "")
         if source_type not in {"transcript", "manual_note", "attachment"}:
             raise ValueError("summary_chapter_source_type_invalid")
-        source_id = (
-            f"{source_type}:"
-            f"{_source_part(item.get('source_id'))}:"
-            f"{_source_part(item.get('source_revision_id'))}:"
-            f"{int(item.get('source_start_utf8') or 0)}-"
-            f"{int(item.get('source_end_utf8') or 0)}"
-        )
-        if len(source_id) > 190:
-            source_id = f"{source_type}:" + hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+        # Keep the public identity aligned with the immutable source owner so
+        # a mobile citation can jump back to the original transcript row.
+        # Revision/range/hash remain part of the source record and are still
+        # checked by the source package and provider verifier. Duplicate IDs
+        # (for example note chunks) receive a deterministic ordinal suffix.
+        source_base = f"{source_type}:{_source_part(item.get('source_id'))}"
+        duplicate_count = source_id_counts.get(source_base, 0)
+        source_id_counts[source_base] = duplicate_count + 1
+        source_id = source_base if duplicate_count == 0 else f"{source_base}:{duplicate_count}"
         content_hash = str(item.get("content_sha256") or "")
         content = str(item.get("content") or "")
         model_prefix = {"transcript": "t", "manual_note": "n", "attachment": "a"}[source_type]
