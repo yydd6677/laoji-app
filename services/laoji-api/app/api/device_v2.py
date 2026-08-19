@@ -7,6 +7,7 @@ on v1 until the mobile Keystore client and the v2 capability gate are ready.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Literal
 
@@ -40,6 +41,7 @@ from app.schemas.vnext_contracts import (
 
 router = APIRouter(prefix="/device/v2", tags=["device-v2"])
 security = HTTPBearer(auto_error=False)
+_logger = logging.getLogger(__name__)
 
 
 class BootstrapChallengeRequest(BaseModel):
@@ -827,7 +829,7 @@ async def complete_upload(
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             vnext_upload_store.complete_upload_session,
             context,
             session_id,
@@ -839,6 +841,27 @@ async def complete_upload(
             transcription_generation_id=payload.transcription_generation_id,
             transcription_input_sha256=payload.transcription_input_sha256,
         )
+        # Materialize the durable import run before acknowledging completion.
+        # The worker still owns execution, but the phone can immediately poll
+        # a queued run instead of observing a transient 404 between the upload
+        # commit and the worker's next maintenance scan.
+        if vnext_import_transcription_pipeline.import_transcription_enabled():
+            try:
+                await asyncio.to_thread(
+                    vnext_import_transcript_store.ensure_run_for_task,
+                    context,
+                    str(result["task"]["task_id"]),
+                )
+            except Exception as error:
+                # Upload verification is already durable.  The GET path has
+                # the same idempotent self-healing hook and the worker will
+                # retry the handoff, so do not turn a committed upload into a
+                # false upload failure.
+                _logger.warning(
+                    "vnext import run handoff deferred: %s",
+                    type(error).__name__,
+                )
+        return result
     except vnext_upload_store.VNextUploadError as error:
         raise _upload_error(error) from error
 

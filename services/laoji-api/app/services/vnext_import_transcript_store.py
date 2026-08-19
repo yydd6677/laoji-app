@@ -201,6 +201,38 @@ def ensure_run(
     return dict(row), False
 
 
+def ensure_run_for_task(
+    context: ImportOwnerContext,
+    task_id: str,
+) -> tuple[dict[str, Any], bool] | None:
+    """Materialize the import run for a verified upload task.
+
+    Upload completion and the import worker are intentionally separate
+    transactions.  A device can therefore poll in the small interval after
+    the task/asset commit but before the worker's next scan.  Resolve the
+    verified source here and create the idempotent run immediately so that
+    polling observes ``queued`` instead of a misleading 404.
+
+    ``None`` means the task is not a verified upload (for example a realtime
+    task or a terminal task whose source has already been cleaned up).
+    """
+    task_id = _safe(task_id, "task_id", 512)
+    from app.services import vnext_upload_store
+
+    try:
+        source = vnext_upload_store.get_verified_transcription_source(context, task_id)
+    except vnext_upload_store.VNextUploadError as error:
+        if error.code in {"VERIFIED_ASSET_NOT_FOUND", "VERIFIED_ASSET_UNAVAILABLE"}:
+            return None
+        raise VNextImportTranscriptError(
+            "TRANSCRIPT_SOURCE_UNAVAILABLE",
+            error.message,
+            error.status_code,
+        ) from error
+    source["task_id"] = task_id
+    return ensure_run(context, source)
+
+
 def mark_running(
     context: ImportOwnerContext,
     task_id: str,
@@ -536,8 +568,20 @@ def get_event_snapshot(
                  WHERE task_id = ? AND device_id = ? AND epoch_id = ?""",
             (task_id, context.device_id, context.epoch_id),
         ).fetchone()
+    if run is None:
+        # Self-heal the upload-complete -> worker handoff.  This closes the
+        # short race where the phone polls before the maintenance scan has
+        # materialized the durable import run.
+        ensure_run_for_task(context, task_id)
+        with control_connection() as connection:
+            run = connection.execute(
+                """SELECT * FROM vnext_import_transcript_runs
+                     WHERE task_id = ? AND device_id = ? AND epoch_id = ?""",
+                (task_id, context.device_id, context.epoch_id),
+            ).fetchone()
         if run is None:
             return None
+    with control_connection() as connection:
         rows = connection.execute(
             """SELECT * FROM vnext_import_transcript_events
                  WHERE task_id = ? AND event_seq > ? ORDER BY event_seq LIMIT ?""",

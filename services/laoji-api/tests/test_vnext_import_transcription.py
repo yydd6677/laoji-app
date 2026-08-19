@@ -275,6 +275,23 @@ def _running_attempt(context: DeviceV2Context, source: dict, owner: str = "impor
     return attempt_id
 
 
+def test_first_event_poll_materializes_queued_run_after_upload_commit(import_context) -> None:
+    """The phone must see queued, not a transient run-not-found response."""
+    context, fake = import_context
+    _verified_source(context, fake, b"poll-before-worker-scan")
+
+    snapshot = vnext_import_transcript_store.get_event_snapshot(context, TASK_ID)
+
+    assert snapshot is not None
+    assert snapshot["state"] == "queued"
+    assert snapshot["task_id"] == TASK_ID
+    with device_identity.control_connection() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM vnext_import_transcript_runs WHERE task_id = ?",
+            (TASK_ID,),
+        ).fetchone()[0] == 1
+
+
 def test_stable_events_are_recoverable_and_r2_waits_for_phone_ack(import_context) -> None:
     context, fake = import_context
     source = _verified_source(context, fake, b"private-audio")
