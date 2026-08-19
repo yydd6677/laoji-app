@@ -251,22 +251,28 @@ const SERVER_REQUIRED_NATURAL_RE =
 // never be turned into a locally-created event just because a date or a title
 // can be extracted from the sentence. The server owns the operation contract.
 const SCHEDULE_OPERATION_RE =
-  /(?:查询|查一下|查查|看看|显示|列出|找一下|有没有|有没|有哪些|有什么|哪天|什么时候|改到几点|还是|(?:多少)(?:个|次)?(?:会|会议|日程|安排)|(?:我|这|本|下周|明天|后天|今天)[^，,。.!！?？；;]{0,28}(?:有|还有|希望谁|谁来|谁参加)[^，,。.!！?？；;]{0,20}(?:吗|呢|啊|什么|哪些|几个|多少|谁|事|会|会议|日程|安排)|(?:会议|日程|安排)[^，,。.!！?？；;]{0,12}吗$|我的(?:工作|每周)?(?:时间表|计划)|(?:取消|取消掉|删除|删掉|移除|撤销|删了|删掉了)[^，,。.!！?？；;]{0,24}(?:日程|安排|会议|约会|跑步|培训|牙医|事情|那个|这条)?)/;
+  /(?:查询|查一下|查查|看看|显示|列出|找一下|有没有|有没|有哪些|有什么|哪天|哪几天|什么时候|改到几点|还是|(?:多少)(?:个|次)?(?:会|会议|日程|安排)|(?:我|这|本|下周|明天|后天|今天)[^，,。.!！?？；;]{0,28}(?:有|还有|希望谁|谁来|谁参加)[^，,。.!！?？；;]{0,20}(?:吗|呢|啊|什么|哪些|几个|多少|谁)|(?:会议|日程|安排)[^，,。.!！?？；;]{0,12}吗$|我的(?:工作|每周)?(?:时间表|计划)|(?:取消|取消掉|删除|删掉|删去|移除|撤销|去掉|去除|清除|清理|清空|删了|删掉了)[^，,。.!！?？；;]{0,24}(?:日程|日历|安排|会议|约会|跑步|培训|牙医|事件|活动|事项|事情|那个|这条)?)/;
 
-const DELETE_OPERATION_RE = /(?:取消|取消掉|删除|删掉|移除|撤销|删了|删掉了)/;
+const DELETE_OPERATION_RE = /(?:取消|取消掉|删除|删掉|删去|移除|撤销|去掉|去除|清除|清理|清空|删了|删掉了)/;
 
 // MASSIVE query utterances are broader than the short operation vocabulary
 // above. These markers cover ordinary calendar questions without treating a
 // question as a new event merely because it contains a date or activity noun.
 const BROAD_SCHEDULE_QUERY_RE =
-  /(?:告诉我|给我看|给我[^，,。.!！?？；;]{0,20}(?:清单|信息|活动|日程|提醒)|请查看|查看|看一下|查一下|日程表|时间表|行程安排|我的[^，,。.!！?？；;]{0,24}(?:日程|活动|事项|提醒|计划|行程|会议|会面|安排)[^，,。.!！?？；;]{0,24}(?:是|有|什么|怎样|怎么样|吗|呢|在哪|哪里|几点|谁|多少)|(?:我|我的|今天|明天|本周|这周|下周)[^，,。.!！?？；;]{0,20}(?:是什么样子|忙吗|有空吗|做什么|要见谁)|(?:日程|活动|事项|提醒|会议|会面|安排)[^，,。.!！?？；;]{0,24}(?:是什么|怎样|怎么样|吗|在哪|哪里|几点|谁|多少)|(?:谁|什么|哪|多少|几个|几次|几点|几号|哪里|哪儿|何时|何地|怎样|怎么样|吗|呢|是否)[^，,。.!！?？；;]{0,20}(?:会面|会议|活动|日程|事项|提醒|计划|安排|行程))/;
+  /(?:告诉我|给我看|给我[^，,。.!！?？；;]{0,20}(?:清单|信息|活动|日程|提醒)|请查看|查看|看一下|查一下|(?:想知道|了解)[^，,。.!！?？；;]{0,20}(?:事项|日程|活动|事件|提醒)|[^，,。.!！?？；;]{1,24}(?:在哪里|在什么地方|在哪儿)|我的[^，,。.!！?？；;]{0,24}(?:日程|活动|事项|提醒|计划|行程|会议|会面|安排)[^，,。.!！?？；;]{0,24}(?:是|有|什么|怎样|怎么样|吗|呢|在哪|哪里|几点|谁|多少)|(?:我|我的|今天|明天|本周|这周|下周)[^，,。.!！?？；;]{0,20}(?:是什么样子|忙吗|有空吗|做什么|要见谁)|(?:日程|活动|事项|提醒|会议|会面|安排)[^，,。.!！?？；;]{0,24}(?:是什么|怎样|怎么样|吗|在哪|哪里|几点|谁|多少)|(?:谁|什么|哪|多少|几个|几次|几点|几号|哪里|哪儿|何时|何地|怎样|怎么样|吗|呢|是否)[^，,。.!！?？；;]{0,20}(?:会面|会议|活动|日程|事项|提醒|计划|安排|行程))/;
 
 const CALENDAR_QUERY_MARKER_RE =
-  /(?:吗|嘛|呢|是否|真的吗|是什么|什么|什么地方|什么时间|什么信息|怎样|怎么样|哪里|哪儿|几点|几号|谁|多少|多远|清单|倒计时|地址|地点|位置|信息|何时|何地|做什么|忙吗|有空吗|发生了|会有|朗读|下个(?!月)|设置的|任何事)/;
+  /(?:吗|嘛|呢|是否|真的吗|是什么|什么|什么地方|什么时间|什么信息|怎样|怎么样|哪里|哪儿|哪几天|几点|几号|谁|多少|多远|清单|倒计时|地址|地点|位置|信息|何时|何地|做什么|忙吗|有空吗|发生了|会有|朗读|下个(?!月)|设置的|任何事)/;
 const CALENDAR_QUERY_NOUN_RE =
   /(?:日程|日历|安排|事件|事项|提醒|会议|会面|活动|预约|生日|婚礼|婚禮|派对|演唱会|比赛|培训|计划|行程|节目|聚会|待办|发型师|医生|假期)/;
 const SCHEDULE_CREATE_ACTION_RE =
-  /(?:安排|提醒|记一下|记个|记住|创建|新建|添加|加入|设置|预定|规划|计划|开会|举行|进行|参加|处理|完成|提交|阅读|支付|跑步|健身|复习|上课|吃饭|见面)/;
+  /(?:安排|提醒|通知|记一下|记个|记住|记在|标记|创建|新建|添加|加入|加到|放到|放在|设置|设定|定为|制定|预定|规划|计划|发个邀请|发邀请|重复(?:这个|该|活动|事件)|(?:你能|能否|请|帮我)[^，,。.!！?？；;]{0,8}重复|开会|举行|进行|参加|处理|完成|提交|阅读|支付|跑步|健身|复习|上课|吃饭|见面)/;
+
+// A concrete causative request remains a creation even if polite wording
+// ends in “吗” or the sentence also mentions 日历/地点. Keep this narrower
+// than the general activity vocabulary so information questions still win.
+const EXPLICIT_CREATE_REQUEST_RE =
+  /(?:(?:把|将)[^，,。.!！?？；;]{0,30}(?:添加|加入|加到|放到|放在|记在|标记|设为|定为|安排|创建|新建)|(?:请|帮我|给我|替我|为我|你能|能否|可以)[^，,。.!！?？；;]{0,32}(?:发(?:个|一个)?(?:提醒|邀请)|添加(?:个|一个)?提醒|创建|新建|安排|记在|加到|放到|设置|设定|重复|通知)|(?:添加|加入|加到|记在|标记|创建|新建|安排|定为|制定)[^，,。.!！?？；;]{0,36}(?:日程|日历|提醒|活动|事件|会议|时间表|假日)|(?:在|到)[^，,。.!！?？；;]{0,12}(?:日历|日程表)[^，,。.!！?？；;]{0,24}(?:做|加|添加|记|标记|设置)[^，,。.!！?？；;]{0,16}(?:提醒|活动|事件|日程)|我有个?[^，,。.!！?？；;]{0,16}(?:会|会议)[^，,。.!！?？；;]{0,16}(?:提醒|设置|记))/;
 
 const UNCERTAIN_LOCATION_RE =
   /(?:(?:地点|地址|位置|在)[^，,。.!！?？；;]{0,24}(?:可能|也许|不确定|还没定|还没确定|未确定|暂定)|(?:可能|也许|不确定|还没定|还没确定|未确定|暂定)[^，,。.!！?？；;]{0,24}(?:地点|地址|位置))/;
@@ -1529,8 +1535,12 @@ export type ScheduleParseIntent = 'create' | 'clarify' | 'query' | 'delete' | 'r
 export function classifyScheduleParseIntent(text: string): ScheduleParseIntent {
   const normalized = normalizeScheduleText(text);
   if (!normalized || isNonScheduleControlText(normalized)) return 'reject';
-  if (CONTEXT_EDIT_RE.test(normalized)) return 'clarify';
+  // Destructive verbs own the request even when they reference "that event";
+  // otherwise the generic context-edit recognizer turns a deletion into a
+  // clarification and can leave the original event untouched.
   if (DELETE_OPERATION_RE.test(normalized)) return 'delete';
+  if (CONTEXT_EDIT_RE.test(normalized)) return 'clarify';
+  if (EXPLICIT_CREATE_REQUEST_RE.test(normalized)) return 'create';
   if (
     SCHEDULE_OPERATION_RE.test(normalized)
     || BROAD_SCHEDULE_QUERY_RE.test(normalized)
@@ -1545,7 +1555,7 @@ export function classifyScheduleParseIntent(text: string): ScheduleParseIntent {
     || (
       !SCHEDULE_CREATE_ACTION_RE.test(normalized)
       && CALENDAR_QUERY_NOUN_RE.test(normalized)
-      && (hasScheduleDateSignal(normalized, new Date(), undefined) || normalized.length <= 18)
+      && CALENDAR_QUERY_MARKER_RE.test(normalized)
     )
   ) return 'query';
   return 'create';

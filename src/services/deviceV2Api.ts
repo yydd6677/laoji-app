@@ -239,11 +239,34 @@ export async function refreshDeviceV2Session(
   return issueDeviceV2Token(identity, key, hash);
 }
 
+function isMissingServerRegistration(error: unknown): boolean {
+  return error instanceof DeviceV2ApiError
+    && error.status === 401
+    && error.code === 'DEVICE_NOT_REGISTERED';
+}
+
+async function refreshOrRestoreDeviceV2Session(
+  previous: DeviceV2Session,
+): Promise<DeviceV2Session> {
+  try {
+    return await refreshDeviceV2Session(previous);
+  } catch (error) {
+    if (!isMissingServerRegistration(error)) throw error;
+    // A restored/replaced server database can legitimately lose the remote
+    // registration while the phone still owns the same device ID, epoch and
+    // non-exportable P-256 key. Re-prove that existing identity instead of
+    // deleting local data or rotating to a second business owner. Other 401s
+    // remain terminal and never enter this recovery path.
+    diagnosticAudit('device_v2_session_registration_restore', {});
+    return bootstrapDeviceV2Session({ ignoreStoredSession: true });
+  }
+}
+
 async function refreshDeviceV2SessionSingleFlight(
   previous: DeviceV2Session,
 ): Promise<DeviceV2Session> {
   if (refreshPromise) return refreshPromise;
-  const operation = refreshDeviceV2Session(previous);
+  const operation = refreshOrRestoreDeviceV2Session(previous);
   refreshPromise = operation;
   try {
     return await operation;
@@ -252,12 +275,16 @@ async function refreshDeviceV2SessionSingleFlight(
   }
 }
 
-async function bootstrapDeviceV2Session(): Promise<DeviceV2Session> {
+async function bootstrapDeviceV2Session(
+  options: { ignoreStoredSession?: boolean } = {},
+): Promise<DeviceV2Session> {
   const identity = await getOrCreateDeviceIdentity();
   const key = await getOrCreateDeviceKey(1);
   const hash = await publicKeyHash(key.publicKeyDer);
-  const stored = await readStoredSession(identity, key, hash);
-  if (stored) return stored;
+  if (!options.ignoreStoredSession) {
+    const stored = await readStoredSession(identity, key, hash);
+    if (stored) return stored;
+  }
 
   const bootstrapRequestId = randomRequestId('bootstrap');
   const purgeCapability = await preparePurgeCapability(
@@ -327,7 +354,7 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
       }
       if (stored) {
         diagnosticAudit('device_v2_session_refresh', {});
-        return refreshDeviceV2Session(stored);
+        return refreshDeviceV2SessionSingleFlight(stored);
       }
       diagnosticAudit('device_v2_session_bootstrap', {});
       return bootstrapDeviceV2Session();

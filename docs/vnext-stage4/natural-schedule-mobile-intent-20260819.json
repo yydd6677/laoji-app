@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "MASSIVE zh-CN source intent supervision only; no LaoJi field or human-adjudication claim",
+  "source_sha256": "sha256:ac30a5a1f63db9a3f6137ac04ef65a8ff64fcd32a3118ccda5cf0ab152561008",
+  "parser_source_sha256": "sha256:0017ae2ec1acc3f622efd87cd4179d76a4d1a79f2ab459769c10714810eea872",
+  "total": 150,
+  "intent_exact": 144,
+  "intent_accuracy": 0.96,
+  "minimum": 0.95,
+  "passed": true,
+  "matrix": {
+    "query->create": 3,
+    "delete->delete": 50,
+    "create->create": 47,
+    "query->query": 47,
+    "create->clarify": 1,
+    "create->delete": 1,
+    "create->query": 1
+  },
+  "mismatches": [
+    {
+      "source_id": "MASSIVE-zh-CN-7569",
+      "utterance_sha256": "sha256:15faef158451fb6011da7f3cd57a19b8753eb2c522597715fa50f2f25d4a44db",
+      "expected": "query",
+      "observed": "create"
+    },
+    {
+      "source_id": "MASSIVE-zh-CN-9035",
+      "utterance_sha256": "sha256:f6d74db606f05cb0335b6bfe18e98587bddf6294faf90cf15532e2a0af00a2ef",
+      "expected": "query",
+      "observed": "create"
+    },
+    {
+      "source_id": "MASSIVE-zh-CN-9193",
+      "utterance_sha256": "sha256:59b4255c31db493e6c40485af1b9dd224f700207a0d9c1bb2ad74a675fe7a0a9",
+      "expected": "create",
+      "observed": "clarify"
+    },
+    {
+      "source_id": "MASSIVE-zh-CN-8525",
+      "utterance_sha256": "sha256:b434d364c4d021211563ec1e5f587e58129ca9e629127a9f8408da8124ff8d8c",
+      "expected": "query",
+      "observed": "create"
+    },
+    {
+      "source_id": "MASSIVE-zh-CN-7711",
+      "utterance_sha256": "sha256:6cb9594e67b8d75b2d901a2cbcfff2c285fd8fffa7fe58effcdbebe8d9c5d1bb",
+      "expected": "create",
+      "observed": "delete"
+    },
+    {
+      "source_id": "MASSIVE-zh-CN-7980",
+      "utterance_sha256": "sha256:2586a1143c7b1f7cab035a369fe66affbaa598492281e33fdb6ca0b6b44d742d",
+      "expected": "create",
+      "observed": "query"
+    }
+  ],
+  "field_promotion_eligible": false,
+  "remaining": [
+    "independent human LaoJi field adjudication",
+    "reference-datetime field oracle",
+    "model route and Android save replay"
+  ]
+}
