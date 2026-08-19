@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -21,6 +22,7 @@ from app.services import (
 
 SendEvent = Callable[[dict[str, Any]], Awaitable[None]]
 AsrCall = Callable[..., dict[str, Any]]
+AsrBatchCall = Callable[..., dict[str, Any]]
 _logger = logging.getLogger(__name__)
 
 
@@ -76,6 +78,7 @@ class VNextRealtimeTextPipeline:
         *,
         vad_factory: Callable[[], Awaitable[Any]] = _create_vad,
         asr_call: AsrCall = vnext_asr_client.transcribe_realtime_segment,
+        asr_batch_call: AsrBatchCall = vnext_asr_client.transcribe_batch,
     ) -> None:
         self.context = context
         self.session_id = session_id
@@ -87,6 +90,7 @@ class VNextRealtimeTextPipeline:
         self.send_event = send_event
         self.vad_factory = vad_factory
         self.asr_call = asr_call
+        self.asr_batch_call = asr_batch_call
         self._wake = asyncio.Event()
         self._finalize = False
         self._task: asyncio.Task | None = None
@@ -197,9 +201,9 @@ class VNextRealtimeTextPipeline:
                 if segment is not None:
                     segments.append(segment)
             self._last_fed_chunk_seq = chunk_seq
-            for segment in segments:
+            if segments:
                 self._checkpoint_ready = True
-                await self._publish_segment(segment)
+                await self._publish_segments(segments)
             if self._checkpoint_ready and getattr(self._vad, "state", "idle") == "idle":
                 locators = await asyncio.to_thread(
                     vnext_realtime_store.advance_chunk_consumption,
@@ -212,7 +216,7 @@ class VNextRealtimeTextPipeline:
                     await asyncio.to_thread(vnext_realtime_crypto.delete_chunk, locator)
                 self._checkpoint_ready = False
 
-    async def _publish_segment(self, segment) -> None:
+    def _segment_request(self, segment) -> tuple[str, bytes, int, int]:
         offset = self._timeline_offset_ms or 0
         source_start_ms = offset + int(segment.start_ms)
         source_end_ms = offset + int(segment.end_ms)
@@ -220,16 +224,83 @@ class VNextRealtimeTextPipeline:
             f"{self.asset_generation}\0{source_start_ms}\0{source_end_ms}"
         ).encode("utf-8")
         stable_key = "segment:" + hashlib.sha256(identity_seed).hexdigest()[:40]
-        if stable_key in self._known_segment_keys:
-            return
         pcm16 = (np.clip(segment.audio_data, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
-        result = await asyncio.to_thread(
-            self.asr_call,
-            item_id=stable_key,
-            pcm_int16=pcm16,
-            source_start_ms=source_start_ms,
-            source_end_ms=source_end_ms,
+        return stable_key, pcm16, source_start_ms, source_end_ms
+
+    async def _publish_segments(self, segments: list) -> None:
+        """Use one ASR request for multiple VAD segments from one durable drain."""
+        requests = []
+        for segment in segments:
+            stable_key, pcm16, source_start_ms, source_end_ms = self._segment_request(segment)
+            if stable_key in self._known_segment_keys:
+                continue
+            requests.append((segment, stable_key, pcm16, source_start_ms, source_end_ms))
+        if not requests:
+            return
+        if len(requests) == 1:
+            segment, stable_key, pcm16, source_start_ms, source_end_ms = requests[0]
+            result = await asyncio.to_thread(
+                self.asr_call,
+                item_id=stable_key,
+                pcm_int16=pcm16,
+                source_start_ms=source_start_ms,
+                source_end_ms=source_end_ms,
+            )
+            await self._commit_segment(
+                segment, stable_key, pcm16, source_start_ms, source_end_ms, result,
+            )
+            return
+
+        items = [{
+            "id": stable_key,
+            "pcm_base64": base64.b64encode(pcm16).decode("ascii"),
+            "sample_rate": 16_000,
+            "language": "Chinese",
+            "source_start_ms": source_start_ms,
+            "source_end_ms": source_end_ms,
+        } for _segment, stable_key, pcm16, source_start_ms, source_end_ms in requests]
+        response = await asyncio.to_thread(
+            self.asr_batch_call,
+            items=items,
+            priority="realtime",
         )
+        results = response.get("items") if isinstance(response, dict) else None
+        if not isinstance(results, list) or len(results) != len(requests):
+            raise RuntimeError("realtime_asr_batch_response_invalid")
+        by_id = {str(item.get("id")): item for item in results if isinstance(item, dict)}
+        if len(by_id) != len(results):
+            raise RuntimeError("realtime_asr_batch_response_invalid")
+        validated = []
+        for segment, stable_key, pcm16, source_start_ms, source_end_ms in requests:
+            result = by_id.get(stable_key)
+            if result is None:
+                raise RuntimeError("realtime_asr_batch_item_missing")
+            if (
+                int(result.get("source_start_ms", -1)) != source_start_ms
+                or int(result.get("source_end_ms", -1)) != source_end_ms
+                or str(result.get("stable_segment_key") or stable_key) != stable_key
+            ):
+                raise RuntimeError("realtime_asr_batch_item_mismatch")
+            validated.append(
+                (segment, stable_key, pcm16, source_start_ms, source_end_ms, result)
+            )
+        for segment, stable_key, pcm16, source_start_ms, source_end_ms, result in validated:
+            await self._commit_segment(
+                segment, stable_key, pcm16, source_start_ms, source_end_ms, result,
+            )
+
+    async def _publish_segment(self, segment) -> None:
+        await self._publish_segments([segment])
+
+    async def _commit_segment(
+        self,
+        segment,
+        stable_key: str,
+        pcm16: bytes,
+        source_start_ms: int,
+        source_end_ms: int,
+        result: dict[str, Any],
+    ) -> None:
         self._last_model_revision = str(result["model_revision"])
         self._last_event_seq += 1
         event = TranscriptStreamEventV2(
