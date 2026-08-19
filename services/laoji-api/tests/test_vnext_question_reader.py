@@ -119,6 +119,90 @@ def test_reader_grounding_returns_canonical_source(monkeypatch):
     assert citation["source_type"] == "transcript"
 
 
+def test_verified_fragment_stream_is_packed_only_for_retrieval() -> None:
+    raw = []
+    offset = 0
+    for index in range(1_357):
+        text = f"第{index}个连续字幕片段"
+        encoded = text.encode("utf-8")
+        raw.append({
+            "source_type": "transcript",
+            "source_id": "recording-1",
+            "source_revision_id": "revision-1",
+            "content_sha256": _hash(text),
+            "source_start_utf8": offset,
+            "source_end_utf8": offset + len(encoded),
+            "start_ms": index * 1_000,
+            "end_ms": index * 1_000 + 900,
+            "text": text,
+        })
+        offset += len(encoded) + 1
+
+    with pytest.raises(reader.Q2ReaderError):
+        reader._source_payload(raw)
+    sources = reader._source_payload(raw, max_sources=reader.MAX_VERIFIED_SOURCES)
+    units = reader._retrieval_units(sources)
+
+    assert len(sources) == 1_357
+    assert len(units) < 100
+    assert [index for unit in units for index in unit["member_indexes"]] == list(range(1_357))
+
+
+def test_identical_text_at_different_recording_ranges_is_not_a_duplicate() -> None:
+    text = "好的。"
+    raw = [
+        {
+            "source_type": "transcript",
+            "source_id": "recording-1",
+            "source_revision_id": "revision-1",
+            "content_sha256": _hash(text),
+            "source_start_utf8": start,
+            "source_end_utf8": start + len(text.encode("utf-8")),
+            "text": text,
+        }
+        for start in (0, 100)
+    ]
+
+    assert len(reader._source_payload(raw)) == 2
+    with pytest.raises(reader.Q2ReaderError):
+        reader._source_payload([raw[0], dict(raw[0])])
+
+
+def test_citation_offsets_are_restored_to_recording_utf8_range(monkeypatch) -> None:
+    text = "周五前由张敏提交接口文档。"
+    answer = "张敏负责提交接口文档。"
+    payload = _payload(text)
+    payload["sources"][0]["source_start_utf8"] = 120
+    payload["sources"][0]["source_end_utf8"] = 120 + len(text.encode("utf-8"))
+    monkeypatch.setattr(reader, "canonical_ollama_base_url", lambda: "http://127.0.0.1:21434")
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(
+        reader,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps({
+            "answer_kind": "answer",
+            "answer": answer,
+            "clauses": [{
+                "clause_id": "c1",
+                "answer_start_utf8": 0,
+                "answer_end_utf8": len(answer.encode("utf-8")),
+                "citations": [{
+                    "citation_id": "cite-1",
+                    "source_id": "s0",
+                    "source_start_utf8": 0,
+                    "source_end_utf8": len(text.encode("utf-8")),
+                    "quote": text,
+                }],
+            }],
+        }, ensure_ascii=False),
+    )
+
+    result = reader.read_q2(payload)
+    citation = result["clauses"][0]["citations"][0]
+    assert citation["source_start_utf8"] == 120
+    assert citation["source_end_utf8"] == 120 + len(text.encode("utf-8"))
+
+
 def test_reader_uses_full_answer_when_provider_span_is_only_a_utf8_prefix(monkeypatch):
     text = "开场明确列出的国家有中国、美国和法国。"
     answer = "开场明确列出的国家有中国、美国和法国。"

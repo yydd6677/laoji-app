@@ -795,6 +795,29 @@ def test_valid_model_response_uses_exactly_one_call(monkeypatch):
     assert operations == ["summary.facts.v3"]
 
 
+def test_provider_response_omits_overview_and_server_projects_it(monkeypatch):
+    active_package = package()
+    value = valid_response(active_package)
+    value.pop("overview")
+    for fact in value["facts"]:
+        for source in fact["sources"]:
+            source.pop("quote")
+            source.pop("content_hash", None)
+
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(value, ensure_ascii=False),
+    )
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.overview.fact_ids == ["f1", "f2"]
+    assert response.overview.text.endswith("。")
+    assert len(response.overview.text) <= 160
+    assert response.facts[0].sources[0].quote == active_package.sources[0].text
+
+
 def test_self_relation_is_dropped_without_consuming_repair(monkeypatch):
     active_package = package()
     value = valid_response(active_package)
@@ -1207,6 +1230,12 @@ def test_ollama_schema_is_complete_and_has_no_unresolved_references():
 
 def test_generation_schema_caps_single_call_output_without_changing_document_contract():
     schema = summary_v3_generator._generation_response_schema()
+    assert "overview" not in schema["properties"]
+    assert "overview" not in schema["required"]
+    source_schema = schema["properties"]["facts"]["items"]["properties"]["sources"]["items"]
+    assert "quote" not in source_schema["properties"]
+    assert "content_hash" not in source_schema["properties"]
+    assert source_schema["required"] == ["source_id", "source_type"]
     assert schema["properties"]["facts"]["maxItems"] == 12
     assert schema["properties"]["relations"]["maxItems"] == 16
     assert schema["properties"]["action_candidates"]["maxItems"] == 6
@@ -1241,6 +1270,28 @@ def test_model_sanitizer_drops_misplaced_root_containers_inside_fact():
     }
     summary_v3_generator._sanitize_model_value(value)
     assert "action_candidates" not in value["facts"][0]
+
+
+def test_unknown_source_alias_drops_only_affected_fact_without_model_repair(monkeypatch):
+    active_package = package()
+    value = valid_response(active_package)
+    value["overview"]["text"] = "概" * 200
+    value["facts"][1]["sources"][0]["source_id"] = "transcript:unknown"
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(value, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.overview.fact_ids == ["f1"]
+    assert response.overview.text == "林清在明天下午提交界面复核清单。"
+    assert response.relations == []
 
 
 def test_speaker_correction_changes_source_and_transcript_fingerprints():

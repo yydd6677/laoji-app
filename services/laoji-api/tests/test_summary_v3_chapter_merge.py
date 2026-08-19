@@ -174,6 +174,31 @@ def test_merge_is_bounded_and_drops_only_invalid_action_states() -> None:
     assert set(document.overview.fact_ids).issubset(fact_by_id)
 
 
+def test_overview_does_not_partially_append_the_next_fact() -> None:
+    first_text = "甲" * 100
+    second_text = "乙" * 100
+    document = _document([
+        _fact("firstLongFact", 1, fact_type="conclusion", content=first_text),
+        _fact("secondLongFact", 2, fact_type="conclusion", content=second_text),
+    ])
+    merged = merge_verified_chapter(None, document, chapter_ordinal=0)
+    overview = merged.facts_document.overview
+
+    assert overview.text in {first_text + "。", second_text + "。"}
+    assert len(overview.fact_ids) == 1
+
+
+def test_overview_marks_an_unavoidable_single_fact_truncation() -> None:
+    document = _document([
+        _fact("veryLongFact", 1, fact_type="conclusion", content="长" * 300),
+    ])
+    merged = merge_verified_chapter(None, document, chapter_ordinal=0)
+    overview = merged.facts_document.overview
+
+    assert len(overview.text) == 160
+    assert overview.text.endswith("…。")
+
+
 def test_contradiction_relation_gets_deterministic_conflict_group() -> None:
     document = _document(
         [

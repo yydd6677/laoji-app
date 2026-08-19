@@ -20,6 +20,7 @@ from app.services.summary_v3_evidence import (
     EvidencePackage,
     EvidenceSource,
     build_evidence_package_from_sources,
+    normalize_transcript_evidence_sources,
 )
 from app.services.summary_v3_store import source_fingerprint
 
@@ -101,14 +102,34 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
     raw_items = chapter.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         raise ValueError("summary_chapter_sources_empty")
-    sources: list[EvidenceSource] = []
-    identity: list[dict[str, Any]] = []
-    transcript_identity: list[dict[str, Any]] = []
+    transcript_items = [
+        item
+        for item in raw_items
+        if str(item.get("source_type") or "") == "transcript"
+    ]
+    transcript_sources = normalize_transcript_evidence_sources([
+        {
+            # item_id is unique within the immutable source stream while
+            # source_id may intentionally identify the whole recording.
+            "id": item.get("item_id") or item.get("source_id"),
+            "text": item.get("content"),
+            "start_ms": item.get("start_ms"),
+            "end_ms": item.get("end_ms"),
+            "speaker": item.get("speaker"),
+        }
+        for item in transcript_items
+    ])
+    sources: list[EvidenceSource] = list(transcript_sources)
     source_id_counts: dict[str, int] = {}
-    for ordinal, item in enumerate(raw_items):
+    for source in sources:
+        source_id_counts[source.source_id] = source_id_counts.get(source.source_id, 0) + 1
+    for item in raw_items:
         source_type = str(item.get("source_type") or "")
         if source_type not in {"transcript", "manual_note", "attachment"}:
             raise ValueError("summary_chapter_source_type_invalid")
+        if source_type == "transcript":
+            continue
+        ordinal = len(sources)
         # Keep the public identity aligned with the immutable source owner so
         # a mobile citation can jump back to the original transcript row.
         # Revision/range/hash remain part of the source record and are still
@@ -134,7 +155,8 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
             model_source_id=f"{source_type}:{model_prefix}{ordinal:x}",
         )
         sources.append(source)
-        source_identity = {
+    identity = [
+        {
             "source_id": source.source_id,
             "source_type": source.source_type,
             "content_hash": source.content_hash,
@@ -142,9 +164,9 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
             "end_ms": source.end_ms,
             "speaker": source.speaker,
         }
-        identity.append(source_identity)
-        if source_type == "transcript":
-            transcript_identity.append(source_identity)
+        for source in sources
+    ]
+    transcript_identity = identity[: len(transcript_sources)]
     fingerprint = source_fingerprint({"sources": identity})
     transcript_revision = source_fingerprint({
         "sources": transcript_identity or identity,

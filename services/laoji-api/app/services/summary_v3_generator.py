@@ -149,6 +149,30 @@ def _generation_response_schema() -> dict[str, Any]:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
+    # Overview is a deterministic projection of verified facts. Ollama's
+    # grammar currently ignores JSON Schema maxLength; allowing overview as
+    # the first generated string let a model consume the entire output budget
+    # before emitting any fact. Keep it out of the provider contract and add
+    # it back before Pydantic/source verification.
+    properties.pop("overview", None)
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [field for field in required if field != "overview"]
+    try:
+        source_items = properties["facts"]["items"]["properties"]["sources"]["items"]
+        source_properties = source_items["properties"]
+        source_required = source_items["required"]
+    except (KeyError, TypeError):
+        raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
+    # The model selects immutable source aliases; the server owns verbatim
+    # quote materialization. Copying evidence through the model wastes output
+    # tokens and is less reliable than resolving the alias against the exact
+    # immutable package.
+    source_properties.pop("quote", None)
+    source_properties.pop("content_hash", None)
+    source_items["required"] = [
+        field for field in source_required if field not in {"quote", "content_hash"}
+    ]
     limits = {
         "facts": _GENERATION_FACT_LIMIT,
         "relations": _GENERATION_RELATION_LIMIT,
@@ -189,7 +213,11 @@ def _repair_truncated_root_arrays(raw: str) -> str:
         pass
 
     root_arrays = ("facts", "relations", "action_candidates")
-    root_array_limits = {"facts": 40, "relations": 48, "action_candidates": 10}
+    root_array_limits = {
+        "facts": _GENERATION_FACT_LIMIT,
+        "relations": _GENERATION_RELATION_LIMIT,
+        "action_candidates": _GENERATION_ACTION_LIMIT,
+    }
     stack: list[tuple[str, str | None]] = []
     item_ends: dict[str, list[int]] = {name: [] for name in root_arrays}
     current_array: str | None = None
@@ -283,14 +311,56 @@ def _repair_root_array_closures(raw: str) -> str:
     return value
 
 
-def _sanitize_model_value(value: Any) -> Any:
-    """Apply harmless cardinality normalization before strict validation."""
+def _project_model_overview(facts: list[Any]) -> dict[str, Any] | None:
+    pieces: list[str] = []
+    fact_ids: list[str] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        content = str(fact.get("content") or "").strip().rstrip("。！？；; ")
+        fact_id = fact.get("fact_id")
+        if not content or not isinstance(fact_id, str):
+            continue
+        if not pieces and len(content) > 159:
+            pieces.append(content[:158].rstrip("，,；; ") + "…")
+            fact_ids.append(fact_id)
+            break
+        projected = "；".join([*pieces, content])
+        if len(projected) > 159:
+            break
+        pieces.append(content)
+        fact_ids.append(fact_id)
+        if len(fact_ids) == 6:
+            break
+    if not pieces:
+        return None
+    return {
+        "text": "；".join(pieces).rstrip("。") + "。",
+        "fact_ids": fact_ids,
+    }
+
+
+def _sanitize_model_value(
+    value: Any,
+    package: EvidencePackage | None = None,
+) -> Any:
+    """Apply loss-bounded protocol normalization before strict validation.
+
+    An overlong citation is already unusable under the public contract and
+    must not consume the one model repair attempt. Drop only that fact and
+    deterministically remove references to it. This implements the v3 rule
+    that an invalid individual citation removes the affected fact while the
+    rest of a structurally readable response remains usable.
+    """
     if not isinstance(value, dict):
         return value
     facts = value.get("facts")
     if isinstance(facts, list):
-        for fact in facts:
+        sanitized_facts: list[Any] = []
+        source_map = package.source_map() if package is not None else None
+        for fact in facts[:_GENERATION_FACT_LIMIT]:
             if not isinstance(fact, dict):
+                sanitized_facts.append(fact)
                 continue
             # Qwen occasionally repeats a root field immediately after the
             # last source of a fact.  These misplaced containers carry no
@@ -303,10 +373,68 @@ def _sanitize_model_value(value: Any) -> Any:
                 # the first evidence it selected remains stable; source and
                 # quote integrity is still checked after this normalization.
                 fact["sources"] = fact["sources"][:3]
+                if source_map is not None:
+                    invalid_source = False
+                    for source_reference in fact["sources"]:
+                        if not isinstance(source_reference, dict):
+                            invalid_source = True
+                            break
+                        source = source_map.get(str(source_reference.get("source_id") or ""))
+                        if (
+                            source is None
+                            or source_reference.get("source_type") != source.source_type
+                            or len(source.text) > 600
+                        ):
+                            invalid_source = True
+                            break
+                        source_reference["quote"] = source.text
+                        source_reference.pop("content_hash", None)
+                    if invalid_source:
+                        continue
+                if any(
+                    isinstance(source, dict)
+                    and isinstance(source.get("quote"), str)
+                    and len(source["quote"].strip()) > 600
+                    for source in fact["sources"]
+                ):
+                    continue
+            sanitized_facts.append(fact)
+        value["facts"] = sanitized_facts
+
+        retained_fact_ids = {
+            fact.get("fact_id")
+            for fact in sanitized_facts
+            if isinstance(fact, dict) and isinstance(fact.get("fact_id"), str)
+        }
+        projected_overview = _project_model_overview(sanitized_facts)
+        if projected_overview is not None:
+            value["overview"] = projected_overview
+        relations = value.get("relations")
+        if isinstance(relations, list):
+            value["relations"] = [
+                relation
+                for relation in relations[:_GENERATION_RELATION_LIMIT]
+                if not isinstance(relation, dict)
+                or (
+                    relation.get("from_fact_id") in retained_fact_ids
+                    and relation.get("to_fact_id") in retained_fact_ids
+                )
+            ]
+        action_candidates = value.get("action_candidates")
+        if isinstance(action_candidates, list):
+            value["action_candidates"] = [
+                candidate
+                for candidate in action_candidates[:_GENERATION_ACTION_LIMIT]
+                if not isinstance(candidate, dict)
+                or candidate.get("fact_id") in retained_fact_ids
+            ]
     return value
 
 
-def _validate_model_response(raw: str) -> MeetingFactsModelResponseV3:
+def _validate_model_response(
+    raw: str,
+    package: EvidencePackage | None = None,
+) -> MeetingFactsModelResponseV3:
     """Validate model JSON after dropping semantically void self-relations.
 
     A relation from a fact to itself cannot carry information and is already
@@ -315,7 +443,7 @@ def _validate_model_response(raw: str) -> MeetingFactsModelResponseV3:
     the single repair attempt; all other structural and enum errors still go
     through the normal repair path.
     """
-    value = _sanitize_model_value(_extract_object(raw))
+    value = _sanitize_model_value(_extract_object(raw), package)
     if isinstance(value, dict) and isinstance(value.get("relations"), list):
         value["relations"] = [
             relation
@@ -371,9 +499,9 @@ def _call_model(
             )
         if "missing" in error_types or "extra_forbidden" in error_types:
             repair_guidance.append(
-                "丢弃任何通用摘要字段。根对象必须且只能使用 schema_version、overview、"
+                "丢弃任何通用摘要字段。根对象必须且只能使用 schema_version、"
                 "facts、relations、action_candidates，并以"
-                '{"schema_version":3,"overview": 开始。'
+                '{"schema_version":3,"facts": 开始。'
             )
         prompt += (
             "\n\n上一次响应没有通过结构协议。根据原证据包重新生成完整对象。"
@@ -397,7 +525,7 @@ def _call_model(
 def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModelResponseV3, int]:
     raw = _call_model(package, operation="summary.facts.v3")
     try:
-        return _validate_model_response(raw), 1
+        return _validate_model_response(raw, package), 1
     except (ValueError, TypeError, ValidationError) as first_error:
         # A delimiter-only repair is deterministic and does not spend the
         # optional model repair attempt.  It remains fail-closed because the
@@ -405,13 +533,13 @@ def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModel
         normalized = _repair_root_array_closures(raw)
         if normalized != raw:
             try:
-                return _validate_model_response(normalized), 1
+                return _validate_model_response(normalized, package), 1
             except (ValueError, TypeError, ValidationError):
                 pass
         truncated = _repair_truncated_root_arrays(raw)
         if truncated != raw:
             try:
-                return _validate_model_response(truncated), 1
+                return _validate_model_response(truncated, package), 1
             except (ValueError, TypeError, ValidationError):
                 pass
         repaired = _call_model(
@@ -420,7 +548,7 @@ def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModel
             repair_errors=_sanitized_errors(first_error),
         )
         try:
-            return _validate_model_response(repaired), 2
+            return _validate_model_response(repaired, package), 2
         except (ValueError, TypeError, ValidationError) as second_error:
             raise SummaryV3GenerationError(
                 "SUMMARY_V3_FORMAT_INVALID",

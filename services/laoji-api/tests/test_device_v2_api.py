@@ -470,5 +470,5 @@ def test_question_reader_source_stream_commits_result_and_replays_by_task(tmp_pa
 
     replay = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
     assert replay.status_code == 200
-    assert replay.json()["snapshot_id"] == "q2-stream-route-snapshot"
+    assert replay.json() == response.json()
     assert len(calls) == 1

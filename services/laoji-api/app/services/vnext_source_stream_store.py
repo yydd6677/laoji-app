@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
 import time
 from typing import Any, Iterable, Literal, Protocol
 import uuid
@@ -144,6 +145,19 @@ def bundle_sha256(items: Iterable[dict[str, Any]]) -> str:
 
 def chapter_sha256(bundle_hashes: Iterable[str]) -> str:
     return _digest(_canonical(list(bundle_hashes)))
+
+
+def _storage_item_id(bundle_id: str, source_item_id: str) -> str:
+    """Scope an encrypted payload key to its bundle.
+
+    ``source_item_id`` is stable source identity supplied by the device and may
+    legitimately recur in a retry, regeneration, summary stream or Q2 stream.
+    The encrypted row key is storage identity and must instead be unique per
+    immutable bundle.
+    """
+    return "source-item:" + hashlib.sha256(
+        f"{bundle_id}\0{source_item_id}".encode("utf-8")
+    ).hexdigest()
 
 
 def _advance_hash(previous: str, ordinal: int, value: str) -> str:
@@ -300,6 +314,7 @@ def ensure_vnext_source_stream_schema() -> None:
 
             CREATE TABLE IF NOT EXISTS vnext_source_bundle_items (
                 item_id TEXT PRIMARY KEY,
+                source_item_id TEXT NOT NULL,
                 bundle_id TEXT NOT NULL REFERENCES vnext_source_bundles(bundle_id) ON DELETE CASCADE,
                 ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
                 source_type TEXT NOT NULL CHECK(source_type IN ('transcript','manual_note','attachment')),
@@ -380,6 +395,7 @@ def ensure_vnext_source_stream_schema() -> None:
             for row in connection.execute("PRAGMA table_info(vnext_source_bundle_items)").fetchall()
         }
         for column, declaration in {
+            "source_item_id": "TEXT",
             "start_ms": "INTEGER",
             "end_ms": "INTEGER",
             "speaker": "TEXT",
@@ -388,6 +404,15 @@ def ensure_vnext_source_stream_schema() -> None:
                 connection.execute(
                     f"ALTER TABLE vnext_source_bundle_items ADD COLUMN {column} {declaration}"
                 )
+        connection.execute(
+            """UPDATE vnext_source_bundle_items
+                  SET source_item_id = item_id
+                WHERE source_item_id IS NULL OR source_item_id = ''"""
+        )
+        connection.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_vnext_source_item_bundle_identity
+                   ON vnext_source_bundle_items(bundle_id, source_item_id)"""
+        )
         connection.commit()
 
 
@@ -1010,11 +1035,11 @@ def create_bundle_group(
         groups_device = int(connection.execute(
             """SELECT COUNT(*) FROM vnext_source_bundle_groups group_row
                JOIN vnext_source_streams stream ON stream.stream_id = group_row.stream_id
-               WHERE stream.device_id = ? AND stream.epoch_id = ? AND group_row.state IN ('open','complete')""",
+               WHERE stream.device_id = ? AND stream.epoch_id = ? AND group_row.state = 'open'""",
             (context.device_id, context.epoch_id),
         ).fetchone()[0])
         groups_global = int(connection.execute(
-            "SELECT COUNT(*) FROM vnext_source_bundle_groups WHERE state IN ('open','complete')"
+            "SELECT COUNT(*) FROM vnext_source_bundle_groups WHERE state = 'open'"
         ).fetchone()[0])
         if groups_device >= MAX_GROUPS_DEVICE or groups_global >= MAX_GROUPS_GLOBAL:
             connection.rollback()
@@ -1142,6 +1167,7 @@ def append_bundle(
         total_bytes += len(encoded)
         normalized.append({
             "item_id": item_id,
+            "storage_item_id": _storage_item_id(bundle_id, item_id),
             "source_type": source_type,
             "source_id": _safe(str(raw.get("source_id") or ""), "source_id", 180),
             "source_revision_id": _safe(str(raw.get("source_revision_id") or ""), "source_revision_id", 180),
@@ -1227,14 +1253,16 @@ def append_bundle(
             )
             for item_ordinal, item in enumerate(normalized):
                 encoded = item["content"].encode("utf-8")
-                nonce, ciphertext = _encrypt("item", item["item_id"], item["content_sha256"], encoded)
+                storage_item_id = item["storage_item_id"]
+                nonce, ciphertext = _encrypt("item", storage_item_id, item["content_sha256"], encoded)
                 connection.execute(
                     """INSERT INTO vnext_source_bundle_items(
-                         item_id, bundle_id, ordinal, source_type, source_id,
+                         item_id, source_item_id, bundle_id, ordinal, source_type, source_id,
                          source_revision_id, source_start_utf8, source_end_utf8,
                          content_sha256, content_bytes, start_ms, end_ms, speaker
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
+                        storage_item_id,
                         item["item_id"],
                         bundle_id,
                         item_ordinal,
@@ -1255,12 +1283,19 @@ def append_bundle(
                          item_id, nonce, ciphertext, aad_sha256
                        ) VALUES (?, ?, ?, ?)""",
                     (
-                        item["item_id"],
+                        storage_item_id,
                         nonce,
                         ciphertext,
-                        _digest(_aad("item", item["item_id"], item["content_sha256"])),
+                        _digest(_aad("item", storage_item_id, item["content_sha256"])),
                     ),
                 )
+        except sqlite3.IntegrityError as error:
+            connection.rollback()
+            raise VNextSourceStreamError(
+                "SOURCE_ITEM_CONFLICT",
+                "来源条目标识与当前章节冲突",
+                409,
+            ) from error
         except Exception:
             connection.rollback()
             raise
@@ -1481,7 +1516,7 @@ def load_next_chapter(
             if _digest(plaintext) != str(row["content_sha256"]):
                 raise VNextSourceStreamError("SOURCE_CONTENT_HASH_MISMATCH", "来源正文校验失败", 500)
             items.append({
-                "item_id": row["item_id"],
+                "item_id": row["source_item_id"] or row["item_id"],
                 "source_type": row["source_type"],
                 "source_id": row["source_id"],
                 "source_revision_id": row["source_revision_id"],
@@ -1960,6 +1995,11 @@ def commit_question_result(
     source_fingerprint = _sha256(source_fingerprint, "source_fingerprint")
     if not isinstance(result, dict):
         raise VNextSourceStreamError("Q2_RESULT_INVALID", "问答结果必须是对象", 422)
+    published_result = {
+        "task_id": task_id,
+        "source_stream_id": source_stream_id,
+        **result,
+    }
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         task, _attempt = _assert_attempt(
@@ -1985,7 +2025,7 @@ def commit_question_result(
             context,
             task_id=task_id,
             attempt_id=attempt_id,
-            result=result,
+            result=published_result,
             result_kind="content_outcome",
             lease_owner=lease_owner,
         ):
@@ -2002,7 +2042,7 @@ def commit_question_result(
         # their triggers release all reservations, including the checkpoint.
         connection.execute("DELETE FROM vnext_source_streams WHERE stream_id = ?", (source_stream_id,))
         connection.commit()
-    return {"task_id": task_id, "source_stream_id": source_stream_id, **result}
+    return published_result
 
 
 def load_generated_artifact(

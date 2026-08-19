@@ -103,7 +103,7 @@ def _chapter(ordinal: int, text: str):
 
 def _upload_chapter(context, stream_id: str, descriptor, item, bundle_hash):
     ordinal = descriptor["chapter_ordinal"]
-    group_id = f"group-source-{ordinal}"
+    group_id = f"group-source-{stream_id}-{ordinal}"
     source_store.create_bundle_group(
         context,
         stream_id,
@@ -119,12 +119,62 @@ def _upload_chapter(context, stream_id: str, descriptor, item, bundle_hash):
     source_store.append_bundle(
         context,
         group_id,
-        bundle_id=f"bundle-source-{ordinal}",
+        bundle_id=f"bundle-source-{stream_id}-{ordinal}",
         ordinal=0,
         items=[item],
         supplied_bundle_sha256=bundle_hash,
     )
     return source_store.commit_bundle_group(context, group_id)
+
+
+def test_stable_source_item_id_can_be_reused_across_summary_and_question_streams(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _, context, generation = _setup(tmp_path, monkeypatch)
+    summary, _ = _create_stream(context, generation, suffix="shared-summary")
+    question, _ = _create_stream(
+        context,
+        generation,
+        suffix="shared-question",
+        capability="question",
+    )
+    item, bundle_hash, descriptor = _chapter(0, "周五前由张敏提交接口文档。")
+    for stream in (summary, question):
+        source_store.append_manifest_page(
+            context,
+            stream["stream_id"],
+            page_seq=0,
+            first_chapter_ordinal=0,
+            descriptors=[descriptor],
+            page_sha256=source_store.manifest_page_sha256([descriptor]),
+            final_page=True,
+        )
+        assert _upload_chapter(
+            context,
+            stream["stream_id"],
+            descriptor,
+            item,
+            bundle_hash,
+        )["state"] == "complete"
+
+    attempt = vnext_task_store.claim_attempt(
+        context,
+        summary["task_id"],
+        lease_owner="shared-source-worker",
+    )
+    assert attempt is not None
+    chapter = source_store.load_next_chapter(
+        context,
+        summary["task_id"],
+        attempt_id=attempt["attempt_id"],
+        lease_owner="shared-source-worker",
+    )
+    assert chapter is not None
+    assert chapter["items"][0]["item_id"] == item["item_id"]
+    question_source = source_store.load_question_source_stream(context, question["stream_id"])
+    assert question_source is not None
+    assert question_source["sources"][0]["text"] == item["content"]
 
 
 def _verified_document(chapter: dict) -> dict:
@@ -196,7 +246,10 @@ def test_source_stream_encrypts_payload_and_promotes_one_atomic_checkpoint(tmp_p
 
     with sqlite3.connect(database) as connection:
         row = connection.execute(
-            "SELECT ciphertext FROM vnext_encrypted_source_payloads WHERE item_id = ?",
+            """SELECT payload.ciphertext
+                 FROM vnext_encrypted_source_payloads payload
+                 JOIN vnext_source_bundle_items item ON item.item_id = payload.item_id
+                WHERE item.source_item_id = ?""",
             (item["item_id"],),
         ).fetchone()
         assert row is not None
@@ -484,6 +537,31 @@ def test_chapter_evidence_restores_time_and_source_identity_without_global_trans
     assert package.coverage["source_coverage"] == 1.0
 
 
+def test_chapter_evidence_packs_fragmented_transcript_for_verbatim_citations() -> None:
+    items = []
+    for index in range(40):
+        text = f"第{index}个连续字幕片段"
+        items.append({
+            "item_id": f"stable-line-{index}",
+            "source_type": "transcript",
+            "source_id": "same-recording",
+            "source_revision_id": "revision-1",
+            "source_start_utf8": index * 30,
+            "source_end_utf8": index * 30 + len(text.encode("utf-8")),
+            "content_sha256": _hash_text(text),
+            "content": text,
+            "start_ms": index * 1_000,
+            "end_ms": index * 1_000 + 900,
+            "speaker": None,
+        })
+    package = vnext_summary_chapter_pipeline.build_chapter_evidence_package({"items": items})
+    assert 1 < len(package.sources) < len(items)
+    assert package.sources[0].source_id.startswith("transcript:")
+    assert "第0个连续字幕片段 第1个连续字幕片段" in package.sources[0].text
+    assert package.sources[0].start_ms == 0
+    assert package.sources[0].end_ms is not None
+
+
 def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, monkeypatch) -> None:
     database, context, generation = _setup(tmp_path, monkeypatch)
     stream, _ = _create_stream(context, generation, suffix="question", capability="question")
@@ -528,7 +606,8 @@ def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, 
     )
     assert committed["task_id"] == stream["task_id"]
     assert vnext_task_store.get_task(context, stream["task_id"])["state"] == "success"
-    assert vnext_task_store.get_task(context, stream["task_id"])["result"]["answer"] == result["answer"]
+    assert vnext_task_store.get_task(context, stream["task_id"])["result"] == committed
+    assert committed["source_stream_id"] == stream["stream_id"]
     assert source_store.get_source_stream(context, stream["stream_id"]) is None
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT COUNT(*) FROM vnext_encrypted_source_payloads").fetchone()[0] == 0
@@ -537,6 +616,44 @@ def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, 
         assert connection.execute(
             "SELECT COUNT(*) FROM vnext_source_reservations WHERE state = 'active'"
         ).fetchone()[0] == 0
+
+
+def test_complete_question_chapters_do_not_consume_open_group_capacity(tmp_path, monkeypatch) -> None:
+    _, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(
+        context,
+        generation,
+        suffix="question-long",
+        capability="question",
+    )
+    chapters = [
+        _chapter(index, f"问答来源第{index}章。")
+        for index in range(3)
+    ]
+    descriptors = [chapter[2] for chapter in chapters]
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=descriptors,
+        page_sha256=source_store.manifest_page_sha256(descriptors),
+        final_page=True,
+    )
+
+    for item, bundle_hash, descriptor in chapters:
+        committed = _upload_chapter(
+            context,
+            stream["stream_id"],
+            descriptor,
+            item,
+            bundle_hash,
+        )
+        assert committed["state"] == "complete"
+
+    snapshot = source_store.load_question_source_stream(context, stream["stream_id"])
+    assert snapshot is not None
+    assert len(snapshot["sources"]) == 3
 
 
 def test_expired_source_stream_cleanup_is_terminal_and_payload_free(tmp_path, monkeypatch) -> None:

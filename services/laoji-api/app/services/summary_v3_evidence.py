@@ -272,6 +272,20 @@ def _transcript_sources(lines: list[dict[str, Any]]) -> list[EvidenceSource]:
     return values
 
 
+def normalize_transcript_evidence_sources(
+    lines: list[dict[str, Any]],
+) -> list[EvidenceSource]:
+    """Public adapter for immutable source-stream transcript rows.
+
+    Both the legacy Summary V3 request and the vNext chapter worker must apply
+    the same deterministic subtitle packing. Keeping this boundary public
+    prevents the source-stream path from treating every ASR fragment as an
+    isolated sentence and then rejecting otherwise valid cross-fragment
+    verbatim citations.
+    """
+    return _transcript_sources(lines)
+
+
 def _milliseconds(milliseconds: object, seconds: object) -> int | None:
     if milliseconds is not None:
         try:

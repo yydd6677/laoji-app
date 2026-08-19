@@ -182,23 +182,36 @@ def _overview(facts: list[MeetingFactV3], origins: dict[str, int]) -> OverviewV3
         ),
     )
     selected = ranked[: min(6, len(ranked))]
-    selected_ids = [fact.fact_id for fact in selected]
     chronological = sorted(
         selected,
         key=lambda fact: (origins[fact.fact_id], fact.fact_id),
     )
     parts: list[str] = []
-    length = 0
+    included_ids: list[str] = []
     for fact in chronological:
-        separator = "；" if parts else ""
-        remaining = 160 - length - len(separator)
-        if remaining <= 0:
+        text = fact.content.strip().rstrip("。！？；; ")
+        if not text:
+            continue
+        if not parts and len(text) > 159:
+            # A single long fact cannot fit. Make the truncation explicit;
+            # never present a cut Chinese/ASCII token as a complete sentence.
+            parts.append(text[:158].rstrip("，,；; ") + "…")
+            included_ids.append(fact.fact_id)
             break
-        text = fact.content[:remaining]
-        if text:
-            parts.append(text)
-            length += len(separator) + len(text)
-    return OverviewV3(text="；".join(parts), fact_ids=selected_ids)
+        projected = "；".join([*parts, text])
+        if len(projected) > 159:
+            # Do not partially append the next fact. It remains visible in the
+            # fact list and can be projected by another local template.
+            break
+        parts.append(text)
+        included_ids.append(fact.fact_id)
+    if not parts:
+        # MeetingFactsDocumentV3 guarantees at least one fact, but keep the
+        # reducer total if a future migration supplies whitespace-only text.
+        fallback = ranked[0]
+        parts = [fallback.content.strip()[:158].rstrip("，,；; ") + "…"]
+        included_ids = [fallback.fact_id]
+    return OverviewV3(text="；".join(parts).rstrip("。") + "。", fact_ids=included_ids)
 
 
 def _conflict_groups(

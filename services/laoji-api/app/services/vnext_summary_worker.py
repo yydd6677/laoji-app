@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import os
 import socket
@@ -25,8 +26,33 @@ from app.services.vnext_source_stream_store import VNextSourceStreamError
 _logger = logging.getLogger(__name__)
 LEASE_SECONDS = 300
 SCAN_SECONDS = max(1.0, min(30.0, float(os.getenv("LAOJI_VNEXT_SUMMARY_SCAN_SECONDS", "2"))))
-HANDLER_REVISION = "summary-facts-v3-chapter-r1"
+HANDLER_REVISION = "summary-facts-v3-chapter-r2"
 PROVIDER_REVISION = "provider-v3-r1"
+
+
+def _safe_generation_failure(error: Exception) -> tuple[str, dict[str, Any]] | None:
+    """Expose only the generator's already-sanitized protocol diagnostics."""
+    error_type = type(error)
+    if (
+        error_type.__name__ != "SummaryV3GenerationError"
+        or error_type.__module__ != "app.services.summary_v3_generator"
+    ):
+        return None
+    code = str(getattr(error, "code", "") or "")
+    if not code.startswith("SUMMARY_") or len(code) > 120:
+        code = "SUMMARY_V3_GENERATION_FAILED"
+    raw_details = getattr(error, "details", {})
+    details = raw_details if isinstance(raw_details, dict) else {}
+    # SummaryV3GenerationError only stores field paths/error kinds. Serializing
+    # through JSON and bounding the result prevents an accidental future type
+    # change from placing source/model text in logs.
+    try:
+        encoded = json.dumps(details, ensure_ascii=True, sort_keys=True)
+    except (TypeError, ValueError):
+        encoded = "{}"
+    if len(encoded) > 4_096:
+        encoded = "{}"
+    return code, json.loads(encoded)
 
 
 def summary_source_stream_enabled() -> bool:
@@ -182,14 +208,35 @@ class VNextSummarySourceStreamWorker:
                 lease_owner=self._lease_owner,
             )
         except Exception as error:
+            generation_failure = _safe_generation_failure(error)
+            error_code = (
+                generation_failure[0]
+                if generation_failure is not None
+                else f"SUMMARY_{type(error).__name__.upper()[:80]}"
+            )
+            if generation_failure is not None:
+                _logger.warning(
+                    "vnext summary generation rejected: code=%s details=%s",
+                    generation_failure[0],
+                    json.dumps(
+                        generation_failure[1],
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
             await asyncio.to_thread(
                 vnext_task_store.mark_failure,
                 context,
                 task_id,
                 attempt_id,
-                f"SUMMARY_{type(error).__name__.upper()[:80]}",
-                retryable=True,
-                retry_after_seconds=30,
+                error_code,
+                # Generation already contains the sole schema-repair call.
+                # Retrying the same immutable package at temperature zero
+                # would exceed the per-operation model-call contract and can
+                # loop forever without new evidence or user intent.
+                retryable=generation_failure is None,
+                retry_after_seconds=30 if generation_failure is None else 0,
                 lease_owner=self._lease_owner,
             )
         finally:

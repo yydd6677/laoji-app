@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.services import vnext_summary_worker as worker_module
+from app.services.summary_v3_generator import SummaryV3GenerationError
 
 
 @pytest.mark.asyncio
@@ -45,3 +46,54 @@ async def test_disabled_summary_worker_does_not_start(monkeypatch):
     worker = worker_module.VNextSummarySourceStreamWorker(scan_seconds=60)
     worker.start()
     assert worker._task is None
+
+
+def test_summary_worker_preserves_sanitized_generator_error_code() -> None:
+    error = SummaryV3GenerationError(
+        "SUMMARY_V3_FORMAT_INVALID",
+        details={"repair_errors": [{"path": "facts.0.sources", "type": "missing"}]},
+    )
+    assert worker_module._safe_generation_failure(error) == (
+        "SUMMARY_V3_FORMAT_INVALID",
+        {"repair_errors": [{"path": "facts.0.sources", "type": "missing"}]},
+    )
+    assert worker_module._safe_generation_failure(RuntimeError("private text")) is None
+
+
+@pytest.mark.asyncio
+async def test_summary_worker_does_not_repeat_a_completed_generation_repair(monkeypatch):
+    failures: list[dict] = []
+    monkeypatch.setattr(
+        worker_module.vnext_task_store,
+        "get_task",
+        lambda *_args: {
+            "task_id": "task-1",
+            "state": "active",
+            "source_stream_id": "stream-1",
+        },
+    )
+    monkeypatch.setattr(
+        worker_module.vnext_task_store,
+        "claim_attempt",
+        lambda *_args, **_kwargs: {"attempt_id": "attempt-1", "attempt_number": 1},
+    )
+    monkeypatch.setattr(
+        worker_module.vnext_task_store,
+        "mark_failure",
+        lambda *_args, **kwargs: failures.append(kwargs) or True,
+    )
+
+    def reject(*_args, **_kwargs):
+        raise SummaryV3GenerationError("SUMMARY_V3_FORMAT_INVALID")
+
+    worker = worker_module.VNextSummarySourceStreamWorker(
+        process_chapter=reject,
+        scan_seconds=60,
+    )
+    await worker._process(worker_module.SummaryTaskOwner("device-1", "epoch-1"), "task-1")
+
+    assert failures == [{
+        "retryable": False,
+        "retry_after_seconds": 0,
+        "lease_owner": worker._lease_owner,
+    }]

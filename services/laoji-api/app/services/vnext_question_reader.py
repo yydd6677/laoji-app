@@ -29,11 +29,14 @@ from app.services.summary_v3_generator import model_revision
 CONTRACT_REVISION = "question.reader.v2"
 PROVIDER_REVISION = "q2-reader-v1"
 MAX_SOURCES = 1_024
+MAX_VERIFIED_SOURCES = 50_000
 MAX_SOURCE_TEXT = 8_000
 MAX_QUESTION = 2_000
 MAX_INPUT_TOKENS = 10_240
 RETRIEVAL_BATCH_SIZE = 32
 RETRIEVAL_LAMBDA = 0.7
+RETRIEVAL_UNIT_CHARS = 360
+RETRIEVAL_UNIT_DURATION_MS = 30_000
 _RETRIEVAL_SIGNAL = re.compile(
     r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|由.{0,12}(?:负责|跟进)|"
     r"(?:今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|周[一二三四五六日天])|"
@@ -103,6 +106,58 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
     return sum(a * b for a, b in zip(left, right))
 
 
+def _retrieval_units(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pack adjacent transcript fragments only for embedding retrieval.
+
+    The model and final grounding continue to use the original source rows,
+    hashes and UTF-8 ranges. This keeps retrieval cost independent of ASR
+    punctuation frequency without inventing a derived citation source.
+    """
+    units: list[dict[str, Any]] = []
+    current_indexes: list[int] = []
+    current_texts: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_indexes, current_texts
+        if current_indexes:
+            units.append({
+                "member_indexes": tuple(current_indexes),
+                "text": " ".join(current_texts),
+            })
+        current_indexes = []
+        current_texts = []
+
+    for index, source in enumerate(sources):
+        if source["source_type"] != "transcript":
+            flush()
+            units.append({"member_indexes": (index,), "text": source["text"]})
+            continue
+        can_join = bool(current_indexes)
+        if can_join:
+            first = sources[current_indexes[0]]
+            previous = sources[current_indexes[-1]]
+            projected_chars = sum(len(text) for text in current_texts) + len(current_texts) + len(source["text"])
+            start_ms = first.get("start_ms")
+            end_ms = source.get("end_ms")
+            duration_ok = (
+                start_ms is None
+                or end_ms is None
+                or int(end_ms) - int(start_ms) <= RETRIEVAL_UNIT_DURATION_MS
+            )
+            can_join = bool(
+                previous["source_id"] == source["source_id"]
+                and previous["source_revision_id"] == source["source_revision_id"]
+                and projected_chars <= RETRIEVAL_UNIT_CHARS
+                and duration_ok
+            )
+        if not can_join:
+            flush()
+        current_indexes.append(index)
+        current_texts.append(source["text"])
+    flush()
+    return units
+
+
 def _model_payload(
     question: str,
     source_fingerprint: str,
@@ -150,6 +205,7 @@ def _select_model_sources(
     if _estimate_model_payload(question, source_fingerprint, sources) <= MAX_INPUT_TOKENS:
         return sources
 
+    units = _retrieval_units(sources)
     query_vectors = embed_texts(
         [question],
         priority="interactive",
@@ -159,10 +215,10 @@ def _select_model_sources(
     if len(query_vectors) != 1:
         raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
     source_vectors: list[tuple[float, ...]] = []
-    for offset in range(0, len(sources), RETRIEVAL_BATCH_SIZE):
-        batch = sources[offset:offset + RETRIEVAL_BATCH_SIZE]
+    for offset in range(0, len(units), RETRIEVAL_BATCH_SIZE):
+        batch = units[offset:offset + RETRIEVAL_BATCH_SIZE]
         vectors = embed_texts(
-            [source["text"] for source in batch],
+            [unit["text"] for unit in batch],
             priority="interactive",
             operation="question.q2.evidence.sources",
             timeout_seconds=45,
@@ -176,40 +232,46 @@ def _select_model_sources(
     # Preserve explicit corrections, dates, owners and boundary statements as
     # evidence candidates, then rank the remaining raw segments by similarity.
     forced = {
-        index for index, source in enumerate(sources)
-        if _RETRIEVAL_SIGNAL.search(source["text"])
+        index for index, unit in enumerate(units)
+        if _RETRIEVAL_SIGNAL.search(unit["text"])
     }
-    ranked = sorted(range(len(sources)), key=lambda index: (-scores[index], index))
-    selected: list[int] = []
-    selected_set: set[int] = set()
+    ranked = sorted(range(len(units)), key=lambda index: (-scores[index], index))
+    selected_units: list[int] = []
+    selected_unit_set: set[int] = set()
+    selected_source_indexes: set[int] = set()
 
     def try_add(index: int) -> bool:
-        if index in selected_set:
+        if index in selected_unit_set:
             return True
-        candidate = [sources[item] for item in selected + [index]]
+        candidate_indexes = selected_source_indexes.union(units[index]["member_indexes"])
+        candidate = [
+            {**sources[item], "_original_index": item}
+            for item in sorted(candidate_indexes)
+        ]
         if _estimate_model_payload(question, source_fingerprint, candidate) > MAX_INPUT_TOKENS:
             return False
-        selected.append(index)
-        selected_set.add(index)
+        selected_units.append(index)
+        selected_unit_set.add(index)
+        selected_source_indexes.update(units[index]["member_indexes"])
         return True
 
     # Critical signals get first chance, but still obey the same hard budget.
     for index in sorted(forced, key=lambda item: (-scores[item], item)):
         try_add(index)
     for index in ranked:
-        if len(selected) >= len(sources):
+        if len(selected_units) >= len(units):
             break
         # One adjacent raw segment keeps a split utterance/correction
         # understandable without adding an unbounded context window.
         for neighbor in (index - 1, index, index + 1):
-            if 0 <= neighbor < len(sources):
+            if 0 <= neighbor < len(units):
                 try_add(neighbor)
 
-    if not selected:
+    if not selected_source_indexes:
         raise LlmProviderError("q2_retrieval_no_evidence")
     return [
         {**sources[index], "_original_index": index}
-        for index in sorted(selected)
+        for index in sorted(selected_source_indexes)
     ]
 
 
@@ -295,11 +357,16 @@ def _citation_supports_text(question: str, clause: str, quote: str) -> bool:
     return bool(quote_terms & answer_terms or quote_terms & question_terms)
 
 
-def _source_payload(raw: Any, *, max_source_text: int = MAX_SOURCE_TEXT) -> list[dict[str, str]]:
-    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SOURCES:
+def _source_payload(
+    raw: Any,
+    *,
+    max_source_text: int = MAX_SOURCE_TEXT,
+    max_sources: int = MAX_SOURCES,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= max_sources:
         raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源数量无效")
-    sources: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    sources: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, int, int, str]] = set()
     for item in raw:
         if not isinstance(item, dict):
             raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源格式无效")
@@ -312,7 +379,38 @@ def _source_payload(raw: Any, *, max_source_text: int = MAX_SOURCE_TEXT) -> list
         content = _text(item.get("text"), "text", max_source_text)
         if _sha256_text(content) != content_hash:
             raise Q2ReaderError("Q2_SOURCE_HASH_MISMATCH", "Q2 来源内容校验失败", 409)
-        key = (source_type, source_id, revision, content_hash)
+        source_start = item.get("source_start_utf8", 0)
+        source_end = item.get("source_end_utf8", source_start + len(content.encode("utf-8")))
+        if (
+            not isinstance(source_start, int)
+            or isinstance(source_start, bool)
+            or not isinstance(source_end, int)
+            or isinstance(source_end, bool)
+            or source_start < 0
+            or source_end < source_start
+        ):
+            raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源范围无效")
+        start_ms = item.get("start_ms")
+        end_ms = item.get("end_ms")
+        if start_ms is not None and (
+            not isinstance(start_ms, int) or isinstance(start_ms, bool) or start_ms < 0
+        ):
+            raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源时间无效")
+        if end_ms is not None and (
+            not isinstance(end_ms, int)
+            or isinstance(end_ms, bool)
+            or end_ms < 0
+            or (start_ms is not None and end_ms < start_ms)
+        ):
+            raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源时间无效")
+        key = (
+            source_type,
+            source_id,
+            revision,
+            source_start,
+            source_end,
+            content_hash,
+        )
         if key in seen:
             raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源重复")
         seen.add(key)
@@ -322,6 +420,10 @@ def _source_payload(raw: Any, *, max_source_text: int = MAX_SOURCE_TEXT) -> list
             "source_revision_id": revision,
             "content_sha256": content_hash,
             "text": content,
+            "source_start_utf8": source_start,
+            "source_end_utf8": source_end,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
         })
     return sources
 
@@ -466,6 +568,7 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     sources = _source_payload(
         payload.get("sources"),
         max_source_text=16 * 1024 * 1024 if source_stream_verified else MAX_SOURCE_TEXT,
+        max_sources=MAX_VERIFIED_SOURCES if source_stream_verified else MAX_SOURCES,
     )
     if not source_stream_verified and _source_fingerprint(sources) != source_fingerprint:
         raise Q2ReaderError("Q2_SOURCE_FINGERPRINT_MISMATCH", "Q2 来源整体标识校验失败", 409)
@@ -533,7 +636,16 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     if not 1 <= len(clauses_raw) <= 32:
         raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答分句数量无效", 502)
     source_by_alias = {f"s{index}": source for index, source in enumerate(sources)}
-    source_by_id = {source["source_id"]: source for source in sources}
+    sources_by_id: dict[str, list[dict[str, Any]]] = {}
+    for source in sources:
+        sources_by_id.setdefault(source["source_id"], []).append(source)
+    # A recording-level source ID can legitimately repeat across immutable
+    # rows. Only accept an unaliased provider ID when it is unambiguous.
+    source_by_id = {
+        source_id: values[0]
+        for source_id, values in sources_by_id.items()
+        if len(values) == 1
+    }
     answer_bytes = answer.encode("utf-8")
     previous_end = 0
     clauses: list[dict[str, Any]] = []
@@ -698,6 +810,8 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                     quote = model_quote
             else:
                 quote = quote_from_range
+            source_start += int(source.get("source_start_utf8") or 0)
+            source_end += int(source.get("source_start_utf8") or 0)
             normalized_citation = {
                 "citation_id": citation_id,
                 "source_type": source["source_type"],
