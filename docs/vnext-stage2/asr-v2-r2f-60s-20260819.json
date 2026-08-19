@@ -1,0 +1,22 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "media": "restart-60s.mp4",
+  "endpoint": "isolated 127.0.0.1:8031/v2/asr/batch",
+  "repeat": 10,
+  "audio_ms": 60011,
+  "chunks_per_run": 5,
+  "batch_size": 8,
+  "contract_validated_runs": 10,
+  "rtf": [0.4673, 0.4621, 0.4729, 0.4478, 0.439, 0.4508, 0.4658, 0.4635, 0.4567, 0.459],
+  "first_result_ms": [28041, 27734, 28378, 26874, 26346, 27052, 27956, 27814, 27406, 27543],
+  "p50_rtf": 0.46055,
+  "p95_rtf": 0.4729,
+  "p50_first_result_ms": 27638.5,
+  "p95_first_result_ms": 28378,
+  "model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+  "notes": [
+    "RTF is below the Stage 2 0.5 limit.",
+    "first_result_ms is a full 60-second single batch probe and is not the actual VAD 12-second import flush; the Android/real import first-segment gate remains unverified."
+  ]
+}

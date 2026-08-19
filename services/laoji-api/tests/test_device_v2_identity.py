@@ -28,6 +28,23 @@ def _setup(tmp_path, monkeypatch):
     device_v2_identity.ensure_v2_schema()
 
 
+def test_device_schema_can_boot_before_domain_tables(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "control-only.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    device_identity._SCHEMA_READY.clear()  # type: ignore[attr-defined]
+
+    # Capability barriers and device bootstrap can be probed before the ORM
+    # domain tables exist. The control schema must remain independently usable.
+    device_identity.ensure_device_schema()
+    with device_identity.control_connection() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'device_epochs'"
+        ).fetchone() is not None
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meetings'"
+        ).fetchone() is None
+
+
 def _public_key_and_private():
     private = ec.generate_private_key(ec.SECP256R1())
     public = private.public_key().public_bytes(

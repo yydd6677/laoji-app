@@ -192,18 +192,28 @@ def ensure_device_schema() -> None:
                     ON device_speaker_cleanup_outbox(status, updated_at, id);
                 """
             )
-            columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(meetings)").fetchall()
-            }
-            if "data_epoch_id" not in columns:
+            # The control store is also used by isolated capability/identity
+            # probes before the domain ORM has created its tables. Do not
+            # manufacture a partial meetings table here, and do not make the
+            # device schema unusable just because the optional domain table is
+            # absent. The normal API lifespan creates meetings first, so the
+            # additive epoch column/index is applied on that path.
+            meetings_exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meetings'"
+            ).fetchone() is not None
+            if meetings_exists:
+                columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(meetings)").fetchall()
+                }
+                if "data_epoch_id" not in columns:
+                    connection.execute(
+                        "ALTER TABLE meetings ADD COLUMN data_epoch_id TEXT"
+                    )
                 connection.execute(
-                    "ALTER TABLE meetings ADD COLUMN data_epoch_id TEXT"
+                    "CREATE INDEX IF NOT EXISTS idx_meetings_device_epoch "
+                    "ON meetings(user_id, data_epoch_id, updated_at)"
                 )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_meetings_device_epoch "
-                "ON meetings(user_id, data_epoch_id, updated_at)"
-            )
             # Existing compact-production tables predate device epochs.  Add
             # nullable columns so old rows remain readable while every new
             # device-owned object can be filtered by its epoch.  SQLite has
