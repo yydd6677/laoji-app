@@ -1,0 +1,35 @@
+{
+  "source_bytes_each": 3174969,
+  "source_sha256": "sha256:56b6ae775b5d64e4038dc59d97f3317540adc6b3c43af8217469c6b6b076709f",
+  "upload_count": 2,
+  "upload_wall_ms": [
+    2758,
+    3891
+  ],
+  "task_count": 4,
+  "task_counts_by_capability": {
+    "speaker.overlay.v2": 2,
+    "transcript": 2
+  },
+  "task_states": [
+    "succeeded",
+    "succeeded"
+  ],
+  "stable_event_counts": [
+    19,
+    19
+  ],
+  "final_event_counts": [
+    1,
+    1
+  ],
+  "realtime": {
+    "wall_ms": 5540,
+    "queue_ms": 6,
+    "infer_ms": 5524,
+    "outcome": "text",
+    "model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5"
+  },
+  "cleanup_processed": 2,
+  "wall_ms": 123805
+}
