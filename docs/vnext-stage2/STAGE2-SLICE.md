@@ -3,6 +3,11 @@
 状态：`in progress`。媒体上传、文字优先转写和 capability barrier 候选已实现但未激活；线上 8030
 仍只发布 v1 ASR 入口，因此候选 v2 全链路尚不能切换。
 
+2026-08-19 候选 `7f2b8e1` 又完成了 CAM++ 推理无 autograd 与 Linux allocator trim 的真实回放。
+双上传/离线转写/realtime 混合负载和 10 次实时断线恢复均通过，候选 API RSS 保持在 Stage 2
+峰值门以内；详见 [候选内存回放](MEMORY-TRIM-REAL-20260819.md)。这仍不能替代专属 Android
+设备门，且 GPU0 余量不足，capability barrier 继续关闭。
+
 ## 已实现
 
 - 0043 为 Transcript 增加 source manifest/text-final 边界，为 segment 增加稳定 key、revision 和

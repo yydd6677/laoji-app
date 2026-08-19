@@ -15,6 +15,13 @@ R2 上传 operation 已在本机 `device_operations` 创建并绑定录音资产
 候选 provider 重复执行仍为 `27/27` 与 `9/9`。上述均为隔离证据，
 不代表 Stage 2/3/4 退出、生产切换或 Stage 5 删除许可。
 
+2026-08-19 候选又闭合了两项真实回放边界：Q2 reader 对 UTF-8 坐标前缀和部分缺失字段的
+引用归一化，更新样本完整问答 `27/27`；CAM++ 推理改为 `inference_mode` 并在 Linux 做
+best-effort allocator trim，隔离混合负载和 10 次断线恢复的候选 API RSS 均低于门限。证据分别见
+`docs/vnext-stage3/Q2-UTF8-GROUNDING-FIX-20260819.md` 与
+`docs/vnext-stage2/MEMORY-TRIM-REAL-20260819.md`。这些仍是候选证据，Android 设备门、GPU0
+余量门、公开零流量周期和 capability barrier 继续未通过。
+
 2026-08-19 新增 Stage 5 候选基础设施：`capability_cutovers` 现在持久保存不可替换的
 `legacy_reader_removal_revision` 与证据 SHA-256；只允许在对应 capability 已激活且旧提交已关闭后登记，
 不会自动启用能力或删除代码。候选 `b4f84c9` 已在隔离 `18021` 启动并通过 `/api/ready`；五个能力仍未登记，
