@@ -12,6 +12,7 @@ CAM++ 的网络结构已收纳在本模块目录，不依赖其他语音识别�
 
 import asyncio
 import copy
+import ctypes
 import hashlib
 import os
 import threading
@@ -24,6 +25,23 @@ import torch
 
 _CAMPPLUS_INFERENCE_LOCK = threading.Lock()
 _VAD_INSTANCE_LOCK = threading.Lock()
+
+
+def _trim_cpu_allocator() -> None:
+    """Return freed glibc arenas after a long CAM++ inference stream.
+
+    Python and libtorch can keep large temporary feature buffers in process
+    arenas after a long meeting.  Trimming is best-effort and Linux-only;
+    Windows and libc implementations without ``malloc_trim`` simply skip it.
+    """
+    if os.name != "posix":
+        return
+    try:
+        trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+        if trim is not None:
+            trim(0)
+    except (AttributeError, OSError):
+        return
 
 
 def _resolve_model_path(path: str) -> str:
@@ -496,7 +514,8 @@ class SpeakerEmbeddingExtractor:
                 if len(embedding.shape) > 2:
                     embedding = embedding.squeeze(0)
 
-                embedding_np = embedding.cpu().numpy()
+                embedding_np = embedding.cpu().numpy().copy()
+                _trim_cpu_allocator()
 
             if embedding_np.ndim > 1:
                 embedding_np = embedding_np[0] if embedding_np.shape[0] == 1 else embedding_np.mean(axis=0)
