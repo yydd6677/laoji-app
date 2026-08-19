@@ -25,7 +25,15 @@ def require(path: Path, *needles: str) -> str:
 def main() -> None:
     client = ROOT / "src/services/deviceV2SourceStream.ts"
     summary = ROOT / "src/services/meetingSummaryV3SourceStream.ts"
+    summary_dispatch = ROOT / "src/services/meetingSummary.ts"
+    summary_contract = ROOT / "src/services/meetingSummaryV3.ts"
+    summary_screen = ROOT / "src/screens/TranscriptionScreen.android.tsx"
+    summary_repository = ROOT / "src/data/repositories/meetingSummaryV3Repository.ts"
+    summary_generation_migration = ROOT / "src/data/db/migrations/0048SummaryFactsGenerations.ts"
     server = ROOT / "services/laoji-api/app/services/vnext_source_stream_store.py"
+    chapter_pipeline = ROOT / "services/laoji-api/app/services/vnext_summary_chapter_pipeline.py"
+    task_store = ROOT / "services/laoji-api/app/services/vnext_task_store.py"
+    worker = ROOT / "services/laoji-api/app/services/vnext_summary_worker.py"
 
     client_source = require(
         client,
@@ -47,8 +55,76 @@ def main() -> None:
         "MANIFEST_PAGE_DESCRIPTORS",
         "current.next_manifest_chapter",
         "MANIFEST_CAPACITY",
+        "const existingTask = await getDeviceV2Task(taskId);",
+        "if (existingTask.task.state === 'success')",
+        "const streamId = `summary-stream:${hex(await digest(taskId))}`;",
+        "streamId,",
     )
-    require(server, "MAX_GROUPS_DEVICE = 2", '"received_bundle_count"', '"received_item_count"')
+    dispatch_source = require(
+        summary_dispatch,
+        "if (getFeatureFlags().meetingSummarySourceStreamCandidate)",
+        "return generateDeviceMeetingSummaryV3(options);",
+        "const capabilities = await loadDeviceServiceCapabilities().catch(() => null);",
+    )
+    candidate_dispatch = dispatch_source.index(
+        "if (getFeatureFlags().meetingSummarySourceStreamCandidate)"
+    )
+    legacy_capability_probe = dispatch_source.index(
+        "const capabilities = await loadDeviceServiceCapabilities().catch(() => null);",
+        candidate_dispatch,
+    )
+    if candidate_dispatch >= legacy_capability_probe:
+        raise AssertionError("source-stream candidate still depends on device-v1 capability discovery")
+    require(
+        summary_contract,
+        "const documentId = text(root?.document_id, 220);",
+        "function anchorTranscriptCitation(",
+        "Math.abs(candidate.startMs - requestedStart) <= 2",
+        "anchorTranscriptCitations(item.citations, transcriptLines)",
+    )
+    require(
+        summary_screen,
+        "current.document.manualNoteRevision,\n        transcriptRef.current,",
+        "const ownsLocalSummaryRestore = () => (",
+        "if (!ownsLocalSummaryRestore()) return;",
+        "transcriptRef.current,",
+        "}, [meetingScopeKey]);",
+        "meeting_summary_v3_local_persist",
+    )
+    repository_source = require(
+        summary_repository,
+        "WHERE id = ?",
+        "result.documentId",
+        "summary v3 immutable identity changed",
+        "summary v3 target version is unavailable",
+        "summary v3 fact document is unavailable",
+    )
+    if "WHERE meeting_id = ? AND source_fingerprint = ?" in repository_source:
+        raise AssertionError("summary v3 repository still collapses distinct force generations")
+    require(
+        summary_generation_migration,
+        "CREATE TABLE summary_fact_documents_v48",
+        "DROP TABLE summary_fact_documents",
+        "idx_summary_fact_document_source_generation",
+    )
+    require(
+        chapter_pipeline,
+        "document_identity = hashlib.sha256(",
+        '"document_id": f"vnext:{document_identity}"',
+    )
+    require(
+        server,
+        "MAX_GROUPS_DEVICE = 2",
+        '"next_bundle_ordinal": int(totals["bundle_count"])',
+        '"received_bundle_count"',
+        '"received_item_count"',
+    )
+    require(
+        task_store,
+        "source_group.chapter_ordinal = stream.next_consumable_chapter",
+        "source_group.state = 'complete'",
+    )
+    require(worker, "LEASE_SECONDS = 30", "HEARTBEAT_SECONDS = 10")
     print("stage3_source_stream_contract=passed")
 
 

@@ -360,26 +360,63 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   let taskId = options.resumeTaskId?.trim() || '';
   let stream: Awaited<ReturnType<typeof getDeviceV2SourceStream>> | null = null;
   if (!taskId) {
-    const binding = await ensureRemoteMeetingServiceBinding(options.meetingId);
-    const generationId = options.force
+    let generationId = options.force
       ? hex(await digest(`${requestSha}:${Date.now()}:${Crypto.randomUUID()}`))
       : hex(requestSha);
     taskId = `vnext-summary:${options.meetingId}:${generationId}`.slice(0, 480);
-    stream = await createDeviceV2SourceStream({
-      bindingId: binding.bindingId,
-      bindingGeneration: binding.bindingGeneration,
-      bindingRevision: binding.bindingRevision,
-      cancelRevision: binding.cancelRevision,
-      taskId,
-      clientOperationId: `summary-source:${taskId}`.slice(0, 180),
-      generationId,
-      requestSha256: requestSha,
-      capability: 'summary',
-      entityId: options.meetingId,
-      entityRevision: Math.max(1, options.transcriptLines.length),
-      taskInputSha256: requestSha,
-    });
-    await options.onTaskSubmitted?.(taskId);
+    if (!options.force) {
+      try {
+        const existingTask = await getDeviceV2Task(taskId);
+        if (existingTask.task.input_sha256 !== requestSha) {
+          throw new Error('新版整理任务来源已变化，请重新整理。');
+        }
+        if (existingTask.task.state === 'success') {
+          const artifact = await getDeviceV2TaskArtifact(taskId);
+          const parsed = parseMeetingFactsResultV3(artifact.output);
+          if (!parsed) throw new Error('新版整理结果格式无效');
+          return meetingFactsV3ToSummary(
+            parsed,
+            options.template,
+            options.manualNote.revision,
+            options.transcriptLines,
+          );
+        }
+        if (existingTask.task.state === 'active' && existingTask.task.source_stream_id) {
+          stream = await getDeviceV2SourceStream(existingTask.task.source_stream_id);
+          await options.onTaskSubmitted?.(taskId);
+        } else if (existingTask.task.state !== 'active') {
+          // A deterministic generation that reached a terminal failure cannot
+          // be mutated or rebound. A user retry is a new explicit generation.
+          generationId = hex(await digest(`${requestSha}:${Date.now()}:${Crypto.randomUUID()}`));
+          taskId = `vnext-summary:${options.meetingId}:${generationId}`.slice(0, 480);
+        }
+      } catch (reason) {
+        if (!(reason instanceof DeviceV2ApiError && reason.status === 404)) throw reason;
+      }
+    }
+    if (!stream) {
+      const binding = await ensureRemoteMeetingServiceBinding(options.meetingId);
+      // Source stream identity must survive process death and a lost local
+      // pending pointer. A fresh random UUID made a replay of the same
+      // task/generation conflict with the server's idempotency fence.
+      const streamId = `summary-stream:${hex(await digest(taskId))}`;
+      stream = await createDeviceV2SourceStream({
+        streamId,
+        bindingId: binding.bindingId,
+        bindingGeneration: binding.bindingGeneration,
+        bindingRevision: binding.bindingRevision,
+        cancelRevision: binding.cancelRevision,
+        taskId,
+        clientOperationId: `summary-source:${taskId}`.slice(0, 180),
+        generationId,
+        requestSha256: requestSha,
+        capability: 'summary',
+        entityId: options.meetingId,
+        entityRevision: Math.max(1, options.transcriptLines.length),
+        taskInputSha256: requestSha,
+      });
+      await options.onTaskSubmitted?.(taskId);
+    }
     options.onProgress?.('preparing');
   } else {
     const resumedTask = await getDeviceV2Task(taskId);
@@ -428,7 +465,12 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       const artifact = await getDeviceV2TaskArtifact(taskId);
       const parsed = parseMeetingFactsResultV3(artifact.output);
       if (!parsed) throw new Error('新版整理结果格式无效');
-      return meetingFactsV3ToSummary(parsed, options.template, options.manualNote.revision);
+      return meetingFactsV3ToSummary(
+        parsed,
+        options.template,
+        options.manualNote.revision,
+        options.transcriptLines,
+      );
     }
     await new Promise(resolve => setTimeout(resolve, attempt++ < 4 ? 300 : 1_000));
   }

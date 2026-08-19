@@ -75,16 +75,16 @@ export async function saveMeetingFactsResultV3(
     const existing = await database.getFirstAsync<FactDocumentRow>(
       `SELECT id, meeting_id, summary_version_id, document_json
        FROM summary_fact_documents
-       WHERE meeting_id = ? AND source_fingerprint = ?
-         AND model_revision = ? AND prompt_revision = ?`,
-      meetingId,
-      result.sourceFingerprint,
-      result.modelRevision,
-      result.promptRevision,
+       WHERE id = ?`,
+      result.documentId,
     );
     if (existing) {
       const decoded = parseStoredDocument(existing);
-      if (!decoded || decoded.documentId !== result.documentId) {
+      if (
+        existing.meeting_id !== meetingId
+        || !decoded
+        || JSON.stringify(meetingFactsResultV3ToWire(decoded)) !== documentJson
+      ) {
         throw new Error('summary v3 immutable identity changed');
       }
       return;
@@ -120,13 +120,13 @@ export async function linkMeetingFactsToSummaryVersion(
       versionId,
       meetingId,
     );
-    if (!version) return false;
+    if (!version) throw new Error('summary v3 target version is unavailable');
     const row = await database.getFirstAsync<{ summary_version_id: string | null }>(
       'SELECT summary_version_id FROM summary_fact_documents WHERE id = ? AND meeting_id = ?',
       documentId,
       meetingId,
     );
-    if (!row) return false;
+    if (!row) throw new Error('summary v3 fact document is unavailable');
     if (row.summary_version_id && row.summary_version_id !== versionId) {
       throw new Error('summary v3 document is already linked to another version');
     }

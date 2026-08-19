@@ -1107,6 +1107,11 @@ def _group_snapshot(connection: Any, row: Any) -> dict[str, Any]:
         "stream_id": row["stream_id"],
         "chapter_ordinal": int(row["chapter_ordinal"]),
         "state": row["state"],
+        # Bundles are admitted contiguously from ordinal zero, so the number
+        # already persisted is also the only valid next ordinal. Expose it in
+        # every create/append/commit snapshot so a mobile client can resume
+        # after losing any response without inspecting server internals.
+        "next_bundle_ordinal": int(totals["bundle_count"]),
         "declared_bundle_count": int(row["declared_bundle_count"]),
         "declared_item_count": int(row["declared_item_count"]),
         "declared_uncompressed_bytes": int(row["declared_uncompressed_bytes"]),

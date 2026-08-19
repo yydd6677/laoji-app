@@ -13,7 +13,7 @@ import type {
   MeetingSummarySection,
   MeetingTemplate,
 } from '../domain/meeting';
-import type { MeetingSummary } from '../types';
+import type { MeetingSummary, TranscriptLine } from '../types';
 
 const FACT_TYPES = new Set<MeetingFactTypeV3>([
   'topic', 'context', 'conclusion', 'action', 'risk', 'question', 'quote', 'timeline',
@@ -177,7 +177,10 @@ export function parseMeetingFactsResultV3(value: unknown): MeetingFactsResultV3 
   const root = record(value);
   const coverage = record(root?.coverage);
   const factsDocument = parseFactsDocument(root?.facts_document);
-  const documentId = text(root?.document_id, 160);
+  // Early source-stream candidates embedded the task and manifest identities
+  // directly and produced a 161-character opaque ID.  Accept those already
+  // generated artifacts while new servers emit a compact deterministic ID.
+  const documentId = text(root?.document_id, 220);
   const meetingId = text(root?.meeting_id, 160);
   const sourceFingerprint = text(root?.source_fingerprint, 80);
   const transcriptRevision = text(root?.transcript_revision, 512);
@@ -329,6 +332,46 @@ function transcriptCitations(facts: readonly MeetingFactV3[], sectionKey: string
     });
   }));
   return citations;
+}
+
+function anchorTranscriptCitation(
+  citation: MeetingSummaryCitation,
+  transcriptLines: readonly TranscriptLine[],
+): MeetingSummaryCitation | null {
+  if (transcriptLines.length === 0) return null;
+  const requestedStart = Math.max(0, Math.round(citation.startMs));
+  const requestedEnd = Math.max(requestedStart, Math.round(citation.endMs));
+  const directId = citation.segmentId.replace(/^transcript:/, '');
+  const candidates = transcriptLines.map(line => {
+    const startMs = Math.max(0, Math.round((line.start_time ?? 0) * 1_000));
+    const endMs = Math.max(startMs, Math.round((line.end_time ?? line.start_time ?? 0) * 1_000));
+    return { line, startMs, endMs };
+  });
+  const direct = candidates.find(candidate => candidate.line.id === directId);
+  const exactStart = candidates.find(candidate => Math.abs(candidate.startMs - requestedStart) <= 2);
+  const containing = candidates
+    .filter(candidate => candidate.startMs <= requestedStart && requestedStart <= candidate.endMs)
+    .sort((left, right) => right.startMs - left.startMs)[0];
+  const anchor = direct ?? exactStart ?? containing;
+  if (!anchor) return null;
+  const startMs = Math.min(anchor.endMs, Math.max(anchor.startMs, requestedStart));
+  const endMs = Math.max(startMs, Math.min(anchor.endMs, requestedEnd));
+  return {
+    ...citation,
+    segmentId: anchor.line.id,
+    startMs,
+    endMs,
+  };
+}
+
+function anchorTranscriptCitations(
+  citations: readonly MeetingSummaryCitation[],
+  transcriptLines?: readonly TranscriptLine[],
+): MeetingSummaryCitation[] {
+  if (!transcriptLines) return [...citations];
+  return citations
+    .map(citation => anchorTranscriptCitation(citation, transcriptLines))
+    .filter((citation): citation is MeetingSummaryCitation => citation !== null);
 }
 
 function sourceLabel(source: MeetingFactSourceV3 | undefined): string | null {
@@ -539,6 +582,7 @@ export function projectMeetingFactsV3(
   result: MeetingFactsResultV3,
   template: MeetingTemplate,
   manualNoteRevision: number,
+  transcriptLines?: readonly TranscriptLine[],
 ): MeetingSummaryDocument {
   if (!TEMPLATE_IDS.has(template.id) || template.revision !== 3) {
     throw new Error('整理模板版本无效');
@@ -577,7 +621,10 @@ export function projectMeetingFactsV3(
   const factsById = new Map(document.facts.map(fact => [fact.factId, fact]));
   const actions = document.actionCandidates.map(action => {
     const fact = factsById.get(action.factId);
-    const citations = fact ? transcriptCitations([fact], `${template.id}:action:${action.actionId}`) : [];
+    const citations = anchorTranscriptCitations(
+      fact ? transcriptCitations([fact], `${template.id}:action:${action.actionId}`) : [],
+      transcriptLines,
+    );
     return {
       id: action.actionId,
       content: action.content,
@@ -611,7 +658,12 @@ export function projectMeetingFactsV3(
     supersedesVersionId: null,
     createdAtMs: Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now(),
     completedAtMs: Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now(),
-    sections: sections.filter((item): item is MeetingSummarySection => Boolean(item)),
+    sections: sections
+      .filter((item): item is MeetingSummarySection => Boolean(item))
+      .map(item => ({
+        ...item,
+        citations: anchorTranscriptCitations(item.citations, transcriptLines),
+      })),
     actionItemCandidates: actions,
   };
 }
@@ -620,8 +672,9 @@ export function meetingFactsV3ToSummary(
   result: MeetingFactsResultV3,
   template: MeetingTemplate,
   manualNoteRevision: number,
+  transcriptLines?: readonly TranscriptLine[],
 ): MeetingSummary {
-  const structured = projectMeetingFactsV3(result, template, manualNoteRevision);
+  const structured = projectMeetingFactsV3(result, template, manualNoteRevision, transcriptLines);
   return {
     id: result.documentId,
     meeting_id: result.meetingId,

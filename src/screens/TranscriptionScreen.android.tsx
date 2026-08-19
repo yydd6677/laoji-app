@@ -620,6 +620,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [transcript, setTranscript] = useState<TranscriptLine[]>(
     () => meeting ? getCachedTranscript(meeting.id) : [],
   );
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
   const [summary, setSummary] = useState(() => meeting ? meetingSummaryToText(getCachedSummary(meeting.id)) : '');
   const [summaryDocument, setSummaryDocument] = useState<MeetingSummaryDocument | null>(() => (
     meeting ? summaryDocumentFor(meeting.id, getCachedSummary(meeting.id)) : null
@@ -857,9 +859,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       current.canonicalMeetingId,
       meetingScopeKey,
     );
-    if (!currentVersion) return null;
+    if (!currentVersion) {
+      diagnosticAudit('meeting_summary_v3_projection', { status: 'missing_current_version' });
+      return null;
+    }
     const stored = await loadMeetingFactsRecordV3ForVersion(currentVersion.id);
-    if (!stored?.summaryVersionId) return null;
+    if (!stored?.summaryVersionId) {
+      diagnosticAudit('meeting_summary_v3_projection', { status: 'missing_facts_link' });
+      return null;
+    }
     const preference = requestedTemplate
       ? { templateId: requestedTemplate.id, templateRevision: 3 as const }
       : await loadSummaryViewPreference(current.canonicalMeetingId);
@@ -872,6 +880,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         stored.result,
         template,
         current.document.manualNoteRevision,
+        transcriptRef.current,
       ),
       overrides,
     );
@@ -1860,18 +1869,42 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     void transcriptLoad;
 
     const summaryRequest = beginPageRequest(meeting.id, 'summary');
+    // A canonical SQLite read is the local owner state, not a remote page
+    // response. Native page generations can advance while the database is
+    // opening (status/player/layout updates do this legitimately); rejecting
+    // the local result on that counter leaves a valid Facts V3 link hidden
+    // until the next generation. Scope and meeting identity are the only
+    // stale-response boundary for this local restore. Remote reads below keep
+    // using the stricter request token.
+    const ownsLocalSummaryRestore = () => (
+      alive
+      && routeMeetingIdRef.current === meeting.id
+      && activeMeetingScopeRef.current === meetingScopeKey
+    );
     void (async () => {
       let baselineText = cachedSummary;
       let baselineDocument = cachedSummaryDocument;
       if (meetingScopeKey) {
-        const current = await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(() => null);
-        if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+        const current = await loadCurrentMeetingSummaryState(meetingScopeKey, meeting.id).catch(reason => {
+          diagnosticAudit('meeting_summary_v3_restore', {
+            status: 'current_read_failed',
+            error_name: reason instanceof Error ? reason.name : 'unknown',
+          });
+          return null;
+        });
+        if (!ownsLocalSummaryRestore()) return;
+        if (!current) {
+          diagnosticAudit('meeting_summary_v3_restore', { status: 'current_missing' });
+        }
         if (current) {
           const v3 = await loadProjectedMeetingFactsV3(current).catch(reason => {
             diagnosticWarn('[meeting-summary-v3] restore projection failed', reason);
             return null;
           });
-          if (!alive || !isCurrentPageRequest(summaryRequest)) return;
+          if (!ownsLocalSummaryRestore()) return;
+          diagnosticAudit('meeting_summary_v3_restore', {
+            status: v3 ? 'facts_ready' : 'legacy_only',
+          });
           baselineDocument = v3?.document ?? current.document;
           baselineText = meetingSummaryDocumentToText(baselineDocument);
           setSummary(baselineText);
@@ -2768,6 +2801,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         const generatedDocument = text ? summaryDocumentFor(currentMeeting.id, generated) : null;
         if (isActiveSummaryRun()) setSummaryError('');
         let cached = false;
+        let localPersistPhase = 'facts_document';
         try {
           let v3CanonicalMeetingId: string | null = null;
           if (generated.facts_document_v3 && currentMeetingScopeKey) {
@@ -2777,12 +2811,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             );
             if (!v3CanonicalMeetingId) throw new Error('新版整理结果无法关联本机会议');
             await saveMeetingFactsResultV3(v3CanonicalMeetingId, generated.facts_document_v3);
+            localPersistPhase = 'view_preference';
             await saveSummaryViewPreference(v3CanonicalMeetingId, requestedTemplate.id);
           }
+          localPersistPhase = 'summary_projection';
           const cacheResult = await saveCachedSummary(currentMeeting.id, generated);
           cached = cacheResult.mirrorStatus !== 'stale_scope';
           if (generated.facts_document_v3 && v3CanonicalMeetingId && currentMeetingScopeKey) {
             if (cacheResult.localVersionId) {
+              localPersistPhase = 'facts_version_link';
               await linkMeetingFactsToSummaryVersion(
                 v3CanonicalMeetingId,
                 generated.facts_document_v3.documentId,
@@ -2790,6 +2827,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               );
             }
           }
+          localPersistPhase = 'projection_refresh';
           if (
             currentMeetingScopeKey
             && currentMeetingScopeKey !== 'guest'
@@ -2871,7 +2909,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               }
             }
           }
-        } catch {
+        } catch (reason) {
+          diagnosticAudit('meeting_summary_v3_local_persist', {
+            status: 'failed',
+            phase: localPersistPhase,
+            error_name: reason instanceof Error ? reason.name : 'unknown',
+          });
           if (isActiveSummaryRun()) {
             setSummary(text || '暂无整理结果');
             setSummaryDocument(generatedDocument);
@@ -3058,6 +3101,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           active.result,
           template,
           summaryDocument?.manualNoteRevision ?? manualNote.revision,
+          transcript,
         ),
         overrides,
       );
@@ -3931,6 +3975,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             activeMeetingFactsV3.result,
             template,
             summaryDocument?.manualNoteRevision ?? manualNote.revision,
+            transcript,
           ),
           overrides,
         );
@@ -4001,7 +4046,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         setSummarySectionEditorSaving(false);
       }
     }
-  }, [activeMeetingFactsV3, advancePageGenerations, manualNote.revision, meeting, meetingScopeKey, refreshCanonicalSummary, refreshSummarySyncConflicts, summaryDocument, summarySectionEditorSaving, summarySectionEditorTarget]);
+  }, [activeMeetingFactsV3, advancePageGenerations, manualNote.revision, meeting, meetingScopeKey, refreshCanonicalSummary, refreshSummarySyncConflicts, summaryDocument, summarySectionEditorSaving, summarySectionEditorTarget, transcript]);
 
   const saveSpeakerAssignment = useCallback(async (value: MeetingSpeakerAssignmentValue) => {
     const target = speakerAssignmentTarget;
@@ -6031,6 +6076,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         onClose={() => setTemplateSheetVisible(false)}
         onSelect={template => {
           setTemplateSheetVisible(false);
+          diagnosticAudit('meeting_summary_v3_template_select', {
+            mode: activeMeetingFactsV3 ? 'local_projection' : 'generation',
+            template: template.id,
+          });
           if (activeMeetingFactsV3) void switchSummaryTemplate(template);
           else void prepareSummaryGeneration(template);
         }}

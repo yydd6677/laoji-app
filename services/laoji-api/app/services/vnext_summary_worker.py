@@ -24,7 +24,8 @@ from app.services.vnext_source_stream_store import VNextSourceStreamError
 
 
 _logger = logging.getLogger(__name__)
-LEASE_SECONDS = 300
+LEASE_SECONDS = 30
+HEARTBEAT_SECONDS = 10
 SCAN_SECONDS = max(1.0, min(30.0, float(os.getenv("LAOJI_VNEXT_SUMMARY_SCAN_SECONDS", "2"))))
 HANDLER_REVISION = "summary-facts-v3-chapter-r2"
 PROVIDER_REVISION = "provider-v3-r1"
@@ -163,7 +164,7 @@ class VNextSummarySourceStreamWorker:
 
         async def heartbeat() -> None:
             while True:
-                await asyncio.sleep(20)
+                await asyncio.sleep(HEARTBEAT_SECONDS)
                 refreshed = await asyncio.to_thread(
                     vnext_task_store.claim_attempt,
                     context,

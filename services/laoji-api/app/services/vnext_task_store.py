@@ -993,11 +993,23 @@ def pending_source_stream_tasks(limit: int = 32) -> list[dict[str, str]]:
     with control_connection() as connection:
         rows = connection.execute(
             """SELECT device_id, epoch_id, task_id
-                 FROM vnext_tasks
-                WHERE state = 'active'
-                  AND source_stream_id IS NOT NULL
-                  AND capability = 'summary'
-                ORDER BY created_at, task_id
+                 FROM vnext_tasks task
+                WHERE task.state = 'active'
+                  AND task.source_stream_id IS NOT NULL
+                  AND task.capability = 'summary'
+                  AND EXISTS (
+                      SELECT 1
+                        FROM vnext_source_streams stream
+                        JOIN vnext_source_bundle_groups source_group
+                          ON source_group.stream_id = stream.stream_id
+                         AND source_group.chapter_ordinal = stream.next_consumable_chapter
+                         AND source_group.state = 'complete'
+                       WHERE stream.task_id = task.task_id
+                         AND stream.device_id = task.device_id
+                         AND stream.epoch_id = task.epoch_id
+                         AND stream.state IN ('open','consuming')
+                  )
+                ORDER BY task.created_at, task.task_id
                 LIMIT ?""",
             (bounded,),
         ).fetchall()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import uuid
 
@@ -104,7 +105,7 @@ def _chapter(ordinal: int, text: str):
 def _upload_chapter(context, stream_id: str, descriptor, item, bundle_hash):
     ordinal = descriptor["chapter_ordinal"]
     group_id = f"group-source-{stream_id}-{ordinal}"
-    source_store.create_bundle_group(
+    opened, reused = source_store.create_bundle_group(
         context,
         stream_id,
         group_id=group_id,
@@ -116,7 +117,9 @@ def _upload_chapter(context, stream_id: str, descriptor, item, bundle_hash):
         request_sha256=_fixed_hash(str((ordinal % 8) + 1)),
         now_epoch=1_100 + ordinal,
     )
-    source_store.append_bundle(
+    assert reused is False
+    assert opened["next_bundle_ordinal"] == 0
+    appended = source_store.append_bundle(
         context,
         group_id,
         bundle_id=f"bundle-source-{stream_id}-{ordinal}",
@@ -124,7 +127,10 @@ def _upload_chapter(context, stream_id: str, descriptor, item, bundle_hash):
         items=[item],
         supplied_bundle_sha256=bundle_hash,
     )
-    return source_store.commit_bundle_group(context, group_id)
+    assert appended["next_bundle_ordinal"] == 1
+    committed = source_store.commit_bundle_group(context, group_id)
+    assert committed["next_bundle_ordinal"] == 1
+    return committed
 
 
 def test_stable_source_item_id_can_be_reused_across_summary_and_question_streams(
@@ -497,6 +503,7 @@ def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monk
     assert artifact is not None
     assert artifact["output"]["facts_document"]["schema_version"] == 3
     assert artifact["output"]["meeting_id"] == "meeting-source-artifact"
+    assert re.fullmatch(r"vnext:[0-9a-f]{64}", artifact["output"]["document_id"])
     assert artifact["output"]["source_fingerprint"].startswith("sha256:")
     assert artifact["output"]["coverage"]["input_token_budget"] == 10240
     assert artifact["output"]["facts_document"]["action_candidates"]
@@ -537,6 +544,26 @@ def test_chapter_evidence_restores_time_and_source_identity_without_global_trans
     assert package.coverage["source_coverage"] == 1.0
 
 
+def test_chapter_evidence_prefers_unique_mobile_segment_identity() -> None:
+    chapter = {
+        "items": [{
+            "item_id": "transcript:local-segment-a:0",
+            "source_type": "transcript",
+            "source_id": "local-segment-a",
+            "source_revision_id": "revision-4",
+            "source_start_utf8": 0,
+            "source_end_utf8": 18,
+            "content_sha256": _hash_text("这是本机片段来源。"),
+            "content": "这是本机片段来源。",
+            "start_ms": 1_200,
+            "end_ms": 2_400,
+            "speaker": None,
+        }],
+    }
+    package = vnext_summary_chapter_pipeline.build_chapter_evidence_package(chapter)
+    assert package.sources[0].source_id == "transcript:local-segment-a"
+
+
 def test_chapter_evidence_packs_fragmented_transcript_for_verbatim_citations() -> None:
     items = []
     for index in range(40):
@@ -557,6 +584,7 @@ def test_chapter_evidence_packs_fragmented_transcript_for_verbatim_citations() -
     package = vnext_summary_chapter_pipeline.build_chapter_evidence_package({"items": items})
     assert 1 < len(package.sources) < len(items)
     assert package.sources[0].source_id.startswith("transcript:")
+    assert "stable-line-0" in package.sources[0].source_id
     assert "第0个连续字幕片段 第1个连续字幕片段" in package.sources[0].text
     assert package.sources[0].start_ms == 0
     assert package.sources[0].end_ms is not None

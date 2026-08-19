@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with GPU ASR/recovery evidence but exit gates open; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with GPU ASR/recovery evidence but exit gates open; Stage 3 source-stream/Facts-V3 artifact and emulator-5562 restore/template/citation vertical plus Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。

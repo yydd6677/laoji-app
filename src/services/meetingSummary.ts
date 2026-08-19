@@ -584,7 +584,12 @@ async function generateDeviceMeetingSummaryV3(options: {
       && recovered.sourceFingerprint === expectedSourceFingerprint
       && (!expectedModelRevision || recovered.modelRevision === expectedModelRevision)
       && (!expectedPromptRevision || recovered.promptRevision === expectedPromptRevision)) {
-      return meetingFactsV3ToSummary(recovered, options.template, options.manualNote.revision);
+      return meetingFactsV3ToSummary(
+        recovered,
+        options.template,
+        options.manualNote.revision,
+        options.transcriptLines,
+      );
     }
     taskId = await submit();
     status = await waitForTask(
@@ -615,7 +620,12 @@ async function generateDeviceMeetingSummaryV3(options: {
   const result = (matchesExpected(remoteResult) ? remoteResult : null)
     ?? (matchesExpected(statusResult) ? statusResult : null);
   if (!result) throw new Error('设备整理服务返回的新版结果格式无效');
-  return meetingFactsV3ToSummary(result, options.template, options.manualNote.revision);
+  return meetingFactsV3ToSummary(
+    result,
+    options.template,
+    options.manualNote.revision,
+    options.transcriptLines,
+  );
 }
 
 async function generateDeviceMeetingSummary(options: {
@@ -631,6 +641,15 @@ async function generateDeviceMeetingSummary(options: {
   onProgress?: MeetingSummaryProgressListener;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
+  // The source-stream candidate is a complete device-v2 transport and task
+  // owner. Do not probe device-v1 before entering it: a restored candidate
+  // database may intentionally contain no legacy v1 device registration, and
+  // probing v1 here can both reject a valid v2 device and route the same
+  // generation to the legacy summary owner. The v3 source-stream path performs
+  // its own fail-closed device-v2 capability check.
+  if (getFeatureFlags().meetingSummarySourceStreamCandidate) {
+    return generateDeviceMeetingSummaryV3(options);
+  }
   const capabilities = await loadDeviceServiceCapabilities().catch(() => null);
   if (capabilities?.summaryContractV3) return generateDeviceMeetingSummaryV3(options);
   if (options.attachmentAuthorization) throw new DeviceMeetingUnavailableError();

@@ -40,6 +40,11 @@ async def test_summary_worker_processes_one_chapter_without_creating_a_second_ow
     assert calls[0]["provider_revision"] == worker_module.PROVIDER_REVISION
 
 
+def test_summary_worker_lease_meets_restart_recovery_budget() -> None:
+    assert worker_module.LEASE_SECONDS == 30
+    assert 0 < worker_module.HEARTBEAT_SECONDS < worker_module.LEASE_SECONDS
+
+
 @pytest.mark.asyncio
 async def test_disabled_summary_worker_does_not_start(monkeypatch):
     monkeypatch.setenv("LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED", "0")

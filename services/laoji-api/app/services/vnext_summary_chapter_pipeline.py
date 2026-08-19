@@ -61,10 +61,20 @@ def _artifact(
         checkpoint.covered_topic_groups / max(1, checkpoint.topic_groups),
         6,
     )
+    # ``task_id`` is intentionally allowed to carry a descriptive capability,
+    # meeting identity, and generation identity.  Embedding that unbounded wire
+    # identifier in ``document_id`` made the Android/server contract depend on
+    # incidental task-name length (the first real device artifact was 161
+    # characters while the mobile document contract allowed 160).  The
+    # document identity is opaque, so derive a compact deterministic ID from
+    # the same immutable task and source-manifest fence instead.
+    document_identity = hashlib.sha256(
+        f"{task['task_id']}\0{stream['source_manifest_sha256']}".encode("utf-8")
+    ).hexdigest()
     return {
         "schema_version": 3,
         "contract_revision": ARTIFACT_CONTRACT_REVISION,
-        "document_id": f"vnext:{task['task_id']}:{stream['source_manifest_sha256']}",
+        "document_id": f"vnext:{document_identity}",
         "meeting_id": str(task["entity_id"]),
         "source_fingerprint": str(stream["source_manifest_sha256"]),
         "transcript_revision": str(task["input_sha256"]),
@@ -107,11 +117,27 @@ def build_chapter_evidence_package(chapter: dict[str, Any]) -> EvidencePackage:
         for item in raw_items
         if str(item.get("source_type") or "") == "transcript"
     ]
+    transcript_source_id_counts: dict[str, int] = {}
+    for item in transcript_items:
+        source_id = str(item.get("source_id") or "").strip()
+        if source_id:
+            transcript_source_id_counts[source_id] = (
+                transcript_source_id_counts.get(source_id, 0) + 1
+            )
     transcript_sources = normalize_transcript_evidence_sources([
         {
-            # item_id is unique within the immutable source stream while
-            # source_id may intentionally identify the whole recording.
-            "id": item.get("item_id") or item.get("source_id"),
+            # Prefer the mobile transcript row identity when it is unique, so
+            # short evidence sources remain directly addressable by Android.
+            # Generic source streams may use one recording-level source_id for
+            # many byte ranges; those retain their unique immutable item_id.
+            "id": (
+                item.get("source_id")
+                if transcript_source_id_counts.get(
+                    str(item.get("source_id") or "").strip(),
+                    0,
+                ) == 1
+                else item.get("item_id") or item.get("source_id")
+            ),
             "text": item.get("content"),
             "start_ms": item.get("start_ms"),
             "end_ms": item.get("end_ms"),

@@ -73,6 +73,7 @@ GPU1、PCB、Smart Meeting 和其他用户服务未修改。
   已达到 40 facts 上限，需人工确认是否存在过度抽取。
 - 两条样本各产生一个 action candidate，尚未完成“已完成、否定、纯提问、宏观目标不
   得成为可日程候选”的人工行动质量门。
-- 尚未完成 Android `emulator-5562` 的 Facts V3 本地表、四模板即时投影、引用跳转、
-  重启恢复和旧结果迁移纵向验收。
+- Android `emulator-5562` 的 Facts V3 本地表、四模板本地投影、引用跳转和重启恢复已完成
+  候选纵向回放，详见 `ANDROID-SOURCE-STREAM-VERTICAL-20260820.md`；旧结果后台迁移、
+  Q2 Android 纵向和人工质量门仍未完成。
 - capability barrier 仍未登记；旧 Summary V2/Q0 reader 仍必须保留。

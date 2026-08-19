@@ -45,6 +45,7 @@ import { mediaGenerationAndTrashVNext } from './0044MediaGenerationAndTrashVNext
 import { scheduleMentionGraphVNext } from './0045ScheduleMentionGraphVNext';
 import { deviceUploadExecutorV46 } from './0046DeviceUploadExecutor';
 import { transcriptStableIdentityV47 } from './0047TranscriptStableIdentity';
+import { summaryFactsGenerationsV48 } from './0048SummaryFactsGenerations';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -95,6 +96,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   scheduleMentionGraphVNext,
   deviceUploadExecutorV46,
   transcriptStableIdentityV47,
+  summaryFactsGenerationsV48,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -147,4 +149,5 @@ export {
 } from './0045ScheduleMentionGraphVNext';
 export { DEVICE_UPLOAD_EXECUTOR_V46_SQL } from './0046DeviceUploadExecutor';
 export { TRANSCRIPT_STABLE_IDENTITY_V47_SQL } from './0047TranscriptStableIdentity';
+export { SUMMARY_FACTS_GENERATIONS_V48_SQL } from './0048SummaryFactsGenerations';
 export type { MeetingDatabaseMigration } from './types';
