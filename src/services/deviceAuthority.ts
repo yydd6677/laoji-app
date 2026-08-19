@@ -4,6 +4,7 @@ import {
   createMeetingServiceBinding,
   ensureDeviceEpoch,
   getMeetingServiceBinding,
+  listActiveMeetingServiceBindingsThrough,
   type MeetingServiceBinding,
 } from '../data/repositories/vnext/deviceAuthorityRepository';
 import { openMeetingDatabase } from '../data/db/openDatabase';
@@ -72,7 +73,35 @@ export async function ensureRemoteMeetingServiceBinding(
   meetingId: string,
 ): Promise<MeetingServiceBinding> {
   diagnosticAudit('device_binding_remote_start', {});
-  const binding = await ensureLocalMeetingServiceBinding(meetingId);
+  const target = await ensureLocalMeetingServiceBinding(meetingId);
+  return enqueueBindingRegistration(async () => {
+    const prefix = await listActiveMeetingServiceBindingsThrough({
+      epochId: target.deviceEpochId,
+      bindingEpochSeq: target.bindingEpochSeq,
+    });
+    if (!prefix.some(binding => binding.bindingId === target.bindingId)) {
+      diagnosticAudit('device_binding_remote_error', { error_code: 'binding_prefix_incomplete' });
+      throw new Error('会议服务连接序列不完整');
+    }
+    for (const binding of prefix) {
+      await registerRemoteMeetingServiceBinding(binding, binding.bindingId === target.bindingId);
+    }
+    return target;
+  });
+}
+
+let bindingRegistrationQueue: Promise<void> = Promise.resolve();
+
+function enqueueBindingRegistration<T>(operation: () => Promise<T>): Promise<T> {
+  const result = bindingRegistrationQueue.then(operation, operation);
+  bindingRegistrationQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function registerRemoteMeetingServiceBinding(
+  binding: MeetingServiceBinding,
+  target: boolean,
+): Promise<void> {
   const purgeCapability = await preparePurgeCapability(
     'binding',
     binding.deviceEpochId,
@@ -126,7 +155,9 @@ export async function ensureRemoteMeetingServiceBinding(
     diagnosticAudit('device_binding_remote_error', { error_code: 'binding_confirmation_mismatch' });
     throw new Error('会议服务连接确认不一致');
   }
-  diagnosticAudit('device_binding_remote_ready', {});
+  diagnosticAudit('device_binding_remote_ready', {
+    sequence_backfill: !target,
+    binding_epoch_seq: binding.bindingEpochSeq,
+  });
   markPurgeCapabilityArmed(purgeCapability.capabilityId);
-  return binding;
 }

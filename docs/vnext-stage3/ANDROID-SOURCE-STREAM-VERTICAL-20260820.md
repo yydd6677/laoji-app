@@ -66,7 +66,8 @@ Smart Meeting、真机或公网流量。
 - 仍缺更新后全部会议样本和 24 组基线的独立人工盲审，不能声称 Facts 支持率、行动质量或
   Q2 回答/引用相关性达到 95%。
 - Q2 当前会议 direct-reader 的提交、失败重试、引用跳转和重启恢复已完成，详见
-  `Q2-ANDROID-VERTICAL-20260820.md`；长来源流和笔记来源的 Android 纵向仍未完成。
+  `Q2-ANDROID-VERTICAL-20260820.md`；后续长来源流、当前笔记来源和冷启动引用定位也已
+  完成，详见 `Q2-ANDROID-LONG-SOURCE-20260820.md`。
 - 旧结果后台迁移、一个完整公开零 v1 流量周期、capability barrier 与旧 reader 停写仍未
   完成。
 - Stage 2 的纯 CPU ASR 首段和 RTF 性能门未通过，资源边界仍阻止全局候选采用。

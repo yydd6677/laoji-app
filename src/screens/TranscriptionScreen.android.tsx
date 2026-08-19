@@ -3357,7 +3357,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return next;
     });
     setActiveTab(target);
-  }, [route.params.actionFocusRequestId, route.params.focus, route.params.meetingId]);
+  }, [
+    route.params.actionFocusRequestId,
+    route.params.focus,
+    route.params.meetingId,
+    route.params.transcriptFocusRequestId,
+  ]);
 
   const briefSummary = useMemo(
     () => briefGreetingSummaryText(transcript),
@@ -5111,9 +5116,26 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [accessToken, actionShareBusyId, actionShareTarget, meeting, meetingScopeKey, showDialog]);
 
   const openQuestionCitation = useCallback((target: MeetingQuestionCitationTarget) => {
-    if (target.meetingId !== meeting?.id) return;
+    // This callback can be created before the asynchronous meetings owner has
+    // hydrated `meeting`.  Gate against the stable navigation identity rather
+    // than capturing that transient value; otherwise a valid citation closes
+    // the sheet but is silently ignored after a cold start.
+    if (target.meetingId !== route.params.meetingId) return;
     const requestId = Date.now();
+    const selectCitationTab = (tab: MinutesDetailTab) => {
+      setTabGeneration(value => {
+        const next = value + 1;
+        tabOwnerRef.current.accept({
+          meetingId: target.meetingId,
+          tab,
+          generation: next,
+        });
+        return next;
+      });
+      setActiveTab(tab);
+    };
     if (target.kind === 'transcript') {
+      selectCitationTab('transcript');
       navigation.setParams({
         focus: 'transcript',
         segmentId: target.segmentId,
@@ -5123,6 +5145,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return;
     }
     if (target.kind === 'summary') {
+      selectCitationTab('summary');
       navigation.setParams({
         focus: 'summary',
         actionId: undefined,
@@ -5130,12 +5153,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       });
       return;
     }
+    selectCitationTab('notes');
     navigation.setParams({
       focus: 'notes',
       actionId: undefined,
       actionFocusRequestId: requestId,
     });
-  }, [navigation]);
+  }, [navigation, route.params.meetingId]);
 
   function retryProcessingStage(stage: MinutesProcessingStage): void {
     if (!meeting || !processingStageCanRetry(processingStatuses, stage)) {

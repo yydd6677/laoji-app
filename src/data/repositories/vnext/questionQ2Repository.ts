@@ -2,6 +2,9 @@ import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../../db/op
 
 export type Q2SourceType = 'transcript' | 'manual_note' | 'attachment';
 export type Q2AnswerKind = 'answer' | 'not_stated' | 'cannot_confirm';
+// source.stream.v2 accepts this many immutable items. A long meeting can have
+// thousands of short stable transcript fragments even when its text is small.
+export const MAX_Q2_SNAPSHOT_SOURCES = 50_000;
 
 export interface Q2SnapshotSource {
   sourceType: Q2SourceType;
@@ -294,7 +297,9 @@ export async function createQ2Snapshot(input: {
   const transcriptRevisionId = identifier(input.transcriptRevisionId, 'transcriptRevisionId');
   const sourceFingerprint = sha256(input.sourceFingerprint, 'sourceFingerprint');
   const createdAtMs = nonNegative(input.createdAtMs ?? Date.now(), 'createdAtMs');
-  if (input.sources.length < 1 || input.sources.length > 256) throw new Error('Q2 来源数量无效');
+  if (input.sources.length < 1 || input.sources.length > MAX_Q2_SNAPSHOT_SOURCES) {
+    throw new Error('Q2 来源数量无效');
+  }
   const sources = input.sources.map(source => ({
     sourceType: source.sourceType,
     sourceId: identifier(source.sourceId, 'sourceId'),
@@ -509,6 +514,13 @@ export async function commitQ2Turn(input: {
     for (let clauseOrdinal = 0; clauseOrdinal < input.clauses.length; clauseOrdinal += 1) {
       const clause = input.clauses[clauseOrdinal];
       const clauseId = identifier(clause.clauseId, 'clauseId');
+      // Provider clause/citation IDs are scoped only to one response and are
+      // commonly reused as c1/cite1. The local schema uses global primary
+      // keys, so namespace them by the immutable turn before persistence.
+      const persistedClauseId = identifier(
+        `q2-clause:${turnId}:${clauseOrdinal}:${clauseId}`,
+        'persistedClauseId',
+      );
       const answerStart = nonNegative(clause.answerStartUtf8, 'answerStartUtf8');
       const answerEnd = nonNegative(clause.answerEndUtf8, 'answerEndUtf8');
       if (answerEnd < answerStart) throw new Error('Q2 分句范围无效');
@@ -519,7 +531,7 @@ export async function commitQ2Turn(input: {
         `INSERT INTO meeting_question_q2_clauses (
            clause_id, turn_id, ordinal, answer_start_utf8, answer_end_utf8
          ) VALUES (?, ?, ?, ?, ?)`,
-        clauseId,
+        persistedClauseId,
         turnId,
         clauseOrdinal,
         answerStart,
@@ -527,6 +539,11 @@ export async function commitQ2Turn(input: {
       );
       for (let citationOrdinal = 0; citationOrdinal < clause.citations.length; citationOrdinal += 1) {
         const citation = clause.citations[citationOrdinal];
+        const citationId = identifier(citation.citationId, 'citationId');
+        const persistedCitationId = identifier(
+          `q2-citation:${turnId}:${clauseOrdinal}:${citationOrdinal}:${citationId}`,
+          'persistedCitationId',
+        );
         const sourceStart = nonNegative(citation.sourceStartUtf8, 'sourceStartUtf8');
         const sourceEnd = nonNegative(citation.sourceEndUtf8, 'sourceEndUtf8');
         if (sourceEnd < sourceStart) throw new Error('Q2 引用范围无效');
@@ -551,8 +568,8 @@ export async function commitQ2Turn(input: {
              citation_id, clause_id, ordinal, source_type, source_id, source_revision_id,
              content_sha256, source_start_utf8, source_end_utf8, quote_sha256
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          identifier(citation.citationId, 'citationId'),
-          clauseId,
+          persistedCitationId,
+          persistedClauseId,
           citationOrdinal,
           citation.sourceType,
           identifier(citation.sourceId, 'sourceId'),

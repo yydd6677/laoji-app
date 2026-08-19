@@ -49,6 +49,10 @@ _HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONFLICT_FINAL_QUERY = re.compile(r"(?:最终|成交|确定|定下来|以哪个为准).*(?:日期|时间|哪天|价格|报价|多少钱|金额)|(?:日期|时间|哪天|价格|报价|多少钱|金额).*(?:最终|成交|确定|定下来|以哪个为准)")
 _DATE_VALUE = re.compile(r"(?:\d{1,4}\s*[年/月日号]|[一二三四五六七八九十百]+\s*[月日号])")
 _PRICE_VALUE = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:元|万元|万|块)|[一二三四五六七八九十百]+\s*(?:元|万元|万|块))")
+_FACT_VALUE = re.compile(
+    r"\d+(?:\.\d+)?(?:\s*(?:%|％|亿元|万元|万|亿|元|人|位|个|次|天|日|号|月|年))?",
+    re.IGNORECASE,
+)
 
 
 class Q2ReaderError(RuntimeError):
@@ -363,6 +367,131 @@ def _citation_supports_text(question: str, clause: str, quote: str) -> bool:
     answer_terms = _support_terms(clause)
     question_terms = _support_terms(question)
     return bool(quote_terms & answer_terms or quote_terms & question_terms)
+
+
+def _fact_values(value: str) -> set[str]:
+    """Extract literal quantitative claims that must be present in evidence.
+
+    This is a grounding check, not an answer rule: values are taken only from
+    the model's answer and verified against exact current-source text.
+    """
+    return {re.sub(r"\s+", "", match.group(0)) for match in _FACT_VALUE.finditer(value)}
+
+
+def _lexical_terms(value: str) -> set[str]:
+    return {term for term in _support_terms(value) if not re.search(r"\d", term)}
+
+
+def _quote_window(source_text: str, value: str) -> tuple[int, int, str] | None:
+    compact_characters: list[str] = []
+    original_indexes: list[int] = []
+    for index, character in enumerate(source_text):
+        if character.isspace():
+            continue
+        compact_characters.append(character)
+        original_indexes.append(index)
+    compact_text = "".join(compact_characters)
+    compact_position = compact_text.find(re.sub(r"\s+", "", value))
+    if compact_position < 0:
+        return None
+    value_end = compact_position + len(re.sub(r"\s+", "", value)) - 1
+    if value_end >= len(original_indexes):
+        return None
+    position = original_indexes[compact_position]
+    original_value_end = original_indexes[value_end] + 1
+    start_character = max(0, position - 120)
+    end_character = min(len(source_text), original_value_end + 120)
+    if end_character - start_character > 600:
+        end_character = start_character + 600
+    quote = source_text[start_character:end_character]
+    start_utf8 = len(source_text[:start_character].encode("utf-8"))
+    end_utf8 = start_utf8 + len(quote.encode("utf-8"))
+    return start_utf8, end_utf8, quote
+
+
+def _ground_quantitative_citations(
+    question: str,
+    clause_text: str,
+    sources: list[dict[str, Any]],
+    citations: list[dict[str, Any]],
+    clause_index: int,
+) -> list[dict[str, Any]]:
+    """Require every answer value to have an exact, semantically linked quote.
+
+    Providers sometimes cite a nearby sentence with a different percentage.
+    Such a quote is exact but does not support the answer. Remove conflicting
+    numeric citations, then deterministically add only a current-source quote
+    that contains the missing value and at least two shared lexical terms.
+    Existing citation proximity breaks ties so split adjacent ASR segments can
+    ground one statement without guessing across the meeting.
+    """
+    answer_values = _fact_values(clause_text)
+    if not answer_values:
+        return citations
+    filtered = [
+        citation
+        for citation in citations
+        if not _fact_values(citation["quote"])
+        or bool(_fact_values(citation["quote"]) & answer_values)
+    ]
+    source_index = {
+        (source["source_id"], source["content_sha256"]): index
+        for index, source in enumerate(sources)
+    }
+    anchor_indexes = [
+        source_index[(citation["source_id"], citation["content_sha256"])]
+        for citation in filtered
+        if (citation["source_id"], citation["content_sha256"]) in source_index
+    ]
+    lexical = _lexical_terms(f"{question} {clause_text}")
+    for value in sorted(answer_values):
+        if any(value in re.sub(r"\s+", "", citation["quote"]) for citation in filtered):
+            continue
+        candidates: list[tuple[int, int, int, dict[str, Any], tuple[int, int, str]]] = []
+        for index, source in enumerate(sources):
+            compact_text = re.sub(r"\s+", "", source["text"])
+            if value not in compact_text:
+                continue
+            overlap = len(lexical & _lexical_terms(source["text"]))
+            if overlap < 2:
+                continue
+            distances = [
+                abs(index - anchor)
+                for anchor in anchor_indexes
+                if sources[anchor]["source_type"] == source["source_type"]
+                and sources[anchor]["source_revision_id"] == source["source_revision_id"]
+            ]
+            # A numeric claim split across ASR rows may be grounded by an
+            # adjacent source.  A matching number elsewhere in a long meeting
+            # is not interchangeable evidence, even when it shares generic
+            # terms such as "比例". Fail closed instead of crossing topics.
+            if anchor_indexes and (not distances or min(distances) > 3):
+                continue
+            distance = min(distances, default=0)
+            window = _quote_window(source["text"], value)
+            if window is not None:
+                candidates.append((-distance, overlap, -index, source, window))
+        if not candidates:
+            raise Q2ReaderError("Q2_GROUNDING_INVALID", "回答中的数字缺少逐字依据", 502)
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        best = candidates[0]
+        if len(candidates) > 1 and candidates[1][:3] == best[:3]:
+            raise Q2ReaderError("Q2_GROUNDING_INVALID", "回答中的数字存在多处无法区分的依据", 502)
+        _, _, _, source, (start_utf8, end_utf8, quote) = best
+        start_utf8 += int(source.get("source_start_utf8") or 0)
+        end_utf8 += int(source.get("source_start_utf8") or 0)
+        filtered.append({
+            "citation_id": f"cite-{clause_index + 1}-ground-{len(filtered) + 1}",
+            "source_type": source["source_type"],
+            "source_id": source["source_id"],
+            "source_revision_id": source["source_revision_id"],
+            "content_sha256": source["content_sha256"],
+            "source_start_utf8": start_utf8,
+            "source_end_utf8": end_utf8,
+            "quote": quote,
+        })
+        anchor_indexes.append(source_index[(source["source_id"], source["content_sha256"])])
+    return filtered[:8]
 
 
 def _source_payload(
@@ -834,9 +963,23 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             if citation_key not in clause_citations:
                 clause_citations.add(citation_key)
                 citations.append(normalized_citation)
+        citations = _ground_quantitative_citations(
+            question,
+            clause_text,
+            sources,
+            citations,
+            clause_index,
+        )
+        for citation in citations:
+            citation_key = (
+                citation["source_id"],
+                citation["source_start_utf8"],
+                citation["source_end_utf8"],
+                citation["quote"],
+            )
             if citation_key not in seen_citations:
                 seen_citations.add(citation_key)
-                canonical_citations.append(normalized_citation)
+                canonical_citations.append(citation)
         if not citations and _is_absence_clause(clause_text) and canonical_citations:
             # Do not expose a clause that has no positive source citation. The
             # answer is collapsed to one server-owned span after validation,

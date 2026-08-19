@@ -157,6 +157,35 @@ export async function getMeetingServiceBinding(meetingId: string): Promise<Meeti
   ));
 }
 
+/**
+ * Returns the client-owned binding prefix in its registration order. A local
+ * binding can be allocated before any remote feature needs it; later remote
+ * registration must backfill that prefix instead of skipping sequence values.
+ */
+export async function listActiveMeetingServiceBindingsThrough(input: {
+  epochId: string;
+  bindingEpochSeq: number;
+}): Promise<readonly MeetingServiceBinding[]> {
+  const epochId = required(input.epochId, 'epochId');
+  if (!Number.isSafeInteger(input.bindingEpochSeq) || input.bindingEpochSeq < 1) {
+    throw new Error('binding epoch sequence is invalid');
+  }
+  const rows = await (await openMeetingDatabase()).getAllAsync<BindingRow>(
+    `SELECT meeting_id, device_epoch_id, binding_id, binding_generation, binding_epoch_seq,
+            binding_revision, state, cancel_revision, created_at_ms, updated_at_ms
+       FROM meeting_service_bindings
+      WHERE device_epoch_id = ? AND binding_epoch_seq <= ? AND state = 'active'
+      ORDER BY binding_epoch_seq, binding_id`,
+    epochId,
+    input.bindingEpochSeq,
+  );
+  return rows.map(row => {
+    const binding = bindingFromRow(row);
+    if (!binding) throw new Error('stored meeting binding is invalid');
+    return binding;
+  });
+}
+
 export interface CreateMeetingServiceBindingInput {
   meetingId: string;
   bindingId: string;

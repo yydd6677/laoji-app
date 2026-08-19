@@ -1174,8 +1174,12 @@ def append_bundle(
             "item_id": item_id,
             "storage_item_id": _storage_item_id(bundle_id, item_id),
             "source_type": source_type,
-            "source_id": _safe(str(raw.get("source_id") or ""), "source_id", 180),
-            "source_revision_id": _safe(str(raw.get("source_revision_id") or ""), "source_revision_id", 180),
+            # Source identities are opaque owner handles. Android stable
+            # transcript identities can exceed the 180-character transport
+            # alias bound, and both SourceBundleItemV2 and the Q2 reader expose
+            # the shared 512-character source boundary.
+            "source_id": _safe(str(raw.get("source_id") or ""), "source_id", 512),
+            "source_revision_id": _safe(str(raw.get("source_revision_id") or ""), "source_revision_id", 512),
             "source_start_utf8": start,
             "source_end_utf8": end,
             "content_sha256": content_hash,

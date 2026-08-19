@@ -1,4 +1,5 @@
 import {
+  getDeviceV2Task,
   DeviceV2SourceStreamUnavailableError,
   appendDeviceV2SourceBundle,
   appendDeviceV2SourceManifestPage,
@@ -7,8 +8,9 @@ import {
   createDeviceV2SourceStream,
   type SourceStreamSourceType,
 } from './deviceV2SourceStream';
-import { deviceV2Request, loadDeviceV2Capabilities } from './deviceV2Api';
+import { DeviceV2ApiError, deviceV2Request, loadDeviceV2Capabilities } from './deviceV2Api';
 import { ensureRemoteMeetingServiceBinding } from './deviceAuthority';
+import { RequestTimeoutError } from './http';
 import type {
   Q2CandidateProvider,
   Q2CandidateProviderRequest,
@@ -18,7 +20,10 @@ import * as Crypto from 'expo-crypto';
 
 export const Q2_READER_PROVIDER_REVISION = 'q2-reader-v1';
 const LONG_SOURCE_CHAR_THRESHOLD = 40_000;
+const MAX_DIRECT_SOURCE_ITEMS = 1_024;
 const MAX_STREAM_BUNDLES = 8;
+const Q2_TASK_RECOVERY_TIMEOUT_MS = 120_000;
+const Q2_TASK_POLL_INTERVAL_MS = 1_000;
 
 function required(value: unknown, field: string, maximum = 512): string {
   if (typeof value !== 'string') throw new Error(`${field}无效`);
@@ -84,13 +89,62 @@ async function digest(value: unknown): Promise<string> {
   return `sha256:${hash.toLowerCase()}`;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function recoverTimedOutQuestionTask(
+  taskId: string,
+  request: Q2CandidateProviderRequest,
+): Promise<Q2CandidateProviderResponse> {
+  const deadline = Date.now() + Q2_TASK_RECOVERY_TIMEOUT_MS;
+  let lastError: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      const snapshot = await getDeviceV2Task(taskId);
+      if (snapshot.task.capability !== 'question' || snapshot.task.input_sha256 !== request.sourceFingerprint) {
+        throw new DeviceV2ApiError('会议问答任务来源不匹配', 409, 'Q2_TASK_FENCE_INVALID');
+      }
+      if (snapshot.task.state === 'success') {
+        if (!snapshot.task.result || typeof snapshot.task.result !== 'object' || Array.isArray(snapshot.task.result)) {
+          throw new DeviceV2ApiError('会议问答任务结果无效', 502, 'Q2_TASK_RESULT_INVALID');
+        }
+        return normalizeResponse(snapshot.task.result, request);
+      }
+      if (snapshot.task.state === 'failure' || snapshot.task.state === 'cancelled') {
+        throw new DeviceV2ApiError(
+          snapshot.task.state === 'cancelled' ? '会议问答任务已取消' : '会议问答任务失败',
+          409,
+          snapshot.task.error_code ?? 'Q2_TASK_FAILED',
+        );
+      }
+      lastError = null;
+    } catch (error) {
+      if (error instanceof DeviceV2ApiError && error.status >= 400 && error.status < 500) throw error;
+      lastError = error;
+    }
+    await delay(Q2_TASK_POLL_INTERVAL_MS);
+  }
+  if (lastError instanceof Error) throw lastError;
+  throw new DeviceV2ApiError('会议问答仍在处理中，请稍后重试', 504, 'Q2_TASK_TIMEOUT');
+}
+
 async function streamLongSources(
   request: Q2CandidateProviderRequest,
   binding: Awaited<ReturnType<typeof ensureRemoteMeetingServiceBinding>>,
 ): Promise<{ taskId: string; streamId: string }> {
-  const seed = request.operationId ?? `${request.snapshotId}:${request.sourceFingerprint.slice(-20)}`;
-  const taskId = `q2-task:${seed}`;
-  const streamId = `q2-source-stream:${seed}`;
+  // Android operation IDs deliberately retain their full predecessor lineage,
+  // so they are valid business identities but can exceed transport bounds.
+  // Derive compact, deterministic source-stream handles without truncating or
+  // weakening the full operation identity used by the local durable task.
+  const transportDigest = await digest({
+    operation_id: request.operationId ?? null,
+    snapshot_id: request.snapshotId,
+    source_fingerprint: request.sourceFingerprint,
+  });
+  const transportSeed = transportDigest.slice('sha256:'.length);
+  const taskId = `q2-task:${transportSeed}`;
+  const streamId = `q2-source-stream:${transportSeed}`;
   const items = request.sources.map((source, index) => {
     const contentBytes = new TextEncoder().encode(source.text).byteLength;
     return {
@@ -144,8 +198,8 @@ async function streamLongSources(
     cancelRevision: binding.cancelRevision,
     taskId,
     streamId,
-    clientOperationId: request.operationId ?? streamId,
-    generationId: `${seed}:generation`,
+    clientOperationId: `q2-operation:${transportSeed}`,
+    generationId: `q2-generation:${transportSeed}`,
     requestSha256: request.sourceFingerprint,
     taskInputSha256: request.sourceFingerprint,
     capability: 'question',
@@ -210,32 +264,45 @@ export class DeviceQ2CandidateProvider implements Q2CandidateProvider {
     if (!capabilities.questionReaderV2) throw new DeviceV2SourceStreamUnavailableError();
     const binding = await ensureRemoteMeetingServiceBinding(request.meetingId);
     const shouldStream = request.sources.length > 0
-      && request.sources.reduce((total, source) => total + source.text.length, 0) > LONG_SOURCE_CHAR_THRESHOLD;
-    if (shouldStream && capabilities.sourceStreamV2) {
-      const stream = await streamLongSources(request, binding);
-      const value = await deviceV2Request<any>(
-        `/meetings/${encodeURIComponent(binding.bindingId)}/questions-v2`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schema_version: 2,
-            contract_revision: 'question.reader.v2',
-            provider_revision: request.providerRevision,
-            snapshot_id: request.snapshotId,
-            source_fingerprint: request.sourceFingerprint,
-            question: request.question,
-            binding_generation: binding.bindingGeneration,
-            binding_revision: binding.bindingRevision,
-            cancel_revision: binding.cancelRevision,
-            task_id: stream.taskId,
-            source_stream_id: stream.streamId,
-            sources: [],
-          }),
-        },
-        '会议问答服务暂时不可用',
+      && (
+        request.sources.length > MAX_DIRECT_SOURCE_ITEMS
+        || request.sources.reduce((total, source) => total + source.text.length, 0) > LONG_SOURCE_CHAR_THRESHOLD
       );
-      return normalizeResponse(value, request);
+    if (shouldStream) {
+      if (!capabilities.sourceStreamV2) throw new DeviceV2SourceStreamUnavailableError();
+      const stream = await streamLongSources(request, binding);
+      try {
+        const value = await deviceV2Request<any>(
+          `/meetings/${encodeURIComponent(binding.bindingId)}/questions-v2`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schema_version: 2,
+              contract_revision: 'question.reader.v2',
+              provider_revision: request.providerRevision,
+              snapshot_id: request.snapshotId,
+              source_fingerprint: request.sourceFingerprint,
+              question: request.question,
+              binding_generation: binding.bindingGeneration,
+              binding_revision: binding.bindingRevision,
+              cancel_revision: binding.cancelRevision,
+              task_id: stream.taskId,
+              source_stream_id: stream.streamId,
+              sources: [],
+            }),
+          },
+          '会议问答服务暂时不可用',
+        );
+        return normalizeResponse(value, request);
+      } catch (error) {
+        // The server owns a durable task before it starts the reader. A long
+        // meeting can outlive the ordinary mobile HTTP deadline; recover the
+        // same task instead of creating a second model call or losing a result
+        // that the server commits after the socket closes.
+        if (!(error instanceof RequestTimeoutError)) throw error;
+        return recoverTimedOutQuestionTask(stream.taskId, request);
+      }
     }
     const value = await deviceV2Request<any>(
       `/meetings/${encodeURIComponent(binding.bindingId)}/questions-v2`,

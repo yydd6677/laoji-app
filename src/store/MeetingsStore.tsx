@@ -3279,7 +3279,16 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           const fastProjectionPromise = buildCanonicalMeetingListProjection(
             sqliteMeetingNoteRepository,
             scope,
-          ).catch(() => null);
+          ).catch(error => {
+            diagnosticWarn('[meeting-db] fast root projection failed', error);
+            diagnosticAudit('meeting_start_fast_projection', {
+              elapsed_ms: Math.max(0, Date.now() - rootsStartedAtMs),
+              meetings: 0,
+              status: 'failed',
+              error_code: error instanceof Error ? error.name : 'UnknownError',
+            });
+            return null;
+          });
           // Do not make the first render wait for SQLite open/migrations. The
           // canonical list is adopted as soon as it is ready, while the rest
           // of the scope continues through the normal hydration path.

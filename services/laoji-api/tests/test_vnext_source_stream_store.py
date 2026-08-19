@@ -98,12 +98,18 @@ def _create_stream(context, generation, *, suffix="1", capability="summary", now
     )
 
 
-def _chapter(ordinal: int, text: str):
+def _chapter(
+    ordinal: int,
+    text: str,
+    *,
+    source_id: str = "transcript-source-1",
+    source_revision_id: str = "transcript-revision-1",
+):
     item = {
         "item_id": f"item-source-{ordinal}",
         "source_type": "transcript",
-        "source_id": "transcript-source-1",
-        "source_revision_id": "transcript-revision-1",
+        "source_id": source_id,
+        "source_revision_id": source_revision_id,
         "source_start_utf8": 0,
         "source_end_utf8": len(text.encode("utf-8")),
         "content_sha256": _hash_text(text),
@@ -200,6 +206,42 @@ def test_stable_source_item_id_can_be_reused_across_summary_and_question_streams
     question_source = source_store.load_question_source_stream(context, question["stream_id"])
     assert question_source is not None
     assert question_source["sources"][0]["text"] == item["content"]
+
+
+def test_question_stream_persists_android_source_identity_over_180_chars(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(
+        context,
+        generation,
+        suffix="long-source-identity",
+        capability="question",
+    )
+    source_id = "transcript:" + "a" * 194
+    source_revision_id = "revision:" + "b" * 194
+    item, bundle_hash, descriptor = _chapter(
+        0,
+        "管理公司持股百分之六十五，合作方持股百分之三十五。",
+        source_id=source_id,
+        source_revision_id=source_revision_id,
+    )
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    _upload_chapter(context, stream["stream_id"], descriptor, item, bundle_hash)
+
+    loaded = source_store.load_question_source_stream(context, stream["stream_id"])
+    assert loaded is not None
+    assert loaded["sources"][0]["source_id"] == source_id
+    assert loaded["sources"][0]["source_revision_id"] == source_revision_id
 
 
 def _verified_document(chapter: dict) -> dict:

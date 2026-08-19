@@ -161,6 +161,150 @@ def test_reader_preserves_android_stable_source_identity_over_180_chars(monkeypa
     assert citation["source_revision_id"] == source_revision_id
 
 
+def test_reader_replaces_conflicting_percentage_with_exact_entity_evidence(monkeypatch):
+    texts = [
+        "管理公司中方占35%",
+        "华特迪士尼占65%",
+        "华特迪士尼在另一家公司占44%",
+    ]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(texts)]
+    payload = {
+        "schema_version": 2,
+        "contract_revision": reader.CONTRACT_REVISION,
+        "provider_revision": reader.PROVIDER_REVISION,
+        "snapshot_id": "q2-percentage-grounding",
+        "source_fingerprint": reader._source_fingerprint(sources),
+        "question": "管理公司最后讨论到的股权比例是多少？",
+        "sources": sources,
+    }
+    answer = "管理公司最后确定中方占35%，华特迪士尼占65%。"
+    monkeypatch.setattr(reader, "canonical_ollama_base_url", lambda: "http://127.0.0.1:21434")
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(
+        reader,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps({
+            "answer_kind": "answer",
+            "answer": answer,
+            "clauses": [{
+                "clause_id": "c1",
+                "answer_start_utf8": 0,
+                "answer_end_utf8": len(answer.encode("utf-8")),
+                "citations": [{
+                    "citation_id": "cite-1",
+                    "source_id": "s0",
+                    "source_start_utf8": 0,
+                    "source_end_utf8": len(texts[0].encode("utf-8")),
+                    "quote": texts[0],
+                }, {
+                    "citation_id": "cite-2",
+                    "source_id": "s2",
+                    "source_start_utf8": 0,
+                    "source_end_utf8": len(texts[2].encode("utf-8")),
+                    "quote": texts[2],
+                }],
+            }],
+        }, ensure_ascii=False),
+    )
+
+    result = reader.read_q2(payload)
+
+    quotes = [citation["quote"] for citation in result["clauses"][0]["citations"]]
+    assert texts[0] in quotes
+    assert texts[1] in quotes
+    assert texts[2] not in quotes
+
+
+def test_quantitative_grounding_prefers_adjacent_context_over_distant_overlap() -> None:
+    texts = [
+        "目标主体甲方占35%",
+        "目标主体乙方占65%",
+        "中间的其他讨论",
+        "又一段无关讨论",
+        "另一主体占到65%的股权比例",
+    ]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(texts)]
+    citations = [{
+        "citation_id": "cite-1",
+        "source_type": "transcript",
+        "source_id": "line-0",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(texts[0]),
+        "source_start_utf8": 0,
+        "source_end_utf8": len(texts[0].encode("utf-8")),
+        "quote": texts[0],
+    }]
+
+    grounded = reader._ground_quantitative_citations(
+        "目标主体最后的股权比例是多少？",
+        "目标主体甲方占35%，乙方占65%。",
+        sources,
+        citations,
+        0,
+    )
+
+    quotes = [citation["quote"] for citation in grounded]
+    assert texts[1] in quotes
+    assert texts[4] not in quotes
+
+
+def test_quantitative_grounding_rejects_distant_same_value() -> None:
+    texts = [
+        "目标主体甲方占35%",
+        "第一段无关内容",
+        "第二段无关内容",
+        "第三段无关内容",
+        "另一主体乙方占65%的股权比例",
+    ]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(texts)]
+    citations = [{
+        "citation_id": "cite-1",
+        "source_type": "transcript",
+        "source_id": "line-0",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(texts[0]),
+        "source_start_utf8": 0,
+        "source_end_utf8": len(texts[0].encode("utf-8")),
+        "quote": texts[0],
+    }]
+
+    with pytest.raises(reader.Q2ReaderError, match="数字缺少逐字依据"):
+        reader._ground_quantitative_citations(
+            "目标主体最后的股权比例是多少？",
+            "目标主体甲方占35%，乙方占65%。",
+            sources,
+            citations,
+            0,
+        )
+
+
+def test_quote_window_accepts_whitespace_inside_numeric_value() -> None:
+    source = "目标主体乙方占 65 %，其余内容不变。"
+
+    window = reader._quote_window(source, "65%")
+
+    assert window is not None
+    assert "65 %" in window[2]
+
+
 def test_verified_fragment_stream_is_packed_only_for_retrieval() -> None:
     raw = []
     offset = 0

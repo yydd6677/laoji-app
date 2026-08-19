@@ -361,7 +361,10 @@ export async function appendDeviceV2SourceBundle(input: {
   if (bundle.items.length < 1 || bundle.items.length > MAX_BUNDLE_ITEMS) throw new Error('来源条目数量无效');
   const items = bundle.items.map(item => ({
     item_id: id(item.item_id, 'item_id', 180), source_type: item.source_type,
-    source_id: id(item.source_id, 'source_id', 180), source_revision_id: id(item.source_revision_id, 'source_revision_id', 180),
+    // Stable Android transcript identities are opaque owner handles and can
+    // legitimately exceed the short transport alias bound. Keep this aligned
+    // with SourceBundleItemV2 and the Q2 reader contract.
+    source_id: id(item.source_id, 'source_id', 512), source_revision_id: id(item.source_revision_id, 'source_revision_id', 512),
     source_start_utf8: nonNegativeInteger(item.source_start_utf8, 'source_start_utf8'),
     source_end_utf8: nonNegativeInteger(item.source_end_utf8, 'source_end_utf8'), content_sha256: sha256(item.content_sha256, 'content_sha256'),
     content: contentText(item.content, 'content', 16 * 1024 * 1024),

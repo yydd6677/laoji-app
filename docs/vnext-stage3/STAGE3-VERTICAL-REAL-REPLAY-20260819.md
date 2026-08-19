@@ -77,5 +77,6 @@ GPU1、PCB、Smart Meeting 和其他用户服务未修改。
   候选纵向回放，详见 `ANDROID-SOURCE-STREAM-VERTICAL-20260820.md`；旧结果后台迁移、
   人工质量门仍未完成。
 - Q2 Android 当前会议 direct-reader 的失败重试、引用展开/跳转、负向无引用回答和重启恢复
-  已完成，详见 `Q2-ANDROID-VERTICAL-20260820.md`；Android 长来源流和笔记来源纵向仍缺失。
+  已完成，详见 `Q2-ANDROID-VERTICAL-20260820.md`；Android 长来源流、当前笔记、定量
+  引用和冷启动定位也已完成，详见 `Q2-ANDROID-LONG-SOURCE-20260820.md`。
 - capability barrier 仍未登记；旧 Summary V2/Q0 reader 仍必须保留。
