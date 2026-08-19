@@ -1106,6 +1106,15 @@ Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开
 p95。8/8/4 输出限额实验因 9 组 holdout 仅 8/9 已拒绝并回退。详见
 `docs/vnext-stage3/SUMMARY-V3-LATENCY-BATCH64-20260820.md`。
 
+随后 r14 将仅供 provider 使用的响应改为 `f1..f12/r1..r16/a1..a6` 固定槽位，事实 ID、来源类型、
+逐字引用、哈希和行动正文由服务器确定性展开；Ollama 尝试越界槽位时立即停止，解析器只重建停止前
+完整对象。单个可选槽位错误不再触发整场修复，首个必需事实错误仍失败关闭。同一 Android 长会任务
+总时长为 34.53 秒，模型一次调用、617 tokens、`done_reason=stop`；最终 9 组跨主题字幕窗口均一次
+调用通过，p50 7.883 秒、最大 12.549 秒。详见
+`docs/vnext-stage3/SUMMARY-V3-BOUNDED-SLOTS-20260820.md` 和
+`docs/vnext-stage3/facts-v3-r14-slots-final-20260820.json`。小样本结构门和单次长会仍不等于 98%
+总体 Schema 合法率、p95 延迟或 95% 人工事实/行动质量，Stage 3 继续保持未采用。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

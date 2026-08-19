@@ -92,8 +92,36 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
     assert direct["prompt_eval_count"] == direct["cumulative_prompt_eval_count"] == 1_024
     assert direct["eval_count"] == direct["cumulative_eval_count"] == 256
     assert direct["call_count"] == 1
+    assert direct["output_string_count"] == 0
+    assert direct["output_max_string_chars"] == 0
     assert "模型结果" not in repr(direct)
+
+
+def test_json_output_shape_is_numeric_and_does_not_retain_values():
+    value = '{"facts":[{"fact_id":"f1","content":"内部会议正文","sources":[{"source_id":"transcript:t0"}]}]}'
+    shape = llm_provider._json_output_shape(value)
+
+    assert shape["output_fact_id_fields"] == 1
+    assert shape["output_source_id_fields"] == 1
+    assert shape["output_content_fields"] == 1
+    assert shape["output_string_count"] == 8
+    assert shape["output_max_nesting"] == 5
+    assert shape["output_compact_fact_slots"] == 0
+    assert "内部会议正文" not in repr(shape)
     llm_provider._reset_inference_telemetry_for_tests()
+
+
+def test_json_output_shape_counts_only_compact_slot_keys():
+    value = (
+        '{"v":3,"facts":{"f1":{"content":"事实"},"f2":{"content":"另一事实"}},'
+        '"relations":{"r1":{"from_fact":"f1","to_fact":"f2"}},'
+        '"actions":{"a1":{"fact":"f1"}}}'
+    )
+    shape = llm_provider._json_output_shape(value)
+
+    assert shape["output_compact_fact_slots"] == 2
+    assert shape["output_compact_relation_slots"] == 1
+    assert shape["output_compact_action_slots"] == 1
 
 
 def test_invalid_ollama_fallback_port_is_rejected(monkeypatch):

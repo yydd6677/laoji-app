@@ -1230,16 +1230,176 @@ def test_ollama_schema_is_complete_and_has_no_unresolved_references():
 
 def test_generation_schema_caps_single_call_output_without_changing_document_contract():
     schema = summary_v3_generator._generation_response_schema()
-    assert "overview" not in schema["properties"]
-    assert "overview" not in schema["required"]
-    source_schema = schema["properties"]["facts"]["items"]["properties"]["sources"]["items"]
-    assert "quote" not in source_schema["properties"]
-    assert "content_hash" not in source_schema["properties"]
-    assert source_schema["required"] == ["source_id", "source_type"]
-    assert schema["properties"]["facts"]["maxItems"] == 12
-    assert schema["properties"]["relations"]["maxItems"] == 16
-    assert schema["properties"]["action_candidates"]["maxItems"] == 6
+    assert schema["required"] == ["v", "facts", "relations", "actions"]
+    assert schema["additionalProperties"] is False
+    facts = schema["properties"]["facts"]
+    assert facts["additionalProperties"] is False
+    assert facts["required"] == ["f1"]
+    assert list(facts["properties"]) == [f"f{index}" for index in range(1, 13)]
+    first_fact = facts["properties"]["f1"]
+    assert first_fact["required"] == ["type", "state", "content", "source_1"]
+    assert "quote" not in first_fact["properties"]
+    assert "source_type" not in first_fact["properties"]
+    assert "fact_id" not in first_fact["properties"]
+    assert list(schema["properties"]["relations"]["properties"]) == [
+        f"r{index}" for index in range(1, 17)
+    ]
+    assert list(schema["properties"]["actions"]["properties"]) == [
+        f"a{index}" for index in range(1, 7)
+    ]
+    assert schema["properties"]["actions"]["properties"]["a1"]["required"] == ["fact"]
+    assert "maxItems" not in json.dumps(schema, ensure_ascii=False)
     assert model_response_json_schema()["properties"]["facts"]["maxItems"] == 40
+
+
+def test_compact_provider_response_expands_immutable_source_fields(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "timeline",
+                "state": "uncertain",
+                "content": "截止时间需要会后确认",
+                "source_1": second.model_source_id,
+            },
+        },
+        "relations": {
+            "r1": {"type": "depends_on", "from_fact": "f1", "to_fact": "f2"},
+        },
+        "actions": {
+            "a1": {"fact": "f1", "owner": "林清", "due": "明天下午", "fit": "high"},
+        },
+    }
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(compact, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1", "f2"]
+    assert response.facts[0].sources[0].source_type == first.source_type
+    assert response.facts[0].sources[0].quote == first.text
+    assert response.facts[0].sources[0].content_hash is None
+    assert response.action_candidates[0].content == response.facts[0].content
+    assert response.overview.fact_ids == ["f1", "f2"]
+
+
+def test_compact_action_without_fit_uses_conservative_projection(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {"a1": {"fact": "f1", "owner": "林清", "due": "明天下午"}},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.action_candidates[0].schedule_fit == "medium"
+
+
+def test_invalid_optional_compact_fact_does_not_spend_repair_call(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "已讨论界面复核安排",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "not-a-fact-type",
+                "state": "uncertain",
+                "content": "截止时间需要会后确认",
+                "source_1": second.model_source_id,
+            },
+        },
+        "relations": {
+            "r1": {"type": "depends_on", "from_fact": "f1", "to_fact": "f2"},
+        },
+        "actions": {},
+    }
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(compact, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.relations == []
+
+
+def test_nested_limit_stop_recovers_only_complete_fact_slots():
+    raw = (
+        '{"v":3,"facts":{'
+        '"f1":{"type":"context","state":"confirmed","content":"第一条事实",'
+        '"source_1":"transcript:t0"},'
+        '"f2":{"type":"risk","state":"uncertain","content":"第二条事实",'
+        '"source_1":"transcript:t1"},'
+    )
+
+    recovered = json.loads(summary_v3_generator._recover_compact_root_prefix(raw))
+
+    assert recovered == {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "第一条事实",
+                "source_1": "transcript:t0",
+            },
+            "f2": {
+                "type": "risk",
+                "state": "uncertain",
+                "content": "第二条事实",
+                "source_1": "transcript:t1",
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+
+
+def test_nested_limit_stop_does_not_recover_incomplete_first_fact():
+    raw = '{"v":3,"facts":{"f1":{"type":"context","content":"未闭合'
+
+    assert summary_v3_generator._recover_compact_root_prefix(raw) == raw
 
 
 def test_truncated_root_array_repair_discards_only_incomplete_relation():

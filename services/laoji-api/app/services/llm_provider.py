@@ -237,6 +237,63 @@ def _bounded_nonnegative_int(value: Any) -> int | None:
     return integer if 0 <= integer <= 9_007_199_254_740_991 else None
 
 
+def _json_output_shape(value: str) -> dict[str, int]:
+    """Describe JSON response shape numerically without retaining string data."""
+    in_string = False
+    escaped = False
+    string_length = 0
+    string_count = 0
+    total_string_chars = 0
+    max_string_chars = 0
+    depth = 0
+    max_depth = 0
+    for character in value:
+        if in_string:
+            if escaped:
+                escaped = False
+                string_length += 1
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+                string_count += 1
+                total_string_chars += string_length
+                max_string_chars = max(max_string_chars, string_length)
+                string_length = 0
+            else:
+                string_length += 1
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            max_depth = max(max_depth, depth)
+        elif character in "]}":
+            depth = max(0, depth - 1)
+    return {
+        "output_whitespace_chars": sum(character.isspace() for character in value),
+        "output_newline_chars": value.count("\n") + value.count("\r"),
+        "output_string_count": string_count,
+        "output_total_string_chars": total_string_chars,
+        "output_max_string_chars": max_string_chars,
+        "output_max_nesting": max_depth,
+        "output_fact_id_fields": value.count('"fact_id"'),
+        "output_source_id_fields": value.count('"source_id"'),
+        "output_relation_type_fields": value.count('"relation_type"'),
+        "output_action_id_fields": value.count('"action_id"'),
+        "output_content_fields": value.count('"content"'),
+        "output_compact_fact_slots": sum(
+            value.count(f'"f{index}":') for index in range(1, 13)
+        ),
+        "output_compact_relation_slots": sum(
+            value.count(f'"r{index}":') for index in range(1, 17)
+        ),
+        "output_compact_action_slots": sum(
+            value.count(f'"a{index}":') for index in range(1, 7)
+        ),
+    }
+
+
 def _record_inference_telemetry(
     operation: str | None,
     *,
@@ -251,6 +308,8 @@ def _record_inference_telemetry(
         "completed_at_epoch_ms": round(time.time() * 1000),
         "output_bytes": len(output_text.encode("utf-8")),
     }
+    if output_text:
+        snapshot.update(_json_output_shape(output_text))
     if provider == "ollama":
         for field in (
             "total_duration",
@@ -286,6 +345,19 @@ def _record_inference_telemetry(
             "prompt_tokens",
             "completion_tokens",
             "total_tokens",
+            "output_whitespace_chars",
+            "output_newline_chars",
+            "output_string_count",
+            "output_total_string_chars",
+            "output_max_nesting",
+            "output_fact_id_fields",
+            "output_source_id_fields",
+            "output_relation_type_fields",
+            "output_action_id_fields",
+            "output_content_fields",
+            "output_compact_fact_slots",
+            "output_compact_relation_slots",
+            "output_compact_action_slots",
         ):
             current = snapshot.get(field)
             if isinstance(current, int):

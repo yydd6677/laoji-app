@@ -16,6 +16,10 @@ from pydantic import ValidationError
 
 from app.schemas.meeting_facts_v3 import (
     ActionCandidateV3,
+    CompactMeetingFactsModelResponseV3,
+    CompactModelActionV3,
+    CompactModelFactV3,
+    CompactModelRelationV3,
     FactRelationV3,
     MeetingFactV3,
     MeetingFactsDocumentV3,
@@ -24,7 +28,6 @@ from app.schemas.meeting_facts_v3 import (
     OverviewV3,
     PROMPT_REVISION,
     SourceReferenceV3,
-    model_response_json_schema,
 )
 from app.services.llm_provider import (
     GENERATION_MODEL,
@@ -136,54 +139,90 @@ def _system_prompt() -> str:
 
 
 def _generation_response_schema() -> dict[str, Any]:
-    """Use a bounded output contract so a long meeting cannot truncate JSON.
+    """Return a provider-only fixed-slot schema.
 
-    The persisted Facts V3 document supports 40 facts, 48 relations and 10
-    action candidates.  A single model call has a fixed output budget,
-    however, so asking the provider for those maxima encourages it to emit a
-    relation fan-out until the JSON is cut off.  Generation is deliberately
-    stricter; chapter merging and later generations still use the full
-    persisted limits.
+    Some local structured-output grammars validate item shape but ignore
+    ``maxItems``.  A long meeting then emits an unbounded facts array until
+    ``num_predict`` is exhausted.  Finite object properties plus
+    ``additionalProperties=false`` make the cardinality a grammar property,
+    not a request that the model may disregard.  The server expands this DTO
+    into the unchanged public Facts V3 Pydantic contract.
     """
-    schema = deepcopy(model_response_json_schema())
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
-    # Overview is a deterministic projection of verified facts. Ollama's
-    # grammar currently ignores JSON Schema maxLength; allowing overview as
-    # the first generated string let a model consume the entire output budget
-    # before emitting any fact. Keep it out of the provider contract and add
-    # it back before Pydantic/source verification.
-    properties.pop("overview", None)
-    required = schema.get("required")
-    if isinstance(required, list):
-        schema["required"] = [field for field in required if field != "overview"]
-    try:
-        source_items = properties["facts"]["items"]["properties"]["sources"]["items"]
-        source_properties = source_items["properties"]
-        source_required = source_items["required"]
-    except (KeyError, TypeError):
-        raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
-    # The model selects immutable source aliases; the server owns verbatim
-    # quote materialization. Copying evidence through the model wastes output
-    # tokens and is less reliable than resolving the alias against the exact
-    # immutable package.
-    source_properties.pop("quote", None)
-    source_properties.pop("content_hash", None)
-    source_items["required"] = [
-        field for field in source_required if field not in {"quote", "content_hash"}
-    ]
-    limits = {
-        "facts": _GENERATION_FACT_LIMIT,
-        "relations": _GENERATION_RELATION_LIMIT,
-        "action_candidates": _GENERATION_ACTION_LIMIT,
+    source_id = {
+        "type": "string",
+        "pattern": r"^(?:transcript|manual_note|attachment):[A-Za-z0-9._:-]{1,180}$",
     }
-    for field, limit in limits.items():
-        definition = properties.get(field)
-        if not isinstance(definition, dict):
-            raise SummaryV3GenerationError("SUMMARY_V3_SCHEMA_INVALID")
-        definition["maxItems"] = limit
-    return schema
+    fact = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": [
+                    "topic", "context", "conclusion", "action", "risk",
+                    "question", "quote", "timeline",
+                ],
+            },
+            "state": {
+                "type": "string",
+                "enum": ["confirmed", "proposed", "uncertain", "negated", "completed"],
+            },
+            "content": {"type": "string", "minLength": 1, "maxLength": 500},
+            "source_1": deepcopy(source_id),
+            "source_2": deepcopy(source_id),
+            "source_3": deepcopy(source_id),
+        },
+        "required": ["type", "state", "content", "source_1"],
+    }
+    relation = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["supports", "contradicts", "precedes", "depends_on", "alternative"],
+            },
+            "from_fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+            "to_fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+        },
+        "required": ["type", "from_fact", "to_fact"],
+    }
+    action = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+            "owner": {"type": ["string", "null"], "maxLength": 80},
+            "due": {"type": ["string", "null"], "maxLength": 120},
+            "fit": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "required": ["fact"],
+    }
+
+    def slots(prefix: str, count: int, item: dict[str, Any], *, require_first: bool) -> dict[str, Any]:
+        result = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                f"{prefix}{index}": deepcopy(item)
+                for index in range(1, count + 1)
+            },
+        }
+        if require_first:
+            result["required"] = [f"{prefix}1"]
+        return result
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "v": {"type": "integer", "const": 3},
+            "facts": slots("f", _GENERATION_FACT_LIMIT, fact, require_first=True),
+            "relations": slots("r", _GENERATION_RELATION_LIMIT, relation, require_first=False),
+            "actions": slots("a", _GENERATION_ACTION_LIMIT, action, require_first=False),
+        },
+        "required": ["v", "facts", "relations", "actions"],
+    }
 
 
 def _extract_object(raw: str) -> Any:
@@ -191,6 +230,95 @@ def _extract_object(raw: str) -> Any:
     if not value:
         raise ValueError("empty_response")
     return json.loads(value)
+
+
+def _recover_compact_root_prefix(raw: str) -> str:
+    """Rebuild complete nested fact slots before a provider limit stop.
+
+    Ollama may honor the value type but continue with ``f13`` after the last
+    allowed fact. The request stops immediately before that key, leaving the
+    ``facts`` and root objects open. ``JSONDecoder.raw_decode`` walks only
+    complete fact objects and then reconstructs empty optional relation/action
+    containers. It never edits source text or a completed fact field.
+    """
+    value = raw.strip()
+    if not value.startswith("{"):
+        return raw
+    decoder = json.JSONDecoder()
+    index = 1
+    root_values: dict[str, Any] = {}
+    for expected_key in ("v", "facts"):
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            key, key_end = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            return raw
+        if key != expected_key:
+            return raw
+        index = key_end
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ":":
+            return raw
+        index += 1
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if expected_key == "v":
+            try:
+                item, index = decoder.raw_decode(value, index)
+            except json.JSONDecodeError:
+                return raw
+            root_values["v"] = item
+        elif index >= len(value) or value[index] != "{":
+            return raw
+        else:
+            index += 1
+            break
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ",":
+            return raw
+        index += 1
+
+    facts: dict[str, Any] = {}
+    allowed = {f"f{item}" for item in range(1, _GENERATION_FACT_LIMIT + 1)}
+    while index < len(value):
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            key, key_end = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(key, str) or key not in allowed or key in facts:
+            break
+        index = key_end
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ":":
+            break
+        index += 1
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            item, index = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(item, dict):
+            break
+        facts[key] = item
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ",":
+            break
+        index += 1
+    if root_values.get("v") != 3 or "f1" not in facts:
+        return raw
+    return json.dumps(
+        {"v": 3, "facts": facts, "relations": {}, "actions": {}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def _repair_truncated_root_arrays(raw: str) -> str:
@@ -431,6 +559,158 @@ def _sanitize_model_value(
     return value
 
 
+def _slot_number(value: str) -> int:
+    try:
+        return int(value[1:])
+    except (TypeError, ValueError):
+        return 1_000_000
+
+
+def _sanitize_compact_value(value: Any) -> Any:
+    """Drop malformed optional slots without repairing the whole document.
+
+    The public protocol already drops an individual fact whose citation is
+    invalid. Applying the same loss-bounded rule to a provider-only optional
+    slot prevents one bad enum in ``f7`` or one incomplete relation from
+    spending a second full generation. ``f1`` is never dropped: if the first
+    required fact is malformed, normal overall repair remains mandatory.
+    """
+    if not isinstance(value, dict) or not isinstance(value.get("facts"), dict):
+        return value
+    sanitized = dict(value)
+    facts: dict[str, Any] = {}
+    for slot, item in value["facts"].items():
+        try:
+            parsed = CompactModelFactV3.model_validate(item)
+        except (TypeError, ValueError, ValidationError):
+            if slot == "f1":
+                facts[slot] = item
+            continue
+        facts[slot] = parsed.model_dump(mode="json")
+    sanitized["facts"] = facts
+
+    relations: dict[str, Any] = {}
+    relation_items = (
+        (value.get("relations") or {}).items()
+        if isinstance(value.get("relations"), dict)
+        else ()
+    )
+    for slot, item in relation_items:
+        try:
+            parsed = CompactModelRelationV3.model_validate(item)
+        except (TypeError, ValueError, ValidationError):
+            continue
+        relations[slot] = parsed.model_dump(mode="json")
+    sanitized["relations"] = relations
+
+    actions: dict[str, Any] = {}
+    action_items = (
+        (value.get("actions") or {}).items()
+        if isinstance(value.get("actions"), dict)
+        else ()
+    )
+    for slot, item in action_items:
+        try:
+            parsed = CompactModelActionV3.model_validate(item)
+        except (TypeError, ValueError, ValidationError):
+            continue
+        actions[slot] = parsed.model_dump(mode="json")
+    sanitized["actions"] = actions
+    return sanitized
+
+
+def _expand_compact_model_response(
+    response: CompactMeetingFactsModelResponseV3,
+    package: EvidencePackage,
+) -> MeetingFactsModelResponseV3:
+    """Expand the bounded provider DTO into the public model contract.
+
+    Source type, quote and content hash are immutable evidence properties, so
+    accepting model copies of them adds tokens and disagreement modes without
+    adding information.  Facts with an unknown or oversized source are
+    removed here, and dangling relations/actions are removed with them.  This
+    is the same fail-closed individual-citation behavior used by the verbose
+    compatibility parser and does not spend the optional repair call.
+    """
+    source_map = package.source_map()
+    facts: list[dict[str, Any]] = []
+    retained: dict[str, dict[str, Any]] = {}
+    for fact_id, fact in sorted(response.facts.items(), key=lambda item: _slot_number(item[0])):
+        source_ids = [fact.source_1, fact.source_2, fact.source_3]
+        sources: list[dict[str, Any]] = []
+        invalid_source = False
+        for source_id in (value for value in source_ids if value is not None):
+            source = source_map.get(source_id)
+            if source is None or len(source.text) > 600:
+                invalid_source = True
+                break
+            sources.append({
+                "source_id": source_id,
+                "source_type": source.source_type,
+                "quote": source.text,
+            })
+        if invalid_source or not sources:
+            continue
+        value = {
+            "fact_id": fact_id,
+            "fact_type": fact.type,
+            "certainty": fact.state,
+            "content": fact.content,
+            "sources": sources,
+        }
+        retained[fact_id] = value
+        facts.append(value)
+    overview = _project_model_overview(facts)
+    if overview is None:
+        raise ValueError("compact_facts_empty_after_source_validation")
+
+    relations = [
+        {
+            "relation_type": relation.type,
+            "from_fact_id": relation.from_fact,
+            "to_fact_id": relation.to_fact,
+        }
+        for _relation_id, relation in sorted(
+            response.relations.items(),
+            key=lambda item: _slot_number(item[0]),
+        )
+        if relation.from_fact in retained
+        and relation.to_fact in retained
+        and relation.from_fact != relation.to_fact
+    ]
+    actions = [
+        {
+            "action_id": action_id,
+            "fact_id": action.fact,
+            # Action content is the source-backed action fact.  Asking the
+            # model to repeat it created a second text that could disagree.
+            "content": retained[action.fact]["content"],
+            "owner": action.owner,
+            "due_text": action.due,
+            # Missing provider fit never becomes calendar-ready by default.
+            # The fact state is already a model semantic decision and gives a
+            # deterministic conservative projection without a repair call.
+            "schedule_fit": action.fit or (
+                "low"
+                if retained[action.fact]["certainty"] in {"proposed", "uncertain"}
+                else "medium"
+            ),
+        }
+        for action_id, action in sorted(
+            response.actions.items(),
+            key=lambda item: _slot_number(item[0]),
+        )
+        if action.fact in retained
+    ]
+    return MeetingFactsModelResponseV3.model_validate({
+        "schema_version": 3,
+        "overview": overview,
+        "facts": facts,
+        "relations": relations,
+        "action_candidates": actions,
+    })
+
+
 def _validate_model_response(
     raw: str,
     package: EvidencePackage | None = None,
@@ -443,7 +723,20 @@ def _validate_model_response(
     the single repair attempt; all other structural and enum errors still go
     through the normal repair path.
     """
-    value = _sanitize_model_value(_extract_object(raw), package)
+    extracted = _extract_object(raw)
+    if (
+        package is not None
+        and isinstance(extracted, dict)
+        and "v" in extracted
+    ):
+        compact = CompactMeetingFactsModelResponseV3.model_validate(
+            _sanitize_compact_value(extracted)
+        )
+        return _expand_compact_model_response(compact, package)
+    # Keep the verbose parser for immutable historical fixtures and rolling
+    # compatibility during the candidate cycle.  The production schema and
+    # prompt expose only the bounded compact DTO.
+    value = _sanitize_model_value(extracted, package)
     if isinstance(value, dict) and isinstance(value.get("relations"), list):
         value["relations"] = [
             relation
@@ -487,21 +780,19 @@ def _call_model(
         repair_guidance: list[str] = []
         if "json_invalid" in error_types:
             repair_guidance.append(
-                "上次对象可能未闭合或被截断；减少重复背景事实，事实最多 12 条、行动最多 6 条，"
-                "确保 facts 数组先用 ] 闭合后再输出 relations，并在输出预算内完整闭合 JSON。"
+                "上次对象可能未闭合；减少重复背景事实，完整闭合 facts、relations、actions；"
+                "写完 f12 后必须结束 facts，不得创建 f13。"
             )
         if "literal_error" in error_types:
             repair_guidance.append("存在枚举值错误；所有枚举必须逐字选自字段契约。")
         if any(path.endswith(".fact_type") for path in error_paths):
             repair_guidance.append(
-                "fact_type 只能表示语义类别：topic/context/conclusion/action/risk/"
-                "question/quote/timeline；proposed 等状态只能写入 certainty。"
+                "facts 槽位中的 type 只能表示语义类别；proposed 等状态只能写入 state。"
             )
         if "missing" in error_types or "extra_forbidden" in error_types:
             repair_guidance.append(
-                "丢弃任何通用摘要字段。根对象必须且只能使用 schema_version、"
-                "facts、relations、action_candidates，并以"
-                '{"schema_version":3,"facts": 开始。'
+                "丢弃任何通用摘要字段。根对象必须且只能使用 v、facts、relations、actions，"
+                "并以" '{"v":3,"facts":{"f1":' "开始。"
             )
         prompt += (
             "\n\n上一次响应没有通过结构协议。根据原证据包重新生成完整对象。"
@@ -515,7 +806,14 @@ def _call_model(
         json.dumps(package.model_payload(), ensure_ascii=False, separators=(",", ":")),
         timeout=600,
         max_tokens=4096,
-        options={"temperature": 0, "num_ctx": 16_384, "num_predict": 4096},
+        options={
+            "temperature": 0,
+            "num_ctx": 16_384,
+            "num_predict": 4096,
+            # These strings can only occur as an out-of-contract slot key or
+            # slot reference; quotes inside content are escaped and cannot match.
+            "stop": ['"f13"', '"r17"', '"a7"'],
+        },
         response_format=_generation_response_schema(),
         priority="background",
         telemetry_operation=operation,
@@ -527,6 +825,12 @@ def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModel
     try:
         return _validate_model_response(raw, package), 1
     except (ValueError, TypeError, ValidationError) as first_error:
+        compact = _recover_compact_root_prefix(raw)
+        if compact != raw:
+            try:
+                return _validate_model_response(compact, package), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
         # A delimiter-only repair is deterministic and does not spend the
         # optional model repair attempt.  It remains fail-closed because the
         # full schema validator runs immediately afterwards.

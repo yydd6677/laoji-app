@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 SCHEMA_VERSION = 3
-PROMPT_REVISION = "facts-v3-r9"
+PROMPT_REVISION = "facts-v3-r14"
 
 FactId = Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")]
 Sha256 = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -39,6 +39,15 @@ RelationType = Literal[
     "alternative",
 ]
 ScheduleFit = Literal["high", "medium", "low"]
+CompactFactSlot = Literal[
+    "f1", "f2", "f3", "f4", "f5", "f6",
+    "f7", "f8", "f9", "f10", "f11", "f12",
+]
+CompactRelationSlot = Literal[
+    "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8",
+    "r9", "r10", "r11", "r12", "r13", "r14", "r15", "r16",
+]
+CompactActionSlot = Literal["a1", "a2", "a3", "a4", "a5", "a6"]
 
 _HTML_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
 _MARKDOWN_BLOCK = re.compile(
@@ -172,6 +181,74 @@ class ModelActionCandidateV3(V3Model):
 
 class ActionCandidateV3(ModelActionCandidateV3):
     evidence_score: float = Field(ge=0, le=1)
+
+
+class CompactModelFactV3(V3Model):
+    """Bounded provider-only representation expanded by the server.
+
+    The public Facts V3 contract stays descriptive and immutable.  This
+    inference DTO deliberately omits model-generated ids, source types,
+    quotes and hashes because all of them are already owned by the evidence
+    package.  Fixed root slots prevent providers which ignore ``maxItems``
+    from emitting facts until the output window is exhausted.
+    """
+
+    type: FactType
+    state: Certainty
+    content: str = Field(min_length=1, max_length=500)
+    source_1: SourceId
+    source_2: SourceId | None = None
+    source_3: SourceId | None = None
+
+    _validate_content = field_validator("content")(_plain_text)
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "CompactModelFactV3":
+        values = [self.source_1, self.source_2, self.source_3]
+        selected = [value for value in values if value is not None]
+        if len(set(selected)) != len(selected):
+            raise ValueError("compact_fact_sources_not_unique")
+        if self.source_3 is not None and self.source_2 is None:
+            raise ValueError("compact_fact_source_gap")
+        return self
+
+
+class CompactModelRelationV3(V3Model):
+    type: RelationType
+    from_fact: CompactFactSlot
+    to_fact: CompactFactSlot
+
+
+class CompactModelActionV3(V3Model):
+    fact: CompactFactSlot
+    owner: str | None = Field(default=None, max_length=80)
+    due: str | None = Field(default=None, max_length=120)
+    fit: ScheduleFit | None = None
+
+    _validate_owner = field_validator("owner")(
+        lambda value: _plain_text(value) if value is not None else None
+    )
+    _validate_due = field_validator("due")(
+        lambda value: _plain_text(value) if value is not None else None
+    )
+
+
+class CompactMeetingFactsModelResponseV3(V3Model):
+    """Strict provider-only DTO; never persisted or returned to clients."""
+
+    v: Literal[3] = SCHEMA_VERSION
+    facts: dict[CompactFactSlot, CompactModelFactV3] = Field(
+        min_length=1,
+        max_length=12,
+    )
+    relations: dict[CompactRelationSlot, CompactModelRelationV3] = Field(
+        default_factory=dict,
+        max_length=16,
+    )
+    actions: dict[CompactActionSlot, CompactModelActionV3] = Field(
+        default_factory=dict,
+        max_length=6,
+    )
 
 
 class MeetingFactsModelResponseV3(V3Model):
