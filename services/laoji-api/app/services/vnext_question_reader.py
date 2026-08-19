@@ -227,6 +227,47 @@ def _utf8_slice(value: str, start: int, end: int, field: str) -> str:
         raise Q2ReaderError("Q2_GROUNDING_INVALID", f"{field}未落在 UTF-8 字符边界") from error
 
 
+def _answer_coordinates_cover_full_text(answer: str, clauses: list[Any]) -> bool:
+    """Check provider answer spans before using them for citation relevance.
+
+    Qwen sometimes emits character offsets for a UTF-8 byte contract. A
+    prefix can still decode successfully, so checking each span in isolation
+    is insufficient: a later citation may then be compared with only the
+    first few characters of the answer and be rejected as unrelated. The
+    coordinates are presentation metadata; when they do not form one exact
+    UTF-8 cover, the immutable answer text remains the relevance context and
+    the server-owned citation spans are rebuilt below.
+    """
+    previous_end = 0
+    answer_length = len(answer.encode("utf-8"))
+    for clause in clauses:
+        if not isinstance(clause, dict):
+            return False
+        start = clause.get("answer_start_utf8")
+        end = clause.get("answer_end_utf8")
+        if (
+            not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or start != previous_end
+            or end <= start
+            or end > answer_length
+        ):
+            return False
+        try:
+            _utf8_slice(answer, start, end, "回答分句")
+        except Q2ReaderError:
+            return False
+        previous_end = end
+    return previous_end == answer_length
+
+
+def _is_absence_clause(value: str) -> bool:
+    """Whether a clause explicitly reports that a requested field is absent."""
+    return bool(re.search(r"(?:未提及|没有提及|未说明|没有说明|未提供|没有提供|没有信息|无法确认|不详)", value))
+
+
 def _support_terms(value: str) -> set[str]:
     """Return short evidence terms for a conservative citation relevance gate.
 
@@ -498,32 +539,20 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     clauses: list[dict[str, Any]] = []
     canonical_citations: list[dict[str, Any]] = []
     seen_citations: set[tuple[str, int, int, str]] = set()
-    coordinate_valid = True
+    coordinate_valid = _answer_coordinates_cover_full_text(answer, clauses_raw)
     for clause_index, clause in enumerate(clauses_raw):
         if not isinstance(clause, dict):
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答分句格式无效", 502)
         clause_id = _model_identifier(clause.get("clause_id"), f"c{clause_index + 1}")
         start = clause.get("answer_start_utf8")
         end = clause.get("answer_end_utf8")
-        if (
-            not isinstance(start, int)
-            or not isinstance(end, int)
-            or start != previous_end
-            or end <= start
-            or end > len(answer_bytes)
-        ):
-            # Clause coordinates are a presentation aid and some local
-            # models emit character offsets or leave gaps between clauses.
-            # Keep validating citations, then collapse to one server-owned
-            # answer span below instead of losing an otherwise grounded answer.
-            coordinate_valid = False
-        elif coordinate_valid:
+        if coordinate_valid:
+            # The full-cover preflight above guarantees these spans are
+            # contiguous UTF-8 byte ranges. Keep this check defensive if the
+            # loop is reused independently.
             try:
                 _utf8_slice(answer, start, end, "回答分句")
-            except Q2ReaderError:
-                # A numeric range can still be a character range that lands
-                # inside a UTF-8 sequence. Citations remain authoritative;
-                # collapse the answer to one server-owned span below.
+            except (TypeError, Q2ReaderError):
                 coordinate_valid = False
         clause_text = answer
         if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(answer_bytes):
@@ -535,7 +564,7 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
         # though the answer is otherwise meaningful. Use the full answer as
         # relevance context in that narrow case; citation byte grounding
         # remains strict below.
-        if len(re.findall(r"[\u3400-\u9fff]", clause_text)) <= 1:
+        if not coordinate_valid or len(re.findall(r"[\u3400-\u9fff]", clause_text)) <= 1:
             clause_text = answer
         citations_raw = clause.get("citations")
         if not isinstance(citations_raw, list):
@@ -581,6 +610,12 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(model_quote, str) or not model_quote or len(model_quote) > 600:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
             if not _citation_supports_text(question, clause_text, model_quote):
+                # An absence statement has no positive source span to cite.
+                # If another clause already has verified evidence, discard
+                # only this unrelated citation; never expose it as support.
+                # A wholly unsupported answer still fails closed below.
+                if _is_absence_clause(clause_text) and canonical_citations:
+                    continue
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用与回答无关", 502)
             if model_quote not in source["text"]:
                 # A provider can choose an adjacent short-window alias while
@@ -680,6 +715,12 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             if citation_key not in seen_citations:
                 seen_citations.add(citation_key)
                 canonical_citations.append(normalized_citation)
+        if not citations and _is_absence_clause(clause_text) and canonical_citations:
+            # Do not expose a clause that has no positive source citation. The
+            # answer is collapsed to one server-owned span after validation,
+            # retaining only the verified citations from supported clauses.
+            coordinate_valid = False
+            continue
         if coordinate_valid:
             clauses.append({
                 "clause_id": clause_id,

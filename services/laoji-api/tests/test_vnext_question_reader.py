@@ -119,6 +119,80 @@ def test_reader_grounding_returns_canonical_source(monkeypatch):
     assert citation["source_type"] == "transcript"
 
 
+def test_reader_uses_full_answer_when_provider_span_is_only_a_utf8_prefix(monkeypatch):
+    text = "开场明确列出的国家有中国、美国和法国。"
+    answer = "开场明确列出的国家有中国、美国和法国。"
+    payload = _payload(text)
+    payload["question"] = "开场明确列出了哪些国家？"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        # 15 is a valid UTF-8 byte prefix, but not a full answer cover. This
+        # mirrors the character-offset style emitted by the local model.
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": 15,
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len("开场明确列出的国家有中国".encode("utf-8")),
+                "quote": "开场明确列出的国家有中国",
+            }, {
+                "citation_id": "cite-2",
+                "source_id": "s0",
+                "source_start_utf8": len("开场明确列出的国家有中国、".encode("utf-8")),
+                "source_end_utf8": len("开场明确列出的国家有中国、美国".encode("utf-8")),
+                "quote": "美国",
+            }],
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(payload)
+    assert result["clauses"][0]["answer_end_utf8"] == len(answer.encode("utf-8"))
+    assert {item["quote"] for item in result["clauses"][0]["citations"]} == {
+        "开场明确列出的国家有中国",
+        "美国",
+    }
+
+
+def test_reader_drops_unrelated_citation_for_partial_absence_clause(monkeypatch):
+    text = "同时负责管理集团的科技信息管理平台。"
+    answer = "负责科技信息平台的是发言者，联系电话未提及。"
+    payload = _payload(text)
+    payload["question"] = "谁负责科技信息平台，联系电话是多少？"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "answer_start_utf8": 0,
+            "answer_end_utf8": 15,
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len(text.encode("utf-8")),
+                "quote": text,
+            }],
+        }, {
+            "clause_id": "c2",
+            "answer_start_utf8": 15,
+            "answer_end_utf8": 30,
+            "citations": [{
+                "citation_id": "cite-2",
+                "source_id": "s0",
+                "source_start_utf8": 0,
+                "source_end_utf8": len(text.encode("utf-8")),
+                "quote": text,
+            }],
+        }],
+    }, ensure_ascii=False))
+    result = reader.read_q2(payload)
+    assert len(result["clauses"]) == 1
+    assert [item["quote"] for item in result["clauses"][0]["citations"]] == [text]
+
+
 def test_reader_retrieves_large_raw_source_set_without_relabeling_citations(monkeypatch):
     payload = _large_payload()
     source_vectors = []

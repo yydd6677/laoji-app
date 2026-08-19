@@ -1,0 +1,187 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "total": 9,
+  "passed": 9,
+  "failed": 0,
+  "results": [
+    {
+      "case_id": "paper",
+      "sample": "1300572695-1-192.srt",
+      "source_sha256": "sha256:906f3717536838fed211d3c6ba8b65ebc2cb6f77145b98b990af8068eb6df1cc",
+      "source_segments": 100,
+      "estimated_input_tokens": 1889,
+      "coverage": {
+        "total_segments": 14,
+        "included_segments": 14,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 5,
+      "actions": 0,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 17976.9
+    },
+    {
+      "case_id": "report",
+      "sample": "1436403866-1-192.srt",
+      "source_sha256": "sha256:e83759f20a39e0af8acb79e7fa0479aa0c9949f7b44934a26e2c4b1710afd461",
+      "source_segments": 25,
+      "estimated_input_tokens": 1271,
+      "coverage": {
+        "total_segments": 25,
+        "included_segments": 25,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 6,
+      "actions": 3,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 7543.3
+    },
+    {
+      "case_id": "un",
+      "sample": "500001564053724-1-192.srt",
+      "source_sha256": "sha256:758a3467f3f21620430cea8c74e4c25871c958d8b0f2d2d3b355b2184eb1d78c",
+      "source_segments": 267,
+      "estimated_input_tokens": 4395,
+      "coverage": {
+        "total_segments": 35,
+        "included_segments": 35,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 12,
+      "actions": 4,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 37083.0
+    },
+    {
+      "case_id": "finance",
+      "sample": "1437681208-1-192.srt",
+      "source_sha256": "sha256:528d0ed7991ecbaf7fa1ad730504636c4d50a3e1c53e73655bb1fb10101912ce",
+      "source_segments": 44,
+      "estimated_input_tokens": 923,
+      "coverage": {
+        "total_segments": 6,
+        "included_segments": 6,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 4,
+      "actions": 0,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 5104.2
+    },
+    {
+      "case_id": "survey",
+      "sample": "35166292748-1-192.srt",
+      "source_sha256": "sha256:1f787b39f3f50b33f32be60871001bd04ca75e30a8606ec7199f5a4e4ecfd2ae",
+      "source_segments": 111,
+      "estimated_input_tokens": 2151,
+      "coverage": {
+        "total_segments": 16,
+        "included_segments": 16,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 4,
+      "actions": 0,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 10791.6
+    },
+    {
+      "case_id": "negotiation",
+      "sample": "911595290-1-208.srt",
+      "source_sha256": "sha256:68b7628e1aa5e3e2dda0bb057dc4372cb425e007d8a8d5720511547e40618879",
+      "source_segments": 131,
+      "estimated_input_tokens": 2235,
+      "coverage": {
+        "total_segments": 16,
+        "included_segments": 16,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 8,
+      "actions": 6,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 36743.2
+    },
+    {
+      "case_id": "equity",
+      "sample": "1377173065-1-160.srt",
+      "source_sha256": "sha256:512e63ffb2aa697e304c83397e6d321651864da2d5bc4a712ac7b1fa1fb28817",
+      "source_segments": 324,
+      "estimated_input_tokens": 5042,
+      "coverage": {
+        "total_segments": 36,
+        "included_segments": 36,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 2,
+      "actions": 1,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 11556.6
+    },
+    {
+      "case_id": "tender",
+      "sample": "870230340-1-208.srt",
+      "source_sha256": "sha256:2b47490aa092ce0f02832b4d6987b69f1d02050d41c4f6c20f59e210357331ae",
+      "source_segments": 41,
+      "estimated_input_tokens": 941,
+      "coverage": {
+        "total_segments": 8,
+        "included_segments": 8,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 6,
+      "actions": 0,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 9019.5
+    },
+    {
+      "case_id": "energy-planning",
+      "sample": "829384557-1-208.srt",
+      "source_sha256": "sha256:07466321d4bcba0fde60355977aaa6a5afd8944ee1ffaa7188382ba3f86f3148",
+      "source_segments": 90,
+      "estimated_input_tokens": 2037,
+      "coverage": {
+        "total_segments": 15,
+        "included_segments": 15,
+        "source_coverage": 1.0,
+        "used_embeddings": false
+      },
+      "model_calls": 1,
+      "facts": 4,
+      "actions": 1,
+      "passed": true,
+      "errors": [],
+      "latency_ms": 9342.5
+    }
+  ],
+  "remaining": [
+    "full long-meeting source-stream quality",
+    "human fact support and action usefulness review",
+    "Android summary page and recovery replay",
+    "Facts V3 capability barrier"
+  ]
+}
