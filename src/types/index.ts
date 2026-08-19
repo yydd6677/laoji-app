@@ -1,5 +1,10 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
-import type { MeetingEntryPoint, MeetingFactsResultV3, MeetingSummaryDocument } from '../domain/meeting';
+import type {
+  MeetingEntryPoint,
+  MeetingFactsResultV3,
+  MeetingSummaryActivationFenceV3,
+  MeetingSummaryDocument,
+} from '../domain/meeting';
 import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
@@ -139,6 +144,8 @@ export interface MeetingSummary {
   structured_document?: MeetingSummaryDocument;
   /** Raw v3 facts retained locally; templates are deterministic projections of this object. */
   facts_document_v3?: MeetingFactsResultV3;
+  /** Content-free source-stream identity checked again by the atomic SQLite activation. */
+  activation_fence_v3?: MeetingSummaryActivationFenceV3;
 }
 
 export interface EventDraftParams {

@@ -4,6 +4,7 @@ import type {
   MeetingLifecycle,
   MeetingNote,
   MeetingOrigin,
+  MeetingSummaryActivationFenceV3,
   OccurrenceReference,
   ProcessingStage,
   ScheduleSnapshot,
@@ -836,6 +837,14 @@ export interface SaveSummaryVersionOptions {
   activate: boolean;
   citations?: readonly SummaryCitationRecord[];
   factDocument?: SummaryFactDocumentRecord;
+  activationFenceV3?: MeetingSummaryActivationFenceV3;
+}
+
+export class SummaryV3ActivationFenceError extends Error {
+  constructor() {
+    super('summary v3 activation fence changed');
+    this.name = 'SummaryV3ActivationFenceError';
+  }
 }
 
 export interface SummaryVersionProjection {

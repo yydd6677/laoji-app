@@ -31,6 +31,8 @@ def main() -> None:
     summary_tasks = ROOT / "src/services/meetingSummaryTasks.ts"
     summary_mirror = ROOT / "src/services/meetingContentMirror.ts"
     summary_repository = ROOT / "src/data/repositories/meetingSummaryV3Repository.ts"
+    summary_domain = ROOT / "src/domain/meeting/summary.ts"
+    summary_activation_fence = ROOT / "src/domain/meeting/summaryActivationFence.ts"
     meeting_repository_contract = ROOT / "src/data/repositories/meetingNoteRepository.ts"
     meeting_repository = ROOT / "src/data/repositories/sqliteMeetingNoteRepository.ts"
     upgrade_provider = ROOT / "src/components/MeetingSummaryV3UpgradeProvider.tsx"
@@ -64,6 +66,25 @@ def main() -> None:
         "if (existingTask.task.state === 'success')",
         "const streamId = `summary-stream:${hex(await digest(taskId))}`;",
         "streamId,",
+        "completedSummaryActivationFence",
+        "getDeviceAuthorityState()",
+        "ensureLocalMeetingServiceBinding(meetingId)",
+        "stream.binding_revision !== binding.bindingRevision",
+        "activation_fence_v3: await completedSummaryActivationFence(",
+    )
+    require(
+        summary_domain,
+        "export interface MeetingSummaryActivationFenceV3",
+        "deviceEpochId: string;",
+        "bindingCancelRevision: number;",
+        "contentSha256: string;",
+    )
+    require(
+        summary_activation_fence,
+        "export function meetingSummaryActivationFenceMatches(",
+        "binding.cancelRevision !== expected.bindingCancelRevision",
+        "actual.contentSha256 !== attachment.contentSha256",
+        "expectedAttachmentIds.has(attachment.attachmentId)",
     )
     dispatch_source = require(
         summary_dispatch,
@@ -104,6 +125,8 @@ def main() -> None:
         "storedFacts.result.documentId !== generated.facts_document_v3.documentId",
         "signal: inputChanged\n              ? { type: 'discarded' }",
         "title: '会议内容已更新'",
+        "reason instanceof SummaryV3ActivationFenceError",
+        "throw new MeetingSummaryInputChangedError();",
     )
     if "saveMeetingFactsResultV3" in summary_screen_source or "linkMeetingFactsToSummaryVersion" in summary_screen_source:
         raise AssertionError("active summary screen still persists Facts V3 outside the summary-version transaction")
@@ -126,18 +149,28 @@ def main() -> None:
         "const activeManualNote = await transaction.getManualNote(note.id, scopeKey);",
         "const sourceInputsStillActive = sourceTranscriptStillActive && sourceManualNoteStillActive;",
         "factDocument: { ...factDocument, summaryVersionId: existingVersion.id }",
-        "factDocument,\n        });",
+        "const activationFenceV3 = summary?.activation_fence_v3;",
+        "activationFenceV3,",
+        "factDocument,\n          activationFenceV3,\n        });",
     )
     require(
         meeting_repository_contract,
         "export interface SummaryFactDocumentRecord",
         "factDocument?: SummaryFactDocumentRecord;",
+        "activationFenceV3?: MeetingSummaryActivationFenceV3;",
+        "export class SummaryV3ActivationFenceError extends Error",
     )
     require(
         meeting_repository,
         "immutable summary fact document cannot be replaced",
         "INSERT INTO summary_fact_documents",
         "summary_version_id IS NULL",
+        "const activationFence = options.activationFenceV3;",
+        "SELECT current_epoch_id FROM device_authority_state",
+        "FROM meeting_service_bindings WHERE meeting_id = ?",
+        "FROM meeting_attachments",
+        "meetingSummaryActivationFenceMatches(activationFence, {",
+        "throw new SummaryV3ActivationFenceError();",
     )
     require(
         ROOT / "src/services/meetingSummaryProcessing.ts",

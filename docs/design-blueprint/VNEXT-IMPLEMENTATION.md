@@ -62,6 +62,13 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 激活，上一份可用结果持续显示；该安全拒绝以 `discarded` 恢复当前 SummaryVersion 的 ready/stale
 状态和信息提示，不再误报“生成失败”。转写/附件竞态与进程中断矩阵仍未闭合。
 
+随后候选把 device epoch、meeting binding identity/revision/cancel revision 和本次授权文字附件的
+位置、revision、规范正文 SHA-256 加入本机原子激活围栏。23 项可执行领域矩阵覆盖正常、epoch/binding
+变化、附件删除/修改/重复和非法输入；`emulator-5562` 的 `1.1.29 (137)` 又以真实长会证明完成流核对
+后成功落入同一事务并激活 14 条有效引用。详见
+`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。原生 SQLite 逐项负向注入、页面/
+进程中断组合、人工质量和 capability barrier 仍未闭合，Stage 3 保持未采用。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：
@@ -1114,6 +1121,12 @@ p95。8/8/4 输出限额实验因 9 组 holdout 仅 8/9 已拒绝并回退。详
 `docs/vnext-stage3/SUMMARY-V3-BOUNDED-SLOTS-20260820.md` 和
 `docs/vnext-stage3/facts-v3-r14-slots-final-20260820.json`。小样本结构门和单次长会仍不等于 98%
 总体 Schema 合法率、p95 延迟或 95% 人工事实/行动质量，Stage 3 继续保持未采用。
+
+Android 激活围栏随后从 transcript/note 扩展到 device epoch、meeting binding 和显式授权文字附件。
+本机事务在写 Facts/Version/current pointer 前重读所有身份；23 项可执行矩阵通过，真实长会在
+`emulator-5562` 成功激活 3 个 section、14 条引用且无无效引用。证据见
+`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。release 模拟器尚未逐项注入原生
+SQLite 负向突变，故恢复组合门和 Stage 3 capability 仍关闭。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。

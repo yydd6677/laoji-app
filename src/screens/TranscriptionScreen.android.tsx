@@ -251,6 +251,7 @@ import {
   loadSummaryViewPreference,
   saveSummaryViewOverride,
   saveSummaryViewPreference,
+  SummaryV3ActivationFenceError,
   summaryV3UpgradeIsRunning,
   type MeetingAttachmentRecord,
   type MarkerRecord,
@@ -2979,6 +2980,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             }
           }
         } catch (reason) {
+          if (reason instanceof SummaryV3ActivationFenceError) {
+            throw new MeetingSummaryInputChangedError();
+          }
           diagnosticAudit('meeting_summary_v3_local_persist', {
             status: 'failed',
             phase: localPersistPhase,

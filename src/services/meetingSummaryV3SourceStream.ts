@@ -1,7 +1,14 @@
 import * as Crypto from 'expo-crypto';
-import type { MeetingSummaryAttachmentAuthorization } from '../domain/meeting';
+import type {
+  MeetingSummaryActivationFenceV3,
+  MeetingSummaryAttachmentAuthorization,
+} from '../domain/meeting';
 import type { TranscriptLine } from '../types';
-import { ensureRemoteMeetingServiceBinding } from './deviceAuthority';
+import {
+  ensureLocalMeetingServiceBinding,
+  ensureRemoteMeetingServiceBinding,
+} from './deviceAuthority';
+import { getDeviceAuthorityState } from '../data/repositories/vnext/deviceAuthorityRepository';
 import {
   appendDeviceV2SourceBundle,
   appendDeviceV2SourceManifestPage,
@@ -70,6 +77,49 @@ function chapterHash(bundleHashes: readonly string[]): Promise<string> {
 function textTime(value: number | undefined): number | null {
   if (value === undefined || !Number.isFinite(value)) return null;
   return Math.max(0, Math.round(value * 1_000));
+}
+
+async function completedSummaryActivationFence(
+  meetingId: string,
+  taskId: string,
+  stream: DeviceV2SourceStreamSnapshot,
+  authorization: MeetingSummaryAttachmentAuthorization | null,
+): Promise<MeetingSummaryActivationFenceV3> {
+  if (
+    stream.task_id !== taskId
+    || stream.capability !== 'summary'
+    || stream.state !== 'complete'
+  ) throw new Error('新版整理任务来源流尚未完整结束。');
+  const [authority, binding] = await Promise.all([
+    getDeviceAuthorityState(),
+    ensureLocalMeetingServiceBinding(meetingId),
+  ]);
+  if (
+    !authority?.epochId
+    || authority.epochId !== binding.deviceEpochId
+    || stream.binding_id !== binding.bindingId
+    || stream.binding_generation !== binding.bindingGeneration
+    || stream.binding_revision !== binding.bindingRevision
+    || stream.cancel_revision !== binding.cancelRevision
+    || binding.state !== 'active'
+  ) throw new Error('新版整理任务设备连接已变化，请重新整理。');
+  const attachments = (authorization?.items ?? []).map(item => {
+    if (item.kind !== 'text') throw new Error('新版整理激活围栏包含不支持的附件。');
+    return {
+      attachmentId: item.attachmentId,
+      positionMs: item.positionMs,
+      updatedAtMs: item.updatedAtMs,
+      contentSha256: item.contentSha256,
+    };
+  });
+  return {
+    deviceEpochId: binding.deviceEpochId,
+    bindingId: binding.bindingId,
+    bindingGeneration: binding.bindingGeneration,
+    bindingRevision: binding.bindingRevision,
+    bindingCancelRevision: binding.cancelRevision,
+    attachments,
+  };
 }
 
 async function waitForSourceChapterSlot(
@@ -374,12 +424,23 @@ export async function generateMeetingSummaryViaSourceStream(options: {
           const artifact = await getDeviceV2TaskArtifact(taskId);
           const parsed = parseMeetingFactsResultV3(artifact.output);
           if (!parsed) throw new Error('新版整理结果格式无效');
-          return meetingFactsV3ToSummary(
-            parsed,
-            options.template,
-            options.manualNote.revision,
-            options.transcriptLines,
-          );
+          const sourceStreamId = existingTask.task.source_stream_id;
+          if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
+          const completedStream = await getDeviceV2SourceStream(sourceStreamId);
+          return {
+            ...meetingFactsV3ToSummary(
+              parsed,
+              options.template,
+              options.manualNote.revision,
+              options.transcriptLines,
+            ),
+            activation_fence_v3: await completedSummaryActivationFence(
+              options.meetingId,
+              taskId,
+              completedStream,
+              options.attachmentAuthorization,
+            ),
+          };
         }
         if (existingTask.task.state === 'active' && existingTask.task.source_stream_id) {
           stream = await getDeviceV2SourceStream(existingTask.task.source_stream_id);
@@ -465,12 +526,23 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       const artifact = await getDeviceV2TaskArtifact(taskId);
       const parsed = parseMeetingFactsResultV3(artifact.output);
       if (!parsed) throw new Error('新版整理结果格式无效');
-      return meetingFactsV3ToSummary(
-        parsed,
-        options.template,
-        options.manualNote.revision,
-        options.transcriptLines,
-      );
+      const sourceStreamId = task.task.source_stream_id;
+      if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
+      const completedStream = await getDeviceV2SourceStream(sourceStreamId);
+      return {
+        ...meetingFactsV3ToSummary(
+          parsed,
+          options.template,
+          options.manualNote.revision,
+          options.transcriptLines,
+        ),
+        activation_fence_v3: await completedSummaryActivationFence(
+          options.meetingId,
+          taskId,
+          completedStream,
+          options.attachmentAuthorization,
+        ),
+      };
     }
     await new Promise(resolve => setTimeout(resolve, attempt++ < 4 ? 300 : 1_000));
   }

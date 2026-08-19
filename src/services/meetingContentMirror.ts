@@ -399,6 +399,7 @@ export function mirrorLegacySummaryContent(
     try {
       const normalized = summary ? normalizeMeetingSummaryResult(legacyMeeting.id, summary) : null;
       const factsResult = summary?.facts_document_v3 ?? null;
+      const activationFenceV3 = summary?.activation_fence_v3;
       const document = normalized?.structured_document
         ?? (normalized ? legacyMeetingSummaryToDocument(legacyMeeting.id, normalized) : null);
       if (!normalized || !document || !meetingSummaryToText(normalized)) {
@@ -733,6 +734,7 @@ export function mirrorLegacySummaryContent(
               activate: false,
               citations,
               factDocument: { ...factDocument, summaryVersionId: current.id },
+              activationFenceV3,
             });
           }
           replaceLegacyProjection = !currentProtected;
@@ -792,6 +794,7 @@ export function mirrorLegacySummaryContent(
               activate: false,
               citations,
               factDocument: { ...factDocument, summaryVersionId: existingVersion.id },
+              activationFenceV3,
             });
           }
           const remainsCurrent = current?.id === versionId;
@@ -925,6 +928,7 @@ export function mirrorLegacySummaryContent(
           activate,
           citations,
           factDocument,
+          activationFenceV3,
         });
         if (options.settleProcessingStage !== false) {
           const stage = await transaction.getStage(note.id, scopeKey, 'summary');

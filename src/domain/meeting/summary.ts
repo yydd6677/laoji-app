@@ -214,6 +214,28 @@ export interface MeetingSummaryAttachmentAuthorization {
 }
 
 /**
+ * Ephemeral, content-free identity captured from the source-stream task.
+ *
+ * It is carried to the canonical SQLite write so a result that finishes after
+ * a device epoch, binding or explicitly authorized attachment changed cannot
+ * become current.  The fence deliberately contains hashes and revisions only;
+ * meeting source text remains in the encrypted remote task payload.
+ */
+export interface MeetingSummaryActivationFenceV3 {
+  deviceEpochId: string;
+  bindingId: string;
+  bindingGeneration: string;
+  bindingRevision: number;
+  bindingCancelRevision: number;
+  attachments: readonly {
+    attachmentId: string;
+    positionMs: number;
+    updatedAtMs: number;
+    contentSha256: string;
+  }[];
+}
+
+/**
  * Client-normalized v2 document. It is safe to serialize in the legacy cache while SQLite becomes
  * the canonical source; generated content remains immutable after it is mirrored as a version.
  */

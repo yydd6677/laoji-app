@@ -12,6 +12,7 @@ import {
   assertScopeKey,
   automaticMeetingTopicsFromSummaryText,
   calendarMeetingSeriesKey,
+  meetingSummaryActivationFenceMatches,
   namedSpeakerIdentityLabel,
   secureClientIdFactory,
   transitionProcessingStage,
@@ -131,6 +132,7 @@ import type {
   TranscriptSegmentRecord,
   Unsubscribe,
 } from './meetingNoteRepository';
+import { SummaryV3ActivationFenceError } from './meetingNoteRepository';
 
 type MeetingRow = {
   id: string;
@@ -4821,6 +4823,69 @@ class SqliteMeetingTransaction implements MeetingTransaction {
     }
     if (options.activate && version.status !== 'ready' && version.status !== 'stale') {
       throw new Error('only a readable summary version can be activated');
+    }
+    const activationFence = options.activationFenceV3;
+    if (activationFence) {
+      if (!options.factDocument) throw new SummaryV3ActivationFenceError();
+      const authority = await this.database.getFirstAsync<{ current_epoch_id: string | null }>(
+        'SELECT current_epoch_id FROM device_authority_state WHERE singleton_id = 1',
+      );
+      const binding = await this.database.getFirstAsync<{
+        device_epoch_id: string;
+        binding_id: string;
+        binding_generation: string;
+        binding_revision: number;
+        state: string;
+        cancel_revision: number;
+      }>(
+        `SELECT device_epoch_id, binding_id, binding_generation, binding_revision,
+                state, cancel_revision
+           FROM meeting_service_bindings WHERE meeting_id = ?`,
+        version.meetingId,
+      );
+      const currentAttachments: {
+        attachmentId: string;
+        kind: string;
+        positionMs: number;
+        updatedAtMs: number;
+        contentSha256: string;
+      }[] = [];
+      for (const expected of activationFence.attachments) {
+        const current = await this.database.getFirstAsync<{
+          position_ms: number;
+          kind: string;
+          text_content: string | null;
+          updated_at_ms: number;
+        }>(
+          `SELECT position_ms, kind, text_content, updated_at_ms
+             FROM meeting_attachments
+            WHERE id = ? AND meeting_id = ? AND scope_key = ?`,
+          expected.attachmentId,
+          version.meetingId,
+          scopeKey,
+        );
+        if (current) currentAttachments.push({
+          attachmentId: expected.attachmentId,
+          kind: current.kind,
+          positionMs: Number(current.position_ms),
+          updatedAtMs: Number(current.updated_at_ms),
+          contentSha256: await sha256Text((current.text_content ?? '').replace(/\r\n?/g, '\n').trim()),
+        });
+      }
+      if (!meetingSummaryActivationFenceMatches(activationFence, {
+        deviceEpochId: authority?.current_epoch_id ?? null,
+        binding: binding
+          ? {
+              deviceEpochId: binding.device_epoch_id,
+              bindingId: binding.binding_id,
+              bindingGeneration: binding.binding_generation,
+              bindingRevision: Number(binding.binding_revision),
+              state: binding.state,
+              cancelRevision: Number(binding.cancel_revision),
+            }
+          : null,
+        attachments: currentAttachments,
+      })) throw new SummaryV3ActivationFenceError();
     }
     const meeting = await this.getMeeting(version.meetingId, scopeKey);
     if (!meeting || meeting.lifecycle === 'deleted') {
