@@ -477,20 +477,26 @@ class SpeakerEmbeddingExtractor:
             if audio_data.dtype != np.float32:
                 audio_data = audio_data.astype(np.float32)
 
-            audio_tensor = torch.from_numpy(audio_data).float()
-            features, _, _ = extract_feature([audio_tensor])
-            try:
-                features = features.to(device=self.device)
-            except AssertionError:
-                self.device = "cpu"
-                features = features.to(device="cpu")
+            # Speaker overlays are inference-only. Without this guard every
+            # long meeting builds autograd metadata for each CAM++ window;
+            # the tensors are short-lived but the CPU allocator retains the
+            # resulting anonymous pages, causing candidate API RSS to grow
+            # across hundreds of segments.
+            with torch.inference_mode():
+                audio_tensor = torch.from_numpy(audio_data).float()
+                features, _, _ = extract_feature([audio_tensor])
+                try:
+                    features = features.to(device=self.device)
+                except AssertionError:
+                    self.device = "cpu"
+                    features = features.to(device="cpu")
 
-            embedding = self.model(features)
+                embedding = self.model(features)
 
-            if len(embedding.shape) > 2:
-                embedding = embedding.squeeze(0)
+                if len(embedding.shape) > 2:
+                    embedding = embedding.squeeze(0)
 
-            embedding_np = embedding.cpu().detach().numpy()
+                embedding_np = embedding.cpu().numpy()
 
             if embedding_np.ndim > 1:
                 embedding_np = embedding_np[0] if embedding_np.shape[0] == 1 else embedding_np.mean(axis=0)
