@@ -906,7 +906,7 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     assert active_package.coverage["included_segments"] < active_package.coverage["total_segments"]
     assert active_package.coverage["topic_groups"] == active_package.coverage["covered_topic_groups"]
     assert active_package.coverage["source_types"] == ["attachment", "manual_note", "transcript"]
-    assert set(operations) == {"summary.v3.evidence.embedding"}
+    assert operations == ["summary.v3.evidence.embedding"]
 
 
 def test_long_evidence_maps_embedding_provider_failure_to_stable_error(monkeypatch):

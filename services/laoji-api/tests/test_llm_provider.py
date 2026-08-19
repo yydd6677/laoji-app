@@ -49,13 +49,23 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
             return None
 
         def json(self):
-            return {"message": {"content": "模型结果"}}
+            return {
+                "message": {"content": "模型结果"},
+                "done_reason": "stop",
+                "total_duration": 8_000_000_000,
+                "load_duration": 100_000_000,
+                "prompt_eval_count": 1_024,
+                "prompt_eval_duration": 2_000_000_000,
+                "eval_count": 256,
+                "eval_duration": 5_000_000_000,
+            }
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
         return Response()
 
     monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    llm_provider._reset_inference_telemetry_for_tests()
     result = llm_provider._call_ollama_transport(
         Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat"),
         "系统约束",
@@ -72,6 +82,18 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
     assert captured["json"]["options"]["num_predict"] == 321
     assert captured["json"]["format"] == "json"
     assert captured["headers"]["X-Laoji-Priority"] == "background"
+    telemetry = llm_provider.provider_state(probe=False)["inference"]["last_by_operation"]
+    direct = telemetry["test.direct.chat"]
+    assert direct["provider"] == "ollama"
+    assert direct["output_bytes"] == len("模型结果".encode("utf-8"))
+    assert direct["done_reason"] == "stop"
+    assert direct["total_duration"] == direct["cumulative_total_duration"] == 8_000_000_000
+    assert direct["load_duration"] == direct["cumulative_load_duration"] == 100_000_000
+    assert direct["prompt_eval_count"] == direct["cumulative_prompt_eval_count"] == 1_024
+    assert direct["eval_count"] == direct["cumulative_eval_count"] == 256
+    assert direct["call_count"] == 1
+    assert "模型结果" not in repr(direct)
+    llm_provider._reset_inference_telemetry_for_tests()
 
 
 def test_invalid_ollama_fallback_port_is_rejected(monkeypatch):
@@ -134,13 +156,20 @@ def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
             return None
 
         def json(self):
-            return {"embeddings": [[3.0, 4.0]]}
+            return {
+                "embeddings": [[3.0, 4.0]],
+                "total_duration": 2_000_000_000,
+                "load_duration": 1_500_000_000,
+                "prompt_eval_count": 8,
+                "prompt_eval_duration": 400_000_000,
+            }
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
         return Response()
 
     monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    llm_provider._reset_inference_telemetry_for_tests()
     result = llm_provider.embed_texts(["会议问题"])
 
     assert result == [(0.6, 0.8)]
@@ -148,6 +177,12 @@ def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
     assert captured["json"]["model"] == "qwen3-embedding:0.6b"
     assert captured["json"]["keep_alive"] == -1
     assert captured["json"]["options"] == {"num_ctx": 8192}
+    telemetry = llm_provider.provider_state(probe=False)["inference"]["last_by_operation"]
+    assert telemetry["meeting.embedding"]["call_count"] == 1
+    assert telemetry["meeting.embedding"]["total_duration"] == 2_000_000_000
+    assert telemetry["meeting.embedding"]["prompt_eval_count"] == 8
+    assert "会议问题" not in repr(telemetry["meeting.embedding"])
+    llm_provider._reset_inference_telemetry_for_tests()
 
 
 def test_embedding_timeout_is_normalized_to_provider_error(monkeypatch):

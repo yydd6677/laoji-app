@@ -388,9 +388,9 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
 def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
     vectors: list[tuple[float, ...]] = []
     try:
-        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "16"))
+        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "64"))
     except (TypeError, ValueError):
-        configured_batch_size = 16
+        configured_batch_size = 64
     batch_size = max(4, min(64, configured_batch_size))
     for offset in range(0, len(sources), batch_size):
         batch = sources[offset : offset + batch_size]

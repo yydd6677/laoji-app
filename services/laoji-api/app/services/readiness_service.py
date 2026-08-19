@@ -188,6 +188,7 @@ async def readiness_snapshot() -> dict:
         "embedding_probe_latency_ms": llm.get("embedding_probe_latency_ms"),
         "embedding_probe_error": llm.get("embedding_probe_error"),
         "queue": llm.get("queue"),
+        "inference": llm.get("inference"),
         "probe_latency_ms": llm.get("probe_latency_ms"),
     }
     ready = all(

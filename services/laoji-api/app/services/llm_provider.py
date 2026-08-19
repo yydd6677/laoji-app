@@ -226,6 +226,83 @@ _SESSION = requests.Session()
 _SESSION.trust_env = False
 _PROBE_LOCK = threading.Lock()
 _EMBEDDING_PROBE_CACHE: dict[str, Any] = {}
+_INFERENCE_TELEMETRY_LOCK = threading.Lock()
+_INFERENCE_TELEMETRY: dict[str, dict[str, Any]] = {}
+
+
+def _bounded_nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    integer = int(value)
+    return integer if 0 <= integer <= 9_007_199_254_740_991 else None
+
+
+def _record_inference_telemetry(
+    operation: str | None,
+    *,
+    provider: str,
+    body: dict[str, Any],
+    output_text: str,
+) -> None:
+    """Retain bounded performance counters without prompts or model output."""
+    name = str(operation or "llm.chat").strip()[:120] or "llm.chat"
+    snapshot: dict[str, Any] = {
+        "provider": provider,
+        "completed_at_epoch_ms": round(time.time() * 1000),
+        "output_bytes": len(output_text.encode("utf-8")),
+    }
+    if provider == "ollama":
+        for field in (
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "prompt_eval_duration",
+            "eval_count",
+            "eval_duration",
+        ):
+            value = _bounded_nonnegative_int(body.get(field))
+            if value is not None:
+                snapshot[field] = value
+        reason = body.get("done_reason")
+        if isinstance(reason, str) and reason and len(reason) <= 40:
+            snapshot["done_reason"] = reason
+    else:
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = _bounded_nonnegative_int(usage.get(field))
+            if value is not None:
+                snapshot[field] = value
+    with _INFERENCE_TELEMETRY_LOCK:
+        previous = _INFERENCE_TELEMETRY.get(name) or {}
+        snapshot["call_count"] = int(previous.get("call_count") or 0) + 1
+        for field in (
+            "output_bytes",
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "prompt_eval_duration",
+            "eval_count",
+            "eval_duration",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ):
+            current = snapshot.get(field)
+            if isinstance(current, int):
+                snapshot[f"cumulative_{field}"] = (
+                    int(previous.get(f"cumulative_{field}") or 0) + current
+                )
+        _INFERENCE_TELEMETRY[name] = snapshot
+
+
+def _inference_telemetry_snapshot() -> dict[str, dict[str, Any]]:
+    with _INFERENCE_TELEMETRY_LOCK:
+        return {name: dict(value) for name, value in _INFERENCE_TELEMETRY.items()}
+
+
+def _reset_inference_telemetry_for_tests() -> None:
+    with _INFERENCE_TELEMETRY_LOCK:
+        _INFERENCE_TELEMETRY.clear()
 
 
 def _embedding_inference_state(base_url: str) -> dict[str, Any]:
@@ -363,6 +440,12 @@ def _call_ollama_transport(
     content = body.get("message", {}).get("content") if isinstance(body, dict) else None
     if not isinstance(content, str):
         raise LlmProviderError("ollama_response_invalid")
+    _record_inference_telemetry(
+        telemetry_operation,
+        provider="ollama",
+        body=body,
+        output_text=content,
+    )
     return content
 
 
@@ -485,6 +568,12 @@ def _call_dashscope_transport(
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
+        _record_inference_telemetry(
+            telemetry_operation,
+            provider="dashscope",
+            body=body,
+            output_text=content,
+        )
         return content
     # Some OpenAI-compatible gateways return multimodal content blocks even
     # for a text-only request.  Flatten only text blocks; never stringify
@@ -496,7 +585,14 @@ def _call_dashscope_transport(
             if isinstance(item, dict) and isinstance(item.get("text"), str)
         ]
         if text_parts:
-            return "".join(text_parts)
+            joined = "".join(text_parts)
+            _record_inference_telemetry(
+                telemetry_operation,
+                provider="dashscope",
+                body=body,
+                output_text=joined,
+            )
+            return joined
     raise LlmProviderError("dashscope_response_invalid")
 
 
@@ -633,6 +729,12 @@ def embed_texts(
         embeddings = payload.get("embeddings")
         if not isinstance(embeddings, list) or len(embeddings) != len(texts):
             raise LlmProviderError("embedding_response_invalid")
+        _record_inference_telemetry(
+            operation,
+            provider="ollama",
+            body=payload,
+            output_text="",
+        )
         return [_normalized_embedding(item) for item in embeddings]
 
     return _COORDINATOR.submit(
@@ -666,6 +768,7 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
         "embedding_probe_latency_ms": None,
         "embedding_probe_error": None,
         "queue": _COORDINATOR.snapshot(),
+        "inference": {"last_by_operation": _inference_telemetry_snapshot()},
         "ready": None,
         "models": [],
         "probe_latency_ms": None,
