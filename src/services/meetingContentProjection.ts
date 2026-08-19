@@ -50,6 +50,7 @@ export function transcriptProjectionToLegacyLines(
     confidence: segment.confidence ?? undefined,
     created_at: new Date(segment.createdAtMs).toISOString(),
     isFinal: projection.revision.kind !== 'realtime_draft' && segment.isFinal,
+    textState: segment.textState,
     revisionKind,
   }));
 }

@@ -35,6 +35,13 @@ _ALLOWED_FIELDS = frozenset({
     "kind",
     "segments",
     "duration_sec",
+    "audio_ms",
+    "queue_ms",
+    "infer_ms",
+    "wall_ms",
+    "batch_ordinal",
+    "first_batch",
+    "items",
 })
 
 
@@ -62,8 +69,23 @@ def privacy_log(event: str, **fields: Any) -> None:
     for key, value in fields.items():
         if value is None:
             continue
-        if key in {"bytes", "count", "queue_depth", "retry", "attempt", "segments"}:
+        if key in {
+            "bytes",
+            "count",
+            "queue_depth",
+            "retry",
+            "attempt",
+            "segments",
+            "audio_ms",
+            "queue_ms",
+            "infer_ms",
+            "wall_ms",
+            "batch_ordinal",
+            "items",
+        }:
             payload[key] = max(0, int(value))
+        elif key == "first_batch":
+            payload[key] = bool(value)
         elif key in {"duration_ms", "duration_sec"}:
             payload[key] = round(max(0.0, float(value)), 3)
         else:

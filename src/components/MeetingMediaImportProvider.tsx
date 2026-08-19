@@ -11,12 +11,14 @@ import {
   acknowledgeIngestedMeetingMedia,
   acknowledgeMeetingMediaImportIntent,
   addMeetingMediaImportIntentListener,
+  discardIngestedMeetingMedia,
   getPendingMeetingMediaImportIntent,
   hasNativeMeetingMediaImport,
   ingestMeetingMedia,
   inspectMeetingMediaSource,
   pickMeetingMedia,
   recoverPendingMeetingMediaImports,
+  stageMeetingMediaImport,
   type IngestedMeetingMedia,
   type MeetingMediaImportOrigin,
   type PendingMeetingMediaImportIntent,
@@ -183,11 +185,23 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     promptActiveRef.current = false;
     setImportBusy(true);
     let copied = Boolean(source.readyMedia);
+    let staged = Boolean(source.readyMedia);
     let ingestedMedia = source.readyMedia ?? null;
     let navigatedMeetingId: string | null = request.draft.targetMeetingId ?? null;
     let placeholderCreated = false;
     let activeDraft = request.draft;
     try {
+      await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
+      if (!source.readyMedia) {
+        await stageMeetingMediaImport({
+          sourceUri: request.uri,
+          meetingId: request.meetingId,
+          assetId: request.assetId,
+          origin: request.origin,
+          maximumBytes: LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        });
+        staged = true;
+      }
       /*
        * A file import is a local-first operation.  Create the lightweight
        * meeting shell and enter its detail page before copying/extracting the
@@ -222,6 +236,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         navigatedMeetingId = placeholder.id;
         placeholderCreated = true;
         activeDraft = { ...activeDraft, targetMeetingId: placeholder.id };
+        await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
         // The shell and native ingest journal intentionally share one stable
         // identity. Recovery can therefore attach the prepared asset to the
         // same record without another mapping lookup or a duplicate shell.
@@ -236,7 +251,6 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         navigateToMeeting(navigatedMeetingId);
       }
 
-      await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
       const serviceMaximumBytes = source.maximumBytesPromise
         ? await source.maximumBytesPromise
         : source.maximumBytes;
@@ -263,7 +277,12 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         : null;
       const closeFailure = () => {
         void (async () => {
-          if (!copied) await deleteMeetingMediaImportDraft(request.meetingId).catch(() => {});
+          if (!copied) {
+            await deleteMeetingMediaImportDraft(request.meetingId).catch(() => {});
+            if (staged) {
+              await discardIngestedMeetingMedia(request.meetingId, request.assetId).catch(() => false);
+            }
+          }
           if (request.intentToken) await finishIntent(request.intentToken);
           else releasePrompt();
         })();
@@ -471,36 +490,15 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       present();
       return;
     }
-    promptActiveRef.current = true;
-    void loadDeviceServiceCapabilities().then(capability => {
-      if (activeIntentTokenRef.current !== intent.token) return;
-      const mediaImport = capability.mediaImport;
-      const supported = mediaImport?.mimeTypes.some(
-        mimeType => mimeType.toLowerCase() === intent.mimeType?.toLowerCase(),
-      );
-      if (supported && mediaImport) {
-        present(Math.min(LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES, mediaImport.maxBytes));
-        return;
-      }
-      const closeUnsupportedVideo = () => { void finishIntent(intent.token); };
-      showDialog({
-        title: '无法导入',
-        message: '当前服务暂不支持导入这个视频。',
-        tone: 'warning',
-        onDismiss: closeUnsupportedVideo,
-        actions: [{ text: '知道了', role: 'primary', onPress: closeUnsupportedVideo }],
-      });
-    }).catch(() => {
-      if (activeIntentTokenRef.current !== intent.token) return;
-      const closeUnavailableVideo = () => { void finishIntent(intent.token); };
-      showDialog({
-        title: '无法导入',
-        message: '暂时无法确认视频处理能力，请联网后重试。',
-        tone: 'warning',
-        onDismiss: closeUnavailableVideo,
-        actions: [{ text: '知道了', role: 'primary', onPress: closeUnavailableVideo }],
-      });
-    });
+    /*
+     * The native intent inbox has already resolved the URI against the
+     * same allow-list used by the importer.  A remote capability probe here
+     * made a valid share fail whenever the legacy v1 device credential had
+     * expired, even though the authenticated v2 upload path was healthy.
+     * Import is local-first, so let the user confirm immediately and let the
+     * durable ingest/upload path report a real server rejection if needed.
+     */
+    present();
   }, [finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
   handleIntentRef.current = handleIntent;
 
@@ -570,7 +568,12 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
             calendarContext: null,
             targetMeetingId: null,
           };
-          await persistIngestedMedia(media, draft);
+          const recoveredTargetMeetingId = draft.targetMeetingId
+            ?? (meetings.some(meeting => meeting.id === media.meetingId) ? media.meetingId : null);
+          await persistIngestedMedia(media, {
+            ...draft,
+            targetMeetingId: recoveredTargetMeetingId,
+          });
         } catch (reason) {
           const code = reason && typeof reason === 'object'
             ? (reason as { code?: unknown }).code
@@ -613,7 +616,18 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
           return;
         }
       }
-    }).catch(() => {}).finally(() => {
+    }).catch(reason => {
+      if (cancelled) return;
+      promptActiveRef.current = true;
+      const closeRecoveryFailure = () => releasePrompt();
+      showDialog({
+        title: '导入尚未完成',
+        message: meetingMediaImportErrorMessage(reason),
+        tone: 'warning',
+        onDismiss: closeRecoveryFailure,
+        actions: [{ text: '知道了', role: 'primary', onPress: closeRecoveryFailure }],
+      });
+    }).finally(() => {
       if (recoveryGenerationRef.current !== generation) return;
       recoveryRunningRef.current = false;
       setImportBusy(false);
@@ -627,7 +641,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         setImportBusy(false);
       }
     };
-  }, [initializing, mode, persistIngestedMedia, releasePrompt, scopeKey, setImportBusy, showDialog]);
+  }, [initializing, meetings, mode, persistIngestedMedia, releasePrompt, scopeKey, setImportBusy, showDialog]);
 
   const selectMeetingMedia = useCallback(async () => {
     if (busyRef.current || promptActiveRef.current || recoveryRunningRef.current) return;

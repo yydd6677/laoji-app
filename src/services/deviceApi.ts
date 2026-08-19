@@ -113,16 +113,33 @@ async function request<T>(
   init: RequestInit = {},
   fallback = '设备服务暂时不可用',
 ): Promise<T> {
-  const current = await identity();
-  const response = await fetchWithTimeout(url(path), {
-    ...init,
-    headers: { ...jsonHeaders(current), ...(init.headers ?? {}) },
-  });
+  const route = path.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'root';
+  diagnosticAudit('device_v1_http_start', { route });
+  let response: Response;
+  try {
+    const current = await identity();
+    response = await fetchWithTimeout(url(path), {
+      ...init,
+      headers: { ...jsonHeaders(current), ...(init.headers ?? {}) },
+    });
+  } catch (error) {
+    diagnosticAudit('device_v1_http_error', {
+      route,
+      error_code: error instanceof Error ? error.name : 'unknown',
+    });
+    throw error;
+  }
+  diagnosticAudit('device_v1_http_response', { route, status: response.status });
   let data: any = null;
   try { data = await readJsonWithTimeout(response, 15_000); } catch { data = null; }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) invalidateDeviceReady();
     const parsed = parseError(data, fallback);
+    diagnosticAudit('device_v1_http_rejected', {
+      route,
+      status: response.status,
+      error_code: parsed.code ?? 'http_error',
+    });
     throw new DeviceApiError(parsed.message, response.status, parsed.code);
   }
   return data as T;
@@ -284,7 +301,9 @@ export async function loadDeviceServiceCapabilities(
  * accidentally send the secret in a URL/query parameter.
  */
 export async function getDeviceRealtimeAuth(): Promise<DeviceRealtimeAuth> {
+  diagnosticAudit('device_v1_realtime_auth_start', {});
   const current = await ensureDeviceReady();
+  diagnosticAudit('device_v1_realtime_auth_ready', {});
   return {
     deviceToken: `dv1.${current.deviceId}.${current.deviceSecret}`,
     dataEpoch: current.epochId,
@@ -307,11 +326,14 @@ export async function getLocalDeviceRealtimeAuth(): Promise<DeviceRealtimeAuth> 
 }
 
 export async function createMeetingBinding(bindingId: string): Promise<any> {
-  return request(`/meetings/${encodeURIComponent(bindingId)}`, {
+  diagnosticAudit('device_v1_binding_start', {});
+  const result = await request(`/meetings/${encodeURIComponent(bindingId)}`, {
     method: 'PUT',
     headers: { 'Idempotency-Key': `device-meeting-bind:${bindingId}` },
     body: JSON.stringify({ schema_version: 1 }),
   }, '建立会议服务连接失败');
+  diagnosticAudit('device_v1_binding_ready', {});
+  return result;
 }
 
 export interface VNextTaskProjection {

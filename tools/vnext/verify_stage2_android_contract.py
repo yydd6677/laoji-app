@@ -37,6 +37,34 @@ def main() -> None:
     recording = ROOT / "src/services/meetingRecording.ts"
     completion = ROOT / "src/components/DeviceMeetingCompletionProvider.tsx"
     upload_migration = ROOT / "src/data/db/migrations/0046DeviceUploadExecutor.ts"
+    stable_identity_migration = ROOT / "src/data/db/migrations/0047TranscriptStableIdentity.ts"
+    media_ingestor = ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/mediaimport/MediaIngestor.kt"
+    media_import_provider = ROOT / "src/components/MeetingMediaImportProvider.tsx"
+    app_config = ROOT / "app.config.js"
+    cleartext_plugin = ROOT / "plugins/withAndroidCleartextTraffic.js"
+
+    require(
+        app_config,
+        "HTTP development endpoints require EXPO_ALLOW_CLEARTEXT=true",
+        "process.env.EXPO_ALLOW_CLEARTEXT !== 'true'",
+    )
+    require(
+        cleartext_plugin,
+        "EXPO_ALLOW_CLEARTEXT === 'true'",
+        "allowCleartext ? 'true' : 'false'",
+    )
+    require(
+        media_ingestor,
+        'state = "staged"',
+        '"staged", "copying", "extracting" -> ingest(',
+        'current.state in setOf("staged", "copying", "extracting", "prepared")',
+    )
+    require(
+        media_import_provider,
+        "await stageMeetingMediaImport({",
+        "await saveMeetingMediaImportDraft(request.meetingId, activeDraft);",
+        "recoveredTargetMeetingId",
+    )
 
     require(
         transfer,
@@ -106,10 +134,17 @@ def main() -> None:
     )
     require(upload_migration, "idx_device_upload_pending_asset", "version: 46")
     require(
+        stable_identity_migration,
+        "idx_transcript_segment_stable_identity",
+        "revision_id, stable_segment_key",
+        "version: 47",
+    )
+    require(
         recording,
         "listPendingDeviceUploadOperations('guest')",
         "listTerminalDeviceUploadAssetIds('guest')",
         "const canonicalIds = new Set",
+        "const records = await listPendingMeetingAudioUploads(storageScope);",
         "nativeWorkId:",
     )
     meetings_store = ROOT / "src/store/MeetingsStore.tsx"
@@ -119,12 +154,28 @@ def main() -> None:
         "success missing remote identity",
         "await clearPendingMeetingAudioUpload('guest'",
         "await markDeviceUploadOperationSuccess(operationId)",
+        "guestCanonicalUploadCommitted",
+        "await loadCanonicalOwnedScope()",
+        "orphaned success commit deferred",
+        "rerunRequested\n        && !shouldPollPendingUploads",
+        "an immediate rerun would turn",
+    )
+    require(
+        ROOT / "src/screens/TranscriptionScreen.android.tsx",
+        "This detail screen observes their durable state",
+        "if (isGuest) return;",
     )
     require(
         completion,
         "An explicitly completed, empty payload is a valid",
         "await clearDeviceTranscriptTask(meeting.id)",
         "{ hasTranscript: Boolean(meeting.hasTranscript) }",
+        "mirrorLegacyTranscriptProcessingFailure",
+        "finalEvent.outcome === 'no_speech'",
+        "snapshot.state === 'no_content'",
+        "const byStableKey = new Map",
+        "textState: finalEvent?.outcome === 'text' ? 'final' : 'stable'",
+        "stableEvents.some(event => !storedKeys.has",
     )
     require(
         live_screen,

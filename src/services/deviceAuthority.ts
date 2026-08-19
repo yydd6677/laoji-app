@@ -12,6 +12,7 @@ import {
   preparePurgeCapability,
 } from 'laoji-native-platform';
 import { deviceV2Request } from './deviceV2Api';
+import { diagnosticAudit } from './diagnostics';
 
 function randomGeneration(): string {
   const bytes = Crypto.getRandomBytes(16);
@@ -25,6 +26,7 @@ function randomGeneration(): string {
 export async function ensureLocalMeetingServiceBinding(
   meetingId: string,
 ): Promise<MeetingServiceBinding> {
+  diagnosticAudit('device_binding_local_start', {});
   const normalizedMeetingId = meetingId.trim();
   const database = await openMeetingDatabase();
   const resolved = await database.getFirstAsync<{ id: string }>(
@@ -35,21 +37,30 @@ export async function ensureLocalMeetingServiceBinding(
     normalizedMeetingId,
     normalizedMeetingId,
   );
-  if (!resolved) throw new Error('会议本机索引不可用');
+  if (!resolved) {
+    diagnosticAudit('device_binding_local_error', { error_code: 'meeting_index_missing' });
+    throw new Error('会议本机索引不可用');
+  }
   const canonicalMeetingId = resolved.id;
   const existing = await getMeetingServiceBinding(canonicalMeetingId);
   if (existing) {
-    if (existing.state !== 'active') throw new Error('会议服务连接正在清理');
+    if (existing.state !== 'active') {
+      diagnosticAudit('device_binding_local_error', { error_code: 'binding_not_active' });
+      throw new Error('会议服务连接正在清理');
+    }
+    diagnosticAudit('device_binding_local_cached', {});
     return existing;
   }
   const identity = await getOrCreateDeviceIdentity();
   await ensureDeviceEpoch(identity.epochId);
-  return createMeetingServiceBinding({
+  const created = await createMeetingServiceBinding({
     meetingId: canonicalMeetingId,
     epochId: identity.epochId,
     bindingId: Crypto.randomUUID().toLowerCase(),
     bindingGeneration: randomGeneration(),
   });
+  diagnosticAudit('device_binding_local_ready', {});
+  return created;
 }
 
 /**
@@ -60,6 +71,7 @@ export async function ensureLocalMeetingServiceBinding(
 export async function ensureRemoteMeetingServiceBinding(
   meetingId: string,
 ): Promise<MeetingServiceBinding> {
+  diagnosticAudit('device_binding_remote_start', {});
   const binding = await ensureLocalMeetingServiceBinding(meetingId);
   const purgeCapability = await preparePurgeCapability(
     'binding',
@@ -70,6 +82,7 @@ export async function ensureRemoteMeetingServiceBinding(
       bindingGeneration: binding.bindingGeneration,
     },
   );
+  diagnosticAudit('device_binding_remote_capability_ready', {});
   const response = await deviceV2Request<{
     schema_version: 2;
     binding: {
@@ -110,8 +123,10 @@ export async function ensureRemoteMeetingServiceBinding(
     || Number(remote.cancel_revision) !== binding.cancelRevision
     || remote.state !== 'active'
   ) {
+    diagnosticAudit('device_binding_remote_error', { error_code: 'binding_confirmation_mismatch' });
     throw new Error('会议服务连接确认不一致');
   }
+  diagnosticAudit('device_binding_remote_ready', {});
   markPurgeCapabilityArmed(purgeCapability.capabilityId);
   return binding;
 }

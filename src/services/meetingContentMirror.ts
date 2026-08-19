@@ -228,6 +228,9 @@ export function mirrorLegacyTranscriptContent(
             && Number(line.confidence) >= 0 && Number(line.confidence) <= 1
             ? Number(line.confidence)
             : null,
+          textState: line.textState === 'stable' || line.textState === 'final'
+            ? line.textState
+            : 'partial',
           createdAtMs: timestamp(line.created_at, aggregate.note.createdAtMs),
         };
       });
@@ -267,7 +270,9 @@ export function mirrorLegacyTranscriptContent(
         sourceTranscriptionJobId: line.sourceTranscriptionJobId,
         stableSegmentKey: line.sourceId || `${revisionId}:stable:${ordinal}`,
         segmentRevision: 1,
-        textState: realtimeDraft ? 'partial' : 'final',
+        textState: realtimeDraft
+          ? line.textState === 'stable' ? 'stable' : 'partial'
+          : 'final',
         ordinal,
         startMs: line.startMs,
         endMs: line.endMs,

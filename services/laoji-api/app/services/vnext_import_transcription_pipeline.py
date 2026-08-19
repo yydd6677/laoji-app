@@ -29,6 +29,7 @@ from app.services import (
     vnext_upload_store,
 )
 from app.services.compact_transcription_service import (
+    ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
     ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
     CompactTranscriptionError,
     SpeechAudio,
@@ -176,7 +177,7 @@ def stream_r2_speech_segments(
     vad = StreamingVAD(vad_model, sample_rate=16_000)
     vad.set_min_silence_duration(600)
     vad.set_pre_roll_duration(250, initial_duration_ms=250)
-    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
+    vad.set_max_speech_duration(ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS)
     vad.set_min_energy_threshold(0.0002)
     ordinal = 0
     decoded_samples = 0
@@ -193,7 +194,7 @@ def stream_r2_speech_segments(
             end_ms = max(start_ms + 1, int(segment.end_ms))
             audio = np.asarray(segment.audio_data, dtype=np.float32)
             if audio.size:
-                yield SpeechAudio(
+                emitted = SpeechAudio(
                     ordinal=ordinal,
                     segment_id=_stable_segment_id(source_sha256, ordinal, start_ms, end_ms),
                     start_ms=start_ms,
@@ -201,6 +202,9 @@ def stream_r2_speech_segments(
                     audio=audio,
                 )
                 ordinal += 1
+                yield emitted
+                if ordinal == 1:
+                    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
 
     try:
         while True:

@@ -82,6 +82,24 @@ class LaojiMediaImportModule : Module() {
       }
     }
 
+    AsyncFunction("stageMeetingMediaImport") Coroutine {
+        sourceUri: String,
+        meetingId: String,
+        assetId: String,
+        origin: String,
+        maximumBytes: Double,
+      ->
+      withContext(Dispatchers.IO) {
+        MediaIngestor(requireContext()).stage(
+          sourceUri,
+          meetingId,
+          assetId,
+          origin,
+          maximumBytes.toLong(),
+        )
+      }
+    }
+
     AsyncFunction("recoverPendingMediaImports") Coroutine { ->
       withContext(Dispatchers.IO) {
         MediaIngestor(requireContext()).recoverPending().map { it.toMap() }

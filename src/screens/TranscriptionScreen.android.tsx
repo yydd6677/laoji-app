@@ -84,7 +84,6 @@ import {
   subscribePendingMeetingAudioUploadChanged,
   type PendingMeetingAudioUpload,
 } from '../services/meetingRecording';
-import { uploadMeetingRecordingToDeviceService } from '../services/deviceMeetingService';
 import {
   getDeviceTranscriptTask,
   rememberDeviceTranscriptTask,
@@ -2302,19 +2301,42 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           }
           return;
         }
+        // Guest/device uploads must go through the same capability-selected
+        // queue as the meeting list.  Calling the legacy uploader directly
+        // here raced the v2 barrier and produced a visible 426 before the
+        // durable v2 worker could take ownership of the asset.
+        if (isGuest) {
+          await reconcileAudioUploads();
+          const latest = await getPendingMeetingAudioUpload(
+            recordingStorageScope,
+            pending.meetingId,
+            pending.recordingAssetId,
+          );
+          if (mountedRef.current) {
+            setPendingAudioUpload(latest);
+            setPendingAudioError(latest?.failureMessage
+              ? readableErrorMessage(latest.failureMessage, '自动同步未完成，录音仍保存在本机')
+              : '');
+          }
+          if (notifyUser && mountedRef.current) {
+            showDialog(latest
+              ? { title: '正在后台同步', message: '录音将在后台继续上传。', tone: 'info' }
+              : { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
+          }
+          return;
+        }
+
         const uploadCredential = accessToken ?? 'device';
         const uploaded = await retryPendingMeetingAudioUpload(
           recordingStorageScope,
           pending.recordingAssetId,
           uploadCredential,
-          isGuest
-            ? item => uploadMeetingRecordingToDeviceService(item)
-            : (item, token) => uploadMeetingAudio(
+          (item, token) => uploadMeetingAudio(
               item.remoteMeetingId ?? item.meetingId,
               item.audioUri,
               token,
               { fileName: item.fileName, mimeType: item.mimeType },
-            ),
+          ),
           { automatic: !notifyUser },
         );
         const stillPending = uploaded
@@ -2411,6 +2433,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         ? readableErrorMessage(pending.failureMessage, '自动同步未完成，录音仍保存在本机')
         : '');
       if (!pending || (!accessToken && !isGuest)) return;
+      // The provider and WorkManager are the only automatic executors for the
+      // accountless v2 queue. This detail screen observes their durable state;
+      // it only wakes the executor from the explicit retry action below.
+      if (isGuest) return;
       const key = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
       if (automaticAudioUploadKeyRef.current === key) return;
       automaticAudioUploadKeyRef.current = key;

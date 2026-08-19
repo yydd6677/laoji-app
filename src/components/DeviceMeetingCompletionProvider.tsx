@@ -19,6 +19,7 @@ import {
   transcriptProjectionSha256,
 } from '../services/deviceV2ImportTranscript';
 import { applyDeviceV2ImportSpeakerOverlay } from '../services/deviceV2SpeakerOverlay';
+import { mirrorLegacyTranscriptProcessingFailure } from '../services/meetingStageMirror';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import type { TranscriptLine } from '../types';
@@ -172,6 +173,7 @@ export function DeviceMeetingCompletionProvider(): null {
                       end_time: event.source_end_ms / 1000,
                       confidence: 0,
                       isFinal: finalEvent?.outcome === 'text',
+                      textState: finalEvent?.outcome === 'text' ? 'final' : 'stable',
                       revisionKind: finalEvent?.outcome === 'text' ? 'final' : 'realtimeDraft',
                       script: 'zh-Hans',
                     });
@@ -180,7 +182,12 @@ export function DeviceMeetingCompletionProvider(): null {
                     Number(left.start_time ?? 0) - Number(right.start_time ?? 0)
                     || left.id.localeCompare(right.id)
                   )).map(line => finalEvent?.outcome === 'text'
-                    ? { ...line, isFinal: true, revisionKind: 'final' as const }
+                    ? {
+                        ...line,
+                        isFinal: true,
+                        textState: 'final' as const,
+                        revisionKind: 'final' as const,
+                      }
                     : line);
                   let transcriptRevisionId: string | null = null;
                   if (lines.length > 0) {
@@ -229,6 +236,14 @@ export function DeviceMeetingCompletionProvider(): null {
                     projectionSha256,
                   );
                   if (finalEvent) {
+                    if (finalEvent.outcome === 'no_speech') {
+                      await mirrorLegacyTranscriptProcessingFailure(
+                        'guest',
+                        meeting.id,
+                        'no_speech',
+                        new Error('no_speech'),
+                      );
+                    }
                     await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
                     await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
                     await updateMeetingStatus(
@@ -257,6 +272,14 @@ export function DeviceMeetingCompletionProvider(): null {
                   snapshot.last_event_seq === task.eventCursor
                   && ['succeeded', 'no_content'].includes(snapshot.state)
                 ) {
+                  if (snapshot.state === 'no_content') {
+                    await mirrorLegacyTranscriptProcessingFailure(
+                      'guest',
+                      meeting.id,
+                      'no_speech',
+                      new Error('no_speech'),
+                    );
+                  }
                   await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
                   await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
                 }
@@ -307,6 +330,12 @@ export function DeviceMeetingCompletionProvider(): null {
                 // no-speech result.  Do not surface it as a transcription
                 // failure; transport/API failures are handled above and keep
                 // their retryable error state.
+                await mirrorLegacyTranscriptProcessingFailure(
+                  'guest',
+                  meeting.id,
+                  'no_speech',
+                  new Error('no_speech'),
+                );
                 await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
                 await updateMeetingStatus(
                   meeting.id,
@@ -330,6 +359,7 @@ export function DeviceMeetingCompletionProvider(): null {
               end_time: Number(item.end_ms || 0) / 1000,
               confidence: Number(item.confidence || 0),
               isFinal: payloadComplete,
+              textState: payloadComplete ? 'final' : 'stable',
               revisionKind: payloadComplete ? 'final' : 'realtimeDraft',
               script: 'zh-Hans',
             }))).then(items => items.filter((line: TranscriptLine) => line.text.trim()));

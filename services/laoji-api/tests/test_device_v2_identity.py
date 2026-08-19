@@ -45,6 +45,18 @@ def test_device_schema_can_boot_before_domain_tables(tmp_path, monkeypatch) -> N
         ).fetchone() is None
 
 
+def test_control_connection_context_releases_sqlite_handle(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "control-close.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
+    device_identity._SCHEMA_READY.clear()  # type: ignore[attr-defined]
+
+    with device_identity.control_connection() as connection:
+        assert connection.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
+
+
 def _public_key_and_private():
     private = ec.generate_private_key(ec.SECP256R1())
     public = private.public_key().public_bytes(

@@ -71,6 +71,7 @@ def test_r2_media_is_piped_through_ffmpeg_without_whole_file_copy(monkeypatch) -
         output.writeframes((np.full(8_000, 400, dtype="<i2")).tobytes())
     media = buffer.getvalue()
     reads: list[int] = []
+    max_speech_durations: list[int] = []
 
     def chunk_source(*, object_key: str):
         assert object_key == "private-object"
@@ -98,8 +99,8 @@ def test_r2_media_is_piped_through_ffmpeg_without_whole_file_copy(monkeypatch) -
         def set_pre_roll_duration(self, _value, *, initial_duration_ms):
             del initial_duration_ms
 
-        def set_max_speech_duration(self, _value):
-            return None
+        def set_max_speech_duration(self, value):
+            max_speech_durations.append(int(value))
 
         def set_min_energy_threshold(self, _value):
             return None
@@ -123,6 +124,10 @@ def test_r2_media_is_piped_through_ffmpeg_without_whole_file_copy(monkeypatch) -
     assert segments[0].start_ms == 0 and segments[0].end_ms == 500
     assert len(reads) > 2 and max(reads) <= 1_337
     assert observed_duration[-1] == 500
+    assert max_speech_durations == [
+        vnext_import_transcription_pipeline.ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
+        vnext_import_transcription_pipeline.ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
+    ]
 
 
 def test_seekable_r2_input_decodes_media_with_tail_index(tmp_path, monkeypatch) -> None:

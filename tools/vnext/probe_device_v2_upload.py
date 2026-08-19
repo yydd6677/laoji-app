@@ -307,9 +307,13 @@ def main() -> int:
         },
     )
     require_success(status, committed, "complete upload")
+    transcription_started = time.perf_counter()
 
     deadline = time.monotonic() + args.timeout_seconds
     snapshot = None
+    first_stable_ms = None
+    first_stable_source_end_ms = None
+    transcription_wall_ms = None
     while time.monotonic() < deadline:
         status, candidate = json_request(
             f"{args.api}/tasks/{task_id}/transcript-events?after_event_seq=0&limit=1024",
@@ -317,11 +321,20 @@ def main() -> int:
         )
         if status == 200:
             snapshot = candidate
+            stable_events = [
+                event
+                for event in list(snapshot.get("events") or [])
+                if event.get("event_kind") == "stable" and event.get("outcome") == "text"
+            ]
+            if stable_events and first_stable_ms is None:
+                first_stable_ms = round((time.perf_counter() - transcription_started) * 1000)
+                first_stable_source_end_ms = int(stable_events[0].get("source_end_ms") or 0)
             if snapshot.get("state") in {"succeeded", "no_content", "failed", "cancelled"}:
+                transcription_wall_ms = round((time.perf_counter() - transcription_started) * 1000)
                 break
         elif status not in {0, 404}:
             raise RuntimeError(f"event polling failed: HTTP {status} {candidate}")
-        time.sleep(1)
+        time.sleep(0.2)
     if snapshot is None or snapshot.get("state") not in {"succeeded", "no_content"}:
         raise RuntimeError(f"transcription did not succeed: {snapshot}")
     events = list(snapshot.get("events") or [])
@@ -361,6 +374,15 @@ def main() -> int:
         "task_state": snapshot["state"],
         "event_count": len(events),
         "stable_event_count": sum(event.get("event_kind") == "stable" for event in events),
+        "first_stable_ms": first_stable_ms,
+        "first_stable_source_end_ms": first_stable_source_end_ms,
+        "transcription_wall_ms": transcription_wall_ms,
+        "source_duration_ms": int(events[-1].get("source_end_ms") or 0),
+        "transcription_rtf": (
+            round(transcription_wall_ms / int(events[-1].get("source_end_ms") or 1), 6)
+            if transcription_wall_ms is not None and int(events[-1].get("source_end_ms") or 0) > 0
+            else None
+        ),
         "final_event_sequence": snapshot["last_event_seq"],
         "model_revision": snapshot.get("model_revision"),
         "acked": acknowledged.get("through_event_seq") == snapshot["last_event_seq"],

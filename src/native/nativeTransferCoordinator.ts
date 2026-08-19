@@ -11,6 +11,7 @@ import {
   bindDeviceUploadOperationToAsset,
   ensureDeviceUploadOperation,
 } from '../services/deviceUploadOperations';
+import { diagnosticAudit } from '../services/diagnostics';
 
 export interface NativeTransferLease {
   scope: string;
@@ -129,6 +130,7 @@ export async function ensureNativeTransferLease(
 export async function ensureNativeDeviceV2TransferLease(
   session: DeviceV2Session,
 ): Promise<NativeTransferLease | null> {
+  diagnosticAudit('device_v2_lease_start', {});
   if (!transferAvailable()) return null;
   const scope = `device-v2:${session.epochId}`;
   const apiBaseUrl = getApiConfig().apiBase.trim().replace(/\/+$/, '');
@@ -162,8 +164,10 @@ export async function ensureNativeDeviceV2TransferLease(
   leases.set(scope, record);
   try {
     await ready;
+    diagnosticAudit('device_v2_lease_ready', { generation });
     return { scope, generation };
   } catch (error) {
+    diagnosticAudit('device_v2_lease_error', { error_code: error instanceof Error ? error.name : 'unknown' });
     if (leases.get(scope) === record) leases.delete(scope);
     throw error;
   }

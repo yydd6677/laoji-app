@@ -11,7 +11,7 @@ const base = {
   name: '老记',
   slug: 'laoji-app',
   scheme: 'laoji',
-  version: '1.1.14',
+  version: '1.1.16',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
@@ -39,7 +39,7 @@ const base = {
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 122,
+    versionCode: 124,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
@@ -273,6 +273,20 @@ module.exports = () => {
   assertServiceUrl('EXPO_PUBLIC_PRIVACY_POLICY_URL', privacyPolicyUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_TERMS_OF_SERVICE_URL', termsOfServiceUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_ACCOUNT_DELETION_URL', accountDeletionUrl, appEnv);
+
+  // A development APK may target the isolated loopback/tunnel endpoint over
+  // HTTP, but only when the build explicitly opts into Android cleartext
+  // traffic.  Without this guard Expo can produce a successful Release APK
+  // whose manifest silently blocks every request before the app reaches the
+  // candidate service.
+  if (!isSecureDeploymentMode(appEnv)) {
+    const apiProtocol = new URL(apiBase).protocol;
+    if (apiProtocol === 'http:' && process.env.EXPO_ALLOW_CLEARTEXT !== 'true') {
+      throw new Error(
+        'HTTP development endpoints require EXPO_ALLOW_CLEARTEXT=true so Android cleartext policy is explicit.',
+      );
+    }
+  }
 
   return {
     ...base,

@@ -3013,11 +3013,33 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const afterInspections = mode === 'guest' && !deviceV2IngressReady
         ? after.map(item => derivePendingMeetingAudioUploadInspection(item, null))
         : await inspectPendingMeetingAudioUploads(after);
+      let guestCanonicalUploadCommitted = false;
       if (mode === 'guest' && deviceV2IngressReady) {
         await Promise.all(afterInspections.map(async inspection => {
           const operationId = inspection.pending.nativeOperationId?.trim();
           const nativeState = inspection.nativeState;
-          if (!operationId || !nativeState) return;
+          if (!operationId) return;
+          if (!nativeState) {
+            if (!inspection.pending.remoteAssetId || !inspection.pending.remoteAssetRevision) return;
+            // WorkManager may prune a completed executor before JavaScript next
+            // observes it. The verified remote identity is sufficient to
+            // finish the same operation without creating a second upload.
+            const committed = await commitGuestNativeUploadSuccess(inspection).catch(error => {
+              diagnosticWarn('[device-v2-upload] orphaned success commit deferred', error);
+              return false;
+            });
+            if (committed) {
+              guestCanonicalUploadCommitted = true;
+              if (inspection.pending.transcriptionTaskId) {
+                await rememberDeviceTranscriptTaskBestEffort(
+                  inspection.pending.meetingId,
+                  inspection.pending.transcriptionTaskId,
+                );
+              }
+              await markDeviceUploadOperationSuccess(operationId);
+            }
+            return;
+          }
           if (nativeState.state === 'running') {
             await syncDeviceUploadOperationState(operationId, 'running');
           } else if (nativeState.state === 'failed') {
@@ -3034,6 +3056,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               return false;
             });
             if (committed) {
+              guestCanonicalUploadCommitted = true;
               if (inspection.pending.transcriptionTaskId) {
                 await rememberDeviceTranscriptTaskBestEffort(
                   inspection.pending.meetingId,
@@ -3042,21 +3065,15 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
               }
               await markDeviceUploadOperationSuccess(operationId);
             }
-          } else if (
-            !nativeState
-            && inspection.pending.remoteAssetId
-            && inspection.pending.remoteAssetRevision
-          ) {
-            // The native executor handle can be lost across an APK/process
-            // restart.  A canonical remote identity is sufficient evidence to
-            // finish the operation without submitting another upload.
-            const committed = await commitGuestNativeUploadSuccess(inspection).catch(error => {
-              diagnosticWarn('[device-v2-upload] orphaned success commit deferred', error);
-              return false;
-            });
-            if (committed) await markDeviceUploadOperationSuccess(operationId);
           }
         }));
+      }
+      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
+      if (guestCanonicalUploadCommitted) {
+        const owned = await loadCanonicalOwnedScope();
+        if (!owned || !adoptCanonicalOwnedProjection(owned, operationGeneration)) {
+          throw new Error('录音上传完成，但本机会议状态未能刷新');
+        }
       }
       if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) return;
       if (
@@ -3081,10 +3098,22 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const rerunRequested = audioResumeRerunScopesRef.current.delete(operationKey);
       if (
         rerunRequested
+        && !shouldPollPendingUploads
         && generationRef.current === operationGeneration
         && activeScopeRef.current === scope
       ) {
-        void resumePendingAudioUploads(true).catch(() => {});
+        // A caller can append an asset after this pass took its final queue
+        // snapshot. Coalesce that narrow race into one deferred rescan. When
+        // this pass already observed pending native work, the normal bounded
+        // poll below owns projection refresh; an immediate rerun would turn
+        // every pending-registry notification into a self-sustaining loop.
+        if (!audioResumePollTimersRef.current.has(operationKey)) {
+          const timer = setTimeout(() => {
+            audioResumePollTimersRef.current.delete(operationKey);
+            void resumePendingAudioUploads(true).catch(() => {});
+          }, 250);
+          audioResumePollTimersRef.current.set(operationKey, timer);
+        }
         return;
       }
       if (
@@ -3115,7 +3144,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
     });
     audioResumeOperationsRef.current.set(operationKey, operation);
     return operation;
-  }, [accessToken, mode, reconcilePendingAudioUploads, refreshMeetingsFromCloud, scope]);
+  }, [accessToken, adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, mode, reconcilePendingAudioUploads, refreshMeetingsFromCloud, scope]);
 
   const reconcileAudioUploads = useCallback(async (uploaded?: PendingMeetingAudioUpload) => {
     const operationGeneration = generationRef.current;

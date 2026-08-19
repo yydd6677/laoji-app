@@ -78,6 +78,7 @@ def test_segment_checkpoints_resume_without_repeating_asr(tmp_path, monkeypatch)
     source.write_bytes(b"immutable-source")
     monkeypatch.setattr(compact.settings, "AUDIO_STORAGE_PATH", str(tmp_path / "audio"))
     monkeypatch.setattr(compact, "ASR_OFFLINE_BATCH_MAX_AUDIO_MS", 12_000)
+    monkeypatch.setattr(compact, "ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS", 12_000)
     monkeypatch.setattr(compact, "_probe_duration_ms", lambda _source: 21_000)
     monkeypatch.setattr(compact, "_load_registered_profiles", lambda _owner: [])
     first_client = FakeClient()
@@ -119,6 +120,7 @@ def test_offline_batches_yield_between_bounded_audio_slices(tmp_path, monkeypatc
     source.write_bytes(b"immutable-source")
     monkeypatch.setattr(compact.settings, "AUDIO_STORAGE_PATH", str(tmp_path / "audio"))
     monkeypatch.setattr(compact, "ASR_OFFLINE_BATCH_MAX_AUDIO_MS", 4_000)
+    monkeypatch.setattr(compact, "ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS", 4_000)
     monkeypatch.setattr(compact, "_probe_duration_ms", lambda _source: 42_000)
     monkeypatch.setattr(compact, "_load_registered_profiles", lambda _owner: [])
     client = FakeClient()
@@ -136,6 +138,39 @@ def test_offline_batches_yield_between_bounded_audio_slices(tmp_path, monkeypatc
 
     assert [len(batch) for batch in client.batches] == [1, 1, 1, 1, 1, 1]
     assert len(result.turns) == 6
+
+
+def test_first_offline_batch_prioritizes_latency_then_later_batches_use_throughput(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "meeting.mp4"
+    source.write_bytes(b"immutable-source")
+    monkeypatch.setattr(compact.settings, "AUDIO_STORAGE_PATH", str(tmp_path / "audio"))
+    monkeypatch.setattr(compact, "ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS", 4_000)
+    monkeypatch.setattr(compact, "ASR_OFFLINE_BATCH_MAX_AUDIO_MS", 32_000)
+    monkeypatch.setattr(compact, "_probe_duration_ms", lambda _source: 70_000)
+    monkeypatch.setattr(compact, "_load_registered_profiles", lambda _owner: [])
+    client = FakeClient()
+    partial_batches: list[list[str]] = []
+
+    result = compact.transcribe_recording_asset(
+        source_path=str(source),
+        source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        job_id="job-latency-then-throughput-1",
+        owner_user_id=7,
+        language="zh",
+        model_manager=FakeManager(),
+        client=client,
+        segment_iterator=lambda: iter(_long_segments(10)),
+        partial=lambda rows, _progress, _end_ms: partial_batches.append([
+            str(row["segment_id"]) for row in rows
+        ]),
+    )
+
+    assert [len(batch) for batch in client.batches] == [1, 5, 4]
+    assert [len(batch) for batch in partial_batches] == [1, 5, 4]
+    assert len(result.turns) == 10
 
 
 def test_campplus_overlaps_batched_asr_without_delaying_first_batch(tmp_path, monkeypatch):

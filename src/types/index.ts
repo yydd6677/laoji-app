@@ -118,6 +118,8 @@ export interface TranscriptLine {
   created_at?: string | null;
   /** Compatibility metadata projected from the local transcript revision model. */
   isFinal?: boolean;
+  /** Monotonic vNext text state for one stable segment identity. */
+  textState?: 'partial' | 'stable' | 'final';
   revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
   /** Canonical server script. Missing means a legacy/cache row. */
   script?: 'zh-Hans' | 'unknown';

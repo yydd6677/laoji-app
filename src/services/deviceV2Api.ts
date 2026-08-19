@@ -14,6 +14,7 @@ import {
   type PurgeOnlyJournalStatus,
   type DeviceKeyInfo,
 } from 'laoji-native-platform';
+import { diagnosticAudit } from './diagnostics';
 
 const TOKEN_KEY = 'laoji.device.v2.token';
 const TOKEN_EXPIRES_KEY = 'laoji.device.v2.token.expires';
@@ -92,7 +93,19 @@ function message(kind: string, nonce: string, deviceId: string, epochId: string,
 }
 
 async function jsonRequest<T>(path: string, init: RequestInit, fallback: string): Promise<T> {
-  const response = await fetchWithTimeout(endpoint(path), init);
+  const route = path.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'root';
+  diagnosticAudit('device_v2_http_start', { route });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(endpoint(path), init);
+  } catch (error) {
+    diagnosticAudit('device_v2_http_error', {
+      route,
+      error_code: error instanceof Error ? error.name : 'unknown',
+    });
+    throw error;
+  }
+  diagnosticAudit('device_v2_http_response', { route, status: response.status });
   let data: any = null;
   try { data = await readJsonWithTimeout(response, 15_000); } catch { data = null; }
   if (!response.ok) {
@@ -101,6 +114,11 @@ async function jsonRequest<T>(path: string, init: RequestInit, fallback: string)
       ? detail
       : String(detail?.message ?? fallback);
     const code = typeof detail?.code === 'string' ? detail.code : undefined;
+    diagnosticAudit('device_v2_http_rejected', {
+      route,
+      status: response.status,
+      error_code: code ?? 'http_error',
+    });
     throw new DeviceV2ApiError(messageText, response.status, code);
   }
   return data as T;
@@ -295,15 +313,31 @@ async function bootstrapDeviceV2Session(): Promise<DeviceV2Session> {
 export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
   if (sessionPromise) return sessionPromise;
   const operation = (async () => {
-    const identity = await getOrCreateDeviceIdentity();
-    const key = await getOrCreateDeviceKey(1);
-    const hash = await publicKeyHash(key.publicKeyDer);
-    const stored = await readStoredSession(identity, key, hash, { allowExpired: true });
-    if (stored && stored.expiresAt > Date.now() + 30_000) return stored;
-    if (stored) {
-      return refreshDeviceV2Session(stored);
+    diagnosticAudit('device_v2_session_start', {});
+    try {
+      const identity = await getOrCreateDeviceIdentity();
+      diagnosticAudit('device_v2_session_identity_ready', {});
+      const key = await getOrCreateDeviceKey(1);
+      diagnosticAudit('device_v2_session_key_ready', { key_version: key.keyVersion });
+      const hash = await publicKeyHash(key.publicKeyDer);
+      const stored = await readStoredSession(identity, key, hash, { allowExpired: true });
+      if (stored && stored.expiresAt > Date.now() + 30_000) {
+        diagnosticAudit('device_v2_session_cached', {});
+        return stored;
+      }
+      if (stored) {
+        diagnosticAudit('device_v2_session_refresh', {});
+        return refreshDeviceV2Session(stored);
+      }
+      diagnosticAudit('device_v2_session_bootstrap', {});
+      return bootstrapDeviceV2Session();
+    } catch (error) {
+      diagnosticAudit('device_v2_session_error', {
+        error_code: error instanceof DeviceV2ApiError ? (error.code ?? 'device_v2_error') : error instanceof Error ? error.name : 'unknown',
+        status: error instanceof DeviceV2ApiError ? error.status : 0,
+      });
+      throw error;
     }
-    return bootstrapDeviceV2Session();
   })();
   sessionPromise = operation;
   try {
@@ -364,6 +398,14 @@ export async function loadDeviceV2Capabilities(
     const value = await request;
     capabilityValue = value;
     capabilityUntil = Date.now() + CAPABILITY_CACHE_MS;
+    diagnosticAudit('device_v2_capabilities_ready', {
+      upload_sessions_v2: value.uploadSessionsV2,
+      import_transcript_events_v2: value.importTranscriptEventsV2,
+      realtime_asr_v2: value.realtimeAsrV2,
+      schedule_graph_v2: value.scheduleGraphV2,
+      source_stream_v2: value.sourceStreamV2,
+      question_reader_v2: value.questionReaderV2,
+    });
     return value;
   } finally {
     if (capabilityPromise === request) capabilityPromise = null;

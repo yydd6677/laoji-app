@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from typing import Callable, Iterable, Iterator
 import urllib.error
 import urllib.parse
@@ -44,11 +45,18 @@ ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS = max(
         int(os.getenv("LAOJI_ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS", "4000")),
     ),
 )
+ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS = max(
+    1_000,
+    min(
+        ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
+        int(os.getenv("LAOJI_ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS", "4000")),
+    ),
+)
 ASR_OFFLINE_BATCH_MAX_AUDIO_MS = max(
     ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
     min(
         120_000,
-        int(os.getenv("LAOJI_ASR_OFFLINE_BATCH_MAX_AUDIO_MS", "12000")),
+        int(os.getenv("LAOJI_ASR_OFFLINE_BATCH_MAX_AUDIO_MS", "32000")),
     ),
 )
 SPEAKER_PIPELINE_MAX_PENDING = max(
@@ -175,11 +183,13 @@ def _pipeline_fingerprint(*, model_revision: str, speaker_enabled: bool = True) 
         "vad": {
             "silence_ms": 600,
             "pre_roll_ms": 250,
+            "first_max_speech_ms": ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
             "max_speech_ms": ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
             "energy_threshold": 0.0002,
         },
         "asr_batch": {
             "max_items": ASR_BATCH_LIMIT,
+            "first_max_audio_ms": ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
             "max_audio_ms": ASR_OFFLINE_BATCH_MAX_AUDIO_MS,
         },
         "speaker": {
@@ -463,7 +473,7 @@ def stream_speech_segments(
     vad = StreamingVAD(vad_model, sample_rate=SAMPLE_RATE)
     vad.set_min_silence_duration(600)
     vad.set_pre_roll_duration(250, initial_duration_ms=250)
-    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
+    vad.set_max_speech_duration(ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS)
     vad.set_min_energy_threshold(0.0002)
     process = subprocess.Popen(
         [
@@ -506,7 +516,7 @@ def stream_speech_segments(
             end_ms = max(start_ms + 1, int(segment.end_ms))
             audio = np.asarray(segment.audio_data, dtype=np.float32)
             if audio.size:
-                yield SpeechAudio(
+                emitted = SpeechAudio(
                     ordinal=ordinal,
                     segment_id=_stable_segment_id(source_sha256, ordinal, start_ms, end_ms),
                     start_ms=start_ms,
@@ -514,6 +524,9 @@ def stream_speech_segments(
                     audio=audio,
                 )
                 ordinal += 1
+                yield emitted
+                if ordinal == 1:
+                    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
 
     try:
         while True:
@@ -781,6 +794,7 @@ def transcribe_recording_asset(
         tuple[TranscriptRecord, Future[np.ndarray | None]]
     ] = []
     pending_audio_ms = 0
+    submitted_batch_count = 0
     observed_end_ms = 0
     speaker_executor = (
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="laoji-campplus")
@@ -811,11 +825,18 @@ def transcribe_recording_asset(
         speaker_tasks = remaining
 
     def flush() -> None:
-        nonlocal pending_audio_ms
+        nonlocal pending_audio_ms, submitted_batch_count
         if not pending:
             return
         segments = [item[0] for item in pending]
+        batch_audio_ms = pending_audio_ms
+        started_at = time.perf_counter()
         results = asr.transcribe(segments, language)
+        wall_ms = max(0, round((time.perf_counter() - started_at) * 1000))
+        queue_ms = max((int(item.get("queue_ms") or 0) for item in results.values()), default=0)
+        infer_ms = max((int(item.get("infer_ms") or 0) for item in results.values()), default=0)
+        batch_ordinal = submitted_batch_count
+        submitted_batch_count += 1
         published: list[dict] = []
         stable_callbacks: list[tuple[SpeechAudio, dict]] = []
         for segment, embedding_future in pending:
@@ -847,6 +868,19 @@ def transcribe_recording_asset(
                 })
         pending.clear()
         pending_audio_ms = 0
+        privacy_log(
+            "transcription_batch_completed",
+            capability="media.upload",
+            batch_ordinal=batch_ordinal,
+            first_batch=batch_ordinal == 0,
+            items=len(segments),
+            audio_ms=batch_audio_ms,
+            queue_ms=max(0, queue_ms),
+            infer_ms=max(0, infer_ms),
+            wall_ms=wall_ms,
+            model_revision=model_revision,
+            status="completed",
+        )
         if partial is not None and published:
             processed_end_ms = max(item["end_ms"] for item in published)
             partial(
@@ -883,9 +917,14 @@ def transcribe_recording_asset(
                 1,
                 round(segment.audio.size * 1000 / SAMPLE_RATE),
             )
+            batch_audio_limit = (
+                ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS
+                if submitted_batch_count == 0
+                else ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+            )
             if pending and (
                 len(pending) >= ASR_BATCH_LIMIT
-                or pending_audio_ms + segment_audio_ms > ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                or pending_audio_ms + segment_audio_ms > batch_audio_limit
             ):
                 flush()
             embedding_future = submit_embedding(segment)
@@ -923,9 +962,14 @@ def transcribe_recording_asset(
             else:
                 pending.append((segment, embedding_future))
                 pending_audio_ms += segment_audio_ms
+                batch_audio_limit = (
+                    ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS
+                    if submitted_batch_count == 0
+                    else ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                )
                 if (
                     len(pending) >= ASR_BATCH_LIMIT
-                    or pending_audio_ms >= ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                    or pending_audio_ms >= batch_audio_limit
                 ):
                     flush()
             settle_speaker_tasks()

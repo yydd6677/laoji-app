@@ -35,6 +35,16 @@ _SCHEMA_LOCK = __import__("threading").Lock()
 _SCHEMA_READY: set[Path] = set()
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback like sqlite3's context manager, then release its FDs."""
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
+
+
 class DeviceIdentityError(RuntimeError):
     def __init__(self, code: str, message: str, status_code: int = 401):
         super().__init__(message)
@@ -64,7 +74,7 @@ def _database_path() -> Path:
 def _connect() -> sqlite3.Connection:
     path = _database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=30)
+    connection = sqlite3.connect(path, timeout=30, factory=_ClosingConnection)
     connection.row_factory = sqlite3.Row
     # WAL is enabled once by ensure_device_schema.  Reissuing the pragma on
     # every authenticated request can itself take a SQLite write lock.

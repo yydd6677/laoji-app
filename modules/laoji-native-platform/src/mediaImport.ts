@@ -55,6 +55,13 @@ interface NativeMediaImportModule extends NativeModule<NativeMediaImportEvents> 
     origin: MeetingMediaIngestOrigin,
     maximumBytes: number,
   ): Promise<unknown>;
+  stageMeetingMediaImport(
+    sourceUri: string,
+    meetingId: string,
+    assetId: string,
+    origin: MeetingMediaIngestOrigin,
+    maximumBytes: number,
+  ): Promise<boolean>;
   recoverPendingMediaImports(): Promise<unknown>;
   acknowledgeIngestedMeetingMedia(meetingId: string, assetId: string): Promise<boolean>;
   discardIngestedMeetingMedia(meetingId: string, assetId: string): Promise<boolean>;
@@ -218,6 +225,25 @@ export async function ingestMeetingMedia(input: {
     input.origin,
     input.maximumBytes,
   ));
+}
+
+export async function stageMeetingMediaImport(input: {
+  sourceUri: string;
+  meetingId: string;
+  assetId: string;
+  origin: MeetingMediaIngestOrigin;
+  maximumBytes: number;
+}): Promise<boolean> {
+  if (!Number.isSafeInteger(input.maximumBytes) || input.maximumBytes <= 0) {
+    throw new Error('meeting media import maximum size is invalid');
+  }
+  return requireNativeModule().stageMeetingMediaImport(
+    input.sourceUri,
+    input.meetingId,
+    input.assetId,
+    input.origin,
+    input.maximumBytes,
+  );
 }
 
 export async function recoverPendingMeetingMediaImports(): Promise<IngestedMeetingMedia[]> {

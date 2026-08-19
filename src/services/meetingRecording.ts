@@ -199,10 +199,15 @@ export async function getPendingMeetingAudioUpload(
   meetingId: string,
   recordingAssetId?: string,
 ): Promise<PendingMeetingAudioUpload | null> {
-  await pendingStorageMutation.catch(() => {});
-  const records = await readPendingUploads(storageScope);
-  if (recordingAssetId) return records[recordingAssetId] ?? null;
-  return Object.values(records)
+  // Detail pages and the background coordinator must project the same owner.
+  // Reading the legacy AsyncStorage map directly here resurrected an upload
+  // after its canonical Operation had already reached success, leaving an
+  // open meeting on "等待上传录音" while transcript events were arriving.
+  const records = await listPendingMeetingAudioUploads(storageScope);
+  if (recordingAssetId) {
+    return records.find(item => item.recordingAssetId === recordingAssetId) ?? null;
+  }
+  return records
     .filter(item => item.meetingId === meetingId)
     .sort((left, right) => (
       (left.role === 'primary' ? 0 : 1) - (right.role === 'primary' ? 0 : 1)
