@@ -47,6 +47,7 @@ def main() -> None:
         "sourceRevisionId: required(citation?.source_revision_id, 'source_revision_id', 512)",
         "item_id: `q2-item:${index}:${source.contentSha256.slice(-20)}`",
         "const MAX_DIRECT_SOURCE_ITEMS = 1_024",
+        "const Q2_TASK_RECOVERY_TIMEOUT_MS = 180_000",
         "request.sources.length > MAX_DIRECT_SOURCE_ITEMS",
         "if (!capabilities.sourceStreamV2) throw new DeviceV2SourceStreamUnavailableError()",
         "const transportDigest = await digest({",
@@ -116,6 +117,13 @@ def main() -> None:
         "`q2-clause:${turnId}:${clauseOrdinal}:${clauseId}`",
         "`q2-citation:${turnId}:${clauseOrdinal}:${citationOrdinal}:${citationId}`",
         "persistedCitationId,\n          persistedClauseId,",
+        "export class Q2ActivationFenceError extends Error",
+        "turn.transcript_revision_id === activationFence.transcriptRevisionId",
+        "activeTranscript?.id === activationFence.transcriptRevisionId",
+        "turn.current_epoch_id === activationFence.deviceEpochId",
+        "turn.binding_generation === activationFence.bindingGeneration",
+        "Number(turn.binding_cancel_revision) === activationFence.bindingCancelRevision",
+        "source.content_sha256 !== manualNote.content_sha256",
     )
     require(
         authority_repository,

@@ -14,6 +14,7 @@ import {
   createQ2Snapshot,
   createQ2Thread,
   MAX_Q2_SNAPSHOT_SOURCES,
+  type Q2ActivationFence,
   type Q2AnswerKind,
   type Q2CitationInput,
   type Q2ClauseInput,
@@ -225,6 +226,7 @@ export async function executeQ2Candidate(input: {
   turnId: string;
   requestId: string;
   operationId: string;
+  activationFence: Q2ActivationFence;
   ordinal: number;
   providerRevision: string;
   nowMs?: number;
@@ -274,6 +276,7 @@ export async function executeQ2Candidate(input: {
   const committed = await commitQ2Turn({
     turnId: input.turnId,
     expectedOperationId: input.operationId,
+    activationFence: input.activationFence,
     answerKind: validated.answerKind,
     answer: validated.answer,
     clauses: validated.clauses,

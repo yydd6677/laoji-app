@@ -1074,11 +1074,13 @@ Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开
 6. mobile summary/question repositories 原子保存版本、facts/turns、clauses 和 exact citations；Q2
    thread/turn/citation 通过只读投影复用现有问答页，不写旧问答表。
 
-截至 2026-08-20，`emulator-5562` 已完成当前会议 direct Q2 的失败 operation 重试、单次
-reader、逐字引用、引用跳转、负向无引用回答和应用重启恢复；真实 Android 稳定来源 ID 与服务端
-source-stream 边界统一为 512，模型内部仍使用短别名。证据见
-`docs/vnext-stage3/Q2-ANDROID-VERTICAL-20260820.md`。这不覆盖 Android 长来源流、笔记来源或
-95% 人工相关性门，capability 继续关闭。
+截至 2026-08-20，`emulator-5562` 已完成 direct/长来源 Q2、当前笔记、定量逐字引用、引用跳转、
+失败 operation 重试、应用重启恢复以及“模型运行期间笔记 revision 改变”的激活 CAS。迟到成功
+回答在写入 clauses/citations 前失败关闭，完整但失败的加密来源流可取消清理；durable Task 恢复
+窗口为 180 秒。证据见 `docs/vnext-stage3/Q2-ANDROID-VERTICAL-20260820.md`、
+`docs/vnext-stage3/Q2-ANDROID-LONG-SOURCE-20260820.md` 和
+`docs/vnext-stage3/Q2-ANDROID-ACTIVATION-FENCE-20260820.md`。这仍不覆盖附件/epoch/binding 全恢复
+矩阵或 95% 人工相关性门，capability 继续关闭。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。

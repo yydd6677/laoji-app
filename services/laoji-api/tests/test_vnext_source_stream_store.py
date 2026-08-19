@@ -526,6 +526,100 @@ def test_cancel_clears_sources_checkpoints_and_capacity(tmp_path, monkeypatch) -
         ).fetchone()[0] == 0
 
 
+def test_cancel_complete_question_stream_after_retryable_failure_clears_sources(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(
+        context,
+        generation,
+        suffix="question-retry-cancel",
+        capability="question",
+    )
+    item, bundle_hash, descriptor = _chapter(0, "问答校验失败后仍应允许用户取消并清理来源。")
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    _upload_chapter(context, stream["stream_id"], descriptor, item, bundle_hash)
+    assert source_store.get_source_stream(context, stream["stream_id"])["state"] == "complete"
+
+    attempt = vnext_task_store.claim_attempt(
+        context,
+        stream["task_id"],
+        lease_owner="q2-retryable-worker",
+    )
+    assert attempt is not None
+    assert vnext_task_store.mark_failure(
+        context,
+        stream["task_id"],
+        attempt["attempt_id"],
+        "Q2_GROUNDING_INVALID",
+        retryable=True,
+        lease_owner="q2-retryable-worker",
+    )
+    assert vnext_task_store.get_task(context, stream["task_id"])["state"] == "active"
+
+    assert source_store.cancel_source_stream(context, stream["stream_id"])
+    assert source_store.get_source_stream(context, stream["stream_id"])["state"] == "cancelled"
+    assert vnext_task_store.get_task(context, stream["task_id"])["state"] == "cancelled"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_bundle_groups").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_manifest_pages").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM vnext_encrypted_source_payloads").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM vnext_source_reservations WHERE state = 'active'"
+        ).fetchone()[0] == 0
+
+
+def test_cancel_complete_stream_does_not_erase_terminal_task_sources(tmp_path, monkeypatch) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    stream, _ = _create_stream(
+        context,
+        generation,
+        suffix="question-terminal-preserve",
+        capability="question",
+    )
+    item, bundle_hash, descriptor = _chapter(0, "终态任务的来源不能被迟到的取消请求清理。")
+    source_store.append_manifest_page(
+        context,
+        stream["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    _upload_chapter(context, stream["stream_id"], descriptor, item, bundle_hash)
+    attempt = vnext_task_store.claim_attempt(
+        context,
+        stream["task_id"],
+        lease_owner="q2-terminal-worker",
+    )
+    assert attempt is not None
+    assert vnext_task_store.mark_success(
+        context,
+        stream["task_id"],
+        attempt["attempt_id"],
+        {"answer": "已完成"},
+        result_kind="content_outcome",
+        lease_owner="q2-terminal-worker",
+    )
+
+    assert source_store.cancel_source_stream(context, stream["stream_id"]) is False
+    assert source_store.get_source_stream(context, stream["stream_id"])["state"] == "complete"
+    assert vnext_task_store.get_task(context, stream["task_id"])["state"] == "success"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM vnext_source_bundle_groups").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM vnext_encrypted_source_payloads").fetchone()[0] == 1
+
+
 def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monkeypatch) -> None:
     database, context, generation = _setup(tmp_path, monkeypatch)
     stream, _ = _create_stream(context, generation, suffix="artifact")

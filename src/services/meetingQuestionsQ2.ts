@@ -10,6 +10,7 @@ import {
   createQ2Thread,
   findLatestQ2Thread,
   getQ2Thread,
+  Q2ActivationFenceError,
   rebindPendingQ2Turn,
   type Q2CitationInput,
 } from '../data/repositories/vnext/questionQ2Repository';
@@ -342,6 +343,21 @@ export async function askQ2MeetingQuestion(input: {
         turnId,
         requestId,
         operationId,
+        activationFence: {
+          meetingId: input.evidence.meetingId,
+          sourceFingerprint: input.evidence.sourceFingerprint,
+          transcriptRevisionId: input.evidence.transcriptRevisionId,
+          deviceEpochId: deviceSession.epochId,
+          bindingId: binding.bindingId,
+          bindingGeneration: binding.bindingGeneration,
+          bindingRevision: binding.bindingRevision,
+          bindingCancelRevision: binding.cancelRevision,
+          manualNote: input.evidence.includeManualNote && input.evidence.manualNoteRevision !== null
+            ? { mode: 'included', revision: input.evidence.manualNoteRevision }
+            : input.evidence.hasManualNote
+              ? { mode: 'excluded' }
+              : { mode: 'absent' },
+        },
         ordinal,
         providerRevision: Q2_PROVIDER_REVISION,
       });
@@ -367,9 +383,12 @@ export async function askQ2MeetingQuestion(input: {
           operationId,
           expectedRevision: failed.operationRevision,
           state: 'failure',
-          errorCode: 'Q2_READER_FAILED',
+          errorCode: error instanceof Q2ActivationFenceError
+            ? 'Q2_EVIDENCE_CHANGED'
+            : 'Q2_READER_FAILED',
         });
       }
+      if (error instanceof Q2ActivationFenceError) throw new Q2EvidenceChangedError();
       throw error;
     }
   }

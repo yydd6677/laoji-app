@@ -2098,6 +2098,13 @@ def load_generated_artifact(
 
 
 def cancel_source_stream(context: SourceOwnerContext, stream_id: str) -> bool:
+    """Cancel an active owner Task and erase its source payload atomically.
+
+    A question reader can leave an uploaded stream in ``complete`` while its
+    Task is still active after a retryable provider/grounding failure.  That
+    stream remains cancellable.  Conversely, source material belonging to a
+    terminal Task must not be erased by a late cancellation request.
+    """
     ensure_vnext_source_stream_schema()
     stream_id = _safe(stream_id, "stream_id", 180)
     now = utc_now()
@@ -2111,7 +2118,12 @@ def cancel_source_stream(context: SourceOwnerContext, stream_id: str) -> bool:
         if stream["state"] in {"cancelled", "expired"}:
             connection.commit()
             return True
-        if stream["state"] == "complete":
+        if not vnext_task_store.cancel_task_in_transaction(
+            connection,
+            context,
+            task_id=str(stream["task_id"]),
+            now=now,
+        ):
             connection.rollback()
             return False
         reservation_rows = connection.execute(
@@ -2130,12 +2142,6 @@ def cancel_source_stream(context: SourceOwnerContext, stream_id: str) -> bool:
         connection.execute(
             "UPDATE vnext_source_streams SET state = 'cancelled', updated_at = ?, expires_at_epoch = ? WHERE stream_id = ?",
             (now, now_epoch, stream_id),
-        )
-        vnext_task_store.cancel_task_in_transaction(
-            connection,
-            context,
-            task_id=str(stream["task_id"]),
-            now=now,
         )
         connection.commit()
         return True

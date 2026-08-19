@@ -68,7 +68,8 @@ Smart Meeting、真机或公网流量。
 
 - 本轮 Android direct reader 之后，长会议 source stream、当前笔记来源、定量引用和重启
   恢复已在后续候选中完成，详见 `Q2-ANDROID-LONG-SOURCE-20260820.md`。
-- 笔记 revision 在问答运行中变化的冲突恢复仍需单独设备纵向证据。
+- 笔记 revision 在问答运行中变化的冲突恢复已在后续隔离候选完成，详见
+  `Q2-ANDROID-ACTIVATION-FENCE-20260820.md`。
 - 两个问题不能证明问答人工相关性达到 95%，仍需更新样本的独立盲审。
 - 旧结果后台迁移、公开零 v1 流量周期、capability barrier 和旧 reader 停写仍未完成。
 - Stage 2 纯 CPU ASR 性能门未通过，继续阻止全局候选采用。

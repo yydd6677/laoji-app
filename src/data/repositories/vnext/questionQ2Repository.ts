@@ -6,6 +6,30 @@ export type Q2AnswerKind = 'answer' | 'not_stated' | 'cannot_confirm';
 // thousands of short stable transcript fragments even when its text is small.
 export const MAX_Q2_SNAPSHOT_SOURCES = 50_000;
 
+export class Q2ActivationFenceError extends Error {
+  constructor() {
+    super('Q2 来源已更新，旧回答未激活');
+    this.name = 'Q2ActivationFenceError';
+  }
+}
+
+export type Q2ManualNoteActivationFence =
+  | { mode: 'included'; revision: number }
+  | { mode: 'absent' }
+  | { mode: 'excluded' };
+
+export interface Q2ActivationFence {
+  meetingId: string;
+  sourceFingerprint: string;
+  transcriptRevisionId: string;
+  deviceEpochId: string;
+  bindingId: string;
+  bindingGeneration: string;
+  bindingRevision: number;
+  bindingCancelRevision: number;
+  manualNote: Q2ManualNoteActivationFence;
+}
+
 export interface Q2SnapshotSource {
   sourceType: Q2SourceType;
   sourceId: string;
@@ -487,6 +511,7 @@ export async function rebindPendingQ2Turn(input: {
 export async function commitQ2Turn(input: {
   turnId: string;
   expectedOperationId: string;
+  activationFence: Q2ActivationFence;
   answerKind: Q2AnswerKind;
   answer: string;
   clauses: readonly Q2ClauseInput[];
@@ -494,6 +519,30 @@ export async function commitQ2Turn(input: {
 }): Promise<boolean> {
   const turnId = identifier(input.turnId, 'turnId');
   const expectedOperationId = identifier(input.expectedOperationId, 'expectedOperationId');
+  const activationFence = {
+    meetingId: identifier(input.activationFence.meetingId, 'activationMeetingId'),
+    sourceFingerprint: sha256(input.activationFence.sourceFingerprint, 'activationSourceFingerprint'),
+    transcriptRevisionId: identifier(
+      input.activationFence.transcriptRevisionId,
+      'activationTranscriptRevisionId',
+    ),
+    deviceEpochId: identifier(input.activationFence.deviceEpochId, 'activationDeviceEpochId'),
+    bindingId: identifier(input.activationFence.bindingId, 'activationBindingId'),
+    bindingGeneration: identifier(
+      input.activationFence.bindingGeneration,
+      'activationBindingGeneration',
+    ),
+    bindingRevision: nonNegative(input.activationFence.bindingRevision, 'activationBindingRevision'),
+    bindingCancelRevision: nonNegative(
+      input.activationFence.bindingCancelRevision,
+      'activationBindingCancelRevision',
+    ),
+    manualNote: input.activationFence.manualNote,
+  };
+  if (activationFence.bindingRevision < 1) throw new Error('activationBindingRevision 无效');
+  if (activationFence.manualNote.mode === 'included') {
+    nonNegative(activationFence.manualNote.revision, 'activationManualNoteRevision');
+  }
   const answer = input.answer.trim();
   if (!answer || answer.length > 20_000 || /\u0000/.test(answer)) throw new Error('Q2 回答无效');
   if (input.answerKind === 'answer' && input.clauses.length === 0) {
@@ -504,13 +553,112 @@ export async function commitQ2Turn(input: {
   }
   const completedAtMs = nonNegative(input.completedAtMs ?? Date.now(), 'completedAtMs');
   return withMeetingDatabaseTransaction(async database => {
-    const turn = await database.getFirstAsync<TurnRow>(
-      `SELECT turn_id, thread_id, request_id, current_operation_id, ordinal, question,
-              answer_kind, answer, provider_revision, completed_at_ms, created_at_ms
-         FROM meeting_question_q2_turns WHERE turn_id = ?`,
+    const turn = await database.getFirstAsync<TurnRow & {
+      meeting_id: string;
+      snapshot_id: string;
+      source_fingerprint: string;
+      transcript_revision_id: string;
+      lifecycle: string;
+      operation_device_epoch_id: string | null;
+      operation_capability: string | null;
+      operation_entity_id: string | null;
+      operation_input_sha256: string | null;
+      operation_state: string | null;
+      current_epoch_id: string | null;
+      binding_device_epoch_id: string | null;
+      binding_id: string | null;
+      binding_generation: string | null;
+      binding_revision: number | null;
+      binding_state: string | null;
+      binding_cancel_revision: number | null;
+    }>(
+      `SELECT turn.turn_id, turn.thread_id, turn.request_id, turn.current_operation_id,
+              turn.ordinal, turn.question, turn.answer_kind, turn.answer,
+              turn.provider_revision, turn.completed_at_ms, turn.created_at_ms,
+              thread.meeting_id, thread.snapshot_id, snapshot.source_fingerprint,
+              snapshot.transcript_revision_id, meeting.lifecycle,
+              operation.device_epoch_id AS operation_device_epoch_id,
+              operation.capability AS operation_capability,
+              operation.entity_id AS operation_entity_id,
+              operation.input_sha256 AS operation_input_sha256,
+              operation.remote_state AS operation_state,
+              authority.current_epoch_id,
+              binding.device_epoch_id AS binding_device_epoch_id,
+              binding.binding_id, binding.binding_generation, binding.binding_revision,
+              binding.state AS binding_state,
+              binding.cancel_revision AS binding_cancel_revision
+         FROM meeting_question_q2_turns turn
+         INNER JOIN meeting_question_q2_threads thread ON thread.thread_id = turn.thread_id
+         INNER JOIN meeting_question_q2_snapshots snapshot ON snapshot.snapshot_id = thread.snapshot_id
+         INNER JOIN meeting_notes meeting ON meeting.id = thread.meeting_id
+         LEFT JOIN device_operations operation ON operation.operation_id = turn.current_operation_id
+         LEFT JOIN device_authority_state authority ON authority.singleton_id = 1
+         LEFT JOIN meeting_service_bindings binding ON binding.meeting_id = thread.meeting_id
+        WHERE turn.turn_id = ?`,
       turnId,
     );
     if (!turn || turn.current_operation_id !== expectedOperationId || turn.completed_at_ms !== null) return false;
+    const activeTranscript = await database.getFirstAsync<{ id: string }>(
+      `SELECT id FROM transcript_revisions
+        WHERE meeting_id = ? AND is_active = 1
+        ORDER BY created_at_ms DESC, id DESC LIMIT 1`,
+      activationFence.meetingId,
+    );
+    const identityCurrent = turn.meeting_id === activationFence.meetingId
+      && turn.lifecycle !== 'deleted'
+      && turn.source_fingerprint === activationFence.sourceFingerprint
+      && turn.transcript_revision_id === activationFence.transcriptRevisionId
+      && activeTranscript?.id === activationFence.transcriptRevisionId
+      && turn.operation_device_epoch_id === activationFence.deviceEpochId
+      && turn.operation_capability === 'question_reader_v2'
+      && turn.operation_entity_id === activationFence.meetingId
+      && turn.operation_input_sha256 === activationFence.sourceFingerprint
+      && turn.operation_state === 'running'
+      && turn.current_epoch_id === activationFence.deviceEpochId
+      && turn.binding_device_epoch_id === activationFence.deviceEpochId
+      && turn.binding_id === activationFence.bindingId
+      && turn.binding_generation === activationFence.bindingGeneration
+      && Number(turn.binding_revision) === activationFence.bindingRevision
+      && turn.binding_state === 'active'
+      && Number(turn.binding_cancel_revision) === activationFence.bindingCancelRevision;
+    if (!identityCurrent) throw new Q2ActivationFenceError();
+
+    const manualNote = await database.getFirstAsync<{
+      content: string;
+      revision: number;
+      active_revision_id: string | null;
+      content_sha256: string | null;
+    }>(
+      `SELECT note.content, note.revision, note.active_revision_id,
+              immutable.content_sha256
+         FROM manual_notes note
+         LEFT JOIN manual_note_revisions immutable
+           ON immutable.revision_id = note.active_revision_id
+        WHERE note.meeting_id = ?`,
+      activationFence.meetingId,
+    );
+    if (activationFence.manualNote.mode === 'included') {
+      const source = await database.getFirstAsync<{
+        source_revision_id: string;
+        content_sha256: string;
+      }>(
+        `SELECT source_revision_id, content_sha256
+           FROM meeting_question_q2_snapshot_sources
+          WHERE snapshot_id = ? AND source_type = 'manual_note'
+          ORDER BY ordinal LIMIT 1`,
+        turn.snapshot_id,
+      );
+      if (
+        !manualNote
+        || Number(manualNote.revision) !== activationFence.manualNote.revision
+        || manualNote.active_revision_id === null
+        || manualNote.content_sha256 === null
+        || source?.source_revision_id !== `manual_note:${activationFence.manualNote.revision}`
+        || source.content_sha256 !== manualNote.content_sha256
+      ) throw new Q2ActivationFenceError();
+    } else if (activationFence.manualNote.mode === 'absent' && manualNote?.content.trim()) {
+      throw new Q2ActivationFenceError();
+    }
     for (let clauseOrdinal = 0; clauseOrdinal < input.clauses.length; clauseOrdinal += 1) {
       const clause = input.clauses[clauseOrdinal];
       const clauseId = identifier(clause.clauseId, 'clauseId');

@@ -22,7 +22,11 @@ export const Q2_READER_PROVIDER_REVISION = 'q2-reader-v1';
 const LONG_SOURCE_CHAR_THRESHOLD = 40_000;
 const MAX_DIRECT_SOURCE_ITEMS = 1_024;
 const MAX_STREAM_BUNDLES = 8;
-const Q2_TASK_RECOVERY_TIMEOUT_MS = 120_000;
+// A 57-minute source stream completed successfully at the server roughly one
+// second after the former 120-second mobile recovery window expired. Keep the
+// durable task recoverable through transient generation/queue variance without
+// starting a duplicate question operation.
+const Q2_TASK_RECOVERY_TIMEOUT_MS = 180_000;
 const Q2_TASK_POLL_INTERVAL_MS = 1_000;
 
 function required(value: unknown, field: string, maximum = 512): string {
