@@ -97,6 +97,8 @@ def main() -> None:
         "const activationFingerprint = meetingSummaryInputFingerprint(",
         "if (activationFingerprint !== fingerprint) throw new MeetingSummaryInputChangedError()",
         "storedFacts.result.documentId !== generated.facts_document_v3.documentId",
+        "signal: inputChanged\n              ? { type: 'discarded' }",
+        "title: '会议内容已更新'",
     )
     if "saveMeetingFactsResultV3" in summary_screen_source or "linkMeetingFactsToSummaryVersion" in summary_screen_source:
         raise AssertionError("active summary screen still persists Facts V3 outside the summary-version transaction")
@@ -117,6 +119,12 @@ def main() -> None:
         "immutable summary fact document cannot be replaced",
         "INSERT INTO summary_fact_documents",
         "summary_version_id IS NULL",
+    )
+    require(
+        ROOT / "src/services/meetingSummaryProcessing.ts",
+        "currentSummaryStatus: 'ready' | 'stale' | null",
+        "status: currentSummaryStatus,",
+        "sqliteMeetingNoteRepository.getCurrentSummaryVersion(aggregate.note.id, input.scopeKey)",
     )
     upgrade_provider_source = require(
         upgrade_provider,

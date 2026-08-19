@@ -32,11 +32,16 @@ Facts V3 的手机持久化已从“先写事实、再写整理版本、最后�
 4. 强制停止并重新启动 App 后，当前模板仍为“访谈”，概述与主题继续可读；启动审计为
    `meeting_summary_v3_restore={status:facts_ready}`，无启动崩溃。启动时旧 device-v1 token 的一次 401
    随 device-v2 challenge/token 刷新自动恢复，随后 capability 请求为 200，不构成持久鉴权失败。
+5. 再次以带 `SUMMARY-RACE-RETEST` 标记的笔记提交重新整理，在任务进入 preparing 后把当前笔记恢复
+   原文。远端任务约 70 秒后完成，但手机拒绝激活旧来源结果；上一份“访谈”结果、概述和主题始终可读。
+6. 第一轮竞态回放曾把这种安全拒绝误报为红色“生成失败”。修复后 canonical stage 以
+   `signal=discarded` 收敛到当前 SummaryVersion 的真实 ready/stale 状态，界面改为信息提示
+   “会议内容已更新”；返回列表显示“整理结果可更新”，不再显示“整理失败，可重试”。
 
 ## 构建与聚焦验证
 
 - 正式候选 APK：`1.1.27 (135)`，SHA-256
-  `5de1646c4cc98291f35f7966e58b37bde078d5ed9653fa40575137d10a0471f8`；manifest
+  `b73c1e653880aa8ad757bcf678a67b88fb9de45a6aedd330f952aeb501599d69`；manifest
   `debuggable=false`，仅覆盖安装到 `emulator-5562`。
 - TypeScript、Stage 3 source-stream 静态合同和 Q2 Android 静态合同通过。
 - Facts V3、chapter merge、source stream、Task lifecycle、summary worker 和 Q2 reader 聚焦回归
@@ -46,8 +51,7 @@ Facts V3 的手机持久化已从“先写事实、再写整理版本、最后�
 
 ## 尚未满足的 Stage 3 退出门
 
-- 仍需对转写、笔记、附件授权和版本变化做完整的进程中断/竞态矩阵；本次真实 Android 回放没有逐一
-  制造所有竞态组合。
+- 当前笔记变化已有真实 Android 竞态证据；仍需对转写、附件授权/版本和页面/进程中断做完整组合矩阵。
 - 更新会议样本的独立人工盲审尚未证明事实支持率、行动候选质量及 Q2 回答/引用相关性均达到 95%。
 - 旧结果后台迁移尚未完成全量恢复验证，公开零 v1 流量周期与 capability barrier 尚未满足。
 - Stage 2 纯 CPU ASR 的首段和 RTF 性能门仍未通过，因此全局候选仍不能采用。

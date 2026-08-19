@@ -2967,6 +2967,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         }
       } catch (reason) {
         const taskStillRunning = reason instanceof MeetingSummaryTaskPendingError;
+        const inputChanged = reason instanceof MeetingSummaryInputChangedError;
         if (shouldDiscardPendingMeetingSummaryTask(reason)) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
@@ -2974,7 +2975,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           await recordMeetingSummaryProcessing({
             scopeKey: currentMeetingScopeKey,
             legacyMeetingId: currentMeeting.id,
-            signal: (reason as Error)?.name === 'AbortError' || taskStillRunning
+            signal: inputChanged
+              ? { type: 'discarded' }
+              : (reason as Error)?.name === 'AbortError' || taskStillRunning
               ? {
                 type: 'aborted',
                 taskId: knownTaskId,
@@ -2989,7 +2992,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           });
         }
         if (!isActiveSummaryRun()) return;
-        if (taskStillRunning) {
+        if (inputChanged) {
+          setSummaryVisualPhase(summaryDocument ? 'ready' : 'idle');
+          setSummaryError('');
+          setSummaryProgress('');
+          if (!options.automatic) {
+            showDialog({
+              title: '会议内容已更新',
+              message: summaryDocument
+                ? '整理期间会议内容发生了变化，已保留上一份可用结果。请按当前内容重新整理。'
+                : '整理期间会议内容发生了变化，本次结果未保存。请按当前内容重新整理。',
+              tone: 'info',
+            });
+          }
+        } else if (taskStillRunning) {
           setSummaryVisualPhase('background');
           setSummaryError('');
           setSummaryProgress('整理任务仍在后台进行');

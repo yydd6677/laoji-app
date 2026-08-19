@@ -66,9 +66,10 @@ function normalizedRequired(value: string, label: string): string {
 export function meetingSummaryProcessingTransition(
   current: ProcessingStage,
   signal: MeetingSummaryProcessingSignal,
-  hasCurrentSummary: boolean,
+  currentSummaryStatus: 'ready' | 'stale' | null,
 ): ProcessingStageTransition {
   if (current.stage !== 'summary') throw new Error('meeting summary processing stage is invalid');
+  const hasCurrentSummary = currentSummaryStatus !== null;
   if (signal.type === 'prepare') {
     return {
       stage: 'summary',
@@ -182,8 +183,8 @@ export function meetingSummaryProcessingTransition(
   if (hasCurrentSummary) {
     return {
       stage: 'summary',
-      status: current.status === 'stale' ? 'stale' : 'ready',
-      progress: current.status === 'stale' ? null : 1,
+      status: currentSummaryStatus,
+      progress: currentSummaryStatus === 'ready' ? 1 : null,
       jobId: null,
     };
   }
@@ -226,10 +227,16 @@ async function writeProcessingState(
     if (!aggregate || aggregate.note.lifecycle === 'deleted') return 'meeting_unavailable';
     const current = aggregate.processingStages.find(stage => stage.stage === 'summary');
     if (!current) throw new Error('meeting summary processing stage is missing');
+    const currentSummary = aggregate.note.currentSummaryVersionId
+      ? await sqliteMeetingNoteRepository.getCurrentSummaryVersion(aggregate.note.id, input.scopeKey)
+      : null;
+    const currentSummaryStatus = currentSummary?.status === 'ready' || currentSummary?.status === 'stale'
+      ? currentSummary.status
+      : null;
     const transition = meetingSummaryProcessingTransition(
       current,
       input.signal,
-      aggregate.note.currentSummaryVersionId !== null,
+      currentSummaryStatus,
     );
     if (!transitionChangesStage(current, transition)) return 'unchanged';
     await updateProcessingStage.execute({

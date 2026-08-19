@@ -58,6 +58,10 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 `docs/vnext-stage3/SUMMARY-V3-ANDROID-ATOMIC-ACTIVATION-20260820.md`。这仍未满足人工质量、完整竞态、
 旧结果迁移、公开零 v1 流量周期或 capability barrier，Stage 3 保持未采用。
 
+同一证据随后增加了真实 note-mutation 回放：重新整理运行期间 current note 变化时，迟到结果不会
+激活，上一份可用结果持续显示；该安全拒绝以 `discarded` 恢复当前 SummaryVersion 的 ready/stale
+状态和信息提示，不再误报“生成失败”。转写/附件竞态与进程中断矩阵仍未闭合。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：
