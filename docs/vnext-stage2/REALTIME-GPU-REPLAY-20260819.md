@@ -16,6 +16,8 @@
 - 30/30 终态为 `text`。
 - 每次至少产生 1 个 stable event；无重复 final event。
 - 30/30 `purge_state=confirmed`。
+- 回放后当前候选数据库只读审计：`vnext_tasks`、`vnext_object_cleanup_obligations`、实时事件台账和
+  chunk checkpoint 均为 0 活跃/未清理行，SQLite integrity 为 `ok`、foreign-key violation 为 0。
 - 完整断线恢复回放墙钟：p50 `6371ms`，p95 `7929ms`。
 - 该耗时包含上传 chunk、主动断开、重连、事件重放、终态提交、ACK 和 purge，不能冒充稳态首文字
   p95；它证明了连续多次恢复不会丢失文字或跨 binding 覆盖。
@@ -34,5 +36,6 @@
 ## 资源与回滚
 
 测量期间 GPU0 临时 ASR 进程约占 4.98 GiB 显存；测量完成后应停止该临时候选进程，恢复 GPU0
-余量。GPU1、PCB、Smart Meeting、生产服务和公网入口均未触碰。候选 release 可通过
+余量。实测恢复为 GPU0 `23121 MiB used / 8990 MiB free`，8031 已恢复 CPU；GPU1、PCB、Smart
+Meeting、生产服务和公网入口均未触碰。候选 release 可通过
 `/home/zhong/laoji-vnext-candidate/releases/8c3559f` 回溯，生产回滚基线仍是 `1.1.10 (118)`。
