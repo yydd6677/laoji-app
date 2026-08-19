@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with GPU ASR/recovery evidence but exit gates open; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -36,6 +36,13 @@ barrier，生产入口未切换。
 
 候选 `bb38e64` 补齐 App 音频/兼容 recording-assets 和 device-v1 旧 summary 路由；当前静态合同覆盖
 14 个整理/问答/日程入口及 6 个账号兼容媒体入口，候选仍未激活 capability。
+
+2026-08-19 的 Stage 2 切片将同一 VAD drain 产生的多个新片段合并为一次现有 ASR batch 请求，先完整
+校验 batch item 再按源时间顺序持久化，避免 API 侧逐段串行推理；单片段仍保持原低延迟路径。隔离
+GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `142ms`，另有 30 次真实 speech
+断线/重连/ACK/purge 回放全部为 `text` 且清理确认，详见
+`docs/vnext-stage2/REALTIME-GPU-REPLAY-20260819.md`。这两类证据均未证明 Android 端到端首段 p95、
+混合负载资源门或公开零流量周期，Stage 2 仍不能切 capability。
 
 ## 0. 已核对的实施基线
 
@@ -1028,7 +1035,7 @@ canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncS
 兼容补集，遇到成功/取消代际会被抑制。该切片已通过 SQLite 回放和静态 Android 合同，但尚未
 激活 capability，也未替代真实设备回放。
 
-退出：1 GiB 上传内存与恢复门通过；双上传+实时会议无冲突；首段/RTF/讲话人预算通过；
+目标退出门：1 GiB 上传内存与恢复门、双上传+实时会议无冲突、首段/RTF/讲话人预算均需分别有真实证据；
 未知讲话人不命名；NO_SPEECH 中文结果正确。
 
 回滚：barrier 前允许客户端 capability 切回旧完整链路；barrier 后保留 v2 R2 ingress、verified asset
