@@ -51,6 +51,13 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 `docs/vnext-stage2/REALTIME-GPU-REPLAY-20260819.md`。这两类证据均未证明 Android 端到端首段 p95、
 混合负载资源门或公开零流量周期，Stage 2 仍不能切 capability。
 
+2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
+收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前
+来源。长会议在 `emulator-5562` 生成成功，四模板中的“通用/项目同步/访谈”共享同一事实并在本地即时
+切换，切换窗口没有网络请求，强制重启后“访谈”投影和事实结果仍可读。证据见
+`docs/vnext-stage3/SUMMARY-V3-ANDROID-ATOMIC-ACTIVATION-20260820.md`。这仍未满足人工质量、完整竞态、
+旧结果迁移、公开零 v1 流量周期或 capability barrier，Stage 3 保持未采用。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：

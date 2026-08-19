@@ -389,15 +389,19 @@ export async function deferSummaryV3UpgradeTask(
   meetingId: string,
   attemptCount: number,
   nowMs = Date.now(),
+  options: { clearRemoteTask?: boolean; errorCode?: string | null } = {},
 ): Promise<void> {
   const database = await openMeetingDatabase();
   await database.runAsync(
     `UPDATE summary_v3_upgrade_tasks
      SET status = 'pending', attempt_count = ?, next_attempt_at_ms = ?,
-         last_error_code = NULL, updated_at_ms = ?, completed_at_ms = NULL
+         remote_task_id = CASE WHEN ? = 1 THEN NULL ELSE remote_task_id END,
+         last_error_code = ?, updated_at_ms = ?, completed_at_ms = NULL
      WHERE meeting_id = ? AND status = 'running'`,
     Math.max(0, attemptCount - 1),
     nowMs + 60_000,
+    options.clearRemoteTask ? 1 : 0,
+    options.errorCode?.slice(0, 160) ?? null,
     nowMs,
     meetingId,
   );

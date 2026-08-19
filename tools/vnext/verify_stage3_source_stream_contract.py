@@ -28,7 +28,11 @@ def main() -> None:
     summary_dispatch = ROOT / "src/services/meetingSummary.ts"
     summary_contract = ROOT / "src/services/meetingSummaryV3.ts"
     summary_screen = ROOT / "src/screens/TranscriptionScreen.android.tsx"
+    summary_mirror = ROOT / "src/services/meetingContentMirror.ts"
     summary_repository = ROOT / "src/data/repositories/meetingSummaryV3Repository.ts"
+    meeting_repository_contract = ROOT / "src/data/repositories/meetingNoteRepository.ts"
+    meeting_repository = ROOT / "src/data/repositories/sqliteMeetingNoteRepository.ts"
+    upgrade_provider = ROOT / "src/components/MeetingSummaryV3UpgradeProvider.tsx"
     summary_generation_migration = ROOT / "src/data/db/migrations/0048SummaryFactsGenerations.ts"
     server = ROOT / "services/laoji-api/app/services/vnext_source_stream_store.py"
     chapter_pipeline = ROOT / "services/laoji-api/app/services/vnext_summary_chapter_pipeline.py"
@@ -82,7 +86,7 @@ def main() -> None:
         "Math.abs(candidate.startMs - requestedStart) <= 2",
         "anchorTranscriptCitations(item.citations, transcriptLines)",
     )
-    require(
+    summary_screen_source = require(
         summary_screen,
         "current.document.manualNoteRevision,\n        transcriptRef.current,",
         "const ownsLocalSummaryRestore = () => (",
@@ -90,7 +94,38 @@ def main() -> None:
         "transcriptRef.current,",
         "}, [meetingScopeKey]);",
         "meeting_summary_v3_local_persist",
+        "const activationFingerprint = meetingSummaryInputFingerprint(",
+        "if (activationFingerprint !== fingerprint) throw new MeetingSummaryInputChangedError()",
+        "storedFacts.result.documentId !== generated.facts_document_v3.documentId",
     )
+    if "saveMeetingFactsResultV3" in summary_screen_source or "linkMeetingFactsToSummaryVersion" in summary_screen_source:
+        raise AssertionError("active summary screen still persists Facts V3 outside the summary-version transaction")
+    require(
+        summary_mirror,
+        "const activeManualNote = await transaction.getManualNote(note.id, scopeKey);",
+        "const sourceInputsStillActive = sourceTranscriptStillActive && sourceManualNoteStillActive;",
+        "factDocument: { ...factDocument, summaryVersionId: existingVersion.id }",
+        "factDocument,\n        });",
+    )
+    require(
+        meeting_repository_contract,
+        "export interface SummaryFactDocumentRecord",
+        "factDocument?: SummaryFactDocumentRecord;",
+    )
+    require(
+        meeting_repository,
+        "immutable summary fact document cannot be replaced",
+        "INSERT INTO summary_fact_documents",
+        "summary_version_id IS NULL",
+    )
+    upgrade_provider_source = require(
+        upgrade_provider,
+        "if (cached.projection !== 'updated') throw new SummaryV3UpgradeInputChangedError()",
+        "clearRemoteTask: true",
+        "storedFacts.result.documentId !== facts.documentId",
+    )
+    if "saveMeetingFactsResultV3" in upgrade_provider_source or "linkMeetingFactsToSummaryVersion" in upgrade_provider_source:
+        raise AssertionError("background summary upgrade still persists Facts V3 outside the summary-version transaction")
     repository_source = require(
         summary_repository,
         "WHERE id = ?",

@@ -134,6 +134,13 @@ export class DeviceMeetingUnavailableError extends Error {
   }
 }
 
+export class MeetingSummaryInputChangedError extends Error {
+  constructor() {
+    super('会议内容已更新，本次结果未替换当前整理，请重新整理。');
+    this.name = 'MeetingSummaryInputChangedError';
+  }
+}
+
 function isTerminalPollError(error: unknown): boolean {
   return (error instanceof HttpResponseError || error instanceof DeviceApiError)
     && [400, 401, 403, 404].includes(error.status);
@@ -144,7 +151,11 @@ function isMissingTaskError(error: unknown): boolean {
 }
 
 export function shouldDiscardPendingMeetingSummaryTask(error: unknown): boolean {
-  if (error instanceof MeetingSummaryTaskFailureError || error instanceof DeviceMeetingUnavailableError) {
+  if (
+    error instanceof MeetingSummaryTaskFailureError
+    || error instanceof DeviceMeetingUnavailableError
+    || error instanceof MeetingSummaryInputChangedError
+  ) {
     return true;
   }
   // Device-primary meetings use a separate API error class.  A missing

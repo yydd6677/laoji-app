@@ -1,15 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
-import { SelectMeetingSummaryVersionUseCase } from '../application/meeting';
 import {
   claimNextSummaryV3UpgradeTask,
   deferSummaryV3UpgradeTask,
   enqueueMissingSummaryV3UpgradeTasks,
   hasInteractiveMeetingWork,
-  linkMeetingFactsToSummaryVersion,
+  loadMeetingFactsRecordV3ForVersion,
   loadSummaryV3UpgradeMeetingContext,
   recoverInterruptedSummaryV3UpgradeTasks,
-  saveMeetingFactsResultV3,
   saveSummaryV3UpgradeRemoteTaskId,
   settleSummaryV3UpgradeTask,
   sqliteMeetingNoteRepository,
@@ -33,7 +31,13 @@ import type { TranscriptLine } from '../types';
 const IDLE_POLL_MS = 5 * 60_000;
 const NEXT_TASK_DELAY_MS = 15_000;
 const YIELD_CHECK_MS = 1_000;
-const selectSummaryVersion = new SelectMeetingSummaryVersionUseCase(sqliteMeetingNoteRepository);
+
+class SummaryV3UpgradeInputChangedError extends Error {
+  constructor() {
+    super('summary v3 upgrade inputs changed before activation');
+    this.name = 'SummaryV3UpgradeInputChangedError';
+  }
+}
 
 function errorCode(reason: unknown): string {
   const value = reason instanceof Error ? reason.name || reason.message : 'unknown';
@@ -176,30 +180,29 @@ export function MeetingSummaryV3UpgradeProvider(): null {
           });
           const facts = generated.facts_document_v3;
           if (!facts) throw new Error('summary_v3_result_missing');
-          await saveMeetingFactsResultV3(context.canonicalMeetingId, facts);
           const cached = await saveCachedSummary(context.legacyMeetingId, generated);
           if (!cached.localVersionId) throw new Error('summary_v3_local_version_missing');
-          await linkMeetingFactsToSummaryVersion(
-            context.canonicalMeetingId,
-            facts.documentId,
-            cached.localVersionId,
-          );
+          const storedFacts = await loadMeetingFactsRecordV3ForVersion(cached.localVersionId);
+          if (
+            !storedFacts
+            || storedFacts.canonicalMeetingId !== context.canonicalMeetingId
+            || storedFacts.result.documentId !== facts.documentId
+          ) throw new Error('summary_v3_atomic_link_missing');
+          if (cached.projection !== 'updated') throw new SummaryV3UpgradeInputChangedError();
           const current = await sqliteMeetingNoteRepository.getCurrentSummaryVersion(
             context.canonicalMeetingId,
             'guest',
           );
-          if (current?.id !== cached.localVersionId) {
-            await selectSummaryVersion.execute({
-              meetingId: context.canonicalMeetingId,
-              versionId: cached.localVersionId,
-              expectedCurrentVersionId: current?.id ?? null,
-              scopeKey: 'guest',
-            });
-          }
+          if (current?.id !== cached.localVersionId) throw new SummaryV3UpgradeInputChangedError();
           await settleSummaryV3UpgradeTask(task.meetingId, { success: true });
           diagnosticAudit('meeting_summary_v3_upgrade', { status: 'success' });
         } catch (reason) {
-          if (yielded || controller.signal.aborted) {
+          if (reason instanceof SummaryV3UpgradeInputChangedError) {
+            await deferSummaryV3UpgradeTask(task.meetingId, task.attemptCount, Date.now(), {
+              clearRemoteTask: true,
+              errorCode: 'input_changed',
+            });
+          } else if (yielded || controller.signal.aborted) {
             await deferSummaryV3UpgradeTask(task.meetingId, task.attemptCount);
           } else {
             await settleSummaryV3UpgradeTask(task.meetingId, {

@@ -93,6 +93,7 @@ import {
 import {
   generateSummaryForMeeting,
   briefGreetingSummaryText,
+  MeetingSummaryInputChangedError,
   MeetingSummaryTaskPendingError,
   meetingDateForSummary,
   meetingSummaryProgressLabel,
@@ -244,11 +245,9 @@ import { requestMeetingTranscriptCompletion } from '../application/meeting/trans
 import {
   sqliteMeetingNoteRepository,
   deleteSummaryViewOverride,
-  linkMeetingFactsToSummaryVersion,
   loadMeetingFactsRecordV3ForVersion,
   loadSummaryViewOverrides,
   loadSummaryViewPreference,
-  saveMeetingFactsResultV3,
   saveSummaryViewOverride,
   saveSummaryViewPreference,
   summaryV3UpgradeIsRunning,
@@ -760,6 +759,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const autoResumeTaskRef = useRef('');
   const summaryCarryLookupGenerationRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting?.id ?? null);
+  const activeMeetingRef = useRef(meeting);
   const activeMeetingScopeRef = useRef<ScopeKey | null>(null);
   const openingFollowupRef = useRef(false);
   const actionRequestGenerationRef = useRef(0);
@@ -833,6 +833,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     [processingStatuses],
   );
   activeMeetingIdRef.current = meeting?.id ?? null;
+  activeMeetingRef.current = meeting;
   activeMeetingScopeRef.current = meetingScopeKey;
   const speakerNameCandidates = useMemo(() => {
     const seen = new Set<string>();
@@ -2797,11 +2798,41 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             if (outcome !== 'failed') recordedTaskStatus = nextStatus;
           },
         });
+        await manualNote.flush();
+        const latestMeeting = activeMeetingRef.current;
+        const latestNote = manualNote.snapshot();
+        if (
+          !latestMeeting
+          || latestMeeting.id !== currentMeeting.id
+          || activeMeetingScopeRef.current !== currentMeetingScopeKey
+        ) throw new MeetingSummaryInputChangedError();
+        if (
+          attachmentAuthorization
+          && (
+            !currentMeetingScopeKey
+            || !await meetingSummaryAttachmentAuthorizationIsCurrent({
+              scopeKey: currentMeetingScopeKey,
+              meetingId: currentMeeting.id,
+              authorization: attachmentAuthorization,
+              accessToken,
+            })
+          )
+        ) throw new MeetingSummaryInputChangedError();
+        const activationFingerprint = meetingSummaryInputFingerprint(
+          transcriptRef.current,
+          latestMeeting.title,
+          meetingDateForSummary(latestMeeting.date, latestMeeting.createdAt),
+          requestedTemplate,
+          carryForward,
+          attachmentAuthorization,
+          latestNote,
+        );
+        if (activationFingerprint !== fingerprint) throw new MeetingSummaryInputChangedError();
         const text = meetingSummaryToText(generated);
         const generatedDocument = text ? summaryDocumentFor(currentMeeting.id, generated) : null;
         if (isActiveSummaryRun()) setSummaryError('');
         let cached = false;
-        let localPersistPhase = 'facts_document';
+        let localPersistPhase = 'canonical_identity';
         try {
           let v3CanonicalMeetingId: string | null = null;
           if (generated.facts_document_v3 && currentMeetingScopeKey) {
@@ -2810,22 +2841,21 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               currentMeetingScopeKey,
             );
             if (!v3CanonicalMeetingId) throw new Error('新版整理结果无法关联本机会议');
-            await saveMeetingFactsResultV3(v3CanonicalMeetingId, generated.facts_document_v3);
-            localPersistPhase = 'view_preference';
-            await saveSummaryViewPreference(v3CanonicalMeetingId, requestedTemplate.id);
           }
           localPersistPhase = 'summary_projection';
           const cacheResult = await saveCachedSummary(currentMeeting.id, generated);
           cached = cacheResult.mirrorStatus !== 'stale_scope';
           if (generated.facts_document_v3 && v3CanonicalMeetingId && currentMeetingScopeKey) {
-            if (cacheResult.localVersionId) {
-              localPersistPhase = 'facts_version_link';
-              await linkMeetingFactsToSummaryVersion(
-                v3CanonicalMeetingId,
-                generated.facts_document_v3.documentId,
-                cacheResult.localVersionId,
-              );
-            }
+            if (!cacheResult.localVersionId) throw new Error('新版整理结果缺少本机版本身份');
+            localPersistPhase = 'facts_version_verify';
+            const storedFacts = await loadMeetingFactsRecordV3ForVersion(cacheResult.localVersionId);
+            if (
+              !storedFacts
+              || storedFacts.canonicalMeetingId !== v3CanonicalMeetingId
+              || storedFacts.result.documentId !== generated.facts_document_v3.documentId
+            ) throw new Error('新版整理事实与本机版本未原子关联');
+            localPersistPhase = 'view_preference';
+            await saveSummaryViewPreference(v3CanonicalMeetingId, requestedTemplate.id);
           }
           localPersistPhase = 'projection_refresh';
           if (

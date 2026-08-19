@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import type { Meeting, MeetingSummary, TranscriptLine } from '../types';
 import type {
   ActionItemRecord,
+  SummaryFactDocumentRecord,
   SummaryCitationRecord,
   SummarySectionRecord,
   SummaryVersionRecord,
@@ -15,6 +16,7 @@ import { transitionProcessingStage } from '../domain/meeting/processing';
 import { getFeatureFlags } from '../config/featureFlags';
 import { meetingSummaryToText, normalizeMeetingSummaryResult } from './meetingSummaryFormat';
 import { legacyMeetingSummaryToDocument } from './meetingSummaryDocument';
+import { meetingFactsResultV3ToWire } from './meetingSummaryV3';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 import {
   evaluateTranscriptCandidate,
@@ -396,6 +398,7 @@ export function mirrorLegacySummaryContent(
     let canonicalRevision: number | null = null;
     try {
       const normalized = summary ? normalizeMeetingSummaryResult(legacyMeeting.id, summary) : null;
+      const factsResult = summary?.facts_document_v3 ?? null;
       const document = normalized?.structured_document
         ?? (normalized ? legacyMeetingSummaryToDocument(legacyMeeting.id, normalized) : null);
       if (!normalized || !document || !meetingSummaryToText(normalized)) {
@@ -523,6 +526,31 @@ export function mirrorLegacySummaryContent(
       };
       const fingerprint = await sha256(fingerprintPayload);
       const versionId = `${aggregate.note.id}:summary:${document.templateId}:${fingerprint}`;
+      let factDocument: SummaryFactDocumentRecord | undefined;
+      if (factsResult) {
+        if (
+          document.templateRevision !== 3
+          || document.remoteVersionId !== factsResult.documentId
+          || document.scheduleSnapshotHash !== factsResult.sourceFingerprint
+          || document.remoteTranscriptRevisionId !== factsResult.transcriptRevision
+        ) throw new Error('summary fact document does not match its projected version');
+        const wire = meetingFactsResultV3ToWire(factsResult);
+        const generatedAtMs = Date.parse(factsResult.generatedAt);
+        if (!Number.isFinite(generatedAtMs)) throw new Error('summary fact generation time is invalid');
+        factDocument = {
+          id: factsResult.documentId,
+          meetingId: aggregate.note.id,
+          summaryVersionId: versionId,
+          sourceFingerprint: factsResult.sourceFingerprint,
+          transcriptRevision: factsResult.transcriptRevision,
+          modelRevision: factsResult.modelRevision,
+          promptRevision: factsResult.promptRevision,
+          documentJson: JSON.stringify(wire),
+          coverageJson: JSON.stringify(wire.coverage),
+          generatedAtMs,
+          createdAtMs: Date.now(),
+        };
+      }
       const sectionFingerprints = await Promise.all(fingerprintPayload.sections.map(section => sha256(section)));
       const sections: SummarySectionRecord[] = summaryPayload.sections.map((section, ordinal) => ({
         id: `${versionId}:section:${ordinal}:${sectionFingerprints[ordinal]}`,
@@ -631,7 +659,10 @@ export function mirrorLegacySummaryContent(
         const current = await transaction.getCurrentSummaryVersion(note.id, scopeKey);
         const existingVersion = await transaction.getSummaryVersion(versionId, scopeKey);
         const activeTranscript = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+        const activeManualNote = await transaction.getManualNote(note.id, scopeKey);
         const sourceTranscriptStillActive = (sourceTranscript?.id ?? null) === (activeTranscript?.id ?? null);
+        const sourceManualNoteStillActive = activeManualNote?.revision === summaryPayload.manualNoteRevision;
+        const sourceInputsStillActive = sourceTranscriptStillActive && sourceManualNoteStillActive;
         const currentProtected = current
           ? await transaction.hasUserProtectedSummaryState(current.id, scopeKey)
           : false;
@@ -697,11 +728,18 @@ export function mirrorLegacySummaryContent(
             === `${note.id}:summary:${document.templateId}:${currentSourceFingerprint}`;
         }
         if (current && currentMatchesUndeclaredSource) {
+          if (factDocument) {
+            await transaction.saveSummaryVersion(current, sections, actions, scopeKey, {
+              activate: false,
+              citations,
+              factDocument: { ...factDocument, summaryVersionId: current.id },
+            });
+          }
           replaceLegacyProjection = !currentProtected;
           if (
             current.status === 'stale'
             && !currentProtected
-            && sourceTranscriptStillActive
+            && sourceInputsStillActive
             && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
             && current.manualNoteRevision === summaryPayload.manualNoteRevision
           ) {
@@ -749,6 +787,13 @@ export function mirrorLegacySummaryContent(
           return;
         }
         if (existingVersion) {
+          if (factDocument) {
+            await transaction.saveSummaryVersion(existingVersion, sections, actions, scopeKey, {
+              activate: false,
+              citations,
+              factDocument: { ...factDocument, summaryVersionId: existingVersion.id },
+            });
+          }
           const remainsCurrent = current?.id === versionId;
           const existingProtected = await transaction.hasUserProtectedSummaryState(
             existingVersion.id,
@@ -761,7 +806,7 @@ export function mirrorLegacySummaryContent(
           // a retry or a page re-entry.  Do not override an explicit current
           // structured choice; the remote catalog/current merge owns that
           // decision.
-          const activateExisting = sourceTranscriptStillActive
+          const activateExisting = sourceInputsStillActive
             && !currentProtected
             && !existingProtected
             && (
@@ -788,7 +833,7 @@ export function mirrorLegacySummaryContent(
             remainsCurrent
             && current?.status === 'stale'
             && !currentProtected
-            && sourceTranscriptStillActive
+            && sourceInputsStillActive
             && current.transcriptRevisionId === (sourceTranscript?.id ?? null)
             && current.manualNoteRevision === summaryPayload.manualNoteRevision
           ) {
@@ -845,13 +890,13 @@ export function mirrorLegacySummaryContent(
         const incomingLegacyCanReplace = document.templateId !== 'legacy'
           || !current
           || isLegacyProvider(current.generatedBy);
-        const activate = sourceTranscriptStillActive && (
+        const activate = sourceInputsStillActive && (
           !current
           || current.id === versionId
           || (incomingLegacyCanReplace && !currentProtected)
         );
         replaceLegacyProjection = activate && !currentProtected;
-        mirrorStatus = !sourceTranscriptStillActive
+        mirrorStatus = !sourceInputsStillActive
           ? 'saved_stale_input_candidate'
           : activate
             ? currentProtected ? 'preserved_user_projection' : 'activated'
@@ -876,7 +921,11 @@ export function mirrorLegacySummaryContent(
           createdAtMs: document.createdAtMs,
           completedAtMs: generatedAtMs,
         };
-        await transaction.saveSummaryVersion(newVersion, sections, actions, scopeKey, { activate, citations });
+        await transaction.saveSummaryVersion(newVersion, sections, actions, scopeKey, {
+          activate,
+          citations,
+          factDocument,
+        });
         if (options.settleProcessingStage !== false) {
           const stage = await transaction.getStage(note.id, scopeKey, 'summary');
           if (!stage) throw new Error('meeting summary processing stage is missing');

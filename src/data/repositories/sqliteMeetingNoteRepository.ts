@@ -4865,6 +4865,30 @@ class SqliteMeetingTransaction implements MeetingTransaction {
       throw new Error('ready summary version cannot be empty');
     }
     const citations = options.citations ?? [];
+    const factDocument = options.factDocument ?? null;
+    if (factDocument) {
+      assertRecordId(factDocument.id, 'summary fact document ID');
+      if (
+        factDocument.meetingId !== version.meetingId
+        || factDocument.summaryVersionId !== version.id
+        || !/^sha256:[0-9a-f]{64}$/.test(factDocument.sourceFingerprint)
+        || !factDocument.transcriptRevision.trim()
+        || !factDocument.modelRevision.trim()
+        || !factDocument.promptRevision.trim()
+      ) throw new Error('summary fact document identity is invalid');
+      assertNonNegativeInteger(factDocument.generatedAtMs, 'summary fact generation time');
+      assertNonNegativeInteger(factDocument.createdAtMs, 'summary fact persistence time');
+      try {
+        const document = JSON.parse(factDocument.documentJson);
+        const coverage = JSON.parse(factDocument.coverageJson);
+        if (
+          !document || typeof document !== 'object' || Array.isArray(document)
+          || !coverage || typeof coverage !== 'object' || Array.isArray(coverage)
+        ) throw new Error('invalid');
+      } catch {
+        throw new Error('summary fact document payload is invalid');
+      }
+    }
     const citationIds = new Set<string>();
     const citationOrdinals = new Map<string, Set<number>>();
     if (citations.length > 0 && !version.transcriptRevisionId) {
@@ -5065,6 +5089,70 @@ class SqliteMeetingTransaction implements MeetingTransaction {
           citation.quoteHash,
           citation.ordinal,
           citation.userRemovedAtMs,
+        );
+      }
+    }
+
+    if (factDocument) {
+      const existingFact = await this.database.getFirstAsync<{
+        meeting_id: string;
+        summary_version_id: string | null;
+        source_fingerprint: string;
+        transcript_revision: string;
+        model_revision: string;
+        prompt_revision: string;
+        document_json: string;
+        coverage_json: string;
+        generated_at_ms: number;
+      }>(
+        `SELECT meeting_id, summary_version_id, source_fingerprint,
+                transcript_revision, model_revision, prompt_revision,
+                document_json, coverage_json, generated_at_ms
+           FROM summary_fact_documents WHERE id = ?`,
+        factDocument.id,
+      );
+      if (existingFact) {
+        if (
+          existingFact.meeting_id !== factDocument.meetingId
+          || (
+            existingFact.summary_version_id !== null
+            && existingFact.summary_version_id !== factDocument.summaryVersionId
+          )
+          || existingFact.source_fingerprint !== factDocument.sourceFingerprint
+          || existingFact.transcript_revision !== factDocument.transcriptRevision
+          || existingFact.model_revision !== factDocument.modelRevision
+          || existingFact.prompt_revision !== factDocument.promptRevision
+          || existingFact.document_json !== factDocument.documentJson
+          || existingFact.coverage_json !== factDocument.coverageJson
+          || existingFact.generated_at_ms !== factDocument.generatedAtMs
+        ) throw new Error('immutable summary fact document cannot be replaced');
+        if (existingFact.summary_version_id === null) {
+          await this.database.runAsync(
+            `UPDATE summary_fact_documents SET summary_version_id = ?
+              WHERE id = ? AND meeting_id = ? AND summary_version_id IS NULL`,
+            factDocument.summaryVersionId,
+            factDocument.id,
+            factDocument.meetingId,
+          );
+        }
+      } else {
+        await this.database.runAsync(
+          `INSERT INTO summary_fact_documents (
+             id, meeting_id, summary_version_id, source_fingerprint,
+             transcript_revision, model_revision, prompt_revision,
+             document_json, coverage_json, generated_at_ms, created_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          factDocument.id,
+          factDocument.meetingId,
+          factDocument.summaryVersionId,
+          factDocument.sourceFingerprint,
+          factDocument.transcriptRevision,
+          factDocument.modelRevision,
+          factDocument.promptRevision,
+          factDocument.documentJson,
+          factDocument.coverageJson,
+          factDocument.generatedAtMs,
+          factDocument.createdAtMs,
         );
       }
     }

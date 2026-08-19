@@ -537,6 +537,21 @@ export interface SummaryVersionRecord {
   completedAtMs: number | null;
 }
 
+/** Immutable Facts V3 payload linked to the summary version in the same transaction. */
+export interface SummaryFactDocumentRecord {
+  id: string;
+  meetingId: string;
+  summaryVersionId: string;
+  sourceFingerprint: string;
+  transcriptRevision: string;
+  modelRevision: string;
+  promptRevision: string;
+  documentJson: string;
+  coverageJson: string;
+  generatedAtMs: number;
+  createdAtMs: number;
+}
+
 export interface SummarySectionRecord {
   id: string;
   versionId: string;
@@ -820,6 +835,7 @@ export interface MeetingSeriesCarryImportRecord {
 export interface SaveSummaryVersionOptions {
   activate: boolean;
   citations?: readonly SummaryCitationRecord[];
+  factDocument?: SummaryFactDocumentRecord;
 }
 
 export interface SummaryVersionProjection {
