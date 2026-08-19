@@ -310,6 +310,10 @@ export async function claimNextSummaryV3UpgradeTask(nowMs = Date.now()): Promise
        FROM summary_v3_upgrade_tasks
        WHERE status IN ('pending','failure') AND attempt_count < 3
          AND (next_attempt_at_ms IS NULL OR next_attempt_at_ms <= ?)
+         AND NOT EXISTS (
+           SELECT 1 FROM summary_fact_documents facts
+           WHERE facts.meeting_id = summary_v3_upgrade_tasks.meeting_id
+         )
        ORDER BY updated_at_ms, meeting_id LIMIT 1`,
       nowMs,
     );
@@ -331,30 +335,46 @@ export async function claimNextSummaryV3UpgradeTask(nowMs = Date.now()): Promise
 }
 
 export async function enqueueMissingSummaryV3UpgradeTasks(nowMs = Date.now()): Promise<number> {
-  const database = await openMeetingDatabase();
-  const result = await database.runAsync(
-    `INSERT OR IGNORE INTO summary_v3_upgrade_tasks (
-       meeting_id, status, attempt_count, remote_task_id, next_attempt_at_ms,
-       last_error_code, created_at_ms, updated_at_ms, completed_at_ms
-     )
-     SELECT DISTINCT version.meeting_id, 'pending', 0, NULL, NULL, NULL, ?, ?, NULL
-     FROM summary_versions version
-     INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
-     WHERE meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted'
-       AND version.status IN ('ready','stale')
-       AND EXISTS (
-         SELECT 1 FROM transcript_revisions transcript
-         WHERE transcript.meeting_id = version.meeting_id
-           AND transcript.is_active = 1 AND transcript.status = 'ready'
+  return withMeetingDatabaseTransaction(async database => {
+    // A foreground v3 generation can finish while a legacy upgrade is still
+    // pending. Retire that stale queue row before claiming more work; an
+    // existing immutable fact document is the completion authority.
+    const retired = await database.runAsync(
+      `UPDATE summary_v3_upgrade_tasks
+       SET status = 'success', remote_task_id = NULL, next_attempt_at_ms = NULL,
+           last_error_code = NULL, updated_at_ms = ?, completed_at_ms = ?
+       WHERE status IN ('pending','failure')
+         AND EXISTS (
+           SELECT 1 FROM summary_fact_documents facts
+           WHERE facts.meeting_id = summary_v3_upgrade_tasks.meeting_id
+         )`,
+      nowMs,
+      nowMs,
+    );
+    const inserted = await database.runAsync(
+      `INSERT OR IGNORE INTO summary_v3_upgrade_tasks (
+         meeting_id, status, attempt_count, remote_task_id, next_attempt_at_ms,
+         last_error_code, created_at_ms, updated_at_ms, completed_at_ms
        )
-       AND NOT EXISTS (
-         SELECT 1 FROM summary_fact_documents facts
-         WHERE facts.meeting_id = version.meeting_id
-       )`,
-    nowMs,
-    nowMs,
-  );
-  return result.changes;
+       SELECT DISTINCT version.meeting_id, 'pending', 0, NULL, NULL, NULL, ?, ?, NULL
+       FROM summary_versions version
+       INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id
+       WHERE meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted'
+         AND version.status IN ('ready','stale')
+         AND EXISTS (
+           SELECT 1 FROM transcript_revisions transcript
+           WHERE transcript.meeting_id = version.meeting_id
+             AND transcript.is_active = 1 AND transcript.status = 'ready'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM summary_fact_documents facts
+           WHERE facts.meeting_id = version.meeting_id
+         )`,
+      nowMs,
+      nowMs,
+    );
+    return retired.changes + inserted.changes;
+  });
 }
 
 export async function recoverInterruptedSummaryV3UpgradeTasks(nowMs = Date.now()): Promise<number> {
@@ -442,7 +462,11 @@ export async function loadSummaryV3UpgradeMeetingContext(
          meeting.id
        ) AS legacy_meeting_id
      FROM meeting_notes meeting
-     WHERE meeting.id = ? AND meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted'`,
+     WHERE meeting.id = ? AND meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted'
+       AND NOT EXISTS (
+         SELECT 1 FROM summary_fact_documents facts
+         WHERE facts.meeting_id = meeting.id
+       )`,
     canonicalMeetingId,
   );
   return row ? {

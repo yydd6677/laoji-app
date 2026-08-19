@@ -1093,6 +1093,13 @@ Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开
 `docs/vnext-stage3/Q2-ANDROID-ACTIVATION-FENCE-20260820.md`。这仍不覆盖附件/epoch/binding 全恢复
 矩阵或 95% 人工相关性门，capability 继续关闭。
 
+同日，长会议 Facts V3 在远端任务运行期间强制停止并重开 Android 后，已证明恢复同一 task ID、
+同一 attempt 且只新增一个本地版本。恢复身份改为只依赖转写、当前笔记和授权附件，不再把模板、标题
+或日期投影误当成远端任务来源；前台整理与后台旧结果升级也已加互斥让出和已完成队列结清。证据见
+`docs/vnext-stage3/SUMMARY-V3-PROCESS-RECOVERY-DEDUPE-20260820.md`。该次任务总耗时约 98.97 秒，
+超过证据包路径的 90 秒目标，故只关闭本夹具的“进程重启产生重复任务”窗口，不关闭 Stage 3 延迟门，
+也不替代转写/附件组合故障矩阵。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

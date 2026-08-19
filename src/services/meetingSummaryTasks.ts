@@ -159,6 +159,53 @@ export function meetingSummaryInputFingerprint(
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 
+/**
+ * Local recovery identity for the Facts V3 source contract.
+ *
+ * Templates are deterministic local projections of one immutable fact
+ * document, so changing a template must never create another remote task.
+ * Keep this identity aligned with summarySourceRevision: transcript evidence,
+ * the current manual note, and explicitly authorized attachment revisions.
+ */
+export function meetingSummaryFactsInputFingerprint(
+  transcriptLines: TranscriptLine[],
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null,
+  manualNote: { content: string; revision: number } | null = null,
+): string {
+  let primary = 0x811c9dc5;
+  let secondary = 0x9e3779b9;
+  let characterCount = 0;
+  const feed = (value: unknown) => {
+    const text = value == null ? '' : String(value);
+    characterCount += text.length;
+    primary = updateHash(primary, `${text}\u001f`);
+    secondary = updateHash(secondary, `${text.length}:${text}\u001e`);
+  };
+
+  feed('facts-v3-source-v1');
+  feed(transcriptLines.length);
+  transcriptLines.forEach(line => {
+    feed(line.id);
+    feed(line.text);
+    feed(line.start_time);
+    feed(line.end_time);
+    feed(line.speaker_label);
+  });
+  if (manualNote) {
+    feed(manualNote.revision);
+    feed(manualNote.content);
+  }
+  for (const item of attachmentAuthorization?.items ?? []) {
+    feed(item.attachmentId);
+    feed(item.updatedAtMs);
+    feed(item.positionMs);
+    feed(item.kind);
+    feed(item.kind === 'text' ? item.contentSha256 : item.checksumSha256);
+  }
+
+  return `facts-v3-source-v1:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
+}
+
 export async function getPendingMeetingSummaryTask(
   storageScope: string,
   meetingId: string,

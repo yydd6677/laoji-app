@@ -5,6 +5,7 @@ import {
   deferSummaryV3UpgradeTask,
   enqueueMissingSummaryV3UpgradeTasks,
   hasInteractiveMeetingWork,
+  loadLatestMeetingFactsRecordV3,
   loadMeetingFactsRecordV3ForVersion,
   loadSummaryV3UpgradeMeetingContext,
   recoverInterruptedSummaryV3UpgradeTasks,
@@ -21,7 +22,7 @@ import {
   generateSummaryForMeeting,
   meetingDateForSummary,
 } from '../services/meetingSummary';
-import { meetingSummaryInputFingerprint } from '../services/meetingSummaryTasks';
+import { meetingSummaryFactsInputFingerprint } from '../services/meetingSummaryTasks';
 import {
   hasSummaryV3InteractiveWork,
   notifySummaryV3UpgradeChanged,
@@ -83,11 +84,30 @@ export function MeetingSummaryV3UpgradeProvider(): null {
         notifySummaryV3UpgradeChanged(task.meetingId);
         nextDelay = NEXT_TASK_DELAY_MS;
 
+        const alreadyUpgraded = await loadLatestMeetingFactsRecordV3(task.meetingId);
+        if (alreadyUpgraded) {
+          await settleSummaryV3UpgradeTask(task.meetingId, { success: true });
+          notifySummaryV3UpgradeChanged(task.meetingId);
+          return;
+        }
+
         const context = await loadSummaryV3UpgradeMeetingContext(task.meetingId);
+        if (!context) {
+          const completedByForeground = await loadLatestMeetingFactsRecordV3(task.meetingId);
+          await settleSummaryV3UpgradeTask(task.meetingId, completedByForeground
+            ? { success: true }
+            : {
+              success: false,
+              errorCode: 'meeting_projection_unavailable',
+              attemptCount: task.attemptCount,
+            });
+          notifySummaryV3UpgradeChanged(task.meetingId);
+          return;
+        }
         const meeting = context
           ? meetingsRef.current.find(candidate => candidate.id === context.legacyMeetingId)
           : null;
-        if (!context || !meeting) {
+        if (!meeting) {
           await settleSummaryV3UpgradeTask(task.meetingId, {
             success: false,
             errorCode: 'meeting_projection_unavailable',
@@ -132,15 +152,21 @@ export function MeetingSummaryV3UpgradeProvider(): null {
           content: aggregate?.manualNote.content ?? '',
           revision: aggregate?.manualNote.revision ?? 0,
         };
-        const fingerprint = meetingSummaryInputFingerprint(
+        const fingerprint = meetingSummaryFactsInputFingerprint(
           transcriptLines,
-          meeting.title,
-          meetingDateForSummary(meeting.date, meeting.createdAt),
-          DEFAULT_MEETING_TEMPLATE,
-          null,
           null,
           noteSnapshot,
         );
+        if (await loadLatestMeetingFactsRecordV3(task.meetingId)) {
+          await settleSummaryV3UpgradeTask(task.meetingId, { success: true });
+          notifySummaryV3UpgradeChanged(task.meetingId);
+          return;
+        }
+        if (hasSummaryV3InteractiveWork() || await hasInteractiveMeetingWork()) {
+          await deferSummaryV3UpgradeTask(task.meetingId, task.attemptCount);
+          notifySummaryV3UpgradeChanged(task.meetingId);
+          return;
+        }
         const controller = new AbortController();
         let yielded = false;
         const monitor = setInterval(() => {

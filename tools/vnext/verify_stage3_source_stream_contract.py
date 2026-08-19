@@ -28,6 +28,7 @@ def main() -> None:
     summary_dispatch = ROOT / "src/services/meetingSummary.ts"
     summary_contract = ROOT / "src/services/meetingSummaryV3.ts"
     summary_screen = ROOT / "src/screens/TranscriptionScreen.android.tsx"
+    summary_tasks = ROOT / "src/services/meetingSummaryTasks.ts"
     summary_mirror = ROOT / "src/services/meetingContentMirror.ts"
     summary_repository = ROOT / "src/data/repositories/meetingSummaryV3Repository.ts"
     meeting_repository_contract = ROOT / "src/data/repositories/meetingNoteRepository.ts"
@@ -94,14 +95,32 @@ def main() -> None:
         "transcriptRef.current,",
         "}, [meetingScopeKey]);",
         "meeting_summary_v3_local_persist",
-        "const activationFingerprint = meetingSummaryInputFingerprint(",
+        "const activationFingerprint = summaryTaskInputFingerprint({",
         "if (activationFingerprint !== fingerprint) throw new MeetingSummaryInputChangedError()",
+        "const resumableFactsV3Task = Boolean(",
+        "pending.taskId.startsWith('vnext-summary:')",
+        "const releaseInteractiveWork = beginSummaryV3InteractiveWork();",
+        "releaseInteractiveWork();",
         "storedFacts.result.documentId !== generated.facts_document_v3.documentId",
         "signal: inputChanged\n              ? { type: 'discarded' }",
         "title: '会议内容已更新'",
     )
     if "saveMeetingFactsResultV3" in summary_screen_source or "linkMeetingFactsToSummaryVersion" in summary_screen_source:
         raise AssertionError("active summary screen still persists Facts V3 outside the summary-version transaction")
+    tasks_source = require(
+        summary_tasks,
+        "export function meetingSummaryFactsInputFingerprint(",
+        "feed('facts-v3-source-v1');",
+        "feed(line.speaker_label);",
+        "feed(item.positionMs);",
+        "item.kind === 'text' ? item.contentSha256 : item.checksumSha256",
+    )
+    facts_fingerprint = tasks_source[
+        tasks_source.index("export function meetingSummaryFactsInputFingerprint("):
+        tasks_source.index("export async function getPendingMeetingSummaryTask(")
+    ]
+    if "meetingTemplateKey" in facts_fingerprint:
+        raise AssertionError("Facts V3 recovery identity still includes a local template projection")
     require(
         summary_mirror,
         "const activeManualNote = await transaction.getManualNote(note.id, scopeKey);",
@@ -128,6 +147,8 @@ def main() -> None:
     )
     upgrade_provider_source = require(
         upgrade_provider,
+        "const alreadyUpgraded = await loadLatestMeetingFactsRecordV3(task.meetingId);",
+        "const fingerprint = meetingSummaryFactsInputFingerprint(",
         "if (cached.projection !== 'updated') throw new SummaryV3UpgradeInputChangedError()",
         "clearRemoteTask: true",
         "storedFacts.result.documentId !== facts.documentId",
@@ -141,6 +162,8 @@ def main() -> None:
         "summary v3 immutable identity changed",
         "summary v3 target version is unavailable",
         "summary v3 fact document is unavailable",
+        "WHERE status IN ('pending','failure')",
+        "WHERE facts.meeting_id = summary_v3_upgrade_tasks.meeting_id",
     )
     if "WHERE meeting_id = ? AND source_fingerprint = ?" in repository_source:
         raise AssertionError("summary v3 repository still collapses distinct force generations")

@@ -105,6 +105,7 @@ import {
 import {
   clearPendingMeetingSummaryTask,
   getPendingMeetingSummaryTask,
+  meetingSummaryFactsInputFingerprint,
   meetingSummaryInputFingerprint,
   savePendingMeetingSummaryTask,
   type PendingMeetingSummaryTask,
@@ -260,7 +261,10 @@ import {
   applyMeetingSummaryV3Overrides,
   projectMeetingFactsV3,
 } from '../services/meetingSummaryV3';
-import { subscribeSummaryV3UpgradeChanged } from '../services/meetingSummaryV3Upgrade';
+import {
+  beginSummaryV3InteractiveWork,
+  subscribeSummaryV3UpgradeChanged,
+} from '../services/meetingSummaryV3Upgrade';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
 import {
   mirrorLegacyTranscriptProcessingFailure,
@@ -455,6 +459,33 @@ function summaryDocumentFor(
   summary: MeetingSummary | null,
 ): MeetingSummaryDocument | null {
   return summary ? meetingSummaryDocumentForLegacy(meetingId, summary) : null;
+}
+
+function summaryTaskInputFingerprint(input: {
+  transcriptLines: TranscriptLine[];
+  title?: string;
+  meetingDate?: string;
+  template: Pick<MeetingTemplate, 'id' | 'revision'>;
+  carryForward: MeetingSummaryCarryForwardAuthorization | null;
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
+  manualNote: { content: string; revision: number };
+}): string {
+  if (getFeatureFlags().meetingSummarySourceStreamCandidate) {
+    return meetingSummaryFactsInputFingerprint(
+      input.transcriptLines,
+      input.attachmentAuthorization,
+      input.manualNote,
+    );
+  }
+  return meetingSummaryInputFingerprint(
+    input.transcriptLines,
+    input.title,
+    input.meetingDate,
+    input.template,
+    input.carryForward,
+    input.attachmentAuthorization,
+    input.manualNote,
+  );
 }
 
 function summaryCacheFailureCode(reason: unknown): string {
@@ -938,15 +969,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     );
     if (!template) return undefined;
     let active = true;
-    const fingerprint = meetingSummaryInputFingerprint(
-      transcript,
-      meeting.title,
-      meetingDateForSummary(meeting.date, meeting.createdAt),
+    const fingerprint = summaryTaskInputFingerprint({
+      transcriptLines: transcript,
+      title: meeting.title,
+      meetingDate: meetingDateForSummary(meeting.date, meeting.createdAt),
       template,
-      null,
-      null,
-      manualNote.snapshot(),
-    );
+      carryForward: null,
+      attachmentAuthorization: null,
+      manualNote: manualNote.snapshot(),
+    });
     const identity = currentSummaryIdentity;
     void hasCompletedMeetingSummaryTrace({
       meetingId: meeting.id,
@@ -2556,6 +2587,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       }
       return Promise.resolve();
     }
+    const releaseInteractiveWork = beginSummaryV3InteractiveWork();
 
     const meetingDate = meetingDateForSummary(currentMeeting.date, currentMeeting.createdAt);
     const resumedTemplate = options.resumeTask
@@ -2583,15 +2615,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     let recordedTaskStatus: 'queued' | 'generating' | null = options.resumeTask
       ? 'generating'
       : null;
-    let activeFingerprint = meetingSummaryInputFingerprint(
-      lines,
-      currentMeeting.title,
+    let activeFingerprint = summaryTaskInputFingerprint({
+      transcriptLines: lines,
+      title: currentMeeting.title,
       meetingDate,
-      requestedTemplate,
-      requestedCarryForward,
-      requestedAttachmentAuthorization,
-      manualNote.snapshot(),
-    );
+      template: requestedTemplate,
+      carryForward: requestedCarryForward,
+      attachmentAuthorization: requestedAttachmentAuthorization,
+      manualNote: manualNote.snapshot(),
+    });
     let operation: Promise<void> | null = null;
     operation = (async () => {
       // A summary run belongs to the meeting, not to one transient native page
@@ -2656,20 +2688,27 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             throw new MeetingSummaryAttachmentSelectionStaleError();
           }
         }
-        let fingerprint = meetingSummaryInputFingerprint(
-          lines,
-          currentMeeting.title,
+        let fingerprint = summaryTaskInputFingerprint({
+          transcriptLines: lines,
+          title: currentMeeting.title,
           meetingDate,
-          requestedTemplate,
+          template: requestedTemplate,
           carryForward,
           attachmentAuthorization,
-          summaryManualNote,
+          manualNote: summaryManualNote,
+        });
+        const resumableFactsV3Task = Boolean(
+          pending
+          && getFeatureFlags().meetingSummarySourceStreamCandidate
+          && pending.taskId.startsWith('vnext-summary:'),
         );
         if (pending && (
           pending.mode !== expectedMode
-          || pending.templateId !== requestedTemplate.id
-          || pending.templateRevision !== requestedTemplate.revision
-          || pending.inputFingerprint !== fingerprint
+          || (!resumableFactsV3Task && (
+            pending.templateId !== requestedTemplate.id
+            || pending.templateRevision !== requestedTemplate.revision
+            || pending.inputFingerprint !== fingerprint
+          ))
         )) {
           const pendingUsedAttachments = pending.attachmentAuthorization !== null;
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
@@ -2678,15 +2717,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           if (pendingUsedAttachments) throw new MeetingSummaryAttachmentSelectionStaleError();
           carryForward = requestedCarryForward;
           attachmentAuthorization = requestedAttachmentAuthorization;
-          fingerprint = meetingSummaryInputFingerprint(
-            lines,
-            currentMeeting.title,
+          fingerprint = summaryTaskInputFingerprint({
+            transcriptLines: lines,
+            title: currentMeeting.title,
             meetingDate,
-            requestedTemplate,
+            template: requestedTemplate,
             carryForward,
             attachmentAuthorization,
-            summaryManualNote,
-          );
+            manualNote: summaryManualNote,
+          });
         }
         knownTaskId = pending?.taskId ?? null;
         activeFingerprint = fingerprint;
@@ -2818,15 +2857,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             })
           )
         ) throw new MeetingSummaryInputChangedError();
-        const activationFingerprint = meetingSummaryInputFingerprint(
-          transcriptRef.current,
-          latestMeeting.title,
-          meetingDateForSummary(latestMeeting.date, latestMeeting.createdAt),
-          requestedTemplate,
+        const activationFingerprint = summaryTaskInputFingerprint({
+          transcriptLines: transcriptRef.current,
+          title: latestMeeting.title,
+          meetingDate: meetingDateForSummary(latestMeeting.date, latestMeeting.createdAt),
+          template: requestedTemplate,
           carryForward,
           attachmentAuthorization,
-          latestNote,
-        );
+          manualNote: latestNote,
+        });
         if (activationFingerprint !== fingerprint) throw new MeetingSummaryInputChangedError();
         const text = meetingSummaryToText(generated);
         const generatedDocument = text ? summaryDocumentFor(currentMeeting.id, generated) : null;
@@ -3041,6 +3080,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           if (ownsActiveMeeting) setLoadingSummary(false);
         }
         if (summaryInFlightRef.current === operation) summaryInFlightRef.current = null;
+        releaseInteractiveWork();
       }
     })();
     summaryInFlightRef.current = operation;
@@ -3224,15 +3264,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       legacyMeetingId: currentMeetingId,
       signal: {
         type: 'prepare',
-        inputFingerprint: meetingSummaryInputFingerprint(
-          transcript,
-          meeting.title,
-          meetingDateForSummary(meeting.date, meeting.createdAt),
+        inputFingerprint: summaryTaskInputFingerprint({
+          transcriptLines: transcript,
+          title: meeting.title,
+          meetingDate: meetingDateForSummary(meeting.date, meeting.createdAt),
           template,
-          null,
-          null,
-          manualNote.snapshot(),
-        ),
+          carryForward: null,
+          attachmentAuthorization: null,
+          manualNote: manualNote.snapshot(),
+        }),
       },
     }).catch(reason => diagnosticWarn('[meeting-summary] preparation state write deferred', reason));
     try {
@@ -3294,20 +3334,22 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       }
       const pendingTemplate = meetingTemplateById(pending.templateId, pending.templateRevision);
       const fingerprint = pendingTemplate
-        ? meetingSummaryInputFingerprint(
-          transcript,
-          meeting.title,
-          date,
-          pendingTemplate,
-          pending.carryForward,
-          pending.attachmentAuthorization,
-          manualNote.snapshot(),
-        )
+        ? summaryTaskInputFingerprint({
+          transcriptLines: transcript,
+          title: meeting.title,
+          meetingDate: date,
+          template: pendingTemplate,
+          carryForward: pending.carryForward,
+          attachmentAuthorization: pending.attachmentAuthorization,
+          manualNote: manualNote.snapshot(),
+        })
         : '';
+      const resumableFactsV3Task = getFeatureFlags().meetingSummarySourceStreamCandidate
+        && pending.taskId.startsWith('vnext-summary:');
       if (
         !pendingTemplate
         || pending.mode !== expectedMode
-        || pending.inputFingerprint !== fingerprint
+        || (!resumableFactsV3Task && pending.inputFingerprint !== fingerprint)
       ) {
         await clearPendingMeetingSummaryTask(recordingStorageScope, meeting.id).catch(() => {});
         // A mismatched registry entry is stale, but do not overwrite a
@@ -3372,15 +3414,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         mode: isGuest ? 'guest' : 'authenticated',
         templateId: template.id,
         templateRevision: template.revision,
-        inputFingerprint: stage.inputFingerprint ?? meetingSummaryInputFingerprint(
-          transcript,
-          meeting.title,
-          meetingDateForSummary(meeting.date, meeting.createdAt),
+        inputFingerprint: stage.inputFingerprint ?? summaryTaskInputFingerprint({
+          transcriptLines: transcript,
+          title: meeting.title,
+          meetingDate: meetingDateForSummary(meeting.date, meeting.createdAt),
           template,
-          null,
-          null,
-          manualNote.snapshot(),
-        ),
+          carryForward: null,
+          attachmentAuthorization: null,
+          manualNote: manualNote.snapshot(),
+        }),
         carryForward: null,
         attachmentAuthorization: null,
         createdAt: new Date(stage.updatedAtMs).toISOString(),
