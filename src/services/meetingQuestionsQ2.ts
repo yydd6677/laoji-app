@@ -26,6 +26,7 @@ import {
 } from './questionQ2Candidate';
 import { createDeviceQ2CandidateProvider } from './questionQ2DeviceProvider';
 import type { MeetingQuestionEvidence, MeetingQuestionSession } from './meetingQuestions';
+import { diagnosticAudit } from './diagnostics';
 
 const Q2_PROVIDER_REVISION = 'q2-reader-v1';
 
@@ -38,6 +39,16 @@ export class Q2EvidenceChangedError extends Error {
 
 function normalizedText(value: string, maximum: number): string {
   return value.normalize('NFC').replace(/\r\n?/g, '\n').trim().slice(0, maximum);
+}
+
+function operationFailureKind(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/foreign key/i.test(message)) return 'foreign_key';
+  if (/unique|constraint/i.test(message)) return 'constraint';
+  if (/epoch|连接不可用/.test(message)) return 'binding';
+  if (/无效/.test(message)) return 'invalid_identifier';
+  if (/创建失败/.test(message)) return 'insert_ignored';
+  return 'unknown';
 }
 
 function excerpt(value: string): string {
@@ -249,6 +260,7 @@ export async function askQ2MeetingQuestion(input: {
     ?? `q2-turn:${q2Thread.threadId}:${ordinal}:${digest.slice(-20)}`;
   const existingTurn = pendingSameQuestion;
   if (!existingTurn || existingTurn.completedAtMs === null) {
+    diagnosticAudit('meeting_question_q2_operation', { phase: 'binding' });
     const binding = await ensureRemoteMeetingServiceBinding(input.evidence.meetingId);
     const operationId = `q2-operation:${requestId}:${secureClientIdFactory.create()}`;
     const deviceSession = await ensureDeviceV2Session();
@@ -266,31 +278,60 @@ export async function askQ2MeetingQuestion(input: {
     } else if (existingTurn) {
       throw new Error('上一条会议问答缺少可恢复的任务记录，请新建问答记录。');
     }
-    const operation = await createDeviceOperation({
-      operationId,
-      deviceEpochId: deviceSession.epochId,
-      capability: 'question_reader_v2',
-      entityId: input.evidence.meetingId,
-      entityRevision: 1,
-      inputSha256: input.evidence.sourceFingerprint,
-      generationId: `${q2Thread.snapshotId}:${requestId}:${operationId}`,
+    // Operation IDs deliberately carry the thread and question identities.
+    // Concatenating snapshot + request + operation again produced a generation
+    // string longer than the shared device-operation contract (240 chars), so
+    // a real Android question failed before the provider was reached. Preserve
+    // the complete identity as a deterministic digest instead of truncating it.
+    // Do not use NUL delimiters here. expo-crypto's native Android path treated
+    // the first NUL as the end of input, so every retry hashed only snapshotId
+    // and collided with the previous generation's unique idempotency key.
+    const generationDigest = await sha256(
+      JSON.stringify([q2Thread.snapshotId, requestId, operationId]),
+    );
+    const generationId = `q2-generation:${generationDigest.slice('sha256:'.length)}`;
+    diagnosticAudit('meeting_question_q2_operation', {
+      phase: 'local_operation',
+      operation_id_chars: operationId.length,
+      generation_id_chars: generationId.length,
+      predecessor: Boolean(existingTurn?.currentOperationId),
     });
-    if (existingTurn?.currentOperationId) {
-      const rebound = await rebindPendingQ2Turn({
-        turnId: existingTurn.turnId,
-        expectedOperationId: existingTurn.currentOperationId,
-        newOperationId: operationId,
-      });
-      if (!rebound) throw new Error('Q2 问答正在其他请求中处理');
-    }
-    if (operation.remoteState !== 'running') {
-      await updateDeviceOperation({
-        operationId,
-        expectedRevision: operation.operationRevision,
-        state: 'running',
-      });
-    }
+    let operation: Awaited<ReturnType<typeof createDeviceOperation>> | null = null;
+    let operationPhase = 'create';
     try {
+      operation = await createDeviceOperation({
+        operationId,
+        deviceEpochId: deviceSession.epochId,
+        capability: 'question_reader_v2',
+        entityId: input.evidence.meetingId,
+        entityRevision: 1,
+        inputSha256: input.evidence.sourceFingerprint,
+        generationId,
+        predecessorOperationId: existingTurn?.currentOperationId ?? null,
+        creationReason: existingTurn ? 'retry' : 'original',
+      });
+      diagnosticAudit('meeting_question_q2_operation', { phase: 'local_operation_ready' });
+      if (existingTurn?.currentOperationId) {
+        operationPhase = 'rebind';
+        const rebound = await rebindPendingQ2Turn({
+          turnId: existingTurn.turnId,
+          expectedOperationId: existingTurn.currentOperationId,
+          newOperationId: operationId,
+        });
+        if (!rebound) throw new Error('Q2 问答正在其他请求中处理');
+        diagnosticAudit('meeting_question_q2_operation', { phase: 'retry_bound' });
+      }
+      operationPhase = 'running';
+      if (operation.remoteState !== 'running') {
+        const running = await updateDeviceOperation({
+          operationId,
+          expectedRevision: operation.operationRevision,
+          state: 'running',
+        });
+        if (!running) throw new Error('Q2 问答任务状态已变化');
+      }
+      diagnosticAudit('meeting_question_q2_operation', { phase: 'provider' });
+      operationPhase = 'provider';
       await executeQ2Candidate({
         meetingId: input.evidence.meetingId,
         evidence: input.evidence,
@@ -312,8 +353,15 @@ export async function askQ2MeetingQuestion(input: {
           state: 'success',
         });
       }
+      diagnosticAudit('meeting_question_q2_operation', { phase: 'success' });
     } catch (error) {
-      const failed = await getDeviceOperation(operationId);
+      diagnosticAudit('meeting_question_q2_operation', {
+        phase: 'failure',
+        operation_phase: operationPhase,
+        failure_kind: operationFailureKind(error),
+        error_name: error instanceof Error ? error.name : 'unknown',
+      });
+      const failed = operation ? await getDeviceOperation(operationId) : null;
       if (failed && (failed.remoteState === 'queued' || failed.remoteState === 'running')) {
         await updateDeviceOperation({
           operationId,

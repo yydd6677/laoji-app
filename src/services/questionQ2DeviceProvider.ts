@@ -58,8 +58,8 @@ function normalizeResponse(value: any, request: Q2CandidateProviderRequest): Q2C
       citations: Array.isArray(clause?.citations) ? clause.citations.map((citation: any) => ({
         citationId: required(citation?.citation_id, 'citation_id', 180),
         sourceType: sourceType(citation?.source_type),
-        sourceId: required(citation?.source_id, 'source_id', 180),
-        sourceRevisionId: required(citation?.source_revision_id, 'source_revision_id', 180),
+        sourceId: required(citation?.source_id, 'source_id', 512),
+        sourceRevisionId: required(citation?.source_revision_id, 'source_revision_id', 512),
         contentSha256: required(citation?.content_sha256, 'content_sha256', 71),
         sourceStartUtf8: Number(citation?.source_start_utf8),
         sourceEndUtf8: Number(citation?.source_end_utf8),
@@ -94,7 +94,10 @@ async function streamLongSources(
   const items = request.sources.map((source, index) => {
     const contentBytes = new TextEncoder().encode(source.text).byteLength;
     return {
-      item_id: `q2-item:${index}:${source.sourceType}:${source.sourceId}`,
+      // item_id is a transport-local handle. Do not embed the opaque Android
+      // source identity here: a valid stable transcript ID can be over 200
+      // characters while source.stream.v2 intentionally caps item IDs at 180.
+      item_id: `q2-item:${index}:${source.contentSha256.slice(-20)}`,
       source_type: source.sourceType,
       source_id: source.sourceId,
       source_revision_id: source.sourceRevisionId,

@@ -423,7 +423,9 @@ export function MeetingQuestionSheet({
               <Text style={[styles.scopeLabel, { color: colors.textCaption }]}>
                 {[
                   '文字记录',
-                  session.evidence.summary.length > 0 ? '整理结果' : null,
+                  session.thread.summaryVersionId && session.evidence.summary.length > 0
+                    ? '整理结果'
+                    : null,
                   session.evidence.includeManualNote ? '我的笔记' : null,
                 ].filter(Boolean).join(' · ')}
               </Text>

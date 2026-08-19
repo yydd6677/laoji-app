@@ -60,7 +60,7 @@
     {
       "name": "source_bundle_item_v2",
       "path": "schemas/source_bundle_item_v2.schema.json",
-      "sha256": "c82a5aac8f1e531a6dc8aca1daf8e471611216260d08b1b05ee0c7d582fc01b7"
+      "sha256": "4e903da7da0a91d042a0b317e7599c19594c19eff57a421e7ec7efe09712d6f1"
     },
     {
       "name": "source_manifest_descriptor_v2",

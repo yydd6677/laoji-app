@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with GPU ASR/recovery evidence but exit gates open; Stage 3 source-stream/Facts-V3 artifact and emulator-5562 restore/template/citation vertical plus Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with ASR/recovery evidence but CPU performance exit gates open; Stage 3 source-stream/Facts-V3 and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -1073,6 +1073,12 @@ Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开
    再按 capability 默认。笔记/附件修改、epoch/binding 变化和迟到 attempt 都必须使本机激活 CAS 失败。
 6. mobile summary/question repositories 原子保存版本、facts/turns、clauses 和 exact citations；Q2
    thread/turn/citation 通过只读投影复用现有问答页，不写旧问答表。
+
+截至 2026-08-20，`emulator-5562` 已完成当前会议 direct Q2 的失败 operation 重试、单次
+reader、逐字引用、引用跳转、负向无引用回答和应用重启恢复；真实 Android 稳定来源 ID 与服务端
+source-stream 边界统一为 512，模型内部仍使用短别名。证据见
+`docs/vnext-stage3/Q2-ANDROID-VERTICAL-20260820.md`。这不覆盖 Android 长来源流、笔记来源或
+95% 人工相关性门，capability 继续关闭。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。

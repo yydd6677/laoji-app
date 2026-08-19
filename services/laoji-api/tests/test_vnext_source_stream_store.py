@@ -8,6 +8,7 @@ import uuid
 import pytest
 
 from app.config import settings
+from app.schemas.vnext_contracts import SourceBundleItemV2
 from app.services import (
     device_identity,
     device_v2_identity,
@@ -23,6 +24,24 @@ def _hash_text(value: str) -> str:
 
 def _fixed_hash(char: str) -> str:
     return "sha256:" + char * 64
+
+
+def test_source_bundle_contract_preserves_android_stable_source_identity() -> None:
+    source_id = "transcript:" + "a" * 194
+    source_revision_id = "revision:" + "b" * 119
+    item = SourceBundleItemV2.model_validate({
+        "item_id": "q2-item:0:0123456789abcdef",
+        "source_type": "transcript",
+        "source_id": source_id,
+        "source_revision_id": source_revision_id,
+        "source_start_utf8": 0,
+        "source_end_utf8": 3,
+        "content_sha256": _fixed_hash("c"),
+        "content": "好",
+    })
+
+    assert item.source_id == source_id
+    assert item.source_revision_id == source_revision_id
 
 
 def _setup(tmp_path, monkeypatch):

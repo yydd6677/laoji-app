@@ -39,13 +39,13 @@
       "type": "integer"
     },
     "source_id": {
-      "maxLength": 180,
+      "maxLength": 512,
       "minLength": 1,
       "title": "Source Id",
       "type": "string"
     },
     "source_revision_id": {
-      "maxLength": 180,
+      "maxLength": 512,
       "minLength": 1,
       "title": "Source Revision Id",
       "type": "string"

@@ -15,7 +15,7 @@ object VNextSchemaManifest {
         "schedule_mention_graph" to "a78a504fb661cd4c8e485fa21adbc1ad651033bf1466fdab1fcf0f65643d4386",
         "schedule_parse_request_legacy_projection" to "35cc3c14a24370dd4c3c48da341c0e40cf25ef8a11f329c4af1b36432d50f84e",
         "schedule_parse_response_legacy_projection" to "df521e9f08f423d719fbefdfb7ddf9d083f0ead61d43c028911af17a4f470bfc",
-        "source_bundle_item_v2" to "c82a5aac8f1e531a6dc8aca1daf8e471611216260d08b1b05ee0c7d582fc01b7",
+        "source_bundle_item_v2" to "4e903da7da0a91d042a0b317e7599c19594c19eff57a421e7ec7efe09712d6f1",
         "source_manifest_descriptor_v2" to "5c86a8337c5767060c587a0a390f4e76ed7edd8c697e256a86422168b2c2f1f9",
         "source_ref" to "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712",
         "source_stream_snapshot_v2" to "ae4f956d2e0b97ec085762a7e1af1c9910674433c018ef4fbfa720ee0fa9ec1e",

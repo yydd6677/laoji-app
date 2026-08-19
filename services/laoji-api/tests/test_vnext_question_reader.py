@@ -119,6 +119,48 @@ def test_reader_grounding_returns_canonical_source(monkeypatch):
     assert citation["source_type"] == "transcript"
 
 
+def test_reader_preserves_android_stable_source_identity_over_180_chars(monkeypatch):
+    text = "由五位同学对应用需求做简要介绍。"
+    answer = "一共有五位同学。"
+    source_id = "transcript:" + "a" * 194
+    source_revision_id = "revision:" + "b" * 119
+    assert len(source_id) == 205
+    assert len(source_revision_id) == 128
+    payload = _payload(text)
+    payload["question"] = "本次会议一共有几位同学介绍应用需求？"
+    payload["sources"][0]["source_id"] = source_id
+    payload["sources"][0]["source_revision_id"] = source_revision_id
+    payload["source_fingerprint"] = reader._source_fingerprint(payload["sources"])
+    monkeypatch.setattr(reader, "canonical_ollama_base_url", lambda: "http://127.0.0.1:21434")
+    monkeypatch.setattr(reader, "model_revision", lambda: "ollama:qwen3.5:9b")
+    monkeypatch.setattr(
+        reader,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps({
+            "answer_kind": "answer",
+            "answer": answer,
+            "clauses": [{
+                "clause_id": "c1",
+                "answer_start_utf8": 0,
+                "answer_end_utf8": len(answer.encode("utf-8")),
+                "citations": [{
+                    "citation_id": "cite-1",
+                    "source_id": "s0",
+                    "source_start_utf8": 0,
+                    "source_end_utf8": len(text.encode("utf-8")),
+                    "quote": text,
+                }],
+            }],
+        }, ensure_ascii=False),
+    )
+
+    result = reader.read_q2(payload)
+
+    citation = result["clauses"][0]["citations"][0]
+    assert citation["source_id"] == source_id
+    assert citation["source_revision_id"] == source_revision_id
+
+
 def test_verified_fragment_stream_is_packed_only_for_retrieval() -> None:
     raw = []
     offset = 0

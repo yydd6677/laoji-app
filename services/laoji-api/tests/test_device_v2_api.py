@@ -228,6 +228,8 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
     binding_generation = uuid.uuid4().hex
     source_text = "周五前由张敏提交接口文档。"
     source_hash = "sha256:" + hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    source_id = "transcript:" + "a" * 194
+    source_revision_id = "revision:" + "b" * 119
     payload = {
         "schema_version": 2,
         "contract_revision": "question.reader.v2",
@@ -240,8 +242,8 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
         "cancel_revision": 0,
         "sources": [{
             "source_type": "transcript",
-            "source_id": "line-1",
-            "source_revision_id": "revision-1",
+            "source_id": source_id,
+            "source_revision_id": source_revision_id,
             "content_sha256": source_hash,
             "text": source_text,
         }],
@@ -288,7 +290,8 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
     assert response.status_code == 200
     assert response.json()["answer_kind"] == "not_stated"
     assert len(calls) == 1
-    assert calls[0]["sources"][0]["source_id"] == "line-1"
+    assert calls[0]["sources"][0]["source_id"] == source_id
+    assert calls[0]["sources"][0]["source_revision_id"] == source_revision_id
 
     extra = {**payload, "unexpected": True}
     invalid = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=extra)

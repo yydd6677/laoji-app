@@ -57,8 +57,8 @@ class SourceManifestDescriptorV2(VNextModel):
 class SourceBundleItemV2(VNextModel):
     item_id: str = Field(min_length=8, max_length=180)
     source_type: Literal["transcript", "manual_note", "attachment"]
-    source_id: str = Field(min_length=1, max_length=180)
-    source_revision_id: str = Field(min_length=1, max_length=180)
+    source_id: str = Field(min_length=1, max_length=512)
+    source_revision_id: str = Field(min_length=1, max_length=512)
     source_start_utf8: int = Field(ge=0, le=9_007_199_254_740_991)
     source_end_utf8: int = Field(ge=0, le=9_007_199_254_740_991)
     content_sha256: Sha256 = Field(pattern=r"^sha256:[0-9a-f]{64}$")

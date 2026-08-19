@@ -132,8 +132,12 @@ class Q2ReaderSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_type: Literal["transcript", "manual_note", "attachment"]
-    source_id: str = Field(min_length=1, max_length=180)
-    source_revision_id: str = Field(min_length=1, max_length=180)
+    # Android transcript identities include the meeting owner, stable segment
+    # identity and revision material.  They are opaque source handles, not the
+    # short aliases exposed to the model, so keep the shared 512-character owner
+    # boundary instead of rejecting valid mobile snapshots at the HTTP edge.
+    source_id: str = Field(min_length=1, max_length=512)
+    source_revision_id: str = Field(min_length=1, max_length=512)
     content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     text: str = Field(min_length=1, max_length=8_000)
 

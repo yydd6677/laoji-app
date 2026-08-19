@@ -44,6 +44,7 @@ _RETRIEVAL_SIGNAL = re.compile(
     re.IGNORECASE,
 )
 _ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
+_SOURCE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,512}$")
 _HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONFLICT_FINAL_QUERY = re.compile(r"(?:最终|成交|确定|定下来|以哪个为准).*(?:日期|时间|哪天|价格|报价|多少钱|金额)|(?:日期|时间|哪天|价格|报价|多少钱|金额).*(?:最终|成交|确定|定下来|以哪个为准)")
 _DATE_VALUE = re.compile(r"(?:\d{1,4}\s*[年/月日号]|[一二三四五六七八九十百]+\s*[月日号])")
@@ -70,6 +71,13 @@ def _text(value: Any, field: str, maximum: int) -> str:
 def _id(value: Any, field: str) -> str:
     normalized = _text(value, field, 180)
     if not _ID.fullmatch(normalized):
+        raise Q2ReaderError("Q2_INPUT_INVALID", f"{field}无效")
+    return normalized
+
+
+def _source_id(value: Any, field: str) -> str:
+    normalized = _text(value, field, 512)
+    if not _SOURCE_ID.fullmatch(normalized):
         raise Q2ReaderError("Q2_INPUT_INVALID", f"{field}无效")
     return normalized
 
@@ -373,8 +381,8 @@ def _source_payload(
         source_type = _text(item.get("source_type"), "source_type", 32)
         if source_type not in {"transcript", "manual_note", "attachment"}:
             raise Q2ReaderError("Q2_INPUT_INVALID", "Q2 来源类型无效")
-        source_id = _id(item.get("source_id"), "source_id")
-        revision = _id(item.get("source_revision_id"), "source_revision_id")
+        source_id = _source_id(item.get("source_id"), "source_id")
+        revision = _source_id(item.get("source_revision_id"), "source_revision_id")
         content_hash = _hash(item.get("content_sha256"), "content_sha256")
         content = _text(item.get("text"), "text", max_source_text)
         if _sha256_text(content) != content_hash:
