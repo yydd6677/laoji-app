@@ -30,29 +30,23 @@ const MAX_RETRY_BACKOFF_MS = 5 * 60_000;
 type RetryState = { attempts: number; nextAt: number };
 
 /**
- * A realtime session writes a readable local draft before the device upload
- * finishes, so `meeting.hasTranscript` alone cannot tell us whether the
- * server-side Qwen pass is complete. Read the canonical local revision and
- * keep polling only while it is absent, draft, or finalizing. Historical
- * local-only meetings with an already-ready revision are never sent again.
+ * The durable transcript task is the only authority that can request a
+ * remote completion pull.  In particular, a guest meeting with no task is
+ * not evidence of a pending v1 transcript: old local records commonly have
+ * no transcript and would otherwise cause an endless `GET /meetings/.../
+ * transcript` loop (and, after the v1 credential was retired, repeated 401s).
+ *
+ * A realtime session writes its draft before the server task is created, but
+ * the upload coordinator records the task immediately after submission and
+ * notifies this provider.  The next run therefore sees the task; treating a
+ * task-less meeting as pending is both unnecessary and unsafe.
  */
 async function needsDeviceTranscriptCompletion(meeting: {
   id: string;
   hasTranscript?: boolean;
 }): Promise<boolean> {
   const task = await getDeviceTranscriptTask(meeting.id).catch(() => null);
-  if (task?.state === 'failed') return false;
-  if (task?.state === 'pending') return true;
-  const canonicalId = await sqliteMeetingNoteRepository
-    .resolveCanonicalMeetingId(meeting.id, 'guest')
-    .catch(() => null);
-  if (!canonicalId) return !meeting.hasTranscript;
-  const current = await sqliteMeetingNoteRepository
-    .getActiveTranscriptContent(canonicalId, 'guest')
-    .catch(() => null);
-  if (!current) return !meeting.hasTranscript;
-  return current.revision.kind === 'realtime_draft'
-    || !['ready', 'archived'].includes(current.revision.status);
+  return task?.state === 'pending';
 }
 
 /** Pull generated transcript bodies for phone-owned recordings only. */
