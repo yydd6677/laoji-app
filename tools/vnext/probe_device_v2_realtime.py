@@ -13,10 +13,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 from pathlib import Path
+import socket
 import struct
+import statistics
 import time
 import uuid
 from urllib import request
@@ -36,6 +39,29 @@ from probe_device_v2_upload import (
 
 
 FRAME_PREFIX = struct.Struct(">4sBH")
+_PROBE_SOURCE_IP: str | None = None
+
+
+def configure_source_ip(source_ip: str | None) -> None:
+    """Use a loopback alias for isolated repeated probes when IP quotas are full."""
+    global _PROBE_SOURCE_IP
+    _PROBE_SOURCE_IP = str(source_ip).strip() or None
+    if _PROBE_SOURCE_IP is None:
+        return
+    original = socket.create_connection
+
+    @functools.wraps(original)
+    def create_connection(address, timeout=None, source_address=None, *, all_errors=False):
+        if source_address is None:
+            source_address = (_PROBE_SOURCE_IP, 0)
+        return original(
+            address,
+            timeout=timeout,
+            source_address=source_address,
+            all_errors=all_errors,
+        )
+
+    socket.create_connection = create_connection
 
 
 @dataclass(frozen=True)
@@ -55,6 +81,8 @@ def args() -> argparse.Namespace:
     parser.add_argument("--api", default="http://127.0.0.1:18021/api/device/v2")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--chunk-ms", type=int, default=1000)
+    parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--source-ip", default=None)
     return parser.parse_args()
 
 
@@ -228,10 +256,18 @@ async def receive_until(ws, *, required: str, events: list[dict], timeout: float
     raise TimeoutError(f"timed out waiting for {required}")
 
 
-async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
+async def run_probe(
+    pcm: bytes,
+    api: str,
+    chunk_ms: int,
+    *,
+    state: BootstrapState | None = None,
+    refresh_before_reconnect: bool = True,
+    binding_epoch_seq: int = 1,
+) -> dict:
     import websockets
 
-    state = bootstrap(api)
+    state = state or bootstrap(api)
     auth, purge, device_id, epoch_id = state.auth, state.purge, state.device_id, state.epoch_id
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
@@ -244,7 +280,7 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
         payload={
             "schema_version": 2,
             "binding_generation": binding_generation,
-            "binding_epoch_seq": 1,
+            "binding_epoch_seq": binding_epoch_seq,
             "binding_revision": 1,
             "cancel_revision": 0,
             "purge_capability": {
@@ -285,7 +321,14 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
     # socket resumes from the server's durable chunk/event cursors, exercising
     # the same boundary used by Android after a network interruption.
     interrupted_after = max(1, len(chunks) // 2)
-    async with websockets.connect(ws_url, extra_headers=headers, open_timeout=20, close_timeout=10) as ws:
+    socket_kwargs = {"local_addr": (_PROBE_SOURCE_IP, 0)} if _PROBE_SOURCE_IP else {}
+    async with websockets.connect(
+        ws_url,
+        extra_headers=headers,
+        open_timeout=20,
+        close_timeout=10,
+        **socket_kwargs,
+    ) as ws:
         await ws.send(json.dumps(opened, separators=(",", ":")))
         await receive_until(ws, required="session.ready", events=events)
         for seq, chunk in enumerate(chunks[:interrupted_after]):
@@ -295,13 +338,20 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
     # Refresh the bearer before reconnecting. The session, binding and durable
     # cursors remain unchanged; only the in-memory authorization headers move
     # to the newly issued token.
-    auth = refresh_auth(api, state)
+    if refresh_before_reconnect:
+        auth = refresh_auth(api, state)
     headers = [(key, value) for key, value in auth.items()]
     opened["after_event_seq"] = max(
         (int(event.get("event_sequence", 0)) for event in events),
         default=0,
     )
-    async with websockets.connect(ws_url, extra_headers=headers, open_timeout=20, close_timeout=10) as ws:
+    async with websockets.connect(
+        ws_url,
+        extra_headers=headers,
+        open_timeout=20,
+        close_timeout=10,
+        **socket_kwargs,
+    ) as ws:
         await ws.send(json.dumps(opened, separators=(",", ":")))
         resumed = await receive_until(ws, required="session.ready", events=events)
         resume_seq = max(0, int(resumed.get("last_contiguous_chunk_seq", -1)) + 1)
@@ -344,8 +394,36 @@ async def run_probe(pcm: bytes, api: str, chunk_ms: int) -> dict:
     }
 
 
+async def run_repeated(pcm: bytes, api: str, chunk_ms: int, repeat: int) -> dict:
+    if repeat < 1:
+        raise ValueError("repeat_must_be_positive")
+    state = bootstrap(api)
+    runs = [
+        await run_probe(
+            pcm,
+            api,
+            chunk_ms,
+            state=state,
+            refresh_before_reconnect=False,
+            binding_epoch_seq=index + 1,
+        )
+        for index in range(repeat)
+    ]
+    wall = [int(item["wall_ms"]) for item in runs]
+    return {
+        "count": len(runs),
+        "wall_ms": wall,
+        "p50_ms": statistics.median(wall),
+        "p95_ms": max(wall),
+        "stable_event_count_min": min(int(item["stable_event_count"]) for item in runs),
+        "final_outcomes": sorted({str(item["final_outcome"]) for item in runs}),
+        "runs": runs,
+    }
+
+
 def main() -> int:
     parsed = args()
+    configure_source_ip(getattr(parsed, "source_ip", None))
     pcm = parsed.pcm.read_bytes()
     if not pcm or len(pcm) % 2:
         raise SystemExit("PCM file must be non-empty signed-int16 mono 16k")
@@ -355,7 +433,10 @@ def main() -> int:
     pcm = pcm[: len(pcm) - (len(pcm) % 32)]
     if not pcm:
         raise SystemExit("PCM file is shorter than one millisecond")
-    report = asyncio.run(run_probe(pcm, parsed.api, parsed.chunk_ms))
+    if parsed.repeat == 1:
+        report = asyncio.run(run_probe(pcm, parsed.api, parsed.chunk_ms))
+    else:
+        report = asyncio.run(run_repeated(pcm, parsed.api, parsed.chunk_ms, parsed.repeat))
     parsed.output.parent.mkdir(parents=True, exist_ok=True)
     parsed.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
