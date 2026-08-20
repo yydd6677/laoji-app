@@ -10,6 +10,8 @@ import subprocess
 import sys
 from typing import Any, Mapping
 
+from schedule_holdout_evidence import verify_quality_report
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -72,13 +74,27 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
     _gate(gates, "candidate_graph_capability", _bool(service.get("schedule_graph")), service.get("schedule_graph"), "graph_capability_required")
 
     quality = _mapping(data.get("schedule_quality"))
-    human = _bool(quality.get("independent_human_adjudication"))
+    quality_verified, quality_reason = verify_quality_report(quality)
+    _gate(
+        gates,
+        "schedule_quality_lineage",
+        quality_verified,
+        {
+            "verified": quality_verified,
+            "report_sha256": quality.get("report_sha256"),
+            "contract": quality.get("evidence_contract"),
+        },
+        quality_reason,
+    )
+    metrics = _mapping(quality.get("metrics")) if quality_verified else {}
+    human = _bool(quality.get("independent_human_adjudication")) if quality_verified else None
+    eligible = _bool(quality.get("gate_eligible")) if quality_verified else None
     sample_count = _number(quality.get("sample_count"))
-    exact = _number(quality.get("field_exact_accuracy"))
-    recall = _number(quality.get("key_field_recall"))
-    save_errors = _number(quality.get("save_error_count"))
-    _gate(gates, "schedule_human_holdout", human is True and sample_count is not None and sample_count >= 30,
-          {"human": human, "sample_count": sample_count}, "independent_human_holdout_required")
+    exact = _number(metrics.get("field_exact_accuracy"))
+    recall = _number(metrics.get("key_field_recall"))
+    save_errors = _number(metrics.get("save_error_count"))
+    _gate(gates, "schedule_human_holdout", quality_verified and eligible is True and human is True and sample_count is not None and sample_count >= 30,
+          {"human": human, "gate_eligible": eligible, "sample_count": sample_count}, "independent_human_holdout_required")
     _gate(gates, "schedule_field_exact_accuracy", exact is not None and exact >= 0.95, {"value": exact, "minimum": 0.95}, "blueprint_quality_threshold")
     _gate(gates, "schedule_key_field_recall", recall is not None and recall >= 0.98, {"value": recall, "minimum": 0.98}, "blueprint_quality_threshold")
     _gate(gates, "schedule_save_error_free", save_errors == 0, {"save_error_count": save_errors}, "save_error_rate_must_be_zero")
@@ -130,4 +146,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

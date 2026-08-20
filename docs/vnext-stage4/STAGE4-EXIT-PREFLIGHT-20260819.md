@@ -18,5 +18,10 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
 - 日程服务端聚焦回归：`103 passed`；
 - 聚合预检无 evidence envelope：保持 `passed=false`，真实 Android/人工质量/公开周期仍阻断。
 
-这不是 Stage 4 退出证明。候选 Graph、旧 `/parse`、生产 `18020/8030` 和公网流量未改变。
+2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
+`schedule_quality_lineage` 要求由
+[自然日程盲审与质量证据包](NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)生成并封存的
+`schedule-human-holdout-v1` 报告；旧格式会 fail closed。该变化只收紧证据入口，没有伪造人工 gold，
+因此当前退出状态仍为 blocked。
 
+这不是 Stage 4 退出证明。候选 Graph、旧 `/parse`、生产 `18020/8030` 和公网流量未改变。

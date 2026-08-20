@@ -161,6 +161,10 @@ Stage 4 同样增加了只读聚合预检，要求独立日程人工 holdout、�
 [Stage 4 exit preflight](../vnext-stage4/STAGE4-EXIT-PREFLIGHT-20260819.md)。
 自然日程 150 条盲审队列的来源和注册分布自动审计已通过，但双人母语标注与裁决仍缺，见
 [自然日程语料审计](../vnext-stage4/NATURAL-SCHEDULE-VALIDATION-20260819.md)。
+2026-08-20 已把双人盲审、揭盲裁决、冻结后预测、开发集重叠审计和指标计算固化为可执行证据包；
+Stage 4 预检只接受带完整哈希血缘的 `schedule-human-holdout-v1` 报告，旧的手填布尔值/指标会失败关闭。
+公开本地化或编写语料仍不能晋级，真实第一方双人 gold 尚未提供，见
+[自然日程盲审与质量证据包](../vnext-stage4/NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)。
 模型时间范围两种自然语序回放已通过，证据见
 [日程模型时间范围回放](../vnext-stage4/SCHEDULE-MODEL-RANGE-REPLAY-20260819.md)。
 Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 AudioRecord/journal/录音线程先启动，
