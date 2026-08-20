@@ -85,7 +85,11 @@ export function useNativeProjection<T extends object>(
     }
     let active = true;
     void (async () => {
-      const payloadSha256 = await projectionPayloadSha256(snapshotRef.current);
+      // Hash and envelope one immutable render snapshot. A newer render can
+      // replace snapshotRef while the digest is pending; mixing its body with
+      // the previous payload key would corrupt the persistent action fence.
+      const payloadSnapshot = snapshotRef.current;
+      const payloadSha256 = await projectionPayloadSha256(payloadSnapshot);
       if (!active) return;
       // At most one retry is needed when a cancelled previous render committed
       // between this render reading the checkpoint and accepting its hash.
@@ -102,7 +106,7 @@ export function useNativeProjection<T extends object>(
             viewRevision,
             surfaceInstanceId,
           },
-          snapshotRef.current,
+          payloadSnapshot,
         );
         if (!active) return;
         const accepted = await acceptNativeProjectionCheckpoint({

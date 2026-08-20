@@ -101,6 +101,11 @@ schedule capability barrier，也不改变稳定版或生产服务。
 - `PROJECTION-ANDROID-REPLAY-20260818.md`：在 `emulator-5562/LaoJi_API_35` 的旧数据库上安装候选
   APK，真实完成 0045 迁移、calendar checkpoint 写入和强停/重启恢复；修复页面早于本机 epoch 初始化
   的外键时序后，revision 从 3 单调到 6。此证据仍只覆盖 ProjectionEnvelope 候选，不是 Stage 4 退出。
+- `PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md`：页面回放候选 `1.1.31 (139)` 在同一专用模拟器上继续完成
+  calendar、recording、transcript 三个 surface 的同实体强停重建、完整 JS action identity fence 和会议
+  详情 tab 切换视频抽帧审查。三页面 checkpoint revision 均单调，固定 chrome 未见可见跳动；真实
+  bridge 旧 action 注入仍未完成，因此不把静态/纯函数门禁冒充故障注入。收口代码已以
+  `1.1.33 (141)` 重建并在同一模拟器完成覆盖安装与冷启动 smoke。
 - 迁移仅新增 0045，不改变 0040-0044 顺序。后续候选 `1.1.18 (126)` 已在专用
   `emulator-5562` 完成复杂 Graph -> 补充 -> 保存 -> 强停重建 -> 删除纵向回放；详见
   `MOBILE-GRAPH-VERTICAL-20260819.md`。它没有安装到真机、公开发布或切换生产。
@@ -108,11 +113,11 @@ schedule capability barrier，也不改变稳定版或生产服务。
 ## 未完成
 
 这不是 Stage 4 退出证据。MentionGraph 的 device-v2 候选已接入复杂解析/澄清 owner，但默认关闭；
-ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线、三个页面的默认关闭生成器和本机 checkpoint
-owner，尚未启用 device/surface identity 的真实候选流量，也未跨 capability barrier。服务端 capability barrier、自然语料 holdout 和真实
-Expo SQLite/Android **全局**迁移回放、全部页面 recreate/stale action 故障注入和自然字段质量门仍未
-通过；`emulator-5562` 的 Graph 和 ProjectionEnvelope 回放只证明候选切片的本机 owner、补充 lineage
-与重启 fence。
+ProjectionEnvelope 目前完成了 native Calendar/Minutes 接线、三个页面的默认关闭生成器、本机 checkpoint
+owner 和 JS action 最终身份 fence，并已在 `emulator-5562` 对三类页面完成候选同实体重建。它尚未跨
+capability barrier；服务端 barrier、自然语料 holdout、真实 bridge stale action 注入、公开零流量周期
+和自然字段质量门仍未通过。已有 Graph 和 ProjectionEnvelope 回放只证明候选切片的本机 owner、补充
+lineage、重启 fence 与当前样本页面稳定性。
 在这些门完成前，旧日程链路继续作为生产路径，不能删除旧 parser 或宣称 vNext 日程已上线。
 
 日程字段准确率的外部证据边界已单独记录在

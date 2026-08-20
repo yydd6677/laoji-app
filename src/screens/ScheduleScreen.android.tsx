@@ -10,6 +10,7 @@ import {
   type NativeCalendarCreateEvent,
   type NativeCalendarMutationRequest,
   type NativeCalendarMutationResolution,
+  type NativeProjectionEnvelope,
   type NativeCalendarSemanticEvent,
   type NativeCalendarVisibleRangeEvent,
   type NativeCalendarSearchAction,
@@ -39,6 +40,8 @@ import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot'
 import { Colors as C } from '../theme/colors';
 import { getFeatureFlags } from '../config/featureFlags';
 import { useNativeProjection } from '../native/useNativeProjection';
+import { fenceNativeProjectionAction } from '../native/projectionActionFence';
+import { diagnosticAudit } from '../services/diagnostics';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
@@ -103,6 +106,8 @@ export function ScheduleScreen({
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const generationRef = useRef(0);
+  const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
+  const projectionCandidateEnabled = getFeatureFlags().nativeProjectionEnvelopeCandidate;
   const searchOwnerId = useMemo(() => createNativeOverlayOwnerId('calendar-search'), []);
   const profileEntry = useMemo(
     () => buildNativeProfileEntrySnapshot(profile, isGuest),
@@ -132,10 +137,11 @@ export function ScheduleScreen({
     });
   }, [events, selectedEpochDay, today, visibleRange.endExclusive, visibleRange.start]);
   const snapshot = useNativeProjection(snapshotBody, {
-    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    enabled: projectionCandidateEnabled,
     entityId: 'calendar',
     surfaceKey: 'calendar',
   });
+  currentProjectionRef.current = snapshot.projection ?? null;
 
   const chooseEditScope = useCallback((event: CalEvent): Promise<EventRecurrenceScope | null> => {
     if (!event.repeat || event.repeat === 'once') return Promise.resolve('series');
@@ -151,6 +157,24 @@ export function ScheduleScreen({
   }, [showDialog]);
 
   const handleMutation = useCallback(async (mutation: NativeCalendarMutationRequest) => {
+    const projectionFence = fenceNativeProjectionAction(
+      projectionCandidateEnabled,
+      currentProjectionRef.current,
+      mutation.projection,
+    );
+    if (!projectionFence.accepted) {
+      diagnosticAudit('native_projection_action_rejected', {
+        surface: 'calendar',
+        action_type: 'mutation',
+        reason: projectionFence.reason,
+      });
+      setMutationResolution({
+        operationId: mutation.operationId,
+        accepted: false,
+        message: '日程页面已更新，请重新操作。',
+      });
+      return;
+    }
     const targetRef = {
       sourceEventId: mutation.sourceEventId,
       occurrenceDate: mutation.occurrenceDate,
@@ -176,7 +200,7 @@ export function ScheduleScreen({
         message: readableErrorMessage(error, '修改失败，原日程时间已保留。'),
       });
     }
-  }, [chooseEditScope, events, updateEvent]);
+  }, [chooseEditScope, events, projectionCandidateEnabled, updateEvent]);
 
   const openCreate = useCallback((draft?: NativeCalendarCreateEvent, epochDay = selectedEpochDay) => {
     navigation.navigate('AddEvent', draft ? {

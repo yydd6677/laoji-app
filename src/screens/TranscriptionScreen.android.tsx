@@ -16,6 +16,7 @@ import {
   type MinutesProcessingStage,
   type MinutesSemanticAction,
   type MinutesStatusTone,
+  type NativeProjectionEnvelope,
 } from 'laoji-native-platform';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import {
@@ -291,6 +292,7 @@ import {
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { getFeatureFlags } from '../config/featureFlags';
 import { useNativeProjection } from '../native/useNativeProjection';
+import { fenceNativeProjectionAction } from '../native/projectionActionFence';
 import {
   createMeetingActionShare,
   loadMeetingActionShares,
@@ -628,6 +630,8 @@ function meetingActionFailureCode(reason: unknown): string {
 
 /** MIN-DETAIL-001 / MIN-SUMMARY-001 / MIN-GUEST-001 / MIN-PLAYER-001. */
 export function TranscriptionScreen({ navigation, route }: Props) {
+  const projectionCandidateEnabled = getFeatureFlags().nativeProjectionEnvelopeCandidate;
+  const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
   const {
     meetings,
     deleteMeeting,
@@ -5558,6 +5562,19 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [locationLoading, meeting, showDialog, updateMeetingDetails]);
 
   const handleAction = useCallback((action: MinutesSemanticAction) => {
+    const projectionFence = fenceNativeProjectionAction(
+      projectionCandidateEnabled,
+      currentProjectionRef.current,
+      action.projection,
+    );
+    if (!projectionFence.accepted) {
+      diagnosticAudit('native_projection_action_rejected', {
+        surface: 'transcript',
+        action_type: action.type,
+        reason: projectionFence.reason,
+      });
+      return;
+    }
     switch (action.type) {
       case 'back':
         void manualNote.flush().finally(() => navigation.goBack());
@@ -5707,7 +5724,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [activeMeetingFactsV3, loadingSummary, manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, openSummarySectionEditor, openSummarySyncConflict, playerSources, processingStatuses, removeMarker, requestMeetingLocation, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, summaryTemplate, summaryVisualPhase, toggleMeetingAction]);
+  }, [activeMeetingFactsV3, loadingSummary, manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, openSummarySectionEditor, openSummarySyncConflict, playerSources, processingStatuses, projectionCandidateEnabled, removeMarker, requestMeetingLocation, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, summaryTemplate, summaryVisualPhase, toggleMeetingAction]);
 
   const transcriptCanonicalSuppressed = suppressCanonicalProcessing(transcriptVisualPhase);
   const transcriptStageLoading = transcriptVisualPhase === 'running'
@@ -5943,10 +5960,11 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
   }), [accessToken, activeMeetingFactsV3, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, detailProcessingPresentation.label, detailProcessingPresentation.retryStage, detailProcessingPresentation.tone, deviceTranscriptFailed, deviceTranscriptPending, deviceTranscriptTask?.phase, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, playerSource, playerSourceError, playerSources, processingRetrying, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryOperationActive, summaryProgress, summaryStageError, summaryStageLoading, summarySyncConflicts, summaryConfirmedCurrent, summaryTemplate.title, summaryV3UpgradeRunning, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
   const snapshot = useNativeProjection(snapshotBody, {
-    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    enabled: projectionCandidateEnabled,
     entityId: meeting?.id ?? route.params.meetingId,
     surfaceKey: 'transcript',
   });
+  currentProjectionRef.current = snapshot.projection ?? null;
 
   const moreItems = useMemo<AppActionSheetItem[]>(() => {
     if (!meeting) return [];

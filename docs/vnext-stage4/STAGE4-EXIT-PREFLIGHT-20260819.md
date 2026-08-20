@@ -15,8 +15,12 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
 - Stage 4 migration：通过，12,000 条搜索 workload p95 约 `23.8ms`；
 - Projection checkpoint：通过首次、幂等、stale、新版本和 SQLite reopen 回放；
 - Graph owner、移动端 owner、语音采集顺序：通过静态门；
+- Projection action fence：完整身份字段与 calendar/recording/transcript 三页面前置接线通过静态门；
 - 日程服务端聚焦回归：`103 passed`；
-- 聚合预检无 evidence envelope：保持 `passed=false`，真实 Android/人工质量/公开周期仍阻断。
+- 候选 `1.1.31 (139)` 已完成三页面 checkpoint recreate 和会议详情 tab 视频抽帧回放；收口代码已以
+  `1.1.33 (141)` 重建并覆盖安装到同一专用模拟器，见
+  [ProjectionEnvelope 全局 Android 回放](PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md)；真实 bridge
+  stale action 注入、人工质量、语音 p95 和公开周期仍阻断，因此聚合预检保持 `passed=false`。
 
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由

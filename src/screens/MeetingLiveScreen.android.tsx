@@ -13,6 +13,7 @@ import {
   type MinutesRecordingContent,
   type MinutesRecordingPhase,
   type MinutesSemanticAction,
+  type NativeProjectionEnvelope,
   addNativeRecorderErrorListener,
   addNativeRecorderStateListener,
   addNativeRecorderTranscriptListener,
@@ -43,6 +44,7 @@ import { startDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
 import { getApiConfig } from '../services/config';
 import { getFeatureFlags } from '../config/featureFlags';
 import { useNativeProjection } from '../native/useNativeProjection';
+import { fenceNativeProjectionAction } from '../native/projectionActionFence';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import {
   createMeetingRecordingFinalizer,
@@ -147,6 +149,8 @@ function localUriFromStopError(
 
 /** MIN-REC-STATE-001: Android owns capture; this route only coordinates domain operations. */
 export function MeetingLiveScreen({ navigation, route }: Props) {
+  const projectionCandidateEnabled = getFeatureFlags().nativeProjectionEnvelopeCandidate;
+  const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
   const { accessToken, isGuest } = useAuth();
   const {
     meetings,
@@ -996,6 +1000,19 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   }, [manualNote.reload, manualNoteConflictSaving, manualNoteConflictTarget, meetingScopeKey, refreshManualNoteConflict]);
 
   const handleAction = useCallback((action: MinutesSemanticAction) => {
+    const projectionFence = fenceNativeProjectionAction(
+      projectionCandidateEnabled,
+      currentProjectionRef.current,
+      action.projection,
+    );
+    if (!projectionFence.accepted) {
+      diagnosticAudit('native_projection_action_rejected', {
+        surface: 'recording',
+        action_type: action.type,
+        reason: projectionFence.reason,
+      });
+      return;
+    }
     switch (action.type) {
       case 'back':
         void manualNote.flush().finally(() => navigation.goBack());
@@ -1059,7 +1076,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [confirmStop, createMarkerAt, manualNote, navigation, openManualNoteConflict, phase, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
+  }, [confirmStop, createMarkerAt, manualNote, navigation, openManualNoteConflict, phase, projectionCandidateEnabled, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
 
   // Refs protect async recorder commands, but assigning a ref does not render
   // the native snapshot. Keep a small reactive identity so pause/stop become
@@ -1107,10 +1124,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     transcript,
   }), [activeContent, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, manualNoteConflict, meetingId, phase, requestedMeetingId, title, transcript]);
   const snapshot = useNativeProjection(snapshotBody, {
-    enabled: getFeatureFlags().nativeProjectionEnvelopeCandidate,
+    enabled: projectionCandidateEnabled,
     entityId: meetingId || requestedMeetingId || 'recording',
     surfaceKey: 'recording',
   });
+  currentProjectionRef.current = snapshot.projection ?? null;
 
   return (
     <ScreenContainer edges={['top', 'bottom']} bg={C.body}>
