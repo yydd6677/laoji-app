@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 from pathlib import Path
+import json
 import threading
 import time
 
@@ -41,16 +42,65 @@ def test_chat_forces_single_21434_provider_and_generation_model(monkeypatch):
     assert captured["config"].api_key == ""
 
 
+def test_embedding_cache_reuses_summary_vectors_for_interactive_q2(monkeypatch):
+    calls = []
+
+    def fake_embed(texts, **kwargs):
+        calls.append((list(texts), dict(kwargs)))
+        return [tuple([float(index + 1), 1.0]) for index, _text in enumerate(texts)]
+
+    monkeypatch.setattr(llm_provider, "embed_texts", fake_embed)
+    llm_provider._reset_embedding_cache_for_tests()
+
+    summary = llm_provider.embed_texts_cached(
+        ["相同会议片段", "另一个会议片段"],
+        priority="background",
+        operation="summary.v3.evidence.embedding",
+        num_ctx=2048,
+        num_gpu=0,
+    )
+    question = llm_provider.embed_texts_cached(
+        ["相同会议片段", "另一个会议片段"],
+        priority="interactive",
+        operation="question.q2.evidence.sources",
+        num_ctx=2048,
+        num_gpu=0,
+    )
+
+    assert question == summary
+    assert len(calls) == 1
+    assert calls[0][1]["priority"] == "background"
+
+
+def test_embedding_cache_separates_runner_options(monkeypatch):
+    calls = []
+
+    def fake_embed(texts, **kwargs):
+        calls.append(dict(kwargs))
+        return [(1.0, 0.0) for _text in texts]
+
+    monkeypatch.setattr(llm_provider, "embed_texts", fake_embed)
+    llm_provider._reset_embedding_cache_for_tests()
+
+    llm_provider.embed_texts_cached(["会议片段"], num_ctx=2048, num_gpu=0)
+    llm_provider.embed_texts_cached(["会议片段"], num_ctx=8192, num_gpu=0)
+
+    assert len(calls) == 2
+
+
 def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
     captured = {}
 
     class Response:
+        closed = False
+
         def raise_for_status(self):
             return None
 
         def json(self):
             return {
                 "message": {"content": "模型结果"},
+                "done": True,
                 "done_reason": "stop",
                 "total_duration": 8_000_000_000,
                 "load_duration": 100_000_000,
@@ -59,6 +109,12 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
                 "eval_count": 256,
                 "eval_duration": 5_000_000_000,
             }
+
+        def iter_lines(self):
+            yield json.dumps(self.json()).encode("utf-8")
+
+        def close(self):
+            self.closed = True
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
@@ -79,6 +135,7 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
     assert result == "模型结果"
     assert captured["url"] == "http://127.0.0.1:21434/api/chat"
     assert captured["json"]["messages"][0]["content"].startswith("/no_think\n")
+    assert captured["json"]["stream"] is True
     assert captured["json"]["options"]["num_predict"] == 321
     assert captured["json"]["format"] == "json"
     assert captured["headers"]["X-Laoji-Priority"] == "background"
@@ -131,7 +188,7 @@ def test_invalid_ollama_fallback_port_is_rejected(monkeypatch):
 
 
 def test_pending_interactive_llm_job_precedes_pending_background_job():
-    coordinator = llm_provider._ProviderCoordinator()
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=0)
     first_started = threading.Event()
     release_first = threading.Event()
     order: list[str] = []
@@ -174,6 +231,122 @@ def test_pending_interactive_llm_job_precedes_pending_background_job():
         "live",
         "later",
     }
+
+
+def test_interactive_job_can_take_bounded_handoff_before_next_background_job():
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=150)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    order: list[str] = []
+
+    def submit(name: str, priority: str) -> None:
+        def invoke() -> str:
+            order.append(name)
+            if name == "first":
+                first_started.set()
+                assert release_first.wait(5)
+            return name
+
+        assert coordinator.submit(
+            priority=priority,
+            operation=name,
+            call=invoke,
+            wait_seconds=5,
+        ) == name
+
+    first = threading.Thread(target=submit, args=("first", "background"))
+    later = threading.Thread(target=submit, args=("later", "background"))
+    first.start()
+    assert first_started.wait(5)
+    later.start()
+    release_first.set()
+    # Arrive after the next background job has already been admitted but
+    # within the explicit interactive handoff window.
+    time.sleep(0.04)
+    live = threading.Thread(target=submit, args=("live", "interactive"))
+    live.start()
+    for thread in (first, later, live):
+        thread.join(5)
+        assert not thread.is_alive()
+
+    assert order == ["first", "live", "later"]
+
+
+def test_active_background_job_receives_preemption_when_interactive_arrives():
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=0)
+    background_started = threading.Event()
+    yielded = threading.Event()
+    order: list[str] = []
+
+    def background_call() -> str:
+        order.append("background-start")
+        background_started.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if llm_provider._current_background_preempt_requested():
+                yielded.set()
+                order.append("background-yield")
+                return "yielded"
+            time.sleep(0.01)
+        raise AssertionError("background job did not receive preemption")
+
+    background_result: list[str] = []
+    live_result: list[str] = []
+    background = threading.Thread(target=lambda: background_result.append(coordinator.submit(
+        priority="background",
+        operation="background",
+        call=background_call,
+        wait_seconds=5,
+    )))
+    background.start()
+    assert background_started.wait(5)
+    live = threading.Thread(target=lambda: live_result.append(coordinator.submit(
+        priority="interactive",
+        operation="live",
+        call=lambda: order.append("live") or "live",
+        wait_seconds=5,
+    )))
+    live.start()
+    assert yielded.wait(5)
+    for thread in (background, live):
+        thread.join(5)
+        assert not thread.is_alive()
+    assert background_result == ["yielded"]
+    assert live_result == ["live"]
+    assert order == ["background-start", "background-yield", "live"]
+
+
+def test_background_ollama_stream_closes_when_preempted(monkeypatch):
+    class Response:
+        def __init__(self):
+            self.closed = False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield b'{"message":{"content":"partial"},"done":false}'
+            yield b'{"message":{"content":"late"},"done":true}'
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+    monkeypatch.setattr(llm_provider._SESSION, "post", lambda *_args, **_kwargs: response)
+    checks = iter((False, True))
+    monkeypatch.setattr(
+        llm_provider,
+        "_current_background_preempt_requested",
+        lambda: next(checks, True),
+    )
+    with pytest.raises(llm_provider.LlmProviderPreempted, match="llm_background_preempted"):
+        llm_provider._call_ollama_transport(
+            Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat"),
+            "system",
+            "input",
+            priority="background",
+        )
+    assert response.closed is True
 
 
 def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):

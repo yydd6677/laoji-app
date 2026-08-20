@@ -10,7 +10,7 @@ import os
 import re
 from typing import Any, Iterable
 
-from app.services.llm_provider import LlmProviderError, embed_texts
+from app.services.llm_provider import LlmProviderError, embed_texts, embed_texts_cached
 from app.services.summary_v3_store import source_fingerprint
 
 
@@ -434,9 +434,9 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
 def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
     vectors: list[tuple[float, ...]] = []
     try:
-        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "64"))
+        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "8"))
     except (TypeError, ValueError):
-        configured_batch_size = 64
+        configured_batch_size = 8
     batch_size = max(4, min(64, configured_batch_size))
     try:
         configured_num_ctx = int(os.getenv("SUMMARY_V3_EMBED_NUM_CTX", "2048"))
@@ -457,13 +457,14 @@ def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
         batch = sources[offset : offset + batch_size]
         try:
             vectors.extend(
-                embed_texts(
+                embed_texts_cached(
                     [source.text for source in batch],
                     priority="background",
                     operation="summary.v3.evidence.embedding",
                     timeout_seconds=45,
                     num_ctx=embedding_num_ctx,
                     num_gpu=embedding_num_gpu,
+                    embedder=embed_texts,
                 )
             )
         except LlmProviderError as error:

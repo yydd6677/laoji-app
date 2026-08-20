@@ -9,8 +9,11 @@ meeting text to the cloud.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
+import hashlib
 import itertools
+import json
 import math
 import os
 import queue
@@ -37,6 +40,12 @@ PRIORITIES = {"interactive": 0, "background": 1}
 
 
 class LlmProviderError(RuntimeError):
+    pass
+
+
+class LlmProviderPreempted(LlmProviderError):
+    """A checkpointed background generation yielded to interactive work."""
+
     pass
 
 
@@ -137,10 +146,12 @@ class _ProviderJob:
     finished: threading.Event = field(default_factory=threading.Event)
     result: Any = None
     error: Exception | None = None
+    handoff_waited: bool = False
+    preempt_requested: threading.Event = field(default_factory=threading.Event)
 
 
 class _ProviderCoordinator:
-    def __init__(self) -> None:
+    def __init__(self, *, background_handoff_ms: int | None = None) -> None:
         self._queue: queue.PriorityQueue[tuple[int, int, _ProviderJob]] = queue.PriorityQueue(
             maxsize=max(8, int(os.getenv("LAOJI_LLM_QUEUE_CAPACITY", "128")))
         )
@@ -148,8 +159,22 @@ class _ProviderCoordinator:
         self._lock = threading.Lock()
         self._pending = {name: 0 for name in PRIORITIES}
         self._active: dict[str, Any] | None = None
+        self._active_job: _ProviderJob | None = None
         self._last: dict[str, Any] | None = None
         self._last_by_operation: dict[str, dict[str, Any]] = {}
+        configured_handoff = background_handoff_ms
+        if configured_handoff is None:
+            try:
+                configured_handoff = int(
+                    os.getenv("LAOJI_LLM_BACKGROUND_HANDOFF_MS", "1000")
+                )
+            except ValueError:
+                configured_handoff = 1000
+        self._background_handoff_seconds = max(
+            0.0,
+            min(5.0, int(configured_handoff) / 1000.0),
+        )
+        self._interactive_arrived = threading.Event()
         threading.Thread(target=self._worker, name="laoji-llm-provider", daemon=True).start()
 
     def submit(
@@ -170,6 +195,14 @@ class _ProviderCoordinator:
             raise LlmProviderError("llm_queue_full") from exc
         with self._lock:
             self._pending[normalized] += 1
+            if (
+                normalized == "interactive"
+                and self._active_job is not None
+                and self._active_job.priority == "background"
+            ):
+                self._active_job.preempt_requested.set()
+        if normalized == "interactive":
+            self._interactive_arrived.set()
         if not job.finished.wait(max(1.0, wait_seconds)):
             raise LlmProviderError("llm_queue_timeout")
         if job.error is not None:
@@ -191,14 +224,45 @@ class _ProviderCoordinator:
 
     def _worker(self) -> None:
         while True:
-            _rank, _sequence, job = self._queue.get()
+            rank, sequence, job = self._queue.get()
+            if (
+                job.priority == "background"
+                and not job.handoff_waited
+                and self._background_handoff_seconds > 0
+            ):
+                # A Q2 request usually needs a few hundred milliseconds after
+                # the previous Summary completes to seal and load its source
+                # stream. Without a bounded handoff window, the next Summary
+                # can seize the non-preemptible local model just before that
+                # interactive job reaches this queue, adding a full chapter
+                # generation to user-visible latency.
+                job.handoff_waited = True
+                self._interactive_arrived.clear()
+                with self._lock:
+                    interactive_pending = self._pending["interactive"] > 0
+                if not interactive_pending:
+                    self._interactive_arrived.wait(self._background_handoff_seconds)
+                    with self._lock:
+                        interactive_pending = self._pending["interactive"] > 0
+                if interactive_pending:
+                    try:
+                        self._queue.put_nowait((rank, sequence, job))
+                    except queue.Full:
+                        # The queue filled after this job was removed. Running
+                        # it is safer than dropping an admitted generation.
+                        pass
+                    else:
+                        self._queue.task_done()
+                        continue
             with self._lock:
                 self._pending[job.priority] = max(0, self._pending[job.priority] - 1)
                 self._active = {"priority": job.priority, "operation": job.operation}
+                self._active_job = job
             started = time.perf_counter()
             queue_ms = round((started - job.queued_at) * 1000, 3)
             success = False
             try:
+                _PROVIDER_JOB_CONTEXT.job = job
                 job.result = job.call()
                 success = True
             except Exception as exc:
@@ -207,6 +271,7 @@ class _ProviderCoordinator:
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
                 with self._lock:
                     self._active = None
+                    self._active_job = None
                     completed = {
                         "priority": job.priority,
                         "operation": job.operation,
@@ -217,10 +282,15 @@ class _ProviderCoordinator:
                     }
                     self._last = completed
                     self._last_by_operation[job.operation] = completed
+                try:
+                    del _PROVIDER_JOB_CONTEXT.job
+                except AttributeError:
+                    pass
                 job.finished.set()
                 self._queue.task_done()
 
 
+_PROVIDER_JOB_CONTEXT = threading.local()
 _COORDINATOR = _ProviderCoordinator()
 _SESSION = requests.Session()
 _SESSION.trust_env = False
@@ -228,6 +298,17 @@ _PROBE_LOCK = threading.Lock()
 _EMBEDDING_PROBE_CACHE: dict[str, Any] = {}
 _INFERENCE_TELEMETRY_LOCK = threading.Lock()
 _INFERENCE_TELEMETRY: dict[str, dict[str, Any]] = {}
+_EMBEDDING_CACHE_LOCK = threading.Lock()
+_EMBEDDING_CACHE: OrderedDict[str, tuple[float, ...]] = OrderedDict()
+
+
+def _current_background_preempt_requested() -> bool:
+    job = getattr(_PROVIDER_JOB_CONTEXT, "job", None)
+    return bool(
+        isinstance(job, _ProviderJob)
+        and job.priority == "background"
+        and job.preempt_requested.is_set()
+    )
 
 
 def _bounded_nonnegative_int(value: Any) -> int | None:
@@ -476,20 +557,21 @@ def _call_ollama_transport(
     }
     if options:
         request_options.update(options)
+    active_priority = (priority or "interactive").strip().lower()
+    stream_for_preemption = active_priority == "background"
     payload: dict[str, Any] = {
         "model": str(config.model),
         "messages": [
             {"role": "system", "content": "/no_think\n" + str(system_prompt)},
             {"role": "user", "content": str(transcript)},
         ],
-        "stream": False,
+        "stream": stream_for_preemption,
         "think": False,
         "keep_alive": KEEP_ALIVE,
         "options": request_options,
     }
     if response_format is not None:
         payload["format"] = response_format
-    active_priority = (priority or "interactive").strip().lower()
     headers = {
         "X-Laoji-Priority": active_priority,
     }
@@ -502,16 +584,40 @@ def _call_ollama_transport(
             json=payload,
             headers=headers,
             timeout=timeout_seconds,
+            stream=stream_for_preemption,
         )
         response.raise_for_status()
-        body = response.json()
+        if stream_for_preemption:
+            content_parts: list[str] = []
+            body: dict[str, Any] | None = None
+            for line in response.iter_lines():
+                if _current_background_preempt_requested():
+                    response.close()
+                    raise LlmProviderPreempted("llm_background_preempted")
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                if not isinstance(chunk, dict):
+                    raise LlmProviderError("ollama_response_invalid")
+                body = chunk
+                piece = chunk.get("message", {}).get("content")
+                if isinstance(piece, str):
+                    content_parts.append(piece)
+            if _current_background_preempt_requested():
+                response.close()
+                raise LlmProviderPreempted("llm_background_preempted")
+            if body is None or body.get("done") is not True:
+                raise LlmProviderError("ollama_response_invalid")
+            content = "".join(content_parts)
+        else:
+            body = response.json()
+            content = body.get("message", {}).get("content") if isinstance(body, dict) else None
     except requests.Timeout as exc:
         raise LlmProviderError("ollama_request_timeout") from exc
     except requests.RequestException as exc:
         raise LlmProviderError("ollama_request_failed") from exc
     except (TypeError, ValueError) as exc:
         raise LlmProviderError("ollama_response_invalid") from exc
-    content = body.get("message", {}).get("content") if isinstance(body, dict) else None
     if not isinstance(content, str):
         raise LlmProviderError("ollama_response_invalid")
     _record_inference_telemetry(
@@ -825,6 +931,101 @@ def embed_texts(
         call=invoke,
         wait_seconds=timeout_seconds + 30,
     )
+
+
+def _embedding_cache_key(text: str, *, num_ctx: int | None, num_gpu: int | None) -> str:
+    try:
+        dimensions = max(
+            32,
+            min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
+        )
+    except ValueError:
+        dimensions = 256
+    material = (
+        f"embedding-v1\0{EMBEDDING_MODEL}\0{dimensions}\0{num_ctx}\0{num_gpu}\0{text}"
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _embedding_cache_capacity() -> int:
+    try:
+        configured = int(os.getenv("LAOJI_EMBEDDING_CACHE_ITEMS", "8192"))
+    except ValueError:
+        configured = 8192
+    return max(256, min(50_000, configured))
+
+
+def embed_texts_cached(
+    texts: list[str],
+    *,
+    priority: str = "interactive",
+    operation: str = "meeting.embedding",
+    timeout_seconds: float | None = None,
+    num_ctx: int | None = None,
+    num_gpu: int | None = None,
+    embedder: Callable[..., list[tuple[float, ...]]] | None = None,
+) -> list[tuple[float, ...]]:
+    """Share content-hash embeddings across Summary and Q2 source views.
+
+    The cache retains only model/options-scoped SHA-256 keys and normalized
+    vectors in process memory. Summary and Q2 pack the same immutable transcript
+    rows into the same 360-character/30-second units, so the interactive Q2 path
+    can reuse work already completed while preparing its Summary.
+    """
+    if not texts:
+        return []
+    active_embedder = embedder or embed_texts
+    keys = [
+        _embedding_cache_key(text, num_ctx=num_ctx, num_gpu=num_gpu)
+        for text in texts
+    ]
+    values: list[tuple[float, ...] | None] = [None] * len(texts)
+    missing_by_key: OrderedDict[str, tuple[str, list[int]]] = OrderedDict()
+    with _EMBEDDING_CACHE_LOCK:
+        for index, (key, text) in enumerate(zip(keys, texts)):
+            cached = _EMBEDDING_CACHE.get(key)
+            if cached is not None:
+                values[index] = cached
+                _EMBEDDING_CACHE.move_to_end(key)
+                continue
+            if key not in missing_by_key:
+                missing_by_key[key] = (text, [])
+            missing_by_key[key][1].append(index)
+    if missing_by_key:
+        missing_keys = list(missing_by_key)
+        embedded = active_embedder(
+            [missing_by_key[key][0] for key in missing_keys],
+            priority=priority,
+            operation=operation,
+            timeout_seconds=timeout_seconds,
+            num_ctx=num_ctx,
+            num_gpu=num_gpu,
+        )
+        if len(embedded) != len(missing_keys):
+            raise LlmProviderError("embedding_response_invalid")
+        with _EMBEDDING_CACHE_LOCK:
+            for key, vector in zip(missing_keys, embedded):
+                canonical = tuple(vector)
+                _EMBEDDING_CACHE[key] = canonical
+                _EMBEDDING_CACHE.move_to_end(key)
+                for index in missing_by_key[key][1]:
+                    values[index] = canonical
+            capacity = _embedding_cache_capacity()
+            while len(_EMBEDDING_CACHE) > capacity:
+                _EMBEDDING_CACHE.popitem(last=False)
+    if any(value is None for value in values):
+        raise LlmProviderError("embedding_response_invalid")
+    return [value for value in values if value is not None]
+
+
+def _reset_embedding_cache_for_tests() -> None:
+    with _EMBEDDING_CACHE_LOCK:
+        _EMBEDDING_CACHE.clear()
+
+
+def _embedding_cache_keys_for_tests() -> tuple[str, ...]:
+    with _EMBEDDING_CACHE_LOCK:
+        return tuple(_EMBEDDING_CACHE.keys())
 
 
 def provider_state(*, probe: bool = False) -> dict[str, Any]:

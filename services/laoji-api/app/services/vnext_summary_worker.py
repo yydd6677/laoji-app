@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.runtime_policy import env_enabled
+from app.services.llm_provider import LlmProviderPreempted
 from app.services import vnext_summary_chapter_pipeline, vnext_summary_runtime, vnext_task_store
 from app.services.vnext_source_stream_store import VNextSourceStreamError
 
@@ -215,6 +216,20 @@ class VNextSummarySourceStreamWorker:
                 error.code,
                 retryable=retryable,
                 retry_after_seconds=5 if retryable else 0,
+                lease_owner=self._lease_owner,
+            )
+        except LlmProviderPreempted:
+            # The immutable source and previous checkpoint remain authoritative.
+            # Retry immediately after the interactive queue drains; this is a
+            # deliberate scheduling yield, not a malformed generation result.
+            await asyncio.to_thread(
+                vnext_task_store.mark_failure,
+                context,
+                task_id,
+                attempt_id,
+                "SUMMARY_BACKGROUND_PREEMPTED",
+                retryable=True,
+                retry_after_seconds=0,
                 lease_owner=self._lease_owner,
             )
         except Exception as error:

@@ -241,6 +241,16 @@ Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须�
 [r5 稳定延迟](../vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md)。Stage 3 仍缺独立人工事实/行动
 与 Q2 质量、剩余恢复矩阵、公开零 v1 流量周期和 capability barrier，不能采用或删除旧链路。
 
+同日 Stage 3 又完成了隔离 Summary/Q2 并发纵向切片。Question stream 不再占用 Summary checkpoint
+和 active manifest 配额；Provider 支持后台 Summary checkpoint 重试前让出交互请求；Summary 与 Q2
+统一使用 CPU/2K embedding runner，并以正文 SHA-256 + runner options 共享同一 360 字/30 秒来源
+向量。`q2-reader-v2` 对并列回答逐项校验当前来源、数字和否定极性，只删除无依据子项，不生成补丁
+答案。冷缓存 5 pair / 10 条真实流全部成功，实际重叠 Q2 p50/p95/max 为
+`10.991s/12.897s/13.271s`，显示引用逐字匹配、幂等重放和清理均为 `100%`。详见
+[Stage 3 Summary/Q2 混合切片](../vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md)。这仍不是至少
+30 个暖态样本或包含 ASR/上传/日程的完整十分钟混合负载，也不替代独立人工 `>=95%` 质量门，
+Stage 3 继续保持未采用。
+
 同日，Facts V3 Android 激活围栏在 `emulator-5562` 补齐了 binding revision 与明确授权文字附件
 revision 两种原生迟到结果竞态。远端旧来源 task 均可独立完成，但手机恢复时会把它收敛为
 `input_changed`、清除 pending intent、保留上一份可用整理，不写入迟到 artifact。device-primary

@@ -18,7 +18,7 @@ import type {
 } from './questionQ2Candidate';
 import * as Crypto from 'expo-crypto';
 
-export const Q2_READER_PROVIDER_REVISION = 'q2-reader-v1';
+export const Q2_READER_PROVIDER_REVISION = 'q2-reader-v2';
 const LONG_SOURCE_CHAR_THRESHOLD = 40_000;
 const MAX_DIRECT_SOURCE_ITEMS = 1_024;
 const MAX_STREAM_BUNDLES = 8;

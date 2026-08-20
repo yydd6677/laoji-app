@@ -1150,6 +1150,15 @@ p50/p95 为 `15.368s/35.498s`，全部长证据路径 p95 为 `60.483s`，引用
 因此 Stage 3 的 Summary 暖态性能门已关闭；人工质量、Q2 冷/混合负载、恢复矩阵和 capability 仍开放。
 证据见 `docs/vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md`。
 
+随后完成 Stage 3 内部的冷缓存 Summary/Q2 并发切片：Question stream 只保留 1 字节生命周期哨兵，
+完成后 compact manifest 并释放 reservation；后台 Summary 生成可在 Q2 到达时中止并从 immutable
+source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-256 和 runner options 共享
+有界 LRU。`q2-reader-v2` 将模型并列长句拆为独立 claim，逐项验证数字、否定极性和强字面来源，
+无依据项只删除不补写。API 重启后的 5 pair / 10 流全部成功，实际重叠 Q2 p50/p95/max 为
+`10.991s/12.897s/13.271s`，引用、重放和清理为 100%。证据见
+`docs/vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md`。这只关闭 Stage 3 内部并发回归；至少
+30 个暖态问答样本、完整十分钟全服务混合负载、独立人工质量、恢复矩阵和 capability barrier 仍开放。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

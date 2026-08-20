@@ -44,6 +44,10 @@ MAX_SOURCE_BYTES_DEVICE = 256 * 1024 * 1024
 MAX_SOURCE_BYTES_GLOBAL = 512 * 1024 * 1024
 CHECKPOINT_SLOT_BYTES = 4 * 1024 * 1024
 CHECKPOINT_RESERVATION_BYTES = 2 * CHECKPOINT_SLOT_BYTES
+# Question streams are immutable read snapshots and never write rolling
+# checkpoints. Keep a one-byte lifecycle sentinel so the existing NOT NULL
+# relation and deletion trigger remain intact without charging summary memory.
+QUESTION_CHECKPOINT_SENTINEL_BYTES = 1
 MAX_CHECKPOINT_BYTES_DEVICE = 16 * 1024 * 1024
 MAX_CHECKPOINT_BYTES_GLOBAL = 64 * 1024 * 1024
 
@@ -213,6 +217,33 @@ def _decrypt(kind: str, owner_id: str, content_sha256: str, nonce: bytes, cipher
         )
     except Exception as error:
         raise VNextSourceStreamError("SOURCE_PAYLOAD_INVALID", "来源载荷校验失败", 500) from error
+
+
+def _compact_question_manifest_pages(
+    connection: Any,
+    stream_id: str,
+    now_epoch: int,
+) -> int:
+    """Release upload-manifest quota after a complete Q2 snapshot is sealed."""
+    rows = connection.execute(
+        """SELECT reservation_id FROM vnext_source_manifest_pages
+            WHERE stream_id = ? AND state = 'received'""",
+        (stream_id,),
+    ).fetchall()
+    if not rows:
+        return 0
+    connection.execute(
+        """UPDATE vnext_source_manifest_pages SET state = 'compacted'
+            WHERE stream_id = ? AND state = 'received'""",
+        (stream_id,),
+    )
+    connection.executemany(
+        """UPDATE vnext_source_reservations
+              SET state = 'released', released_at_epoch = ?
+            WHERE reservation_id = ? AND state = 'active'""",
+        [(now_epoch, str(row["reservation_id"])) for row in rows],
+    )
+    return len(rows)
 
 
 def ensure_vnext_source_stream_schema() -> None:
@@ -431,6 +462,40 @@ def ensure_vnext_source_stream_schema() -> None:
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_vnext_source_item_bundle_identity
                    ON vnext_source_bundle_items(bundle_id, source_item_id)"""
         )
+        # Before this distinction existed, complete retryable Q2 streams held
+        # an 8 MiB summary checkpoint reservation even though Q2 never creates
+        # a checkpoint. Shrink active legacy rows in place; encrypted sources
+        # and retry semantics are unchanged and normal stream deletion still
+        # releases the sentinel through the existing trigger.
+        connection.execute(
+            """UPDATE vnext_source_reservations
+                  SET reserved_bytes = ?
+                WHERE resource_kind = 'task_checkpoint'
+                  AND state = 'active'
+                  AND reserved_bytes != ?
+                  AND owner_id IN (
+                      SELECT task_id FROM vnext_tasks WHERE capability = 'question'
+                  )""",
+            (QUESTION_CHECKPOINT_SENTINEL_BYTES, QUESTION_CHECKPOINT_SENTINEL_BYTES),
+        )
+        # A complete question stream reads its immutable bundle groups directly.
+        # Its manifest descriptor pages are no longer needed for recovery and
+        # must not occupy the small in-flight upload-page quota for 24 hours.
+        for row in connection.execute(
+            """SELECT stream.stream_id
+                 FROM vnext_source_streams stream
+                 JOIN vnext_tasks task ON task.task_id = stream.task_id
+                WHERE stream.state = 'complete' AND task.capability = 'question'
+                  AND EXISTS (
+                      SELECT 1 FROM vnext_source_manifest_pages page
+                       WHERE page.stream_id = stream.stream_id AND page.state = 'received'
+                  )"""
+        ).fetchall():
+            _compact_question_manifest_pages(
+                connection,
+                str(row["stream_id"]),
+                int(time.time()),
+            )
         connection.commit()
 
 
@@ -614,6 +679,31 @@ def _active_reserved(connection: Any, kind: str, context: SourceOwnerContext | N
     ).fetchone()[0])
 
 
+def _active_summary_checkpoint_reserved(
+    connection: Any,
+    context: SourceOwnerContext | None = None,
+) -> int:
+    """Count only rolling Summary checkpoints against the two-slot budget."""
+    where = """reservation.resource_kind = 'task_checkpoint'
+               AND reservation.state = 'active'
+               AND task.capability = 'summary'"""
+    if context is None:
+        return int(connection.execute(
+            f"""SELECT COALESCE(SUM(reservation.reserved_bytes),0)
+                  FROM vnext_source_reservations reservation
+                  JOIN vnext_tasks task ON task.task_id = reservation.owner_id
+                 WHERE {where}"""
+        ).fetchone()[0])
+    return int(connection.execute(
+        f"""SELECT COALESCE(SUM(reservation.reserved_bytes),0)
+              FROM vnext_source_reservations reservation
+              JOIN vnext_tasks task ON task.task_id = reservation.owner_id
+             WHERE {where}
+               AND reservation.device_id = ? AND reservation.epoch_id = ?""",
+        (context.device_id, context.epoch_id),
+    ).fetchone()[0])
+
+
 def _reserve(
     connection: Any,
     context: SourceOwnerContext,
@@ -711,6 +801,11 @@ def create_source_stream(
     now_epoch = int(time.time()) if now_epoch is None else _nonnegative(now_epoch, "now_epoch")
     now = utc_now()
     checkpoint_reservation_id = f"checkpoint:{task_id}"
+    checkpoint_reservation_bytes = (
+        CHECKPOINT_RESERVATION_BYTES
+        if capability == "summary"
+        else QUESTION_CHECKPOINT_SENTINEL_BYTES
+    )
 
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -760,10 +855,10 @@ def create_source_stream(
         if active_device >= MAX_ACTIVE_STREAMS_DEVICE or active_global >= MAX_ACTIVE_STREAMS_GLOBAL:
             connection.rollback()
             raise VNextSourceStreamError("SOURCE_STREAM_CAPACITY", "来源处理任务较多，请稍后重试", 429)
-        if (
-            _active_reserved(connection, "task_checkpoint", context) + CHECKPOINT_RESERVATION_BYTES
+        if capability == "summary" and (
+            _active_summary_checkpoint_reserved(connection, context) + CHECKPOINT_RESERVATION_BYTES
             > MAX_CHECKPOINT_BYTES_DEVICE
-            or _active_reserved(connection, "task_checkpoint") + CHECKPOINT_RESERVATION_BYTES
+            or _active_summary_checkpoint_reserved(connection) + CHECKPOINT_RESERVATION_BYTES
             > MAX_CHECKPOINT_BYTES_GLOBAL
         ):
             connection.rollback()
@@ -792,7 +887,7 @@ def create_source_stream(
                 reservation_id=checkpoint_reservation_id,
                 resource_kind="task_checkpoint",
                 owner_id=task_id,
-                reserved_bytes=CHECKPOINT_RESERVATION_BYTES,
+                reserved_bytes=checkpoint_reservation_bytes,
                 now_epoch=now_epoch,
             )
             connection.execute(
@@ -1484,6 +1579,12 @@ def commit_bundle_group(context: SourceOwnerContext, group_id: str) -> dict[str,
                 group["stream_id"],
             ),
         )
+        if next_state == "complete" and is_question_stream:
+            _compact_question_manifest_pages(
+                connection,
+                str(group["stream_id"]),
+                now_epoch,
+            )
         row = connection.execute(
             "SELECT * FROM vnext_source_bundle_groups WHERE group_id = ?",
             (group_id,),

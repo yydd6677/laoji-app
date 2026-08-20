@@ -219,6 +219,103 @@ def test_stable_source_item_id_can_be_reused_across_summary_and_question_streams
     assert question_source["sources"][0]["text"] == item["content"]
 
 
+def test_question_stream_does_not_consume_summary_checkpoint_capacity(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    question, _ = _create_stream(
+        context,
+        generation,
+        suffix="question-checkpoint-sentinel",
+        capability="question",
+    )
+    with sqlite3.connect(database) as connection:
+        reservation_id = connection.execute(
+            "SELECT checkpoint_reservation_id FROM vnext_source_streams WHERE stream_id = ?",
+            (question["stream_id"],),
+        ).fetchone()[0]
+        assert connection.execute(
+            "SELECT reserved_bytes FROM vnext_source_reservations WHERE reservation_id = ?",
+            (reservation_id,),
+        ).fetchone()[0] == source_store.QUESTION_CHECKPOINT_SENTINEL_BYTES
+
+        # Simulate the legacy reservation shape and prove schema maintenance
+        # shrinks capacity without deleting a recoverable question source.
+        connection.execute(
+            "UPDATE vnext_source_reservations SET reserved_bytes = ? WHERE reservation_id = ?",
+            (source_store.CHECKPOINT_RESERVATION_BYTES, reservation_id),
+        )
+        connection.commit()
+    source_store.ensure_vnext_source_stream_schema()
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT reserved_bytes FROM vnext_source_reservations WHERE reservation_id = ?",
+            (reservation_id,),
+        ).fetchone()[0] == source_store.QUESTION_CHECKPOINT_SENTINEL_BYTES
+        assert connection.execute(
+            "SELECT state FROM vnext_source_streams WHERE stream_id = ?",
+            (question["stream_id"],),
+        ).fetchone()[0] == "open"
+
+
+def test_complete_question_stream_does_not_block_two_summary_checkpoints(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    database, context, generation = _setup(tmp_path, monkeypatch)
+    question, _ = _create_stream(
+        context,
+        generation,
+        suffix="question-before-two-summaries",
+        capability="question",
+    )
+    item, bundle_hash, descriptor = _chapter(0, "这条问答来源等待可恢复重试。")
+    source_store.append_manifest_page(
+        context,
+        question["stream_id"],
+        page_seq=0,
+        first_chapter_ordinal=0,
+        descriptors=[descriptor],
+        page_sha256=source_store.manifest_page_sha256([descriptor]),
+        final_page=True,
+    )
+    _upload_chapter(context, question["stream_id"], descriptor, item, bundle_hash)
+    assert source_store.get_source_stream(context, question["stream_id"])["state"] == "complete"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT state FROM vnext_source_manifest_pages WHERE stream_id = ?",
+            (question["stream_id"],),
+        ).fetchone()[0] == "compacted"
+        assert connection.execute(
+            """SELECT reservation.state FROM vnext_source_reservations reservation
+                 JOIN vnext_source_manifest_pages page
+                   ON page.reservation_id = reservation.reservation_id
+                WHERE page.stream_id = ?""",
+            (question["stream_id"],),
+        ).fetchone()[0] == "released"
+
+    first, first_reused = _create_stream(context, generation, suffix="summary-capacity-first")
+    second, second_reused = _create_stream(context, generation, suffix="summary-capacity-second")
+    assert first_reused is False
+    assert second_reused is False
+    assert first["state"] == "open"
+    assert second["state"] == "open"
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            """SELECT task.capability, SUM(reservation.reserved_bytes)
+                 FROM vnext_source_reservations reservation
+                 JOIN vnext_tasks task ON task.task_id = reservation.owner_id
+                WHERE reservation.resource_kind = 'task_checkpoint'
+                  AND reservation.state = 'active'
+                GROUP BY task.capability"""
+        ).fetchall()
+    assert dict(rows) == {
+        "question": source_store.QUESTION_CHECKPOINT_SENTINEL_BYTES,
+        "summary": 2 * source_store.CHECKPOINT_RESERVATION_BYTES,
+    }
+
+
 def test_question_stream_persists_android_source_identity_over_180_chars(
     tmp_path,
     monkeypatch,
@@ -803,7 +900,7 @@ def test_question_stream_reads_complete_sources_and_purges_atomically(tmp_path, 
     result = {
         "schema_version": 2,
         "contract_revision": "question.reader.v2",
-        "provider_revision": "q2-reader-v1",
+        "provider_revision": "q2-reader-v2",
         "model_revision": "test:model",
         "snapshot_id": "q2-snapshot-question",
         "answer_kind": "answer",

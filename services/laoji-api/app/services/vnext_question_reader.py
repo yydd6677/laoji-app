@@ -8,31 +8,30 @@ returns a response that has passed exact UTF-8 citation grounding.
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from difflib import SequenceMatcher
 import hashlib
 import json
 import os
 import re
-import threading
 import unicodedata
 from typing import Any
 
 from app.services.llm_provider import (
-    EMBEDDING_MODEL,
     GENERATION_MODEL,
     LlmConfig,
     LlmProviderError,
     call_llm,
     canonical_ollama_base_url,
     embed_texts,
+    embed_texts_cached,
+    _reset_embedding_cache_for_tests,
 )
 from app.services.summary_v3_evidence import estimate_tokens
 from app.services.summary_v3_generator import model_revision
 
 
 CONTRACT_REVISION = "question.reader.v2"
-PROVIDER_REVISION = "q2-reader-v1"
+PROVIDER_REVISION = "q2-reader-v2"
 MAX_SOURCES = 1_024
 MAX_VERIFIED_SOURCES = 50_000
 MAX_SOURCE_TEXT = 8_000
@@ -88,8 +87,6 @@ _IMPROVEMENT_QUERY = re.compile(
 _CHINESE_COUNT_VALUE = re.compile(
     r"[零〇一二两三四五六七八九十百千万]+(?:个|项|部分|份|人|位|次|天|日|月|年)"
 )
-_RETRIEVAL_EMBEDDING_CACHE_LOCK = threading.Lock()
-_RETRIEVAL_EMBEDDING_CACHE: OrderedDict[str, tuple[float, ...]] = OrderedDict()
 
 
 class Q2ReaderError(RuntimeError):
@@ -163,29 +160,6 @@ def _retrieval_intent_terms(question: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(terms))
 
 
-def _embedding_dimensions() -> int:
-    try:
-        configured = int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))
-    except ValueError:
-        configured = 256
-    return max(32, min(1024, configured))
-
-
-def _embedding_cache_capacity() -> int:
-    try:
-        configured = int(os.getenv("LAOJI_Q2_EMBEDDING_CACHE_ITEMS", "4096"))
-    except ValueError:
-        configured = 4096
-    return max(256, min(50_000, configured))
-
-
-def _retrieval_embedding_key(text: str) -> str:
-    material = (
-        f"q2-unit-v1\0{EMBEDDING_MODEL}\0{_embedding_dimensions()}\0{text}"
-    ).encode("utf-8")
-    return hashlib.sha256(material).hexdigest()
-
-
 def _embed_retrieval_units(units: list[dict[str, Any]]) -> list[tuple[float, ...]]:
     """Embed deterministic packed units with a bounded, content-free LRU.
 
@@ -195,55 +169,29 @@ def _embed_retrieval_units(units: list[dict[str, Any]]) -> list[tuple[float, ...
     vectors in process memory; source text remains in the encrypted task stream
     and cache loss merely causes a safe cold recomputation.
     """
-    keys = [_retrieval_embedding_key(unit["text"]) for unit in units]
-    values: list[tuple[float, ...] | None] = [None] * len(units)
-    missing: list[int] = []
-    with _RETRIEVAL_EMBEDDING_CACHE_LOCK:
-        for index, key in enumerate(keys):
-            cached = _RETRIEVAL_EMBEDDING_CACHE.get(key)
-            if cached is None:
-                missing.append(index)
-            else:
-                values[index] = cached
-                _RETRIEVAL_EMBEDDING_CACHE.move_to_end(key)
-
-    missing_characters = sum(len(units[index]["text"]) for index in missing)
-    source_embedding_num_gpu = (
-        999 if len(missing) >= 16 or missing_characters >= 4_096 else 0
-    )
-    for offset in range(0, len(missing), RETRIEVAL_BATCH_SIZE):
-        indexes = missing[offset:offset + RETRIEVAL_BATCH_SIZE]
-        embedded = embed_texts(
-            [units[index]["text"] for index in indexes],
+    values: list[tuple[float, ...]] = []
+    for offset in range(0, len(units), RETRIEVAL_BATCH_SIZE):
+        batch = units[offset:offset + RETRIEVAL_BATCH_SIZE]
+        values.extend(embed_texts_cached(
+            [unit["text"] for unit in batch],
             priority="interactive",
             operation="question.q2.evidence.sources",
             timeout_seconds=60,
-            # A genuinely cold meeting can use GPU once, then reuse its
-            # content-hash vectors. Tiny incremental sources (for example one
-            # authorized note) stay on CPU so they cannot evict the warm 9B
-            # generator immediately before the next interactive question.
-            num_gpu=source_embedding_num_gpu,
-        )
-        if len(embedded) != len(indexes):
-            raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
-        with _RETRIEVAL_EMBEDDING_CACHE_LOCK:
-            for index, vector in zip(indexes, embedded):
-                values[index] = vector
-                key = keys[index]
-                _RETRIEVAL_EMBEDDING_CACHE[key] = vector
-                _RETRIEVAL_EMBEDDING_CACHE.move_to_end(key)
-            capacity = _embedding_cache_capacity()
-            while len(_RETRIEVAL_EMBEDDING_CACHE) > capacity:
-                _RETRIEVAL_EMBEDDING_CACHE.popitem(last=False)
-
-    if any(value is None for value in values):
+            # Keep one 2k CPU embedding runner shared with Summary evidence.
+            # Loading a second 8k/GPU variant evicts the warm 9B generator and
+            # adds several seconds of model reload to the first question for
+            # every new meeting.
+            num_ctx=2_048,
+            num_gpu=0,
+            embedder=embed_texts,
+        ))
+    if len(values) != len(units):
         raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
-    return [value for value in values if value is not None]
+    return values
 
 
 def _reset_q2_embedding_cache_for_tests() -> None:
-    with _RETRIEVAL_EMBEDDING_CACHE_LOCK:
-        _RETRIEVAL_EMBEDDING_CACHE.clear()
+    _reset_embedding_cache_for_tests()
 
 
 def _retrieval_units(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -395,14 +343,16 @@ def _select_model_sources(
     units = _retrieval_units(sources)
     intent_terms = _retrieval_intent_terms(question)
     retrieval_question = " ".join((question, *intent_terms)).strip()
-    query_vectors = embed_texts(
+    query_vectors = embed_texts_cached(
         [retrieval_question],
         priority="interactive",
         operation="question.q2.evidence.query",
         timeout_seconds=30,
         # Query embedding on CPU coexists with the warm 9B generator. Sending
         # this 0.6B request to GPU would add a ~28s generator reload per turn.
+        num_ctx=2_048,
         num_gpu=0,
+        embedder=embed_texts,
     )
     if len(query_vectors) != 1:
         raise LlmProviderError("q2_retrieval_embedding_count_mismatch")
@@ -612,13 +562,231 @@ _GENERIC_QUERY_FOCUS_TERMS = _GENERIC_CLAIM_TERMS | {
     "怎样", "如何", "怎么", "准备", "后续", "改进", "优化", "调整",
     "修改", "升级", "哪些", "什么", "多少", "几个", "分为",
 }
+_CLAIM_NEGATION = re.compile(r"(?:并非|不是|没有|尚未|未曾|无需|不得|取消|未|不)")
+
+
+def _enumerated_claim_segments(value: str) -> list[str]:
+    """Split an obvious model list into claims without inventing wording.
+
+    Parenthetical examples and a trailing conjunction are independent claims
+    for grounding purposes. Keeping them attached to a supported umbrella such
+    as ``关键问题`` would otherwise let one exact citation legitimize several
+    unsupported examples. This tokenizer is deliberately activated only after
+    the caller has established that the clause is an explicit enumeration.
+    """
+    expanded = re.sub(r"[（(](?:例如|如)", "、", value)
+    expanded = re.sub(r"[）)](?:以及|和|及)?", "、", expanded)
+    segments = []
+    for raw in re.split(r"[、，,；;]", expanded):
+        segment = raw.strip(" ：:。.!！?？()（）")
+        segment = re.sub(r"^(?:以及|并且|而且|同时|此外|其次|然后|和|及)+", "", segment)
+        if segment:
+            segments.append(segment)
+    return segments
+
+
+def _claim_grounding_core(value: str) -> str:
+    """Remove reporting scaffolding before measuring evidence coverage."""
+    core = value.strip(" ：:。.!！?？()（）")
+    core = re.sub(
+        r"^(?:(?:这次|本次)?会议|文中|报告中|发言人)?"
+        r"(?:主要)?(?:讨论|介绍|汇报|提到|指出)(?:了|的是|到)?",
+        "",
+        core,
+    )
+    core = re.sub(r"^(?:包括|以及|并且|同时|将)", "", core)
+    return core.strip(" ：:。.!！?？()（）") or value
+
+
+def _enumerated_claim_support_metrics(
+    claim: str,
+    quotes: list[str],
+) -> tuple[bool, float, int]:
+    """Return strict support plus deterministic ranking metrics."""
+    if not quotes:
+        return False, 0.0, 0
+    core = _claim_grounding_core(claim)
+    compact_core, _ = _alignment_view(core)
+    compact_quotes = [_alignment_view(quote)[0] for quote in quotes]
+    combined_quote = "".join(compact_quotes)
+    if not compact_core or not combined_quote:
+        return False, 0.0, 0
+    # Lexical equality must not turn a negated source into a positive answer or
+    # vice versa. This narrow polarity fence is intentionally conservative;
+    # ambiguous mixed-polarity excerpts are rejected by requiring each quote
+    # group to agree with the claim's negation state.
+    claim_negated = bool(_CLAIM_NEGATION.search(core))
+    quote_negated = bool(_CLAIM_NEGATION.search(" ".join(quotes)))
+    if claim_negated != quote_negated:
+        return False, 0.0, 0
+    values = _fact_values(core)
+    if values and not values.issubset(_fact_values(" ".join(quotes))):
+        return False, 0.0, 0
+    # Reporting scaffolding has already been removed, so predicate bigrams such
+    # as ``影响`` and ``完成`` are evidence-bearing here. Dropping them as
+    # generic would let a matching subject legitimize an unsupported claim.
+    core_terms = _lexical_terms(core)
+    quote_terms = set().union(*(_lexical_terms(quote) for quote in quotes))
+    longest = SequenceMatcher(
+        None,
+        compact_core,
+        combined_quote,
+        autojunk=False,
+    ).find_longest_match().size
+    if len(compact_core) <= 4 and compact_core in combined_quote:
+        return True, 1.0, len(compact_core)
+    if not core_terms:
+        return longest >= 4, 0.0, longest
+    coverage = len(core_terms & quote_terms) / len(core_terms)
+    supported = (longest >= 4 and coverage >= 0.6) or (
+        longest >= 3 and coverage >= (2 / 3)
+    )
+    return supported, coverage, longest
+
+
+def _citation_supports_enumerated_claim(claim: str, quote: str) -> bool:
+    """Require strong literal coverage for one list item.
+
+    This is intentionally stricter than the ordinary citation bridge. A list
+    item can carry an independent fact, so sharing only a generic two-character
+    phrase (for example ``温度``) is not enough. Short named entities remain
+    usable when copied verbatim; longer claims need either a four-character
+    exact run or a three-character run with at least two-thirds term coverage.
+    """
+    supported, _coverage, _longest = _enumerated_claim_support_metrics(
+        claim,
+        [quote],
+    )
+    return supported
+
+
+def _bounded_source_citation(
+    claim: str,
+    source: dict[str, Any],
+    clause_index: int,
+    citation_index: int,
+) -> dict[str, Any] | None:
+    """Project one immutable source row into a bounded exact citation."""
+    source_text = source["text"]
+    if len(source_text) <= 600:
+        quote = source_text
+        character_start = 0
+    else:
+        exact = _adjacent_exact_span(_claim_grounding_core(claim), source_text)
+        if exact is None:
+            return None
+        window = _quote_window(source_text, exact)
+        if window is None:
+            return None
+        relative_start, _relative_end, quote = window
+        character_start = len(source_text.encode("utf-8")[:relative_start].decode("utf-8"))
+    start_utf8 = (
+        int(source.get("source_start_utf8") or 0)
+        + len(source_text[:character_start].encode("utf-8"))
+    )
+    return {
+        "citation_id": f"cite-{clause_index + 1}-enum-{citation_index + 1}",
+        "source_type": source["source_type"],
+        "source_id": source["source_id"],
+        "source_revision_id": source["source_revision_id"],
+        "content_sha256": source["content_sha256"],
+        "source_start_utf8": start_utf8,
+        "source_end_utf8": start_utf8 + len(quote.encode("utf-8")),
+        "quote": quote,
+    }
+
+
+def _recover_enumerated_claim_citations(
+    claim: str,
+    sources: list[dict[str, Any]],
+    clause_index: int,
+) -> list[dict[str, Any]]:
+    """Find the best exact one- or two-row support for a model-written claim.
+
+    Adjacent pairs are needed because ASR subtitle boundaries often split the
+    subject from its value. The answer text is never created or expanded here;
+    this step only rebinds a model claim to exact rows in the current immutable
+    source snapshot. A deterministic best match is acceptable when several
+    repetitions support the same claim because every candidate has already
+    passed the same strict literal and polarity fence.
+    """
+    core = _claim_grounding_core(claim)
+    compact_core, _ = _alignment_view(core)
+    claim_terms = _lexical_terms(core)
+    source_terms = [_lexical_terms(source["text"]) for source in sources]
+    source_compact = [_alignment_view(source["text"])[0] for source in sources]
+    groups: list[tuple[int, ...]] = [(index,) for index in range(len(sources))]
+    groups.extend(
+        (index, index + 1)
+        for index in range(len(sources) - 1)
+        if sources[index]["source_type"] == sources[index + 1]["source_type"]
+        and sources[index]["source_id"] == sources[index + 1]["source_id"]
+        and sources[index]["source_revision_id"] == sources[index + 1]["source_revision_id"]
+    )
+    candidates: list[tuple[float, int, int, tuple[int, ...]]] = []
+
+    def collect(candidate_groups: list[tuple[int, ...]]) -> None:
+        for group in candidate_groups:
+            group_terms = set().union(*(source_terms[index] for index in group))
+            if len(compact_core) <= 4:
+                if compact_core not in "".join(source_compact[index] for index in group):
+                    continue
+            elif len(claim_terms & group_terms) < 2:
+                continue
+            supported, coverage, longest = _enumerated_claim_support_metrics(
+                claim,
+                [sources[index]["text"] for index in group],
+            )
+            if supported:
+                candidates.append((coverage, longest, -len(group), group))
+
+    collect(groups)
+    if not candidates and re.match(
+        r"^(?:(?:这次|本次)?会议|文中|报告中|发言人)?"
+        r"(?:主要)?(?:讨论|介绍|汇报|提到|指出)",
+        claim,
+    ):
+        # A high-level topic can legitimately span a title phrase and a later
+        # subject phrase. Try only the 16 strongest literal rows and at most two
+        # non-adjacent citations; specific facts never use this composition.
+        ranked = sorted(
+            range(len(sources)),
+            key=lambda index: (
+                -len(claim_terms & source_terms[index]),
+                index,
+            ),
+        )[:16]
+        overview_pairs = [
+            (left, right)
+            for position, left in enumerate(ranked)
+            for right in ranked[position + 1:]
+            if sources[left]["source_type"] == sources[right]["source_type"]
+            and sources[left]["source_id"] == sources[right]["source_id"]
+            and sources[left]["source_revision_id"] == sources[right]["source_revision_id"]
+        ]
+        collect(overview_pairs)
+    if not candidates:
+        return []
+    candidates.sort(key=lambda item: (item[0], item[1], item[2], tuple(-i for i in item[3])), reverse=True)
+    group = candidates[0][3]
+    recovered = [
+        _bounded_source_citation(claim, sources[index], clause_index, citation_index)
+        for citation_index, index in enumerate(group)
+    ]
+    citations = [citation for citation in recovered if citation is not None]
+    supported, _coverage, _longest = _enumerated_claim_support_metrics(
+        claim,
+        [citation["quote"] for citation in citations],
+    )
+    return citations if supported else []
 
 
 def _project_grounded_enumerated_claims(
-    question: str,
     clause_text: str,
     citations: list[dict[str, Any]],
-) -> str | None:
+    sources: list[dict[str, Any]],
+    clause_index: int,
+) -> tuple[str | None, list[dict[str, Any]]]:
     """Delete unsupported list items while preserving supported model text.
 
     A model can otherwise put many independent claims into one clause and cite
@@ -636,29 +804,62 @@ def _project_grounded_enumerated_claims(
         or ";" in clause_text
     )
     if not obvious_list:
-        return clause_text
-    segments = [
-        segment.strip(" ：:。.!！?？")
-        for segment in re.split(r"[、，,；;]", clause_text)
-        if segment.strip(" ：:。.!！?？")
-    ]
+        return clause_text, citations
+    segments = _enumerated_claim_segments(clause_text)
     if len(segments) < 2:
-        return clause_text
-    question_terms = _support_terms(question)
-    citation_terms = set().union(*(_support_terms(item["quote"]) for item in citations))
+        return clause_text, citations
     retained: list[str] = []
+    retained_citations: list[dict[str, Any]] = []
+    retained_citation_keys: set[tuple[str, int, int, str]] = set()
     for segment in segments:
-        terms = _support_terms(segment) - question_terms - _GENERIC_CLAIM_TERMS
-        if not terms:
-            terms = _support_terms(segment) - _GENERIC_CLAIM_TERMS
-        if terms and terms & citation_terms:
-            retained.append(segment)
+        candidate_supports = [
+            citation
+            for citation in citations
+            if _lexical_terms(_claim_grounding_core(segment)) & _lexical_terms(citation["quote"])
+        ]
+        supports: list[dict[str, Any]] = []
+        if candidate_supports:
+            supported, _coverage, _longest = _enumerated_claim_support_metrics(
+                segment,
+                [citation["quote"] for citation in candidate_supports[:2]],
+            )
+            if supported:
+                supports = candidate_supports[:2]
+        if not supports:
+            supports = _recover_enumerated_claim_citations(
+                segment,
+                sources,
+                clause_index,
+            )
+        if not supports:
+            continue
+        retained.append(segment)
+        for citation in supports:
+            key = (
+                citation["source_id"],
+                citation["source_start_utf8"],
+                citation["source_end_utf8"],
+                citation["quote"],
+            )
+            if key not in retained_citation_keys:
+                retained_citation_keys.add(key)
+                retained_citations.append(citation)
     if not retained:
-        return None
+        return None, []
+    retained_citations = [
+        {
+            **citation,
+            "citation_id": f"cite-{clause_index + 1}-enum-{index + 1}",
+        }
+        for index, citation in enumerate(retained_citations[:8])
+    ]
     if len(retained) == len(segments):
-        return clause_text
+        return clause_text, retained_citations
     terminal = clause_text[-1] if clause_text[-1] in "。.!！?？" else ""
-    return "、".join(retained).rstrip("。.!！?？") + terminal
+    return (
+        "、".join(retained).rstrip("。.!！?？") + terminal,
+        retained_citations,
+    )
 
 
 def _alignment_view(value: str) -> tuple[str, list[int]]:
@@ -1140,7 +1341,7 @@ def _response_schema() -> dict[str, Any]:
 def _system_prompt() -> str:
     return """你是老记会议问答的唯一证据阅读器。只根据用户提供的当前会议原始来源回答问题，不使用整理结果、历史答案、常识补全或来源之外的信息。
 
-输出严格 JSON，根对象只能有 answer_kind、answer、clauses 三个字段。answer_kind 只能是 answer、not_stated 或 cannot_confirm；answer 是不超过 160 个中文字符的简洁回答，只保留直接回答问题所需的事实，不复述背景或扩展推论。answer_kind 为 answer 时，clauses 是固定槽位对象，只能按顺序使用 c1、c2、c3、c4，禁止输出 c5 或更多分句；每个槽位只能有 clause_id、text、citations 三个字段。各 text 按顺序无缝拼接后必须与 answer 完全相同。citations 也是固定槽位对象，只能按顺序使用 e1、e2，每个槽位只能有 citation_id、source_id、quote 三个字段；每个分句只保留最多两条直接证据。每个 clause 至少有一个引用，text 必须复用引用中的关键名词、数字或状态，至少保留一个连续二字短语。枚举问题最多选择四个最直接的项目，每个项目使用独立的 c 槽位；禁止在一个 text 中用顿号、多个逗号、以及、及、和串联多个独立项目。
+输出严格 JSON，根对象只能有 answer_kind、answer、clauses 三个字段。answer_kind 只能是 answer、not_stated 或 cannot_confirm；answer 是不超过 160 个中文字符的简洁回答，只保留直接回答问题所需的事实，不复述背景或扩展推论。answer_kind 为 answer 时，clauses 是固定槽位对象，只能按顺序使用 c1、c2、c3、c4，禁止输出 c5 或更多分句；每个槽位只能有 clause_id、text、citations 三个字段。各 text 按顺序无缝拼接后必须与 answer 完全相同。citations 也是固定槽位对象，只能按顺序使用 e1、e2，每个槽位只能有 citation_id、source_id、quote 三个字段；每个分句只保留最多两条直接证据。先选择逐字 quote，再围绕 quote 写 text；每个 clause 只表达一个独立事实，text 必须复用 quote 中至少一个连续四字短语，少于四字的姓名、术语或数值必须完整照抄。枚举问题最多选择四个最直接的项目，每个项目使用独立的 c 槽位；禁止在一个 text 中用顿号、多个逗号、以及、及、和串联多个独立项目。主题或概述问题也不得用一个宽泛结论包裹多个例子；quote 没有逐字支撑的例子、原因、范围或上位概念一律不写。
 
 每个独立事实都必须由包含该事实关键名词、数字或状态的逐字引用支撑；不要只引用相邻背景句。answer 中出现的每个阿拉伯数字及其单位必须原样出现在该分句至少一条 quote 中，禁止把中文数字改写成阿拉伯数字、补全数量或换算单位；问题没有要求数字时省略非必要数字细节。每条 quote 必须是单个 source text 中连续存在的原文，不能拼接相邻来源、改写或添加标点。问题包含多个子项、并列对象或成对概念时，优先逐项回答每个有依据的对象；在这些对象全部覆盖前，不得添加问题没有要求的旁支。只要其中一部分有来源支持，就回答已知部分并明确指出其余部分未提及，使用 answer；只有全部子项都没有依据时才使用 not_stated。来源以“我”或“本人”自述负责某项工作但未给姓名时，责任主体可表述为“发言人本人”，不得因姓名或联系方式缺失而抹掉已知职责；缺失子项仍明确说明未提及。不同来源对同一事实冲突时不得自行选边，使用 cannot_confirm 且 clauses 为空对象。not_stated 或 cannot_confirm 时 answer 可以简短说明缺少依据，但 clauses 必须是空对象。不要输出 Markdown、解释、额外字段、递归 clauses 或虚构来源。"""
 
@@ -1614,22 +1815,21 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             citations,
             clause_index,
         )
-        projected_clause_text = _project_grounded_enumerated_claims(
-            question,
+        projected_clause_text, projected_citations = _project_grounded_enumerated_claims(
             clause_text,
             citations,
+            sources,
+            clause_index,
         )
         if projected_clause_text is None:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "回答中的枚举项缺少逐字依据", 502)
         if projected_clause_text != clause_text:
             clause_text = projected_clause_text
-            citations = [
-                citation
-                for citation in citations
-                if _citation_supports_text(question, clause_text, citation["quote"])
-            ]
+            citations = projected_citations
             answer_reprojected = True
             coordinate_valid = False
+        else:
+            citations = projected_citations
         citations = _ground_quantitative_citations(
             question,
             clause_text,

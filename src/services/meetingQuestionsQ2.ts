@@ -29,7 +29,7 @@ import { createDeviceQ2CandidateProvider } from './questionQ2DeviceProvider';
 import type { MeetingQuestionEvidence, MeetingQuestionSession } from './meetingQuestions';
 import { diagnosticAudit } from './diagnostics';
 
-const Q2_PROVIDER_REVISION = 'q2-reader-v1';
+const Q2_PROVIDER_REVISION = 'q2-reader-v2';
 
 export class Q2EvidenceChangedError extends Error {
   constructor() {

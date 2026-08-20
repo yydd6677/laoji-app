@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "api": "http://127.0.0.1:28023/api/device/v2",
+  "requested_pairs": 5,
+  "completed_flows": 9,
+  "failed_flows": 1,
+  "overlapping_pairs": 4,
+  "summary": {
+    "count": 9,
+    "p50_ms": 60411.0,
+    "p95_ms": 81812.4,
+    "max_ms": 83376
+  },
+  "question_all": {
+    "count": 9,
+    "p50_ms": 11851.0,
+    "p95_ms": 24911.2,
+    "max_ms": 25954
+  },
+  "question_during_summary": {
+    "count": 4,
+    "p50_ms": 9911.0,
+    "p95_ms": 14669.6,
+    "max_ms": 15167
+  },
+  "q2_p95_target_ms": 15000,
+  "q2_mixed_p95_pass": true,
+  "exact_grounding": true,
+  "idempotent_question_replays": true,
+  "cleanup_complete": true,
+  "pairs": [
+    {
+      "pair": 1,
+      "question_summary_overlap_ms": 6305,
+      "question_overlap_ms_by_lane": {
+        "a": 6305,
+        "b": 0
+      },
+      "overlapping_question_lanes": [
+        "a"
+      ],
+      "overlap_direction": "a_question_b_summary"
+    },
+    {
+      "pair": 2,
+      "question_summary_overlap_ms": 7971,
+      "question_overlap_ms_by_lane": {
+        "a": 7971,
+        "b": 0
+      },
+      "overlapping_question_lanes": [
+        "a"
+      ],
+      "overlap_direction": "a_question_b_summary"
+    },
+    {
+      "pair": 3,
+      "question_summary_overlap_ms": 0,
+      "question_overlap_ms_by_lane": {
+        "a": 0,
+        "b": 0
+      },
+      "overlapping_question_lanes": [],
+      "overlap_direction": null
+    },
+    {
+      "pair": 4,
+      "question_summary_overlap_ms": 11852,
+      "question_overlap_ms_by_lane": {
+        "a": 11852,
+        "b": 0
+      },
+      "overlapping_question_lanes": [
+        "a"
+      ],
+      "overlap_direction": "a_question_b_summary"
+    },
+    {
+      "pair": 5,
+      "question_summary_overlap_ms": 15167,
+      "question_overlap_ms_by_lane": {
+        "a": 15167,
+        "b": 0
+      },
+      "overlapping_question_lanes": [
+        "a"
+      ],
+      "overlap_direction": "a_question_b_summary"
+    }
+  ],
+  "results": [
+    {
+      "pair": 1,
+      "lane": "a",
+      "sample": "1300572695-1-192.srt",
+      "sample_sha256": "sha256:24c397830086e469c3de09dc321b3d28ccf548eda83f4e2f8dc679aae3b2bd09",
+      "success": true,
+      "duration_ms": 721500,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787220773968,
+        "completed_at_epoch_ms": 1787220787978,
+        "end_to_end_elapsed_ms": 13831,
+        "attempt": 1,
+        "citations": 27,
+        "citations_exact": 27
+      },
+      "question": {
+        "started_at_epoch_ms": 1787220788908,
+        "completed_at_epoch_ms": 1787220795213,
+        "elapsed_ms": 6305,
+        "replay_elapsed_ms": 231,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 4,
+        "citations_exact": 4
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 1,
+      "lane": "b",
+      "sample": "1377173065-1-160.srt",
+      "sample_sha256": "sha256:83dcc7bb4481766ec892a58f2f8186e673ebf77db996620abca26e8590a11c83",
+      "success": true,
+      "duration_ms": 3422160,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787220774012,
+        "completed_at_epoch_ms": 1787220834589,
+        "end_to_end_elapsed_ms": 60411,
+        "attempt": 1,
+        "citations": 10,
+        "citations_exact": 10
+      },
+      "question": {
+        "started_at_epoch_ms": 1787220836028,
+        "completed_at_epoch_ms": 1787220840349,
+        "elapsed_ms": 4321,
+        "replay_elapsed_ms": 195,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 2,
+        "citations_exact": 2
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 2,
+      "lane": "a",
+      "sample": "1436403866-1-192.srt",
+      "sample_sha256": "sha256:6c0afe244537d0c583574326139db1b373f2128d37eb9c6cdf2b02331d9f4adb",
+      "success": true,
+      "duration_ms": 435240,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787220841145,
+        "completed_at_epoch_ms": 1787220855929,
+        "end_to_end_elapsed_ms": 14640,
+        "attempt": 1,
+        "citations": 36,
+        "citations_exact": 36
+      },
+      "question": {
+        "started_at_epoch_ms": 1787220857017,
+        "completed_at_epoch_ms": 1787220864988,
+        "elapsed_ms": 7971,
+        "replay_elapsed_ms": 261,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 3,
+        "citations_exact": 3
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 2,
+      "lane": "b",
+      "sample": "1437681208-1-192.srt",
+      "sample_sha256": "sha256:2b6ebf6d0a7ee461f9af312dca88512bd2943901485db2b52fecf348bead9d62",
+      "success": true,
+      "duration_ms": 4689680,
+      "chapter_count": 2,
+      "summary": {
+        "started_at_epoch_ms": 1787220841194,
+        "completed_at_epoch_ms": 1787220920800,
+        "end_to_end_elapsed_ms": 79467,
+        "attempt": 1,
+        "citations": 27,
+        "citations_exact": 27
+      },
+      "question": {
+        "started_at_epoch_ms": 1787220922475,
+        "completed_at_epoch_ms": 1787220948428,
+        "elapsed_ms": 25954,
+        "replay_elapsed_ms": 136,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 4,
+        "citations_exact": 4
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 3,
+      "lane": "a",
+      "sample": "30528111540-1-192.srt",
+      "success": false,
+      "return_code": 1,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 749,
+        "sha256": "sha256:f5eb89c1c0b5e32633d1a43c423e63de14c2c50306710eccf849a31c664fe8ff"
+      },
+      "failure": {
+        "http_statuses": [
+          502
+        ],
+        "reason_codes": [
+          "Q2_GROUNDING_INVALID"
+        ],
+        "exception_types": [
+          "RuntimeError"
+        ]
+      }
+    },
+    {
+      "pair": 3,
+      "lane": "b",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "success": true,
+      "duration_ms": 2127040,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787220949226,
+        "completed_at_epoch_ms": 1787221009845,
+        "end_to_end_elapsed_ms": 60553,
+        "attempt": 1,
+        "citations": 9,
+        "citations_exact": 9
+      },
+      "question": {
+        "started_at_epoch_ms": 1787221010633,
+        "completed_at_epoch_ms": 1787221024516,
+        "elapsed_ms": 13883,
+        "replay_elapsed_ms": 176,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 2,
+        "citations_exact": 2
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 4,
+      "lane": "a",
+      "sample": "500001564053724-1-192.srt",
+      "sample_sha256": "sha256:edfa19af4f8233d965f5448b0c8d27273d078c8c4e33d679c2dbb5d692fb87a1",
+      "success": true,
+      "duration_ms": 1098520,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787221025195,
+        "completed_at_epoch_ms": 1787221036663,
+        "end_to_end_elapsed_ms": 11394,
+        "attempt": 1,
+        "citations": 12,
+        "citations_exact": 12
+      },
+      "question": {
+        "started_at_epoch_ms": 1787221037645,
+        "completed_at_epoch_ms": 1787221049497,
+        "elapsed_ms": 11851,
+        "replay_elapsed_ms": 230,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 6,
+        "citations_exact": 6
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 4,
+      "lane": "b",
+      "sample": "829384557-1-208.srt",
+      "sample_sha256": "sha256:035afb653adef9e1cb94bd76ab94a83a829d53e544ecca35ff9e2b2fe16cfecf",
+      "success": true,
+      "duration_ms": 4323820,
+      "chapter_count": 2,
+      "summary": {
+        "started_at_epoch_ms": 1787221025232,
+        "completed_at_epoch_ms": 1787221108673,
+        "end_to_end_elapsed_ms": 83376,
+        "attempt": 1,
+        "citations": 48,
+        "citations_exact": 48
+      },
+      "question": {
+        "started_at_epoch_ms": 1787221109913,
+        "completed_at_epoch_ms": 1787221133260,
+        "elapsed_ms": 23347,
+        "replay_elapsed_ms": 161,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 2,
+        "citations_exact": 2
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 5,
+      "lane": "a",
+      "sample": "870230340-1-208.srt",
+      "sample_sha256": "sha256:f5268e42287bcb2753efc7229d8864a4f8034b0fa50f260759c83808c14b2328",
+      "success": true,
+      "duration_ms": 3024260,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787221133926,
+        "completed_at_epoch_ms": 1787221173377,
+        "end_to_end_elapsed_ms": 39362,
+        "attempt": 1,
+        "citations": 33,
+        "citations_exact": 33
+      },
+      "question": {
+        "started_at_epoch_ms": 1787221174073,
+        "completed_at_epoch_ms": 1787221189240,
+        "elapsed_ms": 15167,
+        "replay_elapsed_ms": 140,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 4,
+        "citations_exact": 4
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "pair": 5,
+      "lane": "b",
+      "sample": "911595290-1-208.srt",
+      "sample_sha256": "sha256:a4d16099f6cd3c9f99325abd89cdd638bede8bc51c710a428907df7f26027f07",
+      "success": true,
+      "duration_ms": 932740,
+      "chapter_count": 1,
+      "summary": {
+        "started_at_epoch_ms": 1787221134094,
+        "completed_at_epoch_ms": 1787221197274,
+        "end_to_end_elapsed_ms": 63110,
+        "attempt": 3,
+        "citations": 10,
+        "citations_exact": 10
+      },
+      "question": {
+        "started_at_epoch_ms": 1787221197824,
+        "completed_at_epoch_ms": 1787221205556,
+        "elapsed_ms": 7732,
+        "replay_elapsed_ms": 132,
+        "replay_identical": true,
+        "answer_kind": "answer",
+        "citations": 2,
+        "citations_exact": 2
+      },
+      "cleanup_state": "confirmed",
+      "runtime_revisions": {
+        "schedule_graph_v2": true,
+        "source_stream_v2": true,
+        "question_reader_v2": true,
+        "summary_handler_revision": "summary-facts-v3-chapter-r5",
+        "summary_prompt_revision": "facts-v3-r15",
+        "summary_model_revision": "ollama:qwen3.5:9b"
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app.services import vnext_question_reader as reader
+from app.services import llm_provider, vnext_question_reader as reader
 
 
 @pytest.fixture(autouse=True)
@@ -438,6 +438,110 @@ def test_reader_drops_uncovered_items_in_enumerated_clause(monkeypatch):
     assert result["clauses"][0]["answer_end_utf8"] == len(result["answer"].encode("utf-8"))
 
 
+def test_reader_grounds_each_enumerated_detail_instead_of_trusting_an_umbrella(monkeypatch):
+    texts = [
+        "会议汇报了镍基氧化物超导研究进展。",
+        "将镍基氧化物超导温度提高到90K以上。",
+        "介绍了关键科学问题。",
+    ]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(texts)]
+    payload = _payload(texts[0])
+    payload["question"] = "这次会议主要讨论了什么？"
+    payload["sources"] = sources
+    payload["source_fingerprint"] = reader._source_fingerprint(sources)
+    answer = (
+        "会议主要讨论了镍基氧化物超导研究进展，包括常压下制备高质量单晶、"
+        "将超导温度提高到90K以上、提出提升转变温度策略，以及回顾镍基氧化物"
+        "探索历史、关键科学问题（如氧含量影响、不同层数结构竞争）和理论合作情况。"
+    )
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "text": answer,
+            "citations": [{
+                "citation_id": f"cite-{index}",
+                "source_id": f"s{index}",
+                "quote": text,
+            } for index, text in enumerate(texts)],
+        }],
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(payload)
+
+    assert result["answer"] == (
+        "会议主要讨论了镍基氧化物超导研究进展、"
+        "将超导温度提高到90K以上、关键科学问题。"
+    )
+    assert {
+        citation["quote"]
+        for citation in result["clauses"][0]["citations"]
+    } == set(texts)
+    citation_ids = [
+        citation["citation_id"]
+        for citation in result["clauses"][0]["citations"]
+    ]
+    assert len(citation_ids) == len(set(citation_ids))
+    assert "单晶" not in result["answer"]
+    assert "策略" not in result["answer"]
+    assert "氧含量" not in result["answer"]
+    assert "理论合作" not in result["answer"]
+
+
+def test_reader_keeps_short_exact_entities_in_enumerated_clause(monkeypatch):
+    text = "参会者包括张敏、李强。"
+    answer = "参会者包括张敏、李强。"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "text": answer,
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "quote": text,
+            }],
+        }],
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(_payload(text))
+
+    assert result["answer"] == answer
+    assert result["clauses"][0]["citations"][0]["quote"] == text
+
+
+def test_reader_does_not_rebind_positive_enumeration_to_negated_sources(monkeypatch):
+    text = "任务尚未完成，接口没有上线。"
+    answer = "任务已经完成、接口已经上线。"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": [{
+            "clause_id": "c1",
+            "text": answer,
+            "citations": [{
+                "citation_id": "cite-1",
+                "source_id": "s0",
+                "quote": text,
+            }],
+        }],
+    }, ensure_ascii=False))
+
+    with pytest.raises(reader.Q2ReaderError) as captured:
+        reader.read_q2(_payload(text))
+
+    assert captured.value.code == "Q2_GROUNDING_INVALID"
+    assert "枚举项" in str(captured.value)
+
+
 def test_reader_rebuilds_answer_from_grounded_clause_text(monkeypatch):
     text = "张敏负责提交接口文档。"
     top_answer = "张敏负责提交接口文档，还需要电话联系。"
@@ -579,9 +683,10 @@ def test_retrieval_small_increment_uses_cpu_embedding(monkeypatch):
 
     assert vectors == [(1.0, 0.0)]
     assert calls[0]["num_gpu"] == 0
+    assert calls[0]["num_ctx"] == 2048
 
 
-def test_retrieval_cold_meeting_uses_gpu_embedding(monkeypatch):
+def test_retrieval_cold_meeting_keeps_shared_cpu_embedding_runner(monkeypatch):
     calls = []
     monkeypatch.setattr(reader, "embed_texts", lambda texts, **kwargs: (
         calls.append(kwargs) or [(1.0, 0.0) for _text in texts]
@@ -591,7 +696,8 @@ def test_retrieval_cold_meeting_uses_gpu_embedding(monkeypatch):
     vectors = reader._embed_retrieval_units(units)
 
     assert len(vectors) == 16
-    assert calls[0]["num_gpu"] == 999
+    assert calls[0]["num_gpu"] == 0
+    assert calls[0]["num_ctx"] == 2048
 
 
 def test_reader_splits_cross_row_quote_into_exact_adjacent_citations(monkeypatch):
@@ -967,20 +1073,20 @@ def test_reader_uses_full_answer_when_provider_span_is_only_a_utf8_prefix(monkey
                 "source_start_utf8": 0,
                 "source_end_utf8": len("开场明确列出的国家有中国".encode("utf-8")),
                 "quote": "开场明确列出的国家有中国",
-            }, {
-                "citation_id": "cite-2",
-                "source_id": "s0",
-                "source_start_utf8": len("开场明确列出的国家有中国、".encode("utf-8")),
-                "source_end_utf8": len("开场明确列出的国家有中国、美国".encode("utf-8")),
-                "quote": "美国",
-            }],
+                }, {
+                    "citation_id": "cite-2",
+                    "source_id": "s0",
+                    "source_start_utf8": len("开场明确列出的国家有中国、".encode("utf-8")),
+                    "source_end_utf8": len("开场明确列出的国家有中国、美国和法国".encode("utf-8")),
+                    "quote": "美国和法国",
+                }],
         }],
     }, ensure_ascii=False))
     result = reader.read_q2(payload)
     assert result["clauses"][0]["answer_end_utf8"] == len(answer.encode("utf-8"))
     assert {item["quote"] for item in result["clauses"][0]["citations"]} == {
         "开场明确列出的国家有中国",
-        "美国",
+        "美国和法国",
     }
 
 
@@ -1071,7 +1177,7 @@ def test_reader_retrieves_large_raw_source_set_without_relabeling_citations(monk
     assert len(source_vectors) == first_source_embedding_count
     assert all(
         len(key) == 64 and set(key) <= set("0123456789abcdef")
-        for key in reader._RETRIEVAL_EMBEDDING_CACHE
+        for key in llm_provider._embedding_cache_keys_for_tests()
     )
 
 

@@ -274,35 +274,45 @@ def register_binding(
         candidates.extend(value for value in range(1, 513) if value != preferred)
     last_payload: dict[str, Any] = {}
     for binding_epoch_seq in candidates:
-        binding_id = str(uuid.uuid4())
-        binding_generation = uuid.uuid4().hex
-        purge_id = str(uuid.uuid4())
-        purge_secret = uuid.uuid4().hex + uuid.uuid4().hex
-        status, payload = json_request(
-            f"{api}/meetings/{binding_id}",
-            method="PUT",
-            headers=auth,
-            payload={
-                "schema_version": 2,
-                "binding_generation": binding_generation,
-                "binding_epoch_seq": binding_epoch_seq,
-                "binding_revision": 1,
-                "cancel_revision": 0,
-                "purge_capability": {
-                    "capability_id": purge_id,
-                    "secret_sha256": hashlib.sha256(purge_secret.encode("ascii")).hexdigest(),
-                    "registration_request_id": "stage3-purge-" + uuid.uuid4().hex,
+        sequence_wait_deadline = time.monotonic() + 30
+        while True:
+            binding_id = str(uuid.uuid4())
+            binding_generation = uuid.uuid4().hex
+            purge_id = str(uuid.uuid4())
+            purge_secret = uuid.uuid4().hex + uuid.uuid4().hex
+            status, payload = json_request(
+                f"{api}/meetings/{binding_id}",
+                method="PUT",
+                headers=auth,
+                payload={
+                    "schema_version": 2,
+                    "binding_generation": binding_generation,
+                    "binding_epoch_seq": binding_epoch_seq,
+                    "binding_revision": 1,
+                    "cancel_revision": 0,
+                    "purge_capability": {
+                        "capability_id": purge_id,
+                        "secret_sha256": hashlib.sha256(purge_secret.encode("ascii")).hexdigest(),
+                        "registration_request_id": "stage3-purge-" + uuid.uuid4().hex,
+                    },
                 },
-            },
-        )
-        last_payload = payload
-        detail = payload.get("detail") if isinstance(payload, dict) else None
-        code = detail.get("code") if isinstance(detail, dict) else None
-        if status == 409 and code == "BINDING_SEQUENCE_GAP" and len(candidates) > 1:
-            continue
-        require_success(status, payload, "register Stage 3 binding")
-        _store_next_binding_sequence(auth_state_path, binding_epoch_seq + 1)
-        return binding_id, binding_generation, purge_id, purge_secret
+            )
+            last_payload = payload
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            code = detail.get("code") if isinstance(detail, dict) else None
+            if status == 409 and code == "BINDING_SEQUENCE_GAP":
+                if len(candidates) > 1:
+                    break
+                # A mixed-load probe can reserve consecutive sequence numbers
+                # for two processes. If the higher number arrives first, wait
+                # for the lower registration instead of creating another
+                # device identity or scanning unrelated sequence numbers.
+                if time.monotonic() < sequence_wait_deadline:
+                    time.sleep(0.1)
+                    continue
+            require_success(status, payload, "register Stage 3 binding")
+            _store_next_binding_sequence(auth_state_path, binding_epoch_seq + 1)
+            return binding_id, binding_generation, purge_id, purge_secret
     raise RuntimeError(
         "register Stage 3 binding failed: stored candidate device sequence is "
         f"more than 512 registrations behind server state ({last_payload!r})"
@@ -601,6 +611,7 @@ def main() -> int:
 
     atexit.register(cleanup_binding)
 
+    summary_started_at_epoch_ms = round(time.time() * 1000)
     summary_end_to_end_started = time.perf_counter()
     summary_stream_id, summary_task_id, summary_groups = create_source_stream(
         api=args.api,
@@ -635,11 +646,14 @@ def main() -> int:
         raise RuntimeError("summary artifact runtime revision does not match admission fence")
     facts_document = dict(output.get("facts_document") or {})
     fact_checked, fact_matched = validate_facts_grounding(facts_document, source_texts)
+    summary_completed_at_epoch_ms = round(time.time() * 1000)
 
     question_groups: list[dict[str, Any]] = []
     q2_result: dict[str, Any] | None = None
     replay_result: dict[str, Any] | None = None
     q2_elapsed_ms: int | None = None
+    q2_started_at_epoch_ms: int | None = None
+    q2_completed_at_epoch_ms: int | None = None
     replay_elapsed_ms: int | None = None
     q2_checked = 0
     q2_matched = 0
@@ -657,7 +671,7 @@ def main() -> int:
         question_payload = {
             "schema_version": 2,
             "contract_revision": "question.reader.v2",
-            "provider_revision": "q2-reader-v1",
+            "provider_revision": "q2-reader-v2",
             "snapshot_id": "stage3-q2-snapshot-" + uuid.uuid4().hex,
             "source_fingerprint": source_fingerprint,
             "question": args.question,
@@ -669,6 +683,7 @@ def main() -> int:
             "source_stream_verified": False,
             "sources": [],
         }
+        q2_started_at_epoch_ms = round(time.time() * 1000)
         q2_started = time.perf_counter()
         status, q2_result = json_request(
             f"{args.api}/meetings/{binding_id}/questions-v2",
@@ -678,6 +693,7 @@ def main() -> int:
         )
         q2_result = require_success(status, q2_result, "run Q2 reader")
         q2_elapsed_ms = round((time.perf_counter() - q2_started) * 1000)
+        q2_completed_at_epoch_ms = round(time.time() * 1000)
         q2_checked, q2_matched = validate_q2_grounding(q2_result, source_texts)
         replay_started = time.perf_counter()
         replay_status, replay_result = json_request(
@@ -722,6 +738,8 @@ def main() -> int:
         },
         "summary": {
             "state": summary_task.get("state"),
+            "started_at_epoch_ms": summary_started_at_epoch_ms,
+            "completed_at_epoch_ms": summary_completed_at_epoch_ms,
             "end_to_end_elapsed_ms": summary_end_to_end_elapsed_ms,
             "elapsed_ms": summary_elapsed_ms,
             "final_attempt_number": task_attempt_number(summary_task),
@@ -740,7 +758,12 @@ def main() -> int:
             "overview_sha256": digest_bytes(str(overview.get("text") or "").encode("utf-8")),
         },
         "question": None if q2_result is None or replay_result is None else {
+            "contract_revision": q2_result.get("contract_revision"),
+            "provider_revision": q2_result.get("provider_revision"),
+            "model_revision": q2_result.get("model_revision"),
             "question_sha256": digest_bytes(args.question.encode("utf-8")),
+            "started_at_epoch_ms": q2_started_at_epoch_ms,
+            "completed_at_epoch_ms": q2_completed_at_epoch_ms,
             "elapsed_ms": q2_elapsed_ms,
             "replay_elapsed_ms": replay_elapsed_ms,
             "replay_identical": digest_json(q2_result) == digest_json(replay_result),

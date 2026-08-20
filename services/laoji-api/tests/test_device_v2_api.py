@@ -258,7 +258,7 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
     payload = {
         "schema_version": 2,
         "contract_revision": "question.reader.v2",
-        "provider_revision": "q2-reader-v1",
+        "provider_revision": "q2-reader-v2",
         "snapshot_id": "q2-route-snapshot",
         "source_fingerprint": "sha256:" + "a" * 64,
         "question": "谁负责提交接口文档？",
@@ -302,7 +302,7 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
         return {
             "schema_version": 2,
             "contract_revision": "question.reader.v2",
-            "provider_revision": "q2-reader-v1",
+            "provider_revision": "q2-reader-v2",
             "model_revision": "test:model",
             "snapshot_id": value["snapshot_id"],
             "answer_kind": "not_stated",
@@ -348,7 +348,7 @@ def test_question_reader_route_rejects_binding_revision_and_source_hash(tmp_path
     payload = {
         "schema_version": 2,
         "contract_revision": "question.reader.v2",
-        "provider_revision": "q2-reader-v1",
+        "provider_revision": "q2-reader-v2",
         "snapshot_id": "q2-fence-snapshot",
         "source_fingerprint": "sha256:" + "b" * 64,
         "question": "什么时候开会？",
@@ -466,7 +466,7 @@ def test_question_reader_source_stream_commits_result_and_replays_by_task(tmp_pa
         return {
             "schema_version": 2,
             "contract_revision": "question.reader.v2",
-            "provider_revision": "q2-reader-v1",
+            "provider_revision": "q2-reader-v2",
             "model_revision": "test:model",
             "snapshot_id": value["snapshot_id"],
             "answer_kind": "not_stated",
@@ -478,7 +478,7 @@ def test_question_reader_source_stream_commits_result_and_replays_by_task(tmp_pa
     payload = {
         "schema_version": 2,
         "contract_revision": "question.reader.v2",
-        "provider_revision": "q2-reader-v1",
+        "provider_revision": "q2-reader-v2",
         "snapshot_id": "q2-stream-route-snapshot",
         "source_fingerprint": fingerprint,
         "question": "谁负责提交接口文档？",

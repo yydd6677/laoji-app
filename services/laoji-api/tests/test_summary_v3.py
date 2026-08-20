@@ -14,6 +14,7 @@ from app.schemas.meeting_facts_v3 import (
 )
 from app.services import (
     device_identity,
+    llm_provider,
     summary_task_store,
     summary_v3_evidence,
     summary_v3_generator,
@@ -25,6 +26,13 @@ from app.services.summary_v3_evidence import (
     build_evidence_package,
     normalize_sources,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_shared_embedding_cache():
+    llm_provider._reset_embedding_cache_for_tests()
+    yield
+    llm_provider._reset_embedding_cache_for_tests()
 
 
 def digest(value: str) -> str:
@@ -966,10 +974,12 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     ]
     operations: list[str] = []
     embedding_options: list[tuple[int | None, int | None]] = []
+    embedding_batch_sizes: list[int] = []
 
     def fake_embed_texts(texts, *, operation, **_kwargs):
         operations.append(operation)
         embedding_options.append((_kwargs.get("num_ctx"), _kwargs.get("num_gpu")))
+        embedding_batch_sizes.append(len(texts))
         return [(1.0, 0.0) for _ in texts]
 
     monkeypatch.setattr(summary_v3_evidence, "embed_texts", fake_embed_texts)
@@ -982,8 +992,10 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     assert active_package.coverage["included_segments"] < active_package.coverage["total_segments"]
     assert active_package.coverage["topic_groups"] == active_package.coverage["covered_topic_groups"]
     assert active_package.coverage["source_types"] == ["attachment", "manual_note", "transcript"]
-    assert operations == ["summary.v3.evidence.embedding"]
-    assert embedding_options == [(2048, 0)]
+    assert operations
+    assert set(operations) == {"summary.v3.evidence.embedding"}
+    assert set(embedding_options) == {(2048, 0)}
+    assert max(embedding_batch_sizes) <= 8
 
 
 def test_long_evidence_maps_embedding_provider_failure_to_stable_error(monkeypatch):

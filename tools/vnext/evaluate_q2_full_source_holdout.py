@@ -241,7 +241,7 @@ def main() -> int:
                 payload = {
                     "schema_version": 2,
                     "contract_revision": "question.reader.v2",
-                    "provider_revision": "q2-reader-v1",
+                    "provider_revision": "q2-reader-v2",
                     "snapshot_id": "full-source-holdout-" + uuid.uuid4().hex,
                     "source_fingerprint": source_fingerprint,
                     "question": question,
