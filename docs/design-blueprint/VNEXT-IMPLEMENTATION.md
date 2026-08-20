@@ -1140,8 +1140,11 @@ Android 激活围栏随后从 transcript/note 扩展到 device epoch、meeting b
 binding revision 和授权文字附件 revision 两种原生负向竞态：App 退出后远端旧来源 task 成功，恢复
 时均以稳定 input-changed 结果清理 pending intent，保留上一份 current result，未激活迟到 artifact。
 device-primary 文字附件能力、孤儿 preparation 清理和 canonical transcript 恢复身份也已接通；最终
-Release 为 `1.1.38 (146)`。epoch 及附件删除/移位/正文变化的逐项原生重放、混合负载和 Stage 3
-capability 仍未关闭。
+Release 为 `1.1.38 (146)`。随后 binding epoch、附件删除、附件移位和附件正文变化也在同一专用模拟器
+逐项完成“远端 attempt 成功、App 退出、来源变化、进程恢复”的原生回放，均只丢弃迟到 artifact 而不覆盖
+上一份 current result；最终 `intents=0`、SQLite integrity/FK 正常。详见同一围栏矩阵文档。Summary
+V3 的原生恢复矩阵与全局混合负载已经关闭；Q2 剩余原生来源恢复、独立人工质量、公开零 v1 流量周期
+和 Stage 3 capability 仍未关闭。
 
 同日最终 `facts-v3-r15 / summary-facts-v3-chapter-r4 / provider-v3-r2` 候选修复了行动投影字段错位、
 共享更正来源的最终确认、显式期限保留以及长证据包元数据预算遗漏。外部 24 组语义 manifest 在最终
@@ -1171,8 +1174,8 @@ source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-2
 同一 9B Ollama runner 统一为部署级 16K context，消除 capability 切换时约 12--13 秒的 runner
 重载。在全新迁移数据库上的完整十分钟全服务混合负载中，日程/Q2/Summary p95 分别为
 `1.794s/11.249s/13.953s`，实时、导入、上传、资源和清理门也全部通过；见
-`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；独立人工质量、
-剩余恢复矩阵、公开零 v1 流量周期和 capability barrier 仍开放。
+`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；Q2 剩余原生来源恢复、
+独立人工质量、公开零 v1 流量周期和 capability barrier 仍开放。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。

@@ -38,8 +38,18 @@ public final class VnextSummaryFenceDbMutationTest {
             "vnext-summary-fence-binding-revision.txt";
     private static final String ORIGINAL_ATTACHMENT_REVISION_FILE =
             "vnext-summary-fence-attachment-revision.txt";
+    private static final String ORIGINAL_BINDING_EPOCH_FILE =
+            "vnext-summary-fence-binding-epoch.txt";
+    private static final String DELETED_ATTACHMENT_FILE =
+            "vnext-summary-fence-attachment-deleted.txt";
+    private static final String MOVED_ATTACHMENT_FILE =
+            "vnext-summary-fence-attachment-position.txt";
+    private static final String CHANGED_ATTACHMENT_CONTENT_FILE =
+            "vnext-summary-fence-attachment-content.txt";
     private static final String ATTACHMENT_FIXTURE_TEXT =
             "附件围栏验收：最终结果不得覆盖已经变化的会议来源。";
+    private static final String CHANGED_ATTACHMENT_FIXTURE_TEXT =
+            "附件围栏验收：这段正文已在远端任务运行期间变化。";
 
     @Test
     public void testCreateTextAttachmentFixture() throws Exception {
@@ -144,6 +154,282 @@ public final class VnextSummaryFenceDbMutationTest {
     }
 
     @Test
+    public void testMoveBindingToDifferentEpoch() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String replacementEpochId = fixtureId("epoch", meetingId);
+        final File marker = bindingEpochMarkerFile();
+        assertFalse("restore the previous binding epoch fault first", marker.exists());
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                final BindingState before = readBinding(database, meetingId);
+                assertEquals("fault injection requires an active binding", "active", before.state);
+                assertFalse("replacement epoch unexpectedly matches the binding epoch",
+                        replacementEpochId.equals(before.deviceEpochId));
+                assertEquals("replacement epoch already exists", 0,
+                        epochRowCount(database, replacementEpochId));
+                Files.write(marker.toPath(), (meetingId + "\n" + before.deviceEpochId + "\n"
+                        + replacementEpochId + "\n").getBytes(StandardCharsets.UTF_8));
+                database.execSQL(
+                        "INSERT INTO device_epochs (epoch_id, status, created_at_ms) "
+                                + "VALUES (?, 'active', ?)",
+                        new Object[]{replacementEpochId, System.currentTimeMillis()});
+                database.execSQL(
+                        "UPDATE meeting_service_bindings SET device_epoch_id = ?, "
+                                + "updated_at_ms = updated_at_ms + 1 "
+                                + "WHERE meeting_id = ? AND device_epoch_id = ? AND state = 'active'",
+                        new Object[]{replacementEpochId, meetingId, before.deviceEpochId});
+                assertEquals(replacementEpochId, readBinding(database, meetingId).deviceEpochId);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+    }
+
+    @Test
+    public void testRestoreBindingEpoch() throws Exception {
+        final File marker = bindingEpochMarkerFile();
+        assertTrue("no injected binding epoch is pending", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 3);
+        final String meetingId = lines[0].trim();
+        final String originalEpochId = lines[1].trim();
+        final String replacementEpochId = lines[2].trim();
+        assertEquals(requiredMeetingId(), meetingId);
+        assertEquals(fixtureId("epoch", meetingId), replacementEpochId);
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                assertEquals("binding epoch changed after injection; refusing unsafe restore",
+                        replacementEpochId, readBinding(database, meetingId).deviceEpochId);
+                database.execSQL(
+                        "UPDATE meeting_service_bindings SET device_epoch_id = ?, "
+                                + "updated_at_ms = updated_at_ms + 1 "
+                                + "WHERE meeting_id = ? AND device_epoch_id = ? AND state = 'active'",
+                        new Object[]{originalEpochId, meetingId, replacementEpochId});
+                assertEquals(originalEpochId, readBinding(database, meetingId).deviceEpochId);
+                database.execSQL("DELETE FROM device_epochs WHERE epoch_id = ?",
+                        new Object[]{replacementEpochId});
+                assertEquals(0, epochRowCount(database, replacementEpochId));
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+        assertTrue("binding epoch marker could not be deleted", marker.delete());
+    }
+
+    @Test
+    public void testDeleteAttachmentDuringTask() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String attachmentId = fixtureId("attachment", meetingId);
+        final File marker = deletedAttachmentMarkerFile();
+        assertFalse("restore the previous deleted attachment fault first", marker.exists());
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                final AttachmentState before = readAttachment(database, meetingId, attachmentId);
+                assertEquals(ATTACHMENT_FIXTURE_TEXT, before.textContent);
+                assertEquals("attachment_text:" + attachmentId + ":1", before.activeRevisionId);
+                final long revisionCreatedAtMs = readAttachmentRevisionCreatedAt(
+                        database, before.activeRevisionId);
+                Files.write(marker.toPath(), (meetingId + "\n" + attachmentId + "\n"
+                        + before.scopeKey + "\n" + before.markerId + "\n" + before.positionMs + "\n"
+                        + before.createdAtMs + "\n" + before.updatedAtMs + "\n"
+                        + revisionCreatedAtMs + "\n").getBytes(StandardCharsets.UTF_8));
+                database.execSQL(
+                        "DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ? "
+                                + "AND kind = 'text' AND text_content = ?",
+                        new Object[]{attachmentId, meetingId, ATTACHMENT_FIXTURE_TEXT});
+                assertEquals(0, rowCount(database, "meeting_attachments", attachmentId));
+                assertEquals(0, attachmentRevisionRowCount(database, before.activeRevisionId));
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+    }
+
+    @Test
+    public void testDiscardUncommittedDeletedAttachmentMarker() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String attachmentId = fixtureId("attachment", meetingId);
+        final String revisionId = "attachment_text:" + attachmentId + ":1";
+        final File marker = deletedAttachmentMarkerFile();
+        assertTrue("no uncommitted deleted attachment marker is pending", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 8);
+        assertEquals(meetingId, lines[0].trim());
+        assertEquals(attachmentId, lines[1].trim());
+        try (SQLiteDatabase database = openDatabase()) {
+            assertEquals(1, rowCount(database, "meeting_attachments", attachmentId));
+            assertEquals(1, attachmentRevisionRowCount(database, revisionId));
+            assertEquals(ATTACHMENT_FIXTURE_TEXT,
+                    readAttachment(database, meetingId, attachmentId).textContent);
+        }
+        assertTrue("uncommitted deleted attachment marker could not be deleted", marker.delete());
+    }
+
+    @Test
+    public void testRestoreDeletedAttachment() throws Exception {
+        final File marker = deletedAttachmentMarkerFile();
+        assertTrue("no deleted attachment fault is pending", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 8);
+        final String meetingId = lines[0].trim();
+        final String attachmentId = lines[1].trim();
+        final String scopeKey = lines[2].trim();
+        final String markerId = lines[3].trim();
+        final long positionMs = Long.parseLong(lines[4].trim());
+        final long createdAtMs = Long.parseLong(lines[5].trim());
+        final long updatedAtMs = Long.parseLong(lines[6].trim());
+        final long revisionCreatedAtMs = Long.parseLong(lines[7].trim());
+        final String revisionId = "attachment_text:" + attachmentId + ":1";
+        assertEquals(requiredMeetingId(), meetingId);
+        assertEquals(fixtureId("attachment", meetingId), attachmentId);
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                assertEquals("attachment reappeared after injection; refusing unsafe restore", 0,
+                        rowCount(database, "meeting_attachments", attachmentId));
+                assertEquals("attachment revision reappeared after injection", 0,
+                        attachmentRevisionRowCount(database, revisionId));
+                database.execSQL(
+                        "INSERT INTO meeting_attachments (id, meeting_id, scope_key, marker_id, "
+                                + "position_ms, kind, text_content, created_at_ms, updated_at_ms, "
+                                + "active_text_revision_id) VALUES (?, ?, ?, ?, ?, 'text', ?, ?, ?, ?)",
+                        new Object[]{attachmentId, meetingId, scopeKey, markerId, positionMs,
+                                ATTACHMENT_FIXTURE_TEXT, createdAtMs, updatedAtMs, revisionId});
+                database.execSQL(
+                        "INSERT INTO meeting_attachment_text_revisions (revision_id, attachment_id, "
+                                + "meeting_id, revision, content_kind, content, content_sha256, "
+                                + "migrated_current, created_at_ms) VALUES (?, ?, ?, 1, 'text', ?, ?, 0, ?)",
+                        new Object[]{revisionId, attachmentId, meetingId, ATTACHMENT_FIXTURE_TEXT,
+                                sha256Text(ATTACHMENT_FIXTURE_TEXT), revisionCreatedAtMs});
+                assertEquals(1, rowCount(database, "meeting_attachments", attachmentId));
+                assertEquals(1, attachmentRevisionRowCount(database, revisionId));
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+        assertTrue("deleted attachment marker could not be deleted", marker.delete());
+    }
+
+    @Test
+    public void testMoveAttachmentDuringTask() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String attachmentId = fixtureId("attachment", meetingId);
+        final File marker = movedAttachmentMarkerFile();
+        assertFalse("restore the previous moved attachment fault first", marker.exists());
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                final AttachmentState before = readAttachment(database, meetingId, attachmentId);
+                Files.write(marker.toPath(), (meetingId + "\n" + attachmentId + "\n"
+                        + before.positionMs + "\n").getBytes(StandardCharsets.UTF_8));
+                database.execSQL(
+                        "UPDATE meeting_attachments SET position_ms = position_ms + 1 "
+                                + "WHERE id = ? AND meeting_id = ? AND position_ms = ? AND kind = 'text'",
+                        new Object[]{attachmentId, meetingId, before.positionMs});
+                assertEquals(before.positionMs + 1,
+                        readAttachment(database, meetingId, attachmentId).positionMs);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+    }
+
+    @Test
+    public void testRestoreMovedAttachment() throws Exception {
+        final File marker = movedAttachmentMarkerFile();
+        assertTrue("no moved attachment fault is pending", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 3);
+        final String meetingId = lines[0].trim();
+        final String attachmentId = lines[1].trim();
+        final long originalPositionMs = Long.parseLong(lines[2].trim());
+        assertEquals(requiredMeetingId(), meetingId);
+        assertEquals(fixtureId("attachment", meetingId), attachmentId);
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                assertEquals("attachment moved again after injection; refusing unsafe restore",
+                        originalPositionMs + 1,
+                        readAttachment(database, meetingId, attachmentId).positionMs);
+                database.execSQL(
+                        "UPDATE meeting_attachments SET position_ms = ? "
+                                + "WHERE id = ? AND meeting_id = ? AND position_ms = ? AND kind = 'text'",
+                        new Object[]{originalPositionMs, attachmentId, meetingId,
+                                originalPositionMs + 1});
+                assertEquals(originalPositionMs,
+                        readAttachment(database, meetingId, attachmentId).positionMs);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+        assertTrue("moved attachment marker could not be deleted", marker.delete());
+    }
+
+    @Test
+    public void testChangeAttachmentContentDuringTask() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String attachmentId = fixtureId("attachment", meetingId);
+        final File marker = changedAttachmentContentMarkerFile();
+        assertFalse("restore the previous attachment content fault first", marker.exists());
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                final AttachmentState before = readAttachment(database, meetingId, attachmentId);
+                assertEquals(ATTACHMENT_FIXTURE_TEXT, before.textContent);
+                Files.write(marker.toPath(), (meetingId + "\n" + attachmentId + "\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                database.execSQL(
+                        "UPDATE meeting_attachments SET text_content = ? "
+                                + "WHERE id = ? AND meeting_id = ? AND kind = 'text' "
+                                + "AND text_content = ?",
+                        new Object[]{CHANGED_ATTACHMENT_FIXTURE_TEXT, attachmentId, meetingId,
+                                ATTACHMENT_FIXTURE_TEXT});
+                assertEquals(CHANGED_ATTACHMENT_FIXTURE_TEXT,
+                        readAttachment(database, meetingId, attachmentId).textContent);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+    }
+
+    @Test
+    public void testRestoreChangedAttachmentContent() throws Exception {
+        final File marker = changedAttachmentContentMarkerFile();
+        assertTrue("no attachment content fault is pending", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 2);
+        final String meetingId = lines[0].trim();
+        final String attachmentId = lines[1].trim();
+        assertEquals(requiredMeetingId(), meetingId);
+        assertEquals(fixtureId("attachment", meetingId), attachmentId);
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                assertEquals("attachment content changed again; refusing unsafe restore",
+                        CHANGED_ATTACHMENT_FIXTURE_TEXT,
+                        readAttachment(database, meetingId, attachmentId).textContent);
+                database.execSQL(
+                        "UPDATE meeting_attachments SET text_content = ? "
+                                + "WHERE id = ? AND meeting_id = ? AND kind = 'text' "
+                                + "AND text_content = ?",
+                        new Object[]{ATTACHMENT_FIXTURE_TEXT, attachmentId, meetingId,
+                                CHANGED_ATTACHMENT_FIXTURE_TEXT});
+                assertEquals(ATTACHMENT_FIXTURE_TEXT,
+                        readAttachment(database, meetingId, attachmentId).textContent);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+        }
+        assertTrue("attachment content marker could not be deleted", marker.delete());
+    }
+
+    @Test
     public void testDeleteTextAttachmentFixture() throws Exception {
         final String meetingId = requiredMeetingId();
         final String markerId = fixtureId("marker", meetingId);
@@ -151,6 +437,12 @@ public final class VnextSummaryFenceDbMutationTest {
         final String revisionId = "attachment_text:" + attachmentId + ":1";
         assertFalse("restore the injected attachment revision first",
                 attachmentRevisionMarkerFile().exists());
+        assertFalse("restore the injected attachment deletion first",
+                deletedAttachmentMarkerFile().exists());
+        assertFalse("restore the injected attachment move first",
+                movedAttachmentMarkerFile().exists());
+        assertFalse("restore the injected attachment content first",
+                changedAttachmentContentMarkerFile().exists());
         try (SQLiteDatabase database = openDatabase()) {
             database.beginTransaction();
             try {
@@ -189,6 +481,45 @@ public final class VnextSummaryFenceDbMutationTest {
             } finally {
                 database.endTransaction();
             }
+        }
+    }
+
+    @Test
+    public void testAuditRestoredFenceState() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String attachmentId = fixtureId("attachment", meetingId);
+        assertFalse(markerFile().exists());
+        assertFalse(attachmentRevisionMarkerFile().exists());
+        assertFalse(bindingEpochMarkerFile().exists());
+        assertFalse(deletedAttachmentMarkerFile().exists());
+        assertFalse(movedAttachmentMarkerFile().exists());
+        assertFalse(changedAttachmentContentMarkerFile().exists());
+        try (SQLiteDatabase database = openDatabase()) {
+            final BindingState binding = readBinding(database, meetingId);
+            assertEquals("active", binding.state);
+            assertEquals(readCurrentEpoch(database), binding.deviceEpochId);
+            final AttachmentState attachment = readAttachment(database, meetingId, attachmentId);
+            assertEquals(0L, attachment.positionMs);
+            assertEquals(ATTACHMENT_FIXTURE_TEXT, attachment.textContent);
+            assertEquals("attachment_text:" + attachmentId + ":1", attachment.activeRevisionId);
+            assertEquals(1, attachmentRevisionRowCount(database, attachment.activeRevisionId));
+            assertEquals(0, countRows(database,
+                    "SELECT COUNT(*) FROM device_summary_task_intents WHERE meeting_id = ?",
+                    meetingId));
+            final String currentSummaryVersionId = readCurrentSummaryVersion(database, meetingId);
+            assertNotNull("previous readable summary was lost", currentSummaryVersionId);
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents "
+                            + "WHERE meeting_id = ? AND summary_version_id = ?",
+                    meetingId, currentSummaryVersionId));
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+            final int factsCount = countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ?", meetingId);
+            System.out.println("VNEXT_FENCE_AUDIT facts=" + factsCount
+                    + " intents=0 integrity=ok foreign_keys=0");
         }
     }
 
@@ -289,9 +620,32 @@ public final class VnextSummaryFenceDbMutationTest {
                 ORIGINAL_ATTACHMENT_REVISION_FILE);
     }
 
+    private File bindingEpochMarkerFile() {
+        return cacheFile(ORIGINAL_BINDING_EPOCH_FILE);
+    }
+
+    private File deletedAttachmentMarkerFile() {
+        return cacheFile(DELETED_ATTACHMENT_FILE);
+    }
+
+    private File movedAttachmentMarkerFile() {
+        return cacheFile(MOVED_ATTACHMENT_FILE);
+    }
+
+    private File changedAttachmentContentMarkerFile() {
+        return cacheFile(CHANGED_ATTACHMENT_CONTENT_FILE);
+    }
+
+    private File cacheFile(String name) {
+        return new File(
+                InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), name);
+    }
+
     private SQLiteDatabase openDatabase() {
-        return SQLiteDatabase.openDatabase(
+        final SQLiteDatabase database = SQLiteDatabase.openDatabase(
                 databaseFile().getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
+        database.setForeignKeyConstraintsEnabled(true);
+        return database;
     }
 
     private static String fixtureId(String kind, String meetingId) {
@@ -325,6 +679,69 @@ public final class VnextSummaryFenceDbMutationTest {
             assertTrue(cursor.moveToFirst());
             return cursor.getInt(0);
         }
+    }
+
+    private static int epochRowCount(SQLiteDatabase database, String epochId) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT COUNT(*) FROM device_epochs WHERE epoch_id = ?",
+                new String[]{epochId})) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getInt(0);
+        }
+    }
+
+    private static long readAttachmentRevisionCreatedAt(
+            SQLiteDatabase database, String revisionId) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT created_at_ms FROM meeting_attachment_text_revisions "
+                        + "WHERE revision_id = ?",
+                new String[]{revisionId})) {
+            assertTrue("attachment revision fixture is missing", cursor.moveToFirst());
+            assertEquals(1, cursor.getCount());
+            return cursor.getLong(0);
+        }
+    }
+
+    private static int countRows(SQLiteDatabase database, String query, String... arguments) {
+        try (Cursor cursor = database.rawQuery(query, arguments)) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getInt(0);
+        }
+    }
+
+    private static String scalarString(SQLiteDatabase database, String query) {
+        try (Cursor cursor = database.rawQuery(query, null)) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getString(0);
+        }
+    }
+
+    private static String readCurrentEpoch(SQLiteDatabase database) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT current_epoch_id FROM device_authority_state WHERE singleton_id = 1",
+                null)) {
+            assertTrue("device authority state is missing", cursor.moveToFirst());
+            assertEquals(1, cursor.getCount());
+            return cursor.getString(0);
+        }
+    }
+
+    private static String readCurrentSummaryVersion(
+            SQLiteDatabase database, String meetingId) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT current_summary_version_id FROM meeting_notes WHERE id = ?",
+                new String[]{meetingId})) {
+            assertTrue("meeting fixture target is unavailable", cursor.moveToFirst());
+            assertEquals(1, cursor.getCount());
+            return cursor.isNull(0) ? null : cursor.getString(0);
+        }
+    }
+
+    private static String[] readMarkerLines(File marker, int minimumLines) throws Exception {
+        final String[] lines = new String(
+                Files.readAllBytes(marker.toPath()), StandardCharsets.UTF_8).split("\\R");
+        assertTrue("fault marker is malformed", lines.length >= minimumLines);
+        return lines;
     }
 
     private static String readMeetingScope(SQLiteDatabase database, String meetingId) {
@@ -361,23 +778,64 @@ public final class VnextSummaryFenceDbMutationTest {
         }
     }
 
+    private static AttachmentState readAttachment(
+            SQLiteDatabase database, String meetingId, String attachmentId) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT scope_key, marker_id, position_ms, text_content, created_at_ms, "
+                        + "updated_at_ms, active_text_revision_id FROM meeting_attachments "
+                        + "WHERE id = ? AND meeting_id = ? AND kind = 'text'",
+                new String[]{attachmentId, meetingId})) {
+            assertTrue("text attachment fixture is missing", cursor.moveToFirst());
+            assertEquals(1, cursor.getCount());
+            return new AttachmentState(
+                    cursor.getString(0), cursor.getString(1), cursor.getLong(2),
+                    cursor.getString(3), cursor.getLong(4), cursor.getLong(5),
+                    cursor.getString(6));
+        }
+    }
+
     private static BindingState readBinding(SQLiteDatabase database, String meetingId) {
         try (Cursor cursor = database.rawQuery(
-                "SELECT binding_revision, state FROM meeting_service_bindings WHERE meeting_id = ?",
+            "SELECT binding_revision, state, device_epoch_id FROM meeting_service_bindings "
+                    + "WHERE meeting_id = ?",
                 new String[]{meetingId})) {
             assertTrue("meeting binding is missing", cursor.moveToFirst());
             assertEquals("duplicate meeting binding", 1, cursor.getCount());
-            return new BindingState(cursor.getLong(0), cursor.getString(1));
+            return new BindingState(cursor.getLong(0), cursor.getString(1), cursor.getString(2));
+        }
+    }
+
+    private static final class AttachmentState {
+        final String scopeKey;
+        final String markerId;
+        final long positionMs;
+        final String textContent;
+        final long createdAtMs;
+        final long updatedAtMs;
+        final String activeRevisionId;
+
+        AttachmentState(
+                String scopeKey, String markerId, long positionMs, String textContent,
+                long createdAtMs, long updatedAtMs, String activeRevisionId) {
+            this.scopeKey = scopeKey;
+            this.markerId = markerId;
+            this.positionMs = positionMs;
+            this.textContent = textContent;
+            this.createdAtMs = createdAtMs;
+            this.updatedAtMs = updatedAtMs;
+            this.activeRevisionId = activeRevisionId;
         }
     }
 
     private static final class BindingState {
         final long revision;
         final String state;
+        final String deviceEpochId;
 
-        BindingState(long revision, String state) {
+        BindingState(long revision, String state, String deviceEpochId) {
             this.revision = revision;
             this.state = state;
+            this.deviceEpochId = deviceEpochId;
         }
     }
 }

@@ -107,12 +107,36 @@ identity/revision/cancel revision，以及本次明确授权的文字附件位�
 
 ## 回归与仍未关闭的门
 
+### 原生来源变化矩阵补齐
+
+- `tools/vnext/android/VnextSummaryFenceDbMutationTest.java` 增加了可精确恢复的 binding epoch、附件删除、
+  附件移位和附件正文哈希变化注入。每个注入都要求显式 meeting UUID、固定派生夹具 ID 和严格前置状态；
+  恢复只接受该测试制造的唯一后继状态。直接打开应用 SQLite 时显式启用 foreign keys，附件删除真实触发
+  immutable text revision 级联，而不是留下不可达 revision。
+- 在 `emulator-5562` 上逐项执行了四次完整竞态：手机先把含明确授权附件的 source stream 提交到远端，
+  等待 generic Task 获得真实 attempt 后停止 App，再注入来源变化；四个远端 Task 均独立进入 `success`：
+  `b4572da1.../2688c9aa...`（移位）、`739f716a.../7f672f1a...`（正文）、
+  `9abbafc8.../e2f3eba1...`（删除）、`15472d51.../4cc09d3e...`（binding epoch）。斜线后为
+  artifact ID 前缀，仅用于隔离候选证据定位。
+- 每次重新启动 Release 后均出现
+  `meeting_summary_run_terminal={outcome:input_changed,error_name:MeetingSummaryInputChangedError}`，随后
+  `pending_task_discard=cleared` 和 `processing_stage=discarded`；没有 `shadow_write=activated`，页面保持
+  上一份“概述/主要议题”，按钮恢复为“重新整理”，未显示失败或永久 loading。
+- 最终原生审计为 `facts=15, intents=0, integrity=ok, foreign_keys=0`；binding epoch 已恢复为当前 authority
+  epoch，附件位置、正文和 immutable revision 全部恢复后再按固定身份删除。测试 APK SHA-256 为
+  `64f41bd9d7f1a1c65137a43a0bf189a85dc167b3b9036a74779ceba9eb5a7311`，大小 `367879` bytes，验收后已
+  卸载；模拟器恢复非调试 Release `1.1.38 (146)`，7 条会议仓储投影重新达到 consistent。
+- 一次在 attempt 创建前过早停止 App 的非正式试跑留下 active source stream；它未作为通过证据，最终使用
+  正式 `cancel_source_stream` 领域入口原子取消 Task、释放 checkpoint 并将 stream 标记为 cancelled，未直接
+  改表掩盖残留。
+
 - TypeScript、Stage 3 source-stream 合同、`git diff --check` 通过；Facts V3、chapter merge、source stream、
   worker、Q2、provider、持久任务和 readiness 聚焦回归为 `131 passed`。
 - 本次恢复边界变更另执行 summary/schema/chapter/worker/persistent/version 聚焦回归 `84 passed`，错误身份与
   activation fence 领域测试合计 `28 passed`；source-stream 与 Q2 Android 静态合同均通过。
-- 当前矩阵已直接执行领域比较器，并完成 Android 正向激活、binding revision 变化及授权文字附件
-  revision 变化两种“远端成功、进程退出、本机来源变化、进程恢复”的真实 SQLite 负向竞态。epoch
-  及附件删除/移位/正文变化等其余组合仍由 23 项纯领域矩阵覆盖；尚未对每个组合逐项执行原生重放。
-- 还缺独立人工事实/行动/Q2 质量 `>=95%`、长会议延迟分布、旧结果全量迁移、公开零 v1 流量周期和
-  capability barrier。Stage 2 纯 CPU ASR 首段与 RTF 性能门也仍未通过，因此 Stage 3 和全局候选均未采用。
+- 当前矩阵已直接执行领域比较器，并完成 Android 正向激活，以及 binding revision、binding epoch、授权
+  附件 revision、附件删除、附件移位和附件正文变化六种“远端成功、进程退出、本机来源变化、进程恢复”
+  的真实 SQLite 负向竞态。Summary V3 的选定来源身份组合不再只有纯领域覆盖。
+- 还缺 Q2 剩余原生来源恢复矩阵、独立人工事实/行动/Q2 质量 `>=95%`、旧结果全量迁移、公开零 v1
+  流量周期和 capability barrier。全局混合负载已经单独通过，但这些采用门仍开放，因此 Stage 3 和
+  全局候选均未采用。
