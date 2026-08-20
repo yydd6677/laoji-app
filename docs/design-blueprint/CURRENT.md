@@ -256,9 +256,14 @@ Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须�
 向量。`q2-reader-v2` 对并列回答逐项校验当前来源、数字和否定极性，只删除无依据子项，不生成补丁
 答案。冷缓存 5 pair / 10 条真实流全部成功，实际重叠 Q2 p50/p95/max 为
 `10.991s/12.897s/13.271s`，显示引用逐字匹配、幂等重放和清理均为 `100%`。详见
-[Stage 3 Summary/Q2 混合切片](../vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md)。这仍不是至少
-30 个暖态样本或包含 ASR/上传/日程的完整十分钟混合负载，也不替代独立人工 `>=95%` 质量门，
-Stage 3 继续保持未采用。
+[Stage 3 Summary/Q2 混合切片](../vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md)。随后提交
+`05d6183` 在全新迁移数据库上完成蓝图规定的 10 分钟全服务混合负载：日程 p95 `1.794s`、Q2
+p95 `11.249s`、Summary p95 `13.953s`、实时 stable p95 `1.845s`、导入首段 p95 `3.291s`、
+导入 RTF p95 `0.129`，资源和清理门全部通过。根因是原日程 8K 与 Summary/Q2 16K context 使
+同一 9B Ollama runner 反复重载；现已统一为部署级 16K resident runner。证据见
+[全局混合负载](../vnext-global/GLOBAL-MIXED-LOAD-20260820.md)。这关闭混合负载性能缺口，但不替代
+独立人工 `>=95%` 质量门、剩余原生恢复矩阵、公开零 v1 流量周期或 capability barrier，Stage 3
+继续保持未采用。
 
 同日，Facts V3 Android 激活围栏在 `emulator-5562` 补齐了 binding revision 与明确授权文字附件
 revision 两种原生迟到结果竞态。远端旧来源 task 均可独立完成，但手机恢复时会把它收敛为

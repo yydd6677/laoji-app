@@ -1167,8 +1167,12 @@ source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-2
 有界 LRU。`q2-reader-v2` 将模型并列长句拆为独立 claim，逐项验证数字、否定极性和强字面来源，
 无依据项只删除不补写。API 重启后的 5 pair / 10 流全部成功，实际重叠 Q2 p50/p95/max 为
 `10.991s/12.897s/13.271s`，引用、重放和清理为 100%。证据见
-`docs/vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md`。这只关闭 Stage 3 内部并发回归；至少
-30 个暖态问答样本、完整十分钟全服务混合负载、独立人工质量、恢复矩阵和 capability barrier 仍开放。
+`docs/vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md`。随后 `05d6183` 将日程、Summary 和 Q2 的
+同一 9B Ollama runner 统一为部署级 16K context，消除 capability 切换时约 12--13 秒的 runner
+重载。在全新迁移数据库上的完整十分钟全服务混合负载中，日程/Q2/Summary p95 分别为
+`1.794s/11.249s/13.953s`，实时、导入、上传、资源和清理门也全部通过；见
+`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；独立人工质量、
+剩余恢复矩阵、公开零 v1 流量周期和 capability barrier 仍开放。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
