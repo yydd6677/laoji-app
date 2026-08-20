@@ -1,0 +1,82 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "provider_revision": "q2-reader-v1",
+  "total": 6,
+  "passed": 4,
+  "failed": 2,
+  "citation_grounding_passed": 4,
+  "results": [
+    {
+      "case_id": "paper-method",
+      "sample": "1300572695-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": null,
+      "citation_count": 0,
+      "latency_ms": 4452.6,
+      "passed": false,
+      "errors": [
+        "Q2ReaderError:Q2_GROUNDING_INVALID"
+      ]
+    },
+    {
+      "case_id": "report-three-parts",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 2247.9,
+      "passed": false,
+      "errors": [
+        "citations do not contain expected evidence anchor"
+      ]
+    },
+    {
+      "case_id": "un-areas",
+      "sample": "500001564053724-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 5,
+      "latency_ms": 5734.1,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "energy-ui-plan",
+      "sample": "829384557-1-208.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 3,
+      "latency_ms": 5703.6,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "not-stated-budget",
+      "sample": "500001564053724-1-192.srt",
+      "expected_kind": "not_stated",
+      "actual_kind": "not_stated",
+      "citation_count": 0,
+      "latency_ms": 1897.9,
+      "passed": true,
+      "errors": []
+    },
+    {
+      "case_id": "partial-owner-phone",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 1,
+      "latency_ms": 2844.1,
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "full-transcript retrieval for long meetings",
+    "human citation relevance review",
+    "Android Q2 page and recovery replay",
+    "capability barrier"
+  ]
+}

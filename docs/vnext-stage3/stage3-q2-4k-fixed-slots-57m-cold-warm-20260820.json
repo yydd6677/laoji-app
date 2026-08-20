@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "api": "http://127.0.0.1:28023/api/device/v2",
+  "sample_count": 1,
+  "requested_runs": 2,
+  "completed": 2,
+  "failed": 0,
+  "summary_all": {
+    "count": 2,
+    "p50_ms": 79199.5,
+    "p95_ms": 80401.4,
+    "max_ms": 80535
+  },
+  "summary_under_one_hour": {
+    "count": 2,
+    "p50_ms": 79199.5,
+    "p95_ms": 80401.4,
+    "max_ms": 80535
+  },
+  "question": {
+    "count": 2,
+    "p50_ms": 32763.5,
+    "p95_ms": 36435.1,
+    "max_ms": 36843
+  },
+  "exact_grounding": {
+    "facts": true,
+    "questions": true
+  },
+  "idempotent_question_replays": true,
+  "cleanup_complete": false,
+  "results": [
+    {
+      "sample": "1377173065-1-160.srt",
+      "run": 1,
+      "sample_sha256": "sha256:83dcc7bb4481766ec892a58f2f8186e673ebf77db996620abca26e8590a11c83",
+      "duration_ms": 3422160,
+      "chapter_count": 6,
+      "item_count": 1357,
+      "summary_end_to_end_elapsed_ms": 80535,
+      "summary_poll_elapsed_ms": 28483,
+      "summary_attempt": 1,
+      "facts_count": 40,
+      "actions_count": 0,
+      "facts_citations": 55,
+      "facts_citations_exact": 55,
+      "question_elapsed_ms": 36843,
+      "question_replay_elapsed_ms": 131,
+      "question_replay_identical": true,
+      "question_citations": 3,
+      "question_citations_exact": 3,
+      "cleanup_state": "confirmed"
+    },
+    {
+      "sample": "1377173065-1-160.srt",
+      "run": 2,
+      "sample_sha256": "sha256:83dcc7bb4481766ec892a58f2f8186e673ebf77db996620abca26e8590a11c83",
+      "duration_ms": 3422160,
+      "chapter_count": 6,
+      "item_count": 1357,
+      "summary_end_to_end_elapsed_ms": 77864,
+      "summary_poll_elapsed_ms": 31877,
+      "summary_attempt": 1,
+      "facts_count": 40,
+      "actions_count": 0,
+      "facts_citations": 55,
+      "facts_citations_exact": 55,
+      "question_elapsed_ms": 28684,
+      "question_replay_elapsed_ms": 248,
+      "question_replay_identical": true,
+      "question_citations": 3,
+      "question_citations_exact": 3,
+      "cleanup_state": "confirmed"
+    }
+  ],
+  "failures": []
+}

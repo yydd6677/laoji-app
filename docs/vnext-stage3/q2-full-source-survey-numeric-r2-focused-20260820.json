@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": false,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 2,
+  "total": 2,
+  "passed": 2,
+  "failed": 0,
+  "warm_model_backed": {
+    "count": 1,
+    "p50_ms": 7114,
+    "p95_ms": 7114.0,
+    "max_ms": 7114
+  },
+  "all_exact_citations": true,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "survey-deadline",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "question_sha256": "sha256:c4906ee0082e1fb09e446c9b80b9e7b9855d907d8c9cbbadce0618bf0133dbfd",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 28849,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:e6ee89885a17ca5f2926f66584e066e126969c63c430bc7acdd2d266a9d83fad",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "survey-threshold",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "question_sha256": "sha256:0a97a814e2c6fea5da6688fd2d1ec9e33a99020d2308b0aad0bd5cbb145ed3ec",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 7114,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:f12a6a2d8f574f8bd762c909d9ea27684a05a6f3402cb7d6e72e3471ed655f1a",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "independent human answer and citation relevance review",
+    "mixed-load p95",
+    "capability barrier"
+  ]
+}

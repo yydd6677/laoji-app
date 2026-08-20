@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": true,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 2,
+  "case_count": 27,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "paper-topic",
+      "sample": "1300572695-1-192.srt",
+      "sample_sha256": "sha256:24c397830086e469c3de09dc321b3d28ccf548eda83f4e2f8dc679aae3b2bd09",
+      "question_sha256": "sha256:2d61ccbdfbcf60d688a0a4da196b7ef6c91056fea16cb879c1b8690ebec4fee3",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 24995,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:606c9b38baecbdc787f3d376f948ba5019a0dec76f3fbe8d49772fe53fa9a09e",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "paper-method",
+      "sample": "1300572695-1-192.srt",
+      "sample_sha256": "sha256:24c397830086e469c3de09dc321b3d28ccf548eda83f4e2f8dc679aae3b2bd09",
+      "question_sha256": "sha256:131175d8ff3d47c8528d7050b612eec313129187eae00245be81f38c08e5bd05",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 6523,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:a8bcc37e7366b6bb87da41346438138afa8a36f0ee265d3a401e65fad89286ff",
+      "citation_count": 5,
+      "citation_exact_count": 5,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "report-three-parts",
+      "sample": "1436403866-1-192.srt",
+      "sample_sha256": "sha256:6c0afe244537d0c583574326139db1b373f2128d37eb9c6cdf2b02331d9f4adb",
+      "question_sha256": "sha256:e7947a62ac185ed2d36f9165bc104e2dcd16cea2376b2a4550d22396469f3393",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 23179,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:396eb2ed4fa9b46e737e4e613e1754c1bc608d8b5c97e5640532ce9220220185",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "report-platform",
+      "sample": "1436403866-1-192.srt",
+      "sample_sha256": "sha256:6c0afe244537d0c583574326139db1b373f2128d37eb9c6cdf2b02331d9f4adb",
+      "question_sha256": "sha256:d2e22787f097dd8609f8c1a94e6790aa866876ed3c07e747fa094927b099d2da",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 5357,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:200236da582a07d3874479fa5595e79adb58e048b04bf578ca199a8d5c3bf971",
+      "citation_count": 1,
+      "citation_exact_count": 1,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "un-areas",
+      "sample": "500001564053724-1-192.srt",
+      "sample_sha256": "sha256:edfa19af4f8233d965f5448b0c8d27273d078c8c4e33d679c2dbb5d692fb87a1",
+      "question_sha256": "sha256:1b41cccbdbf7494026316113a289fde3342e5b4c9c044c0d58a0cca92db54252",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 29266,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:e949c839e3485cc15dcfcaa8821d68b156701f825eb9ccee0aeb6532c468091f",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "un-countries",
+      "sample": "500001564053724-1-192.srt",
+      "sample_sha256": "sha256:edfa19af4f8233d965f5448b0c8d27273d078c8c4e33d679c2dbb5d692fb87a1",
+      "question_sha256": "sha256:a9b34748dd8c153ee8e49cadeffcf90eedf82b72d6ae09a3d384590751af2f67",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 6404,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:1751dd5f78fc4251f4072ccfe341a8ac9cafa9fef6be98f948a57cf5835b52e2",
+      "citation_count": 4,
+      "citation_exact_count": 4,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "finance-invoice",
+      "sample": "1437681208-1-192.srt",
+      "sample_sha256": "sha256:2b6ebf6d0a7ee461f9af312dca88512bd2943901485db2b52fecf348bead9d62",
+      "question_sha256": "sha256:fbe274653eea3a7db8a44585e50fb50b1e5fbad742df2f438f261f9e9848c37e",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 27937,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:17da97ab35935eaf3b8b3a7f320264a681742dd796713225d1b905d3ddfcd475",
+      "citation_count": 1,
+      "citation_exact_count": 1,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "finance-cost",
+      "sample": "1437681208-1-192.srt",
+      "sample_sha256": "sha256:2b6ebf6d0a7ee461f9af312dca88512bd2943901485db2b52fecf348bead9d62",
+      "question_sha256": "sha256:634cab7802c129e1c608d8600d24a8e29a498490788e2a90490b810324edee30",
+      "question_overridden_for_full_source": true,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 7226,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:20be470cc91cde4737c1762399ad909ebc1a55752d25097386d012a5848943e6",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "survey-deadline",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "question_sha256": "sha256:c4906ee0082e1fb09e446c9b80b9e7b9855d907d8c9cbbadce0618bf0133dbfd",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 4506,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:e6ee89885a17ca5f2926f66584e066e126969c63c430bc7acdd2d266a9d83fad",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "survey-threshold",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "question_sha256": "sha256:0a97a814e2c6fea5da6688fd2d1ec9e33a99020d2308b0aad0bd5cbb145ed3ec",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 5150,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:f12a6a2d8f574f8bd762c909d9ea27684a05a6f3402cb7d6e72e3471ed655f1a",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "negotiation-opening",
+      "sample": "911595290-1-208.srt",
+      "sample_sha256": "sha256:a4d16099f6cd3c9f99325abd89cdd638bede8bc51c710a428907df7f26027f07",
+      "question_sha256": "sha256:fcaeaa55c5a00adacc620b0c21baa90fc373ce7cbc844d312240f1d06565df9c",
+      "question_overridden_for_full_source": false,
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 22595,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:fba3e26d453734d07923d7a45a3a043d1bcb2b4f0a4e665dc36c3820ba0c591f",
+      "citation_count": 1,
+      "citation_exact_count": 1,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "negotiation-highest",
+      "sample": "911595290-1-208.srt",
+      "sample_sha256": "sha256:a4d16099f6cd3c9f99325abd89cdd638bede8bc51c710a428907df7f26027f07",
+      "question_sha256": "sha256:26b9bd1506eab2811e623cc57f3e4a296b8de0e19f499d4ea0852f0c5bb9635f",
+      "question_overridden_for_full_source": false,
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 6281,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:d47fdd40275674965166c01f561523c174613874140c85e5cb4f32531208fd6d",
+      "citation_count": 3,
+      "citation_exact_count": 3,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "equity-split",
+      "sample": "1377173065-1-160.srt",
+      "passed": false,
+      "error_type": "HoldoutApiError",
+      "error_code": "Q2_GROUNDING_INVALID"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": false,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 1,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "warm_model_backed": {
+    "count": 0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "max_ms": null
+  },
+  "all_exact_citations": true,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "paper-topic",
+      "sample": "1300572695-1-192.srt",
+      "sample_sha256": "sha256:24c397830086e469c3de09dc321b3d28ccf548eda83f4e2f8dc679aae3b2bd09",
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 25077,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:8dc4ee46bd50d33ac63a5267cfdbd4ccc608809decf9860f8d69804c740d5e38",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "independent human answer and citation relevance review",
+    "mixed-load p95",
+    "capability barrier"
+  ]
+}

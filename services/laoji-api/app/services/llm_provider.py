@@ -403,7 +403,9 @@ def _embedding_inference_state(base_url: str) -> dict[str, Any]:
                     "dimensions": 32,
                     "truncate": True,
                     "keep_alive": KEEP_ALIVE,
-                    "options": {"num_ctx": 2048},
+                    # Keep the privacy-free readiness probe from evicting the
+                    # warm 9B generator on compact single-GPU deployments.
+                    "options": {"num_ctx": 2048, "num_gpu": 0},
                 },
                 headers={
                     "X-Laoji-Priority": "interactive",
@@ -753,6 +755,7 @@ def embed_texts(
     priority: str = "interactive",
     operation: str = "meeting.embedding",
     timeout_seconds: float | None = None,
+    num_gpu: int | None = None,
 ) -> list[tuple[float, ...]]:
     if not texts:
         return []
@@ -768,6 +771,8 @@ def embed_texts(
     except ValueError:
         num_ctx = 8192
     num_ctx = min(8192, max(2048, num_ctx))
+    if num_gpu is not None:
+        num_gpu = max(0, min(999, int(num_gpu)))
 
     def invoke() -> list[tuple[float, ...]]:
         try:
@@ -782,7 +787,10 @@ def embed_texts(
                     ),
                     "truncate": True,
                     "keep_alive": KEEP_ALIVE,
-                    "options": {"num_ctx": num_ctx},
+                    "options": {
+                        "num_ctx": num_ctx,
+                        **({"num_gpu": num_gpu} if num_gpu is not None else {}),
+                    },
                 },
                 headers={
                     "X-Laoji-Priority": priority,

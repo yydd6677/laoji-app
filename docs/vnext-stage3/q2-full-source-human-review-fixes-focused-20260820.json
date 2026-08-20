@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": false,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 2,
+  "total": 2,
+  "passed": 2,
+  "failed": 0,
+  "warm_model_backed": {
+    "count": 1,
+    "p50_ms": 13203,
+    "p95_ms": 13203.0,
+    "max_ms": 13203
+  },
+  "all_exact_citations": true,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "energy-outline-count",
+      "sample": "829384557-1-208.srt",
+      "sample_sha256": "sha256:035afb653adef9e1cb94bd76ab94a83a829d53e544ecca35ff9e2b2fe16cfecf",
+      "question_sha256": "sha256:d3db4c86b17c70fb4e32b107aa4568a55b3d805f61ca8a0252694b43a2feffde",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 52846,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:a9c2fc9c207d0bafdbe0a9827d9d80f36d4f7c05e5c182836c02aae9d636fddd",
+      "citation_count": 5,
+      "citation_exact_count": 5,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "energy-ui-plan",
+      "sample": "829384557-1-208.srt",
+      "sample_sha256": "sha256:035afb653adef9e1cb94bd76ab94a83a829d53e544ecca35ff9e2b2fe16cfecf",
+      "question_sha256": "sha256:e51def65a0839065a39cbf799a03efb239643ba323ecb613f2053ac928eaaaf6",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 13203,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:7b90d088c6cd333202364a4f9f9e29564c25cf973f6d247d01c52d7ee449bdc2",
+      "citation_count": 6,
+      "citation_exact_count": 6,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "independent human answer and citation relevance review",
+    "mixed-load p95",
+    "capability barrier"
+  ]
+}

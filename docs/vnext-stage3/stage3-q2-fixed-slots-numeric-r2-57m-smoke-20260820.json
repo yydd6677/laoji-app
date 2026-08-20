@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "candidate_api": "http://127.0.0.1:28023/api/device/v2",
+  "sample_sha256": "sha256:83dcc7bb4481766ec892a58f2f8186e673ebf77db996620abca26e8590a11c83",
+  "source_fingerprint": "sha256:ae77cae40b24e97c2af490264edeaa4a73b8b9ed9b8fb6cc74dec5f11d86e385",
+  "input": {
+    "chapter_count": 6,
+    "item_count": 1357,
+    "duration_ms": 3422160,
+    "chapter_seconds": 600
+  },
+  "capabilities": {
+    "schedule_graph_v2": true,
+    "source_stream_v2": true,
+    "question_reader_v2": true
+  },
+  "summary": {
+    "state": "success",
+    "end_to_end_elapsed_ms": 73854,
+    "elapsed_ms": 26265,
+    "final_attempt_number": 1,
+    "group_terminal_states": [
+      "complete"
+    ],
+    "artifact_contract_revision": "meeting.facts.v3",
+    "artifact_provider_revision": "provider-v3-r1",
+    "artifact_prompt_revision": "summary-facts-v3-chapter-r2",
+    "facts_schema_version": 3,
+    "through_chapter_ordinal": 5,
+    "coverage": {
+      "covered_topic_groups": 6,
+      "estimated_input_tokens": 20799,
+      "included_segments": 123,
+      "included_source_types": [
+        "transcript"
+      ],
+      "input_token_budget": 61440,
+      "source_coverage": 1.0,
+      "source_types": [
+        "transcript"
+      ],
+      "topic_coverage": 1.0,
+      "topic_groups": 6,
+      "total_segments": 123,
+      "used_embeddings": false
+    },
+    "facts_count": 40,
+    "action_candidate_count": 0,
+    "citation_count": 55,
+    "citation_exact_match_count": 55,
+    "overview_sha256": "sha256:46d3dd4889c2b6145aeca19d4df827a66fdff9a85e1f036281f624e973a36003"
+  },
+  "question": {
+    "question_sha256": "sha256:567da99edfb40277f21138ac7d6c6ed66f2272ea25512569e29925c1f5c4bc5e",
+    "elapsed_ms": 38589,
+    "replay_elapsed_ms": 241,
+    "replay_identical": true,
+    "answer_kind": "answer",
+    "answer_sha256": "sha256:4d051dd63a3e0c40d57df65cc80c258b71b374c9a72ca40973e240d4c7993ab9",
+    "clause_count": 1,
+    "citation_count": 3,
+    "citation_exact_match_count": 3,
+    "group_terminal_states": [
+      "complete"
+    ]
+  },
+  "cleanup": {
+    "state": "confirmed",
+    "error_code": null
+  },
+  "total_elapsed_ms": 115521
+}

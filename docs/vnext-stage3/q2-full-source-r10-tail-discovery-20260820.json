@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": true,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 22,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "un-countries",
+      "sample": "500001564053724-1-192.srt",
+      "sample_sha256": "sha256:edfa19af4f8233d965f5448b0c8d27273d078c8c4e33d679c2dbb5d692fb87a1",
+      "question_sha256": "sha256:a9b34748dd8c153ee8e49cadeffcf90eedf82b72d6ae09a3d384590751af2f67",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 7372,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:e987ff58e26bd6aa367f0232ba5c94ddb649534ac06fab99c326cd14c0cb7a5d",
+      "citation_count": 6,
+      "citation_exact_count": 6,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "finance-invoice",
+      "sample": "1437681208-1-192.srt",
+      "sample_sha256": "sha256:2b6ebf6d0a7ee461f9af312dca88512bd2943901485db2b52fecf348bead9d62",
+      "question_sha256": "sha256:fbe274653eea3a7db8a44585e50fb50b1e5fbad742df2f438f261f9e9848c37e",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 33218,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:17da97ab35935eaf3b8b3a7f320264a681742dd796713225d1b905d3ddfcd475",
+      "citation_count": 1,
+      "citation_exact_count": 1,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "finance-cost",
+      "sample": "1437681208-1-192.srt",
+      "sample_sha256": "sha256:2b6ebf6d0a7ee461f9af312dca88512bd2943901485db2b52fecf348bead9d62",
+      "question_sha256": "sha256:634cab7802c129e1c608d8600d24a8e29a498490788e2a90490b810324edee30",
+      "question_overridden_for_full_source": true,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 7096,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:4c27ce505b745ba9f627780828976ea401ea6bc90078de4f5a1baceece9c527e",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "survey-deadline",
+      "sample": "35166292748-1-192.srt",
+      "passed": false,
+      "error_type": "HoldoutApiError",
+      "error_code": "Q2_GROUNDING_INVALID",
+      "error_message": "回答中的枚举项缺少逐字依据"
+    },
+    {
+      "run": 1,
+      "case_id": "survey-threshold",
+      "sample": "35166292748-1-192.srt",
+      "sample_sha256": "sha256:a83a47e9a9bdf2d9d8dc017f85b091f6456f753ee1e115a8de41e4df5cf65d3e",
+      "question_sha256": "sha256:0a97a814e2c6fea5da6688fd2d1ec9e33a99020d2308b0aad0bd5cbb145ed3ec",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": false,
+      "model_backed": true,
+      "elapsed_ms": 7505,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:b776c89fdfb50f69a074b70df9c28ab5d6d9ba0120df560906d91946512d47b9",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "negotiation-opening",
+      "sample": "911595290-1-208.srt",
+      "sample_sha256": "sha256:a4d16099f6cd3c9f99325abd89cdd638bede8bc51c710a428907df7f26027f07",
+      "question_sha256": "sha256:fcaeaa55c5a00adacc620b0c21baa90fc373ce7cbc844d312240f1d06565df9c",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 38831,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:e5da45336f48087da04e76e93f236a4e6cb95e11c0fcde22a9931c2288d3958c",
+      "citation_count": 1,
+      "citation_exact_count": 1,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    }
+  ]
+}

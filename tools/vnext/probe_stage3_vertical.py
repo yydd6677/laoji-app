@@ -537,6 +537,7 @@ def main() -> int:
 
     atexit.register(cleanup_binding)
 
+    summary_end_to_end_started = time.perf_counter()
     summary_stream_id, summary_task_id, summary_groups = create_source_stream(
         api=args.api,
         auth=state.auth,
@@ -550,6 +551,9 @@ def main() -> int:
     del summary_stream_id
     summary_task, summary_elapsed_ms = wait_task(
         args.api, state.auth, summary_task_id, args.timeout_seconds,
+    )
+    summary_end_to_end_elapsed_ms = round(
+        (time.perf_counter() - summary_end_to_end_started) * 1000
     )
     if summary_task.get("state") != "success":
         raise RuntimeError(f"summary task failed: {summary_task.get('error_code')}")
@@ -636,6 +640,7 @@ def main() -> int:
         )},
         "summary": {
             "state": summary_task.get("state"),
+            "end_to_end_elapsed_ms": summary_end_to_end_elapsed_ms,
             "elapsed_ms": summary_elapsed_ms,
             "final_attempt_number": task_attempt_number(summary_task),
             "group_terminal_states": sorted({str(group.get("state")) for group in summary_groups}),

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "api": "http://127.0.0.1:28023/api/device/v2",
+  "sample_count": 1,
+  "requested_runs": 1,
+  "completed": 1,
+  "failed": 0,
+  "summary_all": {
+    "count": 1,
+    "p50_ms": 18914.0,
+    "p95_ms": 18914.0,
+    "max_ms": 18914
+  },
+  "summary_under_one_hour": {
+    "count": 1,
+    "p50_ms": 18914.0,
+    "p95_ms": 18914.0,
+    "max_ms": 18914
+  },
+  "question": {
+    "count": 1,
+    "p50_ms": 8509.0,
+    "p95_ms": 8509.0,
+    "max_ms": 8509
+  },
+  "exact_grounding": {
+    "facts": true,
+    "questions": true
+  },
+  "idempotent_question_replays": true,
+  "cleanup_complete": false,
+  "results": [
+    {
+      "sample": "1300572695-1-192.srt",
+      "run": 1,
+      "sample_sha256": "sha256:24c397830086e469c3de09dc321b3d28ccf548eda83f4e2f8dc679aae3b2bd09",
+      "duration_ms": 721500,
+      "chapter_count": 2,
+      "item_count": 240,
+      "summary_end_to_end_elapsed_ms": 18914,
+      "summary_poll_elapsed_ms": 17760,
+      "summary_attempt": 1,
+      "facts_count": 17,
+      "actions_count": 0,
+      "facts_citations": 32,
+      "facts_citations_exact": 32,
+      "question_elapsed_ms": 8509,
+      "question_replay_elapsed_ms": 162,
+      "question_replay_identical": true,
+      "question_citations": 8,
+      "question_citations_exact": 8,
+      "cleanup_state": "confirmed"
+    }
+  ],
+  "failures": []
+}

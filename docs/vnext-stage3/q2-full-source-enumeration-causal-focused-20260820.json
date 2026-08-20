@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": false,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 2,
+  "total": 2,
+  "passed": 1,
+  "failed": 1,
+  "warm_model_backed": {
+    "count": 0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "max_ms": null
+  },
+  "all_exact_citations": true,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "un-areas",
+      "sample": "500001564053724-1-192.srt",
+      "sample_sha256": "sha256:edfa19af4f8233d965f5448b0c8d27273d078c8c4e33d679c2dbb5d692fb87a1",
+      "question_sha256": "sha256:1b41cccbdbf7494026316113a289fde3342e5b4c9c044c0d58a0cca92db54252",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": false,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 34630,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:20d8fe72cb2a65aea0339dac1616be22e3366db813b8fcd0dfa0707e264e0ac3",
+      "citation_count": 2,
+      "citation_exact_count": 2,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    },
+    {
+      "run": 1,
+      "case_id": "survey-deadline",
+      "sample": "35166292748-1-192.srt",
+      "passed": false,
+      "error_type": "HoldoutApiError",
+      "error_code": "Q2_GROUNDING_INVALID",
+      "error_message": "回答中的数字缺少逐字依据"
+    }
+  ],
+  "remaining": [
+    "independent human answer and citation relevance review",
+    "mixed-load p95",
+    "capability barrier"
+  ]
+}

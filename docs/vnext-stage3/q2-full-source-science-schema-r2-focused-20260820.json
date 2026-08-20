@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "in_progress": false,
+  "source_policy": "complete real subtitle source stream; weak reference only",
+  "requested_runs": 1,
+  "case_count": 1,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "warm_model_backed": {
+    "count": 0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "max_ms": null
+  },
+  "all_exact_citations": true,
+  "results": [
+    {
+      "run": 1,
+      "case_id": "science-question",
+      "sample": "30528111540-1-192.srt",
+      "sample_sha256": "sha256:27c4b11b40daf123965e4351ab5df3895855746c0687f0c304feedc6bb4452c4",
+      "question_sha256": "sha256:cd8f8bd3e08dfdae680107c921587ba6570df4abc992eb0c6711426a83ae4acb",
+      "question_overridden_for_full_source": false,
+      "expectation_overridden_for_full_source": true,
+      "allowed_answer_kinds": [
+        "answer"
+      ],
+      "conditioning": true,
+      "model_backed": true,
+      "elapsed_ms": 26862,
+      "answer_kind": "answer",
+      "answer_sha256": "sha256:5a65b83168b2fbede44585dc3bbf6b776617abe7f489fbcf849f6f4694bda26f",
+      "citation_count": 7,
+      "citation_exact_count": 7,
+      "group_terminal_states": [
+        "complete"
+      ],
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "independent human answer and citation relevance review",
+    "mixed-load p95",
+    "capability barrier"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "candidate_only": true,
+  "production_mutation": false,
+  "source_policy": "real subtitle windows; weak reference only; no production prompt or rule input",
+  "provider_revision": "q2-reader-v1",
+  "total": 2,
+  "passed": 1,
+  "failed": 1,
+  "citation_grounding_passed": 1,
+  "results": [
+    {
+      "case_id": "paper-method",
+      "sample": "1300572695-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": null,
+      "citation_count": 0,
+      "latency_ms": 3574.3,
+      "passed": false,
+      "errors": [
+        "Q2ReaderError:Q2_GROUNDING_INVALID"
+      ]
+    },
+    {
+      "case_id": "report-three-parts",
+      "sample": "1436403866-1-192.srt",
+      "expected_kind": "answer",
+      "actual_kind": "answer",
+      "citation_count": 2,
+      "latency_ms": 1866.2,
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "remaining": [
+    "full-transcript retrieval for long meetings",
+    "human citation relevance review",
+    "Android Q2 page and recovery replay",
+    "capability barrier"
+  ]
+}

@@ -198,13 +198,13 @@ def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
 
     monkeypatch.setattr(llm_provider._SESSION, "post", post)
     llm_provider._reset_inference_telemetry_for_tests()
-    result = llm_provider.embed_texts(["会议问题"])
+    result = llm_provider.embed_texts(["会议问题"], num_gpu=0)
 
     assert result == [(0.6, 0.8)]
     assert captured["url"] == "http://127.0.0.1:21434/api/embed"
     assert captured["json"]["model"] == "qwen3-embedding:0.6b"
     assert captured["json"]["keep_alive"] == -1
-    assert captured["json"]["options"] == {"num_ctx": 8192}
+    assert captured["json"]["options"] == {"num_ctx": 8192, "num_gpu": 0}
     telemetry = llm_provider.provider_state(probe=False)["inference"]["last_by_operation"]
     assert telemetry["meeting.embedding"]["call_count"] == 1
     assert telemetry["meeting.embedding"]["total_duration"] == 2_000_000_000
