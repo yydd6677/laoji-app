@@ -49,3 +49,31 @@ def test_realtime_lag_percentile_is_interpolated() -> None:
 def test_missing_source_ip_does_not_become_hostname_none() -> None:
     configure_source_ip(None)
     assert probe_device_v2_realtime._PROBE_SOURCE_IP is None
+
+
+def test_source_ip_wrapper_remains_compatible_with_python310_socket(monkeypatch) -> None:
+    captured = {}
+
+    def python310_create_connection(address, timeout=None, source_address=None):
+        captured.update(
+            address=address,
+            timeout=timeout,
+            source_address=source_address,
+        )
+        return "connected"
+
+    monkeypatch.setattr(
+        probe_device_v2_realtime.socket,
+        "create_connection",
+        python310_create_connection,
+    )
+    configure_source_ip("127.0.0.51")
+
+    assert probe_device_v2_realtime.socket.create_connection(
+        ("127.0.0.1", 18028), timeout=3,
+    ) == "connected"
+    assert captured == {
+        "address": ("127.0.0.1", 18028),
+        "timeout": 3,
+        "source_address": ("127.0.0.51", 0),
+    }

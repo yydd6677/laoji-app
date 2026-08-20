@@ -56,12 +56,17 @@ def configure_source_ip(source_ip: str | None) -> None:
         host = str(address[0]).strip().lower()
         if source_address is None and (host == "localhost" or host.startswith("127.")):
             source_address = (_PROBE_SOURCE_IP, 0)
-        return original(
-            address,
-            timeout=timeout,
-            source_address=source_address,
-            all_errors=all_errors,
-        )
+        options = {
+            "timeout": timeout,
+            "source_address": source_address,
+        }
+        # ``all_errors`` was added in Python 3.11.  The final candidate uses
+        # Python 3.12, but keeping the evaluation launcher usable on a stock
+        # 3.10 Linux host prevents a failed probe from idling until its wall
+        # clock resource lane expires.
+        if all_errors:
+            options["all_errors"] = True
+        return original(address, **options)
 
     socket.create_connection = create_connection
 
