@@ -154,6 +154,45 @@ def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
     assert "模型结果" not in repr(direct)
 
 
+def test_generation_context_is_canonical_across_business_callers(monkeypatch):
+    captured = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": {"content": "{}"}, "done": True}
+
+    def post(_url, **kwargs):
+        captured.append(kwargs["json"]["options"]["num_ctx"])
+        return Response()
+
+    monkeypatch.delenv("LAOJI_GENERATION_NUM_CTX", raising=False)
+    monkeypatch.delenv("MEETING_SUMMARY_NUM_CTX", raising=False)
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    config = Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat")
+    for requested in (4096, 8192, 12288, 16384):
+        assert llm_provider._call_ollama_transport(
+            config,
+            "system",
+            "input",
+            options={"num_ctx": requested},
+            priority="interactive",
+        ) == "{}"
+
+    assert captured == [16384, 16384, 16384, 16384]
+
+
+def test_generation_context_uses_one_bounded_deployment_value(monkeypatch):
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "8192")
+    assert llm_provider.canonical_generation_num_ctx() == 8192
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "999999")
+    assert llm_provider.canonical_generation_num_ctx() == 16384
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "invalid")
+    assert llm_provider.canonical_generation_num_ctx() == 16384
+
+
 def test_json_output_shape_is_numeric_and_does_not_retain_values():
     value = '{"facts":[{"fact_id":"f1","content":"内部会议正文","sources":[{"source_id":"transcript:t0"}]}]}'
     shape = llm_provider._json_output_shape(value)

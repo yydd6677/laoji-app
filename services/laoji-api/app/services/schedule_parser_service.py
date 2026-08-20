@@ -23,7 +23,11 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.services.llm_provider import LlmConfig, call_llm as call_ollama
+from app.services.llm_provider import (
+    LlmConfig,
+    call_llm as call_ollama,
+    canonical_generation_num_ctx,
+)
 from app.privacy_logging import privacy_log
 
 
@@ -289,10 +293,8 @@ def _schedule_llm_max_tokens() -> int:
 
 
 def _schedule_llm_num_ctx() -> int:
-    try:
-        return max(1024, min(8192, int(os.getenv("SCHEDULE_LLM_NUM_CTX", "8192"))))
-    except ValueError:
-        return 8192
+    """Use the single resident runner shared by every generation task."""
+    return canonical_generation_num_ctx()
 
 
 def _schedule_force_llm() -> bool:

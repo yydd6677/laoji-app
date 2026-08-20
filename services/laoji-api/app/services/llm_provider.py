@@ -110,6 +110,28 @@ def canonical_ollama_base_url() -> str:
     return raw
 
 
+def canonical_generation_num_ctx() -> int:
+    """Return the one resident context size for the shared generation model.
+
+    Ollama keys a loaded runner by model options. Letting schedule, Summary
+    and Q2 request differently sized variants of the same 9B model causes a
+    costly unload/reload on capability switches. vNext has one generation
+    provider, so it must also have one resident runner shape.
+
+    ``MEETING_SUMMARY_NUM_CTX`` remains a compatibility input for existing
+    deployments, but individual business callers cannot override the value.
+    """
+    raw = os.getenv(
+        "LAOJI_GENERATION_NUM_CTX",
+        os.getenv("MEETING_SUMMARY_NUM_CTX", "16384"),
+    )
+    try:
+        configured = int(raw)
+    except (TypeError, ValueError):
+        configured = 16_384
+    return min(16_384, max(4_096, configured))
+
+
 def canonical_dashscope_base_url() -> str:
     """Validate a DashScope/OpenAI-compatible base URL from server config."""
     raw = os.getenv(
@@ -543,20 +565,17 @@ def _call_ollama_transport(
         default_max_tokens = int(os.getenv("MEETING_SUMMARY_MAX_TOKENS", "2048"))
     except ValueError:
         default_max_tokens = 2048
-    try:
-        # v3 reserves 10,240 input tokens plus protocol/output headroom inside
-        # Ollama's 16,384-token context.  Keep the cap here so a deployment
-        # cannot silently fall back to the old 8k window for local generation.
-        default_num_ctx = int(os.getenv("MEETING_SUMMARY_NUM_CTX", "16384"))
-    except ValueError:
-        default_num_ctx = 16384
     request_options: dict[str, Any] = {
         "temperature": 0.1,
-        "num_ctx": min(16_384, max(4_096, default_num_ctx)),
+        "num_ctx": canonical_generation_num_ctx(),
         "num_predict": default_max_tokens if max_tokens is None else max_tokens,
     }
     if options:
         request_options.update(options)
+    # Business-specific context sizes would create multiple Ollama runners for
+    # the same model and defeat infinite keep-alive. Enforce this after caller
+    # options are merged. Embeddings use their own transport and runner.
+    request_options["num_ctx"] = canonical_generation_num_ctx()
     active_priority = (priority or "interactive").strip().lower()
     stream_for_preemption = active_priority == "background"
     payload: dict[str, Any] = {

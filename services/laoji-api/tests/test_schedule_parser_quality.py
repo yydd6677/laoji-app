@@ -5,14 +5,18 @@ import pytest
 from app.services import schedule_parser_service as parser
 
 
-def test_schedule_llm_context_defaults_to_shared_8192_runner(monkeypatch):
+def test_schedule_llm_context_uses_shared_generation_runner(monkeypatch):
     monkeypatch.delenv("SCHEDULE_LLM_NUM_CTX", raising=False)
-    assert parser._schedule_llm_num_ctx() == 8192
+    monkeypatch.delenv("LAOJI_GENERATION_NUM_CTX", raising=False)
+    monkeypatch.delenv("MEETING_SUMMARY_NUM_CTX", raising=False)
+    assert parser._schedule_llm_num_ctx() == 16384
 
+    # The retired schedule-specific knob must not fork an 8k runner from the
+    # Summary/Q2 16k runner.
     monkeypatch.setenv("SCHEDULE_LLM_NUM_CTX", "4096")
-    assert parser._schedule_llm_num_ctx() == 4096
+    assert parser._schedule_llm_num_ctx() == 16384
 
-    monkeypatch.setenv("SCHEDULE_LLM_NUM_CTX", "invalid")
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "8192")
     assert parser._schedule_llm_num_ctx() == 8192
 
 
