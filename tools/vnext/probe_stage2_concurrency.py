@@ -20,6 +20,7 @@ import subprocess
 import threading
 import time
 import uuid
+from urllib import error as urllib_error
 from urllib import request
 
 from app.services import (
@@ -55,16 +56,25 @@ def sha256_bytes(payload: bytes) -> str:
 
 def put_object(url: str, payload: bytes) -> float:
     started = time.perf_counter()
-    req = request.Request(
-        url,
-        data=payload,
-        method="PUT",
-        headers={"Content-Length": str(len(payload))},
-    )
-    with request.urlopen(req, timeout=300) as response:
-        if not 200 <= response.status < 300:
-            raise RuntimeError(f"R2 PUT failed: HTTP {response.status}")
-    return time.perf_counter() - started
+    last_error: BaseException | None = None
+    for attempt in range(3):
+        req = request.Request(
+            url,
+            data=payload,
+            method="PUT",
+            headers={"Content-Length": str(len(payload))},
+        )
+        try:
+            with request.urlopen(req, timeout=300) as response:
+                if not 200 <= response.status < 300:
+                    raise RuntimeError(f"R2 PUT failed: HTTP {response.status}")
+            return time.perf_counter() - started
+        except (urllib_error.URLError, ConnectionError, TimeoutError, OSError) as error:
+            last_error = error
+            if attempt >= 2:
+                break
+            time.sleep(0.5 * (2 ** attempt))
+    raise RuntimeError("R2 PUT failed after bounded retries") from last_error
 
 
 def realtime_pcm(media: Path) -> bytes:

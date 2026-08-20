@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 import sqlite3
 import uuid
 
@@ -61,8 +62,16 @@ class FakeR2:
         content = self.objects.get(object_key)
         return None if content is None else {"content_length": len(content), "etag": "fake"}
 
-    def stream_object_sha256(self, *, object_key: str) -> str:
-        return "sha256:" + hashlib.sha256(self.objects[object_key]).hexdigest()
+    def stream_object_sha256(
+        self,
+        *,
+        object_key: str,
+        mirror_target: Path | None = None,
+    ) -> tuple[str, int]:
+        content = self.objects[object_key]
+        if mirror_target is not None:
+            mirror_target.write_bytes(content)
+        return "sha256:" + hashlib.sha256(content).hexdigest(), len(content)
 
     def delete_object(self, *, object_key: str):
         self.objects.pop(object_key, None)
@@ -82,6 +91,8 @@ def upload_context(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "R2_UPLOAD_SESSION_TTL_HOURS", 24)
     monkeypatch.setattr(settings, "R2_PRESIGN_TTL_SECONDS", 60)
     monkeypatch.setattr(settings, "R2_PART_SIZE", 5 * 1024 * 1024)
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_PATH", str(tmp_path / "media-cache"))
     device_identity._SCHEMA_READY.clear()  # type: ignore[attr-defined]
     with sqlite3.connect(database) as connection:
         connection.execute(
@@ -142,7 +153,7 @@ def create_small(context, content: bytes, *, suffix: str = "1", now_epoch: int =
     return session, reused, digest
 
 
-def test_single_upload_verification_and_task_commit_are_atomic(upload_context) -> None:
+def test_single_upload_verification_and_task_commit_are_atomic(upload_context, monkeypatch) -> None:
     context, fake = upload_context
     content = b"real-audio-content"
     session, reused, digest = create_small(context, content)
@@ -151,6 +162,36 @@ def test_single_upload_verification_and_task_commit_are_atomic(upload_context) -
     assert session["put_url"].startswith("https://r2.invalid/")
     assert fake.last_key
     fake.objects[fake.last_key] = content
+
+    original_promote = vnext_upload_store.vnext_verified_media_cache.promote
+    promote_observations: list[tuple[str, int, int]] = []
+
+    def promote_after_commit(reservation, *, actual_sha256: str, actual_size: int):
+        with device_identity.control_connection() as connection:
+            session_state = connection.execute(
+                "SELECT state FROM vnext_upload_sessions WHERE session_id = ?",
+                (session["session_id"],),
+            ).fetchone()[0]
+            asset_count = connection.execute(
+                "SELECT COUNT(*) FROM vnext_verified_assets WHERE asset_revision_id = ?",
+                (f"asset-revision:{session['session_id']}",),
+            ).fetchone()[0]
+            task_count = connection.execute(
+                "SELECT COUNT(*) FROM vnext_tasks WHERE task_id = ?",
+                ("transcription-task-1",),
+            ).fetchone()[0]
+        promote_observations.append((session_state, asset_count, task_count))
+        return original_promote(
+            reservation,
+            actual_sha256=actual_sha256,
+            actual_size=actual_size,
+        )
+
+    monkeypatch.setattr(
+        vnext_upload_store.vnext_verified_media_cache,
+        "promote",
+        promote_after_commit,
+    )
 
     completed = vnext_upload_store.complete_upload_session(
         context,
@@ -167,6 +208,13 @@ def test_single_upload_verification_and_task_commit_are_atomic(upload_context) -
     assert completed["verified_asset"]["source_sha256"] == digest
     assert completed["verified_asset"]["object_revision"] == 1
     assert completed["task"]["capability"] == "transcript"
+    assert promote_observations == [("verified", 1, 1)]
+    cached = vnext_upload_store.vnext_verified_media_cache.resolve(
+        asset_revision_id=f"asset-revision:{session['session_id']}",
+        source_sha256=digest,
+        expected_size=len(content),
+    )
+    assert cached is not None and cached.read_bytes() == content
     with device_identity.control_connection() as connection:
         session_row = connection.execute(
             "SELECT state, verified_asset_id, transcription_task_id FROM vnext_upload_sessions"

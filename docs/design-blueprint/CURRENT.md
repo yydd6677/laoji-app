@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 implementation candidate is performance-blocked; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.38 (146)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.38 (146)`
 
 ## 权威文件
 
@@ -94,6 +94,14 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 最新完整后端回归的精确结果与旧合同失败边界见
 [2026-08-19 回归复核](../vnext-stage2/RECHECK-20260819.md)，不要继续引用过期的 `488/17` 统计。
 
+2026-08-20 的候选将上传校验时已经读取的压缩媒体流复用为私有、有界、事务提交后才可见的临时缓存，
+避免 worker 再做一次公开 R2 Range 下载；R2 仍为恢复来源，终态或孤儿缓存会被确定性清理。使用隔离
+API/数据库/R2 前缀和 loopback v2 测试桥、但复用生产 GPU0 上完全相同的 Qwen3-ASR-1.7B/revision，
+30 条真实媒体全链路首段 p95 为 `2.877s`、RTF p95 为 `0.140411`，30/30 文本、单 final 与清理均通过。
+这关闭了选定架构的首段/RTF 性能项；纯 CPU 和 8 秒片段路线被否决。正式 8030 v2 handler 部署、
+Android/质量/混合负载、公开零流量和 capability barrier 仍开放，详见
+[校验媒体复用与 GPU0 回放](../vnext-stage2/VERIFIED-MEDIA-CACHE-GPU-20260820.md)。
+
 隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
 [Stage 2 真实候选证据](../vnext-stage2/REAL-CANDIDATE-20260818.md)。ASR revision 现在要求固定值，
@@ -108,7 +116,8 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 [candidate deployment](../vnext-stage3/CANDIDATE-DEPLOY-47640F3-20260819.md)；旧候选仍可回滚）；生产 `18020/8030`
 仍未修改。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
-生产延迟。下一入口是 Android 网络/进程恢复、手机连续文字投影和 NO_SPEECH/性能门；
+生产延迟。下一入口是正式 8030 v2 handler、Android 网络/进程恢复、手机连续文字投影、NO_SPEECH、
+混合负载和质量门；
 不得重放 Stage 0/1，也不得激活生产 capability barrier。当前登记的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且

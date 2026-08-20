@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from pathlib import Path
 import sqlite3
 import time
 import uuid
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from app.api import device_v2
 from app.config import settings
 from app.services import (
+    compact_transcription_service,
     device_identity,
     r2_storage_service,
     vnext_import_transcript_store,
@@ -23,6 +25,7 @@ from app.services import (
     vnext_realtime_store,
     vnext_task_store,
     vnext_upload_store,
+    vnext_verified_media_cache,
 )
 from app.services.device_v2_identity import DeviceV2Context
 from app.services.compact_transcription_service import SpeechAudio
@@ -48,8 +51,16 @@ class FakeR2:
         content = self.objects.get(object_key)
         return None if content is None else {"content_length": len(content), "etag": "fake"}
 
-    def stream_object_sha256(self, *, object_key: str) -> str:
-        return _digest(self.objects[object_key])
+    def stream_object_sha256(
+        self,
+        *,
+        object_key: str,
+        mirror_target: Path | None = None,
+    ) -> tuple[str, int]:
+        content = self.objects[object_key]
+        if mirror_target is not None:
+            mirror_target.write_bytes(content)
+        return _digest(content), len(content)
 
     def delete_object(self, *, object_key: str) -> None:
         self.objects.pop(object_key, None)
@@ -196,6 +207,8 @@ def import_context(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "R2_UPLOAD_SESSION_TTL_HOURS", 24)
     monkeypatch.setattr(settings, "R2_PRESIGN_TTL_SECONDS", 60)
     monkeypatch.setattr(settings, "R2_PART_SIZE", 5 * 1024 * 1024)
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_ENABLED", False)
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_PATH", str(tmp_path / "media-cache"))
     monkeypatch.setattr(
         settings,
         "VNEXT_SPEAKER_SPOOL_PATH",
@@ -797,3 +810,121 @@ async def test_checkpoint_replay_republishes_stable_text_without_second_asr_call
     snapshot = vnext_import_transcript_store.get_event_snapshot(context, TASK_ID)
     assert snapshot is not None
     assert [event["event_kind"] for event in snapshot["events"]] == ["stable", "final"]
+
+
+@pytest.mark.asyncio
+async def test_verified_media_cache_is_local_and_removed_after_final(
+    import_context,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    context, fake = import_context
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "VNEXT_VERIFIED_MEDIA_CACHE_PATH", str(tmp_path / "media-cache"))
+    monkeypatch.setattr(settings, "AUDIO_STORAGE_PATH", str(tmp_path / "audio"))
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16_000)
+        output.writeframes(np.full(24_000, 600, dtype="<i2").tobytes())
+    source = _verified_source(context, fake, buffer.getvalue())
+    cached = vnext_verified_media_cache.resolve(
+        asset_revision_id=str(source["asset_revision_id"]),
+        source_sha256=str(source["source_sha256"]),
+        expected_size=int(source["byte_size"]),
+    )
+    assert cached is not None and cached.is_file()
+    attempt_id = _running_attempt(context, source, owner="cache-owner")
+    speech = SpeechAudio(
+        ordinal=0,
+        segment_id="segment-local-cache",
+        start_ms=0,
+        end_ms=1_500,
+        audio=np.full(24_000, 0.1, dtype=np.float32),
+    )
+
+    class FakeManager:
+        async def initialize_vad(self) -> None:
+            return None
+
+        def create_vad_model(self):
+            return object()
+
+    manager = FakeManager()
+    monkeypatch.setattr(
+        vnext_import_transcription_pipeline.ModelManager,
+        "get_instance",
+        lambda: manager,
+    )
+
+    def local_segments(path, *, source_sha256, vad_model):
+        assert Path(path) == cached
+        assert source_sha256 == str(source["source_sha256"])[7:]
+        assert vad_model is not None
+        return iter([speech])
+
+    monkeypatch.setattr(compact_transcription_service, "stream_speech_segments", local_segments)
+    monkeypatch.setattr(compact_transcription_service, "_probe_duration_ms", lambda _path: 1_500)
+    monkeypatch.setattr(
+        vnext_import_transcription_pipeline,
+        "stream_r2_speech_segments",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("R2 must not be read twice")),
+    )
+    monkeypatch.setattr(
+        vnext_import_transcription_pipeline.vnext_asr_client,
+        "ready_snapshot",
+        lambda: {"ready": True, "model": "Qwen3-ASR", "model_revision": "asr-test-r1"},
+    )
+
+    def fake_batch(*, items, priority, timeout_seconds):
+        del timeout_seconds
+        assert priority == "offline"
+        return {
+            "schema_version": 2,
+            "contract_revision": "asr.batch.v2",
+            "model": "Qwen3-ASR",
+            "model_revision": "asr-test-r1",
+            "priority": priority,
+            "queue_ms": 1,
+            "infer_ms": 2,
+            "items": [{
+                "id": item["id"],
+                "stable_segment_key": item["id"],
+                "segment_revision": 1,
+                "text_state": "stable",
+                "outcome": "text",
+                "text": "本地校验媒体只解码一次。",
+                "language": "Chinese",
+                "source_start_ms": item["source_start_ms"],
+                "source_end_ms": item["source_end_ms"],
+                "audio_ms": 1_500,
+                "model_revision": "asr-test-r1",
+                "queue_ms": 1,
+                "infer_ms": 2,
+            } for item in items],
+        }
+
+    monkeypatch.setattr(
+        vnext_import_transcription_pipeline.vnext_asr_client,
+        "transcribe_batch",
+        fake_batch,
+    )
+
+    async def fake_speaker_finalize(_context, _run_id):
+        return {"state": "queued"}
+
+    monkeypatch.setattr(
+        vnext_import_transcription_pipeline.vnext_speaker_pipeline,
+        "finalize_realtime_speaker",
+        fake_speaker_finalize,
+    )
+    result = await vnext_import_transcription_pipeline._transcribe_source(
+        context,
+        source,
+        attempt_id=attempt_id,
+        lease_owner="cache-owner",
+    )
+
+    assert result["transcript"]["state"] == "succeeded"
+    assert not cached.exists()

@@ -10,7 +10,11 @@ import time
 from typing import Any, Iterable, Literal, Protocol
 
 from app.config import settings
-from app.services import r2_storage_service, vnext_task_store
+from app.services import (
+    r2_storage_service,
+    vnext_task_store,
+    vnext_verified_media_cache,
+)
 from app.services.device_identity import control_connection, utc_now
 
 
@@ -726,25 +730,63 @@ def complete_upload_session(
     if int(head["content_length"]) != int(row["expected_size"]):
         _queue_cleanup(context, row, terminal_state="cancelled", not_before_epoch=int(time.time()))
         raise VNextUploadError("UPLOAD_SIZE_MISMATCH", "录音文件大小校验失败", 422)
+    asset_revision_id = f"asset-revision:{session_id}"
+    cache_reservation = vnext_verified_media_cache.reserve(
+        asset_revision_id=asset_revision_id,
+        source_sha256=str(row["expected_sha256"]),
+        expected_size=int(row["expected_size"]),
+    )
+
+    def abort_cache_reservation() -> None:
+        nonlocal cache_reservation
+        if cache_reservation is not None:
+            vnext_verified_media_cache.abort(cache_reservation)
+            cache_reservation = None
+
+    def promote_cache_reservation() -> None:
+        nonlocal cache_reservation
+        if cache_reservation is not None:
+            vnext_verified_media_cache.promote(
+                cache_reservation,
+                actual_sha256=actual_sha256,
+                actual_size=actual_size,
+            )
+            cache_reservation = None
+
     try:
-        actual_sha256 = r2_storage_service.stream_object_sha256(object_key=object_key)
+        actual_sha256, actual_size = r2_storage_service.stream_object_sha256(
+            object_key=object_key,
+            mirror_target=(
+                cache_reservation.partial_path
+                if cache_reservation is not None
+                else None
+            ),
+        )
     except Exception as error:
+        abort_cache_reservation()
         raise VNextUploadError(
             "UPLOAD_STORAGE_UNAVAILABLE", "录音文件暂时无法校验，可重试", 503,
         ) from error
-    if actual_sha256 != str(row["expected_sha256"]):
+    if (
+        actual_size != int(row["expected_size"])
+        or actual_sha256 != str(row["expected_sha256"])
+    ):
+        abort_cache_reservation()
         _queue_cleanup(context, row, terminal_state="cancelled", not_before_epoch=int(time.time()))
-        raise VNextUploadError("UPLOAD_HASH_MISMATCH", "录音文件校验失败", 422)
+        code = "UPLOAD_SIZE_MISMATCH" if actual_size != int(row["expected_size"]) else "UPLOAD_HASH_MISMATCH"
+        message = "录音文件大小校验失败" if code == "UPLOAD_SIZE_MISMATCH" else "录音文件校验失败"
+        raise VNextUploadError(code, message, 422)
     if transcription_input_sha256 != actual_sha256:
+        abort_cache_reservation()
         raise VNextUploadError("TRANSCRIPTION_INPUT_MISMATCH", "转写输入与录音文件不一致", 422)
 
-    asset_revision_id = f"asset-revision:{session_id}"
     now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         current = _session_row(connection, context, session_id)
         if current is None:
             connection.rollback()
+            abort_cache_reservation()
             raise VNextUploadError("UPLOAD_SESSION_NOT_FOUND", "上传任务不存在", 404)
         try:
             _assert_binding(
@@ -754,16 +796,20 @@ def complete_upload_session(
             )
         except VNextUploadError:
             connection.rollback()
+            abort_cache_reservation()
             _queue_cleanup(context, current, terminal_state="cancelled", not_before_epoch=int(time.time()))
             raise
         if current["state"] == "verified":
             asset, task = _verified_and_task(connection, context, current)
             connection.commit()
             if asset is None or task is None:
+                abort_cache_reservation()
                 raise VNextUploadError("UPLOAD_COMMIT_DAMAGED", "已完成上传记录不完整", 500)
+            promote_cache_reservation()
             return {"schema_version": 2, "reused": True, "verified_asset": dict(asset), "task": vnext_task_store.decode_task_row(task)}
         if current["state"] != "completing":
             connection.rollback()
+            abort_cache_reservation()
             raise VNextUploadError("UPLOAD_SESSION_NOT_ACTIVE", "上传任务状态已变化", 409)
         connection.execute(
             """INSERT INTO vnext_verified_assets(
@@ -809,6 +855,7 @@ def complete_upload_session(
             )
             if not same_task:
                 connection.rollback()
+                abort_cache_reservation()
                 raise VNextUploadError("TASK_ID_CONFLICT", "转写任务标识已用于其他输入", 409)
         else:
             connection.execute(
@@ -833,6 +880,7 @@ def complete_upload_session(
         asset, task = _verified_and_task(connection, context, current)
         connection.commit()
     assert asset is not None and task is not None
+    promote_cache_reservation()
     return {"schema_version": 2, "reused": False, "verified_asset": dict(asset), "task": vnext_task_store.decode_task_row(task)}
 
 
@@ -1307,6 +1355,24 @@ def list_pending_transcription_sources(limit: int = 32) -> list[dict[str, Any]]:
             (time.time(), bounded),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def list_active_transcription_cache_identities() -> list[tuple[str, str]]:
+    """Return only hashed-cache inputs whose transcript Task can still run."""
+    ensure_vnext_upload_schema()
+    with control_connection() as connection:
+        rows = connection.execute(
+            """SELECT asset.asset_revision_id, asset.source_sha256
+                 FROM vnext_tasks task
+                 JOIN vnext_upload_sessions session
+                   ON session.transcription_task_id = task.task_id
+                 JOIN vnext_verified_assets asset
+                   ON asset.asset_revision_id = session.verified_asset_id
+                WHERE task.capability = 'transcript' AND task.state = 'active'
+                  AND session.state = 'verified' AND asset.state = 'sealed'
+                ORDER BY task.created_at, task.task_id"""
+        ).fetchall()
+    return [(str(row["asset_revision_id"]), str(row["source_sha256"])) for row in rows]
 
 
 def get_verified_transcription_source(

@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 from typing import Any, Callable, Iterable, Iterator
 
 import numpy as np
@@ -27,6 +28,7 @@ from app.services import (
     vnext_speaker_store,
     vnext_task_store,
     vnext_upload_store,
+    vnext_verified_media_cache,
 )
 from app.services.compact_transcription_service import (
     ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
@@ -323,16 +325,30 @@ async def _transcribe_source(
             _logger.warning("vnext import speaker segment deferred: %s", type(error).__name__)
 
     normalized_sha = str(source["source_sha256"])[7:]
-    iterator = lambda: stream_r2_speech_segments(
-        object_key=str(source["object_key"]),
-        source_sha256=normalized_sha,
-        vad_model=vad_model,
-        on_decoded_duration_ms=observe_duration,
+    cached_source = vnext_verified_media_cache.resolve(
+        asset_revision_id=str(source["asset_revision_id"]),
+        source_sha256=str(source["source_sha256"]),
+        expected_size=int(source["byte_size"]),
     )
+    iterator = (
+        None
+        if cached_source is not None
+        else lambda: stream_r2_speech_segments(
+            object_key=str(source["object_key"]),
+            source_sha256=normalized_sha,
+            vad_model=vad_model,
+            on_decoded_duration_ms=observe_duration,
+        )
+    )
+    final_committed = False
     try:
         result = await asyncio.to_thread(
             transcribe_recording_asset,
-            source_path=f"r2-{source['asset_revision_id']}.audio",
+            source_path=(
+                str(cached_source)
+                if cached_source is not None
+                else f"r2-{source['asset_revision_id']}.audio"
+            ),
             source_sha256=str(source["source_sha256"]),
             job_id=task_id,
             owner_user_id=0,
@@ -343,8 +359,8 @@ async def _transcribe_source(
             partial=publish_partial,
             on_stable_segment=collect_speaker,
             speaker_enabled=False,
-            source_size_override=int(source["byte_size"]),
-            source_duration_ms_override=1,
+            source_size_override=(None if cached_source is not None else int(source["byte_size"])),
+            source_duration_ms_override=(None if cached_source is not None else 1),
         )
     except CompactTranscriptionError as error:
         if str(error) != "no_speech":
@@ -363,6 +379,7 @@ async def _transcribe_source(
             source_duration_ms=decoded_duration_ms,
             model_revision=str(ready["model_revision"]),
         )
+        final_committed = True
     else:
         final = await asyncio.to_thread(
             vnext_import_transcript_store.commit_final,
@@ -373,6 +390,13 @@ async def _transcribe_source(
             outcome="text",
             source_duration_ms=max(result.source_duration_ms, decoded_duration_ms),
             model_revision=result.model_revision,
+        )
+        final_committed = True
+    if final_committed and cached_source is not None:
+        await asyncio.to_thread(
+            vnext_verified_media_cache.remove,
+            asset_revision_id=str(source["asset_revision_id"]),
+            source_sha256=str(source["source_sha256"]),
         )
     speaker = await vnext_speaker_pipeline.finalize_realtime_speaker(
         context,
@@ -396,6 +420,7 @@ class VNextImportTranscriptionWorker:
         self._maintenance_task: asyncio.Task | None = None
         self._closed = False
         self._queued: set[str] = set()
+        self._last_cache_prune_epoch = 0.0
         self._lease_owner = f"import-transcript:{socket.gethostname()}:{os.getpid()}"
 
     def start(self) -> None:
@@ -446,6 +471,13 @@ class VNextImportTranscriptionWorker:
         sources = await asyncio.to_thread(vnext_upload_store.list_pending_transcription_sources, 16)
         for source in sources:
             self.notify(source)
+        now = time.time()
+        if now - self._last_cache_prune_epoch >= 30.0:
+            active = await asyncio.to_thread(
+                vnext_upload_store.list_active_transcription_cache_identities,
+            )
+            await asyncio.to_thread(vnext_verified_media_cache.prune, active)
+            self._last_cache_prune_epoch = now
 
     async def _maintain(self) -> None:
         while not self._closed:

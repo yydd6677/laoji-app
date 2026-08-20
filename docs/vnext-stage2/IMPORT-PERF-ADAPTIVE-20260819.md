@@ -1,6 +1,9 @@
 # Stage 2 导入转写性能回放
 
-状态：`isolated candidate evidence; performance gate open`。
+状态：`isolated CPU evidence; CPU route rejected`。
+
+本报告保留被否决的 CPU/8 秒片段证据。选定 GPU0 架构在复用已校验压缩媒体后已通过首段/RTF 门，
+见 [校验媒体复用与 GPU0 回放](VERIFIED-MEDIA-CACHE-GPU-20260820.md)；Stage 2 的其他采用门仍开放。
 
 ## 实现切片
 
@@ -27,9 +30,9 @@
 
 ## 根因边界
 
-回放在候选 CPU ASR 上执行；生产 `8030`、`18020`、GPU0/GPU1、PCB 和其他服务未切换。8 秒片段实验降低了段数但增加了单次推理负载，未改善 p95，因此没有保留该回归。当前阻断是 ASR 资源/性能门，不是媒体格式、R2、稳定事件、NO_SPEECH 或数据一致性失败。
+回放在候选 CPU ASR 上执行；生产 `8030`、`18020`、GPU0/GPU1、PCB 和其他服务未切换。8 秒片段实验降低了段数但增加了单次推理负载，未改善 p95，因此没有保留该回归。该轮证明 CPU 路线的阻断是 ASR 资源/性能门，不是媒体格式、R2、稳定事件、NO_SPEECH 或数据一致性失败。
 
-本证据不授权 capability barrier、生产流量切换或旧链路删除。
+本 CPU 证据不授权 capability barrier、生产流量切换或旧链路删除，也不再作为选定架构的性能结论。
 
 后续线程拓扑复测见 `CPU-THREAD-TOPOLOGY-20260819.md`：当前跨双路 56 线程的 4 秒暖态调用为
-`3.211-4.761s`，单 NUMA/28 线程反而退化，未采用；完整导入性能门仍保持未通过。
+`3.211-4.761s`，单 NUMA/28 线程反而退化，未采用；CPU 完整导入性能门未通过。

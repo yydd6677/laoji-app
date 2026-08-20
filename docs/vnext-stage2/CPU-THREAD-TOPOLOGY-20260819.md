@@ -1,6 +1,9 @@
 # Stage 2 CPU ASR thread-topology check (2026-08-19)
 
-状态：`isolated candidate evidence; no adopted runtime change; performance gate open`。
+状态：`isolated CPU evidence; topology rejected; no adopted runtime change`。
+
+本报告保留 CPU 拓扑否决证据。选定 GPU0 架构的首段/RTF 后续结果见
+[校验媒体复用与 GPU0 回放](VERIFIED-MEDIA-CACHE-GPU-20260820.md)。
 
 ## 实时边界
 
@@ -26,7 +29,6 @@
 ## 结论
 
 4 秒模型调用本身的暖态尾部低于 8 秒，但这不能替代导入端到端 30 条门。旧导入回放 p95 的高值
-包含 worker、VAD、R2 读取和共享 CPU 尖峰；当前仍需在真实混合负载下重新取得 30 条
-`first_stable_p95 <= 8s` 与 `RTF p95 <= 0.5`，并解决 GPU0 余量/常驻部署边界。缩短首段到 2 秒会
-增加断句和上下文损失，不作为追求指标的默认改动。
-
+包含 worker、VAD、R2 读取和共享 CPU 尖峰；该 CPU 路线未能取得 30 条
+`first_stable_p95 <= 8s` 与 `RTF p95 <= 0.5`，因此被否决。选定 GPU0 路线仍须解决余量、正式 v2
+handler 和混合负载采用边界。缩短首段到 2 秒会增加断句和上下文损失，不作为追求指标的默认改动。

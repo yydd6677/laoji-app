@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 isolated candidate with ASR/recovery evidence but CPU performance exit gates open; Stage 3 source-stream/Facts-V3 and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 selected-architecture first-segment/RTF performance gate passed but deployment/Android/quality/capability gates remain open; Stage 3 source-stream/Facts-V3 and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -50,6 +50,14 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 断线/重连/ACK/purge 回放全部为 `text` 且清理确认，详见
 `docs/vnext-stage2/REALTIME-GPU-REPLAY-20260819.md`。这两类证据均未证明 Android 端到端首段 p95、
 混合负载资源门或公开零流量周期，Stage 2 仍不能切 capability。
+
+2026-08-20 的 Stage 2 候选消除了上传校验后由 worker 再次公开读取 R2 的重复 I/O：校验流同步镜像
+压缩媒体，但只在 verified asset + transcription Task 事务提交后原子发布到私有、有界缓存；终态删除，
+缺失时仍从 R2 恢复。隔离 API/数据库/R2 与 loopback v2 测试桥复用生产 GPU0 上相同模型/revision 的
+30 条真实媒体回放，首段 p95 `2.877s`、RTF p95 `0.140411`，并保持 30/30 文本、单 final 和清理。
+因此选定架构的首段/RTF 性能门已关闭，纯 CPU 路线被否决；正式 8030 v2 handler、Android、质量、
+混合负载、公开零流量与 capability 门仍开放。证据见
+`docs/vnext-stage2/VERIFIED-MEDIA-CACHE-GPU-20260820.md`。
 
 2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
 收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前
@@ -1045,6 +1053,8 @@ Stage 1 停写/退出门：generic probe 的 restart/cancel/replay、epoch/bindi
 
 1. 顺序执行 0043/0044；MediaAudioExtractor 输出 app-private 可 seek 音频和 hash。
 2. MeetingUploadWorker 接入 single/multipart R2；server upload/verified-asset/cleanup schema 与 API 上线。
+   服务端校验 R2 对象时可把同一压缩媒体流写入私有有界缓存，但必须在 verified asset + Task 事务提交后
+   才原子发布；缓存不是业务真相或整份 WAV，缺失时回退 R2，任务终态和孤儿条目必须清理。
 3. 先发布 v2 upload/transcript 客户端；对应 v1 submit 连续一个完整公开周期为零后激活 capability
    barrier。server commit 在同事务激活 verified asset 并创建唯一 generic transcription task；barrier 后
    v1 submit 返回 426，旧 ASR job 只由旧 worker drain。
@@ -1061,7 +1071,8 @@ canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncS
 激活 capability，也未替代真实设备回放。
 
 目标退出门：1 GiB 上传内存与恢复门、双上传+实时会议无冲突、首段/RTF/讲话人预算均需分别有真实证据；
-未知讲话人不命名；NO_SPEECH 中文结果正确。
+未知讲话人不命名；NO_SPEECH 中文结果正确。首段/RTF 已由 2026-08-20 的 GPU0 全链路证据关闭，
+其余门不得由该性能报告代替。
 
 回滚：barrier 前允许客户端 capability 切回旧完整链路；barrier 后保留 v2 R2 ingress、verified asset
 和 generic Task，只把新 generation 显式路由到 legacy transcription handler adapter，不恢复旧 upload/

@@ -51,6 +51,28 @@ class Settings(BaseSettings):
     R2_PART_SIZE: int = Field(default=8 * 1024 * 1024, ge=5 * 1024 * 1024, le=128 * 1024 * 1024)
     R2_UPLOAD_SESSION_TTL_HOURS: int = Field(default=24, ge=1, le=168)
 
+    # The upload verifier already reads the complete sealed R2 object. Mirror
+    # that same compressed byte stream into a private, bounded transient file
+    # so ASR does not repeat a slow public Range download. R2 remains the
+    # recoverable source and files are removed when the Task becomes terminal.
+    VNEXT_VERIFIED_MEDIA_CACHE_ENABLED: bool = True
+    VNEXT_VERIFIED_MEDIA_CACHE_PATH: str = "./data/vnext-verified-media-cache"
+    VNEXT_VERIFIED_MEDIA_CACHE_MAX_SOURCE_BYTES: int = Field(
+        default=512 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=512 * 1024 * 1024,
+    )
+    VNEXT_VERIFIED_MEDIA_CACHE_MAX_TOTAL_BYTES: int = Field(
+        default=4 * 1024 * 1024 * 1024,
+        ge=512 * 1024 * 1024,
+        le=4 * 1024 * 1024 * 1024,
+    )
+    VNEXT_VERIFIED_MEDIA_CACHE_PARTIAL_TTL_SECONDS: int = Field(
+        default=60 * 60,
+        ge=60,
+        le=24 * 60 * 60,
+    )
+
     SECRET_KEY: str = "change-me-in-production"
     CORS_ORIGINS: str = '["http://localhost","http://localhost:5179"]'
 

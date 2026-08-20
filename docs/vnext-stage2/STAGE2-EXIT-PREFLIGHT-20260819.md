@@ -28,7 +28,9 @@
 
 ## 阻断结论
 
-当前真实外部状态仍缺专属 Android 实例；已知候选 realtime 单次墙钟约 `16.224s`，高于蓝图稳态
-`p95 <= 2s` 目标；完整总 RSS、GPU0 安全余量和旧公开零流量周期也没有合格 envelope。因此该工具
-当前应保持非零退出，Stage 2 capability barrier 不能激活，生产 `18020/8030` 和旧链路未触碰。
-
+2026-08-20 的 30 条真实全链路回放已为选定 GPU0 架构提供 `first_segment_p95_ms=2877` 和
+`import_rtf_p95=0.140411`，这两个数值门已单独通过，见
+[校验媒体复用与 GPU0 回放](VERIFIED-MEDIA-CACHE-GPU-20260820.md)。但当前仍缺专属 Android 的网络/
+进程恢复和端到端 realtime p95，以及完整总 RSS、GPU0 安全余量、质量门和旧公开零流量周期；正式
+8030 也尚未部署 v2 handler。因此还不能形成全字段合格 envelope，该工具必须继续非零退出，Stage 2
+capability barrier 不能激活，生产 `18020/8030` 配置和旧链路均未改变。

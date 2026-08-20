@@ -318,17 +318,50 @@ def object_head(*, object_key: str) -> dict[str, Any] | None:
     }
 
 
-def stream_object_sha256(*, object_key: str, chunk_size: int = 4 * 1024 * 1024) -> str:
-    """Verify an R2 object without materializing a second whole-file copy."""
+def stream_object_sha256(
+    *,
+    object_key: str,
+    chunk_size: int = 4 * 1024 * 1024,
+    mirror_target: Path | None = None,
+) -> tuple[str, int]:
+    """Verify an R2 object and optionally mirror the same bounded stream.
+
+    ``mirror_target`` must be an unverified unique path supplied by the media
+    cache. This adapter never promotes it to a usable source; the caller does
+    so only after checking both the expected SHA-256 and byte length.
+    """
     response = _client().get_object(Bucket=settings.R2_BUCKET.strip(), Key=object_key)
     body = response["Body"]
     digest = hashlib.sha256()
+    total = 0
+    mirror = None
     try:
+        if mirror_target is not None:
+            mirror_target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            mirror = mirror_target.open("xb")
+            try:
+                mirror_target.chmod(0o600)
+            except OSError:
+                pass
         while chunk := body.read(max(64 * 1024, min(16 * 1024 * 1024, int(chunk_size)))):
             digest.update(chunk)
+            total += len(chunk)
+            if mirror is not None:
+                mirror.write(chunk)
+        if mirror is not None:
+            mirror.flush()
+            os.fsync(mirror.fileno())
+    except BaseException:
+        if mirror is not None:
+            mirror.close()
+        if mirror_target is not None:
+            mirror_target.unlink(missing_ok=True)
+        raise
     finally:
+        if mirror is not None and not mirror.closed:
+            mirror.close()
         body.close()
-    return f"sha256:{digest.hexdigest()}"
+    return f"sha256:{digest.hexdigest()}", total
 
 
 def delete_object(*, object_key: str) -> None:
