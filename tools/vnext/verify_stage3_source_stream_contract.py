@@ -240,7 +240,7 @@ def main() -> None:
     require(worker, "LEASE_SECONDS = 30", "HEARTBEAT_SECONDS = 10")
     require(
         runtime,
-        'HANDLER_REVISION = "summary-facts-v3-chapter-r4"',
+        'HANDLER_REVISION = "summary-facts-v3-chapter-r5"',
         "PROMPT_REVISION",
         "model_revision()",
     )

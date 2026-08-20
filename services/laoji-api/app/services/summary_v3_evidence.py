@@ -438,6 +438,21 @@ def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
     except (TypeError, ValueError):
         configured_batch_size = 64
     batch_size = max(4, min(64, configured_batch_size))
+    try:
+        configured_num_ctx = int(os.getenv("SUMMARY_V3_EMBED_NUM_CTX", "2048"))
+    except (TypeError, ValueError):
+        configured_num_ctx = 2048
+    try:
+        configured_num_gpu = int(os.getenv("SUMMARY_V3_EMBED_NUM_GPU", "0"))
+    except (TypeError, ValueError):
+        configured_num_gpu = 0
+    # Evidence chunks are bounded to 360 characters.  A dedicated 2k CPU
+    # embedding runner keeps the 9B generator resident on a memory-constrained
+    # GPU; using the previous 8k GPU embedding runner evicted and reloaded the
+    # generator before every long summary.  Both knobs remain deployment
+    # configurable for a future host with more GPU headroom.
+    embedding_num_ctx = max(2_048, min(8_192, configured_num_ctx))
+    embedding_num_gpu = max(0, min(999, configured_num_gpu))
     for offset in range(0, len(sources), batch_size):
         batch = sources[offset : offset + batch_size]
         try:
@@ -447,6 +462,8 @@ def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
                     priority="background",
                     operation="summary.v3.evidence.embedding",
                     timeout_seconds=45,
+                    num_ctx=embedding_num_ctx,
+                    num_gpu=embedding_num_gpu,
                 )
             )
         except LlmProviderError as error:

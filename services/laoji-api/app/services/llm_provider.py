@@ -755,6 +755,7 @@ def embed_texts(
     priority: str = "interactive",
     operation: str = "meeting.embedding",
     timeout_seconds: float | None = None,
+    num_ctx: int | None = None,
     num_gpu: int | None = None,
 ) -> list[tuple[float, ...]]:
     if not texts:
@@ -766,10 +767,11 @@ def embed_texts(
         )
     else:
         timeout_seconds = max(1.0, min(60.0, float(timeout_seconds)))
-    try:
-        num_ctx = int(os.getenv("MEETING_QUESTION_EMBEDDING_NUM_CTX", "8192"))
-    except ValueError:
-        num_ctx = 8192
+    if num_ctx is None:
+        try:
+            num_ctx = int(os.getenv("MEETING_QUESTION_EMBEDDING_NUM_CTX", "8192"))
+        except ValueError:
+            num_ctx = 8192
     num_ctx = min(8192, max(2048, num_ctx))
     if num_gpu is not None:
         num_gpu = max(0, min(999, int(num_gpu)))

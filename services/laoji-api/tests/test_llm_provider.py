@@ -222,6 +222,28 @@ def test_embedding_timeout_is_normalized_to_provider_error(monkeypatch):
         llm_provider.embed_texts(["长会议内容"])
 
 
+def test_embedding_accepts_call_specific_context_without_changing_default(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[1.0, 0.0]]}
+
+    def post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return Response()
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+
+    result = llm_provider.embed_texts(["会议片段"], num_ctx=2048, num_gpu=0)
+
+    assert result == [(1.0, 0.0)]
+    assert captured["json"]["options"] == {"num_ctx": 2048, "num_gpu": 0}
+
+
 def test_provider_readiness_requires_real_embedding_inference(monkeypatch):
     calls = {"get": 0, "post": 0}
 

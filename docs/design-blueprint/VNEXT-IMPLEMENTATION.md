@@ -1137,6 +1137,14 @@ few-shot 和样本污染命中均为 `0`。当前 10 个 SRT 样本各三轮的 
 `20s/45s`，因此只关闭自动语义、精确引用和不限长度完成性窗口，不关闭性能、独立人工质量、恢复矩阵
 或 capability barrier。证据见 `docs/vnext-stage3/FACTS-V3-R15-RUNTIME-R4-20260820.md`。
 
+随后性能拆分证明长会先使用 8K GPU embedding 会把 9B 生成模型挤出显存，单次重新装载约
+`23.626s`。`summary-facts-v3-chapter-r5` 将仅 Summary 证据选择改为同一 0.6B embedding 的 CPU +
+2K context，Q2 策略不变且保留环境可调；35.5 分钟同输入的后续暖态 device-v2 回放由 r4 的
+`41.602-58.089s` 降到 `27.074s`，文档/概述哈希、行动和 9/9 引用保持一致。正式 30 次分布尚未重跑：
+当时服务器被其他项目推至约 67 load average，不能把变化中的外部 CPU 竞争当成可比空载证据。
+因此该项只是已提交的性能候选，Stage 3 延迟门仍开放。证据见
+`docs/vnext-stage3/SUMMARY-V3-CPU-EMBED-CANDIDATE-20260820.md`。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

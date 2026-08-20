@@ -14,7 +14,7 @@ from app.schemas.meeting_facts_v3 import PROMPT_REVISION
 from app.services.summary_v3_generator import model_revision
 
 
-HANDLER_REVISION = "summary-facts-v3-chapter-r4"
+HANDLER_REVISION = "summary-facts-v3-chapter-r5"
 PROVIDER_ADAPTER_REVISION = "provider-v3-r2"
 
 

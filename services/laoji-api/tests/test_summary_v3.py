@@ -965,9 +965,11 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
         for index in range(18)
     ]
     operations: list[str] = []
+    embedding_options: list[tuple[int | None, int | None]] = []
 
     def fake_embed_texts(texts, *, operation, **_kwargs):
         operations.append(operation)
+        embedding_options.append((_kwargs.get("num_ctx"), _kwargs.get("num_gpu")))
         return [(1.0, 0.0) for _ in texts]
 
     monkeypatch.setattr(summary_v3_evidence, "embed_texts", fake_embed_texts)
@@ -981,6 +983,7 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     assert active_package.coverage["topic_groups"] == active_package.coverage["covered_topic_groups"]
     assert active_package.coverage["source_types"] == ["attachment", "manual_note", "transcript"]
     assert operations == ["summary.v3.evidence.embedding"]
+    assert embedding_options == [(2048, 0)]
 
 
 def test_long_evidence_maps_embedding_provider_failure_to_stable_error(monkeypatch):
