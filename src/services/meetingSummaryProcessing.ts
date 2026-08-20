@@ -281,11 +281,17 @@ export function meetingSummaryProcessingFailureCode(reason: unknown): string {
     if (reason.status === 404) return 'summary_task_missing';
     if (reason.status >= 500) return 'summary_service_unavailable';
   }
-  const name = reason instanceof Error ? reason.name : '';
-  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  const name = reason && typeof reason === 'object' && typeof (reason as { name?: unknown }).name === 'string'
+    ? (reason as { name: string }).name
+    : '';
+  const message = reason && typeof reason === 'object' && typeof (reason as { message?: unknown }).message === 'string'
+    ? (reason as { message: string }).message.toLowerCase()
+    : '';
   if (name === 'DeviceMeetingUnavailableError') return 'summary_device_meeting_unavailable';
   if (name === 'MeetingSummaryTaskFailureError') return 'summary_worker_failed';
-  if (name === 'MeetingSummaryInputChangedError') return 'summary_input_changed';
+  if (name === 'MeetingSummaryInputChangedError' || name === 'SummaryV3ActivationFenceError') {
+    return 'summary_input_changed';
+  }
   if (/timed out|timeout/.test(message)) return 'summary_task_timeout';
   if (/network|failed to fetch|connection refused/.test(message)) return 'summary_network_unavailable';
   return 'summary_generation_failed';

@@ -44,6 +44,10 @@ import {
   summarySourceRevision,
 } from './meetingSummaryV3SourceStream';
 import { getFeatureFlags } from '../config/featureFlags';
+import {
+  isMeetingSummaryInputChangedErrorLike,
+  isSummaryV3ActivationFenceErrorLike,
+} from '../domain/meeting/summaryErrorIdentity';
 
 export {
   meetingSummaryTextToPlainText,
@@ -155,6 +159,8 @@ export function shouldDiscardPendingMeetingSummaryTask(error: unknown): boolean 
     error instanceof MeetingSummaryTaskFailureError
     || error instanceof DeviceMeetingUnavailableError
     || error instanceof MeetingSummaryInputChangedError
+    || isMeetingSummaryInputChangedErrorLike(error)
+    || isSummaryV3ActivationFenceErrorLike(error)
   ) {
     return true;
   }

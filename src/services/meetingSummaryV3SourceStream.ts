@@ -25,6 +25,7 @@ import { DeviceV2ApiError, loadDeviceV2Capabilities } from './deviceV2Api';
 import { parseMeetingFactsResultV3, meetingFactsV3ToSummary } from './meetingSummaryV3';
 import type { MeetingSummary } from '../types';
 import type { MeetingTemplate } from '../domain/meeting';
+import { createSummaryV3ActivationFenceError } from '../domain/meeting/summaryErrorIdentity';
 
 const MAX_CHAPTER_BYTES = 48 * 1024;
 const POLL_LIMIT = 10 * 60 * 1_000;
@@ -102,7 +103,7 @@ async function completedSummaryActivationFence(
     || stream.binding_revision !== binding.bindingRevision
     || stream.cancel_revision !== binding.cancelRevision
     || binding.state !== 'active'
-  ) throw new Error('新版整理任务设备连接已变化，请重新整理。');
+  ) throw createSummaryV3ActivationFenceError();
   const attachments = (authorization?.items ?? []).map(item => {
     if (item.kind !== 'text') throw new Error('新版整理激活围栏包含不支持的附件。');
     return {

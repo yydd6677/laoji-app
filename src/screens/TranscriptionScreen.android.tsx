@@ -259,6 +259,10 @@ import {
   type SummaryVersionRecord,
 } from '../data/repositories';
 import {
+  isMeetingSummaryInputChangedErrorLike,
+  isSummaryV3ActivationFenceErrorLike,
+} from '../domain/meeting/summaryErrorIdentity';
+import {
   applyMeetingSummaryV3Overrides,
   projectMeetingFactsV3,
 } from '../services/meetingSummaryV3';
@@ -2980,7 +2984,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             }
           }
         } catch (reason) {
-          if (reason instanceof SummaryV3ActivationFenceError) {
+          if (
+            reason instanceof SummaryV3ActivationFenceError
+            || isSummaryV3ActivationFenceErrorLike(reason)
+          ) {
             throw new MeetingSummaryInputChangedError();
           }
           diagnosticAudit('meeting_summary_v3_local_persist', {
@@ -3010,9 +3017,37 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         }
       } catch (reason) {
         const taskStillRunning = reason instanceof MeetingSummaryTaskPendingError;
-        const inputChanged = reason instanceof MeetingSummaryInputChangedError;
-        if (shouldDiscardPendingMeetingSummaryTask(reason)) {
-          await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
+        const inputChanged = reason instanceof MeetingSummaryInputChangedError
+          || isMeetingSummaryInputChangedErrorLike(reason)
+          || isSummaryV3ActivationFenceErrorLike(reason);
+        const failureCode = meetingSummaryProcessingFailureCode(reason);
+        diagnosticAudit('meeting_summary_run_terminal', {
+          outcome: inputChanged
+            ? 'input_changed'
+            : taskStillRunning
+              ? 'background'
+              : (reason as { name?: unknown })?.name === 'AbortError'
+                ? 'aborted'
+                : 'failed',
+          error_name: reason && typeof reason === 'object'
+            && typeof (reason as { name?: unknown }).name === 'string'
+            ? (reason as { name: string }).name
+            : typeof reason,
+          failure_code: failureCode,
+        });
+        if (inputChanged || shouldDiscardPendingMeetingSummaryTask(reason)) {
+          try {
+            await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id);
+            diagnosticAudit('meeting_summary_pending_task_discard', { status: 'cleared' });
+          } catch (discardReason) {
+            diagnosticAudit('meeting_summary_pending_task_discard', {
+              status: 'failed',
+              error_name: discardReason && typeof discardReason === 'object'
+                && typeof (discardReason as { name?: unknown }).name === 'string'
+                ? (discardReason as { name: string }).name
+                : typeof discardReason,
+            });
+          }
         }
         if (currentMeetingScopeKey) {
           await recordMeetingSummaryProcessing({
@@ -3030,7 +3065,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 type: 'failed',
                 taskId: knownTaskId,
                 inputFingerprint: activeFingerprint,
-                errorCode: meetingSummaryProcessingFailureCode(reason),
+                errorCode: failureCode,
               },
           });
         }
