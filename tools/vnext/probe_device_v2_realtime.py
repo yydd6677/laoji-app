@@ -31,6 +31,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from probe_device_v2_upload import (
     b64url,
     decode_b64url,
+    execute_purge_and_wait,
     json_request,
     proof_nonce,
     require_success,
@@ -45,14 +46,15 @@ _PROBE_SOURCE_IP: str | None = None
 def configure_source_ip(source_ip: str | None) -> None:
     """Use a loopback alias for isolated repeated probes when IP quotas are full."""
     global _PROBE_SOURCE_IP
-    _PROBE_SOURCE_IP = str(source_ip).strip() or None
+    _PROBE_SOURCE_IP = str(source_ip).strip() if source_ip else None
     if _PROBE_SOURCE_IP is None:
         return
     original = socket.create_connection
 
     @functools.wraps(original)
     def create_connection(address, timeout=None, source_address=None, *, all_errors=False):
-        if source_address is None:
+        host = str(address[0]).strip().lower()
+        if source_address is None and (host == "localhost" or host.startswith("127.")):
             source_address = (_PROBE_SOURCE_IP, 0)
         return original(
             address,
@@ -83,6 +85,12 @@ def args() -> argparse.Namespace:
     parser.add_argument("--chunk-ms", type=int, default=1000)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--source-ip", default=None)
+    parser.add_argument("--traffic-class", default="isolated-evaluation")
+    parser.add_argument(
+        "--pace-realtime",
+        action="store_true",
+        help="send PCM against its source clock instead of saturating the socket",
+    )
     return parser.parse_args()
 
 
@@ -104,6 +112,27 @@ def encode_chunk(seq: int, pcm: bytes, start_ms: int) -> bytes:
         "content_sha256": sha256_bytes(pcm),
     }, separators=(",", ":")).encode("utf-8")
     return FRAME_PREFIX.pack(b"LJPC", 2, len(header)) + header + pcm
+
+
+def pacing_delay_seconds(
+    *,
+    audio_started_monotonic: float,
+    source_end_ms: int,
+    now_monotonic: float,
+) -> float:
+    target = audio_started_monotonic + max(0, int(source_end_ms)) / 1000.0
+    return max(0.0, target - now_monotonic)
+
+
+def percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    low = int(position)
+    high = min(len(ordered) - 1, low + 1)
+    fraction = position - low
+    return ordered[low] + (ordered[high] - ordered[low]) * fraction
 
 
 def bootstrap(api: str) -> BootstrapState:
@@ -234,11 +263,24 @@ def refresh_auth(api: str, state: BootstrapState) -> dict[str, str]:
         },
     )
     token = require_success(status, token, "refresh auth token")
-    return {
+    auth = {
         "Authorization": "Bearer " + token["access_token"],
         "X-Laoji-Device-Id": state.device_id,
         "X-Laoji-Epoch-Id": state.epoch_id,
     }
+    traffic_class = state.auth.get("X-Laoji-Traffic-Class")
+    if traffic_class:
+        auth["X-Laoji-Traffic-Class"] = traffic_class
+    return auth
+
+
+def purge_epoch(api: str, state: BootstrapState) -> dict:
+    return execute_purge_and_wait(
+        api,
+        state.purge["purge_id"],
+        state.purge["purge_secret"],
+        request_prefix="epoch-purge",
+    )
 
 
 async def receive_until(ws, *, required: str, events: list[dict], timeout: float = 90.0) -> dict:
@@ -246,6 +288,7 @@ async def receive_until(ws, *, required: str, events: list[dict], timeout: float
     while time.monotonic() < deadline:
         value = json.loads(await asyncio.wait_for(ws.recv(), max(0.1, deadline - time.monotonic())))
         if value.get("contract_revision") == "transcript.stream.v2":
+            value["_probe_received_monotonic_ms"] = round(time.monotonic() * 1000)
             events.append(value)
         if value.get("type") == required:
             return value
@@ -264,6 +307,7 @@ async def run_probe(
     state: BootstrapState | None = None,
     refresh_before_reconnect: bool = True,
     binding_epoch_seq: int = 1,
+    pace_realtime: bool = False,
 ) -> dict:
     import websockets
 
@@ -322,6 +366,7 @@ async def run_probe(
     # the same boundary used by Android after a network interruption.
     interrupted_after = max(1, len(chunks) // 2)
     socket_kwargs = {"local_addr": (_PROBE_SOURCE_IP, 0)} if _PROBE_SOURCE_IP else {}
+    audio_started_monotonic: float | None = None
     async with websockets.connect(
         ws_url,
         extra_headers=headers,
@@ -331,9 +376,18 @@ async def run_probe(
     ) as ws:
         await ws.send(json.dumps(opened, separators=(",", ":")))
         await receive_until(ws, required="session.ready", events=events)
+        audio_started_monotonic = time.monotonic()
         for seq, chunk in enumerate(chunks[:interrupted_after]):
             await ws.send(encode_chunk(seq, chunk, seq * chunk_ms))
             await receive_until(ws, required="audio.ack", events=events)
+            if pace_realtime:
+                delay = pacing_delay_seconds(
+                    audio_started_monotonic=audio_started_monotonic,
+                    source_end_ms=(seq * chunk_ms) + len(chunk) // 32,
+                    now_monotonic=time.monotonic(),
+                )
+                if delay:
+                    await asyncio.sleep(delay)
         await asyncio.sleep(0.25)
     # Refresh the bearer before reconnecting. The session, binding and durable
     # cursors remain unchanged; only the in-memory authorization headers move
@@ -359,6 +413,15 @@ async def run_probe(
             chunk = chunks[seq]
             await ws.send(encode_chunk(seq, chunk, seq * chunk_ms))
             await receive_until(ws, required="audio.ack", events=events)
+            if pace_realtime:
+                assert audio_started_monotonic is not None
+                delay = pacing_delay_seconds(
+                    audio_started_monotonic=audio_started_monotonic,
+                    source_end_ms=(seq * chunk_ms) + len(chunk) // 32,
+                    now_monotonic=time.monotonic(),
+                )
+                if delay:
+                    await asyncio.sleep(delay)
         await ws.send(json.dumps({"schema_version": 2, "type": "session.finalize"}, separators=(",", ":")))
         await receive_until(ws, required="session.complete", events=events, timeout=180)
         terminal = events[-1] if events else {}
@@ -366,15 +429,26 @@ async def run_probe(
         await ws.send(json.dumps({"schema_version": 2, "type": "events.ack", "through_event_seq": final_seq}))
         if final_seq:
             await receive_until(ws, required="events.acked", events=events)
-    status, purged = json_request(
-        f"{api}/purge-capabilities/{binding_purge_id}/execute",
-        method="POST",
-        headers={
-            "Authorization": "LaojiPurge " + binding_purge_secret,
-            "X-Laoji-Purge-Request-Id": "purge-" + uuid.uuid4().hex,
-        },
+    purged = execute_purge_and_wait(
+        api,
+        binding_purge_id,
+        binding_purge_secret,
+        request_prefix="purge",
     )
-    require_success(status, purged, "binding purge")
+    stable_lag_ms = []
+    if pace_realtime and audio_started_monotonic is not None:
+        audio_started_ms = audio_started_monotonic * 1000
+        stable_lag_ms = [
+            max(
+                0.0,
+                float(event["_probe_received_monotonic_ms"])
+                - audio_started_ms
+                - float(event.get("source_end_ms") or 0),
+            )
+            for event in events
+            if event.get("event_kind") == "stable"
+            and isinstance(event.get("_probe_received_monotonic_ms"), int)
+        ]
     return {
         "source_sha256": sha256_bytes(pcm),
         "source_bytes": len(pcm),
@@ -386,6 +460,13 @@ async def run_probe(
         "final_outcome": terminal.get("outcome"),
         "final_event_sequence": int(terminal.get("event_sequence", 0)),
         "token_refresh_before_reconnect": True,
+        "paced_realtime": pace_realtime,
+        "stable_lag_ms": {
+            "count": len(stable_lag_ms),
+            "p50": round(percentile(stable_lag_ms, 0.50) or 0, 1) if stable_lag_ms else None,
+            "p95": round(percentile(stable_lag_ms, 0.95) or 0, 1) if stable_lag_ms else None,
+            "max": round(max(stable_lag_ms), 1) if stable_lag_ms else None,
+        },
         "model_revision": terminal.get("model_revision"),
         "purge_state": purged.get("state"),
         "wall_ms": round((time.perf_counter() - started) * 1000),
@@ -394,10 +475,18 @@ async def run_probe(
     }
 
 
-async def run_repeated(pcm: bytes, api: str, chunk_ms: int, repeat: int) -> dict:
+async def run_repeated(
+    pcm: bytes,
+    api: str,
+    chunk_ms: int,
+    repeat: int,
+    *,
+    pace_realtime: bool = False,
+    state: BootstrapState | None = None,
+) -> dict:
     if repeat < 1:
         raise ValueError("repeat_must_be_positive")
-    state = bootstrap(api)
+    state = state or bootstrap(api)
     runs = [
         await run_probe(
             pcm,
@@ -406,6 +495,7 @@ async def run_repeated(pcm: bytes, api: str, chunk_ms: int, repeat: int) -> dict
             state=state,
             refresh_before_reconnect=False,
             binding_epoch_seq=index + 1,
+            pace_realtime=pace_realtime,
         )
         for index in range(repeat)
     ]
@@ -433,10 +523,26 @@ def main() -> int:
     pcm = pcm[: len(pcm) - (len(pcm) % 32)]
     if not pcm:
         raise SystemExit("PCM file is shorter than one millisecond")
+    state = bootstrap(parsed.api)
+    state.auth["X-Laoji-Traffic-Class"] = parsed.traffic_class
     if parsed.repeat == 1:
-        report = asyncio.run(run_probe(pcm, parsed.api, parsed.chunk_ms))
+        report = asyncio.run(run_probe(
+            pcm,
+            parsed.api,
+            parsed.chunk_ms,
+            state=state,
+            pace_realtime=parsed.pace_realtime,
+        ))
     else:
-        report = asyncio.run(run_repeated(pcm, parsed.api, parsed.chunk_ms, parsed.repeat))
+        report = asyncio.run(run_repeated(
+            pcm,
+            parsed.api,
+            parsed.chunk_ms,
+            parsed.repeat,
+            pace_realtime=parsed.pace_realtime,
+            state=state,
+        ))
+    report["epoch_purge_state"] = purge_epoch(parsed.api, state).get("state")
     parsed.output.parent.mkdir(parents=True, exist_ok=True)
     parsed.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))

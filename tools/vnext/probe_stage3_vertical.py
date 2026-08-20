@@ -28,8 +28,13 @@ from typing import Any, Iterable
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from probe_device_v2_realtime import BootstrapState, bootstrap, refresh_auth
-from probe_device_v2_upload import json_request, require_success
+from probe_device_v2_realtime import (
+    BootstrapState,
+    bootstrap,
+    configure_source_ip,
+    refresh_auth,
+)
+from probe_device_v2_upload import execute_purge_and_wait, json_request, require_success
 
 
 SHA_PREFIX = "sha256:"
@@ -60,6 +65,8 @@ def parse_args() -> argparse.Namespace:
         help="optional diagnostic time boundary; zero uses only Android byte packing",
     )
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument("--source-ip", default=None)
+    parser.add_argument("--traffic-class", default="isolated-evaluation")
     parser.add_argument(
         "--skip-question",
         action="store_true",
@@ -550,6 +557,7 @@ def task_attempt_number(task: dict[str, Any]) -> int | None:
 
 def main() -> int:
     args = parse_args()
+    configure_source_ip(args.source_ip)
     transcript = args.transcript.resolve()
     if not transcript.is_file():
         raise SystemExit(f"transcript not found: {transcript}")
@@ -573,6 +581,7 @@ def main() -> int:
 
     auth_state_path = args.auth_state.expanduser().resolve()
     state = persistent_device(args.api, auth_state_path)
+    state.auth["X-Laoji-Traffic-Class"] = args.traffic_class
     status, capabilities = json_request(f"{args.api}/capabilities", headers=state.auth)
     capabilities = require_success(status, capabilities, "read capabilities")
     required = ("source_stream_v2", "question_reader_v2")
@@ -599,15 +608,14 @@ def main() -> int:
         nonlocal cleanup_done
         if cleanup_done:
             return
-        status, _payload = json_request(
-            f"{args.api}/purge-capabilities/{purge_id}/execute",
-            method="POST",
-            headers={
-                "Authorization": f"LaojiPurge {purge_secret}",
-                "X-Laoji-Purge-Request-Id": "stage3-cleanup-" + uuid.uuid4().hex,
-            },
-        )
-        cleanup_done = 200 <= status < 300
+        try:
+            payload = execute_purge_and_wait(
+                args.api, purge_id, purge_secret,
+                request_prefix="stage3-failure-cleanup", timeout_seconds=10,
+            )
+            cleanup_done = payload.get("state") == "confirmed"
+        except Exception:
+            return
 
     atexit.register(cleanup_binding)
 
@@ -705,15 +713,10 @@ def main() -> int:
         replay_result = require_success(replay_status, replay_result, "replay Q2 reader")
         replay_elapsed_ms = round((time.perf_counter() - replay_started) * 1000)
 
-    purge_status, purge_result = json_request(
-        f"{args.api}/purge-capabilities/{purge_id}/execute",
-        method="POST",
-        headers={
-            "Authorization": f"LaojiPurge {purge_secret}",
-            "X-Laoji-Purge-Request-Id": "stage3-cleanup-" + uuid.uuid4().hex,
-        },
+    purge_result = execute_purge_and_wait(
+        args.api, purge_id, purge_secret,
+        request_prefix="stage3-cleanup",
     )
-    purge_result = require_success(purge_status, purge_result, "purge Stage 3 binding")
     cleanup_done = True
     atexit.unregister(cleanup_binding)
 
