@@ -623,6 +623,29 @@ def main() -> int:
     import_results = list(lanes["import_asr"]["results"])
     realtime_result = dict(lanes["realtime"].get("result") or {})
     resources = dict(lanes["resources"])
+    summary_latencies = [
+        float(item["elapsed_ms"])
+        for item in summary_results if item.get("elapsed_ms") is not None
+    ]
+    q2_latencies = [
+        float(item["elapsed_ms"])
+        for item in q2_results if item.get("elapsed_ms") is not None
+    ]
+    schedule_latencies = [
+        float(item["elapsed_ms"])
+        for item in lanes["schedule"]["results"] if item.get("elapsed_ms") is not None
+    ]
+    import_first_stable = [
+        float(item["first_stable_ms"])
+        for item in import_results if item.get("first_stable_ms") is not None
+    ]
+    import_rtfs = [
+        float(item["transcription_rtf"])
+        for item in import_results if item.get("transcription_rtf") is not None
+    ]
+    realtime_stable_p95 = float(
+        (realtime_result.get("stable_lag_ms") or {}).get("p95") or 0
+    )
     gate = {
         "wall_clock_window": round((time.time() * 1000 - started_at_epoch_ms) / 1000, 3) >= args.duration_seconds,
         "realtime_complete": (
@@ -636,9 +659,20 @@ def main() -> int:
         "import_backlog_exercised": bool(import_results) and all(
             item.get("task_state") in {"succeeded", "no_content"} for item in import_results
         ),
+        "realtime_stable_p95_le_2s": int(
+            (realtime_result.get("stable_lag_ms") or {}).get("count") or 0
+        ) > 0 and realtime_stable_p95 <= 2_000,
+        "import_first_stable_p95_le_8s": bool(import_first_stable)
+        and float(percentile(import_first_stable, 0.95) or 0) <= 8_000,
+        "import_rtf_p95_le_0_5": bool(import_rtfs)
+        and float(percentile(import_rtfs, 0.95) or 0) <= 0.5,
         "schedule_cadence_complete": lanes["schedule"]["completed"] == len(schedule_offsets),
+        "schedule_p95_le_3s": bool(schedule_latencies)
+        and float(percentile(schedule_latencies, 0.95) or 0) <= 3_000,
         "q2_cadence_complete": lanes["q2"]["completed"] == len(q2_offsets),
         "summary_cadence_complete": lanes["summary"]["completed"] == len(summary_offsets),
+        "summary_p95_le_45s": bool(summary_latencies)
+        and float(percentile(summary_latencies, 0.95) or 0) <= 45_000,
         "summary_grounding_exact": bool(summary_results) and all(
             item.get("citations") == item.get("citations_exact") for item in summary_results
         ),
@@ -646,9 +680,8 @@ def main() -> int:
             item.get("citation_count") == item.get("citation_exact_match_count")
             for item in q2_results
         ),
-        "q2_warm_p95_le_15s": bool(q2_results) and float(
-            percentile([float(item["elapsed_ms"]) for item in q2_results], 0.95) or 0
-        ) <= 15_000,
+        "q2_warm_p95_le_15s": bool(q2_latencies)
+        and float(percentile(q2_latencies, 0.95) or 0) <= 15_000,
         "gpu_le_16_gib": resources.get("available") is True
         and float((resources.get("gpu_mib") or {}).get("max") or 0) <= 16 * 1024,
         "rss_le_8_gib": resources.get("available") is True
@@ -685,12 +718,11 @@ def main() -> int:
         },
         "lanes": lanes,
         "epoch_cleanup": epoch_cleanup,
-        "summary_latency_ms": distribution([
-            float(item["elapsed_ms"]) for item in summary_results if item.get("elapsed_ms") is not None
-        ]),
-        "q2_latency_ms": distribution([
-            float(item["elapsed_ms"]) for item in q2_results if item.get("elapsed_ms") is not None
-        ]),
+        "summary_latency_ms": distribution(summary_latencies),
+        "q2_latency_ms": distribution(q2_latencies),
+        "schedule_latency_ms": distribution(schedule_latencies),
+        "import_first_stable_ms": distribution(import_first_stable),
+        "import_rtf": distribution(import_rtfs, digits=6),
         "gate": gate,
         "passed": all(gate.values()),
     }
