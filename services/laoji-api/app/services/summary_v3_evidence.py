@@ -20,13 +20,19 @@ NOTE_MAX_BUDGET = 1_536
 ATTACHMENT_MAX_BUDGET = 1_536
 MMR_LAMBDA = 0.7
 MMR_ADDITIONAL_MIN_SCORE = 0.45
-PACKAGE_METADATA_RESERVE = 256
+# The outer package repeats up to 64 compact source aliases in
+# ``priority_source_ids`` and also carries fingerprints plus coverage fields.
+# Reserving only 256 tokens let source selection consume nearly the whole
+# budget and made the final, otherwise valid JSON package fail closed.  This
+# remains inside the fixed 10,240-token model input and still leaves at least
+# the required 75% (7,680 tokens) available to transcript evidence.
+PACKAGE_METADATA_RESERVE = 1_024
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9._:-]{24,}")
 _FORCED_SIGNAL = re.compile(
     r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|由.{0,12}(?:负责|跟进)|"
     r"(?:今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|周[一二三四五六日天])|"
-    r"\d{1,4}(?:年|月|日|号|点|时|分|%|％|万|亿)|"
+    r"\d{1,4}\s*(?:年|月|日|号|点|时|分|%|％|万|亿)|"
     r"首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
     re.IGNORECASE,
 )
@@ -35,8 +41,8 @@ _FORCED_CRITICAL_SIGNAL = re.compile(
     r"由.{0,12}(?:负责|跟进)|今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|"
     r"周[一二三四五六日天]|"
     r"(?:截止|日期|时间|上午|下午|晚上|凌晨|安排|定于|预约|开会|会议|提交|完成|交付|到期|之前|之后)"
-    r".{0,20}\d{1,4}(?:年|月|日|号|点|时|分)|"
-    r"\d{1,4}(?:年|月|日|号|点|时|分).{0,20}"
+    r".{0,20}\d{1,4}\s*(?:年|月|日|号|点|时|分)|"
+    r"\d{1,4}\s*(?:年|月|日|号|点|时|分).{0,20}"
     r"(?:截止|日期|时间|上午|下午|晚上|安排|定于|开会|会议|提交|完成|交付|到期))",
     re.IGNORECASE,
 )
@@ -57,6 +63,44 @@ _NO_NEW_INFORMATION_SIGNAL = re.compile(
 _TRANSCRIPT_PACK_THRESHOLD = 32
 _TRANSCRIPT_PACK_MAX_CHARS = 360
 _TRANSCRIPT_PACK_MAX_DURATION_MS = 30_000
+_MODEL_PRIORITY_SOURCE_LIMIT = 64
+
+
+def _model_priority_source_ids(sources: Iterable["EvidenceSource"]) -> list[str]:
+    """Expose attention hints without deciding whether a source is a fact.
+
+    Dates, corrections and responsibility expressions are already used by the
+    long-meeting selector.  Surfacing the retained IDs helps the single model
+    pass scan past repetitive background, while the model still owns the
+    semantic fact/action decision and the server still verifies every field.
+    """
+    candidates = [
+        source.model_source_id or source.source_id
+        for source in sources
+        if _FORCED_SIGNAL.search(source.text)
+        and not _NO_NEW_INFORMATION_SIGNAL.search(source.text)
+    ]
+    if len(candidates) <= _MODEL_PRIORITY_SOURCE_LIMIT:
+        return candidates
+    half = _MODEL_PRIORITY_SOURCE_LIMIT // 2
+    return [*candidates[:half], *candidates[-half:]]
+
+
+def _model_ordered_sources(sources: Iterable["EvidenceSource"]) -> list["EvidenceSource"]:
+    values = list(sources)
+    priority_ids = set(_model_priority_source_ids(values))
+    if not priority_ids:
+        return values
+    return [
+        *[
+            source for source in values
+            if (source.model_source_id or source.source_id) in priority_ids
+        ],
+        *[
+            source for source in values
+            if (source.model_source_id or source.source_id) not in priority_ids
+        ],
+    ]
 
 
 class SummaryEvidenceIncomplete(RuntimeError):
@@ -112,12 +156,14 @@ class EvidencePackage:
     estimated_tokens: int
 
     def model_payload(self) -> dict[str, Any]:
+        ordered_sources = _model_ordered_sources(self.sources)
         return {
             "schema_version": 3,
             "source_fingerprint": self.source_fingerprint,
             "transcript_revision": self.transcript_revision,
             "coverage": self.coverage,
-            "sources": [source.model_payload() for source in self.sources],
+            "priority_source_ids": _model_priority_source_ids(self.sources),
+            "sources": [source.model_payload() for source in ordered_sources],
         }
 
     def source_map(self) -> dict[str, EvidenceSource]:
@@ -736,12 +782,14 @@ def build_evidence_package_from_sources(
         "input_token_budget": input_token_budget,
         "estimated_input_tokens": 0,
     }
+    ordered_selected = _model_ordered_sources(selected)
     provisional_payload = {
         "schema_version": 3,
         "source_fingerprint": fingerprint,
         "transcript_revision": transcript_revision,
         "coverage": coverage,
-        "sources": [source.model_payload() for source in selected],
+        "priority_source_ids": _model_priority_source_ids(selected),
+        "sources": [source.model_payload() for source in ordered_selected],
     }
     estimated_tokens = estimate_tokens(
         json.dumps(provisional_payload, ensure_ascii=False, separators=(",", ":"))

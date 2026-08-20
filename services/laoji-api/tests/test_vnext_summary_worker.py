@@ -38,6 +38,8 @@ async def test_summary_worker_processes_one_chapter_without_creating_a_second_ow
     assert len(calls) == 1
     assert calls[0]["handler_revision"] == worker_module.HANDLER_REVISION
     assert calls[0]["provider_revision"] == worker_module.PROVIDER_REVISION
+    assert calls[0]["prompt_revision"]
+    assert calls[0]["model_revision"]
 
 
 def test_summary_worker_lease_meets_restart_recovery_budget() -> None:

@@ -140,6 +140,58 @@
       "title": "Stream Id",
       "type": "string"
     },
+    "summary_handler_revision": {
+      "anyOf": [
+        {
+          "maxLength": 180,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Handler Revision"
+    },
+    "summary_model_revision": {
+      "anyOf": [
+        {
+          "maxLength": 180,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Model Revision"
+    },
+    "summary_prompt_revision": {
+      "anyOf": [
+        {
+          "maxLength": 180,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Prompt Revision"
+    },
+    "summary_provider_revision": {
+      "anyOf": [
+        {
+          "maxLength": 180,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Provider Revision"
+    },
     "task_id": {
       "maxLength": 512,
       "minLength": 8,

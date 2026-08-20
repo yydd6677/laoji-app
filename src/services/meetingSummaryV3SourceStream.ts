@@ -387,8 +387,18 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   onProgress?: (stage: 'queued' | 'preparing' | 'generating' | 'verifying' | 'persisting') => void;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
-  const capabilities = await loadDeviceV2Capabilities();
+  // Refresh at task creation so a model/prompt deployment cannot reuse the
+  // one-minute general capability cache as an old deterministic generation.
+  const capabilities = await loadDeviceV2Capabilities({ forceRefresh: true });
   if (!capabilities.sourceStreamV2) throw new Error('来源流整理能力尚未启用');
+  const summaryRevisions = {
+    handlerRevision: capabilities.summaryHandlerRevision,
+    promptRevision: capabilities.summaryPromptRevision,
+    modelRevision: capabilities.summaryModelRevision,
+  };
+  if (!summaryRevisions.handlerRevision || !summaryRevisions.promptRevision || !summaryRevisions.modelRevision) {
+    throw new Error('会议整理服务版本信息不完整，请稍后重试');
+  }
   if ((options.attachmentAuthorization?.items ?? []).some(item => item.kind !== 'text')) {
     throw new Error('所选照片暂时无法用于新版整理，请仅选择文字附件。');
   }
@@ -406,6 +416,11 @@ export async function generateMeetingSummaryViaSourceStream(options: {
     transcript_revision: options.transcriptRevision,
     manual_note_revision: options.manualNote.revision,
     bundles: bundleHashes,
+    summary_runtime: {
+      handler_revision: summaryRevisions.handlerRevision,
+      prompt_revision: summaryRevisions.promptRevision,
+      model_revision: summaryRevisions.modelRevision,
+    },
   }));
   let taskId = options.resumeTaskId?.trim() || '';
   let stream: Awaited<ReturnType<typeof getDeviceV2SourceStream>> | null = null;
@@ -424,6 +439,10 @@ export async function generateMeetingSummaryViaSourceStream(options: {
           const artifact = await getDeviceV2TaskArtifact(taskId);
           const parsed = parseMeetingFactsResultV3(artifact.output);
           if (!parsed) throw new Error('新版整理结果格式无效');
+          if (
+            parsed.promptRevision !== summaryRevisions.promptRevision
+            || parsed.modelRevision !== summaryRevisions.modelRevision
+          ) throw new Error('会议整理结果版本已变化，请重新整理');
           const sourceStreamId = existingTask.task.source_stream_id;
           if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
           const completedStream = await getDeviceV2SourceStream(sourceStreamId);
@@ -475,6 +494,11 @@ export async function generateMeetingSummaryViaSourceStream(options: {
         entityId: options.meetingId,
         entityRevision: Math.max(1, options.transcriptLines.length),
         taskInputSha256: requestSha,
+        summaryRevisions: {
+          handlerRevision: summaryRevisions.handlerRevision,
+          promptRevision: summaryRevisions.promptRevision,
+          modelRevision: summaryRevisions.modelRevision,
+        },
       });
       await options.onTaskSubmitted?.(taskId);
     }
@@ -526,6 +550,10 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       const artifact = await getDeviceV2TaskArtifact(taskId);
       const parsed = parseMeetingFactsResultV3(artifact.output);
       if (!parsed) throw new Error('新版整理结果格式无效');
+      if (
+        parsed.promptRevision !== summaryRevisions.promptRevision
+        || parsed.modelRevision !== summaryRevisions.modelRevision
+      ) throw new Error('会议整理结果版本已变化，请重新整理');
       const sourceStreamId = task.task.source_stream_id;
       if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
       const completedStream = await getDeviceV2SourceStream(sourceStreamId);

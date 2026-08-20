@@ -47,6 +47,8 @@ def _artifact(
     stream: dict[str, Any],
     handler_revision: str,
     provider_revision: str,
+    prompt_revision: str,
+    model_revision: str,
 ) -> dict[str, Any]:
     source_types = sorted({
         source.source_type
@@ -78,8 +80,8 @@ def _artifact(
         "meeting_id": str(task["entity_id"]),
         "source_fingerprint": str(stream["source_manifest_sha256"]),
         "transcript_revision": str(task["input_sha256"]),
-        "model_revision": provider_revision,
-        "prompt_revision": handler_revision,
+        "model_revision": model_revision,
+        "prompt_revision": prompt_revision,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "coverage": {
             "total_segments": checkpoint.total_source_segments,
@@ -252,6 +254,8 @@ def process_next_summary_chapter(
     lease_owner: str,
     handler_revision: str,
     provider_revision: str,
+    prompt_revision: str,
+    model_revision: str,
     generate_verified_chapter: Callable[
         [dict[str, Any]],
         VerifiedSummaryChapter | MeetingFactsDocumentV3 | dict[str, Any],
@@ -269,6 +273,12 @@ def process_next_summary_chapter(
         attempt_id=attempt_id,
         lease_owner=lease_owner,
     )
+    expected_runtime = {
+        "summary_handler_revision": handler_revision,
+        "summary_provider_revision": provider_revision,
+        "summary_prompt_revision": prompt_revision,
+        "summary_model_revision": model_revision,
+    }
     if chapter is None:
         task = vnext_task_store.get_task(context, task_id)
         stream = (
@@ -281,6 +291,7 @@ def process_next_summary_chapter(
         )
         if stream is None or stream["state"] != "complete":
             return {"state": "awaiting_source", "task_id": task_id}
+        vnext_source_stream_store.assert_summary_runtime_revision(stream, expected_runtime)
         stream_task = vnext_source_stream_store.load_current_checkpoint(
             context,
             task_id,
@@ -305,12 +316,15 @@ def process_next_summary_chapter(
                 stream=stream,
                 handler_revision=handler_revision,
                 provider_revision=provider_revision,
+                prompt_revision=prompt_revision,
+                model_revision=model_revision,
             ),
             contract_revision=ARTIFACT_CONTRACT_REVISION,
             provider_revision=provider_revision,
         )
         return {"state": "success", "task_id": task_id, "artifact": artifact}
 
+    vnext_source_stream_store.assert_summary_runtime_revision(chapter, expected_runtime)
     current = (
         FactsV3ChapterCheckpoint.model_validate(chapter["current_aggregate"])
         if chapter["current_aggregate"] is not None
@@ -338,6 +352,8 @@ def process_next_summary_chapter(
         aggregate=checkpoint.model_dump(mode="json"),
         handler_revision=handler_revision,
         provider_revision=provider_revision,
+        prompt_revision=prompt_revision,
+        model_revision=model_revision,
     )
     if promoted["stream_state"] != "complete":
         return {
@@ -365,6 +381,8 @@ def process_next_summary_chapter(
             stream=stream,
             handler_revision=handler_revision,
             provider_revision=provider_revision,
+            prompt_revision=prompt_revision,
+            model_revision=model_revision,
         ),
         contract_revision=ARTIFACT_CONTRACT_REVISION,
         provider_revision=provider_revision,

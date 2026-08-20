@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.runtime_policy import env_enabled
-from app.services import vnext_summary_chapter_pipeline, vnext_task_store
+from app.services import vnext_summary_chapter_pipeline, vnext_summary_runtime, vnext_task_store
 from app.services.vnext_source_stream_store import VNextSourceStreamError
 
 
@@ -27,8 +27,8 @@ _logger = logging.getLogger(__name__)
 LEASE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
 SCAN_SECONDS = max(1.0, min(30.0, float(os.getenv("LAOJI_VNEXT_SUMMARY_SCAN_SECONDS", "2"))))
-HANDLER_REVISION = "summary-facts-v3-chapter-r2"
-PROVIDER_REVISION = "provider-v3-r1"
+HANDLER_REVISION = vnext_summary_runtime.HANDLER_REVISION
+PROVIDER_REVISION = vnext_summary_runtime.PROVIDER_ADAPTER_REVISION
 
 
 def _safe_generation_failure(error: Exception) -> tuple[str, dict[str, Any]] | None:
@@ -178,14 +178,17 @@ class VNextSummarySourceStreamWorker:
 
         heartbeat_task = asyncio.create_task(heartbeat(), name=f"vnext-summary-heartbeat:{task_id}")
         try:
+            runtime_revision = vnext_summary_runtime.current_summary_runtime_revision()
             result = await asyncio.to_thread(
                 self.process_chapter,
                 context,
                 task_id,
                 attempt_id=attempt_id,
                 lease_owner=self._lease_owner,
-                handler_revision=HANDLER_REVISION,
-                provider_revision=PROVIDER_REVISION,
+                handler_revision=runtime_revision.handler_revision,
+                provider_revision=runtime_revision.provider_revision,
+                prompt_revision=runtime_revision.prompt_revision,
+                model_revision=runtime_revision.model_revision,
                 generate_verified_chapter=vnext_summary_chapter_pipeline.generate_verified_summary_chapter,
             )
             if heartbeat_failed.is_set():
@@ -197,7 +200,13 @@ class VNextSummarySourceStreamWorker:
         except asyncio.CancelledError:
             raise
         except VNextSourceStreamError as error:
-            retryable = error.code not in {"CHECKPOINT_INVALID", "CHECKPOINT_POINTER_INVALID", "CHECKPOINT_HASH_MISMATCH"}
+            retryable = error.code not in {
+                "CHECKPOINT_INVALID",
+                "CHECKPOINT_POINTER_INVALID",
+                "CHECKPOINT_HASH_MISMATCH",
+                "SUMMARY_RUNTIME_REVISION_CHANGED",
+                "SUMMARY_RUNTIME_REVISION_MISSING",
+            }
             await asyncio.to_thread(
                 vnext_task_store.mark_failure,
                 context,

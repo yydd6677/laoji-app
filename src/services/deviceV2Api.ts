@@ -52,6 +52,9 @@ export interface DeviceV2Capabilities {
   scheduleGraphV2: boolean;
   sourceStreamV2: boolean;
   questionReaderV2: boolean;
+  summaryHandlerRevision: string | null;
+  summaryPromptRevision: string | null;
+  summaryModelRevision: string | null;
 }
 
 function endpoint(path: string): string {
@@ -400,6 +403,13 @@ function normalizeCapabilities(value: any): DeviceV2Capabilities {
   if (!value || Number(value.schema_version) !== 2 || value.device_api !== true) {
     throw new DeviceV2ApiError('设备服务能力响应无效', 502, 'DEVICE_V2_CAPABILITIES_INVALID');
   }
+  const revision = (candidate: unknown): string | null => {
+    if (typeof candidate !== 'string') return null;
+    const normalized = candidate.trim();
+    return normalized && normalized.length <= 180 && !/[\u0000-\u001f\u007f]/.test(normalized)
+      ? normalized
+      : null;
+  };
   return {
     schemaVersion: 2,
     uploadSessionsV2: value.upload_sessions_v2 === true,
@@ -408,6 +418,9 @@ function normalizeCapabilities(value: any): DeviceV2Capabilities {
     scheduleGraphV2: value.schedule_graph_v2 === true,
     sourceStreamV2: value.source_stream_v2 === true,
     questionReaderV2: value.question_reader_v2 === true,
+    summaryHandlerRevision: revision(value.summary_handler_revision),
+    summaryPromptRevision: revision(value.summary_prompt_revision),
+    summaryModelRevision: revision(value.summary_model_revision),
   };
 }
 

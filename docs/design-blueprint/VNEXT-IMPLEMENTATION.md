@@ -1128,6 +1128,15 @@ Android 激活围栏随后从 transcript/note 扩展到 device epoch、meeting b
 `docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。release 模拟器尚未逐项注入原生
 SQLite 负向突变，故恢复组合门和 Stage 3 capability 仍关闭。
 
+同日最终 `facts-v3-r15 / summary-facts-v3-chapter-r4 / provider-v3-r2` 候选修复了行动投影字段错位、
+共享更正来源的最终确认、显式期限保留以及长证据包元数据预算遗漏。外部 24 组语义 manifest 在最终
+代码上 `24/24` 通过，首次 Schema 合法 `24/24`、引用精确 `100%`、重复行动 `0`，生产 prompt 的
+few-shot 和样本污染命中均为 `0`。当前 10 个 SRT 样本各三轮的 device-v2 真实纵向回放 `30/30`
+成功，全部 attempt 1、清理确认且 revision 全程一致；72.1 分钟/1,569 项/两章节样本也不再被误报
+`SUMMARY_EVIDENCE_INCOMPLETE`。但 24 个单 pack 样本的 p50/p95 为 `21.724s/58.925s`，仍未达到
+`20s/45s`，因此只关闭自动语义、精确引用和不限长度完成性窗口，不关闭性能、独立人工质量、恢复矩阵
+或 capability barrier。证据见 `docs/vnext-stage3/FACTS-V3-R15-RUNTIME-R4-20260820.md`。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

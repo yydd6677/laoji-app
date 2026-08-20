@@ -13,6 +13,7 @@ from app.services import (
     device_identity,
     device_v2_identity,
     vnext_source_stream_store as source_store,
+    vnext_summary_runtime,
 )
 
 
@@ -188,6 +189,12 @@ def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monk
     assert disabled.json()["detail"]["code"] == "SOURCE_STREAM_V2_DISABLED"
 
     monkeypatch.setenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "1")
+    runtime = vnext_summary_runtime.current_summary_runtime_revision()
+    enabled_capabilities = client.get("/api/device/v2/capabilities")
+    assert enabled_capabilities.status_code == 200
+    assert enabled_capabilities.json()["summary_handler_revision"] == runtime.handler_revision
+    assert enabled_capabilities.json()["summary_prompt_revision"] == runtime.prompt_revision
+    assert enabled_capabilities.json()["summary_model_revision"] == runtime.model_revision
     secret = "source-wire-purge-secret"
     registered = client.put(
         f"/api/device/v2/meetings/{binding_id}",
@@ -205,6 +212,24 @@ def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monk
         },
     )
     assert registered.status_code == 200
+    missing_revision = client.post(
+        f"/api/device/v2/meetings/{binding_id}/source-streams",
+        json=payload,
+    )
+    assert missing_revision.status_code == 409
+    assert missing_revision.json()["detail"]["code"] == "SUMMARY_RUNTIME_REVISION_CHANGED"
+    payload.update({
+        "summary_handler_revision": runtime.handler_revision,
+        "summary_prompt_revision": runtime.prompt_revision,
+        "summary_model_revision": "stale-model-revision",
+    })
+    stale_revision = client.post(
+        f"/api/device/v2/meetings/{binding_id}/source-streams",
+        json=payload,
+    )
+    assert stale_revision.status_code == 409
+    assert stale_revision.json()["detail"]["code"] == "SUMMARY_RUNTIME_REVISION_CHANGED"
+    payload["summary_model_revision"] = runtime.model_revision
     created = client.post(
         f"/api/device/v2/meetings/{binding_id}/source-streams",
         json=payload,

@@ -54,6 +54,18 @@ _TEMPORAL_CLAIM = re.compile(
     r"(?:周|星期)[一二三四五六日天](?:上午|下午|晚上)?|"
     r"(?:上午|下午|晚上|凌晨)|(?:月|年)底|季度",
 )
+_EXPLICIT_DUE_BOUND = re.compile(
+    r"(?:"
+    r"(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)|"
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|"
+    r"(?:今天|明天|后天|本周|下周|本月|下月)|"
+    r"(?:本周|下周|周|星期)[一二三四五六日天]|"
+    r"(?:上午|下午|晚上|凌晨|中午)\s*\d{1,2}\s*(?:点|时)(?:半|\s*\d{1,2}\s*分)?"
+    r")"
+    r"(?:\s*(?:上午|下午|晚上|凌晨|中午|下班))?"
+    r"(?:\s*\d{1,2}\s*(?:点|时)(?:半|\s*\d{1,2}\s*分)?)?"
+    r"\s*(?:前|之前|以内|内)",
+)
 _OWNER_CLAIM = (
     re.compile(
         r"(?:由|请|让|交给|负责人(?:是|为)?)"
@@ -579,9 +591,28 @@ def _sanitize_compact_value(value: Any) -> Any:
         return value
     sanitized = dict(value)
     facts: dict[str, Any] = {}
+    misplaced_action_projections: dict[str, dict[str, Any]] = {}
     for slot, item in value["facts"].items():
+        candidate = item
+        if isinstance(item, dict) and item.get("type") == "action":
+            # Some providers repeat the action projection fields beside the
+            # source-backed fact even though the compact contract keeps them
+            # under the root ``actions`` object.  Those three fields cannot
+            # change fact identity or evidence, so discard only this known
+            # redundant copy.  Every other unexpected field remains a strict
+            # validation error and still drops the optional fact.
+            candidate = {
+                key: nested_value
+                for key, nested_value in item.items()
+                if key not in {"owner", "due", "fit"}
+            }
+            misplaced_action_projections[slot] = {
+                key: item[key]
+                for key in ("owner", "due", "fit")
+                if key in item
+            }
         try:
-            parsed = CompactModelFactV3.model_validate(item)
+            parsed = CompactModelFactV3.model_validate(candidate)
         except (TypeError, ValueError, ValidationError):
             if slot == "f1":
                 facts[slot] = item
@@ -615,6 +646,41 @@ def _sanitize_compact_value(value: Any) -> Any:
         except (TypeError, ValueError, ValidationError):
             continue
         actions[slot] = parsed.model_dump(mode="json")
+    for fact_slot, projection in misplaced_action_projections.items():
+        if fact_slot not in facts or not projection:
+            continue
+        existing_slot = next(
+            (
+                slot
+                for slot, action in actions.items()
+                if action.get("fact") == fact_slot
+            ),
+            None,
+        )
+        if existing_slot is not None:
+            candidate_action = dict(actions[existing_slot])
+            for key, nested_value in projection.items():
+                if candidate_action.get(key) is None:
+                    candidate_action[key] = nested_value
+            try:
+                parsed = CompactModelActionV3.model_validate(candidate_action)
+            except (TypeError, ValueError, ValidationError):
+                continue
+            actions[existing_slot] = parsed.model_dump(mode="json")
+            continue
+        available_slot = next(
+            (f"a{index}" for index in range(1, 7) if f"a{index}" not in actions),
+            None,
+        )
+        if available_slot is None:
+            continue
+        try:
+            parsed = CompactModelActionV3.model_validate(
+                {"fact": fact_slot, **projection}
+            )
+        except (TypeError, ValueError, ValidationError):
+            continue
+        actions[available_slot] = parsed.model_dump(mode="json")
     sanitized["actions"] = actions
     return sanitized
 
@@ -1303,6 +1369,14 @@ def _resolve_superseded_conflicts(
             older, newer = left, right
         elif right_bounds[1] < left_bounds[0]:
             older, newer = right, left
+        elif left_bounds[1] < right_bounds[1]:
+            # A corrected fact commonly cites the shared correction utterance
+            # and then a later explicit confirmation.  Its source range
+            # overlaps the historical fact, but the added terminal evidence
+            # still establishes a deterministic transcript order.
+            older, newer = left, right
+        elif right_bounds[1] < left_bounds[1]:
+            older, newer = right, left
         else:
             kept_relations.append(relation)
             continue
@@ -1523,6 +1597,37 @@ def _supported_action_owner(
     return next(iter(self_speakers)) if len(self_speakers) == 1 else None
 
 
+def _supported_action_due_from_fact(fact: MeetingFactV3) -> str | None:
+    """Recover one explicit bounded due phrase already present in the fact.
+
+    This is not a second action classifier: the model has already emitted and
+    the server has already verified an action fact.  The fallback only copies
+    a single explicit ``...前/内`` phrase when the same normalized phrase is
+    present verbatim in an immutable source.  Ambiguous, normalized-only or
+    unbounded time expressions remain empty.
+    """
+    content_matches = {
+        _compact_whitespace(match.group(0))
+        for match in _EXPLICIT_DUE_BOUND.finditer(fact.content)
+    }
+    if len(content_matches) != 1:
+        return None
+    target = next(iter(content_matches))
+    source_matches: list[str] = []
+    for source in fact.sources:
+        for match in _EXPLICIT_DUE_BOUND.finditer(source.quote):
+            value = match.group(0)
+            if _compact_whitespace(value) == target:
+                source_matches.append(value)
+    normalized_sources = {
+        _compact_whitespace(value): value
+        for value in source_matches
+    }
+    if len(normalized_sources) != 1:
+        return None
+    return next(iter(normalized_sources.values()))
+
+
 _REJECTED_PROPOSAL_SIGNAL = re.compile(
     r"(?:不(?:采用|采纳|考虑|再考虑|执行)|否决|驳回|放弃|不成立|暂不(?:采用|执行))",
 )
@@ -1672,7 +1777,7 @@ def _verified_actions(
                 fact_id=fact.fact_id,
                 content=fact.content,
                 owner=_supported_action_owner(owner, fact),
-                due_text=None,
+                due_text=_supported_action_due_from_fact(fact),
                 schedule_fit=(
                     "low" if fact.certainty in {"proposed", "uncertain"} else "medium"
                 ),

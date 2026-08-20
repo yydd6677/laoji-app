@@ -683,6 +683,80 @@ def test_explicit_cancellation_is_not_marked_as_an_unresolved_conflict():
     assert all(fact.conflict_group_id is None for fact in document.facts)
 
 
+def test_later_confirmation_resolves_conflict_with_shared_correction_source():
+    active_package = build_evidence_package(
+        [
+            {"id": "old", "speaker": "主持人", "text": "原先由王工在 9 月 2 日前提交核对表。"},
+            {
+                "id": "correction",
+                "speaker": "主持人",
+                "text": "前面的安排作废，改由赵工负责，截止日期改为 9 月 3 日。",
+            },
+            {"id": "confirmation", "speaker": "赵工", "text": "确认，最终由我在 9 月 3 日前提交核对表。"},
+        ],
+        None,
+        None,
+    )
+    old, correction, confirmation = active_package.sources
+
+    def reference(source):
+        return {
+            "source_id": source.source_id,
+            "source_type": source.source_type,
+            "quote": source.text,
+            "content_hash": source.content_hash,
+        }
+
+    response = MeetingFactsModelResponseV3.model_validate(
+        {
+            "schema_version": 3,
+            "overview": {"text": "改由赵工提交核对表。", "fact_ids": ["new", "old"]},
+            "facts": [
+                {
+                    "fact_id": "new",
+                    "fact_type": "action",
+                    "certainty": "uncertain",
+                    "content": "由赵工在 9 月 3 日前提交核对表。",
+                    "sources": [reference(correction), reference(confirmation)],
+                },
+                {
+                    "fact_id": "old",
+                    "fact_type": "timeline",
+                    "certainty": "uncertain",
+                    "content": "原先由王工在 9 月 2 日前提交核对表。",
+                    "sources": [reference(old), reference(correction)],
+                },
+            ],
+            "relations": [
+                {
+                    "relation_type": "contradicts",
+                    "from_fact_id": "new",
+                    "to_fact_id": "old",
+                }
+            ],
+            "action_candidates": [
+                {
+                    "action_id": "a1",
+                    "fact_id": "new",
+                    "content": "由赵工在 9 月 3 日前提交核对表。",
+                    "owner": "赵工",
+                    "due_text": "9 月 3 日前",
+                    "schedule_fit": "high",
+                }
+            ],
+        }
+    )
+
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert document.relations == []
+    assert {fact.fact_id: fact.certainty for fact in document.facts} == {
+        "new": "confirmed",
+        "old": "negated",
+    }
+    assert document.action_candidates[0].schedule_fit == "high"
+
+
 def test_cross_source_conflict_remains_unresolved():
     active_package = build_evidence_package(
         [{"id": "spoken", "text": "确认使用甲方案。"}],
@@ -974,6 +1048,38 @@ def test_long_evidence_budget_counts_serialized_source_metadata(monkeypatch):
     assert active_package.estimated_tokens == active_package.coverage["estimated_input_tokens"]
 
 
+def test_long_evidence_reserves_dense_priority_source_metadata(monkeypatch):
+    transcript = [
+        {
+            "id": f"priority-{index}",
+            "speaker": f"成员{index}",
+            "text": (
+                f"另外，第{index}项同步运行背景与检查范围，"
+                + "相关说明用于保持上下文完整。" * 8
+            ),
+            "start_ms": index * 8_000,
+            "end_ms": index * 8_000 + 7_000,
+        }
+        for index in range(180)
+    ]
+    monkeypatch.setattr(
+        summary_v3_evidence,
+        "embed_texts",
+        lambda texts, **_kwargs: [(1.0, 0.0) for _ in texts],
+    )
+
+    active_package = build_evidence_package(transcript, None, None)
+    encoded = json.dumps(
+        active_package.model_payload(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    assert len(active_package.model_payload()["priority_source_ids"]) >= 48
+    assert summary_v3_evidence.estimate_tokens(encoded) <= 10_240
+    assert active_package.coverage["included_segments"] < len(transcript)
+
+
 def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatch):
     transcript = [
         {
@@ -994,6 +1100,40 @@ def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatc
     assert active_package.coverage["used_embeddings"] is True
     assert active_package.coverage["included_segments"] <= 4
     assert active_package.coverage["topic_groups"] == 1
+
+
+def test_evidence_payload_marks_attention_sources_without_promoting_background() -> None:
+    package = build_evidence_package([
+        {
+            "id": "background",
+            "speaker": "成员甲",
+            "text": "这部分只是状态同步，没有新增决策或负责人。",
+            "start_ms": 0,
+            "end_ms": 1_000,
+        },
+        {
+            "id": "timeline",
+            "speaker": "主持人",
+            "text": "最终确认在 2026 年 9 月 3 日切换运行模式。",
+            "start_ms": 2_000,
+            "end_ms": 3_000,
+        },
+        {
+            "id": "commitment",
+            "speaker": "成员乙",
+            "text": "我今天下班前提交操作清单。",
+            "start_ms": 4_000,
+            "end_ms": 5_000,
+        },
+    ], None, None)
+
+    assert package.model_payload()["priority_source_ids"] == [
+        "transcript:t1",
+        "transcript:t2",
+    ]
+    assert [
+        source["source_id"] for source in package.model_payload()["sources"]
+    ] == ["transcript:t1", "transcript:t2", "transcript:t0"]
 
 
 def test_plaintext_is_not_stored_in_source_payload(tmp_path, monkeypatch):
@@ -1323,6 +1463,192 @@ def test_compact_action_without_fit_uses_conservative_projection(monkeypatch):
 
     assert calls == 1
     assert response.action_candidates[0].schedule_fit == "medium"
+
+
+def test_compact_action_redundant_projection_fields_do_not_drop_fact(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+                "owner": "林清",
+                "due": "明天下午",
+                "fit": "high",
+            },
+        },
+        "relations": {},
+        "actions": {
+            "a1": {"fact": "f1", "owner": "林清", "due": "明天下午", "fit": "high"},
+        },
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.action_candidates[0].fact_id == "f1"
+    assert response.action_candidates[0].owner == "林清"
+    assert response.action_candidates[0].due_text == "明天下午"
+
+
+def test_compact_action_projection_inside_fact_is_relocated(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+                "owner": "林清",
+                "due": "明天下午",
+                "fit": "high",
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.action_candidates[0].fact_id == "f1"
+    assert response.action_candidates[0].owner == "林清"
+    assert response.action_candidates[0].due_text == "明天下午"
+    assert response.action_candidates[0].schedule_fit == "high"
+
+
+def test_missing_action_projection_recovers_only_explicit_bounded_due(monkeypatch):
+    active_package = build_evidence_package(
+        [
+            {
+                "id": "commitment",
+                "speaker": "周工",
+                "text": "我会在 2026 年 9 月 18 日前提交上线核对表。",
+            }
+        ],
+        None,
+        None,
+    )
+    source = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "在 2026 年 9 月 18 日前提交上线核对表",
+                "source_1": source.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert calls == 1
+    assert document.action_candidates[0].owner == "周工"
+    assert document.action_candidates[0].due_text == "2026 年 9 月 18 日前"
+
+
+def test_missing_action_projection_does_not_infer_unbounded_event_time(monkeypatch):
+    active_package = build_evidence_package(
+        [
+            {
+                "id": "preparation",
+                "speaker": "周工",
+                "text": "9 月 18 日开评审会，我会准备上线核对表。",
+            }
+        ],
+        None,
+        None,
+    )
+    source = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "我会准备上线核对表",
+                "source_1": source.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert calls == 1
+    assert document.action_candidates[0].due_text is None
+
+
+def test_compact_action_unknown_extra_field_still_drops_optional_fact(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "已讨论界面复核安排",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "会后确认截止时间",
+                "source_1": second.model_source_id,
+                "owner": None,
+                "unexpected": "must remain forbidden",
+            },
+        },
+        "relations": {},
+        "actions": {"a1": {"fact": "f2"}},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.action_candidates == []
 
 
 def test_invalid_optional_compact_fact_does_not_spend_repair_call(monkeypatch):

@@ -27,6 +27,7 @@ from app.services import (
     vnext_task_store,
     vnext_upload_store,
     vnext_question_reader,
+    vnext_summary_runtime,
 )
 from app.services.schedule_parser_service import ScheduleParserUnavailable, parse_schedule_text
 from app.schemas.vnext_contracts import (
@@ -230,6 +231,9 @@ class V2SourceStreamCreate(BaseModel):
     entity_id: str = Field(min_length=1, max_length=512)
     entity_revision: int = Field(ge=1, le=9_007_199_254_740_991)
     task_input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    summary_handler_revision: str | None = Field(default=None, min_length=1, max_length=180)
+    summary_prompt_revision: str | None = Field(default=None, min_length=1, max_length=180)
+    summary_model_revision: str | None = Field(default=None, min_length=1, max_length=180)
 
 
 class V2SourceManifestPage(BaseModel):
@@ -403,7 +407,8 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
             and vnext_import_transcription_pipeline.import_transcription_enabled()
         ),
     )
-    return {
+    source_stream_v2 = vnext_capability_cutover.source_stream_v2_enabled()
+    result = {
         "schema_version": 2,
         "device_api": True,
         "device_id": context.device_id,
@@ -417,9 +422,17 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "import_transcript_events_v2": media_upload_v2,
         "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
         "schedule_graph_v2": vnext_capability_cutover.schedule_graph_v2_enabled(),
-        "source_stream_v2": vnext_capability_cutover.source_stream_v2_enabled(),
+        "source_stream_v2": source_stream_v2,
         "question_reader_v2": vnext_capability_cutover.question_reader_v2_enabled(),
     }
+    if source_stream_v2:
+        summary_runtime = vnext_summary_runtime.current_summary_runtime_revision()
+        result.update({
+            "summary_handler_revision": summary_runtime.handler_revision,
+            "summary_prompt_revision": summary_runtime.prompt_revision,
+            "summary_model_revision": summary_runtime.model_revision,
+        })
+    return result
 
 
 @router.get("/ready")
@@ -605,6 +618,16 @@ async def create_source_stream(
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
     _require_source_stream_v2()
+    summary_runtime = vnext_summary_runtime.current_summary_runtime_revision()
+    if payload.capability == "summary" and (
+        payload.summary_handler_revision != summary_runtime.handler_revision
+        or payload.summary_prompt_revision != summary_runtime.prompt_revision
+        or payload.summary_model_revision != summary_runtime.model_revision
+    ):
+        raise HTTPException(status_code=409, detail={
+            "code": "SUMMARY_RUNTIME_REVISION_CHANGED",
+            "message": "会议整理服务已更新，请重新提交整理任务",
+        })
     try:
         await asyncio.to_thread(vnext_source_stream_store.purge_expired_source_streams, limit=32)
         stream, _reused = await asyncio.to_thread(
@@ -623,6 +646,18 @@ async def create_source_stream(
             entity_id=payload.entity_id,
             entity_revision=payload.entity_revision,
             task_input_sha256=payload.task_input_sha256,
+            summary_handler_revision=(
+                summary_runtime.handler_revision if payload.capability == "summary" else None
+            ),
+            summary_provider_revision=(
+                summary_runtime.provider_revision if payload.capability == "summary" else None
+            ),
+            summary_prompt_revision=(
+                summary_runtime.prompt_revision if payload.capability == "summary" else None
+            ),
+            summary_model_revision=(
+                summary_runtime.model_revision if payload.capability == "summary" else None
+            ),
         )
         return stream
     except vnext_source_stream_store.VNextSourceStreamError as error:

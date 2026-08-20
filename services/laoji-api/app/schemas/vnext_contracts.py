@@ -98,6 +98,10 @@ class SourceStreamSnapshotV2(VNextModel):
         pattern=r"^sha256:[0-9a-f]{64}$",
     )
     checkpoint_through_chapter: int | None = Field(default=None, ge=0)
+    summary_handler_revision: str | None = Field(default=None, max_length=180)
+    summary_provider_revision: str | None = Field(default=None, max_length=180)
+    summary_prompt_revision: str | None = Field(default=None, max_length=180)
+    summary_model_revision: str | None = Field(default=None, max_length=180)
     expires_at: int = Field(ge=0)
 
 

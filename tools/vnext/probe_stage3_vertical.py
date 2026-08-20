@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import atexit
-from collections import defaultdict
 import hashlib
 import json
 from pathlib import Path
@@ -34,6 +33,7 @@ from probe_device_v2_upload import json_request, require_success
 
 
 SHA_PREFIX = "sha256:"
+DEFAULT_CHAPTER_BYTES = 48 * 1024
 SRT_TIME = re.compile(
     r"^(?P<sh>\d{2}):(?P<sm>\d{2}):(?P<ss>\d{2})[,.](?P<sms>\d{3})"
     r"\s+-->\s+"
@@ -47,8 +47,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api", default="http://127.0.0.1:18023/api/device/v2")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--question", default="这次会议主要讨论了什么？")
-    parser.add_argument("--chapter-seconds", type=int, default=600)
+    parser.add_argument(
+        "--chapter-bytes",
+        type=int,
+        default=DEFAULT_CHAPTER_BYTES,
+        help="match the Android source-stream byte boundary",
+    )
+    parser.add_argument(
+        "--chapter-seconds",
+        type=int,
+        default=0,
+        help="optional diagnostic time boundary; zero uses only Android byte packing",
+    )
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--skip-question",
+        action="store_true",
+        help="exercise only the summary source stream and artifact path",
+    )
     parser.add_argument("--show-content", action="store_true")
     parser.add_argument(
         "--auth-state",
@@ -131,20 +147,40 @@ def parse_srt(path: Path) -> list[tuple[int, int, str]]:
     return entries
 
 
-def build_items(path: Path, chapter_seconds: int) -> tuple[list[list[dict[str, Any]]], str]:
+def build_items(
+    path: Path,
+    chapter_seconds: int = 0,
+    chapter_bytes: int = DEFAULT_CHAPTER_BYTES,
+) -> tuple[list[list[dict[str, Any]]], str]:
     entries = parse_srt(path)
     raw_hash = digest_bytes(path.read_bytes())
     source_id = "sample:" + raw_hash.removeprefix(SHA_PREFIX)[:24]
     source_revision_id = "srt:" + raw_hash.removeprefix(SHA_PREFIX)
     offset = 0
-    chapters: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    chapters: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_bytes = 0
+    current_time_bucket: int | None = None
     for ordinal, (start_ms, end_ms, content) in enumerate(entries):
         encoded = content.encode("utf-8")
         start_utf8 = offset
         end_utf8 = start_utf8 + len(encoded)
         offset = end_utf8 + 1
-        chapter_ordinal = start_ms // max(1, chapter_seconds * 1000)
-        chapters[chapter_ordinal].append({
+        time_bucket = (
+            start_ms // (chapter_seconds * 1000)
+            if chapter_seconds > 0
+            else None
+        )
+        if current and (
+            current_bytes + len(encoded) > chapter_bytes
+            or (time_bucket is not None and time_bucket != current_time_bucket)
+        ):
+            chapters.append(current)
+            current = []
+            current_bytes = 0
+        if not current:
+            current_time_bucket = time_bucket
+        current.append({
             "item_id": f"srt-item-{ordinal:06d}-{raw_hash[-12:]}",
             "source_type": "transcript",
             "source_id": source_id,
@@ -157,10 +193,10 @@ def build_items(path: Path, chapter_seconds: int) -> tuple[list[list[dict[str, A
             "end_ms": end_ms,
             "speaker": None,
         })
-    # The wire contract requires dense chapter ordinals. Merge empty wall-time
-    # buckets out instead of sending sparse ordinals for meetings with pauses.
-    dense = [chapters[key] for key in sorted(chapters)]
-    return dense, raw_hash
+        current_bytes += len(encoded)
+    if current:
+        chapters.append(current)
+    return chapters, raw_hash
 
 
 def persistent_device(api: str, path: Path) -> BootstrapState:
@@ -283,6 +319,7 @@ def create_source_stream(
     capability: str,
     input_sha256: str,
     timeout_seconds: int,
+    summary_revisions: dict[str, str] | None = None,
 ) -> tuple[str, str, list[dict[str, Any]]]:
     suffix = uuid.uuid4().hex
     stream_id = f"stage3-{capability}-stream-{suffix}"
@@ -307,6 +344,17 @@ def create_source_stream(
         "entity_revision": 1,
         "task_input_sha256": input_sha256,
     }
+    if capability == "summary":
+        required_revisions = (
+            "summary_handler_revision",
+            "summary_prompt_revision",
+            "summary_model_revision",
+        )
+        if summary_revisions is None or any(
+            not summary_revisions.get(name) for name in required_revisions
+        ):
+            raise RuntimeError("candidate summary runtime revisions are missing")
+        create_payload.update({name: summary_revisions[name] for name in required_revisions})
     status, created = json_request(
         f"{api}/meetings/{binding_id}/source-streams",
         method="POST",
@@ -495,10 +543,16 @@ def main() -> int:
     transcript = args.transcript.resolve()
     if not transcript.is_file():
         raise SystemExit(f"transcript not found: {transcript}")
-    if args.chapter_seconds < 60:
-        raise SystemExit("chapter-seconds must be at least 60")
+    if args.chapter_seconds < 0 or (0 < args.chapter_seconds < 60):
+        raise SystemExit("chapter-seconds must be zero or at least 60")
+    if args.chapter_bytes < 1024:
+        raise SystemExit("chapter-bytes must be at least 1024")
     started = time.perf_counter()
-    chapters, sample_sha256 = build_items(transcript, args.chapter_seconds)
+    chapters, sample_sha256 = build_items(
+        transcript,
+        args.chapter_seconds,
+        args.chapter_bytes,
+    )
     all_items = [item for chapter in chapters for item in chapter]
     source_texts = [str(item["content"]) for item in all_items]
     source_fingerprint = digest_json([{
@@ -514,6 +568,16 @@ def main() -> int:
     required = ("source_stream_v2", "question_reader_v2")
     if any(not capabilities.get(name) for name in required):
         raise RuntimeError(f"candidate capabilities missing: {required}")
+    summary_revisions = {
+        name: str(capabilities.get(name) or "")
+        for name in (
+            "summary_handler_revision",
+            "summary_prompt_revision",
+            "summary_model_revision",
+        )
+    }
+    if any(not value for value in summary_revisions.values()):
+        raise RuntimeError("candidate summary runtime revisions are missing")
     binding_id, binding_generation, purge_id, purge_secret = register_binding(
         args.api,
         state.auth,
@@ -547,6 +611,7 @@ def main() -> int:
         capability="summary",
         input_sha256=source_fingerprint,
         timeout_seconds=args.timeout_seconds,
+        summary_revisions=summary_revisions,
     )
     del summary_stream_id
     summary_task, summary_elapsed_ms = wait_task(
@@ -563,53 +628,66 @@ def main() -> int:
     )
     artifact = require_success(status, artifact_wire, "read Facts V3 artifact")["artifact"]
     output = dict(artifact.get("output") or {})
+    if (
+        output.get("prompt_revision") != summary_revisions["summary_prompt_revision"]
+        or output.get("model_revision") != summary_revisions["summary_model_revision"]
+    ):
+        raise RuntimeError("summary artifact runtime revision does not match admission fence")
     facts_document = dict(output.get("facts_document") or {})
     fact_checked, fact_matched = validate_facts_grounding(facts_document, source_texts)
 
-    question_stream_id, question_task_id, question_groups = create_source_stream(
-        api=args.api,
-        auth=state.auth,
-        binding_id=binding_id,
-        binding_generation=binding_generation,
-        chapters=chapters,
-        capability="question",
-        input_sha256=source_fingerprint,
-        timeout_seconds=args.timeout_seconds,
-    )
-    question_payload = {
-        "schema_version": 2,
-        "contract_revision": "question.reader.v2",
-        "provider_revision": "q2-reader-v1",
-        "snapshot_id": "stage3-q2-snapshot-" + uuid.uuid4().hex,
-        "source_fingerprint": source_fingerprint,
-        "question": args.question,
-        "binding_generation": binding_generation,
-        "binding_revision": 1,
-        "cancel_revision": 0,
-        "task_id": question_task_id,
-        "source_stream_id": question_stream_id,
-        "source_stream_verified": False,
-        "sources": [],
-    }
-    q2_started = time.perf_counter()
-    status, q2_result = json_request(
-        f"{args.api}/meetings/{binding_id}/questions-v2",
-        method="POST",
-        headers=state.auth,
-        payload=question_payload,
-    )
-    q2_result = require_success(status, q2_result, "run Q2 reader")
-    q2_elapsed_ms = round((time.perf_counter() - q2_started) * 1000)
-    q2_checked, q2_matched = validate_q2_grounding(q2_result, source_texts)
-    replay_started = time.perf_counter()
-    replay_status, replay_result = json_request(
-        f"{args.api}/meetings/{binding_id}/questions-v2",
-        method="POST",
-        headers=state.auth,
-        payload=question_payload,
-    )
-    replay_result = require_success(replay_status, replay_result, "replay Q2 reader")
-    replay_elapsed_ms = round((time.perf_counter() - replay_started) * 1000)
+    question_groups: list[dict[str, Any]] = []
+    q2_result: dict[str, Any] | None = None
+    replay_result: dict[str, Any] | None = None
+    q2_elapsed_ms: int | None = None
+    replay_elapsed_ms: int | None = None
+    q2_checked = 0
+    q2_matched = 0
+    if not args.skip_question:
+        question_stream_id, question_task_id, question_groups = create_source_stream(
+            api=args.api,
+            auth=state.auth,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            chapters=chapters,
+            capability="question",
+            input_sha256=source_fingerprint,
+            timeout_seconds=args.timeout_seconds,
+        )
+        question_payload = {
+            "schema_version": 2,
+            "contract_revision": "question.reader.v2",
+            "provider_revision": "q2-reader-v1",
+            "snapshot_id": "stage3-q2-snapshot-" + uuid.uuid4().hex,
+            "source_fingerprint": source_fingerprint,
+            "question": args.question,
+            "binding_generation": binding_generation,
+            "binding_revision": 1,
+            "cancel_revision": 0,
+            "task_id": question_task_id,
+            "source_stream_id": question_stream_id,
+            "source_stream_verified": False,
+            "sources": [],
+        }
+        q2_started = time.perf_counter()
+        status, q2_result = json_request(
+            f"{args.api}/meetings/{binding_id}/questions-v2",
+            method="POST",
+            headers=state.auth,
+            payload=question_payload,
+        )
+        q2_result = require_success(status, q2_result, "run Q2 reader")
+        q2_elapsed_ms = round((time.perf_counter() - q2_started) * 1000)
+        q2_checked, q2_matched = validate_q2_grounding(q2_result, source_texts)
+        replay_started = time.perf_counter()
+        replay_status, replay_result = json_request(
+            f"{args.api}/meetings/{binding_id}/questions-v2",
+            method="POST",
+            headers=state.auth,
+            payload=question_payload,
+        )
+        replay_result = require_success(replay_status, replay_result, "replay Q2 reader")
+        replay_elapsed_ms = round((time.perf_counter() - replay_started) * 1000)
 
     purge_status, purge_result = json_request(
         f"{args.api}/purge-capabilities/{purge_id}/execute",
@@ -634,10 +712,14 @@ def main() -> int:
             "item_count": len(all_items),
             "duration_ms": max(int(item["end_ms"]) for item in all_items),
             "chapter_seconds": args.chapter_seconds,
+            "chapter_bytes": args.chapter_bytes,
         },
-        "capabilities": {name: bool(capabilities.get(name)) for name in (
-            "schedule_graph_v2", "source_stream_v2", "question_reader_v2",
-        )},
+        "capabilities": {
+            **{name: bool(capabilities.get(name)) for name in (
+                "schedule_graph_v2", "source_stream_v2", "question_reader_v2",
+            )},
+            **summary_revisions,
+        },
         "summary": {
             "state": summary_task.get("state"),
             "end_to_end_elapsed_ms": summary_end_to_end_elapsed_ms,
@@ -647,6 +729,7 @@ def main() -> int:
             "artifact_contract_revision": artifact.get("contract_revision"),
             "artifact_provider_revision": artifact.get("provider_revision"),
             "artifact_prompt_revision": output.get("prompt_revision"),
+            "artifact_model_revision": output.get("model_revision"),
             "facts_schema_version": facts_document.get("schema_version"),
             "through_chapter_ordinal": output.get("through_chapter_ordinal"),
             "coverage": output.get("coverage"),
@@ -656,7 +739,7 @@ def main() -> int:
             "citation_exact_match_count": fact_matched,
             "overview_sha256": digest_bytes(str(overview.get("text") or "").encode("utf-8")),
         },
-        "question": {
+        "question": None if q2_result is None or replay_result is None else {
             "question_sha256": digest_bytes(args.question.encode("utf-8")),
             "elapsed_ms": q2_elapsed_ms,
             "replay_elapsed_ms": replay_elapsed_ms,
@@ -679,8 +762,8 @@ def main() -> int:
     if args.show_content:
         print(json.dumps({
             "overview": overview.get("text"),
-            "answer": q2_result.get("answer"),
-            "clauses": q2_result.get("clauses"),
+            "answer": q2_result.get("answer") if q2_result else None,
+            "clauses": q2_result.get("clauses") if q2_result else None,
         }, ensure_ascii=False, indent=2))
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

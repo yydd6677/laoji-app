@@ -75,7 +75,7 @@
     {
       "name": "source_stream_snapshot_v2",
       "path": "schemas/source_stream_snapshot_v2.schema.json",
-      "sha256": "ae4f956d2e0b97ec085762a7e1af1c9910674433c018ef4fbfa720ee0fa9ec1e"
+      "sha256": "ad9e26d6db04210ebf75e88435187ef59461b1ef39aeed52c77b0252f444d7a0"
     },
     {
       "name": "speaker_overlay_snapshot_v2",

@@ -54,7 +54,18 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--timeout-seconds", type=int, default=900)
-    parser.add_argument("--chapter-seconds", type=int, default=600)
+    parser.add_argument("--chapter-bytes", type=int, default=48 * 1024)
+    parser.add_argument(
+        "--include-question",
+        action="store_true",
+        help="also run Q2; summary latency evidence is summary-only by default",
+    )
+    parser.add_argument(
+        "--chapter-seconds",
+        type=int,
+        default=0,
+        help="diagnostic time boundary; zero matches Android byte-only packing",
+    )
     parser.add_argument("--id", action="append", default=[])
     parser.add_argument(
         "--auth-state",
@@ -108,9 +119,12 @@ def main() -> int:
                     "--api", args.api,
                     "--output", str(output),
                     "--timeout-seconds", str(args.timeout_seconds),
+                    "--chapter-bytes", str(args.chapter_bytes),
                     "--chapter-seconds", str(args.chapter_seconds),
                     "--auth-state", str(args.auth_state.expanduser()),
                 ]
+                if not args.include_question:
+                    command.append("--skip-question")
                 completed = subprocess.run(
                     command,
                     cwd=ROOT,
@@ -132,7 +146,7 @@ def main() -> int:
                     continue
                 report = json.loads(output.read_text(encoding="utf-8"))
                 summary = report["summary"]
-                question = report["question"]
+                question = report.get("question")
                 result = {
                     "sample": sample.name,
                     "run": run,
@@ -147,28 +161,57 @@ def main() -> int:
                     "actions_count": summary["action_candidate_count"],
                     "facts_citations": summary["citation_count"],
                     "facts_citations_exact": summary["citation_exact_match_count"],
-                    "question_elapsed_ms": question["elapsed_ms"],
-                    "question_replay_elapsed_ms": question["replay_elapsed_ms"],
-                    "question_replay_identical": question["replay_identical"],
-                    "question_citations": question["citation_count"],
-                    "question_citations_exact": question["citation_exact_match_count"],
+                    "question_elapsed_ms": question["elapsed_ms"] if question else None,
+                    "question_replay_elapsed_ms": question["replay_elapsed_ms"] if question else None,
+                    "question_replay_identical": question["replay_identical"] if question else None,
+                    "question_citations": question["citation_count"] if question else None,
+                    "question_citations_exact": question["citation_exact_match_count"] if question else None,
                     "cleanup_state": report["cleanup"]["state"],
+                    "runtime_revisions": {
+                        name: report["capabilities"].get(name)
+                        for name in (
+                            "summary_handler_revision",
+                            "summary_prompt_revision",
+                            "summary_model_revision",
+                        )
+                    },
                 }
                 results.append(result)
                 write_checkpoint()
                 print(
                     f"PASS run={run} sample={sample.name} "
                     f"summary={result['summary_end_to_end_elapsed_ms']}ms "
-                    f"q2={result['question_elapsed_ms']}ms",
+                    + (
+                        f"q2={result['question_elapsed_ms']}ms"
+                        if question else "q2=skipped"
+                    ),
                     flush=True,
                 )
 
     under_hour = [item for item in results if item["duration_ms"] <= 3_600_000]
+    single_pack = [item for item in results if item["chapter_count"] == 1]
+    question_results = [item for item in results if item["question_elapsed_ms"] is not None]
+    runtime_revisions = sorted({
+        json.dumps(item["runtime_revisions"], ensure_ascii=False, sort_keys=True)
+        for item in results
+    })
+    runtime_revision_values = [json.loads(value) for value in runtime_revisions]
+    runtime_revision_consistent = bool(results) and len(runtime_revision_values) == 1 and all(
+        runtime_revision_values[0].get(name)
+        for name in (
+            "summary_handler_revision",
+            "summary_prompt_revision",
+            "summary_model_revision",
+        )
+    )
     report = {
         "schema_version": 1,
         "candidate_only": True,
         "production_mutation": False,
         "api": args.api,
+        "chapter_bytes": args.chapter_bytes,
+        "chapter_seconds": args.chapter_seconds,
+        "include_question": args.include_question,
         "sample_count": len(samples),
         "requested_runs": args.runs,
         "completed": len(results),
@@ -176,22 +219,30 @@ def main() -> int:
         "summary_all": distribution([
             item["summary_end_to_end_elapsed_ms"] for item in results
         ]),
+        "summary_single_pack": distribution([
+            item["summary_end_to_end_elapsed_ms"] for item in single_pack
+        ]),
         "summary_under_one_hour": distribution([
             item["summary_end_to_end_elapsed_ms"] for item in under_hour
         ]),
-        "question": distribution([item["question_elapsed_ms"] for item in results]),
+        "runtime_revisions": runtime_revision_values,
+        "runtime_revision_consistent": runtime_revision_consistent,
+        "question": distribution([item["question_elapsed_ms"] for item in question_results]),
         "exact_grounding": {
             "facts": all(
                 item["facts_citations"] == item["facts_citations_exact"] for item in results
             ),
             "questions": all(
                 item["question_citations"] == item["question_citations_exact"] for item in results
-            ),
+            ) if question_results else None,
         },
         "idempotent_question_replays": all(
             item["question_replay_identical"] for item in results
+        ) if question_results else None,
+        "cleanup_complete": all(
+            item["cleanup_state"] in {"completed", "confirmed"}
+            for item in results
         ),
-        "cleanup_complete": all(item["cleanup_state"] == "completed" for item in results),
         "results": results,
         "failures": failures,
     }
@@ -206,7 +257,7 @@ def main() -> int:
         "summary_under_one_hour": report["summary_under_one_hour"],
         "question": report["question"],
     }, ensure_ascii=False), flush=True)
-    return 0 if not failures else 1
+    return 0 if not failures and runtime_revision_consistent else 1
 
 
 if __name__ == "__main__":

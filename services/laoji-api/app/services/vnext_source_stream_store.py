@@ -249,6 +249,10 @@ def ensure_vnext_source_stream_schema() -> None:
                 generation_id TEXT NOT NULL,
                 request_sha256 TEXT NOT NULL,
                 contract_revision TEXT NOT NULL,
+                summary_handler_revision TEXT,
+                summary_provider_revision TEXT,
+                summary_prompt_revision TEXT,
+                summary_model_revision TEXT,
                 manifest_accumulator_sha256 TEXT NOT NULL,
                 next_manifest_page INTEGER NOT NULL DEFAULT 0 CHECK(next_manifest_page >= 0),
                 next_manifest_chapter INTEGER NOT NULL DEFAULT 0 CHECK(next_manifest_chapter >= 0),
@@ -390,6 +394,20 @@ def ensure_vnext_source_stream_schema() -> None:
             END;
             """
         )
+        stream_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(vnext_source_streams)").fetchall()
+        }
+        for column in (
+            "summary_handler_revision",
+            "summary_provider_revision",
+            "summary_prompt_revision",
+            "summary_model_revision",
+        ):
+            if column not in stream_columns:
+                connection.execute(
+                    f"ALTER TABLE vnext_source_streams ADD COLUMN {column} TEXT"
+                )
         item_columns = {
             str(row[1])
             for row in connection.execute("PRAGMA table_info(vnext_source_bundle_items)").fetchall()
@@ -543,8 +561,44 @@ def _snapshot(connection: Any, row: Any) -> dict[str, Any]:
         ),
         "source_manifest_sha256": row["source_manifest_sha256"],
         "checkpoint_through_chapter": _task_checkpoint_ordinal(connection, str(row["task_id"])),
+        "summary_handler_revision": row["summary_handler_revision"],
+        "summary_provider_revision": row["summary_provider_revision"],
+        "summary_prompt_revision": row["summary_prompt_revision"],
+        "summary_model_revision": row["summary_model_revision"],
         "expires_at": int(row["expires_at_epoch"]),
     }
+
+
+def assert_summary_runtime_revision(
+    value: Any,
+    expected: dict[str, str],
+) -> None:
+    """Fail closed before a summary resumes under a different implementation."""
+    names = (
+        "summary_handler_revision",
+        "summary_provider_revision",
+        "summary_prompt_revision",
+        "summary_model_revision",
+    )
+    actual: dict[str, str | None] = {}
+    for name in names:
+        try:
+            raw = value[name]
+        except (KeyError, IndexError, TypeError):
+            raw = None
+        actual[name] = str(raw) if raw is not None else None
+    if any(actual[name] is None for name in names):
+        raise VNextSourceStreamError(
+            "SUMMARY_RUNTIME_REVISION_MISSING",
+            "整理任务缺少运行版本，需重新提交",
+            409,
+        )
+    if any(actual[name] != expected.get(name) for name in names):
+        raise VNextSourceStreamError(
+            "SUMMARY_RUNTIME_REVISION_CHANGED",
+            "整理服务版本已变化，需重新提交",
+            409,
+        )
 
 
 def _active_reserved(connection: Any, kind: str, context: SourceOwnerContext | None = None) -> int:
@@ -612,6 +666,10 @@ def create_source_stream(
     entity_id: str,
     entity_revision: int,
     task_input_sha256: str,
+    summary_handler_revision: str | None = None,
+    summary_provider_revision: str | None = None,
+    summary_prompt_revision: str | None = None,
+    summary_model_revision: str | None = None,
     now_epoch: int | None = None,
 ) -> tuple[dict[str, Any], bool]:
     ensure_vnext_source_stream_schema()
@@ -626,6 +684,27 @@ def create_source_stream(
     request_sha256 = _sha256(request_sha256, "request_sha256")
     if capability not in {"summary", "question"}:
         raise VNextSourceStreamError("CAPABILITY_INVALID", "来源流能力无效", 422)
+    summary_revisions = {
+        "summary_handler_revision": summary_handler_revision,
+        "summary_provider_revision": summary_provider_revision,
+        "summary_prompt_revision": summary_prompt_revision,
+        "summary_model_revision": summary_model_revision,
+    }
+    if capability == "summary":
+        for name, value in summary_revisions.items():
+            if value is None:
+                raise VNextSourceStreamError(
+                    "SUMMARY_RUNTIME_REVISION_MISSING",
+                    "整理任务缺少运行版本",
+                    422,
+                )
+            summary_revisions[name] = _safe(value, name, 180)
+    elif any(value is not None for value in summary_revisions.values()):
+        raise VNextSourceStreamError(
+            "SUMMARY_RUNTIME_REVISION_UNEXPECTED",
+            "非整理任务不能声明整理运行版本",
+            422,
+        )
     entity_id = _safe(entity_id, "entity_id")
     entity_revision = _positive(entity_revision, "entity_revision")
     task_input_sha256 = _sha256(task_input_sha256, "task_input_sha256")
@@ -658,6 +737,10 @@ def create_source_stream(
                 and str(existing["request_sha256"]) == request_sha256
                 and str(existing["binding_id"]) == binding_id
                 and str(existing["binding_generation"]) == binding_generation
+                and all(
+                    existing[name] == summary_revisions[name]
+                    for name in summary_revisions
+                )
             )
             if not same:
                 connection.rollback()
@@ -717,10 +800,12 @@ def create_source_stream(
                      stream_id, task_id, device_id, epoch_id, binding_id,
                      binding_generation, binding_revision, cancel_revision,
                      client_operation_id, generation_id, request_sha256,
-                     contract_revision, manifest_accumulator_sha256,
+                     contract_revision, summary_handler_revision,
+                     summary_provider_revision, summary_prompt_revision,
+                     summary_model_revision, manifest_accumulator_sha256,
                      state, checkpoint_reservation_id, expires_at_epoch,
                      created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)""",
                 (
                     stream_id,
                     task_id,
@@ -734,6 +819,10 @@ def create_source_stream(
                     generation_id,
                     request_sha256,
                     CONTRACT_REVISION,
+                    summary_revisions["summary_handler_revision"],
+                    summary_revisions["summary_provider_revision"],
+                    summary_revisions["summary_prompt_revision"],
+                    summary_revisions["summary_model_revision"],
                     ZERO_SHA256,
                     checkpoint_reservation_id,
                     now_epoch + EMPTY_STREAM_TTL_SECONDS,
@@ -1554,6 +1643,10 @@ def load_next_chapter(
                 if checkpoint is not None
                 else None
             ),
+            "summary_handler_revision": stream["summary_handler_revision"],
+            "summary_provider_revision": stream["summary_provider_revision"],
+            "summary_prompt_revision": stream["summary_prompt_revision"],
+            "summary_model_revision": stream["summary_model_revision"],
             "items": items,
         }
 
@@ -1600,6 +1693,8 @@ def promote_checkpoint(
     aggregate: dict[str, Any],
     handler_revision: str,
     provider_revision: str,
+    prompt_revision: str,
+    model_revision: str,
     now_epoch: int | None = None,
 ) -> dict[str, Any]:
     """Seal a new aggregate before deleting the just-consumed source chapter."""
@@ -1610,6 +1705,8 @@ def promote_checkpoint(
     chapter_ordinal = _nonnegative(chapter_ordinal, "chapter_ordinal")
     handler_revision = _safe(handler_revision, "handler_revision", 180)
     provider_revision = _safe(provider_revision, "provider_revision", 180)
+    prompt_revision = _safe(prompt_revision, "prompt_revision", 180)
+    model_revision = _safe(model_revision, "model_revision", 180)
     if not isinstance(aggregate, dict):
         raise VNextSourceStreamError("CHECKPOINT_INVALID", "整理恢复点必须是对象", 422)
     encoded = _canonical(aggregate)
@@ -1635,6 +1732,12 @@ def promote_checkpoint(
         if stream is None or stream["state"] not in {"open", "consuming"}:
             connection.rollback()
             raise VNextSourceStreamError("SOURCE_STREAM_CLOSED", "来源流已经结束", 409)
+        assert_summary_runtime_revision(stream, {
+            "summary_handler_revision": handler_revision,
+            "summary_provider_revision": provider_revision,
+            "summary_prompt_revision": prompt_revision,
+            "summary_model_revision": model_revision,
+        })
         if int(stream["next_consumable_chapter"]) != chapter_ordinal:
             connection.rollback()
             raise VNextSourceStreamError("CHECKPOINT_SEQUENCE_INVALID", "整理章节顺序已变化", 409)
@@ -1658,6 +1761,16 @@ def promote_checkpoint(
             if int(current_checkpoint["through_chapter_ordinal"]) != chapter_ordinal - 1:
                 connection.rollback()
                 raise VNextSourceStreamError("CHECKPOINT_SEQUENCE_INVALID", "上一章恢复点不匹配", 500)
+            if (
+                str(current_checkpoint["handler_revision"]) != handler_revision
+                or str(current_checkpoint["provider_revision"]) != provider_revision
+            ):
+                connection.rollback()
+                raise VNextSourceStreamError(
+                    "SUMMARY_RUNTIME_REVISION_CHANGED",
+                    "整理服务版本已变化，需重新提交",
+                    409,
+                )
             target_slot = 1 - int(current_checkpoint["slot_no"])
             previous_prefix = str(current_checkpoint["source_prefix_sha256"])
             previous_aggregate_hash = str(current_checkpoint["aggregate_sha256"])

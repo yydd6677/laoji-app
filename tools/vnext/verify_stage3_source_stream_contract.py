@@ -41,6 +41,8 @@ def main() -> None:
     chapter_pipeline = ROOT / "services/laoji-api/app/services/vnext_summary_chapter_pipeline.py"
     task_store = ROOT / "services/laoji-api/app/services/vnext_task_store.py"
     worker = ROOT / "services/laoji-api/app/services/vnext_summary_worker.py"
+    runtime = ROOT / "services/laoji-api/app/services/vnext_summary_runtime.py"
+    device_api = ROOT / "services/laoji-api/app/api/device_v2.py"
 
     client_source = require(
         client,
@@ -71,6 +73,18 @@ def main() -> None:
         "ensureLocalMeetingServiceBinding(meetingId)",
         "stream.binding_revision !== binding.bindingRevision",
         "activation_fence_v3: await completedSummaryActivationFence(",
+        "loadDeviceV2Capabilities({ forceRefresh: true })",
+        "handlerRevision: summaryRevisions.handlerRevision",
+        "promptRevision: summaryRevisions.promptRevision",
+        "modelRevision: summaryRevisions.modelRevision",
+        "parsed.promptRevision !== summaryRevisions.promptRevision",
+        "parsed.modelRevision !== summaryRevisions.modelRevision",
+    )
+    require(
+        client,
+        "summary_handler_revision: id(input.summaryRevisions.handlerRevision",
+        "summary_prompt_revision: id(input.summaryRevisions.promptRevision",
+        "summary_model_revision: id(input.summaryRevisions.modelRevision",
     )
     require(
         summary_domain,
@@ -224,6 +238,19 @@ def main() -> None:
         "source_group.state = 'complete'",
     )
     require(worker, "LEASE_SECONDS = 30", "HEARTBEAT_SECONDS = 10")
+    require(
+        runtime,
+        'HANDLER_REVISION = "summary-facts-v3-chapter-r4"',
+        "PROMPT_REVISION",
+        "model_revision()",
+    )
+    require(
+        device_api,
+        '"summary_handler_revision": summary_runtime.handler_revision',
+        '"summary_prompt_revision": summary_runtime.prompt_revision',
+        '"summary_model_revision": summary_runtime.model_revision',
+        '"code": "SUMMARY_RUNTIME_REVISION_CHANGED"',
+    )
     print("stage3_source_stream_contract=passed")
 
 

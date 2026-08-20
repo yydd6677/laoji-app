@@ -79,6 +79,16 @@ def _setup(tmp_path, monkeypatch):
 
 
 def _create_stream(context, generation, *, suffix="1", capability="summary", now_epoch=None):
+    summary_revisions = (
+        {
+            "summary_handler_revision": "summary-facts-v3-chapter-r1",
+            "summary_provider_revision": "provider-test-r1",
+            "summary_prompt_revision": "facts-test-r1",
+            "summary_model_revision": "model-test-r1",
+        }
+        if capability == "summary"
+        else {}
+    )
     return source_store.create_source_stream(
         context,
         stream_id=f"stream-source-{suffix}",
@@ -95,6 +105,7 @@ def _create_stream(context, generation, *, suffix="1", capability="summary", now
         entity_revision=1,
         task_input_sha256=_fixed_hash("b"),
         now_epoch=1_000 if now_epoch is None else now_epoch,
+        **summary_revisions,
     )
 
 
@@ -345,6 +356,8 @@ def test_source_stream_encrypts_payload_and_promotes_one_atomic_checkpoint(tmp_p
         aggregate={"schema_version": 3, "facts": [{"id": "fact-1"}]},
         handler_revision="summary-facts-v3-chapter-r1",
         provider_revision="provider-test-r1",
+        prompt_revision="facts-test-r1",
+        model_revision="model-test-r1",
         now_epoch=1_200,
     )
     assert promoted["slot_no"] == 0
@@ -409,6 +422,8 @@ def test_three_chapters_keep_only_two_checkpoint_slots(tmp_path, monkeypatch) ->
             aggregate={"schema_version": 3, "through": ordinal, "facts": list(range(ordinal + 1))},
             handler_revision="summary-facts-v3-chapter-r1",
             provider_revision="provider-test-r1",
+            prompt_revision="facts-test-r1",
+            model_revision="model-test-r1",
             now_epoch=2_100 + ordinal,
         )
 
@@ -640,6 +655,19 @@ def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monk
         lease_owner="summary-artifact-worker",
     )
     assert attempt is not None
+    with pytest.raises(source_store.VNextSourceStreamError) as changed:
+        vnext_summary_chapter_pipeline.process_next_summary_chapter(
+            context,
+            stream["task_id"],
+            attempt_id=attempt["attempt_id"],
+            lease_owner="summary-artifact-worker",
+            handler_revision="summary-facts-v3-chapter-r1",
+            provider_revision="provider-test-r1",
+            prompt_revision="facts-test-r1",
+            model_revision="stale-model-test-r0",
+            generate_verified_chapter=_verified_document,
+        )
+    assert changed.value.code == "SUMMARY_RUNTIME_REVISION_CHANGED"
     result = vnext_summary_chapter_pipeline.process_next_summary_chapter(
         context,
         stream["task_id"],
@@ -647,6 +675,8 @@ def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monk
         lease_owner="summary-artifact-worker",
         handler_revision="summary-facts-v3-chapter-r1",
         provider_revision="provider-test-r1",
+        prompt_revision="facts-test-r1",
+        model_revision="model-test-r1",
         generate_verified_chapter=_verified_document,
     )
     assert result["state"] == "success"
@@ -660,6 +690,8 @@ def test_summary_pipeline_atomically_publishes_encrypted_artifact(tmp_path, monk
     assert artifact["output"]["meeting_id"] == "meeting-source-artifact"
     assert re.fullmatch(r"vnext:[0-9a-f]{64}", artifact["output"]["document_id"])
     assert artifact["output"]["source_fingerprint"].startswith("sha256:")
+    assert artifact["output"]["prompt_revision"] == "facts-test-r1"
+    assert artifact["output"]["model_revision"] == "model-test-r1"
     assert artifact["output"]["coverage"]["input_token_budget"] == 10240
     assert artifact["output"]["facts_document"]["action_candidates"]
     with sqlite3.connect(database) as connection:
@@ -889,6 +921,8 @@ def test_final_checkpoint_recovers_after_worker_lease_loss_without_regeneration(
         aggregate=checkpoint.model_dump(mode="json"),
         handler_revision="summary-facts-v3-chapter-r1",
         provider_revision="provider-test-r1",
+        prompt_revision="facts-test-r1",
+        model_revision="model-test-r1",
     )
     with device_identity.control_connection() as connection:
         connection.execute(
@@ -912,6 +946,8 @@ def test_final_checkpoint_recovers_after_worker_lease_loss_without_regeneration(
         lease_owner="worker-after-crash",
         handler_revision="summary-facts-v3-chapter-r1",
         provider_revision="provider-test-r1",
+        prompt_revision="facts-test-r1",
+        model_revision="model-test-r1",
         generate_verified_chapter=must_not_generate,
     )
     assert recovered["state"] == "success"

@@ -51,6 +51,11 @@ export interface CreateDeviceV2SourceStreamInput extends SourceStreamBindingFenc
   entityId: string;
   entityRevision: number;
   taskInputSha256: string;
+  summaryRevisions?: {
+    handlerRevision: string;
+    promptRevision: string;
+    modelRevision: string;
+  };
 }
 
 export interface SourceManifestDescriptor {
@@ -287,6 +292,11 @@ export async function createDeviceV2SourceStream(
     entity_id: id(input.entityId, 'entity_id'),
     entity_revision: positiveInteger(input.entityRevision, 'entity_revision'),
     task_input_sha256: sha256(input.taskInputSha256, 'task_input_sha256'),
+    ...(input.summaryRevisions ? {
+      summary_handler_revision: id(input.summaryRevisions.handlerRevision, 'summary_handler_revision', 180),
+      summary_prompt_revision: id(input.summaryRevisions.promptRevision, 'summary_prompt_revision', 180),
+      summary_model_revision: id(input.summaryRevisions.modelRevision, 'summary_model_revision', 180),
+    } : {}),
   };
   if (body.capability !== 'summary' && body.capability !== 'question') throw new Error('来源流能力无效');
   const value = await deviceV2Request<any>(

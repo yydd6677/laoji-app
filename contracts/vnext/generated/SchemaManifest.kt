@@ -18,7 +18,7 @@ object VNextSchemaManifest {
         "source_bundle_item_v2" to "4e903da7da0a91d042a0b317e7599c19594c19eff57a421e7ec7efe09712d6f1",
         "source_manifest_descriptor_v2" to "5c86a8337c5767060c587a0a390f4e76ed7edd8c697e256a86422168b2c2f1f9",
         "source_ref" to "808f31a5ad291dc4292e2a79b1402be6ec0f6daa87869f52cdb03c0a44083712",
-        "source_stream_snapshot_v2" to "ae4f956d2e0b97ec085762a7e1af1c9910674433c018ef4fbfa720ee0fa9ec1e",
+        "source_stream_snapshot_v2" to "ad9e26d6db04210ebf75e88435187ef59461b1ef39aeed52c77b0252f444d7a0",
         "speaker_overlay_snapshot_v2" to "aabe52c9234603c180bdc6bbd3f3a7ec778c386f971e0ab280748e94482c2ab1",
         "task_attempt" to "7bba4a91ea01d367bf8cd6cab4d26620ddf78060afc71c8565d60219fa821a36",
         "transcript_stream_event_v2" to "af174ee12fbb7d4ac7e76830213006bef672ae3d4177e3a78d1fed9f22dede6a",
