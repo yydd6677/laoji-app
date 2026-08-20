@@ -233,3 +233,10 @@ provider 失败保留可重试任务，重放可用 task ID 幂等读取。短�
 Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须与回答分句或问题共享中文/数字短语，
 否则 fail-closed，避免“引用真实但与回答无关”。该修复只属于隔离候选，人工引用相关率和 Android
 回放仍未通过，证据见 [Q2 citation relevance gate](../vnext-stage3/Q2-CITATION-RELEVANCE-GATE-20260819.md)。
+
+2026-08-20 的 r5 稳定资源回放已关闭 Stage 3 的 Summary 暖态性能门：相同 10 份完整字幕每份三轮
+共 30/30 一次成功，单包 p50/p95 为 `15.368s/35.498s`，含双章节长会的完整证据路径 p95 为
+`60.483s`；所有显示引用逐字匹配，临时任务与来源均 purge-confirmed。该改进来自 Summary embedding
+固定 CPU，避免挤出 GPU0 上常驻的 9B 生成模型；未改提示词或事实协议。详见
+[r5 稳定延迟](../vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md)。Stage 3 仍缺独立人工事实/行动
+与 Q2 质量、剩余恢复矩阵、公开零 v1 流量周期和 capability barrier，不能采用或删除旧链路。

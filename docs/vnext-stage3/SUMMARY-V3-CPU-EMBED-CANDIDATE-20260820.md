@@ -2,7 +2,7 @@
 
 Date: 2026-08-20
 
-Status: isolated performance candidate; warm distribution gate not yet rerun; production API was not
+Status: isolated performance candidate; warm distribution gate subsequently passed; production API was not
 redeployed or switched.
 
 ## Bottleneck evidence
@@ -65,11 +65,11 @@ A warm local phase diagnostic after both runners were resident showed 15.359s Ol
 0.415s load duration, 1.939s prompt evaluation and 9.969s output evaluation. CPU evidence selection
 was exposed to unrelated host load and is not promoted as a formal latency result.
 
-## Remaining gate
+## Stable distribution follow-up
 
-At measurement time the server load average was approximately 67, with another project using several
-CPU emulators and extraction jobs. Those services were not stopped. A new 30-run warm distribution
-under that changing external load would not be comparable to r4, so it is deferred. The r5 smoke proves
-the placement is viable and output-stable but does not close the Stage 3 `20s/45s` single-pack p50/p95
-gate. Cold-start latency must also remain separately reported.
-
+At the initial measurement time the server load average was approximately 67, with another project using several
+CPU emulators and extraction jobs. Those services were not stopped, so the distribution was initially deferred.
+It has now been rerun after the host returned to a lower starting load, while retaining the real shared-load spikes:
+30/30 succeeded, single-pack p50/p95 were `15.368s/35.498s`, and the complete evidence path p95 was `60.483s`.
+See [r5 stable latency](SUMMARY-V3-R5-STABLE-LATENCY-20260820.md). The Summary warm performance gate is now
+closed; cold-start, mixed Q2, independent human quality and capability gates remain separate.
