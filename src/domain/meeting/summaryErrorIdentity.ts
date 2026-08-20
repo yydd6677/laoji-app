@@ -25,6 +25,12 @@ export function isMeetingSummaryInputChangedErrorLike(reason: unknown): boolean 
     );
 }
 
+export function createMeetingSummaryInputChangedError(): Error {
+  const error = new Error('会议内容已更新，本次结果未替换当前整理，请重新整理。');
+  error.name = 'MeetingSummaryInputChangedError';
+  return error;
+}
+
 export function isSummaryV3ActivationFenceErrorLike(reason: unknown): boolean {
   return errorHasStableName(reason, 'SummaryV3ActivationFenceError')
     || errorHasInternalSentinel(reason, 'summary v3 activation fence changed');

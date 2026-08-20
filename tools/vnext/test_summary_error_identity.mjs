@@ -2,11 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  createMeetingSummaryInputChangedError,
   createSummaryV3ActivationFenceError,
   errorHasStableName,
   isMeetingSummaryInputChangedErrorLike,
   isSummaryV3ActivationFenceErrorLike,
 } from '../../src/domain/meeting/summaryErrorIdentity.ts';
+
+test('creates a stable source-stream input-changed error', () => {
+  const error = createMeetingSummaryInputChangedError();
+  assert.equal(error.name, 'MeetingSummaryInputChangedError');
+  assert.equal(isMeetingSummaryInputChangedErrorLike(error), true);
+});
 
 test('recognizes an Error instance by its stable name', () => {
   const error = new Error('changed');

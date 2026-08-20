@@ -531,6 +531,7 @@ async def device_capabilities(context: DeviceContext = Depends(require_device)) 
         "public_links": False,
         "cross_device": False,
         "summary_contract_v3": True,
+        "summary_attachments_text": True,
     }
 
 

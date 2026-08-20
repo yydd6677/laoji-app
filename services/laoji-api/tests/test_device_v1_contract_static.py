@@ -55,6 +55,15 @@ def test_device_router_does_not_reach_into_private_module_state() -> None:
     assert "__dict__" not in source
 
 
+def test_device_capabilities_advertise_local_text_summary_attachments() -> None:
+    source = (ROOT / "app/api/device_v1.py").read_text(encoding="utf-8")
+    capability_start = source.index("async def device_capabilities")
+    capability_end = source.index("def _vnext_error", capability_start)
+    capability_block = source[capability_start:capability_end]
+    assert '"summary_contract_v3": True' in capability_block
+    assert '"summary_attachments_text": True' in capability_block
+
+
 def test_identity_exports_router_facing_helpers() -> None:
     tree = _tree("app/services/device_identity.py")
     names = {

@@ -25,7 +25,10 @@ import { DeviceV2ApiError, loadDeviceV2Capabilities } from './deviceV2Api';
 import { parseMeetingFactsResultV3, meetingFactsV3ToSummary } from './meetingSummaryV3';
 import type { MeetingSummary } from '../types';
 import type { MeetingTemplate } from '../domain/meeting';
-import { createSummaryV3ActivationFenceError } from '../domain/meeting/summaryErrorIdentity';
+import {
+  createMeetingSummaryInputChangedError,
+  createSummaryV3ActivationFenceError,
+} from '../domain/meeting/summaryErrorIdentity';
 
 const MAX_CHAPTER_BYTES = 48 * 1024;
 const POLL_LIMIT = 10 * 60 * 1_000;
@@ -434,7 +437,7 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       try {
         const existingTask = await getDeviceV2Task(taskId);
         if (existingTask.task.input_sha256 !== requestSha) {
-          throw new Error('新版整理任务来源已变化，请重新整理。');
+          throw createMeetingSummaryInputChangedError();
         }
         if (existingTask.task.state === 'success') {
           const artifact = await getDeviceV2TaskArtifact(taskId);
@@ -507,7 +510,7 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   } else {
     const resumedTask = await getDeviceV2Task(taskId);
     if (resumedTask.task.input_sha256 !== requestSha) {
-      throw new Error('新版整理任务来源已变化，请重新整理。');
+      throw createMeetingSummaryInputChangedError();
     }
     if (resumedTask.task.state === 'active') {
       const sourceStreamId = resumedTask.task.source_stream_id;

@@ -44,6 +44,7 @@ export interface DeviceServiceCapabilities {
   maxAssetBytes: number;
   mediaImport: DeviceMediaImportCapabilities | null;
   summaryContractV3: boolean;
+  summaryAttachmentsText: boolean;
 }
 
 let identityPromise: Promise<DeviceIdentity> | null = null;
@@ -259,6 +260,7 @@ function normalizeDeviceCapabilities(value: any): DeviceServiceCapabilities {
       ? { mimeTypes, maxBytes }
       : null,
     summaryContractV3: value?.summary_contract_v3 === true,
+    summaryAttachmentsText: value?.summary_attachments_text === true,
   };
 }
 

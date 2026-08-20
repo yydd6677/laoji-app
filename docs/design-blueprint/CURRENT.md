@@ -4,13 +4,13 @@
 - architecture revision: `vnext-1`
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
-- production/App/APK/device/GPU mutation: `none`
+- production/App/GPU mutation: `none`; `emulator-5562` carries isolated candidate only
 - stable source reference: `master` / `v1.1.10`
 - implementation reference: `vnext/implementation`
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 in progress; Stage 3 source-stream/Facts-V3 artifact candidate and Stage 4 schedule provenance slices implemented in isolation; 1.1.13 (121) candidate archived`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 implementation candidate is performance-blocked; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.38 (146)`
 
 ## 权威文件
 
@@ -240,3 +240,13 @@ Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须�
 固定 CPU，避免挤出 GPU0 上常驻的 9B 生成模型；未改提示词或事实协议。详见
 [r5 稳定延迟](../vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md)。Stage 3 仍缺独立人工事实/行动
 与 Q2 质量、剩余恢复矩阵、公开零 v1 流量周期和 capability barrier，不能采用或删除旧链路。
+
+同日，Facts V3 Android 激活围栏在 `emulator-5562` 补齐了 binding revision 与明确授权文字附件
+revision 两种原生迟到结果竞态。远端旧来源 task 均可独立完成，但手机恢复时会把它收敛为
+`input_changed`、清除 pending intent、保留上一份可用整理，不写入迟到 artifact。device-primary
+文字附件能力不再依赖 account endpoint；无 task ID 的孤儿 preparation 状态可安全清理；首次提交和
+重启恢复统一使用 canonical transcript revision 构造来源身份。最终 Release 候选为 `1.1.38 (146)`，
+测试附件、immutable revision 和 test APK 已清除，本机数据库完整性为 `ok`。证据见
+[Facts V3 激活围栏矩阵](../vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md)。epoch 及附件
+删除/移位/正文变化仍只有纯领域矩阵，混合负载、独立人工质量、公开零 v1 流量周期与 capability
+barrier 仍开放，因此 Stage 3 继续保持未采用。

@@ -1125,8 +1125,12 @@ p95。8/8/4 输出限额实验因 9 组 holdout 仅 8/9 已拒绝并回退。详
 Android 激活围栏随后从 transcript/note 扩展到 device epoch、meeting binding 和显式授权文字附件。
 本机事务在写 Facts/Version/current pointer 前重读所有身份；23 项可执行矩阵通过，真实长会在
 `emulator-5562` 成功激活 3 个 section、14 条引用且无无效引用。证据见
-`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。release 模拟器尚未逐项注入原生
-SQLite 负向突变，故恢复组合门和 Stage 3 capability 仍关闭。
+`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。同一专用模拟器随后完成了
+binding revision 和授权文字附件 revision 两种原生负向竞态：App 退出后远端旧来源 task 成功，恢复
+时均以稳定 input-changed 结果清理 pending intent，保留上一份 current result，未激活迟到 artifact。
+device-primary 文字附件能力、孤儿 preparation 清理和 canonical transcript 恢复身份也已接通；最终
+Release 为 `1.1.38 (146)`。epoch 及附件删除/移位/正文变化的逐项原生重放、混合负载和 Stage 3
+capability 仍未关闭。
 
 同日最终 `facts-v3-r15 / summary-facts-v3-chapter-r4 / provider-v3-r2` 候选修复了行动投影字段错位、
 共享更正来源的最终确认、显式期限保留以及长证据包元数据预算遗漏。外部 24 组语义 manifest 在最终

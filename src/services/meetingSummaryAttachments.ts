@@ -9,6 +9,7 @@ import {
 import type { MeetingAttachmentRecord } from '../data/repositories';
 import { loadMeetingCapabilities } from '../data/api/v2';
 import { loadMeetingAttachments } from './meetingAttachments';
+import { loadDeviceServiceCapabilities } from './deviceApi';
 
 const MAX_SUMMARY_ATTACHMENTS = 12;
 const MAX_SUMMARY_IMAGE_ATTACHMENTS = 4;
@@ -126,10 +127,25 @@ async function authorizedItem(record: MeetingAttachmentRecord): Promise<MeetingS
   };
 }
 
-async function freshAttachmentCapabilities(accessToken?: string | null) {
+async function freshAttachmentCapabilities(input: {
+  scopeKey: ScopeKey;
+  accessToken?: string | null;
+}) {
+  if (input.scopeKey === 'guest') {
+    try {
+      const capabilities = await loadDeviceServiceCapabilities({ forceRefresh: true });
+      return {
+        summaryAttachmentsText: capabilities.summaryAttachmentsText,
+        summaryAttachmentsImage: false,
+        meetingAttachmentsV1: false,
+      };
+    } catch {
+      throw new MeetingSummaryAttachmentCapabilityUnavailableError();
+    }
+  }
   try {
     const state = await loadMeetingCapabilities({
-      accessToken,
+      accessToken: input.accessToken,
       forceRefresh: true,
       allowStaleOnError: false,
     });
@@ -146,7 +162,7 @@ export async function canUseMeetingSummaryImageAttachments(input: {
 }): Promise<boolean> {
   assertScopeKey(input.scopeKey);
   if (input.scopeKey === 'guest' || !input.accessToken) return false;
-  const capabilities = await freshAttachmentCapabilities(input.accessToken);
+  const capabilities = await freshAttachmentCapabilities(input);
   return capabilities.summaryAttachmentsImage && capabilities.meetingAttachmentsV1;
 }
 
@@ -169,7 +185,7 @@ export async function authorizeMeetingSummaryAttachments(input: {
     || imageRecords.reduce((total, record) => total + (record.byteSize ?? 0), 0) > MAX_TOTAL_IMAGE_BYTES
     || imageRecords.some(record => !meetingSummaryImageAttachmentIsSelectable(record))
   ) throw new MeetingSummaryAttachmentSelectionStaleError();
-  const capabilities = await freshAttachmentCapabilities(input.accessToken);
+  const capabilities = await freshAttachmentCapabilities(input);
   if (textRecords.length > 0 && !capabilities.summaryAttachmentsText) {
     throw new MeetingSummaryAttachmentCapabilityUnavailableError();
   }

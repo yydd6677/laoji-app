@@ -797,6 +797,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const uploadInFlightRef = useRef<Promise<void> | null>(null);
   const automaticAudioUploadKeyRef = useRef('');
   const autoResumeTaskRef = useRef('');
+  const orphanedSummaryPreparationRef = useRef('');
   const summaryCarryLookupGenerationRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting?.id ?? null);
   const activeMeetingRef = useRef(meeting);
@@ -2589,13 +2590,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (!meeting) return Promise.resolve();
     if (summaryInFlightRef.current) return summaryInFlightRef.current;
     const currentMeeting = meeting;
-    const lines = options.transcriptLines ?? transcript;
-    if (lines.length === 0) {
-      if (!options.automatic) {
-        showDialog({ title: '暂无转写', message: '需要先有会议转写内容，才能生成整理结果。', tone: 'info' });
-      }
-      return Promise.resolve();
-    }
+    let lines = options.transcriptLines ?? transcript;
     const releaseInteractiveWork = beginSummaryV3InteractiveWork();
 
     const meetingDate = meetingDateForSummary(currentMeeting.date, currentMeeting.createdAt);
@@ -2624,6 +2619,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     let recordedTaskStatus: 'queued' | 'generating' | null = options.resumeTask
       ? 'generating'
       : null;
+    let sourceTranscriptWasCanonical = false;
     let activeFingerprint = summaryTaskInputFingerprint({
       transcriptLines: lines,
       title: currentMeeting.title,
@@ -2658,6 +2654,45 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (manualNote.loading) throw new Error('我的笔记仍在读取，请稍后重试。');
         await manualNote.flush();
         const summaryManualNote = manualNote.snapshot();
+        // The visible transcript can briefly be the legacy cache while the
+        // canonical revision is loading. Creating a durable source-stream
+        // task from that transient projection makes the same task impossible
+        // to resume once the canonical lines arrive because their stable
+        // source identities differ. Resolve the local owner revision inside
+        // every initial and resumed run so both paths hash the same source.
+        if (currentMeetingScopeKey) {
+          const activeTranscript = await loadActiveMeetingTranscriptState(
+            currentMeetingScopeKey,
+            currentMeeting.id,
+          );
+          if (activeTranscript) {
+            lines = simplifyTranscriptLines(activeTranscript.lines);
+            sourceTranscriptWasCanonical = true;
+          }
+        }
+        if (lines.length === 0) {
+          if (isActiveSummaryRun()) {
+            setSummaryVisualPhase(summaryDocument ? 'ready' : 'idle');
+            setSummaryProgress('');
+          }
+          if (!options.automatic) {
+            showDialog({
+              title: '暂无转写',
+              message: '需要先有会议转写内容，才能生成整理结果。',
+              tone: 'info',
+            });
+          }
+          return;
+        }
+        activeFingerprint = summaryTaskInputFingerprint({
+          transcriptLines: lines,
+          title: currentMeeting.title,
+          meetingDate,
+          template: requestedTemplate,
+          carryForward: requestedCarryForward,
+          attachmentAuthorization: requestedAttachmentAuthorization,
+          manualNote: summaryManualNote,
+        });
         let pending = options.resumeTask ?? null;
         if (options.forceRegenerate) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
@@ -2693,6 +2728,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           if (!authorizationIsCurrent) {
             if (pending) {
               await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
+              // The user-approved source changed after a durable task was
+              // submitted. This is an activation-fence outcome, not a service
+              // failure or a bad selection. Preserve the previous summary and
+              // converge the canonical stage through the shared input-changed
+              // terminal path.
+              throw new MeetingSummaryInputChangedError();
             }
             throw new MeetingSummaryAttachmentSelectionStaleError();
           }
@@ -2866,8 +2907,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             })
           )
         ) throw new MeetingSummaryInputChangedError();
+        let activationTranscriptLines = transcriptRef.current;
+        if (sourceTranscriptWasCanonical && currentMeetingScopeKey) {
+          const latestTranscript = await loadActiveMeetingTranscriptState(
+            currentMeetingScopeKey,
+            currentMeeting.id,
+          );
+          if (!latestTranscript) throw new MeetingSummaryInputChangedError();
+          activationTranscriptLines = simplifyTranscriptLines(latestTranscript.lines);
+        }
         const activationFingerprint = summaryTaskInputFingerprint({
-          transcriptLines: transcriptRef.current,
+          transcriptLines: activationTranscriptLines,
           title: latestMeeting.title,
           meetingDate: meetingDateForSummary(latestMeeting.date, latestMeeting.createdAt),
           template: requestedTemplate,
@@ -3427,6 +3477,74 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
     return () => { alive = false; };
   }, [isCurrentPageRequest, isGuest, loadingSummary, loadingTranscript, meeting?.createdAt, meeting?.date, meeting?.id, meeting?.title, meetingScopeKey, processingStatuses.summary, recordingStorageScope, transcript]);
+
+  // Preparation is persisted before the optional attachment sheet opens so
+  // list/detail status stays consistent from the first tap. If the process is
+  // killed while that sheet is open, however, there is no accepted task ID or
+  // local UI operation to resume. Leaving that bare queued stage in SQLite
+  // permanently disables template and regenerate actions after the next
+  // launch. Recover only the provably orphaned case: no mounted preparation,
+  // no in-flight request, no durable task ID, and no pending-task registry
+  // entry. A task that reached onTaskSubmitted keeps either jobId or the
+  // registry entry and is never discarded here.
+  useEffect(() => {
+    if (
+      !meeting
+      || !meetingScopeKey
+      || loadingSummary
+      || summaryInFlightRef.current
+      || summaryAttachmentRequest
+      || summaryCarryForwardRequest
+    ) return undefined;
+    const stage = canonicalProcessingSnapshot?.stages.find(item => item.stage === 'summary');
+    if (
+      !stage
+      || !summaryStageIsActive(processingStatuses.summary)
+      || stage.jobId
+    ) return undefined;
+    const recoveryKey = `${meetingScopeKey}:${meeting.id}:${stage.updatedAtMs}`;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (orphanedSummaryPreparationRef.current === recoveryKey) return;
+      orphanedSummaryPreparationRef.current = recoveryKey;
+      void getPendingMeetingSummaryTask(recordingStorageScope, meeting.id)
+        .then(async pending => {
+          if (cancelled) return;
+          if (pending) {
+            orphanedSummaryPreparationRef.current = '';
+            return;
+          }
+          const outcome = await recordMeetingSummaryProcessing({
+            scopeKey: meetingScopeKey,
+            legacyMeetingId: meeting.id,
+            signal: { type: 'discarded' },
+          });
+          diagnosticAudit('meeting_summary_orphaned_preparation_recovery', {
+            outcome,
+            had_current_summary: Boolean(summaryDocument),
+          });
+          if (outcome === 'failed') orphanedSummaryPreparationRef.current = '';
+        })
+        .catch(reason => {
+          orphanedSummaryPreparationRef.current = '';
+          diagnosticWarn('[meeting-summary] orphaned preparation recovery deferred', reason);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    canonicalProcessingSnapshot,
+    loadingSummary,
+    meeting,
+    meetingScopeKey,
+    processingStatuses.summary,
+    recordingStorageScope,
+    summaryAttachmentRequest,
+    summaryCarryForwardRequest,
+    summaryDocument,
+  ]);
 
   // If the recovery registry was lost but the canonical stage still carries a
   // task ID, resume that exact task from SQLite.  This is deliberately

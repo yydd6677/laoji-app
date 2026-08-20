@@ -74,14 +74,45 @@ identity/revision/cancel revision，以及本次明确授权的文字附件位�
   bytes。`run-as` 被系统拒绝，启动后恢复 7 条会议、Facts V3 和五项候选 capability，无崩溃；测试 APK、
   Metro 与调试 reverse 已移除，仅保留 `28121 -> 28023` 的隔离 API 映射。
 
+## Android 文字附件竞态与恢复收敛
+
+- device-primary 客户端不再向已退出目标架构的 account capability 查询文字附件能力。隔离
+  `device/v1` 明确宣告 `summary_attachments_text=true`，手机按 device capability 完成选择、授权、
+  source-stream 上传和结果读取；服务端静态合同禁止 guest/device 路径退回 account endpoint。
+- 页面在打开附件选择层期间被杀死时，曾留下没有 task ID 的“正在提交整理任务”。候选只在不存在
+  本地 preparation、sheet、pending intent、job ID 和运行中 generation 时清理这个孤儿阶段；已有结果
+  继续显示，不新增状态行。真实恢复审计为
+  `meeting_summary_orphaned_preparation_recovery={outcome:updated,had_current_summary:true}`。
+- source-stream 首次提交和重启恢复现在都从本机 canonical transcript revision 重建来源，不再把页面
+  临时 legacy transcript cache 作为 task 身份。重启后 transcript/attachment 来源变化统一抛出
+  `MeetingSummaryInputChangedError`，而不是普通生成错误。
+- 在 `emulator-5562` 为目标会议创建一条确定性文字附件后，远端 task
+  `vnext-summary:e2d63c79-6986-54fc-b044-185d0c5d9190:972c828857022a3770ae44f757861431`
+  已进入 `consuming`，App 随即被强制停止；独立 test APK 将该附件 `updated_at_ms` 精确增加 `1`。
+  服务端随后独立成功，artifact 为 `49c2e2e6-2f0c-532a-8b88-164737f728e9`，来源 manifest SHA-256 为
+  `ec2d797e8e123555aebe0ccbb404648ae6bd64daed0d8939e9734cf5c9ca1732`。
+- 覆盖安装并启动 `1.1.37 (145)` 后，审计顺序为 `meeting_summary_v3_restore=facts_ready`、
+  `meeting_summary_processing_stage=task_status`、
+  `meeting_summary_run_terminal={outcome:input_changed,error_name:MeetingSummaryInputChangedError}`、
+  `meeting_summary_pending_task_discard={status:cleared}` 和 `processing_stage=discarded`。旧来源 artifact
+  未写入本机；上一份 current pointer 保持
+  `...:summary:general:031925b92e7fedb20f1f1c05bd771395100a84818d65404f5ddcc77c72e17ef2`，
+  页面继续显示可读概述且“重新整理”可操作，无错误或持续 loading。
+- 数据库复核得到 `device_summary_task_intents=0`，被拒绝 artifact 的 output SHA 未出现在本机 Facts
+  文档，`integrity_check=ok`。注入 revision 已先恢复，随后 marker、附件和 immutable text revision
+  均按固定 ID、固定正文和 SHA-256 精确删除，最终计数全部为 `0`；test APK 已卸载。
+- 最终模拟器为非调试 Release `1.1.38 (146)`，APK SHA-256
+  `87fe10f90b131d86db4e452ca43d98c024934e8d76f2a45602bf94c74c36687a`，大小 `82,588,383`
+  bytes；v2 签名验证通过。隔离 API `18023` readiness 仍为 ready；生产服务未改变。
+
 ## 回归与仍未关闭的门
 
 - TypeScript、Stage 3 source-stream 合同、`git diff --check` 通过；Facts V3、chapter merge、source stream、
   worker、Q2、provider、持久任务和 readiness 聚焦回归为 `131 passed`。
 - 本次恢复边界变更另执行 summary/schema/chapter/worker/persistent/version 聚焦回归 `84 passed`，错误身份与
   activation fence 领域测试合计 `28 passed`；source-stream 与 Q2 Android 静态合同均通过。
-- 当前矩阵已直接执行领域比较器，并完成 Android 正向激活与“远端成功、进程退出、binding revision
-  变化、进程恢复”的真实 SQLite 负向竞态。其余 attachment/epoch 组合仍由 23 项纯领域矩阵覆盖；尚未
-  对每个组合分别构建 Android test APK 重放。
+- 当前矩阵已直接执行领域比较器，并完成 Android 正向激活、binding revision 变化及授权文字附件
+  revision 变化两种“远端成功、进程退出、本机来源变化、进程恢复”的真实 SQLite 负向竞态。epoch
+  及附件删除/移位/正文变化等其余组合仍由 23 项纯领域矩阵覆盖；尚未对每个组合逐项执行原生重放。
 - 还缺独立人工事实/行动/Q2 质量 `>=95%`、长会议延迟分布、旧结果全量迁移、公开零 v1 流量周期和
   capability barrier。Stage 2 纯 CPU ASR 首段与 RTF 性能门也仍未通过，因此 Stage 3 和全局候选均未采用。

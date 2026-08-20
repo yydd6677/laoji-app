@@ -29,6 +29,8 @@ def main() -> None:
     summary_contract = ROOT / "src/services/meetingSummaryV3.ts"
     summary_screen = ROOT / "src/screens/TranscriptionScreen.android.tsx"
     summary_tasks = ROOT / "src/services/meetingSummaryTasks.ts"
+    summary_attachments = ROOT / "src/services/meetingSummaryAttachments.ts"
+    device_v1_client = ROOT / "src/services/deviceApi.ts"
     summary_mirror = ROOT / "src/services/meetingContentMirror.ts"
     summary_repository = ROOT / "src/data/repositories/meetingSummaryV3Repository.ts"
     summary_domain = ROOT / "src/domain/meeting/summary.ts"
@@ -43,6 +45,7 @@ def main() -> None:
     worker = ROOT / "services/laoji-api/app/services/vnext_summary_worker.py"
     runtime = ROOT / "services/laoji-api/app/services/vnext_summary_runtime.py"
     device_api = ROOT / "services/laoji-api/app/api/device_v2.py"
+    device_v1_api = ROOT / "services/laoji-api/app/api/device_v1.py"
 
     client_source = require(
         client,
@@ -53,6 +56,18 @@ def main() -> None:
     )
     if "Number(group.bundle_count)" in client_source or "Number(group.item_count)" in client_source:
         raise AssertionError("mobile source-group normalizer still reads legacy count names")
+    require(
+        device_v1_client,
+        "summaryAttachmentsText: boolean;",
+        "summaryAttachmentsText: value?.summary_attachments_text === true,",
+    )
+    require(
+        summary_attachments,
+        "if (input.scopeKey === 'guest')",
+        "loadDeviceServiceCapabilities({ forceRefresh: true })",
+        "summaryAttachmentsText: capabilities.summaryAttachmentsText",
+    )
+    require(device_v1_api, '"summary_attachments_text": True')
     require(
         summary,
         "getDeviceV2SourceStream",
@@ -79,6 +94,7 @@ def main() -> None:
         "modelRevision: summaryRevisions.modelRevision",
         "parsed.promptRevision !== summaryRevisions.promptRevision",
         "parsed.modelRevision !== summaryRevisions.modelRevision",
+        "throw createMeetingSummaryInputChangedError();",
     )
     require(
         client,
@@ -141,6 +157,10 @@ def main() -> None:
         "title: '会议内容已更新'",
         "reason instanceof SummaryV3ActivationFenceError",
         "throw new MeetingSummaryInputChangedError();",
+        "const activeTranscript = await loadActiveMeetingTranscriptState(",
+        "lines = simplifyTranscriptLines(activeTranscript.lines);",
+        "sourceTranscriptWasCanonical = true;",
+        "activationTranscriptLines = simplifyTranscriptLines(latestTranscript.lines);",
     )
     if "saveMeetingFactsResultV3" in summary_screen_source or "linkMeetingFactsToSummaryVersion" in summary_screen_source:
         raise AssertionError("active summary screen still persists Facts V3 outside the summary-version transaction")
