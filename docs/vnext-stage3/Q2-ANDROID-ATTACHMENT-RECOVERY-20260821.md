@@ -18,6 +18,9 @@
   投影到当前会话；若远端 Task 仍 active，会先尽力调用同一 device-v2 cancel 接口清理 Task/source stream。
 - source stream 的网络、408、429 和 5xx 保留同一 Task 供恢复；确定性 4xx/校验失败才终止，不建立第二
   个隐式 owner。
+- 跨进程恢复先核对设备会话和本机 canonical binding，再登记远端 binding。只有本机 epoch、generation、
+  cancel revision 与 turn activation fence 一致时才访问远端 binding；不一致时只取消已经过确定性身份
+  校验的精确 Task，并把本机 operation 失败关闭，避免旧 binding 先触发清理凭据冲突。
 
 ## 正向回放
 
@@ -37,6 +40,20 @@
 6. instrumentation `testQ2ChangedAttachmentResultRejected` 断言上述状态、零 clause 和数据库完整性；随后
    `testRestoreChangedAttachmentContent` 安全恢复附件正文，两项均为 `OK (1 test)`。
 
+## Binding epoch 恢复时序
+
+1. 在同一股权会议夹具提交“会议中提到的注册资本是多少？”，确认确定性 Task 和 source stream 已建立、
+   Attempt 尚未创建后强制停止应用。
+2. 通过独立 instrumentation 将本机 meeting binding 移到不同 epoch。旧恢复顺序会先登记这个刻意过期的
+   binding，页面显示 `PURGE_CAPABILITY_CONFLICT`，Task/source stream 也无法由本机 owner 收敛。
+3. 改为 local-first fence 后，以 `1.1.40 (148)` 重新打开问答页：页面正常打开且没有清理凭据错误；客户端
+   精确取消原 Task，再将 operation 终结为 `failure/Q2_EVIDENCE_CHANGED`。
+4. 候选库中 Task 为 `cancelled`、`cancel_revision=1`、`current_attempt_id=NULL`；Attempt 数为 0，source
+   stream 为 `cancelled`，checkpoint reservation 已释放，`PRAGMA integrity_check=ok`。
+5. Release-target instrumentation `testQ2ChangedAttachmentResultRejected` 返回 `OK (1 test)`，断言 turn
+   的 `answer/completed_at` 为空、引用/clauses 为 0，随后把 binding epoch 精确恢复。主应用重新启动无
+   crash，也未再出现 `PURGE_CAPABILITY_CONFLICT`。
+
 ## 回归与制品
 
 - `npx tsc --noEmit`：通过。
@@ -45,10 +62,14 @@
 - compact Python 3.12 环境中的 Q2 reader、Task recovery、source stream 和 device-v2 API：
   `90 passed`；pytest 配置只有一条不影响结果的 `asyncio_mode` 未识别警告。
 - `git diff --check`：通过。
-- 候选 APK：`1.1.38 (146)`，SHA-256
-  `20f13b59c1d1d188904e2e840fd1773ac0b4a795939a25327665257a5e12cdc9`。
-- androidTest APK SHA-256：
-  `da0d809d149eb951990e64b57c7878dffd6cf7127427410282a1d2f32f984a56`。
+- 候选 APK：`1.1.40 (148)`，SHA-256
+  `681a6cffcfea2680183250cdb36fe4a0f9a464159b47997558a559a57c82f27a`。
+- Release-target androidTest APK SHA-256：
+  `b9544106efea52b7ef9464ddb5e8dd732c1b6412235607f53db4dfbf0301a2db`。
+- Release-target 测试先运行
+  `python3 tools/vnext/prepare_stage3_android_instrumentation.py`，再以
+  `-Pandroid.testBuildType=release :app:assembleReleaseAndroidTest` 生成；这避免 Expo prebuild 覆盖测试
+  harness，也避免把 Debug instrumentation 缺少 Release 目标运行时类的打包错误误判为产品崩溃。
 
 ## 仍未关闭的 Stage 3 门
 

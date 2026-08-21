@@ -40,6 +40,9 @@ def main() -> None:
         "Q2_RECOVERY_FENCE_MISSING",
         "await q2TransportHandles({",
         "operation.remoteTaskId !== expectedTransport.taskId",
+        "Closing only the local operation",
+        "getMeetingServiceBinding(evidence.meetingId)",
+        "Only register/confirm the binding remotely after the canonical local",
         "error instanceof DeviceV2ApiError && error.status === 404",
         "reconcilePendingQ2TurnsForMeeting",
         "findPendingQ2ThreadsForMeeting",
@@ -186,6 +189,12 @@ def main() -> None:
         "for (const binding of prefix)",
         "registerRemoteMeetingServiceBinding(binding, binding.bindingId === target.bindingId)",
         "sequence_backfill: !target",
+    )
+    require(
+        ROOT / "tools/vnext/prepare_stage3_android_instrumentation.py",
+        "android.testBuildType",
+        "VnextSummaryFenceDbMutationTest.java",
+        "shutil.copy2(HARNESS_SOURCE, HARNESS_TARGET)",
     )
 
     require(

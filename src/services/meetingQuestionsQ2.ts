@@ -25,6 +25,7 @@ import {
   getDeviceOperation,
   updateDeviceOperation,
 } from '../data/repositories/vnext/deviceOperationsRepository';
+import { getMeetingServiceBinding } from '../data/repositories/vnext/deviceAuthorityRepository';
 import {
   buildQ2CandidateSources,
   executeQ2Candidate,
@@ -312,14 +313,6 @@ async function recoverCompletedPendingQ2Turn(
     await terminalizeRecoveredOperation(operation, 'failure', 'Q2_RECOVERY_FENCE_MISSING');
     return null;
   }
-  const [deviceSession, binding] = await Promise.all([
-    ensureDeviceV2Session(),
-    ensureRemoteMeetingServiceBinding(evidence.meetingId),
-  ]);
-  if (!recoveryFenceCurrent(pending.activationFence, evidence, deviceSession.epochId, binding)) {
-    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_EVIDENCE_CHANGED');
-    return null;
-  }
   if (
     operation.capability !== 'question_reader_v2'
     || operation.entityId !== evidence.meetingId
@@ -336,6 +329,33 @@ async function recoverCompletedPendingQ2Turn(
   });
   if (operation.remoteTaskId !== expectedTransport.taskId) {
     await terminalizeRecoveredOperation(operation, 'failure', 'Q2_TASK_FENCE_INVALID');
+    return null;
+  }
+  const [deviceSession, localBinding] = await Promise.all([
+    ensureDeviceV2Session(),
+    getMeetingServiceBinding(evidence.meetingId),
+  ]);
+  if (
+    !localBinding
+    || !recoveryFenceCurrent(pending.activationFence, evidence, deviceSession.epochId, localBinding)
+  ) {
+    // The deterministic Task identity has already been verified above, so it
+    // is safe to cancel the exact stale owner. Closing only the local operation
+    // would leave its encrypted source stream resident until TTL whenever an
+    // epoch, binding, note policy or attachment selection changed while
+    // Android was not running.
+    await cancelDeviceV2Task(operation.remoteTaskId).catch(() => undefined);
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_EVIDENCE_CHANGED');
+    return null;
+  }
+  // Only register/confirm the binding remotely after the canonical local
+  // authority still matches the turn's activation fence. Trying to register a
+  // deliberately stale binding first can surface a purge-capability conflict
+  // and strand the pending turn before it reaches fail-closed reconciliation.
+  const binding = await ensureRemoteMeetingServiceBinding(evidence.meetingId);
+  if (!recoveryFenceCurrent(pending.activationFence, evidence, deviceSession.epochId, binding)) {
+    await cancelDeviceV2Task(operation.remoteTaskId).catch(() => undefined);
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_EVIDENCE_CHANGED');
     return null;
   }
   let remote;
