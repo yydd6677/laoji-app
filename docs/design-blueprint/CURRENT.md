@@ -143,6 +143,13 @@ overlay p50/p95/max 为 `479.6/629.6/702.5 ms`，所有 binding/epoch 清理均�
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
+
+2026-08-21 已核实生产 8030 仍运行 8 月 9 日旧 handler，真实 `/v2/asr/batch` 返回 `404`；仓库正式
+handler 与旧版差异只涉及严格 v2、数字静音和固定 model revision readiness。候选/回滚源码及 systemd
+unit 已封存在服务器版本目录，并用生产同一 Python 3.12/torch 环境完成 legacy、v1、v2、NO_SPEECH、
+版本拒绝与 readiness 六门 HTTP 探针。没有重启或修改生产 8030；正式部署缺口现收敛为一次获准的短
+维护窗口切换、真实模型纵向复验和 API 去除 8031 引用。详见
+[8030 v2 handler 切换候选](../vnext-stage2/ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md)。
 2026-08-19 复核实际目录仍为 12 个 MP4、10 个同名 SRT，视频哈希与清单逐项一致，见
 [样本快照复核](../vnext-acceptance/SAMPLE-SNAPSHOT-VERIFY-20260819.md)。
 
