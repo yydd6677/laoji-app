@@ -120,6 +120,12 @@ Facts/行动候选随后以同一隔离 device-v2 source stream 对 10 份完整
 所以不关闭 Stage 3 人工质量门。证据见
 `docs/vnext-stage3/FACTS-ACTIONS-BLIND-REVIEW-PACK-20260821.md`。
 
+`1.1.46 (154)` 又把四模板说明与实际 Facts V3 稳定块合同对齐，并在 `emulator-5562` 完成四模板逐项
+切换、零候选 API 请求、进程重启偏好恢复和版本历史不增生回放；确定性投影与 activation fence 合并
+`26/26` 通过，100 次暖态投影约 `7ms`。这关闭模板本地投影合同，不替代独立人工 Facts/行动质量、
+富块全类型两主题视觉门、公开零旧链路周期或 capability barrier。证据见
+`docs/vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md`。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：

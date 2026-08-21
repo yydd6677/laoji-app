@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.45 (153)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.46 (154)`
 
 ## 权威文件
 
@@ -329,3 +329,9 @@ Facts/行动候选也已对 10 份完整 SRT 通过真实 device-v2 source strea
 `41.791s`，两章节 p95 `65.063s`，满足既定 `45s/90s` 路径门。私有包含完整来源和逐事实/逐行动
 人工字段，但字段仍为空，因此不把自动化结果冒充事实支持、重要遗漏或行动质量通过。见
 [Facts/行动完整来源盲审包](../vnext-stage3/FACTS-ACTIONS-BLIND-REVIEW-PACK-20260821.md)。
+
+同日 `1.1.46 (154)` 将四模板可见说明与 Facts V3 的稳定投影块对齐，并在 `emulator-5562` 逐项切换
+通用、1:1、项目同步和访谈。切换窗口候选 API 日志保持 `139 -> 139`，选择“项目同步”后强制重启仍
+恢复同一偏好，整理版本页也没有产生新版本。确定性合同与 activation fence 合并 `26/26` 通过，100 次
+暖态本地投影约 `7ms`。这关闭模板本地切换和说明漂移，不关闭独立人工质量或 Stage 3 adoption；见
+[四模板本地投影合同](../vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md)。

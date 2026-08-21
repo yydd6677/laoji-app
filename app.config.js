@@ -11,7 +11,7 @@ const base = {
   name: '老记',
   slug: 'laoji-app',
   scheme: 'laoji',
-  version: '1.1.45',
+  version: '1.1.46',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
