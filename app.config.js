@@ -241,6 +241,10 @@ module.exports = () => {
   const scheduleGraphV2Candidate = ['1', 'true', 'yes', 'on'].includes(
     String(process.env.EXPO_PUBLIC_SCHEDULE_GRAPH_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
   );
+  const mediaUploadV2Candidate = localMeetingDbCanonicalReadV1
+    && ['1', 'true', 'yes', 'on'].includes(
+      String(process.env.EXPO_PUBLIC_MEDIA_UPLOAD_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
+    );
   const realtimeAsrV2Candidate = ['1', 'true', 'yes', 'on'].includes(
     String(process.env.EXPO_PUBLIC_REALTIME_ASR_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
   );
@@ -307,6 +311,7 @@ module.exports = () => {
         localMeetingDbLegacyProjectionWriteV1,
         localMeetingDbAccountRootWriteV1,
         localMeetingDbAccountUploadWriteV1,
+        mediaUploadV2Candidate,
         scheduleGraphV2Candidate,
         realtimeAsrV2Candidate,
         meetingQuestionsQ2Candidate,

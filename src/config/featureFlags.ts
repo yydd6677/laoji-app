@@ -26,6 +26,7 @@ export interface LaoJiFeatureFlags {
   meetingActionCollaborationV1: boolean;
   meetingContentShareLinksV1: boolean;
   meetingCrossMeetingSearchV1: boolean;
+  mediaUploadV2Candidate: boolean;
   scheduleGraphV2Candidate: boolean;
   realtimeAsrV2Candidate: boolean;
   meetingSummarySourceStreamCandidate: boolean;
@@ -119,6 +120,11 @@ export function getFeatureFlags(): LaoJiFeatureFlags {
     // advertises the read-only endpoint and passes its permission audit.
     meetingCrossMeetingSearchV1: localMeetingDbCanonicalReadV1
       && extra.featureFlags?.meetingCrossMeetingSearchV1 === true,
+    // Media v2 becomes the sole submission owner in a Stage 5A candidate.
+    // Retained device-v1 code is rollback-only and must never be selected just
+    // because the remote capability probe failed or timed out.
+    mediaUploadV2Candidate: localMeetingDbCanonicalReadV1
+      && extra.featureFlags?.mediaUploadV2Candidate === true,
     // MentionGraph changes the parse/clarification owner.  A remote
     // capability alone must not opt a stable APK into the candidate path.
     scheduleGraphV2Candidate: extra.featureFlags?.scheduleGraphV2Candidate === true,

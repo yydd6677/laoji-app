@@ -2826,8 +2826,12 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       if (remoteIdentityChanged) before = await listPendingMeetingAudioUploads(scope);
 
       let deviceV2IngressReady = false;
-      if (mode === 'guest') {
-        const remoteCapability = await loadDeviceV2Capabilities().catch(() => null);
+      const mediaUploadV2Candidate = mode === 'guest' && flags.mediaUploadV2Candidate;
+      if (mediaUploadV2Candidate) {
+        const remoteCapability = await loadDeviceV2Capabilities().catch(reason => {
+          diagnosticWarn('[device-v2-upload] capability unavailable; legacy fallback is disabled', reason);
+          return null;
+        });
         deviceV2IngressReady = await selectClosedVNextCapability(
           'media.upload',
           Boolean(remoteCapability?.uploadSessionsV2 && remoteCapability.importTranscriptEventsV2),
@@ -2887,6 +2891,18 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
             }));
           }
           before = await listPendingMeetingAudioUploads(scope);
+        }
+        if (!deviceV2IngressReady) {
+          // Keep the phone-owned source in the durable pending registry. A
+          // Stage 5A build has exactly one upload owner, so an unavailable v2
+          // capability delays the upload instead of submitting it to device-v1.
+          diagnosticAudit('meeting_audio_upload_resume_deferred', {
+            ...scopeTelemetry(scope as ScopeKey, 'device-v2'),
+            reason: 'vnext_media_capability_unavailable',
+            pending: before.length,
+          });
+          shouldPollPendingUploads = before.length > 0;
+          return;
         }
       }
 
@@ -2960,7 +2976,7 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
         scope,
         accessToken ?? 'device',
         (pending, token) => mode === 'guest'
-          ? deviceV2IngressReady
+          ? mediaUploadV2Candidate
             ? Promise.reject(new Error('v2 原生上传不可回退到旧入口'))
             : recordVNextLegacySubmit('media.upload')
               .then(() => uploadMeetingRecordingToDeviceService(pending))

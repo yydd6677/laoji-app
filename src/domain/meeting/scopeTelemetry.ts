@@ -10,11 +10,11 @@ import type { ScopeKey } from './entities';
  */
 export function scopeTelemetry(
   scopeKey: ScopeKey,
-  networkPath: 'none' | 'device-v1' | 'account-api',
+  networkPath: 'none' | 'device-v1' | 'device-v2' | 'account-api',
 ): {
   scope: 'guest' | 'account';
   scope_kind: 'device-local' | 'account';
-  network_path: 'none' | 'device-v1' | 'account-api';
+  network_path: 'none' | 'device-v1' | 'device-v2' | 'account-api';
 } {
   const deviceLocal = scopeKey === 'guest';
   return {

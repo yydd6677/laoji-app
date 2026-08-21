@@ -722,10 +722,17 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         realtimeSecure,
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const realtimeV2 = getFeatureFlags().realtimeAsrV2Candidate
-        ? await loadDeviceV2Capabilities().catch(() => null)
+      const realtimeV2Candidate = getFeatureFlags().realtimeAsrV2Candidate;
+      const realtimeV2 = realtimeV2Candidate
+        ? await loadDeviceV2Capabilities().catch(reason => {
+          diagnosticWarn('vNext realtime capability unavailable; legacy fallback is disabled', reason);
+          return null;
+        })
         : null;
-      const snapshot = realtimeV2?.realtimeAsrV2
+      if (realtimeV2Candidate && !realtimeV2?.realtimeAsrV2) {
+        throw new Error('新版实时转写服务暂时不可用，录音尚未开始，请稍后重试');
+      }
+      const snapshot = realtimeV2Candidate
         ? await startDeviceV2RealtimeRecording({
           meetingId: readyMeeting.id,
           sessionId: readyMeeting.id,
