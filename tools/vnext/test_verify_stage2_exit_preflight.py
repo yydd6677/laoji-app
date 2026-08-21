@@ -55,6 +55,7 @@ def _passing_envelope() -> dict:
             "realtime_p95_ms": 1_900,
             "import_rtf_p95": 0.48,
             "first_segment_p95_ms": 7_600,
+            "speaker_overlay_sample_count": 30,
             "speaker_overlay_p95_ms": 29_000,
             "api_rss_peak_kib": 1_200_000,
             "api_rss_delta_mib": 64,
@@ -90,6 +91,17 @@ def test_slow_realtime_and_nonzero_legacy_cycle_block() -> None:
     assert report["passed"] is False
     assert "performance_realtime_p95_ms" in report["blocking_gates"]
     assert "legacy_submit_zero_public_cycle" in report["blocking_gates"]
+
+
+def test_speaker_overlay_latency_requires_at_least_30_samples() -> None:
+    evidence = _passing_envelope()
+    evidence["performance"]["speaker_overlay_sample_count"] = 1
+    evidence["performance"]["speaker_overlay_p95_ms"] = 100
+
+    report = inspect(ROOT, evidence)
+
+    assert report["passed"] is False
+    assert "performance_speaker_overlay_sample_count" in report["blocking_gates"]
 
 
 def test_weak_subtitle_metrics_cannot_close_human_quality_gate() -> None:

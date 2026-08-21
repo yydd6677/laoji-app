@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.privacy_logging import install_uvicorn_protocol_privacy_filter
 from app.runtime_policy import env_enabled as _env_enabled
 from app.security_headers import SensitiveApiHeadersMiddleware
 from app.service_telemetry import ServiceTelemetryMiddleware
@@ -35,6 +36,7 @@ if not _access_log:
 
 # 保留 uvicorn.error 和 uvicorn.asgi 的 INFO 日志（有用）
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+install_uvicorn_protocol_privacy_filter()
 
 
 # 静默第三方库的冗余 INFO 日志。

@@ -21,6 +21,7 @@ Example envelope shape::
         "realtime_p95_ms": 1900,
         "import_rtf_p95": 0.48,
         "first_segment_p95_ms": 7600,
+        "speaker_overlay_sample_count": 30,
         "speaker_overlay_p95_ms": 29000,
         "api_rss_peak_kib": 1200000,
         "api_rss_delta_mib": 64,
@@ -76,6 +77,7 @@ REALTIME_P95_LIMIT_MS = 2_000
 IMPORT_RTF_LIMIT = 0.5
 FIRST_SEGMENT_P95_LIMIT_MS = 8_000
 SPEAKER_OVERLAY_P95_LIMIT_MS = 30_000
+SPEAKER_OVERLAY_MINIMUM_SAMPLE_COUNT = 30
 CER_MEDIAN_LIMIT = 0.08
 CER_P95_LIMIT = 0.18
 NUMERIC_TIME_ACCURACY_MINIMUM = 0.95
@@ -226,6 +228,18 @@ def inspect(
         _gate(gates, f"android_{field}", value, evidence=value, reason="android_runtime_evidence_required")
 
     performance = _mapping(data.get("performance"))
+    speaker_overlay_count = _number(performance.get("speaker_overlay_sample_count"))
+    _gate(
+        gates,
+        "performance_speaker_overlay_sample_count",
+        speaker_overlay_count is not None
+        and speaker_overlay_count >= SPEAKER_OVERLAY_MINIMUM_SAMPLE_COUNT,
+        evidence={
+            "value": speaker_overlay_count,
+            "minimum": SPEAKER_OVERLAY_MINIMUM_SAMPLE_COUNT,
+        },
+        reason="measured_speaker_overlay_sample_count_required",
+    )
     performance_checks = (
         ("realtime_p95_ms", REALTIME_P95_LIMIT_MS, "realtime_p95_ms"),
         ("import_rtf_p95", IMPORT_RTF_LIMIT, "import_rtf_p95"),

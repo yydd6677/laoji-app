@@ -10,6 +10,7 @@ from probe_device_v2_realtime import (
     encode_chunk,
     pacing_delay_seconds,
     percentile,
+    wait_speaker_overlay,
 )
 import probe_device_v2_realtime
 
@@ -77,3 +78,35 @@ def test_source_ip_wrapper_remains_compatible_with_python310_socket(monkeypatch)
         "timeout": 3,
         "source_address": ("127.0.0.51", 0),
     }
+
+
+def test_speaker_overlay_wait_reports_metadata_only(monkeypatch) -> None:
+    responses = iter([
+        (200, {"state": "running", "overlay": None}),
+        (200, {
+            "state": "succeeded",
+            "overlay": {
+                "model_revision": "campplus-zh-test",
+                "assignments": [{"automatic_label": "must-not-be-copied"}],
+            },
+        }),
+    ])
+    clock = iter([10.0, 10.0, 10.1, 10.2])
+    monkeypatch.setattr(probe_device_v2_realtime, "json_request", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr(probe_device_v2_realtime.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(probe_device_v2_realtime.time, "sleep", lambda _seconds: None)
+
+    result = wait_speaker_overlay(
+        "http://127.0.0.1:18030/api/device/v2",
+        {"Authorization": "redacted"},
+        "session-redacted",
+        transcript_completed_monotonic=10.0,
+    )
+
+    assert result == {
+        "state": "succeeded",
+        "latency_ms": 200.0,
+        "assignment_count": 1,
+        "model_revision": "campplus-zh-test",
+    }
+    assert "must-not-be-copied" not in str(result)

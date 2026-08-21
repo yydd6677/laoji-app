@@ -96,6 +96,11 @@ def args() -> argparse.Namespace:
         action="store_true",
         help="send PCM against its source clock instead of saturating the socket",
     )
+    parser.add_argument(
+        "--wait-speaker-overlay",
+        action="store_true",
+        help="wait for the independent speaker overlay before binding purge",
+    )
     return parser.parse_args()
 
 
@@ -288,6 +293,51 @@ def purge_epoch(api: str, state: BootstrapState) -> dict:
     )
 
 
+def wait_speaker_overlay(
+    api: str,
+    auth: dict[str, str],
+    session_id: str,
+    *,
+    transcript_completed_monotonic: float,
+    timeout_seconds: float = 60.0,
+    poll_seconds: float = 0.1,
+) -> dict:
+    """Poll only metadata until the independent overlay reaches a terminal state."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        status, snapshot = json_request(
+            f"{api}/realtime/{session_id}/speaker-overlay",
+            headers=auth,
+        )
+        if status == 404:
+            time.sleep(poll_seconds)
+            continue
+        snapshot = require_success(status, snapshot, "speaker overlay")
+        state = str(snapshot.get("state") or "")
+        if state in {"succeeded", "no_content"}:
+            overlay = snapshot.get("overlay")
+            if not isinstance(overlay, dict):
+                raise RuntimeError("speaker overlay terminal state has no document")
+            assignments = overlay.get("assignments")
+            if not isinstance(assignments, list):
+                raise RuntimeError("speaker overlay assignments are invalid")
+            return {
+                "state": state,
+                "latency_ms": round(
+                    (time.monotonic() - transcript_completed_monotonic) * 1000,
+                    1,
+                ),
+                "assignment_count": len(assignments),
+                "model_revision": str(overlay.get("model_revision") or ""),
+            }
+        if state in {"failed", "cancelled"}:
+            raise RuntimeError(
+                "speaker overlay failed: " + str(snapshot.get("error_code") or state)
+            )
+        time.sleep(poll_seconds)
+    raise TimeoutError("speaker overlay did not complete before timeout")
+
+
 async def receive_until(ws, *, required: str, events: list[dict], timeout: float = 90.0) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -313,6 +363,7 @@ async def run_probe(
     refresh_before_reconnect: bool = True,
     binding_epoch_seq: int = 1,
     pace_realtime: bool = False,
+    wait_for_speaker_overlay: bool = False,
 ) -> dict:
     import websockets
 
@@ -429,11 +480,23 @@ async def run_probe(
                     await asyncio.sleep(delay)
         await ws.send(json.dumps({"schema_version": 2, "type": "session.finalize"}, separators=(",", ":")))
         await receive_until(ws, required="session.complete", events=events, timeout=180)
+        transcript_completed_monotonic = time.monotonic()
         terminal = events[-1] if events else {}
         final_seq = max((int(event.get("event_sequence", 0)) for event in events), default=0)
         await ws.send(json.dumps({"schema_version": 2, "type": "events.ack", "through_event_seq": final_seq}))
         if final_seq:
             await receive_until(ws, required="events.acked", events=events)
+    speaker_overlay = (
+        await asyncio.to_thread(
+            wait_speaker_overlay,
+            api,
+            auth,
+            session_id,
+            transcript_completed_monotonic=transcript_completed_monotonic,
+        )
+        if wait_for_speaker_overlay
+        else None
+    )
     purged = execute_purge_and_wait(
         api,
         binding_purge_id,
@@ -473,6 +536,7 @@ async def run_probe(
             "max": round(max(stable_lag_ms), 1) if stable_lag_ms else None,
         },
         "model_revision": terminal.get("model_revision"),
+        "speaker_overlay": speaker_overlay,
         "purge_state": purged.get("state"),
         "wall_ms": round((time.perf_counter() - started) * 1000),
         "device_id_sha256": hashlib.sha256(device_id.encode()).hexdigest()[:12],
@@ -488,6 +552,7 @@ async def run_repeated(
     *,
     pace_realtime: bool = False,
     state: BootstrapState | None = None,
+    wait_for_speaker_overlay: bool = False,
 ) -> dict:
     if repeat < 1:
         raise ValueError("repeat_must_be_positive")
@@ -501,10 +566,16 @@ async def run_repeated(
             refresh_before_reconnect=False,
             binding_epoch_seq=index + 1,
             pace_realtime=pace_realtime,
+            wait_for_speaker_overlay=wait_for_speaker_overlay,
         )
         for index in range(repeat)
     ]
     wall = [int(item["wall_ms"]) for item in runs]
+    overlay_latency = [
+        float(item["speaker_overlay"]["latency_ms"])
+        for item in runs
+        if isinstance(item.get("speaker_overlay"), dict)
+    ]
     return {
         "count": len(runs),
         "wall_ms": wall,
@@ -512,6 +583,12 @@ async def run_repeated(
         "p95_ms": max(wall),
         "stable_event_count_min": min(int(item["stable_event_count"]) for item in runs),
         "final_outcomes": sorted({str(item["final_outcome"]) for item in runs}),
+        "speaker_overlay_latency_ms": {
+            "count": len(overlay_latency),
+            "p50": round(percentile(overlay_latency, 0.50) or 0, 1) if overlay_latency else None,
+            "p95": round(percentile(overlay_latency, 0.95) or 0, 1) if overlay_latency else None,
+            "max": round(max(overlay_latency), 1) if overlay_latency else None,
+        },
         "runs": runs,
     }
 
@@ -537,6 +614,7 @@ def main() -> int:
             parsed.chunk_ms,
             state=state,
             pace_realtime=parsed.pace_realtime,
+            wait_for_speaker_overlay=parsed.wait_speaker_overlay,
         ))
     else:
         report = asyncio.run(run_repeated(
@@ -546,6 +624,7 @@ def main() -> int:
             parsed.repeat,
             pace_realtime=parsed.pace_realtime,
             state=state,
+            wait_for_speaker_overlay=parsed.wait_speaker_overlay,
         ))
     report["epoch_purge_state"] = purge_epoch(parsed.api, state).get("state")
     parsed.output.parent.mkdir(parents=True, exist_ok=True)

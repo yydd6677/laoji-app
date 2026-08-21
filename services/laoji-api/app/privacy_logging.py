@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 import time
 from typing import Any
 
@@ -43,6 +45,32 @@ _ALLOWED_FIELDS = frozenset({
     "first_batch",
     "items",
 })
+
+_UVICORN_PROTOCOL_PATH_RE = re.compile(
+    r"(?:WebSocket|(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD))\s+/api/"
+)
+
+
+class UvicornProtocolPrivacyFilter(logging.Filter):
+    """Drop protocol diagnostics that contain a raw API path.
+
+    Uvicorn emits WebSocket acceptance lines through ``uvicorn.error`` rather
+    than ``uvicorn.access``.  Disabling the access logger therefore does not
+    prevent a realtime session identifier from appearing in the process log.
+    LaoJi already emits bounded request/stage telemetry, so these path-bearing
+    protocol lines are redundant and are rejected rather than redacted.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return _UVICORN_PROTOCOL_PATH_RE.search(record.getMessage()) is None
+
+
+def install_uvicorn_protocol_privacy_filter() -> None:
+    """Install the path filter once on Uvicorn's protocol logger."""
+    logger = logging.getLogger("uvicorn.error")
+    if any(isinstance(item, UvicornProtocolPrivacyFilter) for item in logger.filters):
+        return
+    logger.addFilter(UvicornProtocolPrivacyFilter())
 
 
 def digest_prefix(value: object, length: int = 12) -> str:
