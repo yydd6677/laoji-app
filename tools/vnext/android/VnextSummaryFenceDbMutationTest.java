@@ -52,6 +52,37 @@ public final class VnextSummaryFenceDbMutationTest {
             "附件围栏验收：这段正文已在远端任务运行期间变化。";
 
     @Test
+    public void testQ2ActivationFenceMigration() {
+        final File databaseFile = databaseFile();
+        assertTrue("candidate meeting database is missing", databaseFile.isFile());
+        try (SQLiteDatabase database = openDatabase()) {
+            assertTrue("Q2 attachment-fence migration was not applied",
+                    scalarLong(database, "PRAGMA user_version") >= 50L);
+            final String[] columns = new String[]{
+                    "activation_device_epoch_id",
+                    "activation_binding_id",
+                    "activation_binding_generation",
+                    "activation_binding_revision",
+                    "activation_binding_cancel_revision",
+                    "activation_manual_note_mode",
+                    "activation_manual_note_revision",
+                    "activation_attachment_selection_sha256",
+            };
+            for (String column : columns) {
+                assertEquals("missing Q2 activation-fence column " + column, 1,
+                        countRows(database,
+                                "SELECT COUNT(*) FROM pragma_table_info('meeting_question_q2_turns') "
+                                        + "WHERE name = ?",
+                                column));
+            }
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+        }
+    }
+
+    @Test
     public void testCreateTextAttachmentFixture() throws Exception {
         final String meetingId = requiredMeetingId();
         final String markerId = fixtureId("marker", meetingId);
@@ -430,6 +461,35 @@ public final class VnextSummaryFenceDbMutationTest {
     }
 
     @Test
+    public void testQ2ChangedAttachmentResultRejected() {
+        final String meetingId = requiredMeetingId();
+        final String remoteTaskId = requiredRemoteTaskId();
+        try (SQLiteDatabase database = openDatabase()) {
+            assertEquals("changed attachment result was not rejected exactly once", 1,
+                    countRows(database,
+                            "SELECT COUNT(*) FROM device_operations operation "
+                                    + "INNER JOIN meeting_question_q2_turns turn "
+                                    + "ON turn.current_operation_id = operation.operation_id "
+                                    + "WHERE operation.remote_task_id = ? "
+                                    + "AND operation.entity_id = ? "
+                                    + "AND operation.remote_state = 'failure' "
+                                    + "AND operation.error_code = 'Q2_EVIDENCE_CHANGED' "
+                                    + "AND turn.answer IS NULL AND turn.completed_at_ms IS NULL",
+                            remoteTaskId, meetingId));
+            assertEquals("rejected Q2 result persisted local clauses", 0,
+                    countRows(database,
+                            "SELECT COUNT(*) FROM meeting_question_q2_clauses clause "
+                                    + "INNER JOIN meeting_question_q2_turns turn "
+                                    + "ON turn.turn_id = clause.turn_id "
+                                    + "INNER JOIN device_operations operation "
+                                    + "ON operation.operation_id = turn.current_operation_id "
+                                    + "WHERE operation.remote_task_id = ?",
+                            remoteTaskId));
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+        }
+    }
+
+    @Test
     public void testDeleteTextAttachmentFixture() throws Exception {
         final String meetingId = requiredMeetingId();
         final String markerId = fixtureId("marker", meetingId);
@@ -602,6 +662,16 @@ public final class VnextSummaryFenceDbMutationTest {
         return normalized;
     }
 
+    private String requiredRemoteTaskId() {
+        final Bundle arguments = InstrumentationRegistry.getArguments();
+        final String remoteTaskId = arguments == null ? null : arguments.getString("remote_task_id");
+        assertNotNull("pass -e remote_task_id q2-task:<sha256>", remoteTaskId);
+        final String normalized = remoteTaskId.trim();
+        assertTrue("remote_task_id must be a deterministic Q2 task identity",
+                normalized.matches("q2-task:[0-9a-f]{64}"));
+        return normalized;
+    }
+
     private File databaseFile() {
         return new File(
                 InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),
@@ -713,6 +783,13 @@ public final class VnextSummaryFenceDbMutationTest {
         try (Cursor cursor = database.rawQuery(query, null)) {
             assertTrue(cursor.moveToFirst());
             return cursor.getString(0);
+        }
+    }
+
+    private static long scalarLong(SQLiteDatabase database, String query) {
+        try (Cursor cursor = database.rawQuery(query, null)) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getLong(0);
         }
     }
 

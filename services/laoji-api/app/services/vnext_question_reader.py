@@ -1154,8 +1154,6 @@ def _ground_quantitative_citations(
             if value not in compact_text:
                 continue
             overlap = len(lexical & _lexical_terms(source["text"]))
-            if overlap < 2:
-                continue
             distances = [
                 abs(index - anchor)
                 for anchor in anchor_indexes
@@ -1169,6 +1167,14 @@ def _ground_quantitative_citations(
             if anchor_indexes and (not distances or min(distances) > 3):
                 continue
             distance = min(distances, default=0)
+            # A party name can be replaced by a conversational pronoun in the
+            # answer (for example, ``您方``), leaving the adjacent ASR row with
+            # no lexical bigram in common. Exact values in the immediately
+            # adjacent row are still grounded by the already verified anchor.
+            # More distant rows continue to require a lexical bridge so a
+            # repeated percentage elsewhere in a long meeting cannot leak in.
+            if overlap < 2 and not (anchor_indexes and distance <= 1):
+                continue
             window = _quote_window(source["text"], value)
             if window is not None:
                 candidates.append((-distance, overlap, -index, source, window))

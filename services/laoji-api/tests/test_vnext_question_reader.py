@@ -917,6 +917,41 @@ def test_quantitative_grounding_prefers_adjacent_context_over_distant_overlap() 
     assert texts[4] not in quotes
 
 
+def test_quantitative_grounding_accepts_adjacent_exact_value_after_party_alias() -> None:
+    texts = [
+        "项目管理公司中甲方占35%",
+        "合作伙伴乙公司占65%",
+        "后续进入其他议题",
+    ]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(texts)]
+    citations = [{
+        "citation_id": "cite-1",
+        "source_type": "transcript",
+        "source_id": "line-0",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(texts[0]),
+        "source_start_utf8": 0,
+        "source_end_utf8": len(texts[0].encode("utf-8")),
+        "quote": texts[0],
+    }]
+
+    grounded = reader._ground_quantitative_citations(
+        "管理公司最终的股权比例是多少？",
+        "最终我方占35%，您方占65%。",
+        sources,
+        citations,
+        0,
+    )
+
+    assert [citation["quote"] for citation in grounded] == texts[:2]
+
+
 def test_quantitative_grounding_rejects_distant_same_value() -> None:
     texts = [
         "目标主体甲方占35%",

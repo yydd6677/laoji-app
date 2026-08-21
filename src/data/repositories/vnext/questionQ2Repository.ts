@@ -1,4 +1,5 @@
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../../db/openDatabase';
+import { sha256Text } from './immutableSourceRepository';
 
 export type Q2SourceType = 'transcript' | 'manual_note' | 'attachment';
 export type Q2AnswerKind = 'answer' | 'not_stated' | 'cannot_confirm';
@@ -18,16 +19,20 @@ export type Q2ManualNoteActivationFence =
   | { mode: 'absent' }
   | { mode: 'excluded' };
 
-export interface Q2ActivationFence {
-  meetingId: string;
-  sourceFingerprint: string;
-  transcriptRevisionId: string;
+export interface Q2StoredActivationFence {
   deviceEpochId: string;
   bindingId: string;
   bindingGeneration: string;
   bindingRevision: number;
   bindingCancelRevision: number;
   manualNote: Q2ManualNoteActivationFence;
+  attachmentSelectionSha256: string;
+}
+
+export interface Q2ActivationFence extends Q2StoredActivationFence {
+  meetingId: string;
+  sourceFingerprint: string;
+  transcriptRevisionId: string;
 }
 
 export interface Q2SnapshotSource {
@@ -80,6 +85,7 @@ export interface Q2TurnRecord {
   answerKind: Q2AnswerKind | null;
   answer: string | null;
   providerRevision: string;
+  activationFence: Q2StoredActivationFence | null;
   completedAtMs: number | null;
   createdAtMs: number;
   clauses: readonly Q2ClauseRecord[];
@@ -111,6 +117,14 @@ type TurnRow = {
   answer_kind: Q2AnswerKind | null;
   answer: string | null;
   provider_revision: string;
+  activation_device_epoch_id: string | null;
+  activation_binding_id: string | null;
+  activation_binding_generation: string | null;
+  activation_binding_revision: number | null;
+  activation_binding_cancel_revision: number | null;
+  activation_manual_note_mode: Q2ManualNoteActivationFence['mode'] | null;
+  activation_manual_note_revision: number | null;
+  activation_attachment_selection_sha256: string | null;
   completed_at_ms: number | null;
   created_at_ms: number;
 };
@@ -151,6 +165,49 @@ function nonNegative(value: number, field: string): number {
   return value;
 }
 
+function normalizedActivationFence(input: Q2ActivationFence): Q2ActivationFence {
+  const manualNote = input.manualNote.mode === 'included'
+    ? { mode: 'included' as const, revision: nonNegative(input.manualNote.revision, 'activationManualNoteRevision') }
+    : input.manualNote.mode === 'absent'
+      ? { mode: 'absent' as const }
+      : { mode: 'excluded' as const };
+  const bindingRevision = nonNegative(input.bindingRevision, 'activationBindingRevision');
+  if (bindingRevision < 1) throw new Error('activationBindingRevision 无效');
+  return {
+    meetingId: identifier(input.meetingId, 'activationMeetingId'),
+    sourceFingerprint: sha256(input.sourceFingerprint, 'activationSourceFingerprint'),
+    transcriptRevisionId: identifier(input.transcriptRevisionId, 'activationTranscriptRevisionId'),
+    deviceEpochId: identifier(input.deviceEpochId, 'activationDeviceEpochId'),
+    bindingId: identifier(input.bindingId, 'activationBindingId'),
+    bindingGeneration: identifier(input.bindingGeneration, 'activationBindingGeneration'),
+    bindingRevision,
+    bindingCancelRevision: nonNegative(
+      input.bindingCancelRevision,
+      'activationBindingCancelRevision',
+    ),
+    manualNote,
+    attachmentSelectionSha256: sha256(
+      input.attachmentSelectionSha256,
+      'activationAttachmentSelectionSha256',
+    ),
+  };
+}
+
+function sameStoredActivationFence(row: TurnRow, fence: Q2ActivationFence): boolean {
+  return row.activation_device_epoch_id === fence.deviceEpochId
+    && row.activation_binding_id === fence.bindingId
+    && row.activation_binding_generation === fence.bindingGeneration
+    && Number(row.activation_binding_revision) === fence.bindingRevision
+    && Number(row.activation_binding_cancel_revision) === fence.bindingCancelRevision
+    && row.activation_manual_note_mode === fence.manualNote.mode
+    && row.activation_attachment_selection_sha256 === fence.attachmentSelectionSha256
+    && (
+      fence.manualNote.mode !== 'included'
+        ? row.activation_manual_note_revision === null
+        : Number(row.activation_manual_note_revision) === fence.manualNote.revision
+    );
+}
+
 function turnFromRow(row: TurnRow | null, clauses: readonly Q2ClauseRecord[] = []): Q2TurnRecord | null {
   if (!row) return null;
   return {
@@ -163,9 +220,37 @@ function turnFromRow(row: TurnRow | null, clauses: readonly Q2ClauseRecord[] = [
     answerKind: row.answer_kind,
     answer: row.answer,
     providerRevision: row.provider_revision,
+    activationFence: activationFenceFromRow(row),
     completedAtMs: row.completed_at_ms === null ? null : Number(row.completed_at_ms),
     createdAtMs: Number(row.created_at_ms),
     clauses,
+  };
+}
+
+function activationFenceFromRow(row: TurnRow): Q2StoredActivationFence | null {
+  const mode = row.activation_manual_note_mode;
+  if (
+    row.activation_device_epoch_id === null
+    || row.activation_binding_id === null
+    || row.activation_binding_generation === null
+    || row.activation_binding_revision === null
+    || row.activation_binding_cancel_revision === null
+    || row.activation_attachment_selection_sha256 === null
+    || !/^sha256:[0-9a-f]{64}$/.test(row.activation_attachment_selection_sha256)
+    || !['included', 'absent', 'excluded'].includes(mode ?? '')
+  ) return null;
+  if (mode === 'included' && row.activation_manual_note_revision === null) return null;
+  const storedMode = mode as Q2ManualNoteActivationFence['mode'];
+  return {
+    deviceEpochId: row.activation_device_epoch_id,
+    bindingId: row.activation_binding_id,
+    bindingGeneration: row.activation_binding_generation,
+    bindingRevision: Number(row.activation_binding_revision),
+    bindingCancelRevision: Number(row.activation_binding_cancel_revision),
+    attachmentSelectionSha256: row.activation_attachment_selection_sha256,
+    manualNote: storedMode === 'included'
+      ? { mode: storedMode, revision: Number(row.activation_manual_note_revision) }
+      : { mode: storedMode },
   };
 }
 
@@ -221,7 +306,12 @@ export async function getQ2Thread(threadId: string): Promise<Q2ThreadRecord & { 
   if (!thread) return null;
   const turnRows = await database.getAllAsync<TurnRow>(
     `SELECT turn_id, thread_id, request_id, current_operation_id, ordinal, question,
-            answer_kind, answer, provider_revision, completed_at_ms, created_at_ms
+            answer_kind, answer, provider_revision,
+            activation_device_epoch_id, activation_binding_id,
+            activation_binding_generation, activation_binding_revision,
+            activation_binding_cancel_revision, activation_manual_note_mode,
+            activation_manual_note_revision, activation_attachment_selection_sha256,
+            completed_at_ms, created_at_ms
        FROM meeting_question_q2_turns
       WHERE thread_id = ? ORDER BY ordinal, turn_id`,
     normalized,
@@ -306,6 +396,70 @@ export async function findLatestQ2Thread(input: {
     if (thread) return thread;
   }
   return null;
+}
+
+/**
+ * Return every Q2 thread for one meeting that still owns a live local
+ * operation. Recovery must not be scoped only to the currently selected
+ * source fingerprint: a source edit can make the old thread unreachable while
+ * its durable Task is still running or already completed remotely.
+ */
+export async function findPendingQ2ThreadsForMeeting(
+  meetingIdValue: string,
+): Promise<Array<Q2ThreadRecord & { turns: readonly Q2TurnRecord[] }>> {
+  const meetingId = identifier(meetingIdValue, 'meetingId');
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<{ thread_id: string }>(
+    `SELECT DISTINCT thread.thread_id
+       FROM meeting_question_q2_threads thread
+       INNER JOIN meeting_question_q2_turns turn ON turn.thread_id = thread.thread_id
+       INNER JOIN device_operations operation
+         ON operation.operation_id = turn.current_operation_id
+      WHERE thread.meeting_id = ?
+        AND turn.completed_at_ms IS NULL
+        AND operation.remote_state IN ('queued', 'running')
+      ORDER BY thread.updated_at_ms, thread.thread_id`,
+    meetingId,
+  );
+  const result: Array<Q2ThreadRecord & { turns: readonly Q2TurnRecord[] }> = [];
+  for (const row of rows) {
+    const thread = await getQ2Thread(row.thread_id);
+    if (thread) result.push(thread);
+  }
+  return result;
+}
+
+/**
+ * Recover the explicit attachment selection owned by the newest Q2 snapshot.
+ * The snapshot stores identities and hashes only; the caller must re-resolve
+ * each ID through the current local attachment aggregate before reuse.
+ */
+export async function findLatestQ2AttachmentIds(meetingIdValue: string): Promise<string[]> {
+  const meetingId = identifier(meetingIdValue, 'meetingId');
+  const database = await openMeetingDatabase();
+  const latest = await database.getFirstAsync<{ snapshot_id: string }>(
+    `SELECT thread.snapshot_id
+       FROM meeting_question_q2_threads thread
+       INNER JOIN meeting_notes meeting ON meeting.id = thread.meeting_id
+      WHERE thread.meeting_id = ? AND meeting.lifecycle <> 'deleted'
+      ORDER BY thread.updated_at_ms DESC, thread.created_at_ms DESC, thread.thread_id DESC
+      LIMIT 1`,
+    meetingId,
+  );
+  if (!latest) return [];
+  const rows = await database.getAllAsync<{ source_id: string }>(
+    `SELECT source_id
+       FROM meeting_question_q2_snapshot_sources
+      WHERE snapshot_id = ? AND source_type = 'attachment'
+      ORDER BY ordinal`,
+    latest.snapshot_id,
+  );
+  const prefix = 'attachment:';
+  const ids = rows.map(row => (
+    row.source_id.startsWith(prefix) ? row.source_id.slice(prefix.length) : ''
+  ));
+  if (ids.some(value => !value) || new Set(ids).size !== ids.length) return [];
+  return ids;
 }
 
 export async function createQ2Snapshot(input: {
@@ -440,6 +594,7 @@ export async function appendPendingQ2Turn(input: {
   ordinal: number;
   question: string;
   providerRevision: string;
+  activationFence: Q2ActivationFence;
   createdAtMs?: number;
 }): Promise<Q2TurnRecord> {
   const turnId = identifier(input.turnId, 'turnId');
@@ -449,14 +604,19 @@ export async function appendPendingQ2Turn(input: {
   const question = input.question.trim();
   if (!question || question.length > 2_000 || /\u0000/.test(question)) throw new Error('Q2 问题无效');
   const providerRevision = identifier(input.providerRevision, 'providerRevision');
+  const activationFence = normalizedActivationFence(input.activationFence);
   const ordinal = nonNegative(input.ordinal, 'ordinal');
   const createdAtMs = nonNegative(input.createdAtMs ?? Date.now(), 'createdAtMs');
   return withMeetingDatabaseTransaction(async database => {
     await database.runAsync(
       `INSERT OR IGNORE INTO meeting_question_q2_turns (
          turn_id, thread_id, request_id, current_operation_id, ordinal,
-         question, provider_revision, created_at_ms
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         question, provider_revision, activation_device_epoch_id,
+         activation_binding_id, activation_binding_generation,
+         activation_binding_revision, activation_binding_cancel_revision,
+         activation_manual_note_mode, activation_manual_note_revision,
+         activation_attachment_selection_sha256, created_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       turnId,
       threadId,
       requestId,
@@ -464,17 +624,31 @@ export async function appendPendingQ2Turn(input: {
       ordinal,
       question,
       providerRevision,
+      activationFence.deviceEpochId,
+      activationFence.bindingId,
+      activationFence.bindingGeneration,
+      activationFence.bindingRevision,
+      activationFence.bindingCancelRevision,
+      activationFence.manualNote.mode,
+      activationFence.manualNote.mode === 'included' ? activationFence.manualNote.revision : null,
+      activationFence.attachmentSelectionSha256,
       createdAtMs,
     );
     const row = await database.getFirstAsync<TurnRow>(
       `SELECT turn_id, thread_id, request_id, current_operation_id, ordinal, question,
-              answer_kind, answer, provider_revision, completed_at_ms, created_at_ms
+              answer_kind, answer, provider_revision,
+              activation_device_epoch_id, activation_binding_id,
+              activation_binding_generation, activation_binding_revision,
+              activation_binding_cancel_revision, activation_manual_note_mode,
+              activation_manual_note_revision, activation_attachment_selection_sha256,
+              completed_at_ms, created_at_ms
          FROM meeting_question_q2_turns WHERE thread_id = ? AND request_id = ?`,
       threadId,
       requestId,
     );
     if (!row || row.question !== question || row.current_operation_id !== operationId
-      || Number(row.ordinal) !== ordinal || row.provider_revision !== providerRevision) {
+      || Number(row.ordinal) !== ordinal || row.provider_revision !== providerRevision
+      || !sameStoredActivationFence(row, activationFence)) {
       throw new Error('Q2 request ID 已绑定其他问题');
     }
     await database.runAsync(
@@ -491,16 +665,33 @@ export async function rebindPendingQ2Turn(input: {
   turnId: string;
   expectedOperationId: string;
   newOperationId: string;
+  newProviderRevision: string;
+  activationFence: Q2ActivationFence;
 }): Promise<boolean> {
   const turnId = identifier(input.turnId, 'turnId');
   const expectedOperationId = identifier(input.expectedOperationId, 'expectedOperationId');
   const newOperationId = identifier(input.newOperationId, 'newOperationId');
+  const newProviderRevision = identifier(input.newProviderRevision, 'newProviderRevision');
+  const activationFence = normalizedActivationFence(input.activationFence);
   return withMeetingDatabaseTransaction(async database => {
     const updated = await database.runAsync(
       `UPDATE meeting_question_q2_turns
-          SET current_operation_id = ?
+          SET current_operation_id = ?, provider_revision = ?,
+              activation_device_epoch_id = ?, activation_binding_id = ?,
+              activation_binding_generation = ?, activation_binding_revision = ?,
+              activation_binding_cancel_revision = ?, activation_manual_note_mode = ?,
+              activation_manual_note_revision = ?, activation_attachment_selection_sha256 = ?
         WHERE turn_id = ? AND current_operation_id = ? AND completed_at_ms IS NULL`,
       newOperationId,
+      newProviderRevision,
+      activationFence.deviceEpochId,
+      activationFence.bindingId,
+      activationFence.bindingGeneration,
+      activationFence.bindingRevision,
+      activationFence.bindingCancelRevision,
+      activationFence.manualNote.mode,
+      activationFence.manualNote.mode === 'included' ? activationFence.manualNote.revision : null,
+      activationFence.attachmentSelectionSha256,
       turnId,
       expectedOperationId,
     );
@@ -519,30 +710,7 @@ export async function commitQ2Turn(input: {
 }): Promise<boolean> {
   const turnId = identifier(input.turnId, 'turnId');
   const expectedOperationId = identifier(input.expectedOperationId, 'expectedOperationId');
-  const activationFence = {
-    meetingId: identifier(input.activationFence.meetingId, 'activationMeetingId'),
-    sourceFingerprint: sha256(input.activationFence.sourceFingerprint, 'activationSourceFingerprint'),
-    transcriptRevisionId: identifier(
-      input.activationFence.transcriptRevisionId,
-      'activationTranscriptRevisionId',
-    ),
-    deviceEpochId: identifier(input.activationFence.deviceEpochId, 'activationDeviceEpochId'),
-    bindingId: identifier(input.activationFence.bindingId, 'activationBindingId'),
-    bindingGeneration: identifier(
-      input.activationFence.bindingGeneration,
-      'activationBindingGeneration',
-    ),
-    bindingRevision: nonNegative(input.activationFence.bindingRevision, 'activationBindingRevision'),
-    bindingCancelRevision: nonNegative(
-      input.activationFence.bindingCancelRevision,
-      'activationBindingCancelRevision',
-    ),
-    manualNote: input.activationFence.manualNote,
-  };
-  if (activationFence.bindingRevision < 1) throw new Error('activationBindingRevision 无效');
-  if (activationFence.manualNote.mode === 'included') {
-    nonNegative(activationFence.manualNote.revision, 'activationManualNoteRevision');
-  }
+  const activationFence = normalizedActivationFence(input.activationFence);
   const answer = input.answer.trim();
   if (!answer || answer.length > 20_000 || /\u0000/.test(answer)) throw new Error('Q2 回答无效');
   if (input.answerKind === 'answer' && input.clauses.length === 0) {
@@ -575,6 +743,11 @@ export async function commitQ2Turn(input: {
       `SELECT turn.turn_id, turn.thread_id, turn.request_id, turn.current_operation_id,
               turn.ordinal, turn.question, turn.answer_kind, turn.answer,
               turn.provider_revision, turn.completed_at_ms, turn.created_at_ms,
+              turn.activation_device_epoch_id, turn.activation_binding_id,
+              turn.activation_binding_generation, turn.activation_binding_revision,
+              turn.activation_binding_cancel_revision, turn.activation_manual_note_mode,
+              turn.activation_manual_note_revision,
+              turn.activation_attachment_selection_sha256,
               thread.meeting_id, thread.snapshot_id, snapshot.source_fingerprint,
               snapshot.transcript_revision_id, meeting.lifecycle,
               operation.device_epoch_id AS operation_device_epoch_id,
@@ -604,7 +777,8 @@ export async function commitQ2Turn(input: {
         ORDER BY created_at_ms DESC, id DESC LIMIT 1`,
       activationFence.meetingId,
     );
-    const identityCurrent = turn.meeting_id === activationFence.meetingId
+    const identityCurrent = sameStoredActivationFence(turn, activationFence)
+      && turn.meeting_id === activationFence.meetingId
       && turn.lifecycle !== 'deleted'
       && turn.source_fingerprint === activationFence.sourceFingerprint
       && turn.transcript_revision_id === activationFence.transcriptRevisionId
@@ -658,6 +832,56 @@ export async function commitQ2Turn(input: {
       ) throw new Q2ActivationFenceError();
     } else if (activationFence.manualNote.mode === 'absent' && manualNote?.content.trim()) {
       throw new Q2ActivationFenceError();
+    }
+    const attachmentSources = await database.getAllAsync<{
+      source_id: string;
+      source_revision_id: string;
+      content_sha256: string;
+    }>(
+      `SELECT source_id, source_revision_id, content_sha256
+         FROM meeting_question_q2_snapshot_sources
+        WHERE snapshot_id = ? AND source_type = 'attachment'
+        ORDER BY ordinal`,
+      turn.snapshot_id,
+    );
+    const seenAttachmentIds = new Set<string>();
+    for (const source of attachmentSources) {
+      const prefix = 'attachment:';
+      const attachmentId = source.source_id.startsWith(prefix)
+        ? source.source_id.slice(prefix.length)
+        : '';
+      if (!attachmentId || seenAttachmentIds.has(attachmentId)) {
+        throw new Q2ActivationFenceError();
+      }
+      seenAttachmentIds.add(attachmentId);
+      const current = await database.getFirstAsync<{
+        active_text_revision_id: string | null;
+        pending_operation: string | null;
+        text_content: string | null;
+        immutable_content: string | null;
+        content_sha256: string | null;
+      }>(
+        `SELECT attachment.active_text_revision_id, attachment.pending_operation,
+                attachment.text_content, immutable.content AS immutable_content,
+                immutable.content_sha256
+           FROM meeting_attachments attachment
+           LEFT JOIN meeting_attachment_text_revisions immutable
+             ON immutable.revision_id = attachment.active_text_revision_id
+          WHERE attachment.id = ? AND attachment.meeting_id = ?
+            AND attachment.kind = 'text'`,
+        attachmentId,
+        activationFence.meetingId,
+      );
+      if (
+        !current
+        || current.pending_operation === 'delete'
+        || current.active_text_revision_id !== source.source_revision_id
+        || current.text_content === null
+        || current.immutable_content === null
+        || current.text_content !== current.immutable_content
+        || current.content_sha256 !== source.content_sha256
+        || await sha256Text(current.text_content) !== source.content_sha256
+      ) throw new Q2ActivationFenceError();
     }
     for (let clauseOrdinal = 0; clauseOrdinal < input.clauses.length; clauseOrdinal += 1) {
       const clause = input.clauses[clauseOrdinal];

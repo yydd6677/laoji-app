@@ -28,17 +28,19 @@ function timeLabel(positionMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function authorizationErrorMessage(error: unknown): string {
+function authorizationErrorMessage(error: unknown, purpose: 'summary' | 'question'): string {
   const message = error instanceof Error ? error.message.trim() : '';
   return message && /[\u3400-\u9fff]/.test(message)
     ? message
-    : '附件暂时无法用于整理。';
+    : purpose === 'question' ? '附件暂时无法用于问答。' : '附件暂时无法用于整理。';
 }
 
 export function MeetingSummaryAttachmentSheet({
   visible,
   attachments,
   imageSelectionEnabled,
+  purpose = 'summary',
+  initialSelectedIds = [],
   onClose,
   onSkip,
   onAuthorize,
@@ -47,6 +49,8 @@ export function MeetingSummaryAttachmentSheet({
   visible: boolean;
   attachments: readonly MeetingAttachmentRecord[];
   imageSelectionEnabled: boolean;
+  purpose?: 'summary' | 'question';
+  initialSelectedIds?: readonly string[];
   onClose: () => void;
   onSkip: () => void;
   onAuthorize: (attachmentIds: readonly string[]) => Promise<MeetingSummaryAttachmentAuthorization>;
@@ -64,6 +68,7 @@ export function MeetingSummaryAttachmentSheet({
   const authorizeRef = useRef(onAuthorize);
   const completedRef = useRef(onCompleted);
   const attachmentsRef = useRef(attachments);
+  const initialSelectedIdsRef = useRef(initialSelectedIds);
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -74,6 +79,7 @@ export function MeetingSummaryAttachmentSheet({
   authorizeRef.current = onAuthorize;
   completedRef.current = onCompleted;
   if (visible && !closingRef.current) attachmentsRef.current = attachments;
+  if (visible && !closingRef.current) initialSelectedIdsRef.current = initialSelectedIds;
 
   const finishClose = useCallback((notify: boolean, afterExit?: () => void) => {
     if (!mountedRef.current || closingRef.current) return;
@@ -101,7 +107,7 @@ export function MeetingSummaryAttachmentSheet({
   useEffect(() => {
     if (visible) {
       if (!visibleRef.current) {
-        setSelectedIds(new Set());
+        setSelectedIds(new Set(initialSelectedIdsRef.current));
         setError('');
         setSaving(false);
       }
@@ -190,7 +196,7 @@ export function MeetingSummaryAttachmentSheet({
       finishClose(true, () => completed(authorization));
     } catch (reason) {
       setSaving(false);
-      setError(authorizationErrorMessage(reason));
+      setError(authorizationErrorMessage(reason, purpose));
     }
   };
 
@@ -306,12 +312,16 @@ export function MeetingSummaryAttachmentSheet({
               onPress={() => { void submit(); }}
               disabled={!canSubmit}
               accessibilityRole="button"
-              accessibilityLabel={selected.length > 0 ? `使用所选 ${selected.length} 个附件` : '继续整理'}
+              accessibilityLabel={selected.length > 0
+                ? `使用所选 ${selected.length} 个附件`
+                : purpose === 'question' ? '继续问答' : '继续整理'}
               accessibilityState={{ disabled: !canSubmit, busy: saving }}
             >
               {saving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : (
                 <Text style={[styles.submitText, { color: colors.onPrimary }]}>
-                  {selected.length > 0 ? `使用（${selected.length}）` : '继续整理'}
+                  {selected.length > 0
+                    ? `使用（${selected.length}）`
+                    : purpose === 'question' ? '继续问答' : '继续整理'}
                 </Text>
               )}
             </Pressable>

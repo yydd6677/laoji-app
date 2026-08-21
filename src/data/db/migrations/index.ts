@@ -46,6 +46,8 @@ import { scheduleMentionGraphVNext } from './0045ScheduleMentionGraphVNext';
 import { deviceUploadExecutorV46 } from './0046DeviceUploadExecutor';
 import { transcriptStableIdentityV47 } from './0047TranscriptStableIdentity';
 import { summaryFactsGenerationsV48 } from './0048SummaryFactsGenerations';
+import { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
+import { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -97,6 +99,8 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   deviceUploadExecutorV46,
   transcriptStableIdentityV47,
   summaryFactsGenerationsV48,
+  questionQ2ActivationFenceV49,
+  questionQ2AttachmentFenceV50,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -150,4 +154,6 @@ export {
 export { DEVICE_UPLOAD_EXECUTOR_V46_SQL } from './0046DeviceUploadExecutor';
 export { TRANSCRIPT_STABLE_IDENTITY_V47_SQL } from './0047TranscriptStableIdentity';
 export { SUMMARY_FACTS_GENERATIONS_V48_SQL } from './0048SummaryFactsGenerations';
+export { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
+export { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
 export type { MeetingDatabaseMigration } from './types';

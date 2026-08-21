@@ -24,6 +24,15 @@ export type MeetingQuestionCitation =
     manualNoteRevision: number;
     sourceLabel: string;
     sourceExcerpt: string;
+  }
+  | {
+    id: string;
+    kind: 'attachment';
+    attachmentId: string;
+    attachmentRevisionId: string;
+    positionMs: number;
+    sourceLabel: string;
+    sourceExcerpt: string;
   };
 
 export interface MeetingQuestionTurn {

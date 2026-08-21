@@ -112,6 +112,9 @@ function citationFromRow(row: CitationRow): MeetingQuestionCitation {
       sourceExcerpt: row.source_excerpt,
     };
   }
+  if (row.kind === 'attachment') {
+    throw new Error('旧版问答不能读取附件引用');
+  }
   if (row.manual_note_revision === null) throw new Error('问答引用记录已损坏');
   return {
     id: row.id,
@@ -391,11 +394,13 @@ export async function saveMeetingQuestionTurn(
           thread.summary_version_id,
         );
         if (!section) throw new Error('回答引用不属于锁定的整理结果');
-      } else if (
+      } else if (citation.kind === 'manual_note' && (
         !thread.include_manual_note
         || thread.manual_note_revision !== assertTime(citation.manualNoteRevision, '笔记版本')
-      ) {
+      )) {
         throw new Error('回答引用了未授权的我的笔记');
+      } else if (citation.kind === 'attachment') {
+        throw new Error('旧版问答不能保存附件引用');
       }
     }
 

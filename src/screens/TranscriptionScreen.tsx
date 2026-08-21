@@ -1175,8 +1175,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       return;
     }
     showDialog({
-      title: '来源：我的笔记',
-      message: '当前平台的会议详情尚未提供笔记定位入口。',
+      title: target.kind === 'attachment' ? '来源：附件' : '来源：我的笔记',
+      message: target.kind === 'attachment'
+        ? '当前平台的会议详情尚未提供附件定位入口。'
+        : '当前平台的会议详情尚未提供笔记定位入口。',
       tone: 'info',
     });
   };

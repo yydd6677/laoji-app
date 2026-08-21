@@ -126,18 +126,26 @@ async function sourceForAuxiliary(
   // Q2 is grounded in the current immutable meeting sources.  A generated
   // summary is a derived projection and must never become a hidden second
   // evidence owner or a citation fallback.
-  if (!evidence.includeManualNote || evidence.manualNote === null || evidence.manualNoteRevision === null) {
-    return [];
-  }
-  return [
-    {
+  const sources: Q2CandidateSource[] = [];
+  if (evidence.includeManualNote && evidence.manualNote !== null && evidence.manualNoteRevision !== null) {
+    sources.push({
       sourceType: 'manual_note' as const,
       sourceId: `manual_note:${evidence.meetingId}`,
       sourceRevisionId: `manual_note:${evidence.manualNoteRevision}`,
       contentSha256: await sha256Text(evidence.manualNote),
       text: evidence.manualNote,
-    },
-  ];
+    });
+  }
+  for (const attachment of evidence.attachments) {
+    sources.push({
+      sourceType: 'attachment',
+      sourceId: `attachment:${attachment.attachmentId}`,
+      sourceRevisionId: attachment.revisionId,
+      contentSha256: attachment.contentSha256,
+      text: attachment.text,
+    });
+  }
+  return sources;
 }
 
 export async function buildQ2CandidateSources(
@@ -266,6 +274,7 @@ export async function executeQ2Candidate(input: {
     ordinal: input.ordinal,
     question,
     providerRevision: request.providerRevision,
+    activationFence: input.activationFence,
     createdAtMs: input.nowMs,
   });
   const response = await input.provider.read(request);

@@ -34,6 +34,16 @@ def main() -> None:
         "const generationId = `q2-generation:${generationDigest.slice('sha256:'.length)}`",
         "generationId,",
         "meeting_question_q2_operation",
+        "newProviderRevision: Q2_PROVIDER_REVISION",
+        "await bindQ2DurableTransport({",
+        "!isRecoverableQ2OperationError(error)",
+        "Q2_RECOVERY_FENCE_MISSING",
+        "await q2TransportHandles({",
+        "operation.remoteTaskId !== expectedTransport.taskId",
+        "error instanceof DeviceV2ApiError && error.status === 404",
+        "reconcilePendingQ2TurnsForMeeting",
+        "findPendingQ2ThreadsForMeeting",
+        "snapshot.sourceFingerprint !== evidence.sourceFingerprint",
         "return { thread: await projectThread(completed, input.evidence), evidence: input.evidence };",
     )
     if "generationId: `${q2Thread.snapshotId}:${requestId}:${operationId}`" in q2_source:
@@ -46,17 +56,27 @@ def main() -> None:
         "sourceId: required(citation?.source_id, 'source_id', 512)",
         "sourceRevisionId: required(citation?.source_revision_id, 'source_revision_id', 512)",
         "item_id: `q2-item:${index}:${source.contentSha256.slice(-20)}`",
-        "const MAX_DIRECT_SOURCE_ITEMS = 1_024",
-        "const Q2_TASK_RECOVERY_TIMEOUT_MS = 180_000",
-        "request.sources.length > MAX_DIRECT_SOURCE_ITEMS",
+        "const Q2_TASK_RECOVERY_TIMEOUT_MS = 240_000",
+        "const shouldStream = request.sources.length > 0",
+        "const replay = await readExistingDurableTask(request)",
+        "await bindRemoteTaskToOperation(request.operationId!, taskId)",
+        "export async function bindQ2DurableTransport(",
         "if (!capabilities.sourceStreamV2) throw new DeviceV2SourceStreamUnavailableError()",
         "const transportDigest = await digest({",
-        "const taskId = `q2-task:${transportSeed}`",
+        "taskId: `q2-task:${transportSeed}`",
         "clientOperationId: `q2-operation:${transportSeed}`",
         "generationId: `q2-generation:${transportSeed}`",
-        "if (!(error instanceof RequestTimeoutError)) throw error",
-        "return recoverTimedOutQuestionTask(stream.taskId, request)",
+        "return readFromSourceStream(request, binding, stream)",
+        "const sourceStream = await getDeviceV2SourceStream(replay.streamId)",
+        "sourceStream.state === 'open' || sourceStream.state === 'consuming'",
+        "stream = await streamLongSources(request, binding)",
+        "return recoverQuestionTask(stream.taskId, request, runAttempt)",
+        "snapshot.task.retry_not_before_epoch",
+        "if (!retryableReaderError(error)) throw error",
         "snapshot.task.input_sha256 !== request.sourceFingerprint",
+        "export function q2SourceStreamFailureIsTerminal(error: unknown): boolean",
+        "error.status !== 408",
+        "error.status !== 429",
     )
     if "item_id: `q2-item:${index}:${source.sourceType}:${source.sourceId}`" in provider_source:
         raise AssertionError("Q2 source stream still embeds an overlong stable source ID in item_id")
@@ -67,6 +87,9 @@ def main() -> None:
         ROOT / "src/services/deviceV2SourceStream.ts",
         "source_id: id(item.source_id, 'source_id', 512)",
         "source_revision_id: id(item.source_revision_id, 'source_revision_id', 512)",
+        "retry_not_before_epoch: retryNotBeforeEpoch",
+        "export async function cancelDeviceV2Task(taskId: string)",
+        "/tasks/${encodeURIComponent(id(taskId, 'task_id'))}/cancel",
     )
     if "source_id: id(item.source_id, 'source_id', 180)" in source_stream:
         raise AssertionError("Android source-stream client still rejects valid stable source identities")
@@ -124,6 +147,32 @@ def main() -> None:
         "turn.binding_generation === activationFence.bindingGeneration",
         "Number(turn.binding_cancel_revision) === activationFence.bindingCancelRevision",
         "source.content_sha256 !== manualNote.content_sha256",
+        "SET current_operation_id = ?, provider_revision = ?",
+        "newProviderRevision: string;",
+        "activation_device_epoch_id",
+        "activation_manual_note_revision",
+        "activation_attachment_selection_sha256",
+        "current.active_text_revision_id !== source.source_revision_id",
+        "current.text_content !== current.immutable_content",
+        "current.content_sha256 !== source.content_sha256",
+        "await sha256Text(current.text_content) !== source.content_sha256",
+        "sameStoredActivationFence(turn, activationFence)",
+        "export async function findPendingQ2ThreadsForMeeting",
+        "operation.remote_state IN ('queued', 'running')",
+        "turn.completed_at_ms IS NULL",
+    )
+    require(
+        ROOT / "src/data/db/migrations/0049QuestionQ2ActivationFence.ts",
+        "version: 49",
+        "PRAGMA table_info(meeting_question_q2_turns)",
+        "activation_device_epoch_id",
+        "activation_manual_note_revision",
+    )
+    require(
+        ROOT / "src/data/db/migrations/0050QuestionQ2AttachmentFence.ts",
+        "version: 50",
+        "PRAGMA table_info(meeting_question_q2_turns)",
+        "activation_attachment_selection_sha256",
     )
     require(
         authority_repository,
@@ -143,6 +192,9 @@ def main() -> None:
         sheet,
         "session.thread.summaryVersionId && session.evidence.summary.length > 0",
         "session.evidence.includeManualNote ? '我的笔记' : null",
+        "session.evidence.attachments.length > 0",
+        'testID="meeting-question-attachments"',
+        'purpose="question"',
         "isMeetingQuestionCitationCurrent(citation, session.evidence)",
         "accessibilityLabel={`查看来源：${citation.sourceLabel}`}",
     )

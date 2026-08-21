@@ -9,12 +9,16 @@ import {
   createQ2Snapshot,
   createQ2Thread,
   findLatestQ2Thread,
+  findPendingQ2ThreadsForMeeting,
+  getQ2Snapshot,
   getQ2Thread,
   Q2ActivationFenceError,
   rebindPendingQ2Turn,
+  type Q2ActivationFence,
   type Q2CitationInput,
+  type Q2StoredActivationFence,
 } from '../data/repositories/vnext/questionQ2Repository';
-import { ensureDeviceV2Session, loadDeviceV2Capabilities } from './deviceV2Api';
+import { DeviceV2ApiError, ensureDeviceV2Session, loadDeviceV2Capabilities } from './deviceV2Api';
 import { ensureRemoteMeetingServiceBinding } from './deviceAuthority';
 import {
   createDeviceOperation,
@@ -25,7 +29,13 @@ import {
   buildQ2CandidateSources,
   executeQ2Candidate,
 } from './questionQ2Candidate';
-import { createDeviceQ2CandidateProvider } from './questionQ2DeviceProvider';
+import {
+  bindQ2DurableTransport,
+  createDeviceQ2CandidateProvider,
+  q2TransportHandles,
+} from './questionQ2DeviceProvider';
+import { cancelDeviceV2Task, getDeviceV2Task } from './deviceV2SourceStream';
+import { RequestTimeoutError } from './http';
 import type { MeetingQuestionEvidence, MeetingQuestionSession } from './meetingQuestions';
 import { diagnosticAudit } from './diagnostics';
 
@@ -50,6 +60,15 @@ function operationFailureKind(error: unknown): string {
   if (/无效/.test(message)) return 'invalid_identifier';
   if (/创建失败/.test(message)) return 'insert_ignored';
   return 'unknown';
+}
+
+function isRecoverableQ2OperationError(error: unknown): boolean {
+  if (error instanceof RequestTimeoutError) return true;
+  if (error instanceof DeviceV2ApiError) {
+    return error.status === 429 || error.status >= 500 || error.code === 'Q2_TASK_BUSY';
+  }
+  return error instanceof TypeError
+    && /network request failed|failed to fetch|networkerror/i.test(error.message);
 }
 
 function excerpt(value: string): string {
@@ -81,20 +100,26 @@ async function sha256(value: string): Promise<string> {
 }
 
 function q2SourceText(evidence: MeetingQuestionEvidence): Map<string, {
-  kind: 'transcript' | 'manual_note';
+  kind: 'transcript' | 'manual_note' | 'attachment';
   text: string;
   segmentId?: string;
   startMs?: number;
   endMs?: number;
   manualNoteRevision?: number;
+  attachmentId?: string;
+  attachmentRevisionId?: string;
+  positionMs?: number;
 }> {
   const result = new Map<string, {
-    kind: 'transcript' | 'manual_note';
+    kind: 'transcript' | 'manual_note' | 'attachment';
     text: string;
     segmentId?: string;
     startMs?: number;
     endMs?: number;
     manualNoteRevision?: number;
+    attachmentId?: string;
+    attachmentRevisionId?: string;
+    positionMs?: number;
   }>();
   for (const segment of evidence.transcript) {
     result.set(segment.segmentId, {
@@ -110,6 +135,15 @@ function q2SourceText(evidence: MeetingQuestionEvidence): Map<string, {
       kind: 'manual_note',
       text: evidence.manualNote,
       manualNoteRevision: evidence.manualNoteRevision,
+    });
+  }
+  for (const attachment of evidence.attachments) {
+    result.set(`attachment:${attachment.attachmentId}`, {
+      kind: 'attachment',
+      text: attachment.text,
+      attachmentId: attachment.attachmentId,
+      attachmentRevisionId: attachment.revisionId,
+      positionMs: attachment.positionMs,
     });
   }
   return result;
@@ -137,11 +171,20 @@ async function citationFromQ2(
       sourceExcerpt: excerpt(source.text),
     };
   }
-  return {
+  if (source.kind === 'manual_note') return {
     id: citation.citationId,
     kind: 'manual_note',
     manualNoteRevision: source.manualNoteRevision!,
     sourceLabel: '我的笔记',
+    sourceExcerpt: excerpt(source.text),
+  };
+  return {
+    id: citation.citationId,
+    kind: 'attachment',
+    attachmentId: source.attachmentId!,
+    attachmentRevisionId: source.attachmentRevisionId!,
+    positionMs: source.positionMs!,
+    sourceLabel: `附件 · ${transcriptLabel(source.positionMs!).replace('文字记录 ', '')}`,
     sourceExcerpt: excerpt(source.text),
   };
 }
@@ -197,11 +240,219 @@ async function assertQ2Capability(): Promise<void> {
   if (!capabilities.questionReaderV2) throw new Error('当前版本未开启新版会议问答。');
 }
 
+function recoveryFenceCurrent(
+  fence: Q2StoredActivationFence,
+  evidence: MeetingQuestionEvidence,
+  deviceEpochId: string,
+  binding: Awaited<ReturnType<typeof ensureRemoteMeetingServiceBinding>>,
+): boolean {
+  const noteCurrent = fence.manualNote.mode === 'included'
+    ? evidence.includeManualNote && evidence.manualNoteRevision === fence.manualNote.revision
+    : fence.manualNote.mode === 'absent'
+      ? !evidence.hasManualNote
+      : !evidence.includeManualNote;
+  return noteCurrent
+    && fence.attachmentSelectionSha256 === evidence.attachmentSelectionSha256
+    && deviceEpochId === fence.deviceEpochId
+    && binding.deviceEpochId === fence.deviceEpochId
+    && binding.bindingId === fence.bindingId
+    && binding.bindingGeneration === fence.bindingGeneration
+    && binding.bindingRevision === fence.bindingRevision
+    && binding.cancelRevision === fence.bindingCancelRevision;
+}
+
+function activationFenceFor(
+  evidence: MeetingQuestionEvidence,
+  deviceEpochId: string,
+  binding: Awaited<ReturnType<typeof ensureRemoteMeetingServiceBinding>>,
+): Q2ActivationFence {
+  return {
+    meetingId: evidence.meetingId,
+    sourceFingerprint: evidence.sourceFingerprint,
+    transcriptRevisionId: evidence.transcriptRevisionId,
+    deviceEpochId,
+    bindingId: binding.bindingId,
+    bindingGeneration: binding.bindingGeneration,
+    bindingRevision: binding.bindingRevision,
+    bindingCancelRevision: binding.cancelRevision,
+    manualNote: evidence.includeManualNote && evidence.manualNoteRevision !== null
+      ? { mode: 'included', revision: evidence.manualNoteRevision }
+      : evidence.hasManualNote
+        ? { mode: 'excluded' }
+        : { mode: 'absent' },
+    attachmentSelectionSha256: evidence.attachmentSelectionSha256,
+  };
+}
+
+async function terminalizeRecoveredOperation(
+  operation: NonNullable<Awaited<ReturnType<typeof getDeviceOperation>>>,
+  state: 'success' | 'failure' | 'cancelled',
+  errorCode: string | null = null,
+): Promise<void> {
+  if (operation.remoteState === state) return;
+  if (operation.remoteState !== 'queued' && operation.remoteState !== 'running') return;
+  await updateDeviceOperation({
+    operationId: operation.operationId,
+    expectedRevision: operation.operationRevision,
+    state,
+    errorCode,
+  });
+}
+
+async function recoverCompletedPendingQ2Turn(
+  q2Thread: NonNullable<Awaited<ReturnType<typeof getQ2Thread>>>,
+  evidence: MeetingQuestionEvidence,
+): Promise<typeof q2Thread | null> {
+  const pending = [...q2Thread.turns].reverse().find(turn => turn.completedAtMs === null);
+  if (!pending) return q2Thread;
+  if (!pending.currentOperationId) return null;
+  const operation = await getDeviceOperation(pending.currentOperationId);
+  if (!operation || operation.remoteState === 'failure' || operation.remoteState === 'cancelled') return null;
+  if (!pending.activationFence || !operation.remoteTaskId) {
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_RECOVERY_FENCE_MISSING');
+    return null;
+  }
+  const [deviceSession, binding] = await Promise.all([
+    ensureDeviceV2Session(),
+    ensureRemoteMeetingServiceBinding(evidence.meetingId),
+  ]);
+  if (!recoveryFenceCurrent(pending.activationFence, evidence, deviceSession.epochId, binding)) {
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_EVIDENCE_CHANGED');
+    return null;
+  }
+  if (
+    operation.capability !== 'question_reader_v2'
+    || operation.entityId !== evidence.meetingId
+    || operation.inputSha256 !== evidence.sourceFingerprint
+    || operation.deviceEpochId !== pending.activationFence.deviceEpochId
+  ) {
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_OPERATION_FENCE_INVALID');
+    return null;
+  }
+  const expectedTransport = await q2TransportHandles({
+    operationId: operation.operationId,
+    snapshotId: q2Thread.snapshotId,
+    sourceFingerprint: evidence.sourceFingerprint,
+  });
+  if (operation.remoteTaskId !== expectedTransport.taskId) {
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_TASK_FENCE_INVALID');
+    return null;
+  }
+  let remote;
+  try {
+    remote = await getDeviceV2Task(operation.remoteTaskId);
+  } catch (error) {
+    // 404 means the process died after the local binding but before remote
+    // creation. Replaying the same deterministic identity is safe. A network
+    // or server error is not evidence that the Task does not exist.
+    if (!(error instanceof DeviceV2ApiError && error.status === 404)) throw error;
+    remote = null;
+  }
+  if (remote && (
+    remote.task.capability !== 'question'
+    || remote.task.input_sha256 !== evidence.sourceFingerprint
+  )) {
+    await terminalizeRecoveredOperation(operation, 'failure', 'Q2_TASK_FENCE_INVALID');
+    return null;
+  }
+  if (remote && (remote.task.state === 'failure' || remote.task.state === 'cancelled')) {
+    await terminalizeRecoveredOperation(
+      operation,
+      remote.task.state === 'cancelled' ? 'cancelled' : 'failure',
+      remote.task.error_code ?? 'Q2_TASK_FAILED',
+    );
+    return null;
+  }
+  // Both `active` and `success` replay through the same provider. Active Tasks
+  // resume their existing lease/attempt; successful Tasks return their stored
+  // artifact. A 404 recreates the not-yet-created Task with the same ID.
+  try {
+    await executeQ2Candidate({
+      meetingId: evidence.meetingId,
+      evidence,
+      question: pending.question,
+      provider: createDeviceQ2CandidateProvider(),
+      snapshotId: q2Thread.snapshotId,
+      threadId: q2Thread.threadId,
+      turnId: pending.turnId,
+      requestId: pending.requestId,
+      operationId: operation.operationId,
+      activationFence: {
+        meetingId: evidence.meetingId,
+        sourceFingerprint: evidence.sourceFingerprint,
+        transcriptRevisionId: evidence.transcriptRevisionId,
+        ...pending.activationFence,
+      },
+      ordinal: pending.ordinal,
+      providerRevision: pending.providerRevision,
+    });
+  } catch (error) {
+    if (error instanceof Q2ActivationFenceError) {
+      const changed = await getDeviceOperation(operation.operationId);
+      if (changed) await terminalizeRecoveredOperation(changed, 'failure', 'Q2_EVIDENCE_CHANGED');
+      return null;
+    }
+    if (!isRecoverableQ2OperationError(error)) {
+      const failed = await getDeviceOperation(operation.operationId);
+      if (failed) await terminalizeRecoveredOperation(failed, 'failure', 'Q2_READER_FAILED');
+    }
+    throw error;
+  }
+  const currentOperation = await getDeviceOperation(operation.operationId);
+  if (currentOperation) await terminalizeRecoveredOperation(currentOperation, 'success');
+  return getQ2Thread(q2Thread.threadId);
+}
+
+async function reconcilePendingQ2TurnsForMeeting(
+  evidence: MeetingQuestionEvidence,
+): Promise<void> {
+  const pendingThreads = await findPendingQ2ThreadsForMeeting(evidence.meetingId);
+  for (const thread of pendingThreads) {
+    const pending = [...thread.turns].reverse().find(turn => turn.completedAtMs === null);
+    if (!pending?.currentOperationId) continue;
+    const operation = await getDeviceOperation(pending.currentOperationId);
+    if (!operation || (operation.remoteState !== 'queued' && operation.remoteState !== 'running')) {
+      continue;
+    }
+    const snapshot = await getQ2Snapshot(thread.snapshotId);
+    if (!snapshot || !pending.activationFence || !operation.remoteTaskId) {
+      await terminalizeRecoveredOperation(operation, 'failure', 'Q2_RECOVERY_FENCE_MISSING');
+      continue;
+    }
+    if (operation.inputSha256 !== snapshot.sourceFingerprint) {
+      await terminalizeRecoveredOperation(operation, 'failure', 'Q2_OPERATION_FENCE_INVALID');
+      continue;
+    }
+    const expectedTransport = await q2TransportHandles({
+      operationId: operation.operationId,
+      snapshotId: thread.snapshotId,
+      sourceFingerprint: snapshot.sourceFingerprint,
+    });
+    if (operation.remoteTaskId !== expectedTransport.taskId) {
+      await terminalizeRecoveredOperation(operation, 'failure', 'Q2_TASK_FENCE_INVALID');
+      continue;
+    }
+    if (snapshot.sourceFingerprint !== evidence.sourceFingerprint) {
+      // The result may already be terminal on the server, but it belongs to an
+      // older immutable source set. Close the local owner without downloading
+      // or activating stale answer text.
+      await cancelDeviceV2Task(operation.remoteTaskId).catch(() => undefined);
+      await terminalizeRecoveredOperation(operation, 'failure', 'Q2_EVIDENCE_CHANGED');
+      continue;
+    }
+    await recoverCompletedPendingQ2Turn(thread, evidence);
+  }
+}
+
 export async function prepareQ2MeetingQuestionSession(input: {
   evidence: MeetingQuestionEvidence;
   forceNew?: boolean;
 }): Promise<MeetingQuestionSession> {
   await assertQ2Capability();
+  // Reconcile all unfinished Tasks for the meeting before selecting the thread
+  // for today's source fingerprint. Otherwise an attachment/note/transcript
+  // edit can strand a successful remote Task forever in local `running`.
+  await reconcilePendingQ2TurnsForMeeting(input.evidence);
   const existingForSources = await findLatestQ2Thread({
     meetingId: input.evidence.meetingId,
     sourceFingerprint: input.evidence.sourceFingerprint,
@@ -268,6 +519,7 @@ export async function askQ2MeetingQuestion(input: {
     if (binding.deviceEpochId !== deviceSession.epochId) {
       throw new Error('会议问答设备 epoch 与会议连接不一致');
     }
+    const activationFence = activationFenceFor(input.evidence, deviceSession.epochId, binding);
     if (existingTurn?.currentOperationId) {
       const previousOperation = await getDeviceOperation(existingTurn.currentOperationId);
       if (!previousOperation) {
@@ -318,6 +570,12 @@ export async function askQ2MeetingQuestion(input: {
           turnId: existingTurn.turnId,
           expectedOperationId: existingTurn.currentOperationId,
           newOperationId: operationId,
+          // A pending turn can survive an APK/provider contract upgrade. Its
+          // answer has not been published yet, so the retry must atomically
+          // move both the operation owner and the provider revision. Keeping
+          // the old revision makes the upgraded reader impossible to reach.
+          newProviderRevision: Q2_PROVIDER_REVISION,
+          activationFence,
         });
         if (!rebound) throw new Error('Q2 问答正在其他请求中处理');
         diagnosticAudit('meeting_question_q2_operation', { phase: 'retry_bound' });
@@ -333,6 +591,14 @@ export async function askQ2MeetingQuestion(input: {
       }
       diagnosticAudit('meeting_question_q2_operation', { phase: 'provider' });
       operationPhase = 'provider';
+      // Persist the deterministic remote Task identity before the pending turn
+      // can enter inference. A process death after this point can always poll
+      // or recreate exactly this Task; it never has to guess a second ID.
+      await bindQ2DurableTransport({
+        operationId,
+        snapshotId: q2Thread.snapshotId,
+        sourceFingerprint: input.evidence.sourceFingerprint,
+      });
       await executeQ2Candidate({
         meetingId: input.evidence.meetingId,
         evidence: input.evidence,
@@ -343,21 +609,7 @@ export async function askQ2MeetingQuestion(input: {
         turnId,
         requestId,
         operationId,
-        activationFence: {
-          meetingId: input.evidence.meetingId,
-          sourceFingerprint: input.evidence.sourceFingerprint,
-          transcriptRevisionId: input.evidence.transcriptRevisionId,
-          deviceEpochId: deviceSession.epochId,
-          bindingId: binding.bindingId,
-          bindingGeneration: binding.bindingGeneration,
-          bindingRevision: binding.bindingRevision,
-          bindingCancelRevision: binding.cancelRevision,
-          manualNote: input.evidence.includeManualNote && input.evidence.manualNoteRevision !== null
-            ? { mode: 'included', revision: input.evidence.manualNoteRevision }
-            : input.evidence.hasManualNote
-              ? { mode: 'excluded' }
-              : { mode: 'absent' },
-        },
+        activationFence,
         ordinal,
         providerRevision: Q2_PROVIDER_REVISION,
       });
@@ -378,7 +630,11 @@ export async function askQ2MeetingQuestion(input: {
         error_name: error instanceof Error ? error.name : 'unknown',
       });
       const failed = operation ? await getDeviceOperation(operationId) : null;
-      if (failed && (failed.remoteState === 'queued' || failed.remoteState === 'running')) {
+      if (
+        failed
+        && (failed.remoteState === 'queued' || failed.remoteState === 'running')
+        && !isRecoverableQ2OperationError(error)
+      ) {
         await updateDeviceOperation({
           operationId,
           expectedRevision: failed.operationRevision,

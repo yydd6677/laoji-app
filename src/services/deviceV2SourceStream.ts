@@ -122,6 +122,7 @@ export interface DeviceV2TaskSnapshot {
     state: 'active' | 'success' | 'failure' | 'cancelled';
     result?: unknown;
     error_code?: string | null;
+    retry_not_before_epoch: number | null;
   };
 }
 
@@ -410,6 +411,14 @@ export async function cancelDeviceV2SourceStream(streamId: string): Promise<void
   await deviceV2Request(`/source-streams/${encodeURIComponent(id(streamId, 'stream_id', 180))}`, { method: 'DELETE' }, '取消来源流失败');
 }
 
+export async function cancelDeviceV2Task(taskId: string): Promise<void> {
+  await deviceV2Request(
+    `/tasks/${encodeURIComponent(id(taskId, 'task_id'))}/cancel`,
+    { method: 'POST' },
+    '取消新版任务失败',
+  );
+}
+
 export async function getDeviceV2Task(taskId: string): Promise<DeviceV2TaskSnapshot> {
   const value = await deviceV2Request<any>(
     `/tasks/${encodeURIComponent(id(taskId, 'task_id'))}`,
@@ -423,6 +432,12 @@ export async function getDeviceV2Task(taskId: string): Promise<DeviceV2TaskSnaps
   if (!['active', 'success', 'failure', 'cancelled'].includes(task.state)) {
     throw new DeviceV2ApiError('新版整理任务状态无效', 502, 'VNEXT_TASK_STATE_INVALID');
   }
+  const retryNotBeforeEpoch = task.retry_not_before_epoch == null
+    ? null
+    : Number(task.retry_not_before_epoch);
+  if (retryNotBeforeEpoch !== null && (!Number.isFinite(retryNotBeforeEpoch) || retryNotBeforeEpoch < 0)) {
+    throw new DeviceV2ApiError('新版整理任务重试时间无效', 502, 'VNEXT_TASK_RETRY_STATE_INVALID');
+  }
   return {
     schema_version: 2,
     task: {
@@ -435,6 +450,7 @@ export async function getDeviceV2Task(taskId: string): Promise<DeviceV2TaskSnaps
       state: task.state,
       result: task.result,
       error_code: task.error_code == null ? null : id(String(task.error_code), 'error_code', 160),
+      retry_not_before_epoch: retryNotBeforeEpoch,
     },
   };
 }

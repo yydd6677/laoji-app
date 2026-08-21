@@ -629,7 +629,7 @@ def claim_attempt(
                 (owner, expires, now, current["attempt_id"]),
             )
             connection.execute(
-                "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, "
+                "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, error_code = NULL, "
                 "updated_at = ? WHERE task_id = ?",
                 (current["attempt_id"], now, task_id),
             )
@@ -680,7 +680,7 @@ def claim_attempt(
             (attempt_id, task_id, attempt_number, owner, expires, now, now),
         )
         connection.execute(
-            "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, "
+            "UPDATE vnext_tasks SET current_attempt_id = ?, retry_not_before_epoch = NULL, error_code = NULL, "
             "updated_at = ? WHERE task_id = ?",
             (attempt_id, now, task_id),
         )

@@ -15,15 +15,20 @@ import {
 } from '../data/repositories';
 import {
   secureClientIdFactory,
+  type MeetingSummaryAttachmentAuthorization,
   type MeetingQuestionCitation,
   type MeetingQuestionThread,
   type MeetingQuestionTurn,
   type ScopeKey,
 } from '../domain/meeting';
+import { getActiveAttachmentTextRevision } from '../data/repositories/vnext/immutableSourceRepository';
+import { findLatestQ2AttachmentIds } from '../data/repositories/vnext/questionQ2Repository';
 import { getFeatureFlags } from '../config/featureFlags';
 import { askDeviceQuestion, DeviceApiError } from './deviceApi';
 import { loadGenerationRetentionPreference } from './generationPrivacy';
 import { askQ2MeetingQuestion, prepareQ2MeetingQuestionSession } from './meetingQuestionsQ2';
+import { authorizeMeetingQuestionAttachments } from './meetingQuestionAttachments';
+import { loadMeetingAttachments } from './meetingAttachments';
 
 const INSUFFICIENT_ANSWER = '当前会议记录中没有足够信息';
 const MAX_CONTEXT_TURNS = 12;
@@ -43,6 +48,15 @@ type QuestionSummaryEvidence = {
   text: string;
 };
 
+export type QuestionAttachmentEvidence = {
+  attachmentId: string;
+  positionMs: number;
+  updatedAtMs: number;
+  revisionId: string;
+  contentSha256: string;
+  text: string;
+};
+
 export interface MeetingQuestionEvidence {
   meetingId: string;
   remoteMeetingId: string | null;
@@ -57,6 +71,9 @@ export interface MeetingQuestionEvidence {
   transcript: readonly QuestionTranscriptEvidence[];
   summary: readonly QuestionSummaryEvidence[];
   manualNote: string | null;
+  attachments: readonly QuestionAttachmentEvidence[];
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
+  attachmentSelectionSha256: string;
 }
 
 export interface MeetingQuestionSession {
@@ -111,10 +128,81 @@ function transcriptEvidence(segment: TranscriptSegmentRecord): QuestionTranscrip
   };
 }
 
+async function resolveQuestionAttachments(input: {
+  scopeKey: ScopeKey;
+  navigationMeetingId: string;
+  meetingId: string;
+  authorization: MeetingSummaryAttachmentAuthorization | null;
+}): Promise<{
+  attachments: readonly QuestionAttachmentEvidence[];
+  authorization: MeetingSummaryAttachmentAuthorization | null;
+}> {
+  if (!input.authorization) return { attachments: [], authorization: null };
+  const requested = input.authorization.items;
+  if (
+    requested.length < 1
+    || requested.length > 12
+    || requested.some(item => item.kind !== 'text')
+  ) throw new MeetingQuestionEvidenceChangedError();
+  const ids = requested.map(item => item.attachmentId.trim());
+  if (ids.some(id => !id) || new Set(ids).size !== ids.length) {
+    throw new MeetingQuestionEvidenceChangedError();
+  }
+  const records = await loadMeetingAttachments(input.scopeKey, input.navigationMeetingId);
+  const byId = new Map(records.map(record => [record.id, record]));
+  const attachments: QuestionAttachmentEvidence[] = [];
+  const canonicalItems = [];
+  for (const requestedItem of requested) {
+    if (requestedItem.kind !== 'text') throw new MeetingQuestionEvidenceChangedError();
+    const record = byId.get(requestedItem.attachmentId);
+    const text = normalizedText(record?.textContent ?? '', 2_001);
+    if (
+      !record
+      || record.meetingId !== input.meetingId
+      || record.kind !== 'text'
+      || !text
+      || text.length > 2_000
+      || record.positionMs !== requestedItem.positionMs
+      || record.updatedAtMs !== requestedItem.updatedAtMs
+      || text !== requestedItem.content
+    ) throw new MeetingQuestionEvidenceChangedError();
+    const immutable = await getActiveAttachmentTextRevision({
+      attachmentId: record.id,
+      meetingId: input.meetingId,
+    });
+    if (
+      !immutable
+      || immutable.content !== text
+      || immutable.contentSha256 !== requestedItem.contentSha256
+    ) throw new MeetingQuestionEvidenceChangedError();
+    attachments.push({
+      attachmentId: record.id,
+      positionMs: record.positionMs,
+      updatedAtMs: record.updatedAtMs,
+      revisionId: immutable.revisionId,
+      contentSha256: immutable.contentSha256,
+      text,
+    });
+    canonicalItems.push({
+      attachmentId: record.id,
+      kind: 'text' as const,
+      positionMs: record.positionMs,
+      content: text,
+      contentSha256: immutable.contentSha256,
+      updatedAtMs: record.updatedAtMs,
+    });
+  }
+  return {
+    attachments,
+    authorization: { requestId: input.authorization.requestId, items: canonicalItems },
+  };
+}
+
 export async function loadQuestionEvidence(input: {
   scopeKey: ScopeKey;
   navigationMeetingId: string;
   includeManualNote: boolean;
+  attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
 }): Promise<MeetingQuestionEvidence> {
   const meetingId = await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(
     input.navigationMeetingId,
@@ -159,6 +247,13 @@ export async function loadQuestionEvidence(input: {
   const includeManualNote = input.includeManualNote && hasManualNote;
   const manualNoteRevision = includeManualNote ? aggregate.manualNote.revision : null;
   const manualNote = includeManualNote ? manualNoteContent : null;
+  const attachmentSelection = await resolveQuestionAttachments({
+    scopeKey: input.scopeKey,
+    navigationMeetingId: input.navigationMeetingId,
+    meetingId,
+    authorization: input.attachmentAuthorization ?? null,
+  });
+  const attachments = attachmentSelection.attachments;
   const fingerprintPayload = {
     schemaVersion: 1,
     meetingId,
@@ -169,6 +264,13 @@ export async function loadQuestionEvidence(input: {
     includeManualNote,
     manualNoteRevision,
     manualNote,
+    attachments: attachments.map(attachment => ({
+      attachmentId: attachment.attachmentId,
+      positionMs: attachment.positionMs,
+      updatedAtMs: attachment.updatedAtMs,
+      revisionId: attachment.revisionId,
+      contentSha256: attachment.contentSha256,
+    })),
   };
   const sourceFingerprintSources = [
     ...(await Promise.all(transcriptItems.map(async segment => ({
@@ -185,6 +287,12 @@ export async function loadQuestionEvidence(input: {
         content_sha256: `sha256:${await sha256(manualNote)}`,
       }]
       : []),
+    ...attachments.map(attachment => ({
+      source_type: 'attachment' as const,
+      source_id: `attachment:${attachment.attachmentId}`,
+      source_revision_id: attachment.revisionId,
+      content_sha256: attachment.contentSha256,
+    })),
   ];
   const sourceFingerprintPayload = {
     schema_version: 2,
@@ -192,6 +300,13 @@ export async function loadQuestionEvidence(input: {
   };
   const inputFingerprint = `sha256:${await sha256(stableJson(fingerprintPayload))}`;
   const sourceFingerprint = `sha256:${await sha256(stableJson(sourceFingerprintPayload))}`;
+  const attachmentSelectionSha256 = `sha256:${await sha256(stableJson(
+    attachments.map(attachment => ({
+      attachment_id: attachment.attachmentId,
+      source_revision_id: attachment.revisionId,
+      content_sha256: attachment.contentSha256,
+    })),
+  ))}`;
   return {
     meetingId,
     remoteMeetingId: aggregate.note.remoteId,
@@ -205,6 +320,9 @@ export async function loadQuestionEvidence(input: {
     transcript: transcriptItems,
     summary: summaryItems,
     manualNote,
+    attachments,
+    attachmentAuthorization: attachmentSelection.authorization,
+    attachmentSelectionSha256,
   };
 }
 
@@ -212,18 +330,43 @@ export async function prepareMeetingQuestionSession(input: {
   scopeKey: ScopeKey;
   navigationMeetingId: string;
   includeManualNote?: boolean;
+  attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
   forceNew?: boolean;
 }): Promise<MeetingQuestionSession> {
   const flags = getFeatureFlags();
   if (!flags.meetingQuestionsV1 && !flags.meetingQuestionsQ2Candidate) {
     throw new MeetingQuestionUnavailableError('当前版本未开启会议问答。');
   }
-  const evidence = await loadQuestionEvidence({
+  let evidence = await loadQuestionEvidence({
     scopeKey: input.scopeKey,
     navigationMeetingId: input.navigationMeetingId,
     includeManualNote: input.includeManualNote === true,
+    attachmentAuthorization: input.attachmentAuthorization ?? null,
   });
   if (flags.meetingQuestionsQ2Candidate) {
+    // An omitted selection means "reopen the latest Q2 source snapshot". An
+    // explicit null means the user chose to continue without attachments.
+    if (input.attachmentAuthorization === undefined) {
+      const previousIds = await findLatestQ2AttachmentIds(evidence.meetingId);
+      if (previousIds.length > 0) {
+        try {
+          const authorization = await authorizeMeetingQuestionAttachments({
+            scopeKey: input.scopeKey,
+            navigationMeetingId: input.navigationMeetingId,
+            attachmentIds: previousIds,
+          });
+          evidence = await loadQuestionEvidence({
+            scopeKey: input.scopeKey,
+            navigationMeetingId: input.navigationMeetingId,
+            includeManualNote: input.includeManualNote === true,
+            attachmentAuthorization: authorization,
+          });
+        } catch {
+          // The old result remains in history, but stale/deleted attachment
+          // text must never be silently re-authorized for a new session.
+        }
+      }
+    }
     return prepareQ2MeetingQuestionSession({ evidence, forceNew: input.forceNew });
   }
   const existing = input.forceNew ? null : await findLatestMeetingQuestionThread({
@@ -331,6 +474,15 @@ export function isMeetingQuestionCitationCurrent(
   if (citation.kind === 'summary') {
     const source = evidence.summary.find(item => item.sectionId === citation.sectionId);
     return Boolean(source && citation.sourceExcerpt === excerpt(source.text));
+  }
+  if (citation.kind === 'attachment') {
+    const source = evidence.attachments.find(item => item.attachmentId === citation.attachmentId);
+    return Boolean(
+      source
+      && source.revisionId === citation.attachmentRevisionId
+      && source.positionMs === citation.positionMs
+      && citation.sourceExcerpt === excerpt(source.text),
+    );
   }
   return Boolean(
     evidence.includeManualNote
@@ -495,6 +647,7 @@ function parseQuestionResponse(
 function sourceIdForCitation(citation: MeetingQuestionCitation): string {
   if (citation.kind === 'transcript') return citation.segmentId;
   if (citation.kind === 'summary') return citation.sectionId;
+  if (citation.kind === 'attachment') return `attachment:${citation.attachmentId}`;
   return `manual-note:${citation.manualNoteRevision}`;
 }
 
@@ -561,6 +714,7 @@ export async function askMeetingQuestion(input: {
     scopeKey: input.scopeKey,
     navigationMeetingId: input.navigationMeetingId,
     includeManualNote: input.session.thread.includeManualNote,
+    attachmentAuthorization: input.session.evidence.attachmentAuthorization,
   });
   if (getFeatureFlags().meetingQuestionsQ2Candidate) {
     return askQ2MeetingQuestion({
@@ -593,10 +747,11 @@ export async function askMeetingQuestion(input: {
     answer_scope: turn.answerScope,
     answer_kind: turn.answerKind,
     answer: turn.answer,
-    citations: turn.citations.map(citation => ({
-      kind: citation.kind,
-      source_id: sourceIdForCitation(citation),
-    })),
+    // Legacy wire history has no attachment source contract. Q2 owns
+    // attachment-grounded turns; keep this compatibility projection narrow.
+    citations: turn.citations.flatMap(citation => citation.kind === 'attachment'
+      ? []
+      : [{ kind: citation.kind, source_id: sourceIdForCitation(citation) }]),
   }));
   const request: MeetingQuestionRequestWire = {
     schema_version: 1,

@@ -289,3 +289,31 @@ export async function getCurrentAttachmentTextRevision(
     text(attachmentId, 'attachmentId'),
   ));
 }
+
+/**
+ * Resolve only the immutable revision currently selected by the meeting
+ * aggregate. Reading the newest history row is insufficient for a generation
+ * fence: a failed or interrupted edit can leave a newer orphan revision while
+ * the active pointer still owns the visible attachment text.
+ */
+export async function getActiveAttachmentTextRevision(input: {
+  attachmentId: string;
+  meetingId: string;
+}): Promise<AttachmentTextRevisionRecord | null> {
+  const database = await openMeetingDatabase();
+  return attachmentFromRow(await database.getFirstAsync<AttachmentRow>(
+    `SELECT immutable.revision_id, immutable.attachment_id, immutable.meeting_id,
+            immutable.revision, immutable.content_kind, immutable.content,
+            immutable.content_sha256, immutable.source_asset_sha256,
+            immutable.extractor_revision, immutable.migrated_current,
+            immutable.created_at_ms
+       FROM meeting_attachments attachment
+       INNER JOIN meeting_attachment_text_revisions immutable
+         ON immutable.revision_id = attachment.active_text_revision_id
+      WHERE attachment.id = ? AND attachment.meeting_id = ?
+        AND attachment.kind = 'text' AND attachment.pending_operation IS NOT 'delete'
+      LIMIT 1`,
+    text(input.attachmentId, 'attachmentId'),
+    text(input.meetingId, 'meetingId'),
+  ));
+}

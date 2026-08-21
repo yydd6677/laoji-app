@@ -175,6 +175,10 @@ def test_retry_not_before_survives_store_polling(tmp_path, monkeypatch) -> None:
         lease_owner="worker-delay-b",
     )
     assert second is not None and second["attempt_number"] == 2
+    resumed = vnext_task_store.get_task(context, "task-retry-delay")
+    assert resumed is not None
+    assert resumed["error_code"] is None
+    assert resumed["retry_not_before_epoch"] is None
 
 
 def test_terminal_task_closes_final_retryable_attempt(tmp_path, monkeypatch) -> None:

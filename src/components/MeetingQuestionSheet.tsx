@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -16,8 +16,17 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { MeetingQuestionCitation, MeetingQuestionTurn, ScopeKey } from '../domain/meeting';
+import type {
+  MeetingQuestionCitation,
+  MeetingQuestionTurn,
+  MeetingSummaryAttachmentAuthorization,
+  ScopeKey,
+} from '../domain/meeting';
+import type { MeetingAttachmentRecord } from '../data/repositories';
+import { MeetingSummaryAttachmentSheet } from './MeetingSummaryAttachmentSheet';
 import { readableErrorMessage } from '../services/errors';
+import { authorizeMeetingQuestionAttachments } from '../services/meetingQuestionAttachments';
+import { loadMeetingAttachments } from '../services/meetingAttachments';
 import {
   askMeetingQuestion,
   MeetingQuestionEvidenceChangedError,
@@ -27,6 +36,7 @@ import {
 } from '../services/meetingQuestions';
 import { Q2EvidenceChangedError } from '../services/meetingQuestionsQ2';
 import { beginSummaryV3InteractiveWork } from '../services/meetingSummaryV3Upgrade';
+import { getFeatureFlags } from '../config/featureFlags';
 import { getFeishuTokens } from '../theme/feishuTokens';
 
 const MOTION_MS = 300;
@@ -52,6 +62,14 @@ export type MeetingQuestionCitationTarget =
     transcriptRevisionId: string;
     manualNoteRevision: number | null;
     revision: number;
+  }
+  | {
+    kind: 'attachment';
+    meetingId: string;
+    transcriptRevisionId: string;
+    attachmentId: string;
+    attachmentRevisionId: string;
+    positionMs: number;
   };
 
 function citationTarget(
@@ -74,6 +92,16 @@ function citationTarget(
       transcriptRevisionId: session.evidence.transcriptRevisionId,
       summaryVersionId: session.evidence.summaryVersionId,
       sectionId: citation.sectionId,
+    };
+  }
+  if (citation.kind === 'attachment') {
+    return {
+      kind: 'attachment',
+      meetingId: session.evidence.meetingId,
+      transcriptRevisionId: session.evidence.transcriptRevisionId,
+      attachmentId: citation.attachmentId,
+      attachmentRevisionId: citation.attachmentRevisionId,
+      positionMs: citation.positionMs,
     };
   }
   return {
@@ -195,6 +223,7 @@ export function MeetingQuestionSheet({
   onOpenCitation: (target: MeetingQuestionCitationTarget) => void;
 }) {
   const { colors } = getFeishuTokens();
+  const questionAttachmentsEnabled = getFeatureFlags().meetingQuestionsQ2Candidate;
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -215,6 +244,9 @@ export function MeetingQuestionSheet({
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [attachmentSheetVisible, setAttachmentSheetVisible] = useState(false);
+  const [attachmentLoading, setAttachmentLoading] = useState(false);
+  const [attachments, setAttachments] = useState<readonly MeetingAttachmentRecord[]>([]);
   closeRef.current = onClose;
   citationRef.current = onOpenCitation;
 
@@ -224,6 +256,7 @@ export function MeetingQuestionSheet({
     setClosing(true);
     Keyboard.dismiss();
     requestControllerRef.current?.abort();
+    setAttachmentSheetVisible(false);
     progress.stopAnimation();
     Animated.timing(progress, {
       toValue: 0,
@@ -240,7 +273,11 @@ export function MeetingQuestionSheet({
     });
   }, [progress]);
 
-  const loadSession = useCallback(async (includeManualNote: boolean, forceNew = false) => {
+  const loadSession = useCallback(async (
+    includeManualNote: boolean,
+    forceNew = false,
+    attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null,
+  ) => {
     if (!scopeKey) {
       setSession(null);
       setError('登录状态尚未准备好，请稍后重试。');
@@ -263,6 +300,7 @@ export function MeetingQuestionSheet({
         scopeKey,
         navigationMeetingId: meetingId,
         includeManualNote,
+        attachmentAuthorization,
         forceNew,
       });
       if (!mountedRef.current || loadGenerationRef.current !== generation) return;
@@ -285,6 +323,8 @@ export function MeetingQuestionSheet({
       setDraft('');
       setPendingQuestion(null);
       setStatus('');
+      setAttachmentSheetVisible(false);
+      setAttachmentLoading(false);
       progress.stopAnimation();
       progress.setValue(0);
       Animated.timing(progress, {
@@ -313,6 +353,31 @@ export function MeetingQuestionSheet({
   const turns = session?.thread.turns ?? [];
   const canSend = Boolean(session && draft.trim() && !loading && !sending && !closing);
   const includeManualNote = session?.thread.includeManualNote === true;
+  const selectedAttachmentIds = session?.evidence.attachments.map(item => item.attachmentId) ?? [];
+
+  const openAttachmentSelection = async () => {
+    if (!scopeKey || attachmentLoading || sending || closing) return;
+    setAttachmentLoading(true);
+    setError('');
+    setStatus('');
+    try {
+      const available = (await loadMeetingAttachments(scopeKey, meetingId))
+        .filter(attachment => attachment.kind === 'text');
+      if (!mountedRef.current) return;
+      if (available.length === 0) {
+        setStatus('当前会议没有可用于问答的文字附件。');
+        return;
+      }
+      setAttachments(available);
+      setAttachmentSheetVisible(true);
+    } catch (reason) {
+      if (mountedRef.current) {
+        setError(readableErrorMessage(reason, '附件暂时无法读取，请稍后重试。'));
+      }
+    } finally {
+      if (mountedRef.current) setAttachmentLoading(false);
+    }
+  };
 
   const send = async () => {
     if (!canSend || !session || !scopeKey) return;
@@ -371,6 +436,7 @@ export function MeetingQuestionSheet({
   };
 
   return (
+    <Fragment>
     <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={() => finishClose(true)}>
       <Animated.View
         style={[
@@ -408,7 +474,15 @@ export function MeetingQuestionSheet({
             {turns.length > 0 ? (
               <Pressable
                 style={({ pressed }) => [styles.newThread, pressed && { backgroundColor: colors.pressedFill }]}
-                onPress={() => { if (!sending) void loadSession(includeManualNote, true); }}
+                onPress={() => {
+                  if (!sending) {
+                    void loadSession(
+                      includeManualNote,
+                      true,
+                      session?.evidence.attachmentAuthorization ?? null,
+                    );
+                  }
+                }}
                 disabled={sending || loading}
                 accessibilityRole="button"
                 accessibilityLabel="开始新问答"
@@ -427,8 +501,30 @@ export function MeetingQuestionSheet({
                     ? '整理结果'
                     : null,
                   session.evidence.includeManualNote ? '我的笔记' : null,
+                  session.evidence.attachments.length > 0
+                    ? `附件（${session.evidence.attachments.length}）`
+                    : null,
                 ].filter(Boolean).join(' · ')}
               </Text>
+              {questionAttachmentsEnabled ? <Pressable
+                style={({ pressed }) => [
+                  styles.attachmentAction,
+                  pressed && !attachmentLoading && { backgroundColor: colors.pressedFill },
+                ]}
+                onPress={() => { void openAttachmentSelection(); }}
+                disabled={attachmentLoading || sending || closing}
+                accessibilityRole="button"
+                accessibilityLabel="选择问答附件"
+                accessibilityState={{
+                  busy: attachmentLoading,
+                  disabled: attachmentLoading || sending || closing,
+                }}
+                testID="meeting-question-attachments"
+              >
+                {attachmentLoading
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Ionicons name="attach-outline" size={20} color={colors.iconSecondary} />}
+              </Pressable> : null}
             </View>
           ) : null}
 
@@ -544,6 +640,31 @@ export function MeetingQuestionSheet({
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>
+    {questionAttachmentsEnabled ? <MeetingSummaryAttachmentSheet
+      visible={attachmentSheetVisible}
+      attachments={attachments}
+      imageSelectionEnabled={false}
+      purpose="question"
+      initialSelectedIds={selectedAttachmentIds}
+      onClose={() => setAttachmentSheetVisible(false)}
+      onSkip={() => {
+        setAttachmentSheetVisible(false);
+        void loadSession(includeManualNote, true, null);
+      }}
+      onAuthorize={attachmentIds => {
+        if (!scopeKey) throw new Error('当前会议尚未准备好。');
+        return authorizeMeetingQuestionAttachments({
+          scopeKey,
+          navigationMeetingId: meetingId,
+          attachmentIds,
+        });
+      }}
+      onCompleted={authorization => {
+        setAttachmentSheetVisible(false);
+        void loadSession(includeManualNote, true, authorization);
+      }}
+    /> : null}
+    </Fragment>
   );
 }
 
@@ -570,6 +691,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   scopeLabel: { flex: 1, fontSize: 13, lineHeight: 20 },
+  attachmentAction: { width: 44, height: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 20 },
   emptyListContent: { flexGrow: 1 },
