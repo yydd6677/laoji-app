@@ -14,6 +14,8 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -46,6 +48,12 @@ public final class VnextSummaryFenceDbMutationTest {
             "vnext-summary-fence-attachment-position.txt";
     private static final String CHANGED_ATTACHMENT_CONTENT_FILE =
             "vnext-summary-fence-attachment-content.txt";
+    private static final String SUMMARY_V3_UPGRADE_RECOVERY_FILE =
+            "vnext-summary-v3-upgrade-recovery.txt";
+    private static final String SUMMARY_FACT_BACKUP_TABLE =
+            "vnext_test_summary_fact_backup";
+    private static final String SUMMARY_STAGE_BACKUP_TABLE =
+            "vnext_test_summary_stage_backup";
     private static final String ATTACHMENT_FIXTURE_TEXT =
             "附件围栏验收：最终结果不得覆盖已经变化的会议来源。";
     private static final String CHANGED_ATTACHMENT_FIXTURE_TEXT =
@@ -80,6 +88,418 @@ public final class VnextSummaryFenceDbMutationTest {
                 assertEquals(0, foreignKeys.getCount());
             }
         }
+    }
+
+    @Test
+    public void testAuditSummaryV3UpgradeState() {
+        final File databaseFile = databaseFile();
+        assertTrue("candidate meeting database is missing", databaseFile.isFile());
+        try (SQLiteDatabase database = openDatabase()) {
+            final int pending = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE status = 'pending'");
+            final int running = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE status = 'running'");
+            final int success = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE status = 'success'");
+            final int failure = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE status = 'failure'");
+            final int eligibleMissing = countRows(database,
+                    "SELECT COUNT(DISTINCT version.meeting_id) "
+                            + "FROM summary_versions version "
+                            + "INNER JOIN meeting_notes meeting ON meeting.id = version.meeting_id "
+                            + "WHERE meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted' "
+                            + "AND version.status IN ('ready','stale') "
+                            + "AND EXISTS (SELECT 1 FROM transcript_revisions transcript "
+                            + "WHERE transcript.meeting_id = version.meeting_id "
+                            + "AND transcript.is_active = 1 AND transcript.status = 'ready') "
+                            + "AND NOT EXISTS (SELECT 1 FROM summary_fact_documents facts "
+                            + "WHERE facts.meeting_id = version.meeting_id)");
+            final int successWithoutFacts = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks task "
+                            + "WHERE task.status = 'success' "
+                            + "AND NOT EXISTS (SELECT 1 FROM summary_fact_documents facts "
+                            + "WHERE facts.meeting_id = task.meeting_id)");
+            final int retryExhausted = countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks "
+                            + "WHERE status != 'success' AND attempt_count >= 3");
+            assertTrue("more than one background upgrade is running", running <= 1);
+            assertEquals("successful upgrade row lost its immutable facts", 0, successWithoutFacts);
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+            System.out.println("VNEXT_UPGRADE_AUDIT pending=" + pending
+                    + " running=" + running
+                    + " success=" + success
+                    + " failure=" + failure
+                    + " eligible_missing=" + eligibleMissing
+                    + " retry_exhausted=" + retryExhausted
+                    + " integrity=ok foreign_keys=0");
+            try (Cursor cursor = database.rawQuery(
+                    "SELECT meeting.id, COALESCE(NULLIF(meeting.legacy_source_id, ''), "
+                            + "NULLIF(meeting.remote_id, ''), meeting.id) "
+                            + "FROM meeting_notes meeting "
+                            + "WHERE meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted' "
+                            + "AND EXISTS (SELECT 1 FROM summary_versions version "
+                            + "WHERE version.meeting_id = meeting.id "
+                            + "AND version.status IN ('ready','stale')) "
+                            + "AND EXISTS (SELECT 1 FROM transcript_revisions transcript "
+                            + "WHERE transcript.meeting_id = meeting.id "
+                            + "AND transcript.is_active = 1 AND transcript.status = 'ready') "
+                            + "AND NOT EXISTS (SELECT 1 FROM summary_fact_documents facts "
+                            + "WHERE facts.meeting_id = meeting.id) "
+                            + "ORDER BY meeting.id",
+                    null)) {
+                while (cursor.moveToNext()) {
+                    System.out.println("VNEXT_UPGRADE_ELIGIBLE meeting_id=" + cursor.getString(0)
+                            + " legacy_id=" + cursor.getString(1));
+                }
+            }
+            try (Cursor cursor = database.rawQuery(
+                    "SELECT meeting.id, COALESCE(NULLIF(meeting.legacy_source_id, ''), "
+                            + "NULLIF(meeting.remote_id, ''), meeting.id), "
+                            + "(SELECT COUNT(*) FROM summary_fact_documents facts "
+                            + "WHERE facts.meeting_id = meeting.id), "
+                            + "(SELECT COUNT(*) FROM action_items action "
+                            + "WHERE action.meeting_id = meeting.id), "
+                            + "(SELECT COUNT(*) FROM summary_versions version "
+                            + "WHERE version.meeting_id = meeting.id), "
+                            + "(SELECT COUNT(*) FROM transcript_segments segment "
+                            + "INNER JOIN transcript_revisions revision ON revision.id = segment.revision_id "
+                            + "WHERE revision.meeting_id = meeting.id AND revision.is_active = 1 "
+                            + "AND revision.status = 'ready') "
+                            + "FROM meeting_notes meeting "
+                            + "WHERE meeting.scope_key = 'guest' AND meeting.lifecycle != 'deleted' "
+                            + "AND meeting.current_summary_version_id IS NOT NULL "
+                            + "AND EXISTS (SELECT 1 FROM summary_fact_documents facts "
+                            + "WHERE facts.meeting_id = meeting.id) "
+                            + "AND EXISTS (SELECT 1 FROM transcript_revisions transcript "
+                            + "WHERE transcript.meeting_id = meeting.id "
+                            + "AND transcript.is_active = 1 AND transcript.status = 'ready') "
+                            + "ORDER BY 4, 3, meeting.id LIMIT 20",
+                    null)) {
+                while (cursor.moveToNext()) {
+                    System.out.println("VNEXT_UPGRADE_SOURCE meeting_id=" + cursor.getString(0)
+                            + " legacy_id=" + cursor.getString(1)
+                            + " facts=" + cursor.getInt(2)
+                            + " actions=" + cursor.getInt(3)
+                            + " versions=" + cursor.getInt(4)
+                            + " segments=" + cursor.getInt(5));
+                }
+            }
+            try (Cursor cursor = database.rawQuery(
+                    "SELECT task.meeting_id, task.status, task.attempt_count, "
+                            + "COALESCE(task.remote_task_id, ''), COALESCE(task.last_error_code, ''), "
+                            + "COALESCE((SELECT stage.status FROM processing_stages stage "
+                            + "WHERE stage.meeting_id = task.meeting_id AND stage.stage = 'summary'), '') "
+                            + "FROM summary_v3_upgrade_tasks task "
+                            + "WHERE task.status != 'success' ORDER BY task.meeting_id",
+                    null)) {
+                while (cursor.moveToNext()) {
+                    System.out.println("VNEXT_UPGRADE_TASK meeting_id=" + cursor.getString(0)
+                            + " status=" + cursor.getString(1)
+                            + " attempts=" + cursor.getInt(2)
+                            + " remote_task=" + cursor.getString(3)
+                            + " error=" + cursor.getString(4)
+                            + " summary_stage=" + cursor.getString(5));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testDiscardUncommittedSummaryV3UpgradeRecoveryMarker() throws Exception {
+        final File markerFile = summaryV3UpgradeRecoveryMarkerFile();
+        assertTrue("no uncommitted summary v3 upgrade marker is pending", markerFile.isFile());
+        final String[] lines = readMarkerLines(markerFile, 10);
+        assertEquals("preparing", lines[0].trim());
+        final String meetingId = lines[1].trim();
+        final int factsBefore = Integer.parseInt(lines[4].trim());
+        assertEquals(requiredMeetingId(), meetingId);
+        try (SQLiteDatabase database = openDatabase()) {
+            assertFalse("failed transaction left a Facts backup table",
+                    tableExists(database, SUMMARY_FACT_BACKUP_TABLE));
+            assertFalse("failed transaction left a stage backup table",
+                    tableExists(database, SUMMARY_STAGE_BACKUP_TABLE));
+            assertEquals("failed transaction moved immutable facts", factsBefore, countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ?", meetingId));
+            assertEquals("failed transaction left an upgrade task", 0, countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE meeting_id = ?", meetingId));
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+        }
+        assertTrue("uncommitted summary v3 upgrade marker could not be deleted", markerFile.delete());
+    }
+
+    @Test
+    public void testPrepareSummaryV3UpgradeRecoveryFixture() throws Exception {
+        final String meetingId = requiredMeetingId();
+        final String fixtureToken = fixtureId("summary-v3-upgrade-recovery", meetingId);
+        final File marker = summaryV3UpgradeRecoveryMarkerFile();
+        assertFalse("restore the previous summary v3 upgrade fixture first", marker.exists());
+        final long nowMs = System.currentTimeMillis();
+
+        try (SQLiteDatabase database = openDatabase()) {
+            final String originalCurrentVersion = readCurrentSummaryVersion(database, meetingId);
+            assertNotNull("upgrade fixture requires a readable previous summary", originalCurrentVersion);
+            final int factsBefore = countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ?", meetingId);
+            final int versionsBefore = countRows(database,
+                    "SELECT COUNT(*) FROM summary_versions WHERE meeting_id = ?", meetingId);
+            final int actionsBefore = countRows(database,
+                    "SELECT COUNT(*) FROM action_items WHERE meeting_id = ?", meetingId);
+            final long meetingUpdatedAtMs = readMeetingUpdatedAt(database, meetingId);
+            final int summaryStageBefore = countRows(database,
+                    "SELECT COUNT(*) FROM processing_stages WHERE meeting_id = ? AND stage = 'summary'",
+                    meetingId);
+            assertTrue("upgrade fixture requires immutable Facts V3 history", factsBefore > 0);
+            assertTrue("upgrade fixture requires summary version history", versionsBefore > 0);
+            assertEquals("choose a fixture without mutable action side effects", 0, actionsBefore);
+            assertTrue("summary stage multiplicity is invalid", summaryStageBefore <= 1);
+            assertEquals("upgrade task already exists", 0, countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE meeting_id = ?", meetingId));
+            assertFalse("summary fact backup table already exists",
+                    tableExists(database, SUMMARY_FACT_BACKUP_TABLE));
+            assertFalse("summary stage backup table already exists",
+                    tableExists(database, SUMMARY_STAGE_BACKUP_TABLE));
+            assertTrue("upgrade fixture requires a ready active transcript", countRows(database,
+                    "SELECT COUNT(*) FROM transcript_revisions WHERE meeting_id = ? "
+                            + "AND is_active = 1 AND status = 'ready'", meetingId) > 0);
+
+            final StringBuilder markerBuilder = new StringBuilder(String.join("\n",
+                    "preparing",
+                    meetingId,
+                    fixtureToken,
+                    originalCurrentVersion,
+                    Integer.toString(factsBefore),
+                    Integer.toString(versionsBefore),
+                    Integer.toString(actionsBefore),
+                    Long.toString(meetingUpdatedAtMs),
+                    Long.toString(nowMs),
+                    Integer.toString(summaryStageBefore))).append('\n');
+            final String markerContents = markerBuilder.toString();
+            Files.write(marker.toPath(), markerContents.getBytes(StandardCharsets.UTF_8));
+
+            database.beginTransaction();
+            try {
+                database.execSQL("CREATE TABLE " + SUMMARY_FACT_BACKUP_TABLE
+                        + " AS SELECT * FROM summary_fact_documents WHERE 0");
+                database.execSQL("INSERT INTO " + SUMMARY_FACT_BACKUP_TABLE
+                                + " SELECT * FROM summary_fact_documents WHERE meeting_id = ?",
+                        new Object[]{meetingId});
+                database.execSQL("CREATE TABLE " + SUMMARY_STAGE_BACKUP_TABLE
+                        + " AS SELECT * FROM processing_stages WHERE 0");
+                database.execSQL("INSERT INTO " + SUMMARY_STAGE_BACKUP_TABLE
+                                + " SELECT * FROM processing_stages "
+                                + "WHERE meeting_id = ? AND stage = 'summary'",
+                        new Object[]{meetingId});
+                database.execSQL(
+                        "DELETE FROM summary_fact_documents WHERE meeting_id = ?",
+                        new Object[]{meetingId});
+                assertEquals(factsBefore, countRows(database,
+                        "SELECT COUNT(*) FROM " + SUMMARY_FACT_BACKUP_TABLE));
+                assertEquals(0, countRows(database,
+                        "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ?", meetingId));
+                database.execSQL(
+                        "INSERT INTO summary_v3_upgrade_tasks (meeting_id, status, attempt_count, "
+                                + "remote_task_id, next_attempt_at_ms, last_error_code, created_at_ms, "
+                                + "updated_at_ms, completed_at_ms) "
+                                + "VALUES (?, 'pending', 0, NULL, NULL, NULL, ?, ?, NULL)",
+                        new Object[]{meetingId, nowMs, nowMs});
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+            Files.write(marker.toPath(), markerContents.replaceFirst("preparing", "prepared")
+                    .getBytes(StandardCharsets.UTF_8));
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+            System.out.println("VNEXT_UPGRADE_FIXTURE prepared meeting_id=" + meetingId
+                    + " facts=" + factsBefore + " versions=" + versionsBefore
+                    + " actions=0 integrity=ok foreign_keys=0");
+        }
+    }
+
+    @Test
+    public void testMakeSummaryV3UpgradeRetryReady() throws Exception {
+        final UpgradeRecoveryMarker marker = readUpgradeRecoveryMarker();
+        assertEquals(requiredMeetingId(), marker.meetingId);
+        try (SQLiteDatabase database = openDatabase()) {
+            assertTrue(tableExists(database, SUMMARY_FACT_BACKUP_TABLE));
+            assertEquals(marker.factsBefore, countRows(database,
+                    "SELECT COUNT(*) FROM " + SUMMARY_FACT_BACKUP_TABLE));
+            try (Cursor cursor = database.rawQuery(
+                    "SELECT status, attempt_count, remote_task_id "
+                            + "FROM summary_v3_upgrade_tasks WHERE meeting_id = ?",
+                    new String[]{marker.meetingId})) {
+                assertTrue("summary v3 upgrade recovery task is missing", cursor.moveToFirst());
+                assertEquals(1, cursor.getCount());
+                final String status = cursor.getString(0);
+                final int attempts = cursor.getInt(1);
+                final String remoteTaskId = cursor.isNull(2) ? "" : cursor.getString(2);
+                assertTrue("only a deferred upgrade can be made ready",
+                        "pending".equals(status) || "failure".equals(status));
+                assertTrue("upgrade retry count is invalid", attempts >= 0 && attempts < 3);
+                database.execSQL(
+                        "UPDATE summary_v3_upgrade_tasks SET status = 'pending', "
+                                + "next_attempt_at_ms = NULL, last_error_code = NULL, "
+                                + "updated_at_ms = ?, completed_at_ms = NULL WHERE meeting_id = ?",
+                        new Object[]{System.currentTimeMillis(), marker.meetingId});
+                assertEquals(1, countRows(database,
+                        "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE meeting_id = ? "
+                                + "AND status = 'pending' AND next_attempt_at_ms IS NULL",
+                        marker.meetingId));
+                System.out.println("VNEXT_UPGRADE_FIXTURE retry_ready meeting_id="
+                        + marker.meetingId + " attempts=" + attempts
+                        + " remote_task=" + remoteTaskId);
+            }
+        }
+    }
+
+    @Test
+    public void testAuditSummaryV3UpgradeRecoveryFixture() throws Exception {
+        final UpgradeRecoveryMarker marker = readUpgradeRecoveryMarker();
+        assertEquals(requiredMeetingId(), marker.meetingId);
+        try (SQLiteDatabase database = openDatabase()) {
+            assertEquals(marker.factsBefore, countRows(database,
+                    "SELECT COUNT(*) FROM " + SUMMARY_FACT_BACKUP_TABLE));
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_v3_upgrade_tasks WHERE meeting_id = ? "
+                            + "AND status = 'success' AND attempt_count BETWEEN 1 AND 3 "
+                            + "AND remote_task_id IS NULL AND completed_at_ms IS NOT NULL",
+                    marker.meetingId));
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ? "
+                            + "AND summary_version_id IS NOT NULL",
+                    marker.meetingId));
+            assertEquals(marker.versionsBefore + 1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_versions WHERE meeting_id = ?", marker.meetingId));
+            assertEquals(0, countRows(database,
+                    "SELECT COUNT(*) FROM device_summary_task_intents WHERE meeting_id = ?",
+                    marker.meetingId));
+            final String upgradedVersion = readCurrentSummaryVersion(database, marker.meetingId);
+            assertNotNull("background upgrade did not activate a current version", upgradedVersion);
+            assertFalse("background upgrade did not replace the legacy projection",
+                    marker.originalCurrentVersion.equals(upgradedVersion));
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_fact_documents "
+                            + "WHERE meeting_id = ? AND summary_version_id = ?",
+                    marker.meetingId, upgradedVersion));
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_versions WHERE id = ? AND meeting_id = ? "
+                            + "AND status = 'ready' AND user_edited = 0",
+                    upgradedVersion, marker.meetingId));
+            assertEquals(1, countRows(database,
+                    "SELECT COUNT(*) FROM summary_versions WHERE id = ? AND meeting_id = ? "
+                            + "AND status IN ('ready','stale')",
+                    marker.originalCurrentVersion, marker.meetingId));
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+            System.out.println("VNEXT_UPGRADE_FIXTURE success meeting_id=" + marker.meetingId
+                    + " upgraded_version=" + upgradedVersion
+                    + " attempts=" + countRows(database,
+                    "SELECT attempt_count FROM summary_v3_upgrade_tasks WHERE meeting_id = ?",
+                    marker.meetingId)
+                    + " old_version_readable=true intents=0 integrity=ok foreign_keys=0");
+        }
+    }
+
+    @Test
+    public void testRestoreSummaryV3UpgradeRecoveryFixture() throws Exception {
+        final UpgradeRecoveryMarker marker = readUpgradeRecoveryMarker();
+        assertEquals(requiredMeetingId(), marker.meetingId);
+        try (SQLiteDatabase database = openDatabase()) {
+            database.beginTransaction();
+            try {
+                final List<String> generatedVersions = new ArrayList<>();
+                try (Cursor cursor = database.rawQuery(
+                        "SELECT summary_version_id FROM summary_fact_documents "
+                                + "WHERE meeting_id = ? AND summary_version_id IS NOT NULL",
+                        new String[]{marker.meetingId})) {
+                    while (cursor.moveToNext()) generatedVersions.add(cursor.getString(0));
+                }
+                assertTrue("fixture created more than one replacement facts document",
+                        generatedVersions.size() <= 1);
+                final String generatedVersion = generatedVersions.isEmpty()
+                        ? null : generatedVersions.get(0);
+                if (generatedVersion == null) {
+                    assertEquals("failed upgrade changed the readable previous version",
+                            marker.originalCurrentVersion,
+                            readCurrentSummaryVersion(database, marker.meetingId));
+                } else {
+                    assertFalse(marker.originalCurrentVersion.equals(generatedVersion));
+                    assertEquals(generatedVersion,
+                            readCurrentSummaryVersion(database, marker.meetingId));
+                    assertEquals(0, countRows(database,
+                            "SELECT COUNT(*) FROM action_items WHERE source_summary_version_id = ? "
+                                    + "AND (status != 'pending' OR user_edited_at_ms IS NOT NULL)",
+                            generatedVersion));
+                    database.execSQL(
+                            "DELETE FROM action_items WHERE source_summary_version_id = ? "
+                                    + "AND status = 'pending' AND user_edited_at_ms IS NULL",
+                            new Object[]{generatedVersion});
+                }
+                database.execSQL(
+                        "UPDATE meeting_notes SET current_summary_version_id = ? WHERE id = ?",
+                        new Object[]{marker.originalCurrentVersion, marker.meetingId});
+                database.execSQL(
+                        "DELETE FROM summary_fact_documents WHERE meeting_id = ?",
+                        new Object[]{marker.meetingId});
+                if (generatedVersion != null) {
+                    database.execSQL(
+                            "DELETE FROM summary_versions WHERE id = ? AND meeting_id = ? "
+                                    + "AND user_edited = 0",
+                            new Object[]{generatedVersion, marker.meetingId});
+                    assertEquals(0, countRows(database,
+                            "SELECT COUNT(*) FROM summary_versions WHERE id = ?", generatedVersion));
+                }
+                database.execSQL("INSERT INTO summary_fact_documents SELECT * FROM "
+                        + SUMMARY_FACT_BACKUP_TABLE);
+                database.execSQL("DROP TABLE " + SUMMARY_FACT_BACKUP_TABLE);
+                database.execSQL(
+                        "DELETE FROM summary_v3_upgrade_tasks WHERE meeting_id = ?",
+                        new Object[]{marker.meetingId});
+                database.execSQL(
+                        "DELETE FROM processing_stages WHERE meeting_id = ? AND stage = 'summary'",
+                        new Object[]{marker.meetingId});
+                database.execSQL("INSERT INTO processing_stages SELECT * FROM "
+                        + SUMMARY_STAGE_BACKUP_TABLE);
+                database.execSQL("DROP TABLE " + SUMMARY_STAGE_BACKUP_TABLE);
+                database.execSQL(
+                        "UPDATE meeting_notes SET current_summary_version_id = ?, updated_at_ms = ? "
+                                + "WHERE id = ?",
+                        new Object[]{marker.originalCurrentVersion, marker.meetingUpdatedAtMs,
+                                marker.meetingId});
+                assertEquals(marker.factsBefore, countRows(database,
+                        "SELECT COUNT(*) FROM summary_fact_documents WHERE meeting_id = ?",
+                        marker.meetingId));
+                assertEquals(marker.versionsBefore, countRows(database,
+                        "SELECT COUNT(*) FROM summary_versions WHERE meeting_id = ?", marker.meetingId));
+                assertEquals(marker.actionsBefore, countRows(database,
+                        "SELECT COUNT(*) FROM action_items WHERE meeting_id = ?", marker.meetingId));
+                assertEquals(marker.originalCurrentVersion,
+                        readCurrentSummaryVersion(database, marker.meetingId));
+                assertFalse(tableExists(database, SUMMARY_FACT_BACKUP_TABLE));
+                assertFalse(tableExists(database, SUMMARY_STAGE_BACKUP_TABLE));
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
+            }
+            assertEquals("ok", scalarString(database, "PRAGMA integrity_check"));
+            try (Cursor foreignKeys = database.rawQuery("PRAGMA foreign_key_check", null)) {
+                assertEquals(0, foreignKeys.getCount());
+            }
+        }
+        assertTrue("summary v3 upgrade recovery marker could not be deleted",
+                summaryV3UpgradeRecoveryMarkerFile().delete());
+        System.out.println("VNEXT_UPGRADE_FIXTURE restored meeting_id=" + marker.meetingId
+                + " integrity=ok foreign_keys=0");
     }
 
     @Test
@@ -706,6 +1126,10 @@ public final class VnextSummaryFenceDbMutationTest {
         return cacheFile(CHANGED_ATTACHMENT_CONTENT_FILE);
     }
 
+    private File summaryV3UpgradeRecoveryMarkerFile() {
+        return cacheFile(SUMMARY_V3_UPGRADE_RECOVERY_FILE);
+    }
+
     private File cacheFile(String name) {
         return new File(
                 InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), name);
@@ -716,6 +1140,22 @@ public final class VnextSummaryFenceDbMutationTest {
                 databaseFile().getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
         database.setForeignKeyConstraintsEnabled(true);
         return database;
+    }
+
+    private UpgradeRecoveryMarker readUpgradeRecoveryMarker() throws Exception {
+        final File marker = summaryV3UpgradeRecoveryMarkerFile();
+        assertTrue("summary v3 upgrade recovery fixture is not prepared", marker.isFile());
+        final String[] lines = readMarkerLines(marker, 10);
+        assertEquals("prepared", lines[0].trim());
+        return new UpgradeRecoveryMarker(
+                lines[1].trim(),
+                lines[3].trim(),
+                Integer.parseInt(lines[4].trim()),
+                Integer.parseInt(lines[5].trim()),
+                Integer.parseInt(lines[6].trim()),
+                Long.parseLong(lines[7].trim()),
+                Long.parseLong(lines[8].trim()),
+                Integer.parseInt(lines[9].trim()));
     }
 
     private static String fixtureId(String kind, String meetingId) {
@@ -779,6 +1219,12 @@ public final class VnextSummaryFenceDbMutationTest {
         }
     }
 
+    private static boolean tableExists(SQLiteDatabase database, String tableName) {
+        return countRows(database,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+                tableName) == 1;
+    }
+
     private static String scalarString(SQLiteDatabase database, String query) {
         try (Cursor cursor = database.rawQuery(query, null)) {
             assertTrue(cursor.moveToFirst());
@@ -800,6 +1246,16 @@ public final class VnextSummaryFenceDbMutationTest {
             assertTrue("device authority state is missing", cursor.moveToFirst());
             assertEquals(1, cursor.getCount());
             return cursor.getString(0);
+        }
+    }
+
+    private static long readMeetingUpdatedAt(SQLiteDatabase database, String meetingId) {
+        try (Cursor cursor = database.rawQuery(
+                "SELECT updated_at_ms FROM meeting_notes WHERE id = ?",
+                new String[]{meetingId})) {
+            assertTrue("meeting fixture target is unavailable", cursor.moveToFirst());
+            assertEquals(1, cursor.getCount());
+            return cursor.getLong(0);
         }
     }
 
@@ -913,6 +1369,36 @@ public final class VnextSummaryFenceDbMutationTest {
             this.revision = revision;
             this.state = state;
             this.deviceEpochId = deviceEpochId;
+        }
+    }
+
+    private static final class UpgradeRecoveryMarker {
+        final String meetingId;
+        final String originalCurrentVersion;
+        final int factsBefore;
+        final int versionsBefore;
+        final int actionsBefore;
+        final long meetingUpdatedAtMs;
+        final long startedAtMs;
+        final int summaryStageBefore;
+
+        UpgradeRecoveryMarker(
+                String meetingId,
+                String originalCurrentVersion,
+                int factsBefore,
+                int versionsBefore,
+                int actionsBefore,
+                long meetingUpdatedAtMs,
+                long startedAtMs,
+                int summaryStageBefore) {
+            this.meetingId = meetingId;
+            this.originalCurrentVersion = originalCurrentVersion;
+            this.factsBefore = factsBefore;
+            this.versionsBefore = versionsBefore;
+            this.actionsBefore = actionsBefore;
+            this.meetingUpdatedAtMs = meetingUpdatedAtMs;
+            this.startedAtMs = startedAtMs;
+            this.summaryStageBefore = summaryStageBefore;
         }
     }
 }

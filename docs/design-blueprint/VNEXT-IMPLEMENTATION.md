@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 selected-architecture first-segment/RTF performance gate passed but deployment/Android/quality/capability gates remain open; Stage 3 source-stream/Facts-V3 and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 selected-architecture first-segment/RTF performance gate passed but deployment/Android/quality/capability gates remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices implemented, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -76,6 +76,15 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 后成功落入同一事务并激活 14 条有效引用。详见
 `docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。原生 SQLite 逐项负向注入、页面/
 进程中断组合、人工质量和 capability barrier 仍未闭合，Stage 3 保持未采用。
+
+2026-08-21 又完成旧整理后台升级的真实 Android 闭环。回放首先暴露旧稳定 Transcript ID 被错误拼入
+180 字符传输 `item_id`，导致请求在本机 wire 校验前失败并留下无 Attempt 的远端 active Task；候选改为
+有界传输别名、完整身份保留在 `source_id`，并在请求哈希变化时精确取消旧 Task、清空恢复指针。随后在
+1,357 段长会议的真实 Attempt 运行中强制停止 App，重启后沿用同一个 Task/Attempt 原子激活且只新增一个
+版本；原版本始终可读，夹具最终精确还原，升级队列为 0，SQLite integrity/foreign keys 和 7 条会议投影
+均通过。证据见
+`docs/vnext-stage3/SUMMARY-V3-LEGACY-UPGRADE-RECOVERY-20260821.md`。这关闭旧结果后台升级与客户端
+进程恢复缺口，但不替代独立人工质量、公开零旧链路周期或 capability barrier，Stage 3 仍未采用。
 
 ## 0. 已核对的实施基线
 
@@ -1143,8 +1152,8 @@ device-primary 文字附件能力、孤儿 preparation 清理和 canonical trans
 Release 为 `1.1.38 (146)`。随后 binding epoch、附件删除、附件移位和附件正文变化也在同一专用模拟器
 逐项完成“远端 attempt 成功、App 退出、来源变化、进程恢复”的原生回放，均只丢弃迟到 artifact 而不覆盖
 上一份 current result；最终 `intents=0`、SQLite integrity/FK 正常。详见同一围栏矩阵文档。Summary
-V3 的原生恢复矩阵与全局混合负载已经关闭；Q2 剩余原生来源恢复、独立人工质量、公开零 v1 流量周期
-和 Stage 3 capability 仍未关闭。
+V3 的原生恢复矩阵与全局混合负载已经关闭；Q2 原生来源恢复随后也已关闭。当前仍未关闭的是独立
+人工质量、公开零 v1 流量周期和 Stage 3 capability。
 
 同日最终 `facts-v3-r15 / summary-facts-v3-chapter-r4 / provider-v3-r2` 候选修复了行动投影字段错位、
 共享更正来源的最终确认、显式期限保留以及长证据包元数据预算遗漏。外部 24 组语义 manifest 在最终
@@ -1174,8 +1183,9 @@ source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-2
 同一 9B Ollama runner 统一为部署级 16K context，消除 capability 切换时约 12--13 秒的 runner
 重载。在全新迁移数据库上的完整十分钟全服务混合负载中，日程/Q2/Summary p95 分别为
 `1.794s/11.249s/13.953s`，实时、导入、上传、资源和清理门也全部通过；见
-`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；Q2 剩余原生来源恢复、
-独立人工质量、公开零 v1 流量周期和 capability barrier 仍开放。
+`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；Q2 原生来源恢复和旧
+整理后台升级已在后续 Android 回放关闭，当前仍开放独立人工质量、公开零 v1 流量周期和 capability
+barrier。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。

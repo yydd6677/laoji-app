@@ -95,7 +95,13 @@ def main() -> None:
         "parsed.promptRevision !== summaryRevisions.promptRevision",
         "parsed.modelRevision !== summaryRevisions.modelRevision",
         "throw createMeetingSummaryInputChangedError();",
+        "item_id: `summary-transcript:${index}:${hex(contentSha256)}`",
+        "source_id: sourceId",
+        "item_id: `summary-manual-note:${input.manualNote.revision}:${hex(contentSha256)}`",
+        "item_id: `summary-attachment:${index}:${hex(item.contentSha256)}`",
     )
+    if "item_id: `transcript:${sourceId}:${index}`" in summary.read_text(encoding="utf-8"):
+        raise AssertionError("summary transport item identity still embeds the full stable source ID")
     require(
         client,
         "summary_handler_revision: id(input.summaryRevisions.handlerRevision",
@@ -219,6 +225,9 @@ def main() -> None:
         "if (cached.projection !== 'updated') throw new SummaryV3UpgradeInputChangedError()",
         "clearRemoteTask: true",
         "storedFacts.result.documentId !== facts.documentId",
+        "isMeetingSummaryInputChangedErrorLike(reason)",
+        "await cancelDeviceV2Task(task.remoteTaskId).catch(() => undefined)",
+        "errorCode: 'input_changed'",
     )
     if "saveMeetingFactsResultV3" in upgrade_provider_source or "linkMeetingFactsToSummaryVersion" in upgrade_provider_source:
         raise AssertionError("background summary upgrade still persists Facts V3 outside the summary-version transaction")

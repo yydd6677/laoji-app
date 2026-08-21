@@ -17,7 +17,9 @@ import { DEFAULT_MEETING_TEMPLATE } from '../domain/meeting';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import { loadDeviceServiceCapabilities } from '../services/deviceApi';
+import { cancelDeviceV2Task } from '../services/deviceV2SourceStream';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
+import { isMeetingSummaryInputChangedErrorLike } from '../domain/meeting/summaryErrorIdentity';
 import {
   generateSummaryForMeeting,
   meetingDateForSummary,
@@ -224,6 +226,19 @@ export function MeetingSummaryV3UpgradeProvider(): null {
           diagnosticAudit('meeting_summary_v3_upgrade', { status: 'success' });
         } catch (reason) {
           if (reason instanceof SummaryV3UpgradeInputChangedError) {
+            await deferSummaryV3UpgradeTask(task.meetingId, task.attemptCount, Date.now(), {
+              clearRemoteTask: true,
+              errorCode: 'input_changed',
+            });
+          } else if (isMeetingSummaryInputChangedErrorLike(reason)) {
+            // A retained Task belongs to its immutable request hash. If the
+            // transcript/note/transport revision has changed, retrying that
+            // same Task can never succeed. Cancel only the known deterministic
+            // owner, clear the resume pointer, and rebuild from current local
+            // sources on the next idle pass.
+            if (task.remoteTaskId) {
+              await cancelDeviceV2Task(task.remoteTaskId).catch(() => undefined);
+            }
             await deferSummaryV3UpgradeTask(task.meetingId, task.attemptCount, Date.now(), {
               clearRemoteTask: true,
               errorCode: 'input_changed',

@@ -74,4 +74,5 @@
 ## 仍未关闭的 Stage 3 门
 
 该切片没有证明 Stage 3 已退出。更新样本的独立人工事实支持率、行动质量、Q2 回答与引用相关性
-`>=95%`，完整 Android 来源恢复矩阵、capability barrier、旧结果迁移和公开零旧链路周期仍需单独完成。
+`>=95%`、capability barrier 和公开零旧链路周期仍需单独完成。旧整理后台升级与进程恢复已由
+[旧整理升级恢复](SUMMARY-V3-LEGACY-UPGRADE-RECOVERY-20260821.md) 单独闭合。

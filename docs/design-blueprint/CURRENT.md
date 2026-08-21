@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.38 (146)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.41 (149)`
 
 ## 权威文件
 
@@ -248,7 +248,7 @@ Q2 grounding 随后增加了确定性最小相关性门：逐字引用还必须�
 `60.483s`；所有显示引用逐字匹配，临时任务与来源均 purge-confirmed。该改进来自 Summary embedding
 固定 CPU，避免挤出 GPU0 上常驻的 9B 生成模型；未改提示词或事实协议。详见
 [r5 稳定延迟](../vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md)。Stage 3 仍缺独立人工事实/行动
-与 Q2 质量、Q2 剩余原生来源恢复矩阵、公开零 v1 流量周期和 capability barrier，不能采用或删除旧链路。
+与 Q2 质量、公开零 v1 流量周期和 capability barrier，不能采用或删除旧链路。
 
 同日 Stage 3 又完成了隔离 Summary/Q2 并发纵向切片。Question stream 不再占用 Summary checkpoint
 和 active manifest 配额；Provider 支持后台 Summary checkpoint 重试前让出交互请求；Summary 与 Q2
@@ -262,7 +262,7 @@ p95 `11.249s`、Summary p95 `13.953s`、实时 stable p95 `1.845s`、导入首�
 导入 RTF p95 `0.129`，资源和清理门全部通过。根因是原日程 8K 与 Summary/Q2 16K context 使
 同一 9B Ollama runner 反复重载；现已统一为部署级 16K resident runner。证据见
 [全局混合负载](../vnext-global/GLOBAL-MIXED-LOAD-20260820.md)。这关闭混合负载性能缺口，但不替代
-独立人工 `>=95%` 质量门、Q2 剩余原生来源恢复矩阵、公开零 v1 流量周期或 capability barrier，Stage 3
+独立人工 `>=95%` 质量门、公开零 v1 流量周期或 capability barrier，Stage 3
 继续保持未采用。
 
 同日，Facts V3 Android 激活围栏在 `emulator-5562` 补齐了 binding revision 与明确授权文字附件
@@ -275,5 +275,13 @@ revision 两种原生迟到结果竞态。远端旧来源 task 均可独立完�
 随后又逐项完成 binding epoch、附件删除、附件移位与附件正文变化四种原生竞态；四个远端 Task 均先独立
 成功，手机恢复后均拒绝迟到 artifact、清空 intent 并保留旧结果。最终审计中 Facts 为 `15`、intent 为
 `0`，SQLite integrity 为 `ok` 且无外键违规；夹具和 test APK 已清除。Summary V3 选定的原生来源变化
-矩阵由此关闭；Q2 剩余原生来源恢复、独立人工质量、公开零 v1 流量周期与 capability barrier 仍开放，
+矩阵由此关闭；独立人工质量、公开零 v1 流量周期与 capability barrier 仍开放，
 因此 Stage 3 继续保持未采用。
+
+2026-08-21，Q2 当前笔记/明确附件、同 Task 恢复、附件变化和 binding epoch 的 Android 原生恢复矩阵
+已闭合，见 [Q2 附件与跨快照恢复](../vnext-stage3/Q2-ANDROID-ATTACHMENT-RECOVERY-20260821.md)。同日旧整理
+后台升级完成 115 段失败任务收敛和 1,357 段运行中进程死亡恢复：过长稳定 Transcript ID 不再进入有界
+传输别名；旧不匹配 Task 被精确取消；长会重启后沿用同一 Task/Attempt，只新增一个原子版本且旧版本
+始终可读。测试夹具已精确还原，升级队列为 0，SQLite 完整性、外键和 7 条会议投影通过。证据见
+[旧整理升级恢复](../vnext-stage3/SUMMARY-V3-LEGACY-UPGRADE-RECOVERY-20260821.md)。Stage 3 的剩余门由此收敛为
+独立人工 Facts/行动/Q2 质量 `>=95%`、公开零旧链路周期与 capability barrier；仍不得采用或删除旧链路。

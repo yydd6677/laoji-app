@@ -282,14 +282,19 @@ export async function buildSummarySourceItems(input: {
     const content = String(line.text ?? '');
     if (!content) continue;
     const sourceId = String(line.id || `line-${index}`);
+    const contentSha256 = await digest(content);
     items.push({
-      item_id: `transcript:${sourceId}:${index}`,
+      // item_id is a bounded transport alias. The complete stable transcript
+      // identity remains in source_id, whose contract explicitly allows 512
+      // characters. Embedding sourceId here makes migrated Android identities
+      // fail locally before the bundle request is sent.
+      item_id: `summary-transcript:${index}:${hex(contentSha256)}`,
       source_type: 'transcript',
       source_id: sourceId,
       source_revision_id: input.transcriptRevision,
       source_start_utf8: 0,
       source_end_utf8: utf8Length(content),
-      content_sha256: await digest(content),
+      content_sha256: contentSha256,
       content,
       start_ms: textTime(line.start_time),
       end_ms: textTime(line.end_time),
@@ -297,24 +302,25 @@ export async function buildSummarySourceItems(input: {
     });
   }
   if (input.manualNote.content) {
+    const contentSha256 = await digest(input.manualNote.content);
     items.push({
-      item_id: `manual_note:${input.meetingId}:${input.manualNote.revision}`,
+      item_id: `summary-manual-note:${input.manualNote.revision}:${hex(contentSha256)}`,
       source_type: 'manual_note',
       source_id: `manual_note:${input.meetingId}`,
       source_revision_id: `manual_note:${input.manualNote.revision}`,
       source_start_utf8: 0,
       source_end_utf8: utf8Length(input.manualNote.content),
-      content_sha256: await digest(input.manualNote.content),
+      content_sha256: contentSha256,
       content: input.manualNote.content,
       start_ms: null,
       end_ms: null,
       speaker: null,
     });
   }
-  for (const item of input.attachmentAuthorization?.items ?? []) {
+  for (const [index, item] of (input.attachmentAuthorization?.items ?? []).entries()) {
     if (item.kind !== 'text') continue;
     items.push({
-      item_id: `attachment:${item.attachmentId}:${item.updatedAtMs}`,
+      item_id: `summary-attachment:${index}:${hex(item.contentSha256)}`,
       source_type: 'attachment',
       source_id: item.attachmentId,
       source_revision_id: String(item.updatedAtMs),
