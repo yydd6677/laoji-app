@@ -1,6 +1,6 @@
 # Stage 4 语音日程真实音频回放（2026-08-21）
 
-状态：`bounded preview implemented; preliminary latency evidence; formal 30-sample/mixed-load gate open; isolated candidate; not adopted`。
+状态：`bounded preview implemented; two sealed 30-sample reports failed closed; host-audio injector remains unstable; isolated candidate; not adopted`。
 
 ## 边界
 
@@ -108,6 +108,45 @@ gRPC `injectAudio` 复用。回放使用开发包 `1.1.48 (156)`、`emulator-556
 和 Summary，报告见 [全局混合负载](../vnext-global/GLOBAL-MIXED-LOAD-20260820.md)。它可以作为语音
 envelope 的 mixed-load 旁证，但不能把上述失败的 30 次伪装为通过。
 
+## 1.1.53/1.1.54 严格封存回放
+
+候选随后补齐本机 AudioRecord 确认时间、转写 SHA-256、业务 Draft 合同 SHA-256 和音频时长审计；
+`PREPARING` 不再把页面从 recording 切回 preparing，上一会话释放后会补充一次鉴权/WebSocket 预热。
+回放工具不再在录音期间反复导出 UIAutomator 树，并用持续零值 keepalive 防止 PipeWire null sink 进入
+idle。`1.1.53 (161)` 的 30 次暖态结果为：
+
+| 指标 | 结果 | 门限 | 状态 |
+| --- | ---: | ---: | --- |
+| Draft 成功 | 30/30 | 30/30 | 通过 |
+| 转写/Draft 精确哈希种类 | 1/1 | Draft 1 | 通过 |
+| 按下到本机采集 p95 | 104ms | <=100ms | **失败 4ms** |
+| 按下到首文字 p95 | 1431ms | <=1500ms | 通过 |
+| 停止到 Draft p95 | 2322ms | <=3000ms | 通过 |
+
+该报告完整保留 135ms 和 104ms 两个录音启动离群值，没有改阈值或删除样本，封存文件为
+[1.1.53 语音性能报告](SCHEDULE-VOICE-PERFORMANCE-1.1.53-20260821.json)，报告 SHA-256 为
+`sha256:47aed0369cbad0318763fc3646486bc448fda0beec9becbdbe664cd03ee1384e`。
+
+对启动路径的检查发现每次按下后仍通过 RN bridge 重查一个已经授予的录音权限。`1.1.54 (162)` 将
+权限状态在页面可见/App 恢复时预热，并在权限弹窗后更新缓存；安装后的冷样本仍单独记录为
+`101/1513/1895ms`，其后四个暖样本为 51--63ms 采集和 1239--1339ms 首文字。
+
+但 `1.1.54` 正式 30 次不能证明通过：只有 `27/30` 到达 Draft，采集/首文字/Draft p95 为
+`882/1977/2722ms`，出现 5 种转写和 4 种 Draft 合同。第 9/22 次的采集启动为 1060/882ms；Android
+时间线同时出现 Emulator ranchu Audio HAL `pcm_writei I/O error`、AudioFlinger 线程迟建和系统服务
+563ms slow dispatch。第 27/29 次虽然 AudioRecord 正常启动并产出 31/32 帧，但 peak/RMS 为 `2/0`，
+证明宿主注入再次整段掉为数字静音。所有失败仍保留在
+[1.1.54 语音性能报告](SCHEDULE-VOICE-PERFORMANCE-1.1.54-20260821.json)，报告 SHA-256 为
+`sha256:d592ed29209dd42cd6a315df7a410ca20d98613f3b7ebee487decd08b063af6e`。
+
+因此不能把 1.1.54 的长尾全部归因于权限缓存改动，也不能把 Emulator/宿主故障样本从统计中删除。
+当前事实是：常规暖路径已稳定在约 40--70ms 采集、1.2--1.4s 首文字，但这套 host monitor 仍不能
+提供可靠的 30 次退出证据。下一次正式门必须使用不会在 AudioRecord 会话间丢流的真机/硬件回环，或
+先把模拟器 Audio HAL 注入故障独立关闭；在此之前语音门保持 blocked。
+
+为防止“30 个样本但部分失败”仍被误收，新增 `schedule-voice-performance-v1` 封存器；Stage 4 预检
+现在除 lineage、样本数、混合负载和三个 p95 外，还强制检查 30/30 Draft 与唯一 Draft 合同。
+
 本轮还暴露并修复了真实 UI bridge 缺陷：`CalendarEditPageView` 在 Expo 的 `ComponentActivity`
 context 下会静默丢弃取消/保存等所有 action。候选现在无条件派发 bridge action，并提供只用于测试的
 listener/disable 开关；静态门 `verify_calendar_edit_action_bridge.py` 已接入 Stage 4 聚合预检。连续回放
@@ -121,8 +160,8 @@ listener/disable 开关；静态门 `verify_calendar_edit_action_bridge.py` 已�
   直接关闭浮层且不写业务数据。
 - `tools/vnext/test_schedule_transcript_revision.cjs`：验证 partial/final 同稳定 ID 替换和迟到 partial 围栏。
 
-包含 bridge 修复和宿主音频回放工具的最新候选 APK 已递增为 `1.1.48 (156)`，SHA-256 为
-`171a0055bec91175edbcf57210e09503ad534acd179d9e674a2807554559e012`；已覆盖安装到
+包含录音启动审计、权限预热和证据封存门的最新候选 APK 已递增为 `1.1.54 (162)`，SHA-256 为
+`b5be820474cb27047ce42e7749dbcb27b30784cf50e588695f78b381674ce963`；已覆盖安装到
 `emulator-5562`，保留原数据启动成功且没有 crash/blank-screen。它只指向本机 reverse 后的隔离
 `18030`，未发布、未安装真机、未切公网。
 

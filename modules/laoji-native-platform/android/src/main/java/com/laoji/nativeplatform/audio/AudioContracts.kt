@@ -459,6 +459,8 @@ data class RecorderSnapshot(
   val storageScope: String?,
   val state: RecorderState,
   val startedAtMs: Long,
+  /** Wall-clock instant at which AudioRecord confirmed RECORDSTATE_RECORDING. */
+  val captureStartedAtMs: Long?,
   val updatedAtMs: Long,
   val bytesRecorded: Long,
   val localUri: String?,
@@ -487,6 +489,7 @@ data class RecorderSnapshot(
     "storageScope" to storageScope,
     "state" to state.wireValue,
     "startedAtMs" to startedAtMs.toDouble(),
+    "captureStartedAtMs" to captureStartedAtMs?.toDouble(),
     "updatedAtMs" to updatedAtMs.toDouble(),
     "bytesRecorded" to bytesRecorded.toDouble(),
     "durationMs" to durationMs.toDouble(),

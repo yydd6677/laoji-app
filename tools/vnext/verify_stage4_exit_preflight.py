@@ -148,6 +148,32 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
         {"value": voice_sample_count, "minimum": 30},
         "at_least_30_warm_samples_required",
     )
+    voice_draft_success_count = _number(voice.get("draft_success_count")) if voice_verified else None
+    _gate(
+        gates,
+        "voice_draft_success",
+        (
+            voice_sample_count is not None
+            and voice_draft_success_count is not None
+            and voice_sample_count >= 30
+            and voice_draft_success_count == voice_sample_count
+        ),
+        {
+            "success_count": voice_draft_success_count,
+            "sample_count": voice_sample_count,
+        },
+        "every_warm_sample_must_reach_draft",
+    )
+    voice_draft_distinct_hash_count = (
+        _number(voice.get("draft_distinct_hash_count")) if voice_verified else None
+    )
+    _gate(
+        gates,
+        "voice_draft_determinism",
+        voice_draft_distinct_hash_count == 1,
+        {"distinct_draft_hash_count": voice_draft_distinct_hash_count},
+        "one_stable_draft_contract_required",
+    )
     mixed_load = _mapping(voice.get("mixed_load")) if voice_verified else {}
     mixed_load_duration = _number(mixed_load.get("duration_seconds"))
     traffic_classes = _mapping(mixed_load.get("traffic_classes"))

@@ -19,6 +19,15 @@ export function diagnosticWarn(message: string, error?: unknown): void {
 
 type DiagnosticAuditValue = string | number | boolean | null;
 
+function safeDiagnosticString(value: string): string {
+  if (/^[a-z0-9_.-]{1,120}$/i.test(value)) return value;
+  // Content-addressed identities are explicitly allowed by the vNext
+  // privacy contract. They identify equality across attempts without
+  // exposing the transcript, title, person, file name or object key.
+  if (/^sha256:[0-9a-f]{64}$/i.test(value)) return value.toLowerCase();
+  return '[redacted]';
+}
+
 export function diagnosticAudit(
   event: string,
   fields: Readonly<Record<string, DiagnosticAuditValue>>,
@@ -28,7 +37,7 @@ export function diagnosticAudit(
     const safeKey = key.replace(/[^a-z0-9_.-]/gi, '_').slice(0, 80);
     if (safeKey) {
       result[safeKey] = typeof value === 'string'
-        ? /^[a-z0-9_.-]{1,120}$/i.test(value) ? value : '[redacted]'
+        ? safeDiagnosticString(value)
         : value;
     }
     return result;

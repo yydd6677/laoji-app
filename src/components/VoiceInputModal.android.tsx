@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, InteractionManager, PermissionsAndroid } from 'react-native';
 import { NavigationProp, useIsFocused, useNavigation } from '@react-navigation/native';
+import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   SCHEDULE_VOICE_SNAPSHOT_SCHEMA_VERSION,
@@ -131,6 +132,46 @@ function scheduleVoiceFailureCode(reason: unknown): string {
   return 'parse_failed';
 }
 
+async function scheduleTranscriptSha256(value: string): Promise<string | null> {
+  if (!value) return null;
+  try {
+    const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, value);
+    return `sha256:${digest.toLowerCase()}`;
+  } catch {
+    // Observability must never turn a valid transcript into a user-visible
+    // parse failure. The source graph still validates its own content hash.
+    return null;
+  }
+}
+
+async function scheduleDraftSha256(value: ParseResult): Promise<string | null> {
+  // Hash only the deterministic business projection. This lets candidate
+  // replays prove that punctuation-level ASR variation did not change the
+  // eventual event without logging the title, location, source text, or any
+  // other user content.
+  const contract = JSON.stringify([
+    value.title,
+    value.event_type,
+    value.recurrence_interval ?? null,
+    value.recurrence_weekdays ?? null,
+    value.recurrence_until_date ?? null,
+    value.start_date,
+    value.end_date ?? null,
+    value.start_time,
+    value.end_time,
+    value.time_period ?? null,
+    value.is_all_day,
+    value.location ?? null,
+    value.needs_clarification,
+  ]);
+  try {
+    const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, contract);
+    return `sha256:${digest.toLowerCase()}`;
+  } catch {
+    return null;
+  }
+}
+
 function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<CalEvent, 'id'> {
   const category = normalizeEventCategory(source.category);
   const hasStartTime = !source.is_all_day && Boolean(source.start_time);
@@ -217,6 +258,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const audioLevelRef = useRef({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const stopPromiseRef = useRef<Promise<ParseResult | null> | null>(null);
   const recordingPressedAtMsRef = useRef<number | null>(null);
+  const recordingPressedAtEpochMsRef = useRef<number | null>(null);
   const firstTranscriptLoggedRef = useRef(false);
   const stopPressedAtMsRef = useRef<number | null>(null);
   const recordingStartingRunRef = useRef<number | null>(null);
@@ -224,6 +266,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const stopAfterStartRef = useRef<() => void>(() => undefined);
   const warmDeviceSessionRef = useRef<WarmDeviceSession | null>(null);
   const warmScheduleConnectionRef = useRef<WarmScheduleConnection | null>(null);
+  const microphonePermissionGrantedRef = useRef<boolean | null>(null);
   const mountedRef = useRef(true);
   const runRef = useRef(0);
   const createRequestRef = useRef(createClientRequestState('event'));
@@ -238,7 +281,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     const subscriptions = [
       addNativeRecorderStateListener(event => {
         if (event.sessionId !== activeRef.current?.sessionId || !mountedRef.current) return;
-        if (event.state === 'preparing') setPhase('preparing');
+        // The press already owns an optimistic recording surface. Native
+        // PREPARING is an internal service state, not a user-visible phase;
+        // rendering it would regress recording -> preparing -> recording and
+        // rebind the full window overlay on the capture critical path.
         if (event.state === 'recording') {
           setPhase('recording');
           setError('');
@@ -327,6 +373,24 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     if (warm) discardNativeRecorderPrewarm(warm.sessionId);
   }, []);
 
+  const refreshMicrophonePermission = useCallback(async (): Promise<boolean> => {
+    const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+    microphonePermissionGrantedRef.current = granted;
+    return granted;
+  }, []);
+
+  const ensureMicrophonePermission = useCallback(async () => {
+    if (microphonePermissionGrantedRef.current === true) {
+      return PermissionsAndroid.RESULTS.GRANTED;
+    }
+    if (await refreshMicrophonePermission()) {
+      return PermissionsAndroid.RESULTS.GRANTED;
+    }
+    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
+    microphonePermissionGrantedRef.current = result === PermissionsAndroid.RESULTS.GRANTED;
+    return result;
+  }, [refreshMicrophonePermission]);
+
   const createWarmScheduleConnection = useCallback((): WarmScheduleConnection => {
     const existing = warmScheduleConnectionRef.current;
     if (existing) return existing;
@@ -385,6 +449,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   useEffect(() => {
     if (!hasNativeRecorder()) return undefined;
     const interaction = InteractionManager.runAfterInteractions(() => {
+      void refreshMicrophonePermission().catch(() => {
+        microphonePermissionGrantedRef.current = null;
+      });
       createWarmDeviceSession();
       createWarmScheduleConnection();
     });
@@ -400,6 +467,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     createWarmScheduleConnection,
     discardWarmDeviceSession,
     discardWarmScheduleConnection,
+    refreshMicrophonePermission,
     stopAndDiscard,
   ]);
 
@@ -414,6 +482,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
       createRequestRef.current = createClientRequestState('event');
       // Registration is short-lived work and never blocks the first frame.
+      void refreshMicrophonePermission().catch(() => {
+        microphonePermissionGrantedRef.current = null;
+      });
       createWarmDeviceSession();
       createWarmScheduleConnection();
       return undefined;
@@ -424,7 +495,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     // next press. Component cleanup and app backgrounding release it.
     void stopAndDiscard();
     return undefined;
-  }, [createWarmDeviceSession, createWarmScheduleConnection, stopAndDiscard, visible]);
+  }, [
+    createWarmDeviceSession,
+    createWarmScheduleConnection,
+    refreshMicrophonePermission,
+    stopAndDiscard,
+    visible,
+  ]);
 
   const close = useCallback(() => {
     runRef.current += 1;
@@ -454,6 +531,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     recordingStartingRunRef.current = runId;
     stopRequestedWhileStartingRef.current = false;
     recordingPressedAtMsRef.current = performance.now();
+    recordingPressedAtEpochMsRef.current = Date.now();
     firstTranscriptLoggedRef.current = false;
     stopPressedAtMsRef.current = null;
     // The microphone owns the interaction immediately. Local AudioRecord is
@@ -464,10 +542,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     audioLevelRef.current = { frameCount: 0, maxPeak: 0, maxRms: 0 };
     setText('');
     try {
-      const permissionPromise = PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)
-        .then(granted => granted
-          ? PermissionsAndroid.RESULTS.GRANTED
-          : PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO));
+      const permissionPromise = ensureMicrophonePermission();
       const warmConnection = warmScheduleConnectionRef.current ?? createWarmScheduleConnection();
       warmScheduleConnectionRef.current = null;
       const deviceAuthPromise = warmConnection.authPromise;
@@ -509,7 +584,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         auth: deviceAuth,
         sessionId,
       };
-      await startNativeRecorder({
+      const startedSnapshot = await startNativeRecorder({
         sessionId,
         purpose: 'schedule',
         websocketUrl,
@@ -519,8 +594,17 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         levelIntervalMs: 120,
       });
       if (recordingPressedAtMsRef.current != null) {
+        const nativeCaptureStartedAt = startedSnapshot.captureStartedAtMs;
+        const pressedAtEpoch = recordingPressedAtEpochMsRef.current;
+        const nativeLatency = typeof nativeCaptureStartedAt === 'number'
+          && Number.isFinite(nativeCaptureStartedAt)
+          && pressedAtEpoch != null
+          ? nativeCaptureStartedAt - pressedAtEpoch
+          : null;
         diagnosticAudit('schedule_voice_capture_started', {
-          latency_ms: Math.max(0, Math.round(performance.now() - recordingPressedAtMsRef.current)),
+          latency_ms: Math.max(0, Math.round(nativeLatency
+            ?? performance.now() - recordingPressedAtMsRef.current)),
+          measurement: nativeLatency == null ? 'bridge_completion' : 'native_capture',
         });
       }
       if (recordingStartingRunRef.current === runId) recordingStartingRunRef.current = null;
@@ -541,7 +625,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setError(scheduleVoiceErrorMessage(reason, '语音服务连接失败，请稍后重试。'));
       }
     }
-  }, [createWarmScheduleConnection, phase, releaseDeviceSession, showDialog]);
+  }, [
+    createWarmScheduleConnection,
+    ensureMicrophonePermission,
+    phase,
+    releaseDeviceSession,
+    showDialog,
+  ]);
 
   const parseSourceText = useCallback(async (sourceText: string): Promise<ParseResult> => {
     return parseText(sourceText.trim());
@@ -562,6 +652,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setError('');
     const operation = (async () => {
       let localUri: string | null = null;
+      let audioDurationMs: number | null = null;
+      let transcriptSha256Promise: Promise<string | null> | null = null;
       try {
         let stopResult: NativeRecorderStopResult;
         try {
@@ -572,6 +664,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           stopResult = recovered;
         }
         localUri = stopResult.localUri;
+        audioDurationMs = stopResult.snapshot.durationMs;
         for (const segment of stopResult.transcriptSegments ?? []) {
           transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
             segmentId: segment.segmentId,
@@ -583,6 +676,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           });
         }
         const transcript = currentTranscript().trim();
+        transcriptSha256Promise = scheduleTranscriptSha256(transcript);
         const needsFullAudioRecovery = stopResult.snapshot.transcriptRecoveryRequired;
         const level = audioLevelRef.current;
         const clearlySilent = level.frameCount >= 2
@@ -604,22 +698,35 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setClarificationAnswer('');
         setPhase('confirm');
         if (stopPressedAtMsRef.current != null) {
+          const [transcriptSha256, draftSha256] = await Promise.all([
+            transcriptSha256Promise,
+            scheduleDraftSha256(result),
+          ]);
           diagnosticAudit('schedule_voice_draft_ready', {
             latency_ms: Math.max(0, Math.round(performance.now() - stopPressedAtMsRef.current)),
             used_recovery: needsFullAudioRecovery,
+            audio_duration_ms: audioDurationMs,
+            transcript_sha256: transcriptSha256,
+            transcript_segment_count: transcriptRef.current.length,
+            draft_sha256: draftSha256,
           });
         }
         return result;
       } catch (reason) {
         if (stopPressedAtMsRef.current != null) {
           const level = audioLevelRef.current;
+          const transcriptSha256 = transcriptSha256Promise
+            ? await transcriptSha256Promise
+            : null;
           diagnosticAudit('schedule_voice_draft_failed', {
             latency_ms: Math.max(0, Math.round(performance.now() - stopPressedAtMsRef.current)),
             error_code: scheduleVoiceFailureCode(reason),
             frame_count: level.frameCount,
             max_peak: level.maxPeak,
             max_rms: level.maxRms,
+            audio_duration_ms: audioDurationMs,
             transcript_segment_count: transcriptRef.current.length,
+            transcript_sha256: transcriptSha256,
           });
         }
         if (mountedRef.current && runRef.current === runId) {
@@ -633,13 +740,21 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         }
         await deleteNativeScheduleAudio(localUri);
         await releaseDeviceSession(active);
+        // Replenish the one-shot warm socket after the old recorder has fully
+        // released it. A rapid second voice entry can then start from local
+        // capture without repeating registration/WebSocket setup in the
+        // button-press path. Component unmount/background cleanup still owns
+        // cancellation of this idle connection.
+        if (mountedRef.current && isFocused && AppState.currentState === 'active') {
+          createWarmScheduleConnection();
+        }
       }
     })().finally(() => {
       if (stopPromiseRef.current === operation) stopPromiseRef.current = null;
     });
     stopPromiseRef.current = operation;
     return operation;
-  }, [currentTranscript, parseSourceText, releaseDeviceSession]);
+  }, [createWarmScheduleConnection, currentTranscript, isFocused, parseSourceText, releaseDeviceSession]);
   stopAfterStartRef.current = () => { void stopAndParse(); };
 
   const parseManualText = useCallback(async () => {

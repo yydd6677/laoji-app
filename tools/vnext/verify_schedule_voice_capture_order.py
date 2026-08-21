@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = ROOT / "modules" / "laoji-native-platform" / "android" / "src" / "main" / "java" / "com" / "laoji" / "nativeplatform" / "audio" / "RecorderEngine.kt"
+VOICE_UI = ROOT / "src" / "components" / "VoiceInputModal.android.tsx"
 
 
 def main() -> int:
@@ -24,10 +25,24 @@ def main() -> int:
         "sendOrQueueAsrFrame()",
         "markAsrUnavailable(",
         "fileSession?.updateState(JournalState.RECORDING, currentJournalAsrState())",
+        "captureStartedAtMs = System.currentTimeMillis()",
     )
     missing = [needle for needle in required if needle not in source]
     if missing:
         raise SystemExit(f"schedule_voice_capture_order=failed missing={missing}")
+    ui_source = VOICE_UI.read_text(encoding="utf-8")
+    if "if (event.state === 'preparing') setPhase('preparing')" in ui_source:
+        raise SystemExit("schedule_voice_capture_order=failed user-visible-preparing-regression")
+    ui_required = (
+        "setPhase('recording');",
+        "createWarmScheduleConnection();",
+        "AppState.currentState === 'active'",
+        "startedSnapshot.captureStartedAtMs",
+        "measurement: nativeLatency == null ? 'bridge_completion' : 'native_capture'",
+    )
+    ui_missing = [needle for needle in ui_required if needle not in ui_source]
+    if ui_missing:
+        raise SystemExit(f"schedule_voice_capture_order=failed ui-missing={ui_missing}")
     print("schedule_voice_capture_order=passed")
     return 0
 

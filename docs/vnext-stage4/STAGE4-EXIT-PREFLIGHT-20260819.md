@@ -39,6 +39,18 @@ Android Emulator 36.6.11 的 gRPC 虚拟麦克风在持久流复用时会产生�
 30 样本语音 envelope。详见
 [语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。预检继续失败关闭。
 
+同日后续严格回放将可观察性扩展到本机 AudioRecord 确认、转写/Draft SHA-256 和音频时长，并新增
+可复现 `schedule-voice-performance-v1` 封存器。预检现在额外要求 30/30 Draft 成功和唯一 Draft 合同，
+避免只凭样本数与 p95 接受部分失败的批次。`1.1.53 (161)` 的封存批次为 30/30、Draft 哈希唯一，
+首文字/Draft p95 `1431/2322ms`，但采集 p95 `104ms`，仍以 4ms 超限失败关闭。
+
+`1.1.54 (162)` 把已授予权限的检查移出按键热路径；冷样本单独为 `101/1513/1895ms`，常规暖样本
+采集约 40--70ms。正式 30 次却受到 Emulator ranchu Audio HAL I/O error、系统 slow dispatch 和两次
+host monitor 全零影响，只得到 27/30 Draft、采集/首文字/Draft p95 `882/1977/2722ms` 及 4 种 Draft
+合同。两份封存报告均为 `passed=false`，没有删除失败样本；后者同时阻断
+`voice_draft_success/voice_draft_determinism/voice_capture_start/voice_first_text`。语音退出门需可靠真机/
+硬件回环或已独立关闭的模拟器注入故障，不能继续通过重跑 host monitor 挑选结果。
+
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由
 [自然日程盲审与质量证据包](NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)生成并封存的

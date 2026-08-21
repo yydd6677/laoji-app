@@ -78,6 +78,7 @@ class RecorderEngine(
   private var providerErrorCode: String? = null
   private var providerErrorRetryable: Boolean? = null
   private var firstPcmElapsedMs: Long? = null
+  private var captureStartedAtMs: Long? = null
   private var asrConnectedElapsedMs: Long? = null
   private var firstTranscriptElapsedMs: Long? = null
   private var audioRecord: AudioRecord? = null
@@ -198,6 +199,7 @@ class RecorderEngine(
       storageScope = config.storageScope,
       state = state,
       startedAtMs = startedAtMs,
+      captureStartedAtMs = captureStartedAtMs,
       updatedAtMs = updatedAtMs,
       bytesRecorded = fileSession?.pcmBytes ?: 0L,
       localUri = localUri,
@@ -367,6 +369,7 @@ class RecorderEngine(
       if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
         throw RecorderRuntimeException(RecorderErrorCode.AUDIO_UNAVAILABLE, "microphone did not start recording")
       }
+      captureStartedAtMs = System.currentTimeMillis()
       if (stopRequested) {
         throw RecorderRuntimeException(
           RecorderErrorCode.SERVICE_UNAVAILABLE,

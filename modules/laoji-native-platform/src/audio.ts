@@ -103,6 +103,8 @@ export interface NativeRecorderSnapshot {
   storageScope: string | null;
   state: NativeRecorderState;
   startedAtMs: number;
+  /** Native AudioRecord confirmation time; absent on an older native binary. */
+  captureStartedAtMs?: number | null;
   updatedAtMs: number;
   bytesRecorded: number;
   durationMs: number;

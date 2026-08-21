@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.48 (156); Stage 4 voice 30-run host-audio envelope measured but failed closed`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.54 (162); Stage 4 voice has sealed 30-run evidence but remains blocked by capture tail latency and unreliable emulator host-audio injection`
 
 ## 权威文件
 
@@ -220,6 +220,13 @@ Emulator gRPC 流，完成了同一真实 App 链路的 30 次暖态回放：采
 独立报告关闭，不再重复执行；语音 30 样本本身仍需重跑通过。详见
 [语音日程真实音频回放](../vnext-stage4/SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。断网、进程死亡、
 正式性能 envelope、自然质量和 capability barrier 仍未完成，候选默认仍关闭。
+
+后续 `1.1.53 (161)` 严格暖态 30 次已达到 30/30 Draft、转写与 Draft 哈希各唯一、首文字/Draft p95
+`1431/2322ms`，但采集 p95 `104ms` 仍比门限高 4ms。`1.1.54 (162)` 将已授予权限检查移出按键热路径，
+常规暖样本采集降到约 40--70ms；正式批次却出现 Emulator Audio HAL I/O error、两次宿主全零和两次
+约 0.9--1.1s 的系统/AudioRecord 启动停顿，最终仅 27/30 Draft、采集/首文字 p95 `882/1977ms`。
+两批次都由 `schedule-voice-performance-v1` 封存且失败样本未删除；预检新增 30/30 Draft 和唯一 Draft
+合同门。当前应更换为可靠真机/硬件回环证据，而不是继续重跑不稳定 host monitor；Stage 4 状态不变。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM

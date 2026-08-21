@@ -20,7 +20,9 @@ from inject_emulator_audio import EmulatorMicrophoneInjector, _load_stubs
 
 AUDIT_RE = re.compile(r"\[laoji-audit\] (schedule_voice_[a-z_]+) (\{.*\})")
 BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}")
 CLICKABLE_CACHE: dict[tuple[str, str], tuple[int, int]] = {}
+CALENDAR_EDIT_CANCEL = "__calendar_edit_cancel__"
 CACHEABLE_LABELS = frozenset({
     "新建日程",
     "语音输入",
@@ -149,7 +151,12 @@ def _wait_audit_terminal(serial: str, start_index: int, timeout: float) -> str:
     raise RuntimeError("schedule voice did not reach an audited terminal state")
 
 
-def _leave_voice_result(serial: str, terminal: str) -> None:
+def _leave_voice_result(
+    serial: str,
+    terminal: str,
+    *,
+    verify_calendar: bool,
+) -> None:
     """Return to Calendar without saving the replayed draft.
 
     A successful native voice parse now hands the draft to the calendar edit
@@ -159,18 +166,31 @@ def _leave_voice_result(serial: str, terminal: str) -> None:
     has stopped, then use its explicit discard action.
     """
     if terminal == "确认日程":
-        cancel = _find_clickable(serial, "取消")
+        cancel = CLICKABLE_CACHE.get((serial, CALENDAR_EDIT_CANCEL))
+        if cancel is None:
+            cancel = _find_clickable(serial, "取消")
+            if cancel is not None:
+                CLICKABLE_CACHE[(serial, CALENDAR_EDIT_CANCEL)] = cancel
         if cancel is not None:
             _adb(serial, "shell", "input", "tap", str(cancel[0]), str(cancel[1]))
         else:
             _adb(serial, "shell", "input", "keyevent", "KEYCODE_BACK")
     else:
-        close = _find_clickable(serial, "关闭新建日程")
+        close = CLICKABLE_CACHE.get((serial, "关闭新建日程"))
+        if close is None:
+            close = _find_clickable(serial, "关闭新建日程")
         if close is not None:
             _adb(serial, "shell", "input", "tap", str(close[0]), str(close[1]))
         else:
             _adb(serial, "shell", "input", "keyevent", "KEYCODE_BACK")
-    _wait_visible(serial, ("新建日程",), 8)
+    if verify_calendar:
+        _wait_visible(serial, ("新建日程",), 8)
+    else:
+        # Exporting the full accessibility tree after every short replay can
+        # stall the emulator UI thread and turn the harness itself into the
+        # dominant capture-start cost. The owner-stable coordinates above are
+        # verified on the first, every tenth, and final run instead.
+        time.sleep(0.45)
 
 
 def _calendar(serial: str) -> None:
@@ -232,10 +252,34 @@ def main() -> int:
         ),
     )
     parser.add_argument("--runs", type=int, default=20)
+    parser.add_argument(
+        "--post-playback-drain",
+        type=float,
+        default=0.9,
+        help="seconds to let the host audio monitor drain before pressing stop",
+    )
+    parser.add_argument(
+        "--pulse-latency-ms",
+        type=int,
+        default=20,
+        help="requested PulseAudio playback latency for host-microphone replay",
+    )
+    parser.add_argument(
+        "--expected-transcript-sha256",
+        help="require every run to emit this privacy-safe sha256:<hex> transcript digest",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.runs < 1:
         raise SystemExit("--runs must be positive")
+    if args.post_playback_drain < 0:
+        raise SystemExit("--post-playback-drain must be non-negative")
+    if args.pulse_latency_ms < 1:
+        raise SystemExit("--pulse-latency-ms must be positive")
+    if args.expected_transcript_sha256:
+        args.expected_transcript_sha256 = args.expected_transcript_sha256.lower()
+        if SHA256_RE.fullmatch(args.expected_transcript_sha256) is None:
+            raise SystemExit("--expected-transcript-sha256 must be sha256:<64 lowercase hex>")
 
     _adb(args.serial, "get-state")
     _adb(args.serial, "logcat", "-c")
@@ -273,7 +317,12 @@ def main() -> int:
             time.sleep(0.15)
             if args.pulse_sink:
                 subprocess.run(
-                    ["paplay", f"--device={args.pulse_sink}", str(args.wav)],
+                    [
+                        "paplay",
+                        f"--device={args.pulse_sink}",
+                        f"--latency-msec={args.pulse_latency_ms}",
+                        str(args.wav),
+                    ],
                     check=True,
                     timeout=max(30, int(args.wav.stat().st_size / 16_000) + 30),
                 )
@@ -286,7 +335,7 @@ def main() -> int:
                     # every WAV explicitly so Stop cannot race accepted audio.
                     realtime=True,
                 )
-            time.sleep(0.4)
+            time.sleep(args.post_playback_drain)
             _tap(args.serial, "停止语音输入")
             terminal = _wait_audit_terminal(args.serial, before, 20)
             new_events = _audit_events(args.serial)[before:]
@@ -297,9 +346,19 @@ def main() -> int:
                 "run": ordinal,
                 "terminal": "draft" if terminal == "确认日程" else "failure",
                 "capture_start_ms": by_name.get("schedule_voice_capture_started", {}).get("latency_ms"),
+                "capture_measurement": by_name.get("schedule_voice_capture_started", {}).get("measurement"),
                 "first_text_ms": by_name.get("schedule_voice_first_text", {}).get("latency_ms"),
                 "draft_ms": draft_event.get("latency_ms"),
                 "used_recovery": draft_event.get("used_recovery"),
+                "audio_duration_ms": (
+                    draft_event.get("audio_duration_ms")
+                    or failure_event.get("audio_duration_ms")
+                ),
+                "transcript_sha256": (
+                    draft_event.get("transcript_sha256")
+                    or failure_event.get("transcript_sha256")
+                ),
+                "draft_sha256": draft_event.get("draft_sha256"),
                 "failure_ms": failure_event.get("latency_ms"),
                 "error_code": failure_event.get("error_code"),
                 "frame_count": failure_event.get("frame_count"),
@@ -307,7 +366,12 @@ def main() -> int:
                 "max_rms": failure_event.get("max_rms"),
                 "transcript_segment_count": failure_event.get("transcript_segment_count"),
             })
-            _leave_voice_result(args.serial, terminal)
+            print(json.dumps(runs[-1], ensure_ascii=False), flush=True)
+            _leave_voice_result(
+                args.serial,
+                terminal,
+                verify_calendar=ordinal == 1 or ordinal % 10 == 0 or ordinal == args.runs,
+            )
             # The next iteration uses only cached, owner-stable controls. Do
             # not export the accessibility tree while the emulator microphone
             # RPC remains alive; Emulator 36.6 may block that unrelated shell
@@ -322,6 +386,26 @@ def main() -> int:
     capture = [int(row["capture_start_ms"]) for row in runs if isinstance(row["capture_start_ms"], int)]
     first = [int(row["first_text_ms"]) for row in runs if isinstance(row["first_text_ms"], int)]
     draft = [int(row["draft_ms"]) for row in runs if isinstance(row["draft_ms"], int)]
+    transcript_hash_counts: dict[str, int] = {}
+    draft_hash_counts: dict[str, int] = {}
+    for row in runs:
+        digest = row.get("transcript_sha256")
+        if isinstance(digest, str):
+            transcript_hash_counts[digest] = transcript_hash_counts.get(digest, 0) + 1
+        draft_digest = row.get("draft_sha256")
+        if isinstance(draft_digest, str):
+            draft_hash_counts[draft_digest] = draft_hash_counts.get(draft_digest, 0) + 1
+    expected_digest = args.expected_transcript_sha256
+    transcript_match_count = (
+        sum(row.get("transcript_sha256") == expected_digest for row in runs)
+        if expected_digest
+        else None
+    )
+    transcript_mismatch_runs = (
+        [row["run"] for row in runs if row.get("transcript_sha256") != expected_digest]
+        if expected_digest
+        else []
+    )
     report = {
         "schema_version": 1,
         "candidate_only": True,
@@ -330,10 +414,19 @@ def main() -> int:
         "sample_reused": True,
         "injection_mode": "host_pulse_sink" if args.pulse_sink else "emulator_grpc",
         "pulse_sink": args.pulse_sink,
+        "pulse_latency_ms": args.pulse_latency_ms if args.pulse_sink else None,
+        "post_playback_drain_seconds": args.post_playback_drain,
+        "expected_transcript_sha256": expected_digest,
         "runs": runs,
         "metrics": {
             "run_count": len(runs),
             "draft_success_count": sum(row["terminal"] == "draft" for row in runs),
+            "transcript_match_count": transcript_match_count,
+            "transcript_distinct_hash_count": len(transcript_hash_counts),
+            "transcript_hash_counts": transcript_hash_counts,
+            "transcript_mismatch_runs": transcript_mismatch_runs,
+            "draft_distinct_hash_count": len(draft_hash_counts),
+            "draft_hash_counts": draft_hash_counts,
             "capture_start_p50_ms": _percentile(capture, 0.50),
             "capture_start_p95_ms": _percentile(capture, 0.95),
             "first_text_p50_ms": _percentile(first, 0.50),
@@ -356,6 +449,9 @@ def main() -> int:
         and metrics["first_text_p95_ms"] <= 1_500
         and metrics["draft_p95_ms"] is not None
         and metrics["draft_p95_ms"] <= 3_000
+        and metrics["draft_distinct_hash_count"] == 1
+        and sum(draft_hash_counts.values()) == args.runs
+        and (expected_digest is None or metrics["transcript_match_count"] == args.runs)
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

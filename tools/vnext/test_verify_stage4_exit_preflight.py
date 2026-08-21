@@ -54,6 +54,8 @@ def _passing() -> dict:
     voice = {
         "evidence_contract": VOICE_EVIDENCE_CONTRACT,
         "sample_count": 30,
+        "draft_success_count": 30,
+        "draft_distinct_hash_count": 1,
         "capture_start_p95_ms": 80,
         "first_text_p95_ms": 1200,
         "draft_p95_ms": 2500,
@@ -146,4 +148,6 @@ def test_unsealed_or_single_ability_voice_claim_is_rejected() -> None:
     assert report["passed"] is False
     assert "voice_performance_lineage" in report["blocking_gates"]
     assert "voice_warm_sample_count" in report["blocking_gates"]
+    assert "voice_draft_success" in report["blocking_gates"]
+    assert "voice_draft_determinism" in report["blocking_gates"]
     assert "voice_mixed_load_envelope" in report["blocking_gates"]
