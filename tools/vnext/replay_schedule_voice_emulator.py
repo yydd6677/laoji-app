@@ -25,6 +25,7 @@ CACHEABLE_LABELS = frozenset({
     "语音输入",
     "开始语音输入",
     "停止语音输入",
+    "关闭新建日程",
     "日程",
 })
 
@@ -62,6 +63,11 @@ def _nodes(serial: str) -> list[dict[str, str]]:
                 # throughout this replay.
                 if label in CACHEABLE_LABELS:
                     CLICKABLE_CACHE[(serial, label)] = point
+                # The native record button changes its accessibility label in
+                # place. UIAutomator can stall while AudioRecord is active, so
+                # remember the stop alias before capture enters the timed path.
+                if label == "开始语音输入":
+                    CLICKABLE_CACHE[(serial, "停止语音输入")] = point
         return nodes
 
 
@@ -251,18 +257,17 @@ def main() -> int:
                 "failure_ms": by_name.get("schedule_voice_draft_failed", {}).get("latency_ms"),
             })
             if terminal == "确认日程":
-                if ordinal == 1:
-                    _wait_visible(args.serial, ("保存",), 8)
                 # Close the activity-owned voice overlay directly.  Do not
                 # enter AddEvent or press a generic Cancel button: both make
                 # the performance harness capable of mutating calendar data.
                 _tap(args.serial, "关闭新建日程")
             else:
                 _tap(args.serial, "关闭新建日程")
-            if ordinal == 1:
-                _wait_visible(args.serial, ("新建日程",), 8)
-            else:
-                time.sleep(0.35)
+            # The next iteration uses only cached, owner-stable controls. Do
+            # not export the accessibility tree while the emulator microphone
+            # RPC remains alive; Emulator 36.6 may block that unrelated shell
+            # command for tens of seconds.
+            time.sleep(0.5 if ordinal == 1 else 0.35)
     finally:
         if injector is not None:
             injector.close()
