@@ -81,6 +81,15 @@ def build_report(
     sample_count = _integer(metrics.get("run_count"), "replay_run_count")
     if sample_count != len(runs):
         raise ValueError("replay_run_count_mismatch")
+    raw_warmup_runs = replay.get("warmup_runs", [])
+    if not isinstance(raw_warmup_runs, list):
+        raise ValueError("replay_warmup_runs_required")
+    warmup_run_count = _integer(
+        replay.get("warmup_run_count", len(raw_warmup_runs)),
+        "replay_warmup_run_count",
+    )
+    if warmup_run_count != len(raw_warmup_runs):
+        raise ValueError("replay_warmup_run_count_mismatch")
 
     draft_success_count = _integer(
         metrics.get("draft_success_count"),
@@ -103,20 +112,25 @@ def build_report(
         "replay_first_text_p95_ms",
     )
     draft_p95_ms = _number(metrics.get("draft_p95_ms"), "replay_draft_p95_ms")
-    sealed_runs: list[dict[str, Any]] = []
-    for index, raw_run in enumerate(runs, start=1):
-        run = _mapping(raw_run, f"replay_run_{index}")
-        sealed_runs.append({
-            "run": _integer(run.get("run"), f"replay_run_{index}_ordinal"),
-            "terminal": run.get("terminal"),
-            "capture_start_ms": run.get("capture_start_ms"),
-            "first_text_ms": run.get("first_text_ms"),
-            "draft_ms": run.get("draft_ms"),
-            "audio_duration_ms": run.get("audio_duration_ms"),
-            "transcript_sha256": run.get("transcript_sha256"),
-            "draft_sha256": run.get("draft_sha256"),
-            "error_code": run.get("error_code"),
-        })
+    def seal_runs(raw_runs: list[object], name: str) -> list[dict[str, Any]]:
+        sealed: list[dict[str, Any]] = []
+        for index, raw_run in enumerate(raw_runs, start=1):
+            run = _mapping(raw_run, f"{name}_{index}")
+            sealed.append({
+                "run": _integer(run.get("run"), f"{name}_{index}_ordinal"),
+                "terminal": run.get("terminal"),
+                "capture_start_ms": run.get("capture_start_ms"),
+                "first_text_ms": run.get("first_text_ms"),
+                "draft_ms": run.get("draft_ms"),
+                "audio_duration_ms": run.get("audio_duration_ms"),
+                "transcript_sha256": run.get("transcript_sha256"),
+                "draft_sha256": run.get("draft_sha256"),
+                "error_code": run.get("error_code"),
+            })
+        return sealed
+
+    sealed_runs = seal_runs(runs, "replay_run")
+    sealed_warmup_runs = seal_runs(raw_warmup_runs, "replay_warmup_run")
     measured_draft_success = sum(run["terminal"] == "draft" for run in sealed_runs)
     measured_draft_hashes = {
         run["draft_sha256"]
@@ -153,10 +167,12 @@ def build_report(
         "schema_version": 1,
         "evidence_contract": EVIDENCE_CONTRACT,
         "candidate_only": True,
-        "producer_revision": "schedule-voice-sealer-v1",
+        "producer_revision": "schedule-voice-sealer-v2",
         "source_report_sha256": replay_sha256,
         "mixed_load_report_sha256": mixed_load_sha256,
         "sample_count": sample_count,
+        "warmup_run_count": warmup_run_count,
+        "warmup_runs": sealed_warmup_runs,
         "draft_success_count": draft_success_count,
         "draft_distinct_hash_count": draft_distinct_hash_count,
         "transcript_distinct_hash_count": transcript_distinct_hash_count,

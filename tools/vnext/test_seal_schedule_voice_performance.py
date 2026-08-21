@@ -9,6 +9,17 @@ SHA = "sha256:" + "1" * 64
 def _replay(*, capture_p95: int = 80) -> dict:
     return {
         "candidate_only": True,
+        "warmup_run_count": 1,
+        "warmup_runs": [
+            {
+                "run": 1,
+                "terminal": "draft",
+                "capture_start_ms": 120,
+                "first_text_ms": 1_600,
+                "draft_ms": 2_500,
+                "draft_sha256": SHA,
+            }
+        ],
         "runs": [
             {
                 "run": index + 1,
@@ -52,6 +63,8 @@ def test_passing_report_is_sealed() -> None:
     assert report["passed"] is True
     assert report["draft_success_count"] == 30
     assert report["draft_distinct_hash_count"] == 1
+    assert report["warmup_run_count"] == 1
+    assert report["warmup_runs"][0]["capture_start_ms"] == 120
     assert report["mixed_load"]["traffic_classes"] == {
         "realtime_asr": True,
         "upload": True,

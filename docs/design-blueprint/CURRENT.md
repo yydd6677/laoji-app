@@ -226,7 +226,12 @@ Emulator gRPC 流，完成了同一真实 App 链路的 30 次暖态回放：采
 常规暖样本采集降到约 40--70ms；正式批次却出现 Emulator Audio HAL I/O error、两次宿主全零和两次
 约 0.9--1.1s 的系统/AudioRecord 启动停顿，最终仅 27/30 Draft、采集/首文字 p95 `882/1977ms`。
 两批次都由 `schedule-voice-performance-v1` 封存且失败样本未删除；预检新增 30/30 Draft 和唯一 Draft
-合同门。当前应更换为可靠真机/硬件回环证据，而不是继续重跑不稳定 host monitor；Stage 4 状态不变。
+合同门。随后持续 pipe source、明确 QEMU monitor 路由、计数前非语音预热和 `40ms` 单调节拍 PCM
+writer 独立关闭了 host monitor 的静音/欠载故障；日程 preview 阈值由 `640ms` 降到 `480ms`，不改变
+final、会议 VAD 或会议分段。1 次冷态产品录音单独保留；正式 30 暖样本达到 30/30 Draft、转写与
+Draft 哈希各唯一，采集/首文字/Draft p95 `65/1333/2393ms`。联合既有 600 秒六车道混合负载后，
+Stage 4 全部 voice 性能门已关闭。自然日程第一方双盲 holdout 和公开旧 schedule submit 零流量周期
+仍未完成，capability 仍关闭，Stage 4 整体状态不变。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM

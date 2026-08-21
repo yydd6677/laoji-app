@@ -51,6 +51,14 @@ host monitor 全零影响，只得到 27/30 Draft、采集/首文字/Draft p95 `
 `voice_draft_success/voice_draft_determinism/voice_capture_start/voice_first_text`。语音退出门需可靠真机/
 硬件回环或已独立关闭的模拟器注入故障，不能继续通过重跑 host monitor 挑选结果。
 
+后续实现的持续 pipe source + 小批量单调节拍 PCM writer 已把“路由存在”与“路由可持续供帧”分别
+验证，并保留 1 次冷态完整产品录音。`1.1.54 (162)` 配合 `480ms` 首 preview 的新封存 30 暖样本为
+30/30 Draft、转写/Draft 哈希各唯一，采集/首文字/Draft p95 `65/1333/2393ms`；联合原 600 秒六车道
+混合负载后，所有 `voice_*` 门均通过。封存报告见
+[SCHEDULE-VOICE-PERFORMANCE-1.1.54-PREVIEW480-20260821.json](SCHEDULE-VOICE-PERFORMANCE-1.1.54-PREVIEW480-20260821.json)。
+聚合预检现在只剩自然日程人工质量血缘/阈值和公开旧 schedule submit 零流量周期，Stage 4 整体仍为
+`blocked`，没有启用 capability。
+
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由
 [自然日程盲审与质量证据包](NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)生成并封存的

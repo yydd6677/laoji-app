@@ -24,6 +24,7 @@ def test_qwen_vad_policy_matches_schedule_and_meeting_latency_contract():
         "max_speech_ms": 12000.0,
         "energy_threshold": 0.0002,
     }
+    assert qwen_ws.QWEN_SCHEDULE_PREVIEW_INITIAL_MS == 480
 
 
 @pytest.mark.asyncio

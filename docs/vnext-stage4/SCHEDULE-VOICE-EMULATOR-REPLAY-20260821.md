@@ -1,6 +1,6 @@
 # Stage 4 语音日程真实音频回放（2026-08-21）
 
-状态：`bounded preview implemented; two sealed 30-sample reports failed closed; host-audio injector remains unstable; isolated candidate; not adopted`。
+状态：`bounded preview implemented; reliable host-audio route closed; sealed 30-sample warm performance gate passed; isolated candidate; not adopted`。
 
 ## 边界
 
@@ -143,6 +143,42 @@ idle。`1.1.53 (161)` 的 30 次暖态结果为：
 当前事实是：常规暖路径已稳定在约 40--70ms 采集、1.2--1.4s 首文字，但这套 host monitor 仍不能
 提供可靠的 30 次退出证据。下一次正式门必须使用不会在 AudioRecord 会话间丢流的真机/硬件回环，或
 先把模拟器 Audio HAL 注入故障独立关闭；在此之前语音门保持 blocked。
+
+## 480ms preview 与可靠宿主音频闭环
+
+随后没有删除或重解释上述失败，而是把宿主注入故障拆成可复现的测试工具问题。旧 monitor 每次重开
+playback，或由 Python 每 `10ms` 唤醒写一帧，都会在 Emulator 连续开关 `AudioRecord` 时产生整段静音、
+`pcm_readi late` 与 I/O error。新证据工具改为：
+
+- 一个持续存在的 `module-pipe-source`、PCM writer 和 discard reader；
+- pipe source 经 loopback 接入临时 null sink，QEMU 的既有 source-output 明确移动到其 monitor；
+- 计数前验证 source-output 仍在目标 monitor，发送 `350ms` 非语音路由信号并排空 `750ms`；
+- PCM 改为每 `40ms` 批量写入并按单调时钟节拍，既不让 FIFO 提前吞完整段，也避免 `10ms` Python
+  调度抖动让虚拟声卡断粮；退出时恢复 QEMU 原采集源并卸载全部临时模块；
+- 冷态完整产品录音通过 `warmup_runs` 单独保留在同一原始报告，绝不从计数失败中静默剔除。
+
+同一候选 API 把日程只读 preview 的首个有效讲话阈值由 `640ms` 降到 `480ms`。真实 8030 前缀回放中，
+`800/960/1120/1440ms` 语音分别已经产生逐步可用文本；preview 仍与 final 共用 revision key，失败不改变
+final，会议 VAD、final 静音阈值和会议分段均未改变。聚焦 realtime/VAD 回归为 `19 passed`。
+
+在专属 `emulator-5562`、候选 APK `1.1.54 (162)`、隔离 `18030` 和生产模型同 revision 的 `8030`
+上，先执行 1 次明确记录的冷态录音，再连续执行 30 个暖态计数样本。冷态本身为
+采集/首文字/Draft `48/1423/1919ms` 且文本正确；30 个计数样本结果为：
+
+| 指标 | 结果 | 门限 | 状态 |
+| --- | ---: | ---: | --- |
+| Draft 成功 | 30/30 | 30/30 | 通过 |
+| 转写/Draft 精确哈希种类 | 1/1 | Draft 1 | 通过 |
+| 按下到本机采集 p95 | 65ms | <=100ms | 通过 |
+| 按下到首文字 p95 | 1333ms | <=1500ms | 通过 |
+| 停止到 Draft p95 | 2393ms | <=3000ms | 通过 |
+
+封存报告为
+[1.1.54 preview480 语音性能报告](SCHEDULE-VOICE-PERFORMANCE-1.1.54-PREVIEW480-20260821.json)，
+`schedule-voice-sealer-v2` 同时封存冷态记录、30 条计数明细和既有 600 秒六车道混合负载，报告 SHA-256
+为 `sha256:b25518f41f6d69cc7a3aaade6687ed4bfc00ba2e1f6825537cf39efc30fbb047`。Stage 4 聚合预检的全部
+voice 门现已通过；Stage 4 整体仍被独立人工自然日程 holdout 与公开旧 schedule submit 零流量周期
+阻断，未启用 capability，也未切生产。
 
 为防止“30 个样本但部分失败”仍被误收，新增 `schedule-voice-performance-v1` 封存器；Stage 4 预检
 现在除 lineage、样本数、混合负载和三个 p95 外，还强制检查 30/30 Draft 与唯一 Draft 合同。

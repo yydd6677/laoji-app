@@ -16,6 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 
 from inject_emulator_audio import EmulatorMicrophoneInjector, _load_stubs
+from pulse_pipe_microphone import PulsePipeMicrophone
 
 
 AUDIT_RE = re.compile(r"\[laoji-audit\] (schedule_voice_[a-z_]+) (\{.*\})")
@@ -251,7 +252,47 @@ def main() -> int:
             "using the Emulator gRPC microphone stream"
         ),
     )
+    parser.add_argument(
+        "--pulse-pipe-source",
+        help=(
+            "create a persistent low-latency PulseAudio pipe source with this "
+            "name and inject each WAV into its continuous PCM stream"
+        ),
+    )
+    parser.add_argument(
+        "--pulse-source-process-pid",
+        type=int,
+        help=(
+            "move the existing host capture stream owned by this process PID "
+            "to --pulse-pipe-source for the replay, then restore it"
+        ),
+    )
+    parser.add_argument(
+        "--pulse-monitor-sink",
+        help=(
+            "bridge --pulse-pipe-source into this temporary null sink and "
+            "bind --pulse-source-process-pid to its monitor"
+        ),
+    )
+    parser.add_argument(
+        "--pulse-route-prime",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "before measured runs, prime a new pipe/monitor route with a bounded "
+            "non-speech signal and fully drain it (default: enabled)"
+        ),
+    )
     parser.add_argument("--runs", type=int, default=20)
+    parser.add_argument(
+        "--warmup-runs",
+        type=int,
+        default=0,
+        help=(
+            "run and record this many complete product captures before the measured "
+            "warm sample set; warmups remain in the JSON report"
+        ),
+    )
     parser.add_argument(
         "--post-playback-drain",
         type=float,
@@ -272,10 +313,20 @@ def main() -> int:
     args = parser.parse_args()
     if args.runs < 1:
         raise SystemExit("--runs must be positive")
+    if args.warmup_runs < 0:
+        raise SystemExit("--warmup-runs must be non-negative")
     if args.post_playback_drain < 0:
         raise SystemExit("--post-playback-drain must be non-negative")
     if args.pulse_latency_ms < 1:
         raise SystemExit("--pulse-latency-ms must be positive")
+    if args.pulse_sink and args.pulse_pipe_source:
+        raise SystemExit("--pulse-sink and --pulse-pipe-source are mutually exclusive")
+    if bool(args.pulse_source_process_pid) != bool(args.pulse_monitor_sink):
+        raise SystemExit(
+            "--pulse-source-process-pid and --pulse-monitor-sink must be used together",
+        )
+    if args.pulse_monitor_sink and not args.pulse_pipe_source:
+        raise SystemExit("--pulse-monitor-sink requires --pulse-pipe-source")
     if args.expected_transcript_sha256:
         args.expected_transcript_sha256 = args.expected_transcript_sha256.lower()
         if SHA256_RE.fullmatch(args.expected_transcript_sha256) is None:
@@ -287,22 +338,40 @@ def main() -> int:
     sdk_root = Path(
         os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "~/Android/Sdk",
     ).expanduser()
-    stubs = None if args.pulse_sink else _load_stubs(sdk_root)
+    stubs = None if (args.pulse_sink or args.pulse_pipe_source) else _load_stubs(sdk_root)
     if args.pulse_sink and shutil.which("paplay") is None:
         raise SystemExit("paplay is required for --pulse-sink")
     runs: list[dict[str, object]] = []
+    warmup_runs: list[dict[str, object]] = []
     injector = None
+    pipe_microphone = None
     try:
         if stubs is not None:
             injector = EmulatorMicrophoneInjector(args.endpoint, stubs)
-        for ordinal in range(1, args.runs + 1):
+        if args.pulse_pipe_source:
+            pipe_microphone = PulsePipeMicrophone(args.pulse_pipe_source)
+            pipe_microphone.start()
+            if args.pulse_source_process_pid:
+                pipe_microphone.bridge_to_monitor_sink(
+                    args.pulse_monitor_sink,
+                    process_pid=args.pulse_source_process_pid,
+                )
+                if args.pulse_route_prime:
+                    # This happens while Android has no active AudioRecord and
+                    # is not a discarded product run. It closes a host-route
+                    # readiness race, then drains the bridge before run 1.
+                    pipe_microphone.prime_route()
+        total_runs = args.warmup_runs + args.runs
+        for iteration in range(1, total_runs + 1):
+            is_warmup = iteration <= args.warmup_runs
+            ordinal = iteration if is_warmup else iteration - args.warmup_runs
             _tap(args.serial, "新建日程")
-            if ordinal == 1:
+            if iteration == 1:
                 _wait_visible(args.serial, ("语音输入",), 8)
             else:
                 time.sleep(0.35)
             _tap(args.serial, "语音输入")
-            if ordinal == 1:
+            if iteration == 1:
                 _wait_visible(args.serial, ("开始语音输入",), 8)
             else:
                 time.sleep(0.35)
@@ -315,7 +384,9 @@ def main() -> int:
             # Native capture starts well below 100 ms; a short fixed guard
             # models a person beginning to speak immediately after the tap.
             time.sleep(0.15)
-            if args.pulse_sink:
+            if pipe_microphone is not None:
+                pipe_microphone.play(args.wav)
+            elif args.pulse_sink:
                 subprocess.run(
                     [
                         "paplay",
@@ -342,7 +413,7 @@ def main() -> int:
             by_name = {str(event["event"]): event for event in new_events}
             draft_event = by_name.get("schedule_voice_draft_ready", {})
             failure_event = by_name.get("schedule_voice_draft_failed", {})
-            runs.append({
+            result = {
                 "run": ordinal,
                 "terminal": "draft" if terminal == "确认日程" else "failure",
                 "capture_start_ms": by_name.get("schedule_voice_capture_started", {}).get("latency_ms"),
@@ -365,12 +436,23 @@ def main() -> int:
                 "max_peak": failure_event.get("max_peak"),
                 "max_rms": failure_event.get("max_rms"),
                 "transcript_segment_count": failure_event.get("transcript_segment_count"),
-            })
-            print(json.dumps(runs[-1], ensure_ascii=False), flush=True)
+            }
+            (warmup_runs if is_warmup else runs).append(result)
+            print(
+                json.dumps(
+                    {"phase": "warmup" if is_warmup else "measured", **result},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             _leave_voice_result(
                 args.serial,
                 terminal,
-                verify_calendar=ordinal == 1 or ordinal % 10 == 0 or ordinal == args.runs,
+                verify_calendar=(
+                    iteration == 1
+                    or iteration == total_runs
+                    or (not is_warmup and ordinal % 10 == 0)
+                ),
             )
             # The next iteration uses only cached, owner-stable controls. Do
             # not export the accessibility tree while the emulator microphone
@@ -380,6 +462,8 @@ def main() -> int:
     finally:
         if injector is not None:
             injector.close()
+        if pipe_microphone is not None:
+            pipe_microphone.close()
         if stubs is not None:
             stubs[3].cleanup()
 
@@ -406,17 +490,36 @@ def main() -> int:
         if expected_digest
         else []
     )
+    route_primed = bool(
+        args.pulse_pipe_source
+        and args.pulse_source_process_pid
+        and args.pulse_route_prime
+    )
     report = {
         "schema_version": 1,
         "candidate_only": True,
         "device": args.serial,
         "source_file": args.wav.name,
         "sample_reused": True,
-        "injection_mode": "host_pulse_sink" if args.pulse_sink else "emulator_grpc",
+        "injection_mode": (
+            "host_pulse_pipe"
+            if args.pulse_pipe_source
+            else "host_pulse_sink"
+            if args.pulse_sink
+            else "emulator_grpc"
+        ),
         "pulse_sink": args.pulse_sink,
+        "pulse_pipe_source": args.pulse_pipe_source,
+        "pulse_source_process_pid": args.pulse_source_process_pid,
+        "pulse_monitor_sink": args.pulse_monitor_sink,
+        "pulse_route_primed": route_primed,
+        "pulse_route_prime_signal_seconds": 0.35 if route_primed else None,
+        "pulse_route_prime_settle_seconds": 0.75 if route_primed else None,
         "pulse_latency_ms": args.pulse_latency_ms if args.pulse_sink else None,
         "post_playback_drain_seconds": args.post_playback_drain,
         "expected_transcript_sha256": expected_digest,
+        "warmup_run_count": len(warmup_runs),
+        "warmup_runs": warmup_runs,
         "runs": runs,
         "metrics": {
             "run_count": len(runs),

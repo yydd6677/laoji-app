@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 speaker-overlay latency is closed by 30-run candidate evidence, while independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance and bounded replaceable voice preview are implemented, but two sealed 30-run host-audio batches remain failed closed and the latest emulator injection is not reliable enough for adoption; natural quality, a passing sealed voice envelope and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 speaker-overlay latency is closed by 30-run candidate evidence, while independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance, bounded replaceable voice preview and the sealed 30-run warm voice performance envelope are implemented, while independent natural-schedule quality, public zero-cycle and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -1260,6 +1260,12 @@ manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在
 3. voice session 先录后连；统一 supplement graph revision。
 4. 建立 FTS5、显式标签分类、回收站和本地 Markdown 分享投影。
 5. Minutes/Calendar native snapshots/actions 全部加 envelope；清除文案状态判断。
+
+当前候选语音纵向证据：同一 ASR owner 的首个只读 preview 阈值为 `480ms`，final revision/VAD 合同
+不变；专属 `emulator-5562` 通过持续 pipe source 与 `40ms` 单调节拍宿主输入完成 1 次单独冷态和
+30 次暖态真实 App 回放。30/30 到达 Draft，转写与 Draft 哈希各唯一，采集/首文字/Draft p95 为
+`65/1333/2393ms`；联合既有 600 秒六车道混合负载后，Stage 4 全部 voice 性能门已关闭。该证据不
+替代独立人工自然日程 holdout，也不启用 schedule graph capability。
 
 退出：自然日程 holdout 与常见澄清门通过；两种输入速度预算通过；页面 restart/recreate/stale action
 故障注入无跳动、串页或旧写；全局功能回归通过。
