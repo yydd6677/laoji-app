@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.54 (162); Stage 4 voice has sealed 30-run evidence but remains blocked by capture tail latency and unreliable emulator host-audio injection`
+- implementation status: `Stage 0/1 passed; Stage 2 runtime/performance and the rollback-ready 8030-v2 deployment candidate are closed, while independent ASR/speaker quality, production maintenance-window activation, public zero-cycle and capability adoption remain open; Stage 3 implementation/recovery is closed candidate-only and waits on independent Facts/action/Q2 review plus public zero-cycle/adoption; Stage 4 voice performance is sealed and passed, while first-party natural-schedule review plus public zero-cycle/adoption remain open; emulator candidate 1.1.54 (162); Stage 5 safe_to_delete=false`
 
 ## 权威文件
 
