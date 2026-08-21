@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 historical runtime/resource subset passed 19/20 but quality-aware exit now also blocks on speaker-overlay latency, independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance and bounded replaceable voice preview are implemented with preliminary sub-1.5s first-text evidence, while sealed 30-sample mixed-load performance, natural quality and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 speaker-overlay latency is closed by 30-run candidate evidence, while independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance and bounded replaceable voice preview are implemented with preliminary sub-1.5s first-text evidence, while sealed 30-sample mixed-load performance, natural quality and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -71,6 +71,13 @@ Stage 2 历史运行/资源预检 20 门通过 19 门，唯一运行子集阻断
 `89.71%`；逐条检查确认高误差窗口至少含字幕漏句、错词和边界漂移，因此合同固定为不可晋级，不能按
 弱参考调模型或关闭质量门。`media-human-quality-v1` 只接受第一方双人盲审/裁决参考、预测后置和
 完整哈希血缘；详见 `docs/vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md`。
+
+随后隔离 device-v2 候选对同一真实 6 秒语音完成 30 次独立 CAM++ overlay 暖态回放：`30/30`
+成功，文字完成后的 p95 为 `629.6 ms`，所有 binding/epoch purge 均确认，回放后无 active task、speaker
+input、checkpoint 或 spool 文件。预检现在同时要求至少 30 条 overlay 样本，避免单点时延冒充 p95；
+质量感知聚合结果为 `20/28`，剩余 8 项是独立人工媒体质量和公开零旧提交周期。回放还暴露并修复了
+Uvicorn WebSocket 路径经 `uvicorn.error` 泄漏随机 session ID 的问题；修复候选两份真实运行日志的
+动态扫描均为 0 项。详见 `docs/vnext-stage2/SPEAKER-OVERLAY-WARM30-20260821.md`。
 
 2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
 收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前

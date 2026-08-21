@@ -39,10 +39,12 @@
 
 同日质量门复核发现上述 20 门并未把蓝图已经要求的 CER、数字时间和讲话人质量纳入机器判定，因而
 “19/20”只能称为历史运行/资源子集，不能称为 Stage 2 聚合退出结果。预检 schema v2 已补入
-speaker overlay p95、严格 `media-human-quality-v1` 血缘和五项质量阈值；使用原 envelope 且不重复传入
-旧 SQLite backup 时，当前为 `18/27`，9 个阻断为：speaker overlay p95、质量血缘、独立人工 holdout、
-CER 中位数/p95、数字时间、已登记 attribution F1、未知人强行命名率和公开零旧提交周期。旧 SQLite
-只读审计仍是历史已通过证据，但本次命令未把临时 backup 路径作为第 28 门重新传入。
+speaker overlay 至少 30 条样本及 p95、严格 `media-human-quality-v1` 血缘和五项质量阈值。随后在隔离
+候选完成 30 次真实 speaker overlay 暖态回放，`30/30` 成功，p95 为 `629.6 ms`，binding/epoch 清理均
+确认；质量感知 envelope 现在为 `20/28`。剩余 8 个阻断为：质量血缘、独立人工 holdout、CER
+中位数/p95、数字时间、已登记 attribution F1、未知人强行命名率和公开零旧提交周期。旧 SQLite
+只读审计仍是历史已通过证据，但本次命令未把临时 backup 路径作为附加门重新传入。overlay 证据见
+[30 次暖态回放](SPEAKER-OVERLAY-WARM30-20260821.md)。
 
 10 组视频/SRT 的 30 窗口弱参考诊断见
 [ASR 弱字幕诊断](ASR-SRT-WEAK-DIAGNOSTIC-20260821.md)。结果可定位校正窗口，但 SRT 有错漏，合同强制
@@ -52,6 +54,6 @@ CER 中位数/p95、数字时间、已登记 attribution F1、未知人强行命
 
 2026-08-20 的 GPU0 全链路和混合负载证据已关闭首段、RTF、realtime、RSS、CPU、临时盘及 GPU0
 安全余量；2026-08-21 的 Android v2 回放又关闭设备恢复、连续投影、去重、`NO_SPEECH` 和清理门。
-当前运行/恢复子集只有 `legacy_submit_zero_public_cycle` 一个阻断，但完整 Stage 2 聚合退出还缺上述
-speaker overlay 和独立媒体质量门，并需正式 8030 部署 v2 handler 后才能人工激活 capability barrier。
+当前运行/恢复/overlay 性能子集只有 `legacy_submit_zero_public_cycle` 一个阻断，但完整 Stage 2 聚合
+退出还缺上述独立媒体质量门，并需正式 8030 部署 v2 handler 后才能人工激活 capability barrier。
 因此工具继续非零退出，生产 `18020/8030` 配置和旧链路均未改变。

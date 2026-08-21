@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 historical runtime/resource subset 19/20 passed, while quality-aware exit preflight exposes speaker/ASR quality, public zero-cycle and capability adoption as open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.45 (153)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.45 (153)`
 
 ## 权威文件
 
@@ -116,6 +116,13 @@ Stage 2 只差一个门。质量感知预检已补齐这些门；正式 8030 v2 
 通过或失败。证据边界见
 [ASR 弱字幕诊断](../vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md)。
 
+同日独立 speaker overlay 在隔离候选完成 30 次真实 6 秒语音暖态回放，`30/30` 成功，文字完成后的
+overlay p50/p95/max 为 `479.6/629.6/702.5 ms`，所有 binding/epoch 清理均确认，回放后数据库、任务和
+两个加密 spool 均已收敛。退出预检同时要求至少 30 条样本，质量感知结果更新为 `20/28`；剩余 8 项仅为
+独立人工 ASR/讲话人质量的 7 项门和公开零旧提交周期。回放发现并修复 Uvicorn WebSocket 原始路径日志
+泄漏，修复候选的外层/Tee 两份真实日志动态扫描均为 0 项。证据见
+[speaker overlay 暖态回放](../vnext-stage2/SPEAKER-OVERLAY-WARM30-20260821.md)。
+
 隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
 [Stage 2 真实候选证据](../vnext-stage2/REAL-CANDIDATE-20260818.md)。ASR revision 现在要求固定值，
@@ -181,7 +188,8 @@ Graph 草稿澄清不会把补充拆成独立输入。查询/删除/拒绝不进
 不代表生产 readiness 延迟已改善。
 Stage 2 退出门现在有统一的只读聚合预检 `tools/vnext/verify_stage2_exit_preflight.py`，对 Android
 恢复、性能/资源、speaker overlay、独立 ASR/讲话人质量、候选清理和旧公开零流量逐项 fail-closed；
-历史 `19/20` 只代表运行/资源子集，质量感知 schema v2 仍有 9 项阻断，证据见
+历史 `19/20` 只代表运行/资源子集，speaker overlay 已由 30 次证据关闭，质量感知 schema v2 仍有
+8 项阻断，证据见
 [Stage 2 exit preflight](../vnext-stage2/STAGE2-EXIT-PREFLIGHT-20260819.md)。
 Stage 4 同样增加了只读聚合预检，要求独立日程人工 holdout、语音 p95、页面重建/stale action、FTS
 和旧 schedule submit 零流量证据；当前仅静态/迁移门通过，真实 Android 与质量 envelope 缺失，证据见
