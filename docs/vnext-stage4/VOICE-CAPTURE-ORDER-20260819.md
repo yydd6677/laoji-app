@@ -33,3 +33,8 @@
 - `android/gradlew :laoji-native-platform:compileDebugKotlin --no-daemon`：成功。
 - 该切片尚未替代专属 LaoJi Android 设备上的冷启动、断网、首帧延迟和杀进程回放，不能作为
   Stage 4 退出或生产采用证据。
+
+2026-08-21 已在专属 `emulator-5562` 通过 gRPC 虚拟麦克风完成 5 次真实中文音频回放；本机采集启动
+p50/p95 为 `69/125ms`，首文字 p50/p95 为 `9018/9256ms`。采集路径已接近门限但仍有一次超标，首文字
+明显不合格。证据和根因见
+[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)，因此本切片仍未退出。

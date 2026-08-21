@@ -22,6 +22,12 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
   [ProjectionEnvelope 全局 Android 回放](PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md)；真实 bridge
   stale action 注入、人工质量、语音 p95 和公开周期仍阻断，因此聚合预检保持 `passed=false`。
 
+2026-08-21 的 5 次真实中文音频模拟器回放把语音门从“缺证据”推进为“已实测失败”：采集启动
+p95 `125ms`（目标 `<=100ms`），首文字 p95 `9256ms`（目标 `<=1500ms`）。当前 VAD 闭段后调用 batch
+ASR 的路径不是增量解码；继续压缩静音门会损害断句和句尾动作，不能作为通过方式。详见
+[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。Stage 4 需要同一 ASR owner 下的
+真正 streaming backend；当前 GPU0 余量不足且 GPU1 不在授权范围，候选未部署，预检继续失败关闭。
+
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由
 [自然日程盲审与质量证据包](NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)生成并封存的

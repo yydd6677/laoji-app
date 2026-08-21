@@ -49,6 +49,7 @@ import { validateEventDraft } from '../utils/eventDraftValidation';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import { reminderUnavailableMessage } from '../services/notifications';
 import { readableErrorMessage } from '../services/errors';
+import { diagnosticAudit } from '../services/diagnostics';
 
 interface Props {
   visible: boolean;
@@ -193,6 +194,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
   const transcriptRef = useRef<ScheduleTranscriptSegment[]>([]);
   const audioLevelRef = useRef({ frameCount: 0, maxPeak: 0, maxRms: 0 });
   const stopPromiseRef = useRef<Promise<ParseResult | null> | null>(null);
+  const recordingPressedAtMsRef = useRef<number | null>(null);
+  const firstTranscriptLoggedRef = useRef(false);
+  const stopPressedAtMsRef = useRef<number | null>(null);
   const recordingStartingRunRef = useRef<number | null>(null);
   const stopRequestedWhileStartingRef = useRef(false);
   const stopAfterStartRef = useRef<() => void>(() => undefined);
@@ -231,6 +235,13 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       addNativeRecorderTranscriptListener(event => {
         const ownedSessionId = activeRef.current?.sessionId ?? stoppingSessionIdRef.current;
         if (event.sessionId !== ownedSessionId || !event.text.trim()) return;
+        if (!firstTranscriptLoggedRef.current && recordingPressedAtMsRef.current != null) {
+          firstTranscriptLoggedRef.current = true;
+          diagnosticAudit('schedule_voice_first_text', {
+            latency_ms: Math.max(0, Math.round(performance.now() - recordingPressedAtMsRef.current)),
+            kind: event.kind,
+          });
+        }
         transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
           text: event.text,
           receivedAt: event.receivedAtMs,
@@ -418,6 +429,9 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     const runId = ++runRef.current;
     recordingStartingRunRef.current = runId;
     stopRequestedWhileStartingRef.current = false;
+    recordingPressedAtMsRef.current = performance.now();
+    firstTranscriptLoggedRef.current = false;
+    stopPressedAtMsRef.current = null;
     // The microphone owns the interaction immediately. Local AudioRecord is
     // the critical path; service readiness and WebSocket setup stay hidden.
     setPhase('recording');
@@ -480,6 +494,11 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         allowInsecureDevelopment,
         levelIntervalMs: 120,
       });
+      if (recordingPressedAtMsRef.current != null) {
+        diagnosticAudit('schedule_voice_capture_started', {
+          latency_ms: Math.max(0, Math.round(performance.now() - recordingPressedAtMsRef.current)),
+        });
+      }
       if (recordingStartingRunRef.current === runId) recordingStartingRunRef.current = null;
       if (mountedRef.current && runRef.current === runId) {
         setPhase('recording');
@@ -513,6 +532,7 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     }
     activeRef.current = null;
     stoppingSessionIdRef.current = active.sessionId;
+    stopPressedAtMsRef.current = performance.now();
     const runId = ++runRef.current;
     setPhase('parsing');
     setError('');
@@ -557,8 +577,19 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         setDraft(result);
         setClarificationAnswer('');
         setPhase('confirm');
+        if (stopPressedAtMsRef.current != null) {
+          diagnosticAudit('schedule_voice_draft_ready', {
+            latency_ms: Math.max(0, Math.round(performance.now() - stopPressedAtMsRef.current)),
+            used_recovery: needsFullAudioRecovery,
+          });
+        }
         return result;
       } catch (reason) {
+        if (stopPressedAtMsRef.current != null) {
+          diagnosticAudit('schedule_voice_draft_failed', {
+            latency_ms: Math.max(0, Math.round(performance.now() - stopPressedAtMsRef.current)),
+          });
+        }
         if (mountedRef.current && runRef.current === runId) {
           setPhase('input');
           setError(scheduleVoiceErrorMessage(reason, '未识别到日程，请重试。'));

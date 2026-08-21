@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.41 (149)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.42 (150)`
 
 ## 权威文件
 
@@ -183,7 +183,12 @@ Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 
 快照现在增加向后兼容的 `asrPhase`（connecting/connected/recoveryRequired/completed/notRequired），
 让连接慢和 ASR 故障不会被 UI 当成麦克风失败；顺序/阶段合同脚本、TypeScript 和 Kotlin 编译均通过。
 同时记录首个 PCM 到连接完成、首个 PCM 到首个转写事件的单调延迟，仅用于设备 p50/p95 回放统计。
-这仍尚未经过专属设备的首帧延迟、断网和进程死亡回放，候选默认仍关闭。
+专属 `emulator-5562` 已用虚拟麦克风完成 5 次真实中文音频回放：采集启动 p50/p95 为
+`69/125ms`，首文字 p50/p95 为 `9018/9256ms`，因此语音性能门已从“缺少证据”变为“明确失败”。
+当前闭段后 batch ASR 不能伪装成流式；Stage 4 需在同一 8030 owner 下增加真正 streaming backend，
+但当前 GPU0 余量不足且 GPU1 不在授权范围，尚未部署。证据见
+[语音日程真实音频回放](../vnext-stage4/SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。断网和进程死亡
+回放仍未完成，候选默认仍关闭。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
