@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "service_ready": {
+    "api": true,
+    "source_stream_v2": true,
+    "question_reader_v2": true,
+    "summary_revisions": {
+      "handler": "summary-facts-v3-chapter-r5",
+      "prompt": "facts-v3-r15",
+      "model": "ollama:qwen3.5:9b"
+    }
+  },
+  "automated_quality": {
+    "facts_schema_valid_rate": 1.0,
+    "facts_display_citation_match_rate": 1.0,
+    "q2_display_citation_match_rate": 1.0,
+    "duplicate_action_count": 0,
+    "summary_normal_model_call_max": 1,
+    "summary_repair_model_call_max": 1
+  },
+  "facts_actions_human_quality": {},
+  "q2_human_quality": {},
+  "performance": {
+    "summary_single_p50_ms": 15368,
+    "summary_single_p95_ms": 35498,
+    "summary_long_p95_ms": 60483,
+    "q2_warm_p95_ms": 11529
+  },
+  "runtime_recovery": {
+    "summary_generation_resume": true,
+    "summary_commit_deduplicated": true,
+    "summary_stale_source_rejected": true,
+    "q2_generation_resume": true,
+    "q2_stale_source_rejected": true,
+    "legacy_upgrade_recovered": true,
+    "one_current_summary_version": true,
+    "template_switch_local_only": true
+  },
+  "cleanup_privacy": {
+    "task_cleanup_confirmed": true,
+    "binding_purge_confirmed": true,
+    "temporary_payload_deleted": true,
+    "body_log_hit_count": 0
+  },
+  "public_cycle": {
+    "complete": false,
+    "summary_v2_submit_count": null,
+    "q0_submit_count": null
+  },
+  "evidence_sources": [
+    "docs/vnext-stage3/FACTS-V3-R15-RUNTIME-R4-20260820.md",
+    "docs/vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md",
+    "docs/vnext-stage3/Q2-BLIND-REVIEW-PACK-20260821.md",
+    "docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md",
+    "docs/vnext-stage3/Q2-ANDROID-ATTACHMENT-RECOVERY-20260821.md",
+    "docs/vnext-stage3/SUMMARY-V3-LEGACY-UPGRADE-RECOVERY-20260821.md",
+    "docs/vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md",
+    "docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md"
+  ]
+}

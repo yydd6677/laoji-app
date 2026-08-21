@@ -35,6 +35,10 @@
 绑定和确定性评分合同及 `0600` 私有模板已经补齐，见
 `docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。
 
+Stage 3 聚合退出预检现为 `27/39`；12 个机器阻断收敛为 Facts/行动人工质量、Q2 人工质量和公开
+Summary V2/Q0 零旧提交周期三项外部门，见
+`docs/vnext-stage3/STAGE3-EXIT-PREFLIGHT-20260821.md`。
+
 剩余：两名独立评审完成 Facts 支持与遗漏、行动真实性/适用性、Q2 正确性/完整性/引用相关性裁决并达到
 `>=95%`；随后完成公开 Summary-v2/Q0 零旧调用周期，才可人工采用 capability。自动引用 `100%` 和
 模型回放通过不能替代这些字段。

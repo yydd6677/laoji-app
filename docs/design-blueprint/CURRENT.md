@@ -160,8 +160,10 @@ unit 已封存在服务器版本目录，并用生产同一 Python 3.12/torch �
 Stage 3 的 Facts/行动 10 行与 Q2 27 行私有包已重新界定为冻结来源包：原合同只有一个 `reviewer`，
 不足以产生独立人工通过结论。现已补齐两名不同中文母语评审、第三人裁决、精确文件哈希绑定、分歧
 约束和内容无关聚合报告；对应私有模板均已按 `0700/0600` 生成。工具闭合的是证据合同，不是人工结果，
-当前字段仍为空且 Stage 3 未采用。见
-[Stage 3 独立人工质量证据合同](../vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md)。
+当前字段仍为空且 Stage 3 未采用。失败关闭聚合预检当前通过 `27/39` 门，12 个机器阻断收敛为
+Facts/行动人工质量、Q2 人工质量和公开 Summary V2/Q0 零旧提交周期。见
+[Stage 3 独立人工质量证据合同](../vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md)与
+[Stage 3 退出预检](../vnext-stage3/STAGE3-EXIT-PREFLIGHT-20260821.md)。
 
 2026-08-19 复核实际目录仍为 12 个 MP4、10 个同名 SRT，视频哈希与清单逐项一致，见
 [样本快照复核](../vnext-acceptance/SAMPLE-SNAPSHOT-VERIFY-20260819.md)。

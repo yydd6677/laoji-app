@@ -1244,7 +1244,9 @@ barrier。
 评审和第三人裁决。现已新增统一的 Stage 3 人工质量合同，精确绑定冻结来源包、两份独立 review 与
 adjudication，确定性计算 Facts 支持/遗漏、行动真实性/适用性和 Q2 正确/完整/引用相关率，公开报告
 不复制正文。私有模板已生成但未填，因而只关闭证据结构缺口，不关闭人工 `>=95%` 门。详见
-`docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。
+`docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。同日新增的失败关闭 Stage 3 聚合预检
+通过 `27/39` 门；剩余 12 个机器门只对应两组独立人工质量和一个公开 Summary V2/Q0 零旧调用周期，
+详见 `docs/vnext-stage3/STAGE3-EXIT-PREFLIGHT-20260821.md`。
 
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
