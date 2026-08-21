@@ -1,6 +1,11 @@
 # vNext 剩余外部门（2026-08-21）
 
-状态：`all currently autonomous implementation work reconciled; production adoption and independent human evidence pending`。
+状态：`superseded by explicit product-owner waiver; Stage 5A completed; Stage 5B deletion and production release remain separate`。
+
+> 2026-08-21 后续决定：产品所有者明确跳过下文列出的独立人工质量和正常使用/公开零旧调用周期。
+> 这些门已在 `vnext-product-owner-risk-waiver-v1` 下记为 `waived`，没有改写为测量通过。Stage 5A 已按
+> 单一 owner、无双写、无静默 fallback、legacy 冷回滚保留的合同完成。本文其余内容保留为被豁免风险
+> 的历史说明，不再阻塞 Stage 5A；生产发布与 Stage 5B 物理删除仍需以后分别授权。
 
 本文件不是缩小蓝图，也不把外部门视为可选项。它只区分“仓库/隔离候选还能自主实现”与“必须由真实
 人员、公开运行周期或获准生产维护产生”的证据，防止继续重复已经关闭的恢复矩阵和性能回放。

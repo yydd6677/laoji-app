@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "version_name": "1.1.55",
+  "version_code": 163,
+  "application_id": "com.laoji.app",
+  "artifacts": [
+    {
+      "file": "laoji-vnext-stage5a-1.1.55-163.apk",
+      "bytes": 82619947,
+      "sha256": "c207202e8b08742803d865b25dadd26b7b63b47c18f05c98eda34c8cdc56820e",
+      "git_tracked": false
+    },
+    {
+      "file": "laoji-vnext-stage5a-server-c7045c6.tar.gz",
+      "bytes": 1514512,
+      "sha256": "047bf15375a436a3d9df895dda4d9b38b4593b92f64c1c8fc25aebd20830e806",
+      "git_tracked": false
+    },
+    {
+      "file": "output-metadata.json",
+      "bytes": 706,
+      "sha256": "0f8e83c97cc1e09377ebf585e38e97d420eb0ef05b7d761fbadec583dedd1ad0",
+      "git_tracked": true
+    }
+  ],
+  "production_release_performed": false,
+  "public_traffic_switched": false,
+  "physical_legacy_deletion_performed": false
+}
