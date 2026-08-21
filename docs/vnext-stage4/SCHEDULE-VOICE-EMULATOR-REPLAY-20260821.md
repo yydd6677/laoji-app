@@ -74,6 +74,45 @@ RPC 连续三次的第二次仍未形成终态，继续被排除。这进一步�
 自然中文质量仍只接受第一方 opt-in、双母语盲审和裁决的 holdout。会议片段、TTS、公开语料和模板扩写
 均不能晋级。Stage 4 继续保持未采用。
 
+## 宿主音频 30 次补充回放
+
+随后用临时 PipeWire/PulseAudio null sink 的 monitor 作为 Emulator 宿主麦克风，绕开已确认不稳定的
+gRPC `injectAudio` 复用。回放使用开发包 `1.1.48 (156)`、`emulator-5562`、本机 reverse 和隔离
+`18030/8031`，未触碰生产数据库、生产 handler 或公网流量。
+
+开始这轮前发现并纠正了一个证据链错误：此前安装的公开配置 APK 的 `assets/app.config` 指向
+`https://laoji.cloud`，而候选日志来自本机 reverse 后的 `18030`，两者不能拼成同一次纵向回放。
+重新构建时强制重跑 JS bundle task，并验证包内 `apiBase=http://127.0.0.1:28121`、五个候选 flag 和
+已安装 APK 哈希一致，之后才计入设备审计。
+
+30 次同一日程 TTS 只用于暖态性能分布，不用于自然语言质量。结果为：
+
+| 指标 | p50 | p95 | 门限 | 结果 |
+| --- | ---: | ---: | ---: | --- |
+| 按下到采集 | 52ms | 97ms | <=100ms | 通过 |
+| 按下到首文字 | 1322ms | 1398ms | <=1500ms | 通过 |
+| 停止到 Draft | 2265ms | 3087ms | <=3000ms | 失败 |
+| Draft 成功 | 28/30 | - | 30/30 | 失败 |
+
+失败没有被排除：第 19 次收到有效音频和一个转写段，但 Graph 返回
+`SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE`；第 27 次 32 帧音频的 peak/RMS 均为 0，属于宿主注入瞬时
+失效。第 25 次采集启动为 517ms；另有三个 Draft 样本超过 3 秒。相同规范文本随后直接调用候选 Graph
+30 次，30/30 返回 200、来源哈希完全匹配，延迟范围约 1983--2218ms。因此当前证据只能说明：
+
+- 采集与首文字选定实现达到目标；
+- Draft 尾延迟和端到端成功率仍未达到退出门；
+- 那次 503 需要用每次转写输入指纹继续区分 ASR 变化与模型结构输出，不能笼统归因为网络故障；
+- 宿主 monitor 比 gRPC 稳定，但仍不是可忽略失败的正式注入基准。
+
+提交 `05d6183` 的 600 秒全局混合负载已经独立覆盖 realtime ASR、上传、导入积压、日程解析、Q2
+和 Summary，报告见 [全局混合负载](../vnext-global/GLOBAL-MIXED-LOAD-20260820.md)。它可以作为语音
+envelope 的 mixed-load 旁证，但不能把上述失败的 30 次伪装为通过。
+
+本轮还暴露并修复了真实 UI bridge 缺陷：`CalendarEditPageView` 在 Expo 的 `ComponentActivity`
+context 下会静默丢弃取消/保存等所有 action。候选现在无条件派发 bridge action，并提供只用于测试的
+listener/disable 开关；静态门 `verify_calendar_edit_action_bridge.py` 已接入 Stage 4 聚合预检。连续回放
+已经证明成功草稿可以退出 AddEvent 并返回日历，而不是依赖坐标误点。
+
 ## 可复现工具和回滚
 
 - `tools/vnext/inject_emulator_audio.py`：生成 Emulator gRPC stub 并注入 PCM WAV；小批回放复用单流，
@@ -82,8 +121,8 @@ RPC 连续三次的第二次仍未形成终态，继续被排除。这进一步�
   直接关闭浮层且不写业务数据。
 - `tools/vnext/test_schedule_transcript_revision.cjs`：验证 partial/final 同稳定 ID 替换和迟到 partial 围栏。
 
-包含上述实现和隐私安全失败分类的候选 APK 已递增为 `1.1.45 (153)`，大小 `82616399` bytes，
-SHA-256 为 `b45617219d84c55a4286cc71acb5ee9a27257ccbc89e2ae4ec24d366dd93a906`；已覆盖安装到重启后的
+包含 bridge 修复和宿主音频回放工具的最新候选 APK 已递增为 `1.1.48 (156)`，SHA-256 为
+`171a0055bec91175edbcf57210e09503ad534acd179d9e674a2807554559e012`；已覆盖安装到
 `emulator-5562`，保留原数据启动成功且没有 crash/blank-screen。它只指向本机 reverse 后的隔离
 `18030`，未发布、未安装真机、未切公网。
 

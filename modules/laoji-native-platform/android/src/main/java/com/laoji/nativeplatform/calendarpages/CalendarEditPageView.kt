@@ -57,6 +57,8 @@ class CalendarEditPageView(
 
   private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
+  private var bridgeEventsEnabled = true
+  private var actionListener: ((Map<String, Any?>) -> Unit)? = null
   private val root = FrameLayout(context)
   private val titleBar = CalendarCommonTitleBar(context)
   private val scroll = ScrollView(context).apply {
@@ -216,6 +218,14 @@ class CalendarEditPageView(
 
   fun setSnapshot(value: Map<String, Any?>) {
     pendingSnapshot = value
+  }
+
+  fun setBridgeEventsEnabled(value: Boolean) {
+    bridgeEventsEnabled = value
+  }
+
+  fun setActionListener(listener: ((Map<String, Any?>) -> Unit)?) {
+    actionListener = listener
   }
 
   fun commitProps() {
@@ -533,7 +543,8 @@ class CalendarEditPageView(
   }
 
   private fun dispatchAction(payload: Map<String, Any?>) {
-    if (context !is ComponentActivity) onAction(payload)
+    actionListener?.invoke(payload)
+    if (bridgeEventsEnabled) onAction(payload)
   }
 
   private fun valueRow(iconRes: Int, label: String, value: TextView, onClick: () -> Unit): View =

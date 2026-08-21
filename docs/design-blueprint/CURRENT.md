@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.47 (155)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.48 (156); Stage 4 voice 30-run host-audio envelope measured but failed closed`
 
 ## 权威文件
 
@@ -211,8 +211,13 @@ Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 
 ASR owner 内实现有界 active-speech snapshot：有效讲话 `640ms` 后首个 preview、间隔至少 `1600ms`、
 单会话最多 4 次，partial/final 共享 revision key 且 final 权威替换。更新后的 5 次真实会议讲话采集/
 首文字 p95 为 `43/1490ms`；完整日程 TTS 3 次采集/首文字/Draft p95 为 `43/1481/2513ms`。
-这证明低延迟候选可行，但不是模型级 streaming，也未满足 30 个暖态样本和 10 分钟混合负载；模拟器
-虚拟麦克风的多轮流缺陷已被排除出证据。详见
+这证明低延迟候选可行，但不是模型级 streaming。随后改用宿主 PipeWire/PulseAudio monitor 而不是
+Emulator gRPC 流，完成了同一真实 App 链路的 30 次暖态回放：采集/首文字/Draft p95 为
+`97/1398/3087ms`，28/30 到达 Draft；一次是 Graph Provider 对该次转写失败关闭，一次是宿主音频注入
+全零，另有一次采集启动 `517ms`。因此该批次真实记录为 `passed=false`，不能封存成退出证据。
+同一规范文本的独立 Graph 复放为 30/30 成功、约 `1.98--2.22s`，把单次 503 收敛到“该次转写或
+模型结构输出”的可观察性缺口，而不是固定网络断线。十分钟六通道混合负载已由提交 `05d6183` 的
+独立报告关闭，不再重复执行；语音 30 样本本身仍需重跑通过。详见
 [语音日程真实音频回放](../vnext-stage4/SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。断网、进程死亡、
 正式性能 envelope、自然质量和 capability barrier 仍未完成，候选默认仍关闭。
 

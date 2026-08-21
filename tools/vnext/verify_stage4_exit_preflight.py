@@ -93,6 +93,7 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
         ("verify_schedule_graph_owner.py", '"passed": true', "static_graph_owner"),
         ("verify_schedule_graph_mobile_owner.py", '"passed": true', "static_mobile_graph_owner"),
         ("verify_schedule_voice_capture_order.py", "schedule_voice_capture_order=passed", "static_voice_capture"),
+        ("verify_calendar_edit_action_bridge.py", "calendar_edit_action_bridge=passed", "static_calendar_edit_action_bridge"),
         ("verify_projection_action_fence.py", "projection_action_fence=passed", "static_projection_action_fence"),
     ):
         passed, evidence = _static_gate(root, script, marker)

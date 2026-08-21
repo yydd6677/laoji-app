@@ -32,9 +32,12 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
 聚合预检现要求封存的 `schedule-voice-performance-v1`，除三个 p95 外还强制 `sample_count>=30`、
 至少 600 秒混合负载，并逐项确认 realtime ASR、上传、导入积压、日程解析、问答和整理同时存在。
 Android Emulator 36.6.11 的 gRPC 虚拟麦克风在持久流复用时会产生无声任务，反复开流又会触发模拟器
-自身 SIGSEGV，因此无效的 30 次尝试已排除。详见
-[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。预检继续失败关闭，但阻断已从
-“选定实现没有低延迟路径”收敛为“正式 30 样本/混合负载证据尚缺”。
+自身 SIGSEGV，因此早期无效尝试已排除。改用宿主 PipeWire/PulseAudio monitor 后完成 30 次连续
+回放，得到采集/首文字/Draft p95 `97/1398/3087ms`、Draft `28/30`，其中一次 Graph 503、一次宿主
+输入全零；该报告按合同为 `passed=false`。十分钟六类混合负载已经由
+[全局混合负载](../vnext-global/GLOBAL-MIXED-LOAD-20260820.md)独立关闭，不必重复，但仍缺一份自身通过的
+30 样本语音 envelope。详见
+[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。预检继续失败关闭。
 
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由

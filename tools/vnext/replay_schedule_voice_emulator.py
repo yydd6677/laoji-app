@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -148,6 +149,30 @@ def _wait_audit_terminal(serial: str, start_index: int, timeout: float) -> str:
     raise RuntimeError("schedule voice did not reach an audited terminal state")
 
 
+def _leave_voice_result(serial: str, terminal: str) -> None:
+    """Return to Calendar without saving the replayed draft.
+
+    A successful native voice parse now hands the draft to the calendar edit
+    page.  The old harness kept tapping the cached close coordinate from the
+    voice sheet, which could leave that edit page open and make the next run
+    operate on unrelated controls.  Resolve the current owner after recording
+    has stopped, then use its explicit discard action.
+    """
+    if terminal == "确认日程":
+        cancel = _find_clickable(serial, "取消")
+        if cancel is not None:
+            _adb(serial, "shell", "input", "tap", str(cancel[0]), str(cancel[1]))
+        else:
+            _adb(serial, "shell", "input", "keyevent", "KEYCODE_BACK")
+    else:
+        close = _find_clickable(serial, "关闭新建日程")
+        if close is not None:
+            _adb(serial, "shell", "input", "tap", str(close[0]), str(close[1]))
+        else:
+            _adb(serial, "shell", "input", "keyevent", "KEYCODE_BACK")
+    _wait_visible(serial, ("新建日程",), 8)
+
+
 def _calendar(serial: str) -> None:
     _adb(
         serial,
@@ -199,6 +224,13 @@ def main() -> int:
     parser.add_argument("wav", type=Path)
     parser.add_argument("--serial", default="emulator-5562")
     parser.add_argument("--endpoint", default="127.0.0.1:8554")
+    parser.add_argument(
+        "--pulse-sink",
+        help=(
+            "play each WAV into this host PulseAudio/PipeWire sink instead of "
+            "using the Emulator gRPC microphone stream"
+        ),
+    )
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -211,11 +243,14 @@ def main() -> int:
     sdk_root = Path(
         os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "~/Android/Sdk",
     ).expanduser()
-    stubs = _load_stubs(sdk_root)
+    stubs = None if args.pulse_sink else _load_stubs(sdk_root)
+    if args.pulse_sink and shutil.which("paplay") is None:
+        raise SystemExit("paplay is required for --pulse-sink")
     runs: list[dict[str, object]] = []
     injector = None
     try:
-        injector = EmulatorMicrophoneInjector(args.endpoint, stubs)
+        if stubs is not None:
+            injector = EmulatorMicrophoneInjector(args.endpoint, stubs)
         for ordinal in range(1, args.runs + 1):
             _tap(args.serial, "新建日程")
             if ordinal == 1:
@@ -227,7 +262,8 @@ def main() -> int:
                 _wait_visible(args.serial, ("开始语音输入",), 8)
             else:
                 time.sleep(0.35)
-            injector.prepare()
+            if injector is not None:
+                injector.prepare()
             before = len(_audit_events(args.serial))
             _tap(args.serial, "开始语音输入")
             # UIAutomator dumps take multiple seconds on this emulator and
@@ -235,34 +271,43 @@ def main() -> int:
             # Native capture starts well below 100 ms; a short fixed guard
             # models a person beginning to speak immediately after the tap.
             time.sleep(0.15)
-            injector.inject(
-                args.wav,
-                # A persistent gRPC stream may accept several seconds of PCM
-                # into transport buffers after its first job.  Pace every WAV
-                # explicitly so Stop cannot race audio that the emulator has
-                # accepted but not yet delivered to AudioRecord.
-                realtime=True,
-            )
+            if args.pulse_sink:
+                subprocess.run(
+                    ["paplay", f"--device={args.pulse_sink}", str(args.wav)],
+                    check=True,
+                    timeout=max(30, int(args.wav.stat().st_size / 16_000) + 30),
+                )
+            else:
+                assert injector is not None
+                injector.inject(
+                    args.wav,
+                    # A persistent gRPC stream may accept several seconds of
+                    # PCM into transport buffers after its first job. Pace
+                    # every WAV explicitly so Stop cannot race accepted audio.
+                    realtime=True,
+                )
             time.sleep(0.4)
             _tap(args.serial, "停止语音输入")
             terminal = _wait_audit_terminal(args.serial, before, 20)
             new_events = _audit_events(args.serial)[before:]
             by_name = {str(event["event"]): event for event in new_events}
+            draft_event = by_name.get("schedule_voice_draft_ready", {})
+            failure_event = by_name.get("schedule_voice_draft_failed", {})
             runs.append({
                 "run": ordinal,
                 "terminal": "draft" if terminal == "确认日程" else "failure",
                 "capture_start_ms": by_name.get("schedule_voice_capture_started", {}).get("latency_ms"),
                 "first_text_ms": by_name.get("schedule_voice_first_text", {}).get("latency_ms"),
-                "draft_ms": by_name.get("schedule_voice_draft_ready", {}).get("latency_ms"),
-                "failure_ms": by_name.get("schedule_voice_draft_failed", {}).get("latency_ms"),
+                "draft_ms": draft_event.get("latency_ms"),
+                "used_recovery": draft_event.get("used_recovery"),
+                "failure_ms": failure_event.get("latency_ms"),
+                "error_code": failure_event.get("error_code"),
+                "frame_count": failure_event.get("frame_count"),
+                "max_peak": failure_event.get("max_peak"),
+                "max_rms": failure_event.get("max_rms"),
+                "transcript_segment_count": failure_event.get("transcript_segment_count"),
             })
-            if terminal == "确认日程":
-                # Close the activity-owned voice overlay directly.  Do not
-                # enter AddEvent or press a generic Cancel button: both make
-                # the performance harness capable of mutating calendar data.
-                _tap(args.serial, "关闭新建日程")
-            else:
-                _tap(args.serial, "关闭新建日程")
+            _leave_voice_result(args.serial, terminal)
             # The next iteration uses only cached, owner-stable controls. Do
             # not export the accessibility tree while the emulator microphone
             # RPC remains alive; Emulator 36.6 may block that unrelated shell
@@ -271,7 +316,8 @@ def main() -> int:
     finally:
         if injector is not None:
             injector.close()
-        stubs[3].cleanup()
+        if stubs is not None:
+            stubs[3].cleanup()
 
     capture = [int(row["capture_start_ms"]) for row in runs if isinstance(row["capture_start_ms"], int)]
     first = [int(row["first_text_ms"]) for row in runs if isinstance(row["first_text_ms"], int)]
@@ -282,6 +328,8 @@ def main() -> int:
         "device": args.serial,
         "source_file": args.wav.name,
         "sample_reused": True,
+        "injection_mode": "host_pulse_sink" if args.pulse_sink else "emulator_grpc",
+        "pulse_sink": args.pulse_sink,
         "runs": runs,
         "metrics": {
             "run_count": len(runs),
