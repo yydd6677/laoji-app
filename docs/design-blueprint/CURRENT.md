@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 runtime/resource preflight 19/20 passed with public zero-cycle, independent quality and capability adoption still open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.42 (150)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 historical runtime/resource subset 19/20 passed, while quality-aware exit preflight exposes speaker/ASR quality, public zero-cycle and capability adoption as open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.45 (153)`
 
 ## 权威文件
 
@@ -105,10 +105,16 @@ Android/质量/混合负载、公开零流量和 capability barrier 当时仍开
 2026-08-21 已在 `emulator-5562` 对隔离 `18031/8031` 完成真实原生 v2 网络中断与 App 进程死亡组合
 回放；恢复后只有一个 WorkManager operation、一个 transcript task/attempt 和一个本机 active revision，
 115 个最终片段的稳定键无重复。独立静音文件通过同一路径形成 `no_speech` 成功结果、空错误码和零片段。
-再合并 10 分钟全局混合负载、1 GiB 上传内存及本轮 cleanup/SQLite 审计后，Stage 2 聚合预检为
-`19/20`；唯一运行阻断是旧 submit 的外部公开零流量周期。CER/数字时间和已登记/未知讲话人质量、正式
-8030 v2 部署及 capability 人工采用仍开放，详见
+再合并 10 分钟全局混合负载、1 GiB 上传内存及本轮 cleanup/SQLite 审计后，Stage 2 历史运行/资源
+子集为 `19/20`；该数字未包含 CER、数字时间、speaker overlay 和已登记/未知讲话人质量，不能表示
+Stage 2 只差一个门。质量感知预检已补齐这些门；正式 8030 v2 部署、公开零旧提交周期及 capability
+人工采用仍开放，详见
 [Android v2 网络与进程恢复](../vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md)。
+
+当前 10 组 MP4/SRT 各抽 3 个窗口的弱参考诊断得到 CER 中位数 `5.56%`、p95 `41.67%`、数字/时间
+`89.71%`；最高误差窗口已确认包含明显字幕漏句/错词，因此结果只能生成独立校正清单，不能判定模型
+通过或失败。证据边界见
+[ASR 弱字幕诊断](../vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md)。
 
 隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
@@ -174,8 +180,8 @@ Graph 草稿澄清不会把补充拆成独立输入。查询/删除/拒绝不进
 [readiness probe latency boundary](../vnext-stage5/READINESS-PROBE-20260819.md)；尚未部署远端，
 不代表生产 readiness 延迟已改善。
 Stage 2 退出门现在有统一的只读聚合预检 `tools/vnext/verify_stage2_exit_preflight.py`，对 Android
-恢复、性能/资源、候选清理和旧公开零流量逐项 fail-closed；当前完整 candidate envelope 为 `19/20`，
-仅外部公开零流量周期保持阻断，证据见
+恢复、性能/资源、speaker overlay、独立 ASR/讲话人质量、候选清理和旧公开零流量逐项 fail-closed；
+历史 `19/20` 只代表运行/资源子集，质量感知 schema v2 仍有 9 项阻断，证据见
 [Stage 2 exit preflight](../vnext-stage2/STAGE2-EXIT-PREFLIGHT-20260819.md)。
 Stage 4 同样增加了只读聚合预检，要求独立日程人工 holdout、语音 p95、页面重建/stale action、FTS
 和旧 schedule submit 零流量证据；当前仅静态/迁移门通过，真实 Android 与质量 envelope 缺失，证据见

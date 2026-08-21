@@ -21,12 +21,24 @@ Example envelope shape::
         "realtime_p95_ms": 1900,
         "import_rtf_p95": 0.48,
         "first_segment_p95_ms": 7600,
+        "speaker_overlay_p95_ms": 29000,
         "api_rss_peak_kib": 1200000,
         "api_rss_delta_mib": 64,
         "total_rss_gib": 7.5,
         "gpu0_free_gib": 1.2,
         "cpu_p95_cores": 12,
         "temp_peak_gib": 2.0
+      },
+      "media_quality": {
+        "evidence_contract": "media-human-quality-v1",
+        "gate_eligible": true,
+        "metrics": {
+          "cer_median": 0.07,
+          "cer_p95": 0.17,
+          "numeric_time_accuracy": 0.96,
+          "registered_attribution_f1": 0.91,
+          "unknown_forced_name_rate": 0.0
+        }
       },
       "cleanup": {"pending_tasks": 0, "pending_cleanup": 0},
       "public_cycle": {"complete": true, "legacy_submit_count": 0},
@@ -50,6 +62,8 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from media_quality_evidence import verify_quality_report
+
 
 ROOT = Path(__file__).resolve().parents[2]
 API_RSS_LIMIT_KIB = 1_200 * 1024
@@ -61,6 +75,12 @@ TEMP_LIMIT_GIB = 4.0
 REALTIME_P95_LIMIT_MS = 2_000
 IMPORT_RTF_LIMIT = 0.5
 FIRST_SEGMENT_P95_LIMIT_MS = 8_000
+SPEAKER_OVERLAY_P95_LIMIT_MS = 30_000
+CER_MEDIAN_LIMIT = 0.08
+CER_P95_LIMIT = 0.18
+NUMERIC_TIME_ACCURACY_MINIMUM = 0.95
+REGISTERED_ATTRIBUTION_F1_MINIMUM = 0.90
+UNKNOWN_FORCED_NAME_RATE_LIMIT = 0.0
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
@@ -210,6 +230,7 @@ def inspect(
         ("realtime_p95_ms", REALTIME_P95_LIMIT_MS, "realtime_p95_ms"),
         ("import_rtf_p95", IMPORT_RTF_LIMIT, "import_rtf_p95"),
         ("first_segment_p95_ms", FIRST_SEGMENT_P95_LIMIT_MS, "first_segment_p95_ms"),
+        ("speaker_overlay_p95_ms", SPEAKER_OVERLAY_P95_LIMIT_MS, "speaker_overlay_p95_ms"),
         ("api_rss_peak_kib", API_RSS_LIMIT_KIB, "api_rss_peak_kib"),
         ("api_rss_delta_mib", API_UPLOAD_DELTA_LIMIT_MIB, "api_rss_delta_mib"),
         ("total_rss_gib", TOTAL_RSS_LIMIT_GIB, "total_rss_gib"),
@@ -233,6 +254,80 @@ def inspect(
         evidence={"value": gpu_free, "minimum": GPU0_FREE_LIMIT_GIB},
         reason="measured_gpu_snapshot_required",
     )
+
+    quality = _mapping(data.get("media_quality"))
+    quality_verified, quality_reason = verify_quality_report(quality)
+    _gate(
+        gates,
+        "media_quality_lineage",
+        quality_verified,
+        evidence={
+            "verified": quality_verified,
+            "contract": quality.get("evidence_contract"),
+            "report_sha256": quality.get("report_sha256"),
+        },
+        reason=quality_reason,
+    )
+    quality_metrics = _mapping(quality.get("metrics")) if quality_verified else {}
+    gate_eligible = _bool(quality.get("gate_eligible")) if quality_verified else None
+    asr_count = _number(quality.get("asr_sample_count")) if quality_verified else None
+    registered_count = _number(
+        quality.get("registered_speaker_sample_count")
+    ) if quality_verified else None
+    unknown_count = _number(
+        quality.get("unknown_speaker_sample_count")
+    ) if quality_verified else None
+    _gate(
+        gates,
+        "media_independent_human_holdout",
+        (
+            gate_eligible is True
+            and asr_count is not None and asr_count >= 30
+            and registered_count is not None and registered_count >= 10
+            and unknown_count is not None and unknown_count >= 10
+        ),
+        evidence={
+            "gate_eligible": gate_eligible,
+            "asr_sample_count": asr_count,
+            "registered_speaker_sample_count": registered_count,
+            "unknown_speaker_sample_count": unknown_count,
+        },
+        reason="independent_first_party_media_holdout_required",
+    )
+    for field, limit, comparison, name in (
+        ("cer_median", CER_MEDIAN_LIMIT, "maximum", "asr_cer_median"),
+        ("cer_p95", CER_P95_LIMIT, "maximum", "asr_cer_p95"),
+        (
+            "numeric_time_accuracy",
+            NUMERIC_TIME_ACCURACY_MINIMUM,
+            "minimum",
+            "asr_numeric_time_accuracy",
+        ),
+        (
+            "registered_attribution_f1",
+            REGISTERED_ATTRIBUTION_F1_MINIMUM,
+            "minimum",
+            "speaker_registered_attribution_f1",
+        ),
+        (
+            "unknown_forced_name_rate",
+            UNKNOWN_FORCED_NAME_RATE_LIMIT,
+            "maximum",
+            "speaker_unknown_forced_name_rate",
+        ),
+    ):
+        value = _number(quality_metrics.get(field))
+        passed_quality = (
+            value is not None
+            and ((comparison == "maximum" and value <= limit) or (comparison == "minimum" and value >= limit))
+        )
+        _gate(
+            gates,
+            name,
+            passed_quality,
+            evidence={"value": value, comparison: limit},
+            reason="verified_media_quality_threshold_required",
+        )
 
     cleanup = _mapping(data.get("cleanup"))
     pending_tasks = _number(cleanup.get("pending_tasks"))
@@ -261,7 +356,7 @@ def inspect(
 
     passed = bool(gates) and all(item["status"] == "passed" for item in gates)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "candidate_only": True,
         "production_mutation": False,
         "passed": passed,
@@ -294,4 +389,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

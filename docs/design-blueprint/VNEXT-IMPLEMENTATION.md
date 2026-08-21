@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 runtime/resource preflight 19/20 passed while public zero-cycle, independent quality, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance and bounded replaceable voice preview are implemented with preliminary sub-1.5s first-text evidence, while sealed 30-sample mixed-load performance, natural quality and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 historical runtime/resource subset passed 19/20 but quality-aware exit now also blocks on speaker-overlay latency, independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance and bounded replaceable voice preview are implemented with preliminary sub-1.5s first-text evidence, while sealed 30-sample mixed-load performance, natural quality and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -62,9 +62,15 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 2026-08-21 的专属 `emulator-5562` 原生回放在活跃 WorkManager v2 上传期间同时注入网络中断和 App
 进程死亡，恢复后精确保持一个资产、operation、task/attempt 和 active Transcript revision，稳定片段键
 无重复；独立静音文件以 `no_speech`、空错误码、零片段成功闭合。与先前混合负载/资源证据合并后，
-Stage 2 聚合预检 20 门通过 19 门，唯一阻断为外部公开旧 submit 零流量周期。独立 CER/数字时间与
-讲话人质量、正式 8030 v2 handler 和 capability 人工采用仍需继续，证据见
+Stage 2 历史运行/资源预检 20 门通过 19 门，唯一运行子集阻断为外部公开旧 submit 零流量周期；该
+旧数字没有把 CER、数字时间、speaker overlay、已登记/未知讲话人质量计入机器门禁。质量感知 schema v2
+已补齐这些门，当前仍缺独立人工媒体质量、正式 8030 v2 handler 和 capability 人工采用，证据见
 `docs/vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md`。
+
+2026-08-21 的 10 组 MP4/SRT、30 窗口弱参考诊断得到 CER 中位数 `5.56%`、p95 `41.67%`、数字/时间
+`89.71%`；逐条检查确认高误差窗口至少含字幕漏句、错词和边界漂移，因此合同固定为不可晋级，不能按
+弱参考调模型或关闭质量门。`media-human-quality-v1` 只接受第一方双人盲审/裁决参考、预测后置和
+完整哈希血缘；详见 `docs/vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md`。
 
 2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
 收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前

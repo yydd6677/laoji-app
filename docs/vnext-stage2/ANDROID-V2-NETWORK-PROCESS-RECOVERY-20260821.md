@@ -1,6 +1,6 @@
 # Stage 2 Android v2 网络与进程恢复回放
 
-状态：`candidate evidence; 19/20 exit gates passed; not adopted`。
+状态：`candidate Android/runtime evidence; historical runtime/resource subset 19/20; quality-aware Stage 2 exit still open; not adopted`。
 
 ## 隔离边界
 
