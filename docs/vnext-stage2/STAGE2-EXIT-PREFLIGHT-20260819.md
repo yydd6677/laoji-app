@@ -26,11 +26,18 @@
 - `PYTHONPATH=. .venv-vnext/bin/python -m pytest -q tools/vnext/test_verify_stage2_exit_preflight.py`：`3 passed`。
 - `python3 tools/vnext/verify_stage2_android_contract.py`：通过。
 
+2026-08-21 已补交完整 candidate evidence envelope，并以隔离 `18031`、GPU0 `8031`、
+`emulator-5562` 和只读 SQLite backup 执行聚合预检。20 个运行/资源门中 19 个通过；Android candidate、
+网络中断恢复、进程死亡恢复、页面投影无重复、`NO_SPEECH` 成功、混合负载资源和 cleanup 均已有真实证据。
+机器可读输入与结论分别为 `stage2-exit-evidence-20260821.json` 和
+`stage2-exit-preflight-20260821.json`，设备回放见
+[Android v2 网络与进程恢复](ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md)。
+
 ## 阻断结论
 
-2026-08-20 的 30 条真实全链路回放已为选定 GPU0 架构提供 `first_segment_p95_ms=2877` 和
-`import_rtf_p95=0.140411`，这两个数值门已单独通过，见
-[校验媒体复用与 GPU0 回放](VERIFIED-MEDIA-CACHE-GPU-20260820.md)。但当前仍缺专属 Android 的网络/
-进程恢复和端到端 realtime p95，以及完整总 RSS、GPU0 安全余量、质量门和旧公开零流量周期；正式
-8030 也尚未部署 v2 handler。因此还不能形成全字段合格 envelope，该工具必须继续非零退出，Stage 2
-capability barrier 不能激活，生产 `18020/8030` 配置和旧链路均未改变。
+2026-08-20 的 GPU0 全链路和混合负载证据已关闭首段、RTF、realtime、RSS、CPU、临时盘及 GPU0
+安全余量；2026-08-21 的 Android v2 回放又关闭设备恢复、连续投影、去重、`NO_SPEECH` 和清理门。
+当前聚合预检唯一阻断为 `legacy_submit_zero_public_cycle`：尚无外部公开周期的旧 upload/ASR submit
+零流量记录。更广的 Stage 2 退出仍需独立 CER/数字时间及已登记/未知讲话人质量证据，并需正式 8030
+部署 v2 handler 后才能人工激活 capability barrier。因此工具继续非零退出，生产 `18020/8030`
+配置和旧链路均未改变。

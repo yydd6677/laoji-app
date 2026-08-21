@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 selected-architecture first-segment/RTF performance gate passed but deployment/Android/quality/capability gates remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices and real-audio voice instrumentation implemented, voice first-text gate failed, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 runtime/resource preflight 19/20 passed while public zero-cycle, independent quality, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance slices and real-audio voice instrumentation implemented, voice first-text gate failed, not adopted; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -56,8 +56,15 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 缺失时仍从 R2 恢复。隔离 API/数据库/R2 与 loopback v2 测试桥复用生产 GPU0 上相同模型/revision 的
 30 条真实媒体回放，首段 p95 `2.877s`、RTF p95 `0.140411`，并保持 30/30 文本、单 final 和清理。
 因此选定架构的首段/RTF 性能门已关闭，纯 CPU 路线被否决；正式 8030 v2 handler、Android、质量、
-混合负载、公开零流量与 capability 门仍开放。证据见
+混合负载、公开零流量与 capability 门在该回放后仍开放。证据见
 `docs/vnext-stage2/VERIFIED-MEDIA-CACHE-GPU-20260820.md`。
+
+2026-08-21 的专属 `emulator-5562` 原生回放在活跃 WorkManager v2 上传期间同时注入网络中断和 App
+进程死亡，恢复后精确保持一个资产、operation、task/attempt 和 active Transcript revision，稳定片段键
+无重复；独立静音文件以 `no_speech`、空错误码、零片段成功闭合。与先前混合负载/资源证据合并后，
+Stage 2 聚合预检 20 门通过 19 门，唯一阻断为外部公开旧 submit 零流量周期。独立 CER/数字时间与
+讲话人质量、正式 8030 v2 handler 和 capability 人工采用仍需继续，证据见
+`docs/vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md`。
 
 2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
 收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前
@@ -1090,12 +1097,13 @@ Stage 1 停写/退出门：generic probe 的 restart/cancel/replay、epoch/bindi
 
 当前隔离实现还包含一个上传恢复顺序切片：设备 v2 原生成功必须先把远端资产身份写入
 canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncStorage registry 只作为
-兼容补集，遇到成功/取消代际会被抑制。该切片已通过 SQLite 回放和静态 Android 合同，但尚未
-激活 capability，也未替代真实设备回放。
+兼容补集，遇到成功/取消代际会被抑制。该切片已通过 SQLite、静态合同及 `emulator-5562` 网络/
+进程恢复回放，但尚未激活 capability。
 
 目标退出门：1 GiB 上传内存与恢复门、双上传+实时会议无冲突、首段/RTF/讲话人预算均需分别有真实证据；
-未知讲话人不命名；NO_SPEECH 中文结果正确。首段/RTF 已由 2026-08-20 的 GPU0 全链路证据关闭，
-其余门不得由该性能报告代替。
+未知讲话人不命名；NO_SPEECH 中文结果正确。首段/RTF、混合负载资源、Android 恢复/去重和 NO_SPEECH
+已分别由 2026-08-20/21 证据关闭；CER/数字时间、已登记/未知讲话人质量、外部公开零流量和 capability
+采用仍不得从这些证据推断。
 
 回滚：barrier 前允许客户端 capability 切回旧完整链路；barrier 后保留 v2 R2 ingress、verified asset
 和 generic Task，只把新 generation 显式路由到 legacy transcription handler adapter，不恢复旧 upload/

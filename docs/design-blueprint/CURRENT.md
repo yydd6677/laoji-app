@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 selected-architecture first-segment/RTF gate passed but adoption gates remain open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.42 (150)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 runtime/resource preflight 19/20 passed with public zero-cycle, independent quality and capability adoption still open; Stage 3 and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.42 (150)`
 
 ## 权威文件
 
@@ -99,8 +99,16 @@ v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦�
 API/数据库/R2 前缀和 loopback v2 测试桥、但复用生产 GPU0 上完全相同的 Qwen3-ASR-1.7B/revision，
 30 条真实媒体全链路首段 p95 为 `2.877s`、RTF p95 为 `0.140411`，30/30 文本、单 final 与清理均通过。
 这关闭了选定架构的首段/RTF 性能项；纯 CPU 和 8 秒片段路线被否决。正式 8030 v2 handler 部署、
-Android/质量/混合负载、公开零流量和 capability barrier 仍开放，详见
+Android/质量/混合负载、公开零流量和 capability barrier 当时仍开放，详见
 [校验媒体复用与 GPU0 回放](../vnext-stage2/VERIFIED-MEDIA-CACHE-GPU-20260820.md)。
+
+2026-08-21 已在 `emulator-5562` 对隔离 `18031/8031` 完成真实原生 v2 网络中断与 App 进程死亡组合
+回放；恢复后只有一个 WorkManager operation、一个 transcript task/attempt 和一个本机 active revision，
+115 个最终片段的稳定键无重复。独立静音文件通过同一路径形成 `no_speech` 成功结果、空错误码和零片段。
+再合并 10 分钟全局混合负载、1 GiB 上传内存及本轮 cleanup/SQLite 审计后，Stage 2 聚合预检为
+`19/20`；唯一运行阻断是旧 submit 的外部公开零流量周期。CER/数字时间和已登记/未知讲话人质量、正式
+8030 v2 部署及 capability 人工采用仍开放，详见
+[Android v2 网络与进程恢复](../vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md)。
 
 隔离 8031/18021 候选已完成真实 `/v2/asr/batch`、R2 上传、尾索引媒体 HTTP Range 解码、连续文字
 事件、ACK/cleanup、API 中断恢复和 ASR 推理中断恢复，详见
@@ -116,8 +124,8 @@ Android/质量/混合负载、公开零流量和 capability barrier 仍开放，
 [candidate deployment](../vnext-stage3/CANDIDATE-DEPLOY-47640F3-20260819.md)；旧候选仍可回滚）；生产 `18020/8030`
 仍未修改。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
-生产延迟。下一入口是正式 8030 v2 handler、Android 网络/进程恢复、手机连续文字投影、NO_SPEECH、
-混合负载和质量门；
+生产延迟。Android 网络/进程恢复、手机连续文字投影、NO_SPEECH 和混合负载门已由后续回放关闭；
+下一入口是独立转写/讲话人质量、正式 8030 v2 handler、公开零流量周期与 capability barrier；
 不得重放 Stage 0/1，也不得激活生产 capability barrier。当前登记的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
@@ -126,10 +134,10 @@ Android/质量/混合负载、公开零流量和 capability barrier 仍开放，
 [样本快照复核](../vnext-acceptance/SAMPLE-SNAPSHOT-VERIFY-20260819.md)。
 
 兼容设备转写补全路径现已将“任务明确完成、响应完整但无文字”收敛为成功的 `no_speech` 内容结果，
-不再把明确的无语音录音标记为可重试失败；该修复仍属于隔离候选，尚未经过专属 Android 设备回放。
+不再把明确的无语音录音标记为可重试失败；该修复仍属于隔离候选，后续已经过专属 Android 设备回放。
 真实一秒全零 PCM 曾在旧 8031 被 Qwen 幻觉为“嗯。”；`0eae538` 统一 ASR coordinator 现以可配置的
 保守 RMS/峰值双门在模型前收敛数字静音，并已在隔离 8031 对相同输入返回稳定 `no_speech`、
-空文本和 `infer_ms=0`。生产 8030 未改变，Stage 2 仍缺专属 Android 设备无语音/中断回放。
+空文本和 `infer_ms=0`。生产 8030 未改变；专属 Android 无语音/中断回放已在 2026-08-21 闭合。
 
 随后在隔离候选完成了正式 device-v2 WebSocket 的真实短语音回放：一条真实会议语音在第 5 个分片后
 断线并从服务端游标恢复，得到 stable/final `text`；一条无语音输入得到 final `no_speech`，两次均完成
@@ -166,8 +174,9 @@ Graph 草稿澄清不会把补充拆成独立输入。查询/删除/拒绝不进
 [readiness probe latency boundary](../vnext-stage5/READINESS-PROBE-20260819.md)；尚未部署远端，
 不代表生产 readiness 延迟已改善。
 Stage 2 退出门现在有统一的只读聚合预检 `tools/vnext/verify_stage2_exit_preflight.py`，对 Android
-恢复、性能/资源、候选清理和旧公开零流量逐项 fail-closed；当前无完整 evidence envelope，预检保持
-阻断，证据见 [Stage 2 exit preflight](../vnext-stage2/STAGE2-EXIT-PREFLIGHT-20260819.md)。
+恢复、性能/资源、候选清理和旧公开零流量逐项 fail-closed；当前完整 candidate envelope 为 `19/20`，
+仅外部公开零流量周期保持阻断，证据见
+[Stage 2 exit preflight](../vnext-stage2/STAGE2-EXIT-PREFLIGHT-20260819.md)。
 Stage 4 同样增加了只读聚合预检，要求独立日程人工 holdout、语音 p95、页面重建/stale action、FTS
 和旧 schedule submit 零流量证据；当前仅静态/迁移门通过，真实 Android 与质量 envelope 缺失，证据见
 [Stage 4 exit preflight](../vnext-stage4/STAGE4-EXIT-PREFLIGHT-20260819.md)。
