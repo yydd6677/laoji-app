@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from typing import Any, Mapping
 
 
@@ -38,7 +39,10 @@ def _mapping(value: object, code: str) -> Mapping[str, Any]:
 def _number(value: object, code: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise EvidenceError(code)
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise EvidenceError(code)
+    return number
 
 
 def _integer(value: object, code: str) -> int:
@@ -140,13 +144,14 @@ def verify_quality_report(value: object) -> tuple[bool, str]:
             "media_quality_unknown_rate_invalid",
         )
         for name, metric in (
-            ("cer_median", cer_median),
-            ("cer_p95", cer_p95),
             ("numeric_time_accuracy", numeric_time_accuracy),
             ("registered_attribution_f1", attribution_f1),
             ("unknown_forced_name_rate", unknown_forced_name_rate),
         ):
             if not 0.0 <= metric <= 1.0:
+                raise EvidenceError(f"media_quality_metric_range_invalid:{name}")
+        for name, metric in (("cer_median", cer_median), ("cer_p95", cer_p95)):
+            if metric < 0.0:
                 raise EvidenceError(f"media_quality_metric_range_invalid:{name}")
         if cer_median > cer_p95:
             raise EvidenceError("media_quality_cer_percentile_order_invalid")

@@ -72,6 +72,11 @@ Stage 2 历史运行/资源预检 20 门通过 19 门，唯一运行子集阻断
 弱参考调模型或关闭质量门。`media-human-quality-v1` 只接受第一方双人盲审/裁决参考、预测后置和
 完整哈希血缘；详见 `docs/vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md`。
 
+双盲 review、独立裁决冻结、冻结后 predictions、development 音频哈希隔离和五项指标确定性计算工具
+已于同日补齐；数字/时间参考为空时失败关闭，CER 不截断，公开报告不复制用户内容。现有会议样本已
+参与开发，不能作为独立晋级 holdout，因此该工具只关闭证据生成缺口，完整质量门仍等待新的第一方
+音频和真实人工流程。详见 `docs/vnext-stage2/MEDIA-HUMAN-QUALITY-EVIDENCE-20260821.md`。
+
 随后隔离 device-v2 候选对同一真实 6 秒语音完成 30 次独立 CAM++ overlay 暖态回放：`30/30`
 成功，文字完成后的 p95 为 `629.6 ms`，所有 binding/epoch purge 均确认，回放后无 active task、speaker
 input、checkpoint 或 spool 文件。预检现在同时要求至少 30 条 overlay 样本，避免单点时延冒充 p95；

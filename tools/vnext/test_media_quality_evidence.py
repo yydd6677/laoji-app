@@ -48,6 +48,16 @@ def test_tampered_metric_is_rejected() -> None:
     assert verify_quality_report(report)[0] is False
 
 
+def test_cer_above_one_is_valid_but_not_clipped() -> None:
+    report = _report()
+    report.pop("report_sha256")
+    report["metrics"]["cer_median"] = 1.1
+    report["metrics"]["cer_p95"] = 1.4
+    report = seal_report(report)
+
+    assert verify_quality_report(report) == (True, "verified")
+
+
 def test_subtitle_diagnostic_cannot_claim_gate_eligibility() -> None:
     report = _report()
     report.pop("report_sha256")

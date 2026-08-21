@@ -18,6 +18,9 @@
    复验，再让候选 API 去除 8031 代理引用；
 3. 激活前完成一个公开旧 media submit 为零的完整发布周期，然后才可人工采用 capability。
 
+双盲/裁决/后置预测的模板和确定性评分器已经完成。现有会议视频已进入开发与诊断，不能再作为独立
+质量 holdout；外部输入必须是新的、明确授权且未参与调试的第一方音频。
+
 ## Stage 3
 
 已闭合：source stream、Facts V3、两槽恢复、确定性模板、行动候选边界、Q2 reader/grounding、Android

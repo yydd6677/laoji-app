@@ -50,6 +50,11 @@ speaker overlay 至少 30 条样本及 p95、严格 `media-human-quality-v1` 血
 [ASR 弱字幕诊断](ASR-SRT-WEAK-DIAGNOSTIC-20260821.md)。结果可定位校正窗口，但 SRT 有错漏，合同强制
 `promotion_eligible=false`，不会关闭任何人工质量门。
 
+同日补齐了从双盲 review、独立裁决冻结、后置 predictions 到五项质量指标和最终血缘报告的确定性
+生成器，见 [ASR/讲话人独立人工质量证据链](MEDIA-HUMAN-QUALITY-EVIDENCE-20260821.md)。它同时拒绝
+第一方晋级音频与 development manifest 的任何哈希重叠。现有会议样本已参与多领域开发与诊断，只能
+继续做回归，不能重新包装为独立晋级集；因此完整质量门仍等待新的第一方音频和真实人工流程。
+
 ## 阻断结论
 
 2026-08-20 的 GPU0 全链路和混合负载证据已关闭首段、RTF、realtime、RSS、CPU、临时盘及 GPU0
