@@ -185,6 +185,41 @@ class StreamingVAD:
         self.initial_pre_roll_samples = max(0, int(float(initial_ms) * self.sample_rate / 1000))
         self._trim_pre_roll_buffer(self._active_pre_roll_samples())
 
+    def active_speech_window(self) -> Optional[Tuple[int, int]]:
+        """Return the active segment start and effective speech duration.
+
+        This is a read-only view used by the schedule preview path.  Pre-roll
+        and trailing silence stay in the eventual audio snapshot, but do not
+        make a preview eligible before enough actual speech was observed.
+        """
+        if self.state != "speech" or not self.speech_buffer:
+            return None
+        total_samples = sum(len(chunk) for chunk in self.speech_buffer)
+        effective_samples = max(
+            0,
+            total_samples - self._current_pre_roll_samples - self.silence_samples,
+        )
+        return (
+            int(self.speech_start_sample * 1000 / self.sample_rate),
+            int(effective_samples * 1000 / self.sample_rate),
+        )
+
+    def snapshot_active_speech(self) -> Optional[SpeechSegment]:
+        """Copy the current VAD segment without closing or mutating it."""
+        if self.state != "speech" or not self.speech_buffer:
+            return None
+        audio_data = np.concatenate(self.speech_buffer).copy()
+        start_ms = int(self.speech_start_sample * 1000 / self.sample_rate)
+        end_ms = int(
+            (self.speech_start_sample + len(audio_data)) * 1000 / self.sample_rate
+        )
+        return SpeechSegment(
+            audio_data=audio_data,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            segment_reason="preview",
+        )
+
     def _active_pre_roll_samples(self) -> int:
         return self.pre_roll_samples if self._seen_speech else self.initial_pre_roll_samples
 

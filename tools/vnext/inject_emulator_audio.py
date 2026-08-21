@@ -13,8 +13,10 @@ import argparse
 import importlib
 import os
 from pathlib import Path
+import queue
 import sys
 import tempfile
+import threading
 import time
 import wave
 
@@ -93,6 +95,117 @@ def _packets(pb2, wav_path: Path, chunk_ms: int, realtime: bool):
             packet_index += 1
 
 
+def inject_audio(
+    endpoint: str,
+    wav_path: Path,
+    *,
+    stubs,
+    chunk_ms: int = 20,
+    realtime: bool = False,
+) -> None:
+    """Inject one WAV while reusing already-generated emulator gRPC stubs."""
+    if not wav_path.is_file():
+        raise SystemExit(f"WAV not found: {wav_path}")
+    if not 5 <= chunk_ms <= 100:
+        raise SystemExit("--chunk-ms must be between 5 and 100")
+    with EmulatorMicrophoneInjector(endpoint, stubs) as injector:
+        injector.prepare()
+        injector.inject(wav_path, chunk_ms=chunk_ms, realtime=realtime)
+
+
+class EmulatorMicrophoneInjector:
+    """Keep one emulator microphone stream alive across replay runs."""
+
+    def __init__(self, endpoint: str, stubs):
+        self.grpc, self.pb2, pb2_grpc, _generated = stubs
+        self.channel = self.grpc.insecure_channel(endpoint)
+        self.grpc.channel_ready_future(self.channel).result(timeout=10)
+        self.stub = pb2_grpc.EmulatorControllerStub(self.channel)
+        self.jobs = queue.Queue()
+        self.prepared = False
+        self.stream_failure = None
+        self.stream_thread = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        self.close()
+
+    def prepare(self) -> None:
+        """Register virtual input before Android starts measuring capture."""
+        if self.prepared:
+            if self.stream_failure is not None:
+                raise self.stream_failure
+            return
+        from google.protobuf import empty_pb2  # type: ignore
+
+        self.stub.getMicrophoneState(empty_pb2.Empty(), timeout=10)
+        self.stub.setMicrophoneState(
+            self.pb2.MicrophoneState(realAudioEnabled=False),
+            timeout=10,
+        )
+        self.prepared = True
+        self.stream_thread = threading.Thread(
+            target=self._run_stream,
+            name="laoji-emulator-microphone",
+            daemon=True,
+        )
+        self.stream_thread.start()
+
+    def _packet_stream(self):
+        while True:
+            job = self.jobs.get()
+            if job is None:
+                return
+            wav_path, chunk_ms, realtime, done, errors = job
+            try:
+                yield from _packets(self.pb2, wav_path, chunk_ms, realtime)
+            except BaseException as error:
+                errors.append(error)
+                raise
+            finally:
+                done.set()
+
+    def _run_stream(self) -> None:
+        try:
+            self.stub.injectAudio(self._packet_stream())
+        except BaseException as error:
+            self.stream_failure = error
+            while True:
+                try:
+                    job = self.jobs.get_nowait()
+                except queue.Empty:
+                    break
+                if job is not None:
+                    job[4].append(error)
+                    job[3].set()
+
+    def inject(self, wav_path: Path, *, chunk_ms: int = 20, realtime: bool = False) -> None:
+        if not wav_path.is_file():
+            raise SystemExit(f"WAV not found: {wav_path}")
+        if not self.prepared:
+            self.prepare()
+        if self.stream_failure is not None:
+            raise self.stream_failure
+        done = threading.Event()
+        errors = []
+        self.jobs.put((wav_path, chunk_ms, realtime, done, errors))
+        timeout = max(30, int(wav_path.stat().st_size / 16_000) + 30)
+        if not done.wait(timeout):
+            raise TimeoutError("emulator microphone injection timed out")
+        if errors:
+            raise errors[0]
+        if self.stream_failure is not None:
+            raise self.stream_failure
+
+    def close(self) -> None:
+        if self.prepared and self.stream_thread is not None:
+            self.jobs.put(None)
+            self.stream_thread.join(timeout=10)
+        self.channel.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("wav", type=Path)
@@ -104,30 +217,17 @@ def main() -> int:
     sdk_root = args.android_sdk or Path(
         os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "~/Android/Sdk",
     ).expanduser()
-    if not args.wav.is_file():
-        raise SystemExit(f"WAV not found: {args.wav}")
-    if not 5 <= args.chunk_ms <= 100:
-        raise SystemExit("--chunk-ms must be between 5 and 100")
-
-    grpc, pb2, pb2_grpc, generated = _load_stubs(sdk_root)
+    stubs = _load_stubs(sdk_root)
     try:
-        from google.protobuf import empty_pb2  # type: ignore
-
-        with grpc.insecure_channel(args.endpoint) as channel:
-            grpc.channel_ready_future(channel).result(timeout=10)
-            stub = pb2_grpc.EmulatorControllerStub(channel)
-            microphone = stub.getMicrophoneState(empty_pb2.Empty(), timeout=10)
-            if microphone.realAudioEnabled:
-                stub.setMicrophoneState(
-                    pb2.MicrophoneState(realAudioEnabled=False),
-                    timeout=10,
-                )
-            stub.injectAudio(
-                _packets(pb2, args.wav, args.chunk_ms, args.real_time),
-                timeout=max(30, int(args.wav.stat().st_size / 16_000) + 30),
-            )
+        inject_audio(
+            args.endpoint,
+            args.wav,
+            stubs=stubs,
+            chunk_ms=args.chunk_ms,
+            realtime=args.real_time,
+        )
     finally:
-        generated.cleanup()
+        stubs[3].cleanup()
     return 0
 
 

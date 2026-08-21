@@ -24,11 +24,17 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
   `projection_stale` 拒绝且业务数据未改变。人工质量、语音 p95 和公开周期仍阻断，因此聚合预检保持
   `passed=false`。
 
-2026-08-21 的 5 次真实中文音频模拟器回放把语音门从“缺证据”推进为“已实测失败”：采集启动
-p95 `125ms`（目标 `<=100ms`），首文字 p95 `9256ms`（目标 `<=1500ms`）。当前 VAD 闭段后调用 batch
-ASR 的路径不是增量解码；继续压缩静音门会损害断句和句尾动作，不能作为通过方式。详见
-[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。Stage 4 需要同一 ASR owner 下的
-真正 streaming backend；当前 GPU0 余量不足且 GPU1 不在授权范围，候选未部署，预检继续失败关闭。
+2026-08-21 的旧路径 5 次真实中文音频回放先把语音首文字门实测为失败（p95 `9256ms`）。候选没有
+缩短 final VAD 静音或增加模型，而是在同一 ASR owner 内加入最多 4 次的只读 active-speech snapshot，
+并让 partial/final 共享 revision key。更新后的 5 次真实会议讲话采集/首文字 p95 为 `43/1490ms`，
+完整日程 TTS 3 次采集/首文字/Draft p95 为 `43/1481/2513ms`；只构成小批初步证据。
+
+聚合预检现要求封存的 `schedule-voice-performance-v1`，除三个 p95 外还强制 `sample_count>=30`、
+至少 600 秒混合负载，并逐项确认 realtime ASR、上传、导入积压、日程解析、问答和整理同时存在。
+Android Emulator 36.6.11 的 gRPC 虚拟麦克风在持久流复用时会产生无声任务，反复开流又会触发模拟器
+自身 SIGSEGV，因此无效的 30 次尝试已排除。详见
+[语音日程真实音频回放](SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。预检继续失败关闭，但阻断已从
+“选定实现没有低延迟路径”收敛为“正式 30 样本/混合负载证据尚缺”。
 
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由

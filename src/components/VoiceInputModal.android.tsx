@@ -109,6 +109,28 @@ function scheduleVoiceErrorMessage(reason: unknown, fallback: string): string {
   return message;
 }
 
+function scheduleVoiceFailureCode(reason: unknown): string {
+  const record = reason && typeof reason === 'object'
+    ? reason as Record<string, unknown>
+    : null;
+  const stableCode = record?.errorCode ?? record?.code;
+  if (typeof stableCode === 'string' && /^[a-z0-9_.-]{1,80}$/i.test(stableCode)) {
+    return stableCode;
+  }
+  const status = record?.status;
+  if (typeof status === 'number' && Number.isInteger(status)) return `http_${status}`;
+  const message = reason instanceof Error
+    ? reason.message
+    : typeof reason === 'string' ? reason : '';
+  if (/未识别到语音内容/.test(message)) return 'no_transcript';
+  if (/无法从语音中提取日程|未识别到有效日期|不是日程/.test(message)) return 'not_schedule';
+  if (/timeout|timed out|超时/i.test(message)) return 'timeout';
+  if (/Network request failed|Failed to fetch|connection refused|无法连接/i.test(message)) {
+    return 'network_unavailable';
+  }
+  return 'parse_failed';
+}
+
 function eventPayloadFromDraft(source: ParseResult, inputText: string): Omit<CalEvent, 'id'> {
   const category = normalizeEventCategory(source.category);
   const hasStartTime = !source.is_all_day && Boolean(source.start_time);
@@ -243,6 +265,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
           });
         }
         transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
+          segmentId: event.segmentId,
+          isFinal: event.isFinal,
           text: event.text,
           receivedAt: event.receivedAtMs,
           startTime: event.startMs == null ? undefined : event.startMs / 1000,
@@ -550,6 +574,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         localUri = stopResult.localUri;
         for (const segment of stopResult.transcriptSegments ?? []) {
           transcriptRef.current = appendScheduleTranscriptSegment(transcriptRef.current, {
+            segmentId: segment.segmentId,
+            isFinal: true,
             text: segment.text,
             receivedAt: segment.receivedAtMs,
             startTime: segment.startMs == null ? undefined : segment.startMs / 1000,
@@ -586,8 +612,14 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
         return result;
       } catch (reason) {
         if (stopPressedAtMsRef.current != null) {
+          const level = audioLevelRef.current;
           diagnosticAudit('schedule_voice_draft_failed', {
             latency_ms: Math.max(0, Math.round(performance.now() - stopPressedAtMsRef.current)),
+            error_code: scheduleVoiceFailureCode(reason),
+            frame_count: level.frameCount,
+            max_peak: level.maxPeak,
+            max_rms: level.maxRms,
+            transcript_segment_count: transcriptRef.current.length,
           });
         }
         if (mountedRef.current && runRef.current === runId) {

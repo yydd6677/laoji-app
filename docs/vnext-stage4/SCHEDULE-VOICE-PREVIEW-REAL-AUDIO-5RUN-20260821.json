@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "device": "emulator-5562",
+  "source_kind": "real-meeting-audio-excerpt",
+  "sample_reused": true,
+  "runs": [
+    {"run": 1, "terminal": "not_schedule", "capture_start_ms": 42, "first_text_ms": 1490, "draft_ms": null, "failure_ms": 73},
+    {"run": 2, "terminal": "not_schedule", "capture_start_ms": 32, "first_text_ms": 1298, "draft_ms": null, "failure_ms": 71},
+    {"run": 3, "terminal": "not_schedule", "capture_start_ms": 42, "first_text_ms": 1262, "draft_ms": null, "failure_ms": 77},
+    {"run": 4, "terminal": "not_schedule", "capture_start_ms": 33, "first_text_ms": 1276, "draft_ms": null, "failure_ms": 59},
+    {"run": 5, "terminal": "not_schedule", "capture_start_ms": 43, "first_text_ms": 1314, "draft_ms": null, "failure_ms": 68}
+  ],
+  "metrics": {
+    "run_count": 5,
+    "draft_success_count": 0,
+    "capture_start_p50_ms": 42,
+    "capture_start_p95_ms": 43,
+    "first_text_p50_ms": 1298,
+    "first_text_p95_ms": 1490,
+    "draft_p50_ms": null,
+    "draft_p95_ms": null
+  },
+  "thresholds": {
+    "capture_start_p95_ms": 100,
+    "first_text_p95_ms": 1500,
+    "draft_p95_ms": 3000
+  },
+  "passed": false,
+  "limitations": [
+    "The real excerpt is intentionally not a schedule utterance and cannot establish Draft quality.",
+    "Five samples are preliminary and do not satisfy the 30-sample mixed-load gate."
+  ]
+}

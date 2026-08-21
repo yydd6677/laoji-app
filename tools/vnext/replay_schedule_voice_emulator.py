@@ -6,17 +6,27 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
 
+from inject_emulator_audio import EmulatorMicrophoneInjector, _load_stubs
+
 
 AUDIT_RE = re.compile(r"\[laoji-audit\] (schedule_voice_[a-z_]+) (\{.*\})")
 BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+CLICKABLE_CACHE: dict[tuple[str, str], tuple[int, int]] = {}
+CACHEABLE_LABELS = frozenset({
+    "新建日程",
+    "语音输入",
+    "开始语音输入",
+    "停止语音输入",
+    "日程",
+})
 
 
 def _adb(serial: str, *args: str, timeout: float = 30) -> subprocess.CompletedProcess[str]:
@@ -35,7 +45,24 @@ def _nodes(serial: str) -> list[dict[str, str]]:
         local = Path(directory) / "window.xml"
         _adb(serial, "shell", "uiautomator", "dump", remote)
         _adb(serial, "pull", remote, str(local))
-        return [dict(node.attrib) for node in ET.parse(local).getroot().iter("node")]
+        nodes = [dict(node.attrib) for node in ET.parse(local).getroot().iter("node")]
+        for node in nodes:
+            if node.get("clickable") != "true":
+                continue
+            match = BOUNDS_RE.fullmatch(node.get("bounds", ""))
+            if match is None:
+                continue
+            left, top, right, bottom = map(int, match.groups())
+            point = ((left + right) // 2, (top + bottom) // 2)
+            for label in {node.get("text", ""), node.get("content-desc", "")} - {""}:
+                # Labels such as "取消" and "保存" appear on multiple native
+                # surfaces.  Reusing their coordinates after navigation can
+                # turn a cleanup action into an edit or a real save.  Cache
+                # only controls whose ownership and position are invariant
+                # throughout this replay.
+                if label in CACHEABLE_LABELS:
+                    CLICKABLE_CACHE[(serial, label)] = point
+        return nodes
 
 
 def _find_clickable(serial: str, label: str) -> tuple[int, int] | None:
@@ -52,6 +79,10 @@ def _find_clickable(serial: str, label: str) -> tuple[int, int] | None:
 
 
 def _tap(serial: str, label: str, *, retries: int = 6) -> None:
+    cached = CLICKABLE_CACHE.get((serial, label))
+    if cached is not None:
+        _adb(serial, "shell", "input", "tap", str(cached[0]), str(cached[1]))
+        return
     for _ in range(retries):
         point = _find_clickable(serial, label)
         if point is not None:
@@ -97,6 +128,20 @@ def _wait_parse_terminal(serial: str, timeout: float) -> str:
     return _wait_visible(serial, labels, timeout)
 
 
+def _wait_audit_terminal(serial: str, start_index: int, timeout: float) -> str:
+    """Wait for the product's terminal audit instead of exporting the UI tree."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        events = _audit_events(serial)[start_index:]
+        names = {str(event.get("event")) for event in events}
+        if "schedule_voice_draft_ready" in names:
+            return "确认日程"
+        if "schedule_voice_draft_failed" in names:
+            return "failure"
+        time.sleep(0.15)
+    raise RuntimeError("schedule voice did not reach an audited terminal state")
+
+
 def _calendar(serial: str) -> None:
     _adb(
         serial,
@@ -110,11 +155,15 @@ def _calendar(serial: str) -> None:
     )
     time.sleep(2)
     for _ in range(8):
-        if _find_clickable(serial, "新建日程") is not None:
-            return
         close = _find_clickable(serial, "关闭新建日程")
         if close is not None:
             _adb(serial, "shell", "input", "tap", str(close[0]), str(close[1]))
+        elif (cancel := _find_clickable(serial, "取消")) is not None:
+            _adb(serial, "shell", "input", "tap", str(cancel[0]), str(cancel[1]))
+        elif _find_clickable(serial, "新建日程") is not None:
+            return
+        elif (schedule := _find_clickable(serial, "日程")) is not None:
+            _adb(serial, "shell", "input", "tap", str(schedule[0]), str(schedule[1]))
         else:
             _adb(serial, "shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(0.8)
@@ -153,41 +202,71 @@ def main() -> int:
     _adb(args.serial, "get-state")
     _adb(args.serial, "logcat", "-c")
     _calendar(args.serial)
+    sdk_root = Path(
+        os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "~/Android/Sdk",
+    ).expanduser()
+    stubs = _load_stubs(sdk_root)
     runs: list[dict[str, object]] = []
-    for ordinal in range(1, args.runs + 1):
-        _tap(args.serial, "新建日程")
-        _wait_visible(args.serial, ("语音输入",), 8)
-        _tap(args.serial, "语音输入")
-        _wait_visible(args.serial, ("开始语音输入",), 8)
-        before = len(_audit_events(args.serial))
-        _tap(args.serial, "开始语音输入")
-        _wait_visible(args.serial, ("停止语音输入",), 8)
-        subprocess.run(
-            [
-                sys.executable,
-                str(Path(__file__).with_name("inject_emulator_audio.py")),
-                "--endpoint",
-                args.endpoint,
-                str(args.wav),
-            ],
-            check=True,
-            timeout=60,
-        )
-        time.sleep(3)
-        _tap(args.serial, "停止语音输入")
-        terminal = _wait_parse_terminal(args.serial, 20)
-        new_events = _audit_events(args.serial)[before:]
-        by_name = {str(event["event"]): event for event in new_events}
-        runs.append({
-            "run": ordinal,
-            "terminal": "draft" if terminal == "确认日程" else "failure",
-            "capture_start_ms": by_name.get("schedule_voice_capture_started", {}).get("latency_ms"),
-            "first_text_ms": by_name.get("schedule_voice_first_text", {}).get("latency_ms"),
-            "draft_ms": by_name.get("schedule_voice_draft_ready", {}).get("latency_ms"),
-            "failure_ms": by_name.get("schedule_voice_draft_failed", {}).get("latency_ms"),
-        })
-        _tap(args.serial, "关闭新建日程")
-        _wait_visible(args.serial, ("新建日程",), 8)
+    injector = None
+    try:
+        injector = EmulatorMicrophoneInjector(args.endpoint, stubs)
+        for ordinal in range(1, args.runs + 1):
+            _tap(args.serial, "新建日程")
+            if ordinal == 1:
+                _wait_visible(args.serial, ("语音输入",), 8)
+            else:
+                time.sleep(0.35)
+            _tap(args.serial, "语音输入")
+            if ordinal == 1:
+                _wait_visible(args.serial, ("开始语音输入",), 8)
+            else:
+                time.sleep(0.35)
+            injector.prepare()
+            before = len(_audit_events(args.serial))
+            _tap(args.serial, "开始语音输入")
+            # UIAutomator dumps take multiple seconds on this emulator and
+            # would delay the synthetic speaker after capture has begun.
+            # Native capture starts well below 100 ms; a short fixed guard
+            # models a person beginning to speak immediately after the tap.
+            time.sleep(0.15)
+            injector.inject(
+                args.wav,
+                # A persistent gRPC stream may accept several seconds of PCM
+                # into transport buffers after its first job.  Pace every WAV
+                # explicitly so Stop cannot race audio that the emulator has
+                # accepted but not yet delivered to AudioRecord.
+                realtime=True,
+            )
+            time.sleep(0.4)
+            _tap(args.serial, "停止语音输入")
+            terminal = _wait_audit_terminal(args.serial, before, 20)
+            new_events = _audit_events(args.serial)[before:]
+            by_name = {str(event["event"]): event for event in new_events}
+            runs.append({
+                "run": ordinal,
+                "terminal": "draft" if terminal == "确认日程" else "failure",
+                "capture_start_ms": by_name.get("schedule_voice_capture_started", {}).get("latency_ms"),
+                "first_text_ms": by_name.get("schedule_voice_first_text", {}).get("latency_ms"),
+                "draft_ms": by_name.get("schedule_voice_draft_ready", {}).get("latency_ms"),
+                "failure_ms": by_name.get("schedule_voice_draft_failed", {}).get("latency_ms"),
+            })
+            if terminal == "确认日程":
+                if ordinal == 1:
+                    _wait_visible(args.serial, ("保存",), 8)
+                # Close the activity-owned voice overlay directly.  Do not
+                # enter AddEvent or press a generic Cancel button: both make
+                # the performance harness capable of mutating calendar data.
+                _tap(args.serial, "关闭新建日程")
+            else:
+                _tap(args.serial, "关闭新建日程")
+            if ordinal == 1:
+                _wait_visible(args.serial, ("新建日程",), 8)
+            else:
+                time.sleep(0.35)
+    finally:
+        if injector is not None:
+            injector.close()
+        stubs[3].cleanup()
 
     capture = [int(row["capture_start_ms"]) for row in runs if isinstance(row["capture_start_ms"], int)]
     first = [int(row["first_text_ms"]) for row in runs if isinstance(row["first_text_ms"], int)]

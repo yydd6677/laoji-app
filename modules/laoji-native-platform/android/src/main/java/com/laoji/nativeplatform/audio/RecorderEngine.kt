@@ -310,6 +310,7 @@ class RecorderEngine(
         "source" to transcript.source,
         "eventSequence" to transcript.eventSequence?.toDouble(),
         "stableSegmentKey" to transcript.stableSegmentKey,
+        "revisionKey" to transcript.revisionKey,
         "purpose" to config.purpose.wireValue,
         "receivedAtMs" to receivedAtMs.toDouble(),
       ),

@@ -1,4 +1,6 @@
 export interface ScheduleTranscriptSegment {
+  segmentId?: string;
+  isFinal?: boolean;
   text: string;
   receivedAt: number;
   startTime?: number;
@@ -23,6 +25,22 @@ export function appendScheduleTranscriptSegment(
   const text = incoming.text.trim();
   if (!text || isStandaloneFiller(text)) return current;
   const normalized = { ...incoming, text };
+  if (normalized.segmentId) {
+    const revisionIndex = current.findIndex(
+      segment => segment.segmentId === normalized.segmentId,
+    );
+    if (revisionIndex >= 0) {
+      const existing = current[revisionIndex];
+      if (existing.isFinal && !normalized.isFinal) return current;
+      if (
+        !normalized.isFinal
+        && normalized.receivedAt < existing.receivedAt
+      ) return current;
+      const next = [...current];
+      next[revisionIndex] = normalized;
+      return next;
+    }
+  }
   if (current.some(segment => segment.text === text)) return current;
   const last = current[current.length - 1];
   if (!last) return [normalized];

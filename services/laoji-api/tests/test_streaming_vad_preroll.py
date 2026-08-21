@@ -110,3 +110,27 @@ def test_vad_configurable_silence_duration_controls_segment_latency():
 
     assert segment is not None
     assert vad.min_silence_samples == VAD_WINDOW_SIZE * 2
+
+
+def test_vad_active_snapshot_is_read_only_and_excludes_pre_roll_from_duration():
+    vad = StreamingVAD(None)
+    vad.set_min_energy_threshold(0.5)
+    vad.set_pre_roll_duration(VAD_WINDOW_SIZE * 2 * 1000 / vad.sample_rate)
+
+    assert vad.feed(_window(0.1)) is None
+    assert vad.feed(_window(0.2)) is None
+    assert vad.feed(_window(1.0)) is None
+
+    assert vad.active_speech_window() == (0, 32)
+    preview = vad.snapshot_active_speech()
+
+    assert preview is not None
+    assert preview.segment_reason == "preview"
+    assert preview.start_ms == 0
+    assert preview.end_ms == 96
+    assert len(preview.audio_data) == VAD_WINDOW_SIZE * 3
+    assert vad.state == "speech"
+    assert len(vad.speech_buffer) == 3
+
+    preview.audio_data[:] = 0.0
+    np.testing.assert_allclose(vad.speech_buffer[-1], 1.0)

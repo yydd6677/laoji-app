@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from schedule_holdout_evidence import EVIDENCE_CONTRACT, _seal_report
-from verify_stage4_exit_preflight import inspect
+from verify_stage4_exit_preflight import VOICE_EVIDENCE_CONTRACT, inspect
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,14 +51,36 @@ def _quality_report() -> dict:
 
 
 def _passing() -> dict:
+    voice = {
+        "evidence_contract": VOICE_EVIDENCE_CONTRACT,
+        "sample_count": 30,
+        "capture_start_p95_ms": 80,
+        "first_text_p95_ms": 1200,
+        "draft_p95_ms": 2500,
+        "mixed_load": {
+            "duration_seconds": 600,
+            "traffic_classes": {
+                "realtime_asr": True,
+                "upload": True,
+                "import_asr_backlog": True,
+                "schedule_parse": True,
+                "question": True,
+                "summary": True,
+            },
+        },
+    }
+    voice["report_sha256"] = "sha256:" + hashlib.sha256(
+        json.dumps(
+            voice,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     return {
         "service_ready": {"api": True, "schedule_graph": True},
         "schedule_quality": _quality_report(),
-        "voice_schedule_performance": {
-            "capture_start_p95_ms": 80,
-            "first_text_p95_ms": 1200,
-            "draft_p95_ms": 2500,
-        },
+        "voice_schedule_performance": voice,
         "projection_runtime": {
             "global_sqlite_replay": True,
             "page_recreate": True,
@@ -107,3 +131,19 @@ def test_legacy_boolean_quality_claim_is_rejected() -> None:
     assert report["passed"] is False
     assert "schedule_quality_lineage" in report["blocking_gates"]
     assert "schedule_human_holdout" in report["blocking_gates"]
+
+
+def test_unsealed_or_single_ability_voice_claim_is_rejected() -> None:
+    evidence = _passing()
+    voice = dict(evidence["voice_schedule_performance"])
+    voice.pop("report_sha256")
+    voice["sample_count"] = 5
+    voice["mixed_load"] = {"duration_seconds": 0, "traffic_classes": {}}
+    evidence["voice_schedule_performance"] = voice
+
+    report = inspect(ROOT, evidence)
+
+    assert report["passed"] is False
+    assert "voice_performance_lineage" in report["blocking_gates"]
+    assert "voice_warm_sample_count" in report["blocking_gates"]
+    assert "voice_mixed_load_envelope" in report["blocking_gates"]

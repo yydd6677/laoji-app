@@ -193,12 +193,14 @@ Stage 4 语音日程 native 候选已将 `RecorderEngine` 的顺序改为本机 
 快照现在增加向后兼容的 `asrPhase`（connecting/connected/recoveryRequired/completed/notRequired），
 让连接慢和 ASR 故障不会被 UI 当成麦克风失败；顺序/阶段合同脚本、TypeScript 和 Kotlin 编译均通过。
 同时记录首个 PCM 到连接完成、首个 PCM 到首个转写事件的单调延迟，仅用于设备 p50/p95 回放统计。
-专属 `emulator-5562` 已用虚拟麦克风完成 5 次真实中文音频回放：采集启动 p50/p95 为
-`69/125ms`，首文字 p50/p95 为 `9018/9256ms`，因此语音性能门已从“缺少证据”变为“明确失败”。
-当前闭段后 batch ASR 不能伪装成流式；Stage 4 需在同一 8030 owner 下增加真正 streaming backend，
-但当前 GPU0 余量不足且 GPU1 不在授权范围，尚未部署。证据见
-[语音日程真实音频回放](../vnext-stage4/SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。断网和进程死亡
-回放仍未完成，候选默认仍关闭。
+专属 `emulator-5562` 的首轮 5 次真实中文回放测得旧闭段路径首文字 p95 `9256ms`。候选随后在同一
+ASR owner 内实现有界 active-speech snapshot：有效讲话 `640ms` 后首个 preview、间隔至少 `1600ms`、
+单会话最多 4 次，partial/final 共享 revision key 且 final 权威替换。更新后的 5 次真实会议讲话采集/
+首文字 p95 为 `43/1490ms`；完整日程 TTS 3 次采集/首文字/Draft p95 为 `43/1481/2513ms`。
+这证明低延迟候选可行，但不是模型级 streaming，也未满足 30 个暖态样本和 10 分钟混合负载；模拟器
+虚拟麦克风的多轮流缺陷已被排除出证据。详见
+[语音日程真实音频回放](../vnext-stage4/SCHEDULE-VOICE-EMULATOR-REPLAY-20260821.md)。断网、进程死亡、
+正式性能 envelope、自然质量和 capability barrier 仍未完成，候选默认仍关闭。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM

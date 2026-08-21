@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -14,6 +15,15 @@ from schedule_holdout_evidence import verify_quality_report
 
 
 ROOT = Path(__file__).resolve().parents[2]
+VOICE_EVIDENCE_CONTRACT = "schedule-voice-performance-v1"
+VOICE_MIXED_LOAD_CLASSES = (
+    "realtime_asr",
+    "upload",
+    "import_asr_backlog",
+    "schedule_parse",
+    "question",
+    "summary",
+)
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
@@ -28,6 +38,24 @@ def _number(value: object) -> float | None:
 
 def _bool(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
+
+
+def _verified_voice_report(value: object) -> tuple[Mapping[str, Any], bool]:
+    report = _mapping(value)
+    claimed = report.get("report_sha256")
+    if report.get("evidence_contract") != VOICE_EVIDENCE_CONTRACT or not isinstance(claimed, str):
+        return report, False
+    unsigned = dict(report)
+    unsigned.pop("report_sha256", None)
+    actual = "sha256:" + hashlib.sha256(
+        json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return report, claimed == actual
 
 
 def _gate(gates: list[dict[str, Any]], name: str, passed: bool | None, evidence: object, reason: str) -> None:
@@ -100,13 +128,51 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
     _gate(gates, "schedule_key_field_recall", recall is not None and recall >= 0.98, {"value": recall, "minimum": 0.98}, "blueprint_quality_threshold")
     _gate(gates, "schedule_save_error_free", save_errors == 0, {"save_error_count": save_errors}, "save_error_rate_must_be_zero")
 
-    voice = _mapping(data.get("voice_schedule_performance"))
+    voice, voice_verified = _verified_voice_report(data.get("voice_schedule_performance"))
+    _gate(
+        gates,
+        "voice_performance_lineage",
+        voice_verified,
+        {
+            "contract": voice.get("evidence_contract"),
+            "report_sha256": voice.get("report_sha256"),
+        },
+        "sealed_voice_performance_report_required",
+    )
+    voice_sample_count = _number(voice.get("sample_count")) if voice_verified else None
+    _gate(
+        gates,
+        "voice_warm_sample_count",
+        voice_sample_count is not None and voice_sample_count >= 30,
+        {"value": voice_sample_count, "minimum": 30},
+        "at_least_30_warm_samples_required",
+    )
+    mixed_load = _mapping(voice.get("mixed_load")) if voice_verified else {}
+    mixed_load_duration = _number(mixed_load.get("duration_seconds"))
+    traffic_classes = _mapping(mixed_load.get("traffic_classes"))
+    mixed_load_complete = (
+        mixed_load_duration is not None
+        and mixed_load_duration >= 600
+        and all(_bool(traffic_classes.get(name)) is True for name in VOICE_MIXED_LOAD_CLASSES)
+    )
+    _gate(
+        gates,
+        "voice_mixed_load_envelope",
+        mixed_load_complete,
+        {
+            "duration_seconds": mixed_load_duration,
+            "traffic_classes": {
+                name: traffic_classes.get(name) for name in VOICE_MIXED_LOAD_CLASSES
+            },
+        },
+        "ten_minute_blueprint_mixed_load_required",
+    )
     for field, limit, name in (
         ("capture_start_p95_ms", 100.0, "voice_capture_start"),
         ("first_text_p95_ms", 1_500.0, "voice_first_text"),
         ("draft_p95_ms", 3_000.0, "voice_draft_ready"),
     ):
-        value = _number(voice.get(field))
+        value = _number(voice.get(field)) if voice_verified else None
         _gate(gates, name, value is not None and value <= limit, {"value": value, "limit": limit}, "measured_voice_p95_required")
 
     projection = _mapping(data.get("projection_runtime"))

@@ -98,6 +98,7 @@ sealed class AsrServerEvent {
     val purpose: String?,
     val eventSequence: Long? = null,
     val stableSegmentKey: String? = null,
+    val revisionKey: String? = null,
   ) : AsrServerEvent()
 
   data class Error(
@@ -283,6 +284,7 @@ object AsrProtocol {
           endMs = json.optionalMilliseconds("end_ms", "end_time"),
           source = json.optionalString("source"),
           purpose = json.optionalString("purpose"),
+          revisionKey = json.optionalString("revision_key"),
         )
       }
       "error" -> AsrServerEvent.Error(
@@ -295,12 +297,14 @@ object AsrProtocol {
   }
 
   fun transcriptIdentity(sessionId: String, transcript: AsrServerEvent.Transcript): String {
+    val revisionKey = transcript.revisionKey?.trim().orEmpty()
     val canonical = listOf(
       sessionId,
-      transcript.speakerId.orEmpty(),
-      transcript.startMs?.toString().orEmpty(),
-      transcript.endMs?.toString().orEmpty(),
-      transcript.text,
+      if (revisionKey.isNotEmpty()) "revision" else "content",
+      if (revisionKey.isNotEmpty()) revisionKey else transcript.speakerId.orEmpty(),
+      if (revisionKey.isNotEmpty()) "" else transcript.startMs?.toString().orEmpty(),
+      if (revisionKey.isNotEmpty()) "" else transcript.endMs?.toString().orEmpty(),
+      if (revisionKey.isNotEmpty()) "" else transcript.text,
     ).joinToString("\u001f")
     return MessageDigest.getInstance("SHA-256")
       .digest(canonical.toByteArray(Charsets.UTF_8))
