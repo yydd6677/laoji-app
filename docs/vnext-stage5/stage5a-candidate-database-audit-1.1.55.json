@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "production_release_authorized": false,
+  "physical_legacy_deletion_performed": false,
+  "legacy_source_retained": true,
+  "safe_to_delete": false,
+  "active_path_policy": "single-owner-no-dual-write-no-silent-fallback",
+  "candidate_database_file": "api.db",
+  "candidate_root": "/home/zhong/laoji-vnext-candidate/stage5a-release-0c5d13a-data",
+  "owner_waiver": {
+    "verified": true,
+    "reason": "verified",
+    "report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059"
+  },
+  "checks": {
+    "candidate_root_exists": true,
+    "candidate_database_exists": true,
+    "production_database_exists": true,
+    "candidate_database_inside_candidate_root": true,
+    "candidate_database_name_is_not_production_name": true,
+    "candidate_database_is_distinct_from_production": true,
+    "owner_waiver_valid": true,
+    "pre_adoption_sqlite_backup_present": true,
+    "sqlite_integrity": true,
+    "sqlite_foreign_keys": true,
+    "capability_cutovers_table_present": true,
+    "all_required_capabilities_adopted": true,
+    "all_candidate_lifecycles_drained": true
+  },
+  "capabilities": {
+    "media.upload": {
+      "present": true,
+      "activated": true,
+      "legacy_submission_closed": true,
+      "adoption_basis_verified": true,
+      "adoption_evidence_verified": true,
+      "cold_rollback_retained": true,
+      "legacy_reader_not_removed": true,
+      "passed": true
+    },
+    "transcript.realtime": {
+      "present": true,
+      "activated": true,
+      "legacy_submission_closed": true,
+      "adoption_basis_verified": true,
+      "adoption_evidence_verified": true,
+      "cold_rollback_retained": true,
+      "legacy_reader_not_removed": true,
+      "passed": true
+    },
+    "summary": {
+      "present": true,
+      "activated": true,
+      "legacy_submission_closed": true,
+      "adoption_basis_verified": true,
+      "adoption_evidence_verified": true,
+      "cold_rollback_retained": true,
+      "legacy_reader_not_removed": true,
+      "passed": true
+    },
+    "question": {
+      "present": true,
+      "activated": true,
+      "legacy_submission_closed": true,
+      "adoption_basis_verified": true,
+      "adoption_evidence_verified": true,
+      "cold_rollback_retained": true,
+      "legacy_reader_not_removed": true,
+      "passed": true
+    },
+    "schedule": {
+      "present": true,
+      "activated": true,
+      "legacy_submission_closed": true,
+      "adoption_basis_verified": true,
+      "adoption_evidence_verified": true,
+      "cold_rollback_retained": true,
+      "legacy_reader_not_removed": true,
+      "passed": true
+    }
+  },
+  "lifecycle": {
+    "tasks": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    },
+    "attempts": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    },
+    "uploads": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    },
+    "transcripts": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    },
+    "purges": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    },
+    "cleanup_obligations": {
+      "status": "drained",
+      "total_count": 0,
+      "nonterminal_count": 0,
+      "state_counts": {}
+    }
+  },
+  "backup_files": [
+    "api.db.pre-stage5a-stage5a-release-0c5d13a"
+  ],
+  "passed": true,
+  "blocking_reasons": [],
+  "database": {
+    "integrity": "ok",
+    "foreign_key_violation_count": 0,
+    "table_count": 92
+  }
+}

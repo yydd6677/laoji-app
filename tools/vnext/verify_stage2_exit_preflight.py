@@ -411,6 +411,7 @@ def main() -> int:
     parser.add_argument("--api-ready-url")
     parser.add_argument("--asr-ready-url")
     parser.add_argument("--owner-waiver", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("root", nargs="?", type=Path, default=ROOT)
     args = parser.parse_args()
     envelope: Mapping[str, Any] | None = None
@@ -429,7 +430,11 @@ def main() -> int:
         asr_ready_url=args.asr_ready_url,
         owner_waiver=owner_waiver,
     )
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    encoded = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(encoded, encoding="utf-8")
+    print(encoded, end="")
     return 0 if report["passed"] else 1
 
 

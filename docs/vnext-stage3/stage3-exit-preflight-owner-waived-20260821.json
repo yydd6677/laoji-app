@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "passed": true,
+  "owner_risk_waiver": {
+    "verified": true,
+    "reason": "verified",
+    "contract": "vnext-product-owner-risk-waiver-v1",
+    "report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+    "scopes": [
+      "stage2.media_quality",
+      "stage2.public_cycle",
+      "stage3.human_quality",
+      "stage3.public_cycle",
+      "stage4.public_cycle",
+      "stage4.schedule_quality",
+      "stage5.legacy_retention"
+    ],
+    "physical_legacy_deletion_authorized": false,
+    "production_release_authorized": false,
+    "waived_gate_names": [
+      "facts_actions_quality_lineage",
+      "facts_actions_independent_human_quality",
+      "q2_quality_lineage",
+      "q2_independent_human_quality",
+      "facts_human_support",
+      "facts_human_accuracy",
+      "actions_human_commitment",
+      "actions_human_schedule_fit",
+      "q2_human_correctness",
+      "q2_human_completeness",
+      "q2_human_citation_relevance",
+      "legacy_summary_q0_zero_public_cycle"
+    ]
+  },
+  "gates": [
+    {
+      "name": "static_source_stream_contract",
+      "status": "passed",
+      "evidence": "stage3_source_stream_contract=passed"
+    },
+    {
+      "name": "static_q2_android_contract",
+      "status": "passed",
+      "evidence": "stage3_q2_android_contract=passed"
+    },
+    {
+      "name": "candidate_api_ready",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "candidate_source_stream_v2_ready",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "candidate_question_reader_v2_ready",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "candidate_summary_revisions_ready",
+      "status": "passed",
+      "evidence": {
+        "handler": "summary-facts-v3-chapter-r5",
+        "prompt": "facts-v3-r15",
+        "model": "ollama:qwen3.5:9b"
+      }
+    },
+    {
+      "name": "facts_schema_validity",
+      "status": "passed",
+      "evidence": {
+        "value": 1.0,
+        "minimum": 0.98
+      }
+    },
+    {
+      "name": "facts_citation_exactness",
+      "status": "passed",
+      "evidence": {
+        "value": 1.0,
+        "minimum": 1.0
+      }
+    },
+    {
+      "name": "q2_citation_exactness",
+      "status": "passed",
+      "evidence": {
+        "value": 1.0,
+        "minimum": 1.0
+      }
+    },
+    {
+      "name": "automated_duplicate_action_free",
+      "status": "passed",
+      "evidence": {
+        "duplicate_action_count": 0.0
+      }
+    },
+    {
+      "name": "summary_single_generation_call",
+      "status": "passed",
+      "evidence": {
+        "normal_max": 1.0,
+        "repair_max": 1.0
+      }
+    },
+    {
+      "name": "facts_actions_quality_lineage",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "verified": false,
+          "domain": null,
+          "report_sha256": null
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "facts_actions_independent_human_quality",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "quality_passed": null,
+          "blind_reviewer_count": null,
+          "source_row_count": null
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "q2_quality_lineage",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "verified": false,
+          "domain": null,
+          "report_sha256": null
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "q2_independent_human_quality",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "quality_passed": null,
+          "blind_reviewer_count": null,
+          "source_row_count": null
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "facts_human_support",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "facts_human_accuracy",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "actions_human_commitment",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "actions_human_schedule_fit",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "q2_human_correctness",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "q2_human_completeness",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "q2_human_citation_relevance",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "value": null,
+          "minimum": 0.95
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    },
+    {
+      "name": "summary_single_p50",
+      "status": "passed",
+      "evidence": {
+        "value": 15368.0,
+        "limit": 20000.0
+      }
+    },
+    {
+      "name": "summary_single_p95",
+      "status": "passed",
+      "evidence": {
+        "value": 35498.0,
+        "limit": 45000.0
+      }
+    },
+    {
+      "name": "summary_long_p95",
+      "status": "passed",
+      "evidence": {
+        "value": 60483.0,
+        "limit": 90000.0
+      }
+    },
+    {
+      "name": "q2_warm_p95",
+      "status": "passed",
+      "evidence": {
+        "value": 11529.0,
+        "limit": 15000.0
+      }
+    },
+    {
+      "name": "runtime_summary_generation_resume",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_summary_commit_deduplicated",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_summary_stale_source_rejected",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_q2_generation_resume",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_q2_stale_source_rejected",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_legacy_upgrade_recovered",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_one_current_summary_version",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "runtime_template_switch_local_only",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "cleanup_task_cleanup_confirmed",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "cleanup_binding_purge_confirmed",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "cleanup_temporary_payload_deleted",
+      "status": "passed",
+      "evidence": true
+    },
+    {
+      "name": "privacy_body_log_free",
+      "status": "passed",
+      "evidence": {
+        "body_log_hit_count": 0.0
+      }
+    },
+    {
+      "name": "legacy_summary_q0_zero_public_cycle",
+      "status": "waived",
+      "evidence": {
+        "waiver_contract": "vnext-product-owner-risk-waiver-v1",
+        "waiver_report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059",
+        "underlying_evidence": {
+          "complete": false,
+          "summary_v2_submit_count": null,
+          "q0_submit_count": null
+        }
+      },
+      "reason": "product_owner_explicit_risk_waiver"
+    }
+  ],
+  "blocking_gates": [],
+  "waived_gates": [
+    "facts_actions_quality_lineage",
+    "facts_actions_independent_human_quality",
+    "q2_quality_lineage",
+    "q2_independent_human_quality",
+    "facts_human_support",
+    "facts_human_accuracy",
+    "actions_human_commitment",
+    "actions_human_schedule_fit",
+    "q2_human_correctness",
+    "q2_human_completeness",
+    "q2_human_citation_relevance",
+    "legacy_summary_q0_zero_public_cycle"
+  ]
+}

@@ -282,6 +282,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--owner-waiver", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("root", nargs="?", type=Path, default=ROOT)
     args = parser.parse_args()
     envelope = json.loads(args.evidence.read_text(encoding="utf-8")) if args.evidence else None
@@ -291,7 +292,11 @@ def main() -> int:
         else None
     )
     report = inspect(args.root.resolve(), envelope, owner_waiver=owner_waiver)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    encoded = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(encoded, encoding="utf-8")
+    print(encoded, end="")
     return 0 if report["passed"] else 1
 
 
