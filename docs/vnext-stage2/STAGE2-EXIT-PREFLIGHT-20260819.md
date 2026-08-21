@@ -60,5 +60,8 @@ speaker overlay 至少 30 条样本及 p95、严格 `media-human-quality-v1` 血
 2026-08-20 的 GPU0 全链路和混合负载证据已关闭首段、RTF、realtime、RSS、CPU、临时盘及 GPU0
 安全余量；2026-08-21 的 Android v2 回放又关闭设备恢复、连续投影、去重、`NO_SPEECH` 和清理门。
 当前运行/恢复/overlay 性能子集只有 `legacy_submit_zero_public_cycle` 一个阻断，但完整 Stage 2 聚合
-退出还缺上述独立媒体质量门，并需正式 8030 部署 v2 handler 后才能人工激活 capability barrier。
-因此工具继续非零退出，生产 `18020/8030` 配置和旧链路均未改变。
+退出还缺上述独立媒体质量门与公开零旧提交周期。生产 8030 已在 2026-08-21 获准维护窗口部署 v2
+handler，完成真实 legacy/v1/v2/NO_SPEECH/batch 复验；隔离 18030 直连 8030 后完成真实导入及 API
+中断恢复，旧 8031 代理已停止。该部署证据见
+[8030 v2 handler 切换结果](ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md)，但它不替代人工质量、公开
+周期或 capability 人工采用。因此工具仍应非零退出，生产 `18020`、公网和旧提交路径保持不变。

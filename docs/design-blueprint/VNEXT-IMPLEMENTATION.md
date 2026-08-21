@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 speaker-overlay latency is closed by 30-run candidate evidence, while independent ASR/speaker quality, public zero-cycle, production handler deployment and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance, bounded replaceable voice preview and the sealed 30-run warm voice performance envelope are implemented, while independent natural-schedule quality, public zero-cycle and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; Stage 2 production 8030-v2 deployment, direct candidate use and interrupted import recovery are closed, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance, bounded replaceable voice preview and the sealed 30-run warm voice performance envelope are implemented, while independent natural-schedule quality, public zero-cycle and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -64,8 +64,15 @@ GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `14
 无重复；独立静音文件以 `no_speech`、空错误码、零片段成功闭合。与先前混合负载/资源证据合并后，
 Stage 2 历史运行/资源预检 20 门通过 19 门，唯一运行子集阻断为外部公开旧 submit 零流量周期；该
 旧数字没有把 CER、数字时间、speaker overlay、已登记/未知讲话人质量计入机器门禁。质量感知 schema v2
-已补齐这些门，当前仍缺独立人工媒体质量、正式 8030 v2 handler 和 capability 人工采用，证据见
+已补齐这些门；正式 8030 v2 handler 已在获准窗口完成部署、真实协议复验、候选直连和中断恢复，
+当前仍缺独立人工媒体质量、公开零旧提交周期和 capability 人工采用。证据见
 `docs/vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md`。
+
+同日生产 `laoji-asr.service` 已切换到封存 handler，真实 Qwen3-ASR-1.7B legacy/v1/v2 8-item、
+NO_SPEECH、错误合同均通过；隔离 18030 从 8031 改为直连 8030，并在 transcript attempt 运行时终止
+API 后恢复为 115 个 stable、唯一 final、ACK 和 purge confirmed。确认无连接和外部引用后旧 8031
+兼容代理已停止。该变更不激活 capability、不修改生产 18020 或公网，证据见
+`docs/vnext-stage2/ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md`。
 
 2026-08-21 的 10 组 MP4/SRT、30 窗口弱参考诊断得到 CER 中位数 `5.56%`、p95 `41.67%`、数字/时间
 `89.71%`；逐条检查确认高误差窗口至少含字幕漏句、错词和边界漂移，因此合同固定为不可晋级，不能按

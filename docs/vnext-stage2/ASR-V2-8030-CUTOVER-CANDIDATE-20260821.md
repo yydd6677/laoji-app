@@ -1,8 +1,8 @@
-# Stage 2 正式 8030 v2 handler 切换候选（2026-08-21）
+# Stage 2 正式 8030 v2 handler 切换与实施结果（2026-08-21）
 
-状态：`release staged; target runtime compatibility passed; production unchanged; maintenance-window activation required`。
+状态：`activated on production 8030; legacy/v1/v2 compatibility passed; candidate API recovery passed; capability remains closed`。
 
-## 现场差距
+## 切换前现场差距
 
 生产 `laoji-asr.service` 仍从
 `/home/zhong/laoji-service-platform/compact-production/backend/qwen_asr_service/server.py` 启动，PID
@@ -61,5 +61,43 @@ Qwen、不占用 GPU、不绑定固定端口，只用 fake model 启动真实 `T
 重启；恢复 `/ready` 后再次验证 legacy `/asr` 和 v1。切换前后均不得修改 GPU1、PCB、Smart Meeting
 或其他用户服务。
 
-本轮没有安装 candidate unit、没有重启 8030、没有修改 18020/18030、公网或 capability；结束时
-`laoji-asr.service=active`，生产 `/v2/asr/batch` 仍为 `404`。
+## 维护窗口实施结果
+
+用户于 2026-08-21 明确授权 8030 短维护，并确认当时没有会议或导入任务。切换前再次核实：
+
+- 8030 queue depth 为 0、active priority 为空，且没有 established 8030 连接；
+- 18020 持久任务 `queued=0/running=0`，三库完整性、foreign keys 和 WAL 正常；
+- 线上源码 SHA-256 与本文 rollback 源码一致；线上 unit 原样备份到
+  `/home/zhong/laoji-vnext-candidate/activations/asr-v2-20260821T2110`，未依赖候选包中的注释版
+  rollback unit。
+
+随后原子安装候选 unit、daemon-reload 并重启 `laoji-asr.service`。当前生产进程 PID 为 `800304`，
+只监听 `127.0.0.1:8030`；unit SHA-256 为
+`32249102cc36d964fbc07ba0195face28327d40bc60465f8b92e976dd70c35aa`，实际 handler SHA-256 为
+`4c50e089cc08765e134f1a0f416d539846849d7233d681431dbf85e895c86cac`。`/ready` 返回固定 revision
+`7278e1e70fe206f11671096ffdd38061171dd6e5`、`cuda:0`、队列为空。
+
+真实 Qwen3-ASR-1.7B 复验全部通过：
+
+- legacy `/asr` 与 `/v1/asr/batch` 均返回非空文字和相同固定 revision；
+- 严格 v2 对 8 个 4 秒真实语音 item 返回 8 个唯一 stable item 和 8 个 text outcome，总墙钟
+  `1839 ms`、RTF `0.0575`；
+- 2 秒数字静音返回 `no_speech`、空文字、stable state；
+- 缺失 v2 contract revision 返回 `422 contract_revision_invalid`。
+
+隔离候选 API `127.0.0.1:18030` 已从 8031 改为直接读取 8030 readiness 并调用
+`127.0.0.1:8030/v2/asr/batch`，生产 `18020` 未修改。一次 360.133 秒真实 MP4 普通回放得到 115 个
+stable 和唯一 final，首个 stable `2333 ms`、RTF `0.096836`、ACK 与 binding/epoch purge 均确认。
+第二次同输入在 transcript attempt 1 为 `running/admitted` 时终止候选 API PID `836532`，以同一候选
+SQLite 重启为 PID `849223`；原探针跨中断继续轮询，最终仍得到 115 个 stable、唯一 final、ACK 和
+两级 purge confirmed，RTF `0.186973`。该中断回放的首段 `36698 ms` 包含故意进程中断与租约恢复，
+不得混入正常暖态延迟统计。
+
+旧 `8031` 进程已核实为 `probe_v2_asr_compat_proxy.py`；停止前没有 established 连接，所有运行中
+Python/Uvicorn 环境只有代理自身引用 8031。候选 API 改指 8030 后，该代理及其父 shell 已停止，8031
+不再监听。最终生产 8030、生产 18020 和候选 18030 均 ready，8030 与候选任务队列均为空。
+
+本次只关闭正式 handler 部署、真实协议复验、候选直连和恢复回放缺口；没有激活 media capability、
+没有切换公网或 APK，也没有触碰 GPU1、PCB、Smart Meeting 或其他用户服务。独立媒体人工质量与公开
+零旧提交周期仍阻断 Stage 2 退出。机器可读摘要见
+`asr-v2-8030-cutover-20260821.json`。

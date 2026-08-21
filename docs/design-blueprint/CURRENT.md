@@ -4,13 +4,13 @@
 - architecture revision: `vnext-1`
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
-- production/App/GPU mutation: `none`; `emulator-5562` carries isolated candidate only
+- production/App/GPU mutation: `production ASR 8030 v2 handler activated; App/public capability unchanged; GPU1 untouched`; `emulator-5562` carries isolated candidate only
 - stable source reference: `master` / `v1.1.10`
 - implementation reference: `vnext/implementation`
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0/1 passed; Stage 2 runtime/performance and the rollback-ready 8030-v2 deployment candidate are closed, while independent ASR/speaker quality, production maintenance-window activation, public zero-cycle and capability adoption remain open; Stage 3 implementation/recovery is closed candidate-only and waits on independent Facts/action/Q2 review plus public zero-cycle/adoption; Stage 4 voice performance is sealed and passed, while first-party natural-schedule review plus public zero-cycle/adoption remain open; emulator candidate 1.1.54 (162); Stage 5 safe_to_delete=false`
+- implementation status: `Stage 0/1 passed; Stage 2 runtime/performance and production 8030-v2 activation/recovery are closed, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 implementation/recovery is closed candidate-only and waits on independent Facts/action/Q2 review plus public zero-cycle/adoption; Stage 4 voice performance is sealed and passed, while first-party natural-schedule review plus public zero-cycle/adoption remain open; emulator candidate 1.1.54 (162); Stage 5 safe_to_delete=false`
 
 ## 权威文件
 
@@ -88,7 +88,8 @@ remote-complete 崩溃恢复、原生短令牌续期，并在远端确认后 arm
 Android stable 事件已先持久化本机 Transcript 再确认 durable event；guest device-v2-r2 WorkManager
 接入和 ASR/CAM++ 异步 lane 已在隔离工作树接通。Android 会议录制也已接入默认关闭的本地构建标志
 与远端 `realtime_asr_v2` 双门，
-但 capability 默认关闭，线上 8030 当前仍只有 `/v1/asr/batch`，尚未提供候选 `/v2/asr/batch`。
+capability 仍默认关闭；线上 8030 已在获准维护窗口直接提供 legacy、v1 与严格 v2，App 和公网提交
+路径没有随 handler 部署而切换。
 v20 搜索表保持原结构，Stage 4 才与查询仓储一起切换。聚焦证据见
 [Stage 2 slice](../vnext-stage2/STAGE2-SLICE.md)；这些只证明隔离切片，不代表 Stage 2 退出。
 最新完整后端回归的精确结果与旧合同失败边界见
@@ -107,8 +108,8 @@ Android/质量/混合负载、公开零流量和 capability barrier 当时仍开
 115 个最终片段的稳定键无重复。独立静音文件通过同一路径形成 `no_speech` 成功结果、空错误码和零片段。
 再合并 10 分钟全局混合负载、1 GiB 上传内存及本轮 cleanup/SQLite 审计后，Stage 2 历史运行/资源
 子集为 `19/20`；该数字未包含 CER、数字时间、speaker overlay 和已登记/未知讲话人质量，不能表示
-Stage 2 只差一个门。质量感知预检已补齐这些门；正式 8030 v2 部署、公开零旧提交周期及 capability
-人工采用仍开放，详见
+Stage 2 只差一个门。质量感知预检已补齐这些门；正式 8030 v2 部署已完成，公开零旧提交周期及
+capability 人工采用仍开放，详见
 [Android v2 网络与进程恢复](../vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md)。
 
 当前 10 组 MP4/SRT 各抽 3 个窗口的弱参考诊断得到 CER 中位数 `5.56%`、p95 `41.67%`、数字/时间
@@ -139,22 +140,21 @@ overlay p50/p95/max 为 `479.6/629.6/702.5 ms`，所有 binding/epoch 清理均�
 [device-v2 R2 probe](../vnext-stage2/DEVICE-V2-R2-REAL-PROBE-20260819.md)。
 32 MiB multipart 四片上传、合并、转写事件、ACK 和 purge 也已在候选回放通过，见
 [multipart R2 replay](../vnext-stage2/MULTIPART-R2-REPLAY-20260819.md)。
-当前隔离 API 已部署 `47640f3`，并显式绑定候选 `8031`（部署记录见
-[candidate deployment](../vnext-stage3/CANDIDATE-DEPLOY-47640F3-20260819.md)；旧候选仍可回滚）；生产 `18020/8030`
-仍未修改。
+当前隔离 API 为 `127.0.0.1:18030`，已显式直连生产 `8030` 的严格 v2；旧 8031 兼容代理在确认
+没有连接和外部运行时引用后停止。生产 `18020`、App、公网和 capability 均未切换。
 双上传+realtime 的身份和优先级已通过 CPU 候选，但 16.224 秒 realtime 只证明队列顺序，不满足
 生产延迟。Android 网络/进程恢复、手机连续文字投影、NO_SPEECH 和混合负载门已由后续回放关闭；
-下一入口是独立转写/讲话人质量、正式 8030 v2 handler、公开零流量周期与 capability barrier；
+下一入口是独立转写/讲话人质量、公开零流量周期与 capability barrier；
 不得重放 Stage 0/1，也不得激活生产 capability barrier。当前登记的 12 个会议
 视频和 10 份弱参考字幕已经冻结为验收来源之一，见
 [会议视频验收样本清单](../vnext-acceptance/meeting-video-samples-20260817.md)；字幕不是 ground truth，且
 不得进入生产 prompt、规则或样本专用补丁。只有 Stage 2–5 的实施、迁移和发布门通过后才可声明生产采用。
 
-2026-08-21 已核实生产 8030 仍运行 8 月 9 日旧 handler，真实 `/v2/asr/batch` 返回 `404`；仓库正式
-handler 与旧版差异只涉及严格 v2、数字静音和固定 model revision readiness。候选/回滚源码及 systemd
-unit 已封存在服务器版本目录，并用生产同一 Python 3.12/torch 环境完成 legacy、v1、v2、NO_SPEECH、
-版本拒绝与 readiness 六门 HTTP 探针。没有重启或修改生产 8030；正式部署缺口现收敛为一次获准的短
-维护窗口切换、真实模型纵向复验和 API 去除 8031 引用。详见
+2026-08-21 切换前核实生产 8030 仍运行 8 月 9 日旧 handler，真实 `/v2/asr/batch` 返回 `404`；仓库
+正式 handler 与旧版差异只涉及严格 v2、数字静音和固定 model revision readiness。候选/回滚源码及
+systemd unit 封存后，用户授权没有会议/导入的短维护窗口。生产 8030 已切换并通过真实 Qwen3-ASR
+legacy、v1、8-item v2、NO_SPEECH、版本拒绝和 readiness 复验；候选 18030 直连 8030 后完成普通导入
+及一次 API 进程中断恢复，旧 8031 代理已停止。capability、公网、APK 和生产 18020 保持不变。详见
 [8030 v2 handler 切换候选](../vnext-stage2/ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md)。
 
 Stage 3 的 Facts/行动 10 行与 Q2 27 行私有包已重新界定为冻结来源包：原合同只有一个 `reviewer`，
@@ -171,8 +171,9 @@ Facts/行动人工质量、Q2 人工质量和公开 Summary V2/Q0 零旧提交�
 兼容设备转写补全路径现已将“任务明确完成、响应完整但无文字”收敛为成功的 `no_speech` 内容结果，
 不再把明确的无语音录音标记为可重试失败；该修复仍属于隔离候选，后续已经过专属 Android 设备回放。
 真实一秒全零 PCM 曾在旧 8031 被 Qwen 幻觉为“嗯。”；`0eae538` 统一 ASR coordinator 现以可配置的
-保守 RMS/峰值双门在模型前收敛数字静音，并已在隔离 8031 对相同输入返回稳定 `no_speech`、
-空文本和 `infer_ms=0`。生产 8030 未改变；专属 Android 无语音/中断回放已在 2026-08-21 闭合。
+保守 RMS/峰值双门在模型前收敛数字静音，并先在隔离 8031 对相同输入返回稳定 `no_speech`、
+空文本和 `infer_ms=0`；现已随获准 handler 切换进入生产 8030，并再次以数字静音验证。专属 Android
+无语音/中断回放已在 2026-08-21 闭合。
 
 随后在隔离候选完成了正式 device-v2 WebSocket 的真实短语音回放：一条真实会议语音在第 5 个分片后
 断线并从服务端游标恢复，得到 stable/final `text`；一条无语音输入得到 final `no_speech`，两次均完成

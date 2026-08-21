@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "environment": "production-asr-with-isolated-candidate-api",
+  "maintenance_authorized": true,
+  "activated_at": "2026-08-21T21:11:26+08:00",
+  "production_api_mutated": false,
+  "public_capability_activated": false,
+  "preflight": {
+    "user_declared_no_active_meeting_or_import": true,
+    "asr_queue_depth": 0,
+    "asr_active_priority": null,
+    "asr_established_connections": 0,
+    "production_task_queued": 0,
+    "production_task_running": 0,
+    "database_integrity": "ok"
+  },
+  "activation": {
+    "service": "laoji-asr.service",
+    "active": true,
+    "pid": 800304,
+    "listener": "127.0.0.1:8030",
+    "unit_sha256": "32249102cc36d964fbc07ba0195face28327d40bc60465f8b92e976dd70c35aa",
+    "handler_sha256": "4c50e089cc08765e134f1a0f416d539846849d7233d681431dbf85e895c86cac",
+    "rollback_handler_sha256": "00bfad570b634ddf209720d81bbee098dd31109be23a32842b01b8601c018333",
+    "model": "Qwen3-ASR-1.7B",
+    "model_revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+    "device": "cuda:0"
+  },
+  "live_contract_probes": {
+    "legacy_asr_nonempty_text": true,
+    "v1_batch_nonempty_text": true,
+    "v2_speech_item_count": 8,
+    "v2_speech_text_item_count": 8,
+    "v2_speech_unique_item_ids": 8,
+    "v2_speech_audio_ms": 32000,
+    "v2_speech_wall_ms": 1839,
+    "v2_speech_rtf": 0.0575,
+    "v2_no_speech": true,
+    "v2_no_speech_empty_text": true,
+    "invalid_contract_http_status": 422,
+    "invalid_contract_error_code": "contract_revision_invalid"
+  },
+  "candidate_api": {
+    "listener": "127.0.0.1:18030",
+    "asr_ready_url": "http://127.0.0.1:8030/ready",
+    "asr_v2_batch_url": "http://127.0.0.1:8030/v2/asr/batch",
+    "ready": true,
+    "database_ready": true,
+    "task_queued": 0,
+    "task_running": 0,
+    "final_pid": 856722,
+    "r2_presign_ttl_seconds": 3600
+  },
+  "direct_import_replay": {
+    "source_sha256": "sha256:085afae46e8b163df72230e97b3f1c1663a9b0b3516f7ecfb9d4ff9218e01999",
+    "source_bytes": 19188136,
+    "source_duration_ms": 360133,
+    "task_state": "succeeded",
+    "stable_event_count": 115,
+    "event_count": 116,
+    "final_event_sequence": 116,
+    "first_stable_ms": 2333,
+    "transcription_rtf": 0.096836,
+    "acked": true,
+    "purge_state": "confirmed",
+    "epoch_purge_state": "confirmed"
+  },
+  "interrupted_import_replay": {
+    "interrupted_attempt_number": 1,
+    "interrupted_attempt_state": "running",
+    "interrupted_phase": "admitted",
+    "old_api_pid": 836532,
+    "recovery_api_pid": 849223,
+    "source_sha256": "sha256:085afae46e8b163df72230e97b3f1c1663a9b0b3516f7ecfb9d4ff9218e01999",
+    "source_duration_ms": 360133,
+    "task_state": "succeeded",
+    "stable_event_count": 115,
+    "event_count": 116,
+    "final_event_sequence": 116,
+    "transcription_rtf": 0.186973,
+    "acked": true,
+    "purge_state": "confirmed",
+    "epoch_purge_state": "confirmed"
+  },
+  "compatibility_proxy": {
+    "port": 8031,
+    "process": "probe_v2_asr_compat_proxy.py",
+    "established_connections_before_stop": 0,
+    "external_runtime_references_before_stop": 0,
+    "stopped": true,
+    "listener_after_stop": false
+  },
+  "postflight": {
+    "production_asr_ready": true,
+    "production_api_ready": true,
+    "candidate_api_ready": true,
+    "production_asr_queue_depth": 0,
+    "production_asr_active_priority": null,
+    "production_task_queued": 0,
+    "production_task_running": 0,
+    "candidate_task_queued": 0,
+    "candidate_task_running": 0
+  },
+  "remaining_stage2_blockers": [
+    "independent_first_party_media_human_quality",
+    "legacy_media_submit_zero_public_cycle",
+    "manual_capability_adoption"
+  ]
+}
