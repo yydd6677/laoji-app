@@ -87,6 +87,9 @@ _IMPROVEMENT_QUERY = re.compile(
 _CHINESE_COUNT_VALUE = re.compile(
     r"[零〇一二两三四五六七八九十百千万]+(?:个|项|部分|份|人|位|次|天|日|月|年)"
 )
+_LIST_ORDINAL = re.compile(
+    r"(^|[：:；;。.!！?？])\s*\d{1,2}\s*[.．、)]\s*(?=[\u3400-\u9fffA-Za-z])"
+)
 
 
 class Q2ReaderError(RuntimeError):
@@ -932,13 +935,47 @@ def _recover_exact_quote(
     return recovered
 
 
+def _quote_crosses_adjacent_source_boundary(
+    model_quote: str,
+    sources: list[dict[str, Any]],
+) -> bool:
+    """Prove that one provider quote was copied across exactly two ASR rows."""
+    compact_quote, _ = _alignment_view(model_quote)
+    if len(compact_quote) < 6:
+        return False
+    for index in range(len(sources) - 1):
+        left = sources[index]
+        right = sources[index + 1]
+        if (
+            left["source_type"] != right["source_type"]
+            or left["source_id"] != right["source_id"]
+            or left["source_revision_id"] != right["source_revision_id"]
+        ):
+            continue
+        compact_left, _ = _alignment_view(left["text"])
+        compact_right, _ = _alignment_view(right["text"])
+        position = (compact_left + compact_right).find(compact_quote)
+        if position < 0:
+            continue
+        if position < len(compact_left) < position + len(compact_quote):
+            return True
+    return False
+
+
 def _fact_values(value: str) -> set[str]:
     """Extract literal quantitative claims that must be present in evidence.
 
     This is a grounding check, not an answer rule: values are taken only from
     the model's answer and verified against exact current-source text.
     """
-    return {re.sub(r"\s+", "", match.group(0)) for match in _FACT_VALUE.finditer(value)}
+    # Numbered answer formatting is not a quantitative claim.  Treat ``1.``
+    # after a clause boundary as an ordinal marker while preserving decimals
+    # such as ``3.5`` and every number that appears in the actual claim text.
+    without_ordinals = _LIST_ORDINAL.sub(r"\1", value)
+    return {
+        re.sub(r"\s+", "", match.group(0))
+        for match in _FACT_VALUE.finditer(without_ordinals)
+    }
 
 
 def _lexical_terms(value: str) -> set[str]:
@@ -1589,6 +1626,7 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
     answer_reprojected = False
     canonical_citations: list[dict[str, Any]] = []
     seen_citations: set[tuple[str, int, int, str]] = set()
+    grounding_failures: list[str] = []
     text_clause_ranges = _answer_text_clause_ranges(answer, clauses_raw)
     coordinate_valid = text_clause_ranges is not None or _answer_coordinates_cover_full_text(answer, clauses_raw)
     for clause_index, clause in enumerate(clauses_raw):
@@ -1666,6 +1704,18 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 }]
             else:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
+        if (
+            not citations_raw
+            and isinstance(model_clause_text, str)
+            and _is_absence_clause(model_clause_text)
+        ):
+            # A provider should not cite evidence for an absence assertion.
+            # Keep any independently grounded sibling clauses and remove this
+            # unsupported sub-answer from the public projection. If no sibling
+            # survives, the final all-grounding guard below still fails closed.
+            answer_reprojected = True
+            coordinate_valid = False
+            continue
         if not 1 <= len(citations_raw) <= 32:
             raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用数量无效", 502)
         # Some small providers repeat the same citation object to satisfy the
@@ -1675,6 +1725,7 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
         citations: list[dict[str, Any]] = []
         clause_citations: set[tuple[str, int, int, str]] = set()
         provider_exact_quote_seen = False
+        provider_adjacent_quote_seen = False
         for citation_index, citation in enumerate(citations_raw):
             if not isinstance(citation, dict):
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用格式无效", 502)
@@ -1693,6 +1744,8 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用原文无效", 502)
             if any(model_quote in candidate["text"] for candidate in sources):
                 provider_exact_quote_seen = True
+            if _quote_crosses_adjacent_source_boundary(model_quote, sources):
+                provider_adjacent_quote_seen = True
             if not _citation_supports_text(question, clause_text, model_quote):
                 # Providers sometimes attach an extra transition/background
                 # quote beside the actual evidence. Discard that quote instead
@@ -1815,6 +1868,18 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 sources,
                 clause_index,
             )
+        if provider_adjacent_quote_seen:
+            # A verbatim provider quote may span two adjacent ASR rows while
+            # its alias names only one row. Rebind the unchanged model clause
+            # only when the strict literal/polarity scorer proves one adjacent
+            # source group supports it; otherwise the clause is dropped below.
+            adjacent_citations = _recover_enumerated_claim_citations(
+                clause_text,
+                sources,
+                clause_index,
+            )
+            if adjacent_citations:
+                citations = adjacent_citations
         citations = _complete_adjacent_clause_support(
             clause_text,
             sources,
@@ -1828,7 +1893,14 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             clause_index,
         )
         if projected_clause_text is None:
-            raise Q2ReaderError("Q2_GROUNDING_INVALID", "回答中的枚举项缺少逐字依据", 502)
+            # The model can emit one bad list clause beside independently
+            # grounded clauses. Remove the entire unsupported clause rather
+            # than failing or leaking any of its items. An answer with no
+            # remaining grounded clause is rejected after the loop.
+            answer_reprojected = True
+            coordinate_valid = False
+            grounding_failures.append("回答中的枚举项缺少逐字依据")
+            continue
         if projected_clause_text != clause_text:
             clause_text = projected_clause_text
             citations = projected_citations
@@ -1836,21 +1908,27 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
             coordinate_valid = False
         else:
             citations = projected_citations
-        citations = _ground_quantitative_citations(
-            question,
-            clause_text,
-            sources,
-            citations,
-            clause_index,
-        )
+        try:
+            citations = _ground_quantitative_citations(
+                question,
+                clause_text,
+                sources,
+                citations,
+                clause_index,
+            )
+        except Q2ReaderError as error:
+            if error.code != "Q2_GROUNDING_INVALID":
+                raise
+            grounding_failures.append(error.message)
+            citations = []
         if not citations:
-            # An absence statement has no positive source span to cite. If an
-            # earlier clause is supported, omit only this absent sub-answer;
-            # every other unsupported clause remains a hard failure.
-            if _is_absence_clause(clause_text) and canonical_citations:
-                coordinate_valid = False
-                continue
-            raise Q2ReaderError("Q2_GROUNDING_INVALID", "问答引用与回答无关", 502)
+            # Never expose the unsupported clause.  Continue so later clauses
+            # can still be verified; the final guard rejects the whole answer
+            # when nothing grounded survives.
+            answer_reprojected = True
+            coordinate_valid = False
+            grounding_failures.append("问答引用与回答无关")
+            continue
         grounded_clause_records.append({
             "clause_id": clause_id,
             "text": clause_text,
@@ -1874,6 +1952,12 @@ def read_q2(payload: dict[str, Any]) -> dict[str, Any]:
                 "citations": citations,
             })
             previous_end = end
+    if not grounded_clause_records:
+        raise Q2ReaderError(
+            "Q2_GROUNDING_INVALID",
+            grounding_failures[0] if grounding_failures else "回答没有可验证引用",
+            502,
+        )
     if coordinate_valid and previous_end != len(answer_bytes):
         coordinate_valid = False
     if _COUNT_QUERY.search(question) and len(grounded_clause_records) > 1:

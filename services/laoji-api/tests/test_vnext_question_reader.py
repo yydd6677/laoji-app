@@ -736,6 +736,45 @@ def test_reader_splits_cross_row_quote_into_exact_adjacent_citations(monkeypatch
     }
 
 
+def test_reader_recovers_non_list_claim_split_across_adjacent_asr_rows(monkeypatch):
+    texts = ["只要收数据收到三四百", "可能就一定会有平等的权益"]
+    sources = [{
+        "source_type": "transcript",
+        "source_id": "recording-1",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+        "source_start_utf8": index * 100,
+        "source_end_utf8": index * 100 + len(text.encode("utf-8")),
+    } for index, text in enumerate(texts)]
+    payload = _payload(texts[0])
+    payload["question"] = "达到多少数据量可能就能获得权益？"
+    payload["sources"] = sources
+    payload["source_fingerprint"] = reader._source_fingerprint(sources)
+    answer = "三四百可能就有权益。"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": {
+            "c1": {
+                "clause_id": "c1",
+                "text": answer,
+                "citations": {
+                    "e1": {
+                        "source_id": "s0",
+                        "quote": "只要收数据收到三四百可能就一定会有平等的权益",
+                    },
+                },
+            },
+        },
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(payload)
+
+    assert result["answer"] == answer
+    assert {item["quote"] for item in result["clauses"][0]["citations"]} == set(texts)
+
+
 def test_reader_drops_auxiliary_clause_absent_from_top_level_answer(monkeypatch):
     texts = ["周五前由张敏提交接口文档。", "办公室准备了饮用水。"]
     sources = [{
@@ -1160,6 +1199,117 @@ def test_reader_drops_unrelated_citation_for_partial_absence_clause(monkeypatch)
     result = reader.read_q2(payload)
     assert len(result["clauses"]) == 1
     assert [item["quote"] for item in result["clauses"][0]["citations"]] == [text]
+
+
+def test_reader_drops_empty_citation_for_partial_absence_clause(monkeypatch):
+    text = "同时负责管理集团的科技信息管理平台。"
+    answer = "发言人负责科技信息平台，联系电话未提及。"
+    payload = _payload(text)
+    payload["question"] = "谁负责科技信息平台，联系电话是多少？"
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": answer,
+        "clauses": {
+            "c1": {
+                "clause_id": "c1",
+                "text": "发言人负责科技信息平台",
+                "citations": {
+                    "e1": {
+                        "citation_id": "cite-1",
+                        "source_id": "s0",
+                        "quote": text,
+                    },
+                },
+            },
+            "c2": {
+                "clause_id": "c2",
+                "text": "联系电话未提及",
+                "citations": {},
+            },
+        },
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(payload)
+
+    assert result["answer"] == "发言人负责科技信息平台。"
+    assert len(result["clauses"]) == 1
+
+
+def test_reader_drops_unsupported_sibling_clause_without_leaking_it(monkeypatch):
+    supported = "项目将在周五提交。"
+    unrelated = "会议室已经完成清洁。"
+    payload = _payload(supported)
+    payload["question"] = "项目什么时候提交，还需要什么？"
+    payload["sources"].append({
+        "source_type": "transcript",
+        "source_id": "line-2",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(unrelated),
+        "text": unrelated,
+    })
+    payload["source_fingerprint"] = reader._source_fingerprint(payload["sources"])
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": "项目将在周五提交，还需要电话确认。",
+        "clauses": {
+            "c1": {
+                "clause_id": "c1",
+                "text": "项目将在周五提交",
+                "citations": {
+                    "e1": {"source_id": "s0", "quote": supported},
+                },
+            },
+            "c2": {
+                "clause_id": "c2",
+                "text": "还需要电话确认",
+                "citations": {
+                    "e1": {"source_id": "s1", "quote": unrelated},
+                },
+            },
+        },
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(payload)
+
+    assert result["answer"] == "项目将在周五提交。"
+    assert "电话" not in result["answer"]
+
+
+def test_reader_does_not_ground_numbered_list_ordinals_as_fact_values(monkeypatch):
+    sources = ["样品组分存在不均匀性。", "短程序是另一个关键问题。"]
+    payload = _payload(sources[0])
+    payload["question"] = "报告提到了哪些关键科学问题？"
+    payload["sources"] = [{
+        "source_type": "transcript",
+        "source_id": f"line-{index}",
+        "source_revision_id": "revision-1",
+        "content_sha256": _hash(text),
+        "text": text,
+    } for index, text in enumerate(sources)]
+    payload["source_fingerprint"] = reader._source_fingerprint(payload["sources"])
+    monkeypatch.setattr(reader, "call_llm", lambda *args, **kwargs: json.dumps({
+        "answer_kind": "answer",
+        "answer": "1. 样品组分不均匀；2. 短程序问题。",
+        "clauses": {
+            "c1": {
+                "clause_id": "c1",
+                "text": "1. 样品组分不均匀",
+                "citations": {"e1": {"source_id": "s0", "quote": sources[0]}},
+            },
+            "c2": {
+                "clause_id": "c2",
+                "text": "2. 短程序问题",
+                "citations": {"e1": {"source_id": "s1", "quote": sources[1]}},
+            },
+        },
+    }, ensure_ascii=False))
+
+    result = reader.read_q2(payload)
+
+    assert result["answer_kind"] == "answer"
+    assert len(result["clauses"]) == 2
+    assert reader._fact_values("1. 样品组分不均匀") == set()
+    assert reader._fact_values("方案成本为3.5万元") == {"3.5万元"}
 
 
 def test_reader_retrieves_large_raw_source_set_without_relabeling_citations(monkeypatch):

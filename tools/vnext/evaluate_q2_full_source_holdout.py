@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import hashlib
 import json
+import os
 from pathlib import Path
+import random
 import statistics
 import time
 import uuid
@@ -45,6 +48,15 @@ FULL_SOURCE_QUESTION_OVERRIDES = {
 }
 
 FULL_SOURCE_EXPECTATION_OVERRIDES = {
+    # The complete meeting states both the target (about 400), that it will not
+    # be enforced rigidly, and that three to four hundred may qualify. The old
+    # narrow-window anchor accepted only the latter wording even though both
+    # are directly grounded answers to the threshold question.
+    "survey-threshold": {
+        "expected": "answer",
+        "required_any": ("三四百", "300", "400"),
+        "citation_any": ("三四百", "400"),
+    },
     # The old narrow window stopped at the outline sentence and therefore
     # treated this as absent.  The complete report explicitly enumerates
     # sample quality, oxygen content, short-range order and layer competition.
@@ -70,6 +82,9 @@ FULL_SOURCE_CITATION_GROUPS = {
     "energy-ui-plan": (("文件", "txt"), ("excel", "输出")),
 }
 
+WORKTREE_ROOT = Path(__file__).resolve().parents[2]
+HUMAN_REVIEW_CONTRACT = "stage3-q2-human-review-v1"
+
 
 def percentile(values: list[int], fraction: float) -> float | None:
     if not values:
@@ -91,6 +106,118 @@ def distribution(values: list[int]) -> dict[str, Any]:
     }
 
 
+def resolve_private_review_path(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved.is_relative_to(WORKTREE_ROOT):
+        raise ValueError("--human-review-out must be outside the Git worktree")
+    return resolved
+
+
+def review_id(run: int, case_id: str) -> str:
+    value = f"{HUMAN_REVIEW_CONTRACT}:{run}:{case_id}".encode("utf-8")
+    return "q2-" + hashlib.sha256(value).hexdigest()
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any], *, mode: int | None = None) -> bytes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(body)
+    if mode is not None:
+        os.chmod(temporary, mode)
+    temporary.replace(path)
+    return body
+
+
+def human_review_packet(
+    rows: list[dict[str, Any]],
+    *,
+    in_progress: bool,
+    requested_runs: int,
+    case_count: int,
+    reviewer: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    blinded_rows = list(rows)
+    random.SystemRandom().shuffle(blinded_rows)
+    return {
+        "schema_version": 1,
+        "contract": HUMAN_REVIEW_CONTRACT,
+        "blind": True,
+        "in_progress": in_progress,
+        "independent_human_review_required": True,
+        "requested_runs": requested_runs,
+        "case_count": case_count,
+        "instructions": [
+            "Review only the displayed question, answer, clauses and cited source context.",
+            "Mark answer_correct false for any unsupported or wrong material claim.",
+            "Mark citations_relevant false if any citation does not support its clause.",
+            "Do not infer missing facts from the sample identity or automated pass status.",
+        ],
+        "reviewer": reviewer or {"reviewer_id": "", "completed_at": ""},
+        "rows": blinded_rows,
+    }
+
+
+def load_resume_state(
+    report_path: Path,
+    review_path: Path | None,
+    *,
+    requested_runs: int,
+    case_ids: tuple[str, ...],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str], int]:
+    if not report_path.exists():
+        raise ValueError("--resume requires an existing --json-out checkpoint")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if report.get("requested_runs") != requested_runs:
+        raise ValueError("resume checkpoint requested_runs mismatch")
+    if report.get("case_count") != len(case_ids):
+        raise ValueError("resume checkpoint case_count mismatch")
+    recorded_ids = report.get("selected_case_ids")
+    if recorded_ids is not None and tuple(recorded_ids) != case_ids:
+        raise ValueError("resume checkpoint selected cases mismatch")
+    results = list(report.get("results") or [])
+    completed = [(item.get("run"), item.get("case_id")) for item in results]
+    if len(completed) != len(set(completed)):
+        raise ValueError("resume checkpoint contains duplicate results")
+
+    review_rows: list[dict[str, Any]] = []
+    reviewer = {"reviewer_id": "", "completed_at": ""}
+    if review_path is None and report.get("human_review"):
+        raise ValueError("resume checkpoint requires the original --human-review-out path")
+    if review_path is not None:
+        if not review_path.exists():
+            raise ValueError(
+                "resume checkpoint has no private review packet; use new output paths to recreate it"
+            )
+        packet = json.loads(review_path.read_text(encoding="utf-8"))
+        if packet.get("contract") != HUMAN_REVIEW_CONTRACT:
+            raise ValueError("resume private review contract mismatch")
+        if packet.get("requested_runs") != requested_runs or packet.get("case_count") != len(case_ids):
+            raise ValueError("resume private review selection mismatch")
+        review_rows = list(packet.get("rows") or [])
+        ids = [str(row.get("review_id") or "") for row in review_rows]
+        if not all(ids) or len(ids) != len(set(ids)):
+            raise ValueError("resume private review packet has missing or duplicate review IDs")
+        reviewer_wire = packet.get("reviewer")
+        if isinstance(reviewer_wire, dict):
+            reviewer = {
+                "reviewer_id": str(reviewer_wire.get("reviewer_id") or ""),
+                "completed_at": str(reviewer_wire.get("completed_at") or ""),
+            }
+        if reviewer["completed_at"]:
+            raise ValueError("cannot resume a human review packet after review completion")
+        expected_review_ids = {
+            str(item["review_id"])
+            for item in results
+            if item.get("review_id")
+        }
+        actual_review_ids = set(ids)
+        if not expected_review_ids.issubset(actual_review_ids):
+            raise ValueError("resume private review packet is behind the public checkpoint")
+
+    return results, review_rows, reviewer, int(report.get("auth_refresh_count") or 0)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--samples", type=Path, default=Path("/home/yydd/下载/会议视频样本"))
@@ -99,7 +226,22 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=2)
     parser.add_argument("--id", action="append", default=[])
     parser.add_argument("--start-at", help="Diagnostic subset beginning at this case ID.")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an interrupted checkpoint without repeating completed cases.",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="With --resume, replace only failed checkpoint rows and keep successful rows.",
+    )
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--human-review-out",
+        type=Path,
+        help="Write a private, content-bearing blind review packet outside the Git worktree.",
+    )
     parser.add_argument(
         "--keep-failed-binding",
         action="store_true",
@@ -113,6 +255,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.runs < 1:
         raise SystemExit("runs must be positive")
+    if args.retry_failed and not args.resume:
+        raise SystemExit("--retry-failed requires --resume")
+    review_path: Path | None = None
+    if args.human_review_out:
+        try:
+            review_path = resolve_private_review_path(args.human_review_out)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
     available_cases = tuple(CASES)
     if args.start_at:
         try:
@@ -131,20 +281,69 @@ def main() -> int:
     if not cases:
         raise SystemExit("no matching cases")
 
+    case_ids = tuple(case.case_id for case in cases)
+    results: list[dict[str, Any]] = []
+    review_rows: list[dict[str, Any]] = []
+    reviewer = {"reviewer_id": "", "completed_at": ""}
+    auth_refresh_count = 0
+    if args.resume:
+        try:
+            results, review_rows, reviewer, auth_refresh_count = load_resume_state(
+                args.json_out,
+                review_path,
+                requested_runs=args.runs,
+                case_ids=case_ids,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            raise SystemExit(str(error)) from error
+        if args.retry_failed:
+            failed_review_ids = {
+                str(item["review_id"])
+                for item in results
+                if not item.get("passed") and item.get("review_id")
+            }
+            results = [item for item in results if item.get("passed")]
+            review_rows = [
+                row for row in review_rows
+                if str(row.get("review_id") or "") not in failed_review_ids
+            ]
+
+    completed_keys = {
+        (int(item["run"]), str(item["case_id"]))
+        for item in results
+        if isinstance(item.get("run"), int) and item.get("case_id")
+    }
     auth_path = args.auth_state.expanduser().resolve()
     state = persistent_device(args.api, auth_path)
     auth_refreshed_at = time.monotonic()
-    auth_refresh_count = 0
     status, capability_wire = json_request(f"{args.api}/capabilities", headers=state.auth)
     capabilities = require_success(status, capability_wire, "read capabilities")
     if not capabilities.get("source_stream_v2") or not capabilities.get("question_reader_v2"):
         raise RuntimeError("candidate Q2 capabilities are not enabled")
 
     source_cache: dict[str, tuple[list[list[dict[str, Any]]], str, list[str], dict[str, str]]] = {}
-    seen_samples: set[str] = set()
-    results: list[dict[str, Any]] = []
+    seen_samples = {
+        str(item["sample_sha256"])
+        for item in results
+        if item.get("sample_sha256")
+    }
 
     def checkpoint(in_progress: bool) -> None:
+        review_metadata: dict[str, Any] | None = None
+        if review_path is not None:
+            packet = human_review_packet(
+                review_rows,
+                in_progress=in_progress,
+                requested_runs=args.runs,
+                case_count=len(cases),
+                reviewer=reviewer,
+            )
+            review_body = write_json_atomic(review_path, packet, mode=0o600)
+            review_metadata = {
+                "contract": HUMAN_REVIEW_CONTRACT,
+                "row_count": len(review_rows),
+                "sha256": "sha256:" + hashlib.sha256(review_body).hexdigest(),
+            }
         report = {
             "schema_version": 1,
             "candidate_only": True,
@@ -153,16 +352,18 @@ def main() -> int:
             "source_policy": "complete real subtitle source stream; weak reference only",
             "requested_runs": args.runs,
             "case_count": len(cases),
+            "selected_case_ids": list(case_ids),
             "auth_refresh_count": auth_refresh_count,
             "results": results,
         }
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        temporary = args.json_out.with_suffix(args.json_out.suffix + ".tmp")
-        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(args.json_out)
+        if review_metadata is not None:
+            report["human_review"] = review_metadata
+        write_json_atomic(args.json_out, report)
 
     for run in range(1, args.runs + 1):
         for case in cases:
+            if (run, case.case_id) in completed_keys:
+                continue
             if time.monotonic() - auth_refreshed_at >= 7 * 60:
                 state = replace(state, auth=refresh_auth(args.api, state))
                 auth_refreshed_at = time.monotonic()
@@ -328,7 +529,9 @@ def main() -> int:
                     "sample_sha256": sample_sha256,
                     "question_sha256": digest_json(question),
                     "question_overridden_for_full_source": case.case_id in FULL_SOURCE_QUESTION_OVERRIDES,
-                    "expectation_overridden_for_full_source": case.case_id in FULL_SOURCE_EXPECTATION_OVERRIDES,
+                    "expectation_overridden_for_full_source": (
+                        case.case_id in FULL_SOURCE_EXPECTATION_OVERRIDES
+                    ),
                     "allowed_answer_kinds": sorted(allowed_answer_kinds),
                     "conditioning": conditioning,
                     "model_backed": not case.include_conflicting_note,
@@ -341,6 +544,33 @@ def main() -> int:
                     "passed": not errors and checked == matched,
                     "errors": errors,
                 })
+                if review_path is not None:
+                    row_review_id = review_id(run, case.case_id)
+                    results[-1]["review_id"] = row_review_id
+                    review_rows[:] = [
+                        row for row in review_rows
+                        if row.get("review_id") != row_review_id
+                    ]
+                    review_rows.append({
+                        "review_id": row_review_id,
+                        "question": question,
+                        "answer_kind": response.get("answer_kind"),
+                        "answer": answer,
+                        "clauses": response.get("clauses") or [],
+                        "citation_source_context": sorted({
+                            source_by_hash.get(str(citation.get("content_sha256") or ""), "")
+                            for citation in citations
+                            if source_by_hash.get(str(citation.get("content_sha256") or ""), "")
+                        }),
+                        "review": {
+                            "answer_correct": None,
+                            "answer_complete": None,
+                            "citations_relevant": None,
+                            "refusal_appropriate": None,
+                            "critical_error": None,
+                            "notes": "",
+                        },
+                    })
                 print(
                     f"{'PASS' if results[-1]['passed'] else 'FAIL'} run={run} "
                     f"case={case.case_id} q2={elapsed_ms}ms conditioning={conditioning}",
@@ -395,6 +625,7 @@ def main() -> int:
         "source_policy": "complete real subtitle source stream; weak reference only",
         "requested_runs": args.runs,
         "case_count": len(cases),
+        "selected_case_ids": list(case_ids),
         "auth_refresh_count": auth_refresh_count,
         "total": len(results),
         "passed": passed,
@@ -412,9 +643,25 @@ def main() -> int:
             "capability barrier",
         ],
     }
-    temporary = args.json_out.with_suffix(args.json_out.suffix + ".tmp")
-    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(args.json_out)
+    if review_path is not None:
+        review_packet = human_review_packet(
+            review_rows,
+            in_progress=False,
+            requested_runs=args.runs,
+            case_count=len(cases),
+            reviewer=reviewer,
+        )
+        body = write_json_atomic(review_path, review_packet, mode=0o600)
+        report["human_review"] = {
+            "contract": HUMAN_REVIEW_CONTRACT,
+            "row_count": len(review_rows),
+            "sha256": "sha256:" + hashlib.sha256(body).hexdigest(),
+        }
+        print(json.dumps({
+            "human_review_rows": len(review_rows),
+            "human_review_sha256": "sha256:" + hashlib.sha256(body).hexdigest(),
+        }, ensure_ascii=False), flush=True)
+    write_json_atomic(args.json_out, report)
     print(json.dumps({
         "total": report["total"],
         "passed": report["passed"],
