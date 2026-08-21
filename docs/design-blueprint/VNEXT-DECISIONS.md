@@ -30,6 +30,8 @@
 | D17 | Provider/资源 | SELECTED | 18020/8030/21434；16 GiB GPU、8 GiB RSS、16-core p95 与有界队列 | 业务直连端口、无界队列、11434/21436 静默 fallback 删除 |
 | D18 | 可观察性 | SELECTED | traffic class + revision + stage + timing；正文禁止 | 空 client metadata 和无法区分自动/人工请求的日志格式删除 |
 | D19 | 本场待办与提醒 | RETAINED | `action_items` 是唯一 mutable owner；保留手动/候选/标记 provenance、CRUD、提醒和后续日程 | 账号协作新写与整理重新生成覆盖已有待办删除 |
+| D20 | 质量与观察门 | WAIVED_BY_OWNER | 独立人工质量和公开零旧调用周期明确记为 waived，不生成虚假指标 | 以后可由产品所有者另行恢复真实验收，不影响当前 Stage 5A 候选 |
+| D21 | legacy 收敛 | RETAINED_COLD | Stage 5A 只保留冷回滚资产；单一活跃 owner、无双写、无静默 fallback | Stage 5B 获得产品所有者新授权后才物理删除 |
 
 所有开发关键领域均已闭合；不存在要求实施者重新选择架构的 `pending`。
 
@@ -132,6 +134,17 @@
 - 原因：当前产品已有完整本场待办能力，不能用生成结果版本代替 mutable 用户对象。
 - 边界：账号协作分享不进入 accountless vNext；历史只读后删除，本地导出可包含待办。
 
+### A13 单一产品所有者豁免与两段式 Stage 5
+
+- 决定：因无外部用户且不存在第二名独立人员，产品所有者明确跳过人工质量和正常使用/公开零旧调用
+  周期。工具只把对应门标为 `waived`，不能改成 `passed` 或填入模拟指标。
+- Stage 5A：允许在隔离候选数据库持久 capability barrier，完成单一 owner、迁移恢复、资源隐私和
+  候选交付；legacy reader/writer 源码、表及运行资产保留为冷回滚材料，不登记 reader removal marker。
+- Stage 5B：物理删除不在本次授权内；必须收到新的产品所有者授权，并重新核对任务/租约/引用/open
+  file 和数据库生命周期。
+- 不变边界：不双写、不静默 fallback、不自动发布生产、不切公网。风险豁免合同见
+  `docs/vnext-global/product-owner-risk-waiver-20260821.json`。
+
 ## 3. 明确冻结的否决项
 
 | 方案 | 状态 | 冻结原因 |
@@ -161,7 +174,8 @@
 | 长会议超 context | HIGH | 时间/主题分章 facts，一章一次调用，代码以固定两槽、每槽 4 MiB 的滚动 checkpoint 合并；不截断、不恢复递归摘要、不逐章累积行 |
 | GPU0 与其他进程争用 | HIGH | 老记常驻 `<=16 GiB`、embedding CPU/按需、整卡 1 GiB 安全门和队列 backpressure；GPU1/外部服务不动 |
 | R2 presign 取消后仍可晚写 | HIGH | 独立 cleanup obligation 等到最后 expiry 后 abort/delete/HEAD |
-| 旧客户端与 v2 API 共存 | MEDIUM | barrier 前 v1 legacy/v2 generic；零提交一周期后 v1 submit 返回 426、读保留；禁止 adapter 伪造新合同或请求内 fallback |
+| 旧客户端与 v2 API 共存 | HIGH (OWNER ACCEPTED) | Stage 5A 跳过零调用周期；候选只允许 vNext 单路写入，legacy 只作冷回滚资产；禁止 adapter 伪造新合同、双写或请求内 fallback |
+| 未执行独立人工质量验收 | HIGH (OWNER ACCEPTED) | 对应门只标记 waived；保留自动结构、引用、恢复、性能与隐私证据，不能声称人工质量达标 |
 | Transcript 重分段导致人工修正悬空 | HIGH | stable source ID + overlay expected revision + deterministic rebase/待确认，不删除修正 |
 | 长会 Q&A 无法证明“未提及” | MEDIUM | 超完整上下文时明确返回无法确认；不从 top-k absence 推断 |
 | 云端 provider 可用但隐私不同 | HIGH | 只允许部署级显式选择；本地失败不自动外传 |

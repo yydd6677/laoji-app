@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "evidence_contract": "vnext-product-owner-risk-waiver-v1",
+  "owner_role": "sole_product_owner",
+  "decision": "accept_unverified_quality_and_observation_risk",
+  "issued_at": "2026-08-21T14:05:00+00:00",
+  "authorization_reference": "codex-thread:01a00b55-b0d9-7c30-8f49-8ccc020c3e96:2026-08-21-owner-waiver",
+  "baseline_revision": "b884f70",
+  "applies_to": [
+    "stage2.media_quality",
+    "stage2.public_cycle",
+    "stage3.human_quality",
+    "stage3.public_cycle",
+    "stage4.public_cycle",
+    "stage4.schedule_quality",
+    "stage5.legacy_retention"
+  ],
+  "active_path_policy": "single-owner-no-dual-write-no-silent-fallback",
+  "physical_legacy_deletion_authorized": false,
+  "production_release_authorized": false,
+  "risk_acknowledgements": [
+    "quality_metrics_are_unverified",
+    "legacy_zero_cycle_was_not_observed",
+    "legacy_assets_are_cold_rollback_only",
+    "physical_legacy_deletion_requires_later_owner_authorization",
+    "production_release_requires_separate_owner_authorization"
+  ],
+  "report_sha256": "sha256:9a5c26d3fe75baa911e59dd5f7111d833e7ffe090d14314ba6294066ec302059"
+}

@@ -64,6 +64,11 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from media_quality_evidence import verify_quality_report
+from product_owner_risk_waiver import (
+    STAGE2_MEDIA_QUALITY,
+    STAGE2_PUBLIC_CYCLE,
+    apply_waiver_to_gates,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -197,6 +202,7 @@ def inspect(
     candidate_database: Path | None = None,
     api_ready_url: str | None = None,
     asr_ready_url: str | None = None,
+    owner_waiver: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     data = _mapping(envelope)
     gates: list[dict[str, Any]] = []
@@ -368,14 +374,33 @@ def inspect(
         reason="external_public_cycle_record_required",
     )
 
-    passed = bool(gates) and all(item["status"] == "passed" for item in gates)
+    waiver = apply_waiver_to_gates(
+        gates,
+        owner_waiver,
+        {
+            STAGE2_MEDIA_QUALITY: (
+                "media_quality_lineage",
+                "media_independent_human_holdout",
+                "asr_cer_median",
+                "asr_cer_p95",
+                "asr_numeric_time_accuracy",
+                "speaker_registered_attribution_f1",
+                "speaker_unknown_forced_name_rate",
+            ),
+            STAGE2_PUBLIC_CYCLE: ("legacy_submit_zero_public_cycle",),
+        },
+    )
+
+    passed = bool(gates) and all(item["status"] in {"passed", "waived"} for item in gates)
     return {
         "schema_version": 2,
         "candidate_only": True,
         "production_mutation": False,
         "passed": passed,
+        "owner_risk_waiver": waiver,
         "gates": gates,
-        "blocking_gates": [item["name"] for item in gates if item["status"] != "passed"],
+        "blocking_gates": [item["name"] for item in gates if item["status"] == "blocked"],
+        "waived_gates": [item["name"] for item in gates if item["status"] == "waived"],
     }
 
 
@@ -385,17 +410,24 @@ def main() -> int:
     parser.add_argument("--candidate-database", type=Path)
     parser.add_argument("--api-ready-url")
     parser.add_argument("--asr-ready-url")
+    parser.add_argument("--owner-waiver", type=Path)
     parser.add_argument("root", nargs="?", type=Path, default=ROOT)
     args = parser.parse_args()
     envelope: Mapping[str, Any] | None = None
     if args.evidence:
         envelope = json.loads(args.evidence.read_text(encoding="utf-8"))
+    owner_waiver = (
+        json.loads(args.owner_waiver.read_text(encoding="utf-8"))
+        if args.owner_waiver
+        else None
+    )
     report = inspect(
         args.root.resolve(),
         envelope,
         candidate_database=args.candidate_database.resolve() if args.candidate_database else None,
         api_ready_url=args.api_ready_url,
         asr_ready_url=args.asr_ready_url,
+        owner_waiver=owner_waiver,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["passed"] else 1

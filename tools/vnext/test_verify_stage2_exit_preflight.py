@@ -3,10 +3,36 @@ from __future__ import annotations
 from pathlib import Path
 
 from media_quality_evidence import EVIDENCE_CONTRACT, seal_report
+from product_owner_risk_waiver import (
+    ACTIVE_PATH_POLICY,
+    EVIDENCE_CONTRACT as WAIVER_CONTRACT,
+    OWNER_DECISION,
+    OWNER_ROLE,
+    REQUIRED_SCOPES,
+    RISK_ACKNOWLEDGEMENTS,
+    seal_waiver,
+)
 from verify_stage2_exit_preflight import inspect
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _owner_waiver() -> dict:
+    return seal_waiver({
+        "schema_version": 1,
+        "evidence_contract": WAIVER_CONTRACT,
+        "owner_role": OWNER_ROLE,
+        "decision": OWNER_DECISION,
+        "issued_at": "2026-08-21T14:00:00+00:00",
+        "authorization_reference": "codex-thread:test",
+        "baseline_revision": "test",
+        "applies_to": sorted(REQUIRED_SCOPES),
+        "active_path_policy": ACTIVE_PATH_POLICY,
+        "physical_legacy_deletion_authorized": False,
+        "production_release_authorized": False,
+        "risk_acknowledgements": list(RISK_ACKNOWLEDGEMENTS),
+    })
 
 
 def _passing_envelope() -> dict:
@@ -117,3 +143,29 @@ def test_weak_subtitle_metrics_cannot_close_human_quality_gate() -> None:
 
     assert report["passed"] is False
     assert "media_independent_human_holdout" in report["blocking_gates"]
+
+
+def test_owner_waiver_marks_only_external_gates_waived() -> None:
+    evidence = _passing_envelope()
+    evidence["media_quality"] = {}
+    evidence["public_cycle"] = {"complete": False, "legacy_submit_count": None}
+
+    report = inspect(ROOT, evidence, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is True
+    assert len(report["waived_gates"]) == 8
+    assert "media_quality_lineage" in report["waived_gates"]
+    assert "legacy_submit_zero_public_cycle" in report["waived_gates"]
+    assert report["owner_risk_waiver"]["physical_legacy_deletion_authorized"] is False
+
+
+def test_owner_waiver_does_not_hide_runtime_failure() -> None:
+    evidence = _passing_envelope()
+    evidence["media_quality"] = {}
+    evidence["public_cycle"] = {"complete": False}
+    evidence["performance"]["realtime_p95_ms"] = 3_000
+
+    report = inspect(ROOT, evidence, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is False
+    assert "performance_realtime_p95_ms" in report["blocking_gates"]

@@ -1147,8 +1147,8 @@ canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncS
 和 generic Task，只把新 generation 显式路由到 legacy transcription handler adapter，不恢复旧 upload/
 ASR submit。新 generation 不回退旧状态；已创建 R2 对象仍由 cleanup obligation 清理。
 
-Stage 2 停写/退出门：旧 upload/ASR submission 已连续一个完整公开周期为零且 capability barrier
-已持久激活；barrier 前 lease 可恢复排空；verified asset、late PUT、NO_SPEECH success、双上传+实时
+Stage 2 停写/退出门：产品所有者已用哈希合同豁免独立人工媒体质量和完整公开零旧提交周期；这些门
+状态为 `waived` 而非 `passed`。隔离候选 capability barrier 需持久激活；barrier 前 lease 可恢复排空；verified asset、late PUT、NO_SPEECH success、双上传+实时
 会议和删除/恢复回放通过。旧 worker/handler 保留到 Stage 5；barrier 后回滚只切换 handler revision，
 不停止 v2/generic ingress。
 
@@ -1263,8 +1263,8 @@ adjudication，确定性计算 Facts 支持/遗漏、行动真实性/适用性�
 不迁回 legacy，也不恢复 legacy submit/mirror。禁止 Q2 失败时请求内调用 Q0。兼容 handler 只在
 Stage 5 删除门通过后物理删除。
 
-Stage 3 停写/退出门：summary/question v1 submission 已连续一个完整公开周期为零且 capability barrier
-已激活；旧 legacy queued/running/retry_wait 仅剩可恢复排空项；generic 不使用 retry_wait；Q2 immutable source、Facts V3、ActionItem、章节
+Stage 3 停写/退出门：产品所有者已豁免 Facts/行动/Q2 独立人工质量和公开零旧提交周期；这些门保持
+`waived`。隔离候选 summary/question capability barrier 需持久激活；旧 legacy queued/running/retry_wait 仅剩可恢复排空项；generic 不使用 retry_wait；Q2 immutable source、Facts V3、ActionItem、章节
 manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在此阶段物理删除。
 
 ## 12. Stage 4：日程、搜索与投影
@@ -1294,33 +1294,41 @@ manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在
 只把新请求显式路由到 `LegacyScheduleGraphAdapter`，不得重开 v1 submit 或第二 Draft owner。新 Draft
 不混入旧 parser 字段。
 
-Stage 4 停写/退出门：v1 schedule submission 已连续一个完整公开周期为零，schedule graph capability
-barrier 与本地 validator 已成为默认；旧 parser 只作为版本化 handler adapter；自然 holdout、语音补充、FTS/标签、stale envelope、冷/暖启动与全局本地
+Stage 4 停写/退出门：产品所有者已豁免自然日程人工质量和公开零旧提交周期；这些门保持 `waived`。
+隔离候选 schedule graph capability barrier 与本地 validator 需成为默认；旧 parser 只作为版本化 handler adapter；语音补充、FTS/标签、stale envelope、冷/暖启动与全局本地
 功能回放通过。所有旧 parser/mirror/fallback 继续保留到 Stage 5 删除门。
 
-## 13. Stage 5：删除、资源与发布
+## 13. Stage 5A：采用、资源与候选交付（本次授权范围）
 
-入口：所有 Stage 1-4 exit gate 通过。删除逐 capability 执行；被删除的每个 legacy capability 必须
-同时满足：submission 为零一个完整公开周期、其 legacy 表 queued/running/retry_wait 与有效 lease 为零
-（`retry_wait` 仅是 legacy 状态）、legacy 结果保留期已结束、已发布客户端不再保存或查询对应 legacy
-task ID、generic task/handler 对待删 route/table/module 的引用计数为零，并且 meeting/epoch 双 store
-purge 与进程重启/回滚演练通过。正常 vNext generic task 可以继续 active，不要求全局停服或队列清空。
+入口：Stage 1 已通过，Stage 2--4 的机器/恢复/性能/资源/隐私门通过，人工质量和公开观察门由有效
+`vnext-product-owner-risk-waiver-v1` 显式标为 `waived`。waiver 不授权生产发布或物理删除。
 
 实施：
 
-1. 在 0041/capability_cutovers 写入 reader removal marker，并再次核对上述逐 capability 删除门。
-2. 删除 account/cross-device sync、旧 upload、summary v2、Q0、server duplicate parser 和 mirror。
-3. 清理旧模型/venv/cache 前执行 cwd/open-file/systemd/source-reference/hash 审计。
-4. 验证三进程拓扑、loopback、公网 80/443、TLS/WSS、日志脱敏、磁盘和 GPU 预算。
-5. 递增 version/name/versionCode，构建 APK；核对 APK metadata、hash、size、本地 manifest、公开
-   manifest 和下载 headers 后发布。
+1. 在隔离 candidate SQLite 的 `capability_cutovers` 持久激活 media/realtime/summary/question/schedule，
+   记录 waiver SHA-256、`cold_rollback` 和保留的 legacy submit count；不得写 reader removal marker。
+2. 候选 APK 对每项能力只选择 vNext owner；旧入口不得双写、不得请求内静默 fallback，旧代码/表/
+   handler 只保留为显式整链冷回滚资产。
+3. 排空候选 task/attempt/lease/cleanup，验证迁移、进程恢复、幂等、purge、正文日志、三进程拓扑、
+   loopback、磁盘、GPU/RSS/CPU/temp 预算以及 1.1.10 稳定包仍可独立启动。
+4. 递增 versionName/versionCode，构建候选 APK；核对 APK metadata、签名、hash、size、本地 manifest，
+   生成服务部署包、数据库迁移和显式 handler 回滚清单。
+5. 不更新公开 manifest、不发布 APK、不切公网；这些仍等待单独授权。
 
-退出：删除清单无活跃引用；全局验收通过；恢复演练可回到 Stage 4 稳定包；文档与发布事实一致。
+退出：五项 candidate barrier 持久关闭且 adoption provenance 一致；只有一个活跃 owner；无双写/静默
+fallback；候选生命周期排空；工程验收通过；候选 APK/部署包/迁移/回滚资产可回溯。legacy 物理资产
+仍存在是预期状态，不把 `safe_to_delete=false` 当成 Stage 5A 失败。
 
-回滚：保留 Stage 4 APK、数据库 migration forward compatibility 和一个轻量源码 tag；重资产模型可
-重新下载，不保留活动目录多轮副本。
+回滚：保留 1.1.10 与 Stage 4 APK、数据库 migration forward compatibility 和版本化 handler；只显式
+切换整条 handler，不恢复双写，不让失败请求自动回落 legacy。
 
-## 14. 删除清单
+### 13.1 Stage 5B：legacy 物理删除（延期、未授权）
+
+产品所有者以后明确授权后，才执行原 Stage 5 删除门：零旧调用观察、legacy queue/lease/result/read
+排空、reader removal marker、源码/表/模型/venv/cache 的 cwd/open-file/systemd/reference/hash 审计和
+物理删除。当前 `safe_to_delete=false` 必须保持真实，不能因 Stage 5A 完成而改成 true。
+
+## 14. Stage 5B 删除清单（当前只审计和保留，不执行）
 
 Stage 1 后停止新写或移出默认路径；实体代码/表保留到 Stage 5 删除门：
 

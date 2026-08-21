@@ -61,6 +61,9 @@ def ensure_schema() -> None:
                 legacy_reader_removed_at TEXT,
                 legacy_reader_removal_revision TEXT,
                 legacy_reader_removal_evidence_sha256 TEXT,
+                adoption_basis TEXT,
+                adoption_evidence_sha256 TEXT,
+                legacy_retention_mode TEXT,
                 legacy_submit_count INTEGER NOT NULL DEFAULT 0 CHECK(legacy_submit_count >= 0),
                 last_legacy_submit_at TEXT,
                 updated_at TEXT NOT NULL
@@ -71,6 +74,9 @@ def ensure_schema() -> None:
         additive_columns = {
             "legacy_reader_removal_revision": "TEXT",
             "legacy_reader_removal_evidence_sha256": "TEXT",
+            "adoption_basis": "TEXT",
+            "adoption_evidence_sha256": "TEXT",
+            "legacy_retention_mode": "TEXT",
         }
         for column, declaration in additive_columns.items():
             if column not in columns:
@@ -92,6 +98,9 @@ def _payload(row: Any) -> dict[str, Any] | None:
         "legacy_reader_removed_at": row["legacy_reader_removed_at"],
         "legacy_reader_removal_revision": row["legacy_reader_removal_revision"],
         "legacy_reader_removal_evidence_sha256": row["legacy_reader_removal_evidence_sha256"],
+        "adoption_basis": row["adoption_basis"],
+        "adoption_evidence_sha256": row["adoption_evidence_sha256"],
+        "legacy_retention_mode": row["legacy_retention_mode"],
         "legacy_submit_count": int(row["legacy_submit_count"]),
         "last_legacy_submit_at": row["last_legacy_submit_at"],
         "closed": row["legacy_submit_closed_at"] is not None,
@@ -113,11 +122,28 @@ def activate_cutover(
     contract_revision: str,
     *,
     barrier_id: str | None = None,
+    adoption_basis: str | None = None,
+    adoption_evidence_sha256: str | None = None,
+    legacy_retention_mode: str | None = None,
 ) -> dict[str, Any]:
     ensure_schema()
     normalized = _safe(capability, "capability", 120)
     revision = _safe(contract_revision, "contract_revision", 160)
     requested_barrier = _safe(barrier_id, "barrier_id", 160) if barrier_id else f"barrier-{uuid.uuid4()}"
+    adoption_values = (adoption_basis, adoption_evidence_sha256, legacy_retention_mode)
+    if any(value is not None for value in adoption_values) and not all(value is not None for value in adoption_values):
+        raise VNextCapabilityCutoverError(
+            "CAPABILITY_ADOPTION_EVIDENCE_INCOMPLETE",
+            "能力采用证据不完整",
+            422,
+        )
+    normalized_basis = _safe(adoption_basis, "adoption_basis", 120) if adoption_basis is not None else None
+    normalized_evidence = _sha256(adoption_evidence_sha256) if adoption_evidence_sha256 is not None else None
+    normalized_retention = (
+        _safe(legacy_retention_mode, "legacy_retention_mode", 120)
+        if legacy_retention_mode is not None
+        else None
+    )
     now = utc_now()
     with control_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -134,17 +160,51 @@ def activate_cutover(
             connection.execute(
                 """INSERT INTO capability_cutovers (
                        capability, contract_revision, barrier_id, activated_at,
-                       legacy_submit_closed_at, legacy_submit_count, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, 0, ?)""",
-                (normalized, revision, requested_barrier, now, now, now),
+                       legacy_submit_closed_at, adoption_basis,
+                       adoption_evidence_sha256, legacy_retention_mode,
+                       legacy_submit_count, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                (
+                    normalized, revision, requested_barrier, now, now,
+                    normalized_basis, normalized_evidence, normalized_retention, now,
+                ),
             )
         elif existing["legacy_submit_closed_at"] is None:
             connection.execute(
                 """UPDATE capability_cutovers
-                      SET barrier_id = ?, activated_at = ?, legacy_submit_closed_at = ?, updated_at = ?
+                      SET barrier_id = ?, activated_at = ?, legacy_submit_closed_at = ?,
+                          adoption_basis = ?, adoption_evidence_sha256 = ?,
+                          legacy_retention_mode = ?, updated_at = ?
                     WHERE capability = ? AND legacy_submit_closed_at IS NULL""",
-                (existing["barrier_id"] or requested_barrier, now, now, now, normalized),
+                (
+                    existing["barrier_id"] or requested_barrier, now, now,
+                    normalized_basis, normalized_evidence, normalized_retention,
+                    now, normalized,
+                ),
             )
+        elif normalized_evidence is not None:
+            existing_evidence = existing["adoption_evidence_sha256"]
+            existing_basis = existing["adoption_basis"]
+            existing_retention = existing["legacy_retention_mode"]
+            existing_values = (existing_basis, existing_evidence, existing_retention)
+            requested_values = (normalized_basis, normalized_evidence, normalized_retention)
+            if any(value is not None for value in existing_values) and existing_values != requested_values:
+                raise VNextCapabilityCutoverError(
+                    "CAPABILITY_ADOPTION_PROOF_CONFLICT",
+                    "能力采用证据已登记且不能替换",
+                    409,
+                )
+            if all(value is None for value in existing_values):
+                connection.execute(
+                    """UPDATE capability_cutovers
+                          SET adoption_basis = ?, adoption_evidence_sha256 = ?,
+                              legacy_retention_mode = ?, updated_at = ?
+                        WHERE capability = ?""",
+                    (
+                        normalized_basis, normalized_evidence,
+                        normalized_retention, now, normalized,
+                    ),
+                )
         row = connection.execute(
             "SELECT * FROM capability_cutovers WHERE capability = ?",
             (normalized,),

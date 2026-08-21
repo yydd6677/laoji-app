@@ -1,7 +1,7 @@
 # 老记设计蓝图当前入口
 
 - current architecture: `LaoJi vNext global development baseline`
-- architecture revision: `vnext-1`
+- architecture revision: `vnext-2-owner-waived-stage5a`
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
 - production/App/GPU mutation: `production ASR 8030 v2 handler activated; App/public capability unchanged; GPU1 untouched`; `emulator-5562` carries isolated candidate only
@@ -10,7 +10,12 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0/1 passed; Stage 2 runtime/performance and production 8030-v2 activation/recovery are closed, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 implementation/recovery is closed candidate-only and waits on independent Facts/action/Q2 review plus public zero-cycle/adoption; Stage 4 voice performance is sealed and passed, while first-party natural-schedule review plus public zero-cycle/adoption remain open; emulator candidate 1.1.54 (162); Stage 5 safe_to_delete=false`
+- implementation status: `Stage 0/1 passed; Stage 2-4 machine/recovery/performance/privacy gates passed and owner-waived human/public-cycle gates now pass only as waived; candidate capability adoption and Stage 5A candidate delivery in progress; emulator candidate 1.1.54 (162); legacy physical deletion deferred and safe_to_delete=false`
+
+2026-08-21 最新产品决定：跳过独立人工质量和正常使用/公开零旧调用周期；对应门必须显示 `waived`，
+不能伪报质量指标。完成 Stage 5A 的 vNext 单一 owner、隔离 barrier、迁移恢复、工程验收、候选 APK 与
+部署/回滚资产；legacy 只作冷回滚保留，不物理删除，不登记 reader removal marker，不自动发布生产。
+授权合同见 [product-owner-risk-waiver-20260821.json](../vnext-global/product-owner-risk-waiver-20260821.json)。
 
 ## 权威文件
 
@@ -65,8 +70,9 @@ mobile SQLite + app-private media (business authority)
 - Stage 3：Facts V3 长会闭合、行动候选、Q2 single reader。
 - Stage 4：Mention Graph 日程、FTS、ProjectionEnvelope 和全局本地功能（0045/FTS 与 MentionGraph
   隔离切片已实现，未采用）。
-- Stage 5：删除 account/sync、旧上传、summary v2、Q0、重复 parser、mirror/fallback 并发布；当前候选已补齐
-  运行日志隐私静态门禁，删除门仍未通过。
+- Stage 5A：采用 vNext 单一 owner、完成迁移/资源/隐私和候选交付；legacy 冷保留。
+- Stage 5B：以后单独授权才删除 account/sync、旧上传、summary v2、Q0、重复 parser、mirror/fallback；
+  当前删除门保持未通过。
 
 ## 当前边界
 

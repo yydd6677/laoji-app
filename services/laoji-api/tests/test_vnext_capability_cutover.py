@@ -166,3 +166,52 @@ def test_reader_removal_requires_closed_capability_and_is_immutable(cutover_data
             evidence_sha256="sha256:" + ("b" * 64),
         )
     assert conflict.value.code == "CAPABILITY_READER_PROOF_CONFLICT"
+
+
+def test_owner_waiver_adoption_proof_is_persisted_and_immutable(cutover_database) -> None:
+    capability = vnext_capability_cutover.SOURCE_STREAM_CAPABILITY
+    revision = vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION
+    evidence = "sha256:" + ("c" * 64)
+
+    activated = vnext_capability_cutover.activate_cutover(
+        capability,
+        revision,
+        barrier_id="stage5a-summary",
+        adoption_basis="product_owner_risk_waiver",
+        adoption_evidence_sha256=evidence,
+        legacy_retention_mode="cold_rollback",
+    )
+
+    assert activated["closed"] is True
+    assert activated["adoption_basis"] == "product_owner_risk_waiver"
+    assert activated["adoption_evidence_sha256"] == evidence
+    assert activated["legacy_retention_mode"] == "cold_rollback"
+    replay = vnext_capability_cutover.activate_cutover(
+        capability,
+        revision,
+        barrier_id="ignored-replay",
+        adoption_basis="product_owner_risk_waiver",
+        adoption_evidence_sha256=evidence,
+        legacy_retention_mode="cold_rollback",
+    )
+    assert replay["barrier_id"] == "stage5a-summary"
+
+    with pytest.raises(vnext_capability_cutover.VNextCapabilityCutoverError) as conflict:
+        vnext_capability_cutover.activate_cutover(
+            capability,
+            revision,
+            adoption_basis="product_owner_risk_waiver",
+            adoption_evidence_sha256="sha256:" + ("d" * 64),
+            legacy_retention_mode="cold_rollback",
+        )
+    assert conflict.value.code == "CAPABILITY_ADOPTION_PROOF_CONFLICT"
+
+
+def test_partial_adoption_proof_is_rejected(cutover_database) -> None:
+    with pytest.raises(vnext_capability_cutover.VNextCapabilityCutoverError) as incomplete:
+        vnext_capability_cutover.activate_cutover(
+            vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
+            vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
+            adoption_basis="product_owner_risk_waiver",
+        )
+    assert incomplete.value.code == "CAPABILITY_ADOPTION_EVIDENCE_INCOMPLETE"

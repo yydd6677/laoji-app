@@ -5,10 +5,36 @@ import json
 from pathlib import Path
 
 from schedule_holdout_evidence import EVIDENCE_CONTRACT, _seal_report
+from product_owner_risk_waiver import (
+    ACTIVE_PATH_POLICY,
+    EVIDENCE_CONTRACT as WAIVER_CONTRACT,
+    OWNER_DECISION,
+    OWNER_ROLE,
+    REQUIRED_SCOPES,
+    RISK_ACKNOWLEDGEMENTS,
+    seal_waiver,
+)
 from verify_stage4_exit_preflight import VOICE_EVIDENCE_CONTRACT, _verified_voice_report, inspect
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _owner_waiver() -> dict:
+    return seal_waiver({
+        "schema_version": 1,
+        "evidence_contract": WAIVER_CONTRACT,
+        "owner_role": OWNER_ROLE,
+        "decision": OWNER_DECISION,
+        "issued_at": "2026-08-21T14:00:00+00:00",
+        "authorization_reference": "codex-thread:test",
+        "baseline_revision": "test",
+        "applies_to": sorted(REQUIRED_SCOPES),
+        "active_path_policy": ACTIVE_PATH_POLICY,
+        "physical_legacy_deletion_authorized": False,
+        "production_release_authorized": False,
+        "risk_acknowledgements": list(RISK_ACKNOWLEDGEMENTS),
+    })
 
 
 def _quality_report() -> dict:
@@ -177,3 +203,34 @@ def test_voice_evidence_reference_is_repo_bounded_and_hash_verified(tmp_path: Pa
         {"evidence_file": "../voice.json", "file_sha256": reference["file_sha256"]},
     )
     assert escaped is False
+
+
+def test_owner_waiver_marks_schedule_quality_and_cycle_waived() -> None:
+    evidence = _passing()
+    evidence["schedule_quality"] = {}
+    evidence["public_cycle"] = {"complete": False}
+
+    report = inspect(ROOT, evidence, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is True
+    assert len(report["waived_gates"]) == 6
+    assert "schedule_quality_lineage" in report["waived_gates"]
+    assert "legacy_schedule_zero_public_cycle" in report["waived_gates"]
+
+
+def test_owner_waiver_does_not_hide_voice_failure() -> None:
+    evidence = _passing()
+    evidence["schedule_quality"] = {}
+    evidence["public_cycle"] = {"complete": False}
+    voice = dict(evidence["voice_schedule_performance"])
+    voice.pop("report_sha256")
+    voice["first_text_p95_ms"] = 2_000
+    voice["report_sha256"] = "sha256:" + hashlib.sha256(
+        json.dumps(voice, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    evidence["voice_schedule_performance"] = voice
+
+    report = inspect(ROOT, evidence, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is False
+    assert "voice_first_text" in report["blocking_gates"]

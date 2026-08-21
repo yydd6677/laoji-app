@@ -3,11 +3,37 @@ from __future__ import annotations
 from pathlib import Path
 
 from stage3_human_quality_evidence import DOMAIN_FACTS, DOMAIN_Q2, _seal
+from product_owner_risk_waiver import (
+    ACTIVE_PATH_POLICY,
+    EVIDENCE_CONTRACT as WAIVER_CONTRACT,
+    OWNER_DECISION,
+    OWNER_ROLE,
+    REQUIRED_SCOPES,
+    RISK_ACKNOWLEDGEMENTS,
+    seal_waiver,
+)
 from verify_stage3_exit_preflight import inspect
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DIGEST = "sha256:" + "1" * 64
+
+
+def _owner_waiver() -> dict:
+    return seal_waiver({
+        "schema_version": 1,
+        "evidence_contract": WAIVER_CONTRACT,
+        "owner_role": OWNER_ROLE,
+        "decision": OWNER_DECISION,
+        "issued_at": "2026-08-21T14:00:00+00:00",
+        "authorization_reference": "codex-thread:test",
+        "baseline_revision": "test",
+        "applies_to": sorted(REQUIRED_SCOPES),
+        "active_path_policy": ACTIVE_PATH_POLICY,
+        "physical_legacy_deletion_authorized": False,
+        "production_release_authorized": False,
+        "risk_acknowledgements": list(RISK_ACKNOWLEDGEMENTS),
+    })
 
 
 def _quality(domain: str) -> dict:
@@ -155,4 +181,31 @@ def test_public_cycle_and_recovery_cannot_be_inferred() -> None:
 
     assert report["passed"] is False
     assert "legacy_summary_q0_zero_public_cycle" in report["blocking_gates"]
+    assert "runtime_q2_stale_source_rejected" in report["blocking_gates"]
+
+
+def test_owner_waiver_does_not_manufacture_human_metrics() -> None:
+    envelope = _passing()
+    envelope["facts_actions_human_quality"] = {}
+    envelope["q2_human_quality"] = {}
+    envelope["public_cycle"] = {"complete": False}
+
+    report = inspect(ROOT, envelope, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is True
+    assert len(report["waived_gates"]) == 12
+    assert "facts_human_support" in report["waived_gates"]
+    assert "legacy_summary_q0_zero_public_cycle" in report["waived_gates"]
+
+
+def test_owner_waiver_does_not_hide_recovery_failure() -> None:
+    envelope = _passing()
+    envelope["facts_actions_human_quality"] = {}
+    envelope["q2_human_quality"] = {}
+    envelope["public_cycle"] = {"complete": False}
+    envelope["runtime_recovery"]["q2_stale_source_rejected"] = False
+
+    report = inspect(ROOT, envelope, owner_waiver=_owner_waiver())
+
+    assert report["passed"] is False
     assert "runtime_q2_stale_source_rejected" in report["blocking_gates"]

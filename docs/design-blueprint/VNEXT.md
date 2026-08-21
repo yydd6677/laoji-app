@@ -2,13 +2,29 @@
 
 - status: `global development baseline; frozen for implementation`
 - baseline release: `1.1.10 (118)`
-- architecture revision: `vnext-1`
+- architecture revision: `vnext-2-owner-waived-stage5a`
 - scope: Android/React Native 客户端、`laoji-api`、`laoji-asr`、Ollama、R2
 - excluded systems: GPU1、PCB、Smart Meeting 及同机其他用户服务
 - production mutation during design: `none`
 
 本文是老记下一阶段开发的唯一架构入口。历史蓝图、研究和候选只提供证据；与本文冲突时，
 除非用户形成更新的明确决定，否则以本文为准。
+
+### 0.1 产品所有者风险豁免与 Stage 5A 边界（2026-08-21）
+
+当前软件尚无外部用户，且只有产品所有者本人可参与验收。产品所有者明确决定跳过独立人工质量验收
+和正常使用/公开零旧调用观察周期，并要求完成除物理删除当前链路之外的后续 vNext 开发。该决定由
+`vnext-product-owner-risk-waiver-v1` 哈希合同记录，门禁状态必须显示为 `waived`，不得伪报为
+`passed`，不得生成 CER、问答正确率或日程准确率等不存在的人工指标。
+
+本修订允许隔离候选在其余机器、恢复、资源和隐私门通过后采用 vNext capability，并把 Stage 5 拆为：
+
+- `Stage 5A`：vNext 单一活跃 owner、候选数据库 barrier、迁移/恢复、资源/隐私、候选 APK 和部署包；
+- `Stage 5B`：产品所有者以后明确授权后，排空并物理删除 legacy route/table/module/model/runtime asset。
+
+Stage 5A 期间 legacy 源码、表和运行资产只作为冷回滚资产保留。vNext 候选不得双写、不得在单次请求
+中静默 fallback、不得让两个 owner 同时提交 current result。回滚只能显式切换版本化 handler。该豁免
+不授权生产发布、公网切换或 legacy 物理删除。
 
 ## 1. 产品边界
 
@@ -60,8 +76,8 @@
 | 页面状态与 JS/native 投影 | STAGED | JS repository 拥有持久业务状态；native 拥有系统能力运行态和 surface 瞬时态；跨边界都带 revision envelope |
 | Provider、任务、资源与可观察性 | SELECTED | 3 个业务进程；一个最小任务/attempt owner；领域 API 保持独立；禁止通用 DAG 拥有业务状态 |
 
-`STAGED` 不表示路线待选。它表示目标结构已确定，但 vNext 第一阶段保留一个有期限的旧接口
-适配器；适配器删除条件见实施文档。
+`STAGED` 不表示路线待选。它表示目标结构已确定，但 Stage 5A 保留冷回滚旧接口/handler 资产；
+它们不属于活跃第二 owner。物理删除推迟到 Stage 5B，条件见实施文档。
 
 ## 3. 端到端拓扑
 
@@ -457,12 +473,13 @@ purge 重试继续工作，绝不丢弃义务或阻塞本机清除。
 - 业务代码不依赖 Linux 绝对路径、shell 管道或 systemd；文件路径通过配置和 `pathlib`/平台 API。
 - systemd、Cloudflare Tunnel 和 GPU 配置只在 `deploy/linux`；数据迁移和测试工具必须可在 Linux
   与 Windows 使用 `python3`/Node 运行。
-- v1 API 只保留一个已发布周期的显式 adapter；客户端 capability 明确选择 v1 或 v2，不能在一次
-  请求中静默降级。
+- Stage 5A 保留 v1/legacy 实现作为冷回滚资产；客户端 capability 明确选择一条完整链路，不能双写，
+  也不能在一次请求中静默降级。Stage 5B 获得产品所有者新授权后才物理删除。
 
 ## 16. 架构完成定义
 
-本基线已经选定所有开发关键路线。实施阶段仍需验证性能、质量和迁移门禁，但不得重新选择数据
+本基线已经选定所有开发关键路线。实施阶段仍需验证性能、迁移、恢复、资源和隐私门禁；人工质量与
+公开观察门按 0.1 节明确记录为 `waived`，不是已验证事实。不得重新选择数据
 所有权、领域边界、上传拓扑、Transcript 版本模型、Facts V3、Q2 或三进程服务拓扑。若真实证据
 证明任一选定路线不可行，必须形成新的全局 revision，说明对其他领域和删除计划的影响；不得在
 局部添加第三个 owner、fallback 或长期兼容层。

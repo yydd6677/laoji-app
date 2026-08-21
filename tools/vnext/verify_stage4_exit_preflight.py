@@ -12,6 +12,11 @@ import sys
 from typing import Any, Mapping
 
 from schedule_holdout_evidence import verify_quality_report
+from product_owner_risk_waiver import (
+    STAGE4_PUBLIC_CYCLE,
+    STAGE4_SCHEDULE_QUALITY,
+    apply_waiver_to_gates,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -107,7 +112,12 @@ def _static_gate(root: Path, script: str, marker: str) -> tuple[bool, str]:
     return result.returncode == 0 and marker in output, marker if marker in output else f"{script}:failed"
 
 
-def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
+def inspect(
+    root: Path,
+    envelope: Mapping[str, Any] | None,
+    *,
+    owner_waiver: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     data = _mapping(envelope)
     gates: list[dict[str, Any]] = []
 
@@ -241,23 +251,46 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
     _gate(gates, "legacy_schedule_zero_public_cycle", _bool(cycle.get("complete")) is True and legacy_count == 0,
           {"complete": cycle.get("complete"), "legacy_submit_count": legacy_count}, "external_public_cycle_record_required")
 
+    waiver = apply_waiver_to_gates(
+        gates,
+        owner_waiver,
+        {
+            STAGE4_SCHEDULE_QUALITY: (
+                "schedule_quality_lineage",
+                "schedule_human_holdout",
+                "schedule_field_exact_accuracy",
+                "schedule_key_field_recall",
+                "schedule_save_error_free",
+            ),
+            STAGE4_PUBLIC_CYCLE: ("legacy_schedule_zero_public_cycle",),
+        },
+    )
+
     return {
         "schema_version": 1,
         "candidate_only": True,
         "production_mutation": False,
-        "passed": bool(gates) and all(gate["status"] == "passed" for gate in gates),
+        "passed": bool(gates) and all(gate["status"] in {"passed", "waived"} for gate in gates),
+        "owner_risk_waiver": waiver,
         "gates": gates,
-        "blocking_gates": [gate["name"] for gate in gates if gate["status"] != "passed"],
+        "blocking_gates": [gate["name"] for gate in gates if gate["status"] == "blocked"],
+        "waived_gates": [gate["name"] for gate in gates if gate["status"] == "waived"],
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--owner-waiver", type=Path)
     parser.add_argument("root", nargs="?", type=Path, default=ROOT)
     args = parser.parse_args()
     envelope = json.loads(args.evidence.read_text(encoding="utf-8")) if args.evidence else None
-    report = inspect(args.root.resolve(), envelope)
+    owner_waiver = (
+        json.loads(args.owner_waiver.read_text(encoding="utf-8"))
+        if args.owner_waiver
+        else None
+    )
+    report = inspect(args.root.resolve(), envelope, owner_waiver=owner_waiver)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["passed"] else 1
 
