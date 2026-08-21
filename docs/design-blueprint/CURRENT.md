@@ -150,8 +150,9 @@ device epoch / surface / entity 持久恢复 revision/hash fence，幂等接收�
 工作负载、projection checkpoint 关闭重开回放已通过；`emulator-5562/LaoJi_API_35` 已继续完成
 calendar、recording、transcript 三页面同实体重建和详情 tab 稳定性回放，并在 JS action 执行前增加
 全身份 fence，见 [ProjectionEnvelope 全局 Android 回放](../vnext-stage4/PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md)。
-真实 bridge stale action 注入、独立人工日程质量、语音 p95、公开零流量周期和 capability barrier 仍未
-通过，因此 Stage 4 仍是未采用的隔离候选。
+真实 native 日历操作跨 JS bridge 排队并在新快照后恢复的竞态已验证为 `projection_stale`，且本机日程
+没有被修改；独立人工日程质量、语音 p95、公开零流量周期和 capability barrier 仍未通过，因此
+Stage 4 仍是未采用的隔离候选。
 Graph owner 边界已进一步收敛：候选 Graph 路由强制 `model_only`，请求透传调用方 `client_intent`，
 producer 不再导入旧 intent classifier 或在缺少 observation 时隐式同步 fallback；空模型观察失败关闭。
 这只是一项候选静态/集成边界修复，不改变生产 `/parse`，证据见

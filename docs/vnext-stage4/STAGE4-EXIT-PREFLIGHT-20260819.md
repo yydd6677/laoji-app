@@ -19,8 +19,10 @@ FTS p95、显式标签 owner 和一个完整旧 schedule submit 零流量公开�
 - 日程服务端聚焦回归：`103 passed`；
 - 候选 `1.1.31 (139)` 已完成三页面 checkpoint recreate 和会议详情 tab 视频抽帧回放；收口代码已以
   `1.1.33 (141)` 重建并覆盖安装到同一专用模拟器，见
-  [ProjectionEnvelope 全局 Android 回放](PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md)；真实 bridge
-  stale action 注入、人工质量、语音 p95 和公开周期仍阻断，因此聚合预检保持 `passed=false`。
+  [ProjectionEnvelope 全局 Android 回放](PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md)；2026-08-21
+  又以真实 native gesture -> JS bridge -> 新快照 -> 旧 action 恢复的时序验证了
+  `projection_stale` 拒绝且业务数据未改变。人工质量、语音 p95 和公开周期仍阻断，因此聚合预检保持
+  `passed=false`。
 
 2026-08-21 的 5 次真实中文音频模拟器回放把语音门从“缺证据”推进为“已实测失败”：采集启动
 p95 `125ms`（目标 `<=100ms`），首文字 p95 `9256ms`（目标 `<=1500ms`）。当前 VAD 闭段后调用 batch

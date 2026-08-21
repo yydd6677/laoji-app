@@ -79,8 +79,6 @@ error 和异步终态组合均已证明无闪烁。
 
 ## 尚未证明
 
-- 尚未通过 instrumentation 向 bridge 注入“旧 action 排队、随后新快照生效”的真实事件；当前只由
-  纯函数合同、native reducer 和三页面 action 前置接线共同证明失败关闭。
 - 尚缺第一方自然中文日程独立双人盲审与裁决、语音首字符/Draft p95、旧 schedule submit 的完整公开
   零流量周期和 capability barrier。
 - 本证据不关闭 Stage 4，也不允许删除旧 parser、旧 projection reader 或兼容路径。
@@ -94,6 +92,15 @@ error 和异步终态组合均已证明无闪烁。
 候选现加入有界 `CalendarProjectionLineage`：每个 `sourceEventId + occurrenceDate + revision` 保存产生
 它的投影身份，mutation 必须按 `original.revision` 取身份；最多保留 2048 项，surface 清空或销毁时清理。
 专用 `emulator-5562` 的 Android instrumentation 已验证旧/新 revision 分别取回旧/新投影，以及容量
-淘汰和清理；release Kotlin 编译通过。该修复让后续真实 bridge 排队竞态能够被 JS 明确拒绝，但本轮
-尚未用 instrumentation 控制 React 队列时序，因此 `stale_action_rejected` 运行门仍保持未通过，不能
-用这两项底层测试冒充 Stage 4 退出。
+淘汰和清理；release Kotlin 编译通过。
+
+随后以一次性构建期探针让真实 native 日历 move 事件进入 JS 后暂停 1.5 秒，期间切换 selected date
+产生并接受新 ProjectionEnvelope，再恢复旧 mutation。应用记录脱敏事件
+`native_projection_action_rejected {surface:calendar, action_type:mutation, reason:projection_stale}`；夹具
+在操作前后均为 `2026-08-04 10:00-10:30`，没有发生本机业务写入。探针源码随后已移除，测试夹具也已
+删除，机器可读结果见
+[PROJECTION-BRIDGE-STALE-ACTION-20260821.json](PROJECTION-BRIDGE-STALE-ACTION-20260821.json)。
+移除探针后已重新构建并覆盖安装 `1.1.42 (150)`，最终 APK SHA-256 为
+`56e1340ee464d571fc84df180d44b675e46fd553844fc05646b2de94472f7304`；冷启动未出现 React/native fatal。
+这关闭了 Stage 4 的 `stale_action_rejected` Android 运行项，但人工日程质量、语音性能和公开零流量
+周期仍然阻断 Stage 4。
