@@ -8,6 +8,7 @@ import {
   meetingFactsV3Markdown,
   projectMeetingFactsV3,
 } from '../../src/services/meetingSummaryV3.ts';
+import { isNormalizedMeetingSummaryActionLabel } from '../../src/domain/meeting/summarySectionClassification.ts';
 
 const HASH = `sha256:${'a'.repeat(64)}`;
 
@@ -170,4 +171,9 @@ test('warm local projection remains comfortably inside the 100 ms switch budget'
     projectMeetingFactsV3(result, MEETING_TEMPLATES[index % MEETING_TEMPLATES.length], 4, transcriptLines);
   }
   assert.ok(performance.now() - started < 100);
+});
+
+test('interview follow-up questions are not hidden as an action section', () => {
+  assert.equal(isNormalizedMeetingSummaryActionLabel('后续问题'), false);
+  assert.equal(isNormalizedMeetingSummaryActionLabel('后续行动'), true);
 });

@@ -10,7 +10,7 @@
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.46 (154)`
+- implementation status: `Stage 0 passed; Stage 1 passed; Stage 2 speaker-overlay performance is now closed by a 30-run replay, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 deterministic four-template/rich-block projection and Stage 4 slices remain isolated/not adopted; emulator candidate 1.1.47 (155)`
 
 ## 权威文件
 
@@ -335,3 +335,11 @@ Facts/行动候选也已对 10 份完整 SRT 通过真实 device-v2 source strea
 恢复同一偏好，整理版本页也没有产生新版本。确定性合同与 activation fence 合并 `26/26` 通过，100 次
 暖态本地投影约 `7ms`。这关闭模板本地切换和说明漂移，不关闭独立人工质量或 Stage 3 adoption；见
 [四模板本地投影合同](../vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md)。
+
+随后 `1.1.47 (155)` 使用可恢复的 Release-target SQLite 夹具，在 `emulator-5562` 对八种 Facts V3
+白名单富块完成标准蓝和绚彩可见回放。回放发现“后续问题”被旧“后续*”行动区前缀误判并隐藏；候选将
+规范化标题分类收敛为无依赖纯函数，明确保留问题类 section，同时继续识别“后续行动”。回归与
+activation fence 合并 `27/27` 通过；两主题下段落、项目符号、引用、时间线、窄屏流程退化、方案对比、
+风险卡和统计均可见。原 Facts JSON、主题和模板偏好已恢复，临时备份表和测试包已清除，SQLite 完整性
+通过。该证据关闭富块视觉门，不关闭独立人工质量、公开零旧链路周期或 capability barrier；见
+[富内容 Android 回放](../vnext-stage3/SUMMARY-V3-RICH-BLOCK-ANDROID-REPLAY-20260821.md)。

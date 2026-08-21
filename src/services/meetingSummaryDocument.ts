@@ -8,6 +8,7 @@ import type {
   MeetingSummarySection,
   MeetingSummarySectionKind,
 } from '../domain/meeting';
+import { isNormalizedMeetingSummaryActionLabel } from '../domain/meeting/summarySectionClassification';
 import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 type UnknownRecord = Record<string, unknown>;
@@ -447,10 +448,10 @@ function normalizedSectionLabel(value: string): string {
 export function isMeetingSummaryActionSection(section: Pick<MeetingSummarySection, 'kind' | 'stableKey' | 'title'>): boolean {
   if (section.kind === 'action_items') return true;
   const labels = [section.stableKey, section.title ?? ''].map(normalizedSectionLabel);
-  return labels.some(label => (
-    /^(?:待办事项|待办|行动项|行动事项|任务|任务清单|后续事项|后续行动|下一步|跟进事项|todo(?:s)?|actionitems?|tasks?|followups?)$/.test(label)
-      || /^(?:待办|行动|任务|后续|下一步|跟进)/.test(label)
-  ));
+  // “后续问题” is an interview evidence block, not an action list. The
+  // legacy prefix matcher used to hide it whenever a real action candidate
+  // existed in the same Facts V3 document.
+  return labels.some(isNormalizedMeetingSummaryActionLabel);
 }
 
 /** Strictly normalizes the additive v2 API or a previously cached camelCase document. */

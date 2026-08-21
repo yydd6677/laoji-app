@@ -126,6 +126,13 @@ Facts/行动候选随后以同一隔离 device-v2 source stream 对 10 份完整
 富块全类型两主题视觉门、公开零旧链路周期或 capability barrier。证据见
 `docs/vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md`。
 
+`1.1.47 (155)` 进一步使用可恢复的 Release-target SQLite 夹具，在 `emulator-5562` 对全部八种富块
+完成标准蓝/绚彩可见回放。过程中发现访谈“后续问题”被旧行动区前缀规则隐藏，已将规范化标题分类
+提取为纯函数并增加回归门；合并测试 `27/27` 通过。窄屏流程按合同退化为纵向列表，其他引用、时间线、
+对比、风险和统计块均正常。原 Facts JSON、主题和模板偏好已经恢复，备份表与测试包已清除，SQLite
+完整性通过。这关闭富块视觉门，不关闭独立人工质量、公开零旧链路周期或 capability barrier。证据见
+`docs/vnext-stage3/SUMMARY-V3-RICH-BLOCK-ANDROID-REPLAY-20260821.md`。
+
 ## 0. 已核对的实施基线
 
 2026-08-17 只读现场核对：

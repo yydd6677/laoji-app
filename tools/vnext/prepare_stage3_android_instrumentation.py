@@ -15,18 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_GRADLE = ROOT / "android" / "app" / "build.gradle"
-HARNESS_SOURCE = ROOT / "tools" / "vnext" / "android" / "VnextSummaryFenceDbMutationTest.java"
-HARNESS_TARGET = (
-    ROOT
-    / "android"
-    / "app"
-    / "src"
-    / "androidTest"
-    / "java"
-    / "com"
-    / "laoji"
-    / "app"
-    / HARNESS_SOURCE.name
+HARNESS_SOURCES = (
+    ROOT / "tools" / "vnext" / "android" / "VnextSummaryFenceDbMutationTest.java",
+    ROOT / "tools" / "vnext" / "android" / "VnextSummaryRichBlockFixtureTest.java",
+)
+HARNESS_TARGET_DIRECTORY = (
+    ROOT / "android" / "app" / "src" / "androidTest" / "java" / "com" / "laoji" / "app"
 )
 GRADLE_LINE = "    testBuildType (findProperty('android.testBuildType') ?: 'debug').toString()"
 GRADLE_ANCHOR = "    ndkVersion rootProject.ext.ndkVersion"
@@ -49,20 +43,23 @@ def prepare_gradle() -> bool:
     return True
 
 
-def prepare_harness() -> bool:
-    if not HARNESS_SOURCE.is_file():
-        raise SystemExit(f"tracked instrumentation harness is missing: {HARNESS_SOURCE}")
-    unchanged = HARNESS_TARGET.is_file() and HARNESS_TARGET.read_bytes() == HARNESS_SOURCE.read_bytes()
-    if unchanged:
-        return False
-    HARNESS_TARGET.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(HARNESS_SOURCE, HARNESS_TARGET)
-    return True
+def prepare_harnesses() -> bool:
+    changed = False
+    HARNESS_TARGET_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    for source in HARNESS_SOURCES:
+        if not source.is_file():
+            raise SystemExit(f"tracked instrumentation harness is missing: {source}")
+        target = HARNESS_TARGET_DIRECTORY / source.name
+        if target.is_file() and target.read_bytes() == source.read_bytes():
+            continue
+        shutil.copy2(source, target)
+        changed = True
+    return changed
 
 
 def main() -> None:
     gradle_changed = prepare_gradle()
-    harness_changed = prepare_harness()
+    harness_changed = prepare_harnesses()
     print("android_test_build_type_ready=true")
     print(f"generated_gradle_changed={str(gradle_changed).lower()}")
     print(f"instrumentation_harness_changed={str(harness_changed).lower()}")

@@ -194,7 +194,8 @@ def main() -> None:
         ROOT / "tools/vnext/prepare_stage3_android_instrumentation.py",
         "android.testBuildType",
         "VnextSummaryFenceDbMutationTest.java",
-        "shutil.copy2(HARNESS_SOURCE, HARNESS_TARGET)",
+        "VnextSummaryRichBlockFixtureTest.java",
+        "shutil.copy2(source, target)",
     )
 
     require(
