@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "production_mutation": false,
+  "service_ready": {
+    "api": true,
+    "schedule_graph": true
+  },
+  "schedule_quality": {},
+  "voice_schedule_performance": {
+    "evidence_file": "docs/vnext-stage4/SCHEDULE-VOICE-PERFORMANCE-1.1.54-PREVIEW480-20260821.json",
+    "file_sha256": "sha256:4a436796db45f5cc4172add70b753075a9fe54735406214ae1adc5a0dc3c5aef"
+  },
+  "projection_runtime": {
+    "global_sqlite_replay": true,
+    "page_recreate": true,
+    "stale_action_rejected": true,
+    "no_status_jump": true
+  },
+  "local_features": {
+    "fts_query_p95_ms": 23.8,
+    "explicit_label_owner": true
+  },
+  "public_cycle": {
+    "complete": false,
+    "legacy_submit_count": null
+  },
+  "evidence_sources": {
+    "voice_performance": "docs/vnext-stage4/SCHEDULE-VOICE-PERFORMANCE-1.1.54-PREVIEW480-20260821.json",
+    "mixed_load": "docs/vnext-global/global-mixed-formal-clean-05d6183.json",
+    "projection_android": "docs/vnext-stage4/PROJECTION-GLOBAL-ANDROID-REPLAY-20260820.md",
+    "projection_stale_action": "docs/vnext-stage4/PROJECTION-BRIDGE-STALE-ACTION-20260821.json",
+    "migration_and_search": "docs/vnext-stage4/STAGE4-EXIT-PREFLIGHT-20260819.md",
+    "natural_quality_contract": "docs/vnext-stage4/NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md"
+  }
+}

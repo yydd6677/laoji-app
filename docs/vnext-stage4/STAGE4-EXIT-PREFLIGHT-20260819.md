@@ -59,6 +59,13 @@ host monitor 全零影响，只得到 27/30 Draft、采集/首文字/Draft p95 `
 聚合预检现在只剩自然日程人工质量血缘/阈值和公开旧 schedule submit 零流量周期，Stage 4 整体仍为
 `blocked`，没有启用 capability。
 
+2026-08-21 已把上述已通过证据收敛为
+`docs/vnext-stage4/stage4-exit-evidence-20260821.json`。为避免复制一整份 30 次语音明细，聚合包改用
+仓库内相对路径和文件 SHA-256 匹配的 `schedule-voice-performance-v1` 引用，预检同时继续验证报告自身封印；
+绝对路径、目录逃逸、文件哈希或内部 report hash 不匹配都会失败关闭。当前聚合结果为 `23/29`：剩余
+6 门精确对应自然日程质量血缘、人工 holdout、字段完全正确率、关键字段召回、零保存错误和公开旧
+schedule submit 零周期。
+
 2026-08-20 起，日程质量不再接受手填的 `independent_human_adjudication` 布尔值和指标。
 `schedule_quality_lineage` 要求由
 [自然日程盲审与质量证据包](NATURAL-HOLDOUT-EVIDENCE-PACK-20260820.md)生成并封存的

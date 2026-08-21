@@ -40,8 +40,32 @@ def _bool(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _verified_voice_report(value: object) -> tuple[Mapping[str, Any], bool]:
+def _verified_voice_report(root: Path, value: object) -> tuple[Mapping[str, Any], bool]:
     report = _mapping(value)
+    evidence_file = report.get("evidence_file")
+    if evidence_file is not None:
+        expected_file_sha256 = report.get("file_sha256")
+        if (
+            not isinstance(evidence_file, str)
+            or not evidence_file.strip()
+            or not isinstance(expected_file_sha256, str)
+            or not expected_file_sha256.startswith("sha256:")
+        ):
+            return report, False
+        candidate = (root / evidence_file).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            return report, False
+        try:
+            raw = candidate.read_bytes()
+            actual_file_sha256 = "sha256:" + hashlib.sha256(raw).hexdigest()
+            loaded = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return report, False
+        if actual_file_sha256 != expected_file_sha256 or not isinstance(loaded, Mapping):
+            return report, False
+        report = loaded
     claimed = report.get("report_sha256")
     if report.get("evidence_contract") != VOICE_EVIDENCE_CONTRACT or not isinstance(claimed, str):
         return report, False
@@ -129,7 +153,7 @@ def inspect(root: Path, envelope: Mapping[str, Any] | None) -> dict[str, Any]:
     _gate(gates, "schedule_key_field_recall", recall is not None and recall >= 0.98, {"value": recall, "minimum": 0.98}, "blueprint_quality_threshold")
     _gate(gates, "schedule_save_error_free", save_errors == 0, {"save_error_count": save_errors}, "save_error_rate_must_be_zero")
 
-    voice, voice_verified = _verified_voice_report(data.get("voice_schedule_performance"))
+    voice, voice_verified = _verified_voice_report(root, data.get("voice_schedule_performance"))
     _gate(
         gates,
         "voice_performance_lineage",

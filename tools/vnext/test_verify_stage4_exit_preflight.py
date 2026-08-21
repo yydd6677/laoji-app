@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from schedule_holdout_evidence import EVIDENCE_CONTRACT, _seal_report
-from verify_stage4_exit_preflight import VOICE_EVIDENCE_CONTRACT, inspect
+from verify_stage4_exit_preflight import VOICE_EVIDENCE_CONTRACT, _verified_voice_report, inspect
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -151,3 +151,29 @@ def test_unsealed_or_single_ability_voice_claim_is_rejected() -> None:
     assert "voice_draft_success" in report["blocking_gates"]
     assert "voice_draft_determinism" in report["blocking_gates"]
     assert "voice_mixed_load_envelope" in report["blocking_gates"]
+
+
+def test_voice_evidence_reference_is_repo_bounded_and_hash_verified(tmp_path: Path) -> None:
+    inline = _passing()["voice_schedule_performance"]
+    source = tmp_path / "voice.json"
+    raw = json.dumps(inline, ensure_ascii=False, indent=2).encode("utf-8")
+    source.write_bytes(raw)
+    reference = {
+        "evidence_file": "voice.json",
+        "file_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+    }
+
+    loaded, verified = _verified_voice_report(tmp_path, reference)
+
+    assert verified is True
+    assert loaded["sample_count"] == 30
+    _, wrong_hash = _verified_voice_report(
+        tmp_path,
+        {**reference, "file_sha256": "sha256:" + "0" * 64},
+    )
+    assert wrong_hash is False
+    _, escaped = _verified_voice_report(
+        tmp_path,
+        {"evidence_file": "../voice.json", "file_sha256": reference["file_sha256"]},
+    )
+    assert escaped is False

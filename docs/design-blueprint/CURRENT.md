@@ -254,7 +254,9 @@ writer 独立关闭了 host monitor 的静音/欠载故障；日程 preview 阈�
 final、会议 VAD 或会议分段。1 次冷态产品录音单独保留；正式 30 暖样本达到 30/30 Draft、转写与
 Draft 哈希各唯一，采集/首文字/Draft p95 `65/1333/2393ms`。联合既有 600 秒六车道混合负载后，
 Stage 4 全部 voice 性能门已关闭。自然日程第一方双盲 holdout 和公开旧 schedule submit 零流量周期
-仍未完成，capability 仍关闭，Stage 4 整体状态不变。
+仍未完成，capability 仍关闭，Stage 4 整体状态不变。运行、投影、搜索和语音证据已收敛到失败关闭的
+聚合 envelope，结果为 `23/29`；6 个阻断只来自上述人工质量与公开周期，见
+[Stage 4 exit preflight](../vnext-stage4/STAGE4-EXIT-PREFLIGHT-20260819.md)。
 
 Stage 3 当前已补齐隔离的 source stream 纵向切片：`device/v2` 默认关闭的来源流可以与 generic
 Task 在一个事务创建，manifest 页和章节 group 受设备/全局数量与字节配额约束，正文使用 AES-GCM
