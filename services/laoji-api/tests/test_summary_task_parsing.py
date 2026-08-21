@@ -759,7 +759,10 @@ def test_interview_fallback_does_not_repeat_overview_as_interviewee_view():
         [],
     )
 
-    assert contents["topics"] == "会议讨论了产品方向。"
+    # An overview is not silently reused as a template-specific interview
+    # topic. Missing interview fields remain empty until source-backed facts
+    # are available.
+    assert contents["topics"] == ""
     assert contents["interviewee_views"] == ""
     assert contents["evidence_quotes"] == ""
     assert contents["follow_up_questions"] == ""

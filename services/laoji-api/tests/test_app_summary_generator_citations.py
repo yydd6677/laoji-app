@@ -113,7 +113,7 @@ def test_template_compact_generation_splits_core_and_template_fields(monkeypatch
     ]
     assert "commitments" not in item_schema["properties"]["section_key"]["enum"]
     assert "follow_ups" not in item_schema["properties"]["section_key"]["enum"]
-    assert captured[1]["max_tokens"] == 768
+    assert captured[1]["max_tokens"] == 1536
     assert captured[1]["timeout"] == 120
     assert "本次模板：1:1（one_on_one@2）" in captured[1]["system_prompt"]
     topic = result["template_sections"]["topics"][0]

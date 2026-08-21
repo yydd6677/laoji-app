@@ -24,7 +24,7 @@ def test_guest_summary_date_requires_iso_calendar_shape():
     )
     assert valid.meeting_date == "2026-07-10"
     assert valid.template_id == "general"
-    assert valid.template_revision == 1
+    assert valid.template_revision == 2
 
     with pytest.raises(ValidationError):
         GuestSummaryRequest(
@@ -74,8 +74,8 @@ async def test_guest_summary_submission_passes_client_segment_identity_to_worker
 
 
 def test_api_template_validation_returns_chinese_422():
-    assert _summary_template_or_422("project_sync", 1)["id"] == "project_sync"
+    assert _summary_template_or_422("project_sync", 2)["id"] == "project_sync"
     with pytest.raises(HTTPException) as error:
-        _summary_template_or_422("project_sync", 2)
+        _summary_template_or_422("project_sync", 1)
     assert error.value.status_code == 422
     assert "版本" in str(error.value.detail)

@@ -272,6 +272,7 @@ def test_auth_rate_limit_window_is_persistent_and_expires(client):
 def test_password_reset_migration_removes_invalid_and_duplicate_pending_rows(client):
     http, tmp_path = client
     register(http)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     auth.close_auth_db()
     conn = sqlite3.connect(tmp_path / "schedule.db")
     conn.execute("DROP INDEX idx_laoji_password_reset_pending_user")
@@ -282,9 +283,9 @@ def test_password_reset_migration_removes_invalid_and_duplicate_pending_rows(cli
         VALUES (?, ?, ?, 'pending', ?)
         """,
         [
-            ("old-known", 1, "user@example.com", "2026-07-01T00:00:00+00:00"),
-            ("new-known", 1, "user@example.com", "2026-07-02T00:00:00+00:00"),
-            ("unknown", None, "missing@example.com", "2026-07-02T00:00:00+00:00"),
+            ("old-known", 1, "user@example.com", (now - timedelta(days=1)).isoformat()),
+            ("new-known", 1, "user@example.com", now.isoformat()),
+            ("unknown", None, "missing@example.com", now.isoformat()),
         ],
     )
     conn.commit()
