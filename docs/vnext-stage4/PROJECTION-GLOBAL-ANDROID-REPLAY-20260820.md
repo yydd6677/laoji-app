@@ -84,3 +84,16 @@ error 和异步终态组合均已证明无闪烁。
 - 尚缺第一方自然中文日程独立双人盲审与裁决、语音首字符/Draft p95、旧 schedule submit 的完整公开
   零流量周期和 capability barrier。
 - 本证据不关闭 Stage 4，也不允许删除旧 parser、旧 projection reader 或兼容路径。
+
+## 2026-08-21 竞态收口
+
+进一步审查真实手势路径发现：日历拖拽/缩放在释放时才组装 bridge mutation；若手势开始后页面接受了
+新快照，旧实现会读取释放时的 `baseSnapshot.projection`，使旧事件 revision 错误携带新投影身份。
+这会削弱 JS action fence，不能只依赖原有纯函数测试。
+
+候选现加入有界 `CalendarProjectionLineage`：每个 `sourceEventId + occurrenceDate + revision` 保存产生
+它的投影身份，mutation 必须按 `original.revision` 取身份；最多保留 2048 项，surface 清空或销毁时清理。
+专用 `emulator-5562` 的 Android instrumentation 已验证旧/新 revision 分别取回旧/新投影，以及容量
+淘汰和清理；release Kotlin 编译通过。该修复让后续真实 bridge 排队竞态能够被 JS 明确拒绝，但本轮
+尚未用 instrumentation 控制 React 队列时序，因此 `stale_action_rejected` 运行门仍保持未通过，不能
+用这两项底层测试冒充 Stage 4 退出。

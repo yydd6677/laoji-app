@@ -65,6 +65,10 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private val operationIds = CalendarOperationIdGenerator()
   private val handledResolutionIds = linkedSetOf<String>()
   private val acknowledgedEvents = linkedMapOf<String, CalendarEvent>()
+  // A gesture can outlive the snapshot it started from. Retain a bounded
+  // revision-to-projection lineage so the eventual bridge action cannot wear
+  // the identity of a newer snapshot and bypass the JS stale-action fence.
+  private val projectionLineage = CalendarProjectionLineage()
   private var mode = CalendarMode.MONTH
   private var baseSnapshot: CalendarSnapshot? = null
   private var renderedSnapshot: CalendarSnapshot? = null
@@ -148,6 +152,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
       baseSnapshot = null
       renderedSnapshot = null
       currentProjection = null
+      projectionLineage.clear()
       monthPager.setSnapshot(null)
       dayView.setSnapshot(null)
       pickerPanel.setDateData(CalendarQuickChooseDateData.EMPTY)
@@ -179,6 +184,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
       return
     }
     val normalized = snapshot.normalized()
+    normalized.projection?.let { projectionLineage.remember(normalized.events, it) }
     val incomingByIdentity = normalized.events.associateBy(CalendarEvent::identity)
     acknowledgedEvents.entries.removeAll { (identity, acknowledged) ->
       val incoming = incomingByIdentity[identity]
@@ -277,6 +283,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     disposed = true
     ledger.clear()
     acknowledgedEvents.clear()
+    projectionLineage.clear()
     createFab.setActionListener(null)
     bottomBar.setTabPressListener(null)
     pickerPanel.dispose()
@@ -608,7 +615,9 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     mutation.optimistic.startMinutes?.let { put("startMinutes", it) }
     mutation.optimistic.endMinutes?.let { put("endMinutes", it) }
     put("baseRevision", mutation.original.revision)
-    baseSnapshot?.projection?.let { projection -> put("projection", projectionPayload(projection)) }
+    val actionProjection = projectionLineage.projectionFor(mutation.original)
+      ?: baseSnapshot?.projection
+    actionProjection?.let { projection -> put("projection", projectionPayload(projection)) }
   }
 
   private fun projectionPayload(projection: ProjectionEnvelope): Map<String, Any> = mapOf(

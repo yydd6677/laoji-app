@@ -19,6 +19,12 @@ SCREENS = {
 def inspect(root: Path = ROOT) -> dict[str, object]:
     helper = (root / "src/native/projectionActionFence.ts").read_text(encoding="utf-8")
     coordinator = (root / "src/native/useNativeProjection.ts").read_text(encoding="utf-8")
+    calendar_host = (
+        root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarHostView.kt"
+    ).read_text(encoding="utf-8")
+    calendar_lineage = (
+        root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarProjectionLineage.kt"
+    ).read_text(encoding="utf-8")
     identity_fields = (
         "deviceEpoch",
         "entityId",
@@ -40,6 +46,12 @@ def inspect(root: Path = ROOT) -> dict[str, object]:
             "const payloadSnapshot = snapshotRef.current" in coordinator
             and "projectionPayloadSha256(payloadSnapshot)" in coordinator
             and "payloadSnapshot," in coordinator
+        ),
+        "calendar_action_uses_source_revision_projection": (
+            "projectionLineage.remember(normalized.events" in calendar_host
+            and "projectionLineage.projectionFor(mutation.original)" in calendar_host
+            and "CalendarEventVersionKey" in calendar_lineage
+            and "maximumEntries" in calendar_lineage
         ),
     }
     screen_checks: dict[str, dict[str, bool]] = {}
