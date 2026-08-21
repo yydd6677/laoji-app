@@ -1240,6 +1240,12 @@ source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-2
 整理后台升级已在后续 Android 回放关闭，当前仍开放独立人工质量、公开零 v1 流量周期和 capability
 barrier。
 
+2026-08-21 复核发现上述 Facts/行动与 Q2 私有包都只有一个 `reviewer`，即使填完也不能证明两名独立
+评审和第三人裁决。现已新增统一的 Stage 3 人工质量合同，精确绑定冻结来源包、两份独立 review 与
+adjudication，确定性计算 Facts 支持/遗漏、行动真实性/适用性和 Q2 正确/完整/引用相关率，公开报告
+不复制正文。私有模板已生成但未填，因而只关闭证据结构缺口，不关闭人工 `>=95%` 门。详见
+`docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。
+
 退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
 进程在 generation/commit 阶段中断后只有一个当前版本。
 

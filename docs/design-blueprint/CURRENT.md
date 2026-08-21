@@ -156,6 +156,13 @@ unit 已封存在服务器版本目录，并用生产同一 Python 3.12/torch �
 版本拒绝与 readiness 六门 HTTP 探针。没有重启或修改生产 8030；正式部署缺口现收敛为一次获准的短
 维护窗口切换、真实模型纵向复验和 API 去除 8031 引用。详见
 [8030 v2 handler 切换候选](../vnext-stage2/ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md)。
+
+Stage 3 的 Facts/行动 10 行与 Q2 27 行私有包已重新界定为冻结来源包：原合同只有一个 `reviewer`，
+不足以产生独立人工通过结论。现已补齐两名不同中文母语评审、第三人裁决、精确文件哈希绑定、分歧
+约束和内容无关聚合报告；对应私有模板均已按 `0700/0600` 生成。工具闭合的是证据合同，不是人工结果，
+当前字段仍为空且 Stage 3 未采用。见
+[Stage 3 独立人工质量证据合同](../vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md)。
+
 2026-08-19 复核实际目录仍为 12 个 MP4、10 个同名 SRT，视频哈希与清单逐项一致，见
 [样本快照复核](../vnext-acceptance/SAMPLE-SNAPSHOT-VERIFY-20260819.md)。
 

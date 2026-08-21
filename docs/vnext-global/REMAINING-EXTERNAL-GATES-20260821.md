@@ -31,6 +31,10 @@
 - `/home/yydd/.cache/laoji-vnext/facts-human-review-20260821-r1.json`
 - `/home/yydd/.cache/laoji-vnext/q2-human-review-20260821-r2.json`
 
+两份文件现在只作为冻结来源包；原单 `reviewer` 结构不足以证明独立人工门。两评审、第三人裁决、哈希
+绑定和确定性评分合同及 `0600` 私有模板已经补齐，见
+`docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。
+
 剩余：两名独立评审完成 Facts 支持与遗漏、行动真实性/适用性、Q2 正确性/完整性/引用相关性裁决并达到
 `>=95%`；随后完成公开 Summary-v2/Q0 零旧调用周期，才可人工采用 capability。自动引用 `100%` 和
 模型回放通过不能替代这些字段。
