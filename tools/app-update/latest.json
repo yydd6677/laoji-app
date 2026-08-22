@@ -1,14 +1,14 @@
 {
   "platform": "android",
-  "version_name": "1.1.10",
-  "version_code": 118,
-  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.10-118.apk",
-  "sha256": "sha256:b5ce1ce8e3f5dc42043d0ed2e4cf90094f43ee887322701328cec4cbc67fc04f",
-  "size_bytes": 82278571,
+  "version_name": "1.1.56",
+  "version_code": 164,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.56-164.apk",
+  "sha256": "sha256:cfb04ddfba793f54254af4ab89375dd291aab66d4107543905d06270c3b8f5ee",
+  "size_bytes": 82619999,
   "release_notes": [
-    "上传录音转写时持续显示已完成的文字片段，并缩短整体处理时间。",
-    "会议整理和会议问答会参考当前我的笔记，问答引用可跳回原始笔记。",
-    "管理标签入口移至分类查看的标签页，设置文书同步更新。"
+    "启用 vNext 本地数据主链，日程与会议由设备稳定持有，服务任务支持断点恢复。",
+    "上传、实时转写、会议整理、会议问答和日程解析切换到单一新版链路。",
+    "会议整理使用事实与来源协议，问答引用严格绑定当前会议，不再请求级回退旧实现。"
   ],
   "minimum_supported_version_code": 106
 }

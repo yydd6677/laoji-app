@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "evidence_contract": "vnext-production-release-authorization-v1",
+  "owner_role": "sole_product_owner",
+  "decision": "authorize_vnext_production_release",
+  "issued_at": "2026-08-22T10:16:17+08:00",
+  "authorization_reference": "current-user-message-20260822:我需要实际使用vnext,执行切换与发布",
+  "baseline_revision": "8ff54be",
+  "target_version_name": "1.1.56",
+  "target_version_code": 164,
+  "production_database": "/home/zhong/laoji-service-platform/compact-production/backend/local.db",
+  "active_path_policy": "single-owner-no-dual-write-no-silent-fallback",
+  "legacy_retention_mode": "cold_rollback",
+  "production_release_authorized": true,
+  "public_traffic_switch_authorized": true,
+  "physical_legacy_deletion_authorized": false,
+  "risk_acknowledgements": [
+    "human_quality_and_normal_use_gates_were_owner_waived",
+    "release_uses_single_vnext_owner_per_capability",
+    "rollback_is_whole_release_not_request_fallback",
+    "legacy_assets_remain_cold_rollback_only",
+    "physical_legacy_deletion_requires_later_owner_authorization"
+  ],
+  "report_sha256": "sha256:9a17c76efd38313bdfd89a60a9821383dc96f322d5dc22f512827de4ed11289d"
+}
