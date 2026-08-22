@@ -55,7 +55,9 @@ ACTIVE_QUERIES = (
     ("summary_tasks_v2", "status", ("queued", "running")),
     ("meeting_recording_r2_uploads_v1", "status", ("active",)),
     ("meeting_recording_transcription_jobs_v2", "status", ("queued", "running")),
-    ("meeting_retention_cleanup_jobs_v2", "status", ("queued", "running")),
+    # This table contains only pending cleanup work and deletes rows on success;
+    # unlike the other ledgers it intentionally has no status column.
+    ("meeting_retention_cleanup_jobs_v2", None, ()),
     ("meeting_media_clip_jobs_v1", "status", ("queued", "running")),
     ("meeting_speaker_reprocess_jobs_v2", "status", ("queued", "running")),
     ("vnext_tasks", "state", ("active",)),
@@ -104,11 +106,14 @@ def inspect_active_work(database: Path) -> dict[str, int]:
             if table not in tables:
                 counts[table] = 0
                 continue
-            placeholders = ",".join("?" for _ in states)
-            count = int(connection.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({placeholders})",
-                states,
-            ).fetchone()[0])
+            if column is None:
+                count = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            else:
+                placeholders = ",".join("?" for _ in states)
+                count = int(connection.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({placeholders})",
+                    states,
+                ).fetchone()[0])
             counts[table] = count
     return counts
 
@@ -257,4 +262,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

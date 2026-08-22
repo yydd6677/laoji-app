@@ -132,6 +132,23 @@ def test_active_work_blocks_apply(tmp_path: Path) -> None:
         )
 
 
+def test_retention_rows_without_status_block_apply(tmp_path: Path) -> None:
+    database = tmp_path / "local.db"
+    _database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE meeting_retention_cleanup_jobs_v2 (id TEXT PRIMARY KEY)")
+        connection.execute("INSERT INTO meeting_retention_cleanup_jobs_v2 VALUES ('cleanup-1')")
+    with pytest.raises(ProductionAdoptionError, match="production_work_not_drained"):
+        adopt(
+            database_path=database,
+            release_authorization=_authorization(database),
+            owner_waiver=_waiver(),
+            activation_id="release-test",
+            backup_path=tmp_path.parent / "retention-backup.db",
+            apply=True,
+        )
+
+
 def test_authorization_cannot_enable_legacy_deletion(tmp_path: Path) -> None:
     database = tmp_path / "local.db"
     _database(database)
