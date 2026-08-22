@@ -20,7 +20,12 @@ from typing import Any, Callable
 
 from app.runtime_policy import env_enabled
 from app.services.llm_provider import LlmProviderPreempted
-from app.services import vnext_summary_chapter_pipeline, vnext_summary_runtime, vnext_task_store
+from app.services import (
+    vnext_source_stream_store,
+    vnext_summary_chapter_pipeline,
+    vnext_summary_runtime,
+    vnext_task_store,
+)
 from app.services.vnext_source_stream_store import VNextSourceStreamError
 
 
@@ -284,6 +289,12 @@ def get_summary_source_stream_worker() -> VNextSummarySourceStreamWorker:
 
 def start_summary_source_stream_worker() -> None:
     if summary_source_stream_enabled():
+        # A freshly adopted production database has the generic task kernel but
+        # may never have received a source-stream request.  Bootstrap the
+        # dependent tables before the maintenance scan starts; otherwise the
+        # worker loops on a hidden ``no such table`` OperationalError until the
+        # first API request happens to create the schema.
+        vnext_source_stream_store.ensure_vnext_source_stream_schema()
         get_summary_source_stream_worker().start()
 
 

@@ -67,6 +67,25 @@ def test_summary_worker_preserves_sanitized_generator_error_code() -> None:
     assert worker_module._safe_generation_failure(RuntimeError("private text")) is None
 
 
+def test_start_bootstraps_source_schema_before_worker_scan(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setenv("LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED", "1")
+    monkeypatch.setattr(
+        worker_module.vnext_source_stream_store,
+        "ensure_vnext_source_stream_schema",
+        lambda: calls.append("schema"),
+    )
+
+    class FakeWorker:
+        def start(self) -> None:
+            calls.append("worker")
+
+    monkeypatch.setattr(worker_module, "get_summary_source_stream_worker", lambda: FakeWorker())
+    worker_module.start_summary_source_stream_worker()
+
+    assert calls == ["schema", "worker"]
+
+
 @pytest.mark.asyncio
 async def test_summary_worker_does_not_repeat_a_completed_generation_repair(monkeypatch):
     failures: list[dict] = []
