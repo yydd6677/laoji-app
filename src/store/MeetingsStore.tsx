@@ -3180,13 +3180,20 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
   }, [reconcilePendingAudioUploads, resumePendingAudioUploads, scope]);
 
   const refreshMeetings = useCallback(async () => {
+    if (mode === 'guest' && isScopeKey(scope)) {
+      const operationGeneration = generationRef.current;
+      const owned = await loadCanonicalOwnedScope();
+      if (owned) adoptCanonicalOwnedProjection(owned, operationGeneration);
+      void resumePendingAudioUploads(true).catch(() => {});
+      return;
+    }
     if (mode === 'authenticated' && isScopeKey(scope)) {
       requestMeetingRootSync(scope);
       requestMeetingActionSync(scope);
     }
     await refreshMeetingsFromCloud();
     void resumePendingAudioUploads(true).catch(() => {});
-  }, [mode, refreshMeetingsFromCloud, resumePendingAudioUploads, scope]);
+  }, [adoptCanonicalOwnedProjection, loadCanonicalOwnedScope, mode, refreshMeetingsFromCloud, resumePendingAudioUploads, scope]);
 
   useEffect(() => {
     if (mode !== 'authenticated' || !accessToken || !isScopeKey(scope)) return undefined;

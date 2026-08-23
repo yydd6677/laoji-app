@@ -181,6 +181,58 @@ export async function getLatestDeviceOperation(
   ));
 }
 
+/**
+ * Enumerates recoverable operations from the durable owner itself.
+ *
+ * Recovery callers must not derive this set from a UI projection: list
+ * filters, a stale roots cache, or an interrupted canonical cutover can all
+ * temporarily hide a meeting while its accepted remote operation remains
+ * active.  Scope and device-epoch fences prevent an old installation or
+ * another local owner from being resurrected.
+ */
+export async function listPendingDeviceOperations(input: {
+  capability: string;
+  scopeKey: ScopeKey;
+  deviceEpochId: string;
+  limit?: number;
+}): Promise<readonly DeviceOperationRecord[]> {
+  const requestedLimit = Math.trunc(input.limit ?? 64);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(256, requestedLimit))
+    : 64;
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<OperationRow>(
+    `SELECT operation.operation_id, operation.device_epoch_id, operation.capability,
+            operation.entity_id, operation.entity_revision, operation.input_sha256,
+            operation.generation_id, operation.predecessor_operation_id,
+            operation.creation_reason, operation.operation_revision,
+            operation.cancel_revision, operation.remote_task_id,
+            operation.accepted_attempt_id, operation.remote_state,
+            operation.progress_done, operation.progress_total, operation.error_code,
+            operation.retry_after_ms, operation.created_at_ms, operation.updated_at_ms,
+            operation.terminal_at_ms, operation.executor_kind, operation.executor_id
+       FROM device_operations operation
+       INNER JOIN meeting_notes meeting ON meeting.id = operation.entity_id
+      WHERE operation.capability = ?
+        AND operation.device_epoch_id = ?
+        AND operation.remote_state IN ('queued', 'running')
+        AND meeting.scope_key = ?
+        AND meeting.lifecycle <> 'deleted'
+      ORDER BY CASE operation.remote_state WHEN 'running' THEN 0 ELSE 1 END,
+               operation.updated_at_ms,
+               operation.operation_id
+      LIMIT ?`,
+    value(input.capability, 'capability'),
+    value(input.deviceEpochId, 'deviceEpochId'),
+    input.scopeKey,
+    limit,
+  );
+  return rows.flatMap(row => {
+    const operation = fromRow(row);
+    return operation ? [operation] : [];
+  });
+}
+
 function uploadOperationSelect(): string {
   return `
     SELECT operation.operation_id, operation.device_epoch_id, operation.capability,

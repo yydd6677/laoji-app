@@ -2,9 +2,11 @@ import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './ap
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
 import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
+import { sqliteMeetingNoteRepository } from '../data/repositories';
 import {
   createDeviceOperation,
   getLatestDeviceOperation,
+  listPendingDeviceOperations,
   updateDeviceOperation,
   type DeviceOperationRecord,
 } from '../data/repositories/vnext/deviceOperationsRepository';
@@ -69,6 +71,12 @@ function normalizedTaskId(value: string): string {
 
 function operationId(meetingId: string, taskId: string): string {
   return `transcript:${meetingId}:${taskId}`;
+}
+
+async function operationMeetingId(meetingId: string): Promise<string> {
+  const normalized = normalizedMeetingId(meetingId);
+  return await sqliteMeetingNoteRepository.resolveCanonicalMeetingId(normalized, 'guest')
+    ?? normalized;
 }
 
 function toRecord(operation: DeviceOperationRecord): DeviceTranscriptTaskRecord | null {
@@ -141,7 +149,8 @@ async function promoteLegacy(meetingId: string): Promise<DeviceTranscriptTaskRec
   const legacy = registry[meetingId];
   if (!legacy) return null;
   await rememberDeviceTranscriptTask(legacy.meetingId, legacy.taskId);
-  const current = await getLatestDeviceOperation('transcript', meetingId);
+  const entityId = await operationMeetingId(meetingId);
+  const current = await getLatestDeviceOperation('transcript', entityId);
   if (legacy.state === 'failed' && current && current.remoteState !== 'failure') {
     await updateDeviceOperation({
       operationId: current.operationId,
@@ -159,15 +168,45 @@ async function promoteLegacy(meetingId: string): Promise<DeviceTranscriptTaskRec
     });
   }
   await removeLegacyRecord(meetingId).catch(() => undefined);
-  const promoted = await getLatestDeviceOperation('transcript', meetingId);
-  return promoted ? toRecord(promoted) : null;
+  const promoted = await getLatestDeviceOperation('transcript', entityId);
+  const record = promoted ? toRecord(promoted) : null;
+  return record ? { ...record, meetingId } : null;
 }
 
 export async function getDeviceTranscriptTask(meetingId: string): Promise<DeviceTranscriptTaskRecord | null> {
   const normalized = normalizedMeetingId(meetingId);
-  const operation = await getLatestDeviceOperation('transcript', normalized);
-  if (operation) return toRecord(operation);
+  const operation = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
+  if (operation) {
+    const record = toRecord(operation);
+    return record ? { ...record, meetingId: normalized } : null;
+  }
   return promoteLegacy(normalized);
+}
+
+/**
+ * Returns every transcript task recoverable by this installation, including
+ * tasks whose meeting card is temporarily absent from the rendered list.
+ */
+export async function listPendingDeviceTranscriptTasks(
+  limit = 64,
+): Promise<readonly DeviceTranscriptTaskRecord[]> {
+  const identity = await getOrCreateDeviceIdentity();
+  const operations = await listPendingDeviceOperations({
+    capability: 'transcript',
+    scopeKey: 'guest',
+    deviceEpochId: identity.epochId,
+    limit,
+  });
+  const records = await Promise.all(operations.map(async operation => {
+    const record = toRecord(operation);
+    if (record?.state !== 'pending') return null;
+    const aggregate = await sqliteMeetingNoteRepository.get(operation.entityId, 'guest');
+    return {
+      ...record,
+      meetingId: aggregate?.note.legacySourceId?.trim() || operation.entityId,
+    } satisfies DeviceTranscriptTaskRecord;
+  }));
+  return records.filter((record): record is DeviceTranscriptTaskRecord => record !== null);
 }
 
 export async function rememberDeviceTranscriptTask(meetingId: string, taskId: string): Promise<void> {
@@ -175,14 +214,15 @@ export async function rememberDeviceTranscriptTask(meetingId: string, taskId: st
   const normalizedTaskIdValue = normalizedTaskId(taskId);
   const identity = await getOrCreateDeviceIdentity();
   await ensureDeviceEpoch(identity.epochId);
-  await ensureLocalMeetingServiceBinding(normalizedMeetingIdValue);
-  const current = await getLatestDeviceOperation('transcript', normalizedMeetingIdValue);
+  const binding = await ensureLocalMeetingServiceBinding(normalizedMeetingIdValue);
+  const entityId = binding.meetingId;
+  const current = await getLatestDeviceOperation('transcript', entityId);
   if (current?.generationId === normalizedTaskIdValue) return;
   await createDeviceOperation({
-    operationId: operationId(normalizedMeetingIdValue, normalizedTaskIdValue),
+    operationId: operationId(entityId, normalizedTaskIdValue),
     deviceEpochId: identity.epochId,
     capability: 'transcript',
-    entityId: normalizedMeetingIdValue,
+    entityId,
     entityRevision: 1,
     input: normalizedTaskIdValue,
     generationId: normalizedTaskIdValue,
@@ -197,7 +237,7 @@ export async function markDeviceTranscriptTaskProgress(
   phase: DeviceTranscriptTaskPhase,
 ): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const existing = await getLatestDeviceOperation('transcript', normalized);
+  const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
   if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
   if ((phase === 'running' && existing.remoteState === 'running')
     || (phase === 'queued' && existing.remoteState === 'queued')) return;
@@ -223,7 +263,7 @@ export async function advanceDeviceTranscriptEventCursor(
     || !Number.isSafeInteger(nextCursor) || nextCursor < expectedCursor
     || !Number.isSafeInteger(eventTotal) || eventTotal < nextCursor
   ) throw new Error('设备转写事件游标无效');
-  const existing = await getLatestDeviceOperation('transcript', normalized);
+  const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
   if (!existing || existing.generationId !== normalizedTask) return false;
   const current = existing.progressDone ?? 0;
   if (current >= nextCursor) return true;
@@ -243,7 +283,7 @@ export async function advanceDeviceTranscriptEventCursor(
 
 export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const existing = await getLatestDeviceOperation('transcript', normalized);
+  const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
   if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
   const updated = await updateDeviceOperation({
     operationId: existing.operationId,
@@ -256,7 +296,7 @@ export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCod
 
 export async function cancelDeviceTranscriptTask(meetingId: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const existing = await getLatestDeviceOperation('transcript', normalized);
+  const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
   if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
   const updated = await updateDeviceOperation({
     operationId: existing.operationId,
@@ -269,7 +309,7 @@ export async function cancelDeviceTranscriptTask(meetingId: string): Promise<voi
 /** Marks the durable operation successful; it is retained for idempotent replay. */
 export async function clearDeviceTranscriptTask(meetingId: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
-  const existing = await getLatestDeviceOperation('transcript', normalized);
+  const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
   if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') {
     await removeLegacyRecord(normalized).catch(() => undefined);
     return;

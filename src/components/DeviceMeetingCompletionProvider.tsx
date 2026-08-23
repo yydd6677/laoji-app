@@ -6,8 +6,10 @@ import { getLocalDeviceSpeakerName } from '../services/speakers';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import {
   advanceDeviceTranscriptEventCursor,
+  cancelDeviceTranscriptTask,
   clearDeviceTranscriptTask,
   getDeviceTranscriptTask,
+  listPendingDeviceTranscriptTasks,
   markDeviceTranscriptTaskFailed,
   markDeviceTranscriptTaskProgress,
   subscribeDeviceTranscriptTaskChanged,
@@ -59,6 +61,7 @@ export function DeviceMeetingCompletionProvider(): null {
     getCachedTranscript,
     saveCachedTranscript,
     updateMeetingStatus,
+    refreshMeetings,
   } = useMeetings();
   const meetingsRef = useRef(meetings);
   meetingsRef.current = meetings;
@@ -74,19 +77,31 @@ export function DeviceMeetingCompletionProvider(): null {
       running = true;
       let hasActivePartialTask = false;
       try {
-        // The durable task registry is authoritative. Import finalization can
-        // clear audioSyncPending before the meeting projection adopts its
-        // processing state, so filtering by visible meeting flags can suppress
-        // every draft pull until the user re-enters the page.
-        const candidatePool = meetingsRef.current.filter(meeting => (
-          (retryRef.current[meeting.id]?.nextAt ?? 0) <= Date.now()
-        )).slice(0, 64);
-        const pendingChecks = await Promise.all(candidatePool.map(async meeting => (
+        // Enumerate the durable operation owner first. A task must remain
+        // recoverable even when the list is still showing an old roots cache
+        // or a local projection refresh was interrupted.
+        const durableTasks = await listPendingDeviceTranscriptTasks(64);
+        const visiblePendingChecks = await Promise.all(meetingsRef.current.slice(0, 64).map(async meeting => (
           [meeting, await needsDeviceTranscriptCompletion(meeting)] as const
         )));
-        const candidates = pendingChecks
+        const pendingIds = new Set(durableTasks.map(task => task.meetingId));
+        visiblePendingChecks
           .filter(([, pending]) => pending)
-          .map(([meeting]) => meeting)
+          .forEach(([meeting]) => pendingIds.add(meeting.id));
+
+        if ([...pendingIds].some(id => !meetingsRef.current.some(meeting => meeting.id === id))) {
+          await refreshMeetings();
+        }
+        const visibleById = new Map(meetingsRef.current.map(meeting => [meeting.id, meeting]));
+        const missingIds = [...pendingIds].filter(id => !visibleById.has(id));
+        // A durable operation with no active meeting after a canonical refresh
+        // belongs to a deleted/incompatible local root. Safely retire the
+        // local recovery intent instead of displaying an endless hidden task.
+        await Promise.all(missingIds.map(id => cancelDeviceTranscriptTask(id).catch(() => undefined)));
+        const candidates = [...pendingIds]
+          .filter(id => (retryRef.current[id]?.nextAt ?? 0) <= Date.now())
+          .map(id => visibleById.get(id))
+          .filter((meeting): meeting is NonNullable<typeof meeting> => Boolean(meeting))
           .slice(0, 4);
         for (const meeting of candidates) {
           if (!active) return;
@@ -439,7 +454,7 @@ export function DeviceMeetingCompletionProvider(): null {
       unsubscribeTask();
       subscription.remove();
     };
-  }, [getCachedTranscript, loading, mode, saveCachedTranscript, updateMeetingStatus]);
+  }, [getCachedTranscript, loading, mode, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
 
   return null;
 }

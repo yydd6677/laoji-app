@@ -34,6 +34,7 @@ def main() -> None:
     upload_owner = ROOT / "src/services/deviceUploadOperations.ts"
     coordinator = ROOT / "src/native/nativeTransferCoordinator.ts"
     operations = ROOT / "src/data/repositories/vnext/deviceOperationsRepository.ts"
+    transcript_tasks = ROOT / "src/services/deviceTranscriptTasks.ts"
     recording = ROOT / "src/services/meetingRecording.ts"
     completion = ROOT / "src/components/DeviceMeetingCompletionProvider.tsx"
     upload_migration = ROOT / "src/data/db/migrations/0046DeviceUploadExecutor.ts"
@@ -129,8 +130,18 @@ def main() -> None:
         operations,
         "executor_kind",
         "listPendingDeviceUploadOperations",
+        "listPendingDeviceOperations",
+        "operation.device_epoch_id = ?",
+        "operation.remote_state IN ('queued', 'running')",
         "listTerminalDeviceUploadAssetIds",
         "asset.remote_asset_id IS NOT NULL",
+    )
+    require(
+        transcript_tasks,
+        "listPendingDeviceTranscriptTasks",
+        "resolveCanonicalMeetingId(normalized, 'guest')",
+        "deviceEpochId: identity.epochId",
+        "meetingId: aggregate?.note.legacySourceId?.trim() || operation.entityId",
     )
     require(upload_migration, "idx_device_upload_pending_asset", "version: 46")
     require(
@@ -176,6 +187,9 @@ def main() -> None:
         "const byStableKey = new Map",
         "textState: finalEvent?.outcome === 'text' ? 'final' : 'stable'",
         "stableEvents.some(event => !storedKeys.has",
+        "const durableTasks = await listPendingDeviceTranscriptTasks(64)",
+        "await refreshMeetings()",
+        "cancelDeviceTranscriptTask(id)",
     )
     require(
         live_screen,
