@@ -684,7 +684,7 @@ internal class MinutesSummaryPage(
 ) : MinutesDetailPage(context, MinutesDetailTab.SUMMARY, emitAction) {
   private val root = LinearLayout(context)
   private val summaryActionBar = LinearLayout(context)
-  private val templateAction = context.textView("切换模板", 15, MinutesPalette.secondary)
+  private val templateAction = context.textView("板块", 15, MinutesPalette.secondary)
   private val regenerateAction = context.textView("重新整理", 15, MinutesPalette.primary)
   internal val scroll = NestedScrollView(context)
   private val rows = LinearLayout(context)
@@ -710,7 +710,7 @@ internal class MinutesSummaryPage(
       gravity = Gravity.CENTER
       isClickable = true
       isFocusable = true
-      contentDescription = "切换整理模板"
+      contentDescription = "选择整理板块"
       setTextColor(statefulIconTint(MinutesPalette.secondary, MinutesPalette.primary, MinutesPalette.disabled))
       background = context.roundedStateBackground(
         defaultColor = MinutesPalette.surface,
@@ -718,7 +718,7 @@ internal class MinutesSummaryPage(
         disabledColor = MinutesPalette.surface,
         radiusDp = 6,
       )
-      setOnClickListener { emitAction(mapOf("type" to "selectSummaryTemplate")) }
+      setOnClickListener { emitAction(mapOf("type" to "openSummaryBlocks")) }
     }
     regenerateAction.apply {
       gravity = Gravity.CENTER
@@ -788,8 +788,8 @@ internal class MinutesSummaryPage(
     ) View.VISIBLE else View.GONE
     templateAction.visibility = if (hasContent && state.canSelectSummaryTemplate) View.VISIBLE else View.GONE
     templateAction.isEnabled = !state.summaryGenerating
-    templateAction.text = state.summaryTemplateLabel.ifBlank { "切换模板" }
-    templateAction.contentDescription = "切换整理模板，当前${templateAction.text}"
+    templateAction.text = state.summaryTemplateLabel.ifBlank { "板块" }
+    templateAction.contentDescription = "选择整理板块"
     regenerateAction.visibility = if (hasContent && state.canGenerateSummary) View.VISIBLE else View.GONE
     regenerateAction.isEnabled = !state.summaryGenerating
     val idleActionLabel = state.summaryActionLabel.ifBlank { "重新整理" }
@@ -1159,6 +1159,7 @@ internal class MinutesSummaryPage(
     item: MinutesSummaryRichItem,
     textColor: Int = MinutesPalette.text,
     horizontalPaddingDp: Int = 0,
+    showMetadata: Boolean = false,
   ): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setPadding(context.dp(horizontalPaddingDp), context.dp(7), context.dp(horizontalPaddingDp), context.dp(7))
@@ -1181,7 +1182,7 @@ internal class MinutesSummaryPage(
       if (item.meta.isNotBlank()) add(item.meta)
       item.startMs?.let { add(formatClock(it)) }
     }.distinct().joinToString(" · ")
-    if (metadata.isNotBlank()) {
+    if (showMetadata && metadata.isNotBlank()) {
       addView(
         context.textView(metadata, 12, MinutesPalette.faint).apply { setPadding(0, context.dp(3), 0, 0) },
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
@@ -1274,7 +1275,7 @@ internal class MinutesSummaryPage(
           },
         )
         row.addView(
-          richSourceTarget(item, richItemBody(item, MinutesPalette.secondary)),
+          richSourceTarget(item, richItemBody(item, MinutesPalette.secondary, showMetadata = true)),
           LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1517,51 +1518,33 @@ internal class MinutesSummaryPage(
           LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
       }
-      val citationRow = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, context.dp(4), 0, 0)
-      }
-      section.citations.forEach { citation ->
-        val target = FrameLayout(context).apply {
-          isClickable = true
-          isFocusable = true
-          contentDescription = "跳转到文字记录 ${citation.label.ifBlank { formatClock(citation.startMs) }}"
-          setOnClickListener {
-            emitAction(
-              mapOf(
-                "type" to "seekSummaryCitation",
-                "segmentId" to citation.segmentId,
-                "positionMs" to citation.startMs,
-              ),
-            )
-          }
+      val evidenceTarget = FrameLayout(context).apply {
+        isClickable = true
+        isFocusable = true
+        contentDescription = "查看${section.citations.size}处整理依据"
+        setOnClickListener {
+          emitAction(
+            mapOf(
+              "type" to "openSummaryEvidence",
+              "sectionId" to section.id,
+            ),
+          )
         }
-        target.addView(
-          context.textView(
-            citation.label.ifBlank { formatClock(citation.startMs) },
-            14,
-            MinutesPalette.primary,
-          ).apply {
-            gravity = Gravity.CENTER
-            setPadding(context.dp(10), 0, context.dp(10), 0)
-            backgroundShape(MinutesPalette.primarySoft, radiusDp = 6)
-          },
-          FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(32), Gravity.CENTER),
-        )
-        citationRow.addView(
-          target,
-          LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
-            rightMargin = context.dp(4)
-          },
-        )
       }
-      val scroller = HorizontalScrollView(context).apply {
-        isHorizontalScrollBarEnabled = false
-        overScrollMode = View.OVER_SCROLL_NEVER
-        addView(citationRow, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-      }
-      container.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(48)))
+      evidenceTarget.addView(
+        context.textView("依据 ${section.citations.size} 处", 14, MinutesPalette.primary).apply {
+          gravity = Gravity.CENTER
+          setPadding(context.dp(10), 0, context.dp(10), 0)
+          backgroundShape(MinutesPalette.primarySoft, radiusDp = 6)
+        },
+        FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(32), Gravity.CENTER_VERTICAL),
+      )
+      container.addView(
+        evidenceTarget,
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+          topMargin = context.dp(4)
+        },
+      )
     }
     return container
   }

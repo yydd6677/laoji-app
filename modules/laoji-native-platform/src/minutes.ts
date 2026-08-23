@@ -377,6 +377,8 @@ export type MinutesSemanticAction = (
   | { type: 'manageSpeaker'; surface: MinutesSurface; meetingId: string; speakerId: string }
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
   | { type: 'selectSummaryTemplate'; surface: 'detail'; meetingId: string }
+  | { type: 'openSummaryBlocks'; surface: 'detail'; meetingId: string }
+  | { type: 'openSummaryEvidence'; surface: 'detail'; meetingId: string; sectionId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }
   | { type: 'updateSearchQuery'; surface: 'list'; query: string }
 ) & { projection?: NativeProjectionEnvelope | null };

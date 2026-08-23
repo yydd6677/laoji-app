@@ -25,6 +25,11 @@ export interface MeetingSummaryCitation {
   quoteHash: string | null;
   sourceType?: 'transcript' | 'manual_note' | 'attachment';
   sourceLabel?: string | null;
+  /**
+   * A short, verbatim source excerpt for the collapsed evidence sheet.
+   * It is presentation-only and never becomes a second fact body.
+   */
+  excerpt?: string | null;
 }
 
 export interface MeetingSummaryRichItem {

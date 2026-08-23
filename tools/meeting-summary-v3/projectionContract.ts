@@ -1,8 +1,8 @@
-import type { MeetingFactsResultV3, MeetingTemplate } from '../../src/domain/meeting';
+import type { MeetingFactsResultV3, MeetingTemplate } from '../../src/domain/meeting/index.ts';
 import {
   applyMeetingSummaryV3Overrides,
   projectMeetingFactsV3,
-} from '../../src/services/meetingSummaryV3';
+} from '../../src/services/meetingSummaryV3.ts';
 
 function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -101,6 +101,8 @@ const templates = templateIds.map(id => ({ id, revision: 3, title: id, sectionSc
 const sourceBefore = JSON.stringify(result.factsDocument);
 const projected = templates.map(template => projectMeetingFactsV3(result, template, 2));
 check(JSON.stringify(result.factsDocument) === sourceBefore, 'template projection mutated the fact document');
+check(new Set(projected.map(document => JSON.stringify(document.sections))).size === 1, 'legacy template input changed adaptive content');
+check(projected.every(document => document.templateId === 'general'), 'adaptive summary leaked a visible template identity');
 
 const actionIdentity = projected.map(document => JSON.stringify(document.actionItemCandidates.map(action => ({
   id: action.id,
@@ -115,8 +117,12 @@ check(projected.every(document => document.actionItemCandidates.length === 1), '
 const general = projected[0];
 const overview = general.sections.find(section => section.stableKey === 'general:overview');
 check(overview?.richBlock?.items[0]?.text === result.factsDocument.overview.text, 'overview block does not render overview text');
-const representativeQuote = general.sections.find(section => section.stableKey === 'general:representative_quote');
-check(representativeQuote?.richBlock?.items[0]?.text === '上线标准是稳定，而不是功能堆叠。', 'quote block is not verbatim evidence');
+const themes = general.sections.find(section => section.stableKey === 'general:themes');
+check(themes?.richBlock?.items.some(item => item.text === '上线标准是稳定而不是功能堆叠') === true, 'distilled quote fact is missing from themes');
+check(general.sections.every(section => !['受访者观点', '代表性引用', '证据摘录'].includes(section.title ?? '')), 'legacy quote/view section leaked into adaptive view');
+check(general.sections.flatMap(section => section.richBlock?.items ?? []).every(item => (
+  item.meta === null && item.sourceId === null && item.startMs === null
+)), 'ordinary adaptive row exposes duplicate source metadata');
 
 const overridden = applyMeetingSummaryV3Overrides(general, [{
   stableBlockKey: 'general:overview',
@@ -125,7 +131,7 @@ const overridden = applyMeetingSummaryV3Overrides(general, [{
   userEditedAtMs: 123,
 }]);
 check(overridden.sections.find(section => section.stableKey === 'general:overview')?.userEdited === true, 'general override was not applied');
-check(projected[2].sections.every(section => !section.userEdited), 'general override leaked into another template');
+check(projected[2].sections.every(section => !section.userEdited), 'source projection was mutated by an override');
 
 for (const template of templates) {
   const started = performance.now();

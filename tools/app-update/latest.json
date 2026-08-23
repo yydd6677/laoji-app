@@ -1,13 +1,14 @@
 {
   "platform": "android",
-  "version_name": "1.1.57",
-  "version_code": 165,
-  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.57-165.apk",
-  "sha256": "sha256:37af64a4616f7a1fd5f80c1b4a2e166ce8ecc1ca3a07176c8b53d07215bbbb0c",
-  "size_bytes": 82621599,
+  "version_name": "1.1.63",
+  "version_code": 171,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.63-171.apk",
+  "sha256": "sha256:2279f63b09bb9d8f65a51ad0fdd217f33b61f319b47eebbe38d3aff10b2b9515",
+  "size_bytes": 82665955,
   "release_notes": [
-    "回收站右上角新增一键清空入口，可一次永久删除全部回收站会议。",
-    "清空前会显示记录数量并再次确认；个别记录清理失败时会保留并提示重试。"
+    "会议整理改为一份自适应结果，不再用四个标题不同但正文近似的模板重复组织内容。",
+    "新增本机板块显示设置；时间线、流程、对比、数据、风险和问题只在有对应依据时出现。",
+    "讲话人和时间引用按板块收纳为一个依据入口，普通条目不再重复显示来源。"
   ],
   "minimum_supported_version_code": 106
 }

@@ -475,7 +475,9 @@ function structuredSummaryActions(
 ) {
   return dedupeMeetingSummaryActions(actions).map(action => {
     const actionId = action.canonicalId ?? action.id;
-    const source = action.citations[0];
+    const source = action.citations.find(citation => (
+      citation.sourceType === undefined || citation.sourceType === 'transcript'
+    ));
     const sourceSegmentId = source?.segmentId ?? action.sourceSegmentId ?? undefined;
     const sourceStartMs = source?.startMs ?? action.sourceStartMs ?? undefined;
     const due = action.dueAtMs === null ? null : new Date(action.dueAtMs);

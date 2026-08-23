@@ -53,7 +53,9 @@ function actionMetadata(
 }
 
 function actionSource(action: MeetingSummaryActionCandidate): { label: string; available: boolean } {
-  const citation = action.citations[0];
+  const citation = action.citations.find(item => (
+    item.sourceType === undefined || item.sourceType === 'transcript'
+  ));
   const positionMs = citation?.startMs ?? action.sourceStartMs;
   if (positionMs === null || positionMs === undefined || !Number.isFinite(positionMs)) {
     return { label: '', available: false };

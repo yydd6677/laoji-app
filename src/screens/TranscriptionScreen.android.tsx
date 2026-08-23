@@ -57,7 +57,11 @@ import {
   MeetingSpeakerAssignmentSheet,
   type MeetingSpeakerAssignmentValue,
 } from '../components/MeetingSpeakerAssignmentSheet';
-import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
+import {
+  MeetingSummaryBlocksSheet,
+  type MeetingSummaryBlockOption,
+} from '../components/MeetingSummaryBlocksSheet';
+import { MeetingSummaryEvidenceSheet } from '../components/MeetingSummaryEvidenceSheet';
 import { MeetingSummaryAttachmentSheet } from '../components/MeetingSummaryAttachmentSheet';
 import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
 import { MeetingShareSheet } from '../components/MeetingShareSheet';
@@ -153,6 +157,7 @@ import {
   type MeetingActionSharePermission,
   type MeetingContentShare,
   type MeetingSummaryActionCandidate,
+  type MeetingSummaryCitation,
   type MeetingSummaryDocument,
   type MeetingFactsResultV3,
   type ProcessingStage,
@@ -249,9 +254,7 @@ import {
   deleteSummaryViewOverride,
   loadMeetingFactsRecordV3ForVersion,
   loadSummaryViewOverrides,
-  loadSummaryViewPreference,
   saveSummaryViewOverride,
-  saveSummaryViewPreference,
   SummaryV3ActivationFenceError,
   summaryV3UpgradeIsRunning,
   type MeetingAttachmentRecord,
@@ -267,6 +270,13 @@ import {
   applyMeetingSummaryV3Overrides,
   projectMeetingFactsV3,
 } from '../services/meetingSummaryV3';
+import {
+  isFixedMeetingSummarySection,
+  loadMeetingSummaryHiddenBlocks,
+  resetMeetingSummaryHiddenBlocks,
+  saveMeetingSummaryHiddenBlocks,
+  visibleMeetingSummaryDocument,
+} from '../services/meetingSummaryLayout';
 import {
   beginSummaryV3InteractiveWork,
   subscribeSummaryV3UpgradeChanged,
@@ -583,7 +593,7 @@ function summaryTemplateLabel(templateId: string): string {
   if (templateId === 'legacy') return '旧版整理';
   const template = meetingTemplateById(templateId);
   if (!template) return '整理结果';
-  return template.id === 'general' ? '通用整理' : template.title;
+  return template.id === 'general' ? '统一整理' : `旧版${template.title}`;
 }
 
 function summaryVersionChoices(state: MeetingSummaryVersionsState | null): MeetingSummaryVersionChoice[] {
@@ -669,11 +679,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [summaryV3UpgradeRunning, setSummaryV3UpgradeRunning] = useState(false);
   const summaryV3UpgradeWasRunningRef = useRef(false);
   const [confirmedCurrentSummaryIdentity, setConfirmedCurrentSummaryIdentity] = useState('');
-  const [summaryTemplate, setSummaryTemplate] = useState<MeetingTemplate>(() => {
-    const cached = meeting ? summaryDocumentFor(meeting.id, getCachedSummary(meeting.id)) : null;
-    return meetingTemplateById(cached?.templateId, cached?.templateRevision) ?? DEFAULT_MEETING_TEMPLATE;
-  });
-  const [templateSheetVisible, setTemplateSheetVisible] = useState(false);
+  // Generation retains the general@3 wire envelope for server/history
+  // compatibility, while the active product has one adaptive summary.
+  const [summaryTemplate, setSummaryTemplate] = useState<MeetingTemplate>(DEFAULT_MEETING_TEMPLATE);
+  const [summaryBlocksSheetVisible, setSummaryBlocksSheetVisible] = useState(false);
+  const [summaryEvidenceSectionId, setSummaryEvidenceSectionId] = useState<string | null>(null);
+  const [hiddenSummaryBlockKeys, setHiddenSummaryBlockKeys] = useState<readonly string[]>([]);
   const [locationLoading, setLocationLoading] = useState(false);
   const [summaryAttachmentRequest, setSummaryAttachmentRequest] = useState<{
     meetingId: string;
@@ -890,7 +901,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const manualNote = useMeetingManualNote(meetingScopeKey, meeting?.id);
   const loadProjectedMeetingFactsV3 = useCallback(async (
     current: { canonicalMeetingId: string; document: MeetingSummaryDocument },
-    requestedTemplate?: MeetingTemplate,
+    _requestedTemplate?: MeetingTemplate,
   ): Promise<{
     active: ActiveMeetingFactsV3;
     document: MeetingSummaryDocument;
@@ -910,12 +921,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       diagnosticAudit('meeting_summary_v3_projection', { status: 'missing_facts_link' });
       return null;
     }
-    const preference = requestedTemplate
-      ? { templateId: requestedTemplate.id, templateRevision: 3 as const }
-      : await loadSummaryViewPreference(current.canonicalMeetingId);
-    const template = requestedTemplate
-      ?? meetingTemplateById(preference.templateId, preference.templateRevision)
-      ?? DEFAULT_MEETING_TEMPLATE;
+    const template = DEFAULT_MEETING_TEMPLATE;
     const overrides = await loadSummaryViewOverrides(currentVersion.id, template.id);
     const projected = applyMeetingSummaryV3Overrides(
       projectMeetingFactsV3(
@@ -1435,7 +1441,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSummaryVersionsVisible(false);
     setActiveMeetingFactsV3(null);
     setSummaryV3UpgradeRunning(false);
-    setTemplateSheetVisible(false);
+    setSummaryBlocksSheetVisible(false);
+    setSummaryEvidenceSectionId(null);
+    setHiddenSummaryBlockKeys([]);
     setSummaryVersionsState(null);
     setSummaryVersionsLoading(false);
     setSummaryVersionsError('');
@@ -1521,11 +1529,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [meeting, summaryV3UpgradeRunning]);
 
   useEffect(() => {
-    setSummaryTemplate(
-      meetingTemplateById(summaryDocument?.templateId, summaryDocument?.templateRevision)
-        ?? DEFAULT_MEETING_TEMPLATE,
-    );
-  }, [route.params.meetingId, summaryDocument?.templateId, summaryDocument?.templateRevision]);
+    setSummaryTemplate(DEFAULT_MEETING_TEMPLATE);
+    let active = true;
+    void loadMeetingSummaryHiddenBlocks(route.params.meetingId).then(keys => {
+      if (active && routeMeetingIdRef.current === route.params.meetingId) {
+        setHiddenSummaryBlockKeys(keys);
+      }
+    }).catch(reason => diagnosticWarn('[meeting-summary-layout] preference load failed', reason));
+    return () => { active = false; };
+  }, [route.params.meetingId]);
 
   useEffect(() => {
     void refreshMarkers();
@@ -2983,8 +2995,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               || storedFacts.canonicalMeetingId !== v3CanonicalMeetingId
               || storedFacts.result.documentId !== generated.facts_document_v3.documentId
             ) throw new Error('新版整理事实与本机版本未原子关联');
-            localPersistPhase = 'view_preference';
-            await saveSummaryViewPreference(v3CanonicalMeetingId, requestedTemplate.id);
+            localPersistPhase = 'adaptive_projection_ready';
           }
           localPersistPhase = 'projection_refresh';
           if (
@@ -3301,49 +3312,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }).catch(reason => diagnosticWarn('[meeting-summary] preparation cancellation deferred', reason));
   }
 
-  async function switchSummaryTemplate(template: MeetingTemplate): Promise<void> {
-    if (!meeting || !activeMeetingFactsV3 || loadingSummary) return;
-    const active = activeMeetingFactsV3;
-    try {
-      const overrides = await loadSummaryViewOverrides(active.summaryVersionId, template.id);
-      const projected = applyMeetingSummaryV3Overrides(
-        projectMeetingFactsV3(
-          active.result,
-          template,
-          summaryDocument?.manualNoteRevision ?? manualNote.revision,
-          transcript,
-        ),
-        overrides,
-      );
-      await saveSummaryViewPreference(active.canonicalMeetingId, template.id);
-      if (
-        activeMeetingIdRef.current !== meeting.id
-        || activeMeetingFactsV3.summaryVersionId !== active.summaryVersionId
-      ) return;
-      const visibleDocument: MeetingSummaryDocument = {
-        ...projected,
-        meetingId: meeting.id,
-        remoteVersionId: summaryDocument?.remoteVersionId ?? active.result.documentId,
-        transcriptRevisionId: summaryDocument?.transcriptRevisionId ?? null,
-        remoteTranscriptRevisionId: projected.remoteTranscriptRevisionId ?? active.result.transcriptRevision,
-        manualNoteRevision: summaryDocument?.manualNoteRevision ?? manualNote.revision,
-        status: summaryDocument?.status ?? 'ready',
-        supersedesVersionId: summaryDocument?.supersedesVersionId ?? null,
-      };
-      setSummaryTemplate(template);
-      setSummaryDocument(visibleDocument);
-      setSummary(meetingSummaryDocumentToText(visibleDocument));
-      advancePageGenerations('summary');
-    } catch (reason) {
-      diagnosticWarn('[meeting-summary-v3] switch template failed', reason);
-      showDialog({
-        title: '模板切换失败',
-        message: '当前整理结果暂时无法切换模板，请稍后重试。',
-        tone: 'warning',
-      });
-    }
-  }
-
   async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
     if (!meeting || summaryInFlightRef.current || summaryVisualPhase === 'running') return;
     const currentMeetingId = meeting.id;
@@ -3649,9 +3617,27 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     [transcript],
   );
   const displayedSummary = summary || briefSummary || '';
-  const displayedSummaryDocument = summary && summaryDocument?.meetingId === (meeting?.id ?? route.params.meetingId)
+  const fullDisplayedSummaryDocument = summary && summaryDocument?.meetingId === (meeting?.id ?? route.params.meetingId)
     ? summaryDocument
     : null;
+  const displayedSummaryDocument = useMemo(() => (
+    fullDisplayedSummaryDocument
+      ? visibleMeetingSummaryDocument(fullDisplayedSummaryDocument, hiddenSummaryBlockKeys)
+      : null
+  ), [fullDisplayedSummaryDocument, hiddenSummaryBlockKeys]);
+  const summaryBlockOptions = useMemo<readonly MeetingSummaryBlockOption[]>(() => (
+    fullDisplayedSummaryDocument?.sections.map(section => ({
+      stableKey: section.stableKey,
+      title: section.title?.trim() || '整理内容',
+      visible: isFixedMeetingSummarySection(section) || !hiddenSummaryBlockKeys.includes(section.stableKey),
+      fixed: isFixedMeetingSummarySection(section),
+    })) ?? []
+  ), [fullDisplayedSummaryDocument, hiddenSummaryBlockKeys]);
+  const summaryEvidenceSection = useMemo(() => (
+    summaryEvidenceSectionId
+      ? fullDisplayedSummaryDocument?.sections.find(section => section.id === summaryEvidenceSectionId) ?? null
+      : null
+  ), [fullDisplayedSummaryDocument, summaryEvidenceSectionId]);
   const sourceActionCandidates = useMemo(
     () => {
       const projected = displayedSummaryDocument?.actionItemCandidates ?? [];
@@ -3690,6 +3676,50 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     )),
     [displayedActionCandidates],
   );
+
+  const toggleSummaryBlock = useCallback((stableKey: string) => {
+    const requestedMeetingId = meeting?.id;
+    const option = summaryBlockOptions.find(item => item.stableKey === stableKey);
+    if (!requestedMeetingId || !option || option.fixed) return;
+    setHiddenSummaryBlockKeys(current => {
+      const next = current.includes(stableKey)
+        ? current.filter(key => key !== stableKey)
+        : [...current, stableKey];
+      void saveMeetingSummaryHiddenBlocks(requestedMeetingId, next).catch(reason => {
+        diagnosticWarn('[meeting-summary-layout] preference save failed', reason);
+        ToastAndroid.show('板块显示偏好暂时无法保存。', ToastAndroid.SHORT);
+      });
+      return next;
+    });
+  }, [meeting?.id, summaryBlockOptions]);
+
+  const resetSummaryBlocks = useCallback(() => {
+    const requestedMeetingId = meeting?.id;
+    if (!requestedMeetingId) return;
+    setHiddenSummaryBlockKeys([]);
+    void resetMeetingSummaryHiddenBlocks(requestedMeetingId).catch(reason => {
+      diagnosticWarn('[meeting-summary-layout] preference reset failed', reason);
+      ToastAndroid.show('暂时无法恢复自动板块。', ToastAndroid.SHORT);
+    });
+  }, [meeting?.id]);
+
+  const openSummaryEvidenceCitation = useCallback((citation: MeetingSummaryCitation) => {
+    setSummaryEvidenceSectionId(null);
+    if (citation.sourceType && citation.sourceType !== 'transcript') return;
+    const requestId = Date.now();
+    setTabGeneration(value => {
+      const next = value + 1;
+      tabOwnerRef.current.accept({ meetingId: route.params.meetingId, tab: 'transcript', generation: next });
+      return next;
+    });
+    setActiveTab('transcript');
+    navigation.setParams({
+      focus: 'transcript',
+      segmentId: citation.segmentId,
+      positionMs: citation.startMs,
+      transcriptFocusRequestId: requestId,
+    });
+  }, [navigation, route.params.meetingId]);
 
   const refreshMeetingActionsSheet = useCallback(async () => {
     const requestedMeetingId = meeting?.id;
@@ -3736,7 +3766,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   const openMeetingActionSource = useCallback((actionId: string) => {
     const candidate = meetingAction(displayedActionCandidates, actionId);
-    const citation = candidate?.citations[0];
+    const citation = candidate?.citations.find(item => (
+      item.sourceType === undefined || item.sourceType === 'transcript'
+    ));
     const positionMs = citation?.startMs ?? candidate?.sourceStartMs;
     const segmentId = citation?.segmentId ?? candidate?.sourceSegmentId;
     if (
@@ -5814,9 +5846,17 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (summaryInFlightRef.current || loadingSummary || summaryVisualPhase === 'running') break;
         void prepareSummaryGeneration(summaryTemplate);
         break;
-      case 'selectSummaryTemplate':
+      case 'selectSummaryTemplate': // Compatibility with pre-v20 native snapshots.
+      case 'openSummaryBlocks':
         if (action.meetingId !== route.params.meetingId || !activeMeetingFactsV3) break;
-        setTemplateSheetVisible(true);
+        setSummaryBlocksSheetVisible(true);
+        break;
+      case 'openSummaryEvidence':
+        if (action.meetingId !== route.params.meetingId) break;
+        if (!fullDisplayedSummaryDocument?.sections.some(section => (
+          section.id === action.sectionId && section.citations.length > 0
+        ))) break;
+        setSummaryEvidenceSectionId(action.sectionId);
         break;
       case 'editSummarySection':
         if (action.meetingId !== route.params.meetingId) break;
@@ -5873,7 +5913,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [activeMeetingFactsV3, loadingSummary, manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, openSummarySectionEditor, openSummarySyncConflict, playerSources, processingStatuses, projectionCandidateEnabled, removeMarker, requestMeetingLocation, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, summaryTemplate, summaryVisualPhase, toggleMeetingAction]);
+  }, [activeMeetingFactsV3, fullDisplayedSummaryDocument, loadingSummary, manageSpeaker, manualNote, markers, meeting, navigation, openActionCollaboration, openManualNoteConflict, openMediaClipEditor, openMeetingActionCreator, openMeetingActionEditor, openMeetingActionFollowup, openSpeakerAssignment, openSummarySectionEditor, openSummarySyncConflict, playerSources, processingStatuses, projectionCandidateEnabled, removeMarker, requestMeetingLocation, retryProcessingStage, route.params.meetingId, runRecordingMerge, sharing, showDialog, summary, summaryTemplate, summaryVisualPhase, toggleMeetingAction]);
 
   const transcriptCanonicalSuppressed = suppressCanonicalProcessing(transcriptVisualPhase);
   const transcriptStageLoading = transcriptVisualPhase === 'running'
@@ -6060,8 +6100,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     // account; the callback selects the device service when no token exists.
     canManageSpeakers: Boolean(meeting),
     canGenerateSummary: Boolean(meeting && transcript.length > 0),
-    canSelectSummaryTemplate: Boolean(meeting && activeMeetingFactsV3),
-    summaryTemplateLabel: summaryTemplate.title,
+    // Legacy wire field names remain additive-compatible with older native
+    // shells; the active control now owns local block visibility, not a
+    // generation template.
+    canSelectSummaryTemplate: Boolean(
+      meeting
+      && activeMeetingFactsV3
+      && summaryBlockOptions.some(option => !option.fixed),
+    ),
+    summaryTemplateLabel: '板块',
     canEditSummary: Boolean(
       meetingScopeKey
       && displayedSummaryDocument?.remoteVersionId
@@ -6107,7 +6154,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     recordingMergeStatusLabel,
     recordingMergeActionLabel,
     recordingMergeActionEnabled: !recordingMergeBusy && Boolean(recordingMergeActionLabel),
-  }), [accessToken, activeMeetingFactsV3, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, detailProcessingPresentation.label, detailProcessingPresentation.retryStage, detailProcessingPresentation.tone, deviceTranscriptFailed, deviceTranscriptPending, deviceTranscriptTask?.phase, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, playerSource, playerSourceError, playerSources, processingRetrying, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryCached, summaryError, summaryOperationActive, summaryProgress, summaryStageError, summaryStageLoading, summarySyncConflicts, summaryConfirmedCurrent, summaryTemplate.title, summaryV3UpgradeRunning, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
+  }), [accessToken, activeMeetingFactsV3, activeTab, briefSummary, canCreateMediaClip, conflictedActionIds, deletingMarkerId, detailProcessingPresentation.label, detailProcessingPresentation.retryStage, detailProcessingPresentation.tone, deviceTranscriptFailed, deviceTranscriptPending, deviceTranscriptTask?.phase, displayedSummary, displayedSummaryDocument, focusedTab, isGuest, loadingAudio, loadingSummary, loadingTranscript, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.revision, manualNote.saving, manualNoteConflict, markers, meeting, meetingActionCollaborationEnabled, meetingScopeKey, pageGenerations, playerSource, playerSourceError, playerSources, processingRetrying, recordingMergeActionLabel, recordingMergeBusy, recordingMergeStatusLabel, retryingSpeakerCorrection, route.params.actionFocusRequestId, route.params.actionId, route.params.focus, route.params.meetingId, route.params.positionMs, route.params.segmentId, route.params.transcriptFocusRequestId, sharing, summaryActionCandidates, summaryBlockOptions, summaryCached, summaryError, summaryOperationActive, summaryProgress, summaryStageError, summaryStageLoading, summarySyncConflicts, summaryConfirmedCurrent, summaryV3UpgradeRunning, tabGeneration, transcript, transcriptCached, transcriptCompleting, transcriptError, transcriptStageError, transcriptStageLoading, transcriptStageMessage, updatingActionId]);
   const snapshot = useNativeProjection(snapshotBody, {
     enabled: projectionCandidateEnabled,
     entityId: meeting?.id ?? route.params.meetingId,
@@ -6384,23 +6431,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         onSave={value => { void saveSummarySectionEdit(value); }}
         onRestore={() => { void saveSummarySectionEdit(null); }}
       />
-      <MeetingTemplateSheet
-        visible={templateSheetVisible}
-        selectedTemplate={summaryTemplate}
-        // Template selection is the hand-off into preparation; do not lock
-        // this sheet just because the previous operation has a stale loading
-        // bit. The real task guard remains summaryInFlightRef in runSummaryTask.
-        busy={false}
-        onClose={() => setTemplateSheetVisible(false)}
-        onSelect={template => {
-          setTemplateSheetVisible(false);
-          diagnosticAudit('meeting_summary_v3_template_select', {
-            mode: activeMeetingFactsV3 ? 'local_projection' : 'generation',
-            template: template.id,
-          });
-          if (activeMeetingFactsV3) void switchSummaryTemplate(template);
-          else void prepareSummaryGeneration(template);
-        }}
+      <MeetingSummaryBlocksSheet
+        visible={summaryBlocksSheetVisible}
+        options={summaryBlockOptions}
+        customized={hiddenSummaryBlockKeys.length > 0}
+        onClose={() => setSummaryBlocksSheetVisible(false)}
+        onToggle={toggleSummaryBlock}
+        onReset={resetSummaryBlocks}
+      />
+      <MeetingSummaryEvidenceSheet
+        visible={summaryEvidenceSection !== null}
+        sectionTitle={summaryEvidenceSection?.title?.trim() || '整理内容'}
+        citations={summaryEvidenceSection?.citations ?? []}
+        onClose={() => setSummaryEvidenceSectionId(null)}
+        onOpenCitation={openSummaryEvidenceCitation}
       />
         <MeetingSummaryAttachmentSheet
         visible={summaryAttachmentRequest !== null}

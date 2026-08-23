@@ -118,7 +118,7 @@ function actionContract(document) {
   }));
 }
 
-test('four templates project the same immutable facts, references and actions', () => {
+test('legacy template inputs project one immutable adaptive summary', () => {
   const { result, transcriptLines } = fixture();
   const before = JSON.stringify(result);
   const projected = MEETING_TEMPLATES.map(template => (
@@ -129,16 +129,27 @@ test('four templates project the same immutable facts, references and actions', 
   assert.equal(new Set(projected.map(document => document.remoteVersionId)).size, 1);
   assert.equal(new Set(projected.map(document => document.scheduleSnapshotHash)).size, 1);
   assert.deepEqual(projected.map(actionContract), projected.map(() => actionContract(projected[0])));
-  for (const [index, document] of projected.entries()) {
-    const template = MEETING_TEMPLATES[index];
+  assert.equal(new Set(projected.map(document => JSON.stringify(document.sections))).size, 1);
+  for (const document of projected) {
     const keys = new Set(document.sections.map(section => section.stableKey));
-    for (const definition of template.sectionSchema) {
-      assert.ok(keys.has(`${template.id}:${definition.stableKey}`), `${template.id}:${definition.stableKey}`);
-    }
-    assert.ok(document.sections.every(section => section.stableKey.startsWith(`${template.id}:`)));
+    assert.ok(keys.has('general:overview'));
+    assert.ok(keys.has('general:themes'));
+    assert.ok(keys.has('general:flow'));
+    assert.ok(keys.has('general:comparison'));
+    assert.ok(keys.has('general:risks'));
+    assert.ok(keys.has('general:questions'));
+    assert.ok(document.sections.every(section => section.stableKey.startsWith('general:')));
+    assert.equal(document.templateId, 'general');
     assert.ok(document.sections.every(section => section.title !== '决定'));
+    assert.ok(document.sections.every(section => !['受访者观点', '代表性引用', '证据摘录'].includes(section.title)));
+    const visibleBodies = document.sections.flatMap(section => section.richBlock?.items.map(item => item.text) ?? []);
+    assert.equal(new Set(visibleBodies.map(value => value.replace(/[\s，。！？；：、,.!?;:'"“”‘’（）()【】\[\]《》<>—_-]+/g, ''))).size, visibleBodies.length);
+    assert.ok(document.sections.flatMap(section => section.richBlock?.items ?? []).every(item => (
+      item.meta === null && item.sourceId === null && item.startMs === null
+    )));
     assert.equal(document.actionItemCandidates.length, 1);
     assert.equal(document.actionItemCandidates[0].citations[0].segmentId, 'action');
+    assert.equal(document.actionItemCandidates[0].citations[0].excerpt, '成员甲明天下午完成回归清单');
   }
 });
 
@@ -156,7 +167,7 @@ test('template override stays local and Markdown contains one action copy', () =
   assert.equal(edited.sections[0].content, '用户编辑后的概述');
   assert.equal(edited.sections[0].richBlock.originalSourceLabel, '原始依据');
   assert.notEqual(general.sections[0].content, edited.sections[0].content);
-  assert.notEqual(project.sections[0].content, edited.sections[0].content);
+  assert.equal(project.sections[0].content, general.sections[0].content);
   const markdown = meetingFactsV3Markdown(result, MEETING_TEMPLATES[0], 4);
   assert.equal(markdown.split('成员甲明天下午完成回归清单').length - 1, 1);
 });

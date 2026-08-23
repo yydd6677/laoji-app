@@ -221,6 +221,7 @@ function citations(
         ? text(firstValue(record, 'sourceType', 'source_type'), 30) as MeetingSummaryCitation['sourceType']
         : undefined,
       sourceLabel: text(firstValue(record, 'sourceLabel', 'source_label'), 120) || null,
+      excerpt: text(firstValue(record, 'excerpt', 'quote', 'source_excerpt'), 600) || null,
     });
   });
   return result;

@@ -315,20 +315,24 @@ function factText(fact: MeetingFactV3): string {
   return `${certaintyPrefix(fact.certainty)}${fact.content}`;
 }
 
-function transcriptCitations(facts: readonly MeetingFactV3[], sectionKey: string): MeetingSummaryCitation[] {
+function factCitations(facts: readonly MeetingFactV3[], sectionKey: string): MeetingSummaryCitation[] {
   const seen = new Set<string>();
   const citations: MeetingSummaryCitation[] = [];
   facts.forEach(fact => fact.sources.forEach(source => {
-    if (source.sourceType !== 'transcript' || source.startMs === null || seen.has(source.sourceId)) return;
-    seen.add(source.sourceId);
+    const identity = `${source.sourceType}\u0000${source.sourceId}\u0000${source.contentHash}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
     citations.push({
       id: `${sectionKey}:citation:${citations.length}:${source.sourceId}`,
-      segmentId: source.sourceId.replace(/^transcript:/, ''),
-      startMs: source.startMs,
-      endMs: source.endMs ?? source.startMs,
+      segmentId: source.sourceType === 'transcript'
+        ? source.sourceId.replace(/^transcript:/, '')
+        : source.sourceId,
+      startMs: source.startMs ?? 0,
+      endMs: source.endMs ?? source.startMs ?? 0,
       quoteHash: source.contentHash,
       sourceType: source.sourceType,
-      sourceLabel: source.speaker,
+      sourceLabel: sourceLabel(source),
+      excerpt: source.quote,
     });
   }));
   return citations;
@@ -338,6 +342,7 @@ function anchorTranscriptCitation(
   citation: MeetingSummaryCitation,
   transcriptLines: readonly TranscriptLine[],
 ): MeetingSummaryCitation | null {
+  if (citation.sourceType && citation.sourceType !== 'transcript') return citation;
   if (transcriptLines.length === 0) return null;
   const requestedStart = Math.max(0, Math.round(citation.startMs));
   const requestedEnd = Math.max(requestedStart, Math.round(citation.endMs));
@@ -380,43 +385,41 @@ function sourceLabel(source: MeetingFactSourceV3 | undefined): string | null {
   return source?.speaker ?? null;
 }
 
+function normalizedDisplayText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-CN')
+    .replace(/[\s，。！？；：、,.!?;:'"“”‘’（）()【】\[\]《》<>—_-]+/g, '');
+}
+
+function uniqueFacts(facts: readonly MeetingFactV3[]): MeetingFactV3[] {
+  const selected = new Map<string, MeetingFactV3>();
+  facts.forEach(fact => {
+    const key = normalizedDisplayText(factText(fact));
+    if (!key) return;
+    const current = selected.get(key);
+    if (!current || fact.evidenceScore > current.evidenceScore) selected.set(key, fact);
+  });
+  return [...selected.values()];
+}
+
 function richItems(facts: readonly MeetingFactV3[]) {
   return facts.map(fact => {
-    const source = fact.sources[0];
     return {
       id: fact.factId,
       title: null,
       text: factText(fact),
-      meta: sourceLabel(source),
-      sourceId: source?.sourceId ?? null,
-      startMs: source?.startMs ?? null,
+      // Source identity is shown once in the section evidence sheet. Keeping
+      // it off ordinary rows prevents a second speaker/time owner and avoids
+      // turning every sentence into a hidden playback target.
+      meta: null,
+      sourceId: null,
+      startMs: null,
     };
   });
 }
 
-function quoteItems(facts: readonly MeetingFactV3[]) {
-  const seen = new Set<string>();
-  return facts.flatMap(fact => {
-    const source = fact.sources.find(candidate => {
-      const identity = `${candidate.sourceId}\u0000${candidate.quote}`;
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
-    });
-    if (!source) return [];
-    return [{
-      id: `${fact.factId}:quote:${source.sourceId}`,
-      title: null,
-      text: source.quote,
-      meta: sourceLabel(source),
-      sourceId: source.sourceId,
-      startMs: source.startMs,
-    }];
-  }).slice(0, 8);
-}
-
 function section(
-  template: MeetingTemplate,
   stableKey: string,
   title: string,
   kind: MeetingSummaryRichBlock['kind'],
@@ -425,10 +428,12 @@ function section(
   options: {
     edges?: MeetingSummaryRichBlock['edges'];
     text?: string;
-    useSourceQuotes?: boolean;
   } = {},
 ): MeetingSummarySection | null {
-  const key = `${template.id}:${stableKey}`;
+  // Keep the historical `general` storage namespace while the active product
+  // has one adaptive view. This preserves existing user overrides without
+  // letting a template preference become content identity again.
+  const key = `general:${stableKey}`;
   const items = options.text !== undefined
     ? [{
       id: `${key}:text`,
@@ -438,9 +443,7 @@ function section(
       sourceId: null,
       startMs: null,
     }]
-    : options.useSourceQuotes
-      ? quoteItems(facts)
-      : richItems(facts);
+    : richItems(uniqueFacts(facts));
   const content = options.text ?? items.map(item => item.text).join('\n');
   if (!content.trim()) return null;
   return {
@@ -449,7 +452,7 @@ function section(
     kind,
     title,
     content,
-    citations: transcriptCitations(facts, key),
+    citations: factCitations(facts, key),
     richBlock: {
       kind,
       iconKey,
@@ -464,10 +467,13 @@ function factsOf(document: MeetingFactsDocumentV3, ...types: MeetingFactTypeV3[]
   return document.facts.filter(fact => wanted.has(fact.factType));
 }
 
-function flowSection(document: MeetingFactsDocumentV3, template: MeetingTemplate): MeetingSummarySection | null {
+function flowCandidate(
+  document: MeetingFactsDocumentV3,
+  eligible: ReadonlySet<string>,
+): { facts: MeetingFactV3[]; edges: NonNullable<MeetingSummaryRichBlock['edges']> } | null {
   const relations = document.relations.filter(relation => (
     relation.relationType === 'precedes' || relation.relationType === 'depends_on'
-  )).slice(0, 10);
+  ) && eligible.has(relation.fromFactId) && eligible.has(relation.toFactId)).slice(0, 10);
   const byId = new Map(document.facts.map(fact => [fact.factId, fact]));
   const nodeIds = [...new Set(relations.flatMap(relation => [relation.fromFactId, relation.toFactId]))].slice(0, 8);
   const facts = nodeIds.map(id => byId.get(id)).filter((fact): fact is MeetingFactV3 => Boolean(fact));
@@ -480,34 +486,38 @@ function flowSection(document: MeetingFactsDocumentV3, template: MeetingTemplate
       to: relation.toFactId,
       label: relation.relationType === 'depends_on' ? '依赖' : null,
     }));
-  const adjacency = new Map<string, string[]>();
-  edges.forEach(edge => adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), edge.to]));
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const cyclic = (id: string): boolean => {
-    if (visiting.has(id)) return true;
-    if (visited.has(id)) return false;
-    visiting.add(id);
-    if ((adjacency.get(id) ?? []).some(cyclic)) return true;
-    visiting.delete(id);
-    visited.add(id);
-    return false;
-  };
-  const hasCycle = facts.some(fact => cyclic(fact.factId));
-  return section(
-    template,
-    'dependencies',
-    '依赖与流程',
-    hasCycle || edges.length === 0 ? 'bullet_group' : 'flow',
-    'flow',
-    facts,
-    hasCycle ? {} : { edges },
-  );
+  if (edges.length !== facts.length - 1) return null;
+  const outgoing = new Map<string, typeof edges>();
+  const incoming = new Map<string, typeof edges>();
+  edges.forEach(edge => {
+    outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
+    incoming.set(edge.to, [...(incoming.get(edge.to) ?? []), edge]);
+  });
+  if ([...outgoing.values(), ...incoming.values()].some(items => items.length > 1)) return null;
+  const start = facts.find(fact => !(incoming.get(fact.factId)?.length));
+  if (!start) return null;
+  const ordered: MeetingFactV3[] = [];
+  const seen = new Set<string>();
+  let current: MeetingFactV3 | undefined = start;
+  while (current && !seen.has(current.factId)) {
+    seen.add(current.factId);
+    ordered.push(current);
+    const nextId: string | undefined = outgoing.get(current.factId)?.[0]?.to;
+    current = nextId ? byId.get(nextId) : undefined;
+  }
+  return ordered.length === facts.length ? { facts: ordered, edges } : null;
 }
 
-function statSection(document: MeetingFactsDocumentV3, template: MeetingTemplate): MeetingSummarySection | null {
-  const facts = document.facts.filter(fact => /\d+(?:\.\d+)?(?:%|％|万|亿|元|人|次|个|天|周|月|年)?/.test(fact.content)).slice(0, 4);
-  return section(template, 'numbers', '明确数字', 'stat', 'stat', facts);
+const EVIDENCE_METRIC = /-?\d+(?:\.\d+)?\s*(?:%|％|元|万元|亿元|人|次|个|项|台|份|GB|MB|秒|分钟|小时|天|周)/giu;
+
+function metricFacts(facts: readonly MeetingFactV3[]): MeetingFactV3[] {
+  return facts.filter(fact => {
+    const values = fact.content.match(EVIDENCE_METRIC) ?? [];
+    if (values.length === 0) return false;
+    const evidence = fact.sources.map(source => source.quote).join(' ');
+    return values.some(value => evidence.includes(value.replace(/\s+/g, ''))
+      || evidence.replace(/\s+/g, '').includes(value.replace(/\s+/g, '')));
+  }).slice(0, 4);
 }
 
 const EXPLICIT_TIME = /(?:今天|明天|后天|本周|下周|本月|下月|月底|年底|季度|周[一二三四五六日天]|星期[一二三四五六日天]|(?:上午|下午|晚上|凌晨)|\d{1,4}(?:年|月|日|号|点|时|分))/;
@@ -519,15 +529,18 @@ function timelineFacts(document: MeetingFactsDocumentV3): MeetingFactV3[] {
   )).slice(0, 12);
 }
 
-function comparisonSection(document: MeetingFactsDocumentV3, template: MeetingTemplate): MeetingSummarySection | null {
+function comparisonFacts(
+  document: MeetingFactsDocumentV3,
+  eligible: ReadonlySet<string>,
+): MeetingFactV3[] {
   const ids = [...new Set(document.relations
     .filter(relation => relation.relationType === 'alternative')
-    .flatMap(relation => [relation.fromFactId, relation.toFactId]))].slice(0, 3);
+    .flatMap(relation => [relation.fromFactId, relation.toFactId]))]
+    .filter(id => eligible.has(id))
+    .slice(0, 3);
   const byId = new Map(document.facts.map(fact => [fact.factId, fact]));
   const facts = ids.map(id => byId.get(id)).filter((fact): fact is MeetingFactV3 => Boolean(fact));
-  return facts.length >= 2
-    ? section(template, 'alternatives', '方案对比', 'comparison', 'compare', facts)
-    : null;
+  return facts.length >= 2 ? facts : [];
 }
 
 export interface MeetingSummaryViewOverrideInputV3 {
@@ -589,42 +602,78 @@ export function projectMeetingFactsV3(
   }
   const document = result.factsDocument;
   const sections: Array<MeetingSummarySection | null> = [];
+  const claimed = new Set<string>();
+  const visibleBodies = new Set<string>();
+  const overviewBody = normalizedDisplayText(document.overview.text);
+  if (overviewBody) visibleBodies.add(overviewBody);
+  const claim = (facts: readonly MeetingFactV3[]): MeetingFactV3[] => {
+    const selected = uniqueFacts(facts).filter(fact => {
+      if (claimed.has(fact.factId)) return false;
+      const body = normalizedDisplayText(factText(fact));
+      if (!body || visibleBodies.has(body)) return false;
+      visibleBodies.add(body);
+      return true;
+    });
+    selected.forEach(fact => claimed.add(fact.factId));
+    return selected;
+  };
+  const eligibleIds = () => new Set(
+    document.facts
+      .filter(fact => !claimed.has(fact.factId) && fact.factType !== 'action')
+      .map(fact => fact.factId),
+  );
   const overviewFacts = document.overview.factIds
     .map(id => document.facts.find(fact => fact.factId === id))
     .filter((fact): fact is MeetingFactV3 => Boolean(fact));
-  sections.push(section(template, 'overview', '概述', 'paragraph', 'overview', overviewFacts, {
+  sections.push(section('overview', '概述', 'paragraph', 'overview', overviewFacts, {
     text: document.overview.text,
   }));
 
-  if (template.id === 'general') {
-    sections.push(section(template, 'topics', '主要议题', 'bullet_group', 'topic', factsOf(document, 'topic', 'context', 'question')));
-    sections.push(section(template, 'conclusions', '关键结论', 'bullet_group', 'topic', factsOf(document, 'conclusion')));
-    sections.push(section(template, 'representative_quote', '代表性引用', 'quote', 'quote', factsOf(document, 'quote').slice(0, 3), { useSourceQuotes: true }));
-    sections.push(statSection(document, template));
-  } else if (template.id === 'one_on_one') {
-    sections.push(section(template, 'discussion', '讨论主题', 'bullet_group', 'topic', factsOf(document, 'topic', 'context')));
-    sections.push(section(template, 'feedback', '反馈与关注', 'quote', 'quote', factsOf(document, 'quote', 'risk'), { useSourceQuotes: true }));
-    sections.push(section(template, 'support', '支持需求', 'bullet_group', 'action', factsOf(document, 'question')));
-  } else if (template.id === 'project_sync') {
-    sections.push(section(template, 'progress', '进展', 'bullet_group', 'topic', document.facts.filter(fact => fact.certainty === 'completed' || fact.factType === 'context' || fact.factType === 'conclusion')));
-    sections.push(section(template, 'risks', '风险与阻塞', 'risk_card', 'risk', factsOf(document, 'risk')));
-    sections.push(section(template, 'timeline', '范围和里程碑', 'timeline', 'time', timelineFacts(document)));
-    sections.push(flowSection(document, template));
-  } else {
-    sections.push(section(template, 'topics', '主题', 'bullet_group', 'topic', factsOf(document, 'topic', 'context')));
-    sections.push(section(template, 'views', '受访者观点', 'quote', 'quote', document.facts.filter(fact => fact.factType === 'quote' || fact.sources.some(source => Boolean(source.speaker))).slice(0, 8), { useSourceQuotes: true }));
-    sections.push(section(template, 'evidence', '证据摘录', 'quote', 'quote', factsOf(document, 'quote').slice(0, 6), { useSourceQuotes: true }));
-    sections.push(section(template, 'follow_up_questions', '后续问题', 'bullet_group', 'topic', factsOf(document, 'question')));
-  }
-  sections.push(comparisonSection(document, template));
+  // More structured relationships claim their facts first. A fact then has
+  // exactly one primary visible owner, so rich blocks cannot become a second
+  // rendering of the same sentence under a different heading.
+  const alternativeCandidates = uniqueFacts(comparisonFacts(document, eligibleIds()));
+  const alternatives = alternativeCandidates.length >= 2 ? claim(alternativeCandidates) : [];
+  const flow = flowCandidate(document, eligibleIds());
+  const flowCandidates = flow ? uniqueFacts(flow.facts) : [];
+  const flowFacts = flow && flowCandidates.length === flow.facts.length ? claim(flowCandidates) : [];
+  const timeline = uniqueFacts(timelineFacts(document).filter(fact => !claimed.has(fact.factId)));
+  const timelineOwned = timeline.length >= 2 ? claim(timeline) : [];
+  const metrics = uniqueFacts(metricFacts(document.facts.filter(fact => !claimed.has(fact.factId) && fact.factType !== 'action')));
+  const metricOwned = metrics.length >= 2 ? claim(metrics) : [];
+
+  const themes = claim(document.facts.filter(fact => (
+    fact.factType === 'topic'
+    || fact.factType === 'context'
+    || fact.factType === 'quote'
+  )));
+  const conclusions = claim(factsOf(document, 'conclusion'));
+  const risks = claim(factsOf(document, 'risk'));
+  const questions = claim(factsOf(document, 'question'));
+  // Preserve unusual, supported facts instead of dropping them merely because
+  // a newer provider added a type that this compatibility adapter did not
+  // anticipate. Action facts remain owned by the action-candidate area.
+  const other = claim(document.facts.filter(fact => fact.factType !== 'action'));
+
+  sections.push(section('themes', '主题与要点', 'bullet_group', 'topic', [...themes, ...other]));
+  sections.push(section('conclusions', '关键结论', 'bullet_group', 'topic', conclusions));
+  sections.push(section('timeline', '时间线', 'timeline', 'time', timelineOwned));
+  sections.push(flow && flowFacts.length === flow.facts.length
+    ? section('flow', '流程与依赖', 'flow', 'flow', flowFacts, { edges: flow.edges })
+    : null);
+  sections.push(section('comparison', '方案对比', 'comparison', 'compare', alternatives));
+  sections.push(section('metrics', '数据概览', 'stat', 'stat', metricOwned));
+  sections.push(section('risks', '风险与阻塞', 'risk_card', 'risk', risks));
+  sections.push(section('questions', '待确认问题', 'bullet_group', 'topic', questions));
 
   const factsById = new Map(document.facts.map(fact => [fact.factId, fact]));
   const actions = document.actionCandidates.map(action => {
     const fact = factsById.get(action.factId);
     const citations = anchorTranscriptCitations(
-      fact ? transcriptCitations([fact], `${template.id}:action:${action.actionId}`) : [],
+      fact ? factCitations([fact], `general:action:${action.actionId}`) : [],
       transcriptLines,
     );
+    const transcriptCitation = citations.find(citation => citation.sourceType === 'transcript');
     return {
       id: action.actionId,
       content: action.content,
@@ -636,8 +685,8 @@ export function projectMeetingFactsV3(
       followupEventSourceId: null,
       status: 'pending' as const,
       citations,
-      sourceSegmentId: citations[0]?.segmentId ?? null,
-      sourceStartMs: citations[0]?.startMs ?? null,
+      sourceSegmentId: transcriptCitation?.segmentId ?? null,
+      sourceStartMs: transcriptCitation?.startMs ?? null,
       scheduleFit: action.scheduleFit,
       evidenceScore: action.evidenceScore,
     };
@@ -647,7 +696,9 @@ export function projectMeetingFactsV3(
     schemaVersion: 2,
     remoteVersionId: result.documentId,
     meetingId: result.meetingId,
-    templateId: template.id,
+    // `general@3` remains an internal compatibility envelope only. The active
+    // UI exposes one adaptive summary and never asks the user for a template.
+    templateId: 'general',
     templateRevision: 3,
     transcriptRevisionId: null,
     remoteTranscriptRevisionId: result.transcriptRevision,
