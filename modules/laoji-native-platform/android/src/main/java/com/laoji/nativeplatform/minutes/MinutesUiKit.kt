@@ -417,6 +417,8 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
     title: String,
     viewMode: MinutesHomeViewMode,
     recycleBin: Boolean,
+    canEmptyRecycleBin: Boolean,
+    recycleBinEmptying: Boolean,
     onAction: (String) -> Unit,
   ) {
     titleView.text = title
@@ -433,14 +435,18 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
     } else {
       "切换到网格视图"
     }
-    val nextConfiguration = if (recycleBin) "recycle" else "meetings"
+    val nextConfiguration = listOf(
+      if (recycleBin) "recycle" else "meetings",
+      canEmptyRecycleBin,
+      recycleBinEmptying,
+    ).joinToString("|")
     if (actionConfiguration == nextConfiguration) return
     actionConfiguration = nextConfiguration
     leading.removeAllViews()
     actions.removeAllViews()
     (titleView.layoutParams as LayoutParams).apply {
-      leftMargin = context.dp(if (recycleBin) 54 else 98)
-      rightMargin = context.dp(if (recycleBin) 54 else 98)
+      leftMargin = context.dp(if (recycleBin) 70 else 98)
+      rightMargin = context.dp(if (recycleBin) 70 else 98)
     }.also(titleView::setLayoutParams)
     if (recycleBin) {
       leading.addView(
@@ -449,6 +455,23 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
           "返回会议记录",
         ).apply { setOnClickListener { actionHandler?.invoke("closeRecycleBin") } },
         LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+      )
+      actions.addView(
+        context.textView(
+          if (recycleBinEmptying) "清理中" else "清空",
+          textSizeSp = 15,
+          color = if (canEmptyRecycleBin) MinutesPalette.danger else MinutesPalette.faint,
+          weight = Typeface.BOLD,
+        ).apply {
+          gravity = Gravity.CENTER
+          isClickable = canEmptyRecycleBin && !recycleBinEmptying
+          isFocusable = canEmptyRecycleBin && !recycleBinEmptying
+          isEnabled = canEmptyRecycleBin && !recycleBinEmptying
+          visibility = if (canEmptyRecycleBin || recycleBinEmptying) View.VISIBLE else View.INVISIBLE
+          contentDescription = if (recycleBinEmptying) "正在清空回收站" else "清空回收站"
+          setOnClickListener { actionHandler?.invoke("emptyRecycleBin") }
+        },
+        LinearLayout.LayoutParams(context.dp(64), context.dp(44)),
       )
       return
     }

@@ -215,6 +215,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const [recycleBinError, setRecycleBinError] = useState('');
   const [restoringMeetingId, setRestoringMeetingId] = useState<string | null>(null);
   const [permanentlyDeletingMeetingId, setPermanentlyDeletingMeetingId] = useState<string | null>(null);
+  const [recycleBinEmptying, setRecycleBinEmptying] = useState(false);
   const [meetingTags, setMeetingTags] = useState<readonly MeetingTagRecord[]>([]);
   const [tagAssignments, setTagAssignments] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
   const [tagSheetMode, setTagSheetMode] = useState<'assign' | 'manage' | null>(null);
@@ -225,6 +226,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const searchRequestRef = useRef(0);
   const focusRequestRef = useRef(0);
   const reorderInFlightRef = useRef(false);
+  const recycleBinEmptyingRef = useRef(false);
   const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
   const meetingScope = isGuest ? 'guest' as ScopeKey : accountScope;
   const profileEntry = useMemo(
@@ -235,7 +237,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const refreshRecycleBin = useCallback(async (syncRemote = false) => {
     if (!meetingScope || retentionDays === null) {
       setRecycleBinEntries([]);
-      return;
+      return false;
     }
     setRecycleBinLoading(true);
     setRecycleBinError('');
@@ -246,8 +248,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         meetingScope,
         retentionDays,
       ));
+      return true;
     } catch (reason) {
       setRecycleBinError(readableErrorMessage(reason, '回收站暂时无法加载，请稍后重试。'));
+      return false;
     } finally {
       setRecycleBinLoading(false);
     }
@@ -525,6 +529,8 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         dateTimeLabel: compactMeetingDateTime(date, time),
         statusLabel: restoringMeetingId === entry.meetingId
           ? '正在恢复'
+          : recycleBinEmptying
+            ? '正在清理'
           : permanentlyDeletingMeetingId === entry.meetingId
             ? '正在删除'
           : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '正在同步',
@@ -535,7 +541,8 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         // A conflicted tombstone may not be restorable, but it must remain
         // long-pressable so the user can still permanently remove it.
         actionEnabled: restoringMeetingId === null
-          && permanentlyDeletingMeetingId === null,
+          && permanentlyDeletingMeetingId === null
+          && !recycleBinEmptying,
         coverType: 'default' as const,
       };
     });
@@ -556,6 +563,14 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         title: recycleBinVisible ? '回收站' : '会议记录',
         mode: recycleBinVisible ? 'recycleBin' : 'meetings',
         canOpenRecycleBin: retentionDays !== null,
+        canEmptyRecycleBin: recycleBinVisible
+          && recycleBinEntries.length > 0
+          && !recycleBinLoading
+          && !recycleBinError
+          && restoringMeetingId === null
+          && permanentlyDeletingMeetingId === null
+          && !recycleBinEmptying,
+        recycleBinEmptying,
         canReorder: !recycleBinVisible
           && !searching
           && !reorderSaving
@@ -585,7 +600,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           : activeSearch ? searchMeetingSnapshots : normalMeetingSnapshots,
       },
     };
-  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings, permanentlyDeletingMeetingId, query, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
+  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings, permanentlyDeletingMeetingId, query, recycleBinEmptying, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
 
   const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);
@@ -677,6 +692,73 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
               });
             } finally {
               setPermanentlyDeletingMeetingId(null);
+            }
+          },
+        },
+        { text: '取消', role: 'cancel' },
+      ],
+    });
+  };
+
+  const confirmEmptyRecycleBin = () => {
+    if (
+      retentionDays === null
+      || recycleBinEntries.length === 0
+      || recycleBinLoading
+      || recycleBinError
+      || restoringMeetingId
+      || permanentlyDeletingMeetingId
+      || recycleBinEmptyingRef.current
+    ) return;
+    const targets = [...new Map(
+      recycleBinEntries.map(entry => [entry.meetingId, entry] as const),
+    ).values()];
+    showDialog({
+      title: '清空回收站？',
+      message: `将永久删除回收站中的${targets.length}条会议记录及其本机录音、文字记录和整理结果，无法恢复。`,
+      tone: 'danger',
+      actions: [
+        {
+          text: '全部删除',
+          role: 'destructive',
+          onPress: async () => {
+            if (recycleBinEmptyingRef.current) return;
+            recycleBinEmptyingRef.current = true;
+            setRecycleBinEmptying(true);
+            let deletedCount = 0;
+            let failureCount = 0;
+            let refreshFailed = false;
+            try {
+              for (const entry of targets) {
+                try {
+                  await permanentlyDeleteDeletedMeeting(entry.meetingId, retentionDays);
+                  deletedCount += 1;
+                } catch {
+                  failureCount += 1;
+                }
+              }
+              refreshFailed = !(await refreshRecycleBin(false));
+            } finally {
+              recycleBinEmptyingRef.current = false;
+              setRecycleBinEmptying(false);
+            }
+            if (failureCount > 0) {
+              showDialog({
+                title: '清理未完成',
+                message: `已永久删除${deletedCount}条，另有${failureCount}条暂时无法删除，仍保留在回收站中，可稍后重试。`,
+                tone: 'warning',
+              });
+            } else if (refreshFailed) {
+              showDialog({
+                title: '清理完成',
+                message: `已永久删除${deletedCount}条会议记录，但列表刷新失败，请重新进入回收站确认。`,
+                tone: 'warning',
+              });
+            } else {
+              showDialog({
+                title: '回收站已清空',
+                message: `已永久删除${deletedCount}条会议记录。`,
+              });
             }
           },
         },
@@ -812,6 +894,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         break;
       case 'closeRecycleBin':
         setRecycleBinVisible(false);
+        break;
+      case 'emptyRecycleBin':
+        confirmEmptyRecycleBin();
         break;
       case 'restoreMeeting':
         confirmRestore(action.meetingId);

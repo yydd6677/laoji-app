@@ -251,6 +251,8 @@ internal class MinutesListSurface(
       state.title,
       if (recycleBin) MinutesHomeViewMode.LIST else viewMode,
       recycleBin,
+      state.canEmptyRecycleBin,
+      state.recycleBinEmptying,
     ) { action ->
       if (action == "toggleViewMode") toggleViewMode()
       else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
@@ -351,7 +353,13 @@ internal class MinutesListSurface(
     val firstVisible = firstVisiblePosition()
     viewMode = if (viewMode == MinutesHomeViewMode.LIST) MinutesHomeViewMode.GRID else MinutesHomeViewMode.LIST
     applyViewMode(viewMode, firstVisible)
-    titleBar.configure(renderedTitle, viewMode, recycleBin = false) { action ->
+    titleBar.configure(
+      renderedTitle,
+      viewMode,
+      recycleBin = false,
+      canEmptyRecycleBin = false,
+      recycleBinEmptying = false,
+    ) { action ->
       if (action == "toggleViewMode") toggleViewMode()
       else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
       else onAction(mapOf("type" to action))

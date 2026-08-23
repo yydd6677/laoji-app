@@ -326,6 +326,8 @@ data class MinutesListState(
   val showingCachedData: Boolean = false,
   val mode: MinutesListMode = MinutesListMode.MEETINGS,
   val canOpenRecycleBin: Boolean = false,
+  val canEmptyRecycleBin: Boolean = false,
+  val recycleBinEmptying: Boolean = false,
   val canReorder: Boolean = false,
   val meetings: List<MinutesMeeting> = emptyList(),
 )

@@ -37,6 +37,8 @@ object MinutesSnapshotParser {
     showingCachedData = raw.boolean("showingCachedData"),
     mode = MinutesListMode.fromWireName(raw.string("mode")),
     canOpenRecycleBin = raw.boolean("canOpenRecycleBin"),
+    canEmptyRecycleBin = raw.boolean("canEmptyRecycleBin"),
+    recycleBinEmptying = raw.boolean("recycleBinEmptying"),
     canReorder = raw.boolean("canReorder"),
     meetings = raw.maps("meetings").mapIndexed { index, item ->
       MinutesMeeting(
