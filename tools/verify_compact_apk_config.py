@@ -11,6 +11,27 @@ import zipfile
 
 
 EXPECTED_API_BASE = "https://laoji.cloud"
+EXPECTED_ENABLED_FLAGS = (
+    "localMeetingDbV1",
+    "localMeetingDbCanonicalReadV1",
+    "localMeetingDbCanonicalWriteV1",
+    "mediaUploadV2Candidate",
+    "meetingQuestionsQ2Candidate",
+    "meetingSummarySourceStreamCandidate",
+    "nativeProjectionEnvelopeCandidate",
+    "realtimeAsrV2Candidate",
+    "scheduleGraphV2Candidate",
+)
+EXPECTED_DISABLED_FLAGS = (
+    "localMeetingDbLegacyProjectionWriteV1",
+    "localMeetingDbAccountRootWriteV1",
+    "localMeetingDbAccountUploadWriteV1",
+    "meetingQuestionsV1",
+    "meetingAttachmentSyncV1",
+    "meetingMarkerSyncV1",
+    "meetingSummarySyncV1",
+    "meetingTagSyncV1",
+)
 LEGACY_MARKERS = (
     "18035",
     "21436",
@@ -40,6 +61,8 @@ def verify(apk: Path) -> list[str]:
 
     if config.get("android", {}).get("package") != "com.laoji.app":
         failures.append("Android 包名不是 com.laoji.app")
+    if extra.get("appEnv") != "production":
+        failures.append(f"appEnv 不是 production: {extra.get('appEnv')!r}")
     if extra.get("apiBase") != EXPECTED_API_BASE:
         failures.append(f"apiBase 不是 {EXPECTED_API_BASE}: {extra.get('apiBase')!r}")
     bootstrap_key = extra.get("deviceBootstrapKey")
@@ -49,6 +72,17 @@ def verify(apk: Path) -> list[str]:
         value = extra.get(key)
         if not isinstance(value, str) or not value.startswith(EXPECTED_API_BASE):
             failures.append(f"{key} 不是同域 HTTPS 地址: {value!r}")
+
+    feature_flags = extra.get("featureFlags")
+    if not isinstance(feature_flags, dict):
+        failures.append("APK 缺少 featureFlags 配置")
+    else:
+        for name in EXPECTED_ENABLED_FLAGS:
+            if feature_flags.get(name) is not True:
+                failures.append(f"vNext 生产开关未启用: {name}")
+        for name in EXPECTED_DISABLED_FLAGS:
+            if feature_flags.get(name) is not False:
+                failures.append(f"旧生产写入开关未关闭: {name}")
 
     serialized = raw.decode("utf-8", errors="replace")
     for marker in LEGACY_MARKERS:
@@ -66,7 +100,7 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
-    print(f"PASS: {args.apk} 使用 {EXPECTED_API_BASE} 紧凑入口")
+    print(f"PASS: {args.apk} 使用 {EXPECTED_API_BASE} 的 vNext 生产配置")
     return 0
 
 

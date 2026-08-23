@@ -175,6 +175,9 @@ def main() -> None:
         ROOT / "src/screens/TranscriptionScreen.android.tsx",
         "This detail screen observes their durable state",
         "if (isGuest) return;",
+        "hasTranscript` becomes true as soon as the first stable segment is saved",
+        "activeState.kind !== 'realtime_draft' && !activeState.completing",
+        "processingStatuses.transcript,",
     )
     require(
         completion,

@@ -2076,26 +2076,57 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   }, [accessToken, advancePageGenerations, beginPageRequest, getCachedSummary, getCachedTranscript, isCurrentPageRequest, isGuest, loadProjectedMeetingFactsV3, meeting?.id, meetingScopeKey, reloadKey, remoteMeetingId, saveCachedSummary, saveCachedTranscript]);
 
   // Recording transcription is also completed by the app-level coordinator.
-  // Its canonical write updates the meeting projection, but this mounted detail
-  // screen owns an independent transcript state. Adopt the finished cache when
-  // hasTranscript flips instead of requiring the user to leave and reopen.
+  // `hasTranscript` becomes true as soon as the first stable segment is saved,
+  // so it does not flip again when the final revision arrives. Observe the
+  // canonical transcript stage as well and only clear the page-local
+  // "completing" state after the active revision is actually final. This keeps
+  // an open detail page aligned with the list without requiring re-entry.
   useEffect(() => {
     if (!meeting?.hasTranscript) return;
-    const completed = simplifyTranscriptLines(getCachedTranscript(meeting.id));
-    if (completed.length === 0) return;
-    setTranscript(current => {
-      const decision = evaluateTranscriptLineCandidate(current, completed, {
-        candidateKind: 'final',
-        serverCompleteness: 'complete',
+    const requestedMeetingId = meeting.id;
+    let active = true;
+    void (async () => {
+      const activeState = meetingScopeKey
+        ? await loadActiveMeetingTranscriptState(meetingScopeKey, requestedMeetingId).catch(() => null)
+        : null;
+      if (
+        !active
+        || !mountedRef.current
+        || routeMeetingIdRef.current !== requestedMeetingId
+      ) return;
+      const completed = simplifyTranscriptLines(
+        activeState?.lines.length
+          ? activeState.lines
+          : getCachedTranscript(requestedMeetingId),
+      );
+      const hasFinalRevision = activeState
+        ? activeState.kind !== 'realtime_draft' && !activeState.completing
+        : completed.length > 0 && completed.every(line => (
+          line.isFinal !== false && line.revisionKind !== 'realtimeDraft'
+        ));
+      if (!hasFinalRevision || completed.length === 0) return;
+      setTranscript(current => {
+        const decision = evaluateTranscriptLineCandidate(current, completed, {
+          candidateKind: 'final',
+          serverCompleteness: 'complete',
+        });
+        return decision.useCandidate ? completed : current;
       });
-      return decision.useCandidate ? completed : current;
-    });
-    setTranscriptCached(true);
-    setTranscriptCompleting(false);
-    setTranscriptVisualPhase('ready');
-    setTranscriptError('');
-    advancePageGenerations('transcript', 'speakers');
-  }, [advancePageGenerations, getCachedTranscript, meeting?.hasTranscript, meeting?.id]);
+      setTranscriptCached(true);
+      setTranscriptCompleting(false);
+      setTranscriptVisualPhase('ready');
+      setTranscriptError('');
+      advancePageGenerations('transcript', 'speakers');
+    })();
+    return () => { active = false; };
+  }, [
+    advancePageGenerations,
+    getCachedTranscript,
+    meeting?.hasTranscript,
+    meeting?.id,
+    meetingScopeKey,
+    processingStatuses.transcript,
+  ]);
 
   useEffect(() => {
     if (!meeting) {
